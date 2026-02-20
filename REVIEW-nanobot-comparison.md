@@ -28,7 +28,7 @@ HKUDS/nanobot is an ultra-lightweight personal AI assistant (~4,000 lines Python
 - **Architecture:** Event-driven message bus → Agent engine → Tool execution → Memory → Learning cycle
 - **LLM Providers:** 15+ (Claude, OpenAI, DeepSeek, Gemini, Groq, OpenRouter/200+ models, vLLM local, etc.)
 - **Unique Strengths:** 9 chat platforms, skills marketplace (ClawHub), MCP support, minimal footprint
-- **License:** MIT | **Stars:** 17,800+ | **Status:** Very active (launched Feb 2, 2026)
+- **License:** MIT | **Stars:** 22,300+ | **Forks:** 3,400+ | **Version:** 0.1.4 | **Status:** Very active (launched Feb 2, 2026; 7 releases in first 2 weeks)
 
 ---
 
@@ -48,6 +48,15 @@ HKUDS/nanobot is an ultra-lightweight personal AI assistant (~4,000 lines Python
 | Docker sandboxing | No | No (nanobot-ai/nanobot has this) | Parity |
 
 **Assessment:** Agent42 has stronger *operational* security (approval gates, JWT auth). Nanobot has stronger *runtime* security (sandboxing, command blocking). Both approaches are complementary.
+
+**Nanobot security caveats (from their own SECURITY.md):**
+- No built-in rate limiting
+- Plain-text config storage (no encrypted secrets vault)
+- No session authentication layer beyond per-channel allowlists
+- Known path traversal bypass issues reported in issue tracker
+- Empty `allowFrom` defaults to allowing ALL users
+- Minimal audit trails
+- 230+ open issues, some security-related
 
 ### 2. Connectivity / Chat Platforms
 
@@ -112,7 +121,7 @@ HKUDS/nanobot is an ultra-lightweight personal AI assistant (~4,000 lines Python
 | vLLM (local) | No | Yes |
 | GitHub Copilot | No | Yes |
 
-**Assessment:** Nanobot supports 15+ providers vs Agent42's 2. The Provider Registry pattern (2-step addition) is also cleaner than Agent42's manual client setup.
+**Assessment:** Nanobot supports 16+ providers (via LiteLLM routing) vs Agent42's 2. The declarative `ProviderSpec` registry pattern (2-step addition) is significantly cleaner than Agent42's manual client setup. Notable additions include Amazon Bedrock, Zhipu GLM, DashScope/Qwen, Moonshot/Kimi, MiniMax, SiliconFlow, and OAuth-based GitHub Copilot/OpenAI Codex support.
 
 ### 6. Memory & State
 
@@ -143,14 +152,26 @@ HKUDS/nanobot is an ultra-lightweight personal AI assistant (~4,000 lines Python
 
 ### What Nanobot does better that Agent42 should adopt:
 
-1. **Channel gateway pattern** — Unified `InboundMessage`/`OutboundMessage` normalization
-2. **Skills framework** — `SKILL.md` directory pattern with dynamic loading
-3. **Provider registry** — 2-step LLM provider addition
-4. **MCP integration** — Access to the broader MCP tool ecosystem
-5. **Workspace sandboxing** — `restrictToWorkspace` for runtime safety
-6. **Dangerous command blocking** — Shell execution safety filters
-7. **Persistent memory** — Two-layer grep-based memory system
-8. **Cron scheduling** — Heartbeat-based task automation
+1. **Channel gateway pattern** — Unified `InboundMessage`/`OutboundMessage` normalization via `BaseChannel` abstraction
+2. **Skills framework** — `SKILL.md` directory pattern with YAML frontmatter, dynamic loading, and requirements checking
+3. **Provider registry** — Declarative `ProviderSpec` + LiteLLM for 16+ providers with 2-step addition
+4. **MCP integration** — Stdio + HTTP transport, auto-discovery via `session.list_tools()`, namespaced tool registration
+5. **Workspace sandboxing** — `restrictToWorkspace` with `_resolve_path()` enforcement
+6. **Dangerous command blocking** — Deny-list pattern matching + optional allowlist for shell execution
+7. **Persistent memory** — Two-layer system: `MEMORY.md` (consolidated facts) + `HISTORY.md` (grep-searchable event log)
+8. **Cron scheduling** — Heartbeat-based task automation with `HEARTBEAT.md` for autonomous wake-ups
+9. **Bootstrap personality system** — `SOUL.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`, `IDENTITY.md` for behavior customization
+10. **Voice transcription** — Groq Whisper integration for speech-to-text
+11. **Agent social networking** — Mochat/Moltbook/ClawdChat inter-agent communication layer
+12. **Subagent delegation** — Background task spawning with isolated toolsets and async result reporting
+
+### Nanobot stability risks to consider:
+
+1. **Rapid churn:** 7 releases in 2 weeks (v0.1.3.post4 → v0.1.4), API stability not guaranteed
+2. **Growing pains:** 230 open issues, 290 open PRs — quality concerns at scale
+3. **Flat-file persistence:** Sessions (JSONL), memory (Markdown), cron (JSON) — fragile at scale
+4. **Security immaturity:** Known path traversal bypasses, no rate limiting, plain-text secrets
+5. **WhatsApp vulnerability:** Early security issue discovered and patched, indicates need for careful review
 
 ---
 
