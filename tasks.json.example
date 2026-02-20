@@ -1,0 +1,17 @@
+[
+  {
+    "title": "Add user authentication endpoint",
+    "description": "Create a POST /api/auth/register endpoint that accepts email and password, validates input, hashes the password with bcrypt, and stores the user in the database. Return a JWT token on success.",
+    "task_type": "coding"
+  },
+  {
+    "title": "Debug memory leak in WebSocket handler",
+    "description": "The WebSocket connection handler is not properly cleaning up disconnected clients, causing memory usage to grow over time. Investigate and fix.",
+    "task_type": "debugging"
+  },
+  {
+    "title": "Write product launch email",
+    "description": "Draft a product launch announcement email for our new AI-powered analytics dashboard. Target audience: existing SaaS customers. Tone: professional but excited.",
+    "task_type": "email"
+  }
+]
