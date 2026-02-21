@@ -71,23 +71,23 @@ class ApprovalGate:
         self._pending.pop(key, None)
         return req.approved is True
 
-    def approve(self, task_id: str, action: str):
+    def approve(self, task_id: str, action: str, user: str = ""):
         """Approve a pending request (called from dashboard)."""
         key = f"{task_id}:{action}"
         req = self._pending.get(key)
         if req:
             req.approved = True
             req._event.set()
-            logger.info(f"Approved: {key}")
+            logger.info(f"AUDIT: Approved {key} by {user or 'unknown'}")
 
-    def deny(self, task_id: str, action: str):
+    def deny(self, task_id: str, action: str, user: str = ""):
         """Deny a pending request (called from dashboard)."""
         key = f"{task_id}:{action}"
         req = self._pending.get(key)
         if req:
             req.approved = False
             req._event.set()
-            logger.info(f"Denied: {key}")
+            logger.info(f"AUDIT: Denied {key} by {user or 'unknown'}")
 
     def pending_requests(self) -> list[dict]:
         """List all pending approval requests for the dashboard."""

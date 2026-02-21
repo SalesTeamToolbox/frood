@@ -93,16 +93,17 @@ def create_app(
     # Security headers on all responses
     app.add_middleware(SecurityHeadersMiddleware)
 
-    # CORS: restricted to configured origins only
+    # CORS: always enabled with secure defaults
+    # If CORS_ALLOWED_ORIGINS is not configured, default to same-origin only
+    # (empty list = no cross-origin requests allowed)
     cors_origins = settings.get_cors_origins()
-    if cors_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=cors_origins,
-            allow_credentials=True,
-            allow_methods=["GET", "POST", "PUT", "DELETE"],
-            allow_headers=["Authorization", "Content-Type"],
-        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins if cors_origins else [],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
 
     # -- Health ----------------------------------------------------------------
 
@@ -133,6 +134,14 @@ def create_app(
 
     @app.post("/api/login")
     async def login(req: LoginRequest, request: Request):
+        # Fail-secure: reject all logins when no password is configured
+        if not settings.dashboard_password and not settings.dashboard_password_hash:
+            logger.warning("Login attempt with no password configured — rejected")
+            raise HTTPException(
+                status_code=401,
+                detail="Dashboard login is disabled. Set DASHBOARD_PASSWORD or DASHBOARD_PASSWORD_HASH.",
+            )
+
         client_ip = request.client.host if request.client else "unknown"
 
         if not check_rate_limit(client_ip):
@@ -142,7 +151,10 @@ def create_app(
             )
 
         if req.username != settings.dashboard_username or not verify_password(req.password):
+            logger.info(f"Failed login attempt for '{req.username}' from {client_ip}")
             raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        logger.info(f"Successful login for '{req.username}' from {client_ip}")
         return {"token": create_token(req.username)}
 
     # -- Tasks -----------------------------------------------------------------
@@ -203,9 +215,9 @@ def create_app(
         req: ApprovalAction, _user: str = Depends(get_current_user)
     ):
         if req.approved:
-            approval_gate.approve(req.task_id, req.action)
+            approval_gate.approve(req.task_id, req.action, user=_user)
         else:
-            approval_gate.deny(req.task_id, req.action)
+            approval_gate.deny(req.task_id, req.action, user=_user)
         return {"status": "ok"}
 
     # -- Review Feedback (learning from human review) --------------------------
@@ -287,13 +299,20 @@ def create_app(
             await ws.close(code=4001, reason="Missing token")
             return
         try:
-            from jose import jwt as jose_jwt, JWTError
+            from jose import jwt as jose_jwt, JWTError, ExpiredSignatureError
             payload = jose_jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
             if not payload.get("sub"):
                 await ws.close(code=4001, reason="Invalid token")
                 return
-        except (JWTError, Exception):
-            await ws.close(code=4001, reason="Invalid or expired token")
+        except ExpiredSignatureError:
+            await ws.close(code=4001, reason="Token expired")
+            return
+        except JWTError:
+            await ws.close(code=4001, reason="Invalid token")
+            return
+        except Exception as e:
+            logger.error(f"Unexpected error in WebSocket auth: {e}")
+            await ws.close(code=1011, reason="Server error")
             return
 
         await ws_manager.connect(ws)

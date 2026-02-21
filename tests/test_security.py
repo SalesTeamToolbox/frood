@@ -1,5 +1,6 @@
 """Tests for hardened security: shell, command filter, auth, SSRF, worktree."""
 
+import logging
 import tempfile
 import time
 
@@ -761,3 +762,188 @@ class TestGitCommitMessageLength:
         result = await self.tool.execute(action="commit", args="x" * 20000)
         assert not result.success
         assert "too long" in result.error.lower()
+
+
+# ---------------------------------------------------------------------------
+# NEW: Dashboard auth/JWT security hardening
+# ---------------------------------------------------------------------------
+
+try:
+    from unittest.mock import patch, MagicMock, AsyncMock
+    from fastapi.testclient import TestClient
+    from core.task_queue import TaskQueue
+    from core.approval_gate import ApprovalGate, ProtectedAction
+    from dashboard.websocket_manager import WebSocketManager
+    from dashboard.server import create_app
+    HAS_TESTCLIENT = True
+except ImportError:
+    HAS_TESTCLIENT = False
+
+
+@pytest.mark.skipif(not HAS_TESTCLIENT, reason="fastapi test dependencies not installed")
+class TestFailSecureLogin:
+    """When no password is configured, all login attempts must be rejected."""
+
+    def setup_method(self):
+        self.tq = TaskQueue()
+        self.ws = WebSocketManager()
+        self.ag = ApprovalGate(self.tq)
+
+    def test_login_rejected_no_password(self):
+        """Login is rejected when no password/hash is configured."""
+        with patch("dashboard.server.settings") as mock_settings:
+            mock_settings.dashboard_password = ""
+            mock_settings.dashboard_password_hash = ""
+            mock_settings.dashboard_username = "admin"
+            mock_settings.jwt_secret = "test-secret-32-chars-long-ok-yep"
+            mock_settings.max_websocket_connections = 50
+            mock_settings.get_cors_origins.return_value = []
+
+            app = create_app(self.tq, self.ws, self.ag)
+            client = TestClient(app)
+            resp = client.post("/api/login", json={"username": "admin", "password": "anything"})
+            assert resp.status_code == 401
+            assert "disabled" in resp.json()["detail"].lower() or "DASHBOARD_PASSWORD" in resp.json()["detail"]
+
+    def test_login_rejected_empty_password_attempt(self):
+        """Even an empty password attempt is rejected when no password is configured."""
+        with patch("dashboard.server.settings") as mock_settings:
+            mock_settings.dashboard_password = ""
+            mock_settings.dashboard_password_hash = ""
+            mock_settings.dashboard_username = "admin"
+            mock_settings.jwt_secret = "test-secret-32-chars-long-ok-yep"
+            mock_settings.max_websocket_connections = 50
+            mock_settings.get_cors_origins.return_value = []
+
+            app = create_app(self.tq, self.ws, self.ag)
+            client = TestClient(app)
+            resp = client.post("/api/login", json={"username": "admin", "password": ""})
+            assert resp.status_code == 401
+
+
+@pytest.mark.skipif(not HAS_TESTCLIENT, reason="fastapi test dependencies not installed")
+class TestHealthEndpointSecurity:
+    """Public health should return minimal info; detailed health requires auth."""
+
+    def setup_method(self):
+        self.tq = TaskQueue()
+        self.ws = WebSocketManager()
+        self.ag = ApprovalGate(self.tq)
+
+    def test_public_health_minimal(self):
+        with patch("dashboard.server.settings") as mock_settings:
+            mock_settings.get_cors_origins.return_value = []
+            mock_settings.max_websocket_connections = 50
+
+            app = create_app(self.tq, self.ws, self.ag)
+            client = TestClient(app)
+            resp = client.get("/health")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data == {"status": "ok"}
+            # Must NOT contain detailed metrics
+            assert "tasks_total" not in data
+            assert "websocket_connections" not in data
+
+    def test_detailed_health_requires_auth(self):
+        with patch("dashboard.server.settings") as mock_settings:
+            mock_settings.get_cors_origins.return_value = []
+            mock_settings.max_websocket_connections = 50
+
+            app = create_app(self.tq, self.ws, self.ag)
+            client = TestClient(app)
+            resp = client.get("/api/health")
+            # Should get 401/403 without auth token
+            assert resp.status_code in (401, 403)
+
+
+@pytest.mark.skipif(not HAS_TESTCLIENT, reason="fastapi test dependencies not installed")
+class TestSecurityHeaders:
+    """Verify security headers are present on responses."""
+
+    def setup_method(self):
+        self.tq = TaskQueue()
+        self.ws = WebSocketManager()
+        self.ag = ApprovalGate(self.tq)
+
+    def test_security_headers_present(self):
+        with patch("dashboard.server.settings") as mock_settings:
+            mock_settings.get_cors_origins.return_value = []
+            mock_settings.max_websocket_connections = 50
+
+            app = create_app(self.tq, self.ws, self.ag)
+            client = TestClient(app)
+            resp = client.get("/health")
+            assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+            assert resp.headers.get("X-Frame-Options") == "DENY"
+            assert resp.headers.get("X-XSS-Protection") == "1; mode=block"
+            assert "default-src 'self'" in resp.headers.get("Content-Security-Policy", "")
+            assert resp.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+            assert "camera=()" in resp.headers.get("Permissions-Policy", "")
+
+
+class TestApprovalGateAudit:
+    """Verify approval gate tracks user identity for audit."""
+
+    def test_approve_records_user(self, caplog):
+        import asyncio
+        tq = MagicMock()
+        gate = ApprovalGate(tq)
+
+        # Create a pending request manually
+        req = MagicMock()
+        req.approved = None
+        req._event = asyncio.Event()
+        gate._pending["task1:git_push"] = req
+
+        with caplog.at_level(logging.INFO, logger="agent42.approval"):
+            gate.approve("task1", "git_push", user="alice@example.com")
+
+        assert req.approved is True
+        assert any("alice@example.com" in record.message for record in caplog.records)
+
+    def test_deny_records_user(self, caplog):
+        import asyncio
+        tq = MagicMock()
+        gate = ApprovalGate(tq)
+
+        req = MagicMock()
+        req.approved = None
+        req._event = asyncio.Event()
+        gate._pending["task2:file_delete"] = req
+
+        with caplog.at_level(logging.INFO, logger="agent42.approval"):
+            gate.deny("task2", "file_delete", user="bob@example.com")
+
+        assert req.approved is False
+        assert any("bob@example.com" in record.message for record in caplog.records)
+
+    def test_approve_unknown_user_logged(self, caplog):
+        import asyncio
+        tq = MagicMock()
+        gate = ApprovalGate(tq)
+
+        req = MagicMock()
+        req.approved = None
+        req._event = asyncio.Event()
+        gate._pending["task3:external_api"] = req
+
+        with caplog.at_level(logging.INFO, logger="agent42.approval"):
+            gate.approve("task3", "external_api")
+
+        assert any("unknown" in record.message for record in caplog.records)
+
+
+class TestWebSocketMessageSizeLimit:
+    """WebSocket should reject oversized messages."""
+
+    def test_message_size_constant(self):
+        """Verify the max message size is defined (checked in server code)."""
+        # The limit is 4096 bytes, hardcoded in server.py websocket_endpoint
+        # We verify by reading the source to ensure it hasn't been removed
+        import inspect
+        from dashboard import server
+        source = inspect.getsource(server.websocket_endpoint) if hasattr(server, 'websocket_endpoint') else ""
+        # Since websocket_endpoint is a nested function, check the module source
+        module_source = inspect.getsource(server)
+        assert "4096" in module_source
