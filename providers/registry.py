@@ -18,8 +18,6 @@ logger = logging.getLogger("agent42.providers")
 
 
 class ProviderType(str, Enum):
-    NVIDIA = "nvidia"
-    GROQ = "groq"
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     DEEPSEEK = "deepseek"
@@ -46,7 +44,7 @@ class ProviderSpec:
 
 class ModelTier(str, Enum):
     """Cost tier for model selection strategy."""
-    FREE = "free"           # $0 models (OpenRouter free, NVIDIA free, Groq free)
+    FREE = "free"           # $0 models (OpenRouter free tier)
     CHEAP = "cheap"         # Low-cost models (GPT-4o-mini, Haiku, etc.)
     PREMIUM = "premium"     # Full-price frontier models (GPT-4o, Sonnet, etc.)
 
@@ -64,20 +62,6 @@ class ModelSpec:
 
 # -- Provider catalog ---------------------------------------------------------
 PROVIDERS: dict[ProviderType, ProviderSpec] = {
-    ProviderType.NVIDIA: ProviderSpec(
-        provider_type=ProviderType.NVIDIA,
-        base_url="https://integrate.api.nvidia.com/v1",
-        api_key_env="NVIDIA_API_KEY",
-        display_name="NVIDIA Build",
-        default_model="qwen/qwen2.5-coder-32b-instruct",
-    ),
-    ProviderType.GROQ: ProviderSpec(
-        provider_type=ProviderType.GROQ,
-        base_url="https://api.groq.com/openai/v1",
-        api_key_env="GROQ_API_KEY",
-        display_name="Groq",
-        default_model="llama-3.3-70b-versatile",
-    ),
     ProviderType.OPENAI: ProviderSpec(
         provider_type=ProviderType.OPENAI,
         base_url="https://api.openai.com/v1",
@@ -153,17 +137,6 @@ MODELS: dict[str, ModelSpec] = {
     # Lightweight / fast
     "or-free-nemotron": ModelSpec("nvidia/nemotron-3-nano-30b-a3b:free", ProviderType.OPENROUTER, display_name="NVIDIA Nemotron 30B (free)", tier=ModelTier.FREE),
     "or-free-gemma-27b": ModelSpec("google/gemma-3-27b-it:free", ProviderType.OPENROUTER, display_name="Gemma 3 27B (free)", tier=ModelTier.FREE),
-
-    # NVIDIA hosted (free tier with API key)
-    "qwen-coder-32b": ModelSpec("qwen/qwen2.5-coder-32b-instruct", ProviderType.NVIDIA, display_name="Qwen 2.5 Coder 32B", tier=ModelTier.FREE),
-    "deepseek-r1": ModelSpec("deepseek/deepseek-r1", ProviderType.NVIDIA, temperature=0.2, display_name="DeepSeek R1", tier=ModelTier.FREE),
-    "llama-405b": ModelSpec("meta/llama-3.1-405b-instruct", ProviderType.NVIDIA, display_name="Llama 3.1 405B", tier=ModelTier.FREE),
-    "llama-70b": ModelSpec("meta/llama-3.3-70b-instruct", ProviderType.NVIDIA, display_name="Llama 3.3 70B", tier=ModelTier.FREE),
-    "mistral-large": ModelSpec("mistralai/mistral-large-2-instruct", ProviderType.NVIDIA, display_name="Mistral Large 2", tier=ModelTier.FREE),
-
-    # Groq hosted (free tier, fast inference)
-    "groq-llama-70b": ModelSpec("llama-3.3-70b-versatile", ProviderType.GROQ, display_name="Groq Llama 70B", tier=ModelTier.FREE),
-    "groq-mixtral": ModelSpec("mixtral-8x7b-32768", ProviderType.GROQ, display_name="Groq Mixtral", tier=ModelTier.FREE),
 
     # ═══════════════════════════════════════════════════════════════════════════
     # CHEAP TIER — low-cost models for when free isn't enough

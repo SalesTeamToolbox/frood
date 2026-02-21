@@ -1,15 +1,14 @@
 """
 Model router — maps task types to the best model for the job.
 
-Free-first strategy: uses free models (OpenRouter, NVIDIA, Groq) for bulk
-agent work. Premium models only used when admin explicitly configures them
-for specific task types or for final reviews.
+Free-first strategy: uses OpenRouter free models for bulk agent work.
+Premium models only used when admin explicitly configures them for
+specific task types or for final reviews.
 
 Routing priority:
   1. Admin override (TASK_TYPE_MODEL env var) — always wins
   2. OpenRouter free models (single API key, broadest free catalog)
-  3. NVIDIA / Groq free tier (dedicated free tier providers)
-  4. Fallback to premium only if configured by admin
+  3. Fallback to premium only if configured by admin
 """
 
 import logging
@@ -63,54 +62,13 @@ FREE_ROUTING: dict[TaskType, dict] = {
     },
 }
 
-# Legacy routing using NVIDIA/Groq directly (for users with those API keys)
-NVIDIA_GROQ_ROUTING: dict[TaskType, dict] = {
-    TaskType.CODING: {
-        "primary": "qwen-coder-32b",
-        "critic": "deepseek-r1",
-        "max_iterations": 8,
-    },
-    TaskType.DEBUGGING: {
-        "primary": "deepseek-r1",
-        "critic": "qwen-coder-32b",
-        "max_iterations": 10,
-    },
-    TaskType.RESEARCH: {
-        "primary": "llama-405b",
-        "critic": "mistral-large",
-        "max_iterations": 5,
-    },
-    TaskType.REFACTORING: {
-        "primary": "qwen-coder-32b",
-        "critic": "deepseek-r1",
-        "max_iterations": 8,
-    },
-    TaskType.DOCUMENTATION: {
-        "primary": "llama-70b",
-        "critic": "groq-mixtral",
-        "max_iterations": 4,
-    },
-    TaskType.MARKETING: {
-        "primary": "llama-405b",
-        "critic": "groq-mixtral",
-        "max_iterations": 6,
-    },
-    TaskType.EMAIL: {
-        "primary": "mistral-large",
-        "critic": None,
-        "max_iterations": 3,
-    },
-}
-
 
 class ModelRouter:
     """Free-first model router with admin overrides.
 
     Resolution order:
     1. Admin env var override: AGENT42_CODING_MODEL, AGENT42_CODING_CRITIC, etc.
-    2. OpenRouter free tier (if OPENROUTER_API_KEY is set)
-    3. NVIDIA/Groq free tier (if their API keys are set)
-    4. Whatever is available
+    2. OpenRouter free tier (default — single API key covers everything)
     """
 
     def __init__(self):
@@ -124,15 +82,7 @@ class ModelRouter:
             logger.info(f"Admin override for {task_type.value}: {override}")
             return override
 
-        # Prefer OpenRouter free (single key, broadest free catalog)
-        if os.getenv("OPENROUTER_API_KEY"):
-            return FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING])
-
-        # Fall back to NVIDIA/Groq direct
-        if os.getenv("NVIDIA_API_KEY") or os.getenv("GROQ_API_KEY"):
-            return NVIDIA_GROQ_ROUTING.get(task_type, NVIDIA_GROQ_ROUTING[TaskType.CODING])
-
-        # Last resort: OpenRouter free routing (will warn about missing key)
+        # OpenRouter free routing (single key covers all free models)
         return FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING])
 
     def _check_admin_override(self, task_type: TaskType) -> dict | None:

@@ -1,8 +1,8 @@
 """
 Semantic memory — vector embeddings for meaning-based search.
 
-Uses any OpenAI-compatible embedding API (OpenRouter, NVIDIA, OpenAI, etc.)
-and a lightweight JSON-backed vector store. No heavy deps (no numpy, no faiss).
+Uses any OpenAI-compatible embedding API (OpenAI or OpenRouter) and a
+lightweight JSON-backed vector store. No heavy deps (no numpy, no faiss).
 
 Gracefully degrades to grep-based search when no embedding API is configured.
 """
@@ -23,7 +23,6 @@ logger = logging.getLogger("agent42.memory.embeddings")
 EMBEDDING_MODELS = {
     "openai": "text-embedding-3-small",       # OpenAI — cheap, 1536 dims
     "openrouter": "openai/text-embedding-3-small",  # Via OpenRouter
-    "nvidia": "nvidia/nv-embedqa-e5-v5",      # NVIDIA — free tier
 }
 
 
@@ -57,8 +56,7 @@ class EmbeddingStore:
     1. EMBEDDING_MODEL + EMBEDDING_PROVIDER env vars (explicit config)
     2. OpenAI (if OPENAI_API_KEY is set)
     3. OpenRouter (if OPENROUTER_API_KEY is set)
-    4. NVIDIA (if NVIDIA_API_KEY is set)
-    5. Disabled — falls back to grep search
+    4. Disabled — falls back to grep search
     """
 
     def __init__(self, store_path: str | Path):
@@ -88,7 +86,6 @@ class EmbeddingStore:
         for provider, model in [
             ("openai", EMBEDDING_MODELS["openai"]),
             ("openrouter", EMBEDDING_MODELS["openrouter"]),
-            ("nvidia", EMBEDDING_MODELS["nvidia"]),
         ]:
             base_url, api_key = self._provider_config(provider)
             if api_key:
@@ -105,7 +102,6 @@ class EmbeddingStore:
         configs = {
             "openai": ("https://api.openai.com/v1", os.getenv("OPENAI_API_KEY", "")),
             "openrouter": ("https://openrouter.ai/api/v1", os.getenv("OPENROUTER_API_KEY", "")),
-            "nvidia": ("https://integrate.api.nvidia.com/v1", os.getenv("NVIDIA_API_KEY", "")),
         }
         return configs.get(provider, ("https://api.openai.com/v1", ""))
 
