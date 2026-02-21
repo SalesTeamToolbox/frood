@@ -60,6 +60,31 @@ FREE_ROUTING: dict[TaskType, dict] = {
         "critic": None,
         "max_iterations": 3,
     },
+    TaskType.DESIGN: {
+        "primary": "or-free-llama4-maverick",   # Strong visual/creative reasoning
+        "critic": "or-free-deepseek-chat",
+        "max_iterations": 5,
+    },
+    TaskType.CONTENT: {
+        "primary": "or-free-llama4-maverick",   # Best free model for writing
+        "critic": "or-free-gemma-27b",          # Fast editorial check
+        "max_iterations": 6,
+    },
+    TaskType.STRATEGY: {
+        "primary": "or-free-deepseek-r1",       # Deep reasoning for strategy
+        "critic": "or-free-llama4-maverick",
+        "max_iterations": 5,
+    },
+    TaskType.DATA_ANALYSIS: {
+        "primary": "or-free-qwen-coder",        # Good with data/code/tables
+        "critic": "or-free-deepseek-chat",
+        "max_iterations": 6,
+    },
+    TaskType.PROJECT_MANAGEMENT: {
+        "primary": "or-free-llama4-maverick",
+        "critic": "or-free-gemma-27b",
+        "max_iterations": 4,
+    },
 }
 
 

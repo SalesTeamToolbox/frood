@@ -35,6 +35,11 @@ class TaskType(str, Enum):
     DOCUMENTATION = "documentation"
     MARKETING = "marketing"
     EMAIL = "email"
+    DESIGN = "design"
+    CONTENT = "content"
+    STRATEGY = "strategy"
+    DATA_ANALYSIS = "data_analysis"
+    PROJECT_MANAGEMENT = "project_management"
 
 
 # Keyword-based task type inference for channel messages
@@ -45,6 +50,11 @@ _TASK_TYPE_KEYWORDS: dict[TaskType, list[str]] = {
     TaskType.DOCUMENTATION: ["document", "readme", "docstring", "wiki", "explain", "write docs"],
     TaskType.MARKETING: ["marketing", "copy", "landing page", "social media", "campaign", "blog post", "seo"],
     TaskType.EMAIL: ["email", "draft email", "reply to", "send email", "write email", "compose"],
+    TaskType.DESIGN: ["design", "mockup", "wireframe", "ui design", "ux design", "user interface", "layout", "visual", "logo", "brand identity", "creative brief", "graphic"],
+    TaskType.CONTENT: ["blog", "article", "write", "content", "post", "copywrite", "narrative", "story", "headline"],
+    TaskType.STRATEGY: ["strategy", "competitive", "swot", "market analysis", "business plan", "positioning", "go-to-market"],
+    TaskType.DATA_ANALYSIS: ["data", "chart", "graph", "csv", "spreadsheet", "analyze data", "visualization", "metrics", "dashboard", "statistics"],
+    TaskType.PROJECT_MANAGEMENT: ["project plan", "timeline", "milestone", "sprint", "roadmap", "status report", "task breakdown", "gantt"],
 }
 
 
