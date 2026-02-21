@@ -61,6 +61,17 @@ from tools.diff_tool import DiffTool
 from tools.test_runner import TestRunnerTool
 from tools.linter_tool import LinterTool
 from tools.http_client import HttpClientTool
+from tools.browser_tool import BrowserTool
+from tools.code_intel import CodeIntelTool
+from tools.dependency_audit import DependencyAuditTool
+from tools.docker_tool import DockerTool
+from tools.python_exec import PythonExecTool
+from tools.repo_map import RepoMapTool
+from tools.pr_generator import PRGeneratorTool
+from tools.security_analyzer import SecurityAnalyzerTool
+from tools.workflow_tool import WorkflowTool
+from tools.summarizer_tool import SummarizerTool
+from tools.file_watcher import FileWatcherTool
 from core.heartbeat import HeartbeatService
 from dashboard.server import create_app
 from dashboard.websocket_manager import WebSocketManager
@@ -171,6 +182,19 @@ class Agent42:
         self.tool_registry.register(TestRunnerTool(workspace))
         self.tool_registry.register(LinterTool(workspace))
         self.tool_registry.register(HttpClientTool())
+
+        # Advanced tools (from competitive analysis)
+        self.tool_registry.register(BrowserTool(workspace))
+        self.tool_registry.register(CodeIntelTool(workspace))
+        self.tool_registry.register(DependencyAuditTool(workspace))
+        self.tool_registry.register(DockerTool(workspace))
+        self.tool_registry.register(PythonExecTool(workspace))
+        self.tool_registry.register(RepoMapTool(workspace))
+        self.tool_registry.register(PRGeneratorTool(workspace))
+        self.tool_registry.register(SecurityAnalyzerTool(workspace))
+        self.tool_registry.register(WorkflowTool(workspace, self.tool_registry))
+        self.tool_registry.register(SummarizerTool(workspace))
+        self.tool_registry.register(FileWatcherTool(workspace))
 
     async def _setup_channels(self):
         """Configure and register enabled channels based on settings."""
