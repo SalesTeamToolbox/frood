@@ -28,36 +28,36 @@ logger = logging.getLogger("agent42.router")
 FREE_ROUTING: dict[TaskType, dict] = {
     TaskType.CODING: {
         "primary": "or-free-qwen-coder",       # Qwen3 Coder 480B — strongest free coder
-        "critic": "or-free-deepseek-r1",        # DeepSeek R1 — strong free reasoner
+        "critic": "or-free-deepseek-r1",        # DeepSeek R1 0528 — best free reasoner
         "max_iterations": 8,
     },
     TaskType.DEBUGGING: {
         "primary": "or-free-deepseek-r1",       # DeepSeek R1 — reasoning for root cause
-        "critic": "or-free-qwen-coder",         # Qwen coder to verify fix
+        "critic": "or-free-devstral",            # Devstral 123B — multi-file awareness
         "max_iterations": 10,
     },
     TaskType.RESEARCH: {
-        "primary": "or-free-llama-70b",         # Llama 70B — strong general
+        "primary": "or-free-llama4-maverick",   # Llama 4 Maverick — GPT-4+ level
         "critic": "or-free-deepseek-chat",      # DeepSeek Chat for second opinion
         "max_iterations": 5,
     },
     TaskType.REFACTORING: {
-        "primary": "or-free-qwen-coder",
-        "critic": "or-free-deepseek-r1",
+        "primary": "or-free-qwen-coder",        # Qwen3 Coder — best for code changes
+        "critic": "or-free-devstral",            # Devstral — multi-file project awareness
         "max_iterations": 8,
     },
     TaskType.DOCUMENTATION: {
-        "primary": "or-free-llama-70b",
-        "critic": "or-free-nemotron",
+        "primary": "or-free-llama4-maverick",   # Llama 4 — strong writing
+        "critic": "or-free-gemma-27b",           # Gemma 27B — fast verification
         "max_iterations": 4,
     },
     TaskType.MARKETING: {
-        "primary": "or-free-llama-70b",
-        "critic": "or-free-deepseek-chat",
+        "primary": "or-free-llama4-maverick",   # Llama 4 — creative + general
+        "critic": "or-free-deepseek-chat",      # DeepSeek Chat v3.1
         "max_iterations": 6,
     },
     TaskType.EMAIL: {
-        "primary": "or-free-deepseek-chat",
+        "primary": "or-free-mistral-small",     # Mistral Small 3.1 — fast + precise
         "critic": None,
         "max_iterations": 3,
     },

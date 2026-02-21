@@ -132,13 +132,27 @@ MODELS: dict[str, ModelSpec] = {
     # ═══════════════════════════════════════════════════════════════════════════
 
     # OpenRouter free models (single API key, no credit card needed)
+    # ~30 free models available — these are the best for agent work
     "or-free-auto": ModelSpec("openrouter/free", ProviderType.OPENROUTER, display_name="OR Free Auto-Router", tier=ModelTier.FREE),
-    "or-free-deepseek-r1": ModelSpec("deepseek/deepseek-r1:free", ProviderType.OPENROUTER, temperature=0.2, display_name="DeepSeek R1 (free)", tier=ModelTier.FREE),
+
+    # Coding specialists
+    "or-free-qwen-coder": ModelSpec("qwen/qwen3-coder:free", ProviderType.OPENROUTER, max_tokens=8192, display_name="Qwen3 Coder 480B (free)", tier=ModelTier.FREE),
+    "or-free-devstral": ModelSpec("mistralai/devstral-2512:free", ProviderType.OPENROUTER, max_tokens=8192, display_name="Devstral 123B (free)", tier=ModelTier.FREE),
+
+    # Reasoning specialists
+    "or-free-deepseek-r1": ModelSpec("deepseek/deepseek-r1-0528:free", ProviderType.OPENROUTER, temperature=0.2, display_name="DeepSeek R1 0528 (free)", tier=ModelTier.FREE),
     "or-free-deepseek-chat": ModelSpec("deepseek/deepseek-chat-v3.1:free", ProviderType.OPENROUTER, display_name="DeepSeek Chat v3.1 (free)", tier=ModelTier.FREE),
+
+    # General-purpose
+    "or-free-llama4-maverick": ModelSpec("meta-llama/llama-4-maverick:free", ProviderType.OPENROUTER, display_name="Llama 4 Maverick (free)", tier=ModelTier.FREE),
     "or-free-llama-70b": ModelSpec("meta-llama/llama-3.3-70b-instruct:free", ProviderType.OPENROUTER, display_name="Llama 3.3 70B (free)", tier=ModelTier.FREE),
-    "or-free-qwen-coder": ModelSpec("qwen/qwen3-coder-480b:free", ProviderType.OPENROUTER, display_name="Qwen3 Coder 480B (free)", tier=ModelTier.FREE),
-    "or-free-qwen-thinking": ModelSpec("qwen/qwen3-235b-a22b-thinking-2507:free", ProviderType.OPENROUTER, temperature=0.2, display_name="Qwen3 235B Thinking (free)", tier=ModelTier.FREE),
-    "or-free-nemotron": ModelSpec("nvidia/nemotron-3-nano-30b:free", ProviderType.OPENROUTER, display_name="NVIDIA Nemotron 30B (free)", tier=ModelTier.FREE),
+    "or-free-gemini-flash": ModelSpec("google/gemini-2.0-flash-exp:free", ProviderType.OPENROUTER, max_tokens=8192, display_name="Gemini 2.0 Flash (free, 1M ctx)", tier=ModelTier.FREE),
+    "or-free-gemini-pro": ModelSpec("google/gemini-2.5-pro-exp-03-25:free", ProviderType.OPENROUTER, max_tokens=8192, display_name="Gemini 2.5 Pro (free)", tier=ModelTier.FREE),
+    "or-free-mistral-small": ModelSpec("mistralai/mistral-small-3.1-24b-instruct:free", ProviderType.OPENROUTER, display_name="Mistral Small 3.1 (free)", tier=ModelTier.FREE),
+
+    # Lightweight / fast
+    "or-free-nemotron": ModelSpec("nvidia/nemotron-3-nano-30b-a3b:free", ProviderType.OPENROUTER, display_name="NVIDIA Nemotron 30B (free)", tier=ModelTier.FREE),
+    "or-free-gemma-27b": ModelSpec("google/gemma-3-27b-it:free", ProviderType.OPENROUTER, display_name="Gemma 3 27B (free)", tier=ModelTier.FREE),
 
     # NVIDIA hosted (free tier with API key)
     "qwen-coder-32b": ModelSpec("qwen/qwen2.5-coder-32b-instruct", ProviderType.NVIDIA, display_name="Qwen 2.5 Coder 32B", tier=ModelTier.FREE),
