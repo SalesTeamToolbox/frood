@@ -6,6 +6,10 @@ Inspired by Nanobot's MEMORY.md + HISTORY.md pattern:
 - HISTORY.md: Append-only chronological event log (grep-searchable)
 - embeddings.json: Vector embeddings for semantic search (auto-managed)
 
+Enhanced storage backends (optional, auto-detected):
+- Qdrant: HNSW-indexed vector search for sub-ms semantic retrieval
+- Redis: Session caching, embedding cache, cross-instance sharing
+
 Semantic search is enabled automatically when any embedding-capable API
 key is configured (OpenAI or OpenRouter). Falls back to grep when no
 embedding API is available.
@@ -22,13 +26,25 @@ logger = logging.getLogger("agent42.memory")
 
 
 class MemoryStore:
-    """Persistent two-layer memory with semantic search support."""
+    """Persistent two-layer memory with semantic search support.
 
-    def __init__(self, workspace_dir: str | Path):
+    Optionally integrates with Qdrant (vector DB) and Redis (cache)
+    for enhanced search and performance. Falls back to file-based
+    storage when these services are unavailable.
+    """
+
+    def __init__(self, workspace_dir: str | Path, qdrant_store=None,
+                 redis_backend=None):
         self.workspace_dir = Path(workspace_dir)
         self.memory_path = self.workspace_dir / "MEMORY.md"
         self.history_path = self.workspace_dir / "HISTORY.md"
-        self.embeddings = EmbeddingStore(self.workspace_dir / "embeddings.json")
+        self._qdrant = qdrant_store
+        self._redis = redis_backend
+        self.embeddings = EmbeddingStore(
+            self.workspace_dir / "embeddings.json",
+            qdrant_store=qdrant_store,
+            redis_backend=redis_backend,
+        )
         self._ensure_files()
 
     def _ensure_files(self):
@@ -59,6 +75,9 @@ class MemoryStore:
     def update_memory(self, content: str):
         """Replace the entire memory contents."""
         self.memory_path.write_text(content, encoding="utf-8")
+        # Notify Redis of memory change (cache invalidation)
+        if self._redis and self._redis.is_available:
+            self._redis.increment_memory_version()
         logger.info("Memory updated")
 
     def append_to_section(self, section: str, content: str):
@@ -211,8 +230,10 @@ class MemoryStore:
         """Build context augmented with semantically relevant memory.
 
         When a query is provided, includes the most relevant memory chunks
-        instead of just recent history. Falls back to build_context() if
-        semantic search is unavailable.
+        instead of just recent history. Also searches past conversations
+        when Qdrant is available.
+
+        Falls back to build_context() if semantic search is unavailable.
         """
         if not self.embeddings.is_available:
             return self.build_context(max_memory_lines=max_memory_lines)
@@ -228,7 +249,7 @@ class MemoryStore:
         parts.append("## Persistent Memory\n")
         parts.append("\n".join(memory_lines))
 
-        # Add semantically relevant context
+        # Add semantically relevant context from memory + history
         results = await self.embeddings.search(query, top_k=top_k)
         if results:
             parts.append("\n## Relevant Context (semantic search)\n")
@@ -236,6 +257,23 @@ class MemoryStore:
                 score_pct = int(r["score"] * 100)
                 parts.append(f"**[{r['source']}/{r['section']}]** ({score_pct}% match)")
                 parts.append(r["text"])
+                parts.append("")
+
+        # Add relevant past conversations (Qdrant only)
+        conv_results = await self.embeddings.search_conversations(
+            query, top_k=3,
+        )
+        if conv_results:
+            parts.append("\n## Related Past Conversations\n")
+            for r in conv_results:
+                score_pct = int(r["score"] * 100)
+                channel = r.get("metadata", {}).get("channel_type", "unknown")
+                parts.append(f"**[{channel}]** ({score_pct}% match)")
+                # Truncate long conversation summaries
+                text = r["text"]
+                if len(text) > 500:
+                    text = text[:500] + "..."
+                parts.append(text)
                 parts.append("")
 
         return "\n".join(parts)
