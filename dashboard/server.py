@@ -39,6 +39,11 @@ class ApprovalAction(BaseModel):
     approved: bool
 
 
+class ReviewFeedback(BaseModel):
+    feedback: str
+    approved: bool
+
+
 def create_app(
     task_queue: TaskQueue,
     ws_manager: WebSocketManager,
@@ -46,6 +51,7 @@ def create_app(
     tool_registry=None,
     skill_loader=None,
     channel_manager=None,
+    learner=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -112,6 +118,27 @@ def create_app(
         else:
             approval_gate.deny(req.task_id, req.action)
         return {"status": "ok"}
+
+    # -- Review Feedback (learning from human review) --------------------------
+
+    @app.post("/api/tasks/{task_id}/review")
+    async def submit_review_feedback(
+        task_id: str, req: ReviewFeedback, _user: str = Depends(get_current_user)
+    ):
+        """Submit human reviewer feedback — the agent learns from this."""
+        task = task_queue.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if learner:
+            learner.record_reviewer_feedback(
+                task_id=task_id,
+                task_title=task.title,
+                feedback=req.feedback,
+                approved=req.approved,
+            )
+        if req.approved:
+            await task_queue.approve(task_id)
+        return {"status": "feedback recorded", "approved": req.approved}
 
     # -- Providers (Phase 5) ---------------------------------------------------
 
