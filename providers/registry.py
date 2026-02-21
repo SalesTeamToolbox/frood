@@ -237,6 +237,10 @@ class ProviderRegistry:
             self._clients[provider_type] = self._build_client(provider_type)
         return self._clients[provider_type]
 
+    def clear_cache(self):
+        """Clear cached clients so they rebuild with fresh API keys on next use."""
+        self._clients.clear()
+
     def get_model(self, model_key: str) -> ModelSpec:
         """Resolve a model key to its spec."""
         spec = MODELS.get(model_key)

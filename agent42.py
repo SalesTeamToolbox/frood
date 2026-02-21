@@ -43,6 +43,7 @@ from core.sandbox import WorkspaceSandbox
 from core.command_filter import CommandFilter, DEFAULT_ALLOWLIST
 from core.rate_limiter import ToolRateLimiter, ToolLimit
 from core.device_auth import DeviceStore
+from core.key_store import KeyStore
 from dashboard.auth import init_device_store
 from agents.agent import Agent
 from agents.learner import Learner
@@ -187,6 +188,10 @@ class Agent42:
         # Phase 10: Device gateway authentication
         self.device_store = DeviceStore(self.repo_path / settings.devices_file)
         init_device_store(self.device_store)
+
+        # Admin-configured API keys (override .env values)
+        self.key_store = KeyStore(self.repo_path / ".agent42" / "settings.json")
+        self.key_store.inject_into_environ()
 
         # Self-learning
         self.workspace_skills_dir = self.repo_path / "skills" / "workspace"
@@ -629,6 +634,7 @@ class Agent42:
                 learner=self.learner,
                 device_store=self.device_store,
                 heartbeat=self.heartbeat,
+                key_store=self.key_store,
             )
             config = uvicorn.Config(
                 app,
