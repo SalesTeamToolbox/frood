@@ -1,20 +1,27 @@
 """
 FastAPI dashboard server with REST API and WebSocket support.
 
+Security features:
+- CORS restricted to configured origins (no wildcard)
+- Login rate limiting per IP
+- WebSocket connection limits
+- Health check endpoint
+
 Extended with endpoints for providers, tools, skills, and channels.
 """
 
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from core.task_queue import TaskQueue, Task, TaskType
+from core.config import settings
+from core.task_queue import TaskQueue, Task, TaskType, TaskStatus
 from core.approval_gate import ApprovalGate
-from dashboard.auth import verify_password, create_token, get_current_user
+from dashboard.auth import verify_password, create_token, get_current_user, check_rate_limit
 from dashboard.websocket_manager import WebSocketManager
 
 logger = logging.getLogger("agent42.server")
@@ -55,21 +62,49 @@ def create_app(
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
-    app = FastAPI(title="Agent42 Dashboard", version="0.2.0")
+    app = FastAPI(title="Agent42 Dashboard", version="0.3.0")
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # CORS: restricted to configured origins only
+    cors_origins = settings.get_cors_origins()
+    if cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "DELETE"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
+
+    # -- Health ----------------------------------------------------------------
+
+    @app.get("/health")
+    async def health_check():
+        """Public health check endpoint (no auth required)."""
+        return {
+            "status": "ok",
+            "tasks_total": len(task_queue.all_tasks()),
+            "tasks_pending": sum(
+                1 for t in task_queue.all_tasks() if t.status == TaskStatus.PENDING
+            ),
+            "tasks_running": sum(
+                1 for t in task_queue.all_tasks() if t.status == TaskStatus.RUNNING
+            ),
+            "websocket_connections": ws_manager.connection_count,
+        }
 
     # -- Auth ------------------------------------------------------------------
 
     @app.post("/api/login")
-    async def login(req: LoginRequest):
-        if req.username != "admin" or not verify_password(req.password):
+    async def login(req: LoginRequest, request: Request):
+        client_ip = request.client.host if request.client else "unknown"
+
+        if not check_rate_limit(client_ip):
+            raise HTTPException(
+                status_code=429,
+                detail="Too many login attempts. Try again in 1 minute.",
+            )
+
+        if req.username != settings.dashboard_username or not verify_password(req.password):
             raise HTTPException(status_code=401, detail="Invalid credentials")
         return {"token": create_token(req.username)}
 
@@ -102,6 +137,23 @@ def create_app(
     async def approve_task(task_id: str, _user: str = Depends(get_current_user)):
         await task_queue.approve(task_id)
         return {"status": "approved"}
+
+    @app.post("/api/tasks/{task_id}/cancel")
+    async def cancel_task(task_id: str, _user: str = Depends(get_current_user)):
+        """Cancel a pending or running task."""
+        await task_queue.cancel(task_id)
+        return {"status": "cancelled"}
+
+    @app.post("/api/tasks/{task_id}/retry")
+    async def retry_task(task_id: str, _user: str = Depends(get_current_user)):
+        """Re-queue a failed task."""
+        task = task_queue.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task.status != TaskStatus.FAILED:
+            raise HTTPException(status_code=400, detail="Only failed tasks can be retried")
+        await task_queue.retry(task_id)
+        return {"status": "retried"}
 
     # -- Approvals -------------------------------------------------------------
 
@@ -187,6 +239,11 @@ def create_app(
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket):
+        # Connection limit
+        if ws_manager.connection_count >= settings.max_websocket_connections:
+            await ws.close(code=4003, reason="Too many connections")
+            return
+
         # Authenticate via query parameter: ws://host/ws?token=<jwt>
         token = ws.query_params.get("token")
         if not token:
@@ -194,8 +251,7 @@ def create_app(
             return
         try:
             from jose import jwt as jose_jwt, JWTError
-            from core.config import settings as _settings
-            payload = jose_jwt.decode(token, _settings.jwt_secret, algorithms=["HS256"])
+            payload = jose_jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
             if not payload.get("sub"):
                 await ws.close(code=4001, reason="Invalid token")
                 return

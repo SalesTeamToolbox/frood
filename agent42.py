@@ -35,7 +35,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from core.config import settings
-from core.task_queue import TaskQueue, Task, TaskType, infer_task_type
+from core.task_queue import TaskQueue, Task, TaskType, TaskStatus, infer_task_type
 from core.worktree_manager import WorktreeManager
 from core.approval_gate import ApprovalGate
 from core.sandbox import WorkspaceSandbox
@@ -222,11 +222,14 @@ class Agent42:
             ),
         )
 
-        # Create a task from the message with inferred type
+        # Create a task from the message with inferred type + origin tracking
         task = Task(
             title=f"[{message.channel_type}] {message.content[:60]}",
             description=message.content,
             task_type=infer_task_type(message.content),
+            origin_channel=message.channel_type,
+            origin_channel_id=message.channel_id,
+            origin_metadata=message.metadata,
         )
         await self.task_queue.add(task)
 
@@ -245,8 +248,39 @@ class Agent42:
         )
 
     async def _on_task_update(self, task):
-        """Broadcast task state changes to all dashboard clients."""
+        """Broadcast task state changes to all dashboard clients.
+
+        Also routes results back to the originating channel when a task
+        completes or fails.
+        """
         await self.ws_manager.broadcast("task_update", task.to_dict())
+
+        # Route results back to originating channel
+        if task.origin_channel and task.status in (TaskStatus.REVIEW, TaskStatus.DONE):
+            content = f"Task **{task.title}** completed.\n\n"
+            if task.result:
+                # Truncate long results for chat
+                result_preview = task.result[:1500]
+                if len(task.result) > 1500:
+                    result_preview += "\n... (truncated — see dashboard for full output)"
+                content += result_preview
+
+            outbound = OutboundMessage(
+                channel_type=task.origin_channel,
+                channel_id=task.origin_channel_id,
+                content=content,
+                metadata=task.origin_metadata,
+            )
+            await self.channel_manager.send(outbound)
+
+        elif task.origin_channel and task.status == TaskStatus.FAILED:
+            outbound = OutboundMessage(
+                channel_type=task.origin_channel,
+                channel_id=task.origin_channel_id,
+                content=f"Task **{task.title}** failed: {task.error}",
+                metadata=task.origin_metadata,
+            )
+            await self.channel_manager.send(outbound)
 
     async def emit(self, event_type: str, data: dict):
         """Push events from agents to the dashboard via WebSocket."""
@@ -264,6 +298,7 @@ class Agent42:
                 skill_loader=self.skill_loader,
                 memory_store=self.memory_store,
                 workspace_skills_dir=self.workspace_skills_dir,
+                tool_registry=self.tool_registry,
             )
             await agent.run()
 
@@ -289,13 +324,19 @@ class Agent42:
         """Start the orchestrator: dashboard, channels, queue processor, cron, MCP."""
         self._validate_env()
 
+        dashboard_host = settings.dashboard_host
+
         logger.info(f"Agent42 starting — repo: {self.repo_path}")
         logger.info(f"  Max concurrent agents: {self.max_agents}")
         logger.info(f"  Sandbox: {'enabled' if settings.sandbox_enabled else 'disabled'}")
         logger.info(f"  Skills loaded: {len(self.skill_loader.all_skills())}")
         logger.info(f"  Tools registered: {len(self.tool_registry.list_tools())}")
         if not self.headless:
-            logger.info(f"  Dashboard: http://0.0.0.0:{self.dashboard_port}")
+            logger.info(f"  Dashboard: http://{dashboard_host}:{self.dashboard_port}")
+
+        # Auth warnings
+        for warning in settings.validate_dashboard_auth():
+            logger.warning(warning)
 
         # Load tasks and initialize subsystems
         await self.task_queue.load_from_file()
@@ -328,7 +369,7 @@ class Agent42:
             )
             config = uvicorn.Config(
                 app,
-                host="0.0.0.0",
+                host=dashboard_host,
                 port=self.dashboard_port,
                 log_level="warning",
             )

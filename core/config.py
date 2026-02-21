@@ -5,9 +5,20 @@ All settings are validated at import time so failures surface early.
 """
 
 import json
+import logging
 import os
+import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger("agent42.config")
+
+# Known-insecure JWT secrets that must never be used in production
+_INSECURE_JWT_SECRETS = {
+    "change-me-to-a-long-random-string",
+    "change-me-to-a-long-random-string-at-least-32-chars",
+    "",
+}
 
 
 @dataclass(frozen=True)
@@ -26,7 +37,9 @@ class Settings:
     dashboard_username: str = "admin"
     dashboard_password: str = ""
     dashboard_password_hash: str = ""
-    jwt_secret: str = "change-me-to-a-long-random-string"
+    jwt_secret: str = ""
+    dashboard_host: str = "127.0.0.1"
+    cors_allowed_origins: str = ""  # Comma-separated origins, empty = same-origin only
 
     # Orchestrator
     default_repo_path: str = "."
@@ -36,6 +49,13 @@ class Settings:
     # Security (Phase 1)
     sandbox_enabled: bool = True
     workspace_restrict: bool = True
+
+    # Rate limiting
+    login_rate_limit: int = 5  # Max login attempts per minute per IP
+    max_websocket_connections: int = 50
+
+    # Spending limits
+    max_daily_api_spend_usd: float = 0.0  # 0 = unlimited
 
     # Channels (Phase 2)
     discord_bot_token: str = ""
@@ -66,6 +86,15 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
+        # Enforce secure JWT secret
+        jwt_secret = os.getenv("JWT_SECRET", "")
+        if jwt_secret in _INSECURE_JWT_SECRETS:
+            jwt_secret = secrets.token_hex(32)
+            logger.warning(
+                "JWT_SECRET not set or insecure — generated a random secret. "
+                "Set JWT_SECRET in .env for persistent sessions across restarts."
+            )
+
         return cls(
             # Provider API keys
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
@@ -78,7 +107,9 @@ class Settings:
             dashboard_username=os.getenv("DASHBOARD_USERNAME", "admin"),
             dashboard_password=os.getenv("DASHBOARD_PASSWORD", ""),
             dashboard_password_hash=os.getenv("DASHBOARD_PASSWORD_HASH", ""),
-            jwt_secret=os.getenv("JWT_SECRET", "change-me-to-a-long-random-string"),
+            jwt_secret=jwt_secret,
+            dashboard_host=os.getenv("DASHBOARD_HOST", "127.0.0.1"),
+            cors_allowed_origins=os.getenv("CORS_ALLOWED_ORIGINS", ""),
             # Orchestrator
             default_repo_path=os.getenv("DEFAULT_REPO_PATH", str(Path.cwd())),
             max_concurrent_agents=int(os.getenv("MAX_CONCURRENT_AGENTS", "3")),
@@ -86,6 +117,9 @@ class Settings:
             # Security
             sandbox_enabled=os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes"),
             workspace_restrict=os.getenv("WORKSPACE_RESTRICT", "true").lower() in ("true", "1", "yes"),
+            login_rate_limit=int(os.getenv("LOGIN_RATE_LIMIT", "5")),
+            max_websocket_connections=int(os.getenv("MAX_WEBSOCKET_CONNECTIONS", "50")),
+            max_daily_api_spend_usd=float(os.getenv("MAX_DAILY_API_SPEND_USD", "0")),
             # Channels
             discord_bot_token=os.getenv("DISCORD_BOT_TOKEN", ""),
             discord_guild_ids=os.getenv("DISCORD_GUILD_IDS", ""),
@@ -134,6 +168,28 @@ class Settings:
             return json.loads(path.read_text())
         except (json.JSONDecodeError, OSError):
             return {}
+
+    def get_cors_origins(self) -> list[str]:
+        """Parse comma-separated CORS allowed origins."""
+        if not self.cors_allowed_origins:
+            return []
+        return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
+
+    def validate_dashboard_auth(self) -> list[str]:
+        """Validate dashboard auth configuration. Returns list of warnings."""
+        warnings = []
+        if not self.dashboard_password and not self.dashboard_password_hash:
+            warnings.append(
+                "No dashboard password configured (DASHBOARD_PASSWORD or "
+                "DASHBOARD_PASSWORD_HASH). Dashboard login will be disabled."
+            )
+        if self.dashboard_password and not self.dashboard_password_hash:
+            warnings.append(
+                "Using plaintext DASHBOARD_PASSWORD. Set DASHBOARD_PASSWORD_HASH "
+                "for production. Generate: python -c \"from passlib.context import "
+                "CryptContext; print(CryptContext(['bcrypt']).hash('yourpassword'))\""
+            )
+        return warnings
 
 
 # Singleton — import this everywhere
