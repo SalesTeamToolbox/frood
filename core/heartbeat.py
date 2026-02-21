@@ -59,6 +59,22 @@ class SystemHealth:
     memory_mb: float = 0
     tools_registered: int = 0
 
+    # CPU metrics
+    cpu_load_1m: float = 0.0
+    cpu_load_5m: float = 0.0
+    cpu_load_15m: float = 0.0
+    cpu_cores: int = 0
+    load_per_core: float = 0.0
+
+    # System memory
+    memory_total_mb: float = 0.0
+    memory_available_mb: float = 0.0
+
+    # Dynamic capacity
+    effective_max_agents: int = 0
+    configured_max_agents: int = 0
+    capacity_reason: str = ""
+
     def to_dict(self) -> dict:
         return {
             "active_agents": self.active_agents,
@@ -69,6 +85,16 @@ class SystemHealth:
             "uptime_seconds": round(self.uptime_seconds, 1),
             "memory_mb": round(self.memory_mb, 1),
             "tools_registered": self.tools_registered,
+            "cpu_load_1m": self.cpu_load_1m,
+            "cpu_load_5m": self.cpu_load_5m,
+            "cpu_load_15m": self.cpu_load_15m,
+            "cpu_cores": self.cpu_cores,
+            "load_per_core": self.load_per_core,
+            "memory_total_mb": round(self.memory_total_mb, 1),
+            "memory_available_mb": round(self.memory_available_mb, 1),
+            "effective_max_agents": self.effective_max_agents,
+            "configured_max_agents": self.configured_max_agents,
+            "capacity_reason": self.capacity_reason,
         }
 
 
@@ -80,11 +106,13 @@ class HeartbeatService:
         interval: float = DEFAULT_INTERVAL,
         on_stall=None,
         on_heartbeat=None,
+        configured_max_agents: int = 3,
     ):
         self._interval = interval
         self._agents: dict[str, AgentHeartbeat] = {}
         self._on_stall = on_stall  # async callback(task_id)
         self._on_heartbeat = on_heartbeat  # async callback(SystemHealth)
+        self._configured_max_agents = configured_max_agents
         self._start_time = time.monotonic()
         self._running = False
         self._task: asyncio.Task | None = None
@@ -136,10 +164,27 @@ class HeartbeatService:
 
     def get_health(self, task_queue=None, tool_registry=None) -> SystemHealth:
         """Get a snapshot of overall system health."""
+        from core.capacity import compute_effective_capacity
+
+        cap = compute_effective_capacity(self._configured_max_agents)
+
         health = SystemHealth(
             active_agents=len(self.active_agents),
             stalled_agents=len(self.stalled_agents),
             uptime_seconds=time.monotonic() - self._start_time,
+            # CPU metrics
+            cpu_load_1m=cap["cpu_load_1m"],
+            cpu_load_5m=cap["cpu_load_5m"],
+            cpu_load_15m=cap["cpu_load_15m"],
+            cpu_cores=cap["cpu_cores"],
+            load_per_core=cap["load_per_core"],
+            # System memory
+            memory_total_mb=cap["memory_total_mb"],
+            memory_available_mb=cap["memory_available_mb"],
+            # Dynamic capacity
+            effective_max_agents=cap["effective_max"],
+            configured_max_agents=cap["configured_max"],
+            capacity_reason=cap["reason"],
         )
 
         if task_queue:
@@ -151,7 +196,7 @@ class HeartbeatService:
         if tool_registry:
             health.tools_registered = len(tool_registry.list_tools())
 
-        # Get memory usage
+        # Get process memory usage
         try:
             import resource
             usage = resource.getrusage(resource.RUSAGE_SELF)

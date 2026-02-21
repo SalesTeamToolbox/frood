@@ -104,6 +104,7 @@ def create_app(
     channel_manager=None,
     learner=None,
     device_store: Optional[DeviceStore] = None,
+    heartbeat=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -147,6 +148,34 @@ def create_app(
                 1 for t in task_queue.all_tasks() if t.status == TaskStatus.RUNNING
             ),
             "websocket_connections": ws_manager.connection_count,
+        }
+
+    # -- Platform Status -------------------------------------------------------
+
+    @app.get("/api/status")
+    async def get_status(_user: str = Depends(get_current_user)):
+        """Full platform status with system metrics and dynamic capacity."""
+        if heartbeat:
+            health = heartbeat.get_health(
+                task_queue=task_queue, tool_registry=tool_registry
+            )
+            return health.to_dict()
+        # Fallback when heartbeat is not available
+        from core.capacity import compute_effective_capacity
+        cap = compute_effective_capacity(settings.max_concurrent_agents)
+        return {
+            "active_agents": 0,
+            "stalled_agents": 0,
+            "tasks_pending": 0,
+            "tasks_completed": 0,
+            "tasks_failed": 0,
+            "uptime_seconds": 0,
+            "memory_mb": 0,
+            "tools_registered": 0,
+            **{k: v for k, v in cap.items() if k != "configured_max"},
+            "effective_max_agents": cap["effective_max"],
+            "configured_max_agents": cap["configured_max"],
+            "capacity_reason": cap["reason"],
         }
 
     # -- Auth ------------------------------------------------------------------
