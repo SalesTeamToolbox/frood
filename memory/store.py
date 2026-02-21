@@ -7,8 +7,8 @@ Inspired by Nanobot's MEMORY.md + HISTORY.md pattern:
 - embeddings.json: Vector embeddings for semantic search (auto-managed)
 
 Semantic search is enabled automatically when any embedding-capable API
-key is configured (OpenAI, OpenRouter, or NVIDIA). Falls back to grep
-when no embedding API is available.
+key is configured (OpenAI or OpenRouter). Falls back to grep when no
+embedding API is available.
 """
 
 import logging

@@ -56,8 +56,6 @@ For direct provider access or premium models, add any of these API keys:
 | Provider | API Key Env Var | Free Tier? |
 |---|---|---|
 | [OpenRouter](https://openrouter.ai) | `OPENROUTER_API_KEY` | Yes — 30+ free models |
-| [NVIDIA Build](https://build.nvidia.com) | `NVIDIA_API_KEY` | Yes — free tier |
-| [Groq](https://console.groq.com) | `GROQ_API_KEY` | Yes — free tier |
 | [OpenAI](https://platform.openai.com) | `OPENAI_API_KEY` | No |
 | [Anthropic](https://console.anthropic.com) | `ANTHROPIC_API_KEY` | No |
 | [DeepSeek](https://platform.deepseek.com) | `DEEPSEEK_API_KEY` | No |
@@ -101,7 +99,7 @@ All config lives in `.env`. See `.env.example` for all options.
 | `MEMORY_DIR` | `.agent42/memory` | Persistent memory storage |
 | `SESSIONS_DIR` | `.agent42/sessions` | Session history |
 | `EMBEDDING_MODEL` | auto-detected | Override embedding model |
-| `EMBEDDING_PROVIDER` | auto-detected | `openai`, `openrouter`, or `nvidia` |
+| `EMBEDDING_PROVIDER` | auto-detected | `openai` or `openrouter` |
 
 ### Tools
 
@@ -145,17 +143,6 @@ One API key, zero cost. These models are used by default for all task types:
 | documentation | Llama 4 Maverick | Gemma 3 27B | 4 |
 | marketing | Llama 4 Maverick | DeepSeek Chat v3.1 | 6 |
 | email | Mistral Small 3.1 | — | 3 |
-
-### Legacy Routing — NVIDIA / Groq Direct
-
-If you have NVIDIA or Groq API keys but no OpenRouter key, the router falls
-back to direct provider access:
-
-| Task Type | Primary | Critic |
-|---|---|---|
-| coding | Qwen 2.5 Coder 32B | DeepSeek R1 |
-| debugging | DeepSeek R1 | Qwen 2.5 Coder 32B |
-| research | Llama 3.1 405B | Mistral Large 2 |
 
 ### Admin Overrides
 
@@ -243,7 +230,7 @@ Agent42 maintains persistent memory and learns from every task:
 - **Structured memory** — key/value sections in `MEMORY.md` (project context, preferences, learned patterns)
 - **Event log** — append-only `HISTORY.md` for audit trail
 - **Session history** — per-conversation message history with configurable limits
-- **Semantic search** — vector embeddings for similarity-based memory retrieval (auto-detects OpenAI, OpenRouter, or NVIDIA embedding APIs; falls back to grep)
+- **Semantic search** — vector embeddings for similarity-based memory retrieval (auto-detects OpenAI or OpenRouter embedding APIs; falls back to grep)
 
 ### Self-Learning Loop
 

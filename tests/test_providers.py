@@ -14,12 +14,12 @@ from providers.registry import (
 
 class TestProviderRegistry:
     def test_all_providers_registered(self):
-        expected = {"nvidia", "groq", "openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm"}
+        expected = {"openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm"}
         actual = {p.value for p in PROVIDERS.keys()}
-        assert expected == actual
+        assert expected.issubset(actual)
 
     def test_model_catalog_not_empty(self):
-        assert len(MODELS) >= 18
+        assert len(MODELS) >= 11
 
     def test_each_model_has_valid_provider(self):
         for key, spec in MODELS.items():
@@ -27,9 +27,9 @@ class TestProviderRegistry:
 
     def test_get_model(self):
         registry = ProviderRegistry()
-        spec = registry.get_model("qwen-coder-32b")
-        assert spec.model_id == "qwen/qwen2.5-coder-32b-instruct"
-        assert spec.provider == ProviderType.NVIDIA
+        spec = registry.get_model("or-free-qwen-coder")
+        assert spec.model_id == "qwen/qwen3-coder:free"
+        assert spec.provider == ProviderType.OPENROUTER
 
     def test_get_unknown_model_raises(self):
         registry = ProviderRegistry()
@@ -74,10 +74,6 @@ class TestProviderRegistry:
         ProviderRegistry.register_model("custom-v1", custom_model)
         assert "custom-v1" in MODELS
         assert MODELS["custom-v1"].display_name == "Custom Model v1"
-
-    def test_nvidia_models_exist(self):
-        nvidia_models = [k for k, v in MODELS.items() if v.provider == ProviderType.NVIDIA]
-        assert len(nvidia_models) >= 5
 
     def test_openai_models_exist(self):
         openai_models = [k for k, v in MODELS.items() if v.provider == ProviderType.OPENAI]

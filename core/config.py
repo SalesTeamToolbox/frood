@@ -15,8 +15,6 @@ class Settings:
     """Immutable application settings derived from environment variables."""
 
     # API keys — providers (Phase 5)
-    nvidia_api_key: str = ""
-    groq_api_key: str = ""
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     deepseek_api_key: str = ""
@@ -34,10 +32,6 @@ class Settings:
     default_repo_path: str = "."
     max_concurrent_agents: int = 3
     tasks_json_path: str = "tasks.json"
-
-    # Model endpoints
-    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
-    groq_base_url: str = "https://api.groq.com/openai/v1"
 
     # Security (Phase 1)
     sandbox_enabled: bool = True
@@ -74,8 +68,6 @@ class Settings:
     def from_env(cls) -> "Settings":
         return cls(
             # Provider API keys
-            nvidia_api_key=os.getenv("NVIDIA_API_KEY", ""),
-            groq_api_key=os.getenv("GROQ_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
@@ -91,9 +83,6 @@ class Settings:
             default_repo_path=os.getenv("DEFAULT_REPO_PATH", str(Path.cwd())),
             max_concurrent_agents=int(os.getenv("MAX_CONCURRENT_AGENTS", "3")),
             tasks_json_path=os.getenv("TASKS_JSON_PATH", "tasks.json"),
-            # Endpoints
-            nvidia_base_url=os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"),
-            groq_base_url=os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
             # Security
             sandbox_enabled=os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes"),
             workspace_restrict=os.getenv("WORKSPACE_RESTRICT", "true").lower() in ("true", "1", "yes"),

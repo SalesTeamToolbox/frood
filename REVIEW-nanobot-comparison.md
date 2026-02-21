@@ -19,7 +19,7 @@ HKUDS/nanobot is an ultra-lightweight personal AI assistant (~4,000 lines Python
 - **Purpose:** Multi-agent task orchestrator with human-in-the-loop approval
 - **Language:** Python 3.11+ (~1,176 lines)
 - **Architecture:** Task queue → Model router → Iteration engine (primary + critic) → Approval gate → Ship
-- **LLM Providers:** NVIDIA, Groq (free-tier, OpenAI-compatible)
+- **LLM Providers:** OpenRouter (200+ models, free tier), OpenAI, Anthropic, DeepSeek, Gemini, vLLM
 - **Unique Strengths:** Critic-loop quality assurance, git worktree isolation, zero API cost, approval gates
 
 ### HKUDS/nanobot
@@ -111,17 +111,15 @@ HKUDS/nanobot is an ultra-lightweight personal AI assistant (~4,000 lines Python
 
 | Provider | Agent42 | HKUDS/nanobot |
 |----------|---------|---------------|
-| NVIDIA | Yes | No |
-| Groq | Yes | Yes |
-| OpenAI | No | Yes |
-| Anthropic Claude | No | Yes |
-| DeepSeek | No | Yes |
-| Google Gemini | No | Yes |
-| OpenRouter (200+) | No | Yes |
-| vLLM (local) | No | Yes |
+| OpenRouter (200+) | Yes | Yes |
+| OpenAI | Yes | Yes |
+| Anthropic Claude | Yes | Yes |
+| DeepSeek | Yes | Yes |
+| Google Gemini | Yes | Yes |
+| vLLM (local) | Yes | Yes |
 | GitHub Copilot | No | Yes |
 
-**Assessment:** Nanobot supports 16+ providers (via LiteLLM routing) vs Agent42's 2. The declarative `ProviderSpec` registry pattern (2-step addition) is significantly cleaner than Agent42's manual client setup. Notable additions include Amazon Bedrock, Zhipu GLM, DashScope/Qwen, Moonshot/Kimi, MiniMax, SiliconFlow, and OAuth-based GitHub Copilot/OpenAI Codex support.
+**Assessment:** Agent42 now supports 6 providers via a declarative `ProviderSpec` registry pattern (2-step addition). OpenRouter alone gives access to 200+ models including all free-tier models previously accessed through NVIDIA and Groq directly. Nanobot also supports Amazon Bedrock, Zhipu GLM, DashScope/Qwen, Moonshot/Kimi, MiniMax, SiliconFlow, and OAuth-based GitHub Copilot/OpenAI Codex support.
 
 ### 6. Memory & State
 
