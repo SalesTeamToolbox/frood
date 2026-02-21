@@ -21,10 +21,13 @@ logger = logging.getLogger("agent42.task_queue")
 
 class TaskStatus(str, Enum):
     PENDING = "pending"
+    ASSIGNED = "assigned"
     RUNNING = "running"
     REVIEW = "review"
+    BLOCKED = "blocked"
     DONE = "done"
     FAILED = "failed"
+    ARCHIVED = "archived"
 
 
 class TaskType(str, Enum):
@@ -85,6 +88,38 @@ class Task:
     origin_channel: str = ""      # "discord", "slack", "telegram", "email", ""
     origin_channel_id: str = ""   # Channel/chat ID to respond to
     origin_metadata: dict = field(default_factory=dict)  # Thread IDs, etc.
+
+    # Mission Control / Kanban fields (OpenClaw feature)
+    assigned_agent: str = ""
+    priority: int = 0             # 0=normal, 1=high, 2=urgent
+    tags: list = field(default_factory=list)
+    comments: list = field(default_factory=list)  # [{author, text, timestamp}]
+    blocked_reason: str = ""
+    parent_task_id: str = ""
+    position: int = 0             # Kanban column ordering
+    context_window: str = "default"  # default | large | max
+
+    def add_comment(self, author: str, text: str):
+        self.comments.append({
+            "author": author,
+            "text": text,
+            "timestamp": time.time(),
+        })
+        self.updated_at = time.time()
+
+    def block(self, reason: str):
+        self.status = TaskStatus.BLOCKED
+        self.blocked_reason = reason
+        self.updated_at = time.time()
+
+    def unblock(self):
+        self.status = TaskStatus.PENDING
+        self.blocked_reason = ""
+        self.updated_at = time.time()
+
+    def archive(self):
+        self.status = TaskStatus.ARCHIVED
+        self.updated_at = time.time()
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -200,6 +235,33 @@ class TaskQueue:
 
     def all_tasks(self) -> list[Task]:
         return sorted(self._tasks.values(), key=lambda t: t.created_at, reverse=True)
+
+    def board(self) -> dict[str, list[dict]]:
+        """Group tasks by status for Kanban board view."""
+        columns = {s.value: [] for s in TaskStatus}
+        for task in self._tasks.values():
+            columns[task.status.value].append(task.to_dict())
+        # Sort each column by position, then priority (urgent first)
+        for col in columns.values():
+            col.sort(key=lambda t: (t.get("position", 0), -t.get("priority", 0)))
+        return columns
+
+    def stats(self) -> dict:
+        """Task count statistics."""
+        counts = {s.value: 0 for s in TaskStatus}
+        for task in self._tasks.values():
+            counts[task.status.value] = counts.get(task.status.value, 0) + 1
+        return counts
+
+    async def move_task(self, task_id: str, new_status: str, position: int = 0):
+        """Move a task to a new status column with position (Kanban drag-and-drop)."""
+        task = self._tasks.get(task_id)
+        if not task:
+            return
+        task.status = TaskStatus(new_status)
+        task.position = position
+        await self._notify(task)
+        await self._persist()
 
     async def _persist(self):
         """Write current state to JSON file."""

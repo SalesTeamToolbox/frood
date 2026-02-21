@@ -348,6 +348,32 @@ class IterationEngine:
         for i in range(1, max_iterations + 1):
             logger.info(f"Iteration {i}/{max_iterations} — primary: {primary_model}")
 
+            # Context window overflow guard (OpenClaw feature)
+            try:
+                from core.config import settings as _cfg
+                max_ctx = _cfg.max_context_tokens
+                strategy = _cfg.context_overflow_strategy
+                # Rough token estimation: chars / 4
+                est_tokens = sum(len(str(m.get("content", ""))) for m in messages) // 4
+                if est_tokens > int(max_ctx * 0.8):
+                    logger.warning(
+                        f"Context approaching limit: ~{est_tokens} tokens "
+                        f"(limit: {max_ctx}, strategy: {strategy})"
+                    )
+                    if strategy == "error":
+                        history.final_output = primary_output if 'primary_output' in dir() else ""
+                        history.total_iterations = i
+                        return history
+                    elif strategy == "truncate_oldest" and len(messages) > 3:
+                        # Keep system prompt + first user msg + latest 2 messages
+                        kept = messages[:2] + messages[-2:]
+                        messages.clear()
+                        messages.extend(kept)
+                        logger.info(f"Truncated context: kept {len(messages)} messages")
+            except ImportError:
+                pass
+
+
             all_tool_records = []
 
             if tool_schemas:

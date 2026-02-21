@@ -64,6 +64,30 @@ class TaskCreateRequest(BaseModel):
     title: str
     description: str
     task_type: str = "coding"
+    priority: int = 0
+    context_window: str = "default"
+
+
+class TaskMoveRequest(BaseModel):
+    status: str
+    position: int = 0
+
+
+class TaskCommentRequest(BaseModel):
+    text: str
+    author: str = "admin"
+
+
+class TaskAssignRequest(BaseModel):
+    agent_id: str
+
+
+class TaskPriorityRequest(BaseModel):
+    priority: int
+
+
+class TaskBlockRequest(BaseModel):
+    reason: str
 
 
 class ApprovalAction(BaseModel):
@@ -171,6 +195,8 @@ def create_app(
             title=req.title,
             description=req.description,
             task_type=TaskType(req.task_type),
+            priority=req.priority,
+            context_window=req.context_window,
         )
         await task_queue.add(task)
         return task.to_dict()
@@ -203,6 +229,117 @@ def create_app(
             raise HTTPException(status_code=400, detail="Only failed tasks can be retried")
         await task_queue.retry(task_id)
         return {"status": "retried"}
+
+    # -- Mission Control (Kanban) endpoints ------------------------------------
+
+    @app.get("/api/tasks/board")
+    async def get_board(_user: str = Depends(get_current_user)):
+        """Get tasks grouped by status for Kanban board."""
+        return task_queue.board()
+
+    @app.patch("/api/tasks/{task_id}/move")
+    async def move_task(
+        task_id: str, req: TaskMoveRequest, _user: str = Depends(get_current_user)
+    ):
+        """Move task to a new status column (Kanban drag-and-drop)."""
+        task = task_queue.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        await task_queue.move_task(task_id, req.status, req.position)
+        return {"status": "moved", "new_status": req.status}
+
+    @app.post("/api/tasks/{task_id}/comment")
+    async def add_comment(
+        task_id: str, req: TaskCommentRequest, _user: str = Depends(get_current_user)
+    ):
+        """Add a comment to a task thread."""
+        task = task_queue.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        task.add_comment(req.author or _user, req.text)
+        await task_queue._persist()
+        return {"status": "comment_added", "comments": len(task.comments)}
+
+    @app.patch("/api/tasks/{task_id}/assign")
+    async def assign_task(
+        task_id: str, req: TaskAssignRequest, _user: str = Depends(get_current_user)
+    ):
+        """Assign task to a specific agent."""
+        task = task_queue.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        task.assigned_agent = req.agent_id
+        task.status = TaskStatus.ASSIGNED
+        task.updated_at = __import__("time").time()
+        await task_queue._persist()
+        return {"status": "assigned", "agent_id": req.agent_id}
+
+    @app.patch("/api/tasks/{task_id}/priority")
+    async def set_priority(
+        task_id: str, req: TaskPriorityRequest, _user: str = Depends(get_current_user)
+    ):
+        """Set task priority."""
+        task = task_queue.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        task.priority = req.priority
+        task.updated_at = __import__("time").time()
+        await task_queue._persist()
+        return {"status": "priority_set", "priority": req.priority}
+
+    @app.patch("/api/tasks/{task_id}/block")
+    async def block_task(
+        task_id: str, req: TaskBlockRequest, _user: str = Depends(get_current_user)
+    ):
+        """Mark task as blocked with reason."""
+        task = task_queue.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        task.block(req.reason)
+        await task_queue._persist()
+        return {"status": "blocked", "reason": req.reason}
+
+    @app.patch("/api/tasks/{task_id}/unblock")
+    async def unblock_task(task_id: str, _user: str = Depends(get_current_user)):
+        """Remove blocked status from task."""
+        task = task_queue.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        task.unblock()
+        await task_queue._persist()
+        return {"status": "unblocked"}
+
+    @app.post("/api/tasks/{task_id}/archive")
+    async def archive_task(task_id: str, _user: str = Depends(get_current_user)):
+        """Archive a completed task."""
+        task = task_queue.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task.status == TaskStatus.RUNNING:
+            raise HTTPException(status_code=400, detail="Cannot archive a running task")
+        task.archive()
+        await task_queue._persist()
+        return {"status": "archived"}
+
+    # -- Activity Feed --------------------------------------------------------
+
+    _activity_feed: list[dict] = []
+
+    @app.get("/api/activity")
+    async def get_activity(_user: str = Depends(get_current_user)):
+        """Get recent activity feed (last 200 events)."""
+        return _activity_feed[-200:]
+
+    # -- Notification config endpoint -----------------------------------------
+
+    @app.get("/api/notifications/config")
+    async def get_notification_config(_user: str = Depends(get_current_user)):
+        """Get current notification configuration."""
+        return {
+            "webhook_urls": settings.get_webhook_urls(),
+            "webhook_events": settings.get_webhook_events(),
+            "email_recipients": settings.get_notification_email_recipients(),
+        }
 
     # -- Approvals -------------------------------------------------------------
 

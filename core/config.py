@@ -84,6 +84,23 @@ class Settings:
     # Skills (Phase 3)
     skills_dirs: str = ""  # Comma-separated extra skill directories
 
+    # URL policy (OpenClaw security fix)
+    url_allowlist: str = ""       # Comma-separated glob patterns, e.g. "*.github.com,api.openai.com"
+    url_denylist: str = ""        # Comma-separated glob patterns to always block
+    max_url_requests_per_agent: int = 100  # 0 = unlimited
+
+    # Browser control security (OpenClaw CVE fix)
+    browser_gateway_token: str = ""  # Auto-generated if empty
+
+    # Context safeguards (OpenClaw feature)
+    max_context_tokens: int = 128000
+    context_overflow_strategy: str = "truncate_oldest"  # truncate_oldest | summarize | error
+
+    # Webhook notifications (OpenClaw feature)
+    webhook_urls: str = ""          # Comma-separated webhook endpoints
+    webhook_events: str = "task_failed,task_review,approval_requested,agent_stalled"
+    notification_email_recipients: str = ""  # Comma-separated emails for critical alerts
+
     # Tools (Phase 4)
     brave_api_key: str = ""
     mcp_servers_json: str = ""  # Path to MCP servers config file
@@ -111,6 +128,15 @@ class Settings:
             logger.warning(
                 "JWT_SECRET not set or insecure — generated a random secret. "
                 "Set JWT_SECRET in .env for persistent sessions across restarts."
+            )
+
+        # Auto-generate browser gateway token if not set
+        browser_gateway_token = os.getenv("BROWSER_GATEWAY_TOKEN", "")
+        if not browser_gateway_token:
+            browser_gateway_token = secrets.token_hex(16)
+            logger.warning(
+                "BROWSER_GATEWAY_TOKEN not set — generated a random token. "
+                "Set BROWSER_GATEWAY_TOKEN in .env for persistent browser sessions."
             )
 
         return cls(
@@ -157,6 +183,19 @@ class Settings:
             email_smtp_port=int(os.getenv("EMAIL_SMTP_PORT", "587")),
             email_smtp_user=os.getenv("EMAIL_SMTP_USER", ""),
             email_smtp_password=os.getenv("EMAIL_SMTP_PASSWORD", ""),
+            # URL policy
+            url_allowlist=os.getenv("URL_ALLOWLIST", ""),
+            url_denylist=os.getenv("URL_DENYLIST", ""),
+            max_url_requests_per_agent=int(os.getenv("MAX_URL_REQUESTS_PER_AGENT", "100")),
+            # Browser control security
+            browser_gateway_token=browser_gateway_token,
+            # Context safeguards
+            max_context_tokens=int(os.getenv("MAX_CONTEXT_TOKENS", "128000")),
+            context_overflow_strategy=os.getenv("CONTEXT_OVERFLOW_STRATEGY", "truncate_oldest"),
+            # Webhook notifications
+            webhook_urls=os.getenv("WEBHOOK_URLS", ""),
+            webhook_events=os.getenv("WEBHOOK_EVENTS", "task_failed,task_review,approval_requested,agent_stalled"),
+            notification_email_recipients=os.getenv("NOTIFICATION_EMAIL_RECIPIENTS", ""),
             # Skills
             skills_dirs=os.getenv("SKILLS_DIRS", ""),
             # Tools
@@ -204,6 +243,36 @@ class Settings:
         if not self.cors_allowed_origins:
             return []
         return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
+
+    def get_url_allowlist(self) -> list[str]:
+        """Parse comma-separated URL allowlist patterns."""
+        if not self.url_allowlist:
+            return []
+        return [p.strip() for p in self.url_allowlist.split(",") if p.strip()]
+
+    def get_url_denylist(self) -> list[str]:
+        """Parse comma-separated URL denylist patterns."""
+        if not self.url_denylist:
+            return []
+        return [p.strip() for p in self.url_denylist.split(",") if p.strip()]
+
+    def get_webhook_urls(self) -> list[str]:
+        """Parse comma-separated webhook URLs."""
+        if not self.webhook_urls:
+            return []
+        return [u.strip() for u in self.webhook_urls.split(",") if u.strip()]
+
+    def get_webhook_events(self) -> list[str]:
+        """Parse comma-separated webhook event types."""
+        if not self.webhook_events:
+            return []
+        return [e.strip() for e in self.webhook_events.split(",") if e.strip()]
+
+    def get_notification_email_recipients(self) -> list[str]:
+        """Parse comma-separated email recipients."""
+        if not self.notification_email_recipients:
+            return []
+        return [e.strip() for e in self.notification_email_recipients.split(",") if e.strip()]
 
     def validate_dashboard_auth(self) -> list[str]:
         """Validate dashboard auth configuration. Returns list of warnings."""

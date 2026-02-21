@@ -4,6 +4,8 @@ Browser automation tool — interact with web pages via Playwright.
 Inspired by OpenClaw's `browser` tool and OpenHands' BrowserInteractiveAction.
 Supports navigation, clicking, form filling, screenshot capture, and content extraction.
 Requires: pip install playwright && playwright install chromium
+
+Security: Gateway token required for browser control (OpenClaw CVE-2026-25253 fix).
 """
 
 import asyncio
@@ -24,6 +26,13 @@ class BrowserTool(Tool):
         self._workspace = workspace_path
         self._browser = None
         self._page = None
+        # Gateway token for browser control security (OpenClaw CVE fix)
+        self._gateway_token = ""
+        try:
+            from core.config import settings
+            self._gateway_token = settings.browser_gateway_token
+        except ImportError:
+            pass
 
     @property
     def name(self) -> str:
@@ -74,9 +83,16 @@ class BrowserTool(Tool):
         }
 
     async def _ensure_browser(self):
-        """Lazily initialize browser and page."""
+        """Lazily initialize browser and page with security controls."""
         if self._page is not None:
             return
+
+        # Require gateway token for browser control (OpenClaw CVE-2026-25253 fix)
+        if not self._gateway_token:
+            raise RuntimeError(
+                "Browser gateway token not configured. "
+                "Set BROWSER_GATEWAY_TOKEN in .env or let it auto-generate."
+            )
 
         try:
             from playwright.async_api import async_playwright
@@ -86,7 +102,13 @@ class BrowserTool(Tool):
             )
 
         pw = await async_playwright().start()
-        self._browser = await pw.chromium.launch(headless=True)
+        # Bind debug port to 127.0.0.1 only — block remote access
+        self._browser = await pw.chromium.launch(
+            headless=True,
+            args=["--remote-debugging-address=127.0.0.1"],
+        )
+        # Set gateway token as environment context for the browser session
+        os.environ["_AGENT42_BROWSER_TOKEN"] = self._gateway_token
         self._page = await self._browser.new_page()
 
     async def execute(
@@ -108,7 +130,7 @@ class BrowserTool(Tool):
 
         try:
             if action == "navigate":
-                return await self._navigate(url, timeout)
+                return await self._navigate(url, timeout, **kwargs)
             elif action == "click":
                 return await self._click(selector, timeout)
             elif action == "fill":
@@ -136,16 +158,16 @@ class BrowserTool(Tool):
         except Exception as e:
             return ToolResult(error=f"Browser error: {e}", success=False)
 
-    async def _navigate(self, url: str, timeout: float) -> ToolResult:
+    async def _navigate(self, url: str, timeout: float, **kwargs) -> ToolResult:
         if not url:
             return ToolResult(error="URL required for navigate action", success=False)
 
-        # SSRF protection
+        # URL policy check (SSRF + allowlist/denylist + per-agent limits)
         try:
-            from tools.web_search import _is_ssrf_target
-            ssrf = _is_ssrf_target(url)
-            if ssrf:
-                return ToolResult(error=f"Blocked: {ssrf}", success=False)
+            from tools.web_search import _url_policy
+            allowed, reason = _url_policy.check(url, agent_id=kwargs.get("agent_id", "default"))
+            if not allowed:
+                return ToolResult(error=f"Blocked: {reason}", success=False)
         except ImportError:
             pass
 

@@ -26,11 +26,11 @@ _FORBIDDEN_HEADERS = frozenset({
     "proxy-authenticate",
 })
 
-# Reuse SSRF protection from web_search
+# Reuse URL policy from core module (SSRF + allowlist/denylist)
 try:
-    from tools.web_search import _is_ssrf_target
+    from tools.web_search import _url_policy
 except ImportError:
-    _is_ssrf_target = None
+    _url_policy = None
 
 
 class HttpClientTool(Tool):
@@ -128,11 +128,11 @@ class HttpClientTool(Tool):
         if not ok:
             return ToolResult(error=f"Invalid headers: {err_msg}", success=False)
 
-        # SSRF protection
-        if _is_ssrf_target:
-            ssrf_msg = _is_ssrf_target(url)
-            if ssrf_msg:
-                return ToolResult(error=f"Blocked: {ssrf_msg}", success=False)
+        # URL policy check (SSRF + allowlist/denylist + per-agent limits)
+        if _url_policy:
+            allowed, reason = _url_policy.check(url, agent_id=kwargs.get("agent_id", "default"))
+            if not allowed:
+                return ToolResult(error=f"Blocked: {reason}", success=False)
 
         # Validate URL
         parsed = urlparse(url)

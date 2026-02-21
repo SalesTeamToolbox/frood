@@ -27,6 +27,7 @@ class AgentHeartbeat:
     iteration: int = 0
     status: str = "running"
     message: str = ""
+    context_tokens_used: int = 0  # Context window tracking (OpenClaw feature)
 
     @property
     def age_seconds(self) -> float:
@@ -44,6 +45,7 @@ class AgentHeartbeat:
             "status": self.status,
             "message": self.message,
             "stalled": self.is_stalled,
+            "context_tokens_used": self.context_tokens_used,
         }
 
 
@@ -80,11 +82,13 @@ class HeartbeatService:
         interval: float = DEFAULT_INTERVAL,
         on_stall=None,
         on_heartbeat=None,
+        notification_service=None,
     ):
         self._interval = interval
         self._agents: dict[str, AgentHeartbeat] = {}
         self._on_stall = on_stall  # async callback(task_id)
         self._on_heartbeat = on_heartbeat  # async callback(SystemHealth)
+        self._notification_service = notification_service  # NotificationService (OpenClaw feature)
         self._start_time = time.monotonic()
         self._running = False
         self._task: asyncio.Task | None = None
@@ -190,6 +194,20 @@ class HeartbeatService:
                     )
                     if self._on_stall:
                         await self._on_stall(hb.task_id)
+                    # Send webhook notification for stalled agents
+                    if self._notification_service:
+                        try:
+                            from core.notification_service import NotificationPayload, SEVERITY_CRITICAL
+                            await self._notification_service.notify(NotificationPayload(
+                                event="agent_stalled",
+                                timestamp=time.time(),
+                                task_id=hb.task_id,
+                                title=f"Agent stalled (iteration {hb.iteration})",
+                                details=f"No heartbeat for {hb.age_seconds:.0f}s. Last message: {hb.message}",
+                                severity=SEVERITY_CRITICAL,
+                            ))
+                        except Exception as e:
+                            logger.error(f"Failed to send stall notification: {e}")
 
                 # Broadcast health
                 if self._on_heartbeat:
