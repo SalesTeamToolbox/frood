@@ -425,6 +425,93 @@ td.task-title:hover { color: var(--accent); }
 .badge-assigned { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
 .badge-blocked { background: var(--danger-dim); color: var(--danger); }
 .badge-archived { background: var(--bg-hover); color: var(--text-muted); }
+/* ---------- Platform Status ---------- */
+
+.status-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;
+}
+
+.status-section { margin-bottom: 0.5rem; }
+.status-section h4 {
+  font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: 0.04em; margin-bottom: 0.75rem;
+}
+
+/* Agent slot visualization */
+.agent-slots {
+  display: flex; flex-wrap: wrap; gap: 6px; padding: 0.5rem 0;
+}
+.agent-slot {
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); transition: all 0.3s;
+}
+.slot-active { background: var(--warning); border-color: var(--warning); }
+.slot-free { background: var(--success-dim); border-color: var(--success); }
+.slot-stalled {
+  background: var(--danger); border-color: var(--danger);
+  animation: slotPulse 1.5s ease-in-out infinite;
+}
+.slot-restricted { background: var(--bg-input); border-color: var(--border); opacity: 0.4; }
+
+@keyframes slotPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.slot-legend {
+  display: flex; gap: 1rem; margin-top: 0.75rem; font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+.slot-legend-item { display: flex; align-items: center; gap: 0.35rem; }
+.slot-legend-dot {
+  width: 10px; height: 10px; border-radius: 2px;
+}
+
+/* Load bars */
+.load-bar-row { margin-bottom: 0.75rem; }
+.load-label-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 0.3rem; font-size: 0.85rem;
+}
+.load-label-row .label { color: var(--text-secondary); }
+.load-label-row .value { font-weight: 600; font-family: var(--mono); font-size: 0.85rem; }
+.load-bar-track {
+  height: 8px; background: var(--bg-input); border-radius: 4px; overflow: hidden;
+}
+.load-bar-fill {
+  height: 100%; border-radius: 4px; transition: width 0.6s ease, background 0.6s ease;
+  min-width: 2px;
+}
+.load-bar-fill.load-ok { background: var(--success); }
+.load-bar-fill.load-warn { background: var(--warning); }
+.load-bar-fill.load-crit { background: var(--danger); }
+
+/* Capacity banner */
+.capacity-banner {
+  background: var(--accent-dim); border: 1px solid var(--accent);
+  border-radius: var(--radius); padding: 1rem 1.25rem;
+  display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;
+}
+.capacity-number {
+  font-size: 2rem; font-weight: 700; color: var(--accent);
+  line-height: 1; min-width: 3rem; text-align: center;
+}
+.capacity-detail { flex: 1; }
+.capacity-detail .capacity-title {
+  font-size: 0.9rem; font-weight: 600; margin-bottom: 0.15rem;
+}
+.capacity-detail .capacity-reason {
+  font-size: 0.8rem; color: var(--text-secondary);
+}
+
+/* Status metric rows (for task stats section) */
+.status-metric-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.5rem 0; border-bottom: 1px solid var(--border);
+}
+.status-metric-row:last-child { border-bottom: none; }
+.status-metric-row .metric-label { color: var(--text-secondary); font-size: 0.85rem; }
+.status-metric-row .metric-value { font-weight: 600; font-family: var(--mono); font-size: 0.9rem; }
 
 /* ---------- Responsive ---------- */
 
@@ -437,4 +524,5 @@ td.task-title:hover { color: var(--accent); }
   .settings-nav { display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); }
   .settings-nav a { white-space: nowrap; }
   .setting-row { grid-template-columns: 1fr; }
+  .status-grid { grid-template-columns: 1fr; }
 }
