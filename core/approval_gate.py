@@ -30,11 +30,15 @@ class ApprovalRequest:
     _event: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
 
+DEFAULT_TIMEOUT = 3600  # 1 hour default timeout for approval requests
+
+
 class ApprovalGate:
     """Intercepts protected operations and waits for human approval."""
 
-    def __init__(self, task_queue):
+    def __init__(self, task_queue, timeout: int = DEFAULT_TIMEOUT):
         self.task_queue = task_queue
+        self.timeout = timeout
         self._pending: dict[str, ApprovalRequest] = {}
 
     async def request(
@@ -44,7 +48,7 @@ class ApprovalGate:
         description: str,
         details: dict | None = None,
     ) -> bool:
-        """Block until the user approves or denies the action."""
+        """Block until the user approves/denies or timeout expires (auto-deny)."""
         req = ApprovalRequest(
             task_id=task_id,
             action=action,
@@ -55,7 +59,14 @@ class ApprovalGate:
         self._pending[key] = req
 
         logger.info(f"Approval requested: {key} — {description}")
-        await req._event.wait()
+
+        try:
+            await asyncio.wait_for(req._event.wait(), timeout=self.timeout)
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Approval timed out after {self.timeout}s: {key} — auto-denying"
+            )
+            req.approved = False
 
         self._pending.pop(key, None)
         return req.approved is True

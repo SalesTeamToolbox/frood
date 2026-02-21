@@ -283,6 +283,46 @@ These operations pause the agent and show an approval modal in the dashboard:
 - `file_delete` — deleting files
 - `external_api` — calling external services
 
+Approval requests timeout after 1 hour (configurable) and auto-deny to prevent
+agents from blocking indefinitely when nobody is watching the dashboard.
+
+## Reliability
+
+### API Retry with Fallback
+
+All LLM API calls use exponential backoff retry (3 attempts: 1s, 2s, 4s). If
+all retries fail, the engine automatically falls back to a different model
+(Llama 4 Maverick) before giving up. This prevents a single API timeout from
+killing an entire task.
+
+### Convergence Detection
+
+The iteration engine monitors critic feedback across iterations. When the critic
+repeats substantially similar feedback (>85% word overlap), the loop accepts the
+output and stops to avoid burning tokens on a stuck review cycle.
+
+### Task Type Inference
+
+Messages from channels (Slack, Discord, Telegram, Email) are automatically
+classified into task types based on keyword matching:
+- "fix the login bug" → debugging
+- "refactor the auth module" → refactoring
+- "write docs for the API" → documentation
+- "research database options" → research
+
+This ensures the correct model routing is used for each task.
+
+### Task Recovery on Restart
+
+Tasks that were in RUNNING state when the orchestrator shut down are automatically
+reset to PENDING on restart, so they get re-dispatched. Duplicate enqueuing is
+prevented by tracking queued task IDs.
+
+### Worktree Cleanup
+
+When an agent fails, its git worktree is automatically cleaned up to prevent
+orphaned worktrees from filling up disk space.
+
 ## Project Structure
 
 ```
@@ -333,7 +373,7 @@ agent42/
 │   ├── server.py              # FastAPI + WebSocket server
 │   ├── auth.py                # JWT authentication
 │   └── websocket_manager.py   # Real-time broadcast
-├── tests/                     # 160 tests across 9 test files
+├── tests/                     # 181 tests across 10 test files
 ├── .env.example               # All configuration options
 ├── requirements.txt
 ├── tasks.json.example
@@ -362,5 +402,6 @@ workspace.
 - **Approval gates**: Sensitive operations (email, push, delete, external API calls) require dashboard approval before execution.
 - **Channel allowlists**: Restrict which users can submit tasks per channel.
 - **Dashboard auth**: JWT-based authentication with bcrypt password hashing.
+- **WebSocket auth**: Real-time dashboard connections require a valid JWT token (`/ws?token=<jwt>`). Unauthenticated connections are rejected.
 - Put nginx in front with HTTPS before making public.
 - `JWT_SECRET` should be a 64-char random string.
