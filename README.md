@@ -5,8 +5,9 @@
 A multi-agent orchestrator platform. Free models handle the iterative work;
 Claude Code (or human review) gates the final output before anything ships.
 
-Not just for coding — Agent42 handles marketing, email, research, documentation,
-and any task you throw at it.
+Not just for coding — Agent42 handles marketing, design, content creation,
+strategy, data analysis, project management, media generation, and any task
+you throw at it. Spin up teams of agents to collaborate, critique, and iterate.
 
 ## Architecture
 
@@ -22,6 +23,8 @@ Inbound Channel  ->  Task Queue  ->  Agent Loop  ->  Critic Pass  ->  REVIEW.md 
 - **Coding**: Qwen3 Coder 480B (primary) + Devstral 123B (critic)
 - **Debugging**: DeepSeek R1 0528 (primary) + Devstral 123B (critic)
 - **Research**: Llama 4 Maverick (primary) + DeepSeek Chat v3.1 (critic)
+- **Marketing/Content/Design**: Llama 4 Maverick + task-aware critics
+- **Image/Video**: FLUX (free), DALL-E 3, Replicate, Luma (premium)
 - **Review gate**: Human + Claude Code final review before anything ships
 - **Zero API cost**: One free OpenRouter API key unlocks 30+ models
 
@@ -53,13 +56,15 @@ That's it — you now have access to 30+ free models for all task types.
 
 For direct provider access or premium models, add any of these API keys:
 
-| Provider | API Key Env Var | Free Tier? |
-|---|---|---|
-| [OpenRouter](https://openrouter.ai) | `OPENROUTER_API_KEY` | Yes — 30+ free models |
-| [OpenAI](https://platform.openai.com) | `OPENAI_API_KEY` | No |
-| [Anthropic](https://console.anthropic.com) | `ANTHROPIC_API_KEY` | No |
-| [DeepSeek](https://platform.deepseek.com) | `DEEPSEEK_API_KEY` | No |
-| [Google Gemini](https://aistudio.google.dev) | `GEMINI_API_KEY` | No |
+| Provider | API Key Env Var | Free Tier? | Capabilities |
+|---|---|---|---|
+| [OpenRouter](https://openrouter.ai) | `OPENROUTER_API_KEY` | Yes — 30+ free models | Text + Images |
+| [OpenAI](https://platform.openai.com) | `OPENAI_API_KEY` | No | Text + DALL-E |
+| [Anthropic](https://console.anthropic.com) | `ANTHROPIC_API_KEY` | No | Text |
+| [DeepSeek](https://platform.deepseek.com) | `DEEPSEEK_API_KEY` | No | Text |
+| [Google Gemini](https://aistudio.google.dev) | `GEMINI_API_KEY` | No | Text |
+| [Replicate](https://replicate.com) | `REPLICATE_API_TOKEN` | No | Images + Video |
+| [Luma AI](https://lumalabs.ai) | `LUMA_API_KEY` | No | Video |
 
 ## Requirements
 
@@ -108,6 +113,11 @@ All config lives in `.env`. See `.env.example` for all options.
 | `BRAVE_API_KEY` | Brave Search API key (for web search tool) |
 | `MCP_SERVERS_JSON` | Path to MCP servers config (JSON) |
 | `CRON_JOBS_PATH` | Path to persistent cron jobs file |
+| `REPLICATE_API_TOKEN` | Replicate API token (for image/video generation) |
+| `LUMA_API_KEY` | Luma AI API key (for video generation) |
+| `IMAGES_DIR` | Generated images storage (default: `.agent42/images`) |
+| `AGENT42_IMAGE_MODEL` | Admin override for image model (e.g., `dall-e-3`) |
+| `AGENT42_VIDEO_MODEL` | Admin override for video model (e.g., `luma-ray2`) |
 
 ## Usage
 
@@ -143,6 +153,11 @@ One API key, zero cost. These models are used by default for all task types:
 | documentation | Llama 4 Maverick | Gemma 3 27B | 4 |
 | marketing | Llama 4 Maverick | DeepSeek Chat v3.1 | 6 |
 | email | Mistral Small 3.1 | — | 3 |
+| design | Llama 4 Maverick | DeepSeek Chat v3.1 | 5 |
+| content | Llama 4 Maverick | Gemma 3 27B | 6 |
+| strategy | DeepSeek R1 0528 | Llama 4 Maverick | 5 |
+| data_analysis | Qwen3 Coder 480B | DeepSeek Chat v3.1 | 6 |
+| project_management | Llama 4 Maverick | Gemma 3 27B | 4 |
 
 ### Admin Overrides
 
@@ -180,10 +195,24 @@ Skills are markdown prompt templates that give agents specialized capabilities.
 They live in `skills/builtins/` and can be extended per-repo in a `skills/` directory.
 
 Built-in skills:
-- **github** — PR creation, issue triage, code review
-- **memory** — Read/update persistent agent memory
-- **skill-creator** — Generate new skills from descriptions
-- **weather** — Weather lookups (example skill)
+
+| Skill | Task Types | Description |
+|---|---|---|
+| **github** | coding | PR creation, issue triage, code review |
+| **memory** | all | Read/update persistent agent memory |
+| **skill-creator** | all | Generate new skills from descriptions |
+| **weather** | research | Weather lookups (example skill) |
+| **content-writing** | content, marketing | Blog posts, articles, copywriting frameworks |
+| **design-review** | design | UI/UX review, accessibility, brand consistency |
+| **strategy-analysis** | strategy, research | SWOT, Porter's Five Forces, market analysis |
+| **data-analysis** | data_analysis | Data processing workflows, visualization |
+| **social-media** | marketing, content | Social media campaigns, platform guidelines |
+| **project-planning** | project_management | Project plans, sprints, roadmaps |
+| **presentation** | content, marketing, strategy | Slide decks, executive summaries |
+| **brand-guidelines** | design, marketing, content | Brand voice, visual identity |
+| **email-marketing** | email, marketing, content | Campaign sequences, deliverability |
+| **competitive-analysis** | strategy, research | Competitive matrix, positioning |
+| **seo** | content, marketing | On-page SEO, keyword research, optimization |
 
 Skills are matched to tasks by `task_types` frontmatter and injected into the
 agent's system prompt automatically.
@@ -192,15 +221,45 @@ agent's system prompt automatically.
 
 Agents have access to a sandboxed tool registry:
 
+### Core Tools
+
 | Tool | Description |
 |---|---|
 | `shell` | Sandboxed command execution (with command filter) |
 | `read_file` / `write_file` / `edit_file` | Filesystem operations (workspace-restricted) |
 | `list_dir` | Directory listing |
 | `web_search` | Brave Search API integration |
+| `http_client` | HTTP requests to external APIs |
+| `python_exec` | Sandboxed Python execution |
 | `subagent` | Spawn focused sub-agents for parallel work |
 | `cron` | Schedule recurring tasks |
+| `repo_map` | Repository structure analysis |
+| `pr_generator` | Pull request generation |
+| `security_analyzer` | Security vulnerability scanning |
+| `workflow` | Multi-step workflow orchestration |
+| `summarizer` | Text and code summarization |
+| `file_watcher` | File change monitoring |
+| `browser` | Web browsing and screenshot |
 | `mcp_*` | MCP server tool proxying |
+
+### Non-Code Workflow Tools
+
+| Tool | Description |
+|---|---|
+| `team` | Multi-agent team orchestration (sequential, parallel, fan-out/fan-in, pipeline workflows). Built-in teams: research, marketing, content, design-review, strategy. Actions: compose, run, status, list, delete, describe, clone |
+| `content_analyzer` | Readability (Flesch-Kincaid), tone (formal/informal/persuasive), structure, keywords, compare, SEO analysis |
+| `data` | CSV/JSON loading, filtering, statistics, ASCII charts, group-by aggregation |
+| `template` | Document templates with variable substitution. Built-in: email-campaign, landing-page, press-release, executive-summary, project-brief. Actions include preview |
+| `outline` | Structured document outlines for articles, presentations, reports, proposals, campaigns, project plans |
+| `scoring` | Rubric-based content evaluation with weighted criteria. Built-in rubrics: marketing-copy, blog-post, email, research-report, design-brief. Includes improve action for rewrite suggestions |
+| `persona` | Audience persona management with demographics, goals, pain points, tone. Built-in: startup-founder, enterprise-buyer, developer, marketing-manager |
+
+### Media Generation Tools
+
+| Tool | Description |
+|---|---|
+| `image_gen` | AI image generation with free-first routing. Models: FLUX Schnell (free), FLUX Dev, SDXL, DALL-E 3 (premium). Team-reviewed prompts before submission. Actions: generate, review_prompt, list_models, status |
+| `video_gen` | AI video generation (async). Models: CogVideoX (cheap), AnimateDiff, Runway Gen-3, Luma Ray2, Stable Video (premium). Actions: generate, image_to_video, review_prompt, list_models, status |
 
 ### Command Filter
 
@@ -237,12 +296,17 @@ Agent42 maintains persistent memory and learns from every task:
 After every task (success or failure), the agent runs a **reflection cycle**:
 
 1. **Post-task reflection** — analyzes what worked, what didn't, and extracts a lesson
-2. **Memory update** — writes reusable patterns and conventions to `MEMORY.md`
-3. **Failure analysis** — when tasks fail, records root cause to prevent repeats
-4. **Reviewer feedback** — when you approve or reject output via the dashboard
+2. **Tool effectiveness tracking** — evaluates which tools were most/least useful
+   per task type. Records `[Tool Preferences]` entries to memory (e.g., "For content
+   tasks, use content_analyzer before scoring_tool for better results")
+3. **Memory update** — writes reusable patterns and conventions to `MEMORY.md`
+4. **Tool recommendations** — on future tasks, injects tool usage recommendations
+   from prior experience into the agent's system prompt
+5. **Failure analysis** — when tasks fail, records root cause to prevent repeats
+6. **Reviewer feedback** — when you approve or reject output via the dashboard
    (`POST /api/tasks/{id}/review`), the feedback is stored in memory. Rejections
    are flagged so the agent avoids the same mistakes in future tasks
-5. **Skill creation** — when the agent recognizes a repeating pattern across tasks,
+7. **Skill creation** — when the agent recognizes a repeating pattern across tasks,
    it can create a new workspace skill (`skills/workspace/`) to codify the pattern
    for future use
 
@@ -301,16 +365,37 @@ The iteration engine monitors critic feedback across iterations. When the critic
 repeats substantially similar feedback (>85% word overlap), the loop accepts the
 output and stops to avoid burning tokens on a stuck review cycle.
 
-### Task Type Inference
+### Context-Aware Task Classification
 
-Messages from channels (Slack, Discord, Telegram, Email) are automatically
-classified into task types based on keyword matching:
+Messages from channels are classified using a two-layer system:
+
+**Layer 1: LLM-based classification** — A fast, free LLM (Mistral Small) analyzes
+the message with conversation history context to understand intent:
+- Considers prior messages in the conversation for context
+- Returns confidence score (0.0-1.0)
+- When ambiguous (confidence < 0.4), asks the user for clarification before creating a task
+- Suggests relevant tools based on the request
+
+**Layer 2: Keyword fallback** — If the LLM is unavailable, falls back to substring
+keyword matching for reliable classification:
 - "fix the login bug" → debugging
-- "refactor the auth module" → refactoring
-- "write docs for the API" → documentation
-- "research database options" → research
+- "write a blog post" → content
+- "create a social media campaign" → marketing
+- "design a wireframe" → design
+- "SWOT analysis" → strategy
+- "load CSV spreadsheet" → data_analysis
+- "create a project timeline" → project_management
 
-This ensures the correct model routing is used for each task.
+Supports all 12 task types with correct model routing for each.
+
+### Non-Code Agent Mode
+
+For non-coding tasks (design, content, strategy, data_analysis, project_management,
+marketing, email), the agent skips git worktree creation and instead:
+- Creates output directories in `.agent42/outputs/{task_id}/`
+- Uses task-type-specific system prompts and critic prompts
+- Saves output as `output.md` instead of `REVIEW.md`
+- Skips git commit/diff steps
 
 ### Task Recovery on Restart
 
@@ -327,19 +412,21 @@ orphaned worktrees from filling up disk space.
 
 ```
 agent42/
-├── agent42.py                 # Main entry point
+├── agent42.py                 # Main entry point + orchestrator
 ├── core/
 │   ├── config.py              # Centralized settings from .env
-│   ├── task_queue.py          # Task state machine + JSON persistence
+│   ├── task_queue.py          # Task state machine + JSON persistence (12 task types)
+│   ├── intent_classifier.py   # LLM-based context-aware task classification
 │   ├── worktree_manager.py    # Git worktree lifecycle
 │   ├── approval_gate.py       # Protected operation intercept
+│   ├── heartbeat.py           # Agent health monitoring
 │   ├── command_filter.py      # Shell command safety filter
 │   └── sandbox.py             # Workspace path restriction
 ├── agents/
-│   ├── agent.py               # Per-task agent orchestration
+│   ├── agent.py               # Per-task agent orchestration (code + non-code modes)
 │   ├── model_router.py        # Free-first task-type -> model routing
-│   ├── iteration_engine.py    # Primary -> Critic -> Revise loop
-│   └── learner.py             # Self-learning: reflection + skill creation
+│   ├── iteration_engine.py    # Primary -> Critic -> Revise loop (task-aware critics)
+│   └── learner.py             # Self-learning: reflection + tool effectiveness tracking
 ├── providers/
 │   └── registry.py            # Declarative LLM provider + model catalog
 ├── channels/
@@ -355,16 +442,45 @@ agent42/
 │   ├── shell.py               # Sandboxed shell execution
 │   ├── filesystem.py          # read/write/edit/list operations
 │   ├── web_search.py          # Brave Search integration
+│   ├── http_client.py         # HTTP requests
+│   ├── python_exec.py         # Sandboxed Python execution
 │   ├── subagent.py            # Sub-agent spawning
 │   ├── cron.py                # Scheduled task execution
-│   └── mcp_client.py          # MCP server tool proxying
+│   ├── repo_map.py            # Repository structure analysis
+│   ├── pr_generator.py        # Pull request generation
+│   ├── security_analyzer.py   # Security vulnerability scanning
+│   ├── workflow_tool.py       # Multi-step workflows
+│   ├── summarizer.py          # Text/code summarization
+│   ├── file_watcher.py        # File change monitoring
+│   ├── browser.py             # Web browsing + screenshots
+│   ├── mcp_client.py          # MCP server tool proxying
+│   ├── team_tool.py           # Multi-agent team orchestration
+│   ├── content_analyzer.py    # Readability, tone, structure, SEO analysis
+│   ├── data_tool.py           # CSV/JSON data loading + analysis
+│   ├── template_tool.py       # Document templates with variable substitution
+│   ├── outline_tool.py        # Structured document outlines
+│   ├── scoring_tool.py        # Rubric-based content evaluation + improvement
+│   ├── persona_tool.py        # Audience persona management
+│   ├── image_gen.py           # AI image generation (free-first)
+│   └── video_gen.py           # AI video generation (async)
 ├── skills/
 │   ├── loader.py              # Skill discovery + frontmatter parser
-│   └── builtins/              # Built-in skill templates
+│   └── builtins/              # Built-in skill templates (15 skills)
 │       ├── github/SKILL.md
 │       ├── memory/SKILL.md
 │       ├── skill-creator/SKILL.md
-│       └── weather/SKILL.md
+│       ├── weather/SKILL.md
+│       ├── content-writing/SKILL.md
+│       ├── design-review/SKILL.md
+│       ├── strategy-analysis/SKILL.md
+│       ├── data-analysis/SKILL.md
+│       ├── social-media/SKILL.md
+│       ├── project-planning/SKILL.md
+│       ├── presentation/SKILL.md
+│       ├── brand-guidelines/SKILL.md
+│       ├── email-marketing/SKILL.md
+│       ├── competitive-analysis/SKILL.md
+│       └── seo/SKILL.md
 ├── memory/
 │   ├── store.py               # Structured memory + event log
 │   ├── session.py             # Per-conversation session history
@@ -373,7 +489,7 @@ agent42/
 │   ├── server.py              # FastAPI + WebSocket server
 │   ├── auth.py                # JWT authentication
 │   └── websocket_manager.py   # Real-time broadcast
-├── tests/                     # 181 tests across 10 test files
+├── tests/                     # 460 tests across 12 test files
 ├── .env.example               # All configuration options
 ├── requirements.txt
 ├── tasks.json.example
@@ -389,6 +505,60 @@ sudo systemctl enable agent42
 sudo systemctl start agent42
 sudo journalctl -u agent42 -f
 ```
+
+## Team Orchestration
+
+The `team` tool enables multi-agent collaboration with four workflow types:
+
+- **sequential** — roles run in order, each receiving prior output as context
+- **parallel** — all roles run simultaneously, results aggregated
+- **fan_out_fan_in** — parallel groups run first, then remaining roles merge results
+- **pipeline** — sequential with independent critic iteration per role
+
+### Built-in Teams
+
+| Team | Workflow | Roles |
+|---|---|---|
+| research-team | sequential | researcher → analyst → writer |
+| marketing-team | pipeline | researcher → strategist → copywriter → editor |
+| content-team | sequential | writer → editor → SEO optimizer |
+| design-review | sequential | designer → critic → brand reviewer |
+| strategy-team | fan_out_fan_in | market-researcher + competitive-researcher → strategist → presenter |
+
+Clone any built-in team to customize roles and workflow for your needs.
+
+## Media Generation
+
+### Image Generation
+
+Free-first model routing for images, same pattern as text LLMs:
+
+| Model | Provider | Tier | Resolution |
+|---|---|---|---|
+| FLUX.1 Schnell | OpenRouter | Free | 1024x1024 |
+| FLUX.1 Dev | Replicate | Cheap | 1024x1024 |
+| SDXL | Replicate | Cheap | 1024x1024 |
+| DALL-E 3 | OpenAI | Premium | 1024x1792 |
+| FLUX 1.1 Pro | Replicate | Premium | 1024x1024 |
+
+**Prompt review**: Before submitting a prompt for generation, a team of agents
+reviews and enhances the prompt for best results. This includes adding specific
+details about composition, lighting, style, and quality. Skip with `skip_review=true`.
+
+### Video Generation
+
+Video generation is async — the tool returns a job ID for polling:
+
+| Model | Provider | Tier | Max Duration |
+|---|---|---|---|
+| CogVideoX-5B | Replicate | Cheap | 6s |
+| AnimateDiff | Replicate | Cheap | 4s |
+| Runway Gen-3 Turbo | Replicate | Premium | 10s |
+| Luma Ray2 | Luma AI | Premium | 10s |
+| Stable Video Diffusion | Replicate | Premium | 4s |
+
+Admin override: Set `AGENT42_IMAGE_MODEL` or `AGENT42_VIDEO_MODEL` env vars to
+force specific models for all generations.
 
 ## Security
 

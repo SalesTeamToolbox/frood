@@ -203,7 +203,7 @@ class TemplateTool(Tool):
             "Render document templates with variable substitution. "
             "Actions: list (show templates), show (view a template), "
             "render (fill template with values), create (save new template), "
-            "delete (remove custom template). "
+            "delete (remove custom template), preview (show with placeholder hints). "
             "Built-in: email-campaign, landing-page-outline, press-release, "
             "executive-summary, project-brief."
         )
@@ -215,7 +215,7 @@ class TemplateTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "show", "render", "create", "delete"],
+                    "enum": ["list", "show", "render", "create", "delete", "preview"],
                     "description": "Template action",
                 },
                 "name": {
@@ -264,6 +264,8 @@ class TemplateTool(Tool):
             return self._create(name, content, description)
         elif action == "delete":
             return self._delete(name)
+        elif action == "preview":
+            return self._preview(name)
         else:
             return ToolResult(error=f"Unknown action: {action}", success=False)
 
@@ -360,3 +362,55 @@ class TemplateTool(Tool):
             )
         del self._templates[name]
         return ToolResult(output=f"Template '{name}' deleted.")
+
+    def _preview(self, name: str) -> ToolResult:
+        """Show a template with placeholder hints instead of requiring all variables."""
+        if not name:
+            return ToolResult(error="name is required for preview", success=False)
+        tmpl = self._templates.get(name)
+        if not tmpl:
+            return ToolResult(error=f"Template '{name}' not found", success=False)
+
+        content = tmpl["content"]
+        # Replace {variable} with [VARIABLE: hint]
+        hints = {
+            "subject": "Email subject line",
+            "preview_text": "Preview text shown in inbox",
+            "recipient_name": "Recipient's first name",
+            "hook": "Opening hook to grab attention",
+            "problem": "Pain point you're addressing",
+            "solution": "Your product/service as the solution",
+            "cta_text": "Call-to-action button text",
+            "cta_url": "Link URL for the CTA",
+            "headline": "Main headline (H1)",
+            "subheadline": "Supporting subheadline",
+            "hero_description": "Hero section description",
+            "social_proof": "Customer testimonial or stat",
+            "product_name": "Your product/service name",
+            "company": "Company name",
+            "city": "City for press release dateline",
+            "date": "Publication date",
+            "title": "Document title",
+            "author": "Author name",
+            "objective": "Primary objective",
+            "project_name": "Project name",
+            "owner": "Project owner",
+            "background": "Background context",
+            "scope": "What's included",
+            "out_of_scope": "What's excluded",
+        }
+
+        preview_content = content
+        for var in tmpl.get("variables", []):
+            hint = hints.get(var, var.replace("_", " ").title())
+            preview_content = preview_content.replace(
+                f"{{{var}}}", f"[{var.upper()}: {hint}]"
+            )
+
+        output = (
+            f"# Preview: {name}\n\n"
+            f"**Description:** {tmpl.get('description', '')}\n\n"
+            f"---\n\n{preview_content}\n\n---\n\n"
+            f"**Variables to fill:** {', '.join(tmpl.get('variables', []))}"
+        )
+        return ToolResult(output=output)

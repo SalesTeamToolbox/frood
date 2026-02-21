@@ -88,6 +88,11 @@ class Settings:
     outputs_dir: str = ".agent42/outputs"
     templates_dir: str = ".agent42/templates"
 
+    # Media generation (Phase 9)
+    replicate_api_token: str = ""
+    luma_api_key: str = ""
+    images_dir: str = ".agent42/images"
+
     @classmethod
     def from_env(cls) -> "Settings":
         # Enforce secure JWT secret
@@ -150,6 +155,10 @@ class Settings:
             # Non-code outputs
             outputs_dir=os.getenv("OUTPUTS_DIR", ".agent42/outputs"),
             templates_dir=os.getenv("TEMPLATES_DIR", ".agent42/templates"),
+            # Media generation
+            replicate_api_token=os.getenv("REPLICATE_API_TOKEN", ""),
+            luma_api_key=os.getenv("LUMA_API_KEY", ""),
+            images_dir=os.getenv("IMAGES_DIR", ".agent42/images"),
         )
 
     def get_discord_guild_ids(self) -> list[int]:

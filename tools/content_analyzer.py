@@ -44,8 +44,9 @@ class ContentAnalyzerTool(Tool):
     def description(self) -> str:
         return (
             "Analyze text for readability (Flesch-Kincaid), tone (formal/informal/persuasive), "
-            "structure (headings, paragraphs), keywords (frequency), and compare two versions. "
-            "Actions: readability, tone, structure, keywords, compare."
+            "structure (headings, paragraphs), keywords (frequency), compare two versions, "
+            "and SEO analysis. "
+            "Actions: readability, tone, structure, keywords, compare, seo."
         )
 
     @property
@@ -55,7 +56,7 @@ class ContentAnalyzerTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["readability", "tone", "structure", "keywords", "compare"],
+                    "enum": ["readability", "tone", "structure", "keywords", "compare", "seo"],
                     "description": "Analysis action",
                 },
                 "text": {
@@ -102,6 +103,8 @@ class ContentAnalyzerTool(Tool):
             if not text_b:
                 return ToolResult(error="text_b is required for compare", success=False)
             return self._compare(text, text_b)
+        elif action == "seo":
+            return self._seo(text)
         else:
             return ToolResult(error=f"Unknown action: {action}", success=False)
 
@@ -337,5 +340,122 @@ class ContentAnalyzerTool(Tool):
             f"**Only in A:** {len(only_a)} words\n"
             f"**Only in B:** {len(only_b)} words\n"
         )
+
+        return ToolResult(output=output)
+
+    def _seo(self, text: str) -> ToolResult:
+        """SEO analysis: keyword density, heading structure, meta description check."""
+        words = self._tokenize(text)
+        lines = text.split("\n")
+        headings = [l.strip() for l in lines if l.strip().startswith("#")]
+
+        word_count = len(words)
+        if word_count == 0:
+            return ToolResult(output="Text too short for SEO analysis.")
+
+        # Keyword density (top terms)
+        stop_words = {
+            "the", "a", "an", "and", "or", "but", "in", "on", "at", "to",
+            "for", "of", "with", "by", "from", "is", "are", "was", "were",
+            "be", "been", "being", "have", "has", "had", "do", "does", "did",
+            "will", "would", "could", "should", "may", "might", "shall",
+            "can", "it", "its", "this", "that", "these", "those", "i", "we",
+            "you", "he", "she", "they", "not", "no", "so", "if", "as",
+        }
+        filtered = [w.lower() for w in words if w.lower() not in stop_words and len(w) > 2]
+        freq = Counter(filtered)
+        top_keywords = freq.most_common(10)
+
+        # Heading structure analysis
+        h1_count = sum(1 for h in headings if h.startswith("# ") and not h.startswith("## "))
+        h2_count = sum(1 for h in headings if h.startswith("## ") and not h.startswith("### "))
+        h3_count = sum(1 for h in headings if h.startswith("### "))
+
+        # Check first paragraph as potential meta description
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip() and not p.strip().startswith("#")]
+        meta_candidate = paragraphs[0] if paragraphs else ""
+        meta_length = len(meta_candidate)
+        meta_ok = 120 <= meta_length <= 160
+
+        # Internal links
+        links = re.findall(r"\[.+?\]\(.+?\)", text)
+        internal_links = [l for l in links if not re.search(r"\(https?://", l)]
+        external_links = [l for l in links if re.search(r"\(https?://", l)]
+
+        # Image alt text check
+        images = re.findall(r"!\[([^\]]*)\]\(", text)
+        images_without_alt = sum(1 for alt in images if not alt.strip())
+
+        # Content length assessment
+        if word_count < 300:
+            length_verdict = "Too short (aim for 800+ words)"
+        elif word_count < 800:
+            length_verdict = "Short (consider expanding to 1000+ words)"
+        elif word_count < 1500:
+            length_verdict = "Good length"
+        elif word_count < 3000:
+            length_verdict = "Strong length for SEO"
+        else:
+            length_verdict = "Comprehensive (good for pillar content)"
+
+        output = (
+            f"# SEO Analysis\n\n"
+            f"## Content Metrics\n\n"
+            f"| Metric | Value | Assessment |\n"
+            f"|--------|-------|------------|\n"
+            f"| Word count | {word_count} | {length_verdict} |\n"
+            f"| H1 headings | {h1_count} | {'Good (1)' if h1_count == 1 else 'Should be exactly 1'} |\n"
+            f"| H2 headings | {h2_count} | {'Good' if h2_count >= 2 else 'Add more H2 sections'} |\n"
+            f"| H3 headings | {h3_count} | {'Good' if h3_count > 0 else 'Consider adding H3 subsections'} |\n"
+            f"| Internal links | {len(internal_links)} | {'Good' if internal_links else 'Add internal links'} |\n"
+            f"| External links | {len(external_links)} | {'Good' if external_links else 'Consider adding references'} |\n"
+            f"| Images | {len(images)} | {'Good' if images else 'Add images'} |\n"
+            f"| Images missing alt text | {images_without_alt} | {'Good' if images_without_alt == 0 else 'Add alt text'} |\n\n"
+        )
+
+        # Meta description
+        output += f"## Meta Description\n\n"
+        if meta_candidate:
+            output += f"**Candidate (first paragraph):** {meta_candidate[:200]}\n"
+            output += f"**Length:** {meta_length} chars "
+            if meta_ok:
+                output += "(ideal: 120-160)\n"
+            elif meta_length < 120:
+                output += f"(too short, add {120 - meta_length} chars)\n"
+            else:
+                output += f"(too long, trim {meta_length - 160} chars)\n"
+        else:
+            output += "No meta description candidate found. Add a descriptive first paragraph.\n"
+
+        # Top keywords
+        output += f"\n## Keyword Density (top 10)\n\n"
+        output += "| Keyword | Count | Density |\n"
+        output += "|---------|-------|---------|\n"
+        for kw, count in top_keywords:
+            density = round(count / len(filtered) * 100, 1) if filtered else 0
+            ideal = "good" if 1.0 <= density <= 3.0 else ("low" if density < 1.0 else "high")
+            output += f"| {kw} | {count} | {density}% ({ideal}) |\n"
+
+        # SEO checklist
+        issues = []
+        if h1_count != 1:
+            issues.append("Use exactly one H1 heading")
+        if h2_count < 2:
+            issues.append("Add at least 2 H2 subheadings for scannability")
+        if word_count < 800:
+            issues.append("Expand content to at least 800 words")
+        if not internal_links:
+            issues.append("Add internal links to related content")
+        if images_without_alt > 0:
+            issues.append(f"Add alt text to {images_without_alt} image(s)")
+        if not meta_ok and meta_candidate:
+            issues.append("Adjust first paragraph length to 120-160 chars for meta description")
+
+        if issues:
+            output += "\n## SEO Improvements\n\n"
+            for issue in issues:
+                output += f"- {issue}\n"
+        else:
+            output += "\n**SEO looks good!** All basic checks passed.\n"
 
         return ToolResult(output=output)

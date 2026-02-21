@@ -89,7 +89,8 @@ class ScoringTool(Tool):
             "Score content against rubrics with weighted criteria. "
             "Actions: list (show rubrics), show (view rubric details), "
             "define (create custom rubric), score (evaluate content), "
-            "compare (score multiple versions and rank), delete."
+            "compare (score multiple versions and rank), delete, "
+            "improve (get specific rewrite suggestions based on scores)."
         )
 
     @property
@@ -99,7 +100,7 @@ class ScoringTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "show", "define", "score", "compare", "delete"],
+                    "enum": ["list", "show", "define", "score", "compare", "delete", "improve"],
                     "description": "Scoring action",
                 },
                 "rubric": {
@@ -167,6 +168,8 @@ class ScoringTool(Tool):
             return self._compare(kwargs)
         elif action == "delete":
             return self._delete(kwargs.get("rubric", ""))
+        elif action == "improve":
+            return self._improve(kwargs)
         else:
             return ToolResult(error=f"Unknown action: {action}", success=False)
 
@@ -322,6 +325,99 @@ class ScoringTool(Tool):
             )
         del self._rubrics[rubric_name]
         return ToolResult(output=f"Rubric '{rubric_name}' deleted.")
+
+    def _improve(self, kwargs: dict) -> ToolResult:
+        """Generate specific improvement suggestions based on scores and rubric."""
+        rubric_name = kwargs.get("rubric", "")
+        scores = kwargs.get("scores", {})
+        label = kwargs.get("content_label", "Content")
+
+        if not rubric_name:
+            return ToolResult(error="rubric name is required", success=False)
+        rubric = self._rubrics.get(rubric_name)
+        if not rubric:
+            return ToolResult(error=f"Rubric '{rubric_name}' not found", success=False)
+        if not scores:
+            return ToolResult(error="scores dict is required for improve", success=False)
+
+        criteria = rubric.get("criteria", [])
+
+        # Sort criteria by score (lowest first) for priority improvements
+        scored_criteria = []
+        for c in criteria:
+            score = scores.get(c["name"], 0)
+            try:
+                score = float(score)
+            except (ValueError, TypeError):
+                score = 0
+            scored_criteria.append((c, score))
+
+        scored_criteria.sort(key=lambda x: x[1])
+
+        lines = [
+            f"# Improvement Plan: {label}",
+            f"**Rubric:** {rubric_name}",
+            f"**Overall Score:** {self._calc_weighted_total(rubric, scores):.1f} / 10\n",
+            "## Priority Improvements (lowest scores first)\n",
+        ]
+
+        for c, score in scored_criteria:
+            if score >= 8:
+                status = "Strong"
+                action = "Maintain current quality"
+            elif score >= 6:
+                status = "Acceptable"
+                action = "Minor refinements needed"
+            elif score >= 4:
+                status = "Needs Work"
+                action = "Significant revision recommended"
+            else:
+                status = "Critical"
+                action = "Major rewrite needed"
+
+            weight = c.get("weight", 0)
+            impact = "HIGH" if weight >= 20 and score < 6 else "MEDIUM" if weight >= 15 else "LOW"
+
+            lines.append(
+                f"### {c['name']} — {score}/10 ({status})\n"
+                f"- **Weight:** {weight}% | **Impact:** {impact}\n"
+                f"- **Criterion:** {c['description']}\n"
+                f"- **Action:** {action}\n"
+            )
+
+            # Specific suggestions based on criterion name patterns
+            name_lower = c["name"].lower()
+            if score < 7:
+                if "hook" in name_lower or "opening" in name_lower:
+                    lines.append("- Try: Start with a provocative question, surprising stat, or bold claim\n")
+                elif "cta" in name_lower or "call to action" in name_lower:
+                    lines.append("- Try: Use specific, action-oriented CTA (\"Start your free trial\" vs \"Learn more\")\n")
+                elif "clarity" in name_lower or "readable" in name_lower or "readability" in name_lower:
+                    lines.append("- Try: Shorten sentences, remove jargon, use active voice\n")
+                elif "seo" in name_lower:
+                    lines.append("- Try: Add target keyword to H1 and first paragraph, use H2/H3 hierarchy\n")
+                elif "tone" in name_lower or "voice" in name_lower:
+                    lines.append("- Try: Review brand guidelines, ensure consistent voice throughout\n")
+                elif "structure" in name_lower:
+                    lines.append("- Try: Add clear headings, use bullet points, keep paragraphs under 3 sentences\n")
+                elif "depth" in name_lower or "thorough" in name_lower:
+                    lines.append("- Try: Add examples, data, expert quotes, or case studies\n")
+                elif "audience" in name_lower or "target" in name_lower:
+                    lines.append("- Try: Use the persona tool to define your audience, then tailor language\n")
+                elif "value" in name_lower or "benefit" in name_lower:
+                    lines.append("- Try: Lead with benefits, not features. Answer: \"What's in it for me?\"\n")
+
+        # Summary
+        weak_count = sum(1 for _, s in scored_criteria if s < 6)
+        strong_count = sum(1 for _, s in scored_criteria if s >= 8)
+        lines.append(
+            f"\n## Summary\n"
+            f"- **Strong areas ({strong_count}):** {', '.join(c['name'] for c, s in scored_criteria if s >= 8) or 'none'}\n"
+            f"- **Areas to improve ({weak_count}):** {', '.join(c['name'] for c, s in scored_criteria if s < 6) or 'none'}\n"
+            f"\nRe-score after revisions to track improvement."
+        )
+
+        return ToolResult(output="\n".join(lines))
 
     # -- Helpers ---------------------------------------------------------------
 

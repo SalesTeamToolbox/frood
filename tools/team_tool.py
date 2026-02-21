@@ -232,7 +232,8 @@ class TeamTool(Tool):
         return (
             "Compose and run teams of agents with defined roles and workflows. "
             "Actions: compose (define a team), run (execute a team on a task), "
-            "status (check run progress), list (show teams), delete (remove a team). "
+            "status (check run progress), list (show teams), delete (remove a team), "
+            "describe (show team details), clone (duplicate a team for customization). "
             "Built-in teams: research-team, marketing-team, content-team, "
             "design-review, strategy-team."
         )
@@ -244,7 +245,7 @@ class TeamTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["compose", "run", "status", "list", "delete"],
+                    "enum": ["compose", "run", "status", "list", "delete", "describe", "clone"],
                     "description": "Team action to perform",
                 },
                 "name": {
@@ -315,6 +316,11 @@ class TeamTool(Tool):
             return self._list()
         elif action == "delete":
             return self._delete(name)
+        elif action == "describe":
+            return self._describe(name)
+        elif action == "clone":
+            new_name = task or f"{name}-custom"
+            return self._clone(name, new_name)
         else:
             return ToolResult(error=f"Unknown action: {action}", success=False)
 
@@ -612,3 +618,69 @@ class TeamTool(Tool):
             )
         del self._teams[name]
         return ToolResult(output=f"Team '{name}' deleted.")
+
+    def _describe(self, name: str) -> ToolResult:
+        """Show detailed information about a team's roles and workflow."""
+        if not name:
+            return ToolResult(error="name is required for describe", success=False)
+        team = self._teams.get(name)
+        if not team:
+            return ToolResult(error=f"Team '{name}' not found", success=False)
+
+        builtin = " (built-in)" if name in BUILTIN_TEAMS else ""
+        lines = [
+            f"# Team: {name}{builtin}",
+            f"\n**Description:** {team.get('description', '')}",
+            f"**Workflow:** {team.get('workflow', 'sequential')}",
+            f"**Roles:** {len(team.get('roles', []))}",
+            "\n## Role Details\n",
+        ]
+
+        for i, role in enumerate(team.get("roles", []), 1):
+            role_name = role.get("name", "unnamed")
+            task_type = role.get("task_type", "research")
+            prompt = role.get("prompt", "")
+            parallel = role.get("parallel_group", "")
+
+            lines.append(f"### {i}. {role_name}")
+            lines.append(f"- **Task type:** {task_type}")
+            if parallel:
+                lines.append(f"- **Parallel group:** {parallel}")
+            lines.append(f"- **Prompt:** {prompt}")
+            lines.append("")
+
+        workflow = team.get("workflow", "sequential")
+        role_names = [r.get("name", "unnamed") for r in team.get("roles", [])]
+        if workflow == "parallel":
+            lines.append(f"**Execution:** All roles run simultaneously: {', '.join(role_names)}")
+        elif workflow == "fan_out_fan_in":
+            lines.append("**Execution:** Parallel groups run first, then remaining roles sequentially")
+        else:
+            lines.append(f"**Execution:** Roles run in order: {' -> '.join(role_names)}")
+
+        return ToolResult(output="\n".join(lines))
+
+    def _clone(self, source_name: str, new_name: str) -> ToolResult:
+        """Clone a team template for customization."""
+        if not source_name:
+            return ToolResult(error="source team name is required", success=False)
+        if not new_name:
+            return ToolResult(error="new team name is required", success=False)
+        source = self._teams.get(source_name)
+        if not source:
+            return ToolResult(error=f"Team '{source_name}' not found", success=False)
+        if new_name in self._teams:
+            return ToolResult(error=f"Team '{new_name}' already exists", success=False)
+
+        import json
+        clone = json.loads(json.dumps(source))  # Deep copy
+        clone["name"] = new_name
+        clone["description"] = f"Custom clone of {source_name}: {clone.get('description', '')}"
+        self._teams[new_name] = clone
+
+        return ToolResult(
+            output=(
+                f"Team '{source_name}' cloned as '{new_name}'. "
+                f"Use compose action to modify roles and workflow."
+            )
+        )
