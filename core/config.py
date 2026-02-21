@@ -84,6 +84,10 @@ class Settings:
     memory_dir: str = ".agent42/memory"
     sessions_dir: str = ".agent42/sessions"
 
+    # Non-code outputs (Phase 8)
+    outputs_dir: str = ".agent42/outputs"
+    templates_dir: str = ".agent42/templates"
+
     @classmethod
     def from_env(cls) -> "Settings":
         # Enforce secure JWT secret
@@ -143,6 +147,9 @@ class Settings:
             # Memory
             memory_dir=os.getenv("MEMORY_DIR", ".agent42/memory"),
             sessions_dir=os.getenv("SESSIONS_DIR", ".agent42/sessions"),
+            # Non-code outputs
+            outputs_dir=os.getenv("OUTPUTS_DIR", ".agent42/outputs"),
+            templates_dir=os.getenv("TEMPLATES_DIR", ".agent42/templates"),
         )
 
     def get_discord_guild_ids(self) -> list[int]:

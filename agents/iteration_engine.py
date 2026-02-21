@@ -66,6 +66,94 @@ MAX_RETRIES = 3
 MAX_TOOL_ROUNDS = 10  # Max tool call rounds per iteration
 SIMILARITY_THRESHOLD = 0.85  # For convergence detection
 
+# Task-aware critic prompts — each task type gets a specialized reviewer
+CRITIC_PROMPTS: dict[str, str] = {
+    "coding": (
+        "You are a strict code reviewer. Evaluate for correctness, security, "
+        "test coverage, and adherence to project conventions. "
+        "If everything looks good, start your response with 'APPROVED'. "
+        "Otherwise, provide specific, actionable feedback for improvement."
+    ),
+    "debugging": (
+        "You are a debugging expert reviewer. Verify the root cause is correctly "
+        "identified, the fix is minimal and correct, and no regressions are introduced. "
+        "If good, start your response with 'APPROVED'. "
+        "Otherwise, provide specific feedback."
+    ),
+    "research": (
+        "You are a research quality reviewer. Evaluate for thoroughness, source "
+        "credibility, balanced analysis, and actionable recommendations. "
+        "If good, start your response with 'APPROVED'. "
+        "Otherwise, provide specific feedback on gaps or weaknesses."
+    ),
+    "refactoring": (
+        "You are a refactoring reviewer. Verify behavior is preserved, code "
+        "structure is improved, and tests still pass. "
+        "If good, start your response with 'APPROVED'. "
+        "Otherwise, provide specific feedback."
+    ),
+    "documentation": (
+        "You are a technical writing reviewer. Evaluate for clarity, completeness, "
+        "accuracy, and developer-friendliness. "
+        "If good, start your response with 'APPROVED'. "
+        "Otherwise, provide specific feedback."
+    ),
+    "marketing": (
+        "You are a marketing strategist reviewer. Evaluate for audience fit, "
+        "persuasive language, clear value proposition, and brand consistency. "
+        "If good, start your response with 'APPROVED'. "
+        "Otherwise, provide specific feedback on messaging and positioning."
+    ),
+    "email": (
+        "You are a communications reviewer. Evaluate for tone, clarity, "
+        "call-to-action effectiveness, and professionalism. "
+        "If good, start your response with 'APPROVED'. "
+        "Otherwise, provide specific feedback."
+    ),
+    "design": (
+        "You are a design reviewer. Evaluate for visual consistency, accessibility, "
+        "user experience, and brand alignment. Check hierarchy, spacing, color "
+        "usage, and typography choices. "
+        "If good, start your response with 'APPROVED'. "
+        "Otherwise, provide specific, actionable design feedback."
+    ),
+    "content": (
+        "You are an editorial reviewer. Evaluate for clarity, engagement, grammar, "
+        "logical flow, and audience appropriateness. Check that the content delivers "
+        "value and has a clear structure. "
+        "If good, start your response with 'APPROVED'. "
+        "Otherwise, provide specific editorial feedback."
+    ),
+    "strategy": (
+        "You are a strategy reviewer. Evaluate for market insight depth, competitive "
+        "awareness, feasibility, and actionable next steps. Check that frameworks "
+        "are applied correctly and conclusions are evidence-based. "
+        "If good, start your response with 'APPROVED'. "
+        "Otherwise, provide specific strategic feedback."
+    ),
+    "data_analysis": (
+        "You are a data analysis reviewer. Evaluate for statistical validity, clear "
+        "visualizations, correct interpretations, and actionable insights. "
+        "Check methodology and ensure conclusions are supported by the data. "
+        "If good, start your response with 'APPROVED'. "
+        "Otherwise, provide specific analytical feedback."
+    ),
+    "project_management": (
+        "You are a project management reviewer. Evaluate for completeness, realistic "
+        "timelines, risk identification, clear deliverables, and resource allocation. "
+        "If good, start your response with 'APPROVED'. "
+        "Otherwise, provide specific planning feedback."
+    ),
+}
+
+# Default critic prompt for unknown task types
+_DEFAULT_CRITIC_PROMPT = (
+    "You are a strict content reviewer. Evaluate the following output "
+    "for correctness, completeness, and quality. "
+    "If everything looks good, start your response with 'APPROVED'. "
+    "Otherwise, provide specific, actionable feedback for improvement."
+)
+
 
 class IterationEngine:
     """Run the primary -> tool exec -> critic -> revise loop."""
@@ -176,6 +264,7 @@ class IterationEngine:
         max_iterations: int,
         system_prompt: str = "",
         on_iteration: callable = None,
+        task_type: str = "coding",
     ) -> IterationHistory:
         """
         Execute the iteration loop with tool calling support.
@@ -229,7 +318,8 @@ class IterationEngine:
             # Critic pass (if configured)
             if critic_model:
                 critic_feedback = await self._critic_pass(
-                    critic_model, task_description, primary_output
+                    critic_model, task_description, primary_output,
+                    task_type=task_type,
                 )
                 result.critic_feedback = critic_feedback
                 result.approved = self._is_approved(critic_feedback)
@@ -350,18 +440,15 @@ class IterationEngine:
         return final
 
     async def _critic_pass(
-        self, critic_model: str, original_task: str, output: str
+        self, critic_model: str, original_task: str, output: str,
+        task_type: str = "coding",
     ) -> str:
         """Have the critic model review the primary's output."""
+        critic_prompt = CRITIC_PROMPTS.get(task_type, _DEFAULT_CRITIC_PROMPT)
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "You are a strict code/content reviewer. Evaluate the following output "
-                    "for correctness, completeness, security issues, and quality. "
-                    "If everything looks good, start your response with 'APPROVED'. "
-                    "Otherwise, provide specific, actionable feedback for improvement."
-                ),
+                "content": critic_prompt,
             },
             {
                 "role": "user",

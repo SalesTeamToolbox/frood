@@ -16,7 +16,7 @@ from typing import Callable, Awaitable
 from agents.model_router import ModelRouter
 from agents.iteration_engine import IterationEngine, IterationResult
 from agents.learner import Learner
-from core.task_queue import Task, TaskQueue, TaskStatus
+from core.task_queue import Task, TaskQueue, TaskStatus, TaskType
 from core.worktree_manager import WorktreeManager
 from core.approval_gate import ApprovalGate
 from skills.loader import SkillLoader
@@ -54,7 +54,35 @@ SYSTEM_PROMPTS = {
         "You are a professional communicator. Draft clear, concise emails that achieve their "
         "purpose. Match the tone to the context."
     ),
+    "design": (
+        "You are a creative design consultant. Provide detailed design feedback, "
+        "suggest improvements for visual hierarchy, accessibility, and brand consistency. "
+        "When creating, describe layouts, color choices, and typography with precision."
+    ),
+    "content": (
+        "You are an expert content creator. Write engaging, well-structured content "
+        "tailored to the target audience. Focus on clarity, narrative flow, and "
+        "a strong call to action."
+    ),
+    "strategy": (
+        "You are a strategic business analyst. Conduct thorough analysis using "
+        "frameworks (SWOT, Porter's Five Forces, etc.), provide data-backed insights, "
+        "and deliver actionable recommendations."
+    ),
+    "data_analysis": (
+        "You are a data analyst. Process data methodically, create clear visualizations "
+        "(described as ASCII/markdown tables when tools unavailable), identify patterns, "
+        "and provide actionable insights with statistical backing."
+    ),
+    "project_management": (
+        "You are a project manager. Create clear project plans with milestones, "
+        "timelines, resource allocation, risk assessment, and status tracking. "
+        "Use structured formats (tables, checklists, Gantt descriptions)."
+    ),
 }
+
+# Task types that require git worktrees — all others use output directories
+_CODE_TASK_TYPES = {TaskType.CODING, TaskType.DEBUGGING, TaskType.REFACTORING}
 
 
 class Agent:
@@ -92,10 +120,18 @@ class Agent:
         """Execute the full agent pipeline for this task."""
         task = self.task
         logger.info(f"Agent starting: {task.id} — {task.title}")
+        needs_worktree = task.task_type in _CODE_TASK_TYPES
 
         try:
-            # Set up worktree
-            worktree_path = await self.worktree_manager.create(task.id)
+            # Set up workspace — worktree for code tasks, output dir for others
+            if needs_worktree:
+                worktree_path = await self.worktree_manager.create(task.id)
+            else:
+                from core.config import settings
+                output_dir = Path(settings.outputs_dir) / task.id
+                output_dir.mkdir(parents=True, exist_ok=True)
+                worktree_path = output_dir
+
             task.worktree_path = str(worktree_path)
 
             await self.emit("agent_start", {
@@ -113,7 +149,7 @@ class Agent:
             # Build task context with file contents, skills, and memory
             task_context = self._build_context(task, worktree_path)
 
-            # Run iteration engine
+            # Run iteration engine with task-type-aware critic
             history = await self.engine.run(
                 task_description=task_context,
                 primary_model=routing["primary"],
@@ -121,18 +157,24 @@ class Agent:
                 max_iterations=routing["max_iterations"],
                 system_prompt=system_prompt,
                 on_iteration=self._on_iteration,
+                task_type=task.task_type.value,
             )
 
-            # Generate REVIEW.md
-            diff = await self.worktree_manager.diff(task.id)
-            review_md = self._generate_review(task, history, diff)
-            review_path = worktree_path / "REVIEW.md"
-            review_path.write_text(review_md)
+            if needs_worktree:
+                # Generate REVIEW.md and commit for code tasks
+                diff = await self.worktree_manager.diff(task.id)
+                review_md = self._generate_review(task, history, diff)
+                review_path = worktree_path / "REVIEW.md"
+                review_path.write_text(review_md)
 
-            # Commit the review
-            await self.worktree_manager.commit(
-                task.id, f"agent42: {task.title} — iteration complete"
-            )
+                await self.worktree_manager.commit(
+                    task.id, f"agent42: {task.title} — iteration complete"
+                )
+            else:
+                # Save output as markdown for non-code tasks
+                output_path = worktree_path / "output.md"
+                review_md = self._generate_review(task, history, "")
+                output_path.write_text(review_md)
 
             # Transition task to review
             await self.task_queue.complete(task.id, result=history.final_output)
@@ -162,11 +204,12 @@ class Agent:
                 "worktree": str(worktree_path),
             })
 
-            # Clean up worktree to prevent disk space leaks
-            try:
-                await self.worktree_manager.remove(task.id)
-            except Exception as cleanup_err:
-                logger.warning(f"Worktree cleanup failed for {task.id}: {cleanup_err}")
+            # Clean up worktree for code tasks to prevent disk space leaks
+            if needs_worktree:
+                try:
+                    await self.worktree_manager.remove(task.id)
+                except Exception as cleanup_err:
+                    logger.warning(f"Worktree cleanup failed for {task.id}: {cleanup_err}")
 
             logger.info(
                 f"Agent done: {task.id} — {history.total_iterations} iterations"
@@ -177,11 +220,12 @@ class Agent:
             await self.task_queue.fail(task.id, str(e))
             await self.emit("agent_error", {"task_id": task.id, "error": str(e)})
 
-            # Clean up orphaned worktree to prevent disk bloat
-            try:
-                await self.worktree_manager.remove(task.id)
-            except Exception as cleanup_err:
-                logger.warning(f"Worktree cleanup failed for {task.id}: {cleanup_err}")
+            # Clean up orphaned worktree for code tasks to prevent disk bloat
+            if needs_worktree:
+                try:
+                    await self.worktree_manager.remove(task.id)
+                except Exception as cleanup_err:
+                    logger.warning(f"Worktree cleanup failed for {task.id}: {cleanup_err}")
 
             # Post-task learning: analyze the failure
             if self.learner:
@@ -222,33 +266,47 @@ class Agent:
     _MAX_CONTEXT_FILES = 15  # At most this many files read into context
     _MAX_TOTAL_CONTEXT = 200_000  # Total context budget in characters
 
+    # File extensions for code tasks
+    _CODE_EXTENSIONS = (".py", ".js", ".ts", ".jsx", ".tsx", ".json", ".yaml", ".yml", ".md")
+    # File extensions for non-code tasks (reference documents)
+    _NONCODE_EXTENSIONS = (".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".html", ".xml")
+
     def _build_context(self, task: Task, worktree_path: Path) -> str:
-        """Build the full task context including file contents, skills, and memory."""
+        """Build the full task context including file contents, skills, and memory.
+
+        For code tasks: reads source files from the worktree.
+        For non-code tasks: reads reference documents and prior outputs.
+        """
+        is_code_task = task.task_type in _CODE_TASK_TYPES
         parts = [
             f"# Task: {task.title}\n",
             task.description,
             f"\nWorking directory: {worktree_path}",
         ]
 
-        # Include project structure for context
+        extensions = self._CODE_EXTENSIONS if is_code_task else self._NONCODE_EXTENSIONS
+
+        # Include project/reference file structure
         project_files = sorted(worktree_path.rglob("*"))
         relevant = [
             f for f in project_files
             if f.is_file()
-            and f.suffix in (".py", ".js", ".ts", ".jsx", ".tsx", ".json", ".yaml", ".yml", ".md")
+            and f.suffix in extensions
             and ".git" not in f.parts
             and "node_modules" not in str(f)
             and "__pycache__" not in str(f)
         ]
 
         if relevant:
-            parts.append("\n## Project files:")
+            label = "Project files" if is_code_task else "Reference documents"
+            parts.append(f"\n## {label}:")
             for f in relevant[:50]:
                 parts.append(f"- {f.relative_to(worktree_path)}")
 
-        # Read key file contents so the agent has actual source code
+        # Read file contents
         if relevant:
-            parts.append("\n## File Contents:\n")
+            label = "File Contents" if is_code_task else "Reference Contents"
+            parts.append(f"\n## {label}:\n")
             total_chars = 0
             files_read = 0
             for f in relevant[:self._MAX_CONTEXT_FILES]:

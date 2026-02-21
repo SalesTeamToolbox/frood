@@ -72,6 +72,12 @@ from tools.security_analyzer import SecurityAnalyzerTool
 from tools.workflow_tool import WorkflowTool
 from tools.summarizer_tool import SummarizerTool
 from tools.file_watcher import FileWatcherTool
+from tools.team_tool import TeamTool
+from tools.content_analyzer import ContentAnalyzerTool
+from tools.data_tool import DataTool
+from tools.template_tool import TemplateTool
+from tools.outline_tool import OutlineTool
+from tools.scoring_tool import ScoringTool
 from core.heartbeat import HeartbeatService
 from dashboard.server import create_app
 from dashboard.websocket_manager import WebSocketManager
@@ -195,6 +201,14 @@ class Agent42:
         self.tool_registry.register(WorkflowTool(workspace, self.tool_registry))
         self.tool_registry.register(SummarizerTool(workspace))
         self.tool_registry.register(FileWatcherTool(workspace))
+
+        # General-purpose tools (non-coding workflows)
+        self.tool_registry.register(TeamTool(self.task_queue))
+        self.tool_registry.register(ContentAnalyzerTool())
+        self.tool_registry.register(DataTool())
+        self.tool_registry.register(TemplateTool())
+        self.tool_registry.register(OutlineTool())
+        self.tool_registry.register(ScoringTool())
 
     async def _setup_channels(self):
         """Configure and register enabled channels based on settings."""
