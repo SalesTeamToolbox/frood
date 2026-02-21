@@ -77,17 +77,61 @@ class MCPConnection:
                 texts.append(block.get("text", ""))
         return "\n".join(texts) if texts else json.dumps(result)
 
+    # Commands that are allowed for MCP stdio servers
+    _ALLOWED_MCP_COMMANDS = {
+        "npx", "node", "python", "python3", "uvx", "uv",
+        "docker", "deno", "bun",
+    }
+
+    @classmethod
+    def _validate_command(cls, command: str) -> str:
+        """Validate the MCP server command against an allowlist.
+
+        Only known MCP server runners are allowed to prevent arbitrary
+        code execution via malicious mcp_servers.json configs.
+        """
+        import shutil
+
+        if not command:
+            raise ValueError("MCP server command cannot be empty")
+
+        # Extract base command name (strip path)
+        base = os.path.basename(command)
+
+        if base not in cls._ALLOWED_MCP_COMMANDS:
+            raise ValueError(
+                f"MCP command '{command}' not in allowlist. "
+                f"Allowed: {', '.join(sorted(cls._ALLOWED_MCP_COMMANDS))}"
+            )
+
+        # Resolve to full path to avoid PATH manipulation attacks
+        resolved = shutil.which(command)
+        if not resolved:
+            raise FileNotFoundError(f"MCP command not found: {command}")
+
+        return resolved
+
     async def _connect_stdio(self):
         """Connect via stdio (local process)."""
         command = self.config.get("command", "")
         args = self.config.get("args", [])
         env_overrides = self.config.get("env", {})
 
+        # Validate command against allowlist
+        resolved_command = self._validate_command(command)
+
+        # Sanitize env overrides: don't allow overriding PATH or LD_PRELOAD
+        _BLOCKED_ENV_KEYS = {"PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH"}
+        for key in list(env_overrides.keys()):
+            if key.upper() in _BLOCKED_ENV_KEYS:
+                logger.warning(f"MCP server {self.name}: blocked env override '{key}'")
+                del env_overrides[key]
+
         env = os.environ.copy()
         env.update(env_overrides)
 
         self._proc = await asyncio.create_subprocess_exec(
-            command, *args,
+            resolved_command, *args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -215,6 +259,11 @@ class MCPManager:
 
         except Exception as e:
             logger.error(f"Failed to connect MCP server {name}: {e}")
+            # Clean up orphaned process on connection failure
+            try:
+                await conn.disconnect()
+            except Exception:
+                pass
             return []
 
     async def disconnect_all(self):

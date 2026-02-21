@@ -60,6 +60,31 @@ FREE_ROUTING: dict[TaskType, dict] = {
         "critic": None,
         "max_iterations": 3,
     },
+    TaskType.DESIGN: {
+        "primary": "or-free-llama4-maverick",   # Strong visual/creative reasoning
+        "critic": "or-free-deepseek-chat",
+        "max_iterations": 5,
+    },
+    TaskType.CONTENT: {
+        "primary": "or-free-llama4-maverick",   # Best free model for writing
+        "critic": "or-free-gemma-27b",          # Fast editorial check
+        "max_iterations": 6,
+    },
+    TaskType.STRATEGY: {
+        "primary": "or-free-deepseek-r1",       # Deep reasoning for strategy
+        "critic": "or-free-llama4-maverick",
+        "max_iterations": 5,
+    },
+    TaskType.DATA_ANALYSIS: {
+        "primary": "or-free-qwen-coder",        # Good with data/code/tables
+        "critic": "or-free-deepseek-chat",
+        "max_iterations": 6,
+    },
+    TaskType.PROJECT_MANAGEMENT: {
+        "primary": "or-free-llama4-maverick",
+        "critic": "or-free-gemma-27b",
+        "max_iterations": 4,
+    },
 }
 
 
@@ -115,6 +140,33 @@ class ModelRouter:
         return await self.registry.complete(
             model_key, messages, temperature=temperature, max_tokens=max_tokens
         )
+
+    async def complete_with_tools(
+        self,
+        model_key: str,
+        messages: list[dict],
+        tools: list[dict],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ):
+        """Send a chat completion with tool schemas and return the full response.
+
+        Returns the raw response object so the caller can inspect tool_calls.
+        """
+        spec = self.registry.get_model(model_key)
+        client = self.registry.get_client(spec.provider)
+
+        kwargs = {
+            "model": spec.model_id,
+            "messages": messages,
+            "temperature": temperature if temperature is not None else spec.temperature,
+            "max_tokens": max_tokens or spec.max_tokens,
+        }
+        if tools:
+            kwargs["tools"] = tools
+
+        response = await client.chat.completions.create(**kwargs)
+        return response
 
     def available_providers(self) -> list[dict]:
         """List all providers and their availability."""

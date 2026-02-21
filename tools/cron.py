@@ -33,6 +33,8 @@ class CronJob:
     last_run: float = 0.0
     next_run: float = 0.0
     created_at: float = field(default_factory=time.time)
+    stagger_seconds: int = 0  # Manual stagger override (0 = auto)
+    jitter_seconds: int = 0   # Random jitter within stagger window
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -78,14 +80,43 @@ class CronScheduler:
 
     async def start(self):
         """Start the scheduler heartbeat loop."""
+        import random
+        from collections import defaultdict
+
         self._load()
         self._running = True
         logger.info(f"Cron scheduler started with {len(self._jobs)} jobs")
 
+        # Auto-stagger: compute offsets for jobs sharing the same schedule
+        schedule_groups: dict[str, list[str]] = defaultdict(list)
+        for job in self._jobs.values():
+            schedule_groups[job.schedule].append(job.id)
+
+        stagger_offsets: dict[str, float] = {}
+        for schedule_expr, job_ids in schedule_groups.items():
+            if len(job_ids) <= 1:
+                for jid in job_ids:
+                    stagger_offsets[jid] = 0.0
+                continue
+            # Spread jobs evenly over a 60-second window (or use manual override)
+            auto_gap = 60.0 / len(job_ids)
+            for idx, jid in enumerate(job_ids):
+                job = self._jobs[jid]
+                if job.stagger_seconds > 0:
+                    stagger_offsets[jid] = float(job.stagger_seconds)
+                else:
+                    stagger_offsets[jid] = idx * auto_gap
+                # Add random jitter if configured
+                if job.jitter_seconds > 0:
+                    stagger_offsets[jid] += random.uniform(0, job.jitter_seconds)
+
+        logger.info(f"Computed stagger offsets for {len(stagger_offsets)} jobs")
+
         while self._running:
             now = time.time()
             for job in self._jobs.values():
-                if not job.enabled or job.next_run > now:
+                effective_next = job.next_run + stagger_offsets.get(job.id, 0.0)
+                if not job.enabled or effective_next > now:
                     continue
 
                 logger.info(f"Cron trigger: {job.id} — {job.name}")
@@ -111,11 +142,17 @@ class CronScheduler:
     def _compute_next_run(self, schedule: str, from_time: float = 0.0) -> float:
         """Compute the next run time from a schedule string.
 
-        Supports simple intervals: "every 30m", "every 1h", "every 24h"
+        Supports:
+        - Simple intervals: "every 30m", "every 1h", "every 24h"
+        - Cron expressions: "0 9 * * *" (minute hour day month weekday)
         """
+        import datetime
+
         base = from_time or time.time()
 
         schedule = schedule.strip().lower()
+
+        # Simple interval format: "every 30m", "every 1h"
         if schedule.startswith("every "):
             interval_str = schedule[6:].strip()
             multiplier = 1.0
@@ -137,8 +174,65 @@ class CronScheduler:
             except ValueError:
                 pass
 
+        # Cron expression: "minute hour day month weekday"
+        parts = schedule.split()
+        if len(parts) == 5:
+            try:
+                return self._next_cron_time(parts, base)
+            except Exception as e:
+                logger.warning(f"Failed to parse cron expression '{schedule}': {e}")
+
         # Default: 1 hour from now
         return base + 3600
+
+    @staticmethod
+    def _next_cron_time(parts: list[str], from_time: float) -> float:
+        """Compute the next matching time for a 5-field cron expression.
+
+        Fields: minute hour day-of-month month day-of-week
+        Supports: numbers, *, */N (step), and comma-separated values.
+        """
+        import datetime
+
+        def parse_field(field: str, min_val: int, max_val: int) -> set[int]:
+            values = set()
+            for part in field.split(","):
+                part = part.strip()
+                if part == "*":
+                    values.update(range(min_val, max_val + 1))
+                elif part.startswith("*/"):
+                    step = int(part[2:])
+                    values.update(range(min_val, max_val + 1, step))
+                elif "-" in part:
+                    start, end = part.split("-", 1)
+                    values.update(range(int(start), int(end) + 1))
+                else:
+                    values.add(int(part))
+            return values
+
+        minutes = parse_field(parts[0], 0, 59)
+        hours = parse_field(parts[1], 0, 23)
+        days = parse_field(parts[2], 1, 31)
+        months = parse_field(parts[3], 1, 12)
+        weekdays = parse_field(parts[4], 0, 6)  # 0=Monday in Python
+
+        dt = datetime.datetime.fromtimestamp(from_time) + datetime.timedelta(minutes=1)
+        dt = dt.replace(second=0, microsecond=0)
+
+        # Search up to 366 days ahead
+        for _ in range(366 * 24 * 60):
+            if (
+                dt.month in months
+                and dt.day in days
+                and dt.weekday() in weekdays
+                and dt.hour in hours
+                and dt.minute in minutes
+            ):
+                return dt.timestamp()
+            dt += datetime.timedelta(minutes=1)
+
+        # Fallback: 1 hour from now
+        return from_time + 3600
 
     def _persist(self):
         """Save jobs to disk."""

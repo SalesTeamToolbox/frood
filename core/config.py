@@ -5,9 +5,20 @@ All settings are validated at import time so failures surface early.
 """
 
 import json
+import logging
 import os
+import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger("agent42.config")
+
+# Known-insecure JWT secrets that must never be used in production
+_INSECURE_JWT_SECRETS = {
+    "change-me-to-a-long-random-string",
+    "change-me-to-a-long-random-string-at-least-32-chars",
+    "",
+}
 
 
 @dataclass(frozen=True)
@@ -26,7 +37,9 @@ class Settings:
     dashboard_username: str = "admin"
     dashboard_password: str = ""
     dashboard_password_hash: str = ""
-    jwt_secret: str = "change-me-to-a-long-random-string"
+    jwt_secret: str = ""
+    dashboard_host: str = "127.0.0.1"
+    cors_allowed_origins: str = ""  # Comma-separated origins, empty = same-origin only
 
     # Orchestrator
     default_repo_path: str = "."
@@ -36,6 +49,22 @@ class Settings:
     # Security (Phase 1)
     sandbox_enabled: bool = True
     workspace_restrict: bool = True
+
+    # Command filter: "deny" (default deny-list) or "allowlist" (strict production mode)
+    command_filter_mode: str = "deny"
+    command_filter_allowlist: str = ""  # Comma-separated regex patterns (allowlist mode)
+
+    # Approval gate
+    approval_log_path: str = ".agent42/approvals.jsonl"
+
+    # Rate limiting
+    login_rate_limit: int = 5  # Max login attempts per minute per IP
+    max_websocket_connections: int = 50
+    tool_rate_limiting_enabled: bool = True
+    tool_rate_limit_overrides: str = ""  # JSON: {"shell": {"max_calls": 500, "window_seconds": 3600}}
+
+    # Spending limits
+    max_daily_api_spend_usd: float = 0.0  # 0 = unlimited
 
     # Channels (Phase 2)
     discord_bot_token: str = ""
@@ -55,6 +84,23 @@ class Settings:
     # Skills (Phase 3)
     skills_dirs: str = ""  # Comma-separated extra skill directories
 
+    # URL policy (OpenClaw security fix)
+    url_allowlist: str = ""       # Comma-separated glob patterns, e.g. "*.github.com,api.openai.com"
+    url_denylist: str = ""        # Comma-separated glob patterns to always block
+    max_url_requests_per_agent: int = 100  # 0 = unlimited
+
+    # Browser control security (OpenClaw CVE fix)
+    browser_gateway_token: str = ""  # Auto-generated if empty
+
+    # Context safeguards (OpenClaw feature)
+    max_context_tokens: int = 128000
+    context_overflow_strategy: str = "truncate_oldest"  # truncate_oldest | summarize | error
+
+    # Webhook notifications (OpenClaw feature)
+    webhook_urls: str = ""          # Comma-separated webhook endpoints
+    webhook_events: str = "task_failed,task_review,approval_requested,agent_stalled"
+    notification_email_recipients: str = ""  # Comma-separated emails for critical alerts
+
     # Tools (Phase 4)
     brave_api_key: str = ""
     mcp_servers_json: str = ""  # Path to MCP servers config file
@@ -64,8 +110,38 @@ class Settings:
     memory_dir: str = ".agent42/memory"
     sessions_dir: str = ".agent42/sessions"
 
+    # Non-code outputs (Phase 8)
+    outputs_dir: str = ".agent42/outputs"
+    templates_dir: str = ".agent42/templates"
+
+    # Media generation (Phase 9)
+    replicate_api_token: str = ""
+    luma_api_key: str = ""
+    images_dir: str = ".agent42/images"
+
+    # Device gateway auth (Phase 10)
+    devices_file: str = ".agent42/devices.jsonl"
+
     @classmethod
     def from_env(cls) -> "Settings":
+        # Enforce secure JWT secret
+        jwt_secret = os.getenv("JWT_SECRET", "")
+        if jwt_secret in _INSECURE_JWT_SECRETS:
+            jwt_secret = secrets.token_hex(32)
+            logger.warning(
+                "JWT_SECRET not set or insecure — generated a random secret. "
+                "Set JWT_SECRET in .env for persistent sessions across restarts."
+            )
+
+        # Auto-generate browser gateway token if not set
+        browser_gateway_token = os.getenv("BROWSER_GATEWAY_TOKEN", "")
+        if not browser_gateway_token:
+            browser_gateway_token = secrets.token_hex(16)
+            logger.warning(
+                "BROWSER_GATEWAY_TOKEN not set — generated a random token. "
+                "Set BROWSER_GATEWAY_TOKEN in .env for persistent browser sessions."
+            )
+
         return cls(
             # Provider API keys
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
@@ -78,7 +154,9 @@ class Settings:
             dashboard_username=os.getenv("DASHBOARD_USERNAME", "admin"),
             dashboard_password=os.getenv("DASHBOARD_PASSWORD", ""),
             dashboard_password_hash=os.getenv("DASHBOARD_PASSWORD_HASH", ""),
-            jwt_secret=os.getenv("JWT_SECRET", "change-me-to-a-long-random-string"),
+            jwt_secret=jwt_secret,
+            dashboard_host=os.getenv("DASHBOARD_HOST", "127.0.0.1"),
+            cors_allowed_origins=os.getenv("CORS_ALLOWED_ORIGINS", ""),
             # Orchestrator
             default_repo_path=os.getenv("DEFAULT_REPO_PATH", str(Path.cwd())),
             max_concurrent_agents=int(os.getenv("MAX_CONCURRENT_AGENTS", "3")),
@@ -86,6 +164,14 @@ class Settings:
             # Security
             sandbox_enabled=os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes"),
             workspace_restrict=os.getenv("WORKSPACE_RESTRICT", "true").lower() in ("true", "1", "yes"),
+            command_filter_mode=os.getenv("COMMAND_FILTER_MODE", "deny"),
+            command_filter_allowlist=os.getenv("COMMAND_FILTER_ALLOWLIST", ""),
+            approval_log_path=os.getenv("APPROVAL_LOG_PATH", ".agent42/approvals.jsonl"),
+            login_rate_limit=int(os.getenv("LOGIN_RATE_LIMIT", "5")),
+            max_websocket_connections=int(os.getenv("MAX_WEBSOCKET_CONNECTIONS", "50")),
+            tool_rate_limiting_enabled=os.getenv("TOOL_RATE_LIMITING_ENABLED", "true").lower() in ("true", "1", "yes"),
+            tool_rate_limit_overrides=os.getenv("TOOL_RATE_LIMIT_OVERRIDES", ""),
+            max_daily_api_spend_usd=float(os.getenv("MAX_DAILY_API_SPEND_USD", "0")),
             # Channels
             discord_bot_token=os.getenv("DISCORD_BOT_TOKEN", ""),
             discord_guild_ids=os.getenv("DISCORD_GUILD_IDS", ""),
@@ -100,6 +186,19 @@ class Settings:
             email_smtp_port=int(os.getenv("EMAIL_SMTP_PORT", "587")),
             email_smtp_user=os.getenv("EMAIL_SMTP_USER", ""),
             email_smtp_password=os.getenv("EMAIL_SMTP_PASSWORD", ""),
+            # URL policy
+            url_allowlist=os.getenv("URL_ALLOWLIST", ""),
+            url_denylist=os.getenv("URL_DENYLIST", ""),
+            max_url_requests_per_agent=int(os.getenv("MAX_URL_REQUESTS_PER_AGENT", "100")),
+            # Browser control security
+            browser_gateway_token=browser_gateway_token,
+            # Context safeguards
+            max_context_tokens=int(os.getenv("MAX_CONTEXT_TOKENS", "128000")),
+            context_overflow_strategy=os.getenv("CONTEXT_OVERFLOW_STRATEGY", "truncate_oldest"),
+            # Webhook notifications
+            webhook_urls=os.getenv("WEBHOOK_URLS", ""),
+            webhook_events=os.getenv("WEBHOOK_EVENTS", "task_failed,task_review,approval_requested,agent_stalled"),
+            notification_email_recipients=os.getenv("NOTIFICATION_EMAIL_RECIPIENTS", ""),
             # Skills
             skills_dirs=os.getenv("SKILLS_DIRS", ""),
             # Tools
@@ -109,6 +208,15 @@ class Settings:
             # Memory
             memory_dir=os.getenv("MEMORY_DIR", ".agent42/memory"),
             sessions_dir=os.getenv("SESSIONS_DIR", ".agent42/sessions"),
+            # Non-code outputs
+            outputs_dir=os.getenv("OUTPUTS_DIR", ".agent42/outputs"),
+            templates_dir=os.getenv("TEMPLATES_DIR", ".agent42/templates"),
+            # Media generation
+            replicate_api_token=os.getenv("REPLICATE_API_TOKEN", ""),
+            luma_api_key=os.getenv("LUMA_API_KEY", ""),
+            images_dir=os.getenv("IMAGES_DIR", ".agent42/images"),
+            # Device gateway auth
+            devices_file=os.getenv("DEVICES_FILE", ".agent42/devices.jsonl"),
         )
 
     def get_discord_guild_ids(self) -> list[int]:
@@ -134,6 +242,58 @@ class Settings:
             return json.loads(path.read_text())
         except (json.JSONDecodeError, OSError):
             return {}
+
+    def get_cors_origins(self) -> list[str]:
+        """Parse comma-separated CORS allowed origins."""
+        if not self.cors_allowed_origins:
+            return []
+        return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
+
+    def get_url_allowlist(self) -> list[str]:
+        """Parse comma-separated URL allowlist patterns."""
+        if not self.url_allowlist:
+            return []
+        return [p.strip() for p in self.url_allowlist.split(",") if p.strip()]
+
+    def get_url_denylist(self) -> list[str]:
+        """Parse comma-separated URL denylist patterns."""
+        if not self.url_denylist:
+            return []
+        return [p.strip() for p in self.url_denylist.split(",") if p.strip()]
+
+    def get_webhook_urls(self) -> list[str]:
+        """Parse comma-separated webhook URLs."""
+        if not self.webhook_urls:
+            return []
+        return [u.strip() for u in self.webhook_urls.split(",") if u.strip()]
+
+    def get_webhook_events(self) -> list[str]:
+        """Parse comma-separated webhook event types."""
+        if not self.webhook_events:
+            return []
+        return [e.strip() for e in self.webhook_events.split(",") if e.strip()]
+
+    def get_notification_email_recipients(self) -> list[str]:
+        """Parse comma-separated email recipients."""
+        if not self.notification_email_recipients:
+            return []
+        return [e.strip() for e in self.notification_email_recipients.split(",") if e.strip()]
+
+    def validate_dashboard_auth(self) -> list[str]:
+        """Validate dashboard auth configuration. Returns list of warnings."""
+        warnings = []
+        if not self.dashboard_password and not self.dashboard_password_hash:
+            warnings.append(
+                "No dashboard password configured (DASHBOARD_PASSWORD or "
+                "DASHBOARD_PASSWORD_HASH). Dashboard login will be disabled."
+            )
+        if self.dashboard_password and not self.dashboard_password_hash:
+            warnings.append(
+                "Using plaintext DASHBOARD_PASSWORD. Set DASHBOARD_PASSWORD_HASH "
+                "for production. Generate: python -c \"from passlib.context import "
+                "CryptContext; print(CryptContext(['bcrypt']).hash('yourpassword'))\""
+            )
+        return warnings
 
 
 # Singleton — import this everywhere

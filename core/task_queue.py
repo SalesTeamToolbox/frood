@@ -21,10 +21,13 @@ logger = logging.getLogger("agent42.task_queue")
 
 class TaskStatus(str, Enum):
     PENDING = "pending"
+    ASSIGNED = "assigned"
     RUNNING = "running"
     REVIEW = "review"
+    BLOCKED = "blocked"
     DONE = "done"
     FAILED = "failed"
+    ARCHIVED = "archived"
 
 
 class TaskType(str, Enum):
@@ -35,6 +38,11 @@ class TaskType(str, Enum):
     DOCUMENTATION = "documentation"
     MARKETING = "marketing"
     EMAIL = "email"
+    DESIGN = "design"
+    CONTENT = "content"
+    STRATEGY = "strategy"
+    DATA_ANALYSIS = "data_analysis"
+    PROJECT_MANAGEMENT = "project_management"
 
 
 # Keyword-based task type inference for channel messages
@@ -45,6 +53,11 @@ _TASK_TYPE_KEYWORDS: dict[TaskType, list[str]] = {
     TaskType.DOCUMENTATION: ["document", "readme", "docstring", "wiki", "explain", "write docs"],
     TaskType.MARKETING: ["marketing", "copy", "landing page", "social media", "campaign", "blog post", "seo"],
     TaskType.EMAIL: ["email", "draft email", "reply to", "send email", "write email", "compose"],
+    TaskType.DESIGN: ["design", "mockup", "wireframe", "ui design", "ux design", "user interface", "layout", "visual", "logo", "brand identity", "creative brief", "graphic"],
+    TaskType.CONTENT: ["blog", "article", "write", "content", "post", "copywrite", "narrative", "story", "headline"],
+    TaskType.STRATEGY: ["strategy", "competitive", "swot", "market analysis", "business plan", "positioning", "go-to-market"],
+    TaskType.DATA_ANALYSIS: ["data", "chart", "graph", "csv", "spreadsheet", "analyze data", "visualization", "metrics", "dashboard", "statistics"],
+    TaskType.PROJECT_MANAGEMENT: ["project plan", "timeline", "milestone", "sprint", "roadmap", "status report", "task breakdown", "gantt"],
 }
 
 
@@ -71,6 +84,44 @@ class Task:
     worktree_path: str = ""
     result: str = ""
     error: str = ""
+    # Origin channel info for routing responses back
+    origin_channel: str = ""      # "discord", "slack", "telegram", "email", ""
+    origin_channel_id: str = ""   # Channel/chat ID to respond to
+    origin_metadata: dict = field(default_factory=dict)  # Thread IDs, etc.
+    # Device that created this task (empty = dashboard/channel)
+    origin_device_id: str = ""
+
+    # Mission Control / Kanban fields (OpenClaw feature)
+    assigned_agent: str = ""
+    priority: int = 0             # 0=normal, 1=high, 2=urgent
+    tags: list = field(default_factory=list)
+    comments: list = field(default_factory=list)  # [{author, text, timestamp}]
+    blocked_reason: str = ""
+    parent_task_id: str = ""
+    position: int = 0             # Kanban column ordering
+    context_window: str = "default"  # default | large | max
+
+    def add_comment(self, author: str, text: str):
+        self.comments.append({
+            "author": author,
+            "text": text,
+            "timestamp": time.time(),
+        })
+        self.updated_at = time.time()
+
+    def block(self, reason: str):
+        self.status = TaskStatus.BLOCKED
+        self.blocked_reason = reason
+        self.updated_at = time.time()
+
+    def unblock(self):
+        self.status = TaskStatus.PENDING
+        self.blocked_reason = ""
+        self.updated_at = time.time()
+
+    def archive(self):
+        self.status = TaskStatus.ARCHIVED
+        self.updated_at = time.time()
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -154,11 +205,65 @@ class TaskQueue:
         await self._notify(task)
         await self._persist()
 
+    async def cancel(self, task_id: str):
+        """Cancel a pending or running task."""
+        task = self._tasks.get(task_id)
+        if not task:
+            return
+        if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+            task.status = TaskStatus.FAILED
+            task.error = "Cancelled by user"
+            await self._notify(task)
+            await self._persist()
+            logger.info(f"Task cancelled: {task_id}")
+
+    async def retry(self, task_id: str):
+        """Re-queue a failed task for another attempt."""
+        task = self._tasks.get(task_id)
+        if not task:
+            return
+        if task.status == TaskStatus.FAILED:
+            task.status = TaskStatus.PENDING
+            task.error = ""
+            task.result = ""
+            task.iterations = 0
+            await self._queue.put(task)
+            await self._notify(task)
+            await self._persist()
+            logger.info(f"Task retried: {task_id}")
+
     def get(self, task_id: str) -> Task | None:
         return self._tasks.get(task_id)
 
     def all_tasks(self) -> list[Task]:
         return sorted(self._tasks.values(), key=lambda t: t.created_at, reverse=True)
+
+    def board(self) -> dict[str, list[dict]]:
+        """Group tasks by status for Kanban board view."""
+        columns = {s.value: [] for s in TaskStatus}
+        for task in self._tasks.values():
+            columns[task.status.value].append(task.to_dict())
+        # Sort each column by position, then priority (urgent first)
+        for col in columns.values():
+            col.sort(key=lambda t: (t.get("position", 0), -t.get("priority", 0)))
+        return columns
+
+    def stats(self) -> dict:
+        """Task count statistics."""
+        counts = {s.value: 0 for s in TaskStatus}
+        for task in self._tasks.values():
+            counts[task.status.value] = counts.get(task.status.value, 0) + 1
+        return counts
+
+    async def move_task(self, task_id: str, new_status: str, position: int = 0):
+        """Move a task to a new status column with position (Kanban drag-and-drop)."""
+        task = self._tasks.get(task_id)
+        if not task:
+            return
+        task.status = TaskStatus(new_status)
+        task.position = position
+        await self._notify(task)
+        await self._persist()
 
     async def _persist(self):
         """Write current state to JSON file."""
@@ -218,10 +323,27 @@ class TaskQueue:
                 async with aiofiles.open(self._json_path, "r") as f:
                     raw = await f.read()
 
-                for item in json.loads(raw):
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid JSON in tasks file during reload: {e}")
+                    continue
+
+                if not isinstance(data, list):
+                    logger.error(f"Tasks file must contain a JSON array, got {type(data).__name__}")
+                    continue
+
+                for item in data:
+                    if not isinstance(item, dict):
+                        logger.warning(f"Skipping non-dict task entry: {type(item).__name__}")
+                        continue
                     task_id = item.get("id")
                     if task_id not in self._tasks:
-                        task = Task.from_dict(item)
+                        try:
+                            task = Task.from_dict(item)
+                        except (TypeError, ValueError, KeyError) as e:
+                            logger.warning(f"Skipping malformed task entry: {e}")
+                            continue
                         if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
                             task.status = TaskStatus.PENDING
                             await self.add(task)
