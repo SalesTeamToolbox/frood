@@ -3,6 +3,8 @@ Agent — per-task orchestration.
 
 Each agent gets a git worktree, runs the iteration engine, generates
 a REVIEW.md, and transitions the task to the review state.
+
+Now integrates skills (Phase 3), tools (Phase 4), and memory (Phase 6).
 """
 
 import logging
@@ -15,9 +17,12 @@ from agents.iteration_engine import IterationEngine, IterationResult
 from core.task_queue import Task, TaskQueue, TaskStatus
 from core.worktree_manager import WorktreeManager
 from core.approval_gate import ApprovalGate
+from skills.loader import SkillLoader
+from memory.store import MemoryStore
 
 logger = logging.getLogger("agent42.agent")
 
+# Default system prompts (used when no skill overrides)
 SYSTEM_PROMPTS = {
     "coding": (
         "You are an expert software engineer. Write clean, well-tested, production-ready "
@@ -60,6 +65,8 @@ class Agent:
         worktree_manager: WorktreeManager,
         approval_gate: ApprovalGate,
         emit: Callable[[str, dict], Awaitable[None]],
+        skill_loader: SkillLoader | None = None,
+        memory_store: MemoryStore | None = None,
     ):
         self.task = task
         self.task_queue = task_queue
@@ -68,6 +75,8 @@ class Agent:
         self.emit = emit
         self.router = ModelRouter()
         self.engine = IterationEngine(self.router)
+        self.skill_loader = skill_loader
+        self.memory_store = memory_store
 
     async def run(self):
         """Execute the full agent pipeline for this task."""
@@ -87,9 +96,11 @@ class Agent:
 
             # Get model routing for this task type
             routing = self.router.get_routing(task.task_type)
-            system_prompt = SYSTEM_PROMPTS.get(task.task_type.value, SYSTEM_PROMPTS["coding"])
 
-            # Build task context with file contents if in a worktree
+            # Build system prompt (with skill overrides)
+            system_prompt = self._build_system_prompt(task)
+
+            # Build task context with file contents, skills, and memory
             task_context = self._build_context(task, worktree_path)
 
             # Run iteration engine
@@ -116,6 +127,14 @@ class Agent:
             # Transition task to review
             await self.task_queue.complete(task.id, result=history.final_output)
 
+            # Log to memory
+            if self.memory_store:
+                self.memory_store.log_event(
+                    "task_complete",
+                    f"Task '{task.title}' completed in {history.total_iterations} iterations",
+                    f"Type: {task.task_type.value}\nResult preview: {history.final_output[:200]}",
+                )
+
             await self.emit("agent_complete", {
                 "task_id": task.id,
                 "iterations": history.total_iterations,
@@ -131,6 +150,13 @@ class Agent:
             await self.task_queue.fail(task.id, str(e))
             await self.emit("agent_error", {"task_id": task.id, "error": str(e)})
 
+            # Log failure to memory
+            if self.memory_store:
+                self.memory_store.log_event(
+                    "task_failed",
+                    f"Task '{task.title}' failed: {e}",
+                )
+
     async def _on_iteration(self, result: IterationResult):
         """Broadcast iteration progress to the dashboard."""
         await self.emit("iteration", {
@@ -140,8 +166,21 @@ class Agent:
             "preview": result.primary_output[:500],
         })
 
+    def _build_system_prompt(self, task: Task) -> str:
+        """Build the system prompt, incorporating skill overrides if available."""
+        task_type_str = task.task_type.value
+
+        # Check if any skill overrides the system prompt
+        if self.skill_loader:
+            skills = self.skill_loader.get_for_task_type(task_type_str)
+            for skill in skills:
+                if skill.system_prompt_override:
+                    return skill.system_prompt_override
+
+        return SYSTEM_PROMPTS.get(task_type_str, SYSTEM_PROMPTS["coding"])
+
     def _build_context(self, task: Task, worktree_path: Path) -> str:
-        """Build the full task context including relevant file contents."""
+        """Build the full task context including files, skills, and memory."""
         parts = [
             f"# Task: {task.title}\n",
             task.description,
@@ -163,6 +202,18 @@ class Agent:
             parts.append("\n## Project files:")
             for f in relevant[:20]:
                 parts.append(f"- {f.relative_to(worktree_path)}")
+
+        # Include skill context (Phase 3)
+        if self.skill_loader:
+            skill_context = self.skill_loader.build_skill_context(task.task_type.value)
+            if skill_context:
+                parts.append(f"\n{skill_context}")
+
+        # Include memory context (Phase 6)
+        if self.memory_store:
+            memory_context = self.memory_store.build_context()
+            if memory_context.strip():
+                parts.append(f"\n{memory_context}")
 
         return "\n".join(parts)
 
