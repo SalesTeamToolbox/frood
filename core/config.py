@@ -110,6 +110,19 @@ class Settings:
     memory_dir: str = ".agent42/memory"
     sessions_dir: str = ".agent42/sessions"
 
+    # Qdrant vector database (optional — enhances semantic search)
+    qdrant_url: str = ""              # e.g. "http://localhost:6333" for Docker, or empty for embedded
+    qdrant_api_key: str = ""          # API key for Qdrant Cloud or authenticated instances
+    qdrant_collection_prefix: str = "agent42"  # Prefix for collection names
+    qdrant_enabled: bool = False      # Set true to enable Qdrant (auto-enabled if qdrant_url is set)
+    qdrant_local_path: str = ".agent42/qdrant"  # Path for embedded Qdrant storage
+
+    # Redis (optional — fast session cache + embedding cache)
+    redis_url: str = ""               # e.g. "redis://localhost:6379/0"
+    redis_password: str = ""
+    session_ttl_days: int = 7         # TTL for session data in Redis
+    embedding_cache_ttl_hours: int = 24  # TTL for cached embeddings in Redis
+
     # Non-code outputs (Phase 8)
     outputs_dir: str = ".agent42/outputs"
     templates_dir: str = ".agent42/templates"
@@ -208,6 +221,17 @@ class Settings:
             # Memory
             memory_dir=os.getenv("MEMORY_DIR", ".agent42/memory"),
             sessions_dir=os.getenv("SESSIONS_DIR", ".agent42/sessions"),
+            # Qdrant
+            qdrant_url=os.getenv("QDRANT_URL", ""),
+            qdrant_api_key=os.getenv("QDRANT_API_KEY", ""),
+            qdrant_collection_prefix=os.getenv("QDRANT_COLLECTION_PREFIX", "agent42"),
+            qdrant_enabled=os.getenv("QDRANT_ENABLED", "").lower() in ("true", "1", "yes") or bool(os.getenv("QDRANT_URL", "")),
+            qdrant_local_path=os.getenv("QDRANT_LOCAL_PATH", ".agent42/qdrant"),
+            # Redis
+            redis_url=os.getenv("REDIS_URL", ""),
+            redis_password=os.getenv("REDIS_PASSWORD", ""),
+            session_ttl_days=int(os.getenv("SESSION_TTL_DAYS", "7")),
+            embedding_cache_ttl_hours=int(os.getenv("EMBEDDING_CACHE_TTL_HOURS", "24")),
             # Non-code outputs
             outputs_dir=os.getenv("OUTPUTS_DIR", ".agent42/outputs"),
             templates_dir=os.getenv("TEMPLATES_DIR", ".agent42/templates"),

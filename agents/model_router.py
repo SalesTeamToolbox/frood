@@ -99,16 +99,33 @@ class ModelRouter:
     def __init__(self):
         self.registry = ProviderRegistry()
 
-    def get_routing(self, task_type: TaskType) -> dict:
-        """Return the model routing config, applying free-first strategy."""
+    def get_routing(self, task_type: TaskType, context_window: str = "default") -> dict:
+        """Return the model routing config, applying free-first strategy.
+
+        When context_window is "large" or "max", prefer models with larger
+        context windows (e.g. Gemini Flash 1M) over the default task-type model.
+        """
         # Check for admin override via env vars
         override = self._check_admin_override(task_type)
         if override:
             logger.info(f"Admin override for {task_type.value}: {override}")
             return override
 
-        # OpenRouter free routing (single key covers all free models)
-        return FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING])
+        routing = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING]).copy()
+
+        # If task requests large/max context, prefer models with large context windows
+        if context_window == "max":
+            large_models = self.registry.models_by_min_context(500_000)
+            free_large = [m for m in large_models if m["tier"] == "free"]
+            if free_large:
+                routing["primary"] = free_large[0]["key"]
+        elif context_window == "large":
+            large_models = self.registry.models_by_min_context(200_000)
+            free_large = [m for m in large_models if m["tier"] == "free"]
+            if free_large:
+                routing["primary"] = free_large[0]["key"]
+
+        return routing
 
     def _check_admin_override(self, task_type: TaskType) -> dict | None:
         """Check if the admin has set env vars to override model routing.
