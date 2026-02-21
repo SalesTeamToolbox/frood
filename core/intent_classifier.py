@@ -26,6 +26,9 @@ optional conversation history, classify the request into one of these task types
 
 {task_types}
 
+Also determine whether this task needs a single agent or a full team.
+Available teams: research-team, marketing-team, content-team, design-review, strategy-team
+
 Respond with ONLY a JSON object (no markdown, no extra text):
 
 {{
@@ -34,7 +37,9 @@ Respond with ONLY a JSON object (no markdown, no extra text):
   "needs_clarification": <true or false>,
   "clarification_question": "<question to ask if ambiguous, or empty string>",
   "suggested_tools": [<list of tool names that might help, or empty>],
-  "reasoning": "<one sentence explaining your classification>"
+  "reasoning": "<one sentence explaining your classification>",
+  "recommended_mode": "<single_agent or team>",
+  "recommended_team": "<team name if team mode, or empty string>"
 }}
 
 Rules:
@@ -45,7 +50,17 @@ Rules:
 - Use conversation history to understand context (e.g. if they were discussing
   marketing and say "now write it up", that's a content task)
 - Default to "coding" only if the request clearly involves code
+- For complex multi-step tasks (campaigns, full projects, comprehensive analysis),
+  recommend "team" mode with the appropriate team name
+- For focused single-deliverable tasks, recommend "single_agent"
+- Only recommend "team" when the task clearly involves multiple domains or steps
 """
+
+
+_VALID_TEAMS = {
+    "research-team", "marketing-team", "content-team",
+    "design-review", "strategy-team",
+}
 
 
 @dataclass
@@ -58,6 +73,9 @@ class ClassificationResult:
     suggested_tools: list[str] = field(default_factory=list)
     reasoning: str = ""
     used_llm: bool = False  # True if LLM was used, False if keyword fallback
+    # Resource allocation
+    recommended_mode: str = "single_agent"  # "single_agent" or "team"
+    recommended_team: str = ""              # team name or ""
 
 
 @dataclass
@@ -184,6 +202,18 @@ class IntentClassifier:
         suggested_tools = data.get("suggested_tools", [])
         reasoning = data.get("reasoning", "")
 
+        # Resource allocation fields
+        recommended_mode = data.get("recommended_mode", "single_agent")
+        if recommended_mode not in ("single_agent", "team"):
+            recommended_mode = "single_agent"
+
+        recommended_team = data.get("recommended_team", "")
+        if recommended_team and recommended_team not in _VALID_TEAMS:
+            recommended_team = ""
+        # Ensure team is empty when mode is single_agent
+        if recommended_mode == "single_agent":
+            recommended_team = ""
+
         # If confidence is very low, force clarification
         if confidence < 0.4 and not needs_clarification:
             needs_clarification = True
@@ -201,6 +231,8 @@ class IntentClassifier:
             suggested_tools=suggested_tools if isinstance(suggested_tools, list) else [],
             reasoning=reasoning,
             used_llm=True,
+            recommended_mode=recommended_mode,
+            recommended_team=recommended_team,
         )
 
     @staticmethod

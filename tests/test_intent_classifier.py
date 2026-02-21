@@ -150,6 +150,99 @@ class TestResponseParsing:
         assert result.suggested_tools == ["image_gen", "persona"]
 
 
+class TestResourceAllocation:
+    """Test resource allocation fields in ClassificationResult and parsing."""
+
+    def test_defaults_to_single_agent(self):
+        result = ClassificationResult(task_type=TaskType.CODING)
+        assert result.recommended_mode == "single_agent"
+        assert result.recommended_team == ""
+
+    def test_team_mode_construction(self):
+        result = ClassificationResult(
+            task_type=TaskType.MARKETING,
+            recommended_mode="team",
+            recommended_team="marketing-team",
+        )
+        assert result.recommended_mode == "team"
+        assert result.recommended_team == "marketing-team"
+
+    def test_parse_response_with_team_recommendation(self):
+        classifier = IntentClassifier(router=None)
+        response = (
+            '{"task_type": "marketing", "confidence": 0.9, '
+            '"needs_clarification": false, "clarification_question": "", '
+            '"suggested_tools": [], "reasoning": "Campaign task", '
+            '"recommended_mode": "team", "recommended_team": "marketing-team"}'
+        )
+        result = classifier._parse_response(response, "Create a full marketing campaign")
+        assert result.recommended_mode == "team"
+        assert result.recommended_team == "marketing-team"
+
+    def test_parse_response_single_agent(self):
+        classifier = IntentClassifier(router=None)
+        response = (
+            '{"task_type": "coding", "confidence": 0.95, '
+            '"needs_clarification": false, "clarification_question": "", '
+            '"suggested_tools": [], "reasoning": "Simple fix", '
+            '"recommended_mode": "single_agent", "recommended_team": ""}'
+        )
+        result = classifier._parse_response(response, "Fix the bug")
+        assert result.recommended_mode == "single_agent"
+        assert result.recommended_team == ""
+
+    def test_parse_invalid_mode_defaults_to_single(self):
+        classifier = IntentClassifier(router=None)
+        response = (
+            '{"task_type": "coding", "confidence": 0.8, '
+            '"needs_clarification": false, "clarification_question": "", '
+            '"suggested_tools": [], "reasoning": "test", '
+            '"recommended_mode": "multi_agent", "recommended_team": ""}'
+        )
+        result = classifier._parse_response(response, "test")
+        assert result.recommended_mode == "single_agent"
+
+    def test_parse_invalid_team_cleared(self):
+        classifier = IntentClassifier(router=None)
+        response = (
+            '{"task_type": "marketing", "confidence": 0.9, '
+            '"needs_clarification": false, "clarification_question": "", '
+            '"suggested_tools": [], "reasoning": "test", '
+            '"recommended_mode": "team", "recommended_team": "fake-team"}'
+        )
+        result = classifier._parse_response(response, "test")
+        # Invalid team name should be cleared
+        assert result.recommended_team == ""
+
+    def test_parse_single_agent_clears_team(self):
+        classifier = IntentClassifier(router=None)
+        response = (
+            '{"task_type": "coding", "confidence": 0.9, '
+            '"needs_clarification": false, "clarification_question": "", '
+            '"suggested_tools": [], "reasoning": "test", '
+            '"recommended_mode": "single_agent", "recommended_team": "marketing-team"}'
+        )
+        result = classifier._parse_response(response, "test")
+        assert result.recommended_mode == "single_agent"
+        assert result.recommended_team == ""  # cleared because mode is single_agent
+
+    @pytest.mark.asyncio
+    async def test_keyword_fallback_defaults_single(self):
+        """Keyword fallback always returns single_agent mode."""
+        classifier = IntentClassifier(router=None)
+        result = await classifier.classify("Create a social media campaign")
+        assert result.recommended_mode == "single_agent"
+        assert result.recommended_team == ""
+
+    def test_valid_teams_list(self):
+        from core.intent_classifier import _VALID_TEAMS
+        expected = {
+            "research-team", "marketing-team", "content-team",
+            "design-review", "strategy-team",
+        }
+        assert _VALID_TEAMS == expected
+
+
 class TestLearnerToolRecommendations:
     """Test tool effectiveness tracking in the learner."""
 

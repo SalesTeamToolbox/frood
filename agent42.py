@@ -357,7 +357,8 @@ class Agent42:
 
         # Classification is confident — create task
         return await self._create_task_from_message(
-            message.content, message, force_type=classification.task_type
+            message.content, message, force_type=classification.task_type,
+            classification=classification,
         )
 
     async def _create_task_from_message(
@@ -365,13 +366,38 @@ class Agent42:
         description: str,
         message: InboundMessage,
         force_type: TaskType | None = None,
+        classification=None,
     ) -> OutboundMessage:
-        """Create a task from a channel message with the given (or inferred) type."""
+        """Create a task from a channel message with the given (or inferred) type.
+
+        If the classification recommends a team, injects a resource allocation
+        directive into the task description so the executing agent knows to use
+        the team tool.
+        """
         task_type = force_type or infer_task_type(description)
+
+        # Smart resource allocation: inject team directive for complex tasks
+        task_description = description
+        team_name = ""
+        if (
+            classification
+            and classification.recommended_mode == "team"
+            and classification.recommended_team
+        ):
+            team_name = classification.recommended_team
+            task_description = (
+                f"{description}\n\n"
+                f"---\n"
+                f"RESOURCE ALLOCATION: This task has been assessed as requiring "
+                f"team collaboration.\n"
+                f"Use the 'team' tool with action='run', name='{team_name}', "
+                f"and the task description above to execute with the {team_name}.\n"
+                f"The team's Manager will coordinate the roles automatically."
+            )
 
         task = Task(
             title=f"[{message.channel_type}] {description[:60]}",
-            description=description,
+            description=task_description,
             task_type=task_type,
             origin_channel=message.channel_type,
             origin_channel_id=message.channel_id,
@@ -386,11 +412,13 @@ class Agent42:
             description[:500],
         )
 
+        mode_str = f"team: {team_name}" if team_name else "single agent"
         return OutboundMessage(
             channel_type=message.channel_type,
             channel_id=message.channel_id,
             content=(
-                f"Task created: {task.id} (type: {task_type.value}) — I'm working on it."
+                f"Task created: {task.id} (type: {task_type.value}, "
+                f"mode: {mode_str}) — I'm working on it."
             ),
             metadata=message.metadata,
         )

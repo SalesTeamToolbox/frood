@@ -510,10 +510,50 @@ sudo journalctl -u agent42 -f
 
 The `team` tool enables multi-agent collaboration with four workflow types:
 
-- **sequential** — roles run in order, each receiving prior output as context
+- **sequential** — roles run in order, each receiving full team context
 - **parallel** — all roles run simultaneously, results aggregated
 - **fan_out_fan_in** — parallel groups run first, then remaining roles merge results
 - **pipeline** — sequential with independent critic iteration per role
+
+### Manager / Coordinator
+
+Every team run is automatically coordinated by a **Manager agent**:
+
+1. **Planning Phase** — Manager analyzes the task and creates an execution plan
+   - Breaks the task into subtasks for each role
+   - Sets expectations, deliverables, and quality criteria per role
+   - Identifies dependencies between roles
+2. **Team Execution** — Roles execute their workflow with the Manager's plan as context
+3. **Review Phase** — Manager reviews all role outputs
+   - Checks for completeness, consistency, and quality
+   - Synthesizes a final deliverable integrating all role work
+   - Assigns a quality score (1-10)
+4. **Revision Handling** — If any role's output is insufficient, Manager flags it
+   - Flagged roles are re-run once with specific manager feedback
+   - Post-revision, Manager re-reviews to ensure quality
+
+### Shared Team Context
+
+Roles don't just receive the previous role's output — they see the full **TeamContext**:
+
+- The original task description
+- The Manager's execution plan
+- All prior role outputs (sequential) or no peer outputs (parallel)
+- Manager-directed feedback (during revisions)
+- Shared team notes
+
+This enables true inter-agent communication where each role understands the full project scope and can build on all prior work.
+
+### Smart Resource Allocation
+
+Agent42 automatically determines whether a task needs a single agent or a full team:
+
+- **Intent Classification** — The LLM classifier analyzes task complexity and recommends `single_agent` or `team` mode
+- **Complexity Assessment** — Keyword signals (scale markers, multi-deliverable markers, team indicators, cross-domain keywords) supplement LLM assessment
+- **Auto-dispatch** — Complex tasks automatically include team tool directives in their description
+- **Team Matching** — The recommended team is matched to the task's domain (marketing → marketing-team, design → design-review, etc.)
+
+Simple tasks ("Fix the login bug") run as single agents with zero overhead. Complex tasks ("Create a comprehensive marketing campaign with social media, email, and blog content") are automatically routed to the appropriate team with Manager coordination.
 
 ### Built-in Teams
 
