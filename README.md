@@ -217,21 +217,47 @@ Agents have access to a sandboxed tool registry:
 
 ### Command Filter
 
-The shell tool blocks dangerous commands by default:
-- `rm -rf /`, `dd if=`, `mkfs`, `shutdown`, `reboot`
-- `curl | sh`, `wget | bash` (pipe-to-shell)
-- `iptables -F` (firewall flush)
+The shell tool has two layers of defense:
 
-Admins can add extra deny patterns or switch to allowlist mode.
+**Layer 1: Command pattern filter** — blocks known-dangerous commands:
+- Destructive: `rm -rf /`, `dd if=`, `mkfs`, `shutdown`, `reboot`
+- Exfiltration: `scp`, `sftp`, `rsync` to remote, `curl --upload-file`
+- Network: `curl | sh`, `wget | bash`, `nc -l`, `ssh -R` tunnels, `socat LISTEN`
+- System: `systemctl stop/restart`, `useradd`, `passwd`, `crontab -e`
+- Packages: `apt install`, `yum install`, `dnf install`, `snap install`
+- Containers: `docker run`, `docker exec`, `kubectl exec`
+- Firewall: `iptables -F`, `ufw disable`
 
-## Memory
+**Layer 2: Path enforcement** — scans commands for absolute paths and blocks
+any that fall outside the workspace sandbox. System paths (`/usr/bin`, `/tmp`,
+etc.) are allowed. This prevents `cat /etc/hosts`, `sed /var/www/...`,
+`ls /home/user/.ssh/`, etc.
 
-Agent42 maintains persistent memory across sessions:
+Admins can add extra deny patterns or switch to allowlist-only mode.
 
-- **Structured memory** — key/value sections in `memory.md` (project context, preferences, learned patterns)
-- **Event log** — append-only `history.md` for audit trail
+## Memory & Learning
+
+Agent42 maintains persistent memory and learns from every task:
+
+### Persistent Memory
+- **Structured memory** — key/value sections in `MEMORY.md` (project context, preferences, learned patterns)
+- **Event log** — append-only `HISTORY.md` for audit trail
 - **Session history** — per-conversation message history with configurable limits
 - **Semantic search** — vector embeddings for similarity-based memory retrieval (auto-detects OpenAI, OpenRouter, or NVIDIA embedding APIs; falls back to grep)
+
+### Self-Learning Loop
+
+After every task (success or failure), the agent runs a **reflection cycle**:
+
+1. **Post-task reflection** — analyzes what worked, what didn't, and extracts a lesson
+2. **Memory update** — writes reusable patterns and conventions to `MEMORY.md`
+3. **Failure analysis** — when tasks fail, records root cause to prevent repeats
+4. **Reviewer feedback** — when you approve or reject output via the dashboard
+   (`POST /api/tasks/{id}/review`), the feedback is stored in memory. Rejections
+   are flagged so the agent avoids the same mistakes in future tasks
+5. **Skill creation** — when the agent recognizes a repeating pattern across tasks,
+   it can create a new workspace skill (`skills/workspace/`) to codify the pattern
+   for future use
 
 ## Channels
 
@@ -285,7 +311,8 @@ agent42/
 ├── agents/
 │   ├── agent.py               # Per-task agent orchestration
 │   ├── model_router.py        # Free-first task-type -> model routing
-│   └── iteration_engine.py    # Primary -> Critic -> Revise loop
+│   ├── iteration_engine.py    # Primary -> Critic -> Revise loop
+│   └── learner.py             # Self-learning: reflection + skill creation
 ├── providers/
 │   └── registry.py            # Declarative LLM provider + model catalog
 ├── channels/
@@ -319,7 +346,7 @@ agent42/
 │   ├── server.py              # FastAPI + WebSocket server
 │   ├── auth.py                # JWT authentication
 │   └── websocket_manager.py   # Real-time broadcast
-├── tests/                     # 107 tests across 7 test files
+├── tests/                     # 160 tests across 9 test files
 ├── .env.example               # All configuration options
 ├── requirements.txt
 ├── tasks.json.example
@@ -338,10 +365,15 @@ sudo journalctl -u agent42 -f
 
 ## Security
 
-- **Workspace sandbox**: Agents can only read/write within the project worktree
-- **Command filter**: Dangerous shell commands are blocked by default
-- **Approval gates**: Sensitive operations (email, push, delete) require dashboard approval
-- **Channel allowlists**: Restrict which users can submit tasks per channel
-- **Dashboard auth**: JWT-based authentication with bcrypt password hashing
-- Put nginx in front with HTTPS before making public
-- `JWT_SECRET` should be a 64-char random string
+Agent42 is designed to run safely on a shared VPS alongside other services
+(your website, databases, etc.). The agent cannot access anything outside its
+workspace.
+
+- **Workspace sandbox**: Filesystem tools can only read/write within the project worktree. Path traversal (`../`) and absolute paths outside workspace are blocked.
+- **Shell path enforcement**: Shell commands are scanned for absolute paths — any path outside the workspace (e.g. `/var/www`, `/etc/nginx`) is blocked before execution.
+- **Command filter**: 30+ dangerous command patterns blocked (destructive ops, network exfiltration, service manipulation, package installation, container escape, user/permission changes).
+- **Approval gates**: Sensitive operations (email, push, delete, external API calls) require dashboard approval before execution.
+- **Channel allowlists**: Restrict which users can submit tasks per channel.
+- **Dashboard auth**: JWT-based authentication with bcrypt password hashing.
+- Put nginx in front with HTTPS before making public.
+- `JWT_SECRET` should be a 64-char random string.
