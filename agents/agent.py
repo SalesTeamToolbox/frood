@@ -148,10 +148,12 @@ class Agent:
                     succeeded=True,
                 )
                 # Check if this task's pattern should be saved as a reusable skill
+                existing_names = (
+                    [s.name for s in self.skill_loader.all_skills()]
+                    if self.skill_loader else []
+                )
                 await self.learner.check_for_skill_creation(
-                    task_title=task.title,
-                    task_type=task.task_type.value,
-                    task_output=history.final_output[:2000],
+                    existing_skill_names=existing_names,
                 )
 
             await self.emit("agent_complete", {
