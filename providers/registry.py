@@ -58,6 +58,7 @@ class ModelSpec:
     temperature: float = 0.3
     display_name: str = ""
     tier: ModelTier = ModelTier.FREE  # Default to free for cost-conscious routing
+    max_context_tokens: int = 128000
 
 
 # -- Provider catalog ---------------------------------------------------------
@@ -130,8 +131,8 @@ MODELS: dict[str, ModelSpec] = {
     # General-purpose
     "or-free-llama4-maverick": ModelSpec("meta-llama/llama-4-maverick:free", ProviderType.OPENROUTER, display_name="Llama 4 Maverick (free)", tier=ModelTier.FREE),
     "or-free-llama-70b": ModelSpec("meta-llama/llama-3.3-70b-instruct:free", ProviderType.OPENROUTER, display_name="Llama 3.3 70B (free)", tier=ModelTier.FREE),
-    "or-free-gemini-flash": ModelSpec("google/gemini-2.0-flash-exp:free", ProviderType.OPENROUTER, max_tokens=8192, display_name="Gemini 2.0 Flash (free, 1M ctx)", tier=ModelTier.FREE),
-    "or-free-gemini-pro": ModelSpec("google/gemini-2.5-pro-exp-03-25:free", ProviderType.OPENROUTER, max_tokens=8192, display_name="Gemini 2.5 Pro (free)", tier=ModelTier.FREE),
+    "or-free-gemini-flash": ModelSpec("google/gemini-2.0-flash-exp:free", ProviderType.OPENROUTER, max_tokens=8192, display_name="Gemini 2.0 Flash (free, 1M ctx)", tier=ModelTier.FREE, max_context_tokens=1000000),
+    "or-free-gemini-pro": ModelSpec("google/gemini-2.5-pro-exp-03-25:free", ProviderType.OPENROUTER, max_tokens=8192, display_name="Gemini 2.5 Pro (free)", tier=ModelTier.FREE, max_context_tokens=1000000),
     "or-free-mistral-small": ModelSpec("mistralai/mistral-small-3.1-24b-instruct:free", ProviderType.OPENROUTER, display_name="Mistral Small 3.1 (free)", tier=ModelTier.FREE),
 
     # Lightweight / fast
@@ -144,7 +145,7 @@ MODELS: dict[str, ModelSpec] = {
 
     "gpt-4o-mini": ModelSpec("gpt-4o-mini", ProviderType.OPENAI, display_name="GPT-4o Mini", tier=ModelTier.CHEAP),
     "claude-haiku": ModelSpec("claude-haiku-4-5-20251001", ProviderType.ANTHROPIC, display_name="Claude Haiku 4.5", tier=ModelTier.CHEAP),
-    "gemini-2-flash": ModelSpec("gemini-2.0-flash", ProviderType.GEMINI, display_name="Gemini 2.0 Flash", tier=ModelTier.CHEAP),
+    "gemini-2-flash": ModelSpec("gemini-2.0-flash", ProviderType.GEMINI, display_name="Gemini 2.0 Flash", tier=ModelTier.CHEAP, max_context_tokens=1000000),
     "deepseek-chat": ModelSpec("deepseek-chat", ProviderType.DEEPSEEK, display_name="DeepSeek Chat", tier=ModelTier.CHEAP),
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -154,7 +155,7 @@ MODELS: dict[str, ModelSpec] = {
     "gpt-4o": ModelSpec("gpt-4o", ProviderType.OPENAI, display_name="GPT-4o", tier=ModelTier.PREMIUM),
     "o1": ModelSpec("o1", ProviderType.OPENAI, temperature=1.0, display_name="o1", tier=ModelTier.PREMIUM),
     "claude-sonnet": ModelSpec("claude-sonnet-4-20250514", ProviderType.ANTHROPIC, display_name="Claude Sonnet 4", tier=ModelTier.PREMIUM),
-    "gemini-2-pro": ModelSpec("gemini-2.5-pro-preview-05-06", ProviderType.GEMINI, display_name="Gemini 2.5 Pro", tier=ModelTier.PREMIUM),
+    "gemini-2-pro": ModelSpec("gemini-2.5-pro-preview-05-06", ProviderType.GEMINI, display_name="Gemini 2.5 Pro", tier=ModelTier.PREMIUM, max_context_tokens=1000000),
     "deepseek-reasoner": ModelSpec("deepseek-reasoner", ProviderType.DEEPSEEK, temperature=0.2, display_name="DeepSeek Reasoner", tier=ModelTier.PREMIUM),
 
     # OpenRouter paid pass-through (use any model via single key)
@@ -319,6 +320,15 @@ class ProviderRegistry:
     def free_models(self) -> list[dict]:
         """List all free ($0) models."""
         return self.models_by_tier(ModelTier.FREE)
+
+    def models_by_min_context(self, min_tokens: int) -> list[dict]:
+        """List models with at least *min_tokens* context window."""
+        return [
+            {"key": k, "model_id": s.model_id, "provider": s.provider.value,
+             "display_name": s.display_name or k, "tier": s.tier.value,
+             "max_context_tokens": s.max_context_tokens}
+            for k, s in MODELS.items() if s.max_context_tokens >= min_tokens
+        ]
 
     @staticmethod
     def register_provider(provider_type: ProviderType, spec: ProviderSpec):

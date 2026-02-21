@@ -17,6 +17,12 @@ const state = {
   channels: [],
   providers: {},
   health: {},
+  // Mission Control state
+  viewMode: "kanban", // "kanban" or "list"
+  activityFeed: [],
+  activityOpen: false,
+  filterPriority: "",
+  filterType: "",
   status: {},
 };
 
@@ -271,6 +277,81 @@ async function doSubmitReview(taskId, feedback, approved) {
   } catch (err) { toast(err.message, "error"); }
 }
 
+// -- Mission Control actions --
+async function doMoveTask(taskId, newStatus, position = 0) {
+  try {
+    await api(`/tasks/${taskId}/move`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: newStatus, position }),
+    });
+    await loadTasks();
+    if (state.page === "tasks") renderTasks();
+    toast(`Task moved to ${newStatus}`, "success");
+  } catch (err) { toast(err.message, "error"); }
+}
+
+async function doAddComment(taskId, text) {
+  try {
+    await api(`/tasks/${taskId}/comment`, {
+      method: "POST",
+      body: JSON.stringify({ text, author: "admin" }),
+    });
+    await loadTasks();
+    if (state.selectedTask?.id === taskId) {
+      state.selectedTask = state.tasks.find((t) => t.id === taskId);
+      renderDetail();
+    }
+    toast("Comment added", "success");
+  } catch (err) { toast(err.message, "error"); }
+}
+
+async function doSetPriority(taskId, priority) {
+  try {
+    await api(`/tasks/${taskId}/priority`, {
+      method: "PATCH",
+      body: JSON.stringify({ priority }),
+    });
+    await loadTasks();
+    if (state.page === "tasks") renderTasks();
+  } catch (err) { toast(err.message, "error"); }
+}
+
+async function doBlockTask(taskId, reason) {
+  try {
+    await api(`/tasks/${taskId}/block`, {
+      method: "PATCH",
+      body: JSON.stringify({ reason }),
+    });
+    await loadTasks();
+    if (state.page === "tasks") renderTasks();
+    toast("Task blocked", "info");
+  } catch (err) { toast(err.message, "error"); }
+}
+
+async function doUnblockTask(taskId) {
+  try {
+    await api(`/tasks/${taskId}/unblock`, { method: "PATCH" });
+    await loadTasks();
+    if (state.page === "tasks") renderTasks();
+    toast("Task unblocked", "success");
+  } catch (err) { toast(err.message, "error"); }
+}
+
+async function doArchiveTask(taskId) {
+  try {
+    await api(`/tasks/${taskId}/archive`, { method: "POST" });
+    await loadTasks();
+    if (state.page === "tasks") renderTasks();
+    toast("Task archived", "info");
+  } catch (err) { toast(err.message, "error"); }
+}
+
+async function loadActivity() {
+  try {
+    state.activityFeed = (await api("/activity")) || [];
+  } catch { state.activityFeed = []; }
+}
+
 async function doHandleApproval(taskId, action, approved) {
   try {
     await api("/approvals", {
@@ -419,60 +500,183 @@ function timeSince(ts) {
 function renderStats() {
   const el = document.getElementById("stats-row");
   if (!el) return;
-  const counts = { pending: 0, running: 0, review: 0, done: 0, failed: 0 };
+  const counts = { pending: 0, assigned: 0, running: 0, review: 0, blocked: 0, done: 0, failed: 0, archived: 0 };
   state.tasks.forEach((t) => { if (counts[t.status] !== undefined) counts[t.status]++; });
+  const active = counts.pending + counts.assigned + counts.running + counts.review + counts.blocked;
   el.innerHTML = `
-    <div class="stat-card"><div class="stat-label">Total Tasks</div><div class="stat-value">${state.tasks.length}</div></div>
-    <div class="stat-card"><div class="stat-label">Pending</div><div class="stat-value text-info">${counts.pending}</div></div>
-    <div class="stat-card"><div class="stat-label">Running</div><div class="stat-value text-warning">${counts.running}</div></div>
-    <div class="stat-card"><div class="stat-label">In Review</div><div class="stat-value" style="color:var(--accent)">${counts.review}</div></div>
-    <div class="stat-card"><div class="stat-label">Completed</div><div class="stat-value text-success">${counts.done}</div></div>
-    <div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value text-danger">${counts.failed}</div></div>
+    <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value">${state.tasks.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value text-info">${active}</div></div>
+    <div class="stat-card"><div class="stat-label">In Progress</div><div class="stat-value text-warning">${counts.running}</div></div>
+    <div class="stat-card"><div class="stat-label">Review</div><div class="stat-value" style="color:var(--accent)">${counts.review}</div></div>
+    <div class="stat-card"><div class="stat-label">Blocked</div><div class="stat-value text-danger">${counts.blocked}</div></div>
+    <div class="stat-card"><div class="stat-label">Done</div><div class="stat-value text-success">${counts.done}</div></div>
   `;
 }
 
 function renderTasks() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "tasks") return;
-  const approvalCount = state.approvals.length;
+
+  el.innerHTML = `
+    <div id="stats-row" class="stats-row"></div>
+    <div class="kanban-controls">
+      <div class="view-toggle">
+        <button class="${state.viewMode === 'kanban' ? 'active' : ''}" onclick="state.viewMode='kanban';renderTasks()">Board</button>
+        <button class="${state.viewMode === 'list' ? 'active' : ''}" onclick="state.viewMode='list';renderTasks()">List</button>
+      </div>
+      <div class="filter-bar">
+        <select onchange="state.filterPriority=this.value;renderTasks()">
+          <option value="">All Priorities</option>
+          <option value="2" ${state.filterPriority==="2"?"selected":""}>Urgent</option>
+          <option value="1" ${state.filterPriority==="1"?"selected":""}>High</option>
+          <option value="0" ${state.filterPriority==="0"?"selected":""}>Normal</option>
+        </select>
+        <select onchange="state.filterType=this.value;renderTasks()">
+          <option value="">All Types</option>
+          ${["coding","debugging","research","refactoring","documentation","marketing","email","design","content","strategy","data_analysis","project_management"].map(t=>`<option value="${t}" ${state.filterType===t?"selected":""}>${t.replace("_"," ")}</option>`).join("")}
+        </select>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button>
+      <button class="btn btn-outline btn-sm" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>
+    </div>
+    <div id="board-area"></div>
+  `;
+  renderStats();
+  if (state.viewMode === "kanban") renderKanbanBoard();
+  else renderListView();
+}
+
+function getFilteredTasks() {
+  return state.tasks.filter(t => {
+    if (state.filterPriority !== "" && String(t.priority || 0) !== state.filterPriority) return false;
+    if (state.filterType && t.task_type !== state.filterType) return false;
+    return true;
+  });
+}
+
+function renderKanbanBoard() {
+  const area = document.getElementById("board-area");
+  if (!area) return;
+  const columns = [
+    { key: "pending", label: "Inbox" },
+    { key: "assigned", label: "Assigned" },
+    { key: "running", label: "In Progress" },
+    { key: "review", label: "Review" },
+    { key: "blocked", label: "Blocked" },
+    { key: "done", label: "Done" },
+    { key: "archived", label: "Archived" },
+  ];
+  const filtered = getFilteredTasks();
+  const byStatus = {};
+  columns.forEach(c => byStatus[c.key] = []);
+  filtered.forEach(t => { if (byStatus[t.status]) byStatus[t.status].push(t); });
+
+  area.innerHTML = `<div class="kanban-board">${columns.map(col => {
+    const tasks = byStatus[col.key] || [];
+    tasks.sort((a,b) => (a.position||0) - (b.position||0) || (b.priority||0) - (a.priority||0));
+    return `
+      <div class="kanban-column" data-status="${col.key}">
+        <div class="kanban-column-header">
+          <span>${col.label}</span>
+          <span class="count">${tasks.length}</span>
+        </div>
+        <div class="kanban-column-body"
+             ondragover="event.preventDefault();this.classList.add('drag-over')"
+             ondragleave="this.classList.remove('drag-over')"
+             ondrop="handleDrop(event,'${col.key}');this.classList.remove('drag-over')">
+          ${tasks.map(t => `
+            <div class="kanban-card" draggable="true"
+                 ondragstart="event.dataTransfer.setData('text/plain','${t.id}');this.classList.add('dragging')"
+                 ondragend="this.classList.remove('dragging')"
+                 onclick="navigate('detail', state.tasks.find(x=>x.id==='${t.id}'))">
+              <div class="card-title">${esc(t.title)}</div>
+              <div class="card-meta">
+                <span class="priority-dot p${t.priority||0}"></span>
+                <span class="badge-type">${esc(t.task_type)}</span>
+                ${t.assigned_agent ? `<span>${esc(t.assigned_agent)}</span>` : ""}
+                ${(t.comments||[]).length > 0 ? `<span>${(t.comments||[]).length} comments</span>` : ""}
+              </div>
+            </div>
+          `).join("")}
+          ${tasks.length === 0 ? '<div style="color:var(--text-muted);font-size:0.8rem;text-align:center;padding:1rem">Drop tasks here</div>' : ""}
+        </div>
+      </div>
+    `;
+  }).join("")}</div>`;
+}
+
+function handleDrop(event, newStatus) {
+  event.preventDefault();
+  const taskId = event.dataTransfer.getData("text/plain");
+  if (taskId) doMoveTask(taskId, newStatus);
+}
+
+function renderListView() {
+  const area = document.getElementById("board-area");
+  if (!area) return;
+  const filtered = getFilteredTasks();
 
   let rows = "";
-  if (state.tasks.length === 0) {
-    rows = `<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">&#128203;</div><h3>No tasks yet</h3><p>Create a task or send a message via a connected channel.</p></div></td></tr>`;
+  if (filtered.length === 0) {
+    rows = `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">&#128203;</div><h3>No tasks</h3></div></td></tr>`;
   } else {
-    rows = state.tasks.map((t) => `
+    rows = filtered.map((t) => `
       <tr>
         <td style="font-family:var(--mono);font-size:0.8rem;color:var(--text-muted)">${esc(t.id)}</td>
-        <td class="task-title" onclick="navigate('detail', state.tasks.find(x=>x.id==='${t.id}'))">${esc(t.title)}</td>
+        <td class="task-title" onclick="navigate('detail', state.tasks.find(x=>x.id==='${t.id}'))">
+          <span class="priority-dot p${t.priority||0}"></span> ${esc(t.title)}
+        </td>
         <td>${statusBadge(t.status)}</td>
         <td><span class="badge-type">${esc(t.task_type)}</span></td>
+        <td style="color:var(--text-muted)">${esc(t.assigned_agent || '-')}</td>
         <td style="color:var(--text-muted)">${timeSince(t.created_at)}</td>
         <td>
           ${t.status === "review" ? `<button class="btn btn-sm btn-success" onclick="event.stopPropagation();doApproveTask('${t.id}')">Approve</button>` : ""}
           ${t.status === "review" ? `<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();showReviewModal(state.tasks.find(x=>x.id==='${t.id}'))">Review</button>` : ""}
           ${t.status === "pending" || t.status === "running" ? `<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();doCancelTask('${t.id}')">Cancel</button>` : ""}
           ${t.status === "failed" ? `<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();doRetryTask('${t.id}')">Retry</button>` : ""}
+          ${t.status === "done" ? `<button class="btn btn-sm btn-outline" onclick="event.stopPropagation();doArchiveTask('${t.id}')">Archive</button>` : ""}
         </td>
       </tr>
     `).join("");
   }
 
-  el.innerHTML = `
-    <div id="stats-row" class="stats-row"></div>
+  area.innerHTML = `
     <div class="card">
-      <div class="card-header">
-        <h3>Tasks</h3>
-        <button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button>
-      </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Type</th><th>Created</th><th>Actions</th></tr></thead>
+          <thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Type</th><th>Agent</th><th>Created</th><th>Actions</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
     </div>
   `;
-  renderStats();
+}
+
+function renderActivitySidebar() {
+  let sidebar = document.getElementById("activity-sidebar");
+  if (!sidebar) {
+    sidebar = document.createElement("div");
+    sidebar.id = "activity-sidebar";
+    sidebar.className = "activity-sidebar";
+    document.body.appendChild(sidebar);
+  }
+  sidebar.classList.toggle("open", state.activityOpen);
+  sidebar.innerHTML = `
+    <div class="activity-header">
+      <span>Activity Feed</span>
+      <button class="btn btn-icon btn-outline" onclick="state.activityOpen=false;renderActivitySidebar()">&times;</button>
+    </div>
+    <div class="activity-list">
+      ${state.activityFeed.length === 0 ? '<div style="padding:1rem;color:var(--text-muted);text-align:center">No recent activity</div>' : ""}
+      ${state.activityFeed.slice(-50).reverse().map(a => `
+        <div class="activity-item">
+          <div>${esc(a.event || a.type || "event")}: ${esc(a.title || a.task_id || "")}</div>
+          <div class="activity-time">${a.timestamp ? timeSince(a.timestamp) : ""}</div>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 function renderDetail() {
@@ -519,13 +723,60 @@ function renderDetail() {
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" style="margin-bottom:1.5rem">
       <div class="card-header"><h3>${t.status === "failed" ? "Error" : "Output"}</h3></div>
       <div class="card-body">
         <div class="detail-result">${esc(result)}</div>
       </div>
     </div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-header"><h3>Comments (${(t.comments||[]).length})</h3></div>
+      <div class="card-body">
+        <div class="comment-thread" style="max-height:200px;overflow-y:auto;margin-bottom:0.75rem">
+          ${(t.comments||[]).map(c => `
+            <div style="padding:0.5rem;border-bottom:1px solid var(--border)">
+              <span style="font-weight:600;color:var(--accent);font-size:0.8rem">${esc(c.author)}</span>
+              <span style="color:var(--text-muted);font-size:0.7rem;margin-left:0.5rem">${c.timestamp ? timeSince(c.timestamp) : ""}</span>
+              <div style="margin-top:0.2rem;font-size:0.85rem">${esc(c.text)}</div>
+            </div>
+          `).join("") || '<div style="color:var(--text-muted);font-size:0.85rem">No comments yet</div>'}
+        </div>
+        <div style="display:flex;gap:0.5rem">
+          <input type="text" id="comment-input" placeholder="Add a comment..." style="flex:1">
+          <button class="btn btn-primary btn-sm" onclick="submitComment('${t.id}')">Post</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3>Actions</h3></div>
+      <div class="card-body" style="display:flex;gap:0.5rem;flex-wrap:wrap">
+        <select onchange="if(this.value)doSetPriority('${t.id}',parseInt(this.value));this.value=''" style="width:auto">
+          <option value="">Set Priority...</option>
+          <option value="0">Normal</option>
+          <option value="1">High</option>
+          <option value="2">Urgent</option>
+        </select>
+        ${t.status !== "blocked" ? `<button class="btn btn-outline btn-sm" onclick="promptBlock('${t.id}')">Block</button>` : ""}
+        ${t.status === "blocked" ? `<button class="btn btn-outline btn-sm" onclick="doUnblockTask('${t.id}')">Unblock</button>` : ""}
+        ${t.status === "done" || t.status === "failed" ? `<button class="btn btn-outline btn-sm" onclick="doArchiveTask('${t.id}')">Archive</button>` : ""}
+      </div>
+    </div>
   `;
+}
+
+function submitComment(taskId) {
+  const input = document.getElementById("comment-input");
+  if (input && input.value.trim()) {
+    doAddComment(taskId, input.value.trim());
+    input.value = "";
+  }
+}
+
+function promptBlock(taskId) {
+  const reason = prompt("Block reason:");
+  if (reason) doBlockTask(taskId, reason);
 }
 
 function renderApprovals() {
@@ -912,6 +1163,7 @@ function settingReadonly(envVar, label, help) {
 // Main render
 // ---------------------------------------------------------------------------
 async function loadAll() {
+  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity()]);
   await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadStatus()]);
 }
 
@@ -947,6 +1199,7 @@ function render() {
       <aside class="sidebar">
         <div class="sidebar-brand">Agent<span class="num">42</span></div>
         <nav class="sidebar-nav">
+          <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks')">&#127919; Mission Control</a>
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks')">&#128203; Tasks</a>
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status')">&#128200; Status</a>
           <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals')">&#128274; Approvals ${approvalBadge}</a>
@@ -962,9 +1215,10 @@ function render() {
       </aside>
       <div class="main">
         <div class="topbar">
+          <h2>${{ tasks: "Mission Control", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail" }[state.page] || "Dashboard"}</h2>
           <h2>${{ tasks: "Tasks", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
-            ${state.page === "tasks" ? '<button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button>' : ""}
+            ${state.page === "tasks" ? '<button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button><button class="btn btn-outline btn-sm" style="margin-left:0.5rem" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>' : ""}
           </div>
         </div>
         <div class="content" id="page-content"></div>

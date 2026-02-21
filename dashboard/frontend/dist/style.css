@@ -327,6 +327,104 @@ td.task-title:hover { color: var(--accent); }
   display: flex; justify-content: flex-end; gap: 0.5rem;
 }
 
+/* ---------- Kanban Board (Mission Control) ---------- */
+
+.kanban-controls {
+  display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.kanban-controls .view-toggle {
+  display: flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden;
+}
+.kanban-controls .view-toggle button {
+  background: var(--bg-input); border: none; color: var(--text-secondary);
+  padding: 0.35rem 0.75rem; cursor: pointer; font-size: 0.8rem;
+  transition: all 0.15s;
+}
+.kanban-controls .view-toggle button.active { background: var(--accent); color: #fff; }
+.kanban-controls .filter-bar { display: flex; gap: 0.5rem; flex: 1; }
+.kanban-controls .filter-bar select {
+  width: auto; padding: 0.3rem 0.6rem; font-size: 0.8rem; min-width: 120px;
+}
+
+.kanban-board {
+  display: flex; gap: 0.75rem; overflow-x: auto; padding-bottom: 1rem;
+  min-height: 400px;
+}
+.kanban-column {
+  flex: 0 0 220px; background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: var(--radius); display: flex; flex-direction: column;
+  max-height: calc(100vh - 200px);
+}
+.kanban-column-header {
+  padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--text-muted);
+}
+.kanban-column-header .count {
+  background: var(--bg-hover); border-radius: 10px; padding: 0.1rem 0.5rem;
+  font-size: 0.7rem; color: var(--text-secondary);
+}
+.kanban-column-body {
+  flex: 1; padding: 0.5rem; overflow-y: auto; min-height: 60px;
+}
+.kanban-column-body.drag-over { background: var(--accent-dim); }
+
+.kanban-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 0.6rem 0.75rem; margin-bottom: 0.5rem;
+  cursor: pointer; transition: all 0.15s; font-size: 0.85rem;
+}
+.kanban-card:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: var(--shadow); }
+.kanban-card.dragging { opacity: 0.5; }
+.kanban-card .card-title { font-weight: 600; margin-bottom: 0.3rem; line-height: 1.3; }
+.kanban-card .card-meta {
+  display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
+  font-size: 0.75rem; color: var(--text-muted);
+}
+.kanban-card .priority-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+}
+.priority-dot.p0 { background: var(--text-muted); }
+.priority-dot.p1 { background: var(--warning); }
+.priority-dot.p2 { background: var(--danger); }
+
+/* Task detail modal for Kanban */
+.task-detail-modal { max-width: 600px; }
+.task-detail-modal .comment-thread { max-height: 200px; overflow-y: auto; margin-bottom: 0.75rem; }
+.task-detail-modal .comment {
+  padding: 0.5rem; border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.task-detail-modal .comment .comment-author { font-weight: 600; color: var(--accent); font-size: 0.8rem; }
+.task-detail-modal .comment .comment-time { color: var(--text-muted); font-size: 0.7rem; }
+.task-detail-modal .comment .comment-text { margin-top: 0.2rem; }
+.task-detail-modal .detail-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
+
+/* Activity feed */
+.activity-sidebar {
+  position: fixed; right: 0; top: 0; bottom: 0; width: 300px;
+  background: var(--bg-secondary); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; z-index: 50;
+  transform: translateX(100%); transition: transform 0.2s;
+}
+.activity-sidebar.open { transform: translateX(0); }
+.activity-sidebar .activity-header {
+  padding: 0.75rem 1rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  font-weight: 600;
+}
+.activity-sidebar .activity-list { flex: 1; overflow-y: auto; padding: 0.5rem; }
+.activity-item {
+  padding: 0.5rem; border-bottom: 1px solid var(--border); font-size: 0.8rem;
+}
+.activity-item .activity-time { color: var(--text-muted); font-size: 0.7rem; }
+
+/* New status badge colors for new statuses */
+.badge-assigned { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
+.badge-blocked { background: var(--danger-dim); color: var(--danger); }
+.badge-archived { background: var(--bg-hover); color: var(--text-muted); }
 /* ---------- Platform Status ---------- */
 
 .status-grid {

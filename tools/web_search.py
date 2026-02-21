@@ -89,57 +89,16 @@ class WebSearchTool(Tool):
             return ToolResult(error=f"Search failed: {e}", success=False)
 
 
-import ipaddress
-import socket
-from urllib.parse import urlparse
+# URL policy: consolidated SSRF + allowlist/denylist from core module
+from core.url_policy import UrlPolicy, _is_ssrf_target, _BLOCKED_IP_RANGES  # noqa: F401
+from core.config import settings
 
-# SSRF protection: blocked IP ranges
-_BLOCKED_IP_RANGES = [
-    ipaddress.ip_network("127.0.0.0/8"),       # Loopback
-    ipaddress.ip_network("10.0.0.0/8"),         # Private
-    ipaddress.ip_network("172.16.0.0/12"),      # Private
-    ipaddress.ip_network("192.168.0.0/16"),     # Private
-    ipaddress.ip_network("169.254.0.0/16"),     # Link-local / cloud metadata
-    ipaddress.ip_network("0.0.0.0/8"),          # Current network
-    ipaddress.ip_network("::1/128"),            # IPv6 loopback
-    ipaddress.ip_network("fc00::/7"),           # IPv6 private
-    ipaddress.ip_network("fe80::/10"),          # IPv6 link-local
-    ipaddress.ip_network("::ffff:127.0.0.0/104"),  # IPv4-mapped loopback
-    ipaddress.ip_network("::ffff:10.0.0.0/104"),   # IPv4-mapped private
-    ipaddress.ip_network("::ffff:172.16.0.0/108"), # IPv4-mapped private
-    ipaddress.ip_network("::ffff:192.168.0.0/112"), # IPv4-mapped private
-]
-
-# Hostnames that resolve to localhost regardless of DNS
-_BLOCKED_HOSTNAMES = {"localhost", "localhost.localdomain", "local"}
-
-
-def _is_ssrf_target(url: str) -> str | None:
-    """Check if a URL targets an internal/private IP. Returns error message or None."""
-    try:
-        parsed = urlparse(url)
-        hostname = parsed.hostname
-        if not hostname:
-            return "Invalid URL: no hostname"
-
-        # Block known localhost hostnames
-        if hostname.lower() in _BLOCKED_HOSTNAMES:
-            return f"Blocked: {hostname} is a localhost alias"
-
-        # Resolve hostname to IP
-        try:
-            addr_infos = socket.getaddrinfo(hostname, parsed.port or 80)
-        except socket.gaierror:
-            return None  # DNS resolution failed — let httpx handle it
-
-        for family, _, _, _, sockaddr in addr_infos:
-            ip = ipaddress.ip_address(sockaddr[0])
-            for blocked in _BLOCKED_IP_RANGES:
-                if ip in blocked:
-                    return f"Blocked: {hostname} resolves to private/internal IP {ip}"
-        return None
-    except Exception:
-        return None  # Don't block on validation errors
+# Shared URL policy instance for web tools
+_url_policy = UrlPolicy(
+    allowlist=settings.get_url_allowlist(),
+    denylist=settings.get_url_denylist(),
+    max_requests_per_agent=settings.max_url_requests_per_agent,
+)
 
 
 class WebFetchTool(Tool):
@@ -170,11 +129,11 @@ class WebFetchTool(Tool):
         if not url.startswith(("http://", "https://")):
             return ToolResult(error="Only http/https URLs are supported", success=False)
 
-        # SSRF protection: block requests to internal networks
-        ssrf_error = _is_ssrf_target(url)
-        if ssrf_error:
-            logger.warning(f"SSRF blocked: {url} — {ssrf_error}")
-            return ToolResult(error=ssrf_error, success=False)
+        # URL policy check: SSRF + allowlist/denylist + per-agent limits
+        allowed, reason = _url_policy.check(url, agent_id=kwargs.get("agent_id", "default"))
+        if not allowed:
+            logger.warning(f"URL blocked: {url} — {reason}")
+            return ToolResult(error=reason, success=False)
 
         try:
             # Disable auto-redirects to validate each redirect destination for SSRF

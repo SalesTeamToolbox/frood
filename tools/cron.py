@@ -33,6 +33,8 @@ class CronJob:
     last_run: float = 0.0
     next_run: float = 0.0
     created_at: float = field(default_factory=time.time)
+    stagger_seconds: int = 0  # Manual stagger override (0 = auto)
+    jitter_seconds: int = 0   # Random jitter within stagger window
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -78,14 +80,43 @@ class CronScheduler:
 
     async def start(self):
         """Start the scheduler heartbeat loop."""
+        import random
+        from collections import defaultdict
+
         self._load()
         self._running = True
         logger.info(f"Cron scheduler started with {len(self._jobs)} jobs")
 
+        # Auto-stagger: compute offsets for jobs sharing the same schedule
+        schedule_groups: dict[str, list[str]] = defaultdict(list)
+        for job in self._jobs.values():
+            schedule_groups[job.schedule].append(job.id)
+
+        stagger_offsets: dict[str, float] = {}
+        for schedule_expr, job_ids in schedule_groups.items():
+            if len(job_ids) <= 1:
+                for jid in job_ids:
+                    stagger_offsets[jid] = 0.0
+                continue
+            # Spread jobs evenly over a 60-second window (or use manual override)
+            auto_gap = 60.0 / len(job_ids)
+            for idx, jid in enumerate(job_ids):
+                job = self._jobs[jid]
+                if job.stagger_seconds > 0:
+                    stagger_offsets[jid] = float(job.stagger_seconds)
+                else:
+                    stagger_offsets[jid] = idx * auto_gap
+                # Add random jitter if configured
+                if job.jitter_seconds > 0:
+                    stagger_offsets[jid] += random.uniform(0, job.jitter_seconds)
+
+        logger.info(f"Computed stagger offsets for {len(stagger_offsets)} jobs")
+
         while self._running:
             now = time.time()
             for job in self._jobs.values():
-                if not job.enabled or job.next_run > now:
+                effective_next = job.next_run + stagger_offsets.get(job.id, 0.0)
+                if not job.enabled or effective_next > now:
                     continue
 
                 logger.info(f"Cron trigger: {job.id} — {job.name}")
