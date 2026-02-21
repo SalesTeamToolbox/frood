@@ -107,7 +107,12 @@ class Agent:
         self.emit = emit
         self.router = ModelRouter()
         self.tool_registry = tool_registry
-        self.engine = IterationEngine(self.router, tool_registry=tool_registry)
+        self.engine = IterationEngine(
+            self.router,
+            tool_registry=tool_registry,
+            approval_gate=approval_gate,
+            agent_id=task.id,
+        )
         self.skill_loader = skill_loader
         self.memory_store = memory_store
         self.learner = (
@@ -158,6 +163,7 @@ class Agent:
                 system_prompt=system_prompt,
                 on_iteration=self._on_iteration,
                 task_type=task.task_type.value,
+                task_id=task.id,
             )
 
             if needs_worktree:

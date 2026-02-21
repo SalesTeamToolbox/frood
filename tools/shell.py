@@ -25,6 +25,30 @@ DEFAULT_TIMEOUT = 60
 # Regex to find absolute paths in a command string
 _ABS_PATH_RE = re.compile(r'(?<!\w)/(?:[\w./-]+)')
 
+# Patterns that may indicate credentials in command output
+_CREDENTIAL_PATTERNS = [
+    (re.compile(r'(?i)(password|passwd|pwd)\s*[=:]\s*\S+'), r'\1=***REDACTED***'),
+    (re.compile(r'(?i)(api[_-]?key|apikey)\s*[=:]\s*\S+'), r'\1=***REDACTED***'),
+    (re.compile(r'(?i)(secret|api[_-]?secret)\s*[=:]\s*\S+'), r'\1=***REDACTED***'),
+    (re.compile(r'(?i)(token|auth[_-]?token|access[_-]?token)\s*[=:]\s*\S+'), r'\1=***REDACTED***'),
+    (re.compile(r'(?i)(database[_-]?url|db[_-]?url)\s*[=:]\s*\S+'), r'\1=***REDACTED***'),
+    (re.compile(r'(?i)(aws[_-]?access[_-]?key[_-]?id)\s*[=:]\s*\S+'), r'\1=***REDACTED***'),
+    (re.compile(r'(?i)(aws[_-]?secret[_-]?access[_-]?key)\s*[=:]\s*\S+'), r'\1=***REDACTED***'),
+    # AWS key pattern
+    (re.compile(r'AKIA[0-9A-Z]{16}'), '***AWS_KEY_REDACTED***'),
+    # Slack token pattern
+    (re.compile(r'xox[bpras]-[a-zA-Z0-9-]{10,}'), '***SLACK_TOKEN_REDACTED***'),
+    # GitHub token pattern
+    (re.compile(r'gh[pousr]_[A-Za-z0-9_]{36,}'), '***GITHUB_TOKEN_REDACTED***'),
+]
+
+
+def _sanitize_output(text: str) -> str:
+    """Redact likely credentials from command output."""
+    for pattern, replacement in _CREDENTIAL_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
 # Paths that are always allowed (read-only system utilities)
 _SAFE_PATH_PREFIXES = (
     "/usr/bin", "/usr/local/bin", "/usr/sbin",
@@ -132,6 +156,10 @@ class ShellTool(Tool):
 
             output = stdout.decode("utf-8", errors="replace")
             errors = stderr.decode("utf-8", errors="replace")
+
+            # Sanitize credentials from output before returning
+            output = _sanitize_output(output)
+            errors = _sanitize_output(errors)
 
             # Truncate long outputs
             if len(output) > MAX_OUTPUT_LENGTH:

@@ -62,16 +62,35 @@ class TelegramChannel(BaseChannel):
         if not self._app:
             return
 
+        # Validate and convert chat_id
+        try:
+            chat_id = int(message.channel_id)
+        except (ValueError, OverflowError):
+            logger.error(f"Invalid channel_id format: {message.channel_id!r}")
+            return
+
+        # Validate reply_to if present
+        reply_to_id = None
+        if message.reply_to:
+            try:
+                reply_to_id = int(message.reply_to)
+            except (ValueError, OverflowError):
+                logger.warning(f"Invalid reply_to format: {message.reply_to!r}, ignoring")
+
         # Split long messages (Telegram limit: 4096 chars)
         content = message.content
         while content:
             chunk = content[:4096]
             content = content[4096:]
-            await self._app.bot.send_message(
-                chat_id=int(message.channel_id),
-                text=chunk,
-                reply_to_message_id=int(message.reply_to) if message.reply_to else None,
-            )
+            try:
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=chunk,
+                    reply_to_message_id=reply_to_id,
+                )
+            except Exception as e:
+                logger.error(f"Failed to send Telegram message: {e}")
+                return
 
     async def _handle_message(self, update: "Update", context: "ContextTypes.DEFAULT_TYPE"):
         """Process incoming Telegram messages."""
