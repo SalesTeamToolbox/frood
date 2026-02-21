@@ -71,6 +71,10 @@ class Task:
     worktree_path: str = ""
     result: str = ""
     error: str = ""
+    # Origin channel info for routing responses back
+    origin_channel: str = ""      # "discord", "slack", "telegram", "email", ""
+    origin_channel_id: str = ""   # Channel/chat ID to respond to
+    origin_metadata: dict = field(default_factory=dict)  # Thread IDs, etc.
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -153,6 +157,33 @@ class TaskQueue:
         task.status = TaskStatus.DONE
         await self._notify(task)
         await self._persist()
+
+    async def cancel(self, task_id: str):
+        """Cancel a pending or running task."""
+        task = self._tasks.get(task_id)
+        if not task:
+            return
+        if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+            task.status = TaskStatus.FAILED
+            task.error = "Cancelled by user"
+            await self._notify(task)
+            await self._persist()
+            logger.info(f"Task cancelled: {task_id}")
+
+    async def retry(self, task_id: str):
+        """Re-queue a failed task for another attempt."""
+        task = self._tasks.get(task_id)
+        if not task:
+            return
+        if task.status == TaskStatus.FAILED:
+            task.status = TaskStatus.PENDING
+            task.error = ""
+            task.result = ""
+            task.iterations = 0
+            await self._queue.put(task)
+            await self._notify(task)
+            await self._persist()
+            logger.info(f"Task retried: {task_id}")
 
     def get(self, task_id: str) -> Task | None:
         return self._tasks.get(task_id)

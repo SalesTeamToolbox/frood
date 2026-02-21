@@ -4,6 +4,12 @@ Command filter — blocks dangerous shell patterns before execution.
 Deny-list approach with optional allowlist for strict environments.
 Patterns derived from common destructive commands that agents should never run.
 
+Security layers:
+1. Deny-list of known-dangerous command patterns
+2. Interpreter execution blocking (python -c, perl -e, etc.)
+3. Shell metacharacter abuse detection (eval, backticks, $() in dangerous contexts)
+4. Optional allowlist for strict lockdown
+
 Note: This is one layer of defense. The shell tool also enforces workspace path
 restrictions (blocking absolute paths outside the sandbox). Both layers must
 pass for a command to execute.
@@ -64,6 +70,9 @@ DENY_PATTERNS: list[re.Pattern] = [
         r"\bpasswd\b",                            # change password
         r"\bvisudo\b",                            # edit sudoers
         r"\bchattr\b",                            # change file attributes
+        r"\bsudo\b",                              # sudo privilege escalation
+        r"\bsu\s+-?\s",                           # su user switching
+        r"\bpkexec\b",                            # polkit escalation
 
         # -- Package management (prevent installing arbitrary software) --
         r"\bapt(-get)?\s+install\b",              # apt install
@@ -71,6 +80,7 @@ DENY_PATTERNS: list[re.Pattern] = [
         r"\bdnf\s+install\b",                     # dnf install
         r"\bpacman\s+-S\b",                       # pacman install
         r"\bsnap\s+install\b",                    # snap install
+        r"\bpip\s+install\b",                     # pip install (in shell context)
 
         # -- Container / VM escape vectors --
         r"\bdocker\s+run\b",                      # docker run
@@ -79,6 +89,29 @@ DENY_PATTERNS: list[re.Pattern] = [
 
         # -- Cron manipulation --
         r"\bcrontab\s+-[er]",                     # edit/remove crontab
+
+        # -- Shell metacharacter abuse / code injection --
+        r"\beval\b",                              # eval command execution
+        r"\bexec\s",                              # exec command replacement
+        r"\bsource\s",                            # source arbitrary scripts
+        r"\b\.\s+/",                              # . /path (source shorthand)
+        r"`[^`]+`",                               # backtick command substitution
+        r"\$\([^)]*\b(rm|curl|wget|nc|ssh|dd|mkfs)\b", # $() with dangerous commands
+        r"\bxargs\b.*\b(rm|sh|bash)\b",          # xargs piping to dangerous commands
+
+        # -- Interpreter-based code execution --
+        r"\bpython[23]?\s+-c\b",                  # python -c arbitrary code
+        r"\bperl\s+-e\b",                         # perl -e arbitrary code
+        r"\bruby\s+-e\b",                         # ruby -e arbitrary code
+        r"\bnode\s+-e\b",                         # node -e arbitrary code
+        r"\bphp\s+-r\b",                          # php -r arbitrary code
+        r"\blua\s+-e\b",                          # lua -e arbitrary code
+        r"\bawk\s+.*\bsystem\b",                  # awk system() calls
+
+        # -- Encoding-based bypass attempts --
+        r"\bbase64\b.*\|\s*(ba)?sh\b",            # base64 decode piped to shell
+        r"\bprintf\b.*\|\s*(ba)?sh\b",            # printf piped to shell
+        r"\becho\b.*\|\s*(ba)?sh\b",              # echo piped to shell
     ]
 ]
 

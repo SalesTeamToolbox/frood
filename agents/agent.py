@@ -70,6 +70,7 @@ class Agent:
         skill_loader: SkillLoader | None = None,
         memory_store: MemoryStore | None = None,
         workspace_skills_dir: Path | None = None,
+        tool_registry=None,
     ):
         self.task = task
         self.task_queue = task_queue
@@ -77,7 +78,8 @@ class Agent:
         self.approval_gate = approval_gate
         self.emit = emit
         self.router = ModelRouter()
-        self.engine = IterationEngine(self.router)
+        self.tool_registry = tool_registry
+        self.engine = IterationEngine(self.router, tool_registry=tool_registry)
         self.skill_loader = skill_loader
         self.memory_store = memory_store
         self.learner = (
@@ -135,7 +137,7 @@ class Agent:
             # Transition task to review
             await self.task_queue.complete(task.id, result=history.final_output)
 
-            # Post-task learning: reflect on what worked
+            # Post-task learning: reflect on what worked + check for skill creation
             if self.learner:
                 await self.learner.reflect_on_task(
                     title=task.title,
@@ -145,12 +147,26 @@ class Agent:
                     iteration_summary=history.summary(),
                     succeeded=True,
                 )
+                # Check if this task's pattern should be saved as a reusable skill
+                existing_names = (
+                    [s.name for s in self.skill_loader.all_skills()]
+                    if self.skill_loader else []
+                )
+                await self.learner.check_for_skill_creation(
+                    existing_skill_names=existing_names,
+                )
 
             await self.emit("agent_complete", {
                 "task_id": task.id,
                 "iterations": history.total_iterations,
                 "worktree": str(worktree_path),
             })
+
+            # Clean up worktree to prevent disk space leaks
+            try:
+                await self.worktree_manager.remove(task.id)
+            except Exception as cleanup_err:
+                logger.warning(f"Worktree cleanup failed for {task.id}: {cleanup_err}")
 
             logger.info(
                 f"Agent done: {task.id} — {history.total_iterations} iterations"
@@ -201,8 +217,13 @@ class Agent:
 
         return SYSTEM_PROMPTS.get(task_type_str, SYSTEM_PROMPTS["coding"])
 
+    # Max bytes of file content to include in context
+    _MAX_FILE_SIZE = 30_000  # ~30KB per file
+    _MAX_CONTEXT_FILES = 15  # At most this many files read into context
+    _MAX_TOTAL_CONTEXT = 200_000  # Total context budget in characters
+
     def _build_context(self, task: Task, worktree_path: Path) -> str:
-        """Build the full task context including files, skills, and memory."""
+        """Build the full task context including file contents, skills, and memory."""
         parts = [
             f"# Task: {task.title}\n",
             task.description,
@@ -222,8 +243,28 @@ class Agent:
 
         if relevant:
             parts.append("\n## Project files:")
-            for f in relevant[:20]:
+            for f in relevant[:50]:
                 parts.append(f"- {f.relative_to(worktree_path)}")
+
+        # Read key file contents so the agent has actual source code
+        if relevant:
+            parts.append("\n## File Contents:\n")
+            total_chars = 0
+            files_read = 0
+            for f in relevant[:self._MAX_CONTEXT_FILES]:
+                if total_chars >= self._MAX_TOTAL_CONTEXT:
+                    parts.append(f"... ({len(relevant) - files_read} more files not shown)")
+                    break
+                try:
+                    content = f.read_text(encoding="utf-8", errors="replace")
+                    if len(content) > self._MAX_FILE_SIZE:
+                        content = content[:self._MAX_FILE_SIZE] + "\n... (file truncated)"
+                    rel_path = f.relative_to(worktree_path)
+                    parts.append(f"### {rel_path}\n```\n{content}\n```\n")
+                    total_chars += len(content)
+                    files_read += 1
+                except Exception:
+                    continue
 
         # Include skill context (Phase 3)
         if self.skill_loader:

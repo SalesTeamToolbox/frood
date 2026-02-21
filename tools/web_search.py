@@ -89,8 +89,50 @@ class WebSearchTool(Tool):
             return ToolResult(error=f"Search failed: {e}", success=False)
 
 
+import ipaddress
+import socket
+from urllib.parse import urlparse
+
+# SSRF protection: blocked IP ranges
+_BLOCKED_IP_RANGES = [
+    ipaddress.ip_network("127.0.0.0/8"),       # Loopback
+    ipaddress.ip_network("10.0.0.0/8"),         # Private
+    ipaddress.ip_network("172.16.0.0/12"),      # Private
+    ipaddress.ip_network("192.168.0.0/16"),     # Private
+    ipaddress.ip_network("169.254.0.0/16"),     # Link-local / cloud metadata
+    ipaddress.ip_network("0.0.0.0/8"),          # Current network
+    ipaddress.ip_network("::1/128"),            # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),           # IPv6 private
+    ipaddress.ip_network("fe80::/10"),          # IPv6 link-local
+]
+
+
+def _is_ssrf_target(url: str) -> str | None:
+    """Check if a URL targets an internal/private IP. Returns error message or None."""
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return "Invalid URL: no hostname"
+
+        # Resolve hostname to IP
+        try:
+            addr_infos = socket.getaddrinfo(hostname, parsed.port or 80)
+        except socket.gaierror:
+            return None  # DNS resolution failed — let httpx handle it
+
+        for family, _, _, _, sockaddr in addr_infos:
+            ip = ipaddress.ip_address(sockaddr[0])
+            for blocked in _BLOCKED_IP_RANGES:
+                if ip in blocked:
+                    return f"Blocked: {hostname} resolves to private/internal IP {ip}"
+        return None
+    except Exception:
+        return None  # Don't block on validation errors
+
+
 class WebFetchTool(Tool):
-    """Fetch and extract content from a URL."""
+    """Fetch and extract content from a URL with SSRF protection."""
 
     @property
     def name(self) -> str:
@@ -98,14 +140,14 @@ class WebFetchTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Fetch content from a URL. Returns the text content (HTML stripped)."
+        return "Fetch content from a public URL. Returns the text content. Private/internal IPs are blocked."
 
     @property
     def parameters(self) -> dict:
         return {
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "URL to fetch"},
+                "url": {"type": "string", "description": "URL to fetch (public URLs only)"},
             },
             "required": ["url"],
         }
@@ -117,12 +159,17 @@ class WebFetchTool(Tool):
         if not url.startswith(("http://", "https://")):
             return ToolResult(error="Only http/https URLs are supported", success=False)
 
+        # SSRF protection: block requests to internal networks
+        ssrf_error = _is_ssrf_target(url)
+        if ssrf_error:
+            logger.warning(f"SSRF blocked: {url} — {ssrf_error}")
+            return ToolResult(error=ssrf_error, success=False)
+
         try:
             async with httpx.AsyncClient(follow_redirects=True) as client:
                 response = await client.get(url, timeout=15.0)
                 response.raise_for_status()
 
-            content_type = response.headers.get("content-type", "")
             text = response.text
 
             # Truncate very large responses

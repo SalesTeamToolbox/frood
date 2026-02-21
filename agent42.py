@@ -35,7 +35,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from core.config import settings
-from core.task_queue import TaskQueue, Task, TaskType, infer_task_type
+from core.task_queue import TaskQueue, Task, TaskType, TaskStatus, infer_task_type
 from core.worktree_manager import WorktreeManager
 from core.approval_gate import ApprovalGate
 from core.sandbox import WorkspaceSandbox
@@ -55,6 +55,24 @@ from tools.web_search import WebSearchTool, WebFetchTool
 from tools.cron import CronScheduler, CronTool
 from tools.subagent import SubagentTool
 from tools.mcp_client import MCPManager
+from tools.git_tool import GitTool
+from tools.grep_tool import GrepTool
+from tools.diff_tool import DiffTool
+from tools.test_runner import TestRunnerTool
+from tools.linter_tool import LinterTool
+from tools.http_client import HttpClientTool
+from tools.browser_tool import BrowserTool
+from tools.code_intel import CodeIntelTool
+from tools.dependency_audit import DependencyAuditTool
+from tools.docker_tool import DockerTool
+from tools.python_exec import PythonExecTool
+from tools.repo_map import RepoMapTool
+from tools.pr_generator import PRGeneratorTool
+from tools.security_analyzer import SecurityAnalyzerTool
+from tools.workflow_tool import WorkflowTool
+from tools.summarizer_tool import SummarizerTool
+from tools.file_watcher import FileWatcherTool
+from core.heartbeat import HeartbeatService
 from dashboard.server import create_app
 from dashboard.websocket_manager import WebSocketManager
 
@@ -133,11 +151,20 @@ class Agent42:
             skills_dir=self.workspace_skills_dir,
         )
 
+        # Phase 7: Heartbeat monitoring
+        self.heartbeat = HeartbeatService(
+            on_stall=self._on_agent_stall,
+            on_heartbeat=self._on_heartbeat,
+        )
+
         # Wire up callbacks
         self.task_queue.on_update(self._on_task_update)
 
     def _register_tools(self):
         """Register all built-in tools."""
+        workspace = str(self.repo_path)
+
+        # Core tools
         self.tool_registry.register(ShellTool(self.sandbox, self.command_filter))
         self.tool_registry.register(ReadFileTool(self.sandbox))
         self.tool_registry.register(WriteFileTool(self.sandbox))
@@ -147,6 +174,27 @@ class Agent42:
         self.tool_registry.register(WebFetchTool())
         self.tool_registry.register(CronTool(self.cron_scheduler))
         self.tool_registry.register(SubagentTool(self.task_queue))
+
+        # Development tools
+        self.tool_registry.register(GitTool(workspace))
+        self.tool_registry.register(GrepTool(workspace))
+        self.tool_registry.register(DiffTool(workspace))
+        self.tool_registry.register(TestRunnerTool(workspace))
+        self.tool_registry.register(LinterTool(workspace))
+        self.tool_registry.register(HttpClientTool())
+
+        # Advanced tools (from competitive analysis)
+        self.tool_registry.register(BrowserTool(workspace))
+        self.tool_registry.register(CodeIntelTool(workspace))
+        self.tool_registry.register(DependencyAuditTool(workspace))
+        self.tool_registry.register(DockerTool(workspace))
+        self.tool_registry.register(PythonExecTool(workspace))
+        self.tool_registry.register(RepoMapTool(workspace))
+        self.tool_registry.register(PRGeneratorTool(workspace))
+        self.tool_registry.register(SecurityAnalyzerTool(workspace))
+        self.tool_registry.register(WorkflowTool(workspace, self.tool_registry))
+        self.tool_registry.register(SummarizerTool(workspace))
+        self.tool_registry.register(FileWatcherTool(workspace))
 
     async def _setup_channels(self):
         """Configure and register enabled channels based on settings."""
@@ -222,11 +270,14 @@ class Agent42:
             ),
         )
 
-        # Create a task from the message with inferred type
+        # Create a task from the message with inferred type + origin tracking
         task = Task(
             title=f"[{message.channel_type}] {message.content[:60]}",
             description=message.content,
             task_type=infer_task_type(message.content),
+            origin_channel=message.channel_type,
+            origin_channel_id=message.channel_id,
+            origin_metadata=message.metadata,
         )
         await self.task_queue.add(task)
 
@@ -245,27 +296,82 @@ class Agent42:
         )
 
     async def _on_task_update(self, task):
-        """Broadcast task state changes to all dashboard clients."""
+        """Broadcast task state changes to all dashboard clients.
+
+        Also routes results back to the originating channel when a task
+        completes or fails.
+        """
         await self.ws_manager.broadcast("task_update", task.to_dict())
+
+        # Route results back to originating channel
+        if task.origin_channel and task.status in (TaskStatus.REVIEW, TaskStatus.DONE):
+            content = f"Task **{task.title}** completed.\n\n"
+            if task.result:
+                # Truncate long results for chat
+                result_preview = task.result[:1500]
+                if len(task.result) > 1500:
+                    result_preview += "\n... (truncated — see dashboard for full output)"
+                content += result_preview
+
+            outbound = OutboundMessage(
+                channel_type=task.origin_channel,
+                channel_id=task.origin_channel_id,
+                content=content,
+                metadata=task.origin_metadata,
+            )
+            await self.channel_manager.send(outbound)
+
+        elif task.origin_channel and task.status == TaskStatus.FAILED:
+            outbound = OutboundMessage(
+                channel_type=task.origin_channel,
+                channel_id=task.origin_channel_id,
+                content=f"Task **{task.title}** failed: {task.error}",
+                metadata=task.origin_metadata,
+            )
+            await self.channel_manager.send(outbound)
 
     async def emit(self, event_type: str, data: dict):
         """Push events from agents to the dashboard via WebSocket."""
         await self.ws_manager.broadcast(event_type, data)
 
+        # Feed iteration events into the heartbeat service
+        if event_type == "iteration" and "task_id" in data:
+            self.heartbeat.beat(
+                data["task_id"],
+                iteration=data.get("iteration", 0),
+                message=data.get("preview", "")[:100],
+            )
+
+    async def _on_agent_stall(self, task_id: str):
+        """Handle a stalled agent by broadcasting a warning."""
+        logger.warning(f"Agent stalled: {task_id}")
+        await self.ws_manager.broadcast("agent_stall", {"task_id": task_id})
+
+    async def _on_heartbeat(self, health):
+        """Broadcast system health to dashboard."""
+        await self.ws_manager.broadcast("system_health", health.to_dict())
+
     async def _run_agent(self, task):
         """Execute a single agent with concurrency limiting."""
-        async with self._semaphore:
-            agent = Agent(
-                task=task,
-                task_queue=self.task_queue,
-                worktree_manager=self.worktree_manager,
-                approval_gate=self.approval_gate,
-                emit=self.emit,
-                skill_loader=self.skill_loader,
-                memory_store=self.memory_store,
-                workspace_skills_dir=self.workspace_skills_dir,
-            )
-            await agent.run()
+        self.heartbeat.register_agent(task.id)
+        try:
+            async with self._semaphore:
+                agent = Agent(
+                    task=task,
+                    task_queue=self.task_queue,
+                    worktree_manager=self.worktree_manager,
+                    approval_gate=self.approval_gate,
+                    emit=self.emit,
+                    skill_loader=self.skill_loader,
+                    memory_store=self.memory_store,
+                    workspace_skills_dir=self.workspace_skills_dir,
+                    tool_registry=self.tool_registry,
+                )
+                await agent.run()
+                self.heartbeat.mark_complete(task.id)
+        except Exception:
+            self.heartbeat.mark_failed(task.id)
+            raise
 
     async def _process_queue(self):
         """Pull tasks from the queue and dispatch agents. Respects concurrency limit."""
@@ -289,13 +395,19 @@ class Agent42:
         """Start the orchestrator: dashboard, channels, queue processor, cron, MCP."""
         self._validate_env()
 
+        dashboard_host = settings.dashboard_host
+
         logger.info(f"Agent42 starting — repo: {self.repo_path}")
         logger.info(f"  Max concurrent agents: {self.max_agents}")
         logger.info(f"  Sandbox: {'enabled' if settings.sandbox_enabled else 'disabled'}")
         logger.info(f"  Skills loaded: {len(self.skill_loader.all_skills())}")
         logger.info(f"  Tools registered: {len(self.tool_registry.list_tools())}")
         if not self.headless:
-            logger.info(f"  Dashboard: http://0.0.0.0:{self.dashboard_port}")
+            logger.info(f"  Dashboard: http://{dashboard_host}:{self.dashboard_port}")
+
+        # Auth warnings
+        for warning in settings.validate_dashboard_auth():
+            logger.warning(warning)
 
         # Load tasks and initialize subsystems
         await self.task_queue.load_from_file()
@@ -304,6 +416,9 @@ class Agent42:
 
         # Set up cron task callback
         self.cron_scheduler.on_trigger(self._cron_create_task)
+
+        # Start heartbeat service
+        await self.heartbeat.start()
 
         tasks_to_run = [
             self._process_queue(),
@@ -328,7 +443,7 @@ class Agent42:
             )
             config = uvicorn.Config(
                 app,
-                host="0.0.0.0",
+                host=dashboard_host,
                 port=self.dashboard_port,
                 log_level="warning",
             )
@@ -351,6 +466,7 @@ class Agent42:
         """Graceful shutdown."""
         logger.info("Agent42 shutting down...")
         self._shutdown_event.set()
+        self.heartbeat.stop()
         self.cron_scheduler.stop()
         await self.channel_manager.stop_all()
         await self.mcp_manager.disconnect_all()

@@ -164,6 +164,50 @@ MODELS: dict[str, ModelSpec] = {
 }
 
 
+class SpendingTracker:
+    """Tracks API spending to enforce daily limits."""
+
+    def __init__(self):
+        self._daily_tokens: dict[str, int] = {}  # date -> total tokens
+        self._daily_cost_usd: float = 0.0
+        self._current_date: str = ""
+
+    def record_usage(self, model_key: str, prompt_tokens: int, completion_tokens: int):
+        """Record token usage for spending tracking."""
+        import datetime
+        today = datetime.date.today().isoformat()
+        if today != self._current_date:
+            self._current_date = today
+            self._daily_tokens.clear()
+            self._daily_cost_usd = 0.0
+
+        total = prompt_tokens + completion_tokens
+        self._daily_tokens[today] = self._daily_tokens.get(today, 0) + total
+
+        # Rough cost estimation (conservative — uses premium pricing)
+        # Actual cost depends on model, but this provides a safety ceiling
+        estimated_cost = (prompt_tokens * 5.0 + completion_tokens * 15.0) / 1_000_000
+        self._daily_cost_usd += estimated_cost
+
+    def check_limit(self, limit_usd: float) -> bool:
+        """Check if daily spending is within limits. Returns True if OK."""
+        if limit_usd <= 0:
+            return True  # No limit set
+        return self._daily_cost_usd < limit_usd
+
+    @property
+    def daily_spend_usd(self) -> float:
+        return round(self._daily_cost_usd, 4)
+
+    @property
+    def daily_tokens(self) -> int:
+        return sum(self._daily_tokens.values())
+
+
+# Shared spending tracker
+spending_tracker = SpendingTracker()
+
+
 class ProviderRegistry:
     """Manages provider clients and model resolution."""
 
@@ -207,6 +251,14 @@ class ProviderRegistry:
         max_tokens: int | None = None,
     ) -> str:
         """Send a chat completion and return the response text."""
+        from core.config import settings as _settings
+        if not spending_tracker.check_limit(_settings.max_daily_api_spend_usd):
+            raise RuntimeError(
+                f"Daily API spending limit reached "
+                f"(${spending_tracker.daily_spend_usd:.2f} / "
+                f"${_settings.max_daily_api_spend_usd:.2f})"
+            )
+
         spec = self.get_model(model_key)
         client = self.get_client(spec.provider)
 
@@ -220,8 +272,12 @@ class ProviderRegistry:
         content = response.choices[0].message.content or ""
         usage = response.usage
         if usage:
+            spending_tracker.record_usage(
+                model_key, usage.prompt_tokens, usage.completion_tokens
+            )
             logger.info(
-                f"[{model_key}] {usage.prompt_tokens}+{usage.completion_tokens} tokens"
+                f"[{model_key}] {usage.prompt_tokens}+{usage.completion_tokens} tokens "
+                f"(daily: ${spending_tracker.daily_spend_usd:.4f})"
             )
         return content
 

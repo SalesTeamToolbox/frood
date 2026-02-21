@@ -1,15 +1,16 @@
 """
-Iteration engine — Primary -> Critic -> Revise loop.
+Iteration engine — Primary -> Tool Execution -> Critic -> Revise loop.
 
-The primary model generates output, the critic reviews it, and the
-primary revises based on feedback. Repeats until the critic approves
-or max iterations are reached.
+The primary model generates output (which may include tool calls), tools
+are executed and results fed back, then the critic reviews. If the critic
+has feedback the primary revises. Repeats until approved or max iterations.
 
 Includes retry with exponential backoff on API failures and
 convergence detection to avoid wasting tokens on stuck loops.
 """
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 
@@ -19,12 +20,22 @@ logger = logging.getLogger("agent42.iteration")
 
 
 @dataclass
+class ToolCallRecord:
+    """Record of a single tool call during an iteration."""
+    tool_name: str
+    arguments: dict
+    result: str
+    success: bool
+
+
+@dataclass
 class IterationResult:
     """Result of a single iteration cycle."""
     iteration: int
     primary_output: str
     critic_feedback: str = ""
     approved: bool = False
+    tool_calls: list[ToolCallRecord] = field(default_factory=list)
 
 
 @dataclass
@@ -40,6 +51,11 @@ class IterationHistory:
             status = "APPROVED" if it.approved else "NEEDS REVISION"
             lines.append(f"\n--- Iteration {it.iteration} [{status}] ---")
             lines.append(f"Output preview: {it.primary_output[:200]}...")
+            if it.tool_calls:
+                lines.append(f"Tool calls: {len(it.tool_calls)}")
+                for tc in it.tool_calls:
+                    status_str = "OK" if tc.success else "FAIL"
+                    lines.append(f"  [{status_str}] {tc.tool_name}")
             if it.critic_feedback:
                 lines.append(f"Critic: {it.critic_feedback[:200]}...")
         return "\n".join(lines)
@@ -47,14 +63,16 @@ class IterationHistory:
 
 FALLBACK_MODEL = "or-free-llama4-maverick"  # General-purpose fallback
 MAX_RETRIES = 3
+MAX_TOOL_ROUNDS = 10  # Max tool call rounds per iteration
 SIMILARITY_THRESHOLD = 0.85  # For convergence detection
 
 
 class IterationEngine:
-    """Run the primary -> critic -> revise loop."""
+    """Run the primary -> tool exec -> critic -> revise loop."""
 
-    def __init__(self, router: ModelRouter):
+    def __init__(self, router: ModelRouter, tool_registry=None):
         self.router = router
+        self.tool_registry = tool_registry
 
     async def _complete_with_retry(
         self, model: str, messages: list[dict], retries: int = MAX_RETRIES,
@@ -85,6 +103,59 @@ class IterationEngine:
             f"API call failed after {retries} retries + fallback: {last_error}"
         )
 
+    async def _complete_with_tools_retry(
+        self, model: str, messages: list[dict], tools: list[dict],
+        retries: int = MAX_RETRIES,
+    ):
+        """Call router.complete_with_tools with retry logic."""
+        last_error = None
+        for attempt in range(retries):
+            try:
+                return await self.router.complete_with_tools(model, messages, tools)
+            except Exception as e:
+                last_error = e
+                wait = 2 ** attempt
+                logger.warning(
+                    f"Tool API call failed (attempt {attempt + 1}/{retries}, "
+                    f"model={model}): {e} — retrying in {wait}s"
+                )
+                await asyncio.sleep(wait)
+
+        # Fallback without tools (degrade to text-only)
+        logger.warning(f"Tool calling failed after {retries} retries, falling back to text-only")
+        return await self.router.complete_with_tools(
+            FALLBACK_MODEL, messages, []
+        )
+
+    async def _execute_tool_calls(self, tool_calls) -> list[ToolCallRecord]:
+        """Execute tool calls from the LLM response and return records."""
+        records = []
+        if not self.tool_registry or not tool_calls:
+            return records
+
+        for tc in tool_calls:
+            tool_name = tc.function.name
+            try:
+                arguments = json.loads(tc.function.arguments)
+            except json.JSONDecodeError:
+                records.append(ToolCallRecord(
+                    tool_name=tool_name, arguments={},
+                    result="Invalid JSON in tool arguments", success=False,
+                ))
+                continue
+
+            logger.info(f"Executing tool: {tool_name}({list(arguments.keys())})")
+            result = await self.tool_registry.execute(tool_name, **arguments)
+
+            records.append(ToolCallRecord(
+                tool_name=tool_name,
+                arguments=arguments,
+                result=result.content,
+                success=result.success,
+            ))
+
+        return records
+
     @staticmethod
     def _feedback_similarity(a: str, b: str) -> float:
         """Simple word-overlap ratio to detect repeated critic feedback."""
@@ -107,7 +178,11 @@ class IterationEngine:
         on_iteration: callable = None,
     ) -> IterationHistory:
         """
-        Execute the iteration loop.
+        Execute the iteration loop with tool calling support.
+
+        If a tool_registry is configured, tool schemas are passed to the LLM
+        and tool calls are executed automatically. The LLM receives tool results
+        and can make additional tool calls before producing its final answer.
 
         Args:
             task_description: What the agent should do.
@@ -124,15 +199,32 @@ class IterationEngine:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": task_description})
 
+        # Get tool schemas if registry is available
+        tool_schemas = []
+        if self.tool_registry:
+            tool_schemas = self.tool_registry.all_schemas()
+
         prev_feedback = ""
 
         for i in range(1, max_iterations + 1):
             logger.info(f"Iteration {i}/{max_iterations} — primary: {primary_model}")
 
-            # Primary pass (with retry + fallback)
-            primary_output = await self._complete_with_retry(primary_model, messages)
+            all_tool_records = []
 
-            result = IterationResult(iteration=i, primary_output=primary_output)
+            if tool_schemas:
+                # Tool-calling loop: let the model make tool calls until it produces text
+                primary_output = await self._run_tool_loop(
+                    primary_model, messages, tool_schemas, all_tool_records
+                )
+            else:
+                # Text-only mode (no tools or model doesn't support tools)
+                primary_output = await self._complete_with_retry(primary_model, messages)
+
+            result = IterationResult(
+                iteration=i,
+                primary_output=primary_output,
+                tool_calls=all_tool_records,
+            )
 
             # Critic pass (if configured)
             if critic_model:
@@ -142,8 +234,7 @@ class IterationEngine:
                 result.critic_feedback = critic_feedback
                 result.approved = self._is_approved(critic_feedback)
 
-                # Convergence detection: if critic keeps giving the same feedback,
-                # accept the output to avoid burning tokens on a stuck loop
+                # Convergence detection
                 if (
                     not result.approved
                     and prev_feedback
@@ -186,6 +277,77 @@ class IterationEngine:
         history.total_iterations = max_iterations
         logger.warning(f"Max iterations ({max_iterations}) reached without full approval")
         return history
+
+    async def _run_tool_loop(
+        self,
+        model: str,
+        messages: list[dict],
+        tool_schemas: list[dict],
+        all_tool_records: list[ToolCallRecord],
+    ) -> str:
+        """Run the tool-calling loop until the model produces a text response.
+
+        The model can make multiple rounds of tool calls. After each round,
+        tool results are appended to the conversation and the model is called
+        again. Stops when the model produces a text response (no tool calls)
+        or MAX_TOOL_ROUNDS is reached.
+        """
+        working_messages = list(messages)
+
+        for round_num in range(MAX_TOOL_ROUNDS):
+            response = await self._complete_with_tools_retry(
+                model, working_messages, tool_schemas
+            )
+
+            choice = response.choices[0]
+            message = choice.message
+
+            # If no tool calls, return the text content
+            if not message.tool_calls:
+                text = message.content or ""
+                # Append to parent conversation for context continuity
+                messages.append({"role": "assistant", "content": text})
+                return text
+
+            # Process tool calls
+            assistant_msg = {"role": "assistant", "content": message.content or ""}
+            assistant_msg["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in message.tool_calls
+            ]
+            working_messages.append(assistant_msg)
+
+            records = await self._execute_tool_calls(message.tool_calls)
+            all_tool_records.extend(records)
+
+            # Add tool results as tool response messages
+            for tc, record in zip(message.tool_calls, records):
+                working_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": record.result,
+                })
+
+            logger.info(
+                f"Tool round {round_num + 1}: {len(records)} calls, "
+                f"continuing..."
+            )
+
+        # Max tool rounds reached — ask model for final answer without tools
+        working_messages.append({
+            "role": "user",
+            "content": "Please provide your final answer now based on the tool results above.",
+        })
+        final = await self._complete_with_retry(model, working_messages)
+        messages.append({"role": "assistant", "content": final})
+        return final
 
     async def _critic_pass(
         self, critic_model: str, original_task: str, output: str
