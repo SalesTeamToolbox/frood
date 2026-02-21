@@ -38,7 +38,6 @@ Draft emails that are clear, purposeful, and get the response you need.
 ### Cold Outreach
 ```
 Subject: [Specific benefit] for [their company]
-
 Hi [Name],
 [One sentence referencing their work.] I'm [name] at [company] — we help
 [their type of company] [achieve outcome]. [One proof sentence.]
@@ -49,7 +48,6 @@ Would you be open to a brief call [next Tue or Wed]?
 ### Follow-Up
 ```
 Subject: Re: [Original subject]
-
 Hi [Name],
 I reached out on [date] about [topic]. [One new piece of value.]
 Is this worth exploring, or should I close the loop?
@@ -59,17 +57,12 @@ Is this worth exploring, or should I close the loop?
 ### Announcement
 ```
 Subject: [What changed] — action needed by [date]
-
-Team,
-Starting [date], [one-sentence change description].
-
+Team, starting [date], [one-sentence change description].
 What's changing:
 - [Change 1]
 - [Change 2]
-
 What you need to do:
 - [Action] by [deadline]
-
 Questions? Reach out to [contact].
 [Sign-off]
 ```

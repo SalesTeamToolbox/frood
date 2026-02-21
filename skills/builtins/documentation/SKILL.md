@@ -32,9 +32,7 @@ Write documentation that helps people accomplish their goals quickly and accurat
 - Use **Markdown**. Fenced code blocks with language identifiers (` ```python `).
 - Tables for comparisons. **Note:** / **Warning:** prefixes for callouts.
 
-## Docstring Conventions
-
-### Python — Google Style
+### Python Docstrings — Google Style
 ```python
 def calculate_total(items: list[dict], tax_rate: float = 0.0) -> float:
     """Calculate the total price for a list of items with optional tax.
