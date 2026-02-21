@@ -146,7 +146,7 @@ class Agent:
             })
 
             # Get model routing for this task type
-            routing = self.router.get_routing(task.task_type)
+            routing = self.router.get_routing(task.task_type, context_window=task.context_window)
 
             # Build system prompt (with skill overrides)
             system_prompt = self._build_system_prompt(task)
