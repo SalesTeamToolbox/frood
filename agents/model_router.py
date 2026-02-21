@@ -1,52 +1,70 @@
 """
-Model router — maps task types to the best free model for the job.
+Model router — maps task types to the best model for the job.
 
-Primary models do the iterative work. Critic models provide independent
-second-opinion passes. All models are accessed via OpenAI-compatible APIs.
+Free-first strategy: uses free models (OpenRouter, NVIDIA, Groq) for bulk
+agent work. Premium models only used when admin explicitly configures them
+for specific task types or for final reviews.
+
+Routing priority:
+  1. Admin override (TASK_TYPE_MODEL env var) — always wins
+  2. OpenRouter free models (single API key, broadest free catalog)
+  3. NVIDIA / Groq free tier (dedicated free tier providers)
+  4. Fallback to premium only if configured by admin
 """
 
 import logging
-from dataclasses import dataclass
-from enum import Enum
+import os
 
-from openai import AsyncOpenAI
-
-from core.config import settings
 from core.task_queue import TaskType
+from providers.registry import ProviderRegistry, ModelTier
 
 logger = logging.getLogger("agent42.router")
 
 
-class Provider(str, Enum):
-    NVIDIA = "nvidia"
-    GROQ = "groq"
+# -- Default routing: free models for everything ------------------------------
+# These are the defaults when no admin override is set.
+# OpenRouter free models are preferred as they need only one API key.
 
-
-@dataclass(frozen=True)
-class ModelSpec:
-    """A specific model on a specific provider."""
-    model_id: str
-    provider: Provider
-    max_tokens: int = 4096
-    temperature: float = 0.3
-
-
-# -- Model catalog -------------------------------------------------------------
-MODELS = {
-    # NVIDIA hosted
-    "qwen-coder-32b": ModelSpec("qwen/qwen2.5-coder-32b-instruct", Provider.NVIDIA),
-    "deepseek-r1": ModelSpec("deepseek/deepseek-r1", Provider.NVIDIA, temperature=0.2),
-    "llama-405b": ModelSpec("meta/llama-3.1-405b-instruct", Provider.NVIDIA),
-    "llama-70b": ModelSpec("meta/llama-3.3-70b-instruct", Provider.NVIDIA),
-    "mistral-large": ModelSpec("mistralai/mistral-large-2-instruct", Provider.NVIDIA),
-    # Groq hosted (faster inference)
-    "groq-llama-70b": ModelSpec("llama-3.3-70b-versatile", Provider.GROQ),
-    "groq-mixtral": ModelSpec("mixtral-8x7b-32768", Provider.GROQ),
+FREE_ROUTING: dict[TaskType, dict] = {
+    TaskType.CODING: {
+        "primary": "or-free-qwen-coder",       # Qwen3 Coder 480B — strongest free coder
+        "critic": "or-free-deepseek-r1",        # DeepSeek R1 0528 — best free reasoner
+        "max_iterations": 8,
+    },
+    TaskType.DEBUGGING: {
+        "primary": "or-free-deepseek-r1",       # DeepSeek R1 — reasoning for root cause
+        "critic": "or-free-devstral",            # Devstral 123B — multi-file awareness
+        "max_iterations": 10,
+    },
+    TaskType.RESEARCH: {
+        "primary": "or-free-llama4-maverick",   # Llama 4 Maverick — GPT-4+ level
+        "critic": "or-free-deepseek-chat",      # DeepSeek Chat for second opinion
+        "max_iterations": 5,
+    },
+    TaskType.REFACTORING: {
+        "primary": "or-free-qwen-coder",        # Qwen3 Coder — best for code changes
+        "critic": "or-free-devstral",            # Devstral — multi-file project awareness
+        "max_iterations": 8,
+    },
+    TaskType.DOCUMENTATION: {
+        "primary": "or-free-llama4-maverick",   # Llama 4 — strong writing
+        "critic": "or-free-gemma-27b",           # Gemma 27B — fast verification
+        "max_iterations": 4,
+    },
+    TaskType.MARKETING: {
+        "primary": "or-free-llama4-maverick",   # Llama 4 — creative + general
+        "critic": "or-free-deepseek-chat",      # DeepSeek Chat v3.1
+        "max_iterations": 6,
+    },
+    TaskType.EMAIL: {
+        "primary": "or-free-mistral-small",     # Mistral Small 3.1 — fast + precise
+        "critic": None,
+        "max_iterations": 3,
+    },
 }
 
-
-# -- Task type -> model mapping ------------------------------------------------
-TASK_ROUTING: dict[TaskType, dict] = {
+# Legacy routing using NVIDIA/Groq directly (for users with those API keys)
+NVIDIA_GROQ_ROUTING: dict[TaskType, dict] = {
     TaskType.CODING: {
         "primary": "qwen-coder-32b",
         "critic": "deepseek-r1",
@@ -85,35 +103,56 @@ TASK_ROUTING: dict[TaskType, dict] = {
 }
 
 
-def _build_client(provider: Provider) -> AsyncOpenAI:
-    """Create an OpenAI-compatible async client for the given provider."""
-    if provider == Provider.NVIDIA:
-        return AsyncOpenAI(
-            base_url=settings.nvidia_base_url,
-            api_key=settings.nvidia_api_key,
-        )
-    elif provider == Provider.GROQ:
-        return AsyncOpenAI(
-            base_url=settings.groq_base_url,
-            api_key=settings.groq_api_key,
-        )
-    raise ValueError(f"Unknown provider: {provider}")
-
-
 class ModelRouter:
-    """Resolves task types to model clients and handles completion calls."""
+    """Free-first model router with admin overrides.
+
+    Resolution order:
+    1. Admin env var override: AGENT42_CODING_MODEL, AGENT42_CODING_CRITIC, etc.
+    2. OpenRouter free tier (if OPENROUTER_API_KEY is set)
+    3. NVIDIA/Groq free tier (if their API keys are set)
+    4. Whatever is available
+    """
 
     def __init__(self):
-        self._clients: dict[Provider, AsyncOpenAI] = {}
-
-    def _get_client(self, provider: Provider) -> AsyncOpenAI:
-        if provider not in self._clients:
-            self._clients[provider] = _build_client(provider)
-        return self._clients[provider]
+        self.registry = ProviderRegistry()
 
     def get_routing(self, task_type: TaskType) -> dict:
-        """Return the model routing config for a task type."""
-        return TASK_ROUTING.get(task_type, TASK_ROUTING[TaskType.CODING])
+        """Return the model routing config, applying free-first strategy."""
+        # Check for admin override via env vars
+        override = self._check_admin_override(task_type)
+        if override:
+            logger.info(f"Admin override for {task_type.value}: {override}")
+            return override
+
+        # Prefer OpenRouter free (single key, broadest free catalog)
+        if os.getenv("OPENROUTER_API_KEY"):
+            return FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING])
+
+        # Fall back to NVIDIA/Groq direct
+        if os.getenv("NVIDIA_API_KEY") or os.getenv("GROQ_API_KEY"):
+            return NVIDIA_GROQ_ROUTING.get(task_type, NVIDIA_GROQ_ROUTING[TaskType.CODING])
+
+        # Last resort: OpenRouter free routing (will warn about missing key)
+        return FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING])
+
+    def _check_admin_override(self, task_type: TaskType) -> dict | None:
+        """Check if the admin has set env vars to override model routing.
+
+        Env var pattern:
+            AGENT42_CODING_MODEL=claude-sonnet
+            AGENT42_CODING_CRITIC=gpt-4o
+            AGENT42_CODING_MAX_ITER=5
+        """
+        prefix = f"AGENT42_{task_type.value.upper()}"
+        primary = os.getenv(f"{prefix}_MODEL")
+        if not primary:
+            return None
+
+        return {
+            "primary": primary,
+            "critic": os.getenv(f"{prefix}_CRITIC"),
+            "max_iterations": int(os.getenv(f"{prefix}_MAX_ITER", "8")),
+        }
 
     async def complete(
         self,
@@ -123,22 +162,18 @@ class ModelRouter:
         max_tokens: int | None = None,
     ) -> str:
         """Send a chat completion request and return the response text."""
-        spec = MODELS.get(model_key)
-        if not spec:
-            raise ValueError(f"Unknown model: {model_key}")
-
-        client = self._get_client(spec.provider)
-
-        response = await client.chat.completions.create(
-            model=spec.model_id,
-            messages=messages,
-            temperature=temperature if temperature is not None else spec.temperature,
-            max_tokens=max_tokens or spec.max_tokens,
+        return await self.registry.complete(
+            model_key, messages, temperature=temperature, max_tokens=max_tokens
         )
 
-        content = response.choices[0].message.content or ""
-        logger.info(
-            f"Completion from {model_key}: "
-            f"{response.usage.prompt_tokens}+{response.usage.completion_tokens} tokens"
-        )
-        return content
+    def available_providers(self) -> list[dict]:
+        """List all providers and their availability."""
+        return self.registry.available_providers()
+
+    def available_models(self) -> list[dict]:
+        """List all registered models."""
+        return self.registry.available_models()
+
+    def free_models(self) -> list[dict]:
+        """List all free ($0) models."""
+        return self.registry.free_models()

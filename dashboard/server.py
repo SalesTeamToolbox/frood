@@ -1,5 +1,7 @@
 """
 FastAPI dashboard server with REST API and WebSocket support.
+
+Extended with endpoints for providers, tools, skills, and channels.
 """
 
 import logging
@@ -41,10 +43,13 @@ def create_app(
     task_queue: TaskQueue,
     ws_manager: WebSocketManager,
     approval_gate: ApprovalGate,
+    tool_registry=None,
+    skill_loader=None,
+    channel_manager=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
-    app = FastAPI(title="Agent42 Dashboard", version="0.1.0")
+    app = FastAPI(title="Agent42 Dashboard", version="0.2.0")
 
     app.add_middleware(
         CORSMiddleware,
@@ -107,6 +112,49 @@ def create_app(
         else:
             approval_gate.deny(req.task_id, req.action)
         return {"status": "ok"}
+
+    # -- Providers (Phase 5) ---------------------------------------------------
+
+    @app.get("/api/providers")
+    async def list_providers(_user: str = Depends(get_current_user)):
+        from providers.registry import ProviderRegistry
+        registry = ProviderRegistry()
+        return {
+            "providers": registry.available_providers(),
+            "models": registry.available_models(),
+        }
+
+    # -- Tools (Phase 4) ------------------------------------------------------
+
+    @app.get("/api/tools")
+    async def list_tools(_user: str = Depends(get_current_user)):
+        if tool_registry:
+            return tool_registry.list_tools()
+        return []
+
+    # -- Skills (Phase 3) -----------------------------------------------------
+
+    @app.get("/api/skills")
+    async def list_skills(_user: str = Depends(get_current_user)):
+        if skill_loader:
+            return [
+                {
+                    "name": s.name,
+                    "description": s.description,
+                    "always_load": s.always_load,
+                    "task_types": s.task_types,
+                }
+                for s in skill_loader.all_skills()
+            ]
+        return []
+
+    # -- Channels (Phase 2) ---------------------------------------------------
+
+    @app.get("/api/channels")
+    async def list_channels(_user: str = Depends(get_current_user)):
+        if channel_manager:
+            return channel_manager.list_channels()
+        return []
 
     # -- WebSocket -------------------------------------------------------------
 
