@@ -31,8 +31,10 @@ _SAFE_PATH_PREFIXES = (
     "/bin", "/sbin",
     "/usr/lib", "/usr/local/lib", "/usr/share",
     "/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr",
-    "/tmp",
     "/proc/self",
+    # Note: /tmp is intentionally excluded — it could be used as a staging area
+    # for attack payloads outside the sandbox. Agents should use workspace-local
+    # temp files instead.
 )
 
 
@@ -148,6 +150,12 @@ class ShellTool(Tool):
             )
 
         except asyncio.TimeoutError:
+            # Kill the orphaned process to prevent resource leaks
+            try:
+                proc.kill()
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except Exception:
+                pass  # Best effort cleanup
             return ToolResult(
                 error=f"Command timed out after {self._timeout} seconds",
                 success=False,

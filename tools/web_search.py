@@ -104,7 +104,14 @@ _BLOCKED_IP_RANGES = [
     ipaddress.ip_network("::1/128"),            # IPv6 loopback
     ipaddress.ip_network("fc00::/7"),           # IPv6 private
     ipaddress.ip_network("fe80::/10"),          # IPv6 link-local
+    ipaddress.ip_network("::ffff:127.0.0.0/104"),  # IPv4-mapped loopback
+    ipaddress.ip_network("::ffff:10.0.0.0/104"),   # IPv4-mapped private
+    ipaddress.ip_network("::ffff:172.16.0.0/108"), # IPv4-mapped private
+    ipaddress.ip_network("::ffff:192.168.0.0/112"), # IPv4-mapped private
 ]
+
+# Hostnames that resolve to localhost regardless of DNS
+_BLOCKED_HOSTNAMES = {"localhost", "localhost.localdomain", "local"}
 
 
 def _is_ssrf_target(url: str) -> str | None:
@@ -114,6 +121,10 @@ def _is_ssrf_target(url: str) -> str | None:
         hostname = parsed.hostname
         if not hostname:
             return "Invalid URL: no hostname"
+
+        # Block known localhost hostnames
+        if hostname.lower() in _BLOCKED_HOSTNAMES:
+            return f"Blocked: {hostname} is a localhost alias"
 
         # Resolve hostname to IP
         try:
@@ -166,8 +177,23 @@ class WebFetchTool(Tool):
             return ToolResult(error=ssrf_error, success=False)
 
         try:
-            async with httpx.AsyncClient(follow_redirects=True) as client:
+            # Disable auto-redirects to validate each redirect destination for SSRF
+            async with httpx.AsyncClient(follow_redirects=False) as client:
                 response = await client.get(url, timeout=15.0)
+
+                # Follow redirects manually with SSRF checks (max 5 hops)
+                redirect_count = 0
+                while response.is_redirect and redirect_count < 5:
+                    redirect_count += 1
+                    next_url = str(response.next_request.url) if response.next_request else None
+                    if not next_url:
+                        break
+                    redirect_ssrf = _is_ssrf_target(next_url)
+                    if redirect_ssrf:
+                        logger.warning(f"SSRF blocked on redirect: {next_url} — {redirect_ssrf}")
+                        return ToolResult(error=f"Redirect blocked: {redirect_ssrf}", success=False)
+                    response = await client.get(next_url, timeout=15.0)
+
                 response.raise_for_status()
 
             text = response.text

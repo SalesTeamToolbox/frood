@@ -112,6 +112,23 @@ DENY_PATTERNS: list[re.Pattern] = [
         r"\bbase64\b.*\|\s*(ba)?sh\b",            # base64 decode piped to shell
         r"\bprintf\b.*\|\s*(ba)?sh\b",            # printf piped to shell
         r"\becho\b.*\|\s*(ba)?sh\b",              # echo piped to shell
+
+        # -- Background processes / persistence --
+        r"\bnohup\b",                              # nohup for process persistence
+        r"\bdisown\b",                             # disown for detaching processes
+        r"\bscreen\b",                             # screen sessions
+        r"\btmux\b",                               # tmux sessions
+
+        # -- Environment variable exfiltration --
+        r"^\s*env\s*$",                            # bare 'env' dumps all env vars
+        r"\bprintenv\b",                           # printenv dumps env vars
+        r"\bset\s*$",                              # bare 'set' dumps shell vars
+
+        # -- Writing to sensitive system files --
+        r"\btee\b.*(/etc/|/var/spool|\.ssh/|\.env|\.bashrc|\.profile)",
+
+        # -- History manipulation --
+        r"\bhistory\b",                            # history access
     ]
 ]
 

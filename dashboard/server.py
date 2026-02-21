@@ -5,7 +5,8 @@ Security features:
 - CORS restricted to configured origins (no wildcard)
 - Login rate limiting per IP
 - WebSocket connection limits
-- Health check endpoint
+- Security response headers (CSP, HSTS, X-Frame-Options, etc.)
+- Health check returns minimal info without auth
 
 Extended with endpoints for providers, tools, skills, and channels.
 """
@@ -17,6 +18,7 @@ from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSock
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from core.config import settings
 from core.task_queue import TaskQueue, Task, TaskType, TaskStatus
@@ -25,6 +27,30 @@ from dashboard.auth import verify_password, create_token, get_current_user, chec
 from dashboard.websocket_manager import WebSocketManager
 
 logger = logging.getLogger("agent42.server")
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to all HTTP responses."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'"
+        )
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=(), payment=()"
+        )
+        # If serving over HTTPS, enable HSTS
+        if request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
+        return response
 
 FRONTEND_DIR = Path(__file__).parent / "frontend" / "dist"
 
@@ -64,22 +90,34 @@ def create_app(
 
     app = FastAPI(title="Agent42 Dashboard", version="0.3.0")
 
-    # CORS: restricted to configured origins only
+    # Security headers on all responses
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    # CORS: always enabled with secure defaults
+    # If CORS_ALLOWED_ORIGINS is not configured, default to same-origin only
+    # (empty list = no cross-origin requests allowed)
     cors_origins = settings.get_cors_origins()
-    if cors_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=cors_origins,
-            allow_credentials=True,
-            allow_methods=["GET", "POST", "PUT", "DELETE"],
-            allow_headers=["Authorization", "Content-Type"],
-        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins if cors_origins else [],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
 
     # -- Health ----------------------------------------------------------------
 
     @app.get("/health")
     async def health_check():
-        """Public health check endpoint (no auth required)."""
+        """Public health check — returns only liveness status.
+
+        Does NOT expose task counts or connection info to unauthenticated users.
+        """
+        return {"status": "ok"}
+
+    @app.get("/api/health")
+    async def health_detail(_user: str = Depends(get_current_user)):
+        """Authenticated health check with detailed metrics."""
         return {
             "status": "ok",
             "tasks_total": len(task_queue.all_tasks()),
@@ -96,6 +134,14 @@ def create_app(
 
     @app.post("/api/login")
     async def login(req: LoginRequest, request: Request):
+        # Fail-secure: reject all logins when no password is configured
+        if not settings.dashboard_password and not settings.dashboard_password_hash:
+            logger.warning("Login attempt with no password configured — rejected")
+            raise HTTPException(
+                status_code=401,
+                detail="Dashboard login is disabled. Set DASHBOARD_PASSWORD or DASHBOARD_PASSWORD_HASH.",
+            )
+
         client_ip = request.client.host if request.client else "unknown"
 
         if not check_rate_limit(client_ip):
@@ -105,7 +151,10 @@ def create_app(
             )
 
         if req.username != settings.dashboard_username or not verify_password(req.password):
+            logger.info(f"Failed login attempt for '{req.username}' from {client_ip}")
             raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        logger.info(f"Successful login for '{req.username}' from {client_ip}")
         return {"token": create_token(req.username)}
 
     # -- Tasks -----------------------------------------------------------------
@@ -166,9 +215,9 @@ def create_app(
         req: ApprovalAction, _user: str = Depends(get_current_user)
     ):
         if req.approved:
-            approval_gate.approve(req.task_id, req.action)
+            approval_gate.approve(req.task_id, req.action, user=_user)
         else:
-            approval_gate.deny(req.task_id, req.action)
+            approval_gate.deny(req.task_id, req.action, user=_user)
         return {"status": "ok"}
 
     # -- Review Feedback (learning from human review) --------------------------
@@ -250,19 +299,32 @@ def create_app(
             await ws.close(code=4001, reason="Missing token")
             return
         try:
-            from jose import jwt as jose_jwt, JWTError
+            from jose import jwt as jose_jwt, JWTError, ExpiredSignatureError
             payload = jose_jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
             if not payload.get("sub"):
                 await ws.close(code=4001, reason="Invalid token")
                 return
-        except (JWTError, Exception):
-            await ws.close(code=4001, reason="Invalid or expired token")
+        except ExpiredSignatureError:
+            await ws.close(code=4001, reason="Token expired")
+            return
+        except JWTError:
+            await ws.close(code=4001, reason="Invalid token")
+            return
+        except Exception as e:
+            logger.error(f"Unexpected error in WebSocket auth: {e}")
+            await ws.close(code=1011, reason="Server error")
             return
 
         await ws_manager.connect(ws)
         try:
             while True:
-                await ws.receive_text()
+                data = await ws.receive_text()
+                # Validate incoming message size (prevent memory exhaustion)
+                if len(data) > 4096:
+                    logger.warning("WebSocket message too large, ignoring")
+                    continue
+                # Client messages are currently ignored (server-push only)
+                # but we validate and log for future use
         except WebSocketDisconnect:
             ws_manager.disconnect(ws)
 
