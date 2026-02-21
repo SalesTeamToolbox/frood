@@ -3,12 +3,19 @@ Approval gate for protected operations.
 
 Certain actions (sending email, git push, file deletion) require
 explicit human approval through the dashboard before proceeding.
+
+Approval decisions are persisted to a JSONL audit log so that:
+1. All approval activity is recorded for compliance/auditing
+2. The audit trail survives application restarts
 """
 
 import asyncio
+import json
 import logging
+import time
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 logger = logging.getLogger("agent42.approval")
 
@@ -27,6 +34,7 @@ class ApprovalRequest:
     description: str
     details: dict = field(default_factory=dict)
     approved: bool | None = None
+    requested_at: float = field(default_factory=time.time)
     _event: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
 
@@ -34,12 +42,37 @@ DEFAULT_TIMEOUT = 3600  # 1 hour default timeout for approval requests
 
 
 class ApprovalGate:
-    """Intercepts protected operations and waits for human approval."""
+    """Intercepts protected operations and waits for human approval.
 
-    def __init__(self, task_queue, timeout: int = DEFAULT_TIMEOUT):
+    All approval events (request, approve, deny, timeout) are appended to a
+    JSONL audit log for persistent record-keeping and compliance.
+    """
+
+    def __init__(
+        self,
+        task_queue,
+        timeout: int = DEFAULT_TIMEOUT,
+        log_path: str = ".agent42/approvals.jsonl",
+    ):
         self.task_queue = task_queue
         self.timeout = timeout
         self._pending: dict[str, ApprovalRequest] = {}
+        self._log_path = Path(log_path)
+        self._log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _log_event(self, event_type: str, key: str, **details):
+        """Append an event to the JSONL audit log."""
+        entry = {
+            "timestamp": time.time(),
+            "event": event_type,
+            "key": key,
+            **details,
+        }
+        try:
+            with open(self._log_path, "a") as f:
+                f.write(json.dumps(entry, default=str) + "\n")
+        except OSError as e:
+            logger.error(f"Failed to write approval log: {e}")
 
     async def request(
         self,
@@ -59,6 +92,8 @@ class ApprovalGate:
         self._pending[key] = req
 
         logger.info(f"Approval requested: {key} — {description}")
+        self._log_event("requested", key, task_id=task_id, action=action.value,
+                        description=description, details=details or {})
 
         try:
             await asyncio.wait_for(req._event.wait(), timeout=self.timeout)
@@ -67,6 +102,7 @@ class ApprovalGate:
                 f"Approval timed out after {self.timeout}s: {key} — auto-denying"
             )
             req.approved = False
+            self._log_event("timeout", key, task_id=task_id, action=action.value)
 
         self._pending.pop(key, None)
         return req.approved is True
@@ -79,6 +115,8 @@ class ApprovalGate:
             req.approved = True
             req._event.set()
             logger.info(f"AUDIT: Approved {key} by {user or 'unknown'}")
+            self._log_event("approved", key, task_id=task_id, action=action,
+                            user=user or "unknown")
 
     def deny(self, task_id: str, action: str, user: str = ""):
         """Deny a pending request (called from dashboard)."""
@@ -88,6 +126,8 @@ class ApprovalGate:
             req.approved = False
             req._event.set()
             logger.info(f"AUDIT: Denied {key} by {user or 'unknown'}")
+            self._log_event("denied", key, task_id=task_id, action=action,
+                            user=user or "unknown")
 
     def pending_requests(self) -> list[dict]:
         """List all pending approval requests for the dashboard."""
@@ -97,6 +137,7 @@ class ApprovalGate:
                 "action": r.action.value,
                 "description": r.description,
                 "details": r.details,
+                "requested_at": r.requested_at,
             }
             for r in self._pending.values()
         ]
