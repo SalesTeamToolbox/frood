@@ -4,7 +4,8 @@ Agent — per-task orchestration.
 Each agent gets a git worktree, runs the iteration engine, generates
 a REVIEW.md, and transitions the task to the review state.
 
-Now integrates skills (Phase 3), tools (Phase 4), and memory (Phase 6).
+Integrates skills (Phase 3), tools (Phase 4), memory (Phase 6),
+and self-learning (post-task reflection + failure analysis).
 """
 
 import logging
@@ -14,6 +15,7 @@ from typing import Callable, Awaitable
 
 from agents.model_router import ModelRouter
 from agents.iteration_engine import IterationEngine, IterationResult
+from agents.learner import Learner
 from core.task_queue import Task, TaskQueue, TaskStatus
 from core.worktree_manager import WorktreeManager
 from core.approval_gate import ApprovalGate
@@ -67,6 +69,7 @@ class Agent:
         emit: Callable[[str, dict], Awaitable[None]],
         skill_loader: SkillLoader | None = None,
         memory_store: MemoryStore | None = None,
+        workspace_skills_dir: Path | None = None,
     ):
         self.task = task
         self.task_queue = task_queue
@@ -77,6 +80,11 @@ class Agent:
         self.engine = IterationEngine(self.router)
         self.skill_loader = skill_loader
         self.memory_store = memory_store
+        self.learner = (
+            Learner(self.router, memory_store, skills_dir=workspace_skills_dir)
+            if memory_store
+            else None
+        )
 
     async def run(self):
         """Execute the full agent pipeline for this task."""
@@ -127,12 +135,15 @@ class Agent:
             # Transition task to review
             await self.task_queue.complete(task.id, result=history.final_output)
 
-            # Log to memory
-            if self.memory_store:
-                self.memory_store.log_event(
-                    "task_complete",
-                    f"Task '{task.title}' completed in {history.total_iterations} iterations",
-                    f"Type: {task.task_type.value}\nResult preview: {history.final_output[:200]}",
+            # Post-task learning: reflect on what worked
+            if self.learner:
+                await self.learner.reflect_on_task(
+                    title=task.title,
+                    task_type=task.task_type.value,
+                    iterations=history.total_iterations,
+                    max_iterations=routing["max_iterations"],
+                    iteration_summary=history.summary(),
+                    succeeded=True,
                 )
 
             await self.emit("agent_complete", {
@@ -150,11 +161,16 @@ class Agent:
             await self.task_queue.fail(task.id, str(e))
             await self.emit("agent_error", {"task_id": task.id, "error": str(e)})
 
-            # Log failure to memory
-            if self.memory_store:
-                self.memory_store.log_event(
-                    "task_failed",
-                    f"Task '{task.title}' failed: {e}",
+            # Post-task learning: analyze the failure
+            if self.learner:
+                await self.learner.reflect_on_task(
+                    title=task.title,
+                    task_type=task.task_type.value,
+                    iterations=0,
+                    max_iterations=routing.get("max_iterations", 8),
+                    iteration_summary="(task failed before completing iterations)",
+                    succeeded=False,
+                    error=str(e),
                 )
 
     async def _on_iteration(self, result: IterationResult):
