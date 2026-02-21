@@ -15,8 +15,20 @@ import logging
 from dataclasses import dataclass, field
 
 from agents.model_router import ModelRouter
+from core.approval_gate import ProtectedAction
 
 logger = logging.getLogger("agent42.iteration")
+
+
+# Tools that require human approval before execution.
+# Maps tool name to the ProtectedAction type.
+_TOOL_TO_ACTION: dict[str, ProtectedAction] = {
+    "http_request": ProtectedAction.EXTERNAL_API,
+}
+
+# Actions within tools that need approval (checked via arguments)
+_GIT_PUSH_KEYWORDS = {"push"}
+_FILE_DELETE_KEYWORDS = {"delete", "remove"}
 
 
 @dataclass
@@ -158,9 +170,12 @@ _DEFAULT_CRITIC_PROMPT = (
 class IterationEngine:
     """Run the primary -> tool exec -> critic -> revise loop."""
 
-    def __init__(self, router: ModelRouter, tool_registry=None):
+    def __init__(self, router: ModelRouter, tool_registry=None,
+                 approval_gate=None, agent_id: str = "default"):
         self.router = router
         self.tool_registry = tool_registry
+        self.approval_gate = approval_gate
+        self.agent_id = agent_id
 
     async def _complete_with_retry(
         self, model: str, messages: list[dict], retries: int = MAX_RETRIES,
@@ -215,7 +230,7 @@ class IterationEngine:
             FALLBACK_MODEL, messages, []
         )
 
-    async def _execute_tool_calls(self, tool_calls) -> list[ToolCallRecord]:
+    async def _execute_tool_calls(self, tool_calls, task_id: str = "") -> list[ToolCallRecord]:
         """Execute tool calls from the LLM response and return records."""
         records = []
         if not self.tool_registry or not tool_calls:
@@ -232,8 +247,26 @@ class IterationEngine:
                 ))
                 continue
 
+            # Check if this tool call needs human approval
+            if self.approval_gate:
+                action = self._resolve_protected_action(tool_name, arguments)
+                if action:
+                    desc = f"Tool '{tool_name}' called with: {list(arguments.keys())}"
+                    approved = await self.approval_gate.request(
+                        task_id or self.agent_id, action, desc, details=arguments,
+                    )
+                    if not approved:
+                        records.append(ToolCallRecord(
+                            tool_name=tool_name, arguments=arguments,
+                            result="Action denied — human approval not granted",
+                            success=False,
+                        ))
+                        continue
+
             logger.info(f"Executing tool: {tool_name}({list(arguments.keys())})")
-            result = await self.tool_registry.execute(tool_name, **arguments)
+            result = await self.tool_registry.execute(
+                tool_name, agent_id=self.agent_id, **arguments,
+            )
 
             records.append(ToolCallRecord(
                 tool_name=tool_name,
@@ -243,6 +276,22 @@ class IterationEngine:
             ))
 
         return records
+
+    @staticmethod
+    def _resolve_protected_action(tool_name: str, arguments: dict) -> ProtectedAction | None:
+        """Determine if a tool call requires approval based on tool name and args."""
+        # Direct tool-level protection
+        action = _TOOL_TO_ACTION.get(tool_name)
+        if action:
+            return action
+
+        # Git tool: only push operations need approval
+        if tool_name == "git":
+            git_action = arguments.get("action", "")
+            if git_action in _GIT_PUSH_KEYWORDS:
+                return ProtectedAction.GIT_PUSH
+
+        return None
 
     @staticmethod
     def _feedback_similarity(a: str, b: str) -> float:
@@ -265,6 +314,7 @@ class IterationEngine:
         system_prompt: str = "",
         on_iteration: callable = None,
         task_type: str = "coding",
+        task_id: str = "",
     ) -> IterationHistory:
         """
         Execute the iteration loop with tool calling support.
@@ -303,7 +353,8 @@ class IterationEngine:
             if tool_schemas:
                 # Tool-calling loop: let the model make tool calls until it produces text
                 primary_output = await self._run_tool_loop(
-                    primary_model, messages, tool_schemas, all_tool_records
+                    primary_model, messages, tool_schemas, all_tool_records,
+                    task_id=task_id,
                 )
             else:
                 # Text-only mode (no tools or model doesn't support tools)
@@ -374,6 +425,7 @@ class IterationEngine:
         messages: list[dict],
         tool_schemas: list[dict],
         all_tool_records: list[ToolCallRecord],
+        task_id: str = "",
     ) -> str:
         """Run the tool-calling loop until the model produces a text response.
 
@@ -414,7 +466,7 @@ class IterationEngine:
             ]
             working_messages.append(assistant_msg)
 
-            records = await self._execute_tool_calls(message.tool_calls)
+            records = await self._execute_tool_calls(message.tool_calls, task_id=task_id)
             all_tool_records.extend(records)
 
             # Add tool results as tool response messages

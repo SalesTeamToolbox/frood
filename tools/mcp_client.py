@@ -259,6 +259,11 @@ class MCPManager:
 
         except Exception as e:
             logger.error(f"Failed to connect MCP server {name}: {e}")
+            # Clean up orphaned process on connection failure
+            try:
+                await conn.disconnect()
+            except Exception:
+                pass
             return []
 
     async def disconnect_all(self):

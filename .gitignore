@@ -29,3 +29,4 @@ Thumbs.db
 # Agent42
 tasks.json
 /tmp/agent42/
+.agent42/

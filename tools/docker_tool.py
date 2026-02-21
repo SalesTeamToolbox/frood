@@ -7,6 +7,7 @@ Provides container lifecycle management and command execution in isolated enviro
 
 import asyncio
 import logging
+import shutil
 
 from tools.base import Tool, ToolResult
 
@@ -18,6 +19,9 @@ class DockerTool(Tool):
 
     def __init__(self, workspace_path: str = "."):
         self._workspace = workspace_path
+        self._docker_available = shutil.which("docker") is not None
+        if not self._docker_available:
+            logger.warning("Docker is not installed or not in PATH")
 
     @property
     def name(self) -> str:
@@ -99,13 +103,22 @@ class DockerTool(Tool):
             output = output[:50000] + "\n... (truncated)"
 
         combined = output
+        safe_error = ""
         if errors and proc.returncode != 0:
-            combined += f"\nSTDERR:\n{errors}"
+            # Log full error at debug to prevent Docker version/config disclosure
+            logger.debug(f"Docker stderr: {errors[:500]}")
+            # Return a sanitized subset — strip lines with version/daemon info
+            safe_lines = [
+                line for line in errors.splitlines()
+                if not any(kw in line.lower() for kw in ("version", "daemon", "docker engine", "api version"))
+            ]
+            safe_error = "\n".join(safe_lines[:20])
+            combined += f"\nSTDERR:\n{safe_error}"
 
         return ToolResult(
             output=combined if combined.strip() else "(no output)",
             success=proc.returncode == 0,
-            error=errors if proc.returncode != 0 else "",
+            error=safe_error if proc.returncode != 0 else "",
         )
 
     async def execute(
@@ -120,6 +133,8 @@ class DockerTool(Tool):
     ) -> ToolResult:
         if not action:
             return ToolResult(error="Action is required", success=False)
+        if not self._docker_available:
+            return ToolResult(error="Docker is not installed or not in PATH", success=False)
 
         if action == "run":
             return await self._action_run(image, command)
@@ -156,10 +171,23 @@ class DockerTool(Tool):
 
         args = [
             "run", "--rm",
-            "--network=none",  # No network access for security
-            "--memory=512m",   # Memory limit
-            "--cpus=1",        # CPU limit
-            "-v", f"{self._workspace}:/workspace:ro",  # Read-only workspace mount
+            # Network isolation
+            "--network=none",
+            # Memory limits (prevent OOM and swap abuse)
+            "--memory=256m",
+            "--memory-swap=256m",
+            # CPU limits
+            "--cpus=0.5",
+            # Process limits (prevent fork bombs)
+            "--pids-limit=50",
+            # Read-only root filesystem with limited tmpfs
+            "--read-only",
+            "--tmpfs=/tmp:size=50m,noexec",
+            # Drop all capabilities
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges:true",
+            # Read-only workspace mount
+            "-v", f"{self._workspace}:/workspace:ro",
             "-w", "/workspace",
             image,
         ]

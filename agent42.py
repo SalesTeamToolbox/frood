@@ -39,7 +39,8 @@ from core.task_queue import TaskQueue, Task, TaskType, TaskStatus, infer_task_ty
 from core.worktree_manager import WorktreeManager
 from core.approval_gate import ApprovalGate
 from core.sandbox import WorkspaceSandbox
-from core.command_filter import CommandFilter
+from core.command_filter import CommandFilter, DEFAULT_ALLOWLIST
+from core.rate_limiter import ToolRateLimiter, ToolLimit
 from agents.agent import Agent
 from agents.learner import Learner
 from agents.model_router import ModelRouter
@@ -119,7 +120,10 @@ class Agent42:
         self.task_queue = TaskQueue(tasks_json_path=settings.tasks_json_path)
         self.ws_manager = WebSocketManager()
         self.worktree_manager = WorktreeManager(str(self.repo_path))
-        self.approval_gate = ApprovalGate(self.task_queue)
+        self.approval_gate = ApprovalGate(
+            self.task_queue,
+            log_path=settings.approval_log_path,
+        )
         self._semaphore = asyncio.Semaphore(self.max_agents)
         self._shutdown_event = asyncio.Event()
 
@@ -127,7 +131,15 @@ class Agent42:
         self.sandbox = WorkspaceSandbox(
             self.repo_path, enabled=settings.sandbox_enabled
         )
-        self.command_filter = CommandFilter()
+
+        # Command filter: strict allowlist mode or default deny-list
+        allowlist = None
+        if settings.command_filter_mode == "allowlist":
+            if settings.command_filter_allowlist:
+                allowlist = [p.strip() for p in settings.command_filter_allowlist.split(",") if p.strip()]
+            else:
+                allowlist = list(DEFAULT_ALLOWLIST)
+        self.command_filter = CommandFilter(allowlist=allowlist)
 
         # Phase 2: Channels
         self.channel_manager = ChannelManager()
@@ -142,8 +154,21 @@ class Agent42:
         self.skill_loader = SkillLoader(skill_dirs)
         self.skill_loader.load_all()
 
-        # Phase 4: Tools
-        self.tool_registry = ToolRegistry()
+        # Phase 4: Tools (with optional rate limiting)
+        rate_limiter = None
+        if settings.tool_rate_limiting_enabled:
+            rate_limiter = ToolRateLimiter()
+            if settings.tool_rate_limit_overrides:
+                try:
+                    overrides_raw = json.loads(settings.tool_rate_limit_overrides)
+                    overrides = {
+                        name: ToolLimit(**spec)
+                        for name, spec in overrides_raw.items()
+                    }
+                    rate_limiter.update_limits(overrides)
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Invalid TOOL_RATE_LIMIT_OVERRIDES: {e}")
+        self.tool_registry = ToolRegistry(rate_limiter=rate_limiter)
         self.mcp_manager = MCPManager()
         self.cron_scheduler = CronScheduler(settings.cron_jobs_path)
 

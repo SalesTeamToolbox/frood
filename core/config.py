@@ -50,9 +50,18 @@ class Settings:
     sandbox_enabled: bool = True
     workspace_restrict: bool = True
 
+    # Command filter: "deny" (default deny-list) or "allowlist" (strict production mode)
+    command_filter_mode: str = "deny"
+    command_filter_allowlist: str = ""  # Comma-separated regex patterns (allowlist mode)
+
+    # Approval gate
+    approval_log_path: str = ".agent42/approvals.jsonl"
+
     # Rate limiting
     login_rate_limit: int = 5  # Max login attempts per minute per IP
     max_websocket_connections: int = 50
+    tool_rate_limiting_enabled: bool = True
+    tool_rate_limit_overrides: str = ""  # JSON: {"shell": {"max_calls": 500, "window_seconds": 3600}}
 
     # Spending limits
     max_daily_api_spend_usd: float = 0.0  # 0 = unlimited
@@ -126,8 +135,13 @@ class Settings:
             # Security
             sandbox_enabled=os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes"),
             workspace_restrict=os.getenv("WORKSPACE_RESTRICT", "true").lower() in ("true", "1", "yes"),
+            command_filter_mode=os.getenv("COMMAND_FILTER_MODE", "deny"),
+            command_filter_allowlist=os.getenv("COMMAND_FILTER_ALLOWLIST", ""),
+            approval_log_path=os.getenv("APPROVAL_LOG_PATH", ".agent42/approvals.jsonl"),
             login_rate_limit=int(os.getenv("LOGIN_RATE_LIMIT", "5")),
             max_websocket_connections=int(os.getenv("MAX_WEBSOCKET_CONNECTIONS", "50")),
+            tool_rate_limiting_enabled=os.getenv("TOOL_RATE_LIMITING_ENABLED", "true").lower() in ("true", "1", "yes"),
+            tool_rate_limit_overrides=os.getenv("TOOL_RATE_LIMIT_OVERRIDES", ""),
             max_daily_api_spend_usd=float(os.getenv("MAX_DAILY_API_SPEND_USD", "0")),
             # Channels
             discord_bot_token=os.getenv("DISCORD_BOT_TOKEN", ""),

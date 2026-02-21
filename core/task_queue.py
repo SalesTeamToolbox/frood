@@ -259,10 +259,27 @@ class TaskQueue:
                 async with aiofiles.open(self._json_path, "r") as f:
                     raw = await f.read()
 
-                for item in json.loads(raw):
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid JSON in tasks file during reload: {e}")
+                    continue
+
+                if not isinstance(data, list):
+                    logger.error(f"Tasks file must contain a JSON array, got {type(data).__name__}")
+                    continue
+
+                for item in data:
+                    if not isinstance(item, dict):
+                        logger.warning(f"Skipping non-dict task entry: {type(item).__name__}")
+                        continue
                     task_id = item.get("id")
                     if task_id not in self._tasks:
-                        task = Task.from_dict(item)
+                        try:
+                            task = Task.from_dict(item)
+                        except (TypeError, ValueError, KeyError) as e:
+                            logger.warning(f"Skipping malformed task entry: {e}")
+                            continue
                         if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
                             task.status = TaskStatus.PENDING
                             await self.add(task)

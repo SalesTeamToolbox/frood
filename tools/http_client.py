@@ -8,12 +8,23 @@ Includes SSRF protection (blocks private/internal IPs).
 import asyncio
 import json
 import logging
+import re
 import time
 from urllib.parse import urlparse
 
 from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.http_client")
+
+# RFC 7230 valid header name characters
+_VALID_HEADER_NAME_RE = re.compile(r"^[a-zA-Z0-9!#$%&'*+\-.^_`|~]+$")
+
+# Headers that must not be user-controlled (hop-by-hop and security-sensitive)
+_FORBIDDEN_HEADERS = frozenset({
+    "host", "connection", "content-length", "transfer-encoding",
+    "upgrade", "te", "trailer", "proxy-authorization",
+    "proxy-authenticate",
+})
 
 # Reuse SSRF protection from web_search
 try:
@@ -74,6 +85,31 @@ class HttpClientTool(Tool):
             "required": ["url"],
         }
 
+    @staticmethod
+    def _validate_headers(headers: dict | None) -> tuple[bool, str, dict]:
+        """Validate and sanitize request headers.
+
+        Returns (ok, error_message, validated_headers).
+        """
+        if not headers:
+            return True, "", {}
+
+        validated = {}
+        for name, value in headers.items():
+            if not isinstance(name, str) or not _VALID_HEADER_NAME_RE.match(name):
+                return False, f"Invalid header name: {name!r}", {}
+            if name.lower() in _FORBIDDEN_HEADERS:
+                return False, f"Forbidden header: {name}", {}
+            if not isinstance(value, str):
+                return False, f"Header value must be string: {name}", {}
+            if "\r" in value or "\n" in value:
+                return False, f"Header value contains newlines (CRLF injection): {name}", {}
+            if len(value) > 8192:
+                return False, f"Header value too long ({len(value)} bytes): {name}", {}
+            validated[name] = value
+
+        return True, "", validated
+
     async def execute(
         self,
         url: str = "",
@@ -86,6 +122,11 @@ class HttpClientTool(Tool):
     ) -> ToolResult:
         if not url:
             return ToolResult(error="URL is required", success=False)
+
+        # Validate headers
+        ok, err_msg, validated_headers = self._validate_headers(headers)
+        if not ok:
+            return ToolResult(error=f"Invalid headers: {err_msg}", success=False)
 
         # SSRF protection
         if _is_ssrf_target:
@@ -102,9 +143,9 @@ class HttpClientTool(Tool):
             import aiohttp
         except ImportError:
             # Fallback to urllib
-            return await self._urllib_request(url, method, headers, body, json_body, timeout)
+            return await self._urllib_request(url, method, validated_headers, body, json_body, timeout)
 
-        return await self._aiohttp_request(url, method, headers or {}, body, json_body, timeout)
+        return await self._aiohttp_request(url, method, validated_headers, body, json_body, timeout)
 
     async def _aiohttp_request(
         self, url: str, method: str, headers: dict, body: str,
