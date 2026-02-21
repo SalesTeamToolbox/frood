@@ -150,6 +150,12 @@ class ShellTool(Tool):
             )
 
         except asyncio.TimeoutError:
+            # Kill the orphaned process to prevent resource leaks
+            try:
+                proc.kill()
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except Exception:
+                pass  # Best effort cleanup
             return ToolResult(
                 error=f"Command timed out after {self._timeout} seconds",
                 success=False,

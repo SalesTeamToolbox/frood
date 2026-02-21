@@ -174,6 +174,8 @@ class GitTool(Tool):
     async def _commit(self, args: str) -> ToolResult:
         if not args:
             return ToolResult(error="Commit message required", success=False)
+        if len(args) > 10000:
+            return ToolResult(error="Commit message too long (max 10000 chars)", success=False)
         code, out, err = await self._run_git("commit", "-m", args)
         if code != 0:
             if "nothing to commit" in err or "nothing to commit" in out:

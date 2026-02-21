@@ -76,9 +76,17 @@ class SummarizerTool(Tool):
         if action == "file":
             if not path:
                 return ToolResult(error="File path required", success=False)
-            full_path = os.path.join(self._workspace, path) if not os.path.isabs(path) else path
+            # Always resolve relative to workspace — never accept raw absolute paths
+            full_path = os.path.normpath(os.path.join(self._workspace, path))
+            workspace_real = os.path.realpath(self._workspace)
+            full_real = os.path.realpath(full_path)
+            if not full_real.startswith(workspace_real + os.sep) and full_real != workspace_real:
+                return ToolResult(
+                    error=f"Blocked: path '{path}' is outside the workspace",
+                    success=False,
+                )
             try:
-                with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                with open(full_real, "r", encoding="utf-8", errors="replace") as f:
                     content = f.read()
             except Exception as e:
                 return ToolResult(error=f"Failed to read file: {e}", success=False)

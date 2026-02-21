@@ -645,3 +645,119 @@ class TestShellTmpBlocked:
     async def test_usr_bin_still_allowed(self):
         result = await self.tool.execute(command="/usr/bin/env echo hello")
         assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# NEW: Path traversal bypass in security_analyzer and summarizer
+# ---------------------------------------------------------------------------
+
+class TestSecurityAnalyzerPathTraversal:
+    """Verify security_analyzer blocks absolute paths outside workspace."""
+
+    def setup_method(self):
+        from tools.security_analyzer import SecurityAnalyzerTool
+        self.tmpdir = tempfile.mkdtemp()
+        self.tool = SecurityAnalyzerTool(self.tmpdir)
+
+    @pytest.mark.asyncio
+    async def test_blocks_absolute_path_etc(self):
+        result = await self.tool.execute(action="scan_file", path="/etc/passwd")
+        assert not result.success
+        assert "outside" in result.error.lower() or "Blocked" in result.error
+
+    @pytest.mark.asyncio
+    async def test_blocks_traversal(self):
+        result = await self.tool.execute(action="scan_file", path="../../etc/passwd")
+        assert not result.success
+        assert "outside" in result.error.lower() or "Blocked" in result.error
+
+    @pytest.mark.asyncio
+    async def test_allows_workspace_relative(self):
+        import os
+        test_file = os.path.join(self.tmpdir, "safe.py")
+        with open(test_file, "w") as f:
+            f.write("x = 1\n")
+        result = await self.tool.execute(action="scan_file", path="safe.py")
+        assert result.success
+
+
+class TestSummarizerPathTraversal:
+    """Verify summarizer blocks absolute paths outside workspace."""
+
+    def setup_method(self):
+        from tools.summarizer_tool import SummarizerTool
+        self.tmpdir = tempfile.mkdtemp()
+        self.tool = SummarizerTool(self.tmpdir)
+
+    @pytest.mark.asyncio
+    async def test_blocks_absolute_path(self):
+        result = await self.tool.execute(action="file", path="/etc/passwd")
+        assert not result.success
+        assert "outside" in result.error.lower() or "Blocked" in result.error
+
+    @pytest.mark.asyncio
+    async def test_blocks_traversal(self):
+        result = await self.tool.execute(action="file", path="../../../etc/hosts")
+        assert not result.success
+        assert "outside" in result.error.lower() or "Blocked" in result.error
+
+    @pytest.mark.asyncio
+    async def test_allows_workspace_file(self):
+        import os
+        test_file = os.path.join(self.tmpdir, "readme.md")
+        with open(test_file, "w") as f:
+            f.write("# Hello\nThis is a test file.\n")
+        result = await self.tool.execute(action="file", path="readme.md")
+        assert result.success
+
+
+# ---------------------------------------------------------------------------
+# NEW: SSRF improvements
+# ---------------------------------------------------------------------------
+
+class TestSSRFImprovements:
+    """Test expanded SSRF protection."""
+
+    def test_blocks_localhost_hostname(self):
+        from tools.web_search import _is_ssrf_target
+        result = _is_ssrf_target("http://localhost/admin")
+        assert result is not None
+        assert "localhost" in result.lower()
+
+    def test_blocks_localhost_localdomain(self):
+        from tools.web_search import _is_ssrf_target
+        result = _is_ssrf_target("http://localhost.localdomain/secret")
+        assert result is not None
+
+    def test_blocks_ipv4_mapped_ipv6_loopback(self):
+        from tools.web_search import _is_ssrf_target, _BLOCKED_IP_RANGES
+        import ipaddress
+        # Verify the IPv4-mapped loopback range is in the blocklist
+        test_ip = ipaddress.ip_address("::ffff:127.0.0.1")
+        blocked = any(test_ip in net for net in _BLOCKED_IP_RANGES)
+        assert blocked
+
+    def test_blocks_ipv4_mapped_ipv6_private(self):
+        from tools.web_search import _BLOCKED_IP_RANGES
+        import ipaddress
+        test_ip = ipaddress.ip_address("::ffff:10.0.0.1")
+        blocked = any(test_ip in net for net in _BLOCKED_IP_RANGES)
+        assert blocked
+
+
+# ---------------------------------------------------------------------------
+# NEW: Git commit message length validation
+# ---------------------------------------------------------------------------
+
+class TestGitCommitMessageLength:
+    """Verify commit message length is validated."""
+
+    def setup_method(self):
+        from tools.git_tool import GitTool
+        self.tool = GitTool("/tmp/test_workspace")
+
+    @pytest.mark.asyncio
+    async def test_blocks_very_long_message(self):
+        result = await self.tool.execute(action="commit", args="x" * 20000)
+        assert not result.success
+        assert "too long" in result.error.lower()
