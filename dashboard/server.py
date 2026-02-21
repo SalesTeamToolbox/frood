@@ -187,6 +187,22 @@ def create_app(
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket):
+        # Authenticate via query parameter: ws://host/ws?token=<jwt>
+        token = ws.query_params.get("token")
+        if not token:
+            await ws.close(code=4001, reason="Missing token")
+            return
+        try:
+            from jose import jwt as jose_jwt, JWTError
+            from core.config import settings as _settings
+            payload = jose_jwt.decode(token, _settings.jwt_secret, algorithms=["HS256"])
+            if not payload.get("sub"):
+                await ws.close(code=4001, reason="Invalid token")
+                return
+        except (JWTError, Exception):
+            await ws.close(code=4001, reason="Invalid or expired token")
+            return
+
         await ws_manager.connect(ws)
         try:
             while True:

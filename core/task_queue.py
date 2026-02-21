@@ -37,6 +37,26 @@ class TaskType(str, Enum):
     EMAIL = "email"
 
 
+# Keyword-based task type inference for channel messages
+_TASK_TYPE_KEYWORDS: dict[TaskType, list[str]] = {
+    TaskType.DEBUGGING: ["bug", "fix", "error", "crash", "broken", "debug", "issue", "traceback", "exception"],
+    TaskType.RESEARCH: ["research", "compare", "evaluate", "investigate", "analyze", "find out", "look into"],
+    TaskType.REFACTORING: ["refactor", "clean up", "reorganize", "restructure", "simplify", "extract"],
+    TaskType.DOCUMENTATION: ["document", "readme", "docstring", "wiki", "explain", "write docs"],
+    TaskType.MARKETING: ["marketing", "copy", "landing page", "social media", "campaign", "blog post", "seo"],
+    TaskType.EMAIL: ["email", "draft email", "reply to", "send email", "write email", "compose"],
+}
+
+
+def infer_task_type(text: str) -> TaskType:
+    """Infer task type from message content using keyword matching."""
+    lower = text.lower()
+    for task_type, words in _TASK_TYPE_KEYWORDS.items():
+        if any(w in lower for w in words):
+            return task_type
+    return TaskType.CODING
+
+
 @dataclass
 class Task:
     title: str
@@ -150,7 +170,11 @@ class TaskQueue:
             logger.error(f"Failed to persist tasks: {e}")
 
     async def load_from_file(self):
-        """Load tasks from JSON file if it exists."""
+        """Load tasks from JSON file if it exists.
+
+        Tasks that were RUNNING when persisted are reset to PENDING so they
+        get re-dispatched on restart.
+        """
         if not self._json_path.exists():
             return
 
@@ -159,11 +183,17 @@ class TaskQueue:
                 raw = await f.read()
 
             data = json.loads(raw)
+            queued_ids: set[str] = set()
             for item in data:
                 task = Task.from_dict(item)
+                # Reset interrupted RUNNING tasks back to PENDING for retry
+                if task.status == TaskStatus.RUNNING:
+                    task.status = TaskStatus.PENDING
+                    logger.info(f"Reset interrupted task {task.id} to pending")
                 self._tasks[task.id] = task
-                if task.status == TaskStatus.PENDING:
+                if task.status == TaskStatus.PENDING and task.id not in queued_ids:
                     await self._queue.put(task)
+                    queued_ids.add(task.id)
 
             logger.info(f"Loaded {len(data)} tasks from {self._json_path}")
             self._last_mtime = self._json_path.stat().st_mtime
@@ -189,8 +219,14 @@ class TaskQueue:
                     raw = await f.read()
 
                 for item in json.loads(raw):
-                    if item.get("id") not in self._tasks:
+                    task_id = item.get("id")
+                    if task_id not in self._tasks:
                         task = Task.from_dict(item)
-                        await self.add(task)
+                        if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+                            task.status = TaskStatus.PENDING
+                            await self.add(task)
+                        else:
+                            # Non-pending tasks just get tracked, not queued
+                            self._tasks[task.id] = task
             except Exception as e:
                 logger.error(f"File watcher error: {e}", exc_info=True)

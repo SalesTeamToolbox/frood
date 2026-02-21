@@ -161,6 +161,12 @@ class Agent:
             await self.task_queue.fail(task.id, str(e))
             await self.emit("agent_error", {"task_id": task.id, "error": str(e)})
 
+            # Clean up orphaned worktree to prevent disk bloat
+            try:
+                await self.worktree_manager.remove(task.id)
+            except Exception as cleanup_err:
+                logger.warning(f"Worktree cleanup failed for {task.id}: {cleanup_err}")
+
             # Post-task learning: analyze the failure
             if self.learner:
                 await self.learner.reflect_on_task(

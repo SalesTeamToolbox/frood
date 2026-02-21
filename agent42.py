@@ -35,12 +35,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from core.config import settings
-from core.task_queue import TaskQueue, Task, TaskType
+from core.task_queue import TaskQueue, Task, TaskType, infer_task_type
 from core.worktree_manager import WorktreeManager
 from core.approval_gate import ApprovalGate
 from core.sandbox import WorkspaceSandbox
 from core.command_filter import CommandFilter
 from agents.agent import Agent
+from agents.learner import Learner
+from agents.model_router import ModelRouter
 from channels.manager import ChannelManager
 from channels.base import InboundMessage, OutboundMessage
 from skills.loader import SkillLoader
@@ -122,6 +124,14 @@ class Agent42:
         # Phase 6: Memory
         self.memory_store = MemoryStore(self.repo_path / settings.memory_dir)
         self.session_manager = SessionManager(self.repo_path / settings.sessions_dir)
+
+        # Self-learning
+        self.workspace_skills_dir = self.repo_path / "skills" / "workspace"
+        self.learner = Learner(
+            router=ModelRouter(),
+            memory_store=self.memory_store,
+            skills_dir=self.workspace_skills_dir,
+        )
 
         # Wire up callbacks
         self.task_queue.on_update(self._on_task_update)
@@ -212,11 +222,11 @@ class Agent42:
             ),
         )
 
-        # Create a task from the message
+        # Create a task from the message with inferred type
         task = Task(
             title=f"[{message.channel_type}] {message.content[:60]}",
             description=message.content,
-            task_type=TaskType.CODING,  # Default; could be inferred
+            task_type=infer_task_type(message.content),
         )
         await self.task_queue.add(task)
 
@@ -253,6 +263,7 @@ class Agent42:
                 emit=self.emit,
                 skill_loader=self.skill_loader,
                 memory_store=self.memory_store,
+                workspace_skills_dir=self.workspace_skills_dir,
             )
             await agent.run()
 
@@ -313,6 +324,7 @@ class Agent42:
                 tool_registry=self.tool_registry,
                 skill_loader=self.skill_loader,
                 channel_manager=self.channel_manager,
+                learner=self.learner,
             )
             config = uvicorn.Config(
                 app,
