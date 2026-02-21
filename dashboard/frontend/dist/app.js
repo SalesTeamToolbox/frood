@@ -24,6 +24,10 @@ const state = {
   filterPriority: "",
   filterType: "",
   status: {},
+  // API key management
+  apiKeys: {},
+  keyEdits: {},
+  keySaving: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -176,6 +180,34 @@ async function loadStatus() {
   try {
     state.status = (await api("/status")) || {};
   } catch { state.status = {}; }
+}
+
+async function loadApiKeys() {
+  try {
+    state.apiKeys = (await api("/settings/keys")) || {};
+  } catch { state.apiKeys = {}; }
+}
+
+async function saveApiKeys() {
+  state.keySaving = true;
+  renderSettingsPanel();
+  try {
+    const keys = {};
+    for (const [envVar, value] of Object.entries(state.keyEdits)) {
+      if (value !== undefined) keys[envVar] = value;
+    }
+    await api("/settings/keys", {
+      method: "PUT",
+      body: JSON.stringify({ keys }),
+    });
+    state.keyEdits = {};
+    await loadApiKeys();
+    toast("API keys saved successfully", "success");
+  } catch (e) {
+    toast("Failed to save: " + e.message, "error");
+  }
+  state.keySaving = false;
+  renderSettingsPanel();
 }
 
 // ---------------------------------------------------------------------------
@@ -1051,7 +1083,10 @@ function renderSettingsPanel() {
       ${settingSecret("LUMA_API_KEY", "Luma AI API Key", "For Luma Ray2 premium video generation.")}
       ${settingSecret("BRAVE_API_KEY", "Brave Search API Key", "For web search tool. Get one at brave.com/search/api.")}
       <div class="form-group" style="margin-top:1.5rem">
-        <div class="help">Settings are read from environment variables at startup. To change them, update your <code>.env</code> file and restart Agent42.</div>
+        <button class="btn btn-primary" id="save-keys-btn" onclick="saveApiKeys()" ${Object.keys(state.keyEdits).length === 0 || state.keySaving ? "disabled" : ""}>
+          ${state.keySaving ? "Saving..." : "Save API Keys"}
+        </button>
+        <div class="help" style="margin-top:0.5rem">Keys saved here override <code>.env</code> values and take effect immediately for new API calls.</div>
       </div>
     `,
     channels: () => `
@@ -1131,19 +1166,40 @@ function renderSettingsPanel() {
 }
 
 function settingSecret(envVar, label, help, highlight = false) {
-  const configured = "***"; // We don't expose actual values for security
+  const keyInfo = state.apiKeys[envVar] || {};
+  const configured = keyInfo.configured;
+  const source = keyInfo.source || "none";
+  const masked = keyInfo.masked_value || "";
+
+  const hasEdit = state.keyEdits[envVar] !== undefined;
+  const statusClass = configured ? "configured" : "not-configured";
+  const statusText = configured
+    ? (source === "admin" ? `Configured via admin UI (${esc(masked)})` : `Configured via .env (${esc(masked)})`)
+    : "Not configured";
+
   return `
     <div class="form-group">
       <label>${esc(label)}</label>
-      <div class="secret-input">
-        <input type="password" value="${configured}" disabled style="font-family:var(--mono);${highlight ? "border-color:var(--accent)" : ""}">
+      <div class="secret-input" style="display:flex;gap:0.5rem;align-items:center">
+        <input type="password"
+               placeholder="${configured ? "Enter new value to override" : "Enter API key"}"
+               value="${hasEdit ? esc(state.keyEdits[envVar]) : ""}"
+               oninput="state.keyEdits['${envVar}']=this.value;updateSaveBtn()"
+               style="font-family:var(--mono);flex:1;${highlight ? "border-color:var(--accent)" : ""}">
+        ${configured && source === "admin" ? `<button class="btn btn-sm" onclick="state.keyEdits['${envVar}']='';updateSaveBtn()" title="Clear admin-set key" style="white-space:nowrap">Clear</button>` : ""}
       </div>
       ${help ? `<div class="help">${help}</div>` : ""}
-      <div class="secret-status not-configured">
-        Set via environment variable: <code>${esc(envVar)}</code>
-      </div>
+      <div class="secret-status ${statusClass}">${statusText}</div>
     </div>
   `;
+}
+
+function updateSaveBtn() {
+  const btn = document.getElementById("save-keys-btn");
+  if (btn) {
+    const hasEdits = Object.values(state.keyEdits).some(v => v !== undefined);
+    btn.disabled = !hasEdits || state.keySaving;
+  }
 }
 
 function settingReadonly(envVar, label, help) {
@@ -1163,7 +1219,7 @@ function settingReadonly(envVar, label, help) {
 // Main render
 // ---------------------------------------------------------------------------
 async function loadAll() {
-  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity()]);
+  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys()]);
   await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadStatus()]);
 }
 

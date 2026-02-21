@@ -119,6 +119,10 @@ class DeviceRegisterRequest(BaseModel):
     capabilities: list[str] = ["tasks", "monitor"]
 
 
+class KeyUpdateRequest(BaseModel):
+    keys: dict[str, str]
+
+
 def create_app(
     task_queue: TaskQueue,
     ws_manager: WebSocketManager,
@@ -129,6 +133,7 @@ def create_app(
     learner=None,
     device_store: Optional[DeviceStore] = None,
     heartbeat=None,
+    key_store=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -536,6 +541,49 @@ def create_app(
                 for s in skill_loader.all_skills()
             ]
         return []
+
+    # -- Settings (API Keys) --------------------------------------------------
+
+    @app.get("/api/settings/keys")
+    async def get_api_keys(_admin: AuthContext = Depends(require_admin)):
+        """Get all configurable API keys with masked values (admin only)."""
+        if not key_store:
+            raise HTTPException(status_code=503, detail="Key store not configured")
+        return key_store.get_masked_keys()
+
+    @app.put("/api/settings/keys")
+    async def update_api_keys(
+        req: KeyUpdateRequest, _admin: AuthContext = Depends(require_admin)
+    ):
+        """Update one or more API keys (admin only)."""
+        if not key_store:
+            raise HTTPException(status_code=503, detail="Key store not configured")
+
+        from core.key_store import ADMIN_CONFIGURABLE_KEYS
+
+        errors = []
+        updated = []
+        for env_var, value in req.keys.items():
+            if env_var not in ADMIN_CONFIGURABLE_KEYS:
+                errors.append(f"{env_var} is not a configurable key")
+                continue
+            value = value.strip()
+            if not value:
+                key_store.delete_key(env_var)
+            else:
+                key_store.set_key(env_var, value)
+            updated.append(env_var)
+
+        # Invalidate cached provider clients so they pick up new keys
+        if updated and tool_registry:
+            try:
+                from providers.registry import ProviderRegistry
+                registry = ProviderRegistry()
+                registry.clear_cache()
+            except Exception:
+                pass
+
+        return {"status": "ok", "updated": updated, "errors": errors}
 
     # -- Channels (Phase 2) ---------------------------------------------------
 

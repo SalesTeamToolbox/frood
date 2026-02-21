@@ -33,22 +33,119 @@ task types — see [Model Routing](#model-routing).
 
 ## Quick Start
 
+### Prerequisites
+
+Before you begin, verify these are installed:
+
+| Requirement | Minimum Version | Check Command |
+|---|---|---|
+| Python | 3.11+ | `python3 --version` |
+| Node.js | 18+ (auto-installed if missing) | `node --version` |
+| git | any | `git --version` |
+
+**Ubuntu/Debian:** `sudo apt update && sudo apt install python3 python3-venv nodejs npm git`
+**macOS:** `brew install python node git`
+
+### Installation
+
+#### 1. Clone the repository
+
 ```bash
 git clone <this-repo> agent42
 cd agent42
+```
+
+#### 2. Run the setup script
+
+```bash
 bash setup.sh
-# Edit .env — set at minimum OPENROUTER_API_KEY and DASHBOARD_PASSWORD
+```
+
+This script automatically:
+- Verifies Python 3.11+ is installed
+- Installs Node.js 20 via nvm if not already present
+- Creates a Python virtual environment in `.venv/`
+- Installs all Python dependencies from `requirements.txt`
+- Copies `.env.example` to `.env` (if `.env` doesn't exist yet)
+- Builds the dashboard frontend (if `dashboard/frontend/package.json` exists)
+- Generates a systemd service file at `/tmp/agent42.service` for optional background running
+
+#### 3. Configure your environment
+
+```bash
+nano .env   # or vim, code, etc.
+```
+
+**Required settings** (you must change these):
+- `OPENROUTER_API_KEY` — Get a free key at [openrouter.ai/keys](https://openrouter.ai/keys) (no credit card needed)
+- `DASHBOARD_PASSWORD` — Change from the default `changeme-right-now` to a strong password
+
+**Tip:** After first launch, you can also configure API keys through the dashboard
+(Settings > LLM Providers) instead of editing `.env`. Keys set via the dashboard
+take effect immediately without a restart.
+
+#### 4. Prepare your git repository
+
+Agent42 uses git worktrees to give each agent an isolated copy of your codebase.
+Your target repository **must** have a `dev` branch:
+
+```bash
+cd /path/to/your/project
+git checkout -b dev    # create dev branch if it doesn't exist
+cd ~/agent42           # return to agent42 directory
+```
+
+**Common gotcha:** If you skip this step, Agent42 will fail at startup with a git
+worktree error. The `dev` branch is used as the base for all agent worktrees.
+
+#### 5. Activate the virtual environment and run
+
+```bash
 source .venv/bin/activate
 python agent42.py --repo /path/to/your/project
 ```
 
-Open `http://localhost:8000` in your browser.
+Other options:
+- `--port 8080` — Use a different dashboard port (default: 8000)
+- `--no-dashboard` — Headless mode (terminal only, no web UI)
+- `--max-agents 2` — Limit concurrent agents (default: 3)
+
+#### 6. Verify installation
+
+1. Open http://localhost:8000 in your browser
+2. Log in with username `admin` and the password you set in `.env`
+3. You should see the Agent42 dashboard with the task board
+4. The bottom-left corner should show a green WebSocket indicator (connected)
+
+### Your First Task
+
+Once logged in, try creating your first task:
+
+1. Click **New Task** in the dashboard
+2. Enter a title like "Add a hello world endpoint" and a description
+3. Select task type **coding** and click Create
+4. Watch the agent pick up the task, iterate with a critic, and produce a `REVIEW.md`
+
+The agent creates a git worktree, makes changes, gets critic feedback, revises, and
+produces output for your review.
+
+### Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| `Python 3.11+ required` | Install Python 3.11+. Ubuntu: `sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.11` |
+| `ModuleNotFoundError` | Make sure you activated the venv: `source .venv/bin/activate` |
+| `No dashboard password configured` | Set `DASHBOARD_PASSWORD` in `.env` |
+| Git worktree error at startup | Ensure your target repo has a `dev` branch: `git checkout -b dev` |
+| `OPENROUTER_API_KEY not set` | Get a free key at [openrouter.ai/keys](https://openrouter.ai/keys) and add to `.env`, or set it in the dashboard Settings page |
+| Port 8000 already in use | Use `--port 8080` flag: `python agent42.py --repo /path --port 8080` |
+| Frontend not loading | Re-run: `cd dashboard/frontend && npm install && npm run build` |
 
 ### Minimum Setup (free, no credit card)
 
 1. Create an [OpenRouter account](https://openrouter.ai) (free, no credit card)
 2. Generate an API key at the OpenRouter dashboard
-3. Set `OPENROUTER_API_KEY` in `.env`
+3. Set `OPENROUTER_API_KEY` in `.env` or via the dashboard Settings page
 
 That's it — you now have access to 30+ free models for all task types.
 
@@ -76,6 +173,10 @@ For direct provider access or premium models, add any of these API keys:
 ## Configuration
 
 All config lives in `.env`. See `.env.example` for all options.
+
+LLM provider API keys can also be configured through the dashboard admin UI
+(Settings > LLM Providers). Keys set via the dashboard are stored locally in
+`.agent42/settings.json` and override `.env` values.
 
 ### Core Settings
 
@@ -628,8 +729,8 @@ skills, and settings.
 - **WebSocket** — Real-time updates with exponential backoff reconnection
 - **Responsive** — Mobile-friendly layout with sidebar navigation
 
-Settings are read-only in the dashboard (configured via environment variables in `.env`).
-Each setting shows its environment variable name, current status, and help text.
+LLM provider API keys can be configured directly through the Settings page (admin only).
+Other settings are displayed as read-only with their environment variable names and help text.
 
 ## Security
 
