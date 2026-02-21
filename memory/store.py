@@ -1,9 +1,14 @@
 """
-Two-layer persistent memory system.
+Two-layer persistent memory system with optional semantic search.
 
 Inspired by Nanobot's MEMORY.md + HISTORY.md pattern:
 - MEMORY.md: Consolidated facts, preferences, and learnings (editable)
 - HISTORY.md: Append-only chronological event log (grep-searchable)
+- embeddings.json: Vector embeddings for semantic search (auto-managed)
+
+Semantic search is enabled automatically when any embedding-capable API
+key is configured (OpenAI, OpenRouter, or NVIDIA). Falls back to grep
+when no embedding API is available.
 """
 
 import logging
@@ -11,16 +16,19 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from memory.embeddings import EmbeddingStore
+
 logger = logging.getLogger("agent42.memory")
 
 
 class MemoryStore:
-    """Persistent two-layer memory for cross-task learning."""
+    """Persistent two-layer memory with semantic search support."""
 
     def __init__(self, workspace_dir: str | Path):
         self.workspace_dir = Path(workspace_dir)
         self.memory_path = self.workspace_dir / "MEMORY.md"
         self.history_path = self.workspace_dir / "HISTORY.md"
+        self.embeddings = EmbeddingStore(self.workspace_dir / "embeddings.json")
         self._ensure_files()
 
     def _ensure_files(self):
@@ -98,6 +106,49 @@ class MemoryStore:
                 results.append(line)
         return results
 
+    # -- Semantic search (embeddings-powered) --
+
+    @property
+    def semantic_available(self) -> bool:
+        """Whether semantic search is available (embedding API configured)."""
+        return self.embeddings.is_available
+
+    async def semantic_search(self, query: str, top_k: int = 5,
+                              source: str = "") -> list[dict]:
+        """Search memory and history using semantic similarity.
+
+        Falls back to grep-based search if no embedding API is configured.
+        Returns list of {text, source, section, score}.
+        """
+        if not self.embeddings.is_available:
+            # Graceful fallback to grep
+            grep_results = self.search_history(query)
+            return [
+                {"text": line, "source": "history", "section": "", "score": 0.0}
+                for line in grep_results[:top_k]
+            ]
+        return await self.embeddings.search(query, top_k=top_k, source_filter=source)
+
+    async def reindex_memory(self):
+        """Re-index MEMORY.md for semantic search.
+
+        Call this after updating memory contents.
+        """
+        if not self.embeddings.is_available:
+            return 0
+        memory = self.read_memory()
+        return await self.embeddings.index_memory(memory)
+
+    async def log_event_semantic(self, event_type: str, summary: str,
+                                 details: str = ""):
+        """Log an event and index it for semantic search.
+
+        Use this instead of log_event() when semantic indexing is desired.
+        """
+        self.log_event(event_type, summary, details)
+        if self.embeddings.is_available:
+            await self.embeddings.index_history_entry(event_type, summary, details)
+
     # -- Context building --
 
     def build_context(self, max_memory_lines: int = 50, max_history_lines: int = 20) -> str:
@@ -120,5 +171,39 @@ class MemoryStore:
             recent = history_lines[-max_history_lines:]
             parts.append("\n## Recent History\n")
             parts.append("\n".join(recent))
+
+        return "\n".join(parts)
+
+    async def build_context_semantic(self, query: str, top_k: int = 5,
+                                     max_memory_lines: int = 50) -> str:
+        """Build context augmented with semantically relevant memory.
+
+        When a query is provided, includes the most relevant memory chunks
+        instead of just recent history. Falls back to build_context() if
+        semantic search is unavailable.
+        """
+        if not self.embeddings.is_available:
+            return self.build_context(max_memory_lines=max_memory_lines)
+
+        parts = []
+
+        # Always include current memory
+        memory = self.read_memory()
+        memory_lines = memory.split("\n")
+        if len(memory_lines) > max_memory_lines:
+            memory_lines = memory_lines[:max_memory_lines]
+            memory_lines.append("... (memory truncated)")
+        parts.append("## Persistent Memory\n")
+        parts.append("\n".join(memory_lines))
+
+        # Add semantically relevant context
+        results = await self.embeddings.search(query, top_k=top_k)
+        if results:
+            parts.append("\n## Relevant Context (semantic search)\n")
+            for r in results:
+                score_pct = int(r["score"] * 100)
+                parts.append(f"**[{r['source']}/{r['section']}]** ({score_pct}% match)")
+                parts.append(r["text"])
+                parts.append("")
 
         return "\n".join(parts)

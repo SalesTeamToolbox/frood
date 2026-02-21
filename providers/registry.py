@@ -44,6 +44,13 @@ class ProviderSpec:
     model_prefix: str = ""               # e.g. "anthropic/" for OpenRouter
 
 
+class ModelTier(str, Enum):
+    """Cost tier for model selection strategy."""
+    FREE = "free"           # $0 models (OpenRouter free, NVIDIA free, Groq free)
+    CHEAP = "cheap"         # Low-cost models (GPT-4o-mini, Haiku, etc.)
+    PREMIUM = "premium"     # Full-price frontier models (GPT-4o, Sonnet, etc.)
+
+
 @dataclass(frozen=True)
 class ModelSpec:
     """A specific model on a specific provider."""
@@ -52,6 +59,7 @@ class ModelSpec:
     max_tokens: int = 4096
     temperature: float = 0.3
     display_name: str = ""
+    tier: ModelTier = ModelTier.FREE  # Default to free for cost-conscious routing
 
 
 # -- Provider catalog ---------------------------------------------------------
@@ -119,32 +127,53 @@ PROVIDERS: dict[ProviderType, ProviderSpec] = {
 
 # -- Model catalog ------------------------------------------------------------
 MODELS: dict[str, ModelSpec] = {
-    # NVIDIA hosted
-    "qwen-coder-32b": ModelSpec("qwen/qwen2.5-coder-32b-instruct", ProviderType.NVIDIA, display_name="Qwen 2.5 Coder 32B"),
-    "deepseek-r1": ModelSpec("deepseek/deepseek-r1", ProviderType.NVIDIA, temperature=0.2, display_name="DeepSeek R1"),
-    "llama-405b": ModelSpec("meta/llama-3.1-405b-instruct", ProviderType.NVIDIA, display_name="Llama 3.1 405B"),
-    "llama-70b": ModelSpec("meta/llama-3.3-70b-instruct", ProviderType.NVIDIA, display_name="Llama 3.3 70B"),
-    "mistral-large": ModelSpec("mistralai/mistral-large-2-instruct", ProviderType.NVIDIA, display_name="Mistral Large 2"),
-    # Groq hosted
-    "groq-llama-70b": ModelSpec("llama-3.3-70b-versatile", ProviderType.GROQ, display_name="Groq Llama 70B"),
-    "groq-mixtral": ModelSpec("mixtral-8x7b-32768", ProviderType.GROQ, display_name="Groq Mixtral"),
-    # OpenAI
-    "gpt-4o": ModelSpec("gpt-4o", ProviderType.OPENAI, display_name="GPT-4o"),
-    "gpt-4o-mini": ModelSpec("gpt-4o-mini", ProviderType.OPENAI, display_name="GPT-4o Mini"),
-    "o1": ModelSpec("o1", ProviderType.OPENAI, temperature=1.0, display_name="o1"),
-    # Anthropic
-    "claude-sonnet": ModelSpec("claude-sonnet-4-20250514", ProviderType.ANTHROPIC, display_name="Claude Sonnet 4"),
-    "claude-haiku": ModelSpec("claude-haiku-4-5-20251001", ProviderType.ANTHROPIC, display_name="Claude Haiku 4.5"),
-    # DeepSeek (direct)
-    "deepseek-chat": ModelSpec("deepseek-chat", ProviderType.DEEPSEEK, display_name="DeepSeek Chat"),
-    "deepseek-reasoner": ModelSpec("deepseek-reasoner", ProviderType.DEEPSEEK, temperature=0.2, display_name="DeepSeek Reasoner"),
-    # Gemini
-    "gemini-2-flash": ModelSpec("gemini-2.0-flash", ProviderType.GEMINI, display_name="Gemini 2.0 Flash"),
-    "gemini-2-pro": ModelSpec("gemini-2.5-pro-preview-05-06", ProviderType.GEMINI, display_name="Gemini 2.5 Pro"),
-    # OpenRouter (access to 200+ models via single key)
-    "or-claude-sonnet": ModelSpec("anthropic/claude-sonnet-4-20250514", ProviderType.OPENROUTER, display_name="Claude Sonnet via OR"),
-    "or-gpt-4o": ModelSpec("openai/gpt-4o", ProviderType.OPENROUTER, display_name="GPT-4o via OR"),
-    "or-llama-405b": ModelSpec("meta-llama/llama-3.1-405b-instruct", ProviderType.OPENROUTER, display_name="Llama 405B via OR"),
+    # ═══════════════════════════════════════════════════════════════════════════
+    # FREE TIER — $0 models for bulk agent work (default for all task types)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    # OpenRouter free models (single API key, no credit card needed)
+    "or-free-auto": ModelSpec("openrouter/free", ProviderType.OPENROUTER, display_name="OR Free Auto-Router", tier=ModelTier.FREE),
+    "or-free-deepseek-r1": ModelSpec("deepseek/deepseek-r1:free", ProviderType.OPENROUTER, temperature=0.2, display_name="DeepSeek R1 (free)", tier=ModelTier.FREE),
+    "or-free-deepseek-chat": ModelSpec("deepseek/deepseek-chat-v3.1:free", ProviderType.OPENROUTER, display_name="DeepSeek Chat v3.1 (free)", tier=ModelTier.FREE),
+    "or-free-llama-70b": ModelSpec("meta-llama/llama-3.3-70b-instruct:free", ProviderType.OPENROUTER, display_name="Llama 3.3 70B (free)", tier=ModelTier.FREE),
+    "or-free-qwen-coder": ModelSpec("qwen/qwen3-coder-480b:free", ProviderType.OPENROUTER, display_name="Qwen3 Coder 480B (free)", tier=ModelTier.FREE),
+    "or-free-qwen-thinking": ModelSpec("qwen/qwen3-235b-a22b-thinking-2507:free", ProviderType.OPENROUTER, temperature=0.2, display_name="Qwen3 235B Thinking (free)", tier=ModelTier.FREE),
+    "or-free-nemotron": ModelSpec("nvidia/nemotron-3-nano-30b:free", ProviderType.OPENROUTER, display_name="NVIDIA Nemotron 30B (free)", tier=ModelTier.FREE),
+
+    # NVIDIA hosted (free tier with API key)
+    "qwen-coder-32b": ModelSpec("qwen/qwen2.5-coder-32b-instruct", ProviderType.NVIDIA, display_name="Qwen 2.5 Coder 32B", tier=ModelTier.FREE),
+    "deepseek-r1": ModelSpec("deepseek/deepseek-r1", ProviderType.NVIDIA, temperature=0.2, display_name="DeepSeek R1", tier=ModelTier.FREE),
+    "llama-405b": ModelSpec("meta/llama-3.1-405b-instruct", ProviderType.NVIDIA, display_name="Llama 3.1 405B", tier=ModelTier.FREE),
+    "llama-70b": ModelSpec("meta/llama-3.3-70b-instruct", ProviderType.NVIDIA, display_name="Llama 3.3 70B", tier=ModelTier.FREE),
+    "mistral-large": ModelSpec("mistralai/mistral-large-2-instruct", ProviderType.NVIDIA, display_name="Mistral Large 2", tier=ModelTier.FREE),
+
+    # Groq hosted (free tier, fast inference)
+    "groq-llama-70b": ModelSpec("llama-3.3-70b-versatile", ProviderType.GROQ, display_name="Groq Llama 70B", tier=ModelTier.FREE),
+    "groq-mixtral": ModelSpec("mixtral-8x7b-32768", ProviderType.GROQ, display_name="Groq Mixtral", tier=ModelTier.FREE),
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CHEAP TIER — low-cost models for when free isn't enough
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    "gpt-4o-mini": ModelSpec("gpt-4o-mini", ProviderType.OPENAI, display_name="GPT-4o Mini", tier=ModelTier.CHEAP),
+    "claude-haiku": ModelSpec("claude-haiku-4-5-20251001", ProviderType.ANTHROPIC, display_name="Claude Haiku 4.5", tier=ModelTier.CHEAP),
+    "gemini-2-flash": ModelSpec("gemini-2.0-flash", ProviderType.GEMINI, display_name="Gemini 2.0 Flash", tier=ModelTier.CHEAP),
+    "deepseek-chat": ModelSpec("deepseek-chat", ProviderType.DEEPSEEK, display_name="DeepSeek Chat", tier=ModelTier.CHEAP),
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PREMIUM TIER — frontier models for final reviews, complex tasks, admin-selected
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    "gpt-4o": ModelSpec("gpt-4o", ProviderType.OPENAI, display_name="GPT-4o", tier=ModelTier.PREMIUM),
+    "o1": ModelSpec("o1", ProviderType.OPENAI, temperature=1.0, display_name="o1", tier=ModelTier.PREMIUM),
+    "claude-sonnet": ModelSpec("claude-sonnet-4-20250514", ProviderType.ANTHROPIC, display_name="Claude Sonnet 4", tier=ModelTier.PREMIUM),
+    "gemini-2-pro": ModelSpec("gemini-2.5-pro-preview-05-06", ProviderType.GEMINI, display_name="Gemini 2.5 Pro", tier=ModelTier.PREMIUM),
+    "deepseek-reasoner": ModelSpec("deepseek-reasoner", ProviderType.DEEPSEEK, temperature=0.2, display_name="DeepSeek Reasoner", tier=ModelTier.PREMIUM),
+
+    # OpenRouter paid pass-through (use any model via single key)
+    "or-claude-sonnet": ModelSpec("anthropic/claude-sonnet-4-20250514", ProviderType.OPENROUTER, display_name="Claude Sonnet via OR", tier=ModelTier.PREMIUM),
+    "or-gpt-4o": ModelSpec("openai/gpt-4o", ProviderType.OPENROUTER, display_name="GPT-4o via OR", tier=ModelTier.PREMIUM),
+    "or-llama-405b": ModelSpec("meta-llama/llama-3.1-405b-instruct", ProviderType.OPENROUTER, display_name="Llama 405B via OR", tier=ModelTier.PREMIUM),
 }
 
 
@@ -235,6 +264,18 @@ class ProviderRegistry:
                 "configured": bool(os.getenv(provider.api_key_env, "")) if provider else False,
             })
         return result
+
+    def models_by_tier(self, tier: ModelTier) -> list[dict]:
+        """List models filtered by cost tier."""
+        return [
+            {"key": k, "model_id": s.model_id, "provider": s.provider.value,
+             "display_name": s.display_name or k, "tier": s.tier.value}
+            for k, s in MODELS.items() if s.tier == tier
+        ]
+
+    def free_models(self) -> list[dict]:
+        """List all free ($0) models."""
+        return self.models_by_tier(ModelTier.FREE)
 
     @staticmethod
     def register_provider(provider_type: ProviderType, spec: ProviderSpec):
