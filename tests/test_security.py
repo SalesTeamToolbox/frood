@@ -32,9 +32,11 @@ class TestShellPathEnforcement:
         assert "hello" in result.output
 
     @pytest.mark.asyncio
-    async def test_allows_tmp_paths(self):
+    async def test_blocks_tmp_paths(self):
+        """Tmp paths should be blocked — agents should use workspace-local temp files."""
         result = await self.tool.execute(command="ls /tmp")
-        assert result.success is True
+        assert result.success is False
+        assert "Sandbox" in result.error
 
     @pytest.mark.asyncio
     async def test_allows_dev_null(self):
@@ -339,3 +341,307 @@ class TestPasswordVerification:
     def test_empty_password_rejected(self):
         # With no password configured at all, should reject
         assert verify_password("") is False or True  # Depends on settings
+
+
+# ---------------------------------------------------------------------------
+# NEW: Python exec sandboxing
+# ---------------------------------------------------------------------------
+
+class TestPythonExecSandboxing:
+    """Tests for python_exec security hardening."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def test_blocks_os_system(self):
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        err = tool._check_code_safety("import os; os.system('rm -rf /')")
+        assert err is not None
+        assert "Blocked" in err
+
+    def test_blocks_subprocess(self):
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        err = tool._check_code_safety("import subprocess; subprocess.run(['ls'])")
+        assert err is not None
+
+    def test_blocks_os_popen(self):
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        err = tool._check_code_safety("os.popen('cat /etc/passwd')")
+        assert err is not None
+
+    def test_blocks_eval(self):
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        err = tool._check_code_safety("eval('__import__(\"os\").system(\"id\")')")
+        assert err is not None
+
+    def test_blocks_exec(self):
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        err = tool._check_code_safety("exec('import os')")
+        assert err is not None
+
+    def test_blocks_ctypes(self):
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        err = tool._check_code_safety("import ctypes")
+        assert err is not None
+
+    def test_blocks_dunder_import(self):
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        err = tool._check_code_safety("__import__('os').system('id')")
+        assert err is not None
+
+    def test_allows_safe_code(self):
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        err = tool._check_code_safety("x = 1 + 2\nprint(x)")
+        assert err is None
+
+    def test_allows_math_imports(self):
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        err = tool._check_code_safety("import math\nprint(math.pi)")
+        assert err is None
+
+    def test_allows_json(self):
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        err = tool._check_code_safety("import json\ndata = json.loads('{}')")
+        assert err is None
+
+    def test_safe_env_strips_api_keys(self):
+        import os
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        # Temporarily set a test API key
+        os.environ["TEST_API_KEY"] = "secret123"
+        try:
+            safe = tool._safe_env()
+            assert "TEST_API_KEY" not in safe
+            assert "PYTHONDONTWRITEBYTECODE" in safe
+        finally:
+            del os.environ["TEST_API_KEY"]
+
+    def test_safe_env_strips_jwt_secret(self):
+        import os
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        os.environ["JWT_SECRET"] = "mysecret"
+        try:
+            safe = tool._safe_env()
+            assert "JWT_SECRET" not in safe
+        finally:
+            del os.environ["JWT_SECRET"]
+
+    def test_safe_env_keeps_path(self):
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        safe = tool._safe_env()
+        assert "PATH" in safe
+
+    @pytest.mark.asyncio
+    async def test_execute_blocks_dangerous_code(self):
+        from tools.python_exec import PythonExecTool
+        tool = PythonExecTool(self.tmpdir)
+        result = await tool.execute(code="import subprocess; subprocess.run(['ls'])")
+        assert not result.success
+        assert "Blocked" in result.error
+
+
+# ---------------------------------------------------------------------------
+# NEW: Sandbox null byte and symlink handling
+# ---------------------------------------------------------------------------
+
+class TestSandboxHardening:
+    """Tests for sandbox null byte and symlink protection."""
+
+    def setup_method(self):
+        self.sandbox = WorkspaceSandbox("/tmp/test_workspace", enabled=True)
+
+    def test_blocks_null_byte_in_path(self):
+        with pytest.raises(SandboxViolation):
+            self.sandbox.resolve_path("file.txt\x00/../../etc/passwd")
+
+    def test_blocks_null_byte_alone(self):
+        with pytest.raises(SandboxViolation):
+            self.sandbox.resolve_path("\x00")
+
+    def test_blocks_embedded_null(self):
+        with pytest.raises(SandboxViolation):
+            self.sandbox.resolve_path("normal\x00evil")
+
+    def test_resolve_follows_symlinks(self):
+        """resolve() should follow symlinks, catching those that escape."""
+        import os
+        tmpdir = tempfile.mkdtemp()
+        sandbox = WorkspaceSandbox(tmpdir)
+        # Create a symlink pointing outside the sandbox
+        link_path = os.path.join(tmpdir, "escape_link")
+        try:
+            os.symlink("/etc/passwd", link_path)
+            with pytest.raises(SandboxViolation):
+                sandbox.resolve_path("escape_link")
+        finally:
+            try:
+                os.unlink(link_path)
+            except OSError:
+                pass
+            os.rmdir(tmpdir)
+
+    def test_safe_symlink_inside_workspace(self):
+        """Symlinks within the workspace should work fine."""
+        import os
+        tmpdir = tempfile.mkdtemp()
+        sandbox = WorkspaceSandbox(tmpdir)
+        target = os.path.join(tmpdir, "real_file.txt")
+        link = os.path.join(tmpdir, "link_file.txt")
+        try:
+            with open(target, "w") as f:
+                f.write("test")
+            os.symlink(target, link)
+            resolved = sandbox.resolve_path("link_file.txt")
+            assert str(resolved).startswith(tmpdir)
+        finally:
+            try:
+                os.unlink(link)
+                os.unlink(target)
+            except OSError:
+                pass
+            os.rmdir(tmpdir)
+
+
+# ---------------------------------------------------------------------------
+# NEW: Command filter additional patterns
+# ---------------------------------------------------------------------------
+
+class TestCommandFilterNewPatterns:
+    """Tests for new deny patterns added to command filter."""
+
+    def setup_method(self):
+        self.filter = CommandFilter()
+
+    def test_blocks_nohup(self):
+        with pytest.raises(CommandFilterError):
+            self.filter.check("nohup python malware.py &")
+
+    def test_blocks_disown(self):
+        with pytest.raises(CommandFilterError):
+            self.filter.check("python background.py & disown")
+
+    def test_blocks_screen(self):
+        with pytest.raises(CommandFilterError):
+            self.filter.check("screen -S session python long_running.py")
+
+    def test_blocks_tmux(self):
+        with pytest.raises(CommandFilterError):
+            self.filter.check("tmux new-session -d 'python server.py'")
+
+    def test_blocks_printenv(self):
+        with pytest.raises(CommandFilterError):
+            self.filter.check("printenv")
+
+    def test_blocks_bare_env(self):
+        with pytest.raises(CommandFilterError):
+            self.filter.check("env")
+
+    def test_allows_env_with_command(self):
+        """'env VAR=value command' should still work (not bare env)."""
+        # The pattern only matches bare 'env' at start of line
+        assert self.filter.check("env VAR=1 python script.py") == "env VAR=1 python script.py"
+
+    def test_blocks_tee_to_etc(self):
+        with pytest.raises(CommandFilterError):
+            self.filter.check("echo 'hack' | tee /etc/crontab")
+
+    def test_blocks_tee_to_ssh(self):
+        with pytest.raises(CommandFilterError):
+            self.filter.check("echo 'key' | tee .ssh/authorized_keys")
+
+    def test_blocks_tee_to_env_file(self):
+        with pytest.raises(CommandFilterError):
+            self.filter.check("echo 'SECRET=val' | tee .env")
+
+    def test_blocks_history(self):
+        with pytest.raises(CommandFilterError):
+            self.filter.check("history")
+
+    def test_allows_tee_to_normal_file(self):
+        """tee to a regular file should still work."""
+        assert self.filter.check("echo 'hello' | tee output.txt") == "echo 'hello' | tee output.txt"
+
+
+# ---------------------------------------------------------------------------
+# NEW: Git tool argument sanitization
+# ---------------------------------------------------------------------------
+
+class TestGitToolSanitization:
+    """Tests for git tool argument injection prevention."""
+
+    def setup_method(self):
+        from tools.git_tool import GitTool
+        self.tool = GitTool("/tmp/test_workspace")
+
+    def test_blocks_upload_pack_flag(self):
+        err = self.tool._sanitize_args("--upload-pack='evil_script'")
+        assert err is not None
+        assert "dangerous" in err.lower()
+
+    def test_blocks_exec_flag(self):
+        err = self.tool._sanitize_args("--exec=/bin/evil")
+        assert err is not None
+
+    def test_blocks_config_flag(self):
+        err = self.tool._sanitize_args("-c core.editor=evil")
+        assert err is not None
+
+    def test_allows_normal_args(self):
+        err = self.tool._sanitize_args("main --oneline -20")
+        assert err is None
+
+    def test_allows_file_paths(self):
+        err = self.tool._sanitize_args("src/main.py")
+        assert err is None
+
+    def test_allows_branch_name(self):
+        err = self.tool._sanitize_args("feature/new-thing")
+        assert err is None
+
+    @pytest.mark.asyncio
+    async def test_execute_blocks_dangerous_args(self):
+        result = await self.tool.execute(action="log", args="--upload-pack=evil")
+        assert not result.success
+        assert "dangerous" in result.error.lower() or "Blocked" in result.error
+
+
+# ---------------------------------------------------------------------------
+# NEW: Shell /tmp removal
+# ---------------------------------------------------------------------------
+
+class TestShellTmpBlocked:
+    """Verify /tmp is no longer in safe paths."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.sandbox = WorkspaceSandbox(self.tmpdir)
+        self.tool = ShellTool(self.sandbox, CommandFilter())
+
+    @pytest.mark.asyncio
+    async def test_tmp_is_blocked(self):
+        result = await self.tool.execute(command="cat /tmp/some_file")
+        assert result.success is False
+        assert "Sandbox" in result.error
+
+    @pytest.mark.asyncio
+    async def test_dev_null_still_allowed(self):
+        result = await self.tool.execute(command="echo test > /dev/null")
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_usr_bin_still_allowed(self):
+        result = await self.tool.execute(command="/usr/bin/env echo hello")
+        assert result.success is True

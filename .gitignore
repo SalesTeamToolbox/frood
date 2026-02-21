@@ -4,8 +4,8 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
-dist/
-build/
+/dist/
+/build/
 
 # Environment
 .env
@@ -15,7 +15,6 @@ build/
 
 # Node
 node_modules/
-dashboard/frontend/dist/
 
 # IDE
 .vscode/

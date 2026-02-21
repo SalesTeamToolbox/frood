@@ -275,9 +275,10 @@ The shell tool has two layers of defense:
 - Firewall: `iptables -F`, `ufw disable`
 
 **Layer 2: Path enforcement** — scans commands for absolute paths and blocks
-any that fall outside the workspace sandbox. System paths (`/usr/bin`, `/tmp`,
-etc.) are allowed. This prevents `cat /etc/hosts`, `sed /var/www/...`,
-`ls /home/user/.ssh/`, etc.
+any that fall outside the workspace sandbox. System utility paths (`/usr/bin`,
+`/usr/lib`, etc.) are allowed. `/tmp` is intentionally excluded from safe paths
+to prevent staging attack payloads outside the sandbox. This prevents
+`cat /etc/hosts`, `sed /var/www/...`, `ls /home/user/.ssh/`, etc.
 
 Admins can add extra deny patterns or switch to allowlist-only mode.
 
@@ -420,8 +421,9 @@ agent42/
 │   ├── worktree_manager.py    # Git worktree lifecycle
 │   ├── approval_gate.py       # Protected operation intercept
 │   ├── heartbeat.py           # Agent health monitoring
-│   ├── command_filter.py      # Shell command safety filter
-│   └── sandbox.py             # Workspace path restriction
+│   ├── command_filter.py      # Shell command safety filter (40+ deny patterns)
+│   ├── sandbox.py             # Workspace path restriction (symlink + null byte protection)
+│   └── complexity.py          # Task complexity assessment + team recommendation
 ├── agents/
 │   ├── agent.py               # Per-task agent orchestration (code + non-code modes)
 │   ├── model_router.py        # Free-first task-type -> model routing
@@ -486,10 +488,14 @@ agent42/
 │   ├── session.py             # Per-conversation session history
 │   └── embeddings.py          # Vector store + semantic search
 ├── dashboard/
-│   ├── server.py              # FastAPI + WebSocket server
-│   ├── auth.py                # JWT authentication
-│   └── websocket_manager.py   # Real-time broadcast
-├── tests/                     # 460 tests across 12 test files
+│   ├── server.py              # FastAPI + WebSocket server (security headers, auth)
+│   ├── auth.py                # JWT authentication + rate limiting
+│   ├── websocket_manager.py   # Real-time broadcast
+│   └── frontend/dist/         # SPA dashboard (vanilla JS, no build step)
+│       ├── index.html         # Entry point
+│       ├── app.js             # Full SPA (login, tasks, approvals, tools, skills, settings)
+│       └── style.css          # Dark theme CSS
+├── tests/                     # 540+ tests across 19 test files
 ├── .env.example               # All configuration options
 ├── requirements.txt
 ├── tasks.json.example
@@ -600,18 +606,69 @@ Video generation is async — the tool returns a job ID for polling:
 Admin override: Set `AGENT42_IMAGE_MODEL` or `AGENT42_VIDEO_MODEL` env vars to
 force specific models for all generations.
 
+## Dashboard
+
+Agent42 includes a full web dashboard for managing tasks, approvals, tools,
+skills, and settings.
+
+### Features
+
+- **Login** — JWT-based authentication with bcrypt password hashing
+- **Task Management** — Create, view, approve, cancel, retry tasks with real-time status updates
+- **Task Detail** — Full task info: status, type, iterations, description, output/error
+- **Approvals** — Approve or deny agent operations (email send, git push, file delete) from the dashboard
+- **Review with Feedback** — Approve or request changes on completed tasks; feedback is stored in agent memory for learning
+- **Tools & Skills** — View all registered tools and loaded skills
+- **Settings** — Organized into 5 tabs with clear descriptions for every setting:
+  - **LLM Providers** — API keys for OpenRouter, OpenAI, Anthropic, DeepSeek, Gemini, Replicate, Luma, Brave
+  - **Channels** — Discord, Slack, Telegram, Email (IMAP/SMTP) configuration
+  - **Security** — Dashboard auth, rate limiting, sandbox settings, CORS
+  - **Orchestrator** — Concurrent agents, spending limits, repo path, task file, MCP, cron
+  - **Storage & Paths** — Memory, sessions, outputs, templates, images, skills directories
+- **WebSocket** — Real-time updates with exponential backoff reconnection
+- **Responsive** — Mobile-friendly layout with sidebar navigation
+
+Settings are read-only in the dashboard (configured via environment variables in `.env`).
+Each setting shows its environment variable name, current status, and help text.
+
 ## Security
 
 Agent42 is designed to run safely on a shared VPS alongside other services
 (your website, databases, etc.). The agent cannot access anything outside its
 workspace.
 
-- **Workspace sandbox**: Filesystem tools can only read/write within the project worktree. Path traversal (`../`) and absolute paths outside workspace are blocked.
-- **Shell path enforcement**: Shell commands are scanned for absolute paths — any path outside the workspace (e.g. `/var/www`, `/etc/nginx`) is blocked before execution.
-- **Command filter**: 30+ dangerous command patterns blocked (destructive ops, network exfiltration, service manipulation, package installation, container escape, user/permission changes).
-- **Approval gates**: Sensitive operations (email, push, delete, external API calls) require dashboard approval before execution.
-- **Channel allowlists**: Restrict which users can submit tasks per channel.
-- **Dashboard auth**: JWT-based authentication with bcrypt password hashing.
-- **WebSocket auth**: Real-time dashboard connections require a valid JWT token (`/ws?token=<jwt>`). Unauthenticated connections are rejected.
-- Put nginx in front with HTTPS before making public.
-- `JWT_SECRET` should be a 64-char random string.
+### Sandbox & Execution
+
+- **Workspace sandbox** — Filesystem tools can only read/write within the project worktree. Path traversal (`../`) and absolute paths outside workspace are blocked. Null bytes in paths are rejected. Symlinks that escape the sandbox are detected and blocked.
+- **Shell path enforcement** — Shell commands are scanned for absolute paths — any path outside the workspace (e.g. `/var/www`, `/etc/nginx`) is blocked before execution. `/tmp` is excluded from safe paths to prevent attack staging.
+- **Command filter** — 40+ dangerous command patterns blocked (destructive ops, network exfiltration, service manipulation, package installation, container escape, user/permission changes, background processes, env variable exfiltration, history access, writing to sensitive files).
+- **Python execution** — Python code is checked for dangerous patterns (subprocess, os.system, ctypes, eval/exec, etc.) before execution. API keys and secrets are stripped from the subprocess environment.
+- **Git tool sanitization** — Git arguments are scanned for dangerous flags (`--upload-pack`, `--exec`, `-c`) that could execute arbitrary commands. Sensitive file staging (.env, credentials.json) is blocked.
+
+### Authentication & Network
+
+- **Dashboard auth** — JWT-based authentication with bcrypt password hashing (plaintext fallback for dev only with warning).
+- **Rate limiting** — Login attempts are rate-limited per IP (default: 5/minute) to prevent brute-force attacks.
+- **WebSocket auth** — Real-time dashboard connections require a valid JWT token (`/ws?token=<jwt>`). Unauthenticated connections are rejected. Message size is validated (max 4KB).
+- **WebSocket connection limits** — Maximum 50 simultaneous WebSocket connections (configurable).
+- **CORS** — Restricted to configured origins only (no wildcard). Empty = same-origin only.
+- **Security headers** — All HTTP responses include: X-Content-Type-Options (nosniff), X-Frame-Options (DENY), CSP (script-src 'self'), Referrer-Policy, Permissions-Policy. HSTS enabled over HTTPS.
+- **Health endpoint** — Public `/health` returns only `{"status": "ok"}`. Detailed metrics available via authenticated `/api/health`.
+- **SSRF protection** — HTTP client and web search tools block requests to private/internal IPs (127.0.0.1, 169.254.x.x, 10.x.x.x, 192.168.x.x).
+
+### Approval Gates
+
+Sensitive operations pause the agent and require dashboard approval:
+- `gmail_send` — sending email
+- `git_push` — pushing code
+- `file_delete` — deleting files
+- `external_api` — calling external services
+
+### Production Recommendations
+
+- Put nginx in front with HTTPS before making public
+- Set `JWT_SECRET` to a 64-char random string
+- Use `DASHBOARD_PASSWORD_HASH` (bcrypt) instead of plaintext `DASHBOARD_PASSWORD`
+- Set `CORS_ALLOWED_ORIGINS` to your domain
+- Set `MAX_DAILY_API_SPEND_USD` to cap API costs
+- Keep `SANDBOX_ENABLED=true` and `WORKSPACE_RESTRICT=true`

@@ -32,24 +32,43 @@ class WorkspaceSandbox:
     def resolve_path(self, path: str | Path) -> Path:
         """Resolve a path and verify it's within the sandbox.
 
-        Blocks path traversal (../) and absolute paths outside the allowed directory.
+        Blocks path traversal (../), absolute paths outside the allowed directory,
+        null bytes in paths, and symlinks that escape the sandbox.
         """
         if not self.enabled:
             return Path(path).resolve()
 
-        target = Path(path)
+        path_str = str(path)
+
+        # Block null bytes — can bypass C-level path checks
+        if "\x00" in path_str:
+            raise SandboxViolation(repr(path_str), str(self.allowed_dir))
+
+        target = Path(path_str)
 
         # Resolve relative paths against allowed_dir
         if not target.is_absolute():
             target = self.allowed_dir / target
 
+        # resolve() follows symlinks to get the real path
         resolved = target.resolve()
 
-        # Verify the resolved path is within the allowed directory
+        # Verify the resolved (real) path is within the allowed directory
         try:
             resolved.relative_to(self.allowed_dir)
         except ValueError:
             raise SandboxViolation(str(path), str(self.allowed_dir))
+
+        # If the target exists and is a symlink, also verify the symlink target
+        # This catches symlinks created after initial resolution (defense in depth)
+        if target.is_symlink():
+            link_target = target.resolve(strict=False)
+            try:
+                link_target.relative_to(self.allowed_dir)
+            except ValueError:
+                raise SandboxViolation(
+                    f"{path} (symlink to {link_target})", str(self.allowed_dir)
+                )
 
         return resolved
 

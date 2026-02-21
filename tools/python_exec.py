@@ -4,17 +4,52 @@ Python execution tool — run Python code in a sandboxed subprocess.
 Inspired by OpenHands' IPythonRunCellAction.
 Executes Python code snippets and returns stdout/stderr/return value.
 Isolated from the main process for safety.
+
+Security:
+- Blocks dangerous imports (os.system, subprocess, shutil.rmtree, etc.)
+- Strips API keys and secrets from the subprocess environment
+- Enforces execution timeout and output limits
 """
 
 import asyncio
 import json
 import logging
 import os
+import re
 import tempfile
 
 from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.python_exec")
+
+# Patterns that indicate dangerous code — block before execution
+_DANGEROUS_PATTERNS: list[re.Pattern] = [
+    re.compile(p)
+    for p in [
+        r"\bos\.system\b",
+        r"\bos\.popen\b",
+        r"\bos\.exec\w*\b",
+        r"\bos\.spawn\w*\b",
+        r"\bos\.kill\b",
+        r"\bsubprocess\b",
+        r"\bshutil\.rmtree\b",
+        r"\b__import__\b",
+        r"\bimportlib\b",
+        r"\beval\s*\(",
+        r"\bexec\s*\(",
+        r"\bcompile\s*\(",
+        r"\bopen\s*\(.*/etc/",
+        r"\bopen\s*\(.*/proc/",
+        r"\bsocket\.socket\b",
+        r"\bctypes\b",
+    ]
+]
+
+# Environment variable prefixes/names that contain secrets and must be stripped
+_SECRET_ENV_PATTERNS = [
+    "API_KEY", "API_TOKEN", "SECRET", "PASSWORD", "CREDENTIAL",
+    "BOT_TOKEN", "JWT_SECRET", "DASHBOARD_PASSWORD",
+]
 
 
 class PythonExecTool(Tool):
@@ -53,6 +88,28 @@ class PythonExecTool(Tool):
             "required": ["code"],
         }
 
+    @staticmethod
+    def _safe_env() -> dict[str, str]:
+        """Build a subprocess environment with secrets stripped out."""
+        env = {}
+        for key, val in os.environ.items():
+            if any(pattern in key.upper() for pattern in _SECRET_ENV_PATTERNS):
+                continue
+            env[key] = val
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return env
+
+    @staticmethod
+    def _check_code_safety(code: str) -> str | None:
+        """Check code for dangerous patterns. Returns error message or None."""
+        for pattern in _DANGEROUS_PATTERNS:
+            if pattern.search(code):
+                return (
+                    f"Blocked: code contains dangerous pattern '{pattern.pattern}'. "
+                    f"Use dedicated tools (shell, http_client, etc.) instead."
+                )
+        return None
+
     async def execute(
         self,
         code: str = "",
@@ -61,6 +118,11 @@ class PythonExecTool(Tool):
     ) -> ToolResult:
         if not code:
             return ToolResult(error="No code provided", success=False)
+
+        # Check for dangerous patterns before execution
+        safety_error = self._check_code_safety(code)
+        if safety_error:
+            return ToolResult(error=safety_error, success=False)
 
         # Cap timeout at 5 minutes
         timeout = min(timeout, 300)
@@ -80,7 +142,7 @@ class PythonExecTool(Tool):
                 cwd=self._workspace,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                env=self._safe_env(),
             )
 
             try:
