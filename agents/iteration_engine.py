@@ -463,8 +463,10 @@ class IterationEngine:
         working_messages = list(messages)
 
         for round_num in range(MAX_TOOL_ROUNDS):
+            # Re-fetch schemas each round so dynamically created tools are visible
+            current_schemas = self.tool_registry.all_schemas() if self.tool_registry else tool_schemas
             response = await self._complete_with_tools_retry(
-                model, working_messages, tool_schemas
+                model, working_messages, current_schemas
             )
 
             choice = response.choices[0]
