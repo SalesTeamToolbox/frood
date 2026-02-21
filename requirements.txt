@@ -22,6 +22,10 @@ aiofiles>=23.0.0
 # HTTP client (Phase 4: web search, web fetch)
 httpx>=0.27.0
 
+# ── Optional memory backends (install as needed) ───────────────────────
+# Qdrant:    pip install qdrant-client         (vector DB for semantic search)
+# Redis:     pip install redis[hiredis]        (session cache + embedding cache)
+
 # ── Optional channel dependencies (install as needed) ──────────────────
 # Discord:   pip install discord.py
 # Slack:     pip install slack-sdk aiohttp

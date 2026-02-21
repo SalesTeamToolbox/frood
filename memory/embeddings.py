@@ -1,8 +1,16 @@
 """
 Semantic memory — vector embeddings for meaning-based search.
 
-Uses any OpenAI-compatible embedding API (OpenAI or OpenRouter) and a
-lightweight JSON-backed vector store. No heavy deps (no numpy, no faiss).
+Uses any OpenAI-compatible embedding API (OpenAI or OpenRouter) with a
+pluggable vector store backend:
+
+1. Qdrant backend (preferred) — HNSW-indexed search, payload filtering,
+   persistence, and scalability. Supports server or embedded mode.
+2. JSON backend (fallback) — Pure-Python cosine similarity with JSON
+   file storage. Works everywhere, no extra dependencies.
+
+Embedding cache via Redis (optional) — avoids redundant API calls for
+repeated queries.
 
 Gracefully degrades to grep-based search when no embedding API is configured.
 """
@@ -50,7 +58,10 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
 
 
 class EmbeddingStore:
-    """JSON-backed vector store for semantic memory search.
+    """Pluggable vector store for semantic memory search.
+
+    Uses Qdrant when available (HNSW-indexed), falls back to JSON
+    (linear scan). Optionally caches embeddings in Redis.
 
     Resolution order for embedding API:
     1. EMBEDDING_MODEL + EMBEDDING_PROVIDER env vars (explicit config)
@@ -59,13 +70,15 @@ class EmbeddingStore:
     4. Disabled — falls back to grep search
     """
 
-    def __init__(self, store_path: str | Path):
+    def __init__(self, store_path: str | Path, qdrant_store=None, redis_backend=None):
         self.store_path = Path(store_path)
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
         self._entries: list[EmbeddingEntry] = []
         self._client: AsyncOpenAI | None = None
         self._model: str = ""
         self._loaded = False
+        self._qdrant = qdrant_store  # QdrantStore instance (optional)
+        self._redis = redis_backend  # RedisSessionBackend instance (optional)
         self._resolve_provider()
 
     def _resolve_provider(self):
@@ -133,16 +146,36 @@ class EmbeddingStore:
             encoding="utf-8",
         )
 
+    @property
+    def qdrant_available(self) -> bool:
+        """Whether the Qdrant backend is available for search."""
+        return self._qdrant is not None and self._qdrant.is_available
+
     async def embed_text(self, text: str) -> list[float]:
-        """Get the embedding vector for a text string."""
+        """Get the embedding vector for a text string.
+
+        Checks Redis cache first, falls back to API call, then caches result.
+        """
         if not self._client:
             raise RuntimeError("No embedding API configured")
+
+        # Check Redis cache
+        if self._redis and self._redis.is_available:
+            cached = self._redis.get_cached_embedding(text)
+            if cached is not None:
+                return cached
 
         response = await self._client.embeddings.create(
             model=self._model,
             input=text,
         )
-        return response.data[0].embedding
+        vector = response.data[0].embedding
+
+        # Cache in Redis
+        if self._redis and self._redis.is_available:
+            self._redis.cache_embedding(text, vector)
+
+        return vector
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """Batch-embed multiple texts."""
@@ -198,18 +231,55 @@ class EmbeddingStore:
         return len(items)
 
     async def search(self, query: str, top_k: int = 5,
-                     source_filter: str = "") -> list[dict]:
+                     source_filter: str = "",
+                     collection: str = "") -> list[dict]:
         """Semantic search: find the most relevant entries for a query.
+
+        When Qdrant is available, uses HNSW-indexed search with payload
+        filtering. Falls back to JSON linear scan otherwise.
+
+        Args:
+            query: Search query text
+            top_k: Number of results
+            source_filter: Filter by source field
+            collection: Qdrant collection suffix (default: searches memory+history)
 
         Returns list of {text, source, section, score, metadata}.
         """
+        # Prefer Qdrant when available
+        if self._qdrant and self._qdrant.is_available:
+            from memory.qdrant_store import QdrantStore
+
+            query_vector = await self.embed_text(query)
+
+            if collection:
+                return self._qdrant.search(
+                    collection, query_vector, top_k=top_k,
+                    source_filter=source_filter,
+                )
+
+            # Search across memory and history collections
+            memory_results = self._qdrant.search(
+                QdrantStore.MEMORY, query_vector, top_k=top_k,
+                source_filter=source_filter,
+            )
+            history_results = self._qdrant.search(
+                QdrantStore.HISTORY, query_vector, top_k=top_k,
+                source_filter=source_filter,
+            )
+
+            # Merge and re-sort by score
+            combined = memory_results + history_results
+            combined.sort(key=lambda x: x["score"], reverse=True)
+            return combined[:top_k]
+
+        # Fallback: JSON linear scan
         self._load()
         if not self._entries:
             return []
 
         query_vector = await self.embed_text(query)
 
-        # Score all entries
         scored = []
         for entry in self._entries:
             if source_filter and entry.source != source_filter:
@@ -217,7 +287,6 @@ class EmbeddingStore:
             score = _cosine_similarity(query_vector, entry.vector)
             scored.append((score, entry))
 
-        # Sort by score descending
         scored.sort(key=lambda x: x[0], reverse=True)
 
         return [
@@ -235,18 +304,33 @@ class EmbeddingStore:
         """Index the contents of MEMORY.md for semantic search.
 
         Splits by sections and indexes each section as a chunk.
+        Writes to Qdrant when available, otherwise to JSON.
         """
-        self._load()
-        # Remove old memory entries
-        self._entries = [e for e in self._entries if e.source != "memory"]
-
-        # Split into sections
         chunks = self._split_into_chunks(memory_text, source="memory")
         if not chunks:
             return 0
 
         texts = [c["text"] for c in chunks]
         vectors = await self.embed_texts(texts)
+
+        # Store in Qdrant if available
+        if self._qdrant and self._qdrant.is_available:
+            from memory.qdrant_store import QdrantStore
+
+            self._qdrant.clear_collection(QdrantStore.MEMORY)
+            payloads = [
+                {"source": "memory", "section": c.get("section", "")}
+                for c in chunks
+            ]
+            count = self._qdrant.upsert_vectors(
+                QdrantStore.MEMORY, texts, vectors, payloads
+            )
+            logger.info(f"Indexed {count} memory chunks → Qdrant")
+            return count
+
+        # Fallback: JSON store
+        self._load()
+        self._entries = [e for e in self._entries if e.source != "memory"]
 
         for chunk, vector in zip(chunks, vectors):
             self._entries.append(EmbeddingEntry(
@@ -258,16 +342,56 @@ class EmbeddingStore:
             ))
 
         self._save()
-        logger.info(f"Indexed {len(chunks)} memory chunks")
+        logger.info(f"Indexed {len(chunks)} memory chunks → JSON")
         return len(chunks)
 
     async def index_history_entry(self, event_type: str, summary: str,
                                   details: str = ""):
-        """Index a single history event for semantic search."""
+        """Index a single history event for semantic search.
+
+        Writes to Qdrant when available, otherwise to JSON.
+        """
         text = f"{event_type}: {summary}"
         if details:
             text += f"\n{details}"
+
+        # Store in Qdrant if available
+        if self._qdrant and self._qdrant.is_available:
+            from memory.qdrant_store import QdrantStore
+
+            vector = await self.embed_text(text)
+            self._qdrant.upsert_single(
+                QdrantStore.HISTORY,
+                text,
+                vector,
+                {"source": "history", "section": event_type},
+            )
+            return
+
+        # Fallback: JSON store
         await self.add_entry(text, source="history", section=event_type)
+
+    async def search_conversations(
+        self,
+        query: str,
+        top_k: int = 5,
+        channel_filter: str = "",
+        time_after: float = 0.0,
+    ) -> list[dict]:
+        """Search across conversation summaries and messages.
+
+        Requires Qdrant — returns empty list if unavailable.
+        """
+        if not self._qdrant or not self._qdrant.is_available:
+            return []
+
+        query_vector = await self.embed_text(query)
+        return self._qdrant.search_conversations(
+            query_vector,
+            top_k=top_k,
+            channel_filter=channel_filter,
+            time_after=time_after,
+        )
 
     @staticmethod
     def _split_into_chunks(text: str, source: str = "",
