@@ -181,6 +181,15 @@ class Agent:
 
             # Post-task learning: reflect on what worked + check for skill creation
             if self.learner:
+                # Extract tool call records for tool effectiveness learning
+                tool_calls_data = []
+                for it_result in history.iterations:
+                    for tc in it_result.tool_calls:
+                        tool_calls_data.append({
+                            "name": tc.tool_name,
+                            "success": tc.success,
+                        })
+
                 await self.learner.reflect_on_task(
                     title=task.title,
                     task_type=task.task_type.value,
@@ -188,6 +197,7 @@ class Agent:
                     max_iterations=routing["max_iterations"],
                     iteration_summary=history.summary(),
                     succeeded=True,
+                    tool_calls=tool_calls_data,
                 )
                 # Check if this task's pattern should be saved as a reusable skill
                 existing_names = (
@@ -335,6 +345,12 @@ class Agent:
             memory_context = self.memory_store.build_context()
             if memory_context.strip():
                 parts.append(f"\n{memory_context}")
+
+        # Include tool usage recommendations from prior learning (Phase 9)
+        if self.learner:
+            tool_recs = self.learner.get_tool_recommendations(task.task_type.value)
+            if tool_recs:
+                parts.append(f"\n{tool_recs}")
 
         return "\n".join(parts)
 

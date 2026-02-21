@@ -34,6 +34,8 @@ Outcome: {outcome}
 
 {failure_details}
 
+{tool_usage_section}
+
 Respond with a structured analysis:
 
 ## What Worked
@@ -41,6 +43,11 @@ Respond with a structured analysis:
 
 ## What Didn't Work
 - (list approaches that failed or needed revision, if any)
+
+## Tool Effectiveness
+- (evaluate which tools were most/least useful for this task type)
+- (note any tools that failed or were used incorrectly)
+- (suggest tool preferences for future tasks of this type)
 
 ## Lesson Learned
 One concise sentence capturing the key takeaway for future tasks of this type.
@@ -50,6 +57,8 @@ If there's a reusable pattern or preference to remember, write it as a single
 bullet point starting with the section name in brackets, e.g.:
 [Project Conventions] - This repo uses pytest with --strict-markers flag
 [Common Patterns] - API endpoints follow /api/v1/resource_name pattern
+[Tool Preferences] - For content tasks, use content_analyzer before scoring_tool
+[Tool Preferences] - For marketing tasks, always apply persona tool first
 
 If nothing worth remembering, write: NONE
 """
@@ -101,8 +110,13 @@ class Learner:
         iteration_summary: str,
         succeeded: bool,
         error: str = "",
+        tool_calls: list[dict] | None = None,
     ) -> dict:
         """Run post-task reflection and update memory with lessons learned.
+
+        Args:
+            tool_calls: List of tool call records from iteration history.
+                Each dict has: name, success (bool), arguments (optional).
 
         Returns a dict with the reflection results for logging/display.
         """
@@ -114,6 +128,9 @@ class Learner:
                 "Focus your analysis on WHY this failed and how to prevent it."
             )
 
+        # Build tool usage section for the reflection prompt
+        tool_usage_section = self._build_tool_usage_section(tool_calls or [], task_type)
+
         prompt = REFLECTION_PROMPT.format(
             title=title,
             task_type=task_type,
@@ -122,6 +139,7 @@ class Learner:
             outcome=outcome,
             iteration_summary=iteration_summary,
             failure_details=failure_details,
+            tool_usage_section=tool_usage_section,
         )
 
         try:
@@ -219,6 +237,74 @@ class Learner:
                 f"({task_title}) {feedback.strip()[:200]}",
             )
             logger.info(f"Reviewer rejection recorded for '{task_title}'")
+
+    def get_tool_recommendations(self, task_type: str) -> str:
+        """Read memory for tool preference entries matching a task type.
+
+        Returns guidance text to inject into the agent's system prompt.
+        """
+        memory_content = self.memory.read_memory()
+        if not memory_content:
+            return ""
+
+        recommendations = []
+        for line in memory_content.split("\n"):
+            stripped = line.strip().lstrip("- ")
+            # Look for [Tool Preferences] entries
+            if stripped.startswith("[Tool Preferences]"):
+                content = stripped[len("[Tool Preferences]"):].strip().lstrip("- ").strip()
+                if content:
+                    # Check if the recommendation is relevant to this task type
+                    lower_content = content.lower()
+                    if task_type.lower() in lower_content or "all task" in lower_content:
+                        recommendations.append(f"- {content}")
+                    elif not any(t.value in lower_content for t in __import__('core.task_queue', fromlist=['TaskType']).TaskType):
+                        # Generic recommendation (not task-type-specific)
+                        recommendations.append(f"- {content}")
+
+        if not recommendations:
+            return ""
+
+        return (
+            "\n## Tool Usage Recommendations (from prior experience)\n"
+            + "\n".join(recommendations)
+        )
+
+    @staticmethod
+    def _build_tool_usage_section(
+        tool_calls: list[dict], task_type: str
+    ) -> str:
+        """Build a tool usage summary for the reflection prompt."""
+        if not tool_calls:
+            return "Tool usage: No tools were called during this task."
+
+        # Aggregate tool stats
+        tool_stats: dict[str, dict] = {}
+        for tc in tool_calls:
+            name = tc.get("name", "unknown")
+            success = tc.get("success", True)
+            if name not in tool_stats:
+                tool_stats[name] = {"total": 0, "success": 0, "fail": 0}
+            tool_stats[name]["total"] += 1
+            if success:
+                tool_stats[name]["success"] += 1
+            else:
+                tool_stats[name]["fail"] += 1
+
+        lines = [
+            f"Tool usage summary (task_type={task_type}):",
+            f"Total tool calls: {len(tool_calls)}",
+            "",
+        ]
+        for name, stats in sorted(tool_stats.items()):
+            rate = (stats["success"] / stats["total"] * 100) if stats["total"] > 0 else 0
+            lines.append(
+                f"- {name}: {stats['total']} calls "
+                f"({stats['success']} success, {stats['fail']} fail, "
+                f"{rate:.0f}% success rate)"
+            )
+
+        return "\n".join(lines)
 
     # -- Internal helpers -------------------------------------------------------
 
