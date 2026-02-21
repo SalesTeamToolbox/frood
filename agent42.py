@@ -35,6 +35,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from core.config import settings
+from core.capacity import compute_effective_capacity
 from core.task_queue import TaskQueue, Task, TaskType, TaskStatus, infer_task_type
 from core.worktree_manager import WorktreeManager
 from core.approval_gate import ApprovalGate
@@ -120,7 +121,8 @@ class Agent42:
         self.ws_manager = WebSocketManager()
         self.worktree_manager = WorktreeManager(str(self.repo_path))
         self.approval_gate = ApprovalGate(self.task_queue)
-        self._semaphore = asyncio.Semaphore(self.max_agents)
+        self._active_count = 0
+        self._active_lock = asyncio.Lock()
         self._shutdown_event = asyncio.Event()
 
         # Phase 1: Security
@@ -165,6 +167,7 @@ class Agent42:
         self.heartbeat = HeartbeatService(
             on_stall=self._on_agent_stall,
             on_heartbeat=self._on_heartbeat,
+            configured_max_agents=self.max_agents,
         )
 
         # Phase 9: Context-aware intent classification
@@ -480,10 +483,28 @@ class Agent42:
         await self.ws_manager.broadcast("system_health", health.to_dict())
 
     async def _run_agent(self, task):
-        """Execute a single agent with concurrency limiting."""
+        """Execute a single agent with dynamic concurrency limiting.
+
+        Uses real-time CPU and memory metrics to determine whether a new
+        agent can be dispatched.  Running agents are never killed — the
+        gate only prevents new dispatches when the system is under load.
+        """
         self.heartbeat.register_agent(task.id)
         try:
-            async with self._semaphore:
+            # Wait until capacity allows a new agent
+            while True:
+                cap = compute_effective_capacity(self.max_agents)
+                async with self._active_lock:
+                    if self._active_count < cap["effective_max"]:
+                        self._active_count += 1
+                        break
+                logger.debug(
+                    f"Capacity full ({self._active_count}/{cap['effective_max']}), "
+                    f"waiting to dispatch task {task.id}"
+                )
+                await asyncio.sleep(10)
+
+            try:
                 agent = Agent(
                     task=task,
                     task_queue=self.task_queue,
@@ -497,6 +518,9 @@ class Agent42:
                 )
                 await agent.run()
                 self.heartbeat.mark_complete(task.id)
+            finally:
+                async with self._active_lock:
+                    self._active_count -= 1
         except Exception:
             self.heartbeat.mark_failed(task.id)
             raise
@@ -568,6 +592,7 @@ class Agent42:
                 skill_loader=self.skill_loader,
                 channel_manager=self.channel_manager,
                 learner=self.learner,
+                heartbeat=self.heartbeat,
             )
             config = uvicorn.Config(
                 app,

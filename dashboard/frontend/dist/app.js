@@ -17,6 +17,7 @@ const state = {
   channels: [],
   providers: {},
   health: {},
+  status: {},
 };
 
 // ---------------------------------------------------------------------------
@@ -101,6 +102,9 @@ function handleWSMessage(msg) {
     }
     // Update stats
     renderStats();
+  } else if (msg.type === "system_health") {
+    state.status = msg.data;
+    if (state.page === "status") renderStatus();
   } else if (msg.type === "agent_stall") {
     toast(`Agent stalled: ${msg.data.task_id}`, "error");
   }
@@ -160,6 +164,12 @@ async function loadHealth() {
   try {
     state.health = (await api("/health")) || {};
   } catch { state.health = {}; }
+}
+
+async function loadStatus() {
+  try {
+    state.status = (await api("/status")) || {};
+  } catch { state.status = {}; }
 }
 
 // ---------------------------------------------------------------------------
@@ -601,6 +611,148 @@ function renderSkills() {
   `;
 }
 
+function renderStatus() {
+  const el = document.getElementById("page-content");
+  if (!el || state.page !== "status") return;
+  const s = state.status;
+
+  // Helpers
+  const fmt = (v, d = 1) => (v != null ? Number(v).toFixed(d) : "--");
+  const cores = s.cpu_cores || 1;
+  const effMax = s.effective_max_agents || 0;
+  const cfgMax = s.configured_max_agents || 0;
+  const active = s.active_agents || 0;
+  const stalled = s.stalled_agents || 0;
+  const memTotal = s.memory_total_mb || 0;
+  const memAvail = s.memory_available_mb || 0;
+  const memUsed = memTotal > 0 ? memTotal - memAvail : 0;
+  const memPct = memTotal > 0 ? ((memUsed / memTotal) * 100) : 0;
+  const uptime = s.uptime_seconds || 0;
+
+  function loadBarClass(pct) {
+    if (pct >= 90) return "load-crit";
+    if (pct >= 70) return "load-warn";
+    return "load-ok";
+  }
+
+  function formatUptime(sec) {
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (d > 0) return d + "d " + h + "h " + m + "m";
+    if (h > 0) return h + "h " + m + "m";
+    return m + "m";
+  }
+
+  // Agent slot visualization
+  const freeSlots = Math.max(0, effMax - active - stalled);
+  const restrictedSlots = Math.max(0, cfgMax - effMax);
+  let slotsHtml = "";
+  for (let i = 0; i < active - stalled; i++) slotsHtml += '<div class="agent-slot slot-active" title="Active agent"></div>';
+  for (let i = 0; i < stalled; i++) slotsHtml += '<div class="agent-slot slot-stalled" title="Stalled agent"></div>';
+  for (let i = 0; i < freeSlots; i++) slotsHtml += '<div class="agent-slot slot-free" title="Available slot"></div>';
+  for (let i = 0; i < restrictedSlots; i++) slotsHtml += '<div class="agent-slot slot-restricted" title="Load-restricted slot"></div>';
+
+  // CPU load bars
+  const load1Pct = Math.min(100, ((s.cpu_load_1m || 0) / cores) * 100);
+  const load5Pct = Math.min(100, ((s.cpu_load_5m || 0) / cores) * 100);
+  const load15Pct = Math.min(100, ((s.cpu_load_15m || 0) / cores) * 100);
+
+  el.innerHTML = `
+    <div class="stats-row" style="margin-bottom:1.5rem">
+      <div class="stat-card">
+        <div class="stat-label">Active Agents</div>
+        <div class="stat-value text-warning">${active} <span style="font-size:0.9rem;color:var(--text-muted)">/ ${effMax}</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Effective Capacity</div>
+        <div class="stat-value text-success">${effMax}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">CPU Load (1m)</div>
+        <div class="stat-value ${load1Pct >= 90 ? "text-danger" : load1Pct >= 70 ? "text-warning" : "text-success"}">${fmt(s.cpu_load_1m, 2)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Memory</div>
+        <div class="stat-value ${memPct >= 90 ? "text-danger" : memPct >= 70 ? "text-warning" : "text-info"}">${fmt(memUsed / 1024, 1)} <span style="font-size:0.9rem;color:var(--text-muted)">/ ${fmt(memTotal / 1024, 1)} GB</span></div>
+      </div>
+    </div>
+
+    <div class="capacity-banner">
+      <div class="capacity-number">${effMax}</div>
+      <div class="capacity-detail">
+        <div class="capacity-title">Dynamic Agent Capacity (configured max: ${cfgMax})</div>
+        <div class="capacity-reason">${esc(s.capacity_reason || "Calculating...")}</div>
+      </div>
+    </div>
+
+    <div class="status-grid">
+      <div>
+        <div class="card status-section">
+          <div class="card-header"><h3>Agent Slots</h3></div>
+          <div class="card-body">
+            <div class="agent-slots">${slotsHtml || '<span style="color:var(--text-muted)">No slots configured</span>'}</div>
+            <div class="slot-legend">
+              <div class="slot-legend-item"><div class="slot-legend-dot" style="background:var(--warning)"></div> Active</div>
+              <div class="slot-legend-item"><div class="slot-legend-dot" style="background:var(--success)"></div> Free</div>
+              <div class="slot-legend-item"><div class="slot-legend-dot" style="background:var(--danger)"></div> Stalled</div>
+              <div class="slot-legend-item"><div class="slot-legend-dot" style="background:var(--text-muted);opacity:0.4"></div> Load-restricted</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card status-section" style="margin-top:1rem">
+          <div class="card-header"><h3>CPU Load</h3></div>
+          <div class="card-body">
+            <div class="load-bar-row">
+              <div class="load-label-row"><span class="label">1 min avg</span><span class="value">${fmt(s.cpu_load_1m, 2)} / ${cores}</span></div>
+              <div class="load-bar-track"><div class="load-bar-fill ${loadBarClass(load1Pct)}" style="width:${load1Pct}%"></div></div>
+            </div>
+            <div class="load-bar-row">
+              <div class="load-label-row"><span class="label">5 min avg</span><span class="value">${fmt(s.cpu_load_5m, 2)} / ${cores}</span></div>
+              <div class="load-bar-track"><div class="load-bar-fill ${loadBarClass(load5Pct)}" style="width:${load5Pct}%"></div></div>
+            </div>
+            <div class="load-bar-row">
+              <div class="load-label-row"><span class="label">15 min avg</span><span class="value">${fmt(s.cpu_load_15m, 2)} / ${cores}</span></div>
+              <div class="load-bar-track"><div class="load-bar-fill ${loadBarClass(load15Pct)}" style="width:${load15Pct}%"></div></div>
+            </div>
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:0.5rem">${cores} logical core${cores !== 1 ? "s" : ""} &middot; Load per core: ${fmt(s.load_per_core, 2)}</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card status-section">
+          <div class="card-header"><h3>Memory</h3></div>
+          <div class="card-body">
+            <div class="load-bar-row">
+              <div class="load-label-row"><span class="label">Used</span><span class="value">${fmt(memUsed, 0)} / ${fmt(memTotal, 0)} MB</span></div>
+              <div class="load-bar-track"><div class="load-bar-fill ${loadBarClass(memPct)}" style="width:${memPct}%"></div></div>
+            </div>
+            <div style="margin-top:0.75rem">
+              <div class="status-metric-row"><span class="metric-label">Total</span><span class="metric-value">${fmt(memTotal, 0)} MB</span></div>
+              <div class="status-metric-row"><span class="metric-label">Available</span><span class="metric-value" style="color:var(--success)">${fmt(memAvail, 0)} MB</span></div>
+              <div class="status-metric-row"><span class="metric-label">Used</span><span class="metric-value">${fmt(memUsed, 0)} MB</span></div>
+              <div class="status-metric-row"><span class="metric-label">Process (Agent42)</span><span class="metric-value">${fmt(s.memory_mb, 1)} MB</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card status-section" style="margin-top:1rem">
+          <div class="card-header"><h3>System</h3></div>
+          <div class="card-body">
+            <div class="status-metric-row"><span class="metric-label">Uptime</span><span class="metric-value">${formatUptime(uptime)}</span></div>
+            <div class="status-metric-row"><span class="metric-label">Tools Registered</span><span class="metric-value">${s.tools_registered || 0}</span></div>
+            <div class="status-metric-row"><span class="metric-label">Tasks Pending</span><span class="metric-value text-info">${s.tasks_pending || 0}</span></div>
+            <div class="status-metric-row"><span class="metric-label">Tasks Completed</span><span class="metric-value text-success">${s.tasks_completed || 0}</span></div>
+            <div class="status-metric-row"><span class="metric-label">Tasks Failed</span><span class="metric-value text-danger">${s.tasks_failed || 0}</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderSettings() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "settings") return;
@@ -760,7 +912,7 @@ function settingReadonly(envVar, label, help) {
 // Main render
 // ---------------------------------------------------------------------------
 async function loadAll() {
-  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth()]);
+  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadStatus()]);
 }
 
 function render() {
@@ -796,6 +948,7 @@ function render() {
         <div class="sidebar-brand">Agent<span class="num">42</span></div>
         <nav class="sidebar-nav">
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks')">&#128203; Tasks</a>
+          <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status')">&#128200; Status</a>
           <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals')">&#128274; Approvals ${approvalBadge}</a>
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools')">&#128295; Tools</a>
           <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills')">&#9889; Skills</a>
@@ -809,7 +962,7 @@ function render() {
       </aside>
       <div class="main">
         <div class="topbar">
-          <h2>${{ tasks: "Tasks", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ tasks: "Tasks", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? '<button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button>' : ""}
           </div>
@@ -822,6 +975,7 @@ function render() {
   // Render page content
   const renderers = {
     tasks: renderTasks,
+    status: renderStatus,
     approvals: renderApprovals,
     tools: renderTools,
     skills: renderSkills,
