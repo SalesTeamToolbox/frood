@@ -85,6 +85,8 @@ class Task:
     origin_channel: str = ""      # "discord", "slack", "telegram", "email", ""
     origin_channel_id: str = ""   # Channel/chat ID to respond to
     origin_metadata: dict = field(default_factory=dict)  # Thread IDs, etc.
+    # Device that created this task (empty = dashboard/channel)
+    origin_device_id: str = ""
 
     def to_dict(self) -> dict:
         d = asdict(self)

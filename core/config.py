@@ -102,6 +102,9 @@ class Settings:
     luma_api_key: str = ""
     images_dir: str = ".agent42/images"
 
+    # Device gateway auth (Phase 10)
+    devices_file: str = ".agent42/devices.jsonl"
+
     @classmethod
     def from_env(cls) -> "Settings":
         # Enforce secure JWT secret
@@ -173,6 +176,8 @@ class Settings:
             replicate_api_token=os.getenv("REPLICATE_API_TOKEN", ""),
             luma_api_key=os.getenv("LUMA_API_KEY", ""),
             images_dir=os.getenv("IMAGES_DIR", ".agent42/images"),
+            # Device gateway auth
+            devices_file=os.getenv("DEVICES_FILE", ".agent42/devices.jsonl"),
         )
 
     def get_discord_guild_ids(self) -> list[int]:

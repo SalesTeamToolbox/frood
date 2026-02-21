@@ -7,12 +7,14 @@ Security features:
 - WebSocket connection limits
 - Security response headers (CSP, HSTS, X-Frame-Options, etc.)
 - Health check returns minimal info without auth
+- Device API key authentication for multi-device gateway
 
-Extended with endpoints for providers, tools, skills, and channels.
+Extended with endpoints for providers, tools, skills, channels, and devices.
 """
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,9 +23,19 @@ from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from core.config import settings
+from core.device_auth import DeviceStore, VALID_DEVICE_TYPES, VALID_CAPABILITIES
 from core.task_queue import TaskQueue, Task, TaskType, TaskStatus
 from core.approval_gate import ApprovalGate
-from dashboard.auth import verify_password, create_token, get_current_user, check_rate_limit
+from dashboard.auth import (
+    AuthContext,
+    verify_password,
+    create_token,
+    get_current_user,
+    get_auth_context,
+    require_admin,
+    check_rate_limit,
+    API_KEY_PREFIX,
+)
 from dashboard.websocket_manager import WebSocketManager
 
 logger = logging.getLogger("agent42.server")
@@ -77,6 +89,12 @@ class ReviewFeedback(BaseModel):
     approved: bool
 
 
+class DeviceRegisterRequest(BaseModel):
+    name: str
+    device_type: str = "other"
+    capabilities: list[str] = ["tasks", "monitor"]
+
+
 def create_app(
     task_queue: TaskQueue,
     ws_manager: WebSocketManager,
@@ -85,11 +103,12 @@ def create_app(
     skill_loader=None,
     channel_manager=None,
     learner=None,
+    device_store: Optional[DeviceStore] = None,
     heartbeat=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
-    app = FastAPI(title="Agent42 Dashboard", version="0.3.0")
+    app = FastAPI(title="Agent42 Dashboard", version="0.4.0")
 
     # Security headers on all responses
     app.add_middleware(SecurityHeadersMiddleware)
@@ -194,12 +213,13 @@ def create_app(
 
     @app.post("/api/tasks")
     async def create_task(
-        req: TaskCreateRequest, _user: str = Depends(get_current_user)
+        req: TaskCreateRequest, auth: AuthContext = Depends(get_auth_context)
     ):
         task = Task(
             title=req.title,
             description=req.description,
             task_type=TaskType(req.task_type),
+            origin_device_id=auth.device_id,
         )
         await task_queue.add(task)
         return task.to_dict()
@@ -270,6 +290,81 @@ def create_app(
             await task_queue.approve(task_id)
         return {"status": "feedback recorded", "approved": req.approved}
 
+    # -- Devices (Gateway Authentication) --------------------------------------
+
+    @app.post("/api/devices/register")
+    async def register_device(
+        req: DeviceRegisterRequest, _admin: AuthContext = Depends(require_admin)
+    ):
+        """Register a new device and return its API key (shown once)."""
+        if not device_store:
+            raise HTTPException(status_code=503, detail="Device store not configured")
+
+        device, raw_key = device_store.register(
+            name=req.name,
+            device_type=req.device_type,
+            capabilities=req.capabilities,
+        )
+        return {
+            "device_id": device.device_id,
+            "name": device.name,
+            "device_type": device.device_type,
+            "capabilities": device.capabilities,
+            "api_key": raw_key,
+            "message": "Store this API key securely — it will not be shown again.",
+        }
+
+    @app.get("/api/devices")
+    async def list_devices(_user: str = Depends(get_current_user)):
+        """List all registered devices with online status."""
+        if not device_store:
+            return []
+        connected = ws_manager.connected_device_ids()
+        return [
+            {
+                "device_id": d.device_id,
+                "name": d.name,
+                "device_type": d.device_type,
+                "capabilities": d.capabilities,
+                "created_at": d.created_at,
+                "last_seen": d.last_seen,
+                "is_revoked": d.is_revoked,
+                "is_online": d.device_id in connected,
+            }
+            for d in device_store.list_devices()
+        ]
+
+    @app.get("/api/devices/{device_id}")
+    async def get_device(device_id: str, _user: str = Depends(get_current_user)):
+        """Get details for a specific device."""
+        if not device_store:
+            raise HTTPException(status_code=503, detail="Device store not configured")
+        device = device_store.get(device_id)
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+        connected = ws_manager.connected_device_ids()
+        return {
+            "device_id": device.device_id,
+            "name": device.name,
+            "device_type": device.device_type,
+            "capabilities": device.capabilities,
+            "created_at": device.created_at,
+            "last_seen": device.last_seen,
+            "is_revoked": device.is_revoked,
+            "is_online": device.device_id in connected,
+        }
+
+    @app.post("/api/devices/{device_id}/revoke")
+    async def revoke_device(
+        device_id: str, _admin: AuthContext = Depends(require_admin)
+    ):
+        """Revoke a device's API key (admin only)."""
+        if not device_store:
+            raise HTTPException(status_code=503, detail="Device store not configured")
+        if not device_store.revoke(device_id):
+            raise HTTPException(status_code=404, detail="Device not found")
+        return {"status": "revoked", "device_id": device_id}
+
     # -- Providers (Phase 5) ---------------------------------------------------
 
     @app.get("/api/providers")
@@ -322,29 +417,49 @@ def create_app(
             await ws.close(code=4003, reason="Too many connections")
             return
 
-        # Authenticate via query parameter: ws://host/ws?token=<jwt>
+        # Authenticate via query parameter: ws://host/ws?token=<jwt_or_api_key>
         token = ws.query_params.get("token")
         if not token:
             await ws.close(code=4001, reason="Missing token")
             return
-        try:
-            from jose import jwt as jose_jwt, JWTError, ExpiredSignatureError
-            payload = jose_jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-            if not payload.get("sub"):
+
+        user = ""
+        device_id = ""
+        device_name = ""
+
+        if token.startswith(API_KEY_PREFIX):
+            # API key authentication (device)
+            if not device_store:
+                await ws.close(code=4001, reason="Device auth not configured")
+                return
+            device = device_store.validate_api_key(token)
+            if not device:
+                await ws.close(code=4001, reason="Invalid or revoked API key")
+                return
+            user = "device"
+            device_id = device.device_id
+            device_name = device.name
+        else:
+            # JWT authentication (dashboard user)
+            try:
+                from jose import jwt as jose_jwt, JWTError, ExpiredSignatureError
+                payload = jose_jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+                if not payload.get("sub"):
+                    await ws.close(code=4001, reason="Invalid token")
+                    return
+                user = payload["sub"]
+            except ExpiredSignatureError:
+                await ws.close(code=4001, reason="Token expired")
+                return
+            except JWTError:
                 await ws.close(code=4001, reason="Invalid token")
                 return
-        except ExpiredSignatureError:
-            await ws.close(code=4001, reason="Token expired")
-            return
-        except JWTError:
-            await ws.close(code=4001, reason="Invalid token")
-            return
-        except Exception as e:
-            logger.error(f"Unexpected error in WebSocket auth: {e}")
-            await ws.close(code=1011, reason="Server error")
-            return
+            except Exception as e:
+                logger.error(f"Unexpected error in WebSocket auth: {e}")
+                await ws.close(code=1011, reason="Server error")
+                return
 
-        await ws_manager.connect(ws)
+        await ws_manager.connect(ws, user=user, device_id=device_id, device_name=device_name)
         try:
             while True:
                 data = await ws.receive_text()

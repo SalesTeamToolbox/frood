@@ -42,6 +42,8 @@ from core.approval_gate import ApprovalGate
 from core.sandbox import WorkspaceSandbox
 from core.command_filter import CommandFilter, DEFAULT_ALLOWLIST
 from core.rate_limiter import ToolRateLimiter, ToolLimit
+from core.device_auth import DeviceStore
+from dashboard.auth import init_device_store
 from agents.agent import Agent
 from agents.learner import Learner
 from agents.model_router import ModelRouter
@@ -181,6 +183,10 @@ class Agent42:
         # Phase 6: Memory
         self.memory_store = MemoryStore(self.repo_path / settings.memory_dir)
         self.session_manager = SessionManager(self.repo_path / settings.sessions_dir)
+
+        # Phase 10: Device gateway authentication
+        self.device_store = DeviceStore(self.repo_path / settings.devices_file)
+        init_device_store(self.device_store)
 
         # Self-learning
         self.workspace_skills_dir = self.repo_path / "skills" / "workspace"
@@ -581,6 +587,8 @@ class Agent42:
         logger.info(f"  Sandbox: {'enabled' if settings.sandbox_enabled else 'disabled'}")
         logger.info(f"  Skills loaded: {len(self.skill_loader.all_skills())}")
         logger.info(f"  Tools registered: {len(self.tool_registry.list_tools())}")
+        active_devices = [d for d in self.device_store.list_devices() if not d.is_revoked]
+        logger.info(f"  Registered devices: {len(active_devices)}")
         if not self.headless:
             logger.info(f"  Dashboard: http://{dashboard_host}:{self.dashboard_port}")
 
@@ -619,6 +627,7 @@ class Agent42:
                 skill_loader=self.skill_loader,
                 channel_manager=self.channel_manager,
                 learner=self.learner,
+                device_store=self.device_store,
                 heartbeat=self.heartbeat,
             )
             config = uvicorn.Config(
