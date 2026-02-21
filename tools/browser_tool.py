@@ -10,6 +10,7 @@ import asyncio
 import base64
 import logging
 import os
+import re
 
 from tools.base import Tool, ToolResult
 
@@ -207,9 +208,35 @@ class BrowserTool(Tool):
             html = html[:50000] + "\n... (truncated)"
         return ToolResult(output=html, success=True)
 
+    # Patterns that indicate data exfiltration or dangerous JS operations
+    _BLOCKED_JS_PATTERNS = [
+        re.compile(r'\bfetch\s*\(', re.IGNORECASE),
+        re.compile(r'\bXMLHttpRequest\b', re.IGNORECASE),
+        re.compile(r'\bnew\s+WebSocket\b', re.IGNORECASE),
+        re.compile(r'\bnavigator\.sendBeacon\b', re.IGNORECASE),
+        re.compile(r'\bdocument\.cookie\b', re.IGNORECASE),
+        re.compile(r'\blocalStorage\b', re.IGNORECASE),
+        re.compile(r'\bsessionStorage\b', re.IGNORECASE),
+        re.compile(r'\bindexedDB\b', re.IGNORECASE),
+        re.compile(r'\beval\s*\(', re.IGNORECASE),
+        re.compile(r'\bFunction\s*\(', re.IGNORECASE),
+        re.compile(r'\bimportScripts\b', re.IGNORECASE),
+        re.compile(r'\bwindow\.open\b', re.IGNORECASE),
+    ]
+
     async def _evaluate(self, js: str) -> ToolResult:
         if not js:
             return ToolResult(error="JavaScript code required", success=False)
+
+        # Block dangerous JS patterns that could exfiltrate data
+        for pattern in self._BLOCKED_JS_PATTERNS:
+            if pattern.search(js):
+                return ToolResult(
+                    error=f"Blocked: JavaScript contains disallowed pattern ({pattern.pattern}). "
+                          "Use specific browser actions (text, html, click, fill) instead.",
+                    success=False,
+                )
+
         result = await self._page.evaluate(js)
         return ToolResult(output=str(result), success=True)
 

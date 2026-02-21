@@ -3,6 +3,8 @@ Filesystem tools — sandboxed file operations with path traversal protection.
 """
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 
 from core.sandbox import WorkspaceSandbox, SandboxViolation
@@ -38,14 +40,17 @@ class ReadFileTool(Tool):
     async def execute(self, path: str = "", **kwargs) -> ToolResult:
         try:
             resolved = self._sandbox.resolve_path(path)
-            if not resolved.exists():
-                return ToolResult(error=f"File not found: {path}", success=False)
-            if not resolved.is_file():
-                return ToolResult(error=f"Not a file: {path}", success=False)
+            # Read directly — avoid TOCTOU race between exists() and read_text()
             content = resolved.read_text(encoding="utf-8", errors="replace")
             return ToolResult(output=content)
         except SandboxViolation as e:
             return ToolResult(error=str(e), success=False)
+        except FileNotFoundError:
+            return ToolResult(error=f"File not found: {path}", success=False)
+        except IsADirectoryError:
+            return ToolResult(error=f"Not a file: {path}", success=False)
+        except PermissionError:
+            return ToolResult(error=f"Permission denied: {path}", success=False)
         except Exception as e:
             return ToolResult(error=str(e), success=False)
 
@@ -79,7 +84,15 @@ class WriteFileTool(Tool):
         try:
             resolved = self._sandbox.resolve_path(path)
             resolved.parent.mkdir(parents=True, exist_ok=True)
-            resolved.write_text(content, encoding="utf-8")
+            # Atomic write: write to temp file then rename to prevent TOCTOU races
+            fd, tmp_path = tempfile.mkstemp(dir=str(resolved.parent), prefix=".write_")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(content)
+                os.replace(tmp_path, str(resolved))
+            except Exception:
+                os.unlink(tmp_path)
+                raise
             return ToolResult(output=f"Written to {path}")
         except SandboxViolation as e:
             return ToolResult(error=str(e), success=False)
@@ -116,10 +129,12 @@ class EditFileTool(Tool):
     async def execute(self, path: str = "", old_string: str = "", new_string: str = "", **kwargs) -> ToolResult:
         try:
             resolved = self._sandbox.resolve_path(path)
-            if not resolved.exists():
+            # Read directly — avoid TOCTOU race between exists() and read_text()
+            try:
+                content = resolved.read_text(encoding="utf-8")
+            except FileNotFoundError:
                 return ToolResult(error=f"File not found: {path}", success=False)
 
-            content = resolved.read_text(encoding="utf-8")
             count = content.count(old_string)
 
             if count == 0:
@@ -131,7 +146,15 @@ class EditFileTool(Tool):
                 )
 
             new_content = content.replace(old_string, new_string, 1)
-            resolved.write_text(new_content, encoding="utf-8")
+            # Atomic write via temp file
+            fd, tmp_path = tempfile.mkstemp(dir=str(resolved.parent), prefix=".edit_")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                os.replace(tmp_path, str(resolved))
+            except Exception:
+                os.unlink(tmp_path)
+                raise
             return ToolResult(output=f"Edited {path}")
         except SandboxViolation as e:
             return ToolResult(error=str(e), success=False)

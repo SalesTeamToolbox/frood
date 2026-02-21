@@ -82,7 +82,9 @@ class EmailChannel(BaseChannel):
                 server.send_message(msg)
             logger.info(f"Email sent to {msg['To']}")
         except Exception as e:
-            logger.error(f"Failed to send email: {e}")
+            # Log full error at debug level only to prevent server version disclosure
+            logger.debug(f"SMTP error details: {e}")
+            logger.error("Failed to send email (SMTP error)")
 
     async def _poll_loop(self):
         """Poll IMAP inbox for new messages."""
@@ -146,6 +148,8 @@ class EmailChannel(BaseChannel):
 
             conn.logout()
         except Exception as e:
-            logger.error(f"IMAP fetch error: {e}")
+            # Log full error at debug level only to prevent server version disclosure
+            logger.debug(f"IMAP error details: {e}")
+            logger.error("IMAP fetch error (connection or auth failure)")
 
         return results
