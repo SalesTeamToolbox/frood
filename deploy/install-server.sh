@@ -107,22 +107,13 @@ ${EDITOR:-nano} "$AGENT42_DIR/.env"
 # ── Step 3: Install Nginx config ─────────────────────────────────────────────
 info "Step 3/6: Installing Nginx reverse proxy config..."
 
-sudo cp "$AGENT42_DIR/deploy/nginx-agent42.conf" /etc/nginx/sites-available/agent42
-
 # Create symlink if it doesn't exist
 if [ ! -L /etc/nginx/sites-enabled/agent42 ]; then
     sudo ln -s /etc/nginx/sites-available/agent42 /etc/nginx/sites-enabled/agent42
 fi
 
-# Test nginx config before reloading
-if sudo nginx -t 2>&1; then
-    info "Nginx config is valid"
-else
-    error "Nginx config test failed — check /etc/nginx/sites-available/agent42"
-fi
-
-# The SSL cert doesn't exist yet, so temporarily serve HTTP only
-# Create a minimal HTTP-only config for certbot
+# SSL certs don't exist yet — start with HTTP-only config so certbot can run
+info "Installing temporary HTTP-only config (certbot will add SSL next)..."
 sudo tee /etc/nginx/sites-available/agent42 > /dev/null << NGINX_TEMP
 server {
     listen 80;
@@ -154,8 +145,12 @@ server {
 }
 NGINX_TEMP
 
-sudo nginx -t && sudo systemctl reload nginx
-info "Nginx configured (HTTP only for now)"
+if sudo nginx -t 2>&1; then
+    sudo systemctl reload nginx
+    info "Nginx configured (HTTP only for now)"
+else
+    error "Nginx config test failed — check /etc/nginx/sites-available/agent42"
+fi
 
 # ── Step 4: SSL with Let's Encrypt ───────────────────────────────────────────
 info "Step 4/6: Setting up SSL with Let's Encrypt..."
@@ -177,15 +172,25 @@ if [ "$dns_ready" = "y" ] || [ "$dns_ready" = "Y" ]; then
         warn "certbot failed — you can run it manually later:"
         warn "  sudo certbot --nginx -d ${DOMAIN}"
     }
+
+    # certbot succeeded — install the full nginx config with rate limiting,
+    # security headers, and WebSocket tuning
+    info "Installing full Nginx config with SSL..."
+    sudo cp "$AGENT42_DIR/deploy/nginx-agent42.conf" /etc/nginx/sites-available/agent42
+    if sudo nginx -t 2>&1; then
+        sudo systemctl reload nginx
+        info "Full Nginx config installed"
+    else
+        warn "Full config failed nginx -t — certbot's auto-generated config is still active"
+        warn "Check /etc/nginx/sites-available/agent42 and fix manually"
+    fi
 else
     warn "Skipping certbot. Run it manually when DNS is ready:"
     warn "  sudo certbot --nginx -d ${DOMAIN}"
+    warn "Then install the full config:"
+    warn "  sudo cp ${AGENT42_DIR}/deploy/nginx-agent42.conf /etc/nginx/sites-available/agent42"
+    warn "  sudo nginx -t && sudo systemctl reload nginx"
 fi
-
-# Now install the full nginx config with SSL
-sudo cp "$AGENT42_DIR/deploy/nginx-agent42.conf" /etc/nginx/sites-available/agent42
-sudo nginx -t && sudo systemctl reload nginx
-info "Full Nginx config installed"
 
 # ── Step 5: Install systemd service ──────────────────────────────────────────
 info "Step 5/6: Installing systemd service..."
