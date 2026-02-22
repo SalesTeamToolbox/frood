@@ -417,7 +417,7 @@ def create_app(
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
         if learner:
-            learner.record_reviewer_feedback(
+            await learner.record_reviewer_feedback(
                 task_id=task_id,
                 task_title=task.title,
                 feedback=req.feedback,

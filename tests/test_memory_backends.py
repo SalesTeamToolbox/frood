@@ -490,3 +490,133 @@ class TestEmbeddingStoreWithBackends:
         results = await store.search("programming", top_k=5)
         assert len(results) == 1
         assert results[0]["text"] == "Python is great"
+
+
+# ── Tests for Gap 7: Embedding cache hash length ──────────────────────────
+
+
+class TestEmbeddingCacheHashLength:
+    """Verify embedding cache uses full SHA-256 to avoid collisions."""
+
+    def test_cache_key_uses_full_hash(self):
+        """Cache key should use full 64-char SHA-256 hex, not truncated."""
+        import hashlib
+
+        # Create backend with a mock client directly
+        config = RedisConfig(url="redis://localhost:6379/0")
+        backend = RedisSessionBackend.__new__(RedisSessionBackend)
+        backend.config = config
+        backend._session_ttl = config.session_ttl_days * 86400
+        backend._embed_ttl = config.embedding_cache_ttl_hours * 3600
+        backend._client = MagicMock()
+
+        backend.cache_embedding("test text", [0.1, 0.2])
+
+        # Get the key that was passed to setex
+        call_args = backend._client.setex.call_args
+        key = call_args[0][0]  # First positional arg is the key
+
+        # Extract the hash portion (after "agent42:embed_cache:")
+        hash_part = key.split(":")[-1]
+        # Full SHA-256 is 64 hex chars
+        assert len(hash_part) == 64
+
+
+# ── Tests for Gap 8: Batch embed with Redis cache ─────────────────────────
+
+
+class TestBatchEmbedWithCache:
+    """Verify embed_texts() uses Redis cache for individual items."""
+
+    @pytest.mark.asyncio
+    async def test_embed_texts_uses_cache(self):
+        """embed_texts should check Redis cache and skip cached items."""
+        mock_redis = MagicMock()
+        mock_redis.is_available = True
+        # First text is cached, second is not
+        mock_redis.get_cached_embedding.side_effect = [
+            [0.1, 0.2, 0.3],  # Cache hit for "cached text"
+            None,              # Cache miss for "uncached text"
+        ]
+
+        store = EmbeddingStore(
+            Path(tempfile.mkdtemp()) / "embeddings.json",
+            redis_backend=mock_redis,
+        )
+        store._client = MagicMock()
+        store._model = "test-model"
+
+        mock_response = MagicMock()
+        mock_response.data = [MagicMock(embedding=[0.4, 0.5, 0.6])]
+        store._client.embeddings = MagicMock()
+        store._client.embeddings.create = AsyncMock(return_value=mock_response)
+
+        vectors = await store.embed_texts(["cached text", "uncached text"])
+
+        assert vectors[0] == [0.1, 0.2, 0.3]  # From cache
+        assert vectors[1] == [0.4, 0.5, 0.6]  # From API
+
+        # API should only be called once (for the uncached text)
+        store._client.embeddings.create.assert_called_once()
+        # The uncached result should be cached
+        mock_redis.cache_embedding.assert_called_once_with(
+            "uncached text", [0.4, 0.5, 0.6]
+        )
+
+    @pytest.mark.asyncio
+    async def test_embed_texts_all_cached(self):
+        """embed_texts should skip API entirely when all texts are cached."""
+        mock_redis = MagicMock()
+        mock_redis.is_available = True
+        mock_redis.get_cached_embedding.side_effect = [
+            [0.1, 0.2],
+            [0.3, 0.4],
+        ]
+
+        store = EmbeddingStore(
+            Path(tempfile.mkdtemp()) / "embeddings.json",
+            redis_backend=mock_redis,
+        )
+        store._client = MagicMock()
+        store._model = "test-model"
+        store._client.embeddings = MagicMock()
+        store._client.embeddings.create = AsyncMock()
+
+        vectors = await store.embed_texts(["a", "b"])
+
+        assert vectors == [[0.1, 0.2], [0.3, 0.4]]
+        # API should NOT have been called
+        store._client.embeddings.create.assert_not_called()
+
+
+# ── Tests for Gap 10: Qdrant point ID format ──────────────────────────────
+
+
+class TestQdrantPointIdFormat:
+    """Verify point IDs are valid UUIDs for Qdrant compatibility."""
+
+    def test_point_id_is_valid_uuid(self):
+        """_make_point_id should return a valid UUID string."""
+        import uuid
+        config = QdrantConfig()
+        store = QdrantStore(config)
+        point_id = store._make_point_id("test text", "memory")
+        # Should be parseable as a UUID
+        parsed = uuid.UUID(point_id)
+        assert str(parsed) == point_id
+
+    def test_point_id_is_deterministic(self):
+        """Same input should always produce the same UUID."""
+        config = QdrantConfig()
+        store = QdrantStore(config)
+        id1 = store._make_point_id("hello world", "memory")
+        id2 = store._make_point_id("hello world", "memory")
+        assert id1 == id2
+
+    def test_different_inputs_produce_different_ids(self):
+        """Different inputs should produce different UUIDs."""
+        config = QdrantConfig()
+        store = QdrantStore(config)
+        id1 = store._make_point_id("text a", "memory")
+        id2 = store._make_point_id("text b", "memory")
+        assert id1 != id2

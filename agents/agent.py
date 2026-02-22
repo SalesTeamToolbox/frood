@@ -152,7 +152,7 @@ class Agent:
             system_prompt = self._build_system_prompt(task)
 
             # Build task context with file contents, skills, and memory
-            task_context = self._build_context(task, worktree_path)
+            task_context = await self._build_context(task, worktree_path)
 
             # Run iteration engine with task-type-aware critic
             history = await self.engine.run(
@@ -287,11 +287,12 @@ class Agent:
     # File extensions for non-code tasks (reference documents)
     _NONCODE_EXTENSIONS = (".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".html", ".xml")
 
-    def _build_context(self, task: Task, worktree_path: Path) -> str:
+    async def _build_context(self, task: Task, worktree_path: Path) -> str:
         """Build the full task context including file contents, skills, and memory.
 
         For code tasks: reads source files from the worktree.
         For non-code tasks: reads reference documents and prior outputs.
+        Uses semantic memory search when available, falls back to recent history.
         """
         is_code_task = task.task_type in _CODE_TASK_TYPES
         parts = [
@@ -346,9 +347,14 @@ class Agent:
             if skill_context:
                 parts.append(f"\n{skill_context}")
 
-        # Include memory context (Phase 6)
+        # Include memory context (Phase 6) — semantic when available
         if self.memory_store:
-            memory_context = self.memory_store.build_context()
+            if self.memory_store.semantic_available:
+                memory_context = await self.memory_store.build_context_semantic(
+                    query=task.description,
+                )
+            else:
+                memory_context = self.memory_store.build_context()
             if memory_context.strip():
                 parts.append(f"\n{memory_context}")
 
