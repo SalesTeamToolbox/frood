@@ -25,7 +25,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 DOMAIN="agent42.meatheadgear.com"
 AGENT42_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-AGENT42_PORT=8001
+AGENT42_PORT=8002
 
 echo ""
 echo "  ╔══════════════════════════════════════════╗"
