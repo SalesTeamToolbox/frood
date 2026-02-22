@@ -32,7 +32,7 @@ from pathlib import Path
 import uvicorn
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).parent / ".env", override=True)
 
 from agents.agent import Agent
 from agents.learner import Learner
