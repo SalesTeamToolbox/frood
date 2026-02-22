@@ -368,6 +368,19 @@ class Settings:
                 'for production. Generate: python -c "from passlib.context import '
                 "CryptContext; print(CryptContext(['bcrypt']).hash('yourpassword'))\""
             )
+        # Diagnostic info (never log the actual password)
+        if self.dashboard_password:
+            pw = self.dashboard_password
+            masked = pw[0] + "*" * (len(pw) - 2) + pw[-1] if len(pw) > 2 else "***"
+            warnings.append(
+                f"Auth config: username='{self.dashboard_username}', "
+                f"password={masked} (len={len(pw)}), hash={'set' if self.dashboard_password_hash else 'not set'}"
+            )
+        elif self.dashboard_password_hash:
+            warnings.append(
+                f"Auth config: username='{self.dashboard_username}', "
+                f"password=not set, hash=set (bcrypt)"
+            )
         return warnings
 
 
