@@ -119,7 +119,10 @@ class TunnelTool(Tool):
     async def _start_cloudflared(self, port: int) -> tuple[asyncio.subprocess.Process, str]:
         """Start a Cloudflare tunnel."""
         proc = await asyncio.create_subprocess_exec(
-            "cloudflared", "tunnel", "--url", f"http://localhost:{port}",
+            "cloudflared",
+            "tunnel",
+            "--url",
+            f"http://localhost:{port}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -146,8 +149,14 @@ class TunnelTool(Tool):
     async def _start_serveo(self, port: int) -> tuple[asyncio.subprocess.Process, str]:
         """Start a Serveo tunnel via SSH."""
         proc = await asyncio.create_subprocess_exec(
-            "ssh", "-o", "StrictHostKeyChecking=no", "-o", "ServerAliveInterval=60",
-            "-R", f"80:localhost:{port}", "serveo.net",
+            "ssh",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "ServerAliveInterval=60",
+            "-R",
+            f"80:localhost:{port}",
+            "serveo.net",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -172,8 +181,14 @@ class TunnelTool(Tool):
     async def _start_localhost_run(self, port: int) -> tuple[asyncio.subprocess.Process, str]:
         """Start a localhost.run tunnel via SSH."""
         proc = await asyncio.create_subprocess_exec(
-            "ssh", "-o", "StrictHostKeyChecking=no", "-o", "ServerAliveInterval=60",
-            "-R", f"80:localhost:{port}", "nokey@localhost.run",
+            "ssh",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "ServerAliveInterval=60",
+            "-R",
+            f"80:localhost:{port}",
+            "nokey@localhost.run",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -234,9 +249,7 @@ class TunnelTool(Tool):
         # Check if port already tunneled
         for t in self._tunnels.values():
             if t.port == port:
-                return ToolResult(
-                    output=f"Port {port} already tunneled: {t.url} (ID: {t.id})"
-                )
+                return ToolResult(output=f"Port {port} already tunneled: {t.url} (ID: {t.id})")
 
         # Detect provider
         actual_provider = provider if provider != "auto" else self._detect_provider()
