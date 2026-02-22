@@ -81,6 +81,8 @@ class Task:
     updated_at: float = field(default_factory=time.time)
     iterations: int = 0
     max_iterations: int = 8
+    retry_count: int = 0
+    max_retries: int = 3
     worktree_path: str = ""
     result: str = ""
     error: str = ""
@@ -223,6 +225,10 @@ class TaskQueue:
         if not task:
             return
         if task.status == TaskStatus.FAILED:
+            if task.retry_count >= task.max_retries:
+                logger.warning(f"Task {task_id} exceeded max retries ({task.max_retries})")
+                return
+            task.retry_count += 1
             task.status = TaskStatus.PENDING
             task.error = ""
             task.result = ""
@@ -230,7 +236,7 @@ class TaskQueue:
             await self._queue.put(task)
             await self._notify(task)
             await self._persist()
-            logger.info(f"Task retried: {task_id}")
+            logger.info(f"Task retried: {task_id} (attempt {task.retry_count}/{task.max_retries})")
 
     def get(self, task_id: str) -> Task | None:
         return self._tasks.get(task_id)

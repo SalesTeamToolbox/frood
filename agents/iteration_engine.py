@@ -344,6 +344,7 @@ class IterationEngine:
             tool_schemas = self.tool_registry.all_schemas()
 
         prev_feedback = ""
+        primary_output = ""
 
         for i in range(1, max_iterations + 1):
             logger.info(f"Iteration {i}/{max_iterations} — primary: {primary_model}")
@@ -361,7 +362,7 @@ class IterationEngine:
                         f"(limit: {max_ctx}, strategy: {strategy})"
                     )
                     if strategy == "error":
-                        history.final_output = primary_output if 'primary_output' in dir() else ""
+                        history.final_output = primary_output
                         history.total_iterations = i
                         return history
                     elif strategy == "truncate_oldest" and len(messages) > 3:

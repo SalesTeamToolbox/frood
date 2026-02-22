@@ -125,14 +125,12 @@ class Agent42:
         self.task_queue = TaskQueue(tasks_json_path=settings.tasks_json_path)
         self.ws_manager = WebSocketManager()
         self.worktree_manager = WorktreeManager(str(self.repo_path))
-        self.approval_gate = ApprovalGate(self.task_queue)
         self._active_count = 0
         self._active_lock = asyncio.Lock()
         self.approval_gate = ApprovalGate(
             self.task_queue,
             log_path=settings.approval_log_path,
         )
-        self._semaphore = asyncio.Semaphore(self.max_agents)
         self._shutdown_event = asyncio.Event()
 
         # Phase 1: Security

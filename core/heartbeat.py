@@ -109,6 +109,7 @@ class HeartbeatService:
         on_stall=None,
         on_heartbeat=None,
         notification_service=None,
+        configured_max_agents: int = 4,
     ):
         self._interval = interval
         self._agents: dict[str, AgentHeartbeat] = {}

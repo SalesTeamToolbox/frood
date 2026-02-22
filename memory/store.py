@@ -131,12 +131,19 @@ class MemoryStore:
                 content = self.history_path.read_text(encoding="utf-8")
                 midpoint = len(content) // 2
                 boundary = content.find("\n---\n", midpoint)
+                if boundary == -1:
+                    # Search backward from midpoint for nearest entry separator
+                    boundary = content.rfind("\n---\n", 0, midpoint)
                 if boundary > 0:
                     archived = content[:boundary + 5]
                     kept = content[boundary + 5:]
                 else:
-                    kept = content[midpoint:]
-                    archived = content[:midpoint]
+                    # No separator found; split at nearest newline to avoid mid-entry corruption
+                    nl = content.find("\n", midpoint)
+                    if nl == -1:
+                        nl = midpoint
+                    kept = content[nl + 1:]
+                    archived = content[:nl + 1]
 
                 archive_path = self.history_path.with_suffix(".old.md")
                 archive_path.write_text(archived, encoding="utf-8")
