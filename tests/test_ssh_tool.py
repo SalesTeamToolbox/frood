@@ -73,9 +73,7 @@ class TestSSHTool:
         approval_gate.request = AsyncMock(return_value=False)
         with patch("tools.ssh_tool.settings") as mock_settings:
             mock_settings.get_ssh_allowed_hosts.return_value = []
-            result = await ssh_tool.execute(
-                action="connect", host="example.com", username="user"
-            )
+            result = await ssh_tool.execute(action="connect", host="example.com", username="user")
         assert not result.success
         assert "denied by approval gate" in result.error
 
@@ -92,9 +90,7 @@ class TestSSHTool:
 
     @pytest.mark.asyncio
     async def test_execute_not_connected(self, ssh_tool):
-        result = await ssh_tool.execute(
-            action="execute", host="example.com", command="ls"
-        )
+        result = await ssh_tool.execute(action="execute", host="example.com", command="ls")
         assert not result.success
         assert "Not connected" in result.error
 
@@ -116,9 +112,7 @@ class TestSSHTool:
             connected_at=time.time(),
         )
 
-        result = await ssh_tool.execute(
-            action="execute", host="example.com", command="rm -rf /"
-        )
+        result = await ssh_tool.execute(action="execute", host="example.com", command="rm -rf /")
         assert not result.success
         assert "blocked" in result.error.lower() or "filter" in result.error.lower()
 
@@ -254,8 +248,12 @@ class TestSanitizeOutput:
 
         mock_conn = MagicMock()
         ssh_tool._connections["host1:22"] = SSHConnection(
-            host="host1", port=22, username="u",
-            conn=mock_conn, approved=True, connected_at=time.time(),
+            host="host1",
+            port=22,
+            username="u",
+            conn=mock_conn,
+            approved=True,
+            connected_at=time.time(),
         )
         ssh_tool._approved_hosts.add("host1:22")
 

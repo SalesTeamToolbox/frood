@@ -154,7 +154,9 @@ class Settings:
 
     # SSH remote shell
     ssh_enabled: bool = False
-    ssh_allowed_hosts: str = ""  # Comma-separated host patterns (e.g., "*.mycompany.com,192.168.1.*")
+    ssh_allowed_hosts: str = (
+        ""  # Comma-separated host patterns (e.g., "*.mycompany.com,192.168.1.*")
+    )
     ssh_default_key_path: str = ""  # Path to default SSH private key
     ssh_max_upload_mb: int = 50  # Max file transfer size in MB
     ssh_command_timeout: int = 120  # Per-command timeout in seconds

@@ -100,8 +100,14 @@ class SSHTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["connect", "execute", "upload", "download", "disconnect",
-                             "list_connections"],
+                    "enum": [
+                        "connect",
+                        "execute",
+                        "upload",
+                        "download",
+                        "disconnect",
+                        "list_connections",
+                    ],
                     "description": "Action to perform",
                 },
                 "host": {
@@ -252,6 +258,7 @@ class SSHTool(Tool):
             )
 
             import time
+
             self._connections[key] = SSHConnection(
                 host=host,
                 port=port,
@@ -369,6 +376,7 @@ class SSHTool(Tool):
 
         # Check file size
         import os
+
         if not os.path.isfile(str(resolved)):
             return ToolResult(error=f"Local file not found: {local_path}", success=False)
 
@@ -381,6 +389,7 @@ class SSHTool(Tool):
 
         try:
             import asyncssh
+
             await asyncssh.scp(str(resolved), (conn_info.conn, remote_path))
             logger.info(f"SSH upload: {local_path} → {host}:{remote_path}")
             return ToolResult(output=f"Uploaded {local_path} → {host}:{remote_path}")
@@ -418,10 +427,12 @@ class SSHTool(Tool):
 
         try:
             import asyncssh
+
             await asyncssh.scp((conn_info.conn, remote_path), str(resolved))
 
             # Check downloaded file size
             import os
+
             if os.path.isfile(str(resolved)):
                 size_mb = os.path.getsize(str(resolved)) / (1024 * 1024)
                 if size_mb > settings.ssh_max_upload_mb:
@@ -454,6 +465,7 @@ class SSHTool(Tool):
             return ToolResult(output="No active SSH connections.")
 
         import time
+
         lines = [f"{'Host':<30} {'User':<15} {'Connected':<20}"]
         for key, conn in self._connections.items():
             if conn.conn is not None:

@@ -100,9 +100,7 @@ class TestKnowledgeTool:
 
     @pytest.mark.asyncio
     async def test_import_file_not_found(self, knowledge_tool):
-        result = await knowledge_tool.execute(
-            action="import_file", path="nonexistent.txt"
-        )
+        result = await knowledge_tool.execute(action="import_file", path="nonexistent.txt")
         assert not result.success or "not found" in result.output.lower()
 
     @pytest.mark.asyncio
@@ -116,9 +114,7 @@ class TestKnowledgeTool:
             mock_settings.knowledge_chunk_size = 100
             mock_settings.knowledge_chunk_overlap = 10
             mock_settings.knowledge_max_results = 10
-            result = await knowledge_tool.execute(
-                action="import_file", path=str(test_file)
-            )
+            result = await knowledge_tool.execute(action="import_file", path=str(test_file))
 
         assert result.success
         assert "Imported" in result.output
@@ -127,15 +123,15 @@ class TestKnowledgeTool:
     @pytest.mark.asyncio
     async def test_import_markdown_file(self, knowledge_tool, tmp_path):
         test_file = tmp_path / "readme.md"
-        test_file.write_text("# Title\n\nSome markdown content.\n\n## Section\n\nMore content here.")
+        test_file.write_text(
+            "# Title\n\nSome markdown content.\n\n## Section\n\nMore content here."
+        )
 
         with patch("tools.knowledge_tool.settings") as mock_settings:
             mock_settings.knowledge_dir = str(tmp_path / "knowledge")
             mock_settings.knowledge_chunk_size = 100
             mock_settings.knowledge_chunk_overlap = 10
-            result = await knowledge_tool.execute(
-                action="import_file", path=str(test_file)
-            )
+            result = await knowledge_tool.execute(action="import_file", path=str(test_file))
 
         assert result.success
 
@@ -144,9 +140,7 @@ class TestKnowledgeTool:
         test_file = tmp_path / "binary.exe"
         test_file.write_bytes(b"\x00\x01\x02")
 
-        result = await knowledge_tool.execute(
-            action="import_file", path=str(test_file)
-        )
+        result = await knowledge_tool.execute(action="import_file", path=str(test_file))
         assert not result.success or "Unsupported" in result.output
 
     @pytest.mark.asyncio
@@ -161,9 +155,7 @@ class TestKnowledgeTool:
             mock_settings.knowledge_chunk_size = 100
             mock_settings.knowledge_chunk_overlap = 10
             mock_settings.knowledge_max_results = 10
-            result = await knowledge_tool.execute(
-                action="import_dir", path=str(tmp_path)
-            )
+            result = await knowledge_tool.execute(action="import_dir", path=str(tmp_path))
 
         assert result.success
         assert "2 files" in result.output  # Only .txt and .md
@@ -229,9 +221,7 @@ class TestKnowledgeTool:
             mock_settings.knowledge_dir = str(tmp_path / "knowledge")
             mock_settings.knowledge_chunk_size = 100
             mock_settings.knowledge_chunk_overlap = 10
-            result = await knowledge_tool.execute(
-                action="import_file", path=str(test_file)
-            )
+            result = await knowledge_tool.execute(action="import_file", path=str(test_file))
 
         assert result.success
 
@@ -244,8 +234,6 @@ class TestKnowledgeTool:
             mock_settings.knowledge_dir = str(tmp_path / "knowledge")
             mock_settings.knowledge_chunk_size = 100
             mock_settings.knowledge_chunk_overlap = 10
-            result = await knowledge_tool.execute(
-                action="import_file", path=str(test_file)
-            )
+            result = await knowledge_tool.execute(action="import_file", path=str(test_file))
 
         assert result.success

@@ -132,9 +132,7 @@ class TestTunnelTool:
 
     @pytest.mark.asyncio
     async def test_list_with_tunnels(self, tunnel_tool):
-        tunnel = TunnelInfo(
-            id="abc", port=8000, provider="serveo", url="https://abc.serveo.net"
-        )
+        tunnel = TunnelInfo(id="abc", port=8000, provider="serveo", url="https://abc.serveo.net")
         tunnel_tool._tunnels["abc"] = tunnel
 
         result = await tunnel_tool.execute(action="list")

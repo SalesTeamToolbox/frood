@@ -171,9 +171,7 @@ class CronScheduler:
                     except Exception as e:
                         logger.error(f"Cron callback error: {e}")
                         job.state = JobState.FAILED
-                        job.error_history.append(
-                            {"time": now, "error": str(e)}
-                        )
+                        job.error_history.append({"time": now, "error": str(e)})
                         # Keep only last 10 errors
                         job.error_history = job.error_history[-10:]
 
@@ -187,8 +185,7 @@ class CronScheduler:
 
             # Clean up completed one-time jobs
             completed_once = [
-                jid for jid, j in self._jobs.items()
-                if j.job_type == JobType.ONCE and not j.enabled
+                jid for jid, j in self._jobs.items() if j.job_type == JobType.ONCE and not j.enabled
             ]
             for jid in completed_once:
                 del self._jobs[jid]
@@ -340,8 +337,16 @@ class CronTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "add", "schedule_once", "schedule_plan",
-                             "remove", "enable", "disable", "task_status"],
+                    "enum": [
+                        "list",
+                        "add",
+                        "schedule_once",
+                        "schedule_plan",
+                        "remove",
+                        "enable",
+                        "disable",
+                        "task_status",
+                    ],
                     "description": "Action to perform",
                 },
                 "name": {"type": "string", "description": "Job name (for add/schedule_once)"},
@@ -359,7 +364,10 @@ class CronTool(Tool):
                     "description": "Task type (default: coding)",
                     "default": "coding",
                 },
-                "job_id": {"type": "string", "description": "Job ID (for remove/enable/disable/task_status)"},
+                "job_id": {
+                    "type": "string",
+                    "description": "Job ID (for remove/enable/disable/task_status)",
+                },
                 "run_at": {
                     "type": "number",
                     "description": "Unix timestamp to run at (for schedule_once)",
@@ -448,8 +456,11 @@ class CronTool(Tool):
         )
         self._scheduler.add_job(job)
         import datetime
+
         run_str = datetime.datetime.fromtimestamp(run_at).strftime("%Y-%m-%d %H:%M:%S")
-        return ToolResult(output=f"Scheduled one-time task: {job.id} — {job.name} (runs at {run_str})")
+        return ToolResult(
+            output=f"Scheduled one-time task: {job.id} — {job.name} (runs at {run_str})"
+        )
 
     def _schedule_plan(self, **kwargs) -> ToolResult:
         steps = kwargs.get("steps", [])
@@ -514,6 +525,7 @@ class CronTool(Tool):
             return ToolResult(error=f"Job not found: {job_id}", success=False)
 
         import datetime
+
         created = datetime.datetime.fromtimestamp(job.created_at).strftime("%Y-%m-%d %H:%M")
         last_run = (
             datetime.datetime.fromtimestamp(job.last_run).strftime("%Y-%m-%d %H:%M")

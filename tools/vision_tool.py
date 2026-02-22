@@ -127,18 +127,25 @@ class VisionTool(Tool):
             return Path(), f"File not found: {image_path}"
 
         if path.suffix.lower() not in SUPPORTED_FORMATS:
-            return Path(), f"Unsupported format: {path.suffix}. Supported: {', '.join(sorted(SUPPORTED_FORMATS))}"
+            return (
+                Path(),
+                f"Unsupported format: {path.suffix}. Supported: {', '.join(sorted(SUPPORTED_FORMATS))}",
+            )
 
         # Check file size
         size_mb = os.path.getsize(str(path)) / (1024 * 1024)
         if size_mb > settings.vision_max_image_mb:
-            return Path(), f"Image too large ({size_mb:.1f}MB). Max: {settings.vision_max_image_mb}MB"
+            return (
+                Path(),
+                f"Image too large ({size_mb:.1f}MB). Max: {settings.vision_max_image_mb}MB",
+            )
 
         return path, None
 
     async def _load_and_encode(self, path: Path) -> tuple[str, str]:
         """Load an image, compress it, and return (base64_data, mime_type)."""
         import aiofiles
+
         async with aiofiles.open(path, "rb") as f:
             raw_data = await f.read()
 

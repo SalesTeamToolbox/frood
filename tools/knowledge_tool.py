@@ -427,7 +427,9 @@ class KnowledgeTool(Tool):
 
     def _action_list(self) -> ToolResult:
         if not self._documents:
-            return ToolResult(output="Knowledge base is empty. Use import_file or import_dir to add documents.")
+            return ToolResult(
+                output="Knowledge base is empty. Use import_file or import_dir to add documents."
+            )
 
         lines = [f"{'File':<40} {'Type':<6} {'Chunks':<8} {'Imported':<20}"]
         for doc in self._documents.values():
@@ -435,8 +437,10 @@ class KnowledgeTool(Tool):
             lines.append(
                 f"{doc.file_name:<40} {doc.file_type:<6} {doc.chunk_count:<8} {imported_str:<20}"
             )
-        lines.append(f"\nTotal: {len(self._documents)} documents, "
-                      f"{sum(d.chunk_count for d in self._documents.values())} chunks")
+        lines.append(
+            f"\nTotal: {len(self._documents)} documents, "
+            f"{sum(d.chunk_count for d in self._documents.values())} chunks"
+        )
         return ToolResult(output="\n".join(lines))
 
     async def _action_delete(self, path: str = "", **kwargs) -> ToolResult:
@@ -457,6 +461,7 @@ class KnowledgeTool(Tool):
         chunk_dir = self._knowledge_dir / Path(doc.file_name).stem
         if chunk_dir.exists():
             import shutil
+
             shutil.rmtree(chunk_dir, ignore_errors=True)
 
         self._save_index()

@@ -23,6 +23,7 @@ def vision_tool(sandbox):
 def _can_import_pillow() -> bool:
     try:
         from PIL import Image  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -32,6 +33,7 @@ def _create_test_image(path: Path, width: int = 100, height: int = 100) -> Path:
     """Create a minimal valid PNG image file for testing."""
     try:
         from PIL import Image
+
         img = Image.new("RGB", (width, height), color="red")
         img.save(str(path), format="PNG")
     except ImportError:
@@ -41,7 +43,11 @@ def _create_test_image(path: Path, width: int = 100, height: int = 100) -> Path:
 
         def _png_chunk(chunk_type, data):
             chunk = chunk_type + data
-            return struct.pack(">I", len(data)) + chunk + struct.pack(">I", zlib.crc32(chunk) & 0xFFFFFFFF)
+            return (
+                struct.pack(">I", len(data))
+                + chunk
+                + struct.pack(">I", zlib.crc32(chunk) & 0xFFFFFFFF)
+            )
 
         sig = b"\x89PNG\r\n\x1a\n"
         ihdr = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
@@ -55,7 +61,10 @@ def _create_test_image(path: Path, width: int = 100, height: int = 100) -> Path:
 class TestVisionTool:
     def test_tool_properties(self, vision_tool):
         assert vision_tool.name == "vision"
-        assert "vision" in vision_tool.description.lower() or "image" in vision_tool.description.lower()
+        assert (
+            "vision" in vision_tool.description.lower()
+            or "image" in vision_tool.description.lower()
+        )
         params = vision_tool.parameters
         assert params["type"] == "object"
         assert "action" in params["properties"]
@@ -74,9 +83,7 @@ class TestVisionTool:
 
     @pytest.mark.asyncio
     async def test_analyze_file_not_found(self, vision_tool):
-        result = await vision_tool.execute(
-            action="analyze", image_path="nonexistent.png"
-        )
+        result = await vision_tool.execute(action="analyze", image_path="nonexistent.png")
         assert not result.success
         assert "not found" in result.error.lower()
 
@@ -84,9 +91,7 @@ class TestVisionTool:
     async def test_analyze_unsupported_format(self, vision_tool, tmp_path):
         test_file = tmp_path / "doc.docx"
         test_file.write_bytes(b"fake content")
-        result = await vision_tool.execute(
-            action="analyze", image_path=str(test_file)
-        )
+        result = await vision_tool.execute(action="analyze", image_path=str(test_file))
         assert not result.success
         assert "Unsupported format" in result.error
 
@@ -97,9 +102,7 @@ class TestVisionTool:
 
         with patch("tools.vision_tool.settings") as mock_settings:
             mock_settings.vision_max_image_mb = 0  # Force size limit to 0
-            result = await vision_tool.execute(
-                action="analyze", image_path=str(test_file)
-            )
+            result = await vision_tool.execute(action="analyze", image_path=str(test_file))
         assert not result.success
         assert "too large" in result.error.lower()
 
