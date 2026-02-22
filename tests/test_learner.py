@@ -152,9 +152,9 @@ class TestLearnerReviewerFeedback:
         self.memory = MemoryStore(self.tmpdir)
         self.router = MagicMock()
 
-    def test_approved_feedback_logs_event(self):
+    async def test_approved_feedback_logs_event(self):
         learner = Learner(self.router, self.memory)
-        learner.record_reviewer_feedback(
+        await learner.record_reviewer_feedback(
             task_id="task-123",
             task_title="Add login page",
             feedback="Looks great, ship it!",
@@ -165,9 +165,9 @@ class TestLearnerReviewerFeedback:
         assert "APPROVED" in history
         assert "Add login page" in history
 
-    def test_rejected_feedback_updates_memory(self):
+    async def test_rejected_feedback_updates_memory(self):
         learner = Learner(self.router, self.memory)
-        learner.record_reviewer_feedback(
+        await learner.record_reviewer_feedback(
             task_id="task-456",
             task_title="Fix API endpoint",
             feedback="Missing input validation on the email field",
@@ -183,9 +183,9 @@ class TestLearnerReviewerFeedback:
         assert "Reviewer Feedback" in memory
         assert "Missing input validation" in memory
 
-    def test_rejected_with_empty_feedback_doesnt_update_memory(self):
+    async def test_rejected_with_empty_feedback_doesnt_update_memory(self):
         learner = Learner(self.router, self.memory)
-        learner.record_reviewer_feedback(
+        await learner.record_reviewer_feedback(
             task_id="task-789",
             task_title="Some task",
             feedback="",
