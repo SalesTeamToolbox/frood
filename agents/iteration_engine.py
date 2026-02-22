@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from agents.model_router import ModelRouter
 from core.approval_gate import ProtectedAction
+from providers.registry import SpendingLimitExceeded
 
 logger = logging.getLogger("agent42.iteration")
 
@@ -185,6 +186,8 @@ class IterationEngine:
         for attempt in range(retries):
             try:
                 return await self.router.complete(model, messages)
+            except SpendingLimitExceeded:
+                raise  # Don't retry spending limits
             except Exception as e:
                 last_error = e
                 wait = 2 ** attempt  # 1s, 2s, 4s
@@ -215,6 +218,8 @@ class IterationEngine:
         for attempt in range(retries):
             try:
                 return await self.router.complete_with_tools(model, messages, tools)
+            except SpendingLimitExceeded:
+                raise  # Don't retry spending limits
             except Exception as e:
                 last_error = e
                 wait = 2 ** attempt

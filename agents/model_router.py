@@ -169,21 +169,12 @@ class ModelRouter:
         """Send a chat completion with tool schemas and return the full response.
 
         Returns the raw response object so the caller can inspect tool_calls.
+        Spending limits are enforced by the registry.
         """
-        spec = self.registry.get_model(model_key)
-        client = self.registry.get_client(spec.provider)
-
-        kwargs = {
-            "model": spec.model_id,
-            "messages": messages,
-            "temperature": temperature if temperature is not None else spec.temperature,
-            "max_tokens": max_tokens or spec.max_tokens,
-        }
-        if tools:
-            kwargs["tools"] = tools
-
-        response = await client.chat.completions.create(**kwargs)
-        return response
+        return await self.registry.complete_with_tools(
+            model_key, messages, tools,
+            temperature=temperature, max_tokens=max_tokens,
+        )
 
     def available_providers(self) -> list[dict]:
         """List all providers and their availability."""
