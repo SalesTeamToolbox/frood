@@ -574,15 +574,9 @@ def create_app(
                 key_store.set_key(env_var, value)
             updated.append(env_var)
 
-        # Invalidate cached provider clients so they pick up new keys
-        if updated and tool_registry:
-            try:
-                from providers.registry import ProviderRegistry
-                registry = ProviderRegistry()
-                registry.clear_cache()
-            except Exception:
-                pass
-
+        # Keys are injected into os.environ by set_key/delete_key, so new
+        # ProviderRegistry clients (created per-agent-run) will pick them up
+        # automatically via os.getenv() in _build_client().
         return {"status": "ok", "updated": updated, "errors": errors}
 
     # -- Channels (Phase 2) ---------------------------------------------------
