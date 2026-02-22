@@ -114,12 +114,16 @@ class Agent42:
 
     def __init__(
         self,
-        repo_path: str,
+        repo_path: str | None = None,
         dashboard_port: int = 8000,
         headless: bool = False,
         max_agents: int | None = None,
     ):
-        self.repo_path = Path(repo_path).resolve()
+        # Data directory: always the agent42 install dir (for memory, sessions, etc.)
+        self.data_dir = Path(__file__).parent.resolve()
+        # Repo path: optional, can be configured later via dashboard
+        self.repo_path = Path(repo_path).resolve() if repo_path else self.data_dir
+        self.has_repo = repo_path is not None and (Path(repo_path).resolve() / ".git").exists()
         self.dashboard_port = dashboard_port
         self.headless = headless
         self.max_agents = max_agents or settings.max_concurrent_agents
@@ -127,7 +131,7 @@ class Agent42:
         # Core infrastructure
         self.task_queue = TaskQueue(tasks_json_path=settings.tasks_json_path)
         self.ws_manager = WebSocketManager()
-        self.worktree_manager = WorktreeManager(str(self.repo_path))
+        self.worktree_manager = WorktreeManager(str(self.repo_path)) if self.has_repo else None
         self._active_count = 0
         self._active_lock = asyncio.Lock()
         self.approval_gate = ApprovalGate(
@@ -204,7 +208,7 @@ class Agent42:
             ))
 
         self.memory_store = MemoryStore(
-            self.repo_path / settings.memory_dir,
+            self.data_dir / settings.memory_dir,
             qdrant_store=self._qdrant_store,
             redis_backend=self._redis_backend,
         )
@@ -216,21 +220,21 @@ class Agent42:
         )
 
         self.session_manager = SessionManager(
-            self.repo_path / settings.sessions_dir,
+            self.data_dir / settings.sessions_dir,
             redis_backend=self._redis_backend,
             consolidation_pipeline=consolidation,
         )
 
         # Phase 10: Device gateway authentication
-        self.device_store = DeviceStore(self.repo_path / settings.devices_file)
+        self.device_store = DeviceStore(self.data_dir / settings.devices_file)
         init_device_store(self.device_store)
 
         # Admin-configured API keys (override .env values)
-        self.key_store = KeyStore(self.repo_path / ".agent42" / "settings.json")
+        self.key_store = KeyStore(self.data_dir / ".agent42" / "settings.json")
         self.key_store.inject_into_environ()
 
         # Self-learning
-        self.workspace_skills_dir = self.repo_path / "skills" / "workspace"
+        self.workspace_skills_dir = self.data_dir / "skills" / "workspace"
         self.learner = Learner(
             router=ModelRouter(),
             memory_store=self.memory_store,
@@ -246,7 +250,7 @@ class Agent42:
 
         # Scheduled security scanning
         self.security_scanner = ScheduledSecurityScanner(
-            workspace_path=str(self.repo_path),
+            workspace_path=str(self.repo_path) if self.has_repo else str(self.data_dir),
             interval_seconds=settings.get_security_scan_interval_seconds(),
             min_severity=settings.security_scan_min_severity,
             github_issues_enabled=settings.security_scan_github_issues,
@@ -719,15 +723,15 @@ class Agent42:
 
     def _validate_env(self):
         """Validate required configuration before starting."""
-        if not self.repo_path.exists():
-            raise SystemExit(f"Repo path does not exist: {self.repo_path}")
-
-        git_dir = self.repo_path / ".git"
-        if not git_dir.exists():
-            raise SystemExit(
-                f"{self.repo_path} is not a git repository. "
-                "Run: git init && git checkout -b dev"
+        if not self.has_repo:
+            logger.info(
+                "No git repository configured. "
+                "Connect repos via the dashboard Settings page."
             )
+        elif not self.repo_path.exists():
+            logger.warning(f"Configured repo path does not exist: {self.repo_path}")
+        elif not (self.repo_path / ".git").exists():
+            logger.warning(f"{self.repo_path} is not a git repository.")
 
         # Warn about unconfigured providers
         from providers.registry import ProviderRegistry
@@ -806,8 +810,8 @@ def main():
     # Server args (also on the root parser for backward compatibility)
     parser.add_argument(
         "--repo",
-        default=settings.default_repo_path,
-        help="Path to the git repository (default: current directory)",
+        default=settings.default_repo_path or "",
+        help="Path to the git repository (optional — configure via dashboard)",
     )
     parser.add_argument(
         "--port",
@@ -880,7 +884,7 @@ def main():
     else:
         # Default: start the orchestrator (existing behavior)
         orchestrator = Agent42(
-            repo_path=args.repo,
+            repo_path=args.repo or None,
             dashboard_port=args.port,
             headless=args.no_dashboard,
             max_agents=args.max_agents,
