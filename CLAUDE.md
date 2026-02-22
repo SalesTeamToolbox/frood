@@ -100,7 +100,14 @@ during Claude Code sessions without manual activation.
 | Orchestrator | The `Agent42` class in `agent42.py` — manages all subsystems |
 | Agent | A per-task worker (`agents/agent.py`) that gets a worktree and runs iterations |
 | Iteration Engine | Primary model → tool execution → critic review → revise loop |
-| Model Router | Free-first strategy selecting models per task type |
+| Model Router | Free-first strategy selecting models per task type, with 4-layer resolution |
+| Model Catalog | `agents/model_catalog.py` — syncs free models from OpenRouter API |
+| Model Evaluator | `agents/model_evaluator.py` — tracks task outcomes, ranks models by composite score |
+| Model Researcher | `agents/model_researcher.py` — fetches benchmark scores from web leaderboards |
+| Dynamic Routing | Data-driven model selection using outcome tracking + research scores |
+| Trial System | Assigns unproven models to a % of tasks to gather performance data |
+| Plugin Loader | `tools/plugin_loader.py` — auto-discovers custom Tool subclasses from a directory |
+| ToolContext | `tools/context.py` — dependency injection container for plugin tools |
 | Skill | A `SKILL.md` package providing task-type-specific prompts and guidelines |
 | Tool | An ABC-derived class (`tools/base.py`) with `execute()`, `name`, `description`, `parameters` |
 | Provider | An LLM API backend (OpenRouter, OpenAI, etc.) via `ProviderSpec` |
@@ -138,7 +145,10 @@ agent42/
 ├── agents/                 # Agent pipeline
 │   ├── agent.py            # Per-task orchestration with worktree, skills, memory
 │   ├── iteration_engine.py # Primary→Tools→Critic→Revise loop with convergence
-│   ├── model_router.py     # Free-first model selection, admin overrides via env
+│   ├── model_router.py     # 4-layer model selection (admin→dynamic→trial→default)
+│   ├── model_catalog.py    # OpenRouter catalog sync, free model discovery
+│   ├── model_evaluator.py  # Outcome tracking, composite scoring, trial system
+│   ├── model_researcher.py # Web benchmark research (LMSys, HuggingFace, etc.)
 │   └── learner.py          # Post-task reflection, failure analysis, skill creation
 │
 ├── core/                   # Infrastructure and security
@@ -167,6 +177,8 @@ agent42/
 ├── tools/                  # 42+ tool implementations
 │   ├── base.py             # Tool ABC: name, description, parameters, execute()
 │   ├── registry.py         # ToolRegistry with rate limiting integration
+│   ├── context.py          # ToolContext dependency injection for plugin tools
+│   ├── plugin_loader.py    # Auto-discovers custom Tool subclasses from directory
 │   ├── shell.py            # Shell command execution (sandboxed)
 │   ├── filesystem.py       # File operations (read, write, search)
 │   ├── git_tool.py         # Git operations
@@ -246,7 +258,13 @@ agent42/
 │   ├── install-server.sh   # Full server setup (nginx, SSL, systemd, firewall)
 │   └── nginx-agent42.conf  # Reverse proxy with rate limiting + security headers
 │
-├── tests/                  # Test suite (28 files)
+├── data/                   # Runtime data (auto-created)
+│   ├── model_catalog.json  # Cached OpenRouter free model catalog
+│   ├── model_performance.json # Per-model outcome tracking stats
+│   ├── model_research.json # Web benchmark research scores
+│   └── dynamic_routing.json# Data-driven model routing overrides
+│
+├── tests/                  # Test suite (29 files)
 │   ├── conftest.py         # Shared fixtures (sandbox, tool_registry, mock_tool)
 │   └── test_*.py           # Per-module test files
 │
@@ -306,7 +324,7 @@ def get_discord_guild_ids(self) -> list[int]: ...
 
 ### Plugin Architecture
 
-**Tools:** Subclass `tools.base.Tool`, implement `name`/`description`/`parameters`/`execute()`,
+**Tools (built-in):** Subclass `tools.base.Tool`, implement `name`/`description`/`parameters`/`execute()`,
 register in `agent42.py` `_register_tools()`.
 
 ```python
@@ -320,6 +338,31 @@ class MyTool(Tool):
         return {"type": "object", "properties": {"input": {"type": "string"}}}
     async def execute(self, input: str = "", **kwargs) -> ToolResult:
         return ToolResult(output=f"Result: {input}")
+```
+
+**Tools (custom plugins):** Drop a `.py` file into `CUSTOM_TOOLS_DIR` and it will be
+auto-discovered at startup via `tools/plugin_loader.py`. No core code changes needed.
+Tools declare dependencies via a `requires` class variable for `ToolContext` injection.
+
+```python
+# custom_tools/hello.py
+from tools.base import Tool, ToolResult
+
+class HelloTool(Tool):
+    requires = ["workspace"]  # Injects workspace from ToolContext
+
+    def __init__(self, workspace="", **kwargs):
+        self._workspace = workspace
+
+    @property
+    def name(self) -> str: return "hello"
+    @property
+    def description(self) -> str: return "Says hello"
+    @property
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {}}
+    async def execute(self, **kwargs) -> ToolResult:
+        return ToolResult(output=f"Hello from {self._workspace}!")
 ```
 
 **Skills:** Create a directory with `SKILL.md` containing YAML frontmatter:
@@ -357,10 +400,20 @@ else:
 from memory.redis_session import RedisSessionStore
 ```
 
-### Free-First Model Routing
+### Dynamic Model Routing (4-Layer)
 
-Default routing table in `model_router.py` uses OpenRouter free models. Admin can override
-per task type via `AGENT42_{TYPE}_MODEL` env vars. **Never hardcode premium models as defaults.**
+Model selection in `model_router.py` uses a 4-layer resolution chain:
+
+1. **Admin override** — `AGENT42_{TYPE}_MODEL` env vars (highest priority)
+2. **Dynamic routing** — `data/dynamic_routing.json` written by `ModelEvaluator` based on outcome data
+3. **Trial injection** — Unproven models randomly assigned (`MODEL_TRIAL_PERCENTAGE`, default 10%)
+4. **Hardcoded defaults** — `FREE_ROUTING` dict (lowest priority fallback)
+
+**Never hardcode premium models as defaults.** The dynamic system self-improves:
+- `ModelCatalog` syncs free models from OpenRouter API (default every 24h)
+- `ModelEvaluator` tracks success rate, iteration efficiency, and critic scores per model
+- `ModelResearcher` fetches benchmark scores from LMSys Arena, HuggingFace, Artificial Analysis
+- Composite score: `0.4*success_rate + 0.3*iteration_efficiency + 0.2*critic_avg + 0.1*research_score`
 
 ### Security Layers (Defense in Depth)
 
@@ -397,6 +450,23 @@ per task type via `AGENT42_{TYPE}_MODEL` env vars. **Never hardcode premium mode
 | `DASHBOARD_PASSWORD_HASH` | Bcrypt password hash | *(none)* | Use instead of plaintext password |
 | `MAX_DAILY_API_SPEND_USD` | Daily API spending cap | `0` (unlimited) | Set a cap for production |
 
+### Tool Plugin Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `CUSTOM_TOOLS_DIR` | Directory for auto-discovered custom tool plugins | *(disabled)* |
+
+### Dynamic Model Routing Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `MODEL_ROUTING_FILE` | Path to dynamic routing data | `data/dynamic_routing.json` |
+| `MODEL_CATALOG_REFRESH_HOURS` | OpenRouter catalog sync interval | `24` |
+| `MODEL_TRIAL_PERCENTAGE` | % of tasks assigned to unproven models | `10` |
+| `MODEL_MIN_TRIALS` | Minimum completions before model is ranked | `5` |
+| `MODEL_RESEARCH_ENABLED` | Enable web benchmark research | `true` |
+| `MODEL_RESEARCH_INTERVAL_HOURS` | Research fetch interval | `168` (weekly) |
+
 ### Optional Backends
 
 | Variable | Purpose | Default |
@@ -405,6 +475,7 @@ per task type via `AGENT42_{TYPE}_MODEL` env vars. **Never hardcode premium mode
 | `QDRANT_URL` | Qdrant for vector semantic search | *(disabled)* |
 | `QDRANT_ENABLED` | Enable Qdrant (auto if URL set) | `false` |
 
+See `.env.example` for the complete list of configuration variables.
 ### SSH & Tunnel Settings
 
 | Variable | Purpose | Default |
@@ -451,7 +522,7 @@ These rules are **non-negotiable** for a platform that runs AI agents on people'
 
 ## Adding New Components
 
-### New Tool
+### New Tool (Built-in)
 
 1. Create `tools/my_tool.py` with class inheriting from `Tool` ABC
 2. Implement required properties: `name`, `description`, `parameters`
@@ -463,6 +534,14 @@ These rules are **non-negotiable** for a platform that runs AI agents on people'
    ```
 5. Create `tests/test_my_tool.py` with tests
 6. Run: `python -m pytest tests/test_my_tool.py -v`
+
+### New Tool (Custom Plugin — no core changes)
+
+1. Set `CUSTOM_TOOLS_DIR=custom_tools` in `.env`
+2. Create `custom_tools/my_tool.py` with a `Tool` subclass
+3. Add `requires = ["sandbox", "workspace"]` class var for dependency injection
+4. Tool is auto-discovered and registered at startup via `PluginLoader`
+5. Tool name must match `^[a-z][a-z0-9_]{1,48}$`; duplicates are skipped
 
 ### New Skill
 
@@ -505,6 +584,7 @@ These rules are **non-negotiable** for a platform that runs AI agents on people'
 3. For security-sensitive changes: `python -m pytest tests/test_security.py tests/test_sandbox.py tests/test_command_filter.py -v`
 4. Update this CLAUDE.md pitfalls table if you discovered a non-obvious issue
 5. For new modules: ensure a corresponding `tests/test_*.py` file exists
+6. Update README.md if new features, skills, tools, or config were added
 
 ---
 
@@ -660,6 +740,9 @@ docker compose down              # Stop
 | 13 | Shell | Using `subprocess.run(shell=True)` in tools | Route through `CommandFilter` and `Sandbox` |
 | 14 | Config | Boolean env vars with wrong parsing | Use `.lower() in ("true", "1", "yes")` pattern |
 | 15 | Tasks | Using wrong `TaskType` enum value | Check `core/task_queue.py` for valid values |
+| 16 | Catalog | `CatalogEntry.to_dict()` format mismatch with `__init__` | `to_dict()` must output `{"id": ..., "pricing": {"prompt": ..., "completion": ...}}` matching constructor format |
+| 17 | Tests | Floating-point equality in composite scores | Use `pytest.approx()` for float comparisons, not `==` |
+| 18 | Init Order | `ModelEvaluator` must init before `Learner` | Learner takes `model_evaluator` param — ensure correct order in `agent42.py` |
 
 ---
 
@@ -674,6 +757,7 @@ CLAUDE.md file when:
 4. **New skills are added** — Note in the skills section
 5. **New patterns are established** — Add to "Architecture Patterns" section
 6. **Configuration changes** — Update "Configuration Reference" section
+7. **README changes** — Update README.md when adding features, skills, tools, or providers
 
 **When to update:**
 - After successfully resolving a non-obvious error
