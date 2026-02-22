@@ -7,12 +7,15 @@ specific task types or for final reviews.
 
 Routing priority:
   1. Admin override (TASK_TYPE_MODEL env var) — always wins
-  2. OpenRouter free models (single API key, broadest free catalog)
-  3. Fallback to premium only if configured by admin
+  2. Dynamic routing (from outcome tracking + research) — data-driven
+  3. Trial model injection (small % of tasks) — evaluates new models
+  4. OpenRouter free models (hardcoded defaults) — fallback
 """
 
+import json
 import logging
 import os
+from pathlib import Path
 
 from core.task_queue import TaskType
 from providers.registry import ProviderRegistry
@@ -89,31 +92,71 @@ FREE_ROUTING: dict[TaskType, dict] = {
 
 
 class ModelRouter:
-    """Free-first model router with admin overrides.
+    """Free-first model router with admin overrides and dynamic ranking.
 
     Resolution order:
     1. Admin env var override: AGENT42_CODING_MODEL, AGENT42_CODING_CRITIC, etc.
-    2. OpenRouter free tier (default — single API key covers everything)
+    2. Dynamic routing: data-driven rankings from task outcomes + research
+    3. Trial injection: unproven models tested on a small % of tasks
+    4. Hardcoded FREE_ROUTING defaults (fallback)
     """
 
-    def __init__(self):
+    def __init__(self, evaluator=None, routing_file: str = ""):
         self.registry = ProviderRegistry()
+        self._evaluator = evaluator
+        self._routing_file = routing_file or self._default_routing_file()
+        self._dynamic_cache: dict | None = None
+        self._dynamic_cache_mtime: float = 0.0
+
+    @staticmethod
+    def _default_routing_file() -> str:
+        """Resolve default routing file path from config."""
+        try:
+            from core.config import settings
+
+            return str(Path(settings.model_routing_file))
+        except Exception:
+            return "data/dynamic_routing.json"
 
     def get_routing(self, task_type: TaskType, context_window: str = "default") -> dict:
-        """Return the model routing config, applying free-first strategy.
+        """Return the model routing config, applying the full resolution chain.
 
         When context_window is "large" or "max", prefer models with larger
         context windows (e.g. Gemini Flash 1M) over the default task-type model.
         """
-        # Check for admin override via env vars
+        # 1. Admin env var override — always wins
         override = self._check_admin_override(task_type)
         if override:
-            logger.info(f"Admin override for {task_type.value}: {override}")
+            logger.info("Admin override for %s: %s", task_type.value, override)
             return override
 
-        routing = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING]).copy()
+        # 2. Dynamic routing from outcome tracking + research
+        dynamic = self._check_dynamic_routing(task_type)
+        if dynamic:
+            logger.info(
+                "Dynamic routing for %s: primary=%s (confidence=%.2f, n=%d)",
+                task_type.value,
+                dynamic.get("primary", "?"),
+                dynamic.get("confidence", 0),
+                dynamic.get("sample_size", 0),
+            )
+            routing = dynamic.copy()
+        else:
+            # 4. Hardcoded free defaults
+            routing = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING]).copy()
 
-        # If task requests large/max context, prefer models with large context windows
+        # 3. Trial injection — maybe swap primary for an unproven model
+        trial_model = self._check_trial(task_type)
+        if trial_model:
+            logger.info(
+                "Trial model injected for %s: %s (replacing %s)",
+                task_type.value,
+                trial_model,
+                routing.get("primary", "?"),
+            )
+            routing["primary"] = trial_model
+
+        # Context window adaptation
         if context_window == "max":
             large_models = self.registry.models_by_min_context(500_000)
             free_large = [m for m in large_models if m["tier"] == "free"]
@@ -126,6 +169,29 @@ class ModelRouter:
                 routing["primary"] = free_large[0]["key"]
 
         return routing
+
+    def record_outcome(
+        self,
+        model_key: str,
+        task_type: str,
+        success: bool,
+        iterations: int,
+        max_iterations: int,
+        critic_score: float | None = None,
+    ):
+        """Record a task outcome for model evaluation.
+
+        Delegates to the ModelEvaluator if one is configured.
+        """
+        if self._evaluator:
+            self._evaluator.record_outcome(
+                model_key=model_key,
+                task_type=task_type,
+                success=success,
+                iterations=iterations,
+                max_iterations=max_iterations,
+                critic_score=critic_score,
+            )
 
     def _check_admin_override(self, task_type: TaskType) -> dict | None:
         """Check if the admin has set env vars to override model routing.
@@ -145,6 +211,39 @@ class ModelRouter:
             "critic": os.getenv(f"{prefix}_CRITIC"),
             "max_iterations": int(os.getenv(f"{prefix}_MAX_ITER", "8")),
         }
+
+    def _check_dynamic_routing(self, task_type: TaskType) -> dict | None:
+        """Load dynamic routing from the routing file if it exists.
+
+        Caches the file contents and only re-reads when mtime changes.
+        """
+        routing_path = Path(self._routing_file)
+        if not routing_path.exists():
+            return None
+
+        try:
+            mtime = routing_path.stat().st_mtime
+            if mtime != self._dynamic_cache_mtime or self._dynamic_cache is None:
+                self._dynamic_cache = json.loads(routing_path.read_text())
+                self._dynamic_cache_mtime = mtime
+        except Exception as e:
+            logger.debug("Failed to read dynamic routing file: %s", e)
+            return None
+
+        routing = self._dynamic_cache.get("routing", {})
+        task_routing = routing.get(task_type.value)
+        if task_routing and task_routing.get("primary"):
+            return task_routing
+
+        return None
+
+    def _check_trial(self, task_type: TaskType) -> str | None:
+        """Maybe inject a trial model for evaluation."""
+        if not self._evaluator:
+            return None
+
+        free_keys = [m["key"] for m in self.registry.free_models()]
+        return self._evaluator.select_trial_model(task_type.value, free_keys)
 
     async def complete(
         self,

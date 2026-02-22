@@ -93,6 +93,7 @@ class Skill:
     path: Path = field(default_factory=lambda: Path("."))
     task_types: list[str] = field(default_factory=list)  # If set, only loaded for these task types
     system_prompt_override: str = ""  # Replaces default system prompt if set
+    extends: str = ""  # Name of base skill to extend (merges instructions instead of replacing)
     metadata: dict = field(default_factory=dict)
 
     @property
@@ -131,6 +132,9 @@ class SkillLoader:
                     logger.info(f"Loaded skill: {skill.name} from {skill_path}")
                 except Exception as e:
                     logger.error(f"Failed to load skill from {skill_path}: {e}")
+
+        # Resolve skill extensions (merge into base skills)
+        self._resolve_extensions()
 
         logger.info(f"Loaded {len(self._skills)} skills total")
         return self._skills
@@ -175,6 +179,57 @@ class SkillLoader:
 
         return "\n".join(parts)
 
+    def _resolve_extensions(self) -> None:
+        """Merge extension skills into their base skills.
+
+        Skills with ``extends: base_name`` in frontmatter have their
+        instructions appended to the base skill rather than replacing it.
+        The extension skill is removed from the registry after merging.
+        """
+        extensions: list[tuple[str, Skill]] = []
+        for name, skill in list(self._skills.items()):
+            if skill.extends:
+                extensions.append((name, skill))
+
+        for ext_name, ext_skill in extensions:
+            base = self._skills.get(ext_skill.extends)
+            if base is None:
+                logger.warning(
+                    "Skill %r extends %r but base skill not found — treating as standalone",
+                    ext_name,
+                    ext_skill.extends,
+                )
+                continue
+
+            # Merge instructions: base content + extension content
+            separator = f"\n\n---\n\n## Extension: {ext_name}\n\n"
+            base.instructions = base.instructions + separator + ext_skill.instructions
+
+            # Union task_types
+            for tt in ext_skill.task_types:
+                if tt not in base.task_types:
+                    base.task_types.append(tt)
+
+            # Union requirements
+            for req in ext_skill.requirements_bins:
+                if req not in base.requirements_bins:
+                    base.requirements_bins.append(req)
+            for req in ext_skill.requirements_env:
+                if req not in base.requirements_env:
+                    base.requirements_env.append(req)
+
+            # Extension overrides (only if non-empty)
+            if ext_skill.description:
+                base.description = ext_skill.description
+            if ext_skill.system_prompt_override:
+                base.system_prompt_override = ext_skill.system_prompt_override
+            if ext_skill.always_load:
+                base.always_load = True
+
+            # Remove the extension from the registry (it's now part of the base)
+            del self._skills[ext_name]
+            logger.info("Merged extension %r into base skill %r", ext_name, base.name)
+
     @staticmethod
     def _load_skill(skill_md: Path) -> Skill:
         """Parse a SKILL.md file into a Skill object."""
@@ -208,5 +263,6 @@ class SkillLoader:
             path=skill_md.parent,
             task_types=frontmatter.get("task_types", []),
             system_prompt_override=frontmatter.get("system_prompt", ""),
+            extends=frontmatter.get("extends", "") or "",
             metadata=frontmatter,
         )

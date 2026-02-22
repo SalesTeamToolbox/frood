@@ -122,6 +122,15 @@ class Settings:
     brave_api_key: str = ""
     mcp_servers_json: str = ""  # Path to MCP servers config file
     cron_jobs_path: str = "cron_jobs.json"
+    custom_tools_dir: str = ""  # Path to directory with custom Tool .py files
+
+    # Dynamic model routing
+    model_routing_file: str = "data/dynamic_routing.json"
+    model_catalog_refresh_hours: float = 24.0  # How often to sync OpenRouter catalog
+    model_trial_percentage: int = 10  # % of tasks to assign unproven models (0-100)
+    model_min_trials: int = 5  # Min task completions before model gets ranked
+    model_research_enabled: bool = True  # Enable web benchmark research
+    model_research_interval_hours: float = 168.0  # How often to research benchmarks (168h = weekly)
 
     # Memory (Phase 6)
     memory_dir: str = ".agent42/memory"
@@ -270,6 +279,15 @@ class Settings:
             brave_api_key=os.getenv("BRAVE_API_KEY", ""),
             mcp_servers_json=os.getenv("MCP_SERVERS_JSON", ""),
             cron_jobs_path=os.getenv("CRON_JOBS_PATH", "cron_jobs.json"),
+            custom_tools_dir=os.getenv("CUSTOM_TOOLS_DIR", ""),
+            # Dynamic model routing
+            model_routing_file=os.getenv("MODEL_ROUTING_FILE", "data/dynamic_routing.json"),
+            model_catalog_refresh_hours=float(os.getenv("MODEL_CATALOG_REFRESH_HOURS", "24")),
+            model_trial_percentage=int(os.getenv("MODEL_TRIAL_PERCENTAGE", "10")),
+            model_min_trials=int(os.getenv("MODEL_MIN_TRIALS", "5")),
+            model_research_enabled=os.getenv("MODEL_RESEARCH_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
+            model_research_interval_hours=float(os.getenv("MODEL_RESEARCH_INTERVAL_HOURS", "168")),
             # Memory
             memory_dir=os.getenv("MEMORY_DIR", ".agent42/memory"),
             sessions_dir=os.getenv("SESSIONS_DIR", ".agent42/sessions"),

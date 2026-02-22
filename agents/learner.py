@@ -95,11 +95,13 @@ class Learner:
         memory_store: MemoryStore,
         skills_dir: Path | None = None,
         reflection_model: str = "or-free-deepseek-chat",
+        model_evaluator=None,
     ):
         self.router = router
         self.memory = memory_store
         self.skills_dir = skills_dir
         self.reflection_model = reflection_model
+        self._model_evaluator = model_evaluator
 
     async def reflect_on_task(
         self,
@@ -111,12 +113,14 @@ class Learner:
         succeeded: bool,
         error: str = "",
         tool_calls: list[dict] | None = None,
+        model_key: str = "",
     ) -> dict:
         """Run post-task reflection and update memory with lessons learned.
 
         Args:
             tool_calls: List of tool call records from iteration history.
                 Each dict has: name, success (bool), arguments (optional).
+            model_key: The primary model key used for this task (for outcome tracking).
 
         Returns a dict with the reflection results for logging/display.
         """
@@ -166,6 +170,19 @@ class Learner:
             f"Post-task reflection for '{title}' ({task_type})",
             f"Outcome: {outcome}\nLesson: {lesson}\nMemory updates: {len(memory_updates)}",
         )
+
+        # Record model outcome for dynamic routing evaluation
+        if self._model_evaluator and model_key:
+            try:
+                self._model_evaluator.record_outcome(
+                    model_key=model_key,
+                    task_type=task_type,
+                    success=succeeded,
+                    iterations=iterations,
+                    max_iterations=max_iterations,
+                )
+            except Exception as e:
+                logger.debug("Model outcome recording failed (non-critical): %s", e)
 
         return {
             "reflection": reflection,

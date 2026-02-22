@@ -271,6 +271,7 @@ pip install redis[hiredis]
 
 | Variable | Description |
 |---|---|
+| `CUSTOM_TOOLS_DIR` | Directory for auto-discovered custom tool plugins |
 | `BRAVE_API_KEY` | Brave Search API key (for web search tool) |
 | `MCP_SERVERS_JSON` | Path to MCP servers config (JSON) |
 | `CRON_JOBS_PATH` | Path to persistent cron jobs file |
@@ -320,6 +321,33 @@ One API key, zero cost. These models are used by default for all task types:
 | data_analysis | Qwen3 Coder 480B | DeepSeek Chat v3.1 | 6 |
 | project_management | Llama 4 Maverick | Gemma 3 27B | 4 |
 
+### Dynamic Routing (Self-Improving)
+
+Agent42 automatically discovers, evaluates, and promotes the best free models
+over time using a 4-layer resolution chain:
+
+1. **Admin override** — `AGENT42_{TYPE}_MODEL` env vars (highest priority)
+2. **Dynamic routing** — `data/dynamic_routing.json` written by ModelEvaluator based on actual task outcomes
+3. **Trial injection** — Unproven models are randomly assigned to a percentage of tasks to gather performance data
+4. **Hardcoded defaults** — `FREE_ROUTING` dict (lowest priority fallback)
+
+**How it works:**
+- **ModelCatalog** syncs free models from the OpenRouter API every 24 hours (configurable)
+- **ModelEvaluator** tracks success rate, iteration efficiency, and critic scores per model per task type
+- **ModelResearcher** fetches benchmark scores from LMSys Arena, HuggingFace, and Artificial Analysis
+- Models are ranked by composite score: `0.4×success + 0.3×efficiency + 0.2×critic + 0.1×research`
+- Models with fewer than 5 completions (configurable) are "unproven" and entered into the trial system
+- After enough trials, proven models are promoted to the dynamic routing table
+
+| Variable | Default | Description |
+|---|---|---|
+| `MODEL_ROUTING_FILE` | `data/dynamic_routing.json` | Path to dynamic routing data |
+| `MODEL_CATALOG_REFRESH_HOURS` | `24` | OpenRouter catalog sync interval |
+| `MODEL_TRIAL_PERCENTAGE` | `10` | % of tasks assigned to unproven models |
+| `MODEL_MIN_TRIALS` | `5` | Minimum completions before a model is ranked |
+| `MODEL_RESEARCH_ENABLED` | `true` | Enable web benchmark research |
+| `MODEL_RESEARCH_INTERVAL_HOURS` | `168` | Research fetch interval (default: weekly) |
+
 ### Admin Overrides
 
 Override any model per task type with environment variables:
@@ -353,9 +381,33 @@ All accessible with a single free OpenRouter API key:
 ## Skills
 
 Skills are markdown prompt templates that give agents specialized capabilities.
-They live in `skills/builtins/` and can be extended per-repo in a `skills/` directory.
+They live in `skills/builtins/` and can be extended per-repo in a `skills/` directory
+or via the `SKILLS_DIRS` env var.
 
-Built-in skills:
+### Skill Extensions
+
+Skills support an `extends` frontmatter field that lets you add to a core skill
+without replacing it entirely. This is ideal for adding company branding, custom
+workflows, or domain-specific guidelines on top of existing skills.
+
+```markdown
+# skills/workspace/brand-seo/SKILL.md
+---
+name: brand-seo
+extends: seo
+description: SEO with Acme Corp branding guidelines
+task_types: [design]
+---
+
+## Acme Corp SEO Extensions
+- Always include "Acme" in meta descriptions
+- Primary brand terms: "enterprise automation", "workflow AI"
+```
+
+This merges your custom content into the base `seo` skill and adds `design` to its
+task types. The base skill's instructions appear first, followed by all extensions.
+
+### Built-in Skills
 
 | Skill | Task Types | Description |
 |---|---|---|
@@ -374,6 +426,7 @@ Built-in skills:
 | **email-marketing** | email, marketing, content | Campaign sequences, deliverability |
 | **competitive-analysis** | strategy, research | Competitive matrix, positioning |
 | **seo** | content, marketing | On-page SEO, keyword research, optimization |
+| **geo** | design, content, marketing | Generative Engine Optimization — AI agent discoverability |
 
 Skills are matched to tasks by `task_types` frontmatter and injected into the
 agent's system prompt automatically.
@@ -421,6 +474,41 @@ Agents have access to a sandboxed tool registry:
 |---|---|
 | `image_gen` | AI image generation with free-first routing. Models: FLUX Schnell (free), FLUX Dev, SDXL, DALL-E 3 (premium). Team-reviewed prompts before submission. Actions: generate, review_prompt, list_models, status |
 | `video_gen` | AI video generation (async). Models: CogVideoX (cheap), AnimateDiff, Runway Gen-3, Luma Ray2, Stable Video (premium). Actions: generate, image_to_video, review_prompt, list_models, status |
+
+### Custom Tool Plugins
+
+Extend Agent42 with custom tools without modifying the core codebase. Set
+`CUSTOM_TOOLS_DIR` in `.env` and drop `.py` files containing `Tool` subclasses:
+
+```python
+# custom_tools/hello.py
+from tools.base import Tool, ToolResult
+
+class HelloTool(Tool):
+    requires = ["workspace"]  # Dependency injection from ToolContext
+
+    def __init__(self, workspace="", **kwargs):
+        self._workspace = workspace
+
+    @property
+    def name(self) -> str: return "hello"
+    @property
+    def description(self) -> str: return "Says hello"
+    @property
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {}}
+
+    async def execute(self, **kwargs) -> ToolResult:
+        return ToolResult(output=f"Hello from {self._workspace}!")
+```
+
+Tools are auto-discovered and registered at startup. The `requires` class variable
+declares which dependencies to inject from `ToolContext` (sandbox, command_filter,
+task_queue, workspace, tool_registry, model_router).
+
+| Variable | Default | Description |
+|---|---|---|
+| `CUSTOM_TOOLS_DIR` | *(disabled)* | Directory for auto-discovered custom tool plugins |
 
 ### Command Filter
 
@@ -598,7 +686,10 @@ agent42/
 │   └── complexity.py          # Task complexity assessment + team recommendation
 ├── agents/
 │   ├── agent.py               # Per-task agent orchestration (code + non-code modes)
-│   ├── model_router.py        # Free-first task-type -> model routing
+│   ├── model_router.py        # 4-layer model selection (admin → dynamic → trial → default)
+│   ├── model_catalog.py       # OpenRouter catalog sync, free model auto-discovery
+│   ├── model_evaluator.py     # Outcome tracking, composite scoring, trial system
+│   ├── model_researcher.py    # Web benchmark research (LMSys, HuggingFace, etc.)
 │   ├── iteration_engine.py    # Primary -> Critic -> Revise loop (task-aware critics)
 │   └── learner.py             # Self-learning: reflection + tool effectiveness tracking
 ├── providers/
@@ -613,6 +704,8 @@ agent42/
 ├── tools/
 │   ├── base.py                # Tool base class + result types
 │   ├── registry.py            # Tool registration + dispatch
+│   ├── context.py             # ToolContext dependency injection for plugin tools
+│   ├── plugin_loader.py       # Auto-discovers custom Tool subclasses from directory
 │   ├── shell.py               # Sandboxed shell execution
 │   ├── filesystem.py          # read/write/edit/list operations
 │   ├── web_search.py          # Brave Search integration
@@ -638,8 +731,8 @@ agent42/
 │   ├── image_gen.py           # AI image generation (free-first)
 │   └── video_gen.py           # AI video generation (async)
 ├── skills/
-│   ├── loader.py              # Skill discovery + frontmatter parser
-│   └── builtins/              # Built-in skill templates (15 skills)
+│   ├── loader.py              # Skill discovery, frontmatter parser, extension merging
+│   └── builtins/              # Built-in skill templates (36 skills)
 │       ├── github/SKILL.md
 │       ├── memory/SKILL.md
 │       ├── skill-creator/SKILL.md
@@ -654,7 +747,9 @@ agent42/
 │       ├── brand-guidelines/SKILL.md
 │       ├── email-marketing/SKILL.md
 │       ├── competitive-analysis/SKILL.md
-│       └── seo/SKILL.md
+│       ├── geo/SKILL.md
+│       ├── seo/SKILL.md
+│       └── ... (36 total)
 ├── memory/
 │   ├── store.py               # Structured memory + event log
 │   ├── session.py             # Per-conversation session history (Redis-cached)
@@ -670,7 +765,12 @@ agent42/
 │       ├── index.html         # Entry point
 │       ├── app.js             # Full SPA (login, tasks, approvals, tools, skills, settings)
 │       └── style.css          # Dark theme CSS
-├── tests/                     # 540+ tests across 19 test files
+├── data/                      # Runtime data (auto-created)
+│   ├── model_catalog.json     # Cached OpenRouter free model catalog
+│   ├── model_performance.json # Per-model outcome tracking
+│   ├── model_research.json    # Web benchmark research scores
+│   └── dynamic_routing.json   # Data-driven model routing overrides
+├── tests/                     # 920+ tests across 30 test files
 ├── .env.example               # All configuration options
 ├── requirements.txt
 ├── tasks.json.example
