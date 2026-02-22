@@ -114,6 +114,7 @@ class GitTool(Tool):
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
             proc.kill()
+            await proc.wait()
             return 1, "", "Command timed out"
         return proc.returncode, stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace")
 
