@@ -1,39 +1,646 @@
 # CLAUDE.md — Agent42 Development Guide
 
-## Testing
+## Quick Reference
+
+```bash
+source .venv/bin/activate        # Activate virtual environment
+python agent42.py                # Start Agent42 (dashboard at http://localhost:8000)
+python -m pytest tests/ -x -q    # Run tests (stop on first failure)
+make lint                        # Run linter (ruff)
+make format                      # Auto-format code (ruff)
+make check                       # Run lint + tests together
+make security                    # Run security scanning (bandit + safety)
+```
+
+## IMPORTANT: Document Your Fixes!
+
+When you resolve a non-obvious bug or discover a new pitfall, you **MUST** add it to the
+[Common Pitfalls](#common-pitfalls) table at the end of this document. This keeps the
+knowledge base current and prevents future regressions.
+
+Ask yourself: *"Would this have saved me time if it was documented?"* If yes, add it.
+
+---
+
+## Automated Development Workflow
+
+This project uses automated hooks in the `.claude/` directory. These run automatically
+during Claude Code sessions without manual activation.
+
+### Active Hooks (Automatic)
+
+| Hook | Trigger | Action |
+|------|---------|--------|
+| `context-loader.py` | UserPromptSubmit | Detects work type from file paths and keywords, loads relevant lessons and patterns |
+| `security-monitor.py` | PostToolUse (Write/Edit) | Flags security-sensitive changes for review (sandbox, auth, command filter) |
+| `test-validator.py` | Stop | Validates tests pass, checks new modules have test coverage |
+| `learning-engine.py` | Stop | Records development patterns, vocabulary, and skill candidates |
+
+### Hook Protocol
+
+- Hooks receive JSON on stdin with `hook_event_name`, `project_dir`, and event-specific data
+- Output to stderr is shown to Claude as feedback
+- Exit code 0 = allow, exit code 2 = block (for PreToolUse hooks)
+
+### How It Works
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  User Prompt Submitted                                           │
+└──────────────────────┬───────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  context-loader.py (UserPromptSubmit)                            │
+│  - Detects work type from file paths + keywords                  │
+│  - Loads relevant lessons, patterns, standards from lessons.md   │
+└──────────────────────┬───────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Claude Processes Request                                        │
+│  (may use Write/Edit tools)                                      │
+└──────────────┬──────────────────────────┬────────────────────────┘
+               │                          │
+               ▼                          ▼
+┌──────────────────────────┐   ┌───────────────────────────────────┐
+│  security-monitor.py     │   │  (other tool processing)          │
+│  (PostToolUse Write/Edit)│   │                                   │
+│  - Flags security risks  │   │                                   │
+└──────────────────────────┘   └───────────────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Stop Event Triggers:                                            │
+│  ├─ test-validator.py   — runs pytest, checks test coverage      │
+│  └─ learning-engine.py  — records patterns, updates lessons.md   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Available Agents (On-Demand)
+
+| Agent | Use Case | Invocation |
+|-------|----------|------------|
+| security-reviewer | Audit security-sensitive code changes | Request security review |
+| performance-auditor | Review async patterns, resource usage, timeouts | Ask about performance |
+
+### Related Files
+
+- `.claude/settings.json` — Hook configuration
+- `.claude/lessons.md` — Accumulated patterns and vocabulary (referenced by hooks)
+- `.claude/learned-patterns.json` — Auto-generated pattern data
+- `.claude/agents/` — Specialized agent definitions
+
+---
+
+## Key Terminology
+
+| Term | Meaning |
+|------|---------|
+| Orchestrator | The `Agent42` class in `agent42.py` — manages all subsystems |
+| Agent | A per-task worker (`agents/agent.py`) that gets a worktree and runs iterations |
+| Iteration Engine | Primary model → tool execution → critic review → revise loop |
+| Model Router | Free-first strategy selecting models per task type |
+| Skill | A `SKILL.md` package providing task-type-specific prompts and guidelines |
+| Tool | An ABC-derived class (`tools/base.py`) with `execute()`, `name`, `description`, `parameters` |
+| Provider | An LLM API backend (OpenRouter, OpenAI, etc.) via `ProviderSpec` |
+| Sandbox | `WorkspaceSandbox` enforcing filesystem boundaries per agent |
+| Command Filter | 6-layer deny-list + optional allowlist for shell command security |
+| Approval Gate | Human-in-the-loop for protected actions (external API, git push, file delete) |
+| Worktree | Git worktree per agent for isolated filesystem access |
+| Free-First | Default routing uses $0 models via OpenRouter; premium only if admin configures |
+| Spending Tracker | Daily API cost cap enforced across all providers |
+
+---
+
+## Project Structure
+
+```
+agent42/
+├── agent42.py              # Main orchestrator entry point (Agent42 class)
+├── CLAUDE.md               # This file — development guide
+├── README.md               # User-facing docs, quick start, architecture
+├── setup.sh                # Local setup script (venv, deps, .env, systemd template)
+├── requirements.txt        # Production Python dependencies
+├── requirements-dev.txt    # Development dependencies (testing, linting, security)
+├── pyproject.toml          # Tool configuration (ruff, pytest, mypy)
+├── Makefile                # Common dev commands
+├── Dockerfile              # Container build
+├── docker-compose.yml      # Dev stack (Agent42 + Redis + Qdrant)
+├── .env.example            # Configuration template (70+ settings)
+├── .gitignore              # Git exclusions
+├── .pre-commit-config.yaml # Pre-commit hooks (ruff, bandit, file checks)
+│
+├── agents/                 # Agent pipeline
+│   ├── agent.py            # Per-task orchestration with worktree, skills, memory
+│   ├── iteration_engine.py # Primary→Tools→Critic→Revise loop with convergence
+│   ├── model_router.py     # Free-first model selection, admin overrides via env
+│   └── learner.py          # Post-task reflection, failure analysis, skill creation
+│
+├── core/                   # Infrastructure and security
+│   ├── config.py           # Frozen dataclass Settings loaded from env (70+ fields)
+│   ├── task_queue.py       # PriorityQueue with JSON/Redis backends, TaskType enum
+│   ├── sandbox.py          # Path resolution, traversal blocking, symlink defense
+│   ├── command_filter.py   # 6-layer shell command filtering (structural, deny, etc.)
+│   ├── approval_gate.py    # Human-in-the-loop for protected actions
+│   ├── rate_limiter.py     # Per-agent per-tool sliding-window rate limits
+│   ├── capacity.py         # Dynamic concurrency based on CPU/memory metrics
+│   ├── worktree_manager.py # Git worktree lifecycle management
+│   ├── security_scanner.py # Scheduled vulnerability scanning + GitHub issue reporting
+│   ├── heartbeat.py        # Agent stall detection
+│   ├── intent_classifier.py# LLM-based message classification
+│   ├── device_auth.py      # Device registration and API key management
+│   ├── key_store.py        # Admin-configured API key overrides
+│   ├── portability.py      # Backup/restore/clone operations
+│   ├── queue_backend.py    # Redis queue backend adapter
+│   ├── notification_service.py # Webhook and email notifications
+│   ├── url_policy.py       # URL allowlist/denylist for SSRF protection
+│   └── complexity.py       # Task complexity estimation
+│
+├── providers/              # LLM provider registry
+│   └── registry.py         # ProviderSpec, ModelSpec, spending tracker, 6 providers
+│
+├── tools/                  # 38+ tool implementations
+│   ├── base.py             # Tool ABC: name, description, parameters, execute()
+│   ├── registry.py         # ToolRegistry with rate limiting integration
+│   ├── shell.py            # Shell command execution (sandboxed)
+│   ├── filesystem.py       # File operations (read, write, search)
+│   ├── git_tool.py         # Git operations
+│   ├── web_search.py       # Brave Search API integration
+│   ├── browser_tool.py     # Headless browser automation
+│   ├── http_client.py      # HTTP requests (URL policy enforced)
+│   ├── docker_tool.py      # Docker container management
+│   ├── python_exec.py      # Python code execution
+│   ├── code_intel.py       # Code analysis and intelligence
+│   ├── grep_tool.py        # File content search
+│   ├── diff_tool.py        # Diff generation and patching
+│   ├── linter_tool.py      # Code linting
+│   ├── test_runner.py      # Test execution
+│   ├── pr_generator.py     # Pull request generation
+│   ├── repo_map.py         # Repository structure analysis
+│   ├── mcp_client.py       # Model Context Protocol client
+│   ├── security_audit.py   # Security posture auditing (36 checks)
+│   ├── security_analyzer.py# Secrets, dependencies, OWASP scanning
+│   ├── image_gen.py        # Image generation (FLUX, DALL-E, Replicate)
+│   ├── video_gen.py        # Video generation (Luma)
+│   ├── content_analyzer.py # Content analysis
+│   ├── scoring_tool.py     # Output quality scoring
+│   ├── summarizer_tool.py  # Text summarization
+│   ├── data_tool.py        # Data processing
+│   ├── template_tool.py    # Template rendering
+│   ├── persona_tool.py     # Persona application
+│   ├── outline_tool.py     # Content outline generation
+│   ├── cron.py             # Scheduled job management
+│   ├── file_watcher.py     # File change monitoring
+│   ├── dependency_audit.py # Dependency vulnerability checking
+│   ├── subagent.py         # Sub-agent spawning
+│   ├── team_tool.py        # Team management operations
+│   ├── workflow_tool.py    # Workflow automation
+│   └── dynamic_tool.py     # Runtime tool generation
+│
+├── skills/                 # Pluggable skill system
+│   ├── loader.py           # SKILL.md discovery, YAML frontmatter parsing
+│   └── builtins/           # 35 built-in skills
+│       ├── api-design/     ├── code-review/    ├── debugging/
+│       ├── deployment/     ├── documentation/  ├── git-workflow/
+│       ├── github/         ├── marketing/      ├── monitoring/
+│       ├── performance/    ├── refactoring/    ├── research/
+│       ├── security-audit/ ├── testing/        ├── tool-creator/
+│       ├── skill-creator/  ├── memory/         └── ... (35 total)
+│
+├── memory/                 # Persistence and semantic search
+│   ├── store.py            # MEMORY.md + HISTORY.md two-layer pattern
+│   ├── embeddings.py       # Vector embedding with optional Qdrant/Redis
+│   ├── session.py          # Session management
+│   ├── qdrant_store.py     # Qdrant vector DB adapter
+│   ├── redis_session.py    # Redis session adapter
+│   └── consolidation.py    # Memory consolidation pipeline
+│
+├── dashboard/              # Web UI
+│   ├── server.py           # FastAPI app with REST + WebSocket
+│   ├── auth.py             # JWT + API key auth, bcrypt, rate limiting
+│   └── websocket_manager.py# Broadcast manager for real-time updates
+│
+├── channels/               # Communication integrations
+│   ├── base.py             # Channel ABC
+│   ├── manager.py          # Channel lifecycle management
+│   ├── discord_channel.py  # Discord bot integration
+│   ├── slack_channel.py    # Slack bot (Socket Mode)
+│   ├── telegram_channel.py # Telegram bot
+│   └── email_channel.py    # IMAP/SMTP email integration
+│
+├── deploy/                 # Production deployment
+│   ├── install-server.sh   # Full server setup (nginx, SSL, systemd, firewall)
+│   └── nginx-agent42.conf  # Reverse proxy with rate limiting + security headers
+│
+├── tests/                  # Test suite (24 files)
+│   ├── conftest.py         # Shared fixtures (sandbox, tool_registry, mock_tool)
+│   └── test_*.py           # Per-module test files
+│
+├── .github/workflows/      # CI/CD
+│   ├── test.yml            # pytest across Python 3.11-3.13
+│   ├── lint.yml            # ruff check + format
+│   └── security.yml        # bandit + safety + security tests
+│
+└── .claude/                # Claude Code development hooks
+    ├── settings.json       # Hook configuration
+    ├── lessons.md          # Accumulated patterns and fixes
+    ├── learned-patterns.json # Auto-generated pattern data
+    ├── hooks/
+    │   ├── context-loader.py    # Work type detection + context loading
+    │   ├── security-monitor.py  # Security change flagging
+    │   ├── test-validator.py    # Test gate
+    │   └── learning-engine.py   # Pattern recording
+    └── agents/
+        ├── security-reviewer.md # Security audit agent
+        └── performance-auditor.md # Performance review agent
+```
+
+---
+
+## Architecture Patterns
+
+### All I/O is Async
+
+Every file operation uses `aiofiles`, every HTTP call uses `httpx` or `openai.AsyncOpenAI`,
+every queue operation is `asyncio`-native. **Never use blocking I/O** in tool implementations.
+
+```python
+# CORRECT
+async with aiofiles.open(path, "r") as f:
+    content = await f.read()
+
+# WRONG — blocks the event loop
+with open(path, "r") as f:
+    content = f.read()
+```
+
+### Frozen Dataclass Configuration
+
+`Settings` is a frozen dataclass loaded once from environment at import time (`core/config.py`).
+When adding new configuration:
+1. Add field to `Settings` class with default
+2. Add `os.getenv()` call in `Settings.from_env()`
+3. Add to `.env.example` with documentation
+
+```python
+# Boolean fields use this pattern:
+sandbox_enabled=os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes")
+
+# Comma-separated fields have get_*() helper methods:
+def get_discord_guild_ids(self) -> list[int]: ...
+```
+
+### Plugin Architecture
+
+**Tools:** Subclass `tools.base.Tool`, implement `name`/`description`/`parameters`/`execute()`,
+register in `agent42.py` `_register_tools()`.
+
+```python
+class MyTool(Tool):
+    @property
+    def name(self) -> str: return "my_tool"
+    @property
+    def description(self) -> str: return "Does something useful"
+    @property
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {"input": {"type": "string"}}}
+    async def execute(self, input: str = "", **kwargs) -> ToolResult:
+        return ToolResult(output=f"Result: {input}")
+```
+
+**Skills:** Create a directory with `SKILL.md` containing YAML frontmatter:
+
+```markdown
+---
+name: my-skill
+description: One-line description of what this skill does.
+always: false
+task_types: [coding, debugging]
+---
+
+# My Skill
+
+Instructions for the agent when this skill is active...
+```
+
+**Providers:** Add `ProviderSpec` to `PROVIDERS` dict and `ModelSpec` entries to `MODELS`
+dict in `providers/registry.py`.
+
+### Graceful Degradation
+
+Redis, Qdrant, channels, and MCP servers are all optional. Code **must** handle their
+absence with fallback behavior, never with crashes.
+
+```python
+# CORRECT — conditional import and check
+if settings.redis_url:
+    from memory.redis_session import RedisSessionStore
+    session_store = RedisSessionStore(settings.redis_url)
+else:
+    session_store = FileSessionStore(settings.sessions_dir)
+
+# WRONG — crashes if Redis isn't installed
+from memory.redis_session import RedisSessionStore
+```
+
+### Free-First Model Routing
+
+Default routing table in `model_router.py` uses OpenRouter free models. Admin can override
+per task type via `AGENT42_{TYPE}_MODEL` env vars. **Never hardcode premium models as defaults.**
+
+### Security Layers (Defense in Depth)
+
+| Layer | Module | Purpose |
+|-------|--------|---------|
+| 1 | `WorkspaceSandbox` | Path resolution, traversal blocking, symlink defense |
+| 2 | `CommandFilter` | 6-layer shell command filtering (structural, deny, interpreter, metachar, indirect, allowlist) |
+| 3 | `ApprovalGate` | Human review for protected actions |
+| 4 | `ToolRateLimiter` | Per-agent per-tool sliding window |
+| 5 | `URLPolicy` | Allowlist/denylist for HTTP requests (SSRF protection) |
+| 6 | `BrowserGatewayToken` | Per-session token for browser tool |
+| 7 | `SpendingTracker` | Daily API cost cap across all providers |
+| 8 | `LoginRateLimit` | Per-IP brute force protection on dashboard |
+
+---
+
+## Configuration Reference
+
+### Required Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `OPENROUTER_API_KEY` | OpenRouter API key (free tier available) | *(none)* |
+| `DASHBOARD_PASSWORD` | Dashboard login password | *(none — login disabled)* |
+
+### Security Settings
+
+| Variable | Purpose | Default | Warning |
+|----------|---------|---------|---------|
+| `SANDBOX_ENABLED` | Enforce filesystem boundaries | `true` | Never disable in production |
+| `COMMAND_FILTER_MODE` | Shell filtering mode | `deny` | `allowlist` for strict production |
+| `JWT_SECRET` | JWT signing key | *(auto-generated)* | Set explicitly for persistent sessions |
+| `DASHBOARD_HOST` | Dashboard bind address | `127.0.0.1` | Never use `0.0.0.0` without nginx |
+| `DASHBOARD_PASSWORD_HASH` | Bcrypt password hash | *(none)* | Use instead of plaintext password |
+| `MAX_DAILY_API_SPEND_USD` | Daily API spending cap | `0` (unlimited) | Set a cap for production |
+
+### Optional Backends
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `REDIS_URL` | Redis for session cache + queue | *(disabled)* |
+| `QDRANT_URL` | Qdrant for vector semantic search | *(disabled)* |
+| `QDRANT_ENABLED` | Enable Qdrant (auto if URL set) | `false` |
+
+See `.env.example` for the complete list of 70+ configuration variables.
+
+---
+
+## Security Requirements
+
+These rules are **non-negotiable** for a platform that runs AI agents on people's servers:
+
+1. **NEVER** disable sandbox in production (`SANDBOX_ENABLED=true`)
+2. **ALWAYS** use bcrypt password hash, not plaintext (`DASHBOARD_PASSWORD_HASH`)
+3. **ALWAYS** set `JWT_SECRET` to a persistent value (auto-generated secrets break sessions across restarts)
+4. **NEVER** expose `DASHBOARD_HOST=0.0.0.0` without nginx/firewall in front
+5. **ALWAYS** run with `COMMAND_FILTER_MODE=deny` (default) or `COMMAND_FILTER_MODE=allowlist`
+6. **REVIEW** `URL_DENYLIST` to block internal network ranges (`169.254.x.x`, `10.x.x.x`, etc.)
+7. **NEVER** log API keys, passwords, or tokens — even at DEBUG level
+8. **ALWAYS** validate file paths through `sandbox.resolve_path()` before file operations
+
+---
+
+## Adding New Components
+
+### New Tool
+
+1. Create `tools/my_tool.py` with class inheriting from `Tool` ABC
+2. Implement required properties: `name`, `description`, `parameters`
+3. Implement `async execute(**kwargs) -> ToolResult`
+4. Register in `agent42.py` `_register_tools()`:
+   ```python
+   from tools.my_tool import MyTool
+   registry.register(MyTool(sandbox=self._sandbox))
+   ```
+5. Create `tests/test_my_tool.py` with tests
+6. Run: `python -m pytest tests/test_my_tool.py -v`
+
+### New Skill
+
+1. Create `skills/builtins/my-skill/SKILL.md` with YAML frontmatter
+2. Set `task_types` to match relevant `TaskType` enum values
+3. Set `always: true` only if the skill should load for every task
+4. Optionally add `requirements_bins` for CLI tool dependencies
+
+### New Provider
+
+1. Add `ProviderSpec` to `PROVIDERS` dict in `providers/registry.py`
+2. Add `ModelSpec` entries to `MODELS` dict for each supported model
+3. Add API key field to `Settings` in `core/config.py`
+4. Add `os.getenv()` call in `Settings.from_env()`
+5. Add to `.env.example` with documentation
+
+### New Config Field
+
+1. Add field to `Settings` class with sensible default
+2. Add `os.getenv()` call in `Settings.from_env()` with type conversion
+3. Add to `.env.example` with description
+4. For boolean fields: use `.lower() in ("true", "1", "yes")` pattern
+5. For comma-separated lists: add `get_*()` helper method
+
+---
+
+## Development Workflow
+
+### Before Writing Code
+
+1. Run tests to confirm green baseline: `python -m pytest tests/ -x -q`
+2. Check if related test files exist for the module you're changing
+3. Read the module's docstring and understand the pattern
+4. For security-sensitive files, read `.claude/lessons.md` security section
+
+### After Writing Code
+
+1. Run the full test suite: `python -m pytest tests/ -x -q`
+2. Run linter: `make lint`
+3. For security-sensitive changes: `python -m pytest tests/test_security.py tests/test_sandbox.py tests/test_command_filter.py -v`
+4. Update this CLAUDE.md pitfalls table if you discovered a non-obvious issue
+5. For new modules: ensure a corresponding `tests/test_*.py` file exists
+
+---
+
+## Testing Standards
 
 **Always install dependencies before running tests:**
 
 ```bash
-pip install -r requirements.txt
-# Or at minimum for tests:
+pip install -r requirements-dev.txt
+# Or at minimum:
 pip install pytest pytest-asyncio aiofiles openai
 ```
 
 Run tests:
 ```bash
-python -m pytest tests/ -x -q
+python -m pytest tests/ -x -q              # Quick: stop on first failure
+python -m pytest tests/ -v                  # Verbose: see all test names
+python -m pytest tests/test_security.py -v  # Single file
+python -m pytest tests/ -k "test_sandbox"   # Filter by name
+python -m pytest tests/ -m security         # Filter by marker
 ```
 
-Some tests require `fastapi` and `redis` — install the full requirements to avoid import errors.
+Some tests require `fastapi` and `redis` — install the full `requirements.txt` to avoid import errors.
 
-## Project Structure
+### Test Writing Rules
 
-- `agent42.py` — Main orchestrator entry point
-- `agents/` — Agent pipeline: model router, iteration engine, learner
-- `core/` — Task queue, config, capacity, security, worktree management
-- `providers/` — LLM provider registry (OpenRouter, OpenAI, Anthropic, etc.)
-- `dashboard/` — FastAPI web dashboard + WebSocket manager
-- `channels/` — Discord, Slack, Telegram, Email integrations
-- `skills/` — Pluggable skill system
-- `memory/` — Session management, semantic search, consolidation
-- `tools/` — Shell, browser, web search, file operations
-- `tests/` — Test suite
+- Every new module in `core/`, `agents/`, `tools/`, `providers/` needs a `tests/test_*.py` file
+- Use `pytest-asyncio` for async tests (configured as `asyncio_mode = "auto"` in pyproject.toml)
+- Use `tmp_path` fixture (or conftest.py `tmp_workspace`) for filesystem tests — never hardcode `/tmp` paths
+- Use class-based organization: `class TestClassName` with `setup_method`
+- Mock external services (LLM calls, Redis, Qdrant) — never hit real APIs in tests
+- Use conftest.py fixtures: `sandbox`, `command_filter`, `tool_registry`, `mock_tool`
+- Name tests descriptively: `test_<function>_<scenario>_<expected>`
 
-## Key Patterns
+```python
+class TestWorkspaceSandbox:
+    def setup_method(self):
+        self.sandbox = WorkspaceSandbox(tmp_path, enabled=True)
 
-- All I/O is async (`asyncio`, `aiofiles`)
-- Task queue uses `asyncio.PriorityQueue` with pluggable backends (JSON file or Redis)
-- Model routing is free-first: uses OpenRouter free models by default
-- Spending tracker enforces `MAX_DAILY_API_SPEND_USD` across all API calls
-- Redis is optional — graceful fallback to JSON/JSONL when unavailable
+    def test_block_path_traversal(self):
+        with pytest.raises(SandboxViolation):
+            self.sandbox.resolve_path("../../etc/passwd")
+
+    @pytest.mark.asyncio
+    async def test_async_tool_execution(self):
+        result = await tool.execute(input="test")
+        assert result.success
+```
+
+---
+
+## Naming Conventions
+
+| Type | Convention | Example |
+|------|-----------|---------|
+| Files | `snake_case.py` | `task_queue.py`, `model_router.py` |
+| Classes | `PascalCase` | `TaskQueue`, `ModelRouter` |
+| Tools | `PascalCase` + `Tool` suffix | `ShellTool`, `GitTool` |
+| Skills | `kebab-case` directories | `code-review/`, `security-audit/` |
+| Tests | `test_{module}.py` / `class TestClassName` | `test_sandbox.py` / `TestWorkspaceSandbox` |
+| Config env vars | `UPPER_SNAKE_CASE` | `MAX_CONCURRENT_AGENTS` |
+| Loggers | `"agent42.{module}"` namespace | `logging.getLogger("agent42.tools.shell")` |
+
+---
+
+## Commit Guidelines
+
+Use conventional commit prefixes:
+
+| Prefix | Use For |
+|--------|---------|
+| `feat:` | New feature or capability |
+| `fix:` | Bug fix |
+| `refactor:` | Code restructuring (no behavior change) |
+| `test:` | Adding or updating tests |
+| `docs:` | Documentation changes |
+| `chore:` | Build process, dependencies, CI |
+| `security:` | Security fix or hardening |
+
+**Format:** `{prefix} Brief description of the change`
+
+**Examples** (from actual project history):
+```
+feat: priority queue, Redis backend, and spending limit enforcement
+fix: 7 bugs: 3 critical startup crashes, 4 major logic/security gaps
+security: add 6-layer command filter with deny patterns
+chore: add CI workflows for testing, linting, and security scanning
+```
+
+Include *what* and *why*, not just *what*.
+
+---
+
+## Deployment
+
+### Development (Local)
+
+```bash
+git clone <repo> agent42 && cd agent42
+bash setup.sh                    # Creates .venv, installs deps, creates .env
+nano .env                        # Set OPENROUTER_API_KEY + DASHBOARD_PASSWORD
+source .venv/bin/activate
+python agent42.py                # http://localhost:8000
+```
+
+### Production (Server)
+
+```bash
+scp -r agent42/ user@server:~/agent42
+ssh user@server
+cd ~/agent42
+bash deploy/install-server.sh    # nginx + SSL + systemd + firewall
+```
+
+The install script handles: setup.sh, .env configuration, nginx reverse proxy,
+Let's Encrypt SSL, systemd service, UFW firewall. See `deploy/install-server.sh`.
+
+**Service commands:**
+```bash
+sudo systemctl start agent42     # Start
+sudo systemctl restart agent42   # Restart
+sudo systemctl status agent42    # Status
+sudo journalctl -u agent42 -f   # Live logs
+```
+
+### Docker (Development Stack)
+
+```bash
+cp .env.example .env && nano .env
+docker compose up -d             # Agent42 + Redis + Qdrant
+docker compose logs -f agent42   # Logs
+docker compose down              # Stop
+```
+
+---
+
+## Common Pitfalls
+
+| # | Area | Pitfall | Correct Pattern |
+|---|------|---------|-----------------|
+| 1 | Config | Adding env var but not to `Settings` dataclass | Add to `Settings` + `from_env()` + `.env.example` |
+| 2 | Async | Using blocking I/O (`open()`) in tools | Use `aiofiles.open()` for all file operations |
+| 3 | Security | Disabling sandbox for convenience | Keep `SANDBOX_ENABLED=true`; use `resolve_path()` |
+| 4 | Tools | Forgetting to register new tool | Add to `_register_tools()` in `agent42.py` |
+| 5 | Tests | Hardcoding `/tmp` paths in tests | Use `tmp_path` fixture for test isolation |
+| 6 | Providers | Hardcoding premium model as default | Use `FREE_ROUTING` dict, allow admin override via env |
+| 7 | Memory | Not handling missing Qdrant/Redis | Check availability before use; fallback to files |
+| 8 | Config | `DASHBOARD_HOST=0.0.0.0` exposed directly | Keep `127.0.0.1`; use nginx for external access |
+| 9 | JWT | Not setting `JWT_SECRET` in `.env` | Random secret breaks sessions across restarts |
+| 10 | Import | Importing optional deps at module level | Conditional import inside function/method body |
+| 11 | Tools | Missing `**kwargs` in `execute()` signature | Always include `**kwargs` for forward compatibility |
+| 12 | Security | Logging API keys or tokens | Never log secrets — even at DEBUG level |
+| 13 | Shell | Using `subprocess.run(shell=True)` in tools | Route through `CommandFilter` and `Sandbox` |
+| 14 | Config | Boolean env vars with wrong parsing | Use `.lower() in ("true", "1", "yes")` pattern |
+| 15 | Tasks | Using wrong `TaskType` enum value | Check `core/task_queue.py` for valid values |
+
+---
+
+## Documentation Maintenance
+
+**AI Assistant Instructions:** When working on this codebase, proactively update this
+CLAUDE.md file when:
+
+1. **New errors are resolved** — Add to "Common Pitfalls" table
+2. **New terminology is introduced** — Add to "Key Terminology" table
+3. **New tools are created** — Add to "Project Structure" tools section
+4. **New skills are added** — Note in the skills section
+5. **New patterns are established** — Add to "Architecture Patterns" section
+6. **Configuration changes** — Update "Configuration Reference" section
+
+**When to update:**
+- After successfully resolving a non-obvious error
+- When discovering undocumented conventions
+- After creating new tools, skills, or providers
+- When server or deployment configuration changes
+
+**Format:** Keep updates concise and consistent with existing table/list formats.

@@ -1,0 +1,56 @@
+[project]
+name = "agent42"
+version = "0.1.0"
+requires-python = ">=3.11"
+description = "Multi-agent AI orchestrator platform"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = [".", "agents", "core", "providers", "tools", "skills", "memory", "dashboard", "channels"]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort (import ordering)
+    "N",     # pep8-naming
+    "UP",    # pyupgrade (modern Python syntax)
+    "B",     # flake8-bugbear (common bugs)
+    "S",     # flake8-bandit (security)
+    "A",     # flake8-builtins (shadowed builtins)
+    "T20",   # flake8-print (catch debug prints)
+    "SIM",   # flake8-simplify
+    "RUF",   # ruff-specific rules
+]
+ignore = [
+    "S101",  # assert usage OK (used extensively in tests and validation)
+    "S603",  # subprocess call OK (shell tool is sandboxed via CommandFilter)
+    "S607",  # partial executable path OK (CommandFilter validates commands)
+    "E501",  # line length handled by formatter
+    "S108",  # /tmp usage OK (tests use tmp_path but some tools reference /tmp)
+    "B008",  # function call in default arg OK (FastAPI Depends pattern)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S106", "S108", "T20"]
+"agent42.py" = ["T20"]  # Main entry point uses print for startup banner
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "security: security-related tests",
+    "integration: tests requiring external services (Redis, Qdrant, etc.)",
+]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
