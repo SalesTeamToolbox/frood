@@ -2,17 +2,17 @@
 
 import pytest
 
+from core.task_queue import TaskType, infer_task_type
 from tools.content_analyzer import ContentAnalyzerTool
 from tools.data_tool import DataTool
-from tools.template_tool import TemplateTool, BUILTIN_TEMPLATES
 from tools.outline_tool import OutlineTool
-from tools.scoring_tool import ScoringTool, BUILTIN_RUBRICS
-from core.task_queue import TaskType, infer_task_type
-
+from tools.scoring_tool import BUILTIN_RUBRICS, ScoringTool
+from tools.template_tool import BUILTIN_TEMPLATES, TemplateTool
 
 # =============================================================================
 # Task Type Inference Tests
 # =============================================================================
+
 
 class TestTaskTypeInference:
     """Test that new task types are correctly inferred from keywords."""
@@ -46,8 +46,8 @@ class TestTaskTypeInference:
 # Content Analyzer Tests
 # =============================================================================
 
-class TestContentAnalyzer:
 
+class TestContentAnalyzer:
     def setup_method(self):
         self.tool = ContentAnalyzerTool()
 
@@ -99,9 +99,7 @@ class TestContentAnalyzer:
     async def test_compare(self):
         text_a = "This is the original version of the text."
         text_b = "This is the revised and improved version of the text with more detail."
-        result = await self.tool.execute(
-            action="compare", text=text_a, text_b=text_b
-        )
+        result = await self.tool.execute(action="compare", text=text_a, text_b=text_b)
         assert result.success
         assert "Version A" in result.output
         assert "Version B" in result.output
@@ -121,8 +119,8 @@ class TestContentAnalyzer:
 # Data Tool Tests
 # =============================================================================
 
-class TestDataTool:
 
+class TestDataTool:
     def setup_method(self):
         self.tool = DataTool()
 
@@ -157,9 +155,7 @@ class TestDataTool:
     async def test_query_filter(self):
         csv_data = "name,score\nAlice,90\nBob,60\nCarol,85"
         await self.tool.execute(action="load", dataset="scores", data=csv_data)
-        result = await self.tool.execute(
-            action="query", dataset="scores", filter="score>70"
-        )
+        result = await self.tool.execute(action="query", dataset="scores", filter="score>70")
         assert result.success
         assert "Alice" in result.output
         assert "Carol" in result.output
@@ -168,9 +164,7 @@ class TestDataTool:
     async def test_chart(self):
         csv_data = "category\nA\nB\nA\nC\nA\nB"
         await self.tool.execute(action="load", dataset="cats", data=csv_data)
-        result = await self.tool.execute(
-            action="chart", dataset="cats", column="category"
-        )
+        result = await self.tool.execute(action="chart", dataset="cats", column="category")
         assert result.success
         assert "Bar Chart" in result.output
 
@@ -179,8 +173,7 @@ class TestDataTool:
         csv_data = "dept,salary\nEng,100\nEng,120\nSales,80\nSales,90"
         await self.tool.execute(action="load", dataset="emp", data=csv_data)
         result = await self.tool.execute(
-            action="transform", dataset="emp",
-            group_by="dept", agg="avg", value_column="salary"
+            action="transform", dataset="emp", group_by="dept", agg="avg", value_column="salary"
         )
         assert result.success
         assert "Eng" in result.output
@@ -190,9 +183,7 @@ class TestDataTool:
     async def test_export_csv(self):
         csv_data = "a,b\n1,2\n3,4"
         await self.tool.execute(action="load", dataset="test", data=csv_data)
-        result = await self.tool.execute(
-            action="export", dataset="test", format="csv"
-        )
+        result = await self.tool.execute(action="export", dataset="test", format="csv")
         assert result.success
         assert "a,b" in result.output
 
@@ -206,9 +197,7 @@ class TestDataTool:
 
     @pytest.mark.asyncio
     async def test_query_nonexistent_dataset(self):
-        result = await self.tool.execute(
-            action="query", dataset="nope"
-        )
+        result = await self.tool.execute(action="query", dataset="nope")
         assert not result.success
 
 
@@ -216,8 +205,8 @@ class TestDataTool:
 # Template Tool Tests
 # =============================================================================
 
-class TestTemplateTool:
 
+class TestTemplateTool:
     def setup_method(self):
         self.tool = TemplateTool()
 
@@ -294,9 +283,7 @@ class TestTemplateTool:
 
     @pytest.mark.asyncio
     async def test_delete_custom_template(self):
-        await self.tool.execute(
-            action="create", name="temp", content="{x}"
-        )
+        await self.tool.execute(action="create", name="temp", content="{x}")
         result = await self.tool.execute(action="delete", name="temp")
         assert result.success
 
@@ -310,8 +297,8 @@ class TestTemplateTool:
 # Outline Tool Tests
 # =============================================================================
 
-class TestOutlineTool:
 
+class TestOutlineTool:
     def setup_method(self):
         self.tool = OutlineTool()
 
@@ -349,9 +336,7 @@ class TestOutlineTool:
 
     @pytest.mark.asyncio
     async def test_expand_section(self):
-        await self.tool.execute(
-            action="create", doc_type="article", name="test-expand"
-        )
+        await self.tool.execute(action="create", doc_type="article", name="test-expand")
         result = await self.tool.execute(
             action="expand",
             name="test-expand",
@@ -363,9 +348,7 @@ class TestOutlineTool:
 
     @pytest.mark.asyncio
     async def test_reorder_sections(self):
-        await self.tool.execute(
-            action="create", doc_type="article", name="test-reorder"
-        )
+        await self.tool.execute(action="create", doc_type="article", name="test-reorder")
         result = await self.tool.execute(
             action="reorder",
             name="test-reorder",
@@ -382,9 +365,7 @@ class TestOutlineTool:
 
     @pytest.mark.asyncio
     async def test_export(self):
-        await self.tool.execute(
-            action="create", doc_type="report", name="test-export"
-        )
+        await self.tool.execute(action="create", doc_type="report", name="test-export")
         result = await self.tool.execute(action="export", name="test-export")
         assert result.success
         assert "##" in result.output  # Markdown headings in export mode
@@ -394,8 +375,8 @@ class TestOutlineTool:
 # Scoring Tool Tests
 # =============================================================================
 
-class TestScoringTool:
 
+class TestScoringTool:
     def setup_method(self):
         self.tool = ScoringTool()
 
@@ -522,6 +503,7 @@ class TestScoringTool:
 # =============================================================================
 # All Builtin Rubrics Validation
 # =============================================================================
+
 
 class TestBuiltinRubrics:
     """Validate all built-in rubrics have correct structure."""

@@ -58,7 +58,7 @@ class JsonFileBackend(QueueBackend):
         if not self._json_path.exists():
             return []
         try:
-            async with aiofiles.open(self._json_path, "r") as f:
+            async with aiofiles.open(self._json_path) as f:
                 raw = await f.read()
             data = json.loads(raw)
             for item in data:
@@ -84,8 +84,7 @@ class JsonFileBackend(QueueBackend):
 
 # Redis hash field types that need special serialization/deserialization
 _LIST_FIELDS = ("tags", "comments", "origin_metadata")
-_INT_FIELDS = ("priority", "position", "iterations", "max_iterations",
-               "retry_count", "max_retries")
+_INT_FIELDS = ("priority", "position", "iterations", "max_iterations", "retry_count", "max_retries")
 _FLOAT_FIELDS = ("created_at", "updated_at")
 
 
@@ -100,9 +99,13 @@ class RedisQueueBackend(QueueBackend):
     Falls back gracefully to JsonFileBackend if Redis connection fails.
     """
 
-    def __init__(self, redis_url: str, redis_password: str = "",
-                 key_prefix: str = "agent42",
-                 fallback_json_path: str = "tasks.json"):
+    def __init__(
+        self,
+        redis_url: str,
+        redis_password: str = "",
+        key_prefix: str = "agent42",
+        fallback_json_path: str = "tasks.json",
+    ):
         self._redis_url = redis_url
         self._redis_password = redis_password
         self._prefix = key_prefix
@@ -121,8 +124,7 @@ class RedisQueueBackend(QueueBackend):
             import redis.asyncio as aioredis
         except ImportError:
             logger.warning(
-                "redis.asyncio not available — pip install redis[hiredis]. "
-                "Using JSON file backend."
+                "redis.asyncio not available — pip install redis[hiredis]. Using JSON file backend."
             )
             return
 
@@ -137,9 +139,7 @@ class RedisQueueBackend(QueueBackend):
             await self._client.ping()
             logger.info(f"Redis queue backend connected: {self._redis_url}")
         except Exception as e:
-            logger.warning(
-                f"Redis queue backend unavailable ({e}) — falling back to JSON"
-            )
+            logger.warning(f"Redis queue backend unavailable ({e}) — falling back to JSON")
             self._client = None
 
     async def stop(self) -> None:
@@ -177,15 +177,12 @@ class RedisQueueBackend(QueueBackend):
                 tasks = await self._fallback.load_all()
                 if tasks:
                     logger.info(
-                        f"Redis empty, loaded {len(tasks)} tasks from JSON — "
-                        "warming Redis cache"
+                        f"Redis empty, loaded {len(tasks)} tasks from JSON — warming Redis cache"
                     )
                     for t in tasks:
                         if isinstance(t, dict) and "id" in t:
                             key = self._key("task", t["id"])
-                            await self._client.hset(
-                                key, mapping=_task_dict_to_hash(t)
-                            )
+                            await self._client.hset(key, mapping=_task_dict_to_hash(t))
                             await self._client.sadd(self._key("task_ids"), t["id"])
                 return tasks
 

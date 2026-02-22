@@ -15,7 +15,17 @@ from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.repo_map")
 
-_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".tox", ".mypy_cache"}
+_SKIP_DIRS = {
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+    ".tox",
+    ".mypy_cache",
+}
 _CODE_EXTS = {".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java", ".rb", ".php"}
 _CONFIG_EXTS = {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg"}
 _DOC_EXTS = {".md", ".rst", ".txt"}
@@ -106,7 +116,9 @@ class RepoMapTool(Tool):
         config_files = [f for f in all_files if f[2] in _CONFIG_EXTS]
         doc_files = [f for f in all_files if f[2] in _DOC_EXTS]
 
-        lines.append(f"**Files:** {len(all_files)} total ({len(code_files)} code, {len(config_files)} config, {len(doc_files)} docs)\n")
+        lines.append(
+            f"**Files:** {len(all_files)} total ({len(code_files)} code, {len(config_files)} config, {len(doc_files)} docs)\n"
+        )
 
         # File tree
         lines.append("### File Tree\n```")
@@ -151,7 +163,7 @@ class RepoMapTool(Tool):
 
     def _python_signatures(self, filepath: str) -> list[str]:
         try:
-            with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            with open(filepath, encoding="utf-8", errors="replace") as f:
                 tree = ast.parse(f.read(), filename=filepath)
         except SyntaxError:
             return []
@@ -159,9 +171,7 @@ class RepoMapTool(Tool):
         sigs = []
         for node in ast.iter_child_nodes(tree):
             if isinstance(node, ast.ClassDef):
-                bases = ", ".join(
-                    getattr(b, "id", getattr(b, "attr", "?")) for b in node.bases
-                )
+                bases = ", ".join(getattr(b, "id", getattr(b, "attr", "?")) for b in node.bases)
                 sigs.append(f"class {node.name}({bases})  # L{node.lineno}")
                 for item in node.body:
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -193,16 +203,19 @@ class RepoMapTool(Tool):
     def _js_signatures(self, filepath: str) -> list[str]:
         """Extract JS/TS signatures via regex (no tree-sitter dependency)."""
         import re
+
         sigs = []
         try:
-            with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            with open(filepath, encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
         except Exception:
             return []
 
         class_re = re.compile(r"(?:export\s+)?class\s+(\w+)(?:\s+extends\s+(\w+))?")
         func_re = re.compile(r"(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)")
-        arrow_re = re.compile(r"(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s+)?\(([^)]*)\)\s*(?:=>|:\s*\w+\s*=>)")
+        arrow_re = re.compile(
+            r"(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s+)?\(([^)]*)\)\s*(?:=>|:\s*\w+\s*=>)"
+        )
         method_re = re.compile(r"^\s+(?:async\s+)?(\w+)\s*\(([^)]*)\)\s*\{")
 
         in_class = False
@@ -210,7 +223,7 @@ class RepoMapTool(Tool):
             m = class_re.search(line)
             if m:
                 extends = f" extends {m.group(2)}" if m.group(2) else ""
-                sigs.append(f"class {m.group(1)}{extends}  # L{i+1}")
+                sigs.append(f"class {m.group(1)}{extends}  # L{i + 1}")
                 in_class = True
                 continue
 
@@ -219,7 +232,7 @@ class RepoMapTool(Tool):
                 params = m.group(2).strip()
                 if len(params) > 40:
                     params = params[:40] + "..."
-                sigs.append(f"function {m.group(1)}({params})  # L{i+1}")
+                sigs.append(f"function {m.group(1)}({params})  # L{i + 1}")
                 continue
 
             m = arrow_re.search(line)
@@ -227,7 +240,7 @@ class RepoMapTool(Tool):
                 params = m.group(2).strip()
                 if len(params) > 40:
                     params = params[:40] + "..."
-                sigs.append(f"const {m.group(1)} = ({params}) =>  # L{i+1}")
+                sigs.append(f"const {m.group(1)} = ({params}) =>  # L{i + 1}")
                 continue
 
             if in_class:
@@ -236,6 +249,6 @@ class RepoMapTool(Tool):
                     params = m.group(2).strip()
                     if len(params) > 40:
                         params = params[:40] + "..."
-                    sigs.append(f"  {m.group(1)}({params})  # L{i+1}")
+                    sigs.append(f"  {m.group(1)}({params})  # L{i + 1}")
 
         return sigs

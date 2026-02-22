@@ -46,7 +46,7 @@ DANGEROUS_PATTERNS = [
         "warning": "subprocess.run(shell=True) detected — use CommandFilter for validation",
     },
     {
-        "pattern": r'0\.0\.0\.0',
+        "pattern": r"0\.0\.0\.0",
         "context": ["host", "bind", "listen", "default"],
         "warning": "Binding to 0.0.0.0 — ensure nginx/firewall is configured",
     },
@@ -114,8 +114,7 @@ def scan_content(content, file_path=""):
         # If context keywords specified, check if they appear in the file path or content
         if check["context"]:
             context_found = any(
-                ctx in file_lower or ctx in content.lower()
-                for ctx in check["context"]
+                ctx in file_lower or ctx in content.lower() for ctx in check["context"]
             )
             if not context_found:
                 continue

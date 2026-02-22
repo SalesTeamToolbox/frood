@@ -13,6 +13,7 @@ Security:
 import asyncio
 import logging
 import re
+
 from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.git")
@@ -51,8 +52,16 @@ class GitTool(Tool):
                 "action": {
                     "type": "string",
                     "enum": [
-                        "status", "diff", "log", "branch", "commit",
-                        "add", "checkout", "show", "stash", "blame",
+                        "status",
+                        "diff",
+                        "log",
+                        "branch",
+                        "commit",
+                        "add",
+                        "checkout",
+                        "show",
+                        "stash",
+                        "blame",
                     ],
                     "description": "Git action to perform",
                 },
@@ -105,18 +114,23 @@ class GitTool(Tool):
     async def _run_git(self, *args: str, timeout: float = 30.0) -> tuple[int, str, str]:
         """Run a git command and return (returncode, stdout, stderr)."""
         proc = await asyncio.create_subprocess_exec(
-            "git", *args,
+            "git",
+            *args,
             cwd=self._workspace,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return 1, "", "Command timed out"
-        return proc.returncode, stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace")
+        return (
+            proc.returncode,
+            stdout.decode("utf-8", errors="replace"),
+            stderr.decode("utf-8", errors="replace"),
+        )
 
     async def _status(self, args: str) -> ToolResult:
         code, out, err = await self._run_git("status", "--porcelain=v2", "--branch")
@@ -164,7 +178,9 @@ class GitTool(Tool):
 
         parts = args.split()
         if parts[0] in ("-d", "--delete"):
-            return ToolResult(error="Branch deletion blocked — use dashboard or manual git", success=False)
+            return ToolResult(
+                error="Branch deletion blocked — use dashboard or manual git", success=False
+            )
 
         # Create new branch
         code, out, err = await self._run_git("branch", *parts)
@@ -191,7 +207,9 @@ class GitTool(Tool):
         blocked = {".env", ".env.local", ".env.production", "credentials.json", "secrets.yaml"}
         for path in args.split():
             if path in blocked:
-                return ToolResult(error=f"Blocked: cannot stage sensitive file '{path}'", success=False)
+                return ToolResult(
+                    error=f"Blocked: cannot stage sensitive file '{path}'", success=False
+                )
         code, out, err = await self._run_git("add", *args.split())
         if code != 0:
             return ToolResult(error=f"git add failed: {err}", success=False)

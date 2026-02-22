@@ -42,8 +42,15 @@ class DockerTool(Tool):
                 "action": {
                     "type": "string",
                     "enum": [
-                        "run", "exec", "build", "ps", "logs",
-                        "stop", "rm", "images", "pull",
+                        "run",
+                        "exec",
+                        "build",
+                        "ps",
+                        "logs",
+                        "stop",
+                        "rm",
+                        "images",
+                        "pull",
                     ],
                     "description": "Docker action to perform",
                 },
@@ -92,7 +99,7 @@ class DockerTool(Tool):
                 error="Docker is not installed or not in PATH",
                 success=False,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             return ToolResult(error=f"Docker command timed out (>{timeout}s)", success=False)
 
@@ -109,8 +116,12 @@ class DockerTool(Tool):
             logger.debug(f"Docker stderr: {errors[:500]}")
             # Return a sanitized subset — strip lines with version/daemon info
             safe_lines = [
-                line for line in errors.splitlines()
-                if not any(kw in line.lower() for kw in ("version", "daemon", "docker engine", "api version"))
+                line
+                for line in errors.splitlines()
+                if not any(
+                    kw in line.lower()
+                    for kw in ("version", "daemon", "docker engine", "api version")
+                )
             ]
             safe_error = "\n".join(safe_lines[:20])
             combined += f"\nSTDERR:\n{safe_error}"
@@ -143,7 +154,9 @@ class DockerTool(Tool):
         elif action == "build":
             return await self._action_build(dockerfile, tag)
         elif action == "ps":
-            return await self._run_docker(["ps", "--format", "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}"])
+            return await self._run_docker(
+                ["ps", "--format", "table {{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Names}}"]
+            )
         elif action == "logs":
             if not container:
                 return ToolResult(error="Container name/ID required", success=False)
@@ -157,7 +170,9 @@ class DockerTool(Tool):
                 return ToolResult(error="Container name/ID required", success=False)
             return await self._run_docker(["rm", container])
         elif action == "images":
-            return await self._run_docker(["images", "--format", "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"])
+            return await self._run_docker(
+                ["images", "--format", "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"]
+            )
         elif action == "pull":
             if not image:
                 return ToolResult(error="Image name required", success=False)
@@ -170,7 +185,8 @@ class DockerTool(Tool):
             return ToolResult(error="Image name required for run", success=False)
 
         args = [
-            "run", "--rm",
+            "run",
+            "--rm",
             # Network isolation
             "--network=none",
             # Memory limits (prevent OOM and swap abuse)
@@ -187,8 +203,10 @@ class DockerTool(Tool):
             "--cap-drop=ALL",
             "--security-opt=no-new-privileges:true",
             # Read-only workspace mount
-            "-v", f"{self._workspace}:/workspace:ro",
-            "-w", "/workspace",
+            "-v",
+            f"{self._workspace}:/workspace:ro",
+            "-w",
+            "/workspace",
             image,
         ]
         if command:

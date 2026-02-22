@@ -11,11 +11,10 @@ Falls back gracefully when qdrant-client is not installed — callers should
 check `is_available` before using.
 """
 
-import hashlib
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger("agent42.memory.qdrant")
 
@@ -69,7 +68,7 @@ class QdrantStore:
 
     def __init__(self, config: QdrantConfig):
         self.config = config
-        self._client: "QdrantClient | None" = None
+        self._client: QdrantClient | None = None
         self._initialized_collections: set[str] = set()
 
         if not QDRANT_AVAILABLE:
@@ -87,9 +86,7 @@ class QdrantStore:
             else:
                 # Embedded mode: local file storage
                 self._client = QdrantClient(path=config.local_path)
-                logger.info(
-                    f"Qdrant backend: using embedded storage at {config.local_path}"
-                )
+                logger.info(f"Qdrant backend: using embedded storage at {config.local_path}")
         except Exception as e:
             logger.warning(f"Qdrant backend: failed to connect — {e}")
             self._client = None
@@ -188,9 +185,7 @@ class QdrantStore:
             for i in range(0, len(points), 100):
                 batch = points[i : i + 100]
                 self._client.upsert(collection_name=name, points=batch)
-            logger.debug(
-                f"Qdrant: upserted {len(points)} points to '{name}'"
-            )
+            logger.debug(f"Qdrant: upserted {len(points)} points to '{name}'")
             return len(points)
         except Exception as e:
             logger.error(f"Qdrant: upsert failed for '{name}': {e}")
@@ -204,9 +199,7 @@ class QdrantStore:
         payload: dict | None = None,
     ) -> bool:
         """Store a single text+vector pair."""
-        return self.upsert_vectors(
-            collection_suffix, [text], [vector], [payload or {}]
-        ) > 0
+        return self.upsert_vectors(collection_suffix, [text], [vector], [payload or {}]) > 0
 
     # -- Search operations --
 
@@ -241,21 +234,13 @@ class QdrantStore:
         # Build filters
         conditions = []
         if source_filter:
-            conditions.append(
-                FieldCondition(
-                    key="source", match=MatchValue(value=source_filter)
-                )
-            )
+            conditions.append(FieldCondition(key="source", match=MatchValue(value=source_filter)))
         if channel_filter:
             conditions.append(
-                FieldCondition(
-                    key="channel_type", match=MatchValue(value=channel_filter)
-                )
+                FieldCondition(key="channel_type", match=MatchValue(value=channel_filter))
             )
         if time_after > 0:
-            conditions.append(
-                FieldCondition(key="timestamp", range=Range(gte=time_after))
-            )
+            conditions.append(FieldCondition(key="timestamp", range=Range(gte=time_after)))
 
         query_filter = Filter(must=conditions) if conditions else None
 

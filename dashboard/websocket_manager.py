@@ -9,6 +9,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+
 from fastapi import WebSocket
 
 logger = logging.getLogger("agent42.websocket")
@@ -19,8 +20,8 @@ class WSConnection:
     """A WebSocket connection with identity metadata."""
 
     ws: WebSocket
-    user: str = ""           # username (JWT) or "device" (API key)
-    device_id: str = ""      # non-empty for API-key-authenticated devices
+    user: str = ""  # username (JWT) or "device" (API key)
+    device_id: str = ""  # non-empty for API-key-authenticated devices
     device_name: str = ""
     connected_at: float = field(default_factory=time.time)
 

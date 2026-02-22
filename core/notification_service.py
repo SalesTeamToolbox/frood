@@ -8,13 +8,12 @@ Inspired by OpenClaw's push notification system.
 """
 
 import asyncio
-import json
 import logging
 import smtplib
 import time
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from dataclasses import dataclass
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 import httpx
 
@@ -34,9 +33,9 @@ _SLACK_COLORS = {
 
 # Discord color mapping (decimal)
 _DISCORD_COLORS = {
-    SEVERITY_INFO: 3586116,      # green
+    SEVERITY_INFO: 3586116,  # green
     SEVERITY_WARNING: 16750848,  # orange
-    SEVERITY_CRITICAL: 16711680, # red
+    SEVERITY_CRITICAL: 16711680,  # red
 }
 
 # Events that trigger email notifications (critical events only)
@@ -46,6 +45,7 @@ _EMAIL_EVENTS = {"task_failed", "agent_stalled", "security_alert"}
 @dataclass
 class NotificationPayload:
     """Structured notification payload."""
+
     event: str
     timestamp: float
     task_id: str = ""
@@ -88,6 +88,7 @@ class NotificationService:
             # SSRF protection on webhook URLs
             try:
                 from core.url_policy import _is_ssrf_target
+
                 ssrf = _is_ssrf_target(url)
                 if ssrf:
                     logger.warning(f"Webhook URL blocked by SSRF: {url} — {ssrf}")
@@ -125,7 +126,7 @@ class NotificationService:
                 logger.warning(f"Webhook error (attempt {attempt + 1}/3): {e}")
 
             # Exponential backoff: 1s, 2s, 4s
-            await asyncio.sleep(2 ** attempt)
+            await asyncio.sleep(2**attempt)
 
         logger.error(f"Webhook failed after 3 retries: {url[:50]}...")
 
@@ -145,28 +146,33 @@ class NotificationService:
         """Format as Slack Block Kit message."""
         color = _SLACK_COLORS.get(payload.severity, _SLACK_COLORS[SEVERITY_INFO])
         return {
-            "attachments": [{
-                "color": color,
-                "blocks": [
-                    {
-                        "type": "header",
-                        "text": {"type": "plain_text", "text": f"Agent42: {payload.event}"}
-                    },
-                    {
-                        "type": "section",
-                        "fields": [
-                            {"type": "mrkdwn", "text": f"*Event:*\n{payload.event}"},
-                            {"type": "mrkdwn", "text": f"*Severity:*\n{payload.severity}"},
-                            {"type": "mrkdwn", "text": f"*Task:*\n{payload.task_id or 'N/A'}"},
-                            {"type": "mrkdwn", "text": f"*Title:*\n{payload.title or 'N/A'}"},
-                        ],
-                    },
-                    {
-                        "type": "section",
-                        "text": {"type": "mrkdwn", "text": payload.details[:2000] if payload.details else "No details"},
-                    },
-                ],
-            }],
+            "attachments": [
+                {
+                    "color": color,
+                    "blocks": [
+                        {
+                            "type": "header",
+                            "text": {"type": "plain_text", "text": f"Agent42: {payload.event}"},
+                        },
+                        {
+                            "type": "section",
+                            "fields": [
+                                {"type": "mrkdwn", "text": f"*Event:*\n{payload.event}"},
+                                {"type": "mrkdwn", "text": f"*Severity:*\n{payload.severity}"},
+                                {"type": "mrkdwn", "text": f"*Task:*\n{payload.task_id or 'N/A'}"},
+                                {"type": "mrkdwn", "text": f"*Title:*\n{payload.title or 'N/A'}"},
+                            ],
+                        },
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": payload.details[:2000] if payload.details else "No details",
+                            },
+                        },
+                    ],
+                }
+            ],
         }
 
     @staticmethod
@@ -174,18 +180,22 @@ class NotificationService:
         """Format as Discord embed."""
         color = _DISCORD_COLORS.get(payload.severity, _DISCORD_COLORS[SEVERITY_INFO])
         return {
-            "embeds": [{
-                "title": f"Agent42: {payload.event}",
-                "color": color,
-                "fields": [
-                    {"name": "Event", "value": payload.event, "inline": True},
-                    {"name": "Severity", "value": payload.severity, "inline": True},
-                    {"name": "Task", "value": payload.task_id or "N/A", "inline": True},
-                    {"name": "Title", "value": payload.title or "N/A", "inline": False},
-                ],
-                "description": payload.details[:4000] if payload.details else "No details",
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(payload.timestamp)),
-            }],
+            "embeds": [
+                {
+                    "title": f"Agent42: {payload.event}",
+                    "color": color,
+                    "fields": [
+                        {"name": "Event", "value": payload.event, "inline": True},
+                        {"name": "Severity", "value": payload.severity, "inline": True},
+                        {"name": "Task", "value": payload.task_id or "N/A", "inline": True},
+                        {"name": "Title", "value": payload.title or "N/A", "inline": False},
+                    ],
+                    "description": payload.details[:4000] if payload.details else "No details",
+                    "timestamp": time.strftime(
+                        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(payload.timestamp)
+                    ),
+                }
+            ],
         }
 
     @staticmethod
@@ -206,7 +216,9 @@ class NotificationService:
         if not self._smtp_host or not self._email_recipients:
             return
 
-        subject = f"[Agent42 {payload.severity.upper()}] {payload.event}: {payload.title or 'Alert'}"
+        subject = (
+            f"[Agent42 {payload.severity.upper()}] {payload.event}: {payload.title or 'Alert'}"
+        )
         body = (
             f"Event: {payload.event}\n"
             f"Severity: {payload.severity}\n"

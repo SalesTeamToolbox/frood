@@ -80,14 +80,18 @@ class DynamicTool(Tool):
         )
 
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", dir=self._workspace, delete=False,
+            mode="w",
+            suffix=".py",
+            dir=self._workspace,
+            delete=False,
         ) as f:
             f.write(script)
             script_path = f.name
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                "python", script_path,
+                "python",
+                script_path,
                 cwd=self._workspace,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -95,10 +99,8 @@ class DynamicTool(Tool):
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=30
-                )
-            except asyncio.TimeoutError:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            except TimeoutError:
                 proc.kill()
                 return ToolResult(
                     error="Dynamic tool execution timed out after 30s",
@@ -205,7 +207,7 @@ class CreateToolTool(Tool):
         if self._dynamic_count >= MAX_DYNAMIC_TOOLS:
             return ToolResult(
                 error=f"Maximum dynamic tools reached ({MAX_DYNAMIC_TOOLS}). "
-                      f"Cannot create more tools in this session.",
+                f"Cannot create more tools in this session.",
                 success=False,
             )
 
@@ -216,7 +218,7 @@ class CreateToolTool(Tool):
         if not _TOOL_NAME_RE.match(tool_name):
             return ToolResult(
                 error=f"Invalid tool name '{tool_name}'. Must be lowercase "
-                      f"alphanumeric + underscores, 3-50 chars, starting with a letter.",
+                f"alphanumeric + underscores, 3-50 chars, starting with a letter.",
                 success=False,
             )
 
@@ -232,7 +234,7 @@ class CreateToolTool(Tool):
         if self._registry.get(tool_name):
             return ToolResult(
                 error=f"A built-in tool named '{tool_name}' already exists. "
-                      f"Choose a different name.",
+                f"Choose a different name.",
                 success=False,
             )
 
@@ -287,7 +289,7 @@ class CreateToolTool(Tool):
             self._registry.register(dynamic_tool)
             self._dynamic_count += 1
 
-            schema = dynamic_tool.to_schema()
+            _schema = dynamic_tool.to_schema()
             logger.info(f"Created dynamic tool: {full_name}")
 
             return ToolResult(

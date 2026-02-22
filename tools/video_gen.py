@@ -8,7 +8,6 @@ Video generation is asynchronous — the tool returns a job ID that can be
 polled for completion. Before generating, prompts are reviewed by a team.
 """
 
-import asyncio
 import logging
 import os
 import time
@@ -41,7 +40,6 @@ VIDEO_MODELS: dict[str, dict] = {
         "max_duration": 4,
         "supports_image_input": False,
     },
-
     # ═══════════════════════════════════════════════════════════════════
     # PREMIUM TIER — high-quality video models
     # ═══════════════════════════════════════════════════════════════════
@@ -125,7 +123,13 @@ class VideoGenTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["generate", "image_to_video", "list_models", "status", "review_prompt"],
+                    "enum": [
+                        "generate",
+                        "image_to_video",
+                        "list_models",
+                        "status",
+                        "review_prompt",
+                    ],
                     "description": "Video generation action",
                 },
                 "prompt": {
@@ -279,9 +283,9 @@ class VideoGenTool(Tool):
         final_prompt = prompt
         review_note = ""
         if not skip_review and self._router:
-            review_result = await self._review_prompt({
-                "prompt": prompt, "context": context, "duration": duration
-            })
+            review_result = await self._review_prompt(
+                {"prompt": prompt, "context": context, "duration": duration}
+            )
             if review_result.success and "**Enhanced:**" in review_result.output:
                 parts = review_result.output.split("**Enhanced:**")
                 if len(parts) > 1:
@@ -314,11 +318,15 @@ class VideoGenTool(Tool):
 
         try:
             if provider == "replicate":
-                prediction = await self._submit_replicate(final_prompt, model_spec, duration, aspect_ratio)
+                prediction = await self._submit_replicate(
+                    final_prompt, model_spec, duration, aspect_ratio
+                )
                 job["prediction_url"] = prediction.get("urls", {}).get("get", "")
                 job["status"] = "processing"
             elif provider == "luma":
-                generation = await self._submit_luma(final_prompt, model_spec, duration, aspect_ratio)
+                generation = await self._submit_luma(
+                    final_prompt, model_spec, duration, aspect_ratio
+                )
                 job["prediction_url"] = generation.get("id", "")
                 job["status"] = "processing"
             else:
@@ -387,15 +395,17 @@ class VideoGenTool(Tool):
         try:
             if model_spec["provider"] == "replicate":
                 prediction = await self._submit_replicate_i2v(
-                    prompt or "Animate with natural movement",
-                    image_url, model_spec, duration
+                    prompt or "Animate with natural movement", image_url, model_spec, duration
                 )
                 job["prediction_url"] = prediction.get("urls", {}).get("get", "")
                 job["status"] = "processing"
             elif model_spec["provider"] == "luma":
                 generation = await self._submit_luma(
-                    prompt or "Animate this image", model_spec, duration,
-                    aspect_ratio, image_url=image_url
+                    prompt or "Animate this image",
+                    model_spec,
+                    duration,
+                    aspect_ratio,
+                    image_url=image_url,
                 )
                 job["prediction_url"] = generation.get("id", "")
                 job["status"] = "processing"
@@ -471,8 +481,7 @@ class VideoGenTool(Tool):
             return response.json()
 
     async def _submit_luma(
-        self, prompt: str, model_spec: dict, duration: int,
-        aspect_ratio: str, image_url: str = ""
+        self, prompt: str, model_spec: dict, duration: int, aspect_ratio: str, image_url: str = ""
     ) -> dict:
         """Submit a video generation job to Luma AI."""
         import httpx
@@ -604,6 +613,7 @@ class VideoGenTool(Tool):
     async def _save_video(self, url: str, provider: str) -> str:
         """Download and save a video from a URL."""
         import httpx
+
         from core.config import settings
 
         output_dir = Path(settings.outputs_dir) / "videos"

@@ -3,18 +3,17 @@
 import json
 import tempfile
 import time
-import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
-from dataclasses import asdict
 
-from memory.qdrant_store import QdrantStore, QdrantConfig, QDRANT_AVAILABLE
-from memory.redis_session import RedisSessionBackend, RedisConfig, REDIS_AVAILABLE
-from memory.consolidation import ConsolidationPipeline, ConversationSummary
+import pytest
+
+from memory.consolidation import ConsolidationPipeline
+from memory.embeddings import EmbeddingStore
+from memory.qdrant_store import QDRANT_AVAILABLE, QdrantConfig, QdrantStore
+from memory.redis_session import REDIS_AVAILABLE, RedisConfig, RedisSessionBackend
 from memory.session import SessionManager, SessionMessage
 from memory.store import MemoryStore
-from memory.embeddings import EmbeddingStore
-
 
 # ── Qdrant Backend Tests ──────────────────────────────────────────────────
 
@@ -54,9 +53,7 @@ class TestQdrantStoreUnavailable:
     def test_upsert_returns_zero_when_unavailable(self):
         with patch("memory.qdrant_store.QDRANT_AVAILABLE", False):
             store = QdrantStore(QdrantConfig())
-            count = store.upsert_vectors(
-                "memory", ["test"], [[0.1] * 1536]
-            )
+            count = store.upsert_vectors("memory", ["test"], [[0.1] * 1536])
             assert count == 0
 
 
@@ -269,11 +266,13 @@ Some stuff happened.
     @pytest.mark.asyncio
     async def test_summarize_messages(self):
         mock_router = MagicMock()
-        mock_router.complete = AsyncMock(return_value=(
-            "## Summary\nDiscussed Python project.\n\n"
-            "## Key Topics\n- Python\n- Testing\n\n"
-            "## Important Details\n- Uses pytest"
-        ))
+        mock_router.complete = AsyncMock(
+            return_value=(
+                "## Summary\nDiscussed Python project.\n\n"
+                "## Key Topics\n- Python\n- Testing\n\n"
+                "## Important Details\n- Uses pytest"
+            )
+        )
 
         mock_embeddings = MagicMock()
         mock_embeddings.is_available = True
@@ -449,7 +448,13 @@ class TestEmbeddingStoreWithBackends:
         mock_qdrant = MagicMock()
         mock_qdrant.is_available = True
         mock_qdrant.search.return_value = [
-            {"text": "result from qdrant", "source": "memory", "section": "test", "score": 0.9, "metadata": {}}
+            {
+                "text": "result from qdrant",
+                "source": "memory",
+                "section": "test",
+                "score": 0.9,
+                "metadata": {},
+            }
         ]
 
         store = EmbeddingStore(self.store_path, qdrant_store=mock_qdrant)
@@ -476,8 +481,7 @@ class TestEmbeddingStoreWithBackends:
         store._model = "test-model"
         store._entries = [
             EmbeddingEntry(
-                text="Python is great", vector=[1.0, 0.0],
-                source="memory", section="tech"
+                text="Python is great", vector=[1.0, 0.0], source="memory", section="tech"
             ),
         ]
         store._loaded = True
@@ -500,7 +504,6 @@ class TestEmbeddingCacheHashLength:
 
     def test_cache_key_uses_full_hash(self):
         """Cache key should use full 64-char SHA-256 hex, not truncated."""
-        import hashlib
 
         # Create backend with a mock client directly
         config = RedisConfig(url="redis://localhost:6379/0")
@@ -536,7 +539,7 @@ class TestBatchEmbedWithCache:
         # First text is cached, second is not
         mock_redis.get_cached_embedding.side_effect = [
             [0.1, 0.2, 0.3],  # Cache hit for "cached text"
-            None,              # Cache miss for "uncached text"
+            None,  # Cache miss for "uncached text"
         ]
 
         store = EmbeddingStore(
@@ -559,9 +562,7 @@ class TestBatchEmbedWithCache:
         # API should only be called once (for the uncached text)
         store._client.embeddings.create.assert_called_once()
         # The uncached result should be cached
-        mock_redis.cache_embedding.assert_called_once_with(
-            "uncached text", [0.4, 0.5, 0.6]
-        )
+        mock_redis.cache_embedding.assert_called_once_with("uncached text", [0.4, 0.5, 0.6])
 
     @pytest.mark.asyncio
     async def test_embed_texts_all_cached(self):
@@ -598,6 +599,7 @@ class TestQdrantPointIdFormat:
     def test_point_id_is_valid_uuid(self):
         """_make_point_id should return a valid UUID string."""
         import uuid
+
         config = QdrantConfig()
         store = QdrantStore(config)
         point_id = store._make_point_id("test text", "memory")

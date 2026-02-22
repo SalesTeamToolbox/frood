@@ -21,17 +21,19 @@ class TestLearnerReflection:
     @pytest.mark.asyncio
     async def test_reflection_updates_memory(self):
         """Reflection should parse [Section] bullets and update memory."""
-        self.router.complete = AsyncMock(return_value=(
-            "## What Worked\n"
-            "- Used structured prompts\n\n"
-            "## What Didn't Work\n"
-            "- Nothing major\n\n"
-            "## Lesson Learned\n"
-            "Always check the test suite before committing.\n\n"
-            "## Memory Update\n"
-            "- [Project Conventions] - Run pytest with --strict-markers\n"
-            "- [Common Patterns] - API uses /api/v1/{resource} format\n"
-        ))
+        self.router.complete = AsyncMock(
+            return_value=(
+                "## What Worked\n"
+                "- Used structured prompts\n\n"
+                "## What Didn't Work\n"
+                "- Nothing major\n\n"
+                "## Lesson Learned\n"
+                "Always check the test suite before committing.\n\n"
+                "## Memory Update\n"
+                "- [Project Conventions] - Run pytest with --strict-markers\n"
+                "- [Common Patterns] - API uses /api/v1/{resource} format\n"
+            )
+        )
 
         learner = Learner(self.router, self.memory)
         result = await learner.reflect_on_task(
@@ -55,16 +57,18 @@ class TestLearnerReflection:
     @pytest.mark.asyncio
     async def test_reflection_on_failure(self):
         """Failure reflection should still extract lessons."""
-        self.router.complete = AsyncMock(return_value=(
-            "## What Worked\n"
-            "- Nothing — task failed immediately\n\n"
-            "## What Didn't Work\n"
-            "- Missing dependency: pandas not installed\n\n"
-            "## Lesson Learned\n"
-            "Check requirements.txt before running data processing tasks.\n\n"
-            "## Memory Update\n"
-            "- [Common Patterns] - This project requires pandas for data tasks\n"
-        ))
+        self.router.complete = AsyncMock(
+            return_value=(
+                "## What Worked\n"
+                "- Nothing — task failed immediately\n\n"
+                "## What Didn't Work\n"
+                "- Missing dependency: pandas not installed\n\n"
+                "## Lesson Learned\n"
+                "Check requirements.txt before running data processing tasks.\n\n"
+                "## Memory Update\n"
+                "- [Common Patterns] - This project requires pandas for data tasks\n"
+            )
+        )
 
         learner = Learner(self.router, self.memory)
         result = await learner.reflect_on_task(
@@ -83,12 +87,14 @@ class TestLearnerReflection:
     @pytest.mark.asyncio
     async def test_reflection_no_memory_updates(self):
         """When reflection says NONE, no memory updates should happen."""
-        self.router.complete = AsyncMock(return_value=(
-            "## What Worked\n- Everything\n\n"
-            "## What Didn't Work\n- Nothing\n\n"
-            "## Lesson Learned\nNothing new.\n\n"
-            "## Memory Update\nNONE\n"
-        ))
+        self.router.complete = AsyncMock(
+            return_value=(
+                "## What Worked\n- Everything\n\n"
+                "## What Didn't Work\n- Nothing\n\n"
+                "## Lesson Learned\nNothing new.\n\n"
+                "## Memory Update\nNONE\n"
+            )
+        )
 
         learner = Learner(self.router, self.memory)
         result = await learner.reflect_on_task(
@@ -105,12 +111,14 @@ class TestLearnerReflection:
     @pytest.mark.asyncio
     async def test_reflection_logs_event(self):
         """Reflection should log an event to history."""
-        self.router.complete = AsyncMock(return_value=(
-            "## What Worked\n- Good\n\n"
-            "## What Didn't Work\n- Nothing\n\n"
-            "## Lesson Learned\nA lesson.\n\n"
-            "## Memory Update\nNONE\n"
-        ))
+        self.router.complete = AsyncMock(
+            return_value=(
+                "## What Worked\n- Good\n\n"
+                "## What Didn't Work\n- Nothing\n\n"
+                "## Lesson Learned\nA lesson.\n\n"
+                "## Memory Update\nNONE\n"
+            )
+        )
 
         learner = Learner(self.router, self.memory)
         await learner.reflect_on_task(
@@ -212,16 +220,18 @@ class TestLearnerSkillCreation:
 
     @pytest.mark.asyncio
     async def test_creates_skill_from_pattern(self):
-        self.router.complete = AsyncMock(return_value=(
-            "CREATE_SKILL\n"
-            "name: api-testing\n"
-            "description: Standard API testing patterns for this project\n"
-            "task_types: [coding, debugging]\n"
-            "---\n"
-            "# API Testing Skill\n\n"
-            "Always use pytest with the --asyncio-mode=auto flag.\n"
-            "Check response status codes AND body content.\n"
-        ))
+        self.router.complete = AsyncMock(
+            return_value=(
+                "CREATE_SKILL\n"
+                "name: api-testing\n"
+                "description: Standard API testing patterns for this project\n"
+                "task_types: [coding, debugging]\n"
+                "---\n"
+                "# API Testing Skill\n\n"
+                "Always use pytest with the --asyncio-mode=auto flag.\n"
+                "Check response status codes AND body content.\n"
+            )
+        )
 
         learner = Learner(self.router, self.memory, skills_dir=self.skills_dir)
         result = await learner.check_for_skill_creation(existing_skill_names=["github"])
@@ -252,14 +262,16 @@ class TestLearnerSkillCreation:
 
     @pytest.mark.asyncio
     async def test_skill_creation_logs_event(self):
-        self.router.complete = AsyncMock(return_value=(
-            "CREATE_SKILL\n"
-            "name: test-skill\n"
-            "description: A test skill\n"
-            "task_types: [coding]\n"
-            "---\n"
-            "# Test\nDo the thing.\n"
-        ))
+        self.router.complete = AsyncMock(
+            return_value=(
+                "CREATE_SKILL\n"
+                "name: test-skill\n"
+                "description: A test skill\n"
+                "task_types: [coding]\n"
+                "---\n"
+                "# Test\nDo the thing.\n"
+            )
+        )
 
         learner = Learner(self.router, self.memory, skills_dir=self.skills_dir)
         await learner.check_for_skill_creation(existing_skill_names=[])
@@ -301,9 +313,7 @@ class TestLearnerMemoryParsing:
 
     def test_extract_lesson(self):
         text = (
-            "## Lesson Learned\n"
-            "Always validate user input before processing.\n\n"
-            "## Memory Update\n"
+            "## Lesson Learned\nAlways validate user input before processing.\n\n## Memory Update\n"
         )
         lesson = self.learner._extract_lesson(text)
         assert lesson == "Always validate user input before processing."

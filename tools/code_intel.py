@@ -52,8 +52,12 @@ class CodeIntelTool(Tool):
                 "action": {
                     "type": "string",
                     "enum": [
-                        "find_class", "find_function", "find_method",
-                        "find_imports", "list_symbols", "outline",
+                        "find_class",
+                        "find_function",
+                        "find_method",
+                        "find_imports",
+                        "list_symbols",
+                        "outline",
                     ],
                     "description": "Type of code search to perform",
                 },
@@ -120,14 +124,14 @@ class CodeIntelTool(Tool):
     def _parse_python(self, filepath: str) -> ast.Module | None:
         """Parse a Python file into AST."""
         try:
-            with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            with open(filepath, encoding="utf-8", errors="replace") as f:
                 return ast.parse(f.read(), filename=filepath)
         except SyntaxError:
             return None
 
     def _read_lines(self, filepath: str) -> list[str]:
         try:
-            with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            with open(filepath, encoding="utf-8", errors="replace") as f:
                 return f.readlines()
         except Exception:
             return []
@@ -164,12 +168,14 @@ class CodeIntelTool(Tool):
                 for node in ast.walk(tree):
                     if isinstance(node, ast.ClassDef) and name in node.name:
                         bases = ", ".join(
-                            getattr(b, "id", getattr(b, "attr", "?"))
-                            for b in node.bases
+                            getattr(b, "id", getattr(b, "attr", "?")) for b in node.bases
                         )
-                        entry = f"{self._relpath(filepath)}:{node.lineno} class {node.name}({bases})"
+                        entry = (
+                            f"{self._relpath(filepath)}:{node.lineno} class {node.name}({bases})"
+                        )
                         methods = [
-                            n.name for n in node.body
+                            n.name
+                            for n in node.body
                             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
                         ]
                         if methods:
@@ -182,7 +188,9 @@ class CodeIntelTool(Tool):
 
         if not results:
             return ToolResult(output=f"No classes matching '{name}' found.", success=True)
-        return ToolResult(output=f"## Classes matching '{name}'\n\n" + "\n\n".join(results), success=True)
+        return ToolResult(
+            output=f"## Classes matching '{name}'\n\n" + "\n\n".join(results), success=True
+        )
 
     def _regex_find_class(self, filepath: str, name: str, include_body: bool) -> list[str]:
         """Regex fallback for JS/TS class search."""
@@ -192,9 +200,9 @@ class CodeIntelTool(Tool):
         for i, line in enumerate(lines):
             m = pattern.search(line)
             if m:
-                entry = f"{self._relpath(filepath)}:{i+1} class {m.group(1)}"
+                entry = f"{self._relpath(filepath)}:{i + 1} class {m.group(1)}"
                 if include_body:
-                    body = "".join(lines[i:i+30])
+                    body = "".join(lines[i : i + 30])
                     entry += f"\n```\n{body}```"
                 results.append(entry)
         return results
@@ -211,11 +219,16 @@ class CodeIntelTool(Tool):
                 if not tree:
                     continue
                 for node in ast.walk(tree):
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and name in node.name:
+                    if (
+                        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                        and name in node.name
+                    ):
                         # Skip methods (functions inside classes)
                         args = ", ".join(a.arg for a in node.args.args)
                         prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
-                        entry = f"{self._relpath(filepath)}:{node.lineno} {prefix} {node.name}({args})"
+                        entry = (
+                            f"{self._relpath(filepath)}:{node.lineno} {prefix} {node.name}({args})"
+                        )
                         if include_body:
                             entry += f"\n```python\n{self._get_body(filepath, node)}```"
                         results.append(entry)
@@ -224,7 +237,9 @@ class CodeIntelTool(Tool):
 
         if not results:
             return ToolResult(output=f"No functions matching '{name}' found.", success=True)
-        return ToolResult(output=f"## Functions matching '{name}'\n\n" + "\n\n".join(results), success=True)
+        return ToolResult(
+            output=f"## Functions matching '{name}'\n\n" + "\n\n".join(results), success=True
+        )
 
     def _regex_find_function(self, filepath: str, name: str, include_body: bool) -> list[str]:
         results = []
@@ -238,9 +253,9 @@ class CodeIntelTool(Tool):
             for pattern in patterns:
                 m = pattern.search(line)
                 if m:
-                    entry = f"{self._relpath(filepath)}:{i+1} {m.group(0).strip()}"
+                    entry = f"{self._relpath(filepath)}:{i + 1} {m.group(0).strip()}"
                     if include_body:
-                        body = "".join(lines[i:i+20])
+                        body = "".join(lines[i : i + 20])
                         entry += f"\n```\n{body}```"
                     results.append(entry)
                     break
@@ -260,7 +275,10 @@ class CodeIntelTool(Tool):
                 for node in ast.walk(tree):
                     if isinstance(node, ast.ClassDef):
                         for item in node.body:
-                            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and name in item.name:
+                            if (
+                                isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                                and name in item.name
+                            ):
                                 args = ", ".join(a.arg for a in item.args.args)
                                 entry = (
                                     f"{self._relpath(filepath)}:{item.lineno} "
@@ -272,7 +290,9 @@ class CodeIntelTool(Tool):
 
         if not results:
             return ToolResult(output=f"No methods matching '{name}' found.", success=True)
-        return ToolResult(output=f"## Methods matching '{name}'\n\n" + "\n\n".join(results), success=True)
+        return ToolResult(
+            output=f"## Methods matching '{name}'\n\n" + "\n\n".join(results), success=True
+        )
 
     def _find_imports(self, search_path: str, name: str) -> ToolResult:
         results = []
@@ -286,7 +306,9 @@ class CodeIntelTool(Tool):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
                         if not name or name in alias.name:
-                            results.append(f"{self._relpath(filepath)}:{node.lineno} import {alias.name}")
+                            results.append(
+                                f"{self._relpath(filepath)}:{node.lineno} import {alias.name}"
+                            )
                 elif isinstance(node, ast.ImportFrom):
                     module = node.module or ""
                     for alias in node.names:
@@ -298,7 +320,11 @@ class CodeIntelTool(Tool):
         if not results:
             msg = f"No imports matching '{name}' found." if name else "No imports found."
             return ToolResult(output=msg, success=True)
-        return ToolResult(output=f"## Imports{' matching ' + repr(name) if name else ''}\n\n" + "\n".join(results), success=True)
+        return ToolResult(
+            output=f"## Imports{' matching ' + repr(name) if name else ''}\n\n"
+            + "\n".join(results),
+            success=True,
+        )
 
     def _list_symbols(self, search_path: str) -> ToolResult:
         symbols: dict[str, list[str]] = {"classes": [], "functions": [], "constants": []}

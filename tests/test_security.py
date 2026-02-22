@@ -2,12 +2,11 @@
 
 import logging
 import tempfile
-import time
 
 import pytest
 
 from core.command_filter import CommandFilter, CommandFilterError
-from core.sandbox import WorkspaceSandbox, SandboxViolation
+from core.sandbox import SandboxViolation, WorkspaceSandbox
 from core.worktree_manager import _sanitize_task_id
 from tools.shell import ShellTool
 
@@ -219,7 +218,7 @@ class TestExpandedCommandFilter:
 
     def test_blocks_node_e(self):
         with pytest.raises(CommandFilterError):
-            self.filter.check("node -e 'require(\"child_process\").execSync(\"rm -rf /\")'")
+            self.filter.check('node -e \'require("child_process").execSync("rm -rf /")\'')
 
     def test_blocks_base64_pipe_to_shell(self):
         with pytest.raises(CommandFilterError):
@@ -246,7 +245,10 @@ class TestExpandedCommandFilter:
         assert self.filter.check("grep -r 'TODO' .") == "grep -r 'TODO' ."
 
     def test_allows_curl_download(self):
-        assert self.filter.check("curl https://api.example.com/data") == "curl https://api.example.com/data"
+        assert (
+            self.filter.check("curl https://api.example.com/data")
+            == "curl https://api.example.com/data"
+        )
 
 
 class TestWorktreePathSanitization:
@@ -284,28 +286,33 @@ class TestSSRFProtection:
 
     def test_blocks_localhost(self):
         from tools.web_search import _is_ssrf_target
+
         result = _is_ssrf_target("http://127.0.0.1/secret")
         assert result is not None
         assert "private" in result.lower() or "blocked" in result.lower()
 
     def test_blocks_metadata_endpoint(self):
         from tools.web_search import _is_ssrf_target
+
         result = _is_ssrf_target("http://169.254.169.254/latest/meta-data/")
         assert result is not None
 
     def test_blocks_private_ip(self):
         from tools.web_search import _is_ssrf_target
+
         result = _is_ssrf_target("http://192.168.1.1/admin")
         assert result is not None
 
     def test_allows_public_url(self):
         from tools.web_search import _is_ssrf_target
+
         result = _is_ssrf_target("https://example.com/page")
         assert result is None
 
 
 try:
-    from dashboard.auth import check_rate_limit, _login_attempts, verify_password
+    from dashboard.auth import _login_attempts, check_rate_limit, verify_password
+
     HAS_FASTAPI = True
 except ImportError:
     HAS_FASTAPI = False
@@ -348,6 +355,7 @@ class TestPasswordVerification:
 # NEW: Python exec sandboxing
 # ---------------------------------------------------------------------------
 
+
 class TestPythonExecSandboxing:
     """Tests for python_exec security hardening."""
 
@@ -356,6 +364,7 @@ class TestPythonExecSandboxing:
 
     def test_blocks_os_system(self):
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
         err = tool._check_code_safety("import os; os.system('rm -rf /')")
         assert err is not None
@@ -363,61 +372,72 @@ class TestPythonExecSandboxing:
 
     def test_blocks_subprocess(self):
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
         err = tool._check_code_safety("import subprocess; subprocess.run(['ls'])")
         assert err is not None
 
     def test_blocks_os_popen(self):
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
         err = tool._check_code_safety("os.popen('cat /etc/passwd')")
         assert err is not None
 
     def test_blocks_eval(self):
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
-        err = tool._check_code_safety("eval('__import__(\"os\").system(\"id\")')")
+        err = tool._check_code_safety('eval(\'__import__("os").system("id")\')')
         assert err is not None
 
     def test_blocks_exec(self):
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
         err = tool._check_code_safety("exec('import os')")
         assert err is not None
 
     def test_blocks_ctypes(self):
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
         err = tool._check_code_safety("import ctypes")
         assert err is not None
 
     def test_blocks_dunder_import(self):
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
         err = tool._check_code_safety("__import__('os').system('id')")
         assert err is not None
 
     def test_allows_safe_code(self):
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
         err = tool._check_code_safety("x = 1 + 2\nprint(x)")
         assert err is None
 
     def test_allows_math_imports(self):
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
         err = tool._check_code_safety("import math\nprint(math.pi)")
         assert err is None
 
     def test_allows_json(self):
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
         err = tool._check_code_safety("import json\ndata = json.loads('{}')")
         assert err is None
 
     def test_safe_env_strips_api_keys(self):
         import os
+
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
         # Temporarily set a test API key
         os.environ["TEST_API_KEY"] = "secret123"
@@ -430,7 +450,9 @@ class TestPythonExecSandboxing:
 
     def test_safe_env_strips_jwt_secret(self):
         import os
+
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
         os.environ["JWT_SECRET"] = "mysecret"
         try:
@@ -441,6 +463,7 @@ class TestPythonExecSandboxing:
 
     def test_safe_env_keeps_path(self):
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
         safe = tool._safe_env()
         assert "PATH" in safe
@@ -448,6 +471,7 @@ class TestPythonExecSandboxing:
     @pytest.mark.asyncio
     async def test_execute_blocks_dangerous_code(self):
         from tools.python_exec import PythonExecTool
+
         tool = PythonExecTool(self.tmpdir)
         result = await tool.execute(code="import subprocess; subprocess.run(['ls'])")
         assert not result.success
@@ -457,6 +481,7 @@ class TestPythonExecSandboxing:
 # ---------------------------------------------------------------------------
 # NEW: Sandbox null byte and symlink handling
 # ---------------------------------------------------------------------------
+
 
 class TestSandboxHardening:
     """Tests for sandbox null byte and symlink protection."""
@@ -479,6 +504,7 @@ class TestSandboxHardening:
     def test_resolve_follows_symlinks(self):
         """resolve() should follow symlinks, catching those that escape."""
         import os
+
         tmpdir = tempfile.mkdtemp()
         sandbox = WorkspaceSandbox(tmpdir)
         # Create a symlink pointing outside the sandbox
@@ -497,6 +523,7 @@ class TestSandboxHardening:
     def test_safe_symlink_inside_workspace(self):
         """Symlinks within the workspace should work fine."""
         import os
+
         tmpdir = tempfile.mkdtemp()
         sandbox = WorkspaceSandbox(tmpdir)
         target = os.path.join(tmpdir, "real_file.txt")
@@ -519,6 +546,7 @@ class TestSandboxHardening:
 # ---------------------------------------------------------------------------
 # NEW: Command filter additional patterns
 # ---------------------------------------------------------------------------
+
 
 class TestCommandFilterNewPatterns:
     """Tests for new deny patterns added to command filter."""
@@ -580,11 +608,13 @@ class TestCommandFilterNewPatterns:
 # NEW: Git tool argument sanitization
 # ---------------------------------------------------------------------------
 
+
 class TestGitToolSanitization:
     """Tests for git tool argument injection prevention."""
 
     def setup_method(self):
         from tools.git_tool import GitTool
+
         self.tool = GitTool("/tmp/test_workspace")
 
     def test_blocks_upload_pack_flag(self):
@@ -623,6 +653,7 @@ class TestGitToolSanitization:
 # NEW: Shell /tmp removal
 # ---------------------------------------------------------------------------
 
+
 class TestShellTmpBlocked:
     """Verify /tmp is no longer in safe paths."""
 
@@ -652,11 +683,13 @@ class TestShellTmpBlocked:
 # NEW: Path traversal bypass in security_analyzer and summarizer
 # ---------------------------------------------------------------------------
 
+
 class TestSecurityAnalyzerPathTraversal:
     """Verify security_analyzer blocks absolute paths outside workspace."""
 
     def setup_method(self):
         from tools.security_analyzer import SecurityAnalyzerTool
+
         self.tmpdir = tempfile.mkdtemp()
         self.tool = SecurityAnalyzerTool(self.tmpdir)
 
@@ -675,6 +708,7 @@ class TestSecurityAnalyzerPathTraversal:
     @pytest.mark.asyncio
     async def test_allows_workspace_relative(self):
         import os
+
         test_file = os.path.join(self.tmpdir, "safe.py")
         with open(test_file, "w") as f:
             f.write("x = 1\n")
@@ -687,6 +721,7 @@ class TestSummarizerPathTraversal:
 
     def setup_method(self):
         from tools.summarizer_tool import SummarizerTool
+
         self.tmpdir = tempfile.mkdtemp()
         self.tool = SummarizerTool(self.tmpdir)
 
@@ -705,6 +740,7 @@ class TestSummarizerPathTraversal:
     @pytest.mark.asyncio
     async def test_allows_workspace_file(self):
         import os
+
         test_file = os.path.join(self.tmpdir, "readme.md")
         with open(test_file, "w") as f:
             f.write("# Hello\nThis is a test file.\n")
@@ -716,31 +752,38 @@ class TestSummarizerPathTraversal:
 # NEW: SSRF improvements
 # ---------------------------------------------------------------------------
 
+
 class TestSSRFImprovements:
     """Test expanded SSRF protection."""
 
     def test_blocks_localhost_hostname(self):
         from tools.web_search import _is_ssrf_target
+
         result = _is_ssrf_target("http://localhost/admin")
         assert result is not None
         assert "localhost" in result.lower()
 
     def test_blocks_localhost_localdomain(self):
         from tools.web_search import _is_ssrf_target
+
         result = _is_ssrf_target("http://localhost.localdomain/secret")
         assert result is not None
 
     def test_blocks_ipv4_mapped_ipv6_loopback(self):
-        from tools.web_search import _is_ssrf_target, _BLOCKED_IP_RANGES
         import ipaddress
+
+        from tools.web_search import _BLOCKED_IP_RANGES
+
         # Verify the IPv4-mapped loopback range is in the blocklist
         test_ip = ipaddress.ip_address("::ffff:127.0.0.1")
         blocked = any(test_ip in net for net in _BLOCKED_IP_RANGES)
         assert blocked
 
     def test_blocks_ipv4_mapped_ipv6_private(self):
-        from tools.web_search import _BLOCKED_IP_RANGES
         import ipaddress
+
+        from tools.web_search import _BLOCKED_IP_RANGES
+
         test_ip = ipaddress.ip_address("::ffff:10.0.0.1")
         blocked = any(test_ip in net for net in _BLOCKED_IP_RANGES)
         assert blocked
@@ -750,11 +793,13 @@ class TestSSRFImprovements:
 # NEW: Git commit message length validation
 # ---------------------------------------------------------------------------
 
+
 class TestGitCommitMessageLength:
     """Verify commit message length is validated."""
 
     def setup_method(self):
         from tools.git_tool import GitTool
+
         self.tool = GitTool("/tmp/test_workspace")
 
     @pytest.mark.asyncio
@@ -769,12 +814,15 @@ class TestGitCommitMessageLength:
 # ---------------------------------------------------------------------------
 
 try:
-    from unittest.mock import patch, MagicMock, AsyncMock
+    from unittest.mock import AsyncMock, MagicMock, patch  # noqa: F401
+
     from fastapi.testclient import TestClient
+
+    from core.approval_gate import ApprovalGate, ProtectedAction  # noqa: F401
     from core.task_queue import TaskQueue
-    from core.approval_gate import ApprovalGate, ProtectedAction
-    from dashboard.websocket_manager import WebSocketManager
     from dashboard.server import create_app
+    from dashboard.websocket_manager import WebSocketManager
+
     HAS_TESTCLIENT = True
 except ImportError:
     HAS_TESTCLIENT = False
@@ -803,7 +851,10 @@ class TestFailSecureLogin:
             client = TestClient(app)
             resp = client.post("/api/login", json={"username": "admin", "password": "anything"})
             assert resp.status_code == 401
-            assert "disabled" in resp.json()["detail"].lower() or "DASHBOARD_PASSWORD" in resp.json()["detail"]
+            assert (
+                "disabled" in resp.json()["detail"].lower()
+                or "DASHBOARD_PASSWORD" in resp.json()["detail"]
+            )
 
     def test_login_rejected_empty_password_attempt(self):
         """Even an empty password attempt is rejected when no password is configured."""
@@ -887,6 +938,7 @@ class TestApprovalGateAudit:
 
     def test_approve_records_user(self, caplog):
         import asyncio
+
         tq = MagicMock()
         gate = ApprovalGate(tq)
 
@@ -904,6 +956,7 @@ class TestApprovalGateAudit:
 
     def test_deny_records_user(self, caplog):
         import asyncio
+
         tq = MagicMock()
         gate = ApprovalGate(tq)
 
@@ -920,6 +973,7 @@ class TestApprovalGateAudit:
 
     def test_approve_unknown_user_logged(self, caplog):
         import asyncio
+
         tq = MagicMock()
         gate = ApprovalGate(tq)
 
@@ -942,8 +996,14 @@ class TestWebSocketMessageSizeLimit:
         # The limit is 4096 bytes, hardcoded in server.py websocket_endpoint
         # We verify by reading the source to ensure it hasn't been removed
         import inspect
+
         from dashboard import server
-        source = inspect.getsource(server.websocket_endpoint) if hasattr(server, 'websocket_endpoint') else ""
+
+        source = (
+            inspect.getsource(server.websocket_endpoint)
+            if hasattr(server, "websocket_endpoint")
+            else ""
+        )
         # Since websocket_endpoint is a nested function, check the module source
         module_source = inspect.getsource(server)
         assert "4096" in module_source

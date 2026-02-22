@@ -97,7 +97,14 @@ class LinterTool(Tool):
                     return "ruff"
 
         # Check for eslint config or JS project
-        for name in (".eslintrc", ".eslintrc.js", ".eslintrc.json", ".eslintrc.yml", "eslint.config.js", "eslint.config.mjs"):
+        for name in (
+            ".eslintrc",
+            ".eslintrc.js",
+            ".eslintrc.json",
+            ".eslintrc.yml",
+            "eslint.config.js",
+            "eslint.config.mjs",
+        ):
             if os.path.exists(os.path.join(workspace, name)):
                 return "eslint"
 
@@ -127,7 +134,7 @@ class LinterTool(Tool):
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             return ToolResult(error="Linter timed out (>2min)", success=False)
 
@@ -145,7 +152,9 @@ class LinterTool(Tool):
                 combined = combined[:50000] + "\n... (output truncated)"
             no_issues = proc.returncode == 0
             return ToolResult(
-                output=f"## Ruff Results\n\n{combined}" if combined.strip() else "## Ruff Results\n\nNo issues found.",
+                output=f"## Ruff Results\n\n{combined}"
+                if combined.strip()
+                else "## Ruff Results\n\nNo issues found.",
                 success=no_issues,
             )
 
@@ -198,7 +207,7 @@ class LinterTool(Tool):
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             return ToolResult(error="Linter timed out (>2min)", success=False)
 
@@ -214,7 +223,9 @@ class LinterTool(Tool):
                 combined = combined[:50000] + "\n... (output truncated)"
             no_issues = proc.returncode == 0
             return ToolResult(
-                output=f"## ESLint Results\n\n{combined}" if combined.strip() else "## ESLint Results\n\nNo issues found.",
+                output=f"## ESLint Results\n\n{combined}"
+                if combined.strip()
+                else "## ESLint Results\n\nNo issues found.",
                 success=no_issues,
             )
 
@@ -259,7 +270,7 @@ class LinterTool(Tool):
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             return ToolResult(error="Linter command timed out (>2min)", success=False)
 

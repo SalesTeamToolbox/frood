@@ -10,17 +10,17 @@ and self-learning (post-task reflection + failure analysis).
 
 import logging
 import textwrap
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Callable, Awaitable
 
-from agents.model_router import ModelRouter
 from agents.iteration_engine import IterationEngine, IterationResult
 from agents.learner import Learner
-from core.task_queue import Task, TaskQueue, TaskStatus, TaskType
-from core.worktree_manager import WorktreeManager
+from agents.model_router import ModelRouter
 from core.approval_gate import ApprovalGate
-from skills.loader import SkillLoader
+from core.task_queue import Task, TaskQueue, TaskType
+from core.worktree_manager import WorktreeManager
 from memory.store import MemoryStore
+from skills.loader import SkillLoader
 
 logger = logging.getLogger("agent42.agent")
 
@@ -135,22 +135,27 @@ class Agent:
                 logger.warning("No repo configured — running code task without worktree")
                 needs_worktree = False
                 from core.config import settings
+
                 output_dir = Path(settings.outputs_dir) / task.id
                 output_dir.mkdir(parents=True, exist_ok=True)
                 worktree_path = output_dir
             else:
                 from core.config import settings
+
                 output_dir = Path(settings.outputs_dir) / task.id
                 output_dir.mkdir(parents=True, exist_ok=True)
                 worktree_path = output_dir
 
             task.worktree_path = str(worktree_path)
 
-            await self.emit("agent_start", {
-                "task_id": task.id,
-                "title": task.title,
-                "worktree": str(worktree_path),
-            })
+            await self.emit(
+                "agent_start",
+                {
+                    "task_id": task.id,
+                    "title": task.title,
+                    "worktree": str(worktree_path),
+                },
+            )
 
             # Get model routing for this task type
             routing = self.router.get_routing(task.task_type, context_window=task.context_window)
@@ -198,10 +203,12 @@ class Agent:
                 tool_calls_data = []
                 for it_result in history.iterations:
                     for tc in it_result.tool_calls:
-                        tool_calls_data.append({
-                            "name": tc.tool_name,
-                            "success": tc.success,
-                        })
+                        tool_calls_data.append(
+                            {
+                                "name": tc.tool_name,
+                                "success": tc.success,
+                            }
+                        )
 
                 await self.learner.reflect_on_task(
                     title=task.title,
@@ -214,18 +221,20 @@ class Agent:
                 )
                 # Check if this task's pattern should be saved as a reusable skill
                 existing_names = (
-                    [s.name for s in self.skill_loader.all_skills()]
-                    if self.skill_loader else []
+                    [s.name for s in self.skill_loader.all_skills()] if self.skill_loader else []
                 )
                 await self.learner.check_for_skill_creation(
                     existing_skill_names=existing_names,
                 )
 
-            await self.emit("agent_complete", {
-                "task_id": task.id,
-                "iterations": history.total_iterations,
-                "worktree": str(worktree_path),
-            })
+            await self.emit(
+                "agent_complete",
+                {
+                    "task_id": task.id,
+                    "iterations": history.total_iterations,
+                    "worktree": str(worktree_path),
+                },
+            )
 
             # Clean up worktree for code tasks to prevent disk space leaks
             if needs_worktree:
@@ -234,9 +243,7 @@ class Agent:
                 except Exception as cleanup_err:
                     logger.warning(f"Worktree cleanup failed for {task.id}: {cleanup_err}")
 
-            logger.info(
-                f"Agent done: {task.id} — {history.total_iterations} iterations"
-            )
+            logger.info(f"Agent done: {task.id} — {history.total_iterations} iterations")
 
         except Exception as e:
             logger.error(f"Agent failed: {task.id} — {e}", exc_info=True)
@@ -264,12 +271,15 @@ class Agent:
 
     async def _on_iteration(self, result: IterationResult):
         """Broadcast iteration progress to the dashboard."""
-        await self.emit("iteration", {
-            "task_id": self.task.id,
-            "iteration": result.iteration,
-            "approved": result.approved,
-            "preview": result.primary_output[:500],
-        })
+        await self.emit(
+            "iteration",
+            {
+                "task_id": self.task.id,
+                "iteration": result.iteration,
+                "approved": result.approved,
+                "preview": result.primary_output[:500],
+            },
+        )
 
     def _build_system_prompt(self, task: Task) -> str:
         """Build the system prompt, incorporating skill overrides if available."""
@@ -313,7 +323,8 @@ class Agent:
         # Include project/reference file structure
         project_files = sorted(worktree_path.rglob("*"))
         relevant = [
-            f for f in project_files
+            f
+            for f in project_files
             if f.is_file()
             and f.suffix in extensions
             and ".git" not in f.parts
@@ -333,14 +344,14 @@ class Agent:
             parts.append(f"\n## {label}:\n")
             total_chars = 0
             files_read = 0
-            for f in relevant[:self._MAX_CONTEXT_FILES]:
+            for f in relevant[: self._MAX_CONTEXT_FILES]:
                 if total_chars >= self._MAX_TOTAL_CONTEXT:
                     parts.append(f"... ({len(relevant) - files_read} more files not shown)")
                     break
                 try:
                     content = f.read_text(encoding="utf-8", errors="replace")
                     if len(content) > self._MAX_FILE_SIZE:
-                        content = content[:self._MAX_FILE_SIZE] + "\n... (file truncated)"
+                        content = content[: self._MAX_FILE_SIZE] + "\n... (file truncated)"
                     rel_path = f.relative_to(worktree_path)
                     parts.append(f"### {rel_path}\n```\n{content}\n```\n")
                     total_chars += len(content)

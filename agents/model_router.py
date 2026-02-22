@@ -15,7 +15,7 @@ import logging
 import os
 
 from core.task_queue import TaskType
-from providers.registry import ProviderRegistry, ModelTier
+from providers.registry import ProviderRegistry
 
 logger = logging.getLogger("agent42.router")
 
@@ -26,57 +26,57 @@ logger = logging.getLogger("agent42.router")
 
 FREE_ROUTING: dict[TaskType, dict] = {
     TaskType.CODING: {
-        "primary": "or-free-qwen-coder",       # Qwen3 Coder 480B — strongest free coder
-        "critic": "or-free-deepseek-r1",        # DeepSeek R1 0528 — best free reasoner
+        "primary": "or-free-qwen-coder",  # Qwen3 Coder 480B — strongest free coder
+        "critic": "or-free-deepseek-r1",  # DeepSeek R1 0528 — best free reasoner
         "max_iterations": 8,
     },
     TaskType.DEBUGGING: {
-        "primary": "or-free-deepseek-r1",       # DeepSeek R1 — reasoning for root cause
-        "critic": "or-free-devstral",            # Devstral 123B — multi-file awareness
+        "primary": "or-free-deepseek-r1",  # DeepSeek R1 — reasoning for root cause
+        "critic": "or-free-devstral",  # Devstral 123B — multi-file awareness
         "max_iterations": 10,
     },
     TaskType.RESEARCH: {
-        "primary": "or-free-llama4-maverick",   # Llama 4 Maverick — GPT-4+ level
-        "critic": "or-free-deepseek-chat",      # DeepSeek Chat for second opinion
+        "primary": "or-free-llama4-maverick",  # Llama 4 Maverick — GPT-4+ level
+        "critic": "or-free-deepseek-chat",  # DeepSeek Chat for second opinion
         "max_iterations": 5,
     },
     TaskType.REFACTORING: {
-        "primary": "or-free-qwen-coder",        # Qwen3 Coder — best for code changes
-        "critic": "or-free-devstral",            # Devstral — multi-file project awareness
+        "primary": "or-free-qwen-coder",  # Qwen3 Coder — best for code changes
+        "critic": "or-free-devstral",  # Devstral — multi-file project awareness
         "max_iterations": 8,
     },
     TaskType.DOCUMENTATION: {
-        "primary": "or-free-llama4-maverick",   # Llama 4 — strong writing
-        "critic": "or-free-gemma-27b",           # Gemma 27B — fast verification
+        "primary": "or-free-llama4-maverick",  # Llama 4 — strong writing
+        "critic": "or-free-gemma-27b",  # Gemma 27B — fast verification
         "max_iterations": 4,
     },
     TaskType.MARKETING: {
-        "primary": "or-free-llama4-maverick",   # Llama 4 — creative + general
-        "critic": "or-free-deepseek-chat",      # DeepSeek Chat v3.1
+        "primary": "or-free-llama4-maverick",  # Llama 4 — creative + general
+        "critic": "or-free-deepseek-chat",  # DeepSeek Chat v3.1
         "max_iterations": 6,
     },
     TaskType.EMAIL: {
-        "primary": "or-free-mistral-small",     # Mistral Small 3.1 — fast + precise
+        "primary": "or-free-mistral-small",  # Mistral Small 3.1 — fast + precise
         "critic": None,
         "max_iterations": 3,
     },
     TaskType.DESIGN: {
-        "primary": "or-free-llama4-maverick",   # Strong visual/creative reasoning
+        "primary": "or-free-llama4-maverick",  # Strong visual/creative reasoning
         "critic": "or-free-deepseek-chat",
         "max_iterations": 5,
     },
     TaskType.CONTENT: {
-        "primary": "or-free-llama4-maverick",   # Best free model for writing
-        "critic": "or-free-gemma-27b",          # Fast editorial check
+        "primary": "or-free-llama4-maverick",  # Best free model for writing
+        "critic": "or-free-gemma-27b",  # Fast editorial check
         "max_iterations": 6,
     },
     TaskType.STRATEGY: {
-        "primary": "or-free-deepseek-r1",       # Deep reasoning for strategy
+        "primary": "or-free-deepseek-r1",  # Deep reasoning for strategy
         "critic": "or-free-llama4-maverick",
         "max_iterations": 5,
     },
     TaskType.DATA_ANALYSIS: {
-        "primary": "or-free-qwen-coder",        # Good with data/code/tables
+        "primary": "or-free-qwen-coder",  # Good with data/code/tables
         "critic": "or-free-deepseek-chat",
         "max_iterations": 6,
     },
@@ -172,8 +172,11 @@ class ModelRouter:
         Spending limits are enforced by the registry.
         """
         return await self.registry.complete_with_tools(
-            model_key, messages, tools,
-            temperature=temperature, max_tokens=max_tokens,
+            model_key,
+            messages,
+            tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
 
     def available_providers(self) -> list[dict]:

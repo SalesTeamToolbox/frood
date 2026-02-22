@@ -6,8 +6,6 @@ import tempfile
 
 import pytest
 
-from tools.base import ToolResult
-
 
 # ---------------------------------------------------------------------------
 # GitTool
@@ -31,6 +29,7 @@ class TestGitTool:
         self._has_initial_commit = ret == 0
 
         from tools.git_tool import GitTool
+
         self.tool = GitTool(self.tmpdir)
 
     def test_tool_metadata(self):
@@ -121,6 +120,7 @@ class TestGrepTool:
             f.write("import os\n\ndef get_path():\n    return os.getcwd()\n")
 
         from tools.grep_tool import GrepTool
+
         self.tool = GrepTool(self.tmpdir)
 
     def test_tool_metadata(self):
@@ -170,6 +170,7 @@ class TestDiffTool:
             f.write("line 1\nline 2 modified\nline 3\n")
 
         from tools.diff_tool import DiffTool
+
         self.tool = DiffTool(self.tmpdir)
 
     def test_tool_metadata(self):
@@ -178,9 +179,7 @@ class TestDiffTool:
 
     @pytest.mark.asyncio
     async def test_create_diff(self):
-        result = await self.tool.execute(
-            action="create", file_a="file_a.txt", file_b="file_b.txt"
-        )
+        result = await self.tool.execute(action="create", file_a="file_a.txt", file_b="file_b.txt")
         assert result.success is True
         assert "line 2" in result.output
 
@@ -196,9 +195,7 @@ class TestDiffTool:
 
     @pytest.mark.asyncio
     async def test_create_diff_identical(self):
-        result = await self.tool.execute(
-            action="create", file_a="file_a.txt", file_b="file_a.txt"
-        )
+        result = await self.tool.execute(action="create", file_a="file_a.txt", file_b="file_a.txt")
         assert result.success is True
         assert "identical" in result.output.lower() or result.output.strip() == ""
 
@@ -212,6 +209,7 @@ class TestTestRunnerTool:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
         from tools.test_runner import TestRunnerTool
+
         self.tool = TestRunnerTool(self.tmpdir)
 
     def test_tool_metadata(self):
@@ -268,6 +266,7 @@ class TestLinterTool:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
         from tools.linter_tool import LinterTool
+
         self.tool = LinterTool(self.tmpdir)
 
     def test_tool_metadata(self):
@@ -358,6 +357,7 @@ class TestHttpClientTool:
 
     def setup_method(self):
         from tools.http_client import HttpClientTool
+
         self.tool = HttpClientTool()
 
     def test_tool_metadata(self):

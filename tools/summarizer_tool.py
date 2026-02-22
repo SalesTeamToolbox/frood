@@ -86,7 +86,7 @@ class SummarizerTool(Tool):
                     success=False,
                 )
             try:
-                with open(full_real, "r", encoding="utf-8", errors="replace") as f:
+                with open(full_real, encoding="utf-8", errors="replace") as f:
                     content = f.read()
             except Exception as e:
                 return ToolResult(error=f"Failed to read file: {e}", success=False)
@@ -135,9 +135,9 @@ class SummarizerTool(Tool):
         for i, line in enumerate(lines):
             stripped = line.rstrip()
             if re.match(r"^(class |def |async def )", stripped):
-                defs.append(f"  L{i+1}: {stripped}")
+                defs.append(f"  L{i + 1}: {stripped}")
             elif re.match(r"^    (def |async def )", stripped):
-                defs.append(f"  L{i+1}:   {stripped.strip()}")
+                defs.append(f"  L{i + 1}:   {stripped.strip()}")
 
         if defs:
             summary.append(f"### Definitions ({len(defs)})")
@@ -153,7 +153,11 @@ class SummarizerTool(Tool):
         lines = content.split("\n")
         summary = []
 
-        files_changed = [l for l in lines if l.startswith("diff --git") or l.startswith("---") or l.startswith("+++")]
+        _files_changed = [
+            l
+            for l in lines
+            if l.startswith("diff --git") or l.startswith("---") or l.startswith("+++")
+        ]
         additions = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))
         deletions = sum(1 for l in lines if l.startswith("-") and not l.startswith("---"))
 
@@ -238,9 +242,9 @@ class SummarizerTool(Tool):
             stripped = line.strip()
             if not stripped:
                 continue
-            if stripped.startswith(("- ", "* ", "1.", "2.", "3.", "> ")):
-                key_lines.append(stripped)
-            elif len(stripped) > 20 and stripped[0].isupper():
+            if stripped.startswith(("- ", "* ", "1.", "2.", "3.", "> ")) or (
+                len(stripped) > 20 and stripped[0].isupper()
+            ):
                 key_lines.append(stripped)
             if len(key_lines) >= max_lines:
                 break
@@ -252,4 +256,4 @@ class SummarizerTool(Tool):
                     kl = kl[:150] + "..."
                 summary.append(f"  {kl}")
 
-        return ToolResult(output="\n".join(summary[:max_lines * 2]), success=True)
+        return ToolResult(output="\n".join(summary[: max_lines * 2]), success=True)

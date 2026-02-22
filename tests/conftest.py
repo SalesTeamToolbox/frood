@@ -5,10 +5,9 @@ and mock tools — eliminating duplication across test files.
 """
 
 import pytest
-from pathlib import Path
 
-from core.sandbox import WorkspaceSandbox
 from core.command_filter import CommandFilter
+from core.sandbox import WorkspaceSandbox
 from tools.base import Tool, ToolResult
 from tools.registry import ToolRegistry
 
@@ -82,8 +81,10 @@ def mock_tool():
 @pytest.fixture
 def mock_tool_factory():
     """Provide a factory for creating mock tools with custom names."""
+
     def _create(name="mock_tool", description="Mock tool for testing"):
         return _MockTool(tool_name=name, tool_description=description)
+
     return _create
 
 

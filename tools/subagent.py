@@ -7,7 +7,6 @@ report results back to the parent agent.
 
 import asyncio
 import logging
-import uuid
 
 from tools.base import Tool, ToolResult
 
@@ -54,7 +53,9 @@ class SubagentTool(Tool):
             "required": ["title", "description"],
         }
 
-    async def execute(self, title: str = "", description: str = "", task_type: str = "coding", **kwargs) -> ToolResult:
+    async def execute(
+        self, title: str = "", description: str = "", task_type: str = "coding", **kwargs
+    ) -> ToolResult:
         if not title or not description:
             return ToolResult(error="title and description are required", success=False)
 

@@ -6,12 +6,13 @@ and parameters (JSON Schema) so the LLM can call them via function calling.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
 class ToolResult:
     """Result of a tool execution."""
+
     output: str = ""
     error: str = ""
     success: bool = True

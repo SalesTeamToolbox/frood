@@ -16,16 +16,18 @@ from pathlib import Path
 logger = logging.getLogger("agent42.key_store")
 
 # API key env var names that can be set via the admin UI
-ADMIN_CONFIGURABLE_KEYS = frozenset({
-    "OPENROUTER_API_KEY",
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "DEEPSEEK_API_KEY",
-    "GEMINI_API_KEY",
-    "REPLICATE_API_TOKEN",
-    "LUMA_API_KEY",
-    "BRAVE_API_KEY",
-})
+ADMIN_CONFIGURABLE_KEYS = frozenset(
+    {
+        "OPENROUTER_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "GEMINI_API_KEY",
+        "REPLICATE_API_TOKEN",
+        "LUMA_API_KEY",
+        "BRAVE_API_KEY",
+    }
+)
 
 _DEFAULT_PATH = Path(".agent42") / "settings.json"
 
@@ -126,9 +128,7 @@ class KeyStore:
 
             if admin_value:
                 masked = (
-                    admin_value[:4] + "..." + admin_value[-4:]
-                    if len(admin_value) > 8
-                    else "****"
+                    admin_value[:4] + "..." + admin_value[-4:] if len(admin_value) > 8 else "****"
                 )
                 result[key] = {
                     "configured": True,
@@ -136,11 +136,7 @@ class KeyStore:
                     "masked_value": masked,
                 }
             elif env_value:
-                masked = (
-                    env_value[:4] + "..." + env_value[-4:]
-                    if len(env_value) > 8
-                    else "****"
-                )
+                masked = env_value[:4] + "..." + env_value[-4:] if len(env_value) > 8 else "****"
                 result[key] = {
                     "configured": True,
                     "source": "env",

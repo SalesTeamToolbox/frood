@@ -14,7 +14,8 @@ logger = logging.getLogger("agent42.channels.telegram")
 
 try:
     from telegram import Update
-    from telegram.ext import Application, MessageHandler, filters, ContextTypes
+    from telegram.ext import Application, ContextTypes, MessageHandler, filters
+
     HAS_TELEGRAM = True
 except ImportError:
     HAS_TELEGRAM = False
@@ -26,7 +27,7 @@ class TelegramChannel(BaseChannel):
     def __init__(self, config: dict):
         super().__init__("telegram", config)
         self.token = config.get("bot_token", "")
-        self._app: "Application | None" = None
+        self._app: Application | None = None
         self._task: asyncio.Task | None = None
 
     async def start(self):
@@ -40,9 +41,7 @@ class TelegramChannel(BaseChannel):
             raise ValueError("Telegram bot_token is required")
 
         self._app = Application.builder().token(self.token).build()
-        self._app.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
-        )
+        self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
 
         self._running = True
         await self._app.initialize()

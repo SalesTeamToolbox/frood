@@ -1,7 +1,9 @@
 """Tests for Phase 2: Channel abstraction and manager."""
 
 import asyncio
+
 import pytest
+
 from channels.base import BaseChannel, InboundMessage, OutboundMessage
 from channels.manager import ChannelManager
 

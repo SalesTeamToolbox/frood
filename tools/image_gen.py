@@ -8,7 +8,6 @@ Before submitting a prompt for generation, the tool runs a team-based
 prompt review to refine the prompt for best results.
 """
 
-import json
 import logging
 import os
 import time
@@ -32,7 +31,6 @@ IMAGE_MODELS: dict[str, dict] = {
         "tier": "free",
         "max_resolution": "1024x1024",
     },
-
     # ═══════════════════════════════════════════════════════════════════
     # CHEAP TIER — low-cost image models
     # ═══════════════════════════════════════════════════════════════════
@@ -50,7 +48,6 @@ IMAGE_MODELS: dict[str, dict] = {
         "tier": "cheap",
         "max_resolution": "1024x1024",
     },
-
     # ═══════════════════════════════════════════════════════════════════
     # PREMIUM TIER — high-quality image models
     # ═══════════════════════════════════════════════════════════════════
@@ -271,8 +268,7 @@ class ImageGenTool(Tool):
             logger.warning(f"Prompt review failed: {e}")
             return ToolResult(
                 output=(
-                    f"Prompt review failed ({e}). Using original prompt.\n\n"
-                    f"**Prompt:** {prompt}"
+                    f"Prompt review failed ({e}). Using original prompt.\n\n**Prompt:** {prompt}"
                 ),
             )
 
@@ -397,9 +393,7 @@ class ImageGenTool(Tool):
 
         return result
 
-    async def _generate_openrouter(
-        self, prompt: str, model_spec: dict, size: str
-    ) -> dict:
+    async def _generate_openrouter(self, prompt: str, model_spec: dict, size: str) -> dict:
         """Generate image via OpenRouter API."""
         import httpx
 
@@ -434,9 +428,7 @@ class ImageGenTool(Tool):
 
         return result
 
-    async def _generate_replicate(
-        self, prompt: str, model_spec: dict, size: str
-    ) -> dict:
+    async def _generate_replicate(self, prompt: str, model_spec: dict, size: str) -> dict:
         """Generate image via Replicate API."""
         import httpx
 
@@ -479,6 +471,7 @@ class ImageGenTool(Tool):
 
             for _ in range(60):  # Max 5 min wait
                 import asyncio
+
                 await asyncio.sleep(5)
 
                 status_response = await client.get(
@@ -497,13 +490,16 @@ class ImageGenTool(Tool):
                     return result
 
                 if status_data["status"] == "failed":
-                    raise RuntimeError(f"Replicate prediction failed: {status_data.get('error', 'unknown')}")
+                    raise RuntimeError(
+                        f"Replicate prediction failed: {status_data.get('error', 'unknown')}"
+                    )
 
             raise RuntimeError("Replicate prediction timed out")
 
     async def _save_from_url(self, url: str, provider: str) -> str:
         """Download and save an image from a URL."""
         import httpx
+
         from core.config import settings
 
         images_dir = Path(settings.images_dir)
@@ -540,7 +536,11 @@ class ImageGenTool(Tool):
         """List available image generation models."""
         lines = ["# Available Image Models\n"]
 
-        for tier_name, tier_label in [("free", "Free Tier"), ("cheap", "Low Cost"), ("premium", "Premium")]:
+        for tier_name, tier_label in [
+            ("free", "Free Tier"),
+            ("cheap", "Low Cost"),
+            ("premium", "Premium"),
+        ]:
             tier_models = {k: v for k, v in IMAGE_MODELS.items() if v["tier"] == tier_name}
             if tier_models:
                 lines.append(f"\n## {tier_label}\n")

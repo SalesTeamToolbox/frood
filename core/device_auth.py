@@ -15,7 +15,7 @@ import logging
 import secrets
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger("agent42.device_auth")

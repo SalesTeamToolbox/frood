@@ -58,14 +58,18 @@ Rules:
 
 
 _VALID_TEAMS = {
-    "research-team", "marketing-team", "content-team",
-    "design-review", "strategy-team",
+    "research-team",
+    "marketing-team",
+    "content-team",
+    "design-review",
+    "strategy-team",
 }
 
 
 @dataclass
 class ClassificationResult:
     """Result of intent classification."""
+
     task_type: TaskType
     confidence: float = 1.0
     needs_clarification: bool = False
@@ -75,12 +79,13 @@ class ClassificationResult:
     used_llm: bool = False  # True if LLM was used, False if keyword fallback
     # Resource allocation
     recommended_mode: str = "single_agent"  # "single_agent" or "team"
-    recommended_team: str = ""              # team name or ""
+    recommended_team: str = ""  # team name or ""
 
 
 @dataclass
 class PendingClarification:
     """A message waiting for user clarification before becoming a task."""
+
     original_message: str
     channel_type: str
     channel_id: str
@@ -149,25 +154,26 @@ class IntentClassifier:
         if conversation_history:
             recent = conversation_history[-10:]
             history_text = "\n".join(
-                f"[{m.get('role', 'user')}]: {m.get('content', '')[:300]}"
-                for m in recent
+                f"[{m.get('role', 'user')}]: {m.get('content', '')[:300]}" for m in recent
             )
-            messages.append({
-                "role": "user",
-                "content": (
-                    f"Conversation history:\n{history_text}\n\n"
-                    f"New message to classify:\n{message}"
-                ),
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"Conversation history:\n{history_text}\n\n"
+                        f"New message to classify:\n{message}"
+                    ),
+                }
+            )
         else:
-            messages.append({
-                "role": "user",
-                "content": f"Message to classify:\n{message}",
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"Message to classify:\n{message}",
+                }
+            )
 
-        response = await self.router.complete(
-            self.model, messages, temperature=0.1, max_tokens=300
-        )
+        response = await self.router.complete(self.model, messages, temperature=0.1, max_tokens=300)
 
         return self._parse_response(response, message)
 
