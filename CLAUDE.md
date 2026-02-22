@@ -106,8 +106,10 @@ during Claude Code sessions without manual activation.
 | Model Researcher | `agents/model_researcher.py` — fetches benchmark scores from web leaderboards |
 | Dynamic Routing | Data-driven model selection using outcome tracking + research scores |
 | Trial System | Assigns unproven models to a % of tasks to gather performance data |
-| Plugin Loader | `tools/plugin_loader.py` — auto-discovers custom Tool subclasses from a directory |
-| ToolContext | `tools/context.py` — dependency injection container for plugin tools |
+| Plugin Loader | `tools/plugin_loader.py` — auto-discovers custom Tool and ToolExtension subclasses from a directory |
+| ToolContext | `tools/context.py` — dependency injection container for plugin tools and extensions |
+| ToolExtension | ABC (`tools/base.py`) for augmenting an existing tool with extra parameters and pre/post hooks |
+| ExtendedTool | Wrapper (`tools/base.py`) that combines a base Tool with one or more ToolExtensions |
 | Skill | A `SKILL.md` package providing task-type-specific prompts and guidelines |
 | Tool | An ABC-derived class (`tools/base.py`) with `execute()`, `name`, `description`, `parameters` |
 | Provider | An LLM API backend (OpenRouter, OpenAI, etc.) via `ProviderSpec` |
@@ -365,6 +367,42 @@ class HelloTool(Tool):
         return ToolResult(output=f"Hello from {self._workspace}!")
 ```
 
+**Tool extensions (custom plugins):** To *extend* an existing tool instead of
+creating a new one, subclass `ToolExtension` instead of `Tool`.  Extensions add
+parameters and pre/post execution hooks without replacing the base tool.  Multiple
+extensions can layer onto one base — just like skills.
+
+```python
+# custom_tools/shell_audit.py
+from tools.base import ToolExtension, ToolResult
+
+class ShellAuditExtension(ToolExtension):
+    extends = "shell"                      # Name of the tool to extend
+    requires = ["workspace"]               # ToolContext injection (same as Tool)
+
+    def __init__(self, workspace="", **kwargs):
+        self._workspace = workspace
+
+    @property
+    def name(self) -> str: return "shell_audit"
+
+    @property
+    def extra_parameters(self) -> dict:    # Merged into the base tool's schema
+        return {"audit": {"type": "boolean", "description": "Log command to audit file"}}
+
+    @property
+    def description_suffix(self) -> str:   # Appended to the base tool's description
+        return "Supports audit logging."
+
+    async def pre_execute(self, **kwargs) -> dict:
+        # Called before the base tool — can inspect/modify kwargs
+        return kwargs
+
+    async def post_execute(self, result: ToolResult, **kwargs) -> ToolResult:
+        # Called after the base tool — can inspect/modify result
+        return result
+```
+
 **Skills:** Create a directory with `SKILL.md` containing YAML frontmatter:
 
 ```markdown
@@ -590,12 +628,14 @@ These rules are **non-negotiable** for a platform that runs AI agents on people'
 
 ## Testing Standards
 
-**Always install dependencies before running tests:**
+**Always install dependencies before running tests.** Tests should always be
+runnable — if a dependency is missing, install it rather than skipping the test:
 
 ```bash
-pip install -r requirements-dev.txt
-# Or at minimum:
-pip install pytest pytest-asyncio aiofiles openai
+pip install -r requirements.txt            # Full production dependencies
+pip install -r requirements-dev.txt        # Dev/test tooling (pytest, ruff, etc.)
+# If the venv is missing, install at minimum:
+pip install pytest pytest-asyncio aiofiles openai fastapi python-jose bcrypt cffi
 ```
 
 Run tests:
@@ -607,7 +647,9 @@ python -m pytest tests/ -k "test_sandbox"   # Filter by name
 python -m pytest tests/ -m security         # Filter by marker
 ```
 
-Some tests require `fastapi` and `redis` — install the full `requirements.txt` to avoid import errors.
+Some tests require `fastapi`, `python-jose`, `bcrypt`, and `redis` — install the full
+`requirements.txt` to avoid import errors. If the `cryptography` backend fails with
+`_cffi_backend` errors, install `cffi` (`pip install cffi`).
 
 ### Test Writing Rules
 
@@ -743,6 +785,8 @@ docker compose down              # Stop
 | 16 | Catalog | `CatalogEntry.to_dict()` format mismatch with `__init__` | `to_dict()` must output `{"id": ..., "pricing": {"prompt": ..., "completion": ...}}` matching constructor format |
 | 17 | Tests | Floating-point equality in composite scores | Use `pytest.approx()` for float comparisons, not `==` |
 | 18 | Init Order | `ModelEvaluator` must init before `Learner` | Learner takes `model_evaluator` param — ensure correct order in `agent42.py` |
+| 19 | Extensions | `ToolExtension.extends` must match an already-registered tool name | Extensions for nonexistent tools are silently skipped with a warning |
+| 20 | Tests | `cryptography` panics with `_cffi_backend` error | Install `cffi` (`pip install cffi`) before running dashboard/auth tests |
 
 ---
 
