@@ -1,0 +1,47 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Weekly Monday 6am UTC
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit safety pytest pytest-asyncio
+
+      - name: Run bandit (code security scan)
+        run: bandit -r . -x tests,.venv,venv -ll -f json -o bandit-report.json || true
+
+      - name: Check bandit results
+        run: bandit -r . -x tests,.venv,venv -ll
+
+      - name: Run safety (dependency vulnerability check)
+        run: safety check -r requirements.txt || true
+        continue-on-error: true
+
+      - name: Run security-focused tests
+        run: python -m pytest tests/test_security.py tests/test_sandbox.py tests/test_command_filter.py -v
+
+      - name: Upload bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json

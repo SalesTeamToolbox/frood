@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          ".claude/hooks/context-loader.py"
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          ".claude/hooks/security-monitor.py"
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          ".claude/hooks/test-validator.py",
+          ".claude/hooks/learning-engine.py"
+        ]
+      }
+    ]
+  }
+}
