@@ -230,8 +230,12 @@ def create_app(
             logger.warning(
                 "Failed login for '%s' from %s — username_match=%s, "
                 "password_len_sent=%d, password_configured=%s, hash_configured=%s",
-                req.username, client_ip, user_ok, len(req.password),
-                bool(settings.dashboard_password), bool(settings.dashboard_password_hash),
+                req.username,
+                client_ip,
+                user_ok,
+                len(req.password),
+                bool(settings.dashboard_password),
+                bool(settings.dashboard_password_hash),
             )
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
