@@ -1,8 +1,10 @@
-"""Tests for tools/plugin_loader.py — custom tool auto-discovery."""
+"""Tests for tools/plugin_loader.py — custom tool auto-discovery and extensions."""
 
 import textwrap
 
-from tools.base import Tool, ToolResult
+import pytest
+
+from tools.base import ExtendedTool, Tool, ToolResult
 from tools.context import ToolContext
 from tools.plugin_loader import PluginLoader
 from tools.registry import ToolRegistry
@@ -246,3 +248,341 @@ class TestPluginLoader:
         result = PluginLoader.load_all(tmp_path, ctx, registry)
         assert "tool_a" in result
         assert "tool_b" in result
+
+
+# ---------------------------------------------------------------------------
+# Helper: a simple base tool used by extension tests
+# ---------------------------------------------------------------------------
+
+
+class _BaseTool(Tool):
+    """Minimal tool used as a base for extension tests."""
+
+    @property
+    def name(self):
+        return "base_tool"
+
+    @property
+    def description(self):
+        return "Base tool"
+
+    @property
+    def parameters(self):
+        return {
+            "type": "object",
+            "properties": {
+                "input": {"type": "string", "description": "Input value"},
+            },
+            "required": ["input"],
+        }
+
+    async def execute(self, input: str = "", **kwargs):
+        return ToolResult(output=f"base:{input}")
+
+
+class TestToolExtensions:
+    """Tests for ToolExtension auto-discovery and ExtendedTool wrapping."""
+
+    def test_extension_merges_parameters(self, tmp_path):
+        """Extra parameters from an extension appear in the extended tool's schema."""
+        ext_code = textwrap.dedent("""\
+            from tools.base import ToolExtension, ToolResult
+
+            class AddFlag(ToolExtension):
+                extends = "base_tool"
+
+                @property
+                def name(self): return "add_flag"
+
+                @property
+                def extra_parameters(self):
+                    return {"flag": {"type": "boolean", "description": "A flag"}}
+        """)
+        (tmp_path / "add_flag.py").write_text(ext_code)
+
+        registry = ToolRegistry()
+        registry.register(_BaseTool())
+        ctx = ToolContext()
+        PluginLoader.load_all(tmp_path, ctx, registry)
+
+        tool = registry.get("base_tool")
+        assert isinstance(tool, ExtendedTool)
+        props = tool.parameters["properties"]
+        assert "input" in props  # Original param preserved
+        assert "flag" in props  # Extension param added
+
+    @pytest.mark.asyncio
+    async def test_extension_pre_execute_hook(self, tmp_path):
+        """pre_execute can modify kwargs before the base tool runs."""
+        ext_code = textwrap.dedent("""\
+            from tools.base import ToolExtension, ToolResult
+
+            class PrefixExt(ToolExtension):
+                extends = "base_tool"
+
+                @property
+                def name(self): return "prefix_ext"
+
+                async def pre_execute(self, **kwargs):
+                    kwargs["input"] = "prefixed:" + kwargs.get("input", "")
+                    return kwargs
+        """)
+        (tmp_path / "prefix_ext.py").write_text(ext_code)
+
+        registry = ToolRegistry()
+        registry.register(_BaseTool())
+        ctx = ToolContext()
+        PluginLoader.load_all(tmp_path, ctx, registry)
+
+        tool = registry.get("base_tool")
+        result = await tool.execute(input="hello")
+        assert result.output == "base:prefixed:hello"
+
+    @pytest.mark.asyncio
+    async def test_extension_post_execute_hook(self, tmp_path):
+        """post_execute can modify the result after the base tool runs."""
+        ext_code = textwrap.dedent("""\
+            from tools.base import ToolExtension, ToolResult
+
+            class SuffixExt(ToolExtension):
+                extends = "base_tool"
+
+                @property
+                def name(self): return "suffix_ext"
+
+                async def post_execute(self, result, **kwargs):
+                    return ToolResult(output=result.output + ":suffix")
+        """)
+        (tmp_path / "suffix_ext.py").write_text(ext_code)
+
+        registry = ToolRegistry()
+        registry.register(_BaseTool())
+        ctx = ToolContext()
+        PluginLoader.load_all(tmp_path, ctx, registry)
+
+        tool = registry.get("base_tool")
+        result = await tool.execute(input="hello")
+        assert result.output == "base:hello:suffix"
+
+    def test_extension_description_suffix(self, tmp_path):
+        """Description includes the base description plus extension suffixes."""
+        ext_code = textwrap.dedent("""\
+            from tools.base import ToolExtension
+
+            class DescExt(ToolExtension):
+                extends = "base_tool"
+
+                @property
+                def name(self): return "desc_ext"
+
+                @property
+                def description_suffix(self): return "Also does more."
+        """)
+        (tmp_path / "desc_ext.py").write_text(ext_code)
+
+        registry = ToolRegistry()
+        registry.register(_BaseTool())
+        ctx = ToolContext()
+        PluginLoader.load_all(tmp_path, ctx, registry)
+
+        tool = registry.get("base_tool")
+        assert tool.description == "Base tool Also does more."
+
+    @pytest.mark.asyncio
+    async def test_multiple_extensions_same_base(self, tmp_path):
+        """Two extensions on the same base should both apply."""
+        ext_a = textwrap.dedent("""\
+            from tools.base import ToolExtension, ToolResult
+
+            class ExtA(ToolExtension):
+                extends = "base_tool"
+
+                @property
+                def name(self): return "ext_a"
+
+                @property
+                def extra_parameters(self):
+                    return {"flag_a": {"type": "boolean"}}
+
+                async def pre_execute(self, **kwargs):
+                    kwargs["input"] = "A(" + kwargs.get("input", "") + ")"
+                    return kwargs
+        """)
+        ext_b = textwrap.dedent("""\
+            from tools.base import ToolExtension, ToolResult
+
+            class ExtB(ToolExtension):
+                extends = "base_tool"
+
+                @property
+                def name(self): return "ext_b"
+
+                @property
+                def extra_parameters(self):
+                    return {"flag_b": {"type": "string"}}
+
+                async def post_execute(self, result, **kwargs):
+                    return ToolResult(output=result.output + "+B")
+        """)
+        (tmp_path / "ext_a.py").write_text(ext_a)
+        (tmp_path / "ext_b.py").write_text(ext_b)
+
+        registry = ToolRegistry()
+        registry.register(_BaseTool())
+        ctx = ToolContext()
+        PluginLoader.load_all(tmp_path, ctx, registry)
+
+        tool = registry.get("base_tool")
+        assert isinstance(tool, ExtendedTool)
+
+        # Both parameters merged
+        props = tool.parameters["properties"]
+        assert "flag_a" in props
+        assert "flag_b" in props
+        assert "input" in props  # Original preserved
+
+        # Hooks chained: pre_execute(A) → base → post_execute(B)
+        result = await tool.execute(input="x")
+        assert result.output == "base:A(x)+B"
+
+    def test_extension_missing_base_skipped(self, tmp_path):
+        """Extension for a nonexistent base logs a warning and is skipped."""
+        ext_code = textwrap.dedent("""\
+            from tools.base import ToolExtension
+
+            class OrphanExt(ToolExtension):
+                extends = "nonexistent_tool"
+
+                @property
+                def name(self): return "orphan_ext"
+        """)
+        (tmp_path / "orphan.py").write_text(ext_code)
+
+        registry = ToolRegistry()
+        ctx = ToolContext()
+        PluginLoader.load_all(tmp_path, ctx, registry)
+
+        # No tool should be registered (the base doesn't exist)
+        assert registry.get("nonexistent_tool") is None
+
+    def test_extension_dependency_injection(self, tmp_path):
+        """Extensions with requires receive ToolContext dependencies."""
+        ext_code = textwrap.dedent("""\
+            from tools.base import ToolExtension, ToolResult
+
+            class InjectExt(ToolExtension):
+                extends = "base_tool"
+                requires = ["workspace"]
+
+                def __init__(self, workspace="", **kwargs):
+                    self._workspace = workspace
+
+                @property
+                def name(self): return "inject_ext"
+
+                @property
+                def description_suffix(self):
+                    return f"(workspace: {self._workspace})"
+        """)
+        (tmp_path / "inject_ext.py").write_text(ext_code)
+
+        registry = ToolRegistry()
+        registry.register(_BaseTool())
+        ctx = ToolContext(workspace="/my/project")
+        PluginLoader.load_all(tmp_path, ctx, registry)
+
+        tool = registry.get("base_tool")
+        assert "(workspace: /my/project)" in tool.description
+
+    def test_extension_invalid_name_skipped(self, tmp_path):
+        """Extensions with invalid names are skipped."""
+        ext_code = textwrap.dedent("""\
+            from tools.base import ToolExtension
+
+            class BadExt(ToolExtension):
+                extends = "base_tool"
+
+                @property
+                def name(self): return "INVALID!"
+        """)
+        (tmp_path / "bad_ext.py").write_text(ext_code)
+
+        registry = ToolRegistry()
+        registry.register(_BaseTool())
+        ctx = ToolContext()
+        PluginLoader.load_all(tmp_path, ctx, registry)
+
+        # Base tool should remain unmodified
+        tool = registry.get("base_tool")
+        assert not isinstance(tool, ExtendedTool)
+
+    def test_extension_and_new_tool_coexist(self, tmp_path):
+        """A file can contain both a new Tool and a ToolExtension."""
+        code = textwrap.dedent("""\
+            from tools.base import Tool, ToolExtension, ToolResult
+
+            class NewTool(Tool):
+                @property
+                def name(self): return "brand_new"
+                @property
+                def description(self): return "A new tool"
+                @property
+                def parameters(self):
+                    return {"type": "object", "properties": {}}
+                async def execute(self, **kwargs):
+                    return ToolResult(output="new")
+
+            class BaseExt(ToolExtension):
+                extends = "base_tool"
+                @property
+                def name(self): return "base_ext"
+                @property
+                def extra_parameters(self):
+                    return {"extra": {"type": "string"}}
+        """)
+        (tmp_path / "combo.py").write_text(code)
+
+        registry = ToolRegistry()
+        registry.register(_BaseTool())
+        ctx = ToolContext()
+        result = PluginLoader.load_all(tmp_path, ctx, registry)
+
+        # New tool registered
+        assert "brand_new" in result
+        assert registry.get("brand_new") is not None
+
+        # Base tool extended
+        tool = registry.get("base_tool")
+        assert isinstance(tool, ExtendedTool)
+        assert "extra" in tool.parameters["properties"]
+
+    def test_extension_preserves_to_schema(self, tmp_path):
+        """ExtendedTool.to_schema() reflects merged parameters."""
+        ext_code = textwrap.dedent("""\
+            from tools.base import ToolExtension
+
+            class SchemaExt(ToolExtension):
+                extends = "base_tool"
+
+                @property
+                def name(self): return "schema_ext"
+
+                @property
+                def extra_parameters(self):
+                    return {"verbose": {"type": "boolean"}}
+
+                @property
+                def description_suffix(self): return "Supports verbose mode."
+        """)
+        (tmp_path / "schema_ext.py").write_text(ext_code)
+
+        registry = ToolRegistry()
+        registry.register(_BaseTool())
+        ctx = ToolContext()
+        PluginLoader.load_all(tmp_path, ctx, registry)
+
+        tool = registry.get("base_tool")
+        schema = tool.to_schema()
+        assert schema["function"]["name"] == "base_tool"
+        assert "verbose" in schema["function"]["parameters"]["properties"]
+        assert "Supports verbose mode." in schema["function"]["description"]
