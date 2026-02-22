@@ -1166,6 +1166,23 @@ function renderSettingsPanel() {
 }
 
 function settingSecret(envVar, label, help, highlight = false) {
+  // Only keys returned by GET /api/settings/keys are admin-configurable.
+  // Other secret fields (channel tokens, password hash) render as read-only.
+  const isAdminConfigurable = envVar in state.apiKeys;
+
+  if (!isAdminConfigurable) {
+    return `
+      <div class="form-group">
+        <label>${esc(label)}</label>
+        <input type="password" value="***" disabled style="font-family:var(--mono)">
+        ${help ? `<div class="help">${help}</div>` : ""}
+        <div class="secret-status not-configured">
+          Set via environment variable: <code>${esc(envVar)}</code>
+        </div>
+      </div>
+    `;
+  }
+
   const keyInfo = state.apiKeys[envVar] || {};
   const configured = keyInfo.configured;
   const source = keyInfo.source || "none";

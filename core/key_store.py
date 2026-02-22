@@ -36,6 +36,7 @@ class KeyStore:
     def __init__(self, path: Path | None = None):
         self._path = path or _DEFAULT_PATH
         self._keys: dict[str, str] = {}
+        self._env_baseline: dict[str, str] = {}  # original .env values
         self._lock = threading.Lock()
         self._load()
 
@@ -67,7 +68,17 @@ class KeyStore:
     # -- public API ------------------------------------------------------------
 
     def inject_into_environ(self):
-        """Inject all stored keys into os.environ (called at startup)."""
+        """Inject all stored keys into os.environ (called at startup).
+
+        Snapshots the original .env-loaded values first so they can be
+        restored if an admin-set key is later cleared.
+        """
+        # Snapshot all original env values before overwriting
+        for key in ADMIN_CONFIGURABLE_KEYS:
+            original = os.environ.get(key, "")
+            if original:
+                self._env_baseline[key] = original
+
         for key, value in self._keys.items():
             os.environ[key] = value
             logger.info("Loaded admin-configured %s", key)
@@ -77,17 +88,27 @@ class KeyStore:
         if env_var not in ADMIN_CONFIGURABLE_KEYS:
             raise ValueError(f"{env_var} is not an admin-configurable key")
         with self._lock:
+            # Snapshot original .env value before first override
+            if env_var not in self._keys and env_var not in self._env_baseline:
+                original = os.environ.get(env_var, "")
+                if original:
+                    self._env_baseline[env_var] = original
             self._keys[env_var] = value
             os.environ[env_var] = value
             self._persist()
         logger.info("Admin set %s via dashboard", env_var)
 
     def delete_key(self, env_var: str):
-        """Remove an admin-set key and fall back to .env value."""
+        """Remove an admin-set key and restore the original .env value."""
         with self._lock:
             if env_var in self._keys:
                 del self._keys[env_var]
-                os.environ.pop(env_var, None)
+                # Restore original .env value if one existed, otherwise remove
+                baseline = self._env_baseline.get(env_var, "")
+                if baseline:
+                    os.environ[env_var] = baseline
+                else:
+                    os.environ.pop(env_var, None)
                 self._persist()
                 logger.info("Admin removed %s override", env_var)
 
@@ -96,7 +117,13 @@ class KeyStore:
         result = {}
         for key in sorted(ADMIN_CONFIGURABLE_KEYS):
             admin_value = self._keys.get(key, "")
-            env_value = os.getenv(key, "")
+            # Check baseline (.env) separately since os.getenv would return
+            # the admin-injected value, not the original .env one
+            env_value = self._env_baseline.get(key, "")
+            if not env_value and key not in self._keys:
+                # No admin override — check live environ for .env values
+                env_value = os.getenv(key, "")
+
             if admin_value:
                 masked = (
                     admin_value[:4] + "..." + admin_value[-4:]
