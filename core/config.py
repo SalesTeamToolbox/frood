@@ -135,6 +135,12 @@ class Settings:
     # Device gateway auth (Phase 10)
     devices_file: str = ".agent42/devices.jsonl"
 
+    # Security scanning (scheduled)
+    security_scan_enabled: bool = True
+    security_scan_interval: str = "8h"       # e.g. "8h", "6h", "12h"
+    security_scan_min_severity: str = "medium"  # low, medium, high, critical
+    security_scan_github_issues: bool = True
+
     @classmethod
     def from_env(cls) -> "Settings":
         # Enforce secure JWT secret
@@ -241,6 +247,11 @@ class Settings:
             images_dir=os.getenv("IMAGES_DIR", ".agent42/images"),
             # Device gateway auth
             devices_file=os.getenv("DEVICES_FILE", ".agent42/devices.jsonl"),
+            # Security scanning
+            security_scan_enabled=os.getenv("SECURITY_SCAN_ENABLED", "true").lower() in ("true", "1", "yes"),
+            security_scan_interval=os.getenv("SECURITY_SCAN_INTERVAL", "8h"),
+            security_scan_min_severity=os.getenv("SECURITY_SCAN_MIN_SEVERITY", "medium"),
+            security_scan_github_issues=os.getenv("SECURITY_SCAN_GITHUB_ISSUES", "true").lower() in ("true", "1", "yes"),
         )
 
     def get_discord_guild_ids(self) -> list[int]:
@@ -302,6 +313,22 @@ class Settings:
         if not self.notification_email_recipients:
             return []
         return [e.strip() for e in self.notification_email_recipients.split(",") if e.strip()]
+
+    def get_security_scan_interval_seconds(self) -> float:
+        """Parse security scan interval string to seconds (e.g. '8h' -> 28800)."""
+        s = self.security_scan_interval.strip().lower()
+        try:
+            if s.endswith("h"):
+                return float(s[:-1]) * 3600
+            elif s.endswith("m"):
+                return float(s[:-1]) * 60
+            elif s.endswith("d"):
+                return float(s[:-1]) * 86400
+            elif s.endswith("s"):
+                return float(s[:-1])
+            return float(s)
+        except ValueError:
+            return 28800.0  # Default: 8 hours
 
     def validate_dashboard_auth(self) -> list[str]:
         """Validate dashboard auth configuration. Returns list of warnings."""

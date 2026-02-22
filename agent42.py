@@ -88,6 +88,7 @@ from tools.video_gen import VideoGenTool
 from tools.persona_tool import PersonaTool
 from core.intent_classifier import IntentClassifier, PendingClarification
 from core.heartbeat import HeartbeatService
+from core.security_scanner import ScheduledSecurityScanner
 from dashboard.server import create_app
 from dashboard.websocket_manager import WebSocketManager
 
@@ -206,6 +207,15 @@ class Agent42:
             on_stall=self._on_agent_stall,
             on_heartbeat=self._on_heartbeat,
             configured_max_agents=self.max_agents,
+        )
+
+        # Scheduled security scanning
+        self.security_scanner = ScheduledSecurityScanner(
+            workspace_path=str(self.repo_path),
+            interval_seconds=settings.get_security_scan_interval_seconds(),
+            min_severity=settings.security_scan_min_severity,
+            github_issues_enabled=settings.security_scan_github_issues,
+            memory_store=self.memory_store,
         )
 
         # Phase 9: Context-aware intent classification
@@ -618,6 +628,11 @@ class Agent42:
             self.cron_scheduler.start(),
         ]
 
+        # Scheduled security scanning
+        if settings.security_scan_enabled:
+            tasks_to_run.append(self.security_scanner.start())
+            logger.info(f"  Security scanning: enabled (every {settings.security_scan_interval})")
+
         # Start channel listeners
         if self.channel_manager._channels:
             tasks_to_run.append(self.channel_manager.start_all())
@@ -663,6 +678,7 @@ class Agent42:
         self._shutdown_event.set()
         self.heartbeat.stop()
         self.cron_scheduler.stop()
+        self.security_scanner.stop()
         await self.channel_manager.stop_all()
         await self.mcp_manager.disconnect_all()
 
