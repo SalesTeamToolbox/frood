@@ -64,6 +64,7 @@ from skills.loader import SkillLoader
 from tools.browser_tool import BrowserTool
 from tools.code_intel import CodeIntelTool
 from tools.content_analyzer import ContentAnalyzerTool
+from tools.context import ToolContext
 from tools.cron import CronScheduler, CronTool
 from tools.data_tool import DataTool
 from tools.dependency_audit import DependencyAuditTool
@@ -79,6 +80,7 @@ from tools.linter_tool import LinterTool
 from tools.mcp_client import MCPManager
 from tools.outline_tool import OutlineTool
 from tools.persona_tool import PersonaTool
+from tools.plugin_loader import PluginLoader
 from tools.pr_generator import PRGeneratorTool
 from tools.python_exec import PythonExecTool
 from tools.registry import ToolRegistry
@@ -196,6 +198,22 @@ class Agent42:
 
         self._register_tools()
 
+        # Phase 4b: Custom tool plugins (auto-discovery from CUSTOM_TOOLS_DIR)
+        if settings.custom_tools_dir:
+            tool_context = ToolContext(
+                sandbox=self.sandbox,
+                command_filter=self.command_filter,
+                task_queue=self.task_queue,
+                workspace=str(self.repo_path),
+                tool_registry=self.tool_registry,
+            )
+            custom_dir = Path(settings.custom_tools_dir)
+            if not custom_dir.is_absolute():
+                custom_dir = self.data_dir / custom_dir
+            self._custom_tools = PluginLoader.load_all(custom_dir, tool_context, self.tool_registry)
+        else:
+            self._custom_tools = []
+
         # Phase 6: Memory (with optional Qdrant + Redis backends)
         self._qdrant_store = None
         self._redis_backend = None
@@ -246,12 +264,41 @@ class Agent42:
         self.key_store = KeyStore(self.data_dir / ".agent42" / "settings.json")
         self.key_store.inject_into_environ()
 
-        # Self-learning
+        # Dynamic model routing components (must be before Learner for injection)
+        from agents.model_catalog import ModelCatalog
+        from agents.model_evaluator import ModelEvaluator
+        from agents.model_researcher import ModelResearcher
+
+        data_dir = self.data_dir / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+
+        self.model_catalog = ModelCatalog(
+            cache_path=data_dir / "model_catalog.json",
+            refresh_hours=settings.model_catalog_refresh_hours,
+        )
+        self.model_evaluator = ModelEvaluator(
+            performance_path=data_dir / "model_performance.json",
+            routing_path=self.data_dir / settings.model_routing_file,
+            research_path=data_dir / "model_research.json",
+            trial_percentage=settings.model_trial_percentage,
+            min_trials=settings.model_min_trials,
+        )
+        self.model_researcher = (
+            ModelResearcher(
+                research_path=data_dir / "model_research.json",
+                interval_hours=settings.model_research_interval_hours,
+            )
+            if settings.model_research_enabled
+            else None
+        )
+
+        # Self-learning (with model evaluator for outcome tracking)
         self.workspace_skills_dir = self.data_dir / "skills" / "workspace"
         self.learner = Learner(
-            router=ModelRouter(),
+            router=ModelRouter(evaluator=self.model_evaluator),
             memory_store=self.memory_store,
             skills_dir=self.workspace_skills_dir,
+            model_evaluator=self.model_evaluator,
         )
 
         # Phase 7: Heartbeat monitoring
@@ -670,6 +717,8 @@ class Agent42:
         logger.info(f"  Sandbox: {'enabled' if settings.sandbox_enabled else 'disabled'}")
         logger.info(f"  Skills loaded: {len(self.skill_loader.all_skills())}")
         logger.info(f"  Tools registered: {len(self.tool_registry.list_tools())}")
+        if self._custom_tools:
+            logger.info(f"  Custom tools: {', '.join(self._custom_tools)}")
         active_devices = [d for d in self.device_store.list_devices() if not d.is_revoked]
         logger.info(f"  Registered devices: {len(active_devices)}")
         if not self.headless:
@@ -694,7 +743,11 @@ class Agent42:
             self._process_queue(),
             self.task_queue.watch_file(),
             self.cron_scheduler.start(),
+            self._model_catalog_refresh_loop(),
         ]
+
+        if self.model_researcher:
+            tasks_to_run.append(self._model_research_loop())
 
         # Scheduled security scanning
         if settings.security_scan_enabled:
@@ -729,6 +782,42 @@ class Agent42:
             tasks_to_run.append(server.serve())
 
         await asyncio.gather(*tasks_to_run)
+
+    async def _model_catalog_refresh_loop(self):
+        """Periodically refresh the OpenRouter model catalog."""
+        from providers.registry import ProviderRegistry
+
+        while not self._shutdown_event.is_set():
+            try:
+                if self.model_catalog.needs_refresh():
+                    await self.model_catalog.refresh(api_key=settings.openrouter_api_key)
+                    new_models = self.model_catalog.register_new_models(ProviderRegistry())
+                    if new_models:
+                        logger.info("Discovered %d new free model(s)", len(new_models))
+                    # Rerank after catalog refresh
+                    self.model_evaluator.rerank_all()
+            except Exception as e:
+                logger.warning("Model catalog refresh failed (non-critical): %s", e)
+
+            await asyncio.sleep(self.model_catalog.refresh_interval_seconds)
+
+    async def _model_research_loop(self):
+        """Periodically research model benchmarks from authoritative sources."""
+        while not self._shutdown_event.is_set():
+            try:
+                if self.model_researcher and self.model_researcher.needs_research():
+                    await self.model_researcher.research(router=ModelRouter())
+                    # Rerank after new research data
+                    self.model_evaluator.rerank_all()
+            except Exception as e:
+                logger.warning("Model research failed (non-critical): %s", e)
+
+            interval = (
+                self.model_researcher.interval_seconds
+                if self.model_researcher
+                else 604800  # 1 week
+            )
+            await asyncio.sleep(interval)
 
     async def _cron_create_task(self, title: str, description: str, task_type: str):
         """Callback for cron scheduler to create tasks."""

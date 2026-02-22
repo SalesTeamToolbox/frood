@@ -517,3 +517,13 @@ class ProviderRegistry:
     def register_model(key: str, spec: ModelSpec):
         """Register a new model at runtime."""
         MODELS[key] = spec
+
+    @staticmethod
+    def register_models_bulk(specs: dict[str, ModelSpec]) -> int:
+        """Register multiple models at once. Returns count of new registrations."""
+        added = 0
+        for key, spec in specs.items():
+            if key not in MODELS:
+                MODELS[key] = spec
+                added += 1
+        return added
