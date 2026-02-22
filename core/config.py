@@ -161,6 +161,31 @@ class Settings:
     # Device gateway auth (Phase 10)
     devices_file: str = ".agent42/devices.jsonl"
 
+    # SSH remote shell
+    ssh_enabled: bool = False
+    ssh_allowed_hosts: str = (
+        ""  # Comma-separated host patterns (e.g., "*.mycompany.com,192.168.1.*")
+    )
+    ssh_default_key_path: str = ""  # Path to default SSH private key
+    ssh_max_upload_mb: int = 50  # Max file transfer size in MB
+    ssh_command_timeout: int = 120  # Per-command timeout in seconds
+
+    # Tunnel manager
+    tunnel_enabled: bool = False
+    tunnel_provider: str = "auto"  # auto|cloudflared|serveo|localhost.run
+    tunnel_allowed_ports: str = ""  # Comma-separated ports (e.g., "8000,3000,80,443")
+    tunnel_ttl_minutes: int = 60  # Auto-shutdown tunnels after this duration
+
+    # Knowledge base / RAG
+    knowledge_dir: str = ".agent42/knowledge"
+    knowledge_chunk_size: int = 500  # Tokens per chunk
+    knowledge_chunk_overlap: int = 50  # Overlap tokens between chunks
+    knowledge_max_results: int = 10  # Max results per query
+
+    # Vision / image analysis
+    vision_max_image_mb: int = 10
+    vision_model: str = ""  # Override model for vision tasks (empty = auto-detect)
+
     # Security scanning (scheduled)
     security_scan_enabled: bool = True
     security_scan_interval: str = "8h"  # e.g. "8h", "6h", "12h"
@@ -294,6 +319,25 @@ class Settings:
             security_scan_min_severity=os.getenv("SECURITY_SCAN_MIN_SEVERITY", "medium"),
             security_scan_github_issues=os.getenv("SECURITY_SCAN_GITHUB_ISSUES", "true").lower()
             in ("true", "1", "yes"),
+            # SSH remote shell
+            ssh_enabled=os.getenv("SSH_ENABLED", "false").lower() in ("true", "1", "yes"),
+            ssh_allowed_hosts=os.getenv("SSH_ALLOWED_HOSTS", ""),
+            ssh_default_key_path=os.getenv("SSH_DEFAULT_KEY_PATH", ""),
+            ssh_max_upload_mb=int(os.getenv("SSH_MAX_UPLOAD_MB", "50")),
+            ssh_command_timeout=int(os.getenv("SSH_COMMAND_TIMEOUT", "120")),
+            # Tunnel manager
+            tunnel_enabled=os.getenv("TUNNEL_ENABLED", "false").lower() in ("true", "1", "yes"),
+            tunnel_provider=os.getenv("TUNNEL_PROVIDER", "auto"),
+            tunnel_allowed_ports=os.getenv("TUNNEL_ALLOWED_PORTS", ""),
+            tunnel_ttl_minutes=int(os.getenv("TUNNEL_TTL_MINUTES", "60")),
+            # Knowledge base / RAG
+            knowledge_dir=os.getenv("KNOWLEDGE_DIR", ".agent42/knowledge"),
+            knowledge_chunk_size=int(os.getenv("KNOWLEDGE_CHUNK_SIZE", "500")),
+            knowledge_chunk_overlap=int(os.getenv("KNOWLEDGE_CHUNK_OVERLAP", "50")),
+            knowledge_max_results=int(os.getenv("KNOWLEDGE_MAX_RESULTS", "10")),
+            # Vision / image analysis
+            vision_max_image_mb=int(os.getenv("VISION_MAX_IMAGE_MB", "10")),
+            vision_model=os.getenv("VISION_MODEL", ""),
         )
 
     def get_discord_guild_ids(self) -> list[int]:
@@ -355,6 +399,18 @@ class Settings:
         if not self.notification_email_recipients:
             return []
         return [e.strip() for e in self.notification_email_recipients.split(",") if e.strip()]
+
+    def get_ssh_allowed_hosts(self) -> list[str]:
+        """Parse comma-separated SSH allowed host patterns."""
+        if not self.ssh_allowed_hosts:
+            return []
+        return [h.strip() for h in self.ssh_allowed_hosts.split(",") if h.strip()]
+
+    def get_tunnel_allowed_ports(self) -> list[int]:
+        """Parse comma-separated tunnel allowed ports."""
+        if not self.tunnel_allowed_ports:
+            return []
+        return [int(p.strip()) for p in self.tunnel_allowed_ports.split(",") if p.strip()]
 
     def get_security_scan_interval_seconds(self) -> float:
         """Parse security scan interval string to seconds (e.g. '8h' -> 28800)."""

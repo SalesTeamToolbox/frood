@@ -76,6 +76,7 @@ from tools.git_tool import GitTool
 from tools.grep_tool import GrepTool
 from tools.http_client import HttpClientTool
 from tools.image_gen import ImageGenTool
+from tools.knowledge_tool import KnowledgeTool
 from tools.linter_tool import LinterTool
 from tools.mcp_client import MCPManager
 from tools.outline_tool import OutlineTool
@@ -88,12 +89,15 @@ from tools.repo_map import RepoMapTool
 from tools.scoring_tool import ScoringTool
 from tools.security_analyzer import SecurityAnalyzerTool
 from tools.shell import ShellTool
+from tools.ssh_tool import SSHTool
 from tools.subagent import SubagentTool
 from tools.summarizer_tool import SummarizerTool
 from tools.team_tool import TeamTool
 from tools.template_tool import TemplateTool
 from tools.test_runner import TestRunnerTool
+from tools.tunnel_tool import TunnelTool
 from tools.video_gen import VideoGenTool
+from tools.vision_tool import VisionTool
 from tools.web_search import WebFetchTool, WebSearchTool
 from tools.workflow_tool import WorkflowTool
 
@@ -373,6 +377,23 @@ class Agent42:
         router = ModelRouter()
         self.tool_registry.register(ImageGenTool(router=router))
         self.tool_registry.register(VideoGenTool(router=router))
+
+        # SSH remote shell (disabled by default — requires SSH_ENABLED=true)
+        if settings.ssh_enabled:
+            self.tool_registry.register(
+                SSHTool(self.sandbox, self.command_filter, self.approval_gate)
+            )
+
+        # Tunnel manager (disabled by default — requires TUNNEL_ENABLED=true)
+        if settings.tunnel_enabled:
+            self.tool_registry.register(TunnelTool(self.approval_gate))
+
+        # Knowledge base / RAG
+        embedding_store = getattr(self, "embedding_store", None)
+        self.tool_registry.register(KnowledgeTool(self.sandbox, embedding_store))
+
+        # Vision / image analysis
+        self.tool_registry.register(VisionTool(self.sandbox))
 
     async def _setup_channels(self):
         """Configure and register enabled channels based on settings."""

@@ -1,8 +1,14 @@
 """
 Cron scheduling tool — persistent task scheduling for Agent42.
 
-Supports cron expressions, intervals, and one-shot schedules.
-Schedules persist to a JSON file and survive restarts.
+Supports cron expressions, intervals, one-shot schedules, and planned
+multi-step task sequences. Schedules persist to a JSON file and survive
+restarts.
+
+Task types:
+- recurring: Standard cron/interval-based jobs (default)
+- once: One-time jobs that run at a specific time and auto-remove
+- planned: Multi-step sequences where tasks run in dependency order
 """
 
 import asyncio
@@ -12,11 +18,25 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
+from enum import Enum
 from pathlib import Path
 
 from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.cron")
+
+
+class JobType(str, Enum):
+    RECURRING = "recurring"
+    ONCE = "once"
+    PLANNED = "planned"
+
+
+class JobState(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 @dataclass
@@ -36,6 +56,15 @@ class CronJob:
     created_at: float = field(default_factory=time.time)
     stagger_seconds: int = 0  # Manual stagger override (0 = auto)
     jitter_seconds: int = 0  # Random jitter within stagger window
+
+    # Enhanced scheduling fields
+    job_type: str = "recurring"  # recurring | once | planned
+    state: str = "pending"  # pending | running | completed | failed
+    run_count: int = 0
+    timeout_seconds: int = 300  # Per-execution timeout
+    error_history: list = field(default_factory=list)  # Last N errors
+    depends_on: str = ""  # Job ID this depends on (for planned sequences)
+    plan_id: str = ""  # Group ID for planned sequences
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -120,9 +149,16 @@ class CronScheduler:
                 if not job.enabled or effective_next > now:
                     continue
 
+                # Check dependency for planned jobs
+                if job.job_type == JobType.PLANNED and job.depends_on:
+                    dep = self._jobs.get(job.depends_on)
+                    if dep and dep.state != JobState.COMPLETED:
+                        continue  # Dependency not yet completed
+
                 logger.info(f"Cron trigger: {job.id} — {job.name}")
                 job.last_run = now
-                job.next_run = self._compute_next_run(job.schedule, now)
+                job.state = JobState.RUNNING
+                job.run_count += 1
 
                 if self._task_callback:
                     try:
@@ -131,8 +167,29 @@ class CronScheduler:
                             job.task_description or job.description,
                             job.task_type,
                         )
+                        job.state = JobState.COMPLETED
                     except Exception as e:
                         logger.error(f"Cron callback error: {e}")
+                        job.state = JobState.FAILED
+                        job.error_history.append({"time": now, "error": str(e)})
+                        # Keep only last 10 errors
+                        job.error_history = job.error_history[-10:]
+
+                # Handle one-time jobs: disable after execution
+                if job.job_type == JobType.ONCE:
+                    job.enabled = False
+                    job.state = JobState.COMPLETED
+                elif job.job_type == JobType.RECURRING:
+                    job.next_run = self._compute_next_run(job.schedule, now)
+                    job.state = JobState.PENDING
+
+            # Clean up completed one-time jobs
+            completed_once = [
+                jid for jid, j in self._jobs.items() if j.job_type == JobType.ONCE and not j.enabled
+            ]
+            for jid in completed_once:
+                del self._jobs[jid]
+                logger.info(f"Removed completed one-time job: {jid}")
 
             self._persist()
             await asyncio.sleep(30)  # Check every 30 seconds
@@ -257,7 +314,7 @@ class CronScheduler:
 
 
 class CronTool(Tool):
-    """Manage scheduled tasks."""
+    """Manage scheduled tasks including recurring, one-time, and planned sequences."""
 
     def __init__(self, scheduler: CronScheduler):
         self._scheduler = scheduler
@@ -268,7 +325,10 @@ class CronTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Manage scheduled tasks. Actions: list, add, remove, enable, disable."
+        return (
+            "Manage scheduled tasks. "
+            "Actions: list, add, schedule_once, schedule_plan, remove, enable, disable, task_status."
+        )
 
     @property
     def parameters(self) -> dict:
@@ -277,64 +337,222 @@ class CronTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "add", "remove", "enable", "disable"],
+                    "enum": [
+                        "list",
+                        "add",
+                        "schedule_once",
+                        "schedule_plan",
+                        "remove",
+                        "enable",
+                        "disable",
+                        "task_status",
+                    ],
                     "description": "Action to perform",
                 },
-                "name": {"type": "string", "description": "Job name (for add)"},
+                "name": {"type": "string", "description": "Job name (for add/schedule_once)"},
                 "schedule": {
                     "type": "string",
-                    "description": "Schedule: 'every 30m', 'every 1h', 'every 24h' (for add)",
+                    "description": "Schedule: 'every 30m', 'every 1h', cron expression (for add)",
                 },
                 "task_title": {
                     "type": "string",
-                    "description": "Task title when triggered (for add)",
+                    "description": "Task title when triggered",
                 },
-                "task_description": {"type": "string", "description": "Task description (for add)"},
+                "task_description": {"type": "string", "description": "Task description"},
                 "task_type": {
                     "type": "string",
-                    "description": "Task type (for add)",
+                    "description": "Task type (default: coding)",
                     "default": "coding",
                 },
-                "job_id": {"type": "string", "description": "Job ID (for remove/enable/disable)"},
+                "job_id": {
+                    "type": "string",
+                    "description": "Job ID (for remove/enable/disable/task_status)",
+                },
+                "run_at": {
+                    "type": "number",
+                    "description": "Unix timestamp to run at (for schedule_once)",
+                },
+                "delay_seconds": {
+                    "type": "integer",
+                    "description": "Seconds from now to run (for schedule_once, alternative to run_at)",
+                },
+                "steps": {
+                    "type": "array",
+                    "description": "Array of {name, task_title, task_description, task_type} for schedule_plan",
+                    "items": {"type": "object"},
+                },
+                "timeout_seconds": {
+                    "type": "integer",
+                    "description": "Per-task timeout in seconds (default: 300)",
+                },
             },
             "required": ["action"],
         }
 
     async def execute(self, action: str = "", **kwargs) -> ToolResult:
         if action == "list":
-            jobs = self._scheduler.list_jobs()
-            if not jobs:
-                return ToolResult(output="No scheduled jobs.")
-            lines = [f"{'ID':<10} {'Name':<20} {'Schedule':<15} {'Enabled':<8}"]
-            for j in jobs:
-                lines.append(f"{j.id:<10} {j.name:<20} {j.schedule:<15} {j.enabled!s:<8}")
-            return ToolResult(output="\n".join(lines))
-
+            return self._list_jobs()
         elif action == "add":
+            return self._add_recurring(**kwargs)
+        elif action == "schedule_once":
+            return self._schedule_once(**kwargs)
+        elif action == "schedule_plan":
+            return self._schedule_plan(**kwargs)
+        elif action == "remove":
+            return self._remove(**kwargs)
+        elif action in ("enable", "disable"):
+            return self._toggle(action, **kwargs)
+        elif action == "task_status":
+            return self._task_status(**kwargs)
+        return ToolResult(error=f"Unknown action: {action}", success=False)
+
+    def _list_jobs(self) -> ToolResult:
+        jobs = self._scheduler.list_jobs()
+        if not jobs:
+            return ToolResult(output="No scheduled jobs.")
+        lines = [f"{'ID':<10} {'Name':<20} {'Type':<10} {'Schedule':<15} {'State':<10} {'Runs':<5}"]
+        for j in jobs:
+            lines.append(
+                f"{j.id:<10} {j.name:<20} {j.job_type:<10} "
+                f"{j.schedule:<15} {j.state:<10} {j.run_count:<5}"
+            )
+        return ToolResult(output="\n".join(lines))
+
+    def _add_recurring(self, **kwargs) -> ToolResult:
+        job = CronJob(
+            name=kwargs.get("name", "Unnamed"),
+            schedule=kwargs.get("schedule", "every 1h"),
+            task_title=kwargs.get("task_title", ""),
+            task_description=kwargs.get("task_description", ""),
+            task_type=kwargs.get("task_type", "coding"),
+            job_type=JobType.RECURRING,
+            timeout_seconds=kwargs.get("timeout_seconds", 300),
+        )
+        self._scheduler.add_job(job)
+        return ToolResult(output=f"Created recurring job: {job.id} — {job.name}")
+
+    def _schedule_once(self, **kwargs) -> ToolResult:
+        run_at = kwargs.get("run_at", 0)
+        delay = kwargs.get("delay_seconds", 0)
+
+        if not run_at and not delay:
+            return ToolResult(
+                error="Either run_at (unix timestamp) or delay_seconds is required",
+                success=False,
+            )
+
+        if delay and not run_at:
+            run_at = time.time() + delay
+
+        job = CronJob(
+            name=kwargs.get("name", "One-time task"),
+            schedule="once",
+            task_title=kwargs.get("task_title", ""),
+            task_description=kwargs.get("task_description", ""),
+            task_type=kwargs.get("task_type", "coding"),
+            job_type=JobType.ONCE,
+            next_run=run_at,
+            timeout_seconds=kwargs.get("timeout_seconds", 300),
+        )
+        self._scheduler.add_job(job)
+        import datetime
+
+        run_str = datetime.datetime.fromtimestamp(run_at).strftime("%Y-%m-%d %H:%M:%S")
+        return ToolResult(
+            output=f"Scheduled one-time task: {job.id} — {job.name} (runs at {run_str})"
+        )
+
+    def _schedule_plan(self, **kwargs) -> ToolResult:
+        steps = kwargs.get("steps", [])
+        if not steps or not isinstance(steps, list):
+            return ToolResult(
+                error="steps array is required for schedule_plan",
+                success=False,
+            )
+
+        plan_id = uuid.uuid4().hex[:8]
+        created_jobs = []
+        prev_job_id = ""
+
+        for i, step in enumerate(steps):
             job = CronJob(
-                name=kwargs.get("name", "Unnamed"),
-                schedule=kwargs.get("schedule", "every 1h"),
-                task_title=kwargs.get("task_title", ""),
-                task_description=kwargs.get("task_description", ""),
-                task_type=kwargs.get("task_type", "coding"),
+                name=step.get("name", f"Step {i + 1}"),
+                schedule="planned",
+                task_title=step.get("task_title", ""),
+                task_description=step.get("task_description", ""),
+                task_type=step.get("task_type", "coding"),
+                job_type=JobType.PLANNED,
+                plan_id=plan_id,
+                depends_on=prev_job_id,
+                next_run=time.time() if i == 0 else 0,  # First step runs immediately
+                timeout_seconds=kwargs.get("timeout_seconds", 300),
             )
             self._scheduler.add_job(job)
-            return ToolResult(output=f"Created cron job: {job.id} — {job.name}")
+            created_jobs.append(job)
+            prev_job_id = job.id
 
-        elif action == "remove":
-            job_id = kwargs.get("job_id", "")
-            if self._scheduler.remove_job(job_id):
-                return ToolResult(output=f"Removed job: {job_id}")
+        lines = [f"Created plan {plan_id} with {len(created_jobs)} steps:"]
+        for i, j in enumerate(created_jobs):
+            dep = f" (after {j.depends_on})" if j.depends_on else " (first)"
+            lines.append(f"  {i + 1}. {j.id} — {j.name}{dep}")
+
+        return ToolResult(output="\n".join(lines))
+
+    def _remove(self, **kwargs) -> ToolResult:
+        job_id = kwargs.get("job_id", "")
+        if self._scheduler.remove_job(job_id):
+            return ToolResult(output=f"Removed job: {job_id}")
+        return ToolResult(error=f"Job not found: {job_id}", success=False)
+
+    def _toggle(self, action: str, **kwargs) -> ToolResult:
+        job_id = kwargs.get("job_id", "")
+        jobs = {j.id: j for j in self._scheduler.list_jobs()}
+        if job_id in jobs:
+            jobs[job_id].enabled = action == "enable"
+            return ToolResult(
+                output=f"Job {job_id} {'enabled' if action == 'enable' else 'disabled'}"
+            )
+        return ToolResult(error=f"Job not found: {job_id}", success=False)
+
+    def _task_status(self, **kwargs) -> ToolResult:
+        job_id = kwargs.get("job_id", "")
+        if not job_id:
+            return ToolResult(error="job_id is required for task_status", success=False)
+
+        jobs = {j.id: j for j in self._scheduler.list_jobs()}
+        job = jobs.get(job_id)
+        if not job:
             return ToolResult(error=f"Job not found: {job_id}", success=False)
 
-        elif action in ("enable", "disable"):
-            job_id = kwargs.get("job_id", "")
-            jobs = {j.id: j for j in self._scheduler.list_jobs()}
-            if job_id in jobs:
-                jobs[job_id].enabled = action == "enable"
-                return ToolResult(
-                    output=f"Job {job_id} {'enabled' if action == 'enable' else 'disabled'}"
-                )
-            return ToolResult(error=f"Job not found: {job_id}", success=False)
+        import datetime
 
-        return ToolResult(error=f"Unknown action: {action}", success=False)
+        created = datetime.datetime.fromtimestamp(job.created_at).strftime("%Y-%m-%d %H:%M")
+        last_run = (
+            datetime.datetime.fromtimestamp(job.last_run).strftime("%Y-%m-%d %H:%M")
+            if job.last_run
+            else "never"
+        )
+
+        lines = [
+            f"Job: {job.id} — {job.name}",
+            f"  Type: {job.job_type}",
+            f"  State: {job.state}",
+            f"  Schedule: {job.schedule}",
+            f"  Run count: {job.run_count}",
+            f"  Created: {created}",
+            f"  Last run: {last_run}",
+            f"  Enabled: {job.enabled}",
+            f"  Timeout: {job.timeout_seconds}s",
+        ]
+
+        if job.depends_on:
+            lines.append(f"  Depends on: {job.depends_on}")
+        if job.plan_id:
+            lines.append(f"  Plan ID: {job.plan_id}")
+        if job.error_history:
+            lines.append(f"  Recent errors: {len(job.error_history)}")
+            for err in job.error_history[-3:]:
+                err_time = datetime.datetime.fromtimestamp(err["time"]).strftime("%H:%M:%S")
+                lines.append(f"    [{err_time}] {err['error'][:100]}")
+
+        return ToolResult(output="\n".join(lines))
