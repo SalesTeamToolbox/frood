@@ -584,6 +584,7 @@ These rules are **non-negotiable** for a platform that runs AI agents on people'
 3. For security-sensitive changes: `python -m pytest tests/test_security.py tests/test_sandbox.py tests/test_command_filter.py -v`
 4. Update this CLAUDE.md pitfalls table if you discovered a non-obvious issue
 5. For new modules: ensure a corresponding `tests/test_*.py` file exists
+6. Update README.md if new features, skills, tools, or config were added
 
 ---
 
@@ -756,6 +757,7 @@ CLAUDE.md file when:
 4. **New skills are added** — Note in the skills section
 5. **New patterns are established** — Add to "Architecture Patterns" section
 6. **Configuration changes** — Update "Configuration Reference" section
+7. **README changes** — Update README.md when adding features, skills, tools, or providers
 
 **When to update:**
 - After successfully resolving a non-obvious error

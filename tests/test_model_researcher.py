@@ -1,7 +1,5 @@
 """Tests for agents/model_researcher.py — benchmark research."""
 
-
-
 from agents.model_researcher import ModelResearcher
 
 

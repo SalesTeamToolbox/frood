@@ -1,6 +1,5 @@
 """Tests for agents/model_evaluator.py — outcome tracking and ranking."""
 
-
 import pytest
 
 from agents.model_evaluator import ModelEvaluator, ModelStats

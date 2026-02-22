@@ -1,7 +1,5 @@
 """Tests for agents/model_catalog.py — OpenRouter catalog sync."""
 
-
-
 from agents.model_catalog import CatalogEntry, ModelCatalog, _slug_from_model_id
 
 
