@@ -17,6 +17,11 @@ from core.config import settings
 logger = logging.getLogger("agent42.providers")
 
 
+class SpendingLimitExceeded(RuntimeError):
+    """Raised when the daily API spending limit is reached."""
+    pass
+
+
 class ProviderType(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
@@ -258,7 +263,7 @@ class ProviderRegistry:
         """Send a chat completion and return the response text."""
         from core.config import settings as _settings
         if not spending_tracker.check_limit(_settings.max_daily_api_spend_usd):
-            raise RuntimeError(
+            raise SpendingLimitExceeded(
                 f"Daily API spending limit reached "
                 f"(${spending_tracker.daily_spend_usd:.2f} / "
                 f"${_settings.max_daily_api_spend_usd:.2f})"
@@ -285,6 +290,52 @@ class ProviderRegistry:
                 f"(daily: ${spending_tracker.daily_spend_usd:.4f})"
             )
         return content
+
+    async def complete_with_tools(
+        self,
+        model_key: str,
+        messages: list[dict],
+        tools: list[dict],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ):
+        """Send a chat completion with tool schemas, tracking spending.
+
+        Returns the full response object so callers can inspect tool_calls.
+        """
+        from core.config import settings as _settings
+        if not spending_tracker.check_limit(_settings.max_daily_api_spend_usd):
+            raise SpendingLimitExceeded(
+                f"Daily API spending limit reached "
+                f"(${spending_tracker.daily_spend_usd:.2f} / "
+                f"${_settings.max_daily_api_spend_usd:.2f})"
+            )
+
+        spec = self.get_model(model_key)
+        client = self.get_client(spec.provider)
+
+        kwargs = {
+            "model": spec.model_id,
+            "messages": messages,
+            "temperature": temperature if temperature is not None else spec.temperature,
+            "max_tokens": max_tokens or spec.max_tokens,
+        }
+        if tools:
+            kwargs["tools"] = tools
+
+        response = await client.chat.completions.create(**kwargs)
+
+        usage = response.usage
+        if usage:
+            spending_tracker.record_usage(
+                model_key, usage.prompt_tokens, usage.completion_tokens
+            )
+            logger.info(
+                f"[{model_key}] {usage.prompt_tokens}+{usage.completion_tokens} tokens "
+                f"(daily: ${spending_tracker.daily_spend_usd:.4f})"
+            )
+
+        return response
 
     def available_providers(self) -> list[dict]:
         """List all providers and their availability status."""
