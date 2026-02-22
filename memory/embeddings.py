@@ -138,8 +138,18 @@ class EmbeddingStore:
             logger.warning(f"Failed to load embeddings: {e}")
             self._entries = []
 
+    # Maximum entries before evicting oldest (prevents unbounded JSON growth)
+    MAX_JSON_ENTRIES = 5000
+
     def _save(self):
-        """Persist entries to disk."""
+        """Persist entries to disk. Evicts oldest entries if over limit."""
+        if len(self._entries) > self.MAX_JSON_ENTRIES:
+            # Keep newest entries, sorted by timestamp
+            self._entries.sort(key=lambda e: e.timestamp)
+            self._entries = self._entries[-self.MAX_JSON_ENTRIES:]
+            logger.info(
+                f"JSON embedding store evicted to {self.MAX_JSON_ENTRIES} entries"
+            )
         data = [asdict(e) for e in self._entries]
         self.store_path.write_text(
             json.dumps(data, ensure_ascii=False),
@@ -178,20 +188,48 @@ class EmbeddingStore:
         return vector
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Batch-embed multiple texts."""
+        """Batch-embed multiple texts with Redis cache support.
+
+        Checks Redis cache for each text first, only sends uncached texts
+        to the API. Caches new results on return.
+        """
         if not self._client:
             raise RuntimeError("No embedding API configured")
 
-        # Batch in chunks of 100 (API limits)
-        vectors = []
-        for i in range(0, len(texts), 100):
-            batch = texts[i:i + 100]
-            response = await self._client.embeddings.create(
-                model=self._model,
-                input=batch,
-            )
-            vectors.extend([d.embedding for d in response.data])
-        return vectors
+        use_cache = self._redis and self._redis.is_available
+        vectors: list[list[float] | None] = [None] * len(texts)
+        uncached_indices: list[int] = []
+
+        # Check cache for each text
+        if use_cache:
+            for i, text in enumerate(texts):
+                cached = self._redis.get_cached_embedding(text)
+                if cached is not None:
+                    vectors[i] = cached
+                else:
+                    uncached_indices.append(i)
+        else:
+            uncached_indices = list(range(len(texts)))
+
+        # Batch-embed uncached texts
+        if uncached_indices:
+            uncached_texts = [texts[i] for i in uncached_indices]
+            api_vectors: list[list[float]] = []
+            for i in range(0, len(uncached_texts), 100):
+                batch = uncached_texts[i:i + 100]
+                response = await self._client.embeddings.create(
+                    model=self._model,
+                    input=batch,
+                )
+                api_vectors.extend([d.embedding for d in response.data])
+
+            # Fill in results and cache
+            for idx, vec in zip(uncached_indices, api_vectors):
+                vectors[idx] = vec
+                if use_cache:
+                    self._redis.cache_embedding(texts[idx], vec)
+
+        return vectors  # type: ignore[return-value]
 
     async def add_entry(self, text: str, source: str = "", section: str = "",
                         metadata: dict | None = None):

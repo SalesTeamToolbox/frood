@@ -227,6 +227,10 @@ class CommandFilter:
         if _ANSI_C_QUOTE_RE.search(command):
             raise CommandFilterError(command, "ANSI-C quoting with escape (potential encoding bypass)")
 
+        # Octal IP addresses can bypass SSRF protections (e.g., 0177.0.0.1 == 127.0.0.1)
+        if _OCTAL_IP_RE.search(command):
+            raise CommandFilterError(command, "octal IP address (potential SSRF bypass)")
+
     def check(self, command: str) -> str:
         """Validate a command. Returns the command if safe, raises if blocked.
 

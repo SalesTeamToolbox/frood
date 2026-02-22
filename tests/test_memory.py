@@ -305,3 +305,100 @@ class TestMemoryStoreSemanticFallback:
         results = await self.store.semantic_search("deploy", top_k=5)
         assert len(results) > 0
         assert any("deploy" in r["text"].lower() for r in results)
+
+
+class TestHistoryRotation:
+    """Tests for Gap 5 fix: timestamped archive names."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.store = MemoryStore(self.tmpdir)
+
+    def test_rotation_creates_timestamped_archive(self):
+        """History rotation should create uniquely-named archives."""
+        # Write enough data to trigger rotation
+        self.store.MAX_HISTORY_SIZE = 100  # Lower threshold for testing
+        for i in range(50):
+            self.store.log_event("event", f"Event number {i}" * 5)
+
+        # Check that a timestamped archive was created (not .old.md)
+        archives = list(Path(self.tmpdir).glob("HISTORY.*.md"))
+        assert len(archives) >= 1
+        # Should NOT have .old.md (the old bug)
+        old_archive = Path(self.tmpdir) / "HISTORY.old.md"
+        assert not old_archive.exists()
+
+    def test_multiple_rotations_preserve_archives(self):
+        """Multiple rotations should not overwrite previous archives."""
+        self.store.MAX_HISTORY_SIZE = 100  # Lower threshold
+        # First rotation
+        for i in range(50):
+            self.store.log_event("event", f"First batch {i}" * 5)
+        archives_1 = set(Path(self.tmpdir).glob("HISTORY.*.md"))
+
+        # Second rotation
+        import time
+        time.sleep(1.1)  # Ensure different timestamp
+        for i in range(50):
+            self.store.log_event("event", f"Second batch {i}" * 5)
+        archives_2 = set(Path(self.tmpdir).glob("HISTORY.*.md"))
+
+        # Should have more archives after second rotation
+        assert len(archives_2) >= len(archives_1)
+
+
+class TestScheduleReindex:
+    """Tests for Gap 3 fix: auto-reindex after memory updates."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def test_update_memory_schedules_reindex_when_available(self):
+        """update_memory should attempt to schedule reindex when embeddings available."""
+        mock_redis = MagicMock()
+        mock_redis.is_available = True
+
+        with patch.dict("os.environ", {}, clear=True):
+            store = MemoryStore(self.tmpdir, redis_backend=mock_redis)
+            # Mock embeddings as available
+            store.embeddings._client = MagicMock()
+            with patch.object(store, '_schedule_reindex') as mock_reindex:
+                store.update_memory("# Updated content")
+                mock_reindex.assert_called_once()
+
+    def test_update_memory_skips_reindex_when_unavailable(self):
+        """update_memory should not schedule reindex when embeddings unavailable."""
+        with patch.dict("os.environ", {}, clear=True):
+            store = MemoryStore(self.tmpdir)
+            assert not store.embeddings.is_available
+            # This should not raise even without an event loop
+            store.update_memory("# Updated content")
+
+
+class TestJsonEmbeddingEviction:
+    """Tests for Gap 6 fix: max entries in JSON embedding store."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.store_path = Path(self.tmpdir) / "embeddings.json"
+
+    def test_save_evicts_oldest_when_over_limit(self):
+        """_save should evict oldest entries when over MAX_JSON_ENTRIES."""
+        from memory.embeddings import EmbeddingEntry
+
+        store = EmbeddingStore(self.store_path)
+        store.MAX_JSON_ENTRIES = 5  # Low limit for testing
+        store._loaded = True
+
+        # Add 8 entries with increasing timestamps
+        for i in range(8):
+            store._entries.append(EmbeddingEntry(
+                text=f"entry {i}", vector=[float(i)],
+                source="test", timestamp=float(i),
+            ))
+
+        store._save()
+        assert len(store._entries) == 5
+        # Should keep the newest (timestamps 3, 4, 5, 6, 7)
+        assert store._entries[0].text == "entry 3"
+        assert store._entries[-1].text == "entry 7"

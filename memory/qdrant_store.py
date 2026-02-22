@@ -14,6 +14,7 @@ check `is_available` before using.
 import hashlib
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("agent42.memory.qdrant")
@@ -127,9 +128,15 @@ class QdrantStore:
             logger.error(f"Qdrant: failed to ensure collection '{name}': {e}")
 
     def _make_point_id(self, text: str, source: str = "") -> str:
-        """Generate a deterministic point ID from text content."""
+        """Generate a deterministic UUID point ID from text content.
+
+        Qdrant expects UUID or integer IDs. We use uuid5 with a SHA-256-based
+        namespace to produce valid, deterministic UUIDs.
+        """
         content = f"{source}:{text}"
-        return hashlib.sha256(content.encode()).hexdigest()[:32]
+        # Use a fixed namespace derived from "agent42" for deterministic UUIDs
+        namespace = uuid.UUID("a42a42a4-2a42-4a42-a42a-42a42a42a42a")
+        return str(uuid.uuid5(namespace, content))
 
     # -- Upsert operations --
 

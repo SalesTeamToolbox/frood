@@ -160,8 +160,8 @@ class Learner:
         # Extract the lesson learned
         lesson = self._extract_lesson(reflection)
 
-        # Log the reflection event
-        self.memory.log_event(
+        # Log the reflection event (with semantic indexing)
+        await self.memory.log_event_semantic(
             "reflection",
             f"Post-task reflection for '{title}' ({task_type})",
             f"Outcome: {outcome}\nLesson: {lesson}\n"
@@ -209,9 +209,9 @@ class Learner:
         if "CREATE_SKILL" not in response:
             return None
 
-        return self._create_skill_from_response(response)
+        return await self._create_skill_from_response(response)
 
-    def record_reviewer_feedback(
+    async def record_reviewer_feedback(
         self,
         task_id: str,
         task_title: str,
@@ -223,7 +223,7 @@ class Learner:
         Called when a human approves/rejects the REVIEW.md output.
         """
         outcome = "APPROVED" if approved else "REJECTED"
-        self.memory.log_event(
+        await self.memory.log_event_semantic(
             "reviewer_feedback",
             f"Human reviewer {outcome} task '{task_title}'",
             f"Task ID: {task_id}\nFeedback: {feedback}",
@@ -335,7 +335,7 @@ class Learner:
                     return stripped
         return ""
 
-    def _create_skill_from_response(self, response: str) -> dict | None:
+    async def _create_skill_from_response(self, response: str) -> dict | None:
         """Parse CREATE_SKILL response and write the skill file."""
         lines = response.split("\n")
         idx = None
@@ -388,7 +388,7 @@ class Learner:
         )
         skill_path.write_text(frontmatter + "\n".join(body_lines))
 
-        self.memory.log_event(
+        await self.memory.log_event_semantic(
             "skill_created",
             f"Agent created new skill: {safe_name}",
             f"Description: {description}\nTask types: {task_types}",

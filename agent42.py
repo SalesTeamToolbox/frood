@@ -53,6 +53,9 @@ from channels.base import InboundMessage, OutboundMessage
 from skills.loader import SkillLoader
 from memory.store import MemoryStore
 from memory.session import SessionManager
+from memory.qdrant_store import QdrantStore, QdrantConfig
+from memory.redis_session import RedisSessionBackend, RedisConfig
+from memory.consolidation import ConsolidationPipeline
 from tools.registry import ToolRegistry
 from tools.shell import ShellTool
 from tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
@@ -125,14 +128,12 @@ class Agent42:
         self.task_queue = TaskQueue(tasks_json_path=settings.tasks_json_path)
         self.ws_manager = WebSocketManager()
         self.worktree_manager = WorktreeManager(str(self.repo_path))
-        self.approval_gate = ApprovalGate(self.task_queue)
         self._active_count = 0
         self._active_lock = asyncio.Lock()
         self.approval_gate = ApprovalGate(
             self.task_queue,
             log_path=settings.approval_log_path,
         )
-        self._semaphore = asyncio.Semaphore(self.max_agents)
         self._shutdown_event = asyncio.Event()
 
         # Phase 1: Security
@@ -182,9 +183,43 @@ class Agent42:
 
         self._register_tools()
 
-        # Phase 6: Memory
-        self.memory_store = MemoryStore(self.repo_path / settings.memory_dir)
-        self.session_manager = SessionManager(self.repo_path / settings.sessions_dir)
+        # Phase 6: Memory (with optional Qdrant + Redis backends)
+        self._qdrant_store = None
+        self._redis_backend = None
+
+        if settings.qdrant_enabled:
+            self._qdrant_store = QdrantStore(QdrantConfig(
+                url=settings.qdrant_url,
+                api_key=settings.qdrant_api_key,
+                collection_prefix=settings.qdrant_collection_prefix,
+                local_path=settings.qdrant_local_path,
+            ))
+
+        if settings.redis_url:
+            self._redis_backend = RedisSessionBackend(RedisConfig(
+                url=settings.redis_url,
+                password=settings.redis_password,
+                session_ttl_days=settings.session_ttl_days,
+                embedding_cache_ttl_hours=settings.embedding_cache_ttl_hours,
+            ))
+
+        self.memory_store = MemoryStore(
+            self.repo_path / settings.memory_dir,
+            qdrant_store=self._qdrant_store,
+            redis_backend=self._redis_backend,
+        )
+
+        consolidation = ConsolidationPipeline(
+            model_router=ModelRouter(),
+            embedding_store=self.memory_store.embeddings,
+            qdrant_store=self._qdrant_store,
+        )
+
+        self.session_manager = SessionManager(
+            self.repo_path / settings.sessions_dir,
+            redis_backend=self._redis_backend,
+            consolidation_pipeline=consolidation,
+        )
 
         # Phase 10: Device gateway authentication
         self.device_store = DeviceStore(self.repo_path / settings.devices_file)
@@ -456,8 +491,8 @@ class Agent42:
         )
         await self.task_queue.add(task)
 
-        # Log to memory
-        self.memory_store.log_event(
+        # Log to memory (semantic indexing for cross-session search)
+        await self.memory_store.log_event_semantic(
             "channel_message",
             f"From {message.sender_name} via {message.channel_type}",
             description[:500],

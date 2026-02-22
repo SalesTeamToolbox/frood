@@ -208,7 +208,7 @@ class RedisSessionBackend:
         if not self._client:
             return None
 
-        text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+        text_hash = hashlib.sha256(text.encode()).hexdigest()
         key = self._key("embed_cache", text_hash)
 
         try:
@@ -224,7 +224,7 @@ class RedisSessionBackend:
         if not self._client:
             return
 
-        text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+        text_hash = hashlib.sha256(text.encode()).hexdigest()
         key = self._key("embed_cache", text_hash)
 
         try:
