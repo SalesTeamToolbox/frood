@@ -31,10 +31,10 @@ jobs:
           pip install bandit safety pytest pytest-asyncio
 
       - name: Run bandit (code security scan)
-        run: bandit -r . -x tests,.venv,venv -ll -f json -o bandit-report.json || true
+        run: bandit -r . -x ./tests/,.venv/,venv/ -ll -f json -o bandit-report.json || true
 
       - name: Check bandit results
-        run: bandit -r . -x tests,.venv,venv -ll
+        run: bandit -r . -x ./tests/,.venv/,venv/ -ll
 
       - name: Run safety (dependency vulnerability check)
         run: safety check -r requirements.txt || true

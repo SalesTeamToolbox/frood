@@ -115,7 +115,7 @@ class TestArchiveManifest:
             "created_at": "2026-02-22T00:00:00",
             "archive_type": "clone",
             "categories": ["config"],
-            "source_path": "/tmp/test",
+            "source_path": "/tmp/test",  # nosec B108
             "file_count": 5,
             "notes": "test note",
         }

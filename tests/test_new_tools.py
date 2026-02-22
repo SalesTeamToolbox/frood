@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 import tempfile
 
 import pytest
@@ -16,17 +17,30 @@ class TestGitTool:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
         # Initialize a git repo in the tmpdir (disable gpg signing for test environments)
-        os.system(
-            f"cd {self.tmpdir} && git init -q "
-            f"&& git config user.email test@test.com "
-            f"&& git config user.name Test "
-            f"&& git config commit.gpgsign false"
+        subprocess.run(
+            ["git", "init", "-q"],
+            cwd=self.tmpdir,
+            check=True,
         )
+        for key, val in [
+            ("user.email", "test@test.com"),
+            ("user.name", "Test"),
+            ("commit.gpgsign", "false"),
+        ]:
+            subprocess.run(["git", "config", key, val], cwd=self.tmpdir, check=True)
         # Create initial commit
         with open(os.path.join(self.tmpdir, "README.md"), "w") as f:
             f.write("# Test\n")
-        ret = os.system(f"cd {self.tmpdir} && git add . && git commit -q --no-gpg-sign -m 'init'")
-        self._has_initial_commit = ret == 0
+        ret = subprocess.run(
+            ["git", "add", "."],
+            cwd=self.tmpdir,
+        )
+        if ret.returncode == 0:
+            ret = subprocess.run(
+                ["git", "commit", "-q", "--no-gpg-sign", "-m", "init"],
+                cwd=self.tmpdir,
+            )
+        self._has_initial_commit = ret.returncode == 0
 
         from tools.git_tool import GitTool
 

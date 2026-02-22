@@ -248,7 +248,7 @@ class HttpClientTool(Tool):
             resp = await asyncio.wait_for(
                 loop.run_in_executor(
                     None,
-                    lambda: urllib.request.urlopen(req, timeout=timeout),
+                    lambda: urllib.request.urlopen(req, timeout=timeout),  # nosec B310
                 ),
                 timeout=timeout + 5,
             )

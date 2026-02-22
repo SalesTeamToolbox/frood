@@ -115,7 +115,7 @@ class FileWatcherTool(Tool):
     @staticmethod
     def _file_hash(filepath: str) -> str:
         try:
-            h = hashlib.md5()
+            h = hashlib.md5(usedforsecurity=False)  # nosec B324
             with open(filepath, "rb") as f:
                 for chunk in iter(lambda: f.read(8192), b""):
                     h.update(chunk)
