@@ -1,10 +1,11 @@
 """Tests for Phase 4: Tool ecosystem."""
 
 import pytest
+
+from core.command_filter import CommandFilter
+from core.sandbox import WorkspaceSandbox
 from tools.base import Tool, ToolResult
 from tools.registry import ToolRegistry
-from core.sandbox import WorkspaceSandbox
-from core.command_filter import CommandFilter
 
 
 class MockTool(Tool):
@@ -118,8 +119,10 @@ class TestToolRegistry:
 class TestShellTool:
     @pytest.mark.asyncio
     async def test_safe_command(self):
-        from tools.shell import ShellTool
         import tempfile
+
+        from tools.shell import ShellTool
+
         tmpdir = tempfile.mkdtemp()
         sandbox = WorkspaceSandbox(tmpdir)
         tool = ShellTool(sandbox, CommandFilter())
@@ -129,8 +132,10 @@ class TestShellTool:
 
     @pytest.mark.asyncio
     async def test_blocked_command(self):
-        from tools.shell import ShellTool
         import tempfile
+
+        from tools.shell import ShellTool
+
         tmpdir = tempfile.mkdtemp()
         sandbox = WorkspaceSandbox(tmpdir)
         tool = ShellTool(sandbox, CommandFilter())
@@ -140,8 +145,10 @@ class TestShellTool:
 
     @pytest.mark.asyncio
     async def test_empty_command(self):
-        from tools.shell import ShellTool
         import tempfile
+
+        from tools.shell import ShellTool
+
         tmpdir = tempfile.mkdtemp()
         sandbox = WorkspaceSandbox(tmpdir)
         tool = ShellTool(sandbox, CommandFilter())
@@ -152,8 +159,10 @@ class TestShellTool:
 class TestFilesystemTools:
     @pytest.mark.asyncio
     async def test_write_and_read(self):
-        from tools.filesystem import WriteFileTool, ReadFileTool
         import tempfile
+
+        from tools.filesystem import ReadFileTool, WriteFileTool
+
         tmpdir = tempfile.mkdtemp()
         sandbox = WorkspaceSandbox(tmpdir)
 
@@ -168,8 +177,10 @@ class TestFilesystemTools:
 
     @pytest.mark.asyncio
     async def test_read_nonexistent(self):
-        from tools.filesystem import ReadFileTool
         import tempfile
+
+        from tools.filesystem import ReadFileTool
+
         tmpdir = tempfile.mkdtemp()
         sandbox = WorkspaceSandbox(tmpdir)
         reader = ReadFileTool(sandbox)
@@ -178,8 +189,10 @@ class TestFilesystemTools:
 
     @pytest.mark.asyncio
     async def test_edit_file(self):
-        from tools.filesystem import WriteFileTool, EditFileTool, ReadFileTool
         import tempfile
+
+        from tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
+
         tmpdir = tempfile.mkdtemp()
         sandbox = WorkspaceSandbox(tmpdir)
 
@@ -196,8 +209,10 @@ class TestFilesystemTools:
 
     @pytest.mark.asyncio
     async def test_sandbox_violation(self):
-        from tools.filesystem import ReadFileTool
         import tempfile
+
+        from tools.filesystem import ReadFileTool
+
         tmpdir = tempfile.mkdtemp()
         sandbox = WorkspaceSandbox(tmpdir)
         reader = ReadFileTool(sandbox)
@@ -207,8 +222,10 @@ class TestFilesystemTools:
 
     @pytest.mark.asyncio
     async def test_list_dir(self):
-        from tools.filesystem import WriteFileTool, ListDirTool
         import tempfile
+
+        from tools.filesystem import ListDirTool, WriteFileTool
+
         tmpdir = tempfile.mkdtemp()
         sandbox = WorkspaceSandbox(tmpdir)
 

@@ -1,10 +1,9 @@
 """Tests for the TeamTool — multi-agent team orchestration."""
 
-import asyncio
 import pytest
 
-from tools.team_tool import TeamTool, BUILTIN_TEAMS
-from core.task_queue import TaskQueue, Task, TaskType, TaskStatus
+from core.task_queue import TaskStatus
+from tools.team_tool import BUILTIN_TEAMS, TeamTool
 
 
 class MockTaskQueue:
@@ -151,9 +150,7 @@ class TestTeamToolRun:
 
     @pytest.mark.asyncio
     async def test_run_nonexistent_team_fails(self):
-        result = await self.tool.execute(
-            action="run", name="nope", task="something"
-        )
+        result = await self.tool.execute(action="run", name="nope", task="something")
         assert not result.success
 
     @pytest.mark.asyncio

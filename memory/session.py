@@ -14,7 +14,7 @@ before pruning so the knowledge is preserved in long-term memory.
 import json
 import logging
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger("agent42.memory.session")
@@ -23,7 +23,8 @@ logger = logging.getLogger("agent42.memory.session")
 @dataclass
 class SessionMessage:
     """A single message in a conversation session."""
-    role: str           # "user", "assistant", "system"
+
+    role: str  # "user", "assistant", "system"
     content: str
     timestamp: float = field(default_factory=time.time)
     channel_type: str = ""
@@ -39,8 +40,7 @@ class SessionManager:
     durable backing store (write-through caching pattern).
     """
 
-    def __init__(self, sessions_dir: str | Path, redis_backend=None,
-                 consolidation_pipeline=None):
+    def __init__(self, sessions_dir: str | Path, redis_backend=None, consolidation_pipeline=None):
         self.sessions_dir = Path(sessions_dir)
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self._sessions: dict[str, list[SessionMessage]] = {}
@@ -76,20 +76,24 @@ class SessionManager:
         # Write-through to Redis cache
         if self._redis and self._redis.is_available:
             self._redis.add_message(
-                channel_type, channel_id, asdict(message),
+                channel_type,
+                channel_id,
+                asdict(message),
                 max_messages=self.MAX_SESSION_MESSAGES,
             )
 
         # Prune old messages to prevent unbounded growth
         if len(self._sessions[key]) > self.MAX_SESSION_MESSAGES:
             # Consolidate before pruning (if pipeline available)
-            pruned_messages = self._sessions[key][:-self.MAX_SESSION_MESSAGES]
+            pruned_messages = self._sessions[key][: -self.MAX_SESSION_MESSAGES]
             if pruned_messages and self._consolidation and self._consolidation.is_available:
                 self._schedule_consolidation(
-                    pruned_messages, channel_type, channel_id,
+                    pruned_messages,
+                    channel_type,
+                    channel_id,
                 )
 
-            self._sessions[key] = self._sessions[key][-self.MAX_SESSION_MESSAGES:]
+            self._sessions[key] = self._sessions[key][-self.MAX_SESSION_MESSAGES :]
             self._rewrite_session(key)
             return
 
@@ -137,7 +141,8 @@ class SessionManager:
         # Warm Redis cache from JSONL data
         if self._redis and self._redis.is_available and messages:
             self._redis.warm_cache(
-                channel_type, channel_id,
+                channel_type,
+                channel_id,
                 [asdict(m) for m in self._sessions[key]],
             )
 
@@ -176,7 +181,7 @@ class SessionManager:
             return messages
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -209,7 +214,9 @@ class SessionManager:
         async def _consolidate():
             try:
                 await self._consolidation.consolidate_and_store(
-                    message_dicts, channel_type, channel_id,
+                    message_dicts,
+                    channel_type,
+                    channel_id,
                 )
             except Exception as e:
                 logger.warning(f"Consolidation failed (non-critical): {e}")

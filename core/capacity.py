@@ -85,9 +85,7 @@ def compute_effective_capacity(configured_max: int) -> dict:
         cpu_reason = f"CPU critically loaded ({load_per_core:.2f}/core)"
     elif load_per_core >= _LOAD_SCALE_START:
         # Linear interpolation: configured_max at 0.80 -> 1 at 0.95
-        fraction = (load_per_core - _LOAD_SCALE_START) / (
-            _LOAD_SCALE_CRITICAL - _LOAD_SCALE_START
-        )
+        fraction = (load_per_core - _LOAD_SCALE_START) / (_LOAD_SCALE_CRITICAL - _LOAD_SCALE_START)
         cpu_cap = max(1, int(configured_max - fraction * (configured_max - 1)))
         cpu_reason = f"CPU load elevated ({load_per_core:.2f}/core), scaling down"
     else:

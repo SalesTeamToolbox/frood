@@ -15,7 +15,6 @@ import os
 import subprocess
 import sys
 
-
 # Directories that should have test coverage
 COVERED_DIRS = ["core", "agents", "tools", "providers"]
 

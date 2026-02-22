@@ -17,8 +17,7 @@ Hook protocol:
 import json
 import os
 import sys
-from datetime import datetime, timezone
-
+from datetime import UTC, datetime
 
 DEFAULT_PATTERNS = {
     "version": 1,
@@ -38,7 +37,7 @@ def load_patterns(project_dir):
     path = os.path.join(project_dir, ".claude", "learned-patterns.json")
     if os.path.exists(path):
         try:
-            with open(path, "r") as f:
+            with open(path) as f:
                 data = json.load(f)
                 # Ensure all keys exist (forward compatibility)
                 for key, default in DEFAULT_PATTERNS.items():
@@ -53,7 +52,7 @@ def load_patterns(project_dir):
 def save_patterns(project_dir, patterns):
     """Save learned patterns to disk."""
     path = os.path.join(project_dir, ".claude", "learned-patterns.json")
-    patterns["last_updated"] = datetime.now(timezone.utc).isoformat()
+    patterns["last_updated"] = datetime.now(UTC).isoformat()
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     try:
@@ -74,7 +73,7 @@ def extract_session_data(event):
     # Extract from tool uses in the session
     tool_uses = event.get("tool_uses", [])
     for tool_use in tool_uses:
-        tool_name = tool_use.get("tool_name", "")
+        _tool_name = tool_use.get("tool_name", "")
         tool_input = tool_use.get("tool_input", {})
 
         # Track files touched
@@ -83,7 +82,7 @@ def extract_session_data(event):
             # Normalize to relative path
             project_dir = event.get("project_dir", "")
             if project_dir and file_path.startswith(project_dir):
-                file_path = file_path[len(project_dir):].lstrip("/")
+                file_path = file_path[len(project_dir) :].lstrip("/")
             data["files_touched"].add(file_path)
 
         # Detect task types from file paths
@@ -116,11 +115,9 @@ def update_patterns(patterns, session_data):
     # Update file co-occurrences
     files = sorted(session_data["files_touched"])
     for i, f1 in enumerate(files):
-        for f2 in files[i + 1:]:
+        for f2 in files[i + 1 :]:
             key = f"{f1}|{f2}"
-            patterns["file_co_occurrences"][key] = (
-                patterns["file_co_occurrences"].get(key, 0) + 1
-            )
+            patterns["file_co_occurrences"][key] = patterns["file_co_occurrences"].get(key, 0) + 1
 
     # Update task type frequency
     for task_type in session_data["task_types"]:
@@ -133,11 +130,13 @@ def update_patterns(patterns, session_data):
         if count >= SKILL_CANDIDATE_THRESHOLD:
             existing = [c["type"] for c in patterns["skill_candidates"]]
             if task_type not in existing:
-                patterns["skill_candidates"].append({
-                    "type": task_type,
-                    "occurrences": count,
-                    "suggested_at": datetime.now(timezone.utc).isoformat(),
-                })
+                patterns["skill_candidates"].append(
+                    {
+                        "type": task_type,
+                        "occurrences": count,
+                        "suggested_at": datetime.now(UTC).isoformat(),
+                    }
+                )
 
     # Cap co-occurrence dict size to prevent unbounded growth
     if len(patterns["file_co_occurrences"]) > 500:
@@ -178,8 +177,7 @@ def main():
 
     # Report new skill candidates
     new_candidates = [
-        c for c in patterns["skill_candidates"]
-        if c["occurrences"] == SKILL_CANDIDATE_THRESHOLD
+        c for c in patterns["skill_candidates"] if c["occurrences"] == SKILL_CANDIDATE_THRESHOLD
     ]
     if new_candidates:
         print("\n[learning-engine] New skill candidates detected:", file=sys.stderr)

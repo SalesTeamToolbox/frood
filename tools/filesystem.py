@@ -5,9 +5,8 @@ Filesystem tools — sandboxed file operations with path traversal protection.
 import logging
 import os
 import tempfile
-from pathlib import Path
 
-from core.sandbox import WorkspaceSandbox, SandboxViolation
+from core.sandbox import SandboxViolation, WorkspaceSandbox
 from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.filesystem")
@@ -126,7 +125,9 @@ class EditFileTool(Tool):
             "required": ["path", "old_string", "new_string"],
         }
 
-    async def execute(self, path: str = "", old_string: str = "", new_string: str = "", **kwargs) -> ToolResult:
+    async def execute(
+        self, path: str = "", old_string: str = "", new_string: str = "", **kwargs
+    ) -> ToolResult:
         try:
             resolved = self._sandbox.resolve_path(path)
             # Read directly — avoid TOCTOU race between exists() and read_text()

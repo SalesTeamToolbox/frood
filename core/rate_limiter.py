@@ -17,6 +17,7 @@ logger = logging.getLogger("agent42.rate_limiter")
 @dataclass(frozen=True)
 class ToolLimit:
     """Rate limit specification for a single tool."""
+
     max_calls: int
     window_seconds: float
 
@@ -24,12 +25,12 @@ class ToolLimit:
 # Default per-tool rate limits (per agent, per window).
 # These are generous defaults — tighten via TOOL_RATE_LIMIT_OVERRIDES for production.
 DEFAULT_TOOL_LIMITS: dict[str, ToolLimit] = {
-    "web_search":   ToolLimit(max_calls=60,  window_seconds=3600),  # 60/hour
-    "web_fetch":    ToolLimit(max_calls=60,  window_seconds=3600),  # 60/hour
+    "web_search": ToolLimit(max_calls=60, window_seconds=3600),  # 60/hour
+    "web_fetch": ToolLimit(max_calls=60, window_seconds=3600),  # 60/hour
     "http_request": ToolLimit(max_calls=120, window_seconds=3600),  # 120/hour
-    "browser":      ToolLimit(max_calls=30,  window_seconds=3600),  # 30/hour
-    "shell":        ToolLimit(max_calls=200, window_seconds=3600),  # 200/hour
-    "docker":       ToolLimit(max_calls=20,  window_seconds=3600),  # 20/hour
+    "browser": ToolLimit(max_calls=30, window_seconds=3600),  # 30/hour
+    "shell": ToolLimit(max_calls=200, window_seconds=3600),  # 200/hour
+    "docker": ToolLimit(max_calls=20, window_seconds=3600),  # 20/hour
 }
 
 

@@ -5,9 +5,9 @@ Pure Python implementation using standard library. Provides agents with
 quantitative metrics to evaluate and improve written content.
 """
 
+import logging
 import math
 import re
-import logging
 from collections import Counter
 
 from tools.base import Tool, ToolResult
@@ -16,20 +16,67 @@ logger = logging.getLogger("agent42.tools.content_analyzer")
 
 # Tone indicators — word lists for simple tone classification
 _FORMAL_INDICATORS = {
-    "therefore", "consequently", "furthermore", "moreover", "hereby",
-    "pursuant", "accordingly", "notwithstanding", "whereas", "henceforth",
-    "thus", "indeed", "nevertheless", "regarding", "pertaining",
+    "therefore",
+    "consequently",
+    "furthermore",
+    "moreover",
+    "hereby",
+    "pursuant",
+    "accordingly",
+    "notwithstanding",
+    "whereas",
+    "henceforth",
+    "thus",
+    "indeed",
+    "nevertheless",
+    "regarding",
+    "pertaining",
 }
 _INFORMAL_INDICATORS = {
-    "awesome", "cool", "gonna", "wanna", "gotta", "hey", "yeah", "nope",
-    "btw", "lol", "ok", "okay", "stuff", "things", "kinda", "sorta",
-    "basically", "literally", "super", "totally",
+    "awesome",
+    "cool",
+    "gonna",
+    "wanna",
+    "gotta",
+    "hey",
+    "yeah",
+    "nope",
+    "btw",
+    "lol",
+    "ok",
+    "okay",
+    "stuff",
+    "things",
+    "kinda",
+    "sorta",
+    "basically",
+    "literally",
+    "super",
+    "totally",
 }
 _PERSUASIVE_INDICATORS = {
-    "free", "guaranteed", "proven", "exclusive", "limited", "now",
-    "instant", "discover", "unlock", "transform", "imagine", "you",
-    "your", "save", "boost", "increase", "secret", "powerful", "easy",
-    "best", "new", "revolutionary",
+    "free",
+    "guaranteed",
+    "proven",
+    "exclusive",
+    "limited",
+    "now",
+    "instant",
+    "discover",
+    "unlock",
+    "transform",
+    "imagine",
+    "you",
+    "your",
+    "save",
+    "boost",
+    "increase",
+    "secret",
+    "powerful",
+    "easy",
+    "best",
+    "new",
+    "revolutionary",
 }
 
 
@@ -201,7 +248,11 @@ class ContentAnalyzerTool(Tool):
         persuasive_pct = round(persuasive_count / total * 100, 1)
 
         # Determine dominant tone
-        scores = {"Formal": formal_count, "Informal": informal_count, "Persuasive": persuasive_count}
+        scores = {
+            "Formal": formal_count,
+            "Informal": informal_count,
+            "Persuasive": persuasive_count,
+        }
         dominant = max(scores, key=scores.get) if any(scores.values()) else "Neutral"
 
         formal_words = sorted(words & _FORMAL_INDICATORS)
@@ -230,7 +281,7 @@ class ContentAnalyzerTool(Tool):
         lines = text.split("\n")
         headings = [l for l in lines if l.strip().startswith("#")]
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-        blank_lines = sum(1 for l in lines if not l.strip())
+        _blank_lines = sum(1 for l in lines if not l.strip())
 
         # Paragraph length distribution
         para_lengths = [len(self._tokenize(p)) for p in paragraphs]
@@ -272,15 +323,84 @@ class ContentAnalyzerTool(Tool):
     def _keywords(self, text: str, top_n: int) -> ToolResult:
         # Common English stop words
         stop_words = {
-            "the", "a", "an", "and", "or", "but", "in", "on", "at", "to",
-            "for", "of", "with", "by", "from", "is", "are", "was", "were",
-            "be", "been", "being", "have", "has", "had", "do", "does", "did",
-            "will", "would", "could", "should", "may", "might", "shall",
-            "can", "it", "its", "this", "that", "these", "those", "i", "we",
-            "you", "he", "she", "they", "me", "him", "her", "us", "them",
-            "my", "your", "his", "our", "their", "not", "no", "so", "if",
-            "as", "up", "out", "about", "into", "than", "then", "each",
-            "all", "any", "both", "more", "most", "other", "some", "such",
+            "the",
+            "a",
+            "an",
+            "and",
+            "or",
+            "but",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "of",
+            "with",
+            "by",
+            "from",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "shall",
+            "can",
+            "it",
+            "its",
+            "this",
+            "that",
+            "these",
+            "those",
+            "i",
+            "we",
+            "you",
+            "he",
+            "she",
+            "they",
+            "me",
+            "him",
+            "her",
+            "us",
+            "them",
+            "my",
+            "your",
+            "his",
+            "our",
+            "their",
+            "not",
+            "no",
+            "so",
+            "if",
+            "as",
+            "up",
+            "out",
+            "about",
+            "into",
+            "than",
+            "then",
+            "each",
+            "all",
+            "any",
+            "both",
+            "more",
+            "most",
+            "other",
+            "some",
+            "such",
         }
 
         words = [w.lower() for w in self._tokenize(text) if len(w) > 2]
@@ -355,12 +475,59 @@ class ContentAnalyzerTool(Tool):
 
         # Keyword density (top terms)
         stop_words = {
-            "the", "a", "an", "and", "or", "but", "in", "on", "at", "to",
-            "for", "of", "with", "by", "from", "is", "are", "was", "were",
-            "be", "been", "being", "have", "has", "had", "do", "does", "did",
-            "will", "would", "could", "should", "may", "might", "shall",
-            "can", "it", "its", "this", "that", "these", "those", "i", "we",
-            "you", "he", "she", "they", "not", "no", "so", "if", "as",
+            "the",
+            "a",
+            "an",
+            "and",
+            "or",
+            "but",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "of",
+            "with",
+            "by",
+            "from",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "shall",
+            "can",
+            "it",
+            "its",
+            "this",
+            "that",
+            "these",
+            "those",
+            "i",
+            "we",
+            "you",
+            "he",
+            "she",
+            "they",
+            "not",
+            "no",
+            "so",
+            "if",
+            "as",
         }
         filtered = [w.lower() for w in words if w.lower() not in stop_words and len(w) > 2]
         freq = Counter(filtered)
@@ -372,7 +539,9 @@ class ContentAnalyzerTool(Tool):
         h3_count = sum(1 for h in headings if h.startswith("### "))
 
         # Check first paragraph as potential meta description
-        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip() and not p.strip().startswith("#")]
+        paragraphs = [
+            p.strip() for p in text.split("\n\n") if p.strip() and not p.strip().startswith("#")
+        ]
         meta_candidate = paragraphs[0] if paragraphs else ""
         meta_length = len(meta_candidate)
         meta_ok = 120 <= meta_length <= 160
@@ -414,7 +583,7 @@ class ContentAnalyzerTool(Tool):
         )
 
         # Meta description
-        output += f"## Meta Description\n\n"
+        output += "## Meta Description\n\n"
         if meta_candidate:
             output += f"**Candidate (first paragraph):** {meta_candidate[:200]}\n"
             output += f"**Length:** {meta_length} chars "
@@ -428,7 +597,7 @@ class ContentAnalyzerTool(Tool):
             output += "No meta description candidate found. Add a descriptive first paragraph.\n"
 
         # Top keywords
-        output += f"\n## Keyword Density (top 10)\n\n"
+        output += "\n## Keyword Density (top 10)\n\n"
         output += "| Keyword | Count | Density |\n"
         output += "|---------|-------|---------|\n"
         for kw, count in top_keywords:

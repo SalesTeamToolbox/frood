@@ -1,9 +1,9 @@
 """Tests for Phase 3: Skills framework."""
 
 import tempfile
-import pytest
 from pathlib import Path
-from skills.loader import SkillLoader, Skill, _parse_yaml_simple
+
+from skills.loader import Skill, SkillLoader, _parse_yaml_simple
 
 
 class TestYamlParser:
@@ -40,7 +40,9 @@ class TestSkillLoader:
         (skill_dir / "SKILL.md").write_text(content)
 
     def test_load_skill_with_frontmatter(self):
-        self._create_skill("test-skill", """---
+        self._create_skill(
+            "test-skill",
+            """---
 name: test-skill
 description: A test skill
 always: true
@@ -50,7 +52,8 @@ task_types: [coding]
 # Test Skill
 
 Instructions here.
-""")
+""",
+        )
         loader = SkillLoader([self.tmpdir])
         skills = loader.load_all()
         assert "test-skill" in skills
@@ -67,20 +70,26 @@ Instructions here.
         assert "Just instructions" in skills["simple"].instructions
 
     def test_get_for_task_type(self):
-        self._create_skill("code-skill", """---
+        self._create_skill(
+            "code-skill",
+            """---
 name: code-skill
 description: Coding helper
 task_types: [coding]
 ---
 Code instructions.
-""")
-        self._create_skill("always-skill", """---
+""",
+        )
+        self._create_skill(
+            "always-skill",
+            """---
 name: always-skill
 description: Always loaded
 always: true
 ---
 Always instructions.
-""")
+""",
+        )
         loader = SkillLoader([self.tmpdir])
         loader.load_all()
 
@@ -91,13 +100,16 @@ Always instructions.
         assert len(research_skills) == 1  # only always
 
     def test_build_skill_context(self):
-        self._create_skill("ctx-skill", """---
+        self._create_skill(
+            "ctx-skill",
+            """---
 name: ctx-skill
 description: Context test
 always: true
 ---
 Context instructions.
-""")
+""",
+        )
         loader = SkillLoader([self.tmpdir])
         loader.load_all()
 

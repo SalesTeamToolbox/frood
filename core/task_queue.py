@@ -12,10 +12,11 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
+from collections.abc import Awaitable, Callable
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Awaitable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import aiofiles
 
@@ -53,17 +54,101 @@ class TaskType(str, Enum):
 
 # Keyword-based task type inference for channel messages
 _TASK_TYPE_KEYWORDS: dict[TaskType, list[str]] = {
-    TaskType.DEBUGGING: ["bug", "fix", "error", "crash", "broken", "debug", "issue", "traceback", "exception"],
-    TaskType.RESEARCH: ["research", "compare", "evaluate", "investigate", "analyze", "find out", "look into"],
-    TaskType.REFACTORING: ["refactor", "clean up", "reorganize", "restructure", "simplify", "extract"],
+    TaskType.DEBUGGING: [
+        "bug",
+        "fix",
+        "error",
+        "crash",
+        "broken",
+        "debug",
+        "issue",
+        "traceback",
+        "exception",
+    ],
+    TaskType.RESEARCH: [
+        "research",
+        "compare",
+        "evaluate",
+        "investigate",
+        "analyze",
+        "find out",
+        "look into",
+    ],
+    TaskType.REFACTORING: [
+        "refactor",
+        "clean up",
+        "reorganize",
+        "restructure",
+        "simplify",
+        "extract",
+    ],
     TaskType.DOCUMENTATION: ["document", "readme", "docstring", "wiki", "explain", "write docs"],
-    TaskType.MARKETING: ["marketing", "copy", "landing page", "social media", "campaign", "blog post", "seo"],
+    TaskType.MARKETING: [
+        "marketing",
+        "copy",
+        "landing page",
+        "social media",
+        "campaign",
+        "blog post",
+        "seo",
+    ],
     TaskType.EMAIL: ["email", "draft email", "reply to", "send email", "write email", "compose"],
-    TaskType.DESIGN: ["design", "mockup", "wireframe", "ui design", "ux design", "user interface", "layout", "visual", "logo", "brand identity", "creative brief", "graphic"],
-    TaskType.CONTENT: ["blog", "article", "write", "content", "post", "copywrite", "narrative", "story", "headline"],
-    TaskType.STRATEGY: ["strategy", "competitive", "swot", "market analysis", "business plan", "positioning", "go-to-market"],
-    TaskType.DATA_ANALYSIS: ["data", "chart", "graph", "csv", "spreadsheet", "analyze data", "visualization", "metrics", "dashboard", "statistics"],
-    TaskType.PROJECT_MANAGEMENT: ["project plan", "timeline", "milestone", "sprint", "roadmap", "status report", "task breakdown", "gantt"],
+    TaskType.DESIGN: [
+        "design",
+        "mockup",
+        "wireframe",
+        "ui design",
+        "ux design",
+        "user interface",
+        "layout",
+        "visual",
+        "logo",
+        "brand identity",
+        "creative brief",
+        "graphic",
+    ],
+    TaskType.CONTENT: [
+        "blog",
+        "article",
+        "write",
+        "content",
+        "post",
+        "copywrite",
+        "narrative",
+        "story",
+        "headline",
+    ],
+    TaskType.STRATEGY: [
+        "strategy",
+        "competitive",
+        "swot",
+        "market analysis",
+        "business plan",
+        "positioning",
+        "go-to-market",
+    ],
+    TaskType.DATA_ANALYSIS: [
+        "data",
+        "chart",
+        "graph",
+        "csv",
+        "spreadsheet",
+        "analyze data",
+        "visualization",
+        "metrics",
+        "dashboard",
+        "statistics",
+    ],
+    TaskType.PROJECT_MANAGEMENT: [
+        "project plan",
+        "timeline",
+        "milestone",
+        "sprint",
+        "roadmap",
+        "status report",
+        "task breakdown",
+        "gantt",
+    ],
 }
 
 
@@ -93,28 +178,30 @@ class Task:
     result: str = ""
     error: str = ""
     # Origin channel info for routing responses back
-    origin_channel: str = ""      # "discord", "slack", "telegram", "email", ""
-    origin_channel_id: str = ""   # Channel/chat ID to respond to
+    origin_channel: str = ""  # "discord", "slack", "telegram", "email", ""
+    origin_channel_id: str = ""  # Channel/chat ID to respond to
     origin_metadata: dict = field(default_factory=dict)  # Thread IDs, etc.
     # Device that created this task (empty = dashboard/channel)
     origin_device_id: str = ""
 
     # Mission Control / Kanban fields (OpenClaw feature)
     assigned_agent: str = ""
-    priority: int = 0             # 0=normal, 1=high, 2=urgent
+    priority: int = 0  # 0=normal, 1=high, 2=urgent
     tags: list = field(default_factory=list)
     comments: list = field(default_factory=list)  # [{author, text, timestamp}]
     blocked_reason: str = ""
     parent_task_id: str = ""
-    position: int = 0             # Kanban column ordering
+    position: int = 0  # Kanban column ordering
     context_window: str = "default"  # default | large | max
 
     def add_comment(self, author: str, text: str):
-        self.comments.append({
-            "author": author,
-            "text": text,
-            "timestamp": time.time(),
-        })
+        self.comments.append(
+            {
+                "author": author,
+                "text": text,
+                "timestamp": time.time(),
+            }
+        )
         self.updated_at = time.time()
 
     def block(self, reason: str):
@@ -153,15 +240,15 @@ class _PriorityEntry:
     We negate priority so urgent (2) sorts before normal (0).
     Sequence number preserves FIFO order within the same priority level.
     """
-    sort_key: tuple = field(compare=True)    # (-priority, sequence)
+
+    sort_key: tuple = field(compare=True)  # (-priority, sequence)
     task: Task = field(compare=False)
 
 
 class TaskQueue:
     """Async task queue with priority ordering and pluggable persistence."""
 
-    def __init__(self, tasks_json_path: str = "tasks.json",
-                 backend: "QueueBackend | None" = None):
+    def __init__(self, tasks_json_path: str = "tasks.json", backend: "QueueBackend | None" = None):
         self._tasks: dict[str, Task] = {}
         self._queue: asyncio.PriorityQueue[_PriorityEntry] = asyncio.PriorityQueue()
         self._seq: int = 0
@@ -338,7 +425,7 @@ class TaskQueue:
             if not self._json_path.exists():
                 return
             try:
-                async with aiofiles.open(self._json_path, "r") as f:
+                async with aiofiles.open(self._json_path) as f:
                     raw = await f.read()
                 data = json.loads(raw)
                 logger.info(f"Loaded {len(data)} tasks from {self._json_path}")
@@ -381,7 +468,7 @@ class TaskQueue:
                 self._last_mtime = mtime
                 logger.info("Tasks file changed — reloading")
 
-                async with aiofiles.open(self._json_path, "r") as f:
+                async with aiofiles.open(self._json_path) as f:
                     raw = await f.read()
 
                 try:

@@ -4,16 +4,16 @@ import json
 import tempfile
 import time
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.device_auth import Device, DeviceStore, _hash_key, API_KEY_PREFIX
-
+from core.device_auth import API_KEY_PREFIX, DeviceStore, _hash_key
 
 # ---------------------------------------------------------------------------
 # DeviceStore — registration, validation, revocation, persistence
 # ---------------------------------------------------------------------------
+
 
 class TestDeviceRegistration:
     """Device registration and API key generation."""
@@ -231,11 +231,13 @@ class TestDeviceListing:
 # Auth layer — dual auth (JWT + API key)
 # ---------------------------------------------------------------------------
 
+
 class TestAuthContext:
     """AuthContext dataclass and dual auth helpers."""
 
     def test_auth_context_jwt_defaults(self):
         from dashboard.auth import AuthContext
+
         ctx = AuthContext(user="admin")
         assert ctx.auth_type == "jwt"
         assert ctx.device_id == ""
@@ -243,8 +245,10 @@ class TestAuthContext:
 
     def test_auth_context_api_key(self):
         from dashboard.auth import AuthContext
-        ctx = AuthContext(user="device", auth_type="api_key",
-                          device_id="abc123", device_name="Watch")
+
+        ctx = AuthContext(
+            user="device", auth_type="api_key", device_id="abc123", device_name="Watch"
+        )
         assert ctx.auth_type == "api_key"
         assert ctx.device_id == "abc123"
 
@@ -258,6 +262,7 @@ class TestDualAuth:
 
     def test_validate_api_key_path(self):
         from dashboard.auth import _validate_api_key, init_device_store
+
         init_device_store(self.store)
         _, raw_key = self.store.register("Laptop", "laptop")
         ctx = _validate_api_key(raw_key)
@@ -266,30 +271,37 @@ class TestDualAuth:
 
     def test_validate_api_key_invalid(self):
         from dashboard.auth import _validate_api_key, init_device_store
+
         init_device_store(self.store)
         from fastapi import HTTPException
+
         with pytest.raises(HTTPException) as exc_info:
             _validate_api_key("ak_invalid")
         assert exc_info.value.status_code == 401
 
     def test_validate_api_key_no_store(self):
         from dashboard.auth import _validate_api_key, init_device_store
+
         init_device_store(None)
         from fastapi import HTTPException
+
         with pytest.raises(HTTPException) as exc_info:
             _validate_api_key("ak_something")
         assert exc_info.value.status_code == 401
 
     def test_validate_jwt_valid(self):
         from dashboard.auth import _validate_jwt, create_token
+
         token = create_token("admin")
         ctx = _validate_jwt(token)
         assert ctx.user == "admin"
         assert ctx.auth_type == "jwt"
 
     def test_validate_jwt_invalid(self):
-        from dashboard.auth import _validate_jwt
         from fastapi import HTTPException
+
+        from dashboard.auth import _validate_jwt
+
         with pytest.raises(HTTPException):
             _validate_jwt("invalid.jwt.token")
 
@@ -300,11 +312,13 @@ class TestDualAuth:
 
 try:
     from fastapi.testclient import TestClient
-    from core.task_queue import TaskQueue
+
     from core.approval_gate import ApprovalGate
-    from dashboard.websocket_manager import WebSocketManager
-    from dashboard.server import create_app
+    from core.task_queue import TaskQueue
     from dashboard.auth import create_token, init_device_store
+    from dashboard.server import create_app
+    from dashboard.websocket_manager import WebSocketManager
+
     HAS_TESTCLIENT = True
 except ImportError:
     HAS_TESTCLIENT = False
@@ -332,9 +346,7 @@ class TestDeviceEndpoints:
             mock_settings.login_rate_limit = 100
             mock_settings.get_cors_origins.return_value = []
 
-            app = create_app(
-                self.tq, self.ws, self.ag, device_store=self.ds
-            )
+            app = create_app(self.tq, self.ws, self.ag, device_store=self.ds)
             return app
 
     def _get_admin_token(self):
@@ -526,6 +538,7 @@ class TestDeviceEndpoints:
 # WebSocket manager — device tracking
 # ---------------------------------------------------------------------------
 
+
 class TestWebSocketDeviceTracking:
     """WebSocketManager device identity tracking."""
 
@@ -547,27 +560,32 @@ class TestWebSocketDeviceTracking:
 # Task model — origin_device_id field
 # ---------------------------------------------------------------------------
 
+
 class TestTaskDeviceField:
     """Task dataclass includes origin_device_id."""
 
     def test_task_default_device_id_empty(self):
         from core.task_queue import Task
+
         task = Task(title="Test", description="Test task")
         assert task.origin_device_id == ""
 
     def test_task_with_device_id(self):
         from core.task_queue import Task
+
         task = Task(title="Test", description="Test task", origin_device_id="abc123def456")
         assert task.origin_device_id == "abc123def456"
 
     def test_task_to_dict_includes_device_id(self):
         from core.task_queue import Task
+
         task = Task(title="Test", description="Test", origin_device_id="dev1")
         d = task.to_dict()
         assert d["origin_device_id"] == "dev1"
 
     def test_task_from_dict_with_device_id(self):
         from core.task_queue import Task
+
         data = {
             "title": "Test",
             "description": "Test",
@@ -580,6 +598,7 @@ class TestTaskDeviceField:
 
     def test_task_from_dict_without_device_id(self):
         from core.task_queue import Task
+
         data = {
             "title": "Test",
             "description": "Test",
@@ -594,19 +613,23 @@ class TestTaskDeviceField:
 # Config — devices_file setting
 # ---------------------------------------------------------------------------
 
+
 class TestDeviceConfig:
     """Config includes devices_file setting."""
 
     def test_default_devices_file(self):
         from core.config import Settings
+
         s = Settings()
         assert s.devices_file == ".agent42/devices.jsonl"
 
     def test_devices_file_from_env(self):
         import os
+
         os.environ["DEVICES_FILE"] = "/custom/path/devices.jsonl"
         try:
             from core.config import Settings
+
             s = Settings.from_env()
             assert s.devices_file == "/custom/path/devices.jsonl"
         finally:

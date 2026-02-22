@@ -12,7 +12,6 @@ Security:
 """
 
 import asyncio
-import json
 import logging
 import os
 import re
@@ -47,8 +46,14 @@ _DANGEROUS_PATTERNS: list[re.Pattern] = [
 
 # Environment variable prefixes/names that contain secrets and must be stripped
 _SECRET_ENV_PATTERNS = [
-    "API_KEY", "API_TOKEN", "SECRET", "PASSWORD", "CREDENTIAL",
-    "BOT_TOKEN", "JWT_SECRET", "DASHBOARD_PASSWORD",
+    "API_KEY",
+    "API_TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "CREDENTIAL",
+    "BOT_TOKEN",
+    "JWT_SECRET",
+    "DASHBOARD_PASSWORD",
 ]
 
 
@@ -129,7 +134,10 @@ class PythonExecTool(Tool):
 
         # Write code to a temporary file
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", dir=self._workspace, delete=False,
+            mode="w",
+            suffix=".py",
+            dir=self._workspace,
+            delete=False,
         ) as f:
             # Wrap code to capture the result of the last expression
             wrapped = self._wrap_code(code)
@@ -138,7 +146,8 @@ class PythonExecTool(Tool):
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                "python", script_path,
+                "python",
+                script_path,
                 cwd=self._workspace,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -147,7 +156,7 @@ class PythonExecTool(Tool):
 
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.kill()
                 return ToolResult(error=f"Execution timed out after {timeout}s", success=False)
 

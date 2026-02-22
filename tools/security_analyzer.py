@@ -36,7 +36,10 @@ _PATTERNS = {
         (r"rm\s+-rf\s+/", "recursive delete from root"),
         (r"marshal\.loads\s*\(", "marshal.loads() — deserialization attack"),
         (r"shelve\.open\s*\(", "shelve.open() — pickle-based deserialization"),
-        (r"xml\.etree\.ElementTree\.parse\s*\(", "xml.etree.ElementTree.parse() — XXE vulnerability (only when used with untrusted input)"),
+        (
+            r"xml\.etree\.ElementTree\.parse\s*\(",
+            "xml.etree.ElementTree.parse() — XXE vulnerability (only when used with untrusted input)",
+        ),
     ],
     RISK_HIGH: [
         (r"subprocess\.(run|Popen|call)\s*\(", "subprocess execution"),
@@ -101,7 +104,15 @@ class SecurityAnalyzerTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["scan_code", "scan_file", "scan_command", "scan_diff", "scan_dependencies", "scan_secrets", "scan_owasp"],
+                    "enum": [
+                        "scan_code",
+                        "scan_file",
+                        "scan_command",
+                        "scan_diff",
+                        "scan_dependencies",
+                        "scan_secrets",
+                        "scan_owasp",
+                    ],
                     "description": "What to analyze",
                 },
                 "code": {
@@ -170,14 +181,16 @@ class SecurityAnalyzerTool(Tool):
             for pattern, description in patterns:
                 for match in re.finditer(pattern, text, re.IGNORECASE):
                     # Find line number
-                    line_num = text[:match.start()].count("\n") + 1
-                    context = text[max(0, match.start()-20):match.end()+20].strip()
-                    findings.append({
-                        "risk": risk_level,
-                        "description": description,
-                        "line": line_num,
-                        "context": context[:100],
-                    })
+                    line_num = text[: match.start()].count("\n") + 1
+                    context = text[max(0, match.start() - 20) : match.end() + 20].strip()
+                    findings.append(
+                        {
+                            "risk": risk_level,
+                            "description": description,
+                            "line": line_num,
+                            "context": context[:100],
+                        }
+                    )
 
         return self._format_findings(findings, source)
 
@@ -200,7 +213,7 @@ class SecurityAnalyzerTool(Tool):
             return ToolResult(error=f"File not found: {path}", success=False)
 
         try:
-            with open(full_real, "r", encoding="utf-8", errors="replace") as f:
+            with open(full_real, encoding="utf-8", errors="replace") as f:
                 content = f.read()
         except Exception as e:
             return ToolResult(error=f"Failed to read file: {e}", success=False)
@@ -243,12 +256,14 @@ class SecurityAnalyzerTool(Tool):
         for risk_level, patterns in dangerous_commands.items():
             for pattern, description in patterns:
                 if re.search(pattern, command, re.IGNORECASE):
-                    findings.append({
-                        "risk": risk_level,
-                        "description": description,
-                        "line": 0,
-                        "context": command[:100],
-                    })
+                    findings.append(
+                        {
+                            "risk": risk_level,
+                            "description": description,
+                            "line": 0,
+                            "context": command[:100],
+                        }
+                    )
 
         return self._format_findings(findings, source=f"command: {command[:60]}")
 
@@ -262,7 +277,7 @@ class SecurityAnalyzerTool(Tool):
             )
 
         try:
-            with open(req_path, "r", encoding="utf-8") as f:
+            with open(req_path, encoding="utf-8") as f:
                 lines = f.readlines()
         except Exception as e:
             return ToolResult(error=f"Failed to read requirements.txt: {e}", success=False)
@@ -272,8 +287,14 @@ class SecurityAnalyzerTool(Tool):
             r"pyyaml\b": ("PyYAML < 6.0 — yaml.load() deserialization risk", RISK_HIGH),
             r"django\s*[<>=].*1\.": ("Django 1.x — end-of-life, many known CVEs", RISK_CRITICAL),
             r"flask\s*[<>=].*0\.": ("Flask 0.x — outdated, potential vulnerabilities", RISK_MEDIUM),
-            r"requests\s*[<>=].*2\.(0|1|2|3|4|5)\.": ("Requests < 2.6 — SSL verification issues", RISK_HIGH),
-            r"urllib3\s*[<>=].*1\.(2[0-5]|1|0)": ("urllib3 < 1.26 — known vulnerabilities", RISK_HIGH),
+            r"requests\s*[<>=].*2\.(0|1|2|3|4|5)\.": (
+                "Requests < 2.6 — SSL verification issues",
+                RISK_HIGH,
+            ),
+            r"urllib3\s*[<>=].*1\.(2[0-5]|1|0)": (
+                "urllib3 < 1.26 — known vulnerabilities",
+                RISK_HIGH,
+            ),
             r"jinja2\s*[<>=].*2\.[0-9]\.": ("Jinja2 2.x — potential sandbox escape", RISK_MEDIUM),
             r"paramiko\b": ("Paramiko — verify version for CVE-2023-48795", RISK_MEDIUM),
             r"pillow\s*[<>=].*[0-8]\.": ("Pillow < 9.0 — multiple CVEs", RISK_HIGH),
@@ -286,21 +307,25 @@ class SecurityAnalyzerTool(Tool):
                 continue
             # Check for unpinned dependencies
             if "==" not in stripped and ">" not in stripped and "<" not in stripped:
-                findings.append({
-                    "risk": RISK_MEDIUM,
-                    "description": f"Unpinned dependency: {stripped} — version not locked",
-                    "line": i,
-                    "context": stripped[:100],
-                })
+                findings.append(
+                    {
+                        "risk": RISK_MEDIUM,
+                        "description": f"Unpinned dependency: {stripped} — version not locked",
+                        "line": i,
+                        "context": stripped[:100],
+                    }
+                )
             # Check against known vulnerable patterns
             for pattern, (desc, risk) in vulnerable_patterns.items():
                 if re.search(pattern, stripped, re.IGNORECASE):
-                    findings.append({
-                        "risk": risk,
-                        "description": desc,
-                        "line": i,
-                        "context": stripped[:100],
-                    })
+                    findings.append(
+                        {
+                            "risk": risk,
+                            "description": desc,
+                            "line": i,
+                            "context": stripped[:100],
+                        }
+                    )
 
         return self._format_findings(findings, source="requirements.txt dependency scan")
 
@@ -310,7 +335,11 @@ class SecurityAnalyzerTool(Tool):
             (r"AKIA[0-9A-Z]{16}", "AWS Access Key ID", RISK_CRITICAL),
             (r"ghp_[A-Za-z0-9_]{36,}", "GitHub Personal Access Token", RISK_CRITICAL),
             (r"xoxb-[0-9A-Za-z-]+", "Slack Bot Token", RISK_CRITICAL),
-            (r"-----BEGIN\s*(RSA|DSA|EC|OPENSSH|PGP)?\s*PRIVATE KEY-----", "Private Key", RISK_CRITICAL),
+            (
+                r"-----BEGIN\s*(RSA|DSA|EC|OPENSSH|PGP)?\s*PRIVATE KEY-----",
+                "Private Key",
+                RISK_CRITICAL,
+            ),
         ]
 
         findings = []
@@ -322,27 +351,43 @@ class SecurityAnalyzerTool(Tool):
             dirs[:] = [d for d in dirs if d not in skip_dirs]
             for fname in files:
                 # Only scan text-like files
-                if fname.endswith((".pyc", ".pyo", ".so", ".o", ".a",
-                                   ".png", ".jpg", ".gif", ".ico",
-                                   ".zip", ".tar", ".gz", ".whl")):
+                if fname.endswith(
+                    (
+                        ".pyc",
+                        ".pyo",
+                        ".so",
+                        ".o",
+                        ".a",
+                        ".png",
+                        ".jpg",
+                        ".gif",
+                        ".ico",
+                        ".zip",
+                        ".tar",
+                        ".gz",
+                        ".whl",
+                    )
+                ):
                     continue
                 fpath = os.path.join(root, fname)
                 rel_path = os.path.relpath(fpath, workspace_real)
                 try:
-                    with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                    with open(fpath, encoding="utf-8", errors="replace") as f:
                         file_content = f.read(200_000)  # Cap at 200KB per file
                 except Exception:
                     continue
 
                 for pattern, desc, risk in secret_patterns:
                     for match in re.finditer(pattern, file_content):
-                        line_num = file_content[:match.start()].count("\n") + 1
-                        findings.append({
-                            "risk": risk,
-                            "description": f"{desc} found in {rel_path}",
-                            "line": line_num,
-                            "context": match.group()[:40] + "...",
-                        })
+                        line_num = file_content[: match.start()].count("\n") + 1
+                        findings.append(
+                            {
+                                "risk": risk,
+                                "description": f"{desc} found in {rel_path}",
+                                "line": line_num,
+                                "context": match.group()[:40] + "...",
+                            }
+                        )
 
         return self._format_findings(findings, source="workspace secret scan")
 
@@ -350,11 +395,23 @@ class SecurityAnalyzerTool(Tool):
         """Scan workspace for OWASP Top 10 vulnerability patterns."""
         owasp_patterns = [
             # SQL Injection — string concatenation in SQL queries
-            (r"(SELECT|INSERT|UPDATE|DELETE)\s+.*['\"]\s*\+", "SQL Injection — string concatenation in SQL query", RISK_CRITICAL),
-            (r"f['\"].*\{.*\}.*(?:SELECT|INSERT|UPDATE|DELETE)", "SQL Injection — f-string in SQL query", RISK_CRITICAL),
+            (
+                r"(SELECT|INSERT|UPDATE|DELETE)\s+.*['\"]\s*\+",
+                "SQL Injection — string concatenation in SQL query",
+                RISK_CRITICAL,
+            ),
+            (
+                r"f['\"].*\{.*\}.*(?:SELECT|INSERT|UPDATE|DELETE)",
+                "SQL Injection — f-string in SQL query",
+                RISK_CRITICAL,
+            ),
             # Command Injection
             (r"os\.system\s*\(", "Command Injection — os.system()", RISK_CRITICAL),
-            (r"subprocess\.[a-z]+\(.*shell\s*=\s*True", "Command Injection — subprocess with shell=True", RISK_CRITICAL),
+            (
+                r"subprocess\.[a-z]+\(.*shell\s*=\s*True",
+                "Command Injection — subprocess with shell=True",
+                RISK_CRITICAL,
+            ),
             # XSS
             (r"innerHTML\s*=", "XSS — innerHTML assignment", RISK_CRITICAL),
             (r"\.innerHTML\s*\+?=", "XSS — innerHTML assignment", RISK_CRITICAL),
@@ -367,27 +424,32 @@ class SecurityAnalyzerTool(Tool):
         for root, dirs, files in os.walk(workspace_real):
             dirs[:] = [d for d in dirs if d not in skip_dirs]
             for fname in files:
-                if not fname.endswith((".py", ".js", ".ts", ".jsx", ".tsx",
-                                       ".html", ".htm", ".php", ".rb")):
+                if not fname.endswith(
+                    (".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".htm", ".php", ".rb")
+                ):
                     continue
                 fpath = os.path.join(root, fname)
                 rel_path = os.path.relpath(fpath, workspace_real)
                 try:
-                    with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                    with open(fpath, encoding="utf-8", errors="replace") as f:
                         file_content = f.read(200_000)
                 except Exception:
                     continue
 
                 for pattern, desc, risk in owasp_patterns:
                     for match in re.finditer(pattern, file_content, re.IGNORECASE):
-                        line_num = file_content[:match.start()].count("\n") + 1
-                        context = file_content[max(0, match.start()-20):match.end()+20].strip()
-                        findings.append({
-                            "risk": risk,
-                            "description": f"{desc} in {rel_path}",
-                            "line": line_num,
-                            "context": context[:100],
-                        })
+                        line_num = file_content[: match.start()].count("\n") + 1
+                        context = file_content[
+                            max(0, match.start() - 20) : match.end() + 20
+                        ].strip()
+                        findings.append(
+                            {
+                                "risk": risk,
+                                "description": f"{desc} in {rel_path}",
+                                "line": line_num,
+                                "context": context[:100],
+                            }
+                        )
 
         return self._format_findings(findings, source="OWASP vulnerability scan")
 

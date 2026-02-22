@@ -19,7 +19,7 @@ import stat
 import tarfile
 import tempfile
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger("agent42.portability")
@@ -28,9 +28,7 @@ MANIFEST_FILENAME = "manifest.json"
 ARCHIVE_VERSION = 1
 
 # Env var keys whose values should be redacted in clone templates
-_SECRET_KEY_PATTERN = re.compile(
-    r"_(KEY|TOKEN|PASSWORD|SECRET|HASH)$", re.IGNORECASE
-)
+_SECRET_KEY_PATTERN = re.compile(r"_(KEY|TOKEN|PASSWORD|SECRET|HASH)$", re.IGNORECASE)
 
 # Data categories and their relative paths (from the Agent42 installation root)
 _BACKUP_CATEGORIES: dict[str, list[str]] = {
@@ -164,7 +162,7 @@ def create_backup(
     out_dir = Path(output_path).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     archive_name = f"agent42-backup-{timestamp}.tar.gz"
 
     staging = Path(tempfile.mkdtemp(prefix="agent42-backup-"))
@@ -195,7 +193,7 @@ def create_backup(
         # Write manifest
         manifest = ArchiveManifest(
             version=ARCHIVE_VERSION,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             archive_type="backup",
             categories=categories_included,
             source_path=str(base),
@@ -270,9 +268,7 @@ def restore_backup(
             )
 
         if manifest.archive_type != "backup":
-            raise ValueError(
-                f"Expected archive_type 'backup', got '{manifest.archive_type}'"
-            )
+            raise ValueError(f"Expected archive_type 'backup', got '{manifest.archive_type}'")
 
         # Secret paths to skip if requested
         secret_paths = {".env", ".agent42/settings.json"}
@@ -328,7 +324,7 @@ def create_clone(
     out_dir = Path(output_path).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     archive_name = f"agent42-clone-{timestamp}.tar.gz"
 
     staging = Path(tempfile.mkdtemp(prefix="agent42-clone-"))
@@ -378,7 +374,7 @@ def create_clone(
         # Write manifest
         manifest = ArchiveManifest(
             version=ARCHIVE_VERSION,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             archive_type="clone",
             categories=categories_included,
             source_path=str(base),

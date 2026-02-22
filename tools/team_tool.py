@@ -88,6 +88,7 @@ Role outputs:
 # Shared team context
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class TeamContext:
     """Shared context for a team run — enables inter-role communication.
@@ -123,9 +124,7 @@ class TeamContext:
                 parts.append("## Prior Team Outputs\n" + "\n\n".join(prior_parts))
 
         if self.role_feedback.get(current_role):
-            parts.append(
-                f"## Manager Feedback for You\n{self.role_feedback[current_role]}"
-            )
+            parts.append(f"## Manager Feedback for You\n{self.role_feedback[current_role]}")
 
         if self.team_notes:
             notes = "\n".join(f"- {n}" for n in self.team_notes)
@@ -437,9 +436,7 @@ class TeamTool(Tool):
         else:
             return ToolResult(error=f"Unknown action: {action}", success=False)
 
-    def _compose(
-        self, name: str, description: str, workflow: str, roles: list
-    ) -> ToolResult:
+    def _compose(self, name: str, description: str, workflow: str, roles: list) -> ToolResult:
         if not name:
             return ToolResult(error="name is required for compose", success=False)
         if not roles:
@@ -522,24 +519,18 @@ class TeamTool(Tool):
             run_state["role_results"] = results
 
             # -- Phase 3: Manager reviews all outputs --
-            manager_review = await self._manager_review(
-                task_description, manager_plan, results
-            )
+            manager_review = await self._manager_review(task_description, manager_plan, results)
             run_state["manager_review"] = manager_review
 
             # -- Phase 4: Handle revision requests --
             revision_requests = self._parse_revision_requests(manager_review)
             if revision_requests:
                 run_state["revisions"] = [r[0] for r in revision_requests]
-                results = await self._handle_revisions(
-                    revision_requests, roles, results, team_ctx
-                )
+                results = await self._handle_revisions(revision_requests, roles, results, team_ctx)
                 run_state["role_results"] = results
 
                 # Re-review after revisions
-                manager_review = await self._manager_review(
-                    task_description, manager_plan, results
-                )
+                manager_review = await self._manager_review(task_description, manager_plan, results)
                 run_state["manager_review"] = manager_review
 
             # Extract quality score
@@ -592,14 +583,9 @@ class TeamTool(Tool):
             )
         role_descriptions = "\n".join(role_desc_parts)
 
-        plan_prompt = MANAGER_PLAN_PROMPT.format(
-            role_descriptions=role_descriptions
-        )
+        plan_prompt = MANAGER_PLAN_PROMPT.format(role_descriptions=role_descriptions)
 
-        full_description = (
-            f"{plan_prompt}\n\n"
-            f"## Task to Plan\n{task_description}"
-        )
+        full_description = f"{plan_prompt}\n\n## Task to Plan\n{task_description}"
 
         task_obj = Task(
             title=f"[manager:plan] {task_description[:50]}",
@@ -610,9 +596,7 @@ class TeamTool(Tool):
         output = await self._wait_for_task(task_obj.id)
         return output
 
-    async def _manager_review(
-        self, task_description: str, manager_plan: str, results: dict
-    ) -> str:
+    async def _manager_review(self, task_description: str, manager_plan: str, results: dict) -> str:
         """Manager reviews all role outputs and synthesizes a final deliverable."""
         from core.task_queue import Task, TaskType
 
@@ -712,7 +696,7 @@ class TeamTool(Tool):
         self, roles: list, task_description: str, team_ctx: TeamContext
     ) -> dict[str, dict]:
         """Run roles sequentially, each receiving full team context."""
-        from core.task_queue import Task, TaskType, TaskStatus
+        from core.task_queue import Task, TaskType
 
         results = {}
 
@@ -805,9 +789,7 @@ class TeamTool(Tool):
 
         # Run parallel groups first
         for group_name, group_roles in parallel_groups.items():
-            group_results = await self._run_parallel(
-                group_roles, task_description, team_ctx
-            )
+            group_results = await self._run_parallel(group_roles, task_description, team_ctx)
             results.update(group_results)
 
         # Run remaining roles sequentially with accumulated context
@@ -869,8 +851,7 @@ class TeamTool(Tool):
                 quality = state.get("quality_score", 0)
                 quality_str = f", quality: {quality}/10" if quality else ""
                 lines.append(
-                    f"- **{rid}** — team: {state['team']}, "
-                    f"status: {state['status']}{quality_str}"
+                    f"- **{rid}** — team: {state['team']}, status: {state['status']}{quality_str}"
                 )
             return ToolResult(output="\n".join(lines))
 
@@ -924,9 +905,7 @@ class TeamTool(Tool):
         if name not in self._teams:
             return ToolResult(error=f"Team '{name}' not found", success=False)
         if name in BUILTIN_TEAMS:
-            return ToolResult(
-                error=f"Cannot delete built-in team '{name}'", success=False
-            )
+            return ToolResult(error=f"Cannot delete built-in team '{name}'", success=False)
         del self._teams[name]
         return ToolResult(output=f"Team '{name}' deleted.")
 
@@ -944,7 +923,7 @@ class TeamTool(Tool):
             f"\n**Description:** {team.get('description', '')}",
             f"**Workflow:** {team.get('workflow', 'sequential')}",
             f"**Roles:** {len(team.get('roles', []))}",
-            f"**Manager:** Automatic (plans before, reviews after, can request revisions)",
+            "**Manager:** Automatic (plans before, reviews after, can request revisions)",
             "\n## Role Details\n",
         ]
 
@@ -966,7 +945,9 @@ class TeamTool(Tool):
         if workflow == "parallel":
             lines.append(f"**Execution:** All roles run simultaneously: {', '.join(role_names)}")
         elif workflow == "fan_out_fan_in":
-            lines.append("**Execution:** Parallel groups run first, then remaining roles sequentially")
+            lines.append(
+                "**Execution:** Parallel groups run first, then remaining roles sequentially"
+            )
         else:
             lines.append(f"**Execution:** Roles run in order: {' -> '.join(role_names)}")
 
@@ -989,7 +970,6 @@ class TeamTool(Tool):
         if new_name in self._teams:
             return ToolResult(error=f"Team '{new_name}' already exists", success=False)
 
-        import json
         clone = json.loads(json.dumps(source))  # Deep copy
         clone["name"] = new_name
         clone["description"] = f"Custom clone of {source_name}: {clone.get('description', '')}"

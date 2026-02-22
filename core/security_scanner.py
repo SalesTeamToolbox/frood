@@ -14,7 +14,7 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 logger = logging.getLogger("agent42.security_scanner")
 
@@ -91,22 +91,26 @@ class ScheduledSecurityScanner:
         # 1. Configuration audit (tools/security_audit.py)
         try:
             from tools.security_audit import run_audit
+
             audit_report = run_audit()
             for check in audit_report.checks:
                 severity = _AUDIT_STATUS_SEVERITY.get(check.status, "none")
                 if _SEVERITY_ORDER.get(severity, 4) <= _SEVERITY_ORDER.get(self._min_severity, 2):
-                    findings.append({
-                        "severity": severity,
-                        "category": f"Config: {check.category}",
-                        "description": check.name,
-                        "detail": check.detail,
-                    })
+                    findings.append(
+                        {
+                            "severity": severity,
+                            "category": f"Config: {check.category}",
+                            "description": check.name,
+                            "detail": check.detail,
+                        }
+                    )
         except Exception as e:
             logger.error(f"Config audit failed: {e}")
 
         # 2. Secrets scan (tools/security_analyzer.py)
         try:
             from tools.security_analyzer import SecurityAnalyzerTool
+
             analyzer = SecurityAnalyzerTool(self._workspace)
             result = analyzer._scan_secrets()
             findings.extend(self._parse_analyzer_output(result.output, "Secrets"))
@@ -116,6 +120,7 @@ class ScheduledSecurityScanner:
         # 3. Dependency scan
         try:
             from tools.security_analyzer import SecurityAnalyzerTool
+
             analyzer = SecurityAnalyzerTool(self._workspace)
             result = analyzer._scan_dependencies()
             findings.extend(self._parse_analyzer_output(result.output, "Dependencies"))
@@ -125,6 +130,7 @@ class ScheduledSecurityScanner:
         # 4. OWASP scan
         try:
             from tools.security_analyzer import SecurityAnalyzerTool
+
             analyzer = SecurityAnalyzerTool(self._workspace)
             result = analyzer._scan_owasp()
             findings.extend(self._parse_analyzer_output(result.output, "OWASP"))
@@ -146,7 +152,7 @@ class ScheduledSecurityScanner:
                 break
 
         report = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "findings": findings,
             "counts": counts,
             "overall_severity": overall,
@@ -186,13 +192,17 @@ class ScheduledSecurityScanner:
             finding_match = re.match(r"^-\s+(?:L\d+\s+)?\*\*(.+?)\*\*", line)
             if finding_match:
                 desc = finding_match.group(1)
-                if _SEVERITY_ORDER.get(current_severity, 4) <= _SEVERITY_ORDER.get(self._min_severity, 2):
-                    findings.append({
-                        "severity": current_severity,
-                        "category": category,
-                        "description": desc,
-                        "detail": "",
-                    })
+                if _SEVERITY_ORDER.get(current_severity, 4) <= _SEVERITY_ORDER.get(
+                    self._min_severity, 2
+                ):
+                    findings.append(
+                        {
+                            "severity": current_severity,
+                            "category": category,
+                            "description": desc,
+                            "detail": "",
+                        }
+                    )
                 continue
 
             # Match context lines:   `some context`
@@ -209,8 +219,7 @@ class ScheduledSecurityScanner:
             existing = await self._get_existing_issue()
             if existing:
                 await self._close_issue(
-                    existing,
-                    f"Security scan passed with no findings at {report['timestamp']}."
+                    existing, f"Security scan passed with no findings at {report['timestamp']}."
                 )
                 logger.info(f"Closed security scan issue #{existing} (clean scan)")
             return
@@ -234,7 +243,7 @@ class ScheduledSecurityScanner:
     def _format_report_body(self, report: dict) -> str:
         """Format scan report as GitHub-flavored markdown."""
         lines = [
-            f"## Security Scan Report",
+            "## Security Scan Report",
             f"**Date:** {report['timestamp']}",
             f"**Overall Severity:** {report['overall_severity'].upper()}",
             f"**Total Findings:** {report['total']}",
@@ -270,11 +279,17 @@ class ScheduledSecurityScanner:
         """Find an existing open security-scan issue."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "gh", "issue", "list",
-                "--label", "security-scan",
-                "--state", "open",
-                "--json", "number",
-                "--limit", "1",
+                "gh",
+                "issue",
+                "list",
+                "--label",
+                "security-scan",
+                "--state",
+                "open",
+                "--json",
+                "number",
+                "--limit",
+                "1",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._workspace,
@@ -318,8 +333,12 @@ class ScheduledSecurityScanner:
         """Add a comment to an existing GitHub issue."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "gh", "issue", "comment", str(issue_number),
-                "--body", body,
+                "gh",
+                "issue",
+                "comment",
+                str(issue_number),
+                "--body",
+                body,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._workspace,
@@ -336,8 +355,12 @@ class ScheduledSecurityScanner:
         """Close a GitHub issue with a comment."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "gh", "issue", "close", str(issue_number),
-                "--comment", comment,
+                "gh",
+                "issue",
+                "close",
+                str(issue_number),
+                "--comment",
+                comment,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._workspace,
@@ -358,18 +381,21 @@ class ScheduledSecurityScanner:
             return
 
         try:
-            from core.notification_service import NotificationPayload, SEVERITY_CRITICAL
-            await self._notification_service.notify(NotificationPayload(
-                event="security_alert",
-                timestamp=time.time(),
-                title=f"Security Scan: {report['overall_severity'].upper()}",
-                details=(
-                    f"{report['total']} findings "
-                    f"(critical={report['counts']['critical']}, "
-                    f"high={report['counts']['high']})"
-                ),
-                severity=SEVERITY_CRITICAL,
-            ))
+            from core.notification_service import SEVERITY_CRITICAL, NotificationPayload
+
+            await self._notification_service.notify(
+                NotificationPayload(
+                    event="security_alert",
+                    timestamp=time.time(),
+                    title=f"Security Scan: {report['overall_severity'].upper()}",
+                    details=(
+                        f"{report['total']} findings "
+                        f"(critical={report['counts']['critical']}, "
+                        f"high={report['counts']['high']})"
+                    ),
+                    severity=SEVERITY_CRITICAL,
+                )
+            )
         except Exception as e:
             logger.error(f"Failed to send security notification: {e}")
 
@@ -380,8 +406,7 @@ class ScheduledSecurityScanner:
         try:
             self._memory_store.log_event(
                 "security_scan",
-                f"Scan complete: {report['overall_severity'].upper()} "
-                f"({report['total']} findings)",
+                f"Scan complete: {report['overall_severity'].upper()} ({report['total']} findings)",
                 json.dumps(report["counts"]),
             )
         except Exception as e:

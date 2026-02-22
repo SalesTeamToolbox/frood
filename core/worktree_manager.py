@@ -21,10 +21,9 @@ from pathlib import Path
 logger = logging.getLogger("agent42.worktree")
 
 # Use user-specific directory instead of world-readable /tmp
-_WORKTREE_BASE = Path(os.getenv(
-    "AGENT42_WORKTREE_DIR",
-    str(Path.home() / ".agent42" / "worktrees")
-))
+_WORKTREE_BASE = Path(
+    os.getenv("AGENT42_WORKTREE_DIR", str(Path.home() / ".agent42" / "worktrees"))
+)
 
 # Only allow alphanumeric + hyphen in task IDs
 _SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -74,8 +73,13 @@ class WorktreeManager:
             return worktree_path
 
         proc = await asyncio.create_subprocess_exec(
-            "git", "worktree", "add", "-b", branch_name,
-            str(worktree_path), base_branch,
+            "git",
+            "worktree",
+            "add",
+            "-b",
+            branch_name,
+            str(worktree_path),
+            base_branch,
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -83,9 +87,7 @@ class WorktreeManager:
         stdout, stderr = await proc.communicate()
 
         if proc.returncode != 0:
-            raise RuntimeError(
-                f"git worktree add failed: {stderr.decode().strip()}"
-            )
+            raise RuntimeError(f"git worktree add failed: {stderr.decode().strip()}")
 
         # Set restrictive permissions
         worktree_path.chmod(0o700)
@@ -100,7 +102,9 @@ class WorktreeManager:
             shutil.rmtree(worktree_path)
 
         proc = await asyncio.create_subprocess_exec(
-            "git", "worktree", "prune",
+            "git",
+            "worktree",
+            "prune",
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -136,7 +140,9 @@ class WorktreeManager:
                     f.write(f"{p}\n")
 
         add_proc = await asyncio.create_subprocess_exec(
-            "git", "add", ".",
+            "git",
+            "add",
+            ".",
             cwd=str(worktree_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -144,7 +150,10 @@ class WorktreeManager:
         await add_proc.communicate()
 
         commit_proc = await asyncio.create_subprocess_exec(
-            "git", "commit", "-m", message,
+            "git",
+            "commit",
+            "-m",
+            message,
             cwd=str(worktree_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -164,7 +173,9 @@ class WorktreeManager:
         """Return the full diff of a worktree against the base branch."""
         worktree_path = self._worktree_path(task_id)
         proc = await asyncio.create_subprocess_exec(
-            "git", "diff", base_branch,
+            "git",
+            "diff",
+            base_branch,
             cwd=str(worktree_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -178,7 +189,11 @@ class WorktreeManager:
         branch_name = f"agent42/{task_id}"
 
         proc = await asyncio.create_subprocess_exec(
-            "git", "push", "-u", "origin", branch_name,
+            "git",
+            "push",
+            "-u",
+            "origin",
+            branch_name,
             cwd=str(worktree_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -197,7 +212,9 @@ class WorktreeManager:
 
         # Checkout base branch
         checkout = await asyncio.create_subprocess_exec(
-            "git", "checkout", base_branch,
+            "git",
+            "checkout",
+            base_branch,
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -208,8 +225,12 @@ class WorktreeManager:
 
         # Merge
         merge = await asyncio.create_subprocess_exec(
-            "git", "merge", "--no-ff", branch_name,
-            "-m", f"Merge agent42/{task_id}: task complete",
+            "git",
+            "merge",
+            "--no-ff",
+            branch_name,
+            "-m",
+            f"Merge agent42/{task_id}: task complete",
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -220,7 +241,9 @@ class WorktreeManager:
             logger.error(f"Merge failed for {task_id}: {stderr.decode().strip()}")
             # Abort the merge
             await asyncio.create_subprocess_exec(
-                "git", "merge", "--abort",
+                "git",
+                "merge",
+                "--abort",
                 cwd=str(self.repo_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

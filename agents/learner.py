@@ -164,8 +164,7 @@ class Learner:
         await self.memory.log_event_semantic(
             "reflection",
             f"Post-task reflection for '{title}' ({task_type})",
-            f"Outcome: {outcome}\nLesson: {lesson}\n"
-            f"Memory updates: {len(memory_updates)}",
+            f"Outcome: {outcome}\nLesson: {lesson}\nMemory updates: {len(memory_updates)}",
         )
 
         return {
@@ -252,28 +251,28 @@ class Learner:
             stripped = line.strip().lstrip("- ")
             # Look for [Tool Preferences] entries
             if stripped.startswith("[Tool Preferences]"):
-                content = stripped[len("[Tool Preferences]"):].strip().lstrip("- ").strip()
+                content = stripped[len("[Tool Preferences]") :].strip().lstrip("- ").strip()
                 if content:
                     # Check if the recommendation is relevant to this task type
                     lower_content = content.lower()
                     if task_type.lower() in lower_content or "all task" in lower_content:
                         recommendations.append(f"- {content}")
-                    elif not any(t.value in lower_content for t in __import__('core.task_queue', fromlist=['TaskType']).TaskType):
+                    elif not any(
+                        t.value in lower_content
+                        for t in __import__("core.task_queue", fromlist=["TaskType"]).TaskType
+                    ):
                         # Generic recommendation (not task-type-specific)
                         recommendations.append(f"- {content}")
 
         if not recommendations:
             return ""
 
-        return (
-            "\n## Tool Usage Recommendations (from prior experience)\n"
-            + "\n".join(recommendations)
+        return "\n## Tool Usage Recommendations (from prior experience)\n" + "\n".join(
+            recommendations
         )
 
     @staticmethod
-    def _build_tool_usage_section(
-        tool_calls: list[dict], task_type: str
-    ) -> str:
+    def _build_tool_usage_section(tool_calls: list[dict], task_type: str) -> str:
         """Build a tool usage summary for the reflection prompt."""
         if not tool_calls:
             return "Tool usage: No tools were called during this task."
@@ -316,7 +315,7 @@ class Learner:
             if line.startswith("[") and "] " in line:
                 bracket_end = line.index("]")
                 section = line[1:bracket_end].strip()
-                content = line[bracket_end + 1:].strip().lstrip("- ").strip()
+                content = line[bracket_end + 1 :].strip().lstrip("- ").strip()
                 if content and section and content.upper() != "NONE":
                     updates.append((section, content))
         return updates
@@ -353,7 +352,7 @@ class Learner:
         body_lines = []
         in_body = False
 
-        for line in lines[idx + 1:]:
+        for line in lines[idx + 1 :]:
             stripped = line.strip()
             if stripped == "---":
                 in_body = True

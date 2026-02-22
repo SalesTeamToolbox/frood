@@ -8,6 +8,7 @@ Returns structured pass/fail/error counts and failure details.
 import asyncio
 import json
 import logging
+
 from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.test_runner")
@@ -92,6 +93,7 @@ class TestRunnerTool(Tool):
     async def _detect_framework(self) -> str:
         """Auto-detect the test framework from project files."""
         import os
+
         workspace = self._workspace
 
         # Check for Python
@@ -130,7 +132,9 @@ class TestRunnerTool(Tool):
 
         return await self._run_and_format(cmd, "pytest")
 
-    async def _run_js_tests(self, framework: str, path: str, filter_: str, verbose: bool) -> ToolResult:
+    async def _run_js_tests(
+        self, framework: str, path: str, filter_: str, verbose: bool
+    ) -> ToolResult:
         cmd = ["npx", framework, "run"]
         if path:
             cmd.append(path)
@@ -150,7 +154,7 @@ class TestRunnerTool(Tool):
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             return ToolResult(error="Test command timed out (>5min)", success=False)
 
@@ -176,7 +180,7 @@ class TestRunnerTool(Tool):
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             return ToolResult(error="Tests timed out (>5min)", success=False)
 

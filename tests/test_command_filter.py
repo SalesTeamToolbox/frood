@@ -1,6 +1,7 @@
 """Tests for Phase 1: CommandFilter."""
 
 import pytest
+
 from core.command_filter import CommandFilter, CommandFilterError
 
 

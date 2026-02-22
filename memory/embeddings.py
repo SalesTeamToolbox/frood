@@ -20,7 +20,7 @@ import logging
 import math
 import os
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from openai import AsyncOpenAI
@@ -29,7 +29,7 @@ logger = logging.getLogger("agent42.memory.embeddings")
 
 # Embedding models available on common providers
 EMBEDDING_MODELS = {
-    "openai": "text-embedding-3-small",       # OpenAI — cheap, 1536 dims
+    "openai": "text-embedding-3-small",  # OpenAI — cheap, 1536 dims
     "openrouter": "openai/text-embedding-3-small",  # Via OpenRouter
 }
 
@@ -37,10 +37,11 @@ EMBEDDING_MODELS = {
 @dataclass
 class EmbeddingEntry:
     """A text chunk with its embedding vector."""
+
     text: str
     vector: list[float]
-    source: str = ""        # "memory" or "history"
-    section: str = ""       # Section heading or event type
+    source: str = ""  # "memory" or "history"
+    section: str = ""  # Section heading or event type
     timestamp: float = 0.0
     metadata: dict = field(default_factory=dict)
 
@@ -92,7 +93,9 @@ class EmbeddingStore:
             base_url, api_key = self._provider_config(explicit_provider)
             if api_key:
                 self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
-                logger.info(f"Embeddings: using {explicit_model} via {explicit_provider or 'openai'}")
+                logger.info(
+                    f"Embeddings: using {explicit_model} via {explicit_provider or 'openai'}"
+                )
                 return
 
         # Auto-detect: try providers in order of preference
@@ -146,10 +149,8 @@ class EmbeddingStore:
         if len(self._entries) > self.MAX_JSON_ENTRIES:
             # Keep newest entries, sorted by timestamp
             self._entries.sort(key=lambda e: e.timestamp)
-            self._entries = self._entries[-self.MAX_JSON_ENTRIES:]
-            logger.info(
-                f"JSON embedding store evicted to {self.MAX_JSON_ENTRIES} entries"
-            )
+            self._entries = self._entries[-self.MAX_JSON_ENTRIES :]
+            logger.info(f"JSON embedding store evicted to {self.MAX_JSON_ENTRIES} entries")
         data = [asdict(e) for e in self._entries]
         self.store_path.write_text(
             json.dumps(data, ensure_ascii=False),
@@ -216,7 +217,7 @@ class EmbeddingStore:
             uncached_texts = [texts[i] for i in uncached_indices]
             api_vectors: list[list[float]] = []
             for i in range(0, len(uncached_texts), 100):
-                batch = uncached_texts[i:i + 100]
+                batch = uncached_texts[i : i + 100]
                 response = await self._client.embeddings.create(
                     model=self._model,
                     input=batch,
@@ -231,8 +232,9 @@ class EmbeddingStore:
 
         return vectors  # type: ignore[return-value]
 
-    async def add_entry(self, text: str, source: str = "", section: str = "",
-                        metadata: dict | None = None):
+    async def add_entry(
+        self, text: str, source: str = "", section: str = "", metadata: dict | None = None
+    ):
         """Embed and store a single text entry."""
         self._load()
         vector = await self.embed_text(text)
@@ -268,9 +270,9 @@ class EmbeddingStore:
         self._save()
         return len(items)
 
-    async def search(self, query: str, top_k: int = 5,
-                     source_filter: str = "",
-                     collection: str = "") -> list[dict]:
+    async def search(
+        self, query: str, top_k: int = 5, source_filter: str = "", collection: str = ""
+    ) -> list[dict]:
         """Semantic search: find the most relevant entries for a query.
 
         When Qdrant is available, uses HNSW-indexed search with payload
@@ -292,17 +294,23 @@ class EmbeddingStore:
 
             if collection:
                 return self._qdrant.search(
-                    collection, query_vector, top_k=top_k,
+                    collection,
+                    query_vector,
+                    top_k=top_k,
                     source_filter=source_filter,
                 )
 
             # Search across memory and history collections
             memory_results = self._qdrant.search(
-                QdrantStore.MEMORY, query_vector, top_k=top_k,
+                QdrantStore.MEMORY,
+                query_vector,
+                top_k=top_k,
                 source_filter=source_filter,
             )
             history_results = self._qdrant.search(
-                QdrantStore.HISTORY, query_vector, top_k=top_k,
+                QdrantStore.HISTORY,
+                query_vector,
+                top_k=top_k,
                 source_filter=source_filter,
             )
 
@@ -356,13 +364,8 @@ class EmbeddingStore:
             from memory.qdrant_store import QdrantStore
 
             self._qdrant.clear_collection(QdrantStore.MEMORY)
-            payloads = [
-                {"source": "memory", "section": c.get("section", "")}
-                for c in chunks
-            ]
-            count = self._qdrant.upsert_vectors(
-                QdrantStore.MEMORY, texts, vectors, payloads
-            )
+            payloads = [{"source": "memory", "section": c.get("section", "")} for c in chunks]
+            count = self._qdrant.upsert_vectors(QdrantStore.MEMORY, texts, vectors, payloads)
             logger.info(f"Indexed {count} memory chunks → Qdrant")
             return count
 
@@ -371,20 +374,21 @@ class EmbeddingStore:
         self._entries = [e for e in self._entries if e.source != "memory"]
 
         for chunk, vector in zip(chunks, vectors):
-            self._entries.append(EmbeddingEntry(
-                text=chunk["text"],
-                vector=vector,
-                source="memory",
-                section=chunk.get("section", ""),
-                timestamp=time.time(),
-            ))
+            self._entries.append(
+                EmbeddingEntry(
+                    text=chunk["text"],
+                    vector=vector,
+                    source="memory",
+                    section=chunk.get("section", ""),
+                    timestamp=time.time(),
+                )
+            )
 
         self._save()
         logger.info(f"Indexed {len(chunks)} memory chunks → JSON")
         return len(chunks)
 
-    async def index_history_entry(self, event_type: str, summary: str,
-                                  details: str = ""):
+    async def index_history_entry(self, event_type: str, summary: str, details: str = ""):
         """Index a single history event for semantic search.
 
         Writes to Qdrant when available, otherwise to JSON.
@@ -432,8 +436,7 @@ class EmbeddingStore:
         )
 
     @staticmethod
-    def _split_into_chunks(text: str, source: str = "",
-                           min_chunk_len: int = 20) -> list[dict]:
+    def _split_into_chunks(text: str, source: str = "", min_chunk_len: int = 20) -> list[dict]:
         """Split markdown text into meaningful chunks by section."""
         chunks = []
         current_section = ""
@@ -445,11 +448,13 @@ class EmbeddingStore:
                 if current_lines:
                     content = "\n".join(current_lines).strip()
                     if len(content) >= min_chunk_len:
-                        chunks.append({
-                            "text": content,
-                            "section": current_section,
-                            "source": source,
-                        })
+                        chunks.append(
+                            {
+                                "text": content,
+                                "section": current_section,
+                                "source": source,
+                            }
+                        )
                 current_section = line.lstrip("#").strip()
                 current_lines = [line]
             elif line.startswith("# "):
@@ -457,11 +462,13 @@ class EmbeddingStore:
                 if current_lines:
                     content = "\n".join(current_lines).strip()
                     if len(content) >= min_chunk_len:
-                        chunks.append({
-                            "text": content,
-                            "section": current_section,
-                            "source": source,
-                        })
+                        chunks.append(
+                            {
+                                "text": content,
+                                "section": current_section,
+                                "source": source,
+                            }
+                        )
                 current_section = line.lstrip("#").strip()
                 current_lines = [line]
             else:
@@ -471,11 +478,13 @@ class EmbeddingStore:
         if current_lines:
             content = "\n".join(current_lines).strip()
             if len(content) >= min_chunk_len:
-                chunks.append({
-                    "text": content,
-                    "section": current_section,
-                    "source": source,
-                })
+                chunks.append(
+                    {
+                        "text": content,
+                        "section": current_section,
+                        "source": source,
+                    }
+                )
 
         return chunks
 

@@ -5,7 +5,6 @@ Inspired by Aider's file watching capability. Detects file modifications,
 creations, and deletions and can trigger actions on change.
 """
 
-import asyncio
 import hashlib
 import logging
 import os
@@ -140,20 +139,21 @@ class FileWatcherTool(Tool):
 
     def _check_changes(self, watch_id: str, target: str, ext_filter: set | None) -> ToolResult:
         if watch_id not in self._snapshots:
-            return ToolResult(error=f"No snapshot found for '{watch_id}'. Take a snapshot first.", success=False)
+            return ToolResult(
+                error=f"No snapshot found for '{watch_id}'. Take a snapshot first.", success=False
+            )
 
         old = self._snapshots[watch_id]
         current = self._collect_hashes(target, ext_filter)
 
         added = set(current.keys()) - set(old.keys())
         deleted = set(old.keys()) - set(current.keys())
-        modified = {
-            f for f in set(current.keys()) & set(old.keys())
-            if current[f] != old[f]
-        }
+        modified = {f for f in set(current.keys()) & set(old.keys()) if current[f] != old[f]}
 
         if not added and not deleted and not modified:
-            return ToolResult(output=f"No changes detected since snapshot '{watch_id}'.", success=True)
+            return ToolResult(
+                output=f"No changes detected since snapshot '{watch_id}'.", success=True
+            )
 
         lines = [f"## Changes since snapshot '{watch_id}'\n"]
         if added:
@@ -172,7 +172,9 @@ class FileWatcherTool(Tool):
                 lines.append(f"  - {f}")
             lines.append("")
 
-        lines.append(f"**Total:** {len(added)} added, {len(modified)} modified, {len(deleted)} deleted")
+        lines.append(
+            f"**Total:** {len(added)} added, {len(modified)} modified, {len(deleted)} deleted"
+        )
         return ToolResult(output="\n".join(lines), success=True)
 
     def _show_diff(self, watch_id: str, target: str, ext_filter: set | None) -> ToolResult:
@@ -187,6 +189,6 @@ class FileWatcherTool(Tool):
         lines = ["## Active Watches\n"]
         for wid, config in self._watches.items():
             age = time.time() - config["timestamp"]
-            age_str = f"{age:.0f}s ago" if age < 120 else f"{age/60:.0f}m ago"
+            age_str = f"{age:.0f}s ago" if age < 120 else f"{age / 60:.0f}m ago"
             lines.append(f"- **{wid}**: {config['file_count']} files, snapshot {age_str}")
         return ToolResult(output="\n".join(lines), success=True)

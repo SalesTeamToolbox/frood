@@ -51,7 +51,7 @@ class RedisSessionBackend:
 
     def __init__(self, config: RedisConfig):
         self.config = config
-        self._client: "redis.Redis | None" = None
+        self._client: redis.Redis | None = None
         self._session_ttl = config.session_ttl_days * 86400  # Convert to seconds
         self._embed_ttl = config.embedding_cache_ttl_hours * 3600
 
@@ -176,9 +176,7 @@ class RedisSessionBackend:
         except Exception as e:
             logger.warning(f"Redis: failed to clear session — {e}")
 
-    def warm_cache(
-        self, channel_type: str, channel_id: str, messages: list[dict]
-    ):
+    def warm_cache(self, channel_type: str, channel_id: str, messages: list[dict]):
         """Pre-populate Redis cache from JSONL data.
 
         Called when a session is loaded from disk but not yet in Redis.

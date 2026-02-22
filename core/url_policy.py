@@ -89,9 +89,7 @@ class UrlPolicy:
 
         # Allowlist check (only when allowlist is configured)
         if self._allowlist:
-            matched = any(
-                fnmatch(hostname.lower(), p.lower()) for p in self._allowlist
-            )
+            matched = any(fnmatch(hostname.lower(), p.lower()) for p in self._allowlist)
             if not matched:
                 reason = f"Blocked by allowlist: {hostname} not in allowed patterns"
                 self._audit_log(url, agent_id, reason)

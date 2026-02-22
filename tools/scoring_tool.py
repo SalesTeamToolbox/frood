@@ -18,11 +18,31 @@ BUILTIN_RUBRICS: dict[str, dict] = {
         "name": "marketing-copy",
         "description": "Evaluate marketing copy quality",
         "criteria": [
-            {"name": "Audience Fit", "weight": 25, "description": "Does the copy speak directly to the target audience?"},
-            {"name": "Value Proposition", "weight": 25, "description": "Is the key benefit clear and compelling?"},
-            {"name": "Call to Action", "weight": 20, "description": "Is the CTA clear, specific, and motivating?"},
-            {"name": "Clarity", "weight": 15, "description": "Is the message easy to understand on first read?"},
-            {"name": "Brand Voice", "weight": 15, "description": "Does the tone match the brand guidelines?"},
+            {
+                "name": "Audience Fit",
+                "weight": 25,
+                "description": "Does the copy speak directly to the target audience?",
+            },
+            {
+                "name": "Value Proposition",
+                "weight": 25,
+                "description": "Is the key benefit clear and compelling?",
+            },
+            {
+                "name": "Call to Action",
+                "weight": 20,
+                "description": "Is the CTA clear, specific, and motivating?",
+            },
+            {
+                "name": "Clarity",
+                "weight": 15,
+                "description": "Is the message easy to understand on first read?",
+            },
+            {
+                "name": "Brand Voice",
+                "weight": 15,
+                "description": "Does the tone match the brand guidelines?",
+            },
         ],
     },
     "blog-post": {
@@ -30,44 +50,120 @@ BUILTIN_RUBRICS: dict[str, dict] = {
         "description": "Evaluate blog post quality",
         "criteria": [
             {"name": "Hook", "weight": 15, "description": "Does the opening grab attention?"},
-            {"name": "Structure", "weight": 20, "description": "Is the content logically organized with clear headings?"},
-            {"name": "Depth", "weight": 20, "description": "Does it provide genuine value and insight?"},
+            {
+                "name": "Structure",
+                "weight": 20,
+                "description": "Is the content logically organized with clear headings?",
+            },
+            {
+                "name": "Depth",
+                "weight": 20,
+                "description": "Does it provide genuine value and insight?",
+            },
             {"name": "Readability", "weight": 15, "description": "Is it easy to scan and read?"},
-            {"name": "Engagement", "weight": 15, "description": "Does it keep the reader interested throughout?"},
-            {"name": "SEO", "weight": 15, "description": "Are keywords used naturally? Is metadata addressed?"},
+            {
+                "name": "Engagement",
+                "weight": 15,
+                "description": "Does it keep the reader interested throughout?",
+            },
+            {
+                "name": "SEO",
+                "weight": 15,
+                "description": "Are keywords used naturally? Is metadata addressed?",
+            },
         ],
     },
     "email": {
         "name": "email",
         "description": "Evaluate email effectiveness",
         "criteria": [
-            {"name": "Subject Line", "weight": 25, "description": "Is it compelling and under 50 characters?"},
-            {"name": "Purpose Clarity", "weight": 25, "description": "Is the purpose immediately obvious?"},
-            {"name": "Tone", "weight": 20, "description": "Is the tone appropriate for the context?"},
-            {"name": "Brevity", "weight": 15, "description": "Is it concise without losing meaning?"},
-            {"name": "Call to Action", "weight": 15, "description": "Is there a clear next step for the reader?"},
+            {
+                "name": "Subject Line",
+                "weight": 25,
+                "description": "Is it compelling and under 50 characters?",
+            },
+            {
+                "name": "Purpose Clarity",
+                "weight": 25,
+                "description": "Is the purpose immediately obvious?",
+            },
+            {
+                "name": "Tone",
+                "weight": 20,
+                "description": "Is the tone appropriate for the context?",
+            },
+            {
+                "name": "Brevity",
+                "weight": 15,
+                "description": "Is it concise without losing meaning?",
+            },
+            {
+                "name": "Call to Action",
+                "weight": 15,
+                "description": "Is there a clear next step for the reader?",
+            },
         ],
     },
     "research-report": {
         "name": "research-report",
         "description": "Evaluate research report quality",
         "criteria": [
-            {"name": "Thoroughness", "weight": 25, "description": "Are all aspects of the topic covered?"},
-            {"name": "Source Quality", "weight": 20, "description": "Are sources credible and properly cited?"},
-            {"name": "Analysis Depth", "weight": 20, "description": "Is the analysis insightful, not just descriptive?"},
-            {"name": "Objectivity", "weight": 15, "description": "Is the analysis balanced and unbiased?"},
-            {"name": "Actionability", "weight": 20, "description": "Are recommendations specific and implementable?"},
+            {
+                "name": "Thoroughness",
+                "weight": 25,
+                "description": "Are all aspects of the topic covered?",
+            },
+            {
+                "name": "Source Quality",
+                "weight": 20,
+                "description": "Are sources credible and properly cited?",
+            },
+            {
+                "name": "Analysis Depth",
+                "weight": 20,
+                "description": "Is the analysis insightful, not just descriptive?",
+            },
+            {
+                "name": "Objectivity",
+                "weight": 15,
+                "description": "Is the analysis balanced and unbiased?",
+            },
+            {
+                "name": "Actionability",
+                "weight": 20,
+                "description": "Are recommendations specific and implementable?",
+            },
         ],
     },
     "design-brief": {
         "name": "design-brief",
         "description": "Evaluate design brief quality",
         "criteria": [
-            {"name": "Objective Clarity", "weight": 25, "description": "Is the design goal clearly stated?"},
-            {"name": "Target Audience", "weight": 20, "description": "Is the audience well-defined?"},
-            {"name": "Constraints", "weight": 15, "description": "Are technical and brand constraints specified?"},
-            {"name": "Success Criteria", "weight": 20, "description": "How will design success be measured?"},
-            {"name": "Reference Material", "weight": 20, "description": "Are examples and inspiration provided?"},
+            {
+                "name": "Objective Clarity",
+                "weight": 25,
+                "description": "Is the design goal clearly stated?",
+            },
+            {
+                "name": "Target Audience",
+                "weight": 20,
+                "description": "Is the audience well-defined?",
+            },
+            {
+                "name": "Constraints",
+                "weight": 15,
+                "description": "Are technical and brand constraints specified?",
+            },
+            {
+                "name": "Success Criteria",
+                "weight": 20,
+                "description": "How will design success be measured?",
+            },
+            {
+                "name": "Reference Material",
+                "weight": 20,
+                "description": "Are examples and inspiration provided?",
+            },
         ],
     },
 }
@@ -232,9 +328,7 @@ class ScoringTool(Tool):
             "criteria": criteria,
         }
 
-        return ToolResult(
-            output=f"Rubric '{rubric_name}' defined with {len(criteria)} criteria."
-        )
+        return ToolResult(output=f"Rubric '{rubric_name}' defined with {len(criteria)} criteria.")
 
     def _score(self, kwargs: dict) -> ToolResult:
         rubric_name = kwargs.get("rubric", "")
@@ -320,9 +414,7 @@ class ScoringTool(Tool):
         if rubric_name not in self._rubrics:
             return ToolResult(error=f"Rubric '{rubric_name}' not found", success=False)
         if rubric_name in BUILTIN_RUBRICS:
-            return ToolResult(
-                error=f"Cannot delete built-in rubric '{rubric_name}'", success=False
-            )
+            return ToolResult(error=f"Cannot delete built-in rubric '{rubric_name}'", success=False)
         del self._rubrics[rubric_name]
         return ToolResult(output=f"Rubric '{rubric_name}' deleted.")
 
@@ -389,23 +481,41 @@ class ScoringTool(Tool):
             name_lower = c["name"].lower()
             if score < 7:
                 if "hook" in name_lower or "opening" in name_lower:
-                    lines.append("- Try: Start with a provocative question, surprising stat, or bold claim\n")
+                    lines.append(
+                        "- Try: Start with a provocative question, surprising stat, or bold claim\n"
+                    )
                 elif "cta" in name_lower or "call to action" in name_lower:
-                    lines.append("- Try: Use specific, action-oriented CTA (\"Start your free trial\" vs \"Learn more\")\n")
-                elif "clarity" in name_lower or "readable" in name_lower or "readability" in name_lower:
+                    lines.append(
+                        '- Try: Use specific, action-oriented CTA ("Start your free trial" vs "Learn more")\n'
+                    )
+                elif (
+                    "clarity" in name_lower
+                    or "readable" in name_lower
+                    or "readability" in name_lower
+                ):
                     lines.append("- Try: Shorten sentences, remove jargon, use active voice\n")
                 elif "seo" in name_lower:
-                    lines.append("- Try: Add target keyword to H1 and first paragraph, use H2/H3 hierarchy\n")
+                    lines.append(
+                        "- Try: Add target keyword to H1 and first paragraph, use H2/H3 hierarchy\n"
+                    )
                 elif "tone" in name_lower or "voice" in name_lower:
-                    lines.append("- Try: Review brand guidelines, ensure consistent voice throughout\n")
+                    lines.append(
+                        "- Try: Review brand guidelines, ensure consistent voice throughout\n"
+                    )
                 elif "structure" in name_lower:
-                    lines.append("- Try: Add clear headings, use bullet points, keep paragraphs under 3 sentences\n")
+                    lines.append(
+                        "- Try: Add clear headings, use bullet points, keep paragraphs under 3 sentences\n"
+                    )
                 elif "depth" in name_lower or "thorough" in name_lower:
                     lines.append("- Try: Add examples, data, expert quotes, or case studies\n")
                 elif "audience" in name_lower or "target" in name_lower:
-                    lines.append("- Try: Use the persona tool to define your audience, then tailor language\n")
+                    lines.append(
+                        "- Try: Use the persona tool to define your audience, then tailor language\n"
+                    )
                 elif "value" in name_lower or "benefit" in name_lower:
-                    lines.append("- Try: Lead with benefits, not features. Answer: \"What's in it for me?\"\n")
+                    lines.append(
+                        '- Try: Lead with benefits, not features. Answer: "What\'s in it for me?"\n'
+                    )
 
         # Summary
         weak_count = sum(1 for _, s in scored_criteria if s < 6)
@@ -437,9 +547,7 @@ class ScoringTool(Tool):
 
         return total / total_weight if total_weight else 0.0
 
-    def _format_scorecard(
-        self, rubric: dict, scores: dict, label: str
-    ) -> str:
+    def _format_scorecard(self, rubric: dict, scores: dict, label: str) -> str:
         criteria = rubric.get("criteria", [])
         weighted_total = self._calc_weighted_total(rubric, scores)
 
@@ -475,9 +583,7 @@ class ScoringTool(Tool):
             weight = c["weight"]
             weighted = score * weight / 100
             bar = "█" * int(score) + "░" * (10 - int(score))
-            lines.append(
-                f"| {c['name']} | {weight}% | {bar} {score}/10 | {weighted:.1f} |"
-            )
+            lines.append(f"| {c['name']} | {weight}% | {bar} {score}/10 | {weighted:.1f} |")
             if score < weakest_score:
                 weakest_score = score
                 weakest = c

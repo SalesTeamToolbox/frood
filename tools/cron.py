@@ -10,9 +10,9 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
+from collections.abc import Awaitable, Callable
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Callable, Awaitable
 
 from tools.base import Tool, ToolResult
 
@@ -22,11 +22,12 @@ logger = logging.getLogger("agent42.tools.cron")
 @dataclass
 class CronJob:
     """A scheduled task."""
+
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     name: str = ""
     description: str = ""
-    schedule: str = ""        # Cron expression or interval (e.g., "every 1h", "0 9 * * *")
-    task_title: str = ""      # Task title to create when triggered
+    schedule: str = ""  # Cron expression or interval (e.g., "every 1h", "0 9 * * *")
+    task_title: str = ""  # Task title to create when triggered
     task_description: str = ""
     task_type: str = "coding"
     enabled: bool = True
@@ -34,7 +35,7 @@ class CronJob:
     next_run: float = 0.0
     created_at: float = field(default_factory=time.time)
     stagger_seconds: int = 0  # Manual stagger override (0 = auto)
-    jitter_seconds: int = 0   # Random jitter within stagger window
+    jitter_seconds: int = 0  # Random jitter within stagger window
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -146,7 +147,6 @@ class CronScheduler:
         - Simple intervals: "every 30m", "every 1h", "every 24h"
         - Cron expressions: "0 9 * * *" (minute hour day month weekday)
         """
-        import datetime
 
         base = from_time or time.time()
 
@@ -285,9 +285,16 @@ class CronTool(Tool):
                     "type": "string",
                     "description": "Schedule: 'every 30m', 'every 1h', 'every 24h' (for add)",
                 },
-                "task_title": {"type": "string", "description": "Task title when triggered (for add)"},
+                "task_title": {
+                    "type": "string",
+                    "description": "Task title when triggered (for add)",
+                },
                 "task_description": {"type": "string", "description": "Task description (for add)"},
-                "task_type": {"type": "string", "description": "Task type (for add)", "default": "coding"},
+                "task_type": {
+                    "type": "string",
+                    "description": "Task type (for add)",
+                    "default": "coding",
+                },
                 "job_id": {"type": "string", "description": "Job ID (for remove/enable/disable)"},
             },
             "required": ["action"],
@@ -324,8 +331,10 @@ class CronTool(Tool):
             job_id = kwargs.get("job_id", "")
             jobs = {j.id: j for j in self._scheduler.list_jobs()}
             if job_id in jobs:
-                jobs[job_id].enabled = (action == "enable")
-                return ToolResult(output=f"Job {job_id} {'enabled' if action == 'enable' else 'disabled'}")
+                jobs[job_id].enabled = action == "enable"
+                return ToolResult(
+                    output=f"Job {job_id} {'enabled' if action == 'enable' else 'disabled'}"
+                )
             return ToolResult(error=f"Job not found: {job_id}", success=False)
 
         return ToolResult(error=f"Unknown action: {action}", success=False)

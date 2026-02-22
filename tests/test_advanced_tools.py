@@ -7,8 +7,6 @@ import tempfile
 
 import pytest
 
-from tools.base import ToolResult
-
 
 # ---------------------------------------------------------------------------
 # CodeIntelTool
@@ -36,6 +34,7 @@ class TestCodeIntelTool:
                 "    app = MyApp('test')\n"
             )
         from tools.code_intel import CodeIntelTool
+
         self.tool = CodeIntelTool(self.tmpdir)
 
     def test_tool_metadata(self):
@@ -102,6 +101,7 @@ class TestSecurityAnalyzerTool:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
         from tools.security_analyzer import SecurityAnalyzerTool
+
         self.tool = SecurityAnalyzerTool(self.tmpdir)
 
     def test_tool_metadata(self):
@@ -169,6 +169,7 @@ class TestPythonExecTool:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
         from tools.python_exec import PythonExecTool
+
         self.tool = PythonExecTool(self.tmpdir)
 
     def test_tool_metadata(self):
@@ -219,6 +220,7 @@ class TestRepoMapTool:
         with open(os.path.join(self.tmpdir, "README.md"), "w") as f:
             f.write("# Project\n")
         from tools.repo_map import RepoMapTool
+
         self.tool = RepoMapTool(self.tmpdir)
 
     def test_tool_metadata(self):
@@ -259,6 +261,7 @@ class TestSummarizerTool:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
         from tools.summarizer_tool import SummarizerTool
+
         self.tool = SummarizerTool(self.tmpdir)
 
     def test_tool_metadata(self):
@@ -324,6 +327,7 @@ class TestFileWatcherTool:
         with open(os.path.join(self.tmpdir, "file1.txt"), "w") as f:
             f.write("original content")
         from tools.file_watcher import FileWatcherTool
+
         self.tool = FileWatcherTool(self.tmpdir)
 
     def test_tool_metadata(self):
@@ -398,6 +402,7 @@ class TestWorkflowTool:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
         from tools.workflow_tool import WorkflowTool
+
         self.tool = WorkflowTool(self.tmpdir)
 
     def test_tool_metadata(self):
@@ -417,7 +422,9 @@ class TestWorkflowTool:
     @pytest.mark.asyncio
     async def test_list_workflows(self):
         steps = [{"tool": "shell", "args": {}, "description": "step"}]
-        await self.tool.execute(action="define", name="wf1", steps=steps, description="First workflow")
+        await self.tool.execute(
+            action="define", name="wf1", steps=steps, description="First workflow"
+        )
         result = await self.tool.execute(action="list")
         assert result.success is True
         assert "wf1" in result.output
@@ -460,6 +467,7 @@ class TestBrowserTool:
 
     def setup_method(self):
         from tools.browser_tool import BrowserTool
+
         self.tool = BrowserTool(".")
 
     def test_tool_metadata(self):
@@ -486,6 +494,7 @@ class TestDockerTool:
 
     def setup_method(self):
         from tools.docker_tool import DockerTool
+
         self.tool = DockerTool(".")
 
     def test_tool_metadata(self):
@@ -513,6 +522,7 @@ class TestDependencyAuditTool:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
         from tools.dependency_audit import DependencyAuditTool
+
         self.tool = DependencyAuditTool(self.tmpdir)
 
     def test_tool_metadata(self):
@@ -529,24 +539,36 @@ class TestDependencyAuditTool:
         assert self.tool._detect_ecosystem() == "javascript"
 
     def test_format_pip_audit_clean(self):
-        result = self.tool._format_pip_audit({"dependencies": [{"name": "flask"}], "vulnerabilities": []}, fix=False)
+        result = self.tool._format_pip_audit(
+            {"dependencies": [{"name": "flask"}], "vulnerabilities": []}, fix=False
+        )
         assert result.success is True
         assert "CLEAN" in result.output
 
     def test_format_pip_audit_vulns(self):
         data = {
             "dependencies": [],
-            "vulnerabilities": [{
-                "name": "flask", "version": "1.0", "id": "CVE-2024-1234",
-                "description": "XSS vulnerability", "fix_versions": ["2.0"],
-            }],
+            "vulnerabilities": [
+                {
+                    "name": "flask",
+                    "version": "1.0",
+                    "id": "CVE-2024-1234",
+                    "description": "XSS vulnerability",
+                    "fix_versions": ["2.0"],
+                }
+            ],
         }
         result = self.tool._format_pip_audit(data, fix=False)
         assert result.success is False
         assert "CVE-2024-1234" in result.output
 
     def test_format_npm_audit_clean(self):
-        data = {"metadata": {"vulnerabilities": {"critical": 0, "high": 0, "moderate": 0, "low": 0}, "totalDependencies": 50}}
+        data = {
+            "metadata": {
+                "vulnerabilities": {"critical": 0, "high": 0, "moderate": 0, "low": 0},
+                "totalDependencies": 50,
+            }
+        }
         result = self.tool._format_npm_audit(data, fix=False)
         assert result.success is True
         assert "CLEAN" in result.output
@@ -560,6 +582,7 @@ class TestPRGeneratorTool:
 
     def setup_method(self):
         from tools.pr_generator import PRGeneratorTool
+
         self.tool = PRGeneratorTool(".")
 
     def test_tool_metadata(self):

@@ -83,6 +83,7 @@ def _parse_yaml_simple(text: str) -> dict:
 @dataclass
 class Skill:
     """A loaded skill with metadata and instructions."""
+
     name: str
     description: str = ""
     instructions: str = ""
@@ -142,9 +143,7 @@ class SkillLoader:
         """Get all skills relevant to a task type."""
         result = []
         for skill in self._skills.values():
-            if skill.always_load:
-                result.append(skill)
-            elif skill.task_types and task_type in skill.task_types:
+            if skill.always_load or (skill.task_types and task_type in skill.task_types):
                 result.append(skill)
         return result
 
@@ -192,7 +191,7 @@ class SkillLoader:
             )
 
         frontmatter = _parse_yaml_simple(match.group(1))
-        instructions = content[match.end():].strip()
+        instructions = content[match.end() :].strip()
 
         # Parse nested 'agent42' or 'nanobot' config block
         agent_config = frontmatter.get("agent42", {})

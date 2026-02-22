@@ -11,8 +11,7 @@ IntentClassifier.
 
 import json
 import logging
-import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from core.task_queue import TaskType
 
@@ -32,20 +31,42 @@ TEAM_TASK_MAP: dict[str, list[str]] = {
 
 # Keywords that signal multi-step / complex tasks
 _SCALE_MARKERS = [
-    "campaign", "full", "comprehensive", "end-to-end", "complete",
-    "entire", "launch", "overhaul", "rebrand", "multi-channel",
-    "omnichannel", "integrated", "holistic",
+    "campaign",
+    "full",
+    "comprehensive",
+    "end-to-end",
+    "complete",
+    "entire",
+    "launch",
+    "overhaul",
+    "rebrand",
+    "multi-channel",
+    "omnichannel",
+    "integrated",
+    "holistic",
 ]
 
 _MULTI_DELIVERABLE_MARKERS = [
-    "and also", "plus", "along with", "in addition", "as well as",
-    "together with", "combined with", "followed by",
+    "and also",
+    "plus",
+    "along with",
+    "in addition",
+    "as well as",
+    "together with",
+    "combined with",
+    "followed by",
 ]
 
 _TEAM_INDICATORS = [
-    "team", "collaborate", "review by", "get feedback",
-    "coordinate", "cross-functional", "multiple perspectives",
-    "peer review", "group effort",
+    "team",
+    "collaborate",
+    "review by",
+    "get feedback",
+    "coordinate",
+    "cross-functional",
+    "multiple perspectives",
+    "peer review",
+    "group effort",
 ]
 
 ASSESSMENT_PROMPT = """\
@@ -81,10 +102,11 @@ Rules:
 @dataclass
 class ComplexityAssessment:
     """Result of task complexity assessment."""
-    level: str = "simple"                  # simple, moderate, complex
-    score: float = 0.0                     # 0.0-1.0
-    recommended_mode: str = "single_agent" # single_agent or team
-    recommended_team: str = ""             # team name or ""
+
+    level: str = "simple"  # simple, moderate, complex
+    score: float = 0.0  # 0.0-1.0
+    recommended_mode: str = "single_agent"  # single_agent or team
+    recommended_team: str = ""  # team name or ""
     reasoning: str = ""
     used_llm: bool = False
 
@@ -122,9 +144,7 @@ class ComplexityAssessor:
 
         return self._keyword_assess(description, task_type)
 
-    async def _llm_assess(
-        self, description: str, task_type: TaskType
-    ) -> ComplexityAssessment:
+    async def _llm_assess(self, description: str, task_type: TaskType) -> ComplexityAssessment:
         """Use LLM for nuanced complexity assessment."""
         teams_list = ", ".join(sorted(TEAM_TASK_MAP.keys()))
         team_desc_parts = []
@@ -141,16 +161,11 @@ class ComplexityAssessor:
             {"role": "system", "content": prompt},
             {
                 "role": "user",
-                "content": (
-                    f"Task type: {task_type.value}\n"
-                    f"Task description: {description}"
-                ),
+                "content": (f"Task type: {task_type.value}\nTask description: {description}"),
             },
         ]
 
-        response = await self.router.complete(
-            self.model, messages, temperature=0.1, max_tokens=200
-        )
+        response = await self.router.complete(self.model, messages, temperature=0.1, max_tokens=200)
 
         return self._parse_response(response, description, task_type)
 
@@ -202,9 +217,7 @@ class ComplexityAssessor:
             used_llm=True,
         )
 
-    def _keyword_assess(
-        self, description: str, task_type: TaskType
-    ) -> ComplexityAssessment:
+    def _keyword_assess(self, description: str, task_type: TaskType) -> ComplexityAssessment:
         """Fallback keyword-based complexity assessment."""
         lower = description.lower()
         score = 0.0
@@ -223,6 +236,7 @@ class ComplexityAssessor:
 
         # Check for multi-domain keywords (spans 2+ task types)
         from core.task_queue import _TASK_TYPE_KEYWORDS
+
         matched_types = set()
         for tt, keywords in _TASK_TYPE_KEYWORDS.items():
             if any(kw in lower for kw in keywords):

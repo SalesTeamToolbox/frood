@@ -19,78 +19,144 @@ import sys
 WORK_TYPE_KEYWORDS = {
     "security": {
         "keywords": [
-            "sandbox", "command_filter", "approval_gate", "auth", "rate_limit",
-            "url_policy", "security", "permission", "token", "password", "jwt",
-            "credential", "encrypt", "ssrf", "injection", "xss",
+            "sandbox",
+            "command_filter",
+            "approval_gate",
+            "auth",
+            "rate_limit",
+            "url_policy",
+            "security",
+            "permission",
+            "token",
+            "password",
+            "jwt",
+            "credential",
+            "encrypt",
+            "ssrf",
+            "injection",
+            "xss",
         ],
         "files": [
-            "core/sandbox.py", "core/command_filter.py", "core/approval_gate.py",
-            "dashboard/auth.py", "core/rate_limiter.py", "core/url_policy.py",
-            "tools/shell.py", "core/security_scanner.py",
+            "core/sandbox.py",
+            "core/command_filter.py",
+            "core/approval_gate.py",
+            "dashboard/auth.py",
+            "core/rate_limiter.py",
+            "core/url_policy.py",
+            "tools/shell.py",
+            "core/security_scanner.py",
         ],
         "section": "Security Patterns",
     },
     "tools": {
         "keywords": [
-            "tool", "execute", "ToolResult", "registry", "register",
-            "to_schema", "parameters",
+            "tool",
+            "execute",
+            "ToolResult",
+            "registry",
+            "register",
+            "to_schema",
+            "parameters",
         ],
         "files": ["tools/"],
         "section": "Tool Development",
     },
     "testing": {
         "keywords": [
-            "test", "pytest", "fixture", "mock", "assert", "conftest",
-            "coverage", "test_",
+            "test",
+            "pytest",
+            "fixture",
+            "mock",
+            "assert",
+            "conftest",
+            "coverage",
+            "test_",
         ],
         "files": ["tests/"],
         "section": "Testing Patterns",
     },
     "providers": {
         "keywords": [
-            "provider", "model", "openrouter", "openai", "anthropic",
-            "deepseek", "gemini", "vllm", "ProviderSpec", "ModelSpec",
-            "spending", "api_key",
+            "provider",
+            "model",
+            "openrouter",
+            "openai",
+            "anthropic",
+            "deepseek",
+            "gemini",
+            "vllm",
+            "ProviderSpec",
+            "ModelSpec",
+            "spending",
+            "api_key",
         ],
         "files": ["providers/"],
         "section": "Provider Patterns",
     },
     "skills": {
         "keywords": [
-            "skill", "SKILL.md", "frontmatter", "task_type", "builtin",
-            "workspace", "loader",
+            "skill",
+            "SKILL.md",
+            "frontmatter",
+            "task_type",
+            "builtin",
+            "workspace",
+            "loader",
         ],
         "files": ["skills/"],
         "section": "Skill Development",
     },
     "async": {
         "keywords": [
-            "async", "await", "asyncio", "aiofiles", "coroutine",
-            "event_loop", "gather", "TaskGroup",
+            "async",
+            "await",
+            "asyncio",
+            "aiofiles",
+            "coroutine",
+            "event_loop",
+            "gather",
+            "TaskGroup",
         ],
         "files": [],
         "section": "Async Patterns",
     },
     "config": {
         "keywords": [
-            "config", "settings", "env", "environment", "Settings",
-            "from_env", ".env",
+            "config",
+            "settings",
+            "env",
+            "environment",
+            "Settings",
+            "from_env",
+            ".env",
         ],
         "files": ["core/config.py", ".env.example"],
         "section": "Configuration Patterns",
     },
     "dashboard": {
         "keywords": [
-            "dashboard", "fastapi", "websocket", "jwt", "login",
-            "api", "endpoint", "route",
+            "dashboard",
+            "fastapi",
+            "websocket",
+            "jwt",
+            "login",
+            "api",
+            "endpoint",
+            "route",
         ],
         "files": ["dashboard/"],
         "section": "Dashboard Patterns",
     },
     "memory": {
         "keywords": [
-            "memory", "session", "embedding", "qdrant", "redis",
-            "semantic", "vector", "consolidat",
+            "memory",
+            "session",
+            "embedding",
+            "qdrant",
+            "redis",
+            "semantic",
+            "vector",
+            "consolidat",
         ],
         "files": ["memory/"],
         "section": "Memory Patterns",
@@ -128,7 +194,7 @@ def load_lessons(project_dir, sections):
         return ""
 
     try:
-        with open(lessons_path, "r") as f:
+        with open(lessons_path) as f:
             content = f.read()
     except OSError:
         return ""
@@ -173,9 +239,7 @@ def main():
                 if isinstance(content, str):
                     prompt = content
                 elif isinstance(content, list):
-                    prompt = " ".join(
-                        c.get("text", "") for c in content if isinstance(c, dict)
-                    )
+                    prompt = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
                 break
 
     # Detect work types

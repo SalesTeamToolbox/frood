@@ -27,7 +27,10 @@ _OUTLINE_TEMPLATES: dict[str, list[dict]] = {
     "presentation": [
         {"heading": "Title Slide", "notes": "Title, subtitle, presenter name, date"},
         {"heading": "Agenda", "notes": "3-5 bullet overview of what will be covered"},
-        {"heading": "Problem / Opportunity", "notes": "What challenge or opportunity are we addressing?"},
+        {
+            "heading": "Problem / Opportunity",
+            "notes": "What challenge or opportunity are we addressing?",
+        },
         {"heading": "Current State", "notes": "Where things stand today — data, context"},
         {"heading": "Proposed Solution", "notes": "What we recommend and why"},
         {"heading": "Implementation Plan", "notes": "How we will execute — timeline, resources"},
@@ -37,7 +40,10 @@ _OUTLINE_TEMPLATES: dict[str, list[dict]] = {
         {"heading": "Q&A", "notes": "Open for discussion"},
     ],
     "report": [
-        {"heading": "Executive Summary", "notes": "High-level overview of findings and recommendations"},
+        {
+            "heading": "Executive Summary",
+            "notes": "High-level overview of findings and recommendations",
+        },
         {"heading": "Introduction", "notes": "Purpose, scope, methodology"},
         {"heading": "Background", "notes": "Context and relevant history"},
         {"heading": "Findings", "notes": "Detailed analysis and data"},
@@ -189,8 +195,7 @@ class OutlineTool(Tool):
 
         # Deep copy the template
         outline = [
-            {"heading": s["heading"], "notes": s["notes"], "subsections": []}
-            for s in template
+            {"heading": s["heading"], "notes": s["notes"], "subsections": []} for s in template
         ]
 
         self._outlines[name] = outline
@@ -227,8 +232,7 @@ class OutlineTool(Tool):
         return ToolResult(
             output=(
                 f"Added {len(subsections)} subsections to section {section_num} "
-                f"({outline[idx]['heading']})\n\n"
-                + self._render_outline(outline)
+                f"({outline[idx]['heading']})\n\n" + self._render_outline(outline)
             )
         )
 
@@ -274,9 +278,7 @@ class OutlineTool(Tool):
         return ToolResult(output=self._render_outline(self._outlines[name], export=True))
 
     @staticmethod
-    def _render_outline(
-        outline: list[dict], topic: str = "", export: bool = False
-    ) -> str:
+    def _render_outline(outline: list[dict], topic: str = "", export: bool = False) -> str:
         lines = []
         if topic:
             lines.append(f"# {topic}\n")

@@ -6,6 +6,7 @@ Optionally enforces per-tool rate limiting via ToolRateLimiter.
 """
 
 import logging
+
 from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.registry")
@@ -62,7 +63,4 @@ class ToolRegistry:
 
     def list_tools(self) -> list[dict]:
         """List all registered tools with metadata."""
-        return [
-            {"name": t.name, "description": t.description}
-            for t in self._tools.values()
-        ]
+        return [{"name": t.name, "description": t.description} for t in self._tools.values()]

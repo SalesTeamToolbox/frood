@@ -20,11 +20,19 @@ logger = logging.getLogger("agent42.tools.http_client")
 _VALID_HEADER_NAME_RE = re.compile(r"^[a-zA-Z0-9!#$%&'*+\-.^_`|~]+$")
 
 # Headers that must not be user-controlled (hop-by-hop and security-sensitive)
-_FORBIDDEN_HEADERS = frozenset({
-    "host", "connection", "content-length", "transfer-encoding",
-    "upgrade", "te", "trailer", "proxy-authorization",
-    "proxy-authenticate",
-})
+_FORBIDDEN_HEADERS = frozenset(
+    {
+        "host",
+        "connection",
+        "content-length",
+        "transfer-encoding",
+        "upgrade",
+        "te",
+        "trailer",
+        "proxy-authorization",
+        "proxy-authenticate",
+    }
+)
 
 # Reuse URL policy from core module (SSRF + allowlist/denylist)
 try:
@@ -140,16 +148,23 @@ class HttpClientTool(Tool):
             return ToolResult(error=f"Unsupported scheme: {parsed.scheme}", success=False)
 
         try:
-            import aiohttp
+            import aiohttp  # noqa: F401
         except ImportError:
             # Fallback to urllib
-            return await self._urllib_request(url, method, validated_headers, body, json_body, timeout)
+            return await self._urllib_request(
+                url, method, validated_headers, body, json_body, timeout
+            )
 
         return await self._aiohttp_request(url, method, validated_headers, body, json_body, timeout)
 
     async def _aiohttp_request(
-        self, url: str, method: str, headers: dict, body: str,
-        json_body: dict | None, timeout: float,
+        self,
+        url: str,
+        method: str,
+        headers: dict,
+        body: str,
+        json_body: dict | None,
+        timeout: float,
     ) -> ToolResult:
         """Make request using aiohttp."""
         import aiohttp
@@ -198,18 +213,23 @@ class HttpClientTool(Tool):
                         output=output,
                         success=200 <= resp.status < 400,
                     )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return ToolResult(error=f"Request timed out after {timeout}s", success=False)
         except Exception as e:
             return ToolResult(error=f"Request failed: {e}", success=False)
 
     async def _urllib_request(
-        self, url: str, method: str, headers: dict | None, body: str,
-        json_body: dict | None, timeout: float,
+        self,
+        url: str,
+        method: str,
+        headers: dict | None,
+        body: str,
+        json_body: dict | None,
+        timeout: float,
     ) -> ToolResult:
         """Fallback using urllib (no aiohttp dependency)."""
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         headers = headers or {}
 
@@ -275,15 +295,20 @@ class HttpClientTool(Tool):
             )
             return ToolResult(output=output, success=False)
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return ToolResult(error=f"Request timed out after {timeout}s", success=False)
         except Exception as e:
             return ToolResult(error=f"Request failed: {e}", success=False)
 
     @staticmethod
     def _format_response(
-        status: int, reason: str, headers: dict, body: str,
-        elapsed: float, method: str, url: str,
+        status: int,
+        reason: str,
+        headers: dict,
+        body: str,
+        elapsed: float,
+        method: str,
+        url: str,
     ) -> str:
         """Format the HTTP response into readable output."""
         lines = [
@@ -295,8 +320,13 @@ class HttpClientTool(Tool):
 
         # Show key headers only
         important_headers = [
-            "Content-Type", "Content-Length", "X-RateLimit-Remaining",
-            "X-RateLimit-Limit", "Location", "Set-Cookie", "Authorization",
+            "Content-Type",
+            "Content-Length",
+            "X-RateLimit-Remaining",
+            "X-RateLimit-Limit",
+            "Location",
+            "Set-Cookie",
+            "Authorization",
         ]
         for key in important_headers:
             if key in headers:

@@ -9,7 +9,6 @@ import asyncio
 import json
 import logging
 import os
-import uuid
 
 from tools.base import Tool, ToolResult
 
@@ -37,11 +36,14 @@ class MCPConnection:
             return
 
         # Initialize the server
-        await self._send_request("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "agent42", "version": "0.1.0"},
-        })
+        await self._send_request(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "agent42", "version": "0.1.0"},
+            },
+        )
         await self._send_notification("notifications/initialized", {})
         logger.info(f"MCP server connected: {self.name}")
 
@@ -65,10 +67,13 @@ class MCPConnection:
 
     async def call_tool(self, tool_name: str, arguments: dict) -> str:
         """Call a tool on the MCP server."""
-        result = await self._send_request("tools/call", {
-            "name": tool_name,
-            "arguments": arguments,
-        })
+        result = await self._send_request(
+            "tools/call",
+            {
+                "name": tool_name,
+                "arguments": arguments,
+            },
+        )
         # Extract text from content blocks
         content = result.get("content", [])
         texts = []
@@ -79,8 +84,15 @@ class MCPConnection:
 
     # Commands that are allowed for MCP stdio servers
     _ALLOWED_MCP_COMMANDS = {
-        "npx", "node", "python", "python3", "uvx", "uv",
-        "docker", "deno", "bun",
+        "npx",
+        "node",
+        "python",
+        "python3",
+        "uvx",
+        "uv",
+        "docker",
+        "deno",
+        "bun",
     }
 
     @classmethod
@@ -131,7 +143,8 @@ class MCPConnection:
         env.update(env_overrides)
 
         self._proc = await asyncio.create_subprocess_exec(
-            resolved_command, *args,
+            resolved_command,
+            *args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -141,7 +154,7 @@ class MCPConnection:
 
     async def _read_loop(self):
         """Read JSON-RPC messages from the server."""
-        buffer = ""
+        _buffer = ""
         while self._proc and self._proc.stdout:
             try:
                 line = await self._proc.stdout.readline()
@@ -161,9 +174,7 @@ class MCPConnection:
                 if msg_id is not None and msg_id in self._pending:
                     future = self._pending.pop(msg_id)
                     if "error" in msg:
-                        future.set_exception(
-                            RuntimeError(msg["error"].get("message", "MCP error"))
-                        )
+                        future.set_exception(RuntimeError(msg["error"].get("message", "MCP error")))
                     else:
                         future.set_result(msg.get("result", {}))
 

@@ -7,18 +7,17 @@ process (register spec + add config field). No if-elif chains needed.
 
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 from openai import AsyncOpenAI
-
-from core.config import settings
 
 logger = logging.getLogger("agent42.providers")
 
 
 class SpendingLimitExceeded(RuntimeError):
     """Raised when the daily API spending limit is reached."""
+
     pass
 
 
@@ -35,28 +34,31 @@ class ProviderType(str, Enum):
 @dataclass(frozen=True)
 class ProviderSpec:
     """Declarative provider specification."""
+
     provider_type: ProviderType
     base_url: str
-    api_key_env: str              # Environment variable name for the API key
+    api_key_env: str  # Environment variable name for the API key
     display_name: str = ""
     default_model: str = ""
     supports_streaming: bool = True
     supports_function_calling: bool = True
     max_tokens_default: int = 4096
     requires_model_prefix: bool = False  # Some gateways need provider/ prefix
-    model_prefix: str = ""               # e.g. "anthropic/" for OpenRouter
+    model_prefix: str = ""  # e.g. "anthropic/" for OpenRouter
 
 
 class ModelTier(str, Enum):
     """Cost tier for model selection strategy."""
-    FREE = "free"           # $0 models (OpenRouter free tier)
-    CHEAP = "cheap"         # Low-cost models (GPT-4o-mini, Haiku, etc.)
-    PREMIUM = "premium"     # Full-price frontier models (GPT-4o, Sonnet, etc.)
+
+    FREE = "free"  # $0 models (OpenRouter free tier)
+    CHEAP = "cheap"  # Low-cost models (GPT-4o-mini, Haiku, etc.)
+    PREMIUM = "premium"  # Full-price frontier models (GPT-4o, Sonnet, etc.)
 
 
 @dataclass(frozen=True)
 class ModelSpec:
     """A specific model on a specific provider."""
+
     model_id: str
     provider: ProviderType
     max_tokens: int = 4096
@@ -120,53 +122,161 @@ MODELS: dict[str, ModelSpec] = {
     # ═══════════════════════════════════════════════════════════════════════════
     # FREE TIER — $0 models for bulk agent work (default for all task types)
     # ═══════════════════════════════════════════════════════════════════════════
-
     # OpenRouter free models (single API key, no credit card needed)
     # ~30 free models available — these are the best for agent work
-    "or-free-auto": ModelSpec("openrouter/free", ProviderType.OPENROUTER, display_name="OR Free Auto-Router", tier=ModelTier.FREE),
-
+    "or-free-auto": ModelSpec(
+        "openrouter/free",
+        ProviderType.OPENROUTER,
+        display_name="OR Free Auto-Router",
+        tier=ModelTier.FREE,
+    ),
     # Coding specialists
-    "or-free-qwen-coder": ModelSpec("qwen/qwen3-coder:free", ProviderType.OPENROUTER, max_tokens=8192, display_name="Qwen3 Coder 480B (free)", tier=ModelTier.FREE),
-    "or-free-devstral": ModelSpec("mistralai/devstral-2512:free", ProviderType.OPENROUTER, max_tokens=8192, display_name="Devstral 123B (free)", tier=ModelTier.FREE),
-
+    "or-free-qwen-coder": ModelSpec(
+        "qwen/qwen3-coder:free",
+        ProviderType.OPENROUTER,
+        max_tokens=8192,
+        display_name="Qwen3 Coder 480B (free)",
+        tier=ModelTier.FREE,
+    ),
+    "or-free-devstral": ModelSpec(
+        "mistralai/devstral-2512:free",
+        ProviderType.OPENROUTER,
+        max_tokens=8192,
+        display_name="Devstral 123B (free)",
+        tier=ModelTier.FREE,
+    ),
     # Reasoning specialists
-    "or-free-deepseek-r1": ModelSpec("deepseek/deepseek-r1-0528:free", ProviderType.OPENROUTER, temperature=0.2, display_name="DeepSeek R1 0528 (free)", tier=ModelTier.FREE),
-    "or-free-deepseek-chat": ModelSpec("deepseek/deepseek-chat-v3.1:free", ProviderType.OPENROUTER, display_name="DeepSeek Chat v3.1 (free)", tier=ModelTier.FREE),
-
+    "or-free-deepseek-r1": ModelSpec(
+        "deepseek/deepseek-r1-0528:free",
+        ProviderType.OPENROUTER,
+        temperature=0.2,
+        display_name="DeepSeek R1 0528 (free)",
+        tier=ModelTier.FREE,
+    ),
+    "or-free-deepseek-chat": ModelSpec(
+        "deepseek/deepseek-chat-v3.1:free",
+        ProviderType.OPENROUTER,
+        display_name="DeepSeek Chat v3.1 (free)",
+        tier=ModelTier.FREE,
+    ),
     # General-purpose
-    "or-free-llama4-maverick": ModelSpec("meta-llama/llama-4-maverick:free", ProviderType.OPENROUTER, display_name="Llama 4 Maverick (free)", tier=ModelTier.FREE),
-    "or-free-llama-70b": ModelSpec("meta-llama/llama-3.3-70b-instruct:free", ProviderType.OPENROUTER, display_name="Llama 3.3 70B (free)", tier=ModelTier.FREE),
-    "or-free-gemini-flash": ModelSpec("google/gemini-2.0-flash-exp:free", ProviderType.OPENROUTER, max_tokens=8192, display_name="Gemini 2.0 Flash (free, 1M ctx)", tier=ModelTier.FREE, max_context_tokens=1000000),
-    "or-free-gemini-pro": ModelSpec("google/gemini-2.5-pro-exp-03-25:free", ProviderType.OPENROUTER, max_tokens=8192, display_name="Gemini 2.5 Pro (free)", tier=ModelTier.FREE, max_context_tokens=1000000),
-    "or-free-mistral-small": ModelSpec("mistralai/mistral-small-3.1-24b-instruct:free", ProviderType.OPENROUTER, display_name="Mistral Small 3.1 (free)", tier=ModelTier.FREE),
-
+    "or-free-llama4-maverick": ModelSpec(
+        "meta-llama/llama-4-maverick:free",
+        ProviderType.OPENROUTER,
+        display_name="Llama 4 Maverick (free)",
+        tier=ModelTier.FREE,
+    ),
+    "or-free-llama-70b": ModelSpec(
+        "meta-llama/llama-3.3-70b-instruct:free",
+        ProviderType.OPENROUTER,
+        display_name="Llama 3.3 70B (free)",
+        tier=ModelTier.FREE,
+    ),
+    "or-free-gemini-flash": ModelSpec(
+        "google/gemini-2.0-flash-exp:free",
+        ProviderType.OPENROUTER,
+        max_tokens=8192,
+        display_name="Gemini 2.0 Flash (free, 1M ctx)",
+        tier=ModelTier.FREE,
+        max_context_tokens=1000000,
+    ),
+    "or-free-gemini-pro": ModelSpec(
+        "google/gemini-2.5-pro-exp-03-25:free",
+        ProviderType.OPENROUTER,
+        max_tokens=8192,
+        display_name="Gemini 2.5 Pro (free)",
+        tier=ModelTier.FREE,
+        max_context_tokens=1000000,
+    ),
+    "or-free-mistral-small": ModelSpec(
+        "mistralai/mistral-small-3.1-24b-instruct:free",
+        ProviderType.OPENROUTER,
+        display_name="Mistral Small 3.1 (free)",
+        tier=ModelTier.FREE,
+    ),
     # Lightweight / fast
-    "or-free-nemotron": ModelSpec("nvidia/nemotron-3-nano-30b-a3b:free", ProviderType.OPENROUTER, display_name="NVIDIA Nemotron 30B (free)", tier=ModelTier.FREE),
-    "or-free-gemma-27b": ModelSpec("google/gemma-3-27b-it:free", ProviderType.OPENROUTER, display_name="Gemma 3 27B (free)", tier=ModelTier.FREE),
-
+    "or-free-nemotron": ModelSpec(
+        "nvidia/nemotron-3-nano-30b-a3b:free",
+        ProviderType.OPENROUTER,
+        display_name="NVIDIA Nemotron 30B (free)",
+        tier=ModelTier.FREE,
+    ),
+    "or-free-gemma-27b": ModelSpec(
+        "google/gemma-3-27b-it:free",
+        ProviderType.OPENROUTER,
+        display_name="Gemma 3 27B (free)",
+        tier=ModelTier.FREE,
+    ),
     # ═══════════════════════════════════════════════════════════════════════════
     # CHEAP TIER — low-cost models for when free isn't enough
     # ═══════════════════════════════════════════════════════════════════════════
-
-    "gpt-4o-mini": ModelSpec("gpt-4o-mini", ProviderType.OPENAI, display_name="GPT-4o Mini", tier=ModelTier.CHEAP),
-    "claude-haiku": ModelSpec("claude-haiku-4-5-20251001", ProviderType.ANTHROPIC, display_name="Claude Haiku 4.5", tier=ModelTier.CHEAP),
-    "gemini-2-flash": ModelSpec("gemini-2.0-flash", ProviderType.GEMINI, display_name="Gemini 2.0 Flash", tier=ModelTier.CHEAP, max_context_tokens=1000000),
-    "deepseek-chat": ModelSpec("deepseek-chat", ProviderType.DEEPSEEK, display_name="DeepSeek Chat", tier=ModelTier.CHEAP),
-
+    "gpt-4o-mini": ModelSpec(
+        "gpt-4o-mini", ProviderType.OPENAI, display_name="GPT-4o Mini", tier=ModelTier.CHEAP
+    ),
+    "claude-haiku": ModelSpec(
+        "claude-haiku-4-5-20251001",
+        ProviderType.ANTHROPIC,
+        display_name="Claude Haiku 4.5",
+        tier=ModelTier.CHEAP,
+    ),
+    "gemini-2-flash": ModelSpec(
+        "gemini-2.0-flash",
+        ProviderType.GEMINI,
+        display_name="Gemini 2.0 Flash",
+        tier=ModelTier.CHEAP,
+        max_context_tokens=1000000,
+    ),
+    "deepseek-chat": ModelSpec(
+        "deepseek-chat", ProviderType.DEEPSEEK, display_name="DeepSeek Chat", tier=ModelTier.CHEAP
+    ),
     # ═══════════════════════════════════════════════════════════════════════════
     # PREMIUM TIER — frontier models for final reviews, complex tasks, admin-selected
     # ═══════════════════════════════════════════════════════════════════════════
-
-    "gpt-4o": ModelSpec("gpt-4o", ProviderType.OPENAI, display_name="GPT-4o", tier=ModelTier.PREMIUM),
-    "o1": ModelSpec("o1", ProviderType.OPENAI, temperature=1.0, display_name="o1", tier=ModelTier.PREMIUM),
-    "claude-sonnet": ModelSpec("claude-sonnet-4-20250514", ProviderType.ANTHROPIC, display_name="Claude Sonnet 4", tier=ModelTier.PREMIUM),
-    "gemini-2-pro": ModelSpec("gemini-2.5-pro-preview-05-06", ProviderType.GEMINI, display_name="Gemini 2.5 Pro", tier=ModelTier.PREMIUM, max_context_tokens=1000000),
-    "deepseek-reasoner": ModelSpec("deepseek-reasoner", ProviderType.DEEPSEEK, temperature=0.2, display_name="DeepSeek Reasoner", tier=ModelTier.PREMIUM),
-
+    "gpt-4o": ModelSpec(
+        "gpt-4o", ProviderType.OPENAI, display_name="GPT-4o", tier=ModelTier.PREMIUM
+    ),
+    "o1": ModelSpec(
+        "o1", ProviderType.OPENAI, temperature=1.0, display_name="o1", tier=ModelTier.PREMIUM
+    ),
+    "claude-sonnet": ModelSpec(
+        "claude-sonnet-4-20250514",
+        ProviderType.ANTHROPIC,
+        display_name="Claude Sonnet 4",
+        tier=ModelTier.PREMIUM,
+    ),
+    "gemini-2-pro": ModelSpec(
+        "gemini-2.5-pro-preview-05-06",
+        ProviderType.GEMINI,
+        display_name="Gemini 2.5 Pro",
+        tier=ModelTier.PREMIUM,
+        max_context_tokens=1000000,
+    ),
+    "deepseek-reasoner": ModelSpec(
+        "deepseek-reasoner",
+        ProviderType.DEEPSEEK,
+        temperature=0.2,
+        display_name="DeepSeek Reasoner",
+        tier=ModelTier.PREMIUM,
+    ),
     # OpenRouter paid pass-through (use any model via single key)
-    "or-claude-sonnet": ModelSpec("anthropic/claude-sonnet-4-20250514", ProviderType.OPENROUTER, display_name="Claude Sonnet via OR", tier=ModelTier.PREMIUM),
-    "or-gpt-4o": ModelSpec("openai/gpt-4o", ProviderType.OPENROUTER, display_name="GPT-4o via OR", tier=ModelTier.PREMIUM),
-    "or-llama-405b": ModelSpec("meta-llama/llama-3.1-405b-instruct", ProviderType.OPENROUTER, display_name="Llama 405B via OR", tier=ModelTier.PREMIUM),
+    "or-claude-sonnet": ModelSpec(
+        "anthropic/claude-sonnet-4-20250514",
+        ProviderType.OPENROUTER,
+        display_name="Claude Sonnet via OR",
+        tier=ModelTier.PREMIUM,
+    ),
+    "or-gpt-4o": ModelSpec(
+        "openai/gpt-4o",
+        ProviderType.OPENROUTER,
+        display_name="GPT-4o via OR",
+        tier=ModelTier.PREMIUM,
+    ),
+    "or-llama-405b": ModelSpec(
+        "meta-llama/llama-3.1-405b-instruct",
+        ProviderType.OPENROUTER,
+        display_name="Llama 405B via OR",
+        tier=ModelTier.PREMIUM,
+    ),
 }
 
 
@@ -181,6 +291,7 @@ class SpendingTracker:
     def record_usage(self, model_key: str, prompt_tokens: int, completion_tokens: int):
         """Record token usage for spending tracking."""
         import datetime
+
         today = datetime.date.today().isoformat()
         if today != self._current_date:
             self._current_date = today
@@ -227,9 +338,7 @@ class ProviderRegistry:
             raise ValueError(f"Unknown provider: {provider_type}")
 
         api_key = os.getenv(spec.api_key_env, "")
-        base_url = os.getenv(
-            f"{provider_type.value.upper()}_BASE_URL", spec.base_url
-        )
+        base_url = os.getenv(f"{provider_type.value.upper()}_BASE_URL", spec.base_url)
 
         if not api_key:
             logger.warning(f"{spec.api_key_env} not set — {spec.display_name} models will fail")
@@ -262,6 +371,7 @@ class ProviderRegistry:
     ) -> str:
         """Send a chat completion and return the response text."""
         from core.config import settings as _settings
+
         if not spending_tracker.check_limit(_settings.max_daily_api_spend_usd):
             raise SpendingLimitExceeded(
                 f"Daily API spending limit reached "
@@ -282,9 +392,7 @@ class ProviderRegistry:
         content = response.choices[0].message.content or ""
         usage = response.usage
         if usage:
-            spending_tracker.record_usage(
-                model_key, usage.prompt_tokens, usage.completion_tokens
-            )
+            spending_tracker.record_usage(model_key, usage.prompt_tokens, usage.completion_tokens)
             logger.info(
                 f"[{model_key}] {usage.prompt_tokens}+{usage.completion_tokens} tokens "
                 f"(daily: ${spending_tracker.daily_spend_usd:.4f})"
@@ -304,6 +412,7 @@ class ProviderRegistry:
         Returns the full response object so callers can inspect tool_calls.
         """
         from core.config import settings as _settings
+
         if not spending_tracker.check_limit(_settings.max_daily_api_spend_usd):
             raise SpendingLimitExceeded(
                 f"Daily API spending limit reached "
@@ -327,9 +436,7 @@ class ProviderRegistry:
 
         usage = response.usage
         if usage:
-            spending_tracker.record_usage(
-                model_key, usage.prompt_tokens, usage.completion_tokens
-            )
+            spending_tracker.record_usage(model_key, usage.prompt_tokens, usage.completion_tokens)
             logger.info(
                 f"[{model_key}] {usage.prompt_tokens}+{usage.completion_tokens} tokens "
                 f"(daily: ${spending_tracker.daily_spend_usd:.4f})"
@@ -342,12 +449,14 @@ class ProviderRegistry:
         result = []
         for ptype, spec in PROVIDERS.items():
             api_key = os.getenv(spec.api_key_env, "")
-            result.append({
-                "provider": ptype.value,
-                "display_name": spec.display_name,
-                "configured": bool(api_key),
-                "base_url": spec.base_url,
-            })
+            result.append(
+                {
+                    "provider": ptype.value,
+                    "display_name": spec.display_name,
+                    "configured": bool(api_key),
+                    "base_url": spec.base_url,
+                }
+            )
         return result
 
     def available_models(self) -> list[dict]:
@@ -355,21 +464,29 @@ class ProviderRegistry:
         result = []
         for key, spec in MODELS.items():
             provider = PROVIDERS.get(spec.provider)
-            result.append({
-                "key": key,
-                "model_id": spec.model_id,
-                "provider": spec.provider.value,
-                "display_name": spec.display_name or key,
-                "configured": bool(os.getenv(provider.api_key_env, "")) if provider else False,
-            })
+            result.append(
+                {
+                    "key": key,
+                    "model_id": spec.model_id,
+                    "provider": spec.provider.value,
+                    "display_name": spec.display_name or key,
+                    "configured": bool(os.getenv(provider.api_key_env, "")) if provider else False,
+                }
+            )
         return result
 
     def models_by_tier(self, tier: ModelTier) -> list[dict]:
         """List models filtered by cost tier."""
         return [
-            {"key": k, "model_id": s.model_id, "provider": s.provider.value,
-             "display_name": s.display_name or k, "tier": s.tier.value}
-            for k, s in MODELS.items() if s.tier == tier
+            {
+                "key": k,
+                "model_id": s.model_id,
+                "provider": s.provider.value,
+                "display_name": s.display_name or k,
+                "tier": s.tier.value,
+            }
+            for k, s in MODELS.items()
+            if s.tier == tier
         ]
 
     def free_models(self) -> list[dict]:
@@ -379,10 +496,16 @@ class ProviderRegistry:
     def models_by_min_context(self, min_tokens: int) -> list[dict]:
         """List models with at least *min_tokens* context window."""
         return [
-            {"key": k, "model_id": s.model_id, "provider": s.provider.value,
-             "display_name": s.display_name or k, "tier": s.tier.value,
-             "max_context_tokens": s.max_context_tokens}
-            for k, s in MODELS.items() if s.max_context_tokens >= min_tokens
+            {
+                "key": k,
+                "model_id": s.model_id,
+                "provider": s.provider.value,
+                "display_name": s.display_name or k,
+                "tier": s.tier.value,
+                "max_context_tokens": s.max_context_tokens,
+            }
+            for k, s in MODELS.items()
+            if s.max_context_tokens >= min_tokens
         ]
 
     @staticmethod

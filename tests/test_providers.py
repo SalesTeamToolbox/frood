@@ -1,14 +1,14 @@
 """Tests for Phase 5: Provider registry."""
 
-import os
 import pytest
+
 from providers.registry import (
+    MODELS,
+    PROVIDERS,
+    ModelSpec,
     ProviderRegistry,
     ProviderSpec,
     ProviderType,
-    ModelSpec,
-    PROVIDERS,
-    MODELS,
 )
 
 
@@ -23,7 +23,9 @@ class TestProviderRegistry:
 
     def test_each_model_has_valid_provider(self):
         for key, spec in MODELS.items():
-            assert spec.provider in ProviderType, f"Model {key} has invalid provider {spec.provider}"
+            assert spec.provider in ProviderType, (
+                f"Model {key} has invalid provider {spec.provider}"
+            )
 
     def test_get_model(self):
         registry = ProviderRegistry()

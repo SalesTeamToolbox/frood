@@ -22,6 +22,7 @@ STALL_THRESHOLD = 300  # 5 minutes
 @dataclass
 class AgentHeartbeat:
     """Heartbeat record for a running agent."""
+
     task_id: str
     last_beat: float = field(default_factory=time.monotonic)
     iteration: int = 0
@@ -52,6 +53,7 @@ class AgentHeartbeat:
 @dataclass
 class SystemHealth:
     """Overall system health snapshot."""
+
     active_agents: int = 0
     stalled_agents: int = 0
     tasks_pending: int = 0
@@ -130,7 +132,9 @@ class HeartbeatService:
             hb.message = message
         else:
             self._agents[task_id] = AgentHeartbeat(
-                task_id=task_id, iteration=iteration, message=message,
+                task_id=task_id,
+                iteration=iteration,
+                message=message,
             )
 
     def register_agent(self, task_id: str):
@@ -154,17 +158,11 @@ class HeartbeatService:
 
     @property
     def active_agents(self) -> list[AgentHeartbeat]:
-        return [
-            hb for hb in self._agents.values()
-            if hb.status == "running"
-        ]
+        return [hb for hb in self._agents.values() if hb.status == "running"]
 
     @property
     def stalled_agents(self) -> list[AgentHeartbeat]:
-        return [
-            hb for hb in self._agents.values()
-            if hb.status == "running" and hb.is_stalled
-        ]
+        return [hb for hb in self._agents.values() if hb.status == "running" and hb.is_stalled]
 
     def get_health(self, task_queue=None, tool_registry=None) -> SystemHealth:
         """Get a snapshot of overall system health."""
@@ -203,6 +201,7 @@ class HeartbeatService:
         # Get process memory usage
         try:
             import resource
+
             usage = resource.getrusage(resource.RUSAGE_SELF)
             health.memory_mb = usage.ru_maxrss / 1024  # KB to MB on Linux
         except (ImportError, AttributeError):
@@ -242,15 +241,21 @@ class HeartbeatService:
                     # Send webhook notification for stalled agents
                     if self._notification_service:
                         try:
-                            from core.notification_service import NotificationPayload, SEVERITY_CRITICAL
-                            await self._notification_service.notify(NotificationPayload(
-                                event="agent_stalled",
-                                timestamp=time.time(),
-                                task_id=hb.task_id,
-                                title=f"Agent stalled (iteration {hb.iteration})",
-                                details=f"No heartbeat for {hb.age_seconds:.0f}s. Last message: {hb.message}",
-                                severity=SEVERITY_CRITICAL,
-                            ))
+                            from core.notification_service import (
+                                SEVERITY_CRITICAL,
+                                NotificationPayload,
+                            )
+
+                            await self._notification_service.notify(
+                                NotificationPayload(
+                                    event="agent_stalled",
+                                    timestamp=time.time(),
+                                    task_id=hb.task_id,
+                                    title=f"Agent stalled (iteration {hb.iteration})",
+                                    details=f"No heartbeat for {hb.age_seconds:.0f}s. Last message: {hb.message}",
+                                    severity=SEVERITY_CRITICAL,
+                                )
+                            )
                         except Exception as e:
                             logger.error(f"Failed to send stall notification: {e}")
 
@@ -262,7 +267,8 @@ class HeartbeatService:
                 # Clean up completed/failed agents older than 10 minutes
                 cutoff = time.monotonic() - 600
                 to_remove = [
-                    tid for tid, hb in self._agents.items()
+                    tid
+                    for tid, hb in self._agents.items()
                     if hb.status in ("completed", "failed") and hb.last_beat < cutoff
                 ]
                 for tid in to_remove:

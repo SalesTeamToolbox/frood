@@ -91,7 +91,7 @@ class PRGeneratorTool(Tool):
                 error="GitHub CLI (gh) not installed. Run: https://cli.github.com/",
                 success=False,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             return ToolResult(error="gh command timed out", success=False)
 
@@ -145,7 +145,12 @@ class PRGeneratorTool(Tool):
             return ToolResult(error=f"Unknown action: {action}", success=False)
 
     async def _create_pr(
-        self, title: str, body: str, base: str, draft: bool, issue: int,
+        self,
+        title: str,
+        body: str,
+        base: str,
+        draft: bool,
+        issue: int,
     ) -> ToolResult:
         if not title:
             return ToolResult(error="PR title required", success=False)
@@ -166,7 +171,10 @@ class PRGeneratorTool(Tool):
 
         # Get diff stats
         proc = await asyncio.create_subprocess_exec(
-            "git", "diff", "--stat", f"origin/main...HEAD",
+            "git",
+            "diff",
+            "--stat",
+            "origin/main...HEAD",
             cwd=self._workspace,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -178,7 +186,10 @@ class PRGeneratorTool(Tool):
 
         # Get commit log
         proc = await asyncio.create_subprocess_exec(
-            "git", "log", "--oneline", "origin/main...HEAD",
+            "git",
+            "log",
+            "--oneline",
+            "origin/main...HEAD",
             cwd=self._workspace,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
