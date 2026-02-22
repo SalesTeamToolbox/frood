@@ -22,6 +22,15 @@ aiofiles>=23.0.0
 # HTTP client (Phase 4: web search, web fetch)
 httpx>=0.27.0
 
+# SSH remote shell
+asyncssh>=2.14.0
+
+# Image processing (vision analysis)
+Pillow>=10.0.0
+
+# PDF parsing (knowledge base / RAG)
+pypdf>=3.0.0
+
 # ── Optional memory backends (install as needed) ───────────────────────
 # Qdrant:    pip install qdrant-client         (vector DB for semantic search)
 # Redis:     pip install redis[hiredis]        (session cache + embedding cache)

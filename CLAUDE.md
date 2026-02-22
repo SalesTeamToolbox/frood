@@ -106,10 +106,14 @@ during Claude Code sessions without manual activation.
 | Provider | An LLM API backend (OpenRouter, OpenAI, etc.) via `ProviderSpec` |
 | Sandbox | `WorkspaceSandbox` enforcing filesystem boundaries per agent |
 | Command Filter | 6-layer deny-list + optional allowlist for shell command security |
-| Approval Gate | Human-in-the-loop for protected actions (external API, git push, file delete) |
+| Approval Gate | Human-in-the-loop for protected actions (external API, git push, file delete, SSH connect, tunnel start) |
 | Worktree | Git worktree per agent for isolated filesystem access |
 | Free-First | Default routing uses $0 models via OpenRouter; premium only if admin configures |
 | Spending Tracker | Daily API cost cap enforced across all providers |
+| SSH Tool | Remote shell execution via `asyncssh` with host allowlist and approval gate |
+| Tunnel Manager | Expose local ports via cloudflared/serveo/localhost.run with TTL auto-expiry |
+| Knowledge Base | RAG tool for importing documents, chunking, and semantic query via embeddings |
+| Vision Tool | Image analysis using LLM vision APIs with Pillow compression |
 
 ---
 
@@ -160,7 +164,7 @@ agent42/
 ├── providers/              # LLM provider registry
 │   └── registry.py         # ProviderSpec, ModelSpec, spending tracker, 6 providers
 │
-├── tools/                  # 38+ tool implementations
+├── tools/                  # 42+ tool implementations
 │   ├── base.py             # Tool ABC: name, description, parameters, execute()
 │   ├── registry.py         # ToolRegistry with rate limiting integration
 │   ├── shell.py            # Shell command execution (sandboxed)
@@ -190,23 +194,32 @@ agent42/
 │   ├── template_tool.py    # Template rendering
 │   ├── persona_tool.py     # Persona application
 │   ├── outline_tool.py     # Content outline generation
-│   ├── cron.py             # Scheduled job management
+│   ├── cron.py             # Scheduled jobs (recurring, one-time, planned sequences)
 │   ├── file_watcher.py     # File change monitoring
 │   ├── dependency_audit.py # Dependency vulnerability checking
 │   ├── subagent.py         # Sub-agent spawning
 │   ├── team_tool.py        # Team management operations
 │   ├── workflow_tool.py    # Workflow automation
-│   └── dynamic_tool.py     # Runtime tool generation
+│   ├── dynamic_tool.py     # Runtime tool generation
+│   ├── ssh_tool.py         # SSH remote shell (asyncssh, host allowlist, SFTP)
+│   ├── tunnel_tool.py      # Tunnel manager (cloudflared, serveo, localhost.run)
+│   ├── knowledge_tool.py   # Knowledge base / RAG (import, chunk, query)
+│   └── vision_tool.py      # Image analysis (Pillow compress, LLM vision API)
 │
 ├── skills/                 # Pluggable skill system
 │   ├── loader.py           # SKILL.md discovery, YAML frontmatter parsing
-│   └── builtins/           # 35 built-in skills
+│   └── builtins/           # 39 built-in skills
 │       ├── api-design/     ├── code-review/    ├── debugging/
 │       ├── deployment/     ├── documentation/  ├── git-workflow/
 │       ├── github/         ├── marketing/      ├── monitoring/
 │       ├── performance/    ├── refactoring/    ├── research/
 │       ├── security-audit/ ├── testing/        ├── tool-creator/
-│       ├── skill-creator/  ├── memory/         └── ... (35 total)
+│       ├── skill-creator/  ├── memory/
+│       ├── server-management/ # LAMP/LEMP, nginx, systemd, firewall
+│       ├── wordpress/      # WP-CLI, wp-config, themes, plugins, multisite
+│       ├── docker-deploy/  # Dockerfile, docker-compose, registry workflows
+│       ├── cms-deploy/     # Ghost, Strapi, general CMS patterns
+│       └── ... (39 total)
 │
 ├── memory/                 # Persistence and semantic search
 │   ├── store.py            # MEMORY.md + HISTORY.md two-layer pattern
@@ -233,7 +246,7 @@ agent42/
 │   ├── install-server.sh   # Full server setup (nginx, SSL, systemd, firewall)
 │   └── nginx-agent42.conf  # Reverse proxy with rate limiting + security headers
 │
-├── tests/                  # Test suite (24 files)
+├── tests/                  # Test suite (28 files)
 │   ├── conftest.py         # Shared fixtures (sandbox, tool_registry, mock_tool)
 │   └── test_*.py           # Per-module test files
 │
@@ -392,7 +405,32 @@ per task type via `AGENT42_{TYPE}_MODEL` env vars. **Never hardcode premium mode
 | `QDRANT_URL` | Qdrant for vector semantic search | *(disabled)* |
 | `QDRANT_ENABLED` | Enable Qdrant (auto if URL set) | `false` |
 
-See `.env.example` for the complete list of 70+ configuration variables.
+### SSH & Tunnel Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `SSH_ENABLED` | Enable SSH remote shell tool | `false` |
+| `SSH_ALLOWED_HOSTS` | Comma-separated host patterns | *(empty — all blocked)* |
+| `SSH_DEFAULT_KEY_PATH` | Default private key path | *(none)* |
+| `SSH_MAX_UPLOAD_MB` | Max SFTP upload size | `50` |
+| `SSH_COMMAND_TIMEOUT` | Per-command timeout (seconds) | `120` |
+| `TUNNEL_ENABLED` | Enable tunnel manager tool | `false` |
+| `TUNNEL_PROVIDER` | auto, cloudflared, serveo, localhost.run | `auto` |
+| `TUNNEL_ALLOWED_PORTS` | Comma-separated allowed ports | *(empty — all allowed)* |
+| `TUNNEL_TTL_MINUTES` | Auto-shutdown TTL | `60` |
+
+### Knowledge & Vision Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `KNOWLEDGE_DIR` | Document storage directory | `.agent42/knowledge` |
+| `KNOWLEDGE_CHUNK_SIZE` | Chunk size in tokens | `500` |
+| `KNOWLEDGE_CHUNK_OVERLAP` | Overlap between chunks | `50` |
+| `KNOWLEDGE_MAX_RESULTS` | Max results per query | `10` |
+| `VISION_MAX_IMAGE_MB` | Max image file size | `10` |
+| `VISION_MODEL` | Override model for vision tasks | *(auto-detect)* |
+
+See `.env.example` for the complete list of 80+ configuration variables.
 
 ---
 

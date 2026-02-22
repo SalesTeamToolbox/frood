@@ -25,6 +25,8 @@ class ProtectedAction(str, Enum):
     GIT_PUSH = "git_push"
     FILE_DELETE = "file_delete"
     EXTERNAL_API = "external_api"
+    SSH_CONNECT = "ssh_connect"
+    TUNNEL_START = "tunnel_start"
 
 
 @dataclass
