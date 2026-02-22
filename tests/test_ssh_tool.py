@@ -1,11 +1,10 @@
 """Tests for SSH remote shell tool."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.approval_gate import ApprovalGate, ProtectedAction
+from core.approval_gate import ApprovalGate
 from core.command_filter import CommandFilter
 from core.sandbox import WorkspaceSandbox
 from tools.ssh_tool import SSHTool, _sanitize_output
@@ -103,8 +102,9 @@ class TestSSHTool:
     async def test_execute_command_filter_blocks(self, ssh_tool):
         """Dangerous commands should be blocked even for remote execution."""
         # First simulate a connection
-        from tools.ssh_tool import SSHConnection
         import time
+
+        from tools.ssh_tool import SSHConnection
 
         mock_conn = MagicMock()
         ssh_tool._connections["example.com:22"] = SSHConnection(
@@ -125,8 +125,9 @@ class TestSSHTool:
     @pytest.mark.asyncio
     async def test_execute_command_success(self, ssh_tool):
         """Test successful command execution."""
-        from tools.ssh_tool import SSHConnection
         import time
+
+        from tools.ssh_tool import SSHConnection
 
         mock_conn = MagicMock()
         mock_result = MagicMock()
@@ -155,8 +156,9 @@ class TestSSHTool:
 
     @pytest.mark.asyncio
     async def test_disconnect(self, ssh_tool):
-        from tools.ssh_tool import SSHConnection
         import time
+
+        from tools.ssh_tool import SSHConnection
 
         mock_conn = MagicMock()
         ssh_tool._connections["example.com:22"] = SSHConnection(
@@ -187,8 +189,9 @@ class TestSSHTool:
 
     @pytest.mark.asyncio
     async def test_list_connections_with_active(self, ssh_tool):
-        from tools.ssh_tool import SSHConnection
         import time
+
+        from tools.ssh_tool import SSHConnection
 
         mock_conn = MagicMock()
         ssh_tool._connections["example.com:22"] = SSHConnection(
@@ -245,8 +248,9 @@ class TestSanitizeOutput:
 
     @pytest.mark.asyncio
     async def test_cleanup(self, ssh_tool):
-        from tools.ssh_tool import SSHConnection
         import time
+
+        from tools.ssh_tool import SSHConnection
 
         mock_conn = MagicMock()
         ssh_tool._connections["host1:22"] = SSHConnection(

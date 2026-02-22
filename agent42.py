@@ -75,6 +75,7 @@ from tools.git_tool import GitTool
 from tools.grep_tool import GrepTool
 from tools.http_client import HttpClientTool
 from tools.image_gen import ImageGenTool
+from tools.knowledge_tool import KnowledgeTool
 from tools.linter_tool import LinterTool
 from tools.mcp_client import MCPManager
 from tools.outline_tool import OutlineTool
@@ -86,18 +87,17 @@ from tools.repo_map import RepoMapTool
 from tools.scoring_tool import ScoringTool
 from tools.security_analyzer import SecurityAnalyzerTool
 from tools.shell import ShellTool
+from tools.ssh_tool import SSHTool
 from tools.subagent import SubagentTool
 from tools.summarizer_tool import SummarizerTool
 from tools.team_tool import TeamTool
 from tools.template_tool import TemplateTool
 from tools.test_runner import TestRunnerTool
+from tools.tunnel_tool import TunnelTool
 from tools.video_gen import VideoGenTool
+from tools.vision_tool import VisionTool
 from tools.web_search import WebFetchTool, WebSearchTool
 from tools.workflow_tool import WorkflowTool
-from tools.ssh_tool import SSHTool
-from tools.tunnel_tool import TunnelTool
-from tools.knowledge_tool import KnowledgeTool
-from tools.vision_tool import VisionTool
 
 # -- Logging -------------------------------------------------------------------
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
