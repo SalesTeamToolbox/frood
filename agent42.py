@@ -131,7 +131,6 @@ class Agent42:
             self.task_queue,
             log_path=settings.approval_log_path,
         )
-        self._semaphore = asyncio.Semaphore(self.max_agents)
         self._shutdown_event = asyncio.Event()
 
         # Phase 1: Security
