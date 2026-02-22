@@ -1,7 +1,10 @@
 """
-Task queue with persistent JSON backing and file-watch hot-reload.
+Task queue with priority ordering and pluggable persistence.
 
 Tasks flow through states:  pending -> running -> review -> done | failed
+
+Supports optional Redis backend for faster incremental persistence and
+pub/sub events.  Falls back to JSON file when Redis is not configured.
 """
 
 import asyncio
@@ -12,9 +15,12 @@ import uuid
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, TYPE_CHECKING
 
 import aiofiles
+
+if TYPE_CHECKING:
+    from core.queue_backend import QueueBackend
 
 logger = logging.getLogger("agent42.task_queue")
 
@@ -139,19 +145,40 @@ class Task:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 
-class TaskQueue:
-    """Async task queue backed by a JSON file."""
+@dataclass(order=True)
+class _PriorityEntry:
+    """Wrapper for asyncio.PriorityQueue ordering.
 
-    def __init__(self, tasks_json_path: str = "tasks.json"):
+    PriorityQueue pops the *smallest* item first.
+    We negate priority so urgent (2) sorts before normal (0).
+    Sequence number preserves FIFO order within the same priority level.
+    """
+    sort_key: tuple = field(compare=True)    # (-priority, sequence)
+    task: Task = field(compare=False)
+
+
+class TaskQueue:
+    """Async task queue with priority ordering and pluggable persistence."""
+
+    def __init__(self, tasks_json_path: str = "tasks.json",
+                 backend: "QueueBackend | None" = None):
         self._tasks: dict[str, Task] = {}
-        self._queue: asyncio.Queue[Task] = asyncio.Queue()
+        self._queue: asyncio.PriorityQueue[_PriorityEntry] = asyncio.PriorityQueue()
+        self._seq: int = 0
         self._json_path = Path(tasks_json_path)
         self._callbacks: list[Callable[[Task], Awaitable[None]]] = []
         self._last_mtime: float = 0.0
+        self._backend = backend
 
     def on_update(self, callback: Callable[[Task], Awaitable[None]]):
         """Register a callback to fire on every task state change."""
         self._callbacks.append(callback)
+
+    def _enqueue(self, task: Task):
+        """Put a task into the priority queue with correct ordering."""
+        self._seq += 1
+        entry = _PriorityEntry(sort_key=(-task.priority, self._seq), task=task)
+        self._queue.put_nowait(entry)
 
     async def _notify(self, task: Task):
         task.updated_at = time.time()
@@ -164,18 +191,19 @@ class TaskQueue:
     async def add(self, task: Task) -> Task:
         """Add a task to the queue."""
         self._tasks[task.id] = task
-        await self._queue.put(task)
+        self._enqueue(task)
         await self._notify(task)
-        await self._persist()
+        await self._persist(task)
         logger.info(f"Task added: {task.id} — {task.title}")
         return task
 
     async def next(self) -> Task:
-        """Wait for and return the next pending task."""
-        task = await self._queue.get()
+        """Wait for and return the next pending task (highest priority first)."""
+        entry = await self._queue.get()
+        task = entry.task
         task.status = TaskStatus.RUNNING
         await self._notify(task)
-        await self._persist()
+        await self._persist(task)
         return task
 
     async def complete(self, task_id: str, result: str = ""):
@@ -186,7 +214,7 @@ class TaskQueue:
         task.status = TaskStatus.REVIEW
         task.result = result
         await self._notify(task)
-        await self._persist()
+        await self._persist(task)
 
     async def fail(self, task_id: str, error: str):
         """Mark a task as failed."""
@@ -196,7 +224,7 @@ class TaskQueue:
         task.status = TaskStatus.FAILED
         task.error = error
         await self._notify(task)
-        await self._persist()
+        await self._persist(task)
 
     async def approve(self, task_id: str):
         """Approve a reviewed task — marks it done."""
@@ -205,7 +233,7 @@ class TaskQueue:
             return
         task.status = TaskStatus.DONE
         await self._notify(task)
-        await self._persist()
+        await self._persist(task)
 
     async def cancel(self, task_id: str):
         """Cancel a pending or running task."""
@@ -216,7 +244,7 @@ class TaskQueue:
             task.status = TaskStatus.FAILED
             task.error = "Cancelled by user"
             await self._notify(task)
-            await self._persist()
+            await self._persist(task)
             logger.info(f"Task cancelled: {task_id}")
 
     async def retry(self, task_id: str):
@@ -233,9 +261,9 @@ class TaskQueue:
             task.error = ""
             task.result = ""
             task.iterations = 0
-            await self._queue.put(task)
+            self._enqueue(task)
             await self._notify(task)
-            await self._persist()
+            await self._persist(task)
             logger.info(f"Task retried: {task_id} (attempt {task.retry_count}/{task.max_retries})")
 
     def get(self, task_id: str) -> Task | None:
@@ -269,10 +297,22 @@ class TaskQueue:
         task.status = TaskStatus(new_status)
         task.position = position
         await self._notify(task)
-        await self._persist()
+        await self._persist(task)
 
-    async def _persist(self):
-        """Write current state to JSON file."""
+    async def _persist(self, task: Task | None = None):
+        """Persist task state.
+
+        With a backend: incremental save of the specific task.
+        Without a backend: full JSON file write (original behavior).
+        """
+        if self._backend:
+            if task:
+                await self._backend.save_task(task.to_dict())
+            else:
+                for t in self._tasks.values():
+                    await self._backend.save_task(t.to_dict())
+            return
+
         data = [t.to_dict() for t in self._tasks.values()]
         try:
             async with aiofiles.open(self._json_path, "w") as f:
@@ -281,38 +321,53 @@ class TaskQueue:
             logger.error(f"Failed to persist tasks: {e}")
 
     async def load_from_file(self):
-        """Load tasks from JSON file if it exists.
+        """Load tasks from storage (backend if available, else JSON file).
 
         Tasks that were RUNNING when persisted are reset to PENDING so they
         get re-dispatched on restart.
         """
-        if not self._json_path.exists():
-            return
+        data: list = []
 
-        try:
-            async with aiofiles.open(self._json_path, "r") as f:
-                raw = await f.read()
+        if self._backend:
+            await self._backend.start()
+            data = await self._backend.load_all()
+            if data:
+                logger.info(f"Loaded {len(data)} tasks from backend")
 
-            data = json.loads(raw)
-            queued_ids: set[str] = set()
-            for item in data:
-                task = Task.from_dict(item)
-                # Reset interrupted RUNNING tasks back to PENDING for retry
-                if task.status == TaskStatus.RUNNING:
-                    task.status = TaskStatus.PENDING
-                    logger.info(f"Reset interrupted task {task.id} to pending")
-                self._tasks[task.id] = task
-                if task.status == TaskStatus.PENDING and task.id not in queued_ids:
-                    await self._queue.put(task)
-                    queued_ids.add(task.id)
+        if not data:
+            if not self._json_path.exists():
+                return
+            try:
+                async with aiofiles.open(self._json_path, "r") as f:
+                    raw = await f.read()
+                data = json.loads(raw)
+                logger.info(f"Loaded {len(data)} tasks from {self._json_path}")
+            except (json.JSONDecodeError, OSError) as e:
+                logger.error(f"Failed to load tasks file: {e}")
+                return
 
-            logger.info(f"Loaded {len(data)} tasks from {self._json_path}")
+        queued_ids: set[str] = set()
+        for item in data:
+            task = Task.from_dict(item)
+            if task.status == TaskStatus.RUNNING:
+                task.status = TaskStatus.PENDING
+                logger.info(f"Reset interrupted task {task.id} to pending")
+            self._tasks[task.id] = task
+            if task.status == TaskStatus.PENDING and task.id not in queued_ids:
+                self._enqueue(task)
+                queued_ids.add(task.id)
+
+        if not self._backend and self._json_path.exists():
             self._last_mtime = self._json_path.stat().st_mtime
-        except (json.JSONDecodeError, OSError) as e:
-            logger.error(f"Failed to load tasks file: {e}")
 
     async def watch_file(self, interval: float = 30.0):
-        """Poll the tasks JSON file for external changes."""
+        """Poll the tasks JSON file for external changes.
+
+        Skipped when using a Redis backend (Redis uses pub/sub instead).
+        """
+        if self._backend:
+            logger.info("File watcher disabled — using queue backend")
+            return
         while True:
             await asyncio.sleep(interval)
             try:

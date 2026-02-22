@@ -128,8 +128,19 @@ class Agent42:
         self.headless = headless
         self.max_agents = max_agents or settings.max_concurrent_agents
 
-        # Core infrastructure
-        self.task_queue = TaskQueue(tasks_json_path=settings.tasks_json_path)
+        # Core infrastructure — optional Redis-backed queue
+        queue_backend = None
+        if settings.redis_url:
+            from core.queue_backend import RedisQueueBackend
+            queue_backend = RedisQueueBackend(
+                redis_url=settings.redis_url,
+                redis_password=settings.redis_password,
+                fallback_json_path=settings.tasks_json_path,
+            )
+        self.task_queue = TaskQueue(
+            tasks_json_path=settings.tasks_json_path,
+            backend=queue_backend,
+        )
         self.ws_manager = WebSocketManager()
         self.worktree_manager = WorktreeManager(str(self.repo_path)) if self.has_repo else None
         self._active_count = 0
