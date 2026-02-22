@@ -1,16 +1,17 @@
 """Tests for dynamic tool creation."""
 
 import json
+
 import pytest
 
 from tools.base import ToolResult
-from tools.registry import ToolRegistry
 from tools.dynamic_tool import (
-    DynamicTool,
-    CreateToolTool,
     DYNAMIC_TOOL_PREFIX,
     MAX_DYNAMIC_TOOLS,
+    CreateToolTool,
+    DynamicTool,
 )
+from tools.registry import ToolRegistry
 
 
 class TestDynamicTool:
@@ -20,14 +21,17 @@ class TestDynamicTool:
         return DynamicTool(
             tool_name=name,
             tool_description="A test tool",
-            param_schema=kwargs.get("param_schema", {
-                "type": "object",
-                "properties": {
-                    "input": {"type": "string"},
+            param_schema=kwargs.get(
+                "param_schema",
+                {
+                    "type": "object",
+                    "properties": {
+                        "input": {"type": "string"},
+                    },
                 },
-            }),
+            ),
             code=code,
-            workspace_path="/tmp",
+            workspace_path="/tmp",  # nosec B108
         )
 
     def test_name_prefix(self):
@@ -47,7 +51,7 @@ class TestDynamicTool:
     @pytest.mark.asyncio
     async def test_execute_simple(self):
         tool = self._make_tool(
-            'def run(**kwargs):\n    return f"Hello {kwargs.get(\'input\', \'world\')}"'
+            "def run(**kwargs):\n    return f\"Hello {kwargs.get('input', 'world')}\""
         )
         result = await tool.execute(input="Agent42")
         assert result.success is True
@@ -55,9 +59,7 @@ class TestDynamicTool:
 
     @pytest.mark.asyncio
     async def test_execute_no_args(self):
-        tool = self._make_tool(
-            "def run(**kwargs):\n    return 'no args needed'"
-        )
+        tool = self._make_tool("def run(**kwargs):\n    return 'no args needed'")
         result = await tool.execute()
         assert result.success is True
         assert "no args needed" in result.output
@@ -74,17 +76,13 @@ class TestDynamicTool:
 
     @pytest.mark.asyncio
     async def test_execute_bad_code(self):
-        tool = self._make_tool(
-            "def run(**kwargs):\n    raise ValueError('intentional')"
-        )
+        tool = self._make_tool("def run(**kwargs):\n    raise ValueError('intentional')")
         result = await tool.execute()
         assert result.success is False
 
     @pytest.mark.asyncio
     async def test_execute_syntax_error(self):
-        tool = self._make_tool(
-            "def run(**kwargs:\n    return 'bad syntax'"
-        )
+        tool = self._make_tool("def run(**kwargs:\n    return 'bad syntax'")
         result = await tool.execute()
         assert result.success is False
 
@@ -94,7 +92,7 @@ class TestCreateToolTool:
 
     def setup_method(self):
         self.registry = ToolRegistry()
-        self.creator = CreateToolTool(self.registry, workspace_path="/tmp")
+        self.creator = CreateToolTool(self.registry, workspace_path="/tmp")  # nosec B108
         self.registry.register(self.creator)
 
     @pytest.mark.asyncio
@@ -217,12 +215,19 @@ class TestCreateToolTool:
 
         class FakeBuiltin(Tool):
             @property
-            def name(self): return "shell"
+            def name(self):
+                return "shell"
+
             @property
-            def description(self): return "Fake"
+            def description(self):
+                return "Fake"
+
             @property
-            def parameters(self): return {"type": "object", "properties": {}}
-            async def execute(self, **kw): return ToolResult(output="ok")
+            def parameters(self):
+                return {"type": "object", "properties": {}}
+
+            async def execute(self, **kw):
+                return ToolResult(output="ok")
 
         self.registry.register(FakeBuiltin())
 

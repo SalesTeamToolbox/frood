@@ -17,20 +17,22 @@ logger = logging.getLogger("agent42.channels")
 @dataclass
 class InboundMessage:
     """Normalized incoming message from any channel."""
-    channel_type: str         # "discord", "slack", "telegram", "email", etc.
-    channel_id: str           # Server/channel/chat identifier
-    sender_id: str            # User identifier on the platform
-    sender_name: str          # Display name
-    content: str              # Message text
+
+    channel_type: str  # "discord", "slack", "telegram", "email", etc.
+    channel_id: str  # Server/channel/chat identifier
+    sender_id: str  # User identifier on the platform
+    sender_name: str  # Display name
+    content: str  # Message text
     timestamp: float = field(default_factory=time.time)
-    reply_to: str = ""        # Message ID being replied to (if applicable)
+    reply_to: str = ""  # Message ID being replied to (if applicable)
     attachments: list[str] = field(default_factory=list)  # URLs or file paths
-    metadata: dict = field(default_factory=dict)           # Platform-specific data
+    metadata: dict = field(default_factory=dict)  # Platform-specific data
 
 
 @dataclass
 class OutboundMessage:
     """Normalized outgoing message to any channel."""
+
     channel_type: str
     channel_id: str
     content: str

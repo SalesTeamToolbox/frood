@@ -9,7 +9,6 @@ import csv
 import io
 import json
 import logging
-import math
 import statistics
 from collections import Counter, defaultdict
 
@@ -212,7 +211,7 @@ class DataTool(Tool):
         unique = len(set(values))
 
         output = f"# Statistics: {name}.{column}\n\n"
-        output += f"| Metric | Value |\n|--------|-------|\n"
+        output += "| Metric | Value |\n|--------|-------|\n"
         output += f"| Total rows | {len(values)} |\n"
         output += f"| Non-empty | {len(non_empty)} |\n"
         output += f"| Unique values | {unique} |\n"
@@ -301,10 +300,14 @@ class DataTool(Tool):
             else:
                 result = len(vals)
 
-            result_rows.append({
-                group_by: key,
-                f"{agg}({value_column or '*'})": f"{result:.4g}" if isinstance(result, float) else str(result),
-            })
+            result_rows.append(
+                {
+                    group_by: key,
+                    f"{agg}({value_column or '*'})": f"{result:.4g}"
+                    if isinstance(result, float)
+                    else str(result),
+                }
+            )
 
         return ToolResult(output=self._rows_to_table(result_rows, f"{name} grouped", len(rows)))
 
@@ -361,17 +364,14 @@ class DataTool(Tool):
                 cell_num = val_num = 0
                 numeric = False
 
-            if op == "=" and cell == val:
-                result.append(row)
-            elif op == "!=" and cell != val:
-                result.append(row)
-            elif op == ">" and numeric and cell_num > val_num:
-                result.append(row)
-            elif op == "<" and numeric and cell_num < val_num:
-                result.append(row)
-            elif op == ">=" and numeric and cell_num >= val_num:
-                result.append(row)
-            elif op == "<=" and numeric and cell_num <= val_num:
+            if (
+                (op == "=" and cell == val)
+                or (op == "!=" and cell != val)
+                or (op == ">" and numeric and cell_num > val_num)
+                or (op == "<" and numeric and cell_num < val_num)
+                or (op == ">=" and numeric and cell_num >= val_num)
+                or (op == "<=" and numeric and cell_num <= val_num)
+            ):
                 result.append(row)
 
         return result

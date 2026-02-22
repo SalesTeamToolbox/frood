@@ -66,9 +66,7 @@ class WorkspaceSandbox:
             try:
                 link_target.relative_to(self.allowed_dir)
             except ValueError:
-                raise SandboxViolation(
-                    f"{path} (symlink to {link_target})", str(self.allowed_dir)
-                )
+                raise SandboxViolation(f"{path} (symlink to {link_target})", str(self.allowed_dir))
 
         return resolved
 

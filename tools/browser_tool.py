@@ -8,8 +8,6 @@ Requires: pip install playwright && playwright install chromium
 Security: Gateway token required for browser control (OpenClaw CVE-2026-25253 fix).
 """
 
-import asyncio
-import base64
 import logging
 import os
 import re
@@ -30,6 +28,7 @@ class BrowserTool(Tool):
         self._gateway_token = ""
         try:
             from core.config import settings
+
             self._gateway_token = settings.browser_gateway_token
         except ImportError:
             pass
@@ -53,8 +52,17 @@ class BrowserTool(Tool):
                 "action": {
                     "type": "string",
                     "enum": [
-                        "navigate", "click", "fill", "text", "screenshot",
-                        "html", "evaluate", "wait", "back", "forward", "close",
+                        "navigate",
+                        "click",
+                        "fill",
+                        "text",
+                        "screenshot",
+                        "html",
+                        "evaluate",
+                        "wait",
+                        "back",
+                        "forward",
+                        "close",
                     ],
                     "description": "Browser action to perform",
                 },
@@ -165,6 +173,7 @@ class BrowserTool(Tool):
         # URL policy check (SSRF + allowlist/denylist + per-agent limits)
         try:
             from tools.web_search import _url_policy
+
             allowed, reason = _url_policy.check(url, agent_id=kwargs.get("agent_id", "default"))
             if not allowed:
                 return ToolResult(error=f"Blocked: {reason}", success=False)
@@ -209,6 +218,7 @@ class BrowserTool(Tool):
         os.makedirs(screenshot_dir, exist_ok=True)
 
         import time
+
         filename = f"screenshot_{int(time.time())}.png"
         path = os.path.join(screenshot_dir, filename)
         await self._page.screenshot(path=path, full_page=False)
@@ -232,18 +242,18 @@ class BrowserTool(Tool):
 
     # Patterns that indicate data exfiltration or dangerous JS operations
     _BLOCKED_JS_PATTERNS = [
-        re.compile(r'\bfetch\s*\(', re.IGNORECASE),
-        re.compile(r'\bXMLHttpRequest\b', re.IGNORECASE),
-        re.compile(r'\bnew\s+WebSocket\b', re.IGNORECASE),
-        re.compile(r'\bnavigator\.sendBeacon\b', re.IGNORECASE),
-        re.compile(r'\bdocument\.cookie\b', re.IGNORECASE),
-        re.compile(r'\blocalStorage\b', re.IGNORECASE),
-        re.compile(r'\bsessionStorage\b', re.IGNORECASE),
-        re.compile(r'\bindexedDB\b', re.IGNORECASE),
-        re.compile(r'\beval\s*\(', re.IGNORECASE),
-        re.compile(r'\bFunction\s*\(', re.IGNORECASE),
-        re.compile(r'\bimportScripts\b', re.IGNORECASE),
-        re.compile(r'\bwindow\.open\b', re.IGNORECASE),
+        re.compile(r"\bfetch\s*\(", re.IGNORECASE),
+        re.compile(r"\bXMLHttpRequest\b", re.IGNORECASE),
+        re.compile(r"\bnew\s+WebSocket\b", re.IGNORECASE),
+        re.compile(r"\bnavigator\.sendBeacon\b", re.IGNORECASE),
+        re.compile(r"\bdocument\.cookie\b", re.IGNORECASE),
+        re.compile(r"\blocalStorage\b", re.IGNORECASE),
+        re.compile(r"\bsessionStorage\b", re.IGNORECASE),
+        re.compile(r"\bindexedDB\b", re.IGNORECASE),
+        re.compile(r"\beval\s*\(", re.IGNORECASE),
+        re.compile(r"\bFunction\s*\(", re.IGNORECASE),
+        re.compile(r"\bimportScripts\b", re.IGNORECASE),
+        re.compile(r"\bwindow\.open\b", re.IGNORECASE),
     ]
 
     async def _evaluate(self, js: str) -> ToolResult:
@@ -255,7 +265,7 @@ class BrowserTool(Tool):
             if pattern.search(js):
                 return ToolResult(
                     error=f"Blocked: JavaScript contains disallowed pattern ({pattern.pattern}). "
-                          "Use specific browser actions (text, html, click, fill) instead.",
+                    "Use specific browser actions (text, html, click, fill) instead.",
                     success=False,
                 )
 

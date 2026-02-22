@@ -7,7 +7,7 @@ and dispatches outbound responses back to the originating channel.
 
 import asyncio
 import logging
-from typing import Callable, Awaitable
+from collections.abc import Awaitable, Callable
 
 from channels.base import BaseChannel, InboundMessage, OutboundMessage
 
@@ -19,7 +19,9 @@ class ChannelManager:
 
     def __init__(self):
         self._channels: dict[str, BaseChannel] = {}
-        self._message_handler: Callable[[InboundMessage], Awaitable[OutboundMessage | None]] | None = None
+        self._message_handler: (
+            Callable[[InboundMessage], Awaitable[OutboundMessage | None]] | None
+        ) = None
         self._running = False
 
     def register(self, channel: BaseChannel):
@@ -75,7 +77,7 @@ class ChannelManager:
                     response = await self._message_handler(message)
                     if response:
                         await channel.send(response)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 logger.error(

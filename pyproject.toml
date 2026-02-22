@@ -1,0 +1,100 @@
+[project]
+name = "agent42"
+version = "0.1.0"
+requires-python = ">=3.11"
+description = "Multi-agent AI orchestrator platform"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = [".", "agents", "core", "providers", "tools", "skills", "memory", "dashboard", "channels"]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort (import ordering)
+    "N",     # pep8-naming
+    "UP",    # pyupgrade (modern Python syntax)
+    "B",     # flake8-bugbear (common bugs)
+    "S",     # flake8-bandit (security)
+    "A",     # flake8-builtins (shadowed builtins)
+    "T20",   # flake8-print (catch debug prints)
+    "SIM",   # flake8-simplify
+    "RUF",   # ruff-specific rules
+]
+ignore = [
+    # --- Pycodestyle ---
+    "E402",  # module-import-not-at-top: conditional imports for graceful degradation
+    "E501",  # line-too-long: handled by formatter
+    "E741",  # ambiguous-variable-name: common short vars (l, I, O) used intentionally
+    # --- Bandit (security) ---
+    "S101",  # assert: used extensively in tests and validation
+    "S105",  # hardcoded-password-string: field names and defaults, not real passwords
+    "S108",  # /tmp usage: tests use tmp_path but some tools reference /tmp
+    "S110",  # try-except-pass: graceful degradation for optional backends
+    "S112",  # try-except-continue: graceful degradation in loops
+    "S310",  # suspicious-url-open: intentional URL handling in tools
+    "S311",  # non-cryptographic random: not used for security purposes
+    "S324",  # hashlib-insecure: used for content hashing, not security
+    "S603",  # subprocess call: shell tool is sandboxed via CommandFilter
+    "S605",  # start-process-with-shell: shell tool is sandboxed via CommandFilter
+    "S607",  # partial executable path: CommandFilter validates commands
+    # --- Bugbear ---
+    "B007",  # unused-loop-control-variable: common pattern (for _ in range)
+    "B008",  # function-call-in-default-arg: FastAPI Depends pattern
+    "B027",  # empty-method-without-abstract-decorator: intentional base class stubs
+    "B904",  # raise-without-from-inside-except: acceptable in exception handlers
+    "B905",  # zip-without-explicit-strict: existing code pattern
+    # --- Naming ---
+    "N802",  # invalid-function-name: some methods follow env var naming
+    "N806",  # non-lowercase-variable-in-function: intentional constants in functions
+    "N818",  # error-suffix-on-exception-name: existing naming convention
+    # --- Builtins ---
+    "A002",  # builtin-argument-shadowing: common param names (input, type, format)
+    # --- Print ---
+    "T201",  # print: used for startup banner, CLI output, and deploy scripts
+    # --- Simplify ---
+    "SIM102", # collapsible-if: explicit nesting preferred for readability
+    "SIM105", # suppressible-exception: explicit try/except preferred for clarity
+    "SIM113", # enumerate-for-loop: manual index preferred in some contexts
+    "SIM114", # if-with-same-arms: intentional duplicate branches for clarity
+    "SIM117", # multiple-with-statements: separate with-statements preferred
+    "SIM118", # in-dict-keys: explicit .keys() preferred for clarity
+    # --- Ruff ---
+    "RUF001", # ambiguous-unicode-character: false positive on intentional chars
+    "RUF005", # collection-literal-concatenation: existing pattern
+    "RUF006", # asyncio-dangling-task: tasks stored in instance vars for lifecycle
+    "RUF012", # mutable-class-default: used intentionally in dataclasses
+    "RUF013", # implicit-optional: existing code pattern (None defaults)
+    "RUF015", # unnecessary-iterable-allocation-for-first-element: clarity preferred
+    "RUF059", # unused-unpacked-variable: common pattern (_, value = ...)
+    # --- Pyupgrade ---
+    "UP042", # replace-str-enum: existing StrEnum pattern
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S106", "S108", "T20", "E741", "F841", "RUF059", "B007"]
+"agent42.py" = ["T20"]  # Main entry point uses print for startup banner
+"core/config.py" = ["N802"]
+"dashboard/server.py" = ["T20"]
+"deploy/*" = ["T20"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "security: security-related tests",
+    "integration: tests requiring external services (Redis, Qdrant, etc.)",
+]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true

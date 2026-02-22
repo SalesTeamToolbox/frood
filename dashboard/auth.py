@@ -13,10 +13,10 @@ import hmac
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
@@ -83,9 +83,7 @@ def check_rate_limit(client_ip: str) -> bool:
         _login_attempts[client_ip] = []
 
     # Prune old attempts
-    _login_attempts[client_ip] = [
-        t for t in _login_attempts[client_ip] if now - t < window
-    ]
+    _login_attempts[client_ip] = [t for t in _login_attempts[client_ip] if now - t < window]
 
     if len(_login_attempts[client_ip]) >= max_attempts:
         return False
@@ -96,7 +94,7 @@ def check_rate_limit(client_ip: str) -> bool:
 
 def create_token(username: str) -> str:
     """Create a JWT access token."""
-    expire = datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS)
+    expire = datetime.now(UTC) + timedelta(hours=TOKEN_EXPIRE_HOURS)
     return jwt.encode(
         {"sub": username, "exp": expire},
         settings.jwt_secret,

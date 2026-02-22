@@ -30,3 +30,21 @@ Thumbs.db
 tasks.json
 /tmp/agent42/
 .agent42/
+
+# Linting & formatting
+.ruff_cache/
+.mypy_cache/
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Security scanning
+bandit-report.json
+
+# Docker
+docker-compose.override.yml
+
+# Editor
+*.code-workspace

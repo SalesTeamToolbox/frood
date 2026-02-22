@@ -10,6 +10,7 @@ import asyncio
 import logging
 import tempfile
 from pathlib import Path
+
 from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.diff")
@@ -92,7 +93,10 @@ class DiffTool(Tool):
             return ToolResult(error="Both file_a and file_b required for create", success=False)
 
         proc = await asyncio.create_subprocess_exec(
-            "diff", "-u", file_a, file_b,
+            "diff",
+            "-u",
+            file_a,
+            file_b,
             cwd=self._workspace,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -105,25 +109,25 @@ class DiffTool(Tool):
         elif proc.returncode == 1:
             return ToolResult(output=output)
         else:
-            return ToolResult(
-                error=f"diff failed: {stderr.decode()}", success=False
-            )
+            return ToolResult(error=f"diff failed: {stderr.decode()}", success=False)
 
     async def _apply_patch(self, patch: str) -> ToolResult:
         if not patch:
             return ToolResult(error="No patch content provided", success=False)
 
         # Write patch to temp file
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".patch", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False) as f:
             f.write(patch)
             patch_path = f.name
 
         try:
             # Dry run first to check if patch applies cleanly
             proc = await asyncio.create_subprocess_exec(
-                "patch", "--dry-run", "-p1", "-i", patch_path,
+                "patch",
+                "--dry-run",
+                "-p1",
+                "-i",
+                patch_path,
                 cwd=self._workspace,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -139,7 +143,10 @@ class DiffTool(Tool):
 
             # Apply for real
             proc = await asyncio.create_subprocess_exec(
-                "patch", "-p1", "-i", patch_path,
+                "patch",
+                "-p1",
+                "-i",
+                patch_path,
                 cwd=self._workspace,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -157,28 +164,32 @@ class DiffTool(Tool):
             Path(patch_path).unlink(missing_ok=True)
 
     async def _compare_strings(
-        self, content_a: str, content_b: str, label_a: str, label_b: str,
+        self,
+        content_a: str,
+        content_b: str,
+        label_a: str,
+        label_b: str,
     ) -> ToolResult:
         if not content_a and not content_b:
             return ToolResult(error="At least one content string required", success=False)
 
         # Write to temp files and diff
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".a", delete=False
-        ) as fa:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".a", delete=False) as fa:
             fa.write(content_a)
             path_a = fa.name
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".b", delete=False
-        ) as fb:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".b", delete=False) as fb:
             fb.write(content_b)
             path_b = fb.name
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                "diff", "-u", f"--label={label_a}", f"--label={label_b}",
-                path_a, path_b,
+                "diff",
+                "-u",
+                f"--label={label_a}",
+                f"--label={label_b}",
+                path_a,
+                path_b,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

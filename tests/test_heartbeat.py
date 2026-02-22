@@ -2,13 +2,11 @@
 
 import time
 
-import pytest
-
 from core.heartbeat import (
+    STALL_THRESHOLD,
     AgentHeartbeat,
     HeartbeatService,
     SystemHealth,
-    STALL_THRESHOLD,
 )
 
 

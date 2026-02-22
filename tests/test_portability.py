@@ -2,10 +2,10 @@
 
 import json
 import os
+import shutil
 import stat
 import tarfile
 import tempfile
-import shutil
 
 import pytest
 
@@ -13,10 +13,10 @@ from core.portability import (
     ARCHIVE_VERSION,
     MANIFEST_FILENAME,
     ArchiveManifest,
+    _sanitize_env_line,
     create_backup,
     create_clone,
     restore_backup,
-    _sanitize_env_line,
 )
 
 
@@ -115,7 +115,7 @@ class TestArchiveManifest:
             "created_at": "2026-02-22T00:00:00",
             "archive_type": "clone",
             "categories": ["config"],
-            "source_path": "/tmp/test",
+            "source_path": "/tmp/test",  # nosec B108
             "file_count": 5,
             "notes": "test note",
         }
@@ -158,7 +158,10 @@ class TestSanitizeEnvLine:
         assert _sanitize_env_line("JWT_SECRET=abc123\n") == "JWT_SECRET=CHANGE_ME\n"
 
     def test_redacts_hash(self):
-        assert _sanitize_env_line("DASHBOARD_PASSWORD_HASH=$2b$...\n") == "DASHBOARD_PASSWORD_HASH=CHANGE_ME\n"
+        assert (
+            _sanitize_env_line("DASHBOARD_PASSWORD_HASH=$2b$...\n")
+            == "DASHBOARD_PASSWORD_HASH=CHANGE_ME\n"
+        )
 
     def test_preserves_non_secret(self):
         assert _sanitize_env_line("MAX_CONCURRENT_AGENTS=3\n") == "MAX_CONCURRENT_AGENTS=3\n"
@@ -170,7 +173,10 @@ class TestSanitizeEnvLine:
         assert _sanitize_env_line("\n") == "\n"
 
     def test_preserves_path(self):
-        assert _sanitize_env_line("DEFAULT_REPO_PATH=/home/user/repo\n") == "DEFAULT_REPO_PATH=/home/user/repo\n"
+        assert (
+            _sanitize_env_line("DEFAULT_REPO_PATH=/home/user/repo\n")
+            == "DEFAULT_REPO_PATH=/home/user/repo\n"
+        )
 
 
 class TestBackup:
@@ -248,9 +254,7 @@ class TestBackup:
         try:
             path = create_backup(self.source, self.output, include_worktrees=True)
             with tarfile.open(path, "r:gz") as tar:
-                manifest_data = json.loads(
-                    tar.extractfile(tar.getmember(MANIFEST_FILENAME)).read()
-                )
+                manifest_data = json.loads(tar.extractfile(tar.getmember(MANIFEST_FILENAME)).read())
                 manifest = ArchiveManifest.from_dict(manifest_data)
                 assert "worktrees" in manifest.categories
                 names = tar.getnames()
@@ -262,9 +266,7 @@ class TestBackup:
     def test_backup_file_count_is_positive(self):
         path = create_backup(self.source, self.output)
         with tarfile.open(path, "r:gz") as tar:
-            manifest_data = json.loads(
-                tar.extractfile(tar.getmember(MANIFEST_FILENAME)).read()
-            )
+            manifest_data = json.loads(tar.extractfile(tar.getmember(MANIFEST_FILENAME)).read())
             manifest = ArchiveManifest.from_dict(manifest_data)
             assert manifest.file_count > 0
 
@@ -288,7 +290,9 @@ class TestRestore:
         assert os.path.exists(os.path.join(self.restore_dir, ".agent42", "memory", "MEMORY.md"))
         assert os.path.exists(os.path.join(self.restore_dir, "tasks.json"))
         assert os.path.exists(os.path.join(self.restore_dir, ".env"))
-        assert os.path.exists(os.path.join(self.restore_dir, ".agent42", "sessions", "discord_123.jsonl"))
+        assert os.path.exists(
+            os.path.join(self.restore_dir, ".agent42", "sessions", "discord_123.jsonl")
+        )
         assert manifest.archive_type == "backup"
 
     def test_restore_preserves_file_content(self):
@@ -396,9 +400,7 @@ class TestClone:
         with tarfile.open(path, "r:gz") as tar:
             names = tar.getnames()
             assert MANIFEST_FILENAME in names
-            manifest_data = json.loads(
-                tar.extractfile(tar.getmember(MANIFEST_FILENAME)).read()
-            )
+            manifest_data = json.loads(tar.extractfile(tar.getmember(MANIFEST_FILENAME)).read())
             assert manifest_data["archive_type"] == "clone"
 
     def test_clone_sanitizes_env(self):
@@ -409,9 +411,7 @@ class TestClone:
             # .env itself should NOT be in the clone
             assert ".env" not in names
 
-            template_content = tar.extractfile(
-                tar.getmember(".env.template")
-            ).read().decode()
+            template_content = tar.extractfile(tar.getmember(".env.template")).read().decode()
             assert "CHANGE_ME" in template_content
             assert "or-key-123" not in template_content
             assert "secret" not in template_content
@@ -450,17 +450,13 @@ class TestClone:
     def test_clone_excludes_skills_by_default(self):
         path = create_clone(self.source, self.output)
         with tarfile.open(path, "r:gz") as tar:
-            manifest_data = json.loads(
-                tar.extractfile(tar.getmember(MANIFEST_FILENAME)).read()
-            )
+            manifest_data = json.loads(tar.extractfile(tar.getmember(MANIFEST_FILENAME)).read())
             assert "skills" not in manifest_data["categories"]
 
     def test_clone_includes_skills_when_flagged(self):
         path = create_clone(self.source, self.output, include_skills=True)
         with tarfile.open(path, "r:gz") as tar:
-            manifest_data = json.loads(
-                tar.extractfile(tar.getmember(MANIFEST_FILENAME)).read()
-            )
+            manifest_data = json.loads(tar.extractfile(tar.getmember(MANIFEST_FILENAME)).read())
             assert "skills" in manifest_data["categories"]
             names = tar.getnames()
             assert any("skills/workspace/my-skill" in n for n in names)
@@ -468,9 +464,7 @@ class TestClone:
     def test_clone_manifest_has_notes(self):
         path = create_clone(self.source, self.output)
         with tarfile.open(path, "r:gz") as tar:
-            manifest_data = json.loads(
-                tar.extractfile(tar.getmember(MANIFEST_FILENAME)).read()
-            )
+            manifest_data = json.loads(tar.extractfile(tar.getmember(MANIFEST_FILENAME)).read())
             assert "Secrets redacted" in manifest_data["notes"]
 
 

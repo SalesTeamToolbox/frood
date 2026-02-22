@@ -92,15 +92,19 @@ class ApprovalGate:
         self._pending[key] = req
 
         logger.info(f"Approval requested: {key} — {description}")
-        self._log_event("requested", key, task_id=task_id, action=action.value,
-                        description=description, details=details or {})
+        self._log_event(
+            "requested",
+            key,
+            task_id=task_id,
+            action=action.value,
+            description=description,
+            details=details or {},
+        )
 
         try:
             await asyncio.wait_for(req._event.wait(), timeout=self.timeout)
-        except asyncio.TimeoutError:
-            logger.warning(
-                f"Approval timed out after {self.timeout}s: {key} — auto-denying"
-            )
+        except TimeoutError:
+            logger.warning(f"Approval timed out after {self.timeout}s: {key} — auto-denying")
             req.approved = False
             self._log_event("timeout", key, task_id=task_id, action=action.value)
 
@@ -115,8 +119,7 @@ class ApprovalGate:
             req.approved = True
             req._event.set()
             logger.info(f"AUDIT: Approved {key} by {user or 'unknown'}")
-            self._log_event("approved", key, task_id=task_id, action=action,
-                            user=user or "unknown")
+            self._log_event("approved", key, task_id=task_id, action=action, user=user or "unknown")
 
     def deny(self, task_id: str, action: str, user: str = ""):
         """Deny a pending request (called from dashboard)."""
@@ -126,8 +129,7 @@ class ApprovalGate:
             req.approved = False
             req._event.set()
             logger.info(f"AUDIT: Denied {key} by {user or 'unknown'}")
-            self._log_event("denied", key, task_id=task_id, action=action,
-                            user=user or "unknown")
+            self._log_event("denied", key, task_id=task_id, action=action, user=user or "unknown")
 
     def pending_requests(self) -> list[dict]:
         """List all pending approval requests for the dashboard."""

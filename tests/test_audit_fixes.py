@@ -2,15 +2,13 @@
 
 import asyncio
 import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agents.iteration_engine import IterationEngine, SIMILARITY_THRESHOLD
+from agents.iteration_engine import SIMILARITY_THRESHOLD, IterationEngine
 from core.approval_gate import ApprovalGate, ProtectedAction
-from core.task_queue import TaskQueue, Task, TaskType, TaskStatus, infer_task_type
-
+from core.task_queue import TaskQueue, TaskStatus, TaskType, infer_task_type
 
 # -- Iteration Engine: Retry + Convergence -----------------------------------
 
@@ -25,9 +23,7 @@ class TestIterationRetry:
     @pytest.mark.asyncio
     async def test_retry_succeeds_on_second_attempt(self):
         """Should retry on failure and succeed."""
-        self.router.complete = AsyncMock(
-            side_effect=[Exception("timeout"), "success output"]
-        )
+        self.router.complete = AsyncMock(side_effect=[Exception("timeout"), "success output"])
         result = await self.engine._complete_with_retry("test-model", [], retries=2)
         assert result == "success output"
         assert self.router.complete.call_count == 2
@@ -146,9 +142,7 @@ class TestApprovalTimeout:
     async def test_timeout_auto_denies(self):
         """Approval request should auto-deny after timeout."""
         gate = ApprovalGate(task_queue=MagicMock(), timeout=0.1)
-        result = await gate.request(
-            "task-1", ProtectedAction.GIT_PUSH, "Push to remote"
-        )
+        result = await gate.request("task-1", ProtectedAction.GIT_PUSH, "Push to remote")
         assert result is False
 
     @pytest.mark.asyncio
@@ -161,9 +155,7 @@ class TestApprovalTimeout:
             gate.approve("task-1", "git_push")
 
         asyncio.create_task(approve_later())
-        result = await gate.request(
-            "task-1", ProtectedAction.GIT_PUSH, "Push to remote"
-        )
+        result = await gate.request("task-1", ProtectedAction.GIT_PUSH, "Push to remote")
         assert result is True
 
     @pytest.mark.asyncio
@@ -176,9 +168,7 @@ class TestApprovalTimeout:
             gate.deny("task-1", "git_push")
 
         asyncio.create_task(deny_later())
-        result = await gate.request(
-            "task-1", ProtectedAction.GIT_PUSH, "Push to remote"
-        )
+        result = await gate.request("task-1", ProtectedAction.GIT_PUSH, "Push to remote")
         assert result is False
 
     @pytest.mark.asyncio
@@ -234,24 +224,28 @@ class TestTaskDeduplication:
     @pytest.mark.asyncio
     async def test_running_tasks_reset_to_pending(self):
         """Tasks that were RUNNING on disk should become PENDING on load."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             import json
-            json.dump([{
-                "id": "abc123",
-                "title": "Test",
-                "description": "Test",
-                "status": "running",
-                "task_type": "coding",
-                "created_at": 1.0,
-                "updated_at": 1.0,
-                "iterations": 0,
-                "max_iterations": 8,
-                "worktree_path": "",
-                "result": "",
-                "error": "",
-            }], f)
+
+            json.dump(
+                [
+                    {
+                        "id": "abc123",
+                        "title": "Test",
+                        "description": "Test",
+                        "status": "running",
+                        "task_type": "coding",
+                        "created_at": 1.0,
+                        "updated_at": 1.0,
+                        "iterations": 0,
+                        "max_iterations": 8,
+                        "worktree_path": "",
+                        "result": "",
+                        "error": "",
+                    }
+                ],
+                f,
+            )
             f.flush()
 
             queue = TaskQueue(tasks_json_path=f.name)
@@ -264,26 +258,28 @@ class TestTaskDeduplication:
     @pytest.mark.asyncio
     async def test_no_duplicate_enqueue(self):
         """Same pending task ID should not be queued twice."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             import json
-            json.dump([
-                {
-                    "id": "dup1",
-                    "title": "Task A",
-                    "description": "A",
-                    "status": "pending",
-                    "task_type": "coding",
-                    "created_at": 1.0,
-                    "updated_at": 1.0,
-                    "iterations": 0,
-                    "max_iterations": 8,
-                    "worktree_path": "",
-                    "result": "",
-                    "error": "",
-                },
-            ], f)
+
+            json.dump(
+                [
+                    {
+                        "id": "dup1",
+                        "title": "Task A",
+                        "description": "A",
+                        "status": "pending",
+                        "task_type": "coding",
+                        "created_at": 1.0,
+                        "updated_at": 1.0,
+                        "iterations": 0,
+                        "max_iterations": 8,
+                        "worktree_path": "",
+                        "result": "",
+                        "error": "",
+                    },
+                ],
+                f,
+            )
             f.flush()
 
             queue = TaskQueue(tasks_json_path=f.name)

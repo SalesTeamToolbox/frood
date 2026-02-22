@@ -76,9 +76,7 @@ class ConsolidationPipeline:
     def is_available(self) -> bool:
         """Whether consolidation can run (needs at minimum a router and embeddings)."""
         return (
-            self.router is not None
-            and self.embeddings is not None
-            and self.embeddings.is_available
+            self.router is not None and self.embeddings is not None and self.embeddings.is_available
         )
 
     async def summarize_messages(
@@ -126,9 +124,7 @@ class ConsolidationPipeline:
         )
 
         try:
-            summary_text = await self.router.complete(
-                model, [{"role": "user", "content": prompt}]
-            )
+            summary_text = await self.router.complete(model, [{"role": "user", "content": prompt}])
         except Exception as e:
             logger.warning(f"Consolidation: summarization failed — {e}")
             return None
@@ -136,9 +132,7 @@ class ConsolidationPipeline:
         # Extract topics from the summary
         topics = self._extract_topics(summary_text)
 
-        timestamps = [
-            msg.get("timestamp", 0.0) for msg in messages if msg.get("timestamp")
-        ]
+        timestamps = [msg.get("timestamp", 0.0) for msg in messages if msg.get("timestamp")]
 
         return ConversationSummary(
             channel_type=channel_type,
@@ -166,9 +160,7 @@ class ConsolidationPipeline:
             logger.debug("Consolidation: pipeline not available (missing router/embeddings)")
             return None
 
-        summary = await self.summarize_messages(
-            messages, channel_type, channel_id, model
-        )
+        summary = await self.summarize_messages(messages, channel_type, channel_id, model)
         if not summary:
             return None
 
@@ -238,9 +230,7 @@ class ConsolidationPipeline:
             return 0
 
         # Filter to substantive messages (skip very short ones)
-        substantive = [
-            m for m in messages if len(m.get("content", "")) > 20
-        ]
+        substantive = [m for m in messages if len(m.get("content", "")) > 20]
         if not substantive:
             return 0
 
@@ -266,9 +256,7 @@ class ConsolidationPipeline:
                 }
                 for m in substantive
             ]
-            return self.qdrant.upsert_vectors(
-                QdrantStore.CONVERSATIONS, texts, vectors, payloads
-            )
+            return self.qdrant.upsert_vectors(QdrantStore.CONVERSATIONS, texts, vectors, payloads)
 
         return 0
 

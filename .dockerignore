@@ -1,0 +1,15 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.env
+.agent42/
+node_modules/
+*.log
+.pytest_cache
+.ruff_cache
+.mypy_cache
+htmlcov
+.coverage
+bandit-report.json

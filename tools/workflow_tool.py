@@ -5,10 +5,8 @@ Inspired by OpenClaw's Lobster workflow engine. Allows defining sequences
 of steps that combine tool calls, conditions, and iterations.
 """
 
-import asyncio
 import json
 import logging
-import os
 import time
 
 from tools.base import Tool, ToolResult
@@ -110,7 +108,7 @@ class WorkflowTool(Tool):
         }
 
         step_summary = "\n".join(
-            f"  {i+1}. [{s.get('tool', '?')}] {s.get('description', '')}"
+            f"  {i + 1}. [{s.get('tool', '?')}] {s.get('description', '')}"
             for i, s in enumerate(steps)
         )
         return ToolResult(
@@ -124,7 +122,9 @@ class WorkflowTool(Tool):
         if name not in self._workflows:
             return ToolResult(error=f"Workflow '{name}' not found", success=False)
         if not self._registry:
-            return ToolResult(error="No tool registry available — cannot execute steps", success=False)
+            return ToolResult(
+                error="No tool registry available — cannot execute steps", success=False
+            )
 
         workflow = self._workflows[name]
         steps = workflow["steps"]
@@ -134,20 +134,22 @@ class WorkflowTool(Tool):
         for i, step in enumerate(steps):
             tool_name = step.get("tool", "")
             tool_args = step.get("args", {})
-            step_desc = step.get("description", f"Step {i+1}")
+            step_desc = step.get("description", f"Step {i + 1}")
             continue_on_error = step.get("continue_on_error", False)
 
-            logger.info(f"Workflow '{name}' step {i+1}/{len(steps)}: {step_desc}")
+            logger.info(f"Workflow '{name}' step {i + 1}/{len(steps)}: {step_desc}")
 
             result = await self._registry.execute(tool_name, **tool_args)
-            results.append({
-                "step": i + 1,
-                "description": step_desc,
-                "tool": tool_name,
-                "success": result.success,
-                "output": result.output[:500] if result.success else "",
-                "error": result.error[:200] if not result.success else "",
-            })
+            results.append(
+                {
+                    "step": i + 1,
+                    "description": step_desc,
+                    "tool": tool_name,
+                    "success": result.success,
+                    "output": result.output[:500] if result.success else "",
+                    "error": result.error[:200] if not result.success else "",
+                }
+            )
 
             if not result.success and not continue_on_error:
                 break
@@ -176,7 +178,9 @@ class WorkflowTool(Tool):
 
         lines = ["## Workflows\n"]
         for name, wf in self._workflows.items():
-            lines.append(f"- **{name}** — {wf['description'] or '(no description)'} ({len(wf['steps'])} steps)")
+            lines.append(
+                f"- **{name}** — {wf['description'] or '(no description)'} ({len(wf['steps'])} steps)"
+            )
         return ToolResult(output="\n".join(lines), success=True)
 
     def _show(self, name: str) -> ToolResult:
@@ -193,7 +197,7 @@ class WorkflowTool(Tool):
         ]
         for i, step in enumerate(wf["steps"]):
             cont = " (continue on error)" if step.get("continue_on_error") else ""
-            lines.append(f"  {i+1}. **{step.get('tool', '?')}**{cont}")
+            lines.append(f"  {i + 1}. **{step.get('tool', '?')}**{cont}")
             if step.get("description"):
                 lines.append(f"     {step['description']}")
             if step.get("args"):

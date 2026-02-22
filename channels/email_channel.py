@@ -12,7 +12,6 @@ import email.utils
 import imaplib
 import logging
 import smtplib
-import time
 
 from channels.base import BaseChannel, InboundMessage, OutboundMessage
 
@@ -133,18 +132,20 @@ class EmailChannel(BaseChannel):
 
                 sender = email.utils.parseaddr(msg.get("From", ""))
 
-                results.append(InboundMessage(
-                    channel_type="email",
-                    channel_id=sender[1],  # sender's email address
-                    sender_id=sender[1],
-                    sender_name=sender[0] or sender[1],
-                    content=body.strip(),
-                    metadata={
-                        "subject": msg.get("Subject", ""),
-                        "message_id": msg.get("Message-ID", ""),
-                        "date": msg.get("Date", ""),
-                    },
-                ))
+                results.append(
+                    InboundMessage(
+                        channel_type="email",
+                        channel_id=sender[1],  # sender's email address
+                        sender_id=sender[1],
+                        sender_name=sender[0] or sender[1],
+                        content=body.strip(),
+                        metadata={
+                            "subject": msg.get("Subject", ""),
+                            "message_id": msg.get("Message-ID", ""),
+                            "date": msg.get("Date", ""),
+                        },
+                    )
+                )
 
             conn.logout()
         except Exception as e:

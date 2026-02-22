@@ -14,6 +14,7 @@ logger = logging.getLogger("agent42.channels.discord")
 
 try:
     import discord
+
     HAS_DISCORD = True
 except ImportError:
     HAS_DISCORD = False
@@ -26,7 +27,7 @@ class DiscordChannel(BaseChannel):
         super().__init__("discord", config)
         self.token = config.get("bot_token", "")
         self.guild_ids: list[int] = config.get("guild_ids", [])
-        self._client: "discord.Client | None" = None
+        self._client: discord.Client | None = None
         self._task: asyncio.Task | None = None
 
     async def start(self):

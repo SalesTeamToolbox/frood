@@ -1,22 +1,18 @@
 """Tests for team Manager coordination, TeamContext, and smart resource dispatch."""
 
-import asyncio
 import pytest
-import time
 
+from core.task_queue import Task, TaskStatus, TaskType
 from tools.team_tool import (
-    TeamTool,
-    TeamContext,
     BUILTIN_TEAMS,
-    MANAGER_PLAN_PROMPT,
-    MANAGER_REVIEW_PROMPT,
+    TeamContext,
+    TeamTool,
 )
-from core.task_queue import Task, TaskQueue, TaskType, TaskStatus
-
 
 # ---------------------------------------------------------------------------
 # Mock task queue for deterministic testing
 # ---------------------------------------------------------------------------
+
 
 class MockTaskQueue:
     """Task queue mock that instantly completes tasks with predictable output."""
@@ -104,6 +100,7 @@ class MockTaskQueueWithRevision(MockTaskQueue):
 # ---------------------------------------------------------------------------
 # TestTeamContext
 # ---------------------------------------------------------------------------
+
 
 class TestTeamContext:
     """Test the TeamContext shared context object."""
@@ -210,6 +207,7 @@ class TestTeamContext:
 # TestManagerRole
 # ---------------------------------------------------------------------------
 
+
 class TestManagerRole:
     """Test the Manager planning and review phases in TeamTool."""
 
@@ -223,10 +221,7 @@ class TestManagerRole:
         )
         assert result.success
         # Check that a manager plan task was created
-        plan_tasks = [
-            t for t in queue._tasks.values()
-            if "[manager:plan]" in t.title
-        ]
+        plan_tasks = [t for t in queue._tasks.values() if "[manager:plan]" in t.title]
         assert len(plan_tasks) == 1
         assert plan_tasks[0].task_type == TaskType.PROJECT_MANAGEMENT
 
@@ -239,10 +234,7 @@ class TestManagerRole:
             action="run", name="research-team", task="Analyze AI market trends"
         )
         assert result.success
-        review_tasks = [
-            t for t in queue._tasks.values()
-            if "[manager:review]" in t.title
-        ]
+        review_tasks = [t for t in queue._tasks.values() if "[manager:review]" in t.title]
         assert len(review_tasks) == 1
         assert review_tasks[0].task_type == TaskType.PROJECT_MANAGEMENT
 
@@ -251,9 +243,7 @@ class TestManagerRole:
         """Final output includes the manager's plan."""
         queue = MockTaskQueue()
         tool = TeamTool(queue)
-        result = await tool.execute(
-            action="run", name="research-team", task="Test task"
-        )
+        result = await tool.execute(action="run", name="research-team", task="Test task")
         assert "## Manager's Plan" in result.output
         assert "Execution Plan" in result.output
 
@@ -262,9 +252,7 @@ class TestManagerRole:
         """Final output includes the manager's review."""
         queue = MockTaskQueue()
         tool = TeamTool(queue)
-        result = await tool.execute(
-            action="run", name="research-team", task="Test task"
-        )
+        result = await tool.execute(action="run", name="research-team", task="Test task")
         assert "## Manager's Review" in result.output
         assert "QUALITY_SCORE" in result.output
 
@@ -273,9 +261,7 @@ class TestManagerRole:
         """Quality score is extracted from manager review."""
         queue = MockTaskQueue()
         tool = TeamTool(queue)
-        await tool.execute(
-            action="run", name="research-team", task="Test task"
-        )
+        await tool.execute(action="run", name="research-team", task="Test task")
         # Check run state
         run_id = list(tool._runs.keys())[0]
         assert tool._runs[run_id]["quality_score"] == 8
@@ -285,13 +271,10 @@ class TestManagerRole:
         """Team roles receive the manager's plan in their task description."""
         queue = MockTaskQueue()
         tool = TeamTool(queue)
-        await tool.execute(
-            action="run", name="research-team", task="Analyze trends"
-        )
+        await tool.execute(action="run", name="research-team", task="Analyze trends")
         # Check that role tasks contain manager plan context
         role_tasks = [
-            t for t in queue._tasks.values()
-            if "[team:" in t.title and "manager" not in t.title
+            t for t in queue._tasks.values() if "[team:" in t.title and "manager" not in t.title
         ]
         assert len(role_tasks) >= 1
         # At least one role should have the manager plan in its description
@@ -332,9 +315,7 @@ class TestRevisionHandling:
     async def test_no_revision_requests(self):
         """When no revisions are needed, empty list returned."""
         tool = TeamTool(MockTaskQueue())
-        revisions = tool._parse_revision_requests(
-            "All outputs are excellent.\nQUALITY_SCORE: 9"
-        )
+        revisions = tool._parse_revision_requests("All outputs are excellent.\nQUALITY_SCORE: 9")
         assert len(revisions) == 0
 
     @pytest.mark.asyncio
@@ -342,15 +323,10 @@ class TestRevisionHandling:
         """Flagged role gets re-run with manager feedback."""
         queue = MockTaskQueueWithRevision()
         tool = TeamTool(queue)
-        result = await tool.execute(
-            action="run", name="research-team", task="Test revision flow"
-        )
+        result = await tool.execute(action="run", name="research-team", task="Test revision flow")
         assert result.success
         # Check that a revision task was created
-        revision_tasks = [
-            t for t in queue._tasks.values()
-            if ":revision]" in t.title
-        ]
+        revision_tasks = [t for t in queue._tasks.values() if ":revision]" in t.title]
         assert len(revision_tasks) == 1
         assert "writer" in revision_tasks[0].title
 
@@ -359,13 +335,8 @@ class TestRevisionHandling:
         """Revised role gets the manager's feedback in its description."""
         queue = MockTaskQueueWithRevision()
         tool = TeamTool(queue)
-        await tool.execute(
-            action="run", name="research-team", task="Test"
-        )
-        revision_tasks = [
-            t for t in queue._tasks.values()
-            if ":revision]" in t.title
-        ]
+        await tool.execute(action="run", name="research-team", task="Test")
+        revision_tasks = [t for t in queue._tasks.values() if ":revision]" in t.title]
         assert len(revision_tasks) == 1
         assert "REVISION REQUESTED" in revision_tasks[0].description
         assert "specific examples" in revision_tasks[0].description
@@ -375,9 +346,7 @@ class TestRevisionHandling:
         """Final output mentions which roles were revised."""
         queue = MockTaskQueueWithRevision()
         tool = TeamTool(queue)
-        result = await tool.execute(
-            action="run", name="research-team", task="Test"
-        )
+        result = await tool.execute(action="run", name="research-team", task="Test")
         assert "## Revisions" in result.output
         assert "writer" in result.output
 
@@ -386,9 +355,7 @@ class TestRevisionHandling:
         """Run state tracks which roles were revised."""
         queue = MockTaskQueueWithRevision()
         tool = TeamTool(queue)
-        await tool.execute(
-            action="run", name="research-team", task="Test"
-        )
+        await tool.execute(action="run", name="research-team", task="Test")
         run_id = list(tool._runs.keys())[0]
         assert "writer" in tool._runs[run_id]["revisions"]
 
@@ -397,13 +364,8 @@ class TestRevisionHandling:
         """Manager review runs twice when revisions happen."""
         queue = MockTaskQueueWithRevision()
         tool = TeamTool(queue)
-        await tool.execute(
-            action="run", name="research-team", task="Test"
-        )
-        review_tasks = [
-            t for t in queue._tasks.values()
-            if "[manager:review]" in t.title
-        ]
+        await tool.execute(action="run", name="research-team", task="Test")
+        review_tasks = [t for t in queue._tasks.values() if "[manager:review]" in t.title]
         assert len(review_tasks) == 2  # initial + post-revision
 
     @pytest.mark.asyncio
@@ -411,9 +373,7 @@ class TestRevisionHandling:
         """Quality score reflects the post-revision review."""
         queue = MockTaskQueueWithRevision()
         tool = TeamTool(queue)
-        await tool.execute(
-            action="run", name="research-team", task="Test"
-        )
+        await tool.execute(action="run", name="research-team", task="Test")
         run_id = list(tool._runs.keys())[0]
         # Post-revision score should be 8 (from MockTaskQueueWithRevision)
         assert tool._runs[run_id]["quality_score"] == 8
@@ -423,6 +383,7 @@ class TestRevisionHandling:
 # TestWorkflowsWithManager
 # ---------------------------------------------------------------------------
 
+
 class TestWorkflowsWithManager:
     """Test that all workflow types work with the manager wrapping."""
 
@@ -430,9 +391,7 @@ class TestWorkflowsWithManager:
     async def test_sequential_team_with_manager(self):
         queue = MockTaskQueue()
         tool = TeamTool(queue)
-        result = await tool.execute(
-            action="run", name="research-team", task="Sequential test"
-        )
+        result = await tool.execute(action="run", name="research-team", task="Sequential test")
         assert result.success
         assert "## Manager's Plan" in result.output
         assert "## Manager's Review" in result.output
@@ -454,9 +413,7 @@ class TestWorkflowsWithManager:
                 {"name": "role-b", "task_type": "research", "prompt": "Do B"},
             ],
         )
-        result = await tool.execute(
-            action="run", name="test-parallel", task="Parallel test"
-        )
+        result = await tool.execute(action="run", name="test-parallel", task="Parallel test")
         assert result.success
         assert "## Manager's Plan" in result.output
         assert "## Manager's Review" in result.output
@@ -465,9 +422,7 @@ class TestWorkflowsWithManager:
     async def test_fan_out_fan_in_with_manager(self):
         queue = MockTaskQueue()
         tool = TeamTool(queue)
-        result = await tool.execute(
-            action="run", name="strategy-team", task="Strategy test"
-        )
+        result = await tool.execute(action="run", name="strategy-team", task="Strategy test")
         assert result.success
         assert "## Manager's Plan" in result.output
         assert "## Manager's Review" in result.output
@@ -482,9 +437,7 @@ class TestWorkflowsWithManager:
     async def test_pipeline_team_with_manager(self):
         queue = MockTaskQueue()
         tool = TeamTool(queue)
-        result = await tool.execute(
-            action="run", name="marketing-team", task="Pipeline test"
-        )
+        result = await tool.execute(action="run", name="marketing-team", task="Pipeline test")
         assert result.success
         assert "## Manager's Plan" in result.output
         assert "## Manager's Review" in result.output
@@ -494,6 +447,7 @@ class TestWorkflowsWithManager:
 # TestStatusAndDescribe
 # ---------------------------------------------------------------------------
 
+
 class TestStatusAndDescribe:
     """Test that status and describe actions reflect manager features."""
 
@@ -501,9 +455,7 @@ class TestStatusAndDescribe:
     async def test_status_shows_quality_score(self):
         queue = MockTaskQueue()
         tool = TeamTool(queue)
-        await tool.execute(
-            action="run", name="research-team", task="Test"
-        )
+        await tool.execute(action="run", name="research-team", task="Test")
         run_id = list(tool._runs.keys())[0]
         result = tool._status(run_id)
         assert "Quality Score" in result.output
@@ -513,9 +465,7 @@ class TestStatusAndDescribe:
     async def test_status_shows_manager_plan_preview(self):
         queue = MockTaskQueue()
         tool = TeamTool(queue)
-        await tool.execute(
-            action="run", name="research-team", task="Test"
-        )
+        await tool.execute(action="run", name="research-team", task="Test")
         run_id = list(tool._runs.keys())[0]
         result = tool._status(run_id)
         assert "Manager's Plan" in result.output
@@ -537,9 +487,7 @@ class TestStatusAndDescribe:
     async def test_status_list_shows_quality(self):
         queue = MockTaskQueue()
         tool = TeamTool(queue)
-        await tool.execute(
-            action="run", name="research-team", task="Test"
-        )
+        await tool.execute(action="run", name="research-team", task="Test")
         result = tool._status("")  # List all runs
         assert "quality: 8/10" in result.output
 
@@ -547,6 +495,7 @@ class TestStatusAndDescribe:
 # ---------------------------------------------------------------------------
 # TestSmartDispatch
 # ---------------------------------------------------------------------------
+
 
 class TestSmartDispatch:
     """Test smart resource allocation in agent42._create_task_from_message."""
@@ -567,10 +516,7 @@ class TestSmartDispatch:
         # Simulate what agent42._create_task_from_message does
         description = "Create a full marketing campaign for our product"
         task_description = description
-        if (
-            classification.recommended_mode == "team"
-            and classification.recommended_team
-        ):
+        if classification.recommended_mode == "team" and classification.recommended_team:
             team_name = classification.recommended_team
             task_description = (
                 f"{description}\n\n"
@@ -600,10 +546,7 @@ class TestSmartDispatch:
 
         description = "Fix the login bug"
         task_description = description
-        if (
-            classification.recommended_mode == "team"
-            and classification.recommended_team
-        ):
+        if classification.recommended_mode == "team" and classification.recommended_team:
             task_description = f"{description}\n\nRESOURCE ALLOCATION: ..."
 
         assert task_description == description
@@ -623,6 +566,7 @@ class TestSmartDispatch:
 # TestBackwardCompatibility
 # ---------------------------------------------------------------------------
 
+
 class TestBackwardCompatibility:
     """Ensure existing team operations still work with manager additions."""
 
@@ -631,8 +575,10 @@ class TestBackwardCompatibility:
         queue = MockTaskQueue()
         tool = TeamTool(queue)
         result = tool._compose(
-            "custom-team", "Test team", "sequential",
-            [{"name": "role1", "task_type": "research", "prompt": "Do research"}]
+            "custom-team",
+            "Test team",
+            "sequential",
+            [{"name": "role1", "task_type": "research", "prompt": "Do research"}],
         )
         assert result.success
         assert "custom-team" in tool._teams
@@ -647,7 +593,9 @@ class TestBackwardCompatibility:
     def test_delete_still_works(self):
         queue = MockTaskQueue()
         tool = TeamTool(queue)
-        tool._compose("temp", "Temp", "sequential", [{"name": "r", "task_type": "research", "prompt": "p"}])
+        tool._compose(
+            "temp", "Temp", "sequential", [{"name": "r", "task_type": "research", "prompt": "p"}]
+        )
         result = tool._delete("temp")
         assert result.success
 
@@ -662,8 +610,11 @@ class TestBackwardCompatibility:
         """All 5 built-in teams still exist with correct structures."""
         assert len(BUILTIN_TEAMS) == 5
         expected = {
-            "research-team", "marketing-team", "content-team",
-            "design-review", "strategy-team",
+            "research-team",
+            "marketing-team",
+            "content-team",
+            "design-review",
+            "strategy-team",
         }
         assert set(BUILTIN_TEAMS.keys()) == expected
         for name, team in BUILTIN_TEAMS.items():

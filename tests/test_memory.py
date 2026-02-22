@@ -2,12 +2,14 @@
 
 import json
 import tempfile
-import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
-from memory.store import MemoryStore
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from memory.embeddings import EmbeddingEntry, EmbeddingStore, _cosine_similarity
 from memory.session import SessionManager, SessionMessage
-from memory.embeddings import EmbeddingStore, _cosine_similarity, EmbeddingEntry
+from memory.store import MemoryStore
 
 
 class TestMemoryStore:
@@ -188,10 +190,20 @@ class TestEmbeddingStore:
 
     def test_clear(self):
         # Write some data
-        self.store_path.write_text(json.dumps([{
-            "text": "test", "vector": [1.0, 0.0], "source": "memory",
-            "section": "", "timestamp": 0.0, "metadata": {},
-        }]))
+        self.store_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "text": "test",
+                        "vector": [1.0, 0.0],
+                        "source": "memory",
+                        "section": "",
+                        "timestamp": 0.0,
+                        "metadata": {},
+                    }
+                ]
+            )
+        )
         store = EmbeddingStore(self.store_path)
         assert store.entry_count() == 1
         store.clear()
@@ -200,10 +212,22 @@ class TestEmbeddingStore:
 
     def test_load_persisted_entries(self):
         entries = [
-            {"text": "entry1", "vector": [1.0, 0.0], "source": "memory",
-             "section": "sec1", "timestamp": 1.0, "metadata": {}},
-            {"text": "entry2", "vector": [0.0, 1.0], "source": "history",
-             "section": "sec2", "timestamp": 2.0, "metadata": {}},
+            {
+                "text": "entry1",
+                "vector": [1.0, 0.0],
+                "source": "memory",
+                "section": "sec1",
+                "timestamp": 1.0,
+                "metadata": {},
+            },
+            {
+                "text": "entry2",
+                "vector": [0.0, 1.0],
+                "source": "history",
+                "section": "sec2",
+                "timestamp": 2.0,
+                "metadata": {},
+            },
         ]
         self.store_path.write_text(json.dumps(entries))
         store = EmbeddingStore(self.store_path)
@@ -235,12 +259,24 @@ class TestEmbeddingStoreWithMockAPI:
     async def test_add_and_search(self):
         # Pre-populate with known vectors
         self.store._entries = [
-            EmbeddingEntry(text="Python is great for AI", vector=[1.0, 0.0, 0.0],
-                           source="memory", section="tech"),
-            EmbeddingEntry(text="Cats are fluffy animals", vector=[0.0, 1.0, 0.0],
-                           source="memory", section="pets"),
-            EmbeddingEntry(text="Machine learning with PyTorch", vector=[0.9, 0.1, 0.0],
-                           source="history", section="tech"),
+            EmbeddingEntry(
+                text="Python is great for AI",
+                vector=[1.0, 0.0, 0.0],
+                source="memory",
+                section="tech",
+            ),
+            EmbeddingEntry(
+                text="Cats are fluffy animals",
+                vector=[0.0, 1.0, 0.0],
+                source="memory",
+                section="pets",
+            ),
+            EmbeddingEntry(
+                text="Machine learning with PyTorch",
+                vector=[0.9, 0.1, 0.0],
+                source="history",
+                section="tech",
+            ),
         ]
         self.store._loaded = True
 
@@ -259,10 +295,10 @@ class TestEmbeddingStoreWithMockAPI:
     @pytest.mark.asyncio
     async def test_search_with_source_filter(self):
         self.store._entries = [
-            EmbeddingEntry(text="Memory entry", vector=[1.0, 0.0],
-                           source="memory", section="sec"),
-            EmbeddingEntry(text="History entry", vector=[0.9, 0.1],
-                           source="history", section="event"),
+            EmbeddingEntry(text="Memory entry", vector=[1.0, 0.0], source="memory", section="sec"),
+            EmbeddingEntry(
+                text="History entry", vector=[0.9, 0.1], source="history", section="event"
+            ),
         ]
         self.store._loaded = True
 
@@ -338,6 +374,7 @@ class TestHistoryRotation:
 
         # Second rotation
         import time
+
         time.sleep(1.1)  # Ensure different timestamp
         for i in range(50):
             self.store.log_event("event", f"Second batch {i}" * 5)
@@ -362,7 +399,7 @@ class TestScheduleReindex:
             store = MemoryStore(self.tmpdir, redis_backend=mock_redis)
             # Mock embeddings as available
             store.embeddings._client = MagicMock()
-            with patch.object(store, '_schedule_reindex') as mock_reindex:
+            with patch.object(store, "_schedule_reindex") as mock_reindex:
                 store.update_memory("# Updated content")
                 mock_reindex.assert_called_once()
 
@@ -392,10 +429,14 @@ class TestJsonEmbeddingEviction:
 
         # Add 8 entries with increasing timestamps
         for i in range(8):
-            store._entries.append(EmbeddingEntry(
-                text=f"entry {i}", vector=[float(i)],
-                source="test", timestamp=float(i),
-            ))
+            store._entries.append(
+                EmbeddingEntry(
+                    text=f"entry {i}",
+                    vector=[float(i)],
+                    source="test",
+                    timestamp=float(i),
+                )
+            )
 
         store._save()
         assert len(store._entries) == 5

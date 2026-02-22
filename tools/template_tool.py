@@ -18,7 +18,21 @@ BUILTIN_TEMPLATES: dict[str, dict] = {
     "email-campaign": {
         "name": "email-campaign",
         "description": "Marketing email campaign template (AIDA framework)",
-        "variables": ["subject", "preview_text", "recipient_name", "hook", "problem", "solution", "benefit_1", "benefit_2", "benefit_3", "cta_text", "cta_url", "sender_name", "company"],
+        "variables": [
+            "subject",
+            "preview_text",
+            "recipient_name",
+            "hook",
+            "problem",
+            "solution",
+            "benefit_1",
+            "benefit_2",
+            "benefit_3",
+            "cta_text",
+            "cta_url",
+            "sender_name",
+            "company",
+        ],
         "content": """Subject: {subject}
 Preview: {preview_text}
 
@@ -46,7 +60,21 @@ P.S. Don't miss out — this offer is available for a limited time.""",
     "landing-page-outline": {
         "name": "landing-page-outline",
         "description": "Landing page content outline",
-        "variables": ["headline", "subheadline", "hero_description", "benefit_1", "benefit_2", "benefit_3", "social_proof", "objection_1", "answer_1", "objection_2", "answer_2", "cta_text", "product_name"],
+        "variables": [
+            "headline",
+            "subheadline",
+            "hero_description",
+            "benefit_1",
+            "benefit_2",
+            "benefit_3",
+            "social_proof",
+            "objection_1",
+            "answer_1",
+            "objection_2",
+            "answer_2",
+            "cta_text",
+            "product_name",
+        ],
         "content": """# {headline}
 
 ## {subheadline}
@@ -90,7 +118,21 @@ P.S. Don't miss out — this offer is available for a limited time.""",
     "press-release": {
         "name": "press-release",
         "description": "Standard press release format",
-        "variables": ["headline", "subheadline", "city", "date", "company", "body_paragraph_1", "quote_person", "quote_title", "quote_text", "body_paragraph_2", "boilerplate", "contact_name", "contact_email"],
+        "variables": [
+            "headline",
+            "subheadline",
+            "city",
+            "date",
+            "company",
+            "body_paragraph_1",
+            "quote_person",
+            "quote_title",
+            "quote_text",
+            "body_paragraph_2",
+            "boilerplate",
+            "contact_name",
+            "contact_email",
+        ],
         "content": """# {headline}
 
 ## {subheadline}
@@ -113,7 +155,18 @@ P.S. Don't miss out — this offer is available for a limited time.""",
     "executive-summary": {
         "name": "executive-summary",
         "description": "Executive summary for reports and proposals",
-        "variables": ["title", "date", "author", "objective", "key_finding_1", "key_finding_2", "key_finding_3", "recommendation", "next_steps", "timeline"],
+        "variables": [
+            "title",
+            "date",
+            "author",
+            "objective",
+            "key_finding_1",
+            "key_finding_2",
+            "key_finding_3",
+            "recommendation",
+            "next_steps",
+            "timeline",
+        ],
         "content": """# Executive Summary: {title}
 
 **Date:** {date}
@@ -142,7 +195,20 @@ P.S. Don't miss out — this offer is available for a limited time.""",
     "project-brief": {
         "name": "project-brief",
         "description": "Project brief for kicking off new initiatives",
-        "variables": ["project_name", "owner", "date", "background", "objective", "scope", "out_of_scope", "success_criteria", "stakeholders", "timeline", "risks", "budget"],
+        "variables": [
+            "project_name",
+            "owner",
+            "date",
+            "background",
+            "objective",
+            "scope",
+            "out_of_scope",
+            "success_criteria",
+            "stakeholders",
+            "timeline",
+            "risks",
+            "budget",
+        ],
         "content": """# Project Brief: {project_name}
 
 **Owner:** {owner}
@@ -278,8 +344,7 @@ class TemplateTool(Tool):
             builtin = " (built-in)" if name in BUILTIN_TEMPLATES else ""
             var_count = len(tmpl.get("variables", []))
             lines.append(
-                f"- **{name}**{builtin} — {tmpl.get('description', '')}\n"
-                f"  Variables: {var_count}"
+                f"- **{name}**{builtin} — {tmpl.get('description', '')}\n  Variables: {var_count}"
             )
         return ToolResult(output="\n".join(lines))
 
@@ -357,9 +422,7 @@ class TemplateTool(Tool):
         if name not in self._templates:
             return ToolResult(error=f"Template '{name}' not found", success=False)
         if name in BUILTIN_TEMPLATES:
-            return ToolResult(
-                error=f"Cannot delete built-in template '{name}'", success=False
-            )
+            return ToolResult(error=f"Cannot delete built-in template '{name}'", success=False)
         del self._templates[name]
         return ToolResult(output=f"Template '{name}' deleted.")
 
@@ -403,9 +466,7 @@ class TemplateTool(Tool):
         preview_content = content
         for var in tmpl.get("variables", []):
             hint = hints.get(var, var.replace("_", " ").title())
-            preview_content = preview_content.replace(
-                f"{{{var}}}", f"[{var.upper()}: {hint}]"
-            )
+            preview_content = preview_content.replace(f"{{{var}}}", f"[{var.upper()}: {hint}]")
 
         output = (
             f"# Preview: {name}\n\n"

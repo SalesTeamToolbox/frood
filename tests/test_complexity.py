@@ -1,13 +1,14 @@
 """Tests for core/complexity.py — task complexity assessor."""
 
 import pytest
+
 from core.complexity import (
-    ComplexityAssessor,
-    ComplexityAssessment,
-    TEAM_TASK_MAP,
-    _SCALE_MARKERS,
     _MULTI_DELIVERABLE_MARKERS,
+    _SCALE_MARKERS,
     _TEAM_INDICATORS,
+    TEAM_TASK_MAP,
+    ComplexityAssessment,
+    ComplexityAssessor,
 )
 from core.task_queue import TaskType
 
@@ -56,9 +57,7 @@ class TestKeywordAssessment:
         assert result.score < 0.3
 
     def test_simple_content_task(self):
-        result = self.assessor._keyword_assess(
-            "Draft a short announcement", TaskType.CONTENT
-        )
+        result = self.assessor._keyword_assess("Draft a short announcement", TaskType.CONTENT)
         assert result.level == "simple"
         assert result.recommended_mode == "single_agent"
 
@@ -184,16 +183,14 @@ class TestLLMResponseParsing:
         self.assessor = ComplexityAssessor(router=None)
 
     def test_parse_valid_response(self):
-        response = '''{
+        response = """{
             "level": "complex",
             "score": 0.8,
             "recommended_mode": "team",
             "recommended_team": "marketing-team",
             "reasoning": "Multi-step campaign"
-        }'''
-        result = self.assessor._parse_response(
-            response, "test task", TaskType.MARKETING
-        )
+        }"""
+        result = self.assessor._parse_response(response, "test task", TaskType.MARKETING)
         assert result.level == "complex"
         assert result.score == 0.8
         assert result.recommended_mode == "team"
@@ -201,72 +198,56 @@ class TestLLMResponseParsing:
         assert result.used_llm is True
 
     def test_parse_simple_response(self):
-        response = '''{
+        response = """{
             "level": "simple",
             "score": 0.2,
             "recommended_mode": "single_agent",
             "recommended_team": "",
             "reasoning": "Simple fix"
-        }'''
-        result = self.assessor._parse_response(
-            response, "fix bug", TaskType.CODING
-        )
+        }"""
+        result = self.assessor._parse_response(response, "fix bug", TaskType.CODING)
         assert result.level == "simple"
         assert result.recommended_mode == "single_agent"
         assert result.recommended_team == ""
 
     def test_parse_response_with_markdown_fences(self):
         response = '```json\n{"level": "moderate", "score": 0.4, "recommended_mode": "single_agent", "recommended_team": "", "reasoning": "ok"}\n```'
-        result = self.assessor._parse_response(
-            response, "test", TaskType.CONTENT
-        )
+        result = self.assessor._parse_response(response, "test", TaskType.CONTENT)
         assert result.level == "moderate"
         assert result.recommended_mode == "single_agent"
 
     def test_parse_invalid_json_falls_back(self):
         response = "not valid json at all"
-        result = self.assessor._parse_response(
-            response, "fix bug", TaskType.CODING
-        )
+        result = self.assessor._parse_response(response, "fix bug", TaskType.CODING)
         # Should fall back to keyword assessment
         assert result.used_llm is False
 
     def test_parse_invalid_level_defaults(self):
         response = '{"level": "extreme", "score": 0.9, "recommended_mode": "team", "recommended_team": "marketing-team", "reasoning": "test"}'
-        result = self.assessor._parse_response(
-            response, "test", TaskType.MARKETING
-        )
+        result = self.assessor._parse_response(response, "test", TaskType.MARKETING)
         assert result.level == "simple"  # invalid level defaults to simple
 
     def test_parse_invalid_team_name_corrected(self):
         response = '{"level": "complex", "score": 0.8, "recommended_mode": "team", "recommended_team": "nonexistent-team", "reasoning": "test"}'
-        result = self.assessor._parse_response(
-            response, "test", TaskType.MARKETING
-        )
+        result = self.assessor._parse_response(response, "test", TaskType.MARKETING)
         # Invalid team should be corrected to best match for type
         assert result.recommended_team in TEAM_TASK_MAP
 
     def test_parse_low_score_forces_single_agent(self):
         response = '{"level": "complex", "score": 0.3, "recommended_mode": "team", "recommended_team": "marketing-team", "reasoning": "test"}'
-        result = self.assessor._parse_response(
-            response, "test", TaskType.MARKETING
-        )
+        result = self.assessor._parse_response(response, "test", TaskType.MARKETING)
         # Score < 0.6 should force single_agent
         assert result.recommended_mode == "single_agent"
         assert result.recommended_team == ""
 
     def test_parse_invalid_mode_defaults(self):
         response = '{"level": "complex", "score": 0.8, "recommended_mode": "multi_agent", "recommended_team": "marketing-team", "reasoning": "test"}'
-        result = self.assessor._parse_response(
-            response, "test", TaskType.MARKETING
-        )
+        result = self.assessor._parse_response(response, "test", TaskType.MARKETING)
         assert result.recommended_mode == "single_agent"
 
     def test_parse_score_clamped(self):
         response = '{"level": "complex", "score": 1.5, "recommended_mode": "team", "recommended_team": "marketing-team", "reasoning": "test"}'
-        result = self.assessor._parse_response(
-            response, "test", TaskType.MARKETING
-        )
+        result = self.assessor._parse_response(response, "test", TaskType.MARKETING)
         assert result.score == 1.0  # clamped to max
 
 

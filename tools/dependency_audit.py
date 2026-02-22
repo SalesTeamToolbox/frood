@@ -69,6 +69,7 @@ class DependencyAuditTool(Tool):
 
     def _detect_ecosystem(self) -> str:
         import os
+
         ws = self._workspace
         for name in ("requirements.txt", "pyproject.toml", "setup.py", "Pipfile"):
             if os.path.exists(os.path.join(ws, name)):
@@ -92,7 +93,7 @@ class DependencyAuditTool(Tool):
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             return ToolResult(error="Audit timed out (>2min)", success=False)
 
@@ -126,7 +127,7 @@ class DependencyAuditTool(Tool):
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             return ToolResult(error="Safety check timed out", success=False)
 
@@ -189,7 +190,7 @@ class DependencyAuditTool(Tool):
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             return ToolResult(error="npm audit timed out", success=False)
 

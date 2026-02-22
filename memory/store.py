@@ -16,8 +16,7 @@ embedding API is available.
 """
 
 import logging
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from memory.embeddings import EmbeddingStore
@@ -33,8 +32,7 @@ class MemoryStore:
     storage when these services are unavailable.
     """
 
-    def __init__(self, workspace_dir: str | Path, qdrant_store=None,
-                 redis_backend=None):
+    def __init__(self, workspace_dir: str | Path, qdrant_store=None, redis_backend=None):
         self.workspace_dir = Path(workspace_dir)
         self.memory_path = self.workspace_dir / "MEMORY.md"
         self.history_path = self.workspace_dir / "HISTORY.md"
@@ -62,8 +60,7 @@ class MemoryStore:
 
         if not self.history_path.exists():
             self.history_path.write_text(
-                "# Agent42 History\n\n"
-                "Chronological log of significant events.\n\n"
+                "# Agent42 History\n\nChronological log of significant events.\n\n"
             )
 
     # -- MEMORY.md (consolidated facts) --
@@ -136,7 +133,7 @@ class MemoryStore:
         """Append an event to the history log. Rotates if the file is too large."""
         self._rotate_history_if_needed()
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
         entry = f"### [{timestamp}] {event_type}\n{summary}\n"
         if details:
             entry += f"\n{details}\n"
@@ -165,17 +162,17 @@ class MemoryStore:
                     # Search backward from midpoint for nearest entry separator
                     boundary = content.rfind("\n---\n", 0, midpoint)
                 if boundary > 0:
-                    archived = content[:boundary + 5]
-                    kept = content[boundary + 5:]
+                    archived = content[: boundary + 5]
+                    kept = content[boundary + 5 :]
                 else:
                     # No separator found; split at nearest newline to avoid mid-entry corruption
                     nl = content.find("\n", midpoint)
                     if nl == -1:
                         nl = midpoint
-                    kept = content[nl + 1:]
-                    archived = content[:nl + 1]
+                    kept = content[nl + 1 :]
+                    archived = content[: nl + 1]
 
-                ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+                ts = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
                 archive_name = self.history_path.stem + f".{ts}.md"
                 archive_path = self.history_path.parent / archive_name
                 archive_path.write_text(archived, encoding="utf-8")
@@ -184,8 +181,7 @@ class MemoryStore:
                     encoding="utf-8",
                 )
                 logger.info(
-                    f"History rotated: {size} -> {len(kept)} bytes, "
-                    f"archived to {archive_name}"
+                    f"History rotated: {size} -> {len(kept)} bytes, archived to {archive_name}"
                 )
         except Exception as e:
             logger.warning(f"History rotation failed: {e}")
@@ -206,8 +202,7 @@ class MemoryStore:
         """Whether semantic search is available (embedding API configured)."""
         return self.embeddings.is_available
 
-    async def semantic_search(self, query: str, top_k: int = 5,
-                              source: str = "") -> list[dict]:
+    async def semantic_search(self, query: str, top_k: int = 5, source: str = "") -> list[dict]:
         """Search memory and history using semantic similarity.
 
         Falls back to grep-based search if no embedding API is configured.
@@ -232,8 +227,7 @@ class MemoryStore:
         memory = self.read_memory()
         return await self.embeddings.index_memory(memory)
 
-    async def log_event_semantic(self, event_type: str, summary: str,
-                                 details: str = ""):
+    async def log_event_semantic(self, event_type: str, summary: str, details: str = ""):
         """Log an event and index it for semantic search.
 
         Use this instead of log_event() when semantic indexing is desired.
@@ -267,8 +261,9 @@ class MemoryStore:
 
         return "\n".join(parts)
 
-    async def build_context_semantic(self, query: str, top_k: int = 5,
-                                     max_memory_lines: int = 50) -> str:
+    async def build_context_semantic(
+        self, query: str, top_k: int = 5, max_memory_lines: int = 50
+    ) -> str:
         """Build context augmented with semantically relevant memory.
 
         When a query is provided, includes the most relevant memory chunks
@@ -303,7 +298,8 @@ class MemoryStore:
 
         # Add relevant past conversations (Qdrant only)
         conv_results = await self.embeddings.search_conversations(
-            query, top_k=3,
+            query,
+            top_k=3,
         )
         if conv_results:
             parts.append("\n## Related Past Conversations\n")

@@ -90,8 +90,8 @@ class WebSearchTool(Tool):
 
 
 # URL policy: consolidated SSRF + allowlist/denylist from core module
-from core.url_policy import UrlPolicy, _is_ssrf_target, _BLOCKED_IP_RANGES  # noqa: F401
 from core.config import settings
+from core.url_policy import _BLOCKED_IP_RANGES, UrlPolicy, _is_ssrf_target  # noqa: F401
 
 # Shared URL policy instance for web tools
 _url_policy = UrlPolicy(

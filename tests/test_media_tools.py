@@ -2,17 +2,17 @@
 
 import pytest
 
-from tools.image_gen import ImageGenTool, IMAGE_MODELS, DEFAULT_IMAGE_MODEL
-from tools.video_gen import VideoGenTool, VIDEO_MODELS, DEFAULT_VIDEO_MODEL
-from tools.persona_tool import PersonaTool, BUILTIN_PERSONAS
 from tools.content_analyzer import ContentAnalyzerTool
+from tools.image_gen import DEFAULT_IMAGE_MODEL, IMAGE_MODELS, ImageGenTool
+from tools.persona_tool import BUILTIN_PERSONAS, PersonaTool
 from tools.scoring_tool import ScoringTool
 from tools.template_tool import TemplateTool
-
+from tools.video_gen import DEFAULT_VIDEO_MODEL, VIDEO_MODELS, VideoGenTool
 
 # =============================================================================
 # Image Generation Tool Tests
 # =============================================================================
+
 
 class TestImageGenTool:
     """Test ImageGenTool actions and model resolution."""
@@ -95,6 +95,7 @@ class TestImageGenTool:
 # =============================================================================
 # Video Generation Tool Tests
 # =============================================================================
+
 
 class TestVideoGenTool:
     """Test VideoGenTool actions and model resolution."""
@@ -180,6 +181,7 @@ class TestVideoGenTool:
 # Persona Tool Tests
 # =============================================================================
 
+
 class TestPersonaTool:
     """Test PersonaTool actions and built-in personas."""
 
@@ -243,9 +245,7 @@ class TestPersonaTool:
 
     @pytest.mark.asyncio
     async def test_delete_custom(self, tool):
-        await tool.execute(
-            action="create", name="temp-persona", title="Temporary"
-        )
+        await tool.execute(action="create", name="temp-persona", title="Temporary")
         result = await tool.execute(action="delete", name="temp-persona")
         assert result.success
         assert "deleted" in result.output
@@ -277,17 +277,27 @@ class TestPersonaTool:
 
     def test_builtin_personas_structure(self):
         """Verify all built-in personas have required fields."""
-        required_fields = {"name", "title", "demographics", "goals", "pain_points", "preferred_tone"}
+        required_fields = {
+            "name",
+            "title",
+            "demographics",
+            "goals",
+            "pain_points",
+            "preferred_tone",
+        }
         for name, persona in BUILTIN_PERSONAS.items():
             for field in required_fields:
                 assert field in persona, f"Persona '{name}' missing field '{field}'"
             assert len(persona["goals"]) >= 2, f"Persona '{name}' needs at least 2 goals"
-            assert len(persona["pain_points"]) >= 2, f"Persona '{name}' needs at least 2 pain points"
+            assert len(persona["pain_points"]) >= 2, (
+                f"Persona '{name}' needs at least 2 pain points"
+            )
 
 
 # =============================================================================
 # Tool Enhancement Tests
 # =============================================================================
+
 
 class TestTeamToolEnhancements:
     """Test new team tool actions: describe and clone."""
@@ -295,10 +305,15 @@ class TestTeamToolEnhancements:
     @pytest.fixture
     def tool(self):
         from tools.team_tool import TeamTool
+
         # Use a mock task queue
         class MockTQ:
-            async def add(self, task): pass
-            def get(self, task_id): return None
+            async def add(self, task):
+                pass
+
+            def get(self, task_id):
+                return None
+
         return TeamTool(MockTQ())
 
     @pytest.mark.asyncio

@@ -34,66 +34,66 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from core.config import settings
-from core.capacity import compute_effective_capacity
-from core.task_queue import TaskQueue, Task, TaskType, TaskStatus, infer_task_type
-from core.worktree_manager import WorktreeManager
-from core.approval_gate import ApprovalGate
-from core.sandbox import WorkspaceSandbox
-from core.command_filter import CommandFilter, DEFAULT_ALLOWLIST
-from core.rate_limiter import ToolRateLimiter, ToolLimit
-from core.device_auth import DeviceStore
-from core.key_store import KeyStore
-from dashboard.auth import init_device_store
 from agents.agent import Agent
 from agents.learner import Learner
 from agents.model_router import ModelRouter
-from channels.manager import ChannelManager
 from channels.base import InboundMessage, OutboundMessage
-from skills.loader import SkillLoader
-from memory.store import MemoryStore
-from memory.session import SessionManager
-from memory.qdrant_store import QdrantStore, QdrantConfig
-from memory.redis_session import RedisSessionBackend, RedisConfig
-from memory.consolidation import ConsolidationPipeline
-from tools.registry import ToolRegistry
-from tools.shell import ShellTool
-from tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
-from tools.web_search import WebSearchTool, WebFetchTool
-from tools.cron import CronScheduler, CronTool
-from tools.subagent import SubagentTool
-from tools.mcp_client import MCPManager
-from tools.git_tool import GitTool
-from tools.grep_tool import GrepTool
-from tools.diff_tool import DiffTool
-from tools.test_runner import TestRunnerTool
-from tools.linter_tool import LinterTool
-from tools.http_client import HttpClientTool
-from tools.browser_tool import BrowserTool
-from tools.code_intel import CodeIntelTool
-from tools.dependency_audit import DependencyAuditTool
-from tools.docker_tool import DockerTool
-from tools.python_exec import PythonExecTool
-from tools.repo_map import RepoMapTool
-from tools.pr_generator import PRGeneratorTool
-from tools.security_analyzer import SecurityAnalyzerTool
-from tools.workflow_tool import WorkflowTool
-from tools.summarizer_tool import SummarizerTool
-from tools.file_watcher import FileWatcherTool
-from tools.team_tool import TeamTool
-from tools.content_analyzer import ContentAnalyzerTool
-from tools.data_tool import DataTool
-from tools.template_tool import TemplateTool
-from tools.outline_tool import OutlineTool
-from tools.scoring_tool import ScoringTool
-from tools.image_gen import ImageGenTool
-from tools.video_gen import VideoGenTool
-from tools.persona_tool import PersonaTool
-from core.intent_classifier import IntentClassifier, PendingClarification
+from channels.manager import ChannelManager
+from core.approval_gate import ApprovalGate
+from core.capacity import compute_effective_capacity
+from core.command_filter import DEFAULT_ALLOWLIST, CommandFilter
+from core.config import settings
+from core.device_auth import DeviceStore
 from core.heartbeat import HeartbeatService
+from core.intent_classifier import IntentClassifier, PendingClarification
+from core.key_store import KeyStore
+from core.rate_limiter import ToolLimit, ToolRateLimiter
+from core.sandbox import WorkspaceSandbox
 from core.security_scanner import ScheduledSecurityScanner
+from core.task_queue import Task, TaskQueue, TaskStatus, TaskType, infer_task_type
+from core.worktree_manager import WorktreeManager
+from dashboard.auth import init_device_store
 from dashboard.server import create_app
 from dashboard.websocket_manager import WebSocketManager
+from memory.consolidation import ConsolidationPipeline
+from memory.qdrant_store import QdrantConfig, QdrantStore
+from memory.redis_session import RedisConfig, RedisSessionBackend
+from memory.session import SessionManager
+from memory.store import MemoryStore
+from skills.loader import SkillLoader
+from tools.browser_tool import BrowserTool
+from tools.code_intel import CodeIntelTool
+from tools.content_analyzer import ContentAnalyzerTool
+from tools.cron import CronScheduler, CronTool
+from tools.data_tool import DataTool
+from tools.dependency_audit import DependencyAuditTool
+from tools.diff_tool import DiffTool
+from tools.docker_tool import DockerTool
+from tools.file_watcher import FileWatcherTool
+from tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from tools.git_tool import GitTool
+from tools.grep_tool import GrepTool
+from tools.http_client import HttpClientTool
+from tools.image_gen import ImageGenTool
+from tools.linter_tool import LinterTool
+from tools.mcp_client import MCPManager
+from tools.outline_tool import OutlineTool
+from tools.persona_tool import PersonaTool
+from tools.pr_generator import PRGeneratorTool
+from tools.python_exec import PythonExecTool
+from tools.registry import ToolRegistry
+from tools.repo_map import RepoMapTool
+from tools.scoring_tool import ScoringTool
+from tools.security_analyzer import SecurityAnalyzerTool
+from tools.shell import ShellTool
+from tools.subagent import SubagentTool
+from tools.summarizer_tool import SummarizerTool
+from tools.team_tool import TeamTool
+from tools.template_tool import TemplateTool
+from tools.test_runner import TestRunnerTool
+from tools.video_gen import VideoGenTool
+from tools.web_search import WebFetchTool, WebSearchTool
+from tools.workflow_tool import WorkflowTool
 
 # -- Logging -------------------------------------------------------------------
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -132,6 +132,7 @@ class Agent42:
         queue_backend = None
         if settings.redis_url:
             from core.queue_backend import RedisQueueBackend
+
             queue_backend = RedisQueueBackend(
                 redis_url=settings.redis_url,
                 redis_password=settings.redis_password,
@@ -152,15 +153,15 @@ class Agent42:
         self._shutdown_event = asyncio.Event()
 
         # Phase 1: Security
-        self.sandbox = WorkspaceSandbox(
-            self.repo_path, enabled=settings.sandbox_enabled
-        )
+        self.sandbox = WorkspaceSandbox(self.repo_path, enabled=settings.sandbox_enabled)
 
         # Command filter: strict allowlist mode or default deny-list
         allowlist = None
         if settings.command_filter_mode == "allowlist":
             if settings.command_filter_allowlist:
-                allowlist = [p.strip() for p in settings.command_filter_allowlist.split(",") if p.strip()]
+                allowlist = [
+                    p.strip() for p in settings.command_filter_allowlist.split(",") if p.strip()
+                ]
             else:
                 allowlist = list(DEFAULT_ALLOWLIST)
         self.command_filter = CommandFilter(allowlist=allowlist)
@@ -185,10 +186,7 @@ class Agent42:
             if settings.tool_rate_limit_overrides:
                 try:
                     overrides_raw = json.loads(settings.tool_rate_limit_overrides)
-                    overrides = {
-                        name: ToolLimit(**spec)
-                        for name, spec in overrides_raw.items()
-                    }
+                    overrides = {name: ToolLimit(**spec) for name, spec in overrides_raw.items()}
                     rate_limiter.update_limits(overrides)
                 except (json.JSONDecodeError, TypeError) as e:
                     logger.warning(f"Invalid TOOL_RATE_LIMIT_OVERRIDES: {e}")
@@ -203,20 +201,24 @@ class Agent42:
         self._redis_backend = None
 
         if settings.qdrant_enabled:
-            self._qdrant_store = QdrantStore(QdrantConfig(
-                url=settings.qdrant_url,
-                api_key=settings.qdrant_api_key,
-                collection_prefix=settings.qdrant_collection_prefix,
-                local_path=settings.qdrant_local_path,
-            ))
+            self._qdrant_store = QdrantStore(
+                QdrantConfig(
+                    url=settings.qdrant_url,
+                    api_key=settings.qdrant_api_key,
+                    collection_prefix=settings.qdrant_collection_prefix,
+                    local_path=settings.qdrant_local_path,
+                )
+            )
 
         if settings.redis_url:
-            self._redis_backend = RedisSessionBackend(RedisConfig(
-                url=settings.redis_url,
-                password=settings.redis_password,
-                session_ttl_days=settings.session_ttl_days,
-                embedding_cache_ttl_hours=settings.embedding_cache_ttl_hours,
-            ))
+            self._redis_backend = RedisSessionBackend(
+                RedisConfig(
+                    url=settings.redis_url,
+                    password=settings.redis_password,
+                    session_ttl_days=settings.session_ttl_days,
+                    embedding_cache_ttl_hours=settings.embedding_cache_ttl_hours,
+                )
+            )
 
         self.memory_store = MemoryStore(
             self.data_dir / settings.memory_dir,
@@ -330,42 +332,62 @@ class Agent42:
         # Discord
         if settings.discord_bot_token:
             from channels.discord_channel import DiscordChannel
-            self.channel_manager.register(DiscordChannel({
-                "bot_token": settings.discord_bot_token,
-                "guild_ids": settings.get_discord_guild_ids(),
-            }))
+
+            self.channel_manager.register(
+                DiscordChannel(
+                    {
+                        "bot_token": settings.discord_bot_token,
+                        "guild_ids": settings.get_discord_guild_ids(),
+                    }
+                )
+            )
             logger.info("Discord channel configured")
 
         # Slack
         if settings.slack_bot_token and settings.slack_app_token:
             from channels.slack_channel import SlackChannel
-            self.channel_manager.register(SlackChannel({
-                "bot_token": settings.slack_bot_token,
-                "app_token": settings.slack_app_token,
-            }))
+
+            self.channel_manager.register(
+                SlackChannel(
+                    {
+                        "bot_token": settings.slack_bot_token,
+                        "app_token": settings.slack_app_token,
+                    }
+                )
+            )
             logger.info("Slack channel configured")
 
         # Telegram
         if settings.telegram_bot_token:
             from channels.telegram_channel import TelegramChannel
-            self.channel_manager.register(TelegramChannel({
-                "bot_token": settings.telegram_bot_token,
-            }))
+
+            self.channel_manager.register(
+                TelegramChannel(
+                    {
+                        "bot_token": settings.telegram_bot_token,
+                    }
+                )
+            )
             logger.info("Telegram channel configured")
 
         # Email
         if settings.email_imap_host:
             from channels.email_channel import EmailChannel
-            self.channel_manager.register(EmailChannel({
-                "imap_host": settings.email_imap_host,
-                "imap_port": settings.email_imap_port,
-                "imap_user": settings.email_imap_user,
-                "imap_password": settings.email_imap_password,
-                "smtp_host": settings.email_smtp_host,
-                "smtp_port": settings.email_smtp_port,
-                "smtp_user": settings.email_smtp_user,
-                "smtp_password": settings.email_smtp_password,
-            }))
+
+            self.channel_manager.register(
+                EmailChannel(
+                    {
+                        "imap_host": settings.email_imap_host,
+                        "imap_port": settings.email_imap_port,
+                        "imap_user": settings.email_imap_user,
+                        "imap_password": settings.email_imap_password,
+                        "smtp_host": settings.email_smtp_host,
+                        "smtp_port": settings.email_smtp_port,
+                        "smtp_user": settings.email_smtp_user,
+                        "smtp_password": settings.email_smtp_password,
+                    }
+                )
+            )
             logger.info("Email channel configured")
 
         # Set up message handler
@@ -386,12 +408,11 @@ class Agent42:
         If the intent is ambiguous, sends a clarification question back to the
         channel instead of creating a task immediately.
         """
-        logger.info(
-            f"[{message.channel_type}] {message.sender_name}: {message.content[:100]}"
-        )
+        logger.info(f"[{message.channel_type}] {message.sender_name}: {message.content[:100]}")
 
         # Store in session history
         from memory.session import SessionMessage
+
         self.session_manager.add_message(
             message.channel_type,
             message.channel_id,
@@ -411,18 +432,13 @@ class Agent42:
             # User responded to clarification — use their answer + original message
             del self._pending_clarifications[clarification_key]
             combined = f"{pending.original_message}\n\nUser clarification: {message.content}"
-            return await self._create_task_from_message(
-                combined, message, force_type=None
-            )
+            return await self._create_task_from_message(combined, message, force_type=None)
 
         # Get conversation history for context-aware classification
         history = self.session_manager.get_messages(
             message.channel_type, message.channel_id, limit=10
         )
-        history_dicts = [
-            {"role": m.role, "content": m.content}
-            for m in history
-        ] if history else []
+        history_dicts = [{"role": m.role, "content": m.content} for m in history] if history else []
 
         # Classify intent with LLM + context
         classification = await self.intent_classifier.classify(
@@ -458,7 +474,9 @@ class Agent42:
 
         # Classification is confident — create task
         return await self._create_task_from_message(
-            message.content, message, force_type=classification.task_type,
+            message.content,
+            message,
+            force_type=classification.task_type,
             classification=classification,
         )
 
@@ -635,7 +653,7 @@ class Agent42:
                 running_tasks.add(t)
                 t.add_done_callback(running_tasks.discard)
                 logger.info(f"Dispatched task {task.id} ({len(running_tasks)} active)")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 logger.error(f"Queue processor error: {e}", exc_info=True)
@@ -736,8 +754,7 @@ class Agent42:
         """Validate required configuration before starting."""
         if not self.has_repo:
             logger.info(
-                "No git repository configured. "
-                "Connect repos via the dashboard Settings page."
+                "No git repository configured. Connect repos via the dashboard Settings page."
             )
         elif not self.repo_path.exists():
             logger.warning(f"Configured repo path does not exist: {self.repo_path}")
@@ -746,6 +763,7 @@ class Agent42:
 
         # Warn about unconfigured providers
         from providers.registry import ProviderRegistry
+
         registry = ProviderRegistry()
         for p in registry.available_providers():
             if not p["configured"]:
@@ -813,9 +831,7 @@ def _run_clone(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Agent42 — The answer to all your tasks"
-    )
+    parser = argparse.ArgumentParser(description="Agent42 — The answer to all your tasks")
     subparsers = parser.add_subparsers(dest="command")
 
     # Server args (also on the root parser for backward compatibility)
@@ -847,11 +863,14 @@ def main():
         "backup", help="Create a full backup archive of Agent42 data"
     )
     backup_parser.add_argument(
-        "-o", "--output", default=".",
+        "-o",
+        "--output",
+        default=".",
         help="Output directory for the archive (default: current directory)",
     )
     backup_parser.add_argument(
-        "--include-worktrees", action="store_true",
+        "--include-worktrees",
+        action="store_true",
         help="Include git worktrees in the backup (can be large)",
     )
 
@@ -860,14 +879,17 @@ def main():
         "restore", help="Restore Agent42 data from a backup archive"
     )
     restore_parser.add_argument(
-        "archive", help="Path to the backup archive (.tar.gz)",
+        "archive",
+        help="Path to the backup archive (.tar.gz)",
     )
     restore_parser.add_argument(
-        "--target", default=".",
+        "--target",
+        default=".",
         help="Target directory to restore into (default: current directory)",
     )
     restore_parser.add_argument(
-        "--skip-secrets", action="store_true",
+        "--skip-secrets",
+        action="store_true",
         help="Skip restoring .env and settings.json",
     )
 
@@ -876,11 +898,14 @@ def main():
         "clone", help="Create a clone package for deploying to a new node"
     )
     clone_parser.add_argument(
-        "-o", "--output", default=".",
+        "-o",
+        "--output",
+        default=".",
         help="Output directory for the archive (default: current directory)",
     )
     clone_parser.add_argument(
-        "--include-skills", action="store_true",
+        "--include-skills",
+        action="store_true",
         help="Include user-installed skills from skills/workspace/",
     )
 

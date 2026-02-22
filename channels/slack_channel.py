@@ -5,7 +5,6 @@ Connects via Socket Mode (no public URL needed) and handles
 messages, threads, and markdown formatting.
 """
 
-import asyncio
 import logging
 
 from channels.base import BaseChannel, InboundMessage, OutboundMessage
@@ -13,10 +12,11 @@ from channels.base import BaseChannel, InboundMessage, OutboundMessage
 logger = logging.getLogger("agent42.channels.slack")
 
 try:
-    from slack_sdk.web.async_client import AsyncWebClient
     from slack_sdk.socket_mode.aiohttp import SocketModeClient
     from slack_sdk.socket_mode.request import SocketModeRequest
     from slack_sdk.socket_mode.response import SocketModeResponse
+    from slack_sdk.web.async_client import AsyncWebClient
+
     HAS_SLACK = True
 except ImportError:
     HAS_SLACK = False
@@ -84,9 +84,7 @@ class SlackChannel(BaseChannel):
     async def _handle_event(self, client: "SocketModeClient", req: "SocketModeRequest"):
         """Process incoming Socket Mode events."""
         # Acknowledge the event immediately
-        await client.send_socket_mode_response(
-            SocketModeResponse(envelope_id=req.envelope_id)
-        )
+        await client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
 
         if req.type != "events_api":
             return

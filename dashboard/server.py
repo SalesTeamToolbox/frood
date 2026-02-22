@@ -14,27 +14,26 @@ Extended with endpoints for providers, tools, skills, channels, and devices.
 
 import logging
 from pathlib import Path
-from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from core.config import settings
-from core.device_auth import DeviceStore, VALID_DEVICE_TYPES, VALID_CAPABILITIES
-from core.task_queue import TaskQueue, Task, TaskType, TaskStatus
 from core.approval_gate import ApprovalGate
+from core.config import settings
+from core.device_auth import DeviceStore
+from core.task_queue import Task, TaskQueue, TaskStatus, TaskType
 from dashboard.auth import (
-    AuthContext,
-    verify_password,
-    create_token,
-    get_current_user,
-    get_auth_context,
-    require_admin,
-    check_rate_limit,
     API_KEY_PREFIX,
+    AuthContext,
+    check_rate_limit,
+    create_token,
+    get_auth_context,
+    get_current_user,
+    require_admin,
+    verify_password,
 )
 from dashboard.websocket_manager import WebSocketManager
 
@@ -59,10 +58,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         )
         # If serving over HTTPS, enable HSTS
         if request.url.scheme == "https":
-            response.headers["Strict-Transport-Security"] = (
-                "max-age=31536000; includeSubDomains"
-            )
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
+
 
 FRONTEND_DIR = Path(__file__).parent / "frontend" / "dist"
 
@@ -131,7 +129,7 @@ def create_app(
     skill_loader=None,
     channel_manager=None,
     learner=None,
-    device_store: Optional[DeviceStore] = None,
+    device_store: DeviceStore | None = None,
     heartbeat=None,
     key_store=None,
 ) -> FastAPI:
@@ -185,12 +183,11 @@ def create_app(
     async def get_status(_user: str = Depends(get_current_user)):
         """Full platform status with system metrics and dynamic capacity."""
         if heartbeat:
-            health = heartbeat.get_health(
-                task_queue=task_queue, tool_registry=tool_registry
-            )
+            health = heartbeat.get_health(task_queue=task_queue, tool_registry=tool_registry)
             return health.to_dict()
         # Fallback when heartbeat is not available
         from core.capacity import compute_effective_capacity
+
         cap = compute_effective_capacity(settings.max_concurrent_agents)
         return {
             "active_agents": 0,
@@ -241,9 +238,7 @@ def create_app(
         return [t.to_dict() for t in task_queue.all_tasks()]
 
     @app.post("/api/tasks")
-    async def create_task(
-        req: TaskCreateRequest, auth: AuthContext = Depends(get_auth_context)
-    ):
+    async def create_task(req: TaskCreateRequest, auth: AuthContext = Depends(get_auth_context)):
         task = Task(
             title=req.title,
             description=req.description,
@@ -292,9 +287,7 @@ def create_app(
         return task_queue.board()
 
     @app.patch("/api/tasks/{task_id}/move")
-    async def move_task(
-        task_id: str, req: TaskMoveRequest, _user: str = Depends(get_current_user)
-    ):
+    async def move_task(task_id: str, req: TaskMoveRequest, _user: str = Depends(get_current_user)):
         """Move task to a new status column (Kanban drag-and-drop)."""
         task = task_queue.get(task_id)
         if not task:
@@ -402,9 +395,7 @@ def create_app(
         return approval_gate.pending_requests()
 
     @app.post("/api/approvals")
-    async def handle_approval(
-        req: ApprovalAction, _user: str = Depends(get_current_user)
-    ):
+    async def handle_approval(req: ApprovalAction, _user: str = Depends(get_current_user)):
         if req.approved:
             approval_gate.approve(req.task_id, req.action, user=_user)
         else:
@@ -497,9 +488,7 @@ def create_app(
         }
 
     @app.post("/api/devices/{device_id}/revoke")
-    async def revoke_device(
-        device_id: str, _admin: AuthContext = Depends(require_admin)
-    ):
+    async def revoke_device(device_id: str, _admin: AuthContext = Depends(require_admin)):
         """Revoke a device's API key (admin only)."""
         if not device_store:
             raise HTTPException(status_code=503, detail="Device store not configured")
@@ -512,6 +501,7 @@ def create_app(
     @app.get("/api/providers")
     async def list_providers(_user: str = Depends(get_current_user)):
         from providers.registry import ProviderRegistry
+
         registry = ProviderRegistry()
         return {
             "providers": registry.available_providers(),
@@ -552,9 +542,7 @@ def create_app(
         return key_store.get_masked_keys()
 
     @app.put("/api/settings/keys")
-    async def update_api_keys(
-        req: KeyUpdateRequest, _admin: AuthContext = Depends(require_admin)
-    ):
+    async def update_api_keys(req: KeyUpdateRequest, _admin: AuthContext = Depends(require_admin)):
         """Update one or more API keys (admin only)."""
         if not key_store:
             raise HTTPException(status_code=503, detail="Key store not configured")
@@ -621,7 +609,9 @@ def create_app(
         else:
             # JWT authentication (dashboard user)
             try:
-                from jose import jwt as jose_jwt, JWTError, ExpiredSignatureError
+                from jose import ExpiredSignatureError, JWTError
+                from jose import jwt as jose_jwt
+
                 payload = jose_jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
                 if not payload.get("sub"):
                     await ws.close(code=4001, reason="Invalid token")

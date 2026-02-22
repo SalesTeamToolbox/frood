@@ -1,17 +1,19 @@
 """Tests for Phase 1: WorkspaceSandbox."""
 
-import pytest
 from pathlib import Path
-from core.sandbox import WorkspaceSandbox, SandboxViolation
+
+import pytest
+
+from core.sandbox import SandboxViolation, WorkspaceSandbox
 
 
 class TestWorkspaceSandbox:
     def setup_method(self):
-        self.sandbox = WorkspaceSandbox("/tmp/test_workspace", enabled=True)
+        self.sandbox = WorkspaceSandbox("/tmp/test_workspace", enabled=True)  # nosec B108
 
     def test_resolve_relative_path(self):
         resolved = self.sandbox.resolve_path("subdir/file.txt")
-        assert str(resolved).startswith("/tmp/test_workspace")
+        assert str(resolved).startswith("/tmp/test_workspace")  # nosec B108
 
     def test_block_path_traversal(self):
         with pytest.raises(SandboxViolation):
@@ -23,14 +25,14 @@ class TestWorkspaceSandbox:
 
     def test_allow_path_inside(self):
         resolved = self.sandbox.resolve_path("src/main.py")
-        assert resolved == Path("/tmp/test_workspace/src/main.py")
+        assert resolved == Path("/tmp/test_workspace/src/main.py")  # nosec B108
 
     def test_check_path_returns_bool(self):
         assert self.sandbox.check_path("safe/file.txt") is True
         assert self.sandbox.check_path("../../etc/passwd") is False
 
     def test_disabled_sandbox_allows_all(self):
-        disabled = WorkspaceSandbox("/tmp/test", enabled=False)
+        disabled = WorkspaceSandbox("/tmp/test", enabled=False)  # nosec B108
         resolved = disabled.resolve_path("/etc/passwd")
         assert resolved == Path("/etc/passwd")
 

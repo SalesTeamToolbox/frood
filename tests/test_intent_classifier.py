@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.intent_classifier import IntentClassifier, ClassificationResult, PendingClarification
+from core.intent_classifier import ClassificationResult, IntentClassifier, PendingClarification
 from core.task_queue import TaskType
 
 
@@ -236,11 +236,15 @@ class TestResourceAllocation:
 
     def test_valid_teams_list(self):
         from core.intent_classifier import _VALID_TEAMS
+
         expected = {
-            "research-team", "marketing-team", "content-team",
-            "design-review", "strategy-team",
+            "research-team",
+            "marketing-team",
+            "content-team",
+            "design-review",
+            "strategy-team",
         }
-        assert _VALID_TEAMS == expected
+        assert expected == _VALID_TEAMS
 
 
 class TestLearnerToolRecommendations:
@@ -248,11 +252,13 @@ class TestLearnerToolRecommendations:
 
     def test_build_tool_usage_section_empty(self):
         from agents.learner import Learner
+
         section = Learner._build_tool_usage_section([], "content")
         assert "No tools were called" in section
 
     def test_build_tool_usage_section_with_calls(self):
         from agents.learner import Learner
+
         tool_calls = [
             {"name": "content_analyzer", "success": True},
             {"name": "content_analyzer", "success": True},
@@ -265,4 +271,4 @@ class TestLearnerToolRecommendations:
         assert "web_search" in section
         assert "Total tool calls: 4" in section
         assert "100%" in section  # content_analyzer success rate
-        assert "0%" in section    # web_search success rate
+        assert "0%" in section  # web_search success rate

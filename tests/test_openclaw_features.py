@@ -13,22 +13,19 @@ Covers:
   - Browser Gateway Token
 """
 
-import asyncio
 import json
 import os
 import tempfile
 import time
 from collections import defaultdict
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 # ============================================================================
 # URL Policy Tests
 # ============================================================================
-
-from core.url_policy import UrlPolicy, _is_ssrf_target, _BLOCKED_IP_RANGES
+from core.url_policy import UrlPolicy, _is_ssrf_target
 
 
 class TestUrlPolicyAllowDeny:
@@ -36,7 +33,11 @@ class TestUrlPolicyAllowDeny:
 
     def test_empty_allowlist_allows_public_url(self):
         """Backward compat: no allowlist means all public URLs pass."""
-        policy = UrlPolicy(allowlist=[], denylist=[], audit_log_path=os.path.join(tempfile.mkdtemp(), "audit.jsonl"))
+        policy = UrlPolicy(
+            allowlist=[],
+            denylist=[],
+            audit_log_path=os.path.join(tempfile.mkdtemp(), "audit.jsonl"),
+        )
         allowed, reason = policy.check("https://example.com/page", agent_id="a1")
         assert allowed is True
         assert reason == ""
@@ -168,7 +169,13 @@ class TestUrlPolicyAuditLog:
 # Security Audit Tests
 # ============================================================================
 
-from tools.security_audit import run_audit, startup_audit, AuditReport, AuditCheck, SecurityAuditTool
+from tools.security_audit import (
+    AuditCheck,
+    AuditReport,
+    SecurityAuditTool,
+    run_audit,
+    startup_audit,
+)
 
 
 class TestSecurityAudit:
@@ -187,22 +194,26 @@ class TestSecurityAudit:
         assert expected.issubset(categories)
 
     def test_audit_report_score_calculation(self):
-        report = AuditReport(checks=[
-            AuditCheck("Cat", "Check1", "pass"),
-            AuditCheck("Cat", "Check2", "pass"),
-            AuditCheck("Cat", "Check3", "fail"),
-            AuditCheck("Cat", "Check4", "warn"),
-        ])
+        report = AuditReport(
+            checks=[
+                AuditCheck("Cat", "Check1", "pass"),
+                AuditCheck("Cat", "Check2", "pass"),
+                AuditCheck("Cat", "Check3", "fail"),
+                AuditCheck("Cat", "Check4", "warn"),
+            ]
+        )
         assert report.passed == 2
         assert report.failures == 1
         assert report.warnings == 1
         assert report.score == 50  # 2/4 * 100
 
     def test_audit_report_format_output(self):
-        report = AuditReport(checks=[
-            AuditCheck("Auth", "Password set", "pass"),
-            AuditCheck("Auth", "Hash used", "fail", "Not configured"),
-        ])
+        report = AuditReport(
+            checks=[
+                AuditCheck("Auth", "Password set", "pass"),
+                AuditCheck("Auth", "Hash used", "fail", "Not configured"),
+            ]
+        )
         output = report.format()
         assert "Security Audit Report" in output
         assert "PASS" in output
@@ -249,9 +260,11 @@ class TestSecurityAuditTool:
 # ============================================================================
 
 from core.notification_service import (
-    NotificationService, NotificationPayload,
-    SEVERITY_INFO, SEVERITY_CRITICAL, SEVERITY_WARNING,
-    _EMAIL_EVENTS,
+    SEVERITY_CRITICAL,
+    SEVERITY_INFO,
+    SEVERITY_WARNING,
+    NotificationPayload,
+    NotificationService,
 )
 
 
@@ -261,8 +274,11 @@ class TestNotificationServiceFormats:
     def test_slack_format_detected(self):
         svc = NotificationService(webhook_urls=["https://hooks.slack.com/services/T/B/x"])
         payload = NotificationPayload(
-            event="task_failed", timestamp=time.time(),
-            task_id="t1", title="Test", severity=SEVERITY_CRITICAL,
+            event="task_failed",
+            timestamp=time.time(),
+            task_id="t1",
+            title="Test",
+            severity=SEVERITY_CRITICAL,
         )
         body = svc._format_webhook("https://hooks.slack.com/services/T/B/x", payload)
         assert "attachments" in body
@@ -271,8 +287,11 @@ class TestNotificationServiceFormats:
     def test_discord_format_detected(self):
         svc = NotificationService(webhook_urls=["https://discord.com/api/webhooks/123/abc"])
         payload = NotificationPayload(
-            event="task_done", timestamp=time.time(),
-            task_id="t2", title="Done", severity=SEVERITY_INFO,
+            event="task_done",
+            timestamp=time.time(),
+            task_id="t2",
+            title="Done",
+            severity=SEVERITY_INFO,
         )
         body = svc._format_webhook("https://discord.com/api/webhooks/123/abc", payload)
         assert "embeds" in body
@@ -281,8 +300,11 @@ class TestNotificationServiceFormats:
     def test_generic_format_for_unknown_url(self):
         svc = NotificationService()
         payload = NotificationPayload(
-            event="task_review", timestamp=time.time(),
-            task_id="t3", title="Review", severity=SEVERITY_WARNING,
+            event="task_review",
+            timestamp=time.time(),
+            task_id="t3",
+            title="Review",
+            severity=SEVERITY_WARNING,
         )
         body = svc._format_webhook("https://webhook.example.com/hook", payload)
         assert body["event"] == "task_review"
@@ -300,8 +322,10 @@ class TestNotificationServiceEventFilter:
             allowed_events=["task_failed"],
         )
         payload = NotificationPayload(
-            event="task_created", timestamp=time.time(),
-            task_id="t4", title="New Task",
+            event="task_created",
+            timestamp=time.time(),
+            task_id="t4",
+            title="New Task",
         )
         # Should not call _send_webhook because task_created not in allowed_events
         with patch.object(svc, "_send_webhook", new_callable=AsyncMock) as mock_send:
@@ -315,8 +339,10 @@ class TestNotificationServiceEventFilter:
             allowed_events=["task_failed"],
         )
         payload = NotificationPayload(
-            event="task_failed", timestamp=time.time(),
-            task_id="t5", title="Failed",
+            event="task_failed",
+            timestamp=time.time(),
+            task_id="t5",
+            title="Failed",
         )
         with patch.object(svc, "_send_webhook", new_callable=AsyncMock) as mock_send:
             await svc.notify(payload)
@@ -336,8 +362,11 @@ class TestNotificationServiceEmail:
             smtp_password="pass",
         )
         payload = NotificationPayload(
-            event="task_failed", timestamp=time.time(),
-            task_id="t6", title="Failed Task", severity=SEVERITY_CRITICAL,
+            event="task_failed",
+            timestamp=time.time(),
+            task_id="t6",
+            title="Failed Task",
+            severity=SEVERITY_CRITICAL,
         )
         with patch.object(svc, "_send_email", new_callable=AsyncMock) as mock_email:
             await svc.notify(payload)
@@ -350,8 +379,11 @@ class TestNotificationServiceEmail:
             smtp_host="smtp.example.com",
         )
         payload = NotificationPayload(
-            event="task_done", timestamp=time.time(),
-            task_id="t7", title="Done", severity=SEVERITY_INFO,
+            event="task_done",
+            timestamp=time.time(),
+            task_id="t7",
+            title="Done",
+            severity=SEVERITY_INFO,
         )
         with patch.object(svc, "_send_email", new_callable=AsyncMock) as mock_email:
             await svc.notify(payload)
@@ -367,8 +399,10 @@ class TestNotificationServiceSsrf:
             webhook_urls=["http://localhost:9999/hook"],
         )
         payload = NotificationPayload(
-            event="task_failed", timestamp=time.time(),
-            task_id="t8", title="Fail",
+            event="task_failed",
+            timestamp=time.time(),
+            task_id="t8",
+            title="Fail",
         )
         with patch.object(svc, "_send_webhook", new_callable=AsyncMock) as mock_send:
             await svc.notify(payload)
@@ -380,7 +414,7 @@ class TestNotificationServiceSsrf:
 # Enhanced Task Model (Kanban) Tests
 # ============================================================================
 
-from core.task_queue import Task, TaskStatus, TaskType, TaskQueue
+from core.task_queue import Task, TaskQueue, TaskStatus, TaskType
 
 
 class TestTaskKanbanFields:
@@ -527,7 +561,7 @@ class TestContextSafeguards:
 # Cron Stagger Tests
 # ============================================================================
 
-from tools.cron import CronScheduler, CronJob
+from tools.cron import CronJob, CronScheduler
 
 
 class TestCronStagger:
@@ -567,6 +601,7 @@ class TestCronStagger:
     def test_jitter_within_bounds(self):
         """Jitter should add a random offset within [0, jitter_seconds]."""
         import random
+
         random.seed(42)
         job = CronJob(name="jittery", schedule="0 * * * *", jitter_seconds=5)
         jitter = random.uniform(0, job.jitter_seconds)
@@ -588,7 +623,7 @@ class TestCronStagger:
 # ============================================================================
 
 from agents.model_router import ModelRouter
-from providers.registry import ProviderRegistry, ModelTier
+from providers.registry import ProviderRegistry
 
 
 class TestExtendedContextWindow:
@@ -711,7 +746,7 @@ class TestSecurityAnalyzerOwasp:
     @pytest.mark.asyncio
     async def test_scan_owasp_finds_command_injection(self):
         with open(os.path.join(self.tmpdir, "run.py"), "w") as f:
-            f.write('import os\nos.system(user_input)\n')
+            f.write("import os\nos.system(user_input)\n")
         result = await self.tool.execute(action="scan_owasp")
         assert "Command Injection" in result.output or "os.system" in result.output
 
@@ -726,7 +761,7 @@ class TestSecurityAnalyzerEnhancedPatterns:
     async def test_marshal_loads_detected(self):
         result = await self.tool.execute(
             action="scan_code",
-            code='import marshal\ndata = marshal.loads(raw_bytes)\n',
+            code="import marshal\ndata = marshal.loads(raw_bytes)\n",
         )
         assert "marshal.loads" in result.output
 
@@ -734,7 +769,7 @@ class TestSecurityAnalyzerEnhancedPatterns:
     async def test_jwt_verify_false_detected(self):
         result = await self.tool.execute(
             action="scan_code",
-            code='payload = jwt.decode(token, verify=False)\n',
+            code="payload = jwt.decode(token, verify=False)\n",
         )
         assert "JWT" in result.output or "jwt" in result.output.lower()
 
@@ -742,7 +777,7 @@ class TestSecurityAnalyzerEnhancedPatterns:
     async def test_md5_password_hash_detected(self):
         result = await self.tool.execute(
             action="scan_code",
-            code='password_hash = hashlib.md5(password.encode()).hexdigest()\n',
+            code="password_hash = hashlib.md5(password.encode()).hexdigest()\n",
         )
         assert "MD5" in result.output or "weak" in result.output.lower()
 
@@ -767,5 +802,6 @@ class TestBrowserGatewayToken:
         # Token is auto-generated in config.py if not set
         # so it should be a non-empty string
         from core.config import settings
+
         assert settings.browser_gateway_token != ""
         assert tool._gateway_token == settings.browser_gateway_token

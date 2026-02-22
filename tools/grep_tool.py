@@ -8,6 +8,7 @@ Returns structured results with file paths, line numbers, and context.
 import asyncio
 import logging
 import shutil
+
 from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.grep")
@@ -99,7 +100,13 @@ class GrepTool(Tool):
             return ToolResult(error="Neither ripgrep nor grep found on this system", success=False)
 
     async def _search_ripgrep(
-        self, pattern, path, file_type, context, case_insensitive, max_results,
+        self,
+        pattern,
+        path,
+        file_type,
+        context,
+        case_insensitive,
+        max_results,
     ) -> ToolResult:
         cmd = [_RG_PATH, "--line-number", "--no-heading", "--color=never"]
 
@@ -113,22 +120,30 @@ class GrepTool(Tool):
             cmd.extend([f"--max-count={max_results}"])
 
         # Always exclude common noise directories
-        cmd.extend([
-            "--glob=!.git",
-            "--glob=!node_modules",
-            "--glob=!__pycache__",
-            "--glob=!*.pyc",
-            "--glob=!.next",
-            "--glob=!dist",
-            "--glob=!build",
-        ])
+        cmd.extend(
+            [
+                "--glob=!.git",
+                "--glob=!node_modules",
+                "--glob=!__pycache__",
+                "--glob=!*.pyc",
+                "--glob=!.next",
+                "--glob=!dist",
+                "--glob=!build",
+            ]
+        )
 
         cmd.extend([pattern, path])
 
         return await self._run_search(cmd)
 
     async def _search_grep(
-        self, pattern, path, file_type, context, case_insensitive, max_results,
+        self,
+        pattern,
+        path,
+        file_type,
+        context,
+        case_insensitive,
+        max_results,
     ) -> ToolResult:
         cmd = [_GREP_PATH, "--recursive", "--line-number", "--color=never"]
 
@@ -138,21 +153,34 @@ class GrepTool(Tool):
             cmd.append("--ignore-case")
         if file_type:
             ext_map = {
-                "py": "*.py", "js": "*.js", "ts": "*.ts", "json": "*.json",
-                "yaml": "*.yaml", "yml": "*.yml", "md": "*.md", "tsx": "*.tsx",
-                "jsx": "*.jsx", "css": "*.css", "html": "*.html", "go": "*.go",
-                "rs": "*.rs", "java": "*.java", "rb": "*.rb",
+                "py": "*.py",
+                "js": "*.js",
+                "ts": "*.ts",
+                "json": "*.json",
+                "yaml": "*.yaml",
+                "yml": "*.yml",
+                "md": "*.md",
+                "tsx": "*.tsx",
+                "jsx": "*.jsx",
+                "css": "*.css",
+                "html": "*.html",
+                "go": "*.go",
+                "rs": "*.rs",
+                "java": "*.java",
+                "rb": "*.rb",
             }
             include = ext_map.get(file_type, f"*.{file_type}")
             cmd.extend([f"--include={include}"])
         if max_results:
             cmd.extend([f"--max-count={max_results}"])
 
-        cmd.extend([
-            "--exclude-dir=.git",
-            "--exclude-dir=node_modules",
-            "--exclude-dir=__pycache__",
-        ])
+        cmd.extend(
+            [
+                "--exclude-dir=.git",
+                "--exclude-dir=node_modules",
+                "--exclude-dir=__pycache__",
+            ]
+        )
 
         cmd.extend([pattern, path])
 
@@ -167,7 +195,7 @@ class GrepTool(Tool):
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             return ToolResult(error="Search timed out (>30s)", success=False)
 

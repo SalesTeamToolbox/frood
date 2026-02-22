@@ -29,7 +29,12 @@ BUILTIN_PERSONAS: dict[str, dict] = {
         ],
         "preferred_tone": "Direct, action-oriented, no fluff. Show ROI quickly.",
         "channels": ["Twitter/X", "LinkedIn", "Product Hunt", "Hacker News"],
-        "buying_triggers": ["Saves time", "Easy to set up", "Proven results", "Free tier available"],
+        "buying_triggers": [
+            "Saves time",
+            "Easy to set up",
+            "Proven results",
+            "Free tier available",
+        ],
     },
     "enterprise-buyer": {
         "name": "enterprise-buyer",
@@ -47,7 +52,12 @@ BUILTIN_PERSONAS: dict[str, dict] = {
         ],
         "preferred_tone": "Professional, data-driven, emphasize security and reliability.",
         "channels": ["LinkedIn", "Industry conferences", "Analyst reports", "Email"],
-        "buying_triggers": ["Enterprise SLA", "SOC 2 compliance", "Case studies", "Dedicated support"],
+        "buying_triggers": [
+            "Enterprise SLA",
+            "SOC 2 compliance",
+            "Case studies",
+            "Dedicated support",
+        ],
     },
     "developer": {
         "name": "developer",

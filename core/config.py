@@ -8,7 +8,7 @@ import json
 import logging
 import os
 import secrets
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger("agent42.config")
@@ -22,8 +22,8 @@ def _resolve_repo_path(raw: str) -> str | None:
     if p.exists() and (p / ".git").exists():
         return str(p)
     logger.info(
-        "DEFAULT_REPO_PATH=%s is not a valid git repo — "
-        "configure repos via the dashboard.", raw,
+        "DEFAULT_REPO_PATH=%s is not a valid git repo — configure repos via the dashboard.",
+        raw,
     )
     return None
 
@@ -76,7 +76,9 @@ class Settings:
     login_rate_limit: int = 5  # Max login attempts per minute per IP
     max_websocket_connections: int = 50
     tool_rate_limiting_enabled: bool = True
-    tool_rate_limit_overrides: str = ""  # JSON: {"shell": {"max_calls": 500, "window_seconds": 3600}}
+    tool_rate_limit_overrides: str = (
+        ""  # JSON: {"shell": {"max_calls": 500, "window_seconds": 3600}}
+    )
 
     # Spending limits
     max_daily_api_spend_usd: float = 0.0  # 0 = unlimited
@@ -100,8 +102,8 @@ class Settings:
     skills_dirs: str = ""  # Comma-separated extra skill directories
 
     # URL policy (OpenClaw security fix)
-    url_allowlist: str = ""       # Comma-separated glob patterns, e.g. "*.github.com,api.openai.com"
-    url_denylist: str = ""        # Comma-separated glob patterns to always block
+    url_allowlist: str = ""  # Comma-separated glob patterns, e.g. "*.github.com,api.openai.com"
+    url_denylist: str = ""  # Comma-separated glob patterns to always block
     max_url_requests_per_agent: int = 100  # 0 = unlimited
 
     # Browser control security (OpenClaw CVE fix)
@@ -112,7 +114,7 @@ class Settings:
     context_overflow_strategy: str = "truncate_oldest"  # truncate_oldest | summarize | error
 
     # Webhook notifications (OpenClaw feature)
-    webhook_urls: str = ""          # Comma-separated webhook endpoints
+    webhook_urls: str = ""  # Comma-separated webhook endpoints
     webhook_events: str = "task_failed,task_review,approval_requested,agent_stalled"
     notification_email_recipients: str = ""  # Comma-separated emails for critical alerts
 
@@ -126,16 +128,16 @@ class Settings:
     sessions_dir: str = ".agent42/sessions"
 
     # Qdrant vector database (optional — enhances semantic search)
-    qdrant_url: str = ""              # e.g. "http://localhost:6333" for Docker, or empty for embedded
-    qdrant_api_key: str = ""          # API key for Qdrant Cloud or authenticated instances
+    qdrant_url: str = ""  # e.g. "http://localhost:6333" for Docker, or empty for embedded
+    qdrant_api_key: str = ""  # API key for Qdrant Cloud or authenticated instances
     qdrant_collection_prefix: str = "agent42"  # Prefix for collection names
-    qdrant_enabled: bool = False      # Set true to enable Qdrant (auto-enabled if qdrant_url is set)
+    qdrant_enabled: bool = False  # Set true to enable Qdrant (auto-enabled if qdrant_url is set)
     qdrant_local_path: str = ".agent42/qdrant"  # Path for embedded Qdrant storage
 
     # Redis (optional — fast session cache + embedding cache)
-    redis_url: str = ""               # e.g. "redis://localhost:6379/0"
+    redis_url: str = ""  # e.g. "redis://localhost:6379/0"
     redis_password: str = ""
-    session_ttl_days: int = 7         # TTL for session data in Redis
+    session_ttl_days: int = 7  # TTL for session data in Redis
     embedding_cache_ttl_hours: int = 24  # TTL for cached embeddings in Redis
 
     # Non-code outputs (Phase 8)
@@ -152,7 +154,7 @@ class Settings:
 
     # Security scanning (scheduled)
     security_scan_enabled: bool = True
-    security_scan_interval: str = "8h"       # e.g. "8h", "6h", "12h"
+    security_scan_interval: str = "8h"  # e.g. "8h", "6h", "12h"
     security_scan_min_severity: str = "medium"  # low, medium, high, critical
     security_scan_github_issues: bool = True
 
@@ -197,13 +199,15 @@ class Settings:
             tasks_json_path=os.getenv("TASKS_JSON_PATH", "tasks.json"),
             # Security
             sandbox_enabled=os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes"),
-            workspace_restrict=os.getenv("WORKSPACE_RESTRICT", "true").lower() in ("true", "1", "yes"),
+            workspace_restrict=os.getenv("WORKSPACE_RESTRICT", "true").lower()
+            in ("true", "1", "yes"),
             command_filter_mode=os.getenv("COMMAND_FILTER_MODE", "deny"),
             command_filter_allowlist=os.getenv("COMMAND_FILTER_ALLOWLIST", ""),
             approval_log_path=os.getenv("APPROVAL_LOG_PATH", ".agent42/approvals.jsonl"),
             login_rate_limit=int(os.getenv("LOGIN_RATE_LIMIT", "5")),
             max_websocket_connections=int(os.getenv("MAX_WEBSOCKET_CONNECTIONS", "50")),
-            tool_rate_limiting_enabled=os.getenv("TOOL_RATE_LIMITING_ENABLED", "true").lower() in ("true", "1", "yes"),
+            tool_rate_limiting_enabled=os.getenv("TOOL_RATE_LIMITING_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
             tool_rate_limit_overrides=os.getenv("TOOL_RATE_LIMIT_OVERRIDES", ""),
             max_daily_api_spend_usd=float(os.getenv("MAX_DAILY_API_SPEND_USD", "0")),
             # Channels
@@ -231,7 +235,9 @@ class Settings:
             context_overflow_strategy=os.getenv("CONTEXT_OVERFLOW_STRATEGY", "truncate_oldest"),
             # Webhook notifications
             webhook_urls=os.getenv("WEBHOOK_URLS", ""),
-            webhook_events=os.getenv("WEBHOOK_EVENTS", "task_failed,task_review,approval_requested,agent_stalled"),
+            webhook_events=os.getenv(
+                "WEBHOOK_EVENTS", "task_failed,task_review,approval_requested,agent_stalled"
+            ),
             notification_email_recipients=os.getenv("NOTIFICATION_EMAIL_RECIPIENTS", ""),
             # Skills
             skills_dirs=os.getenv("SKILLS_DIRS", ""),
@@ -246,7 +252,8 @@ class Settings:
             qdrant_url=os.getenv("QDRANT_URL", ""),
             qdrant_api_key=os.getenv("QDRANT_API_KEY", ""),
             qdrant_collection_prefix=os.getenv("QDRANT_COLLECTION_PREFIX", "agent42"),
-            qdrant_enabled=os.getenv("QDRANT_ENABLED", "").lower() in ("true", "1", "yes") or bool(os.getenv("QDRANT_URL", "")),
+            qdrant_enabled=os.getenv("QDRANT_ENABLED", "").lower() in ("true", "1", "yes")
+            or bool(os.getenv("QDRANT_URL", "")),
             qdrant_local_path=os.getenv("QDRANT_LOCAL_PATH", ".agent42/qdrant"),
             # Redis
             redis_url=os.getenv("REDIS_URL", ""),
@@ -263,10 +270,12 @@ class Settings:
             # Device gateway auth
             devices_file=os.getenv("DEVICES_FILE", ".agent42/devices.jsonl"),
             # Security scanning
-            security_scan_enabled=os.getenv("SECURITY_SCAN_ENABLED", "true").lower() in ("true", "1", "yes"),
+            security_scan_enabled=os.getenv("SECURITY_SCAN_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
             security_scan_interval=os.getenv("SECURITY_SCAN_INTERVAL", "8h"),
             security_scan_min_severity=os.getenv("SECURITY_SCAN_MIN_SEVERITY", "medium"),
-            security_scan_github_issues=os.getenv("SECURITY_SCAN_GITHUB_ISSUES", "true").lower() in ("true", "1", "yes"),
+            security_scan_github_issues=os.getenv("SECURITY_SCAN_GITHUB_ISSUES", "true").lower()
+            in ("true", "1", "yes"),
         )
 
     def get_discord_guild_ids(self) -> list[int]:
@@ -356,7 +365,7 @@ class Settings:
         if self.dashboard_password and not self.dashboard_password_hash:
             warnings.append(
                 "Using plaintext DASHBOARD_PASSWORD. Set DASHBOARD_PASSWORD_HASH "
-                "for production. Generate: python -c \"from passlib.context import "
+                'for production. Generate: python -c "from passlib.context import '
                 "CryptContext; print(CryptContext(['bcrypt']).hash('yourpassword'))\""
             )
         return warnings
