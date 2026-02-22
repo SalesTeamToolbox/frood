@@ -6,6 +6,8 @@
 // ---------------------------------------------------------------------------
 const state = {
   token: localStorage.getItem("agent42_token") || "",
+  setupNeeded: null,  // null = checking, true = show wizard, false = show login/app
+  setupStep: 1,       // 1 = password, 2 = API key, 3 = done
   page: "tasks",
   tasks: [],
   approvals: [],
@@ -50,6 +52,139 @@ async function api(path, opts = {}) {
     throw new Error(data.detail || `HTTP ${res.status}`);
   }
   return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Setup wizard
+// ---------------------------------------------------------------------------
+async function checkSetup() {
+  try {
+    const res = await fetch(`${API}/setup/status`);
+    if (res.ok) {
+      const data = await res.json();
+      state.setupNeeded = data.setup_needed;
+    } else {
+      state.setupNeeded = false;
+    }
+  } catch {
+    state.setupNeeded = false;
+  }
+}
+
+let _setupPassword = "";
+
+function handleSetupStep1() {
+  const pass = document.getElementById("setup-pass")?.value || "";
+  const confirm = document.getElementById("setup-pass-confirm")?.value || "";
+  const errEl = document.getElementById("setup-error");
+  if (errEl) errEl.textContent = "";
+
+  if (pass.length < 8) {
+    if (errEl) errEl.textContent = "Password must be at least 8 characters.";
+    return;
+  }
+  if (pass !== confirm) {
+    if (errEl) errEl.textContent = "Passwords do not match.";
+    return;
+  }
+  _setupPassword = pass;
+  state.setupStep = 2;
+  render();
+}
+
+async function handleSetupStep2(skip) {
+  const apiKey = skip ? "" : (document.getElementById("setup-apikey")?.value?.trim() || "");
+  const btn = document.getElementById("setup-finish-btn");
+  const errEl = document.getElementById("setup-error");
+  if (errEl) errEl.textContent = "";
+  if (btn) { btn.disabled = true; btn.textContent = "Setting up\u2026"; }
+
+  try {
+    const res = await fetch(`${API}/setup/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: _setupPassword, openrouter_api_key: apiKey }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || "Setup failed");
+    }
+    const data = await res.json();
+    _setupPassword = "";
+    state.token = data.token;
+    localStorage.setItem("agent42_token", data.token);
+    state.setupStep = 3;
+    render();
+    // After brief success message, transition to the app
+    setTimeout(async () => {
+      state.setupNeeded = false;
+      state.setupStep = 1;
+      connectWS();
+      await loadAll();
+      render();
+      toast("Welcome to Agent42!", "success");
+    }, 2000);
+  } catch (err) {
+    _setupPassword = "";
+    if (errEl) errEl.textContent = err.message;
+    if (btn) { btn.disabled = false; btn.textContent = "Finish Setup"; }
+  }
+}
+
+function renderSetupWizard() {
+  const root = document.getElementById("app");
+  const s = state.setupStep;
+  const stepDot = (num) => {
+    const cls = s > num ? "active" : s === num ? "active current" : "";
+    return `<div class="setup-step ${cls}"><div class="step-number">${num}</div><div class="step-label">${["Password","API Key","Done"][num-1]}</div></div>`;
+  };
+  const line = (num) => `<div class="setup-step-line ${s > num ? 'active' : ''}"></div>`;
+  const steps = `<div class="setup-steps">${stepDot(1)}${line(1)}${stepDot(2)}${line(2)}${stepDot(3)}</div>`;
+
+  let body = "";
+  if (s === 1) {
+    body = `
+      <h2>Welcome to Agent<span style="color:var(--accent)">42</span></h2>
+      <p class="setup-subtitle">The answer to life, the universe, and all your tasks.</p>
+      <p class="setup-desc">Let's secure your dashboard with a password.</p>
+      ${steps}
+      <div id="setup-error" style="color:var(--danger);font-size:0.85rem;min-height:1.2em;margin-bottom:0.25rem"></div>
+      <form onsubmit="event.preventDefault();handleSetupStep1()">
+        <div class="form-group">
+          <label for="setup-pass">Dashboard Password</label>
+          <input type="password" id="setup-pass" placeholder="At least 8 characters" autofocus autocomplete="new-password">
+        </div>
+        <div class="form-group">
+          <label for="setup-pass-confirm">Confirm Password</label>
+          <input type="password" id="setup-pass-confirm" placeholder="Re-enter password" autocomplete="new-password">
+        </div>
+        <button type="submit" class="btn btn-primary btn-full" style="margin-top:0.5rem">Next</button>
+      </form>`;
+  } else if (s === 2) {
+    body = `
+      <h2>API Key <span style="color:var(--text-muted);font-weight:400;font-size:0.9rem">(optional)</span></h2>
+      <p class="setup-desc">Agent42 uses OpenRouter for LLM access. Free models work without a key, but adding one unlocks 200+ models.</p>
+      ${steps}
+      <div id="setup-error" style="color:var(--danger);font-size:0.85rem;min-height:1.2em;margin-bottom:0.25rem"></div>
+      <div class="form-group">
+        <label for="setup-apikey">OpenRouter API Key</label>
+        <input type="password" id="setup-apikey" placeholder="sk-or-... (optional)" autocomplete="off">
+        <div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.25rem">Get a free key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a></div>
+      </div>
+      <div style="display:flex;gap:0.5rem;margin-top:1rem">
+        <button class="btn btn-outline" style="flex:1" onclick="handleSetupStep2(true)">Skip for Now</button>
+        <button id="setup-finish-btn" class="btn btn-primary" style="flex:1" onclick="handleSetupStep2(false)">Finish Setup</button>
+      </div>`;
+  } else {
+    body = `
+      ${steps}
+      <div style="text-align:center;padding:2rem 0">
+        <div style="font-size:3rem;margin-bottom:0.75rem">&#9989;</div>
+        <h2>You're All Set!</h2>
+        <p class="setup-desc" style="margin-bottom:0">Dashboard secured. Loading Mission Control\u2026</p>
+      </div>`;
+  }
+  root.innerHTML = `<div class="login-page"><div class="login-card setup-wizard">${body}</div></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1249,6 +1384,9 @@ async function loadAll() {
 
 function render() {
   const root = document.getElementById("app");
+  // Setup wizard takes priority
+  if (state.setupNeeded === true && !state.token) { renderSetupWizard(); return; }
+  if (state.setupNeeded === null) { root.innerHTML = ""; return; }  // still checking
   if (!state.token) {
     root.innerHTML = `
       <div class="login-page">
@@ -1324,7 +1462,8 @@ function render() {
 // Init
 // ---------------------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", async () => {
-  if (state.token) {
+  await checkSetup();
+  if (!state.setupNeeded && state.token) {
     await loadAll();
     connectWS();
   }

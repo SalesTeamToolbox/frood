@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from core.approval_gate import ApprovalGate
-from core.config import settings
+from core.config import Settings, settings
 from core.device_auth import DeviceStore
 from core.task_queue import Task, TaskQueue, TaskStatus, TaskType
 from dashboard.auth import (
@@ -32,6 +32,7 @@ from dashboard.auth import (
     create_token,
     get_auth_context,
     get_current_user,
+    pwd_context,
     require_admin,
     verify_password,
 )
@@ -70,12 +71,21 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class SetupRequest(BaseModel):
+    password: str
+    openrouter_api_key: str = ""
+
+
 class TaskCreateRequest(BaseModel):
     title: str
     description: str
     task_type: str = "coding"
     priority: int = 0
     context_window: str = "default"
+
+
+# Passwords treated as unconfigured — trigger the setup wizard
+_INSECURE_PASSWORDS = {"", "changeme-right-now"}
 
 
 class TaskMoveRequest(BaseModel):
@@ -119,6 +129,45 @@ class DeviceRegisterRequest(BaseModel):
 
 class KeyUpdateRequest(BaseModel):
     keys: dict[str, str]
+
+
+def _update_env_file(env_path: Path, updates: dict[str, str]) -> None:
+    """Update or add key=value pairs in a .env file.
+
+    For each key in *updates*:
+    - If the key exists (commented or not), replace the entire line.
+    - If the key does not exist, append it at the end.
+    - Empty values write ``KEY=`` (clears the variable).
+    Creates the file if it does not exist.
+    """
+    lines: list[str] = []
+    if env_path.exists():
+        lines = env_path.read_text().splitlines()
+
+    remaining = dict(updates)
+    new_lines: list[str] = []
+
+    for line in lines:
+        stripped = line.lstrip()
+        matched_key = None
+        for key in remaining:
+            if (
+                stripped.startswith(f"{key}=")
+                or stripped.startswith(f"# {key}=")
+                or stripped.startswith(f"#{key}=")
+            ):
+                matched_key = key
+                break
+        if matched_key is not None:
+            value = remaining.pop(matched_key)
+            new_lines.append(f"{matched_key}={value}" if value else f"{matched_key}=")
+        else:
+            new_lines.append(line)
+
+    for key, value in remaining.items():
+        new_lines.append(f"{key}={value}" if value else f"{key}=")
+
+    env_path.write_text("\n".join(new_lines) + "\n")
 
 
 def create_app(
@@ -202,6 +251,80 @@ def create_app(
             "effective_max_agents": cap["effective_max"],
             "configured_max_agents": cap["configured_max"],
             "capacity_reason": cap["reason"],
+        }
+
+    # -- Setup Wizard ----------------------------------------------------------
+
+    @app.get("/api/setup/status")
+    async def setup_status():
+        """Check if first-run setup is needed. Unauthenticated."""
+        needs_setup = (
+            not settings.dashboard_password_hash
+            and settings.dashboard_password in _INSECURE_PASSWORDS
+        )
+        return {"setup_needed": needs_setup}
+
+    @app.post("/api/setup/complete")
+    async def setup_complete(req: SetupRequest, request: Request):
+        """Complete first-run setup: set password, optional API key.
+
+        Only available when no real password is configured (first run or
+        insecure default).  Writes to .env, reloads settings, and returns
+        a JWT for immediate login.
+        """
+        # Security gate: reject if a real password is already configured
+        if settings.dashboard_password_hash or (
+            settings.dashboard_password and settings.dashboard_password not in _INSECURE_PASSWORDS
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Setup already completed. Use login instead.",
+            )
+
+        client_ip = request.client.host if request.client else "unknown"
+        if not check_rate_limit(client_ip):
+            raise HTTPException(
+                status_code=429,
+                detail="Too many attempts. Try again in 1 minute.",
+            )
+
+        password = req.password.strip()
+        if len(password) < 8:
+            raise HTTPException(
+                status_code=400,
+                detail="Password must be at least 8 characters.",
+            )
+
+        import secrets as _secrets
+
+        password_hash = pwd_context.hash(password)
+        jwt_secret = _secrets.token_hex(32)
+
+        env_path = Path(__file__).parent.parent / ".env"
+        _update_env_file(
+            env_path,
+            {
+                "DASHBOARD_PASSWORD_HASH": password_hash,
+                "DASHBOARD_PASSWORD": "",
+                "JWT_SECRET": jwt_secret,
+            },
+        )
+
+        if req.openrouter_api_key and req.openrouter_api_key.strip():
+            import os
+
+            api_key = req.openrouter_api_key.strip()
+            _update_env_file(env_path, {"OPENROUTER_API_KEY": api_key})
+            os.environ["OPENROUTER_API_KEY"] = api_key
+
+        Settings.reload_from_env()
+
+        logger.info("First-run setup completed from %s", client_ip)
+        token = create_token(settings.dashboard_username)
+        return {
+            "status": "ok",
+            "token": token,
+            "message": "Setup complete. You are now logged in.",
         }
 
     # -- Auth ------------------------------------------------------------------
