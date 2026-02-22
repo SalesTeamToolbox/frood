@@ -225,7 +225,14 @@ def create_app(
             )
 
         if req.username != settings.dashboard_username or not verify_password(req.password):
-            logger.info(f"Failed login attempt for '{req.username}' from {client_ip}")
+            # Log diagnostic details (never the actual passwords)
+            user_ok = req.username == settings.dashboard_username
+            logger.warning(
+                "Failed login for '%s' from %s — username_match=%s, "
+                "password_len_sent=%d, password_configured=%s, hash_configured=%s",
+                req.username, client_ip, user_ok, len(req.password),
+                bool(settings.dashboard_password), bool(settings.dashboard_password_hash),
+            )
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
         logger.info(f"Successful login for '{req.username}' from {client_ip}")

@@ -214,6 +214,10 @@ async function saveApiKeys() {
 // Actions
 // ---------------------------------------------------------------------------
 async function doLogin(username, password) {
+  const errEl = document.getElementById("login-error");
+  const btn = document.querySelector('.login-card button[type="submit"]');
+  if (errEl) errEl.textContent = "";
+  if (btn) { btn.disabled = true; btn.textContent = "Signing in\u2026"; }
   try {
     const res = await fetch(`${API}/login`, {
       method: "POST",
@@ -232,7 +236,10 @@ async function doLogin(username, password) {
     render();
     toast("Logged in successfully", "success");
   } catch (err) {
+    if (errEl) errEl.textContent = err.message;
     toast(err.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Sign In"; }
   }
 }
 
@@ -1249,6 +1256,7 @@ function render() {
           <h1>Agent<span style="color:var(--accent)">42</span></h1>
           <div class="subtitle">The answer to life, the universe, and all your tasks.</div>
           <form onsubmit="event.preventDefault();doLogin(document.getElementById('login-user').value,document.getElementById('login-pass').value)">
+            <div id="login-error" style="color:#ef4444;font-size:0.85rem;min-height:1.2em;margin-bottom:0.25rem"></div>
             <div class="form-group">
               <label for="login-user">Username</label>
               <input type="text" id="login-user" value="admin" autocomplete="username">
