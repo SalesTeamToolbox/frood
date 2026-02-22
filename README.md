@@ -149,6 +149,27 @@ produces output for your review.
 
 That's it — you now have access to 30+ free models for all task types.
 
+### Optional: Enhanced Memory (Qdrant + Redis)
+
+For persistent cross-session memory, fast semantic search, and session caching:
+
+```bash
+# Install client libraries
+pip install qdrant-client redis[hiredis]
+
+# Start services (Docker)
+docker run -d -p 6333:6333 qdrant/qdrant
+docker run -d -p 6379:6379 redis:alpine
+
+# Add to .env
+QDRANT_URL=http://localhost:6333
+REDIS_URL=redis://localhost:6379/0
+```
+
+Or use embedded Qdrant (no Docker needed): set `QDRANT_ENABLED=true` in `.env`.
+
+Agent42 works fully without these — they're optional enhancements. See [Qdrant](#qdrant-vector-database-optional) and [Redis](#redis-optional) for details.
+
 ### Optional: Additional Providers
 
 For direct provider access or premium models, add any of these API keys:
@@ -169,6 +190,10 @@ For direct provider access or premium models, add any of these API keys:
 - Node.js 18+ (for frontend build)
 - git with a repo that has a `dev` branch
 - [OpenRouter account](https://openrouter.ai) (free, no credit card required)
+
+**Optional (for enhanced memory):**
+- `pip install qdrant-client` — Qdrant vector DB for semantic search
+- `pip install redis[hiredis]` — Redis for session caching + embedding cache
 
 ## Configuration
 
@@ -206,6 +231,41 @@ LLM provider API keys can also be configured through the dashboard admin UI
 | `SESSIONS_DIR` | `.agent42/sessions` | Session history |
 | `EMBEDDING_MODEL` | auto-detected | Override embedding model |
 | `EMBEDDING_PROVIDER` | auto-detected | `openai` or `openrouter` |
+
+### Qdrant Vector Database (optional)
+
+Enables HNSW-indexed semantic search, cross-session conversation recall, and scalable long-term memory. Falls back to JSON vector store when not configured.
+
+| Variable | Default | Description |
+|---|---|---|
+| `QDRANT_URL` | — | Qdrant server URL (e.g. `http://localhost:6333`) |
+| `QDRANT_ENABLED` | `false` | Enable embedded mode (no server needed) |
+| `QDRANT_LOCAL_PATH` | `.agent42/qdrant` | Storage path for embedded mode |
+| `QDRANT_API_KEY` | — | API key for Qdrant Cloud |
+| `QDRANT_COLLECTION_PREFIX` | `agent42` | Prefix for collection names |
+
+```bash
+# Docker quickstart:
+docker run -p 6333:6333 qdrant/qdrant
+pip install qdrant-client
+```
+
+### Redis (optional)
+
+Enables fast session caching with TTL expiry, embedding API response caching, and cross-instance session sharing. Falls back to JSONL files when not configured.
+
+| Variable | Default | Description |
+|---|---|---|
+| `REDIS_URL` | — | Redis URL (e.g. `redis://localhost:6379/0`) |
+| `REDIS_PASSWORD` | — | Redis password |
+| `SESSION_TTL_DAYS` | `7` | Auto-expire old sessions |
+| `EMBEDDING_CACHE_TTL_HOURS` | `24` | Cache embedding API responses |
+
+```bash
+# Docker quickstart:
+docker run -p 6379:6379 redis:alpine
+pip install redis[hiredis]
+```
 
 ### Tools
 
@@ -392,6 +452,17 @@ Agent42 maintains persistent memory and learns from every task:
 - **Event log** — append-only `HISTORY.md` for audit trail
 - **Session history** — per-conversation message history with configurable limits
 - **Semantic search** — vector embeddings for similarity-based memory retrieval (auto-detects OpenAI or OpenRouter embedding APIs; falls back to grep)
+
+### Enhanced Memory Backends (optional)
+
+When Qdrant and/or Redis are configured, Agent42 gains advanced memory capabilities. Both are optional — the system gracefully falls back to file-based storage when they're unavailable.
+
+- **Qdrant vector database** — replaces the JSON vector store with HNSW-indexed semantic search for sub-millisecond retrieval across four collections: `memory`, `history`, `conversations`, and `knowledge`. Supports both Docker server mode and embedded (local file) mode with no server required.
+- **Redis session cache** — caches active sessions in memory for <1ms reads (vs. disk I/O), with TTL-based auto-expiry for old sessions and an embedding cache that reduces embedding API calls by caching query vectors.
+- **Cross-session conversation search** — with Qdrant, Agent42 can recall conversations from any channel or session ("What did we discuss about X last week?"). Conversations are indexed with metadata (channel, participants, topics, timestamps) for filtered search.
+- **Memory consolidation pipeline** — when sessions are pruned, old messages are summarized by an LLM and stored in Qdrant as searchable conversation summaries. No context is lost.
+
+Install with: `pip install qdrant-client redis[hiredis]` (see [Qdrant](#qdrant-vector-database-optional) and [Redis](#redis-optional) configuration above).
 
 ### Self-Learning Loop
 
@@ -586,8 +657,11 @@ agent42/
 │       └── seo/SKILL.md
 ├── memory/
 │   ├── store.py               # Structured memory + event log
-│   ├── session.py             # Per-conversation session history
-│   └── embeddings.py          # Vector store + semantic search
+│   ├── session.py             # Per-conversation session history (Redis-cached)
+│   ├── embeddings.py          # Pluggable vector store + semantic search
+│   ├── qdrant_store.py        # Qdrant vector DB backend (HNSW search, collections)
+│   ├── redis_session.py       # Redis session cache + embedding cache
+│   └── consolidation.py       # Conversation summarization pipeline
 ├── dashboard/
 │   ├── server.py              # FastAPI + WebSocket server (security headers, auth)
 │   ├── auth.py                # JWT authentication + rate limiting

@@ -67,6 +67,18 @@ pip install --quiet --upgrade pip
 pip install --quiet -r requirements.txt
 info "Python dependencies installed"
 
+# ── Optional memory backends ────────────────────────────────────────────
+echo ""
+info "Optional: enhanced memory backends (Qdrant + Redis)"
+echo "  These are NOT required — Agent42 works without them."
+echo "  Install for faster semantic search and session caching:"
+echo ""
+echo "    pip install qdrant-client    # Vector DB for semantic search"
+echo "    pip install redis[hiredis]   # Session cache + embedding cache"
+echo ""
+echo "  See .env.example for QDRANT_* and REDIS_* configuration."
+echo ""
+
 # ── .env setup ───────────────────────────────────────────────────────────────
 if [ ! -f ".env" ]; then
     cp .env.example .env
@@ -123,6 +135,12 @@ echo "  1. Edit .env and set your API keys"
 echo "  2. Set DEFAULT_REPO_PATH to your git project"
 echo "  3. Run: source .venv/bin/activate && python agent42.py"
 echo "  4. Open: http://localhost:8000"
+echo ""
+echo "  Optional — enhanced memory (Qdrant + Redis):"
+echo "    pip install qdrant-client redis[hiredis]"
+echo "    docker run -d -p 6333:6333 qdrant/qdrant"
+echo "    docker run -d -p 6379:6379 redis:alpine"
+echo "    # Then set QDRANT_URL and REDIS_URL in .env"
 echo ""
 echo "  Optional — install as a systemd service:"
 echo "    sudo cp /tmp/agent42.service /etc/systemd/system/"
