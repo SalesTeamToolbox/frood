@@ -73,12 +73,38 @@ class MemoryStore:
         return self.memory_path.read_text(encoding="utf-8")
 
     def update_memory(self, content: str):
-        """Replace the entire memory contents."""
+        """Replace the entire memory contents.
+
+        Schedules an async reindex of embeddings if semantic search is available.
+        """
         self.memory_path.write_text(content, encoding="utf-8")
         # Notify Redis of memory change (cache invalidation)
         if self._redis and self._redis.is_available:
             self._redis.increment_memory_version()
+        # Schedule reindex so semantic search stays current
+        self._schedule_reindex()
         logger.info("Memory updated")
+
+    def _schedule_reindex(self):
+        """Schedule an async reindex of memory embeddings (fire-and-forget)."""
+        if not self.embeddings.is_available:
+            return
+
+        import asyncio
+
+        async def _reindex():
+            try:
+                count = await self.reindex_memory()
+                logger.debug(f"Auto-reindexed {count} memory chunks")
+            except Exception as e:
+                logger.warning(f"Auto-reindex failed (non-critical): {e}")
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_reindex())
+        except RuntimeError:
+            # No running event loop — skip reindex
+            logger.debug("No event loop available for memory reindex")
 
     def append_to_section(self, section: str, content: str):
         """Append content under a specific section heading."""
@@ -122,7 +148,11 @@ class MemoryStore:
         logger.debug(f"History logged: {event_type} — {summary}")
 
     def _rotate_history_if_needed(self):
-        """Rotate history file if it exceeds MAX_HISTORY_SIZE."""
+        """Rotate history file if it exceeds MAX_HISTORY_SIZE.
+
+        Archives use timestamped filenames to prevent overwriting previous
+        rotations (e.g. HISTORY.2026-02-22T15-30-00.md).
+        """
         if not self.history_path.exists():
             return
         try:
@@ -145,13 +175,18 @@ class MemoryStore:
                     kept = content[nl + 1:]
                     archived = content[:nl + 1]
 
-                archive_path = self.history_path.with_suffix(".old.md")
+                ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+                archive_name = self.history_path.stem + f".{ts}.md"
+                archive_path = self.history_path.parent / archive_name
                 archive_path.write_text(archived, encoding="utf-8")
                 self.history_path.write_text(
                     "# Agent42 History (rotated)\n\n" + kept,
                     encoding="utf-8",
                 )
-                logger.info(f"History rotated: {size} -> {len(kept)} bytes")
+                logger.info(
+                    f"History rotated: {size} -> {len(kept)} bytes, "
+                    f"archived to {archive_name}"
+                )
         except Exception as e:
             logger.warning(f"History rotation failed: {e}")
 
