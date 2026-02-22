@@ -383,6 +383,21 @@ class Settings:
             )
         return warnings
 
+    @classmethod
+    def reload_from_env(cls) -> None:
+        """Hot-reload the global settings singleton from environment variables.
+
+        Uses object.__setattr__ to update the frozen dataclass in-place,
+        ensuring all modules that imported ``settings`` by name see the
+        new values without needing to re-import.
+        """
+        from dotenv import load_dotenv
+
+        load_dotenv(Path(__file__).parent.parent / ".env", override=True)
+        new = cls.from_env()
+        for field_name in cls.__dataclass_fields__:
+            object.__setattr__(settings, field_name, getattr(new, field_name))
+
 
 # Singleton — import this everywhere
 settings = Settings.from_env()
