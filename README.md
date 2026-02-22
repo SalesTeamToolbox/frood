@@ -52,6 +52,27 @@ Open `http://localhost:8000` in your browser.
 
 That's it — you now have access to 30+ free models for all task types.
 
+### Optional: Enhanced Memory (Qdrant + Redis)
+
+For persistent cross-session memory, fast semantic search, and session caching:
+
+```bash
+# Install client libraries
+pip install qdrant-client redis[hiredis]
+
+# Start services (Docker)
+docker run -d -p 6333:6333 qdrant/qdrant
+docker run -d -p 6379:6379 redis:alpine
+
+# Add to .env
+QDRANT_URL=http://localhost:6333
+REDIS_URL=redis://localhost:6379/0
+```
+
+Or use embedded Qdrant (no Docker needed): set `QDRANT_ENABLED=true` in `.env`.
+
+Agent42 works fully without these — they're optional enhancements. See [Qdrant](#qdrant-vector-database-optional) and [Redis](#redis-optional) for details.
+
 ### Optional: Additional Providers
 
 For direct provider access or premium models, add any of these API keys:
