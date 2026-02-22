@@ -92,7 +92,7 @@ class Agent:
         self,
         task: Task,
         task_queue: TaskQueue,
-        worktree_manager: WorktreeManager,
+        worktree_manager: WorktreeManager | None,
         approval_gate: ApprovalGate,
         emit: Callable[[str, dict], Awaitable[None]],
         skill_loader: SkillLoader | None = None,
@@ -129,8 +129,15 @@ class Agent:
 
         try:
             # Set up workspace — worktree for code tasks, output dir for others
-            if needs_worktree:
+            if needs_worktree and self.worktree_manager:
                 worktree_path = await self.worktree_manager.create(task.id)
+            elif needs_worktree:
+                logger.warning("No repo configured — running code task without worktree")
+                needs_worktree = False
+                from core.config import settings
+                output_dir = Path(settings.outputs_dir) / task.id
+                output_dir.mkdir(parents=True, exist_ok=True)
+                worktree_path = output_dir
             else:
                 from core.config import settings
                 output_dir = Path(settings.outputs_dir) / task.id

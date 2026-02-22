@@ -13,6 +13,21 @@ from pathlib import Path
 
 logger = logging.getLogger("agent42.config")
 
+
+def _resolve_repo_path(raw: str) -> str | None:
+    """Return the repo path if it exists and is a git repo, else None."""
+    if not raw or not raw.strip():
+        return None
+    p = Path(raw).resolve()
+    if p.exists() and (p / ".git").exists():
+        return str(p)
+    logger.info(
+        "DEFAULT_REPO_PATH=%s is not a valid git repo — "
+        "configure repos via the dashboard.", raw,
+    )
+    return None
+
+
 # Known-insecure JWT secrets that must never be used in production
 _INSECURE_JWT_SECRETS = {
     "change-me-to-a-long-random-string",
@@ -42,7 +57,7 @@ class Settings:
     cors_allowed_origins: str = ""  # Comma-separated origins, empty = same-origin only
 
     # Orchestrator
-    default_repo_path: str = "."
+    default_repo_path: str | None = None
     max_concurrent_agents: int = 3
     tasks_json_path: str = "tasks.json"
 
@@ -177,7 +192,7 @@ class Settings:
             dashboard_host=os.getenv("DASHBOARD_HOST", "127.0.0.1"),
             cors_allowed_origins=os.getenv("CORS_ALLOWED_ORIGINS", ""),
             # Orchestrator
-            default_repo_path=os.getenv("DEFAULT_REPO_PATH", str(Path.cwd())),
+            default_repo_path=_resolve_repo_path(os.getenv("DEFAULT_REPO_PATH", "")),
             max_concurrent_agents=int(os.getenv("MAX_CONCURRENT_AGENTS", "3")),
             tasks_json_path=os.getenv("TASKS_JSON_PATH", "tasks.json"),
             # Security
