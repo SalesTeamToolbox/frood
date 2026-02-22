@@ -254,6 +254,7 @@ class TestPluginLoader:
 # Helper: a simple base tool used by extension tests
 # ---------------------------------------------------------------------------
 
+
 class _BaseTool(Tool):
     """Minimal tool used as a base for extension tests."""
 
