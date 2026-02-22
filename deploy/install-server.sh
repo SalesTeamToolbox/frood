@@ -25,7 +25,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 DOMAIN="agent42.meatheadgear.com"
 AGENT42_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-AGENT42_PORT=8000
+AGENT42_PORT=8001
 
 echo ""
 echo "  ╔══════════════════════════════════════════╗"
@@ -207,7 +207,7 @@ After=network.target
 Type=simple
 User=${CURRENT_USER}
 WorkingDirectory=${AGENT42_DIR}
-ExecStart=${VENV_PYTHON} agent42.py
+ExecStart=${VENV_PYTHON} agent42.py --port ${AGENT42_PORT}
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:${AGENT42_DIR}/agent42.log
