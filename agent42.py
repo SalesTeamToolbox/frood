@@ -94,6 +94,10 @@ from tools.test_runner import TestRunnerTool
 from tools.video_gen import VideoGenTool
 from tools.web_search import WebFetchTool, WebSearchTool
 from tools.workflow_tool import WorkflowTool
+from tools.ssh_tool import SSHTool
+from tools.tunnel_tool import TunnelTool
+from tools.knowledge_tool import KnowledgeTool
+from tools.vision_tool import VisionTool
 
 # -- Logging -------------------------------------------------------------------
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -326,6 +330,23 @@ class Agent42:
         router = ModelRouter()
         self.tool_registry.register(ImageGenTool(router=router))
         self.tool_registry.register(VideoGenTool(router=router))
+
+        # SSH remote shell (disabled by default — requires SSH_ENABLED=true)
+        if settings.ssh_enabled:
+            self.tool_registry.register(
+                SSHTool(self.sandbox, self.command_filter, self.approval_gate)
+            )
+
+        # Tunnel manager (disabled by default — requires TUNNEL_ENABLED=true)
+        if settings.tunnel_enabled:
+            self.tool_registry.register(TunnelTool(self.approval_gate))
+
+        # Knowledge base / RAG
+        embedding_store = getattr(self, "embedding_store", None)
+        self.tool_registry.register(KnowledgeTool(self.sandbox, embedding_store))
+
+        # Vision / image analysis
+        self.tool_registry.register(VisionTool(self.sandbox))
 
     async def _setup_channels(self):
         """Configure and register enabled channels based on settings."""
