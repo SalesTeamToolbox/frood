@@ -31,7 +31,7 @@ class TestDynamicTool:
                 },
             ),
             code=code,
-            workspace_path="/tmp",
+            workspace_path="/tmp",  # nosec B108
         )
 
     def test_name_prefix(self):
@@ -92,7 +92,7 @@ class TestCreateToolTool:
 
     def setup_method(self):
         self.registry = ToolRegistry()
-        self.creator = CreateToolTool(self.registry, workspace_path="/tmp")
+        self.creator = CreateToolTool(self.registry, workspace_path="/tmp")  # nosec B108
         self.registry.register(self.creator)
 
     @pytest.mark.asyncio

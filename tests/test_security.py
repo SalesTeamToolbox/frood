@@ -487,7 +487,7 @@ class TestSandboxHardening:
     """Tests for sandbox null byte and symlink protection."""
 
     def setup_method(self):
-        self.sandbox = WorkspaceSandbox("/tmp/test_workspace", enabled=True)
+        self.sandbox = WorkspaceSandbox("/tmp/test_workspace", enabled=True)  # nosec B108
 
     def test_blocks_null_byte_in_path(self):
         with pytest.raises(SandboxViolation):
@@ -615,7 +615,7 @@ class TestGitToolSanitization:
     def setup_method(self):
         from tools.git_tool import GitTool
 
-        self.tool = GitTool("/tmp/test_workspace")
+        self.tool = GitTool("/tmp/test_workspace")  # nosec B108
 
     def test_blocks_upload_pack_flag(self):
         err = self.tool._sanitize_args("--upload-pack='evil_script'")
@@ -800,7 +800,7 @@ class TestGitCommitMessageLength:
     def setup_method(self):
         from tools.git_tool import GitTool
 
-        self.tool = GitTool("/tmp/test_workspace")
+        self.tool = GitTool("/tmp/test_workspace")  # nosec B108
 
     @pytest.mark.asyncio
     async def test_blocks_very_long_message(self):
