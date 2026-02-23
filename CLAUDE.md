@@ -128,6 +128,9 @@ during Claude Code sessions without manual activation.
 | App Tool | `tools/app_tool.py` — agent-facing interface for app lifecycle management |
 | App Builder | Skill (`skills/builtins/app-builder/`) guiding agents through full app creation |
 | App Runtime | How an app runs: `static`, `python`, `node`, or `docker` |
+| App Mode | `internal` (Agent42 system tool) or `external` (app being developed for public release) |
+| App Visibility | `private` (dashboard-only), `unlisted` (anyone with URL), `public` (listed openly) |
+| App API | Agent-to-app HTTP interaction — lets Agent42 call a running app's endpoints via `app_api` |
 
 ---
 
@@ -565,7 +568,12 @@ See `.env.example` for the complete list of configuration variables.
 | `APPS_PORT_RANGE_END` | Dynamic port allocation end | `9199` |
 | `APPS_MAX_RUNNING` | Max simultaneously running apps | `5` |
 | `APPS_AUTO_RESTART` | Restart crashed apps | `true` |
+| `APPS_MONITOR_INTERVAL` | Seconds between health-check polls | `15` |
 | `APPS_DEFAULT_RUNTIME` | Default runtime for new apps | `python` |
+| `APPS_GIT_ENABLED_DEFAULT` | Enable git for new apps by default | `false` |
+| `APPS_GITHUB_TOKEN` | GitHub PAT for repo creation/push | *(disabled)* |
+| `APPS_DEFAULT_MODE` | Default mode for new apps (`internal`/`external`) | `internal` |
+| `APPS_REQUIRE_AUTH_DEFAULT` | Require dashboard auth by default for new apps | `false` |
 
 See `.env.example` for the complete list of 80+ configuration variables.
 
@@ -818,7 +826,8 @@ docker compose down              # Stop
 | 20 | Tests | `cryptography` panics with `_cffi_backend` error | Install `cffi` (`pip install cffi`) before running dashboard/auth tests |
 | 21 | Apps | App entry point missing PORT/HOST env var reading | Always read `os.environ.get("PORT", "8080")` — AppManager sets these |
 | 22 | Apps | New `TaskType` not in `FREE_ROUTING` dict | Add routing entry to `agents/model_router.py` `FREE_ROUTING` for every new TaskType |
-| 23 | Formatting | CI fails with `ruff format --check` after merge | Always run `make format` (or `ruff format .`) before committing — especially after merges that touch multiple files |
+| 23 | Apps | `APPS_GITHUB_TOKEN` leaked to app subprocess | Token is in `_sanitize_env()` blocked list; never passed to child processes |
+| 24 | Formatting | CI fails with `ruff format --check` after merge | Always run `make format` (or `ruff format .`) before committing — especially after merges that touch multiple files |
 
 ---
 

@@ -211,6 +211,10 @@ class Agent42:
                 max_running=settings.apps_max_running,
                 auto_restart=settings.apps_auto_restart,
                 dashboard_port=dashboard_port,
+                git_enabled_default=settings.apps_git_enabled_default,
+                github_token=settings.apps_github_token,
+                default_mode=settings.apps_default_mode,
+                require_auth_default=settings.apps_require_auth_default,
             )
             if settings.apps_enabled
             else None
@@ -774,6 +778,9 @@ class Agent42:
         if self.app_manager:
             await self.app_manager.load()
             logger.info(f"  Apps loaded: {len(self.app_manager.list_apps())}")
+            await self.app_manager.start_monitor(
+                interval=float(settings.apps_monitor_interval),
+            )
         await self._setup_channels()
         await self._setup_mcp()
 
@@ -883,6 +890,8 @@ class Agent42:
         self.security_scanner.stop()
         await self.channel_manager.stop_all()
         await self.mcp_manager.disconnect_all()
+        if self.app_manager:
+            await self.app_manager.shutdown()
 
     def _validate_env(self):
         """Validate required configuration before starting."""
