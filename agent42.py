@@ -110,7 +110,10 @@ _log_handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
 try:
     _log_handlers.append(logging.FileHandler("agent42.log"))
 except PermissionError:
-    print("WARNING: Cannot write to agent42.log (permission denied) — logging to stdout only.", file=sys.stderr)
+    print(
+        "WARNING: Cannot write to agent42.log (permission denied) — logging to stdout only.",
+        file=sys.stderr,
+    )
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, handlers=_log_handlers)
 logger = logging.getLogger("agent42")
