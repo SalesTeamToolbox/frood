@@ -25,8 +25,9 @@ You are building a complete, working web application that the user can access im
 
 1. **Create the app** using the `app` tool:
    ```
-   app create --name "App Name" --runtime python --app_description "What it does" --tags "tag1,tag2"
+   app create --name "App Name" --runtime python --app_description "What it does" --tags "tag1,tag2" --git_enabled true
    ```
+   Set `--git_enabled true` to enable local git version control for the app.
 2. Note the **app ID** and **path** from the response. All files go into that path.
 
 ### Phase 3: Build
@@ -51,7 +52,7 @@ Write the complete application code using filesystem tools (`write_file`, `edit_
 
 ### Phase 5: Launch
 
-1. Mark the app as ready:
+1. Mark the app as ready (auto-commits if git is enabled):
    ```
    app mark_ready --app_id <id> --version "1.0.0"
    ```
@@ -60,6 +61,28 @@ Write the complete application code using filesystem tools (`write_file`, `edit_
    app start --app_id <id>
    ```
 3. Report the URL to the user.
+
+### Phase 6 (Optional): GitHub Integration
+
+If the user wants the app on GitHub, or if sharing/collaboration is needed:
+
+1. **Set up the GitHub repo:**
+   ```
+   app github_setup --app_id <id> --repo_name "my-app" --private true --push_on_build true
+   ```
+   This creates the repo, pushes initial code, and optionally auto-pushes on future builds.
+
+2. **Manual push at any time:**
+   ```
+   app github_push --app_id <id>
+   ```
+
+3. **Other git operations:**
+   ```
+   app git_commit --app_id <id> --message "Add new feature"
+   app git_status --app_id <id>
+   app git_log --app_id <id>
+   ```
 
 ---
 
@@ -199,4 +222,12 @@ When updating an existing app:
 2. Make targeted changes — do not rewrite the entire app.
 3. Preserve existing data structures and functionality.
 4. Bump the version number.
-5. Restart the app after changes.
+5. If git is enabled, commit the changes:
+   ```
+   app git_commit --app_id <id> --message "Description of changes"
+   ```
+6. Mark ready (triggers auto-push if GitHub is configured):
+   ```
+   app mark_ready --app_id <id> --version "1.1.0"
+   ```
+7. Restart the app after changes.

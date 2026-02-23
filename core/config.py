@@ -194,6 +194,8 @@ class Settings:
     apps_max_running: int = 5
     apps_auto_restart: bool = True
     apps_default_runtime: str = "python"
+    apps_git_enabled_default: bool = False  # Default git_enabled for new apps
+    apps_github_token: str = ""  # GitHub PAT for repo creation and push
 
     # Security scanning (scheduled)
     security_scan_enabled: bool = True
@@ -356,6 +358,9 @@ class Settings:
             apps_auto_restart=os.getenv("APPS_AUTO_RESTART", "true").lower()
             in ("true", "1", "yes"),
             apps_default_runtime=os.getenv("APPS_DEFAULT_RUNTIME", "python"),
+            apps_git_enabled_default=os.getenv("APPS_GIT_ENABLED_DEFAULT", "false").lower()
+            in ("true", "1", "yes"),
+            apps_github_token=os.getenv("APPS_GITHUB_TOKEN", ""),
         )
 
     def get_discord_guild_ids(self) -> list[int]:

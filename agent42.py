@@ -210,6 +210,8 @@ class Agent42:
             max_running=settings.apps_max_running,
             auto_restart=settings.apps_auto_restart,
             dashboard_port=dashboard_port,
+            git_enabled_default=settings.apps_git_enabled_default,
+            github_token=settings.apps_github_token,
         ) if settings.apps_enabled else None
 
         self._register_tools()

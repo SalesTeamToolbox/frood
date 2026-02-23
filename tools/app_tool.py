@@ -30,6 +30,13 @@ class AppTool(Tool):
     - logs: View app output logs
     - mark_ready: Mark an app as ready after building
     - update_manifest: Update app metadata (name, description, version, etc.)
+    - git_enable: Enable local git version control for an app
+    - git_disable: Disable git for an app (preserves repo on disk)
+    - git_commit: Stage and commit all changes
+    - git_status: Show git status and recent commits
+    - git_log: Show commit history
+    - github_setup: Create a GitHub repo and link it to the app
+    - github_push: Push commits to GitHub
     """
 
     def __init__(self, app_manager: AppManager):
@@ -43,8 +50,11 @@ class AppTool(Tool):
     def description(self) -> str:
         return (
             "Create and manage user applications. Build web apps from descriptions, "
-            "then start/stop/manage them. Actions: create, scaffold, install_deps, "
-            "start, stop, restart, status, list, logs, mark_ready, update_manifest."
+            "then start/stop/manage them. Supports optional git version control and "
+            "GitHub integration per app. Actions: create, scaffold, install_deps, "
+            "start, stop, restart, status, list, logs, mark_ready, update_manifest, "
+            "git_enable, git_disable, git_commit, git_status, git_log, "
+            "github_setup, github_push."
         )
 
     @property
@@ -66,6 +76,13 @@ class AppTool(Tool):
                         "logs",
                         "mark_ready",
                         "update_manifest",
+                        "git_enable",
+                        "git_disable",
+                        "git_commit",
+                        "git_status",
+                        "git_log",
+                        "github_setup",
+                        "github_push",
                     ],
                     "description": "Action to perform",
                 },
@@ -115,6 +132,31 @@ class AppTool(Tool):
                     "description": "Number of log lines to return (for logs)",
                     "default": 50,
                 },
+                "git_enabled": {
+                    "type": "boolean",
+                    "description": "Enable git version control for the app (for create)",
+                    "default": False,
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Commit message (for git_commit)",
+                    "default": "",
+                },
+                "repo_name": {
+                    "type": "string",
+                    "description": "GitHub repository name (for github_setup, defaults to app slug)",
+                    "default": "",
+                },
+                "private": {
+                    "type": "boolean",
+                    "description": "Create as private GitHub repo (for github_setup)",
+                    "default": True,
+                },
+                "push_on_build": {
+                    "type": "boolean",
+                    "description": "Auto-push to GitHub when app is marked ready (for github_setup)",
+                    "default": True,
+                },
             },
             "required": ["action"],
         }
@@ -143,6 +185,20 @@ class AppTool(Tool):
                 return await self._mark_ready(**kwargs)
             elif action == "update_manifest":
                 return await self._update_manifest(**kwargs)
+            elif action == "git_enable":
+                return await self._git_enable(**kwargs)
+            elif action == "git_disable":
+                return await self._git_disable(**kwargs)
+            elif action == "git_commit":
+                return await self._git_commit(**kwargs)
+            elif action == "git_status":
+                return await self._git_status(**kwargs)
+            elif action == "git_log":
+                return await self._git_log(**kwargs)
+            elif action == "github_setup":
+                return await self._github_setup(**kwargs)
+            elif action == "github_push":
+                return await self._github_push(**kwargs)
             else:
                 return ToolResult(error=f"Unknown action: {action}", success=False)
         except Exception as e:
@@ -158,6 +214,10 @@ class AppTool(Tool):
         tags_str = kwargs.get("tags", "")
         tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
         icon = kwargs.get("icon", "")
+        git_enabled = kwargs.get("git_enabled")
+        # Handle string "true"/"false" from tool params
+        if isinstance(git_enabled, str):
+            git_enabled = git_enabled.lower() in ("true", "1", "yes")
 
         app = await self._manager.create(
             name=name,
@@ -165,8 +225,10 @@ class AppTool(Tool):
             runtime=runtime,
             tags=tags,
             icon=icon,
+            git_enabled=git_enabled,
         )
 
+        git_line = f"  Git: {'enabled' if app.git_enabled else 'disabled'}\n"
         return ToolResult(
             output=(
                 f"App created successfully!\n"
@@ -175,7 +237,8 @@ class AppTool(Tool):
                 f"  Slug: {app.slug}\n"
                 f"  Runtime: {app.runtime}\n"
                 f"  Path: {app.path}\n"
-                f"  Entry point: {app.entry_point}\n\n"
+                f"  Entry point: {app.entry_point}\n"
+                f"{git_line}\n"
                 f"Next steps:\n"
                 f"1. Write your app code to {app.path}/\n"
                 f"2. Use 'app mark_ready' when done\n"
@@ -381,6 +444,10 @@ class AppTool(Tool):
         lines.append(f"  Healthy: {health.get('healthy', 'unknown')}")
         if app.tags:
             lines.append(f"  Tags: {', '.join(app.tags)}")
+        lines.append(f"  Git: {'enabled' if app.git_enabled else 'disabled'}")
+        if app.github_repo:
+            lines.append(f"  GitHub: {app.github_repo}")
+            lines.append(f"  Push on build: {app.github_push_on_build}")
 
         return ToolResult(output="\n".join(lines))
 
@@ -401,6 +468,11 @@ class AppTool(Tool):
             }.get(app.status, f"[{app.status.upper()}]")
 
             line = f"  {status_icon} {app.name} ({app.id}) — {app.runtime}"
+            if app.git_enabled:
+                line += " [git"
+                if app.github_repo:
+                    line += f"→{app.github_repo}"
+                line += "]"
             if app.url:
                 line += f" — {app.url}"
             lines.append(line)
@@ -456,3 +528,65 @@ class AppTool(Tool):
         await self._manager._persist()
 
         return ToolResult(output=f"Updated {field_name} = {value} for app {app.name}")
+
+    # -- Git / GitHub actions --------------------------------------------------
+
+    async def _git_enable(self, **kwargs) -> ToolResult:
+        app_id = kwargs.get("app_id", "")
+        if not app_id:
+            return ToolResult(error="app_id is required", success=False)
+        result = await self._manager.git_enable(app_id)
+        return ToolResult(output=result)
+
+    async def _git_disable(self, **kwargs) -> ToolResult:
+        app_id = kwargs.get("app_id", "")
+        if not app_id:
+            return ToolResult(error="app_id is required", success=False)
+        result = await self._manager.git_disable(app_id)
+        return ToolResult(output=result)
+
+    async def _git_commit(self, **kwargs) -> ToolResult:
+        app_id = kwargs.get("app_id", "")
+        if not app_id:
+            return ToolResult(error="app_id is required", success=False)
+        message = kwargs.get("message", "")
+        result = await self._manager.git_commit(app_id, message=message)
+        return ToolResult(output=result)
+
+    async def _git_status(self, **kwargs) -> ToolResult:
+        app_id = kwargs.get("app_id", "")
+        if not app_id:
+            return ToolResult(error="app_id is required", success=False)
+        result = await self._manager.git_status(app_id)
+        return ToolResult(output=result)
+
+    async def _git_log(self, **kwargs) -> ToolResult:
+        app_id = kwargs.get("app_id", "")
+        if not app_id:
+            return ToolResult(error="app_id is required", success=False)
+        count = kwargs.get("lines", 10)
+        result = await self._manager.git_log(app_id, count=count)
+        return ToolResult(output=result)
+
+    async def _github_setup(self, **kwargs) -> ToolResult:
+        app_id = kwargs.get("app_id", "")
+        if not app_id:
+            return ToolResult(error="app_id is required", success=False)
+        repo_name = kwargs.get("repo_name", "")
+        private = kwargs.get("private", True)
+        if isinstance(private, str):
+            private = private.lower() in ("true", "1", "yes")
+        push_on_build = kwargs.get("push_on_build", True)
+        if isinstance(push_on_build, str):
+            push_on_build = push_on_build.lower() in ("true", "1", "yes")
+        result = await self._manager.github_setup(
+            app_id, repo_name=repo_name, private=private, push_on_build=push_on_build,
+        )
+        return ToolResult(output=result)
+
+    async def _github_push(self, **kwargs) -> ToolResult:
+        app_id = kwargs.get("app_id", "")
+        if not app_id:
+            return ToolResult(error="app_id is required", success=False)
+        result = await self._manager.github_push(app_id)
+        return ToolResult(output=result)
