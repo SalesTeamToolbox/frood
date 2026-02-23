@@ -31,6 +31,7 @@ class WebSocketManager:
 
     def __init__(self):
         self._connections: list[WSConnection] = []
+        self.chat_messages: list[dict] = []  # Shared chat history
 
     @property
     def connection_count(self) -> int:
