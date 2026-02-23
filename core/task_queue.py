@@ -52,6 +52,7 @@ class TaskType(str, Enum):
     PROJECT_MANAGEMENT = "project_management"
     APP_CREATE = "app_create"
     APP_UPDATE = "app_update"
+    PROJECT_SETUP = "project_setup"
 
 
 # Keyword-based task type inference for channel messages
@@ -224,6 +225,10 @@ class Task:
     parent_task_id: str = ""
     position: int = 0  # Kanban column ordering
     context_window: str = "default"  # default | large | max
+
+    # Project interview fields
+    project_id: str = ""  # Links task to a project interview session
+    project_spec_path: str = ""  # Path to PROJECT_SPEC.md for subtask context
 
     def add_comment(self, author: str, text: str):
         self.comments.append(
