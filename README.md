@@ -70,21 +70,7 @@ This script automatically:
 - Builds the dashboard frontend (if `dashboard/frontend/package.json` exists)
 - Generates a systemd service file at `/tmp/agent42.service` for optional background running
 
-#### 3. Configure your environment
-
-```bash
-nano .env   # or vim, code, etc.
-```
-
-**Required settings** (you must change these):
-- `OPENROUTER_API_KEY` — Get a free key at [openrouter.ai/keys](https://openrouter.ai/keys) (no credit card needed)
-- `DASHBOARD_PASSWORD` — Change from the default `changeme-right-now` to a strong password
-
-**Tip:** After first launch, you can also configure API keys through the dashboard
-(Settings > LLM Providers) instead of editing `.env`. Keys set via the dashboard
-take effect immediately without a restart.
-
-#### 4. Prepare your git repository
+#### 3. Prepare your git repository
 
 Agent42 uses git worktrees to give each agent an isolated copy of your codebase.
 Your target repository **must** have a `dev` branch:
@@ -95,10 +81,11 @@ git checkout -b dev    # create dev branch if it doesn't exist
 cd ~/agent42           # return to agent42 directory
 ```
 
-**Common gotcha:** If you skip this step, Agent42 will fail at startup with a git
-worktree error. The `dev` branch is used as the base for all agent worktrees.
+**Note:** If you skip this step, coding, debugging, and refactoring tasks will fail
+with a git worktree error when they try to create an isolated workspace. Non-code
+tasks (marketing, content, design, etc.) work fine without a `dev` branch.
 
-#### 5. Activate the virtual environment and run
+#### 4. Start Agent42
 
 ```bash
 source .venv/bin/activate
@@ -110,12 +97,31 @@ Other options:
 - `--no-dashboard` — Headless mode (terminal only, no web UI)
 - `--max-agents 2` — Limit concurrent agents (default: 3)
 
-#### 6. Verify installation
+#### 5. Complete setup in your browser
 
-1. Open http://localhost:8000 in your browser
-2. Log in with username `admin` and the password you set in `.env`
-3. You should see the Agent42 dashboard with the task board
-4. The bottom-left corner should show a green WebSocket indicator (connected)
+Open http://localhost:8000. On first launch, Agent42 shows a setup wizard:
+
+1. **Set your password** — Choose a dashboard password (8+ characters). This is
+   stored as a bcrypt hash — the plaintext is never saved.
+2. **Add an API key** (optional) — Enter your OpenRouter API key. Get a free key
+   at [openrouter.ai/keys](https://openrouter.ai/keys) (no credit card needed).
+   You can also add this later via Settings > LLM Providers.
+3. **Enhanced Memory** (optional) — Choose a memory backend:
+   - **Skip** — File-based memory (default, no extra setup)
+   - **Qdrant Embedded** — Semantic vector search stored locally (no Docker needed)
+   - **Qdrant + Redis** — Full semantic search + session caching (Docker required).
+     Selecting this auto-queues a setup task with Docker instructions.
+4. **Done** — Setup completes and you're automatically logged in.
+
+The wizard also generates a `JWT_SECRET` for persistent sessions and writes all
+configuration to `.env` automatically.
+
+**Power users:** You can skip the wizard and edit `.env` directly before first launch.
+Set `DASHBOARD_PASSWORD_HASH` (bcrypt) and `OPENROUTER_API_KEY`, then restart.
+
+After setup, additional API keys can be configured through the dashboard
+(Settings > LLM Providers). Keys set via the dashboard take effect immediately
+without a restart and are stored in `.agent42/settings.json`.
 
 ### Your First Task
 
@@ -135,17 +141,18 @@ produces output for your review.
 |---|---|
 | `Python 3.11+ required` | Install Python 3.11+. Ubuntu: `sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.11` |
 | `ModuleNotFoundError` | Make sure you activated the venv: `source .venv/bin/activate` |
-| `No dashboard password configured` | Set `DASHBOARD_PASSWORD` in `.env` |
+| Setup wizard not appearing | Only shows when no password is configured. If you set one manually, go to `/login` directly |
 | Git worktree error at startup | Ensure your target repo has a `dev` branch: `git checkout -b dev` |
-| `OPENROUTER_API_KEY not set` | Get a free key at [openrouter.ai/keys](https://openrouter.ai/keys) and add to `.env`, or set it in the dashboard Settings page |
+| `OPENROUTER_API_KEY not set` | Enter during setup wizard, or add later via Settings > LLM Providers |
 | Port 8000 already in use | Use `--port 8080` flag: `python agent42.py --repo /path --port 8080` |
 | Frontend not loading | Re-run: `cd dashboard/frontend && npm install && npm run build` |
+| Login fails after restart | Set `JWT_SECRET` in `.env` (the setup wizard does this automatically) |
 
 ### Minimum Setup (free, no credit card)
 
 1. Create an [OpenRouter account](https://openrouter.ai) (free, no credit card)
 2. Generate an API key at the OpenRouter dashboard
-3. Set `OPENROUTER_API_KEY` in `.env` or via the dashboard Settings page
+3. Enter the key during the setup wizard, or add it later in Settings > LLM Providers
 
 That's it — you now have access to 30+ free models for all task types.
 
@@ -197,11 +204,12 @@ For direct provider access or premium models, add any of these API keys:
 
 ## Configuration
 
-All config lives in `.env`. See `.env.example` for all options.
+Most settings are configured automatically by the setup wizard on first launch.
+For advanced configuration, edit `.env` directly. See `.env.example` for all 80+ options.
 
 LLM provider API keys can also be configured through the dashboard admin UI
 (Settings > LLM Providers). Keys set via the dashboard are stored locally in
-`.agent42/settings.json` and override `.env` values.
+`.agent42/settings.json` and override `.env` values without requiring a restart.
 
 ### Core Settings
 
@@ -211,7 +219,9 @@ LLM provider API keys can also be configured through the dashboard admin UI
 | `MAX_CONCURRENT_AGENTS` | `3` | Max parallel agents (2-3 for 6GB VPS) |
 | `DEFAULT_REPO_PATH` | `.` | Git repo for worktrees |
 | `DASHBOARD_USERNAME` | `admin` | Dashboard login |
-| `DASHBOARD_PASSWORD` | `changeme` | Dashboard password |
+| `DASHBOARD_PASSWORD` | — | Dashboard password (set via setup wizard) |
+| `DASHBOARD_PASSWORD_HASH` | — | Bcrypt hash (auto-generated by setup wizard) |
+| `JWT_SECRET` | *(auto-generated)* | JWT signing key (auto-generated by setup wizard) |
 | `SANDBOX_ENABLED` | `true` | Restrict agent file operations to workspace |
 
 ### Channels
@@ -280,6 +290,31 @@ pip install redis[hiredis]
 | `IMAGES_DIR` | Generated images storage (default: `.agent42/images`) |
 | `AGENT42_IMAGE_MODEL` | Admin override for image model (e.g., `dall-e-3`) |
 | `AGENT42_VIDEO_MODEL` | Admin override for video model (e.g., `luma-ray2`) |
+
+### SSH & Tunnels
+
+| Variable | Default | Description |
+|---|---|---|
+| `SSH_ENABLED` | `false` | Enable SSH remote shell tool |
+| `SSH_ALLOWED_HOSTS` | *(empty — all blocked)* | Comma-separated host patterns (e.g., `*.example.com`) |
+| `SSH_DEFAULT_KEY_PATH` | *(none)* | Default private key path |
+| `SSH_MAX_UPLOAD_MB` | `50` | Max SFTP upload size in MB |
+| `SSH_COMMAND_TIMEOUT` | `120` | Per-command timeout in seconds |
+| `TUNNEL_ENABLED` | `false` | Enable tunnel manager tool |
+| `TUNNEL_PROVIDER` | `auto` | Provider: `auto`, `cloudflared`, `serveo`, `localhost.run` |
+| `TUNNEL_ALLOWED_PORTS` | *(empty — all allowed)* | Comma-separated allowed ports |
+| `TUNNEL_TTL_MINUTES` | `60` | Auto-shutdown TTL for tunnels |
+
+### Knowledge & Vision
+
+| Variable | Default | Description |
+|---|---|---|
+| `KNOWLEDGE_DIR` | `.agent42/knowledge` | Document storage directory |
+| `KNOWLEDGE_CHUNK_SIZE` | `500` | Chunk size in tokens |
+| `KNOWLEDGE_CHUNK_OVERLAP` | `50` | Overlap between chunks |
+| `KNOWLEDGE_MAX_RESULTS` | `10` | Max results per query |
+| `VISION_MAX_IMAGE_MB` | `10` | Max image file size in MB |
+| `VISION_MODEL` | *(auto-detect)* | Override model for vision tasks |
 
 ## Usage
 
@@ -427,9 +462,21 @@ task types. The base skill's instructions appear first, followed by all extensio
 | **competitive-analysis** | strategy, research | Competitive matrix, positioning |
 | **seo** | content, marketing | On-page SEO, keyword research, optimization |
 | **geo** | design, content, marketing | Generative Engine Optimization — AI agent discoverability |
+| **server-management** | deployment | LAMP/LEMP stack, nginx, systemd, firewall hardening |
+| **wordpress** | deployment | WP-CLI, wp-config, themes, plugins, multisite, backups |
+| **docker-deploy** | deployment | Dockerfile best practices, docker-compose, registry workflows |
+| **cms-deploy** | deployment | Ghost, Strapi, and general CMS deployment patterns |
+| **code-review** | coding | Code quality review with structured feedback |
+| **debugging** | debugging | Systematic debugging methodology |
+| **testing** | coding | Test strategy, coverage, test-driven development |
+| **refactoring** | refactoring | Safe refactoring patterns and techniques |
+| **documentation** | documentation | Technical writing, API docs, guides |
+| **security-audit** | coding | Security vulnerability assessment |
+| **tool-creator** | all | Generate new custom tools from descriptions |
+| **git-workflow** | coding | Branch strategy, commit conventions, merge workflows |
 
-Skills are matched to tasks by `task_types` frontmatter and injected into the
-agent's system prompt automatically.
+40 built-in skills total. Skills are matched to tasks by `task_types` frontmatter
+and injected into the agent's system prompt automatically.
 
 ## Tools
 
@@ -475,6 +522,17 @@ Agents have access to a sandboxed tool registry:
 | `image_gen` | AI image generation with free-first routing. Models: FLUX Schnell (free), FLUX Dev, SDXL, DALL-E 3 (premium). Team-reviewed prompts before submission. Actions: generate, review_prompt, list_models, status |
 | `video_gen` | AI video generation (async). Models: CogVideoX (cheap), AnimateDiff, Runway Gen-3, Luma Ray2, Stable Video (premium). Actions: generate, image_to_video, review_prompt, list_models, status |
 
+### Infrastructure Tools
+
+| Tool | Description |
+|---|---|
+| `ssh` | Remote shell execution via asyncssh. Host allowlist, command filtering, SFTP uploads/downloads, per-command timeout. Actions: connect, execute, upload, download, disconnect, list_connections. Requires approval gate for first connection to each host |
+| `tunnel` | Expose local ports to the internet via cloudflared, serveo, or localhost.run. Auto-expiry TTL (default 60 min), port allowlist enforcement. Actions: start, stop, status, list. Requires approval gate |
+| `knowledge` | Document import and RAG semantic querying. Supports PDF, CSV, HTML, Markdown, JSON, plain text. Configurable chunk size with overlap. Qdrant vector backend with filesystem keyword-search fallback. Actions: import_file, import_dir, query, list, delete |
+| `vision` | Image analysis via LLM vision APIs (OpenAI, Anthropic, OpenRouter). Automatic Pillow compression for cost efficiency. Supports PNG, JPG, GIF, WebP, BMP. Actions: analyze, describe, compare |
+
+SSH and tunnel tools are disabled by default — see [SSH & Tunnels](#ssh--tunnels) configuration.
+
 ### Custom Tool Plugins
 
 Extend Agent42 with custom tools without modifying the core codebase. Set
@@ -509,6 +567,46 @@ task_queue, workspace, tool_registry, model_router).
 | Variable | Default | Description |
 |---|---|---|
 | `CUSTOM_TOOLS_DIR` | *(disabled)* | Directory for auto-discovered custom tool plugins |
+
+### Tool Extensions
+
+Extend an existing tool's behavior without replacing it. Tool extensions add
+parameters and pre/post execution hooks that layer onto any registered tool.
+Multiple extensions can stack on one base tool.
+
+```python
+# custom_tools/shell_audit.py
+from tools.base import ToolExtension, ToolResult
+
+class ShellAuditExtension(ToolExtension):
+    extends = "shell"                      # Name of the tool to extend
+    requires = ["workspace"]               # ToolContext injection (same as Tool)
+
+    def __init__(self, workspace="", **kwargs):
+        self._workspace = workspace
+
+    @property
+    def name(self) -> str: return "shell_audit"
+
+    @property
+    def extra_parameters(self) -> dict:    # Merged into the base tool's schema
+        return {"audit": {"type": "boolean", "description": "Log command to audit file"}}
+
+    @property
+    def description_suffix(self) -> str:   # Appended to the base tool's description
+        return "Supports audit logging."
+
+    async def pre_execute(self, **kwargs) -> dict:
+        # Called before the base tool — can inspect/modify kwargs
+        return kwargs
+
+    async def post_execute(self, result: ToolResult, **kwargs) -> ToolResult:
+        # Called after the base tool — can inspect/modify result
+        return result
+```
+
+Extensions are auto-discovered from the same `CUSTOM_TOOLS_DIR` directory as
+custom tools. The `extends` field must match an already-registered tool name.
 
 ### Command Filter
 
@@ -607,6 +705,8 @@ These operations pause the agent and show an approval modal in the dashboard:
 - `git_push` — pushing code
 - `file_delete` — deleting files
 - `external_api` — calling external services
+- `ssh_connect` — first SSH connection to a new host
+- `tunnel_start` — exposing a local port via tunnel
 
 Approval requests timeout after 1 hour (configurable) and auto-deny to prevent
 agents from blocking indefinitely when nobody is watching the dashboard.
@@ -676,14 +776,23 @@ agent42/
 ├── agent42.py                 # Main entry point + orchestrator
 ├── core/
 │   ├── config.py              # Centralized settings from .env
-│   ├── task_queue.py          # Task state machine + JSON persistence (12 task types)
+│   ├── task_queue.py          # Priority queue + JSON/Redis persistence (12 task types)
+│   ├── queue_backend.py       # Queue backend abstraction (JSON file + Redis)
 │   ├── intent_classifier.py   # LLM-based context-aware task classification
 │   ├── worktree_manager.py    # Git worktree lifecycle
 │   ├── approval_gate.py       # Protected operation intercept
 │   ├── heartbeat.py           # Agent health monitoring
 │   ├── command_filter.py      # Shell command safety filter (40+ deny patterns)
 │   ├── sandbox.py             # Workspace path restriction (symlink + null byte protection)
-│   └── complexity.py          # Task complexity assessment + team recommendation
+│   ├── complexity.py          # Task complexity assessment + team recommendation
+│   ├── device_auth.py         # Multi-device API key registration and validation
+│   ├── key_store.py           # Admin-configured API key overrides (dashboard)
+│   ├── security_scanner.py    # Scheduled vulnerability scanning + GitHub issue reporting
+│   ├── rate_limiter.py        # Per-agent per-tool sliding-window rate limits
+│   ├── capacity.py            # Dynamic concurrency based on CPU/memory metrics
+│   ├── url_policy.py          # URL allowlist/denylist for SSRF protection
+│   ├── notification_service.py # Webhook and email notifications
+│   └── portability.py         # Backup/restore/clone operations
 ├── agents/
 │   ├── agent.py               # Per-task agent orchestration (code + non-code modes)
 │   ├── model_router.py        # 4-layer model selection (admin → dynamic → trial → default)
@@ -702,24 +811,25 @@ agent42/
 │   ├── telegram_channel.py    # Telegram long-polling
 │   └── email_channel.py       # IMAP/SMTP
 ├── tools/
-│   ├── base.py                # Tool base class + result types
+│   ├── base.py                # Tool + ToolExtension base classes, result types
 │   ├── registry.py            # Tool registration + dispatch
 │   ├── context.py             # ToolContext dependency injection for plugin tools
-│   ├── plugin_loader.py       # Auto-discovers custom Tool subclasses from directory
+│   ├── plugin_loader.py       # Auto-discovers custom Tool/ToolExtension subclasses
 │   ├── shell.py               # Sandboxed shell execution
 │   ├── filesystem.py          # read/write/edit/list operations
 │   ├── web_search.py          # Brave Search integration
-│   ├── http_client.py         # HTTP requests
+│   ├── http_client.py         # HTTP requests (URL policy enforced)
 │   ├── python_exec.py         # Sandboxed Python execution
 │   ├── subagent.py            # Sub-agent spawning
-│   ├── cron.py                # Scheduled task execution
+│   ├── cron.py                # Scheduled tasks (recurring, one-time, planned sequences)
 │   ├── repo_map.py            # Repository structure analysis
 │   ├── pr_generator.py        # Pull request generation
 │   ├── security_analyzer.py   # Security vulnerability scanning
+│   ├── security_audit.py      # Security posture auditing (36 checks)
 │   ├── workflow_tool.py       # Multi-step workflows
-│   ├── summarizer.py          # Text/code summarization
+│   ├── summarizer_tool.py     # Text/code summarization
 │   ├── file_watcher.py        # File change monitoring
-│   ├── browser.py             # Web browsing + screenshots
+│   ├── browser_tool.py        # Web browsing + screenshots
 │   ├── mcp_client.py          # MCP server tool proxying
 │   ├── team_tool.py           # Multi-agent team orchestration
 │   ├── content_analyzer.py    # Readability, tone, structure, SEO analysis
@@ -729,27 +839,25 @@ agent42/
 │   ├── scoring_tool.py        # Rubric-based content evaluation + improvement
 │   ├── persona_tool.py        # Audience persona management
 │   ├── image_gen.py           # AI image generation (free-first)
-│   └── video_gen.py           # AI video generation (async)
+│   ├── video_gen.py           # AI video generation (async)
+│   ├── ssh_tool.py            # SSH remote shell (asyncssh, host allowlist, SFTP)
+│   ├── tunnel_tool.py         # Tunnel manager (cloudflared, serveo, localhost.run)
+│   ├── knowledge_tool.py      # Knowledge base / RAG (import, chunk, query)
+│   └── vision_tool.py         # Image analysis (Pillow compress, LLM vision API)
 ├── skills/
 │   ├── loader.py              # Skill discovery, frontmatter parser, extension merging
-│   └── builtins/              # Built-in skill templates (36 skills)
-│       ├── github/SKILL.md
-│       ├── memory/SKILL.md
-│       ├── skill-creator/SKILL.md
-│       ├── weather/SKILL.md
-│       ├── content-writing/SKILL.md
-│       ├── design-review/SKILL.md
-│       ├── strategy-analysis/SKILL.md
-│       ├── data-analysis/SKILL.md
-│       ├── social-media/SKILL.md
-│       ├── project-planning/SKILL.md
-│       ├── presentation/SKILL.md
-│       ├── brand-guidelines/SKILL.md
-│       ├── email-marketing/SKILL.md
-│       ├── competitive-analysis/SKILL.md
-│       ├── geo/SKILL.md
-│       ├── seo/SKILL.md
-│       └── ... (36 total)
+│   └── builtins/              # Built-in skill templates (40 skills)
+│       ├── github/            ├── code-review/     ├── debugging/
+│       ├── testing/           ├── refactoring/     ├── documentation/
+│       ├── git-workflow/      ├── security-audit/  ├── deployment/
+│       ├── server-management/ ├── wordpress/       ├── docker-deploy/
+│       ├── cms-deploy/        ├── memory/          ├── skill-creator/
+│       ├── tool-creator/      ├── content-writing/ ├── design-review/
+│       ├── seo/               ├── geo/             ├── social-media/
+│       ├── brand-guidelines/  ├── email-marketing/ ├── competitive-analysis/
+│       ├── strategy-analysis/ ├── data-analysis/   ├── project-planning/
+│       ├── presentation/      ├── research/        ├── weather/
+│       └── ... (40 total)
 ├── memory/
 │   ├── store.py               # Structured memory + event log
 │   ├── session.py             # Per-conversation session history (Redis-cached)
@@ -758,26 +866,37 @@ agent42/
 │   ├── redis_session.py       # Redis session cache + embedding cache
 │   └── consolidation.py       # Conversation summarization pipeline
 ├── dashboard/
-│   ├── server.py              # FastAPI + WebSocket server (security headers, auth)
-│   ├── auth.py                # JWT authentication + rate limiting
-│   ├── websocket_manager.py   # Real-time broadcast
+│   ├── server.py              # FastAPI + WebSocket server (setup wizard, auth, API)
+│   ├── auth.py                # JWT + API key auth, bcrypt, rate limiting
+│   ├── websocket_manager.py   # Real-time broadcast (device-tracked connections)
 │   └── frontend/dist/         # SPA dashboard (vanilla JS, no build step)
 │       ├── index.html         # Entry point
-│       ├── app.js             # Full SPA (login, tasks, approvals, tools, skills, settings)
+│       ├── app.js             # Full SPA (setup wizard, login, tasks, settings)
 │       └── style.css          # Dark theme CSS
+├── deploy/                    # Production deployment
+│   ├── install-server.sh      # Full server setup (nginx, SSL, systemd, firewall)
+│   └── nginx-agent42.conf     # Reverse proxy with rate limiting + security headers
 ├── data/                      # Runtime data (auto-created)
 │   ├── model_catalog.json     # Cached OpenRouter free model catalog
 │   ├── model_performance.json # Per-model outcome tracking
 │   ├── model_research.json    # Web benchmark research scores
 │   └── dynamic_routing.json   # Data-driven model routing overrides
-├── tests/                     # 920+ tests across 30 test files
-├── .env.example               # All configuration options
-├── requirements.txt
+├── tests/                     # 1000+ tests across 30+ test files
+├── .github/workflows/         # CI/CD (test, lint, security)
+├── Dockerfile                 # Container build (Python 3.12-slim)
+├── docker-compose.yml         # Dev stack (Agent42 + Redis + Qdrant)
+├── .env.example               # All configuration options (80+)
+├── requirements.txt           # Production dependencies
+├── requirements-dev.txt       # Dev dependencies (pytest, ruff, bandit, safety)
+├── pyproject.toml             # Tool configuration (ruff, pytest, mypy)
+├── Makefile                   # Common dev commands (test, lint, format, check)
 ├── tasks.json.example
 └── setup.sh
 ```
 
-## Running as a Service
+## Deployment
+
+### Systemd Service
 
 ```bash
 sudo cp /tmp/agent42.service /etc/systemd/system/
@@ -786,6 +905,37 @@ sudo systemctl enable agent42
 sudo systemctl start agent42
 sudo journalctl -u agent42 -f
 ```
+
+### Docker (Development Stack)
+
+Run Agent42 with Redis and Qdrant using Docker Compose:
+
+```bash
+cp .env.example .env
+docker compose up -d             # Agent42 + Redis + Qdrant
+docker compose logs -f agent42   # Follow logs
+docker compose down              # Stop
+```
+
+The Docker stack includes Agent42, Redis (session cache + queue backend), and
+Qdrant (vector semantic search). All three services are pre-configured to
+communicate.
+
+### Production VPS
+
+For a full production deployment with nginx, SSL, systemd, and firewall:
+
+```bash
+scp -r agent42/ user@server:~/agent42
+ssh user@server
+cd ~/agent42
+bash deploy/install-server.sh
+```
+
+The install script handles: virtual environment setup, `.env` configuration,
+nginx reverse proxy with rate limiting and security headers, Let's Encrypt
+SSL certificates, systemd service, and UFW firewall rules.
+See `deploy/install-server.sh` and `deploy/nginx-agent42.conf`.
 
 ## Team Orchestration
 
@@ -906,6 +1056,35 @@ skills, and settings.
 LLM provider API keys can be configured directly through the Settings page (admin only).
 Other settings are displayed as read-only with their environment variable names and help text.
 
+### First-Run Setup Wizard
+
+On first launch (when no password is configured), the dashboard shows an
+unauthenticated setup wizard instead of the login page:
+
+1. Set a dashboard password (stored as bcrypt hash)
+2. Optionally enter an OpenRouter API key
+3. Optionally select an enhanced memory backend (Qdrant embedded or Qdrant + Redis)
+4. Auto-generates `JWT_SECRET` and updates `.env`
+5. Logs you in immediately (and queues a Docker setup task if Qdrant + Redis was selected)
+
+The wizard endpoint (`/api/setup/complete`) is only accessible when the password
+is unset or still at the insecure default. Once setup is complete, the endpoint
+is disabled.
+
+### Multi-Device Access
+
+Agent42 supports persistent API key authentication for multiple devices
+(laptops, phones, tablets, scripts, CI/CD) alongside browser-based JWT auth.
+
+- **Register a device** — `POST /api/devices/register` with a device name and
+  type. Returns a one-time API key (prefix `ak_`) that must be saved immediately.
+- **Device capabilities** — Each device can be granted `tasks` (create/view tasks),
+  `approvals` (approve/deny agent actions), or `monitor` (read-only dashboard).
+- **Authenticate** — Include `Authorization: Bearer ak_...` on any API request
+  or WebSocket connection. Works alongside JWT auth.
+- **Manage devices** — `GET /api/devices` lists all registered devices with
+  online status. `DELETE /api/devices/{id}` revokes access instantly.
+
 ## Security
 
 Agent42 is designed to run safely on a shared VPS alongside other services
@@ -939,10 +1118,24 @@ Sensitive operations pause the agent and require dashboard approval:
 - `file_delete` — deleting files
 - `external_api` — calling external services
 
+### Scheduled Security Scanning
+
+Agent42 can automatically scan the environment on a configurable interval
+(default: every 8 hours) and report findings:
+
+- **Config posture** — checks for insecure defaults (weak passwords, disabled sandbox, exposed dashboard)
+- **Secret detection** — scans for leaked API keys, tokens, and credentials in code
+- **Dependency scanning** — checks Python dependencies for known vulnerabilities
+- **OWASP pattern matching** — detects common security anti-patterns
+
+Findings can be automatically reported as GitHub issues via the `gh` CLI.
+Configure with `SECURITY_SCAN_ENABLED`, `SECURITY_SCAN_INTERVAL_HOURS`, and
+related env vars.
+
 ### Production Recommendations
 
-- Put nginx in front with HTTPS before making public
-- Set `JWT_SECRET` to a 64-char random string
+- Put nginx in front with HTTPS before making public (see `deploy/nginx-agent42.conf`)
+- Set `JWT_SECRET` to a 64-char random string (the setup wizard does this automatically)
 - Use `DASHBOARD_PASSWORD_HASH` (bcrypt) instead of plaintext `DASHBOARD_PASSWORD`
 - Set `CORS_ALLOWED_ORIGINS` to your domain
 - Set `MAX_DAILY_API_SPEND_USD` to cap API costs
