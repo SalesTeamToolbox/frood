@@ -7,7 +7,7 @@
 const state = {
   token: localStorage.getItem("agent42_token") || "",
   setupNeeded: null,  // null = checking, true = show wizard, false = show login/app
-  setupStep: 1,       // 1 = password, 2 = API key, 3 = done
+  setupStep: 1,       // 1 = password, 2 = API key, 3 = memory, 4 = done
   page: "tasks",
   tasks: [],
   approvals: [],
@@ -72,6 +72,8 @@ async function checkSetup() {
 }
 
 let _setupPassword = "";
+let _setupApiKey = "";
+let _setupMemory = "skip";
 
 function handleSetupStep1() {
   const pass = document.getElementById("setup-pass")?.value || "";
@@ -92,8 +94,20 @@ function handleSetupStep1() {
   render();
 }
 
-async function handleSetupStep2(skip) {
-  const apiKey = skip ? "" : (document.getElementById("setup-apikey")?.value?.trim() || "");
+function handleSetupStep2(skip) {
+  _setupApiKey = skip ? "" : (document.getElementById("setup-apikey")?.value?.trim() || "");
+  state.setupStep = 3;
+  render();
+}
+
+function _selectMemoryOption(choice) {
+  _setupMemory = choice;
+  document.querySelectorAll(".memory-option").forEach(el => {
+    el.classList.toggle("selected", el.dataset.choice === choice);
+  });
+}
+
+async function handleSetupStep3() {
   const btn = document.getElementById("setup-finish-btn");
   const errEl = document.getElementById("setup-error");
   if (errEl) errEl.textContent = "";
@@ -103,7 +117,11 @@ async function handleSetupStep2(skip) {
     const res = await fetch(`${API}/setup/complete`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: _setupPassword, openrouter_api_key: apiKey }),
+      body: JSON.stringify({
+        password: _setupPassword,
+        openrouter_api_key: _setupApiKey,
+        memory_backend: _setupMemory,
+      }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -111,21 +129,29 @@ async function handleSetupStep2(skip) {
     }
     const data = await res.json();
     _setupPassword = "";
+    _setupApiKey = "";
     state.token = data.token;
     localStorage.setItem("agent42_token", data.token);
-    state.setupStep = 3;
+    state._setupResult = data;
+    state.setupStep = 4;
     render();
     // After brief success message, transition to the app
     setTimeout(async () => {
       state.setupNeeded = false;
       state.setupStep = 1;
+      state._setupResult = null;
       connectWS();
       await loadAll();
       render();
-      toast("Welcome to Agent42!", "success");
-    }, 2000);
+      if (data.setup_task_id) {
+        toast("Welcome! A setup task has been queued for Docker services.", "success");
+      } else {
+        toast("Welcome to Agent42!", "success");
+      }
+    }, 4000);
   } catch (err) {
     _setupPassword = "";
+    _setupApiKey = "";
     if (errEl) errEl.textContent = err.message;
     if (btn) { btn.disabled = false; btn.textContent = "Finish Setup"; }
   }
@@ -134,12 +160,13 @@ async function handleSetupStep2(skip) {
 function renderSetupWizard() {
   const root = document.getElementById("app");
   const s = state.setupStep;
+  const labels = ["Password", "API Key", "Memory", "Done"];
   const stepDot = (num) => {
     const cls = s > num ? "active" : s === num ? "active current" : "";
-    return `<div class="setup-step ${cls}"><div class="step-number">${num}</div><div class="step-label">${["Password","API Key","Done"][num-1]}</div></div>`;
+    return `<div class="setup-step ${cls}"><div class="step-number">${num}</div><div class="step-label">${labels[num-1]}</div></div>`;
   };
   const line = (num) => `<div class="setup-step-line ${s > num ? 'active' : ''}"></div>`;
-  const steps = `<div class="setup-steps">${stepDot(1)}${line(1)}${stepDot(2)}${line(2)}${stepDot(3)}</div>`;
+  const steps = `<div class="setup-steps">${stepDot(1)}${line(1)}${stepDot(2)}${line(2)}${stepDot(3)}${line(3)}${stepDot(4)}</div>`;
 
   let body = "";
   if (s === 1) {
@@ -173,15 +200,59 @@ function renderSetupWizard() {
       </div>
       <div style="display:flex;gap:0.5rem;margin-top:1rem">
         <button class="btn btn-outline" style="flex:1" onclick="handleSetupStep2(true)">Skip for Now</button>
-        <button id="setup-finish-btn" class="btn btn-primary" style="flex:1" onclick="handleSetupStep2(false)">Finish Setup</button>
+        <button class="btn btn-primary" style="flex:1" onclick="handleSetupStep2(false)">Next</button>
+      </div>`;
+  } else if (s === 3) {
+    body = `
+      <h2>Enhanced Memory <span style="color:var(--text-muted);font-weight:400;font-size:0.9rem">(optional)</span></h2>
+      <p class="setup-desc">Add semantic search and session caching for smarter agents. Agent42 works fully without these.</p>
+      ${steps}
+      <div id="setup-error" style="color:var(--danger);font-size:0.85rem;min-height:1.2em;margin-bottom:0.25rem"></div>
+      <div class="memory-options">
+        <div class="memory-option selected" data-choice="skip" onclick="_selectMemoryOption('skip')">
+          <div class="memory-option-radio"></div>
+          <div class="memory-option-body">
+            <div class="memory-option-title">Skip</div>
+            <div class="memory-option-desc">Use file-based memory. No extra setup needed.</div>
+          </div>
+        </div>
+        <div class="memory-option" data-choice="qdrant_embedded" onclick="_selectMemoryOption('qdrant_embedded')">
+          <div class="memory-option-radio"></div>
+          <div class="memory-option-body">
+            <div class="memory-option-title">Qdrant Embedded</div>
+            <div class="memory-option-desc">Vector semantic search stored locally. No Docker needed &mdash; just a pip install.</div>
+            <div class="memory-option-tag">Easiest</div>
+          </div>
+        </div>
+        <div class="memory-option" data-choice="qdrant_redis" onclick="_selectMemoryOption('qdrant_redis')">
+          <div class="memory-option-radio"></div>
+          <div class="memory-option-body">
+            <div class="memory-option-title">Qdrant + Redis</div>
+            <div class="memory-option-desc">Full semantic search + fast session caching. Requires Docker for both services.</div>
+            <div class="memory-option-tag">Full Power</div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:0.5rem;margin-top:1rem">
+        <button class="btn btn-outline" style="flex:1" onclick="state.setupStep=2;render()">Back</button>
+        <button id="setup-finish-btn" class="btn btn-primary" style="flex:1" onclick="handleSetupStep3()">Finish Setup</button>
       </div>`;
   } else {
+    const result = state._setupResult || {};
+    const mem = result.memory_backend || "skip";
+    let extraMsg = "";
+    if (mem === "qdrant_redis" && result.setup_task_id) {
+      extraMsg = `<p class="setup-desc" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">A setup task has been queued to guide you through starting the Docker services.</p>`;
+    } else if (mem === "qdrant_embedded") {
+      extraMsg = `<p class="setup-desc" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">Embedded Qdrant enabled. Run <code style="background:var(--bg-tertiary);padding:0.1em 0.3em;border-radius:3px">pip install qdrant-client</code> if not installed yet.</p>`;
+    }
     body = `
       ${steps}
       <div style="text-align:center;padding:2rem 0">
         <div style="font-size:3rem;margin-bottom:0.75rem">&#9989;</div>
         <h2>You're All Set!</h2>
         <p class="setup-desc" style="margin-bottom:0">Dashboard secured. Loading Mission Control\u2026</p>
+        ${extraMsg}
       </div>`;
   }
   root.innerHTML = `<div class="login-page"><div class="login-card setup-wizard">${body}</div></div>`;

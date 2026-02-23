@@ -117,9 +117,7 @@ class TestAppTool:
     @pytest.mark.asyncio
     async def test_mark_ready_action(self):
         app = await self.manager.create(name="Ready Test")
-        result = await self.tool.execute(
-            action="mark_ready", app_id=app.id, version="1.0.0"
-        )
+        result = await self.tool.execute(action="mark_ready", app_id=app.id, version="1.0.0")
         assert result.success
         assert "ready" in result.output.lower()
         assert "1.0.0" in result.output

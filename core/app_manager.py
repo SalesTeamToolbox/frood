@@ -380,9 +380,7 @@ class AppManager:
             for port in range(self._port_start, self._port_end + 1):
                 if port not in used:
                     return port
-            raise RuntimeError(
-                f"No available ports in range {self._port_start}-{self._port_end}"
-            )
+            raise RuntimeError(f"No available ports in range {self._port_start}-{self._port_end}")
 
     # -- Lifecycle: start/stop -------------------------------------------------
 
@@ -396,13 +394,9 @@ class AppManager:
             raise ValueError(f"App already running: {app.name}")
 
         if app.status not in (AppStatus.READY.value, AppStatus.STOPPED.value):
-            raise ValueError(
-                f"Cannot start app in '{app.status}' state (must be ready or stopped)"
-            )
+            raise ValueError(f"Cannot start app in '{app.status}' state (must be ready or stopped)")
 
-        running_count = sum(
-            1 for a in self._apps.values() if a.status == AppStatus.RUNNING.value
-        )
+        running_count = sum(1 for a in self._apps.values() if a.status == AppStatus.RUNNING.value)
         if running_count >= self._max_running:
             raise ValueError(
                 f"Max running apps reached ({self._max_running}). Stop another app first."
@@ -443,7 +437,10 @@ class AppManager:
             await self._persist()
             logger.info(
                 "App started: %s (pid=%d, port=%d, url=%s)",
-                app.name, app.pid, app.port, app.url,
+                app.name,
+                app.pid,
+                app.port,
+                app.url,
             )
             return app
 
@@ -465,7 +462,11 @@ class AppManager:
         reqs = app_path / "requirements.txt"
         if reqs.exists():
             proc = await asyncio.create_subprocess_exec(
-                "pip", "install", "-q", "-r", str(reqs),
+                "pip",
+                "install",
+                "-q",
+                "-r",
+                str(reqs),
                 cwd=str(app_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -475,7 +476,8 @@ class AppManager:
 
         entry = app_path / entry_point
         return await asyncio.create_subprocess_exec(
-            "python", str(entry),
+            "python",
+            str(entry),
             cwd=str(app_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -493,7 +495,9 @@ class AppManager:
         pkg = app_path / "package.json"
         if pkg.exists():
             proc = await asyncio.create_subprocess_exec(
-                "npm", "install", "--production",
+                "npm",
+                "install",
+                "--production",
                 cwd=str(app_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -502,7 +506,8 @@ class AppManager:
             await asyncio.wait_for(proc.communicate(), timeout=120.0)
 
         return await asyncio.create_subprocess_exec(
-            "npm", "start",
+            "npm",
+            "start",
             cwd=str(app_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -515,7 +520,11 @@ class AppManager:
         """Start a Docker Compose app."""
         env["APP_PORT"] = str(port)
         return await asyncio.create_subprocess_exec(
-            "docker", "compose", "up", "--build", "-d",
+            "docker",
+            "compose",
+            "up",
+            "--build",
+            "-d",
             cwd=str(app_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -543,7 +552,9 @@ class AppManager:
         if app.runtime == AppRuntime.DOCKER.value:
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    "docker", "compose", "down",
+                    "docker",
+                    "compose",
+                    "down",
                     cwd=app.path,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -1267,9 +1278,7 @@ class AppManager:
         """Stop all running apps and the monitor gracefully."""
         await self.stop_monitor()
         running = [
-            app_id
-            for app_id, app in self._apps.items()
-            if app.status == AppStatus.RUNNING.value
+            app_id for app_id, app in self._apps.items() if app.status == AppStatus.RUNNING.value
         ]
         for app_id in running:
             try:

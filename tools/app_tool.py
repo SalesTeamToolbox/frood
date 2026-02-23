@@ -411,7 +411,11 @@ class AppTool(Tool):
                 return ToolResult(output="No requirements.txt found — nothing to install")
 
             proc = await asyncio.create_subprocess_exec(
-                "pip", "install", "-q", "-r", str(reqs),
+                "pip",
+                "install",
+                "-q",
+                "-r",
+                str(reqs),
                 cwd=str(app_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -429,7 +433,8 @@ class AppTool(Tool):
                 return ToolResult(output="No package.json found — nothing to install")
 
             proc = await asyncio.create_subprocess_exec(
-                "npm", "install",
+                "npm",
+                "install",
                 cwd=str(app_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -475,11 +480,7 @@ class AppTool(Tool):
 
         app = await self._manager.restart(app_id)
         return ToolResult(
-            output=(
-                f"App restarted: {app.name}\n"
-                f"  URL: {app.url}\n"
-                f"  Port: {app.port}"
-            )
+            output=(f"App restarted: {app.name}\n  URL: {app.url}\n  Port: {app.port}")
         )
 
     async def _status(self, **kwargs) -> ToolResult:

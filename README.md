@@ -81,8 +81,9 @@ git checkout -b dev    # create dev branch if it doesn't exist
 cd ~/agent42           # return to agent42 directory
 ```
 
-**Common gotcha:** If you skip this step, Agent42 will fail at startup with a git
-worktree error. The `dev` branch is used as the base for all agent worktrees.
+**Note:** If you skip this step, coding, debugging, and refactoring tasks will fail
+with a git worktree error when they try to create an isolated workspace. Non-code
+tasks (marketing, content, design, etc.) work fine without a `dev` branch.
 
 #### 4. Start Agent42
 
@@ -105,7 +106,12 @@ Open http://localhost:8000. On first launch, Agent42 shows a setup wizard:
 2. **Add an API key** (optional) — Enter your OpenRouter API key. Get a free key
    at [openrouter.ai/keys](https://openrouter.ai/keys) (no credit card needed).
    You can also add this later via Settings > LLM Providers.
-3. **Done** — Setup completes and you're automatically logged in.
+3. **Enhanced Memory** (optional) — Choose a memory backend:
+   - **Skip** — File-based memory (default, no extra setup)
+   - **Qdrant Embedded** — Semantic vector search stored locally (no Docker needed)
+   - **Qdrant + Redis** — Full semantic search + session caching (Docker required).
+     Selecting this auto-queues a setup task with Docker instructions.
+4. **Done** — Setup completes and you're automatically logged in.
 
 The wizard also generates a `JWT_SECRET` for persistent sessions and writes all
 configuration to `.env` automatically.
@@ -885,7 +891,8 @@ agent42/
 ├── pyproject.toml             # Tool configuration (ruff, pytest, mypy)
 ├── Makefile                   # Common dev commands (test, lint, format, check)
 ├── tasks.json.example
-└── setup.sh
+├── setup.sh
+└── uninstall.sh
 ```
 
 ## Deployment
@@ -930,6 +937,61 @@ The install script handles: virtual environment setup, `.env` configuration,
 nginx reverse proxy with rate limiting and security headers, Let's Encrypt
 SSL certificates, systemd service, and UFW firewall rules.
 See `deploy/install-server.sh` and `deploy/nginx-agent42.conf`.
+
+## Uninstallation
+
+Run the uninstall script from the Agent42 directory:
+
+```bash
+cd ~/agent42
+bash uninstall.sh
+```
+
+The script automatically detects your deployment method (local, systemd,
+Docker) and walks you through each removal step with confirmation prompts.
+It offers to back up your `.env` file before removing it.
+
+**What the script handles:**
+
+- Stops running Agent42 processes (systemd service, Docker Compose stack)
+- Removes standalone Qdrant/Redis containers (if present)
+- Removes the systemd service and reloads the daemon
+- Removes nginx configuration and reloads nginx
+- Optionally removes Let's Encrypt SSL certificates
+- Removes UFW firewall rules
+- Removes all runtime data (`.agent42/`, `data/`, `apps/`, logs)
+- Removes the virtual environment and `.env`
+- Optionally deletes the entire Agent42 directory
+
+### What Gets Removed
+
+| Component | Location | Created By |
+|---|---|---|
+| Virtual environment | `agent42/.venv/` | `setup.sh` |
+| Configuration | `agent42/.env` | `setup.sh` / setup wizard |
+| Runtime data | `agent42/.agent42/` | Agent42 at runtime |
+| Model data | `agent42/data/` | Agent42 at runtime |
+| User apps | `agent42/apps/` | Agent42 at runtime |
+| Log file | `agent42/agent42.log` | systemd / Agent42 |
+| Systemd service | `/etc/systemd/system/agent42.service` | `install-server.sh` |
+| Nginx config | `/etc/nginx/sites-available/agent42` | `install-server.sh` |
+| SSL certificates | `/etc/letsencrypt/live/yourdomain/` | certbot |
+| Docker volumes | `agent42-data`, `redis-data`, `qdrant-data` | `docker compose` |
+
+If `setup.sh` installed Node.js via nvm and you no longer need it, remove it
+manually after uninstalling:
+
+```bash
+rm -rf "$HOME/.nvm"
+# Remove nvm lines from ~/.bashrc or ~/.zshrc
+```
+
+### Reinstalling
+
+After uninstalling, follow the [Quick Start](#quick-start) instructions to
+perform a fresh installation. If you backed up your `.env` file (the script
+offers this), restore it after running `setup.sh` to preserve your API keys
+and settings.
 
 ## Team Orchestration
 
@@ -1057,8 +1119,9 @@ unauthenticated setup wizard instead of the login page:
 
 1. Set a dashboard password (stored as bcrypt hash)
 2. Optionally enter an OpenRouter API key
-3. Auto-generates `JWT_SECRET` and updates `.env`
-4. Logs you in immediately
+3. Optionally select an enhanced memory backend (Qdrant embedded or Qdrant + Redis)
+4. Auto-generates `JWT_SECRET` and updates `.env`
+5. Logs you in immediately (and queues a Docker setup task if Qdrant + Redis was selected)
 
 The wizard endpoint (`/api/setup/complete`) is only accessible when the password
 is unset or still at the insecure default. Once setup is complete, the endpoint
