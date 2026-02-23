@@ -186,6 +186,15 @@ class Settings:
     vision_max_image_mb: int = 10
     vision_model: str = ""  # Override model for vision tasks (empty = auto-detect)
 
+    # Apps platform
+    apps_enabled: bool = True
+    apps_dir: str = "apps"
+    apps_port_range_start: int = 9100
+    apps_port_range_end: int = 9199
+    apps_max_running: int = 5
+    apps_auto_restart: bool = True
+    apps_default_runtime: str = "python"
+
     # Security scanning (scheduled)
     security_scan_enabled: bool = True
     security_scan_interval: str = "8h"  # e.g. "8h", "6h", "12h"
@@ -338,6 +347,15 @@ class Settings:
             # Vision / image analysis
             vision_max_image_mb=int(os.getenv("VISION_MAX_IMAGE_MB", "10")),
             vision_model=os.getenv("VISION_MODEL", ""),
+            # Apps platform
+            apps_enabled=os.getenv("APPS_ENABLED", "true").lower() in ("true", "1", "yes"),
+            apps_dir=os.getenv("APPS_DIR", "apps"),
+            apps_port_range_start=int(os.getenv("APPS_PORT_RANGE_START", "9100")),
+            apps_port_range_end=int(os.getenv("APPS_PORT_RANGE_END", "9199")),
+            apps_max_running=int(os.getenv("APPS_MAX_RUNNING", "5")),
+            apps_auto_restart=os.getenv("APPS_AUTO_RESTART", "true").lower()
+            in ("true", "1", "yes"),
+            apps_default_runtime=os.getenv("APPS_DEFAULT_RUNTIME", "python"),
         )
 
     def get_discord_guild_ids(self) -> list[int]:

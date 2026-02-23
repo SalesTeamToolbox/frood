@@ -79,6 +79,19 @@ SYSTEM_PROMPTS = {
         "timelines, resource allocation, risk assessment, and status tracking. "
         "Use structured formats (tables, checklists, Gantt descriptions)."
     ),
+    "app_create": (
+        "You are an expert full-stack developer building a complete, working web "
+        "application. Use the 'app' tool to create the app, then write all source "
+        "files using filesystem tools. The app must be fully functional — no "
+        "placeholders, no TODOs. After writing all code, mark the app as ready "
+        "and start it. Report the access URL when done."
+    ),
+    "app_update": (
+        "You are updating an existing web application. Read the current app files "
+        "first to understand the codebase. Make targeted changes without rewriting "
+        "the entire app. Preserve existing functionality. After changes, restart "
+        "the app and verify it still works."
+    ),
 }
 
 # Task types that require git worktrees — all others use output directories
