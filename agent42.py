@@ -203,18 +203,22 @@ class Agent42:
         self.cron_scheduler = CronScheduler(settings.cron_jobs_path)
 
         # Apps platform
-        self.app_manager = AppManager(
-            apps_dir=settings.apps_dir,
-            port_range_start=settings.apps_port_range_start,
-            port_range_end=settings.apps_port_range_end,
-            max_running=settings.apps_max_running,
-            auto_restart=settings.apps_auto_restart,
-            dashboard_port=dashboard_port,
-            git_enabled_default=settings.apps_git_enabled_default,
-            github_token=settings.apps_github_token,
-            default_mode=settings.apps_default_mode,
-            require_auth_default=settings.apps_require_auth_default,
-        ) if settings.apps_enabled else None
+        self.app_manager = (
+            AppManager(
+                apps_dir=settings.apps_dir,
+                port_range_start=settings.apps_port_range_start,
+                port_range_end=settings.apps_port_range_end,
+                max_running=settings.apps_max_running,
+                auto_restart=settings.apps_auto_restart,
+                dashboard_port=dashboard_port,
+                git_enabled_default=settings.apps_git_enabled_default,
+                github_token=settings.apps_github_token,
+                default_mode=settings.apps_default_mode,
+                require_auth_default=settings.apps_require_auth_default,
+            )
+            if settings.apps_enabled
+            else None
+        )
 
         self._register_tools()
 

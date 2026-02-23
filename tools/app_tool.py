@@ -651,7 +651,10 @@ class AppTool(Tool):
         if isinstance(push_on_build, str):
             push_on_build = push_on_build.lower() in ("true", "1", "yes")
         result = await self._manager.github_setup(
-            app_id, repo_name=repo_name, private=private, push_on_build=push_on_build,
+            app_id,
+            repo_name=repo_name,
+            private=private,
+            push_on_build=push_on_build,
         )
         return ToolResult(output=result)
 
@@ -749,10 +752,7 @@ class AppTool(Tool):
                 resp_body_str = resp.text[:5000]
 
             return ToolResult(
-                output=(
-                    f"HTTP {resp.status_code} {method} /{endpoint}\n"
-                    f"Response:\n{resp_body_str}"
-                )
+                output=(f"HTTP {resp.status_code} {method} /{endpoint}\nResponse:\n{resp_body_str}")
             )
         except httpx.ConnectError:
             return ToolResult(

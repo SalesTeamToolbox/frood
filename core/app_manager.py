@@ -322,7 +322,8 @@ class AppManager:
     def list_apps_by_mode(self, mode: str) -> list[App]:
         """List non-archived apps filtered by mode (internal/external)."""
         return [
-            a for a in self._apps.values()
+            a
+            for a in self._apps.values()
             if a.status != AppStatus.ARCHIVED.value and a.app_mode == mode
         ]
 
@@ -367,7 +368,11 @@ class AppManager:
     async def get_app_url(self, app_id: str) -> str | None:
         """Get the localhost URL for a running app's API."""
         app = self._apps.get(app_id)
-        if not app or app.status != AppStatus.RUNNING.value or app.runtime == AppRuntime.STATIC.value:
+        if (
+            not app
+            or app.status != AppStatus.RUNNING.value
+            or app.runtime == AppRuntime.STATIC.value
+        ):
             return None
         return f"http://127.0.0.1:{app.port}"
 
@@ -707,7 +712,8 @@ class AppManager:
         env["GIT_CONFIG_KEY_2"] = "user.email"
         env["GIT_CONFIG_VALUE_2"] = env.get("GIT_AUTHOR_EMAIL", "agent42@localhost")
         proc = await asyncio.create_subprocess_exec(
-            "git", *args,
+            "git",
+            *args,
             cwd=str(app_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -747,9 +753,7 @@ class AppManager:
 
         # Initial commit with manifest
         await self._run_git(app_path, "add", "-A")
-        await self._run_git(
-            app_path, "commit", "-m", f"Initial commit: {app.name}"
-        )
+        await self._run_git(app_path, "commit", "-m", f"Initial commit: {app.name}")
         logger.info("Git initialized for app %s", app.id)
         return "Git repository initialized with initial commit"
 
@@ -802,9 +806,7 @@ class AppManager:
             return f"git status failed: {err}"
 
         # Also get log summary
-        rc2, log_out, _ = await self._run_git(
-            app_path, "log", "--oneline", "-5"
-        )
+        rc2, log_out, _ = await self._run_git(app_path, "log", "--oneline", "-5")
         result = f"Status:\n{out.strip() or '(clean)'}"
         if rc2 == 0 and log_out.strip():
             result += f"\n\nRecent commits:\n{log_out.strip()}"
@@ -823,8 +825,7 @@ class AppManager:
             return "Git not initialized"
 
         rc, out, err = await self._run_git(
-            app_path, "log", f"--max-count={count}",
-            "--format=%h %s (%cr)"
+            app_path, "log", f"--max-count={count}", "--format=%h %s (%cr)"
         )
         if rc != 0:
             return f"git log failed: {err}"
@@ -861,7 +862,10 @@ class AppManager:
         return f"Git disabled for '{app.name}'. Repository preserved on disk."
 
     async def github_setup(
-        self, app_id: str, repo_name: str = "", private: bool = True,
+        self,
+        app_id: str,
+        repo_name: str = "",
+        private: bool = True,
         push_on_build: bool = True,
     ) -> str:
         """Create a GitHub repo and link it to the app.
@@ -901,7 +905,8 @@ class AppManager:
         """Check if a command is available on the system."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "which", cmd,
+                "which",
+                cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -911,8 +916,12 @@ class AppManager:
             return False
 
     async def _github_setup_via_gh(
-        self, app: App, app_path: Path, repo_name: str,
-        private: bool, push_on_build: bool,
+        self,
+        app: App,
+        app_path: Path,
+        repo_name: str,
+        private: bool,
+        push_on_build: bool,
     ) -> str:
         """Create GitHub repo using the gh CLI."""
         visibility = "--private" if private else "--public"
@@ -922,11 +931,16 @@ class AppManager:
 
         # Create the repo
         proc = await asyncio.create_subprocess_exec(
-            "gh", "repo", "create", repo_name,
+            "gh",
+            "repo",
+            "create",
+            repo_name,
             visibility,
-            "--source", str(app_path),
+            "--source",
+            str(app_path),
             "--push",
-            "--description", app.description or f"App: {app.name}",
+            "--description",
+            app.description or f"App: {app.name}",
             cwd=str(app_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -949,7 +963,7 @@ class AppManager:
             remote = remote_out.strip()
             for prefix in ["https://github.com/", "git@github.com:"]:
                 if remote.startswith(prefix):
-                    repo_url = remote[len(prefix):].rstrip(".git")
+                    repo_url = remote[len(prefix) :].rstrip(".git")
                     break
 
         app.github_repo = repo_url
@@ -960,8 +974,12 @@ class AppManager:
         return f"GitHub repository created: {repo_url}\nPush on build: {push_on_build}"
 
     async def _github_setup_via_token(
-        self, app: App, app_path: Path, repo_name: str,
-        private: bool, push_on_build: bool,
+        self,
+        app: App,
+        app_path: Path,
+        repo_name: str,
+        private: bool,
+        push_on_build: bool,
     ) -> str:
         """Create GitHub repo using the API via token and add as remote."""
         # Use httpx to create the repo via GitHub API
@@ -1033,7 +1051,9 @@ class AppManager:
         logger.info("GitHub repo linked for app %s: %s", app.id, full_name)
 
         push_status = "pushed" if rc == 0 else f"push pending ({err.strip()})"
-        return f"GitHub repository: {full_name}\nStatus: {push_status}\nPush on build: {push_on_build}"
+        return (
+            f"GitHub repository: {full_name}\nStatus: {push_status}\nPush on build: {push_on_build}"
+        )
 
     async def github_push(self, app_id: str) -> str:
         """Push app commits to GitHub."""
@@ -1041,15 +1061,15 @@ class AppManager:
         if not app:
             raise ValueError(f"App not found: {app_id}")
         if not app.github_repo:
-            raise ValueError(
-                f"No GitHub repo configured for '{app.name}'. Use github_setup first."
-            )
+            raise ValueError(f"No GitHub repo configured for '{app.name}'. Use github_setup first.")
 
         app_path = Path(app.path)
 
         # Set up auth if token available
         if self._github_token:
-            remote_url = f"https://x-access-token:{self._github_token}@github.com/{app.github_repo}.git"
+            remote_url = (
+                f"https://x-access-token:{self._github_token}@github.com/{app.github_repo}.git"
+            )
             await self._run_git(app_path, "remote", "set-url", "origin", remote_url)
 
         rc, out, err = await self._run_git(app_path, "push", "origin", "HEAD")
@@ -1211,7 +1231,8 @@ class AppManager:
                 logger.warning("App monitor tick failed: %s", exc)
             try:
                 await asyncio.wait_for(
-                    self._monitor_stop.wait(), timeout=self._monitor_interval,
+                    self._monitor_stop.wait(),
+                    timeout=self._monitor_interval,
                 )
                 break  # stop event was set
             except TimeoutError:
@@ -1235,7 +1256,8 @@ class AppManager:
             if process is not None:
                 try:
                     _, stderr_bytes = await asyncio.wait_for(
-                        process.communicate(), timeout=2.0,
+                        process.communicate(),
+                        timeout=2.0,
                     )
                     stderr_text = (stderr_bytes or b"").decode(errors="replace")[-500:]
                 except Exception:
@@ -1244,7 +1266,8 @@ class AppManager:
 
             logger.warning(
                 "App '%s' (%s) crashed (exit=%s). stderr: %s",
-                app.name, app_id,
+                app.name,
+                app_id,
                 process.returncode if process else "?",
                 stderr_text[:200] or "(empty)",
             )
@@ -1265,7 +1288,9 @@ class AppManager:
                     app.updated_at = time.time()
                     await self._persist()
                     logger.error(
-                        "Auto-restart failed for app '%s': %s", app.name, e,
+                        "Auto-restart failed for app '%s': %s",
+                        app.name,
+                        e,
                     )
             else:
                 app.status = AppStatus.ERROR.value
