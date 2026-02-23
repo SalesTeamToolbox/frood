@@ -69,6 +69,33 @@ _TEAM_INDICATORS = [
     "group effort",
 ]
 
+# Keywords that signal project-level scope (triggers interview flow)
+_PROJECT_SCOPE_MARKERS = [
+    "build me",
+    "create a platform",
+    "build a platform",
+    "build a system",
+    "build an application",
+    "create an application",
+    "develop a",
+    "full-stack",
+    "fullstack",
+    "from scratch",
+    "new project",
+    "new application",
+    "startup",
+    "saas",
+    "marketplace",
+    "e-commerce",
+    "ecommerce",
+    "social network",
+    "management system",
+    "booking system",
+    "inventory system",
+    "crm",
+    "erp",
+]
+
 ASSESSMENT_PROMPT = """\
 You are a task complexity assessor for an AI agent platform.
 
@@ -109,6 +136,7 @@ class ComplexityAssessment:
     recommended_team: str = ""  # team name or ""
     reasoning: str = ""
     used_llm: bool = False
+    needs_project_setup: bool = False  # True if project-level scope detected
 
 
 class ComplexityAssessor:
@@ -234,6 +262,10 @@ class ComplexityAssessor:
         team_hits = sum(1 for m in _TEAM_INDICATORS if m in lower)
         score += min(team_hits * 0.2, 0.4)
 
+        # Check for project-scope markers (+0.25 each, max 0.5)
+        project_hits = sum(1 for m in _PROJECT_SCOPE_MARKERS if m in lower)
+        score += min(project_hits * 0.25, 0.5)
+
         # Check for multi-domain keywords (spans 2+ task types)
         from core.task_queue import _TASK_TYPE_KEYWORDS
 
@@ -266,10 +298,19 @@ class ComplexityAssessor:
             recommended_mode = "single_agent"
             recommended_team = ""
 
+        # Determine if project setup interview is needed
+        # Triggered by: explicit project scope markers, OR complex coding/app tasks.
+        # Simple moderate tasks (score 0.3-0.6 without project markers) do NOT
+        # trigger the interview — that would catch too many routine tasks.
+        needs_project_setup = project_hits > 0 or (
+            score >= 0.6
+            and task_type in (TaskType.CODING, TaskType.APP_CREATE, TaskType.APP_UPDATE)
+        )
+
         reasoning = (
             f"Keyword assessment: scale={scale_hits}, "
             f"multi-deliverable={multi_hits}, team-indicators={team_hits}, "
-            f"cross-domain={len(matched_types)}"
+            f"project-scope={project_hits}, cross-domain={len(matched_types)}"
         )
 
         return ComplexityAssessment(
@@ -279,6 +320,7 @@ class ComplexityAssessor:
             recommended_team=recommended_team,
             reasoning=reasoning,
             used_llm=False,
+            needs_project_setup=needs_project_setup,
         )
 
     @staticmethod

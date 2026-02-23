@@ -430,6 +430,18 @@ class Agent42:
         if self.app_manager:
             self.tool_registry.register(AppTool(self.app_manager))
 
+        # Project interview tool (for structured project discovery)
+        if settings.project_interview_enabled:
+            from tools.project_interview import ProjectInterviewTool
+
+            self.tool_registry.register(
+                ProjectInterviewTool(
+                    workspace_path=workspace,
+                    router=router,
+                    outputs_dir=settings.outputs_dir,
+                )
+            )
+
     async def _setup_channels(self):
         """Configure and register enabled channels based on settings."""
         # Discord
@@ -597,6 +609,17 @@ class Agent42:
         the team tool.
         """
         task_type = force_type or infer_task_type(description)
+
+        # Project interview detection: route complex project-level tasks through
+        # the interview flow instead of going directly to execution.
+        if (
+            settings.project_interview_enabled
+            and settings.project_interview_mode != "never"
+            and classification
+            and getattr(classification, "needs_project_setup", False)
+            and task_type in (TaskType.CODING, TaskType.APP_CREATE, TaskType.APP_UPDATE)
+        ):
+            task_type = TaskType.PROJECT_SETUP
 
         # Smart resource allocation: inject team directive for complex tasks
         task_description = description
