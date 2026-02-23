@@ -109,8 +109,8 @@ Open http://localhost:8000. On first launch, Agent42 shows a setup wizard:
 3. **Enhanced Memory** (optional) — Choose a memory backend:
    - **Skip** — File-based memory (default, no extra setup)
    - **Qdrant Embedded** — Semantic vector search stored locally (no Docker needed)
-   - **Qdrant + Redis** — Full semantic search + session caching (Docker required).
-     Selecting this auto-queues a setup task with Docker instructions.
+   - **Qdrant + Redis** — Full semantic search + session caching.
+     Selecting this auto-queues a setup task to verify the services are running.
 4. **Done** — Setup completes and you're automatically logged in.
 
 The wizard also generates a `JWT_SECRET` for persistent sessions and writes all
@@ -160,13 +160,23 @@ That's it — you now have access to 30+ free models for all task types.
 
 For persistent cross-session memory, fast semantic search, and session caching:
 
+**Production deployments:** `deploy/install-server.sh` automatically installs and
+configures Redis and Qdrant as native systemd services. No additional setup needed.
+
+**Local development:** Choose "Qdrant + Redis" in the browser setup wizard, then
+start the services:
+
 ```bash
 # Install client libraries
 pip install qdrant-client redis[hiredis]
 
-# Start services (Docker)
+# Option A: Docker
 docker run -d -p 6333:6333 qdrant/qdrant
 docker run -d -p 6379:6379 redis:alpine
+
+# Option B: Native (Ubuntu/Debian)
+sudo apt install redis-server
+# See Qdrant docs for binary install
 
 # Add to .env
 QDRANT_URL=http://localhost:6333
@@ -874,8 +884,8 @@ agent42/
 │       ├── app.js             # Full SPA (setup wizard, login, tasks, settings)
 │       └── style.css          # Dark theme CSS
 ├── deploy/                    # Production deployment
-│   ├── install-server.sh      # Full server setup (nginx, SSL, systemd, firewall)
-│   └── nginx-agent42.conf     # Reverse proxy with rate limiting + security headers
+│   ├── install-server.sh      # Full server setup (Redis, Qdrant, nginx, SSL, systemd, firewall)
+│   └── nginx-agent42.conf     # Reverse proxy template (__DOMAIN__/__PORT__ placeholders)
 ├── data/                      # Runtime data (auto-created)
 │   ├── model_catalog.json     # Cached OpenRouter free model catalog
 │   ├── model_performance.json # Per-model outcome tracking
@@ -924,7 +934,7 @@ communicate.
 
 ### Production VPS
 
-For a full production deployment with nginx, SSL, systemd, and firewall:
+For a full production deployment with Redis, Qdrant, nginx, SSL, systemd, and firewall:
 
 ```bash
 scp -r agent42/ user@server:~/agent42
@@ -933,13 +943,18 @@ cd ~/agent42
 bash deploy/install-server.sh
 ```
 
-The install script prompts for your domain name, then automatically handles:
-Python virtual environment, Redis and Qdrant as system services, nginx reverse
-proxy with rate limiting and security headers, Let's Encrypt SSL certificates,
-systemd service, and UFW firewall rules.
+The script prompts for your domain name (and optional port), then automatically:
+- Runs `setup.sh` (venv, deps, frontend build)
+- Installs Redis as a native systemd service (via apt)
+- Installs Qdrant as a native systemd service (binary from GitHub releases)
+- Configures `.env` with Redis/Qdrant URLs, JWT secret, and CORS
+- Sets up nginx reverse proxy with rate limiting and security headers
+- Obtains Let's Encrypt SSL certificates
+- Installs the Agent42 systemd service
+- Configures UFW firewall rules
 
 After installation, open `https://yourdomain.com` in your browser to complete
-setup through the wizard (password, API key, memory configuration).
+setup through the wizard (password, API key).
 See `deploy/install-server.sh` and `deploy/nginx-agent42.conf`.
 
 ## Uninstallation
@@ -1130,7 +1145,7 @@ unauthenticated setup wizard instead of the login page:
 2. Optionally enter an OpenRouter API key
 3. Optionally select an enhanced memory backend (Qdrant embedded or Qdrant + Redis)
 4. Auto-generates `JWT_SECRET` and updates `.env`
-5. Logs you in immediately (and queues a Docker setup task if Qdrant + Redis was selected)
+5. Logs you in immediately (and queues a verification task if Qdrant + Redis was selected)
 
 The wizard endpoint (`/api/setup/complete`) is only accessible when the password
 is unset or still at the insecure default. Once setup is complete, the endpoint
