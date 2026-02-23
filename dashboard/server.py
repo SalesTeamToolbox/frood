@@ -846,9 +846,7 @@ def create_app(
             description: str = ""
 
         @app.get("/api/apps")
-        async def list_apps(
-            mode: str = "", _user: str = Depends(get_current_user)
-        ):
+        async def list_apps(mode: str = "", _user: str = Depends(get_current_user)):
             """List all apps, optionally filtered by mode (internal/external)."""
             if mode and mode in ("internal", "external"):
                 apps = app_manager.list_apps_by_mode(mode)
@@ -981,7 +979,8 @@ def create_app(
 
         @app.patch("/api/apps/{app_id}/settings")
         async def update_app_settings(
-            app_id: str, req: AppSettingsRequest,
+            app_id: str,
+            req: AppSettingsRequest,
             _user: str = Depends(get_current_user),
         ):
             """Update app mode, auth, or visibility settings."""
@@ -999,6 +998,7 @@ def create_app(
                     raise HTTPException(status_code=400, detail="Invalid visibility")
                 found.visibility = req.visibility
             import time as _time
+
             found.updated_at = _time.time()
             await app_manager._persist()
             return found.to_dict()

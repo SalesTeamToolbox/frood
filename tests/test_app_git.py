@@ -187,19 +187,13 @@ class TestAppManagerGit:
 
     @pytest.mark.asyncio
     async def test_mark_ready_auto_commits(self):
-        app = await self.manager.create(
-            name="Auto Commit", runtime="python", git_enabled=True
-        )
+        app = await self.manager.create(name="Auto Commit", runtime="python", git_enabled=True)
         # Write the entry point
-        (Path(app.path) / "src" / "app.py").write_text(
-            "import os\nprint('hello')\n"
-        )
+        (Path(app.path) / "src" / "app.py").write_text("import os\nprint('hello')\n")
         await self.manager.mark_ready(app.id, version="1.0.0")
 
         # Check that the commit was made
-        rc, out, _ = await self.manager._run_git(
-            Path(app.path), "log", "--oneline", "-1"
-        )
+        rc, out, _ = await self.manager._run_git(Path(app.path), "log", "--oneline", "-1")
         assert rc == 0
         assert "build ready" in out.lower()
 
@@ -213,9 +207,7 @@ class TestAppManagerGit:
     @pytest.mark.asyncio
     async def test_persistence_with_git_fields(self):
         """Git fields survive persistence round-trip."""
-        app = await self.manager.create(
-            name="Persist Git", git_enabled=True
-        )
+        app = await self.manager.create(name="Persist Git", git_enabled=True)
         app.github_repo = "owner/persist-test"
         app.github_push_on_build = True
         await self.manager._persist()
@@ -280,7 +272,9 @@ class TestAppToolGit:
     @pytest.mark.asyncio
     async def test_create_with_git_flag(self):
         result = await self.tool.execute(
-            action="create", name="Git Tool App", git_enabled=True,
+            action="create",
+            name="Git Tool App",
+            git_enabled=True,
         )
         assert result.success
         assert "enabled" in result.output.lower()
@@ -289,7 +283,9 @@ class TestAppToolGit:
     async def test_create_with_git_string_true(self):
         """Handle string 'true' from tool parameters."""
         result = await self.tool.execute(
-            action="create", name="Git String", git_enabled="true",
+            action="create",
+            name="Git String",
+            git_enabled="true",
         )
         assert result.success
         assert "enabled" in result.output.lower()
@@ -312,9 +308,7 @@ class TestAppToolGit:
     async def test_git_commit_action(self):
         app = await self.manager.create(name="Commit Via Tool", git_enabled=True)
         (Path(app.path) / "src" / "test.py").write_text("# test")
-        result = await self.tool.execute(
-            action="git_commit", app_id=app.id, message="Test commit"
-        )
+        result = await self.tool.execute(action="git_commit", app_id=app.id, message="Test commit")
         assert result.success
 
     @pytest.mark.asyncio
@@ -332,25 +326,28 @@ class TestAppToolGit:
 
     @pytest.mark.asyncio
     async def test_git_actions_require_app_id(self):
-        for action in ["git_enable", "git_disable", "git_commit", "git_status",
-                        "git_log", "github_setup", "github_push"]:
+        for action in [
+            "git_enable",
+            "git_disable",
+            "git_commit",
+            "git_status",
+            "git_log",
+            "github_setup",
+            "github_push",
+        ]:
             result = await self.tool.execute(action=action)
             assert not result.success
             assert "required" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_status_shows_git_info(self):
-        app = await self.manager.create(
-            name="Status Git Info", git_enabled=True
-        )
+        app = await self.manager.create(name="Status Git Info", git_enabled=True)
         result = await self.tool.execute(action="status", app_id=app.id)
         assert "Git: enabled" in result.output
 
     @pytest.mark.asyncio
     async def test_status_shows_github_info(self):
-        app = await self.manager.create(
-            name="Status GitHub", git_enabled=True
-        )
+        app = await self.manager.create(name="Status GitHub", git_enabled=True)
         app.github_repo = "owner/status-test"
         app.github_push_on_build = True
         result = await self.tool.execute(action="status", app_id=app.id)

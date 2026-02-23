@@ -281,6 +281,7 @@ class TestAppManagerSetMode:
         app = await self.manager.create(name="Timestamp App")
         old_ts = app.updated_at
         import time
+
         time.sleep(0.01)
         result = await self.manager.set_app_mode(app.id, "external")
         assert result.updated_at > old_ts
@@ -339,9 +340,7 @@ class TestAppToolModes:
     @pytest.mark.asyncio
     async def test_set_mode_action(self):
         app = await self.manager.create(name="Tool Mode App")
-        result = await self.tool.execute(
-            action="set_mode", app_id=app.id, app_mode="external"
-        )
+        result = await self.tool.execute(action="set_mode", app_id=app.id, app_mode="external")
         assert result.success is not False
         assert "external" in result.output
 
@@ -376,9 +375,7 @@ class TestAppToolModes:
     @pytest.mark.asyncio
     async def test_set_auth_action_enable(self):
         app = await self.manager.create(name="Tool Auth App")
-        result = await self.tool.execute(
-            action="set_auth", app_id=app.id, require_auth=True
-        )
+        result = await self.tool.execute(action="set_auth", app_id=app.id, require_auth=True)
         assert result.success is not False
         assert "enabled" in result.output.lower()
 
@@ -386,9 +383,7 @@ class TestAppToolModes:
     async def test_set_auth_action_disable(self):
         app = await self.manager.create(name="Tool Auth App 2")
         await self.manager.set_app_auth(app.id, True)
-        result = await self.tool.execute(
-            action="set_auth", app_id=app.id, require_auth=False
-        )
+        result = await self.tool.execute(action="set_auth", app_id=app.id, require_auth=False)
         assert result.success is not False
         assert "disabled" in result.output.lower()
 
@@ -396,9 +391,7 @@ class TestAppToolModes:
     async def test_set_auth_string_true(self):
         """Test that string 'true' is handled correctly."""
         app = await self.manager.create(name="String Auth")
-        result = await self.tool.execute(
-            action="set_auth", app_id=app.id, require_auth="true"
-        )
+        result = await self.tool.execute(action="set_auth", app_id=app.id, require_auth="true")
         assert result.success is not False
         reloaded = await self.manager.get(app.id)
         assert reloaded.require_auth is True
@@ -600,16 +593,12 @@ class TestAppToolAppApi:
         app.port = 9104
 
         mock_client = AsyncMock()
-        mock_client.request = AsyncMock(
-            side_effect=httpx.TimeoutException("timed out")
-        )
+        mock_client.request = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            result = await self.tool.execute(
-                action="app_api", app_id=app.id, endpoint="/api/slow"
-            )
+            result = await self.tool.execute(action="app_api", app_id=app.id, endpoint="/api/slow")
 
         assert result.success is False
         assert "timed out" in result.error.lower()
@@ -632,9 +621,7 @@ class TestAppToolAppApi:
         mock_client.__aexit__ = AsyncMock(return_value=None)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            result = await self.tool.execute(
-                action="app_api", app_id=app.id, endpoint="/"
-            )
+            result = await self.tool.execute(action="app_api", app_id=app.id, endpoint="/")
 
         assert result.success is not False
         assert "Hello" in result.output
@@ -657,9 +644,7 @@ class TestAppToolAppApi:
         mock_client.__aexit__ = AsyncMock(return_value=None)
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            result = await self.tool.execute(
-                action="app_api", app_id=app.id, endpoint="/api/info"
-            )
+            result = await self.tool.execute(action="app_api", app_id=app.id, endpoint="/api/info")
 
         assert result.success is not False
         assert "node" in result.output

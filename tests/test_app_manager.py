@@ -541,7 +541,9 @@ class TestAppMonitor:
     async def test_monitor_loop_runs_check(self):
         """The monitor loop calls _check_and_restart at least once."""
         with patch.object(
-            self.manager, "_check_and_restart", new_callable=AsyncMock,
+            self.manager,
+            "_check_and_restart",
+            new_callable=AsyncMock,
         ) as mock_check:
             await self.manager.start_monitor(interval=0.1)
             # Give the loop time to run at least one tick
