@@ -891,7 +891,8 @@ agent42/
 ├── pyproject.toml             # Tool configuration (ruff, pytest, mypy)
 ├── Makefile                   # Common dev commands (test, lint, format, check)
 ├── tasks.json.example
-└── setup.sh
+├── setup.sh
+└── uninstall.sh
 ```
 
 ## Deployment
@@ -939,87 +940,28 @@ See `deploy/install-server.sh` and `deploy/nginx-agent42.conf`.
 
 ## Uninstallation
 
-To fully remove Agent42 and perform a clean reinstall, follow the instructions
-for your deployment method.
-
-### Local Installation
+Run the uninstall script from the Agent42 directory:
 
 ```bash
-# 1. Stop Agent42 if it's running
-#    Press Ctrl+C in the terminal, or if using systemd:
-sudo systemctl stop agent42
-
-# 2. Remove the virtual environment and runtime data
 cd ~/agent42
-rm -rf .venv/               # Python virtual environment
-rm -rf .agent42/            # Runtime data (memory, sessions, settings, knowledge, qdrant)
-rm -rf data/                # Model catalog, performance tracking, routing data
-rm -rf apps/                # User-created applications
-rm -f .env                  # Configuration (back up first if you want to preserve settings)
-rm -f agent42.log           # Log file (if present)
-
-# 3. Remove the systemd service template (if generated)
-rm -f /tmp/agent42.service
-
-# 4. Remove the entire Agent42 directory
-cd ~
-rm -rf agent42/
+bash uninstall.sh
 ```
 
-If `setup.sh` installed Node.js via nvm and you no longer need it:
+The script automatically detects your deployment method (local, systemd,
+Docker) and walks you through each removal step with confirmation prompts.
+It offers to back up your `.env` file before removing it.
 
-```bash
-rm -rf "$HOME/.nvm"
-# Remove nvm lines from ~/.bashrc or ~/.zshrc
-```
+**What the script handles:**
 
-### Production Server
-
-For servers set up with `deploy/install-server.sh`:
-
-```bash
-# 1. Stop and disable the systemd service
-sudo systemctl stop agent42
-sudo systemctl disable agent42
-sudo rm /etc/systemd/system/agent42.service
-sudo systemctl daemon-reload
-
-# 2. Remove the nginx configuration
-sudo rm /etc/nginx/sites-enabled/agent42
-sudo rm /etc/nginx/sites-available/agent42
-sudo nginx -t && sudo systemctl reload nginx
-
-# 3. Remove SSL certificates (optional — only if the domain is no longer in use)
-sudo certbot delete --cert-name agent42.yourdomain.com
-
-# 4. Remove firewall rules (if UFW was configured)
-sudo ufw delete deny 8002/tcp
-
-# 5. Remove the Agent42 directory and all data
-rm -rf ~/agent42/
-```
-
-### Docker
-
-```bash
-# 1. Stop and remove containers, networks, and volumes
-cd ~/agent42
-docker compose down -v       # -v removes named volumes (agent42-data, redis-data, qdrant-data)
-
-# 2. Remove Docker images (optional)
-docker rmi $(docker compose config --images) 2>/dev/null
-
-# 3. Remove the Agent42 directory
-cd ~
-rm -rf agent42/
-```
-
-If you started Qdrant or Redis as standalone containers (not via Compose):
-
-```bash
-docker stop qdrant redis
-docker rm qdrant redis
-```
+- Stops running Agent42 processes (systemd service, Docker Compose stack)
+- Removes standalone Qdrant/Redis containers (if present)
+- Removes the systemd service and reloads the daemon
+- Removes nginx configuration and reloads nginx
+- Optionally removes Let's Encrypt SSL certificates
+- Removes UFW firewall rules
+- Removes all runtime data (`.agent42/`, `data/`, `apps/`, logs)
+- Removes the virtual environment and `.env`
+- Optionally deletes the entire Agent42 directory
 
 ### What Gets Removed
 
@@ -1036,11 +978,20 @@ docker rm qdrant redis
 | SSL certificates | `/etc/letsencrypt/live/yourdomain/` | certbot |
 | Docker volumes | `agent42-data`, `redis-data`, `qdrant-data` | `docker compose` |
 
+If `setup.sh` installed Node.js via nvm and you no longer need it, remove it
+manually after uninstalling:
+
+```bash
+rm -rf "$HOME/.nvm"
+# Remove nvm lines from ~/.bashrc or ~/.zshrc
+```
+
 ### Reinstalling
 
 After uninstalling, follow the [Quick Start](#quick-start) instructions to
-perform a fresh installation. If you backed up your `.env` file, you can
-restore it after running `setup.sh` to preserve your API keys and settings.
+perform a fresh installation. If you backed up your `.env` file (the script
+offers this), restore it after running `setup.sh` to preserve your API keys
+and settings.
 
 ## Team Orchestration
 

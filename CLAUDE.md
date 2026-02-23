@@ -139,6 +139,7 @@ agent42/
 ├── CLAUDE.md               # This file — development guide
 ├── README.md               # User-facing docs, quick start, architecture
 ├── setup.sh                # Local setup script (venv, deps, .env, systemd template)
+├── uninstall.sh            # Uninstall script (auto-detects deployment, removes all artifacts)
 ├── requirements.txt        # Production Python dependencies
 ├── requirements-dev.txt    # Development dependencies (testing, linting, security)
 ├── pyproject.toml          # Tool configuration (ruff, pytest, mypy)
