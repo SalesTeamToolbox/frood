@@ -170,10 +170,7 @@ def get_current_user_optional(request) -> str | None:
         return None
     token = auth_header[7:]
     try:
-        if token.startswith(API_KEY_PREFIX):
-            ctx = _validate_api_key(token)
-        else:
-            ctx = _validate_jwt(token)
+        ctx = _validate_api_key(token) if token.startswith(API_KEY_PREFIX) else _validate_jwt(token)
         return ctx.user
     except HTTPException:
         return None
