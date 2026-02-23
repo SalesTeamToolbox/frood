@@ -34,6 +34,12 @@ Updated automatically by the learning engine and manually by developers.
 - The spending tracker resets daily at midnight UTC
 - Provider errors should be caught and retried with exponential backoff (max 3 retries)
 
+## CI / Formatting Patterns
+
+- **Always run `ruff format .` before committing.** CI runs `ruff format --check .` and fails on unformatted files. This is especially important after merges that touch multiple files — merged code may not be formatted even if each branch was individually clean.
+- The `make format` target runs `ruff format .` and is the quickest way to fix formatting.
+- The `make check` target runs both `make lint` and tests together — use as a pre-push gate.
+
 ## Testing Patterns
 
 - Use `tempfile.mkdtemp()` or pytest `tmp_path` fixture for sandbox tests

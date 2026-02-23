@@ -182,6 +182,7 @@ def create_app(
     device_store: DeviceStore | None = None,
     heartbeat=None,
     key_store=None,
+    app_manager=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -828,6 +829,235 @@ def create_app(
                 # but we validate and log for future use
         except WebSocketDisconnect:
             ws_manager.disconnect(ws)
+
+    # -- Apps Platform ---------------------------------------------------------
+
+    if app_manager:
+
+        class AppCreateRequest(BaseModel):
+            name: str
+            description: str = ""
+            runtime: str = "python"
+            tags: list[str] = []
+
+        class AppUpdateRequest(BaseModel):
+            description: str = ""
+
+        @app.get("/api/apps")
+        async def list_apps(_user: str = Depends(get_current_user)):
+            """List all apps with their status."""
+            return [a.to_dict() for a in app_manager.list_apps()]
+
+        @app.post("/api/apps")
+        async def create_user_app(req: AppCreateRequest, _user: str = Depends(get_current_user)):
+            """Create a new app and optionally trigger a build task."""
+            new_app = await app_manager.create(
+                name=req.name,
+                description=req.description,
+                runtime=req.runtime,
+                tags=req.tags,
+            )
+            # Create a build task for the app
+            task = Task(
+                title=f"Build App: {req.name}",
+                description=(
+                    f"Build a complete web application:\n\n"
+                    f"Name: {req.name}\n"
+                    f"Description: {req.description}\n"
+                    f"Runtime: {req.runtime}\n"
+                    f"App ID: {new_app.id}\n"
+                    f"App Path: {new_app.path}\n\n"
+                    f"Use the 'app' tool to manage the app lifecycle. "
+                    f"Write all source files to the app path. "
+                    f"When done, mark the app as ready and start it."
+                ),
+                task_type=TaskType.APP_CREATE,
+                priority=1,
+            )
+            await task_queue.add(task)
+            await app_manager.mark_building(new_app.id, task.id)
+            return {
+                "app": new_app.to_dict(),
+                "task_id": task.id,
+            }
+
+        @app.get("/api/apps/{app_id}")
+        async def get_app(app_id: str, _user: str = Depends(get_current_user)):
+            """Get app details."""
+            found = await app_manager.get(app_id)
+            if not found:
+                raise HTTPException(status_code=404, detail="App not found")
+            return found.to_dict()
+
+        @app.post("/api/apps/{app_id}/start")
+        async def start_app(app_id: str, _user: str = Depends(get_current_user)):
+            """Start a ready/stopped app."""
+            try:
+                started = await app_manager.start(app_id)
+                return {"status": "started", "url": started.url, "port": started.port}
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+
+        @app.post("/api/apps/{app_id}/stop")
+        async def stop_app(app_id: str, _user: str = Depends(get_current_user)):
+            """Stop a running app."""
+            try:
+                await app_manager.stop(app_id)
+                return {"status": "stopped"}
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+
+        @app.post("/api/apps/{app_id}/restart")
+        async def restart_app(app_id: str, _user: str = Depends(get_current_user)):
+            """Restart an app."""
+            try:
+                restarted = await app_manager.restart(app_id)
+                return {"status": "restarted", "url": restarted.url}
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+
+        @app.delete("/api/apps/{app_id}")
+        async def delete_app(app_id: str, _user: str = Depends(get_current_user)):
+            """Archive an app."""
+            try:
+                await app_manager.delete(app_id)
+                return {"status": "archived"}
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+
+        @app.get("/api/apps/{app_id}/logs")
+        async def get_app_logs(
+            app_id: str, lines: int = 100, _user: str = Depends(get_current_user)
+        ):
+            """Get app logs."""
+            output = await app_manager.logs(app_id, lines=lines)
+            return {"logs": output}
+
+        @app.get("/api/apps/{app_id}/health")
+        async def app_health(app_id: str, _user: str = Depends(get_current_user)):
+            """Check app health."""
+            return await app_manager.health_check(app_id)
+
+        @app.post("/api/apps/{app_id}/update")
+        async def update_app(
+            app_id: str, req: AppUpdateRequest, _user: str = Depends(get_current_user)
+        ):
+            """Request changes to an existing app (triggers APP_UPDATE task)."""
+            found = await app_manager.get(app_id)
+            if not found:
+                raise HTTPException(status_code=404, detail="App not found")
+
+            task = Task(
+                title=f"Update App: {found.name}",
+                description=(
+                    f"Update the existing application:\n\n"
+                    f"App: {found.name} ({found.id})\n"
+                    f"Path: {found.path}\n"
+                    f"Runtime: {found.runtime}\n\n"
+                    f"Requested changes:\n{req.description}\n\n"
+                    f"Read the existing app files first. Make targeted changes. "
+                    f"Restart the app when done."
+                ),
+                task_type=TaskType.APP_UPDATE,
+                priority=1,
+            )
+            await task_queue.add(task)
+            return {"task_id": task.id, "app_id": app_id}
+
+        # -- App reverse proxy (for running dynamic apps) ----------------------
+
+        from starlette.responses import Response
+
+        @app.api_route(
+            "/apps/{slug}/{path:path}",
+            methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+        )
+        async def proxy_app_with_path(slug: str, path: str, request: Request):
+            """Reverse proxy requests to running app processes."""
+            return await _proxy_to_app(slug, path, request)
+
+        @app.get("/apps/{slug}/")
+        async def proxy_app_root(slug: str, request: Request):
+            """Serve the root of a running app."""
+            return await _proxy_to_app(slug, "", request)
+
+        @app.get("/apps/{slug}")
+        async def proxy_app_redirect(slug: str):
+            """Redirect to trailing slash."""
+            from starlette.responses import RedirectResponse
+
+            return RedirectResponse(url=f"/apps/{slug}/")
+
+        async def _proxy_to_app(slug: str, path: str, request: Request) -> Response:
+            """Internal: forward request to the app's local port."""
+            found = app_manager.get_by_slug(slug)
+            if not found:
+                raise HTTPException(status_code=404, detail=f"App '{slug}' not found")
+
+            if found.status != "running":
+                raise HTTPException(
+                    status_code=503, detail=f"App '{slug}' is not running (status: {found.status})"
+                )
+
+            # Static apps: serve files directly
+            if found.runtime == "static":
+                from starlette.responses import FileResponse
+
+                app_path = Path(found.path)
+                public_dir = app_path / "public"
+                if not public_dir.exists():
+                    raise HTTPException(status_code=404, detail="App public directory not found")
+
+                file_path = public_dir / path if path else public_dir / "index.html"
+                if not file_path.exists():
+                    file_path = public_dir / "index.html"  # SPA fallback
+                if not file_path.exists():
+                    raise HTTPException(status_code=404, detail="File not found")
+
+                # Security: prevent path traversal
+                try:
+                    file_path.resolve().relative_to(public_dir.resolve())
+                except ValueError:
+                    raise HTTPException(status_code=403, detail="Access denied")
+
+                return FileResponse(str(file_path))
+
+            # Dynamic apps: proxy to their port
+            import httpx
+
+            target_url = f"http://127.0.0.1:{found.port}/{path}"
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    # Forward the request
+                    body = await request.body()
+                    headers = dict(request.headers)
+                    headers.pop("host", None)
+
+                    resp = await client.request(
+                        method=request.method,
+                        url=target_url,
+                        headers=headers,
+                        content=body,
+                        params=dict(request.query_params),
+                    )
+
+                    # Filter response headers
+                    resp_headers = dict(resp.headers)
+                    resp_headers.pop("transfer-encoding", None)
+                    resp_headers.pop("content-encoding", None)
+
+                    return Response(
+                        content=resp.content,
+                        status_code=resp.status_code,
+                        headers=resp_headers,
+                    )
+            except httpx.ConnectError:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"App '{slug}' is not responding on port {found.port}",
+                )
+            except httpx.TimeoutException:
+                raise HTTPException(status_code=504, detail=f"App '{slug}' timed out")
 
     # -- Static files (React frontend) ----------------------------------------
 

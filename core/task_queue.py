@@ -50,6 +50,8 @@ class TaskType(str, Enum):
     STRATEGY = "strategy"
     DATA_ANALYSIS = "data_analysis"
     PROJECT_MANAGEMENT = "project_management"
+    APP_CREATE = "app_create"
+    APP_UPDATE = "app_update"
 
 
 # Keyword-based task type inference for channel messages
@@ -148,6 +150,35 @@ _TASK_TYPE_KEYWORDS: dict[TaskType, list[str]] = {
         "status report",
         "task breakdown",
         "gantt",
+    ],
+    TaskType.APP_CREATE: [
+        "build me an app",
+        "build an app",
+        "create an app",
+        "make me an app",
+        "build me a",
+        "create a web app",
+        "build a website",
+        "build a tool",
+        "make an application",
+        "web application",
+        "build a dashboard",
+        "create a tracker",
+        "build a calculator",
+        "build a game",
+        "build a chat",
+        "build a form",
+    ],
+    TaskType.APP_UPDATE: [
+        "update the app",
+        "modify the app",
+        "add to the app",
+        "change the app",
+        "improve the app",
+        "add dark mode",
+        "add a feature to",
+        "fix the app",
+        "redesign the app",
     ],
 }
 

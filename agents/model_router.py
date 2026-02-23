@@ -88,6 +88,16 @@ FREE_ROUTING: dict[TaskType, dict] = {
         "critic": "or-free-gemma-27b",
         "max_iterations": 4,
     },
+    TaskType.APP_CREATE: {
+        "primary": "or-free-qwen-coder",  # Qwen3 Coder — best for full-stack app generation
+        "critic": "or-free-deepseek-r1",  # DeepSeek R1 — thorough code review
+        "max_iterations": 12,  # Apps need more iterations to build fully
+    },
+    TaskType.APP_UPDATE: {
+        "primary": "or-free-qwen-coder",
+        "critic": "or-free-devstral",  # Devstral — multi-file awareness for updates
+        "max_iterations": 8,
+    },
 }
 
 

@@ -123,6 +123,11 @@ during Claude Code sessions without manual activation.
 | Tunnel Manager | Expose local ports via cloudflared/serveo/localhost.run with TTL auto-expiry |
 | Knowledge Base | RAG tool for importing documents, chunking, and semantic query via embeddings |
 | Vision Tool | Image analysis using LLM vision APIs with Pillow compression |
+| App | A self-contained user application built by Agent42, managed via `AppManager` |
+| App Manager | `core/app_manager.py` — creates, builds, runs, stops, and serves user apps |
+| App Tool | `tools/app_tool.py` — agent-facing interface for app lifecycle management |
+| App Builder | Skill (`skills/builtins/app-builder/`) guiding agents through full app creation |
+| App Runtime | How an app runs: `static`, `python`, `node`, or `docker` |
 
 ---
 
@@ -134,6 +139,7 @@ agent42/
 ├── CLAUDE.md               # This file — development guide
 ├── README.md               # User-facing docs, quick start, architecture
 ├── setup.sh                # Local setup script (venv, deps, .env, systemd template)
+├── uninstall.sh            # Uninstall script (auto-detects deployment, removes all artifacts)
 ├── requirements.txt        # Production Python dependencies
 ├── requirements-dev.txt    # Development dependencies (testing, linting, security)
 ├── pyproject.toml          # Tool configuration (ruff, pytest, mypy)
@@ -171,7 +177,8 @@ agent42/
 │   ├── queue_backend.py    # Redis queue backend adapter
 │   ├── notification_service.py # Webhook and email notifications
 │   ├── url_policy.py       # URL allowlist/denylist for SSRF protection
-│   └── complexity.py       # Task complexity estimation
+│   ├── complexity.py       # Task complexity estimation
+│   └── app_manager.py      # App lifecycle management (create, build, run, stop)
 │
 ├── providers/              # LLM provider registry
 │   └── registry.py         # ProviderSpec, ModelSpec, spending tracker, 6 providers
@@ -218,7 +225,8 @@ agent42/
 │   ├── ssh_tool.py         # SSH remote shell (asyncssh, host allowlist, SFTP)
 │   ├── tunnel_tool.py      # Tunnel manager (cloudflared, serveo, localhost.run)
 │   ├── knowledge_tool.py   # Knowledge base / RAG (import, chunk, query)
-│   └── vision_tool.py      # Image analysis (Pillow compress, LLM vision API)
+│   ├── vision_tool.py      # Image analysis (Pillow compress, LLM vision API)
+│   └── app_tool.py         # App lifecycle management tool (create, start, stop)
 │
 ├── skills/                 # Pluggable skill system
 │   ├── loader.py           # SKILL.md discovery, YAML frontmatter parsing
@@ -233,7 +241,8 @@ agent42/
 │       ├── wordpress/      # WP-CLI, wp-config, themes, plugins, multisite
 │       ├── docker-deploy/  # Dockerfile, docker-compose, registry workflows
 │       ├── cms-deploy/     # Ghost, Strapi, general CMS patterns
-│       └── ... (39 total)
+│       ├── app-builder/   # Build complete web apps from descriptions
+│       └── ... (40 total)
 │
 ├── memory/                 # Persistence and semantic search
 │   ├── store.py            # MEMORY.md + HISTORY.md two-layer pattern
@@ -260,13 +269,20 @@ agent42/
 │   ├── install-server.sh   # Full server setup (nginx, SSL, systemd, firewall)
 │   └── nginx-agent42.conf  # Reverse proxy with rate limiting + security headers
 │
+├── apps/                   # User-created applications (auto-created)
+│   ├── <app-id>/           # Each app in its own directory
+│   │   ├── APP.json        # App manifest (metadata, runtime, config)
+│   │   ├── src/            # Application source code
+│   │   └── public/         # Static assets (for static runtime)
+│   └── apps.json           # App registry (metadata for all apps)
+│
 ├── data/                   # Runtime data (auto-created)
 │   ├── model_catalog.json  # Cached OpenRouter free model catalog
 │   ├── model_performance.json # Per-model outcome tracking stats
 │   ├── model_research.json # Web benchmark research scores
 │   └── dynamic_routing.json# Data-driven model routing overrides
 │
-├── tests/                  # Test suite (29 files)
+├── tests/                  # Test suite (31 files)
 │   ├── conftest.py         # Shared fixtures (sandbox, tool_registry, mock_tool)
 │   └── test_*.py           # Per-module test files
 │
@@ -539,6 +555,18 @@ See `.env.example` for the complete list of configuration variables.
 | `VISION_MAX_IMAGE_MB` | Max image file size | `10` |
 | `VISION_MODEL` | Override model for vision tasks | *(auto-detect)* |
 
+### Apps Platform Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `APPS_ENABLED` | Enable the apps platform | `true` |
+| `APPS_DIR` | Base directory for all apps | `apps` |
+| `APPS_PORT_RANGE_START` | Dynamic port allocation start | `9100` |
+| `APPS_PORT_RANGE_END` | Dynamic port allocation end | `9199` |
+| `APPS_MAX_RUNNING` | Max simultaneously running apps | `5` |
+| `APPS_AUTO_RESTART` | Restart crashed apps | `true` |
+| `APPS_DEFAULT_RUNTIME` | Default runtime for new apps | `python` |
+
 See `.env.example` for the complete list of 80+ configuration variables.
 
 ---
@@ -617,12 +645,13 @@ These rules are **non-negotiable** for a platform that runs AI agents on people'
 
 ### After Writing Code
 
-1. Run the full test suite: `python -m pytest tests/ -x -q`
-2. Run linter: `make lint`
-3. For security-sensitive changes: `python -m pytest tests/test_security.py tests/test_sandbox.py tests/test_command_filter.py -v`
-4. Update this CLAUDE.md pitfalls table if you discovered a non-obvious issue
-5. For new modules: ensure a corresponding `tests/test_*.py` file exists
-6. Update README.md if new features, skills, tools, or config were added
+1. Run the formatter: `make format` (or `ruff format .`)
+2. Run the full test suite: `python -m pytest tests/ -x -q`
+3. Run linter: `make lint`
+4. For security-sensitive changes: `python -m pytest tests/test_security.py tests/test_sandbox.py tests/test_command_filter.py -v`
+5. Update this CLAUDE.md pitfalls table if you discovered a non-obvious issue
+6. For new modules: ensure a corresponding `tests/test_*.py` file exists
+7. Update README.md if new features, skills, tools, or config were added
 
 ---
 
@@ -787,6 +816,9 @@ docker compose down              # Stop
 | 18 | Init Order | `ModelEvaluator` must init before `Learner` | Learner takes `model_evaluator` param — ensure correct order in `agent42.py` |
 | 19 | Extensions | `ToolExtension.extends` must match an already-registered tool name | Extensions for nonexistent tools are silently skipped with a warning |
 | 20 | Tests | `cryptography` panics with `_cffi_backend` error | Install `cffi` (`pip install cffi`) before running dashboard/auth tests |
+| 21 | Apps | App entry point missing PORT/HOST env var reading | Always read `os.environ.get("PORT", "8080")` — AppManager sets these |
+| 22 | Apps | New `TaskType` not in `FREE_ROUTING` dict | Add routing entry to `agents/model_router.py` `FREE_ROUTING` for every new TaskType |
+| 23 | Formatting | CI fails with `ruff format --check` after merge | Always run `make format` (or `ruff format .`) before committing — especially after merges that touch multiple files |
 
 ---
 
