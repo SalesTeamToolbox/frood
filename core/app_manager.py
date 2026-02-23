@@ -698,9 +698,14 @@ class AppManager:
             env["GIT_ASKPASS"] = "echo"
             env["GIT_TERMINAL_PROMPT"] = "0"
         # Disable commit signing — app repos are local-only by default
-        env["GIT_CONFIG_COUNT"] = "1"
+        # Also set fallback author identity so commits work in headless/CI environments
+        env["GIT_CONFIG_COUNT"] = "3"
         env["GIT_CONFIG_KEY_0"] = "commit.gpgsign"
         env["GIT_CONFIG_VALUE_0"] = "false"
+        env["GIT_CONFIG_KEY_1"] = "user.name"
+        env["GIT_CONFIG_VALUE_1"] = env.get("GIT_AUTHOR_NAME", "Agent42")
+        env["GIT_CONFIG_KEY_2"] = "user.email"
+        env["GIT_CONFIG_VALUE_2"] = env.get("GIT_AUTHOR_EMAIL", "agent42@localhost")
         proc = await asyncio.create_subprocess_exec(
             "git", *args,
             cwd=str(app_path),
