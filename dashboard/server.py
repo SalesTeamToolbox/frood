@@ -847,9 +847,9 @@ def create_app(
 
     # -- Chat ------------------------------------------------------------------
 
-    # In-memory chat history (persisted via task comments for agent responses).
-    # Each message: {id, role, content, timestamp}
-    _chat_messages: list[dict] = []
+    # Chat history is stored on ws_manager.chat_messages so agent42.py
+    # can also append assistant messages (ensuring reload persistence).
+    _chat_messages = ws_manager.chat_messages
 
     class ChatSendRequest(BaseModel):
         message: str

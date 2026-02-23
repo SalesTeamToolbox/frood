@@ -661,6 +661,7 @@ class Agent42:
                 "sender": "Agent42",
                 "task_id": task.id,
             }
+            self.ws_manager.chat_messages.append(chat_msg)
             await self.ws_manager.broadcast("chat_message", chat_msg)
             return  # Don't also send via channel manager
 
@@ -676,6 +677,7 @@ class Agent42:
                 "sender": "Agent42",
                 "task_id": task.id,
             }
+            self.ws_manager.chat_messages.append(chat_msg)
             await self.ws_manager.broadcast("chat_message", chat_msg)
             return
 
