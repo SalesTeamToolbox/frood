@@ -39,6 +39,7 @@ from agents.learner import Learner
 from agents.model_router import ModelRouter
 from channels.base import InboundMessage, OutboundMessage
 from channels.manager import ChannelManager
+from core.app_manager import AppManager
 from core.approval_gate import ApprovalGate
 from core.capacity import compute_effective_capacity
 from core.command_filter import DEFAULT_ALLOWLIST, CommandFilter
@@ -61,6 +62,7 @@ from memory.redis_session import RedisConfig, RedisSessionBackend
 from memory.session import SessionManager
 from memory.store import MemoryStore
 from skills.loader import SkillLoader
+from tools.app_tool import AppTool
 from tools.browser_tool import BrowserTool
 from tools.code_intel import CodeIntelTool
 from tools.content_analyzer import ContentAnalyzerTool
@@ -199,6 +201,16 @@ class Agent42:
         self.tool_registry = ToolRegistry(rate_limiter=rate_limiter)
         self.mcp_manager = MCPManager()
         self.cron_scheduler = CronScheduler(settings.cron_jobs_path)
+
+        # Apps platform
+        self.app_manager = AppManager(
+            apps_dir=settings.apps_dir,
+            port_range_start=settings.apps_port_range_start,
+            port_range_end=settings.apps_port_range_end,
+            max_running=settings.apps_max_running,
+            auto_restart=settings.apps_auto_restart,
+            dashboard_port=dashboard_port,
+        ) if settings.apps_enabled else None
 
         self._register_tools()
 
@@ -394,6 +406,10 @@ class Agent42:
 
         # Vision / image analysis
         self.tool_registry.register(VisionTool(self.sandbox))
+
+        # Apps platform (enabled by default)
+        if self.app_manager:
+            self.tool_registry.register(AppTool(self.app_manager))
 
     async def _setup_channels(self):
         """Configure and register enabled channels based on settings."""
@@ -751,6 +767,9 @@ class Agent42:
 
         # Load tasks and initialize subsystems
         await self.task_queue.load_from_file()
+        if self.app_manager:
+            await self.app_manager.load()
+            logger.info(f"  Apps loaded: {len(self.app_manager.list_apps())}")
         await self._setup_channels()
         await self._setup_mcp()
 
@@ -792,6 +811,7 @@ class Agent42:
                 device_store=self.device_store,
                 heartbeat=self.heartbeat,
                 key_store=self.key_store,
+                app_manager=self.app_manager,
             )
             config = uvicorn.Config(
                 app,
