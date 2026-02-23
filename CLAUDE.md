@@ -269,8 +269,8 @@ agent42/
 │   └── email_channel.py    # IMAP/SMTP email integration
 │
 ├── deploy/                 # Production deployment
-│   ├── install-server.sh   # Full server setup (nginx, SSL, systemd, firewall)
-│   └── nginx-agent42.conf  # Reverse proxy with rate limiting + security headers
+│   ├── install-server.sh   # Full server setup (Redis, Qdrant, nginx, SSL, systemd, firewall)
+│   └── nginx-agent42.conf  # Reverse proxy template (__DOMAIN__/__PORT__ placeholders)
 │
 ├── apps/                   # User-created applications (auto-created)
 │   ├── <app-id>/           # Each app in its own directory
@@ -763,10 +763,10 @@ Include *what* and *why*, not just *what*.
 
 ```bash
 git clone <repo> agent42 && cd agent42
-bash setup.sh                    # Creates .venv, installs deps, creates .env
+bash setup.sh                    # Creates .venv, installs deps, builds frontend
 source .venv/bin/activate
 python agent42.py                # http://localhost:8000
-# Open http://localhost:8000 → setup wizard handles password + API key
+# Open browser — setup wizard handles password, API key, and memory
 ```
 
 ### Production (Server)
@@ -775,13 +775,13 @@ python agent42.py                # http://localhost:8000
 scp -r agent42/ user@server:~/agent42
 ssh user@server
 cd ~/agent42
-bash deploy/install-server.sh    # Prompts for domain, then auto-installs everything
+bash deploy/install-server.sh    # Prompts for domain, installs Redis + Qdrant + nginx + SSL + systemd
+# Open https://yourdomain.com — setup wizard handles password and API key
 ```
 
-The install script prompts for your domain name, then handles: setup.sh, Redis +
-Qdrant as system services, .env auto-configuration, nginx reverse proxy,
-Let's Encrypt SSL, systemd service, UFW firewall. After install, open the browser
-to complete setup via wizard. See `deploy/install-server.sh`.
+The install script handles: setup.sh, Redis (apt), Qdrant (binary + systemd),
+nginx reverse proxy (templated), Let's Encrypt SSL, Agent42 systemd service,
+UFW firewall. Redis and Qdrant URLs are pre-configured in .env.
 
 **Service commands:**
 ```bash
