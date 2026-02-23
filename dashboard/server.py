@@ -849,9 +849,7 @@ def create_app(
             return [a.to_dict() for a in app_manager.list_apps()]
 
         @app.post("/api/apps")
-        async def create_user_app(
-            req: AppCreateRequest, _user: str = Depends(get_current_user)
-        ):
+        async def create_user_app(req: AppCreateRequest, _user: str = Depends(get_current_user)):
             """Create a new app and optionally trigger a build task."""
             new_app = await app_manager.create(
                 name=req.name,

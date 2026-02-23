@@ -203,14 +203,18 @@ class Agent42:
         self.cron_scheduler = CronScheduler(settings.cron_jobs_path)
 
         # Apps platform
-        self.app_manager = AppManager(
-            apps_dir=settings.apps_dir,
-            port_range_start=settings.apps_port_range_start,
-            port_range_end=settings.apps_port_range_end,
-            max_running=settings.apps_max_running,
-            auto_restart=settings.apps_auto_restart,
-            dashboard_port=dashboard_port,
-        ) if settings.apps_enabled else None
+        self.app_manager = (
+            AppManager(
+                apps_dir=settings.apps_dir,
+                port_range_start=settings.apps_port_range_start,
+                port_range_end=settings.apps_port_range_end,
+                max_running=settings.apps_max_running,
+                auto_restart=settings.apps_auto_restart,
+                dashboard_port=dashboard_port,
+            )
+            if settings.apps_enabled
+            else None
+        )
 
         self._register_tools()
 
