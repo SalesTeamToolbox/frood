@@ -1334,7 +1334,7 @@ function renderSettingsPanel() {
 
       <h4 style="margin:1rem 0 0.75rem;font-size:0.95rem">Dashboard Authentication</h4>
       ${settingReadonly("DASHBOARD_USERNAME", "Username", "Default: admin")}
-      ${settingSecret("DASHBOARD_PASSWORD_HASH", "Password Hash (bcrypt)", 'Generate: python -c "from passlib.context import CryptContext; print(CryptContext([\'bcrypt\']).hash(\'yourpassword\'))"')}
+      ${settingSecret("DASHBOARD_PASSWORD_HASH", "Password Hash (bcrypt)", 'Generate: python -c "import bcrypt; print(bcrypt.hashpw(b\'yourpassword\', bcrypt.gensalt()).decode())"')}
       <div class="form-group">
         <div class="help" style="color:var(--warning)">Use DASHBOARD_PASSWORD_HASH (bcrypt) in production. DASHBOARD_PASSWORD (plaintext) is for development only.</div>
       </div>
