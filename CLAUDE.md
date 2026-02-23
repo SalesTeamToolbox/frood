@@ -142,6 +142,7 @@ agent42/
 ├── CLAUDE.md               # This file — development guide
 ├── README.md               # User-facing docs, quick start, architecture
 ├── setup.sh                # Local setup script (venv, deps, .env, systemd template)
+├── uninstall.sh            # Uninstall script (auto-detects deployment, removes all artifacts)
 ├── requirements.txt        # Production Python dependencies
 ├── requirements-dev.txt    # Development dependencies (testing, linting, security)
 ├── pyproject.toml          # Tool configuration (ruff, pytest, mypy)
@@ -652,12 +653,13 @@ These rules are **non-negotiable** for a platform that runs AI agents on people'
 
 ### After Writing Code
 
-1. Run the full test suite: `python -m pytest tests/ -x -q`
-2. Run linter: `make lint`
-3. For security-sensitive changes: `python -m pytest tests/test_security.py tests/test_sandbox.py tests/test_command_filter.py -v`
-4. Update this CLAUDE.md pitfalls table if you discovered a non-obvious issue
-5. For new modules: ensure a corresponding `tests/test_*.py` file exists
-6. Update README.md if new features, skills, tools, or config were added
+1. Run the formatter: `make format` (or `ruff format .`)
+2. Run the full test suite: `python -m pytest tests/ -x -q`
+3. Run linter: `make lint`
+4. For security-sensitive changes: `python -m pytest tests/test_security.py tests/test_sandbox.py tests/test_command_filter.py -v`
+5. Update this CLAUDE.md pitfalls table if you discovered a non-obvious issue
+6. For new modules: ensure a corresponding `tests/test_*.py` file exists
+7. Update README.md if new features, skills, tools, or config were added
 
 ---
 
@@ -825,6 +827,7 @@ docker compose down              # Stop
 | 21 | Apps | App entry point missing PORT/HOST env var reading | Always read `os.environ.get("PORT", "8080")` — AppManager sets these |
 | 22 | Apps | New `TaskType` not in `FREE_ROUTING` dict | Add routing entry to `agents/model_router.py` `FREE_ROUTING` for every new TaskType |
 | 23 | Apps | `APPS_GITHUB_TOKEN` leaked to app subprocess | Token is in `_sanitize_env()` blocked list; never passed to child processes |
+| 24 | Formatting | CI fails with `ruff format --check` after merge | Always run `make format` (or `ruff format .`) before committing — especially after merges that touch multiple files |
 
 ---
 
