@@ -469,8 +469,8 @@ class Settings:
         if self.dashboard_password and not self.dashboard_password_hash:
             warnings.append(
                 "Using plaintext DASHBOARD_PASSWORD. Set DASHBOARD_PASSWORD_HASH "
-                'for production. Generate: python -c "from passlib.context import '
-                "CryptContext; print(CryptContext(['bcrypt']).hash('yourpassword'))\""
+                'for production. Generate: python -c "import bcrypt; '
+                "print(bcrypt.hashpw(b'yourpassword', bcrypt.gensalt()).decode())\""
             )
         # Diagnostic info (never log the actual password)
         if self.dashboard_password:

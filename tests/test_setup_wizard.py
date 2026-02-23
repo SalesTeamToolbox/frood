@@ -4,6 +4,9 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+from dashboard.auth import pwd_context
 from dashboard.server import _update_env_file
 
 # ---------------------------------------------------------------------------
@@ -135,3 +138,87 @@ class TestSetupStatus:
         from dashboard.server import _INSECURE_PASSWORDS
 
         assert "my-secure-password" not in _INSECURE_PASSWORDS
+
+
+# ---------------------------------------------------------------------------
+# Bcrypt wrapper (replaced passlib due to bcrypt >= 4.1 incompatibility)
+# ---------------------------------------------------------------------------
+
+
+class TestBcryptContext:
+    """Verify that pwd_context hash/verify works with bcrypt >= 4.1."""
+
+    def test_hash_and_verify(self):
+        hashed = pwd_context.hash("my-password")
+        assert hashed.startswith("$2b$")
+        assert pwd_context.verify("my-password", hashed)
+
+    def test_wrong_password_rejected(self):
+        hashed = pwd_context.hash("correct-password")
+        assert not pwd_context.verify("wrong-password", hashed)
+
+    def test_verify_invalid_hash_returns_false(self):
+        assert not pwd_context.verify("anything", "not-a-hash")
+
+
+# ---------------------------------------------------------------------------
+# Setup complete endpoint (integration)
+# ---------------------------------------------------------------------------
+
+
+class TestSetupCompleteEndpoint:
+    """Integration tests for POST /api/setup/complete."""
+
+    @pytest.fixture()
+    def _fresh_settings(self):
+        """Temporarily clear password settings so the wizard is accessible."""
+        from core.config import settings
+
+        orig_hash = settings.dashboard_password_hash
+        orig_pass = settings.dashboard_password
+        object.__setattr__(settings, "dashboard_password_hash", "")
+        object.__setattr__(settings, "dashboard_password", "")
+        yield
+        object.__setattr__(settings, "dashboard_password_hash", orig_hash)
+        object.__setattr__(settings, "dashboard_password", orig_pass)
+
+    @pytest.fixture()
+    def _app(self, tmp_path):
+        """Create a FastAPI test app backed by a temp task queue."""
+        from core.approval_gate import ApprovalGate
+        from core.task_queue import TaskQueue
+        from dashboard.server import create_app
+        from dashboard.websocket_manager import WebSocketManager
+
+        tq = TaskQueue(tasks_json_path=str(tmp_path / "tasks.json"))
+        ws = WebSocketManager()
+        ag = ApprovalGate(ws)
+        return create_app(tq, ws, ag)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_fresh_settings")
+    async def test_setup_complete_qdrant_redis(self, _app, tmp_path):
+        """Setup with qdrant_redis should succeed and queue a verification task."""
+        from httpx import ASGITransport, AsyncClient
+
+        # Point _update_env_file at a temp .env so it doesn't touch the real one
+        env_path = tmp_path / ".env"
+        env_path.write_text("")
+
+        with patch("dashboard.server._update_env_file"):
+            transport = ASGITransport(app=_app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/setup/complete",
+                    json={
+                        "password": "test12345678",
+                        "openrouter_api_key": "",
+                        "memory_backend": "qdrant_redis",
+                    },
+                )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["memory_backend"] == "qdrant_redis"
+        assert data["setup_task_id"]  # non-empty
+        assert data["token"]  # JWT returned
