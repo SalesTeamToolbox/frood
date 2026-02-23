@@ -834,6 +834,7 @@ docker compose down              # Stop
 | 26 | Dashboard | CSP `script-src 'self'` blocks all inline event handlers (`onclick`, `onsubmit`) | CSP must include `'unsafe-inline'` in `script-src` because `app.js` uses innerHTML with 55+ inline handlers |
 | 27 | Startup | `agent42.log` owned by root (from systemd) blocks `deploy` user startup | Catch `PermissionError` on `FileHandler`; fall back to stdout-only logging |
 | 28 | Auth | `passlib 1.7.4` crashes with `bcrypt >= 4.1` (wrap-bug detection hashes >72-byte secret) | Use `bcrypt` directly via `_BcryptContext` wrapper in `dashboard/auth.py`; do not use `passlib` |
+| 29 | Formatting | Inline `from` imports inside functions/methods trigger ruff I001 if not isort-sorted | Third-party imports (e.g. `httpx`) must come before local imports (e.g. `core.*`, `dashboard.*`) with a blank line between — even inside function bodies; run `ruff check --fix` to auto-correct |
 
 ---
 
