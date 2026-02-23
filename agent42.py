@@ -640,6 +640,41 @@ class Agent42:
         """
         await self.ws_manager.broadcast("task_update", task.to_dict())
 
+        # Dashboard chat: broadcast agent response back as a chat message
+        if task.origin_channel == "dashboard_chat" and task.status in (
+            TaskStatus.REVIEW,
+            TaskStatus.DONE,
+        ):
+            import time as _time
+            import uuid as _uuid
+
+            content = task.result or "(completed with no output)"
+            chat_msg = {
+                "id": _uuid.uuid4().hex[:12],
+                "role": "assistant",
+                "content": content,
+                "timestamp": _time.time(),
+                "sender": "Agent42",
+                "task_id": task.id,
+            }
+            await self.ws_manager.broadcast("chat_message", chat_msg)
+            return  # Don't also send via channel manager
+
+        if task.origin_channel == "dashboard_chat" and task.status == TaskStatus.FAILED:
+            import time as _time
+            import uuid as _uuid
+
+            chat_msg = {
+                "id": _uuid.uuid4().hex[:12],
+                "role": "assistant",
+                "content": f"Sorry, I encountered an error: {task.error}",
+                "timestamp": _time.time(),
+                "sender": "Agent42",
+                "task_id": task.id,
+            }
+            await self.ws_manager.broadcast("chat_message", chat_msg)
+            return
+
         # Route results back to originating channel
         if task.origin_channel and task.status in (TaskStatus.REVIEW, TaskStatus.DONE):
             content = f"Task **{task.title}** completed.\n\n"

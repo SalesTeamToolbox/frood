@@ -58,7 +58,7 @@ class Settings:
 
     # Orchestrator
     default_repo_path: str | None = None
-    max_concurrent_agents: int = 3
+    max_concurrent_agents: int = 0  # 0 = auto (dynamic based on CPU/memory)
     tasks_json_path: str = "tasks.json"
 
     # Security (Phase 1)
@@ -238,7 +238,7 @@ class Settings:
             cors_allowed_origins=os.getenv("CORS_ALLOWED_ORIGINS", ""),
             # Orchestrator
             default_repo_path=_resolve_repo_path(os.getenv("DEFAULT_REPO_PATH", "")),
-            max_concurrent_agents=int(os.getenv("MAX_CONCURRENT_AGENTS", "3")),
+            max_concurrent_agents=int(os.getenv("MAX_CONCURRENT_AGENTS", "0")),
             tasks_json_path=os.getenv("TASKS_JSON_PATH", "tasks.json"),
             # Security
             sandbox_enabled=os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes"),

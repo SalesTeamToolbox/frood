@@ -133,6 +133,42 @@ class KeyUpdateRequest(BaseModel):
     keys: dict[str, str]
 
 
+class SettingsUpdateRequest(BaseModel):
+    settings: dict[str, str]
+
+
+# Settings that can be changed from the dashboard (non-secret, non-security).
+# Security-critical settings (sandbox, password, JWT) are deliberately excluded.
+_DASHBOARD_EDITABLE_SETTINGS = {
+    "MAX_CONCURRENT_AGENTS",
+    "MAX_DAILY_API_SPEND_USD",
+    "DEFAULT_REPO_PATH",
+    "TASKS_JSON_PATH",
+    "MCP_SERVERS_JSON",
+    "CRON_JOBS_PATH",
+    "MEMORY_DIR",
+    "SESSIONS_DIR",
+    "OUTPUTS_DIR",
+    "TEMPLATES_DIR",
+    "IMAGES_DIR",
+    "SKILLS_DIRS",
+    "DISCORD_GUILD_IDS",
+    "EMAIL_IMAP_HOST",
+    "EMAIL_IMAP_PORT",
+    "EMAIL_SMTP_HOST",
+    "EMAIL_SMTP_PORT",
+    "LOGIN_RATE_LIMIT",
+    "MAX_WEBSOCKET_CONNECTIONS",
+    "CORS_ALLOWED_ORIGINS",
+    "DASHBOARD_HOST",
+    "DASHBOARD_USERNAME",
+    "CUSTOM_TOOLS_DIR",
+    "MODEL_TRIAL_PERCENTAGE",
+    "MODEL_CATALOG_REFRESH_HOURS",
+    "MODEL_RESEARCH_ENABLED",
+}
+
+
 def _update_env_file(env_path: Path, updates: dict[str, str]) -> None:
     """Update or add key=value pairs in a .env file.
 
@@ -250,9 +286,14 @@ def create_app(
             "uptime_seconds": 0,
             "memory_mb": 0,
             "tools_registered": 0,
-            **{k: v for k, v in cap.items() if k != "configured_max"},
+            **{
+                k: v
+                for k, v in cap.items()
+                if k not in ("configured_max", "auto_mode", "effective_max", "reason")
+            },
             "effective_max_agents": cap["effective_max"],
             "configured_max_agents": cap["configured_max"],
+            "capacity_auto_mode": cap.get("auto_mode", False),
             "capacity_reason": cap["reason"],
         }
 
@@ -757,6 +798,45 @@ def create_app(
         # automatically via os.getenv() in _build_client().
         return {"status": "ok", "updated": updated, "errors": errors}
 
+    # -- Settings (Editable .env) ----------------------------------------------
+
+    @app.get("/api/settings/env")
+    async def get_env_settings(_admin: AuthContext = Depends(require_admin)):
+        """Get current values for dashboard-editable settings."""
+        import os
+
+        result: dict[str, str] = {}
+        for key in _DASHBOARD_EDITABLE_SETTINGS:
+            result[key] = os.getenv(key, "")
+        return result
+
+    @app.put("/api/settings/env")
+    async def update_env_settings(
+        req: SettingsUpdateRequest, _admin: AuthContext = Depends(require_admin)
+    ):
+        """Update .env settings and hot-reload the config."""
+        import os
+
+        env_path = Path(__file__).parent.parent / ".env"
+        errors = []
+        updated = []
+
+        updates = {}
+        for key, value in req.settings.items():
+            if key not in _DASHBOARD_EDITABLE_SETTINGS:
+                errors.append(f"{key} is not editable from the dashboard")
+                continue
+            updates[key] = value.strip()
+            updated.append(key)
+
+        if updates:
+            _update_env_file(env_path, updates)
+            for key, value in updates.items():
+                os.environ[key] = value
+            Settings.reload_from_env()
+
+        return {"status": "ok", "updated": updated, "errors": errors}
+
     # -- Channels (Phase 2) ---------------------------------------------------
 
     @app.get("/api/channels")
@@ -764,6 +844,68 @@ def create_app(
         if channel_manager:
             return channel_manager.list_channels()
         return []
+
+    # -- Chat ------------------------------------------------------------------
+
+    # In-memory chat history (persisted via task comments for agent responses).
+    # Each message: {id, role, content, timestamp}
+    _chat_messages: list[dict] = []
+
+    class ChatSendRequest(BaseModel):
+        message: str
+
+    @app.get("/api/chat/messages")
+    async def get_chat_messages(_user: str = Depends(get_current_user)):
+        """Return the dashboard chat history."""
+        return _chat_messages[-200:]  # Last 200 messages
+
+    @app.post("/api/chat/send")
+    async def send_chat_message(
+        req: ChatSendRequest, auth: AuthContext = Depends(get_auth_context)
+    ):
+        """Send a message in the dashboard chat.
+
+        Creates a task from the user's message so an agent processes it.
+        The agent's result is posted back as an assistant message via the
+        task_update callback.
+        """
+        import time as _time
+        import uuid as _uuid
+
+        text = req.message.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="Message cannot be empty.")
+        if len(text) > 4000:
+            raise HTTPException(status_code=400, detail="Message too long (max 4000 chars).")
+
+        msg_id = _uuid.uuid4().hex[:12]
+        user_msg = {
+            "id": msg_id,
+            "role": "user",
+            "content": text,
+            "timestamp": _time.time(),
+            "sender": auth.user,
+        }
+        _chat_messages.append(user_msg)
+        await ws_manager.broadcast("chat_message", user_msg)
+
+        # Infer task type from message
+        from core.task_queue import infer_task_type
+
+        task_type = infer_task_type(text)
+
+        task = Task(
+            title=text[:120] + ("..." if len(text) > 120 else ""),
+            description=text,
+            task_type=task_type,
+            priority=1,
+            origin_channel="dashboard_chat",
+            origin_channel_id="chat",
+            origin_metadata={"chat_msg_id": msg_id},
+        )
+        await task_queue.add(task)
+
+        return {"status": "ok", "message": user_msg, "task_id": task.id}
 
     # -- WebSocket -------------------------------------------------------------
 

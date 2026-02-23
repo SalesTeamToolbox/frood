@@ -61,9 +61,13 @@ def compute_effective_capacity(configured_max: int) -> dict:
 
     Args:
         configured_max: The operator-configured maximum (from settings).
+            0 means *auto*: the system determines capacity purely from
+            CPU/memory metrics (capped at ``cpu_cores * 2``).
 
     Returns a dict with:
         effective_max: int — actual number of agents allowed right now
+        configured_max: int — the operator limit (0 = auto)
+        auto_mode: bool — True when configured_max is 0
         cpu_load_1m, cpu_load_5m, cpu_load_15m: float — load averages
         cpu_cores: int — number of logical CPU cores
         load_per_core: float — 1-min load / cores
@@ -79,17 +83,22 @@ def compute_effective_capacity(configured_max: int) -> dict:
     cpu_cores = os.cpu_count() or 1
     load_per_core = load_1m / cpu_cores
 
+    # Auto mode: when configured_max is 0, let hardware decide
+    auto_mode = configured_max == 0
+    absolute_max = cpu_cores * 2
+    upper_bound = absolute_max if auto_mode else configured_max
+
     # CPU-based capacity
     if load_per_core >= _LOAD_SCALE_CRITICAL:
         cpu_cap = 1
         cpu_reason = f"CPU critically loaded ({load_per_core:.2f}/core)"
     elif load_per_core >= _LOAD_SCALE_START:
-        # Linear interpolation: configured_max at 0.80 -> 1 at 0.95
+        # Linear interpolation: upper_bound at 0.80 -> 1 at 0.95
         fraction = (load_per_core - _LOAD_SCALE_START) / (_LOAD_SCALE_CRITICAL - _LOAD_SCALE_START)
-        cpu_cap = max(1, int(configured_max - fraction * (configured_max - 1)))
+        cpu_cap = max(1, int(upper_bound - fraction * (upper_bound - 1)))
         cpu_reason = f"CPU load elevated ({load_per_core:.2f}/core), scaling down"
     else:
-        cpu_cap = configured_max
+        cpu_cap = upper_bound
         cpu_reason = ""
 
     # --- Memory ---
@@ -102,26 +111,28 @@ def compute_effective_capacity(configured_max: int) -> dict:
         mem_cap = max(1, int(memory_available_mb / _AGENT_MEMORY_MB))
         mem_reason = (
             f"Memory allows ~{mem_cap} agents ({memory_available_mb:.0f}MB available)"
-            if mem_cap < configured_max
+            if mem_cap < upper_bound
             else ""
         )
     else:
         # Cannot read memory — don't constrain
-        mem_cap = configured_max
+        mem_cap = upper_bound
         mem_reason = ""
 
     # --- Combine ---
-    absolute_max = cpu_cores * 2
-    effective = min(cpu_cap, mem_cap, configured_max, absolute_max)
+    effective = min(cpu_cap, mem_cap, upper_bound, absolute_max)
     effective = max(1, effective)
 
     # Determine the reason string
-    if effective == configured_max and not cpu_reason and not mem_reason:
+    if not cpu_reason and not mem_reason:
         reason = "System load nominal — full capacity available"
     elif cpu_cap <= mem_cap:
         reason = cpu_reason or "CPU is the limiting factor"
     else:
         reason = mem_reason or "Memory is the limiting factor"
+
+    if auto_mode:
+        reason = f"Auto-scaled: {reason.lower()}"
 
     return {
         "effective_max": effective,
@@ -133,5 +144,6 @@ def compute_effective_capacity(configured_max: int) -> dict:
         "memory_total_mb": round(memory_total_mb, 1),
         "memory_available_mb": round(memory_available_mb, 1),
         "configured_max": configured_max,
+        "auto_mode": auto_mode,
         "reason": reason,
     }

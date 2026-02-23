@@ -30,6 +30,14 @@ const state = {
   apiKeys: {},
   keyEdits: {},
   keySaving: false,
+  // Chat
+  chatMessages: [],
+  chatInput: "",
+  chatSending: false,
+  // Editable settings
+  envSettings: {},
+  envEdits: {},
+  envSaving: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -323,6 +331,9 @@ function handleWSMessage(msg) {
     if (state.page === "status") renderStatus();
   } else if (msg.type === "agent_stall") {
     toast(`Agent stalled: ${msg.data.task_id}`, "error");
+  } else if (msg.type === "chat_message") {
+    state.chatMessages.push(msg.data);
+    if (state.page === "chat") renderChat();
   }
 }
 
@@ -414,6 +425,53 @@ async function saveApiKeys() {
   }
   state.keySaving = false;
   renderSettingsPanel();
+}
+
+async function loadEnvSettings() {
+  try {
+    state.envSettings = (await api("/settings/env")) || {};
+  } catch { state.envSettings = {}; }
+}
+
+async function saveEnvSettings() {
+  state.envSaving = true;
+  renderSettingsPanel();
+  try {
+    await api("/settings/env", {
+      method: "PUT",
+      body: JSON.stringify({ settings: state.envEdits }),
+    });
+    state.envEdits = {};
+    await loadEnvSettings();
+    toast("Settings saved. Some changes may require a restart.", "success");
+  } catch (e) {
+    toast("Failed to save: " + e.message, "error");
+  }
+  state.envSaving = false;
+  renderSettingsPanel();
+}
+
+async function loadChatMessages() {
+  try {
+    state.chatMessages = (await api("/chat/messages")) || [];
+  } catch { state.chatMessages = []; }
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById("chat-input");
+  const text = (input?.value || "").trim();
+  if (!text || state.chatSending) return;
+  state.chatSending = true;
+  try {
+    await api("/chat/send", {
+      method: "POST",
+      body: JSON.stringify({ message: text }),
+    });
+    if (input) input.value = "";
+  } catch (e) {
+    toast("Failed to send: " + e.message, "error");
+  }
+  state.chatSending = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -1177,7 +1235,7 @@ function renderStatus() {
     <div class="capacity-banner">
       <div class="capacity-number">${effMax}</div>
       <div class="capacity-detail">
-        <div class="capacity-title">Dynamic Agent Capacity (configured max: ${cfgMax})</div>
+        <div class="capacity-title">Dynamic Agent Capacity ${s.capacity_auto_mode ? "(auto-scaled from hardware)" : `(configured max: ${cfgMax})`}</div>
         <div class="capacity-reason">${esc(s.capacity_reason || "Calculating...")}</div>
       </div>
     </div>
@@ -1247,6 +1305,49 @@ function renderStatus() {
       </div>
     </div>
   `;
+}
+
+function renderChat() {
+  const el = document.getElementById("page-content");
+  if (!el || state.page !== "chat") return;
+
+  const msgs = state.chatMessages.map(m => {
+    const isUser = m.role === "user";
+    const align = isUser ? "flex-end" : "flex-start";
+    const bg = isUser ? "var(--accent-dim)" : "var(--bg-card)";
+    const border = isUser ? "var(--accent)" : "var(--border)";
+    const sender = m.sender || (isUser ? "You" : "Agent42");
+    const time = m.timestamp ? timeSince(m.timestamp) : "";
+    // Simple line-break rendering for agent output
+    const content = esc(m.content).replace(/\n/g, "<br>");
+    return `
+      <div class="chat-msg" style="align-self:${align}">
+        <div class="chat-bubble" style="background:${bg};border:1px solid ${border}">
+          <div class="chat-sender" style="color:${isUser ? "var(--accent)" : "var(--success)"}">${esc(sender)} <span class="chat-time">${time}</span></div>
+          <div class="chat-text">${content}</div>
+          ${m.task_id ? `<div class="chat-task-link"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : ""}
+        </div>
+      </div>`;
+  }).join("");
+
+  el.innerHTML = `
+    <div class="chat-container">
+      <div class="chat-messages" id="chat-messages">
+        ${msgs || '<div class="chat-empty">No messages yet. Send a message to start a conversation with Agent42.</div>'}
+      </div>
+      <div class="chat-input-bar">
+        <input type="text" id="chat-input" placeholder="Ask Agent42 anything..."
+               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage()}"
+               ${state.chatSending ? "disabled" : ""}>
+        <button class="btn btn-primary" onclick="sendChatMessage()" ${state.chatSending ? "disabled" : ""}>
+          ${state.chatSending ? "Sending..." : "Send"}
+        </button>
+      </div>
+    </div>
+  `;
+  // Auto-scroll to bottom
+  const msgContainer = document.getElementById("chat-messages");
+  if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
 }
 
 function renderSettings() {
@@ -1327,6 +1428,7 @@ function renderSettingsPanel() {
       <div class="form-group" style="margin-top:1rem">
         <div class="help">Active channels: ${state.channels.length > 0 ? state.channels.map((c) => `<strong>${esc(c.type || c.name || c)}</strong>`).join(", ") : "<em>None configured</em>"}</div>
       </div>
+      ${_envSaveBtn()}
     `,
     security: () => `
       <h3>Security</h3>
@@ -1350,17 +1452,19 @@ function renderSettingsPanel() {
       <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">CORS &amp; Network</h4>
       ${settingReadonly("CORS_ALLOWED_ORIGINS", "Allowed origins", "Comma-separated. Empty = same-origin only (most secure).")}
       ${settingReadonly("DASHBOARD_HOST", "Dashboard bind address", "Default: 127.0.0.1 (localhost only). Use 0.0.0.0 for remote access behind a reverse proxy.")}
+      ${_envSaveBtn()}
     `,
     orchestrator: () => `
       <h3>Orchestrator</h3>
       <p class="section-desc">Controls how Agent42 processes tasks, including concurrency limits and spending controls.</p>
 
-      ${settingReadonly("MAX_CONCURRENT_AGENTS", "Max concurrent agents", "Default: 3. How many agents can run simultaneously. Higher values use more memory and API calls.")}
+      ${settingReadonly("MAX_CONCURRENT_AGENTS", "Max concurrent agents", "Default: 0 (auto). When 0, capacity is dynamically determined by CPU/memory. Set a positive number to cap the maximum.")}
       ${settingReadonly("MAX_DAILY_API_SPEND_USD", "Daily API spend limit (USD)", "Default: 0 (unlimited). Set a positive value to cap daily spending across all providers.")}
       ${settingReadonly("DEFAULT_REPO_PATH", "Repository path", "The project directory agents work in.")}
       ${settingReadonly("TASKS_JSON_PATH", "Tasks file path", "Default: tasks.json. Persisted task queue file.")}
       ${settingReadonly("MCP_SERVERS_JSON", "MCP servers config", "Path to JSON file defining MCP server connections.")}
       ${settingReadonly("CRON_JOBS_PATH", "Cron jobs file", "Default: cron_jobs.json. Scheduled task definitions.")}
+      ${_envSaveBtn()}
     `,
     storage: () => `
       <h3>Storage &amp; Paths</h3>
@@ -1372,6 +1476,7 @@ function renderSettingsPanel() {
       ${settingReadonly("TEMPLATES_DIR", "Templates directory", "Default: .agent42/templates. Content templates for reuse.")}
       ${settingReadonly("IMAGES_DIR", "Images directory", "Default: .agent42/images. Generated images from image_gen tool.")}
       ${settingReadonly("SKILLS_DIRS", "Extra skill directories", "Comma-separated paths. Skills are auto-discovered from these + builtins.")}
+      ${_envSaveBtn()}
     `,
   };
 
@@ -1432,24 +1537,53 @@ function updateSaveBtn() {
   }
 }
 
-function settingReadonly(envVar, label, help) {
+function _envSaveBtn() {
+  const hasEdits = Object.keys(state.envEdits).some(k => state.envEdits[k] !== (state.envSettings[k] || ""));
+  return `
+    <div class="form-group" style="margin-top:1.5rem">
+      <button class="btn btn-primary" id="save-env-btn" onclick="saveEnvSettings()" ${!hasEdits || state.envSaving ? "disabled" : ""}>
+        ${state.envSaving ? "Saving..." : "Save Settings"}
+      </button>
+      <div class="help" style="margin-top:0.5rem">Changes are written to <code>.env</code> and hot-reloaded. Some settings may require a restart.</div>
+    </div>
+  `;
+}
+
+function settingEditable(envVar, label, help) {
+  const current = state.envSettings[envVar] || "";
+  const edited = state.envEdits[envVar];
+  const displayVal = edited !== undefined ? edited : current;
+  const isChanged = edited !== undefined && edited !== current;
   return `
     <div class="form-group">
       <label>${esc(label)}</label>
-      <input type="text" value="(set via environment)" disabled style="font-family:var(--mono)">
+      <input type="text" value="${esc(displayVal)}" style="font-family:var(--mono);${isChanged ? "border-color:var(--accent)" : ""}"
+             oninput="state.envEdits['${envVar}']=this.value;updateEnvSaveBtn()">
       ${help ? `<div class="help">${help}</div>` : ""}
-      <div class="secret-status not-configured">
-        Environment variable: <code>${esc(envVar)}</code>
+      <div class="secret-status ${current ? "configured" : "not-configured"}">
+        <code>${esc(envVar)}</code>${current ? "" : " (not set)"}
       </div>
     </div>
   `;
+}
+
+function settingReadonly(envVar, label, help) {
+  return settingEditable(envVar, label, help);
+}
+
+function updateEnvSaveBtn() {
+  const btn = document.getElementById("save-env-btn");
+  if (btn) {
+    const hasEdits = Object.keys(state.envEdits).some(k => state.envEdits[k] !== state.envSettings[k]);
+    btn.disabled = !hasEdits || state.envSaving;
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Main render
 // ---------------------------------------------------------------------------
 async function loadAll() {
-  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys()]);
+  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages()]);
   await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadStatus()]);
 }
 
@@ -1493,6 +1627,7 @@ function render() {
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks')">&#128203; Tasks</a>
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status')">&#128200; Status</a>
           <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals')">&#128274; Approvals ${approvalBadge}</a>
+          <a href="#" data-page="chat" class="${state.page === "chat" ? "active" : ""}" onclick="event.preventDefault();navigate('chat')">&#128172; Chat</a>
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools')">&#128295; Tools</a>
           <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills')">&#9889; Skills</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings')">&#9881; Settings</a>
@@ -1505,8 +1640,8 @@ function render() {
       </aside>
       <div class="main">
         <div class="topbar">
-          <h2>${{ tasks: "Mission Control", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail" }[state.page] || "Dashboard"}</h2>
-          <h2>${{ tasks: "Tasks", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ tasks: "Mission Control", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail", chat: "Chat" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ tasks: "Tasks", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? '<button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button><button class="btn btn-outline btn-sm" style="margin-left:0.5rem" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>' : ""}
           </div>
@@ -1521,6 +1656,7 @@ function render() {
     tasks: renderTasks,
     status: renderStatus,
     approvals: renderApprovals,
+    chat: renderChat,
     tools: renderTools,
     skills: renderSkills,
     settings: renderSettings,

@@ -77,6 +77,7 @@ class SystemHealth:
     # Dynamic capacity
     effective_max_agents: int = 0
     configured_max_agents: int = 0
+    capacity_auto_mode: bool = False
     capacity_reason: str = ""
 
     def to_dict(self) -> dict:
@@ -98,6 +99,7 @@ class SystemHealth:
             "memory_available_mb": round(self.memory_available_mb, 1),
             "effective_max_agents": self.effective_max_agents,
             "configured_max_agents": self.configured_max_agents,
+            "capacity_auto_mode": self.capacity_auto_mode,
             "capacity_reason": self.capacity_reason,
         }
 
@@ -186,6 +188,7 @@ class HeartbeatService:
             # Dynamic capacity
             effective_max_agents=cap["effective_max"],
             configured_max_agents=cap["configured_max"],
+            capacity_auto_mode=cap.get("auto_mode", False),
             capacity_reason=cap["reason"],
         )
 
