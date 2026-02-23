@@ -756,9 +756,9 @@ Include *what* and *why*, not just *what*.
 ```bash
 git clone <repo> agent42 && cd agent42
 bash setup.sh                    # Creates .venv, installs deps, creates .env
-nano .env                        # Set OPENROUTER_API_KEY + DASHBOARD_PASSWORD
 source .venv/bin/activate
 python agent42.py                # http://localhost:8000
+# Open http://localhost:8000 → setup wizard handles password + API key
 ```
 
 ### Production (Server)
@@ -767,11 +767,13 @@ python agent42.py                # http://localhost:8000
 scp -r agent42/ user@server:~/agent42
 ssh user@server
 cd ~/agent42
-bash deploy/install-server.sh    # nginx + SSL + systemd + firewall
+bash deploy/install-server.sh    # Prompts for domain, then auto-installs everything
 ```
 
-The install script handles: setup.sh, .env configuration, nginx reverse proxy,
-Let's Encrypt SSL, systemd service, UFW firewall. See `deploy/install-server.sh`.
+The install script prompts for your domain name, then handles: setup.sh, Redis +
+Qdrant as system services, .env auto-configuration, nginx reverse proxy,
+Let's Encrypt SSL, systemd service, UFW firewall. After install, open the browser
+to complete setup via wizard. See `deploy/install-server.sh`.
 
 **Service commands:**
 ```bash
@@ -819,6 +821,8 @@ docker compose down              # Stop
 | 21 | Apps | App entry point missing PORT/HOST env var reading | Always read `os.environ.get("PORT", "8080")` — AppManager sets these |
 | 22 | Apps | New `TaskType` not in `FREE_ROUTING` dict | Add routing entry to `agents/model_router.py` `FREE_ROUTING` for every new TaskType |
 | 23 | Formatting | CI fails with `ruff format --check` after merge | Always run `make format` (or `ruff format .`) before committing — especially after merges that touch multiple files |
+| 24 | Deploy | Hardcoded domain/port in install scripts and nginx config | Use `__DOMAIN__`/`__PORT__` placeholders in `nginx-agent42.conf`; `install-server.sh` prompts for values and sed-replaces |
+| 25 | Deploy | Install scripts leak interactive output when composed | Use `--quiet` flag when calling `setup.sh` from `install-server.sh` to suppress banners and prompts |
 
 ---
 

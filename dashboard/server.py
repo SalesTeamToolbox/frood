@@ -341,20 +341,20 @@ def create_app(
                     "REDIS_URL": "redis://localhost:6379/0",
                 },
             )
-            # Auto-queue a task to install pip packages and guide Docker setup
+            # Auto-queue a task to verify memory backend connectivity
             setup_task = Task(
-                title="Set up enhanced memory (Qdrant + Redis)",
+                title="Verify enhanced memory (Qdrant + Redis)",
                 description=(
                     "The setup wizard selected Qdrant + Redis for enhanced memory.\n\n"
-                    "Please complete the following steps:\n\n"
-                    "1. Install the Python client libraries:\n"
-                    "   pip install qdrant-client 'redis[hiredis]'\n\n"
-                    "2. Start the Docker services (run these in a terminal):\n"
-                    "   docker run -d --name qdrant -p 6333:6333 qdrant/qdrant\n"
-                    "   docker run -d --name redis -p 6379:6379 redis:alpine\n\n"
-                    "3. Verify connectivity — confirm both services are reachable at\n"
-                    "   http://localhost:6333 (Qdrant) and redis://localhost:6379 (Redis).\n\n"
-                    "4. Restart Agent42 to pick up the new .env settings.\n\n"
+                    "If you used the production installer (deploy/install-server.sh),\n"
+                    "Redis and Qdrant are already running as system services.\n\n"
+                    "Verify connectivity:\n"
+                    "  - Qdrant: curl http://localhost:6333/healthz\n"
+                    "  - Redis:  redis-cli ping\n\n"
+                    "If running locally without the installer, start them manually:\n"
+                    "  sudo apt install redis-server\n"
+                    "  # See docs for Qdrant installation\n\n"
+                    "Restart Agent42 to pick up the new .env settings.\n\n"
                     "The .env file has already been configured with:\n"
                     "  QDRANT_URL=http://localhost:6333\n"
                     "  QDRANT_ENABLED=true\n"
