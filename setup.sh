@@ -69,14 +69,37 @@ info "Python dependencies installed"
 
 # ── Optional memory backends ────────────────────────────────────────────
 echo ""
-info "Optional: enhanced memory backends (Qdrant + Redis)"
-echo "  These are NOT required — Agent42 works without them."
-echo "  Install for faster semantic search and session caching:"
+info "Enhanced Memory (optional)"
+echo "  Agent42 works fully without these. Add them for semantic search + session caching."
 echo ""
-echo "    pip install qdrant-client    # Vector DB for semantic search"
-echo "    pip install redis[hiredis]   # Session cache + embedding cache"
+echo "  1) Skip (default — file-based memory)"
+echo "  2) Qdrant Embedded (no Docker needed, stores vectors locally)"
+echo "  3) Qdrant + Redis (Docker required, full power)"
 echo ""
-echo "  See .env.example for QDRANT_* and REDIS_* configuration."
+read -rp "  Choose [1/2/3]: " memory_choice
+memory_choice=${memory_choice:-1}
+
+case "$memory_choice" in
+  2)
+    info "Installing qdrant-client..."
+    pip install --quiet qdrant-client
+    info "Qdrant client installed. Embedded mode will be enabled in .env."
+    _SETUP_MEMORY="qdrant_embedded"
+    ;;
+  3)
+    info "Installing qdrant-client and redis..."
+    pip install --quiet qdrant-client "redis[hiredis]"
+    info "Client libraries installed."
+    warn "You need to start Docker services before running Agent42:"
+    echo "    docker run -d --name qdrant -p 6333:6333 qdrant/qdrant"
+    echo "    docker run -d --name redis -p 6379:6379 redis:alpine"
+    _SETUP_MEMORY="qdrant_redis"
+    ;;
+  *)
+    info "Skipping enhanced memory — you can add it later."
+    _SETUP_MEMORY="skip"
+    ;;
+esac
 echo ""
 
 # ── .env setup ───────────────────────────────────────────────────────────────
@@ -86,6 +109,23 @@ if [ ! -f ".env" ]; then
     warn "EDIT .env BEFORE RUNNING — set your API keys and change the password!"
 else
     info ".env already exists — skipping"
+fi
+
+# Apply memory backend selection to .env
+if [ "$_SETUP_MEMORY" = "qdrant_embedded" ]; then
+    sed -i 's/^#\?\s*QDRANT_ENABLED=.*/QDRANT_ENABLED=true/' .env
+    sed -i 's/^#\?\s*QDRANT_LOCAL_PATH=.*/QDRANT_LOCAL_PATH=.agent42\/qdrant/' .env
+    # Add if not present
+    grep -q "^QDRANT_ENABLED=" .env || echo "QDRANT_ENABLED=true" >> .env
+    info "Qdrant embedded mode enabled in .env"
+elif [ "$_SETUP_MEMORY" = "qdrant_redis" ]; then
+    sed -i 's/^#\?\s*QDRANT_URL=.*/QDRANT_URL=http:\/\/localhost:6333/' .env
+    sed -i 's/^#\?\s*QDRANT_ENABLED=.*/QDRANT_ENABLED=true/' .env
+    sed -i 's/^#\?\s*REDIS_URL=.*/REDIS_URL=redis:\/\/localhost:6379\/0/' .env
+    grep -q "^QDRANT_URL=" .env || echo "QDRANT_URL=http://localhost:6333" >> .env
+    grep -q "^QDRANT_ENABLED=" .env || echo "QDRANT_ENABLED=true" >> .env
+    grep -q "^REDIS_URL=" .env || echo "REDIS_URL=redis://localhost:6379/0" >> .env
+    info "Qdrant + Redis configured in .env"
 fi
 
 # ── React frontend ───────────────────────────────────────────────────────────
@@ -136,17 +176,18 @@ echo "  2. Set DEFAULT_REPO_PATH to your git project"
 echo "  3. Run: source .venv/bin/activate && python agent42.py"
 echo "  4. Open: http://localhost:8000"
 echo ""
-echo "  Optional — enhanced memory (Qdrant + Redis):"
-echo "    pip install qdrant-client redis[hiredis]"
-echo "    docker run -d -p 6333:6333 qdrant/qdrant"
-echo "    docker run -d -p 6379:6379 redis:alpine"
-echo "    # Then set QDRANT_URL and REDIS_URL in .env"
-echo ""
+if [ "$_SETUP_MEMORY" = "qdrant_redis" ]; then
+    warn "Remember to start Docker services before running Agent42:"
+    echo "    docker run -d --name qdrant -p 6333:6333 qdrant/qdrant"
+    echo "    docker run -d --name redis -p 6379:6379 redis:alpine"
+    echo ""
+fi
 echo "  Optional — install as a systemd service:"
 echo "    sudo cp /tmp/agent42.service /etc/systemd/system/"
 echo "    sudo systemctl daemon-reload"
 echo "    sudo systemctl enable agent42"
 echo "    sudo systemctl start agent42"
 echo ""
-warn "Your git repo must have a 'dev' branch before starting!"
+warn "Your git repo needs a 'dev' branch for coding/debugging/refactoring tasks."
 info "  git checkout -b dev  (if you don't have one)"
+info "  Non-code tasks (marketing, content, design, etc.) work without it."
