@@ -28,8 +28,11 @@ Thumbs.db
 
 # Agent42
 tasks.json
+cron_jobs.json
 /tmp/agent42/
 .agent42/
+data/
+apps/
 
 # Linting & formatting
 .ruff_cache/
