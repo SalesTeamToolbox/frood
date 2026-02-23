@@ -58,6 +58,11 @@ if command -v docker &>/dev/null; then
     fi
 fi
 
+HAS_SYSTEM_QDRANT=false
+HAS_SYSTEM_REDIS=false
+[ -f "$AGENT42_DIR/.agent42-installed-qdrant" ] && HAS_SYSTEM_QDRANT=true
+[ -f "$AGENT42_DIR/.agent42-installed-redis" ] && HAS_SYSTEM_REDIS=true
+
 [ -d "$AGENT42_DIR/.venv" ] && HAS_VENV=true
 [ -d "$AGENT42_DIR/.agent42" ] || [ -d "$AGENT42_DIR/data" ] || [ -d "$AGENT42_DIR/apps" ] && HAS_DATA=true
 [ -f "$AGENT42_DIR/.env" ] && HAS_ENV=true
@@ -72,6 +77,8 @@ $HAS_SYSTEMD && echo "  - Systemd service (agent42.service)"
 $HAS_NGINX && echo "  - Nginx reverse proxy configuration"
 $HAS_DOCKER && echo "  - Docker Compose stack (running)"
 $HAS_STANDALONE_CONTAINERS && echo "  - Standalone Docker containers (qdrant, redis)"
+$HAS_SYSTEM_QDRANT && echo "  - Qdrant system service (installed by Agent42)"
+$HAS_SYSTEM_REDIS && echo "  - Redis system service (installed by Agent42)"
 [ -f /tmp/agent42.service ] && echo "  - Systemd service template (/tmp/agent42.service)"
 [ -f "$AGENT42_DIR/agent42.log" ] && echo "  - Log file (agent42.log)"
 echo ""
@@ -117,6 +124,34 @@ if $HAS_STANDALONE_CONTAINERS; then
         docker stop qdrant redis 2>/dev/null || true
         docker rm qdrant redis 2>/dev/null || true
         info "Standalone containers removed"
+    fi
+    echo ""
+fi
+
+# ── Step 2b: Remove system Qdrant if installed by Agent42 ─────────────────
+if $HAS_SYSTEM_QDRANT; then
+    info "Found Qdrant system service installed by Agent42."
+    read -rp "  Stop and remove Qdrant service? [y/N] " rm_qdrant
+    if [ "$rm_qdrant" = "y" ] || [ "$rm_qdrant" = "Y" ]; then
+        sudo systemctl stop qdrant 2>/dev/null || true
+        sudo systemctl disable qdrant 2>/dev/null || true
+        sudo rm -f /etc/systemd/system/qdrant.service
+        sudo rm -f /usr/local/bin/qdrant
+        sudo rm -rf /var/lib/qdrant
+        sudo systemctl daemon-reload
+        info "Qdrant service removed"
+    fi
+    echo ""
+fi
+
+# ── Step 2c: Remove system Redis if installed by Agent42 ──────────────────
+if $HAS_SYSTEM_REDIS; then
+    info "Found Redis installed by Agent42."
+    read -rp "  Stop and remove Redis? [y/N] " rm_redis
+    if [ "$rm_redis" = "y" ] || [ "$rm_redis" = "Y" ]; then
+        sudo systemctl stop redis-server 2>/dev/null || true
+        sudo apt-get remove -y redis-server 2>/dev/null || true
+        info "Redis service removed"
     fi
     echo ""
 fi
@@ -180,6 +215,8 @@ rm -rf "$AGENT42_DIR/data"
 rm -rf "$AGENT42_DIR/apps"
 rm -f "$AGENT42_DIR/.env"
 rm -f "$AGENT42_DIR/agent42.log"
+rm -f "$AGENT42_DIR/.agent42-installed-redis"
+rm -f "$AGENT42_DIR/.agent42-installed-qdrant"
 rm -f /tmp/agent42.service
 info "Agent42 files removed"
 

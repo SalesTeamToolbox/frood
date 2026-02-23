@@ -933,9 +933,13 @@ cd ~/agent42
 bash deploy/install-server.sh
 ```
 
-The install script handles: virtual environment setup, `.env` configuration,
-nginx reverse proxy with rate limiting and security headers, Let's Encrypt
-SSL certificates, systemd service, and UFW firewall rules.
+The install script prompts for your domain name, then automatically handles:
+Python virtual environment, Redis and Qdrant as system services, nginx reverse
+proxy with rate limiting and security headers, Let's Encrypt SSL certificates,
+systemd service, and UFW firewall rules.
+
+After installation, open `https://yourdomain.com` in your browser to complete
+setup through the wizard (password, API key, memory configuration).
 See `deploy/install-server.sh` and `deploy/nginx-agent42.conf`.
 
 ## Uninstallation
@@ -954,7 +958,8 @@ It offers to back up your `.env` file before removing it.
 **What the script handles:**
 
 - Stops running Agent42 processes (systemd service, Docker Compose stack)
-- Removes standalone Qdrant/Redis containers (if present)
+- Removes Qdrant/Redis system services if installed by Agent42
+- Removes standalone Qdrant/Redis Docker containers (if present)
 - Removes the systemd service and reloads the daemon
 - Removes nginx configuration and reloads nginx
 - Optionally removes Let's Encrypt SSL certificates
@@ -976,6 +981,10 @@ It offers to back up your `.env` file before removing it.
 | Systemd service | `/etc/systemd/system/agent42.service` | `install-server.sh` |
 | Nginx config | `/etc/nginx/sites-available/agent42` | `install-server.sh` |
 | SSL certificates | `/etc/letsencrypt/live/yourdomain/` | certbot |
+| Redis service | system package (`redis-server`) | `install-server.sh` |
+| Qdrant service | `/etc/systemd/system/qdrant.service` | `install-server.sh` |
+| Qdrant binary | `/usr/local/bin/qdrant` | `install-server.sh` |
+| Qdrant data | `/var/lib/qdrant/` | `install-server.sh` |
 | Docker volumes | `agent42-data`, `redis-data`, `qdrant-data` | `docker compose` |
 
 If `setup.sh` installed Node.js via nvm and you no longer need it, remove it
