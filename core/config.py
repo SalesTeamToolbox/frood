@@ -196,6 +196,8 @@ class Settings:
     apps_default_runtime: str = "python"
     apps_git_enabled_default: bool = False  # Default git_enabled for new apps
     apps_github_token: str = ""  # GitHub PAT for repo creation and push
+    apps_default_mode: str = "internal"  # Default mode: "internal" or "external"
+    apps_require_auth_default: bool = False  # Default require_auth for new apps
 
     # Security scanning (scheduled)
     security_scan_enabled: bool = True
@@ -361,6 +363,9 @@ class Settings:
             apps_git_enabled_default=os.getenv("APPS_GIT_ENABLED_DEFAULT", "false").lower()
             in ("true", "1", "yes"),
             apps_github_token=os.getenv("APPS_GITHUB_TOKEN", ""),
+            apps_default_mode=os.getenv("APPS_DEFAULT_MODE", "internal"),
+            apps_require_auth_default=os.getenv("APPS_REQUIRE_AUTH_DEFAULT", "false").lower()
+            in ("true", "1", "yes"),
         )
 
     def get_discord_guild_ids(self) -> list[int]:

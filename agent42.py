@@ -212,6 +212,8 @@ class Agent42:
             dashboard_port=dashboard_port,
             git_enabled_default=settings.apps_git_enabled_default,
             github_token=settings.apps_github_token,
+            default_mode=settings.apps_default_mode,
+            require_auth_default=settings.apps_require_auth_default,
         ) if settings.apps_enabled else None
 
         self._register_tools()

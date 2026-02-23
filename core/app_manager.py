@@ -124,6 +124,10 @@ class App:
     git_enabled: bool = False
     github_repo: str = ""  # e.g. "owner/repo-name"
     github_push_on_build: bool = False  # Auto-push on mark_ready
+    # App mode and access control
+    app_mode: str = "internal"  # "internal" (Agent42 system) or "external" (public release)
+    require_auth: bool = False  # Require dashboard login to access /apps/{slug}/
+    visibility: str = "private"  # "private", "unlisted" (anyone with URL), "public"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -149,6 +153,8 @@ class AppManager:
         dashboard_port: int = 8000,
         git_enabled_default: bool = False,
         github_token: str = "",
+        default_mode: str = "internal",
+        require_auth_default: bool = False,
     ):
         self._apps_dir = Path(apps_dir)
         self._apps_dir.mkdir(parents=True, exist_ok=True)
@@ -159,6 +165,8 @@ class AppManager:
         self._dashboard_port = dashboard_port
         self._git_enabled_default = git_enabled_default
         self._github_token = github_token
+        self._default_mode = default_mode
+        self._require_auth_default = require_auth_default
 
         self._apps: dict[str, App] = {}
         self._processes: dict[str, asyncio.subprocess.Process] = {}
@@ -201,11 +209,13 @@ class AppManager:
         tags: list | None = None,
         icon: str = "",
         git_enabled: bool | None = None,
+        app_mode: str = "",
     ) -> App:
         """Create a new app with manifest and directory structure.
 
         Args:
             git_enabled: Enable local git for this app. None = use default from config.
+            app_mode: "internal" or "external". Empty = use default from config.
         """
         slug = _make_slug(name)
 
@@ -218,6 +228,10 @@ class AppManager:
             counter += 1
 
         use_git = git_enabled if git_enabled is not None else self._git_enabled_default
+        mode = app_mode if app_mode in ("internal", "external") else self._default_mode
+
+        # Smart defaults based on mode
+        default_visibility = "unlisted" if mode == "external" else "private"
 
         app = App(
             name=name,
@@ -228,6 +242,9 @@ class AppManager:
             tags=tags or [],
             icon=icon,
             git_enabled=use_git,
+            app_mode=mode,
+            require_auth=self._require_auth_default,
+            visibility=default_visibility,
         )
         app.path = str(self._apps_dir / app.id)
 
@@ -261,6 +278,9 @@ class AppManager:
             "created_at": app.created_at,
             "git_enabled": app.git_enabled,
             "github_repo": app.github_repo,
+            "app_mode": app.app_mode,
+            "require_auth": app.require_auth,
+            "visibility": app.visibility,
         }
         async with aiofiles.open(app_path / "APP.json", "w") as f:
             await f.write(json.dumps(manifest, indent=2))
@@ -293,6 +313,58 @@ class AppManager:
     def all_apps(self) -> list[App]:
         """List all apps including archived."""
         return list(self._apps.values())
+
+    def list_apps_by_mode(self, mode: str) -> list[App]:
+        """List non-archived apps filtered by mode (internal/external)."""
+        return [
+            a for a in self._apps.values()
+            if a.status != AppStatus.ARCHIVED.value and a.app_mode == mode
+        ]
+
+    # -- Mode / visibility / auth setters ------------------------------------
+
+    async def set_app_mode(self, app_id: str, mode: str) -> App:
+        """Change an app's mode (internal/external)."""
+        if mode not in ("internal", "external"):
+            raise ValueError(f"Invalid mode '{mode}'. Must be 'internal' or 'external'.")
+        app = self._apps.get(app_id)
+        if not app:
+            raise ValueError(f"App not found: {app_id}")
+        app.app_mode = mode
+        app.updated_at = time.time()
+        await self._persist()
+        return app
+
+    async def set_app_visibility(self, app_id: str, visibility: str) -> App:
+        """Change an app's visibility (private/unlisted/public)."""
+        if visibility not in ("private", "unlisted", "public"):
+            raise ValueError(
+                f"Invalid visibility '{visibility}'. Must be 'private', 'unlisted', or 'public'."
+            )
+        app = self._apps.get(app_id)
+        if not app:
+            raise ValueError(f"App not found: {app_id}")
+        app.visibility = visibility
+        app.updated_at = time.time()
+        await self._persist()
+        return app
+
+    async def set_app_auth(self, app_id: str, require_auth: bool) -> App:
+        """Enable or disable authentication requirement for an app."""
+        app = self._apps.get(app_id)
+        if not app:
+            raise ValueError(f"App not found: {app_id}")
+        app.require_auth = require_auth
+        app.updated_at = time.time()
+        await self._persist()
+        return app
+
+    async def get_app_url(self, app_id: str) -> str | None:
+        """Get the localhost URL for a running app's API."""
+        app = self._apps.get(app_id)
+        if not app or app.status != AppStatus.RUNNING.value or app.runtime == AppRuntime.STATIC.value:
+            return None
+        return f"http://127.0.0.1:{app.port}"
 
     # -- Port allocation -------------------------------------------------------
 
@@ -871,8 +943,6 @@ class AppManager:
         private: bool, push_on_build: bool,
     ) -> str:
         """Create GitHub repo using the API via token and add as remote."""
-        import os
-
         # Use httpx to create the repo via GitHub API
         try:
             import httpx

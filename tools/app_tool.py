@@ -5,8 +5,12 @@ Provides the agent with the ability to scaffold new apps, manage their
 lifecycle (start/stop/restart), check status, and view logs. Works with
 the AppManager for process supervision and the existing filesystem tools
 for writing app source code.
+
+Supports dual-mode apps (internal/external), per-app auth/visibility,
+and agent-to-app API interaction for autonomous app operation.
 """
 
+import json
 import logging
 
 from core.app_manager import AppManager, AppRuntime
@@ -37,6 +41,10 @@ class AppTool(Tool):
     - git_log: Show commit history
     - github_setup: Create a GitHub repo and link it to the app
     - github_push: Push commits to GitHub
+    - set_mode: Switch app between internal and external mode
+    - set_visibility: Set app visibility (private/unlisted/public)
+    - set_auth: Toggle authentication requirement for app access
+    - app_api: Call a running app's HTTP API endpoints (agent interaction)
     """
 
     def __init__(self, app_manager: AppManager):
@@ -50,11 +58,12 @@ class AppTool(Tool):
     def description(self) -> str:
         return (
             "Create and manage user applications. Build web apps from descriptions, "
-            "then start/stop/manage them. Supports optional git version control and "
-            "GitHub integration per app. Actions: create, scaffold, install_deps, "
+            "then start/stop/manage them. Supports dual-mode (internal/external), "
+            "per-app auth/visibility, git version control, GitHub integration, "
+            "and agent-to-app API interaction. Actions: create, scaffold, install_deps, "
             "start, stop, restart, status, list, logs, mark_ready, update_manifest, "
             "git_enable, git_disable, git_commit, git_status, git_log, "
-            "github_setup, github_push."
+            "github_setup, github_push, set_mode, set_visibility, set_auth, app_api."
         )
 
     @property
@@ -83,6 +92,10 @@ class AppTool(Tool):
                         "git_log",
                         "github_setup",
                         "github_push",
+                        "set_mode",
+                        "set_visibility",
+                        "set_auth",
+                        "app_api",
                     ],
                     "description": "Action to perform",
                 },
@@ -157,6 +170,44 @@ class AppTool(Tool):
                     "description": "Auto-push to GitHub when app is marked ready (for github_setup)",
                     "default": True,
                 },
+                "app_mode": {
+                    "type": "string",
+                    "enum": ["internal", "external"],
+                    "description": "App mode: 'internal' (Agent42 system app) or 'external' (public release). For create/set_mode.",
+                    "default": "",
+                },
+                "visibility": {
+                    "type": "string",
+                    "enum": ["private", "unlisted", "public"],
+                    "description": "App visibility (for set_visibility)",
+                    "default": "",
+                },
+                "require_auth": {
+                    "type": "boolean",
+                    "description": "Require dashboard auth to access app (for set_auth)",
+                    "default": False,
+                },
+                "method": {
+                    "type": "string",
+                    "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+                    "description": "HTTP method (for app_api)",
+                    "default": "GET",
+                },
+                "endpoint": {
+                    "type": "string",
+                    "description": "API endpoint path, e.g. '/api/trades' (for app_api)",
+                    "default": "/",
+                },
+                "body": {
+                    "type": "string",
+                    "description": "Request body as JSON string (for app_api POST/PUT)",
+                    "default": "",
+                },
+                "api_headers": {
+                    "type": "string",
+                    "description": "Comma-separated headers 'Key: Value, Key2: Value2' (for app_api)",
+                    "default": "",
+                },
             },
             "required": ["action"],
         }
@@ -199,6 +250,14 @@ class AppTool(Tool):
                 return await self._github_setup(**kwargs)
             elif action == "github_push":
                 return await self._github_push(**kwargs)
+            elif action == "set_mode":
+                return await self._set_mode(**kwargs)
+            elif action == "set_visibility":
+                return await self._set_visibility(**kwargs)
+            elif action == "set_auth":
+                return await self._set_auth(**kwargs)
+            elif action == "app_api":
+                return await self._app_api(**kwargs)
             else:
                 return ToolResult(error=f"Unknown action: {action}", success=False)
         except Exception as e:
@@ -219,6 +278,10 @@ class AppTool(Tool):
         if isinstance(git_enabled, str):
             git_enabled = git_enabled.lower() in ("true", "1", "yes")
 
+        app_mode = kwargs.get("app_mode", "")
+        if isinstance(app_mode, str):
+            app_mode = app_mode.strip()
+
         app = await self._manager.create(
             name=name,
             description=desc,
@@ -226,9 +289,9 @@ class AppTool(Tool):
             tags=tags,
             icon=icon,
             git_enabled=git_enabled,
+            app_mode=app_mode,
         )
 
-        git_line = f"  Git: {'enabled' if app.git_enabled else 'disabled'}\n"
         return ToolResult(
             output=(
                 f"App created successfully!\n"
@@ -236,9 +299,12 @@ class AppTool(Tool):
                 f"  Name: {app.name}\n"
                 f"  Slug: {app.slug}\n"
                 f"  Runtime: {app.runtime}\n"
+                f"  Mode: {app.app_mode}\n"
+                f"  Visibility: {app.visibility}\n"
+                f"  Auth required: {app.require_auth}\n"
+                f"  Git: {'enabled' if app.git_enabled else 'disabled'}\n"
                 f"  Path: {app.path}\n"
-                f"  Entry point: {app.entry_point}\n"
-                f"{git_line}\n"
+                f"  Entry point: {app.entry_point}\n\n"
                 f"Next steps:\n"
                 f"1. Write your app code to {app.path}/\n"
                 f"2. Use 'app mark_ready' when done\n"
@@ -429,8 +495,11 @@ class AppTool(Tool):
         lines = [
             f"App: {app.name} ({app.id})",
             f"  Status: {app.status}",
+            f"  Mode: {app.app_mode}",
             f"  Runtime: {app.runtime}",
             f"  Version: {app.version}",
+            f"  Visibility: {app.visibility}",
+            f"  Auth required: {app.require_auth}",
             f"  Path: {app.path}",
         ]
         if app.url:
@@ -467,7 +536,8 @@ class AppTool(Tool):
                 "draft": "[DRAFT]",
             }.get(app.status, f"[{app.status.upper()}]")
 
-            line = f"  {status_icon} {app.name} ({app.id}) — {app.runtime}"
+            mode_tag = f"[{app.app_mode}]" if app.app_mode else ""
+            line = f"  {status_icon} {mode_tag} {app.name} ({app.id}) — {app.runtime}"
             if app.git_enabled:
                 line += " [git"
                 if app.github_repo:
@@ -590,3 +660,103 @@ class AppTool(Tool):
             return ToolResult(error="app_id is required", success=False)
         result = await self._manager.github_push(app_id)
         return ToolResult(output=result)
+
+    # -- Mode / visibility / auth actions --------------------------------------
+
+    async def _set_mode(self, **kwargs) -> ToolResult:
+        app_id = kwargs.get("app_id", "")
+        if not app_id:
+            return ToolResult(error="app_id is required", success=False)
+        mode = kwargs.get("app_mode", "")
+        if not mode:
+            return ToolResult(error="app_mode is required (internal or external)", success=False)
+        app = await self._manager.set_app_mode(app_id, mode)
+        return ToolResult(output=f"App '{app.name}' mode set to: {app.app_mode}")
+
+    async def _set_visibility(self, **kwargs) -> ToolResult:
+        app_id = kwargs.get("app_id", "")
+        if not app_id:
+            return ToolResult(error="app_id is required", success=False)
+        visibility = kwargs.get("visibility", "")
+        if not visibility:
+            return ToolResult(
+                error="visibility is required (private, unlisted, or public)", success=False
+            )
+        app = await self._manager.set_app_visibility(app_id, visibility)
+        return ToolResult(output=f"App '{app.name}' visibility set to: {app.visibility}")
+
+    async def _set_auth(self, **kwargs) -> ToolResult:
+        app_id = kwargs.get("app_id", "")
+        if not app_id:
+            return ToolResult(error="app_id is required", success=False)
+        require_auth = kwargs.get("require_auth", False)
+        if isinstance(require_auth, str):
+            require_auth = require_auth.lower() in ("true", "1", "yes")
+        app = await self._manager.set_app_auth(app_id, require_auth)
+        status = "enabled" if app.require_auth else "disabled"
+        return ToolResult(output=f"Authentication {status} for app '{app.name}'")
+
+    # -- Agent-to-app API interaction ------------------------------------------
+
+    async def _app_api(self, **kwargs) -> ToolResult:
+        """Call a running app's HTTP API endpoint directly."""
+        app_id = kwargs.get("app_id", "")
+        if not app_id:
+            return ToolResult(error="app_id is required", success=False)
+
+        app = await self._manager.get(app_id)
+        if not app:
+            return ToolResult(error=f"App not found: {app_id}", success=False)
+        if app.status != "running":
+            return ToolResult(
+                error=f"App is not running (status: {app.status}). Start it first.",
+                success=False,
+            )
+        if app.runtime == "static":
+            return ToolResult(
+                error="Static apps do not have API endpoints. Use a Python or Node runtime.",
+                success=False,
+            )
+
+        method = kwargs.get("method", "GET").upper()
+        endpoint = kwargs.get("endpoint", "/").lstrip("/")
+        body = kwargs.get("body", "")
+        headers = {}
+        headers_str = kwargs.get("api_headers", "")
+        if headers_str:
+            for pair in headers_str.split(","):
+                if ":" in pair:
+                    k, v = pair.split(":", 1)
+                    headers[k.strip()] = v.strip()
+
+        import httpx
+
+        url = f"http://127.0.0.1:{app.port}/{endpoint}"
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    content=body.encode() if body else None,
+                )
+            # Format response
+            try:
+                resp_body = resp.json()
+                resp_body_str = json.dumps(resp_body, indent=2)
+            except Exception:
+                resp_body_str = resp.text[:5000]
+
+            return ToolResult(
+                output=(
+                    f"HTTP {resp.status_code} {method} /{endpoint}\n"
+                    f"Response:\n{resp_body_str}"
+                )
+            )
+        except httpx.ConnectError:
+            return ToolResult(
+                error=f"App '{app.name}' not responding on port {app.port}",
+                success=False,
+            )
+        except httpx.TimeoutException:
+            return ToolResult(error="Request timed out (30s)", success=False)
