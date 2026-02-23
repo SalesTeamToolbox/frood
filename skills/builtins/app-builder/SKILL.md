@@ -14,19 +14,23 @@ You are building a complete, working web application that the user can access im
 ### Phase 1: Plan
 
 1. **Understand the request.** What does the user want? What are the core features?
-2. **Choose the runtime.** Pick the simplest runtime that meets the requirements:
+2. **Determine the app mode:**
+   - `internal` — A system tool that extends Agent42 (monitoring dashboard, trading bot, analytics panel). Lives inside Agent42, no separate auth needed. Agent42 can operate it via `app_api`.
+   - `external` — An app being developed for public release. Will eventually be deployed independently. May need its own auth, designed for end users.
+3. **Choose the runtime.** Pick the simplest runtime that meets the requirements:
    - `static` — Pure HTML/CSS/JS. Best for: calculators, timers, dashboards, trackers, games, forms, single-page tools. No backend needed.
    - `python` — Flask or FastAPI + SQLite. Best for: CRUD apps, apps with user accounts, apps needing a database, multi-page apps with server logic.
    - `node` — Express + SQLite. Best for: REST APIs, real-time apps (WebSocket), apps where the user specifically wants Node.
    - `docker` — Only for multi-service apps (e.g., app + database + cache). Rarely needed.
-3. **Plan the structure.** Decide on pages, data model, and features. Keep it focused — build the core well rather than spreading thin.
+4. **Plan the structure.** Decide on pages, data model, and features. Keep it focused — build the core well rather than spreading thin.
 
 ### Phase 2: Create
 
 1. **Create the app** using the `app` tool:
    ```
-   app create --name "App Name" --runtime python --app_description "What it does" --tags "tag1,tag2"
+   app create --name "App Name" --runtime python --app_description "What it does" --tags "tag1,tag2" --git_enabled true --app_mode internal
    ```
+   Set `--app_mode internal` for Agent42 system apps, or `--app_mode external` for apps being developed for public release.
 2. Note the **app ID** and **path** from the response. All files go into that path.
 
 ### Phase 3: Build
@@ -51,7 +55,7 @@ Write the complete application code using filesystem tools (`write_file`, `edit_
 
 ### Phase 5: Launch
 
-1. Mark the app as ready:
+1. Mark the app as ready (auto-commits if git is enabled):
    ```
    app mark_ready --app_id <id> --version "1.0.0"
    ```
@@ -60,6 +64,28 @@ Write the complete application code using filesystem tools (`write_file`, `edit_
    app start --app_id <id>
    ```
 3. Report the URL to the user.
+
+### Phase 6 (Optional): GitHub Integration
+
+If the user wants the app on GitHub, or if sharing/collaboration is needed:
+
+1. **Set up the GitHub repo:**
+   ```
+   app github_setup --app_id <id> --repo_name "my-app" --private true --push_on_build true
+   ```
+   This creates the repo, pushes initial code, and optionally auto-pushes on future builds.
+
+2. **Manual push at any time:**
+   ```
+   app github_push --app_id <id>
+   ```
+
+3. **Other git operations:**
+   ```
+   app git_commit --app_id <id> --message "Add new feature"
+   app git_status --app_id <id>
+   app git_log --app_id <id>
+   ```
 
 ---
 
@@ -199,4 +225,87 @@ When updating an existing app:
 2. Make targeted changes — do not rewrite the entire app.
 3. Preserve existing data structures and functionality.
 4. Bump the version number.
-5. Restart the app after changes.
+5. If git is enabled, commit the changes:
+   ```
+   app git_commit --app_id <id> --message "Description of changes"
+   ```
+6. Mark ready (triggers auto-push if GitHub is configured):
+   ```
+   app mark_ready --app_id <id> --version "1.1.0"
+   ```
+7. Restart the app after changes.
+
+---
+
+## Designing Internal Apps for Agent Interaction
+
+Internal apps are not just dashboards for humans — they can be **operated by Agent42 autonomously**. When building an internal app that Agent42 will interact with, design it as an API-first application.
+
+### API Design Pattern
+
+Every internal app that Agent42 will operate should expose a JSON API alongside its UI:
+
+```python
+# Example: Crypto trading app with agent-operable API
+
+@app.route("/api/portfolio")
+def get_portfolio():
+    """Agent42 calls this to check current holdings."""
+    holdings = get_all_holdings()
+    return jsonify({"holdings": holdings, "total_value_usd": sum(h["value"] for h in holdings)})
+
+@app.route("/api/trade", methods=["POST"])
+def execute_trade():
+    """Agent42 calls this to execute a trade."""
+    data = request.get_json()
+    result = process_trade(data["action"], data["symbol"], data["amount"])
+    return jsonify(result)
+
+@app.route("/api/signals")
+def get_signals():
+    """Agent42 calls this to read current trading signals."""
+    return jsonify({"signals": compute_signals()})
+```
+
+### How Agent42 Interacts with Apps
+
+Agent42 uses the `app_api` action to call a running app's HTTP endpoints directly:
+
+```
+app app_api --app_id <id> --method GET --endpoint "/api/portfolio"
+app app_api --app_id <id> --method POST --endpoint "/api/trade" --body '{"action": "buy", "symbol": "BTC", "amount": 0.1}'
+```
+
+This bypasses the dashboard proxy — it calls the app on localhost directly, so no authentication is needed for internal apps.
+
+### Best Practices for Agent-Operable Apps
+
+1. **Return JSON from all API endpoints.** Agent42 parses JSON responses to understand results.
+2. **Use clear, descriptive endpoint names.** `/api/portfolio`, `/api/trade`, `/api/signals` — not `/api/do`.
+3. **Include status and error messages in responses.** Return `{"success": true, "message": "..."}` or `{"error": "..."}`.
+4. **Keep endpoints idempotent where possible.** GET requests should never change state.
+5. **Validate inputs server-side.** Even though Agent42 is the caller, protect against malformed requests.
+6. **Return pagination for large datasets.** Use `?page=1&per_page=50` to avoid oversized responses.
+7. **Include a health/status endpoint.** `GET /api/status` lets Agent42 check if the app is responsive.
+
+### Access Control Settings
+
+Use these commands to manage app access:
+
+```
+app set_mode --app_id <id> --app_mode internal      # System tool (Agent42 operated)
+app set_mode --app_id <id> --app_mode external       # For public release
+app set_visibility --app_id <id> --visibility private  # Dashboard-only access
+app set_visibility --app_id <id> --visibility unlisted # Anyone with URL can access
+app set_visibility --app_id <id> --visibility public   # Listed publicly
+app set_auth --app_id <id> --require_auth true        # Require dashboard login
+app set_auth --app_id <id> --require_auth false       # Open access (default for internal)
+```
+
+### Multi-Agent App Operation
+
+Multiple agents can interact with the same running app concurrently. When building apps that multiple agents may access:
+
+- Use database transactions or locks for write operations
+- Return timestamps in responses so agents can track data freshness
+- Design for concurrent access — avoid in-memory-only state for important data

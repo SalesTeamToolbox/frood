@@ -839,14 +839,22 @@ def create_app(
             description: str = ""
             runtime: str = "python"
             tags: list[str] = []
+            app_mode: str = ""
+            git_enabled: bool | None = None
 
         class AppUpdateRequest(BaseModel):
             description: str = ""
 
         @app.get("/api/apps")
-        async def list_apps(_user: str = Depends(get_current_user)):
-            """List all apps with their status."""
-            return [a.to_dict() for a in app_manager.list_apps()]
+        async def list_apps(
+            mode: str = "", _user: str = Depends(get_current_user)
+        ):
+            """List all apps, optionally filtered by mode (internal/external)."""
+            if mode and mode in ("internal", "external"):
+                apps = app_manager.list_apps_by_mode(mode)
+            else:
+                apps = app_manager.list_apps()
+            return [a.to_dict() for a in apps]
 
         @app.post("/api/apps")
         async def create_user_app(req: AppCreateRequest, _user: str = Depends(get_current_user)):
@@ -856,6 +864,8 @@ def create_app(
                 description=req.description,
                 runtime=req.runtime,
                 tags=req.tags,
+                app_mode=req.app_mode,
+                git_enabled=req.git_enabled,
             )
             # Create a build task for the app
             task = Task(
@@ -964,6 +974,35 @@ def create_app(
             await task_queue.add(task)
             return {"task_id": task.id, "app_id": app_id}
 
+        class AppSettingsRequest(BaseModel):
+            app_mode: str | None = None
+            require_auth: bool | None = None
+            visibility: str | None = None
+
+        @app.patch("/api/apps/{app_id}/settings")
+        async def update_app_settings(
+            app_id: str, req: AppSettingsRequest,
+            _user: str = Depends(get_current_user),
+        ):
+            """Update app mode, auth, or visibility settings."""
+            found = await app_manager.get(app_id)
+            if not found:
+                raise HTTPException(status_code=404, detail="App not found")
+            if req.app_mode is not None:
+                if req.app_mode not in ("internal", "external"):
+                    raise HTTPException(status_code=400, detail="Invalid mode")
+                found.app_mode = req.app_mode
+            if req.require_auth is not None:
+                found.require_auth = req.require_auth
+            if req.visibility is not None:
+                if req.visibility not in ("private", "unlisted", "public"):
+                    raise HTTPException(status_code=400, detail="Invalid visibility")
+                found.visibility = req.visibility
+            import time as _time
+            found.updated_at = _time.time()
+            await app_manager._persist()
+            return found.to_dict()
+
         # -- App reverse proxy (for running dynamic apps) ----------------------
 
         from starlette.responses import Response
@@ -998,6 +1037,17 @@ def create_app(
                 raise HTTPException(
                     status_code=503, detail=f"App '{slug}' is not running (status: {found.status})"
                 )
+
+            # Auth gate: if app requires auth, check for dashboard login
+            if found.require_auth:
+                from dashboard.auth import get_current_user_optional
+
+                user = get_current_user_optional(request)
+                if not user:
+                    raise HTTPException(
+                        status_code=401,
+                        detail=f"App '{slug}' requires authentication. Log in to the dashboard first.",
+                    )
 
             # Static apps: serve files directly
             if found.runtime == "static":

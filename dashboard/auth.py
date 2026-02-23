@@ -159,6 +159,23 @@ def get_current_user(
     return ctx.user
 
 
+def get_current_user_optional(request) -> str | None:
+    """Try to extract authenticated user from request. Returns None if not authenticated.
+
+    Unlike get_current_user(), this does NOT raise HTTP 401 — it returns None
+    for unauthenticated requests. Used by the app proxy to conditionally gate access.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header[7:]
+    try:
+        ctx = _validate_api_key(token) if token.startswith(API_KEY_PREFIX) else _validate_jwt(token)
+        return ctx.user
+    except HTTPException:
+        return None
+
+
 def require_admin(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> AuthContext:
