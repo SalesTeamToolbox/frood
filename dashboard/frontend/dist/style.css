@@ -594,6 +594,53 @@ td.task-title:hover { color: var(--accent); }
   background: var(--accent-dim); color: var(--accent);
 }
 
+/* ---------- Chat ---------- */
+
+.chat-container {
+  display: flex; flex-direction: column;
+  height: calc(100vh - 120px);
+}
+.chat-messages {
+  flex: 1; overflow-y: auto;
+  display: flex; flex-direction: column;
+  gap: 0.75rem; padding: 1rem 0;
+}
+.chat-empty {
+  text-align: center; color: var(--text-muted);
+  padding: 3rem 1rem; font-size: 0.95rem;
+}
+.chat-msg { display: flex; max-width: 80%; }
+.chat-bubble {
+  padding: 0.75rem 1rem; border-radius: var(--radius);
+  word-break: break-word; min-width: 120px;
+}
+.chat-sender {
+  font-size: 0.75rem; font-weight: 600; margin-bottom: 0.25rem;
+}
+.chat-time {
+  font-weight: 400; color: var(--text-muted); margin-left: 0.5rem;
+}
+.chat-text {
+  font-size: 0.9rem; line-height: 1.55;
+  white-space: pre-wrap;
+}
+.chat-task-link {
+  font-size: 0.75rem; margin-top: 0.5rem;
+}
+.chat-input-bar {
+  display: flex; gap: 0.5rem;
+  padding: 0.75rem 0; border-top: 1px solid var(--border);
+}
+.chat-input-bar input {
+  flex: 1; padding: 0.65rem 0.75rem;
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text-primary);
+  font-size: 0.9rem;
+}
+.chat-input-bar input:focus {
+  outline: none; border-color: var(--accent);
+}
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 768px) {
@@ -606,4 +653,5 @@ td.task-title:hover { color: var(--accent); }
   .settings-nav a { white-space: nowrap; }
   .setting-row { grid-template-columns: 1fr; }
   .status-grid { grid-template-columns: 1fr; }
+  .chat-msg { max-width: 95%; }
 }
