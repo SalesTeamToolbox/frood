@@ -62,7 +62,7 @@ def compute_effective_capacity(configured_max: int) -> dict:
     Args:
         configured_max: The operator-configured maximum (from settings).
             0 means *auto*: the system determines capacity purely from
-            CPU/memory metrics (capped at ``cpu_cores * 2``).
+            CPU/memory metrics with no artificial ceiling.
 
     Returns a dict with:
         effective_max: int — actual number of agents allowed right now
@@ -85,10 +85,26 @@ def compute_effective_capacity(configured_max: int) -> dict:
 
     # Auto mode: when configured_max is 0, let hardware decide
     auto_mode = configured_max == 0
-    absolute_max = cpu_cores * 2
-    upper_bound = absolute_max if auto_mode else configured_max
 
-    # CPU-based capacity
+    # --- Memory (compute first — sets the natural upper bound in auto mode) ---
+    memory_total_mb, memory_available_mb = _read_meminfo()
+
+    if memory_available_mb > 0 and memory_available_mb < _MIN_MEMORY_MB:
+        mem_cap = 1
+        mem_reason = f"Low memory ({memory_available_mb:.0f}MB available)"
+    elif memory_available_mb > 0:
+        mem_cap = max(1, int(memory_available_mb / _AGENT_MEMORY_MB))
+        mem_reason = ""
+    else:
+        # Cannot read memory — assume generous default
+        mem_cap = cpu_cores * 4
+        mem_reason = ""
+
+    # In auto mode, memory is the natural ceiling (no artificial cap).
+    # In manual mode, the operator's configured_max is the ceiling.
+    upper_bound = mem_cap if auto_mode else configured_max
+
+    # CPU-based capacity — scales down from upper_bound as load increases
     if load_per_core >= _LOAD_SCALE_CRITICAL:
         cpu_cap = 1
         cpu_reason = f"CPU critically loaded ({load_per_core:.2f}/core)"
@@ -101,26 +117,12 @@ def compute_effective_capacity(configured_max: int) -> dict:
         cpu_cap = upper_bound
         cpu_reason = ""
 
-    # --- Memory ---
-    memory_total_mb, memory_available_mb = _read_meminfo()
-
-    if memory_available_mb > 0 and memory_available_mb < _MIN_MEMORY_MB:
-        mem_cap = 1
-        mem_reason = f"Low memory ({memory_available_mb:.0f}MB available)"
-    elif memory_available_mb > 0:
-        mem_cap = max(1, int(memory_available_mb / _AGENT_MEMORY_MB))
-        mem_reason = (
-            f"Memory allows ~{mem_cap} agents ({memory_available_mb:.0f}MB available)"
-            if mem_cap < upper_bound
-            else ""
-        )
-    else:
-        # Cannot read memory — don't constrain
-        mem_cap = upper_bound
-        mem_reason = ""
+    # Update mem_reason now that we know upper_bound
+    if mem_cap < cpu_cap and mem_reason == "" and memory_available_mb > 0:
+        mem_reason = f"Memory allows ~{mem_cap} agents ({memory_available_mb:.0f}MB available)"
 
     # --- Combine ---
-    effective = min(cpu_cap, mem_cap, upper_bound, absolute_max)
+    effective = min(cpu_cap, mem_cap, upper_bound)
     effective = max(1, effective)
 
     # Determine the reason string
