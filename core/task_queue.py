@@ -229,6 +229,9 @@ class Task:
     # Project interview fields
     project_id: str = ""  # Links task to a project interview session
     project_spec_path: str = ""  # Path to PROJECT_SPEC.md for subtask context
+    # Multi-repository support — which repo and branch the agent should work on
+    repo_id: str = ""  # Repository ID from RepoManager (empty = default/legacy)
+    branch: str = ""  # Target branch (empty = repo's default_branch)
 
     def add_comment(self, author: str, text: str):
         self.comments.append(

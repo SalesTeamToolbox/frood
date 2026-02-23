@@ -205,6 +205,10 @@ class Settings:
     project_interview_mode: str = "auto"  # auto=complexity-based, always, never
     project_interview_max_rounds: int = 4
     project_interview_min_complexity: str = "moderate"  # moderate or complex
+    # Multi-repository management
+    github_token: str = ""  # GitHub PAT for repo operations (fallback: APPS_GITHUB_TOKEN)
+    repos_json_path: str = ".agent42/repos.json"
+    repos_clone_dir: str = ".agent42/repos"  # Base directory for cloned repos
 
     # Security scanning (scheduled)
     security_scan_enabled: bool = True
@@ -340,6 +344,10 @@ class Settings:
             project_interview_min_complexity=os.getenv(
                 "PROJECT_INTERVIEW_MIN_COMPLEXITY", "moderate"
             ),
+            # Multi-repository management
+            github_token=os.getenv("GITHUB_TOKEN", os.getenv("APPS_GITHUB_TOKEN", "")),
+            repos_json_path=os.getenv("REPOS_JSON_PATH", ".agent42/repos.json"),
+            repos_clone_dir=os.getenv("REPOS_CLONE_DIR", ".agent42/repos"),
             # Security scanning
             security_scan_enabled=os.getenv("SECURITY_SCAN_ENABLED", "true").lower()
             in ("true", "1", "yes"),

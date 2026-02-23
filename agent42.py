@@ -49,6 +49,7 @@ from core.heartbeat import HeartbeatService
 from core.intent_classifier import IntentClassifier, PendingClarification
 from core.key_store import KeyStore
 from core.rate_limiter import ToolLimit, ToolRateLimiter
+from core.repo_manager import RepositoryManager
 from core.sandbox import WorkspaceSandbox
 from core.security_scanner import ScheduledSecurityScanner
 from core.task_queue import Task, TaskQueue, TaskStatus, TaskType, infer_task_type
@@ -154,6 +155,14 @@ class Agent42:
         )
         self.ws_manager = WebSocketManager()
         self.worktree_manager = WorktreeManager(str(self.repo_path)) if self.has_repo else None
+
+        # Multi-repository manager
+        self.repo_manager = RepositoryManager(
+            repos_json_path=settings.repos_json_path,
+            clone_dir=settings.repos_clone_dir,
+            github_token=settings.github_token,
+        )
+
         self._active_count = 0
         self._active_lock = asyncio.Lock()
         self.approval_gate = ApprovalGate(
@@ -775,10 +784,23 @@ class Agent42:
                 await asyncio.sleep(10)
 
             try:
+                # Select worktree manager: task-specific repo or default
+                wt_manager = self.worktree_manager
+                if task.repo_id and self.repo_manager:
+                    try:
+                        wt_manager = self.repo_manager.get_worktree_manager(task.repo_id)
+                    except ValueError as e:
+                        logger.warning(
+                            "Task %s repo_id %s not found, using default: %s",
+                            task.id,
+                            task.repo_id,
+                            e,
+                        )
+
                 agent = Agent(
                     task=task,
                     task_queue=self.task_queue,
-                    worktree_manager=self.worktree_manager,
+                    worktree_manager=wt_manager,
                     approval_gate=self.approval_gate,
                     emit=self.emit,
                     skill_loader=self.skill_loader,
@@ -837,6 +859,9 @@ class Agent42:
 
         # Load tasks and initialize subsystems
         await self.task_queue.load_from_file()
+        await self.repo_manager.load()
+        if self.repo_manager.list_repos():
+            logger.info(f"  Repos loaded: {len(self.repo_manager.list_repos())}")
         if self.app_manager:
             await self.app_manager.load()
             logger.info(f"  Apps loaded: {len(self.app_manager.list_apps())}")
@@ -885,6 +910,7 @@ class Agent42:
                 heartbeat=self.heartbeat,
                 key_store=self.key_store,
                 app_manager=self.app_manager,
+                repo_manager=self.repo_manager,
             )
             config = uvicorn.Config(
                 app,
