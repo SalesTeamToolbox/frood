@@ -74,6 +74,7 @@ class LoginRequest(BaseModel):
 class SetupRequest(BaseModel):
     password: str
     openrouter_api_key: str = ""
+    memory_backend: str = ""  # "", "skip", "qdrant_embedded", "qdrant_redis"
 
 
 class TaskCreateRequest(BaseModel):
@@ -266,11 +267,12 @@ def create_app(
 
     @app.post("/api/setup/complete")
     async def setup_complete(req: SetupRequest, request: Request):
-        """Complete first-run setup: set password, optional API key.
+        """Complete first-run setup: set password, optional API key, memory backend.
 
         Only available when no real password is configured (first run or
         insecure default).  Writes to .env, reloads settings, and returns
-        a JWT for immediate login.
+        a JWT for immediate login.  Optionally queues a Docker setup task
+        when the user selects a memory backend that needs Docker services.
         """
         # Security gate: reject if a real password is already configured
         if settings.dashboard_password_hash or (
@@ -317,14 +319,66 @@ def create_app(
             _update_env_file(env_path, {"OPENROUTER_API_KEY": api_key})
             os.environ["OPENROUTER_API_KEY"] = api_key
 
+        # Handle memory backend selection
+        memory_backend = (req.memory_backend or "").strip().lower()
+        setup_task_id = ""
+
+        if memory_backend == "qdrant_embedded":
+            _update_env_file(
+                env_path,
+                {
+                    "QDRANT_ENABLED": "true",
+                    "QDRANT_LOCAL_PATH": ".agent42/qdrant",
+                },
+            )
+        elif memory_backend == "qdrant_redis":
+            _update_env_file(
+                env_path,
+                {
+                    "QDRANT_URL": "http://localhost:6333",
+                    "QDRANT_ENABLED": "true",
+                    "REDIS_URL": "redis://localhost:6379/0",
+                },
+            )
+            # Auto-queue a task to install pip packages and guide Docker setup
+            setup_task = Task(
+                title="Set up enhanced memory (Qdrant + Redis)",
+                description=(
+                    "The setup wizard selected Qdrant + Redis for enhanced memory.\n\n"
+                    "Please complete the following steps:\n\n"
+                    "1. Install the Python client libraries:\n"
+                    "   pip install qdrant-client 'redis[hiredis]'\n\n"
+                    "2. Start the Docker services (run these in a terminal):\n"
+                    "   docker run -d --name qdrant -p 6333:6333 qdrant/qdrant\n"
+                    "   docker run -d --name redis -p 6379:6379 redis:alpine\n\n"
+                    "3. Verify connectivity — confirm both services are reachable at\n"
+                    "   http://localhost:6333 (Qdrant) and redis://localhost:6379 (Redis).\n\n"
+                    "4. Restart Agent42 to pick up the new .env settings.\n\n"
+                    "The .env file has already been configured with:\n"
+                    "  QDRANT_URL=http://localhost:6333\n"
+                    "  QDRANT_ENABLED=true\n"
+                    "  REDIS_URL=redis://localhost:6379/0"
+                ),
+                task_type=TaskType.CODING,
+                priority=10,
+            )
+            await task_queue.add(setup_task)
+            setup_task_id = setup_task.id
+
         Settings.reload_from_env()
 
-        logger.info("First-run setup completed from %s", client_ip)
+        logger.info(
+            "First-run setup completed from %s (memory_backend=%s)",
+            client_ip,
+            memory_backend or "skip",
+        )
         token = create_token(settings.dashboard_username)
         return {
             "status": "ok",
             "token": token,
             "message": "Setup complete. You are now logged in.",
+            "memory_backend": memory_backend or "skip",
+            "setup_task_id": setup_task_id,
         }
 
     # -- Auth ------------------------------------------------------------------
