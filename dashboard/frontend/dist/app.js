@@ -34,6 +34,10 @@ const state = {
   chatMessages: [],
   chatInput: "",
   chatSending: false,
+  canvasOpen: false,
+  canvasContent: "",
+  canvasTitle: "",
+  canvasLang: "",
   // Editable settings
   envSettings: {},
   envEdits: {},
@@ -332,7 +336,16 @@ function handleWSMessage(msg) {
   } else if (msg.type === "agent_stall") {
     toast(`Agent stalled: ${msg.data.task_id}`, "error");
   } else if (msg.type === "chat_message") {
-    state.chatMessages.push(msg.data);
+    // Deduplicate: if we optimistically added this user message, replace with server version
+    if (msg.data.role === "user") {
+      const idx = state.chatMessages.findIndex(m => m.id?.startsWith("local-") && m.content === msg.data.content);
+      if (idx >= 0) { state.chatMessages[idx] = msg.data; }
+      else { state.chatMessages.push(msg.data); }
+    } else {
+      state.chatMessages.push(msg.data);
+      // Agent responded — clear typing indicator
+      state.chatSending = false;
+    }
     if (state.page === "chat") renderChat();
   }
 }
@@ -462,16 +475,26 @@ async function sendChatMessage() {
   const text = (input?.value || "").trim();
   if (!text || state.chatSending) return;
   state.chatSending = true;
+  // Optimistic: add user message immediately
+  state.chatMessages.push({
+    id: "local-" + Date.now(),
+    role: "user",
+    content: text,
+    timestamp: Date.now() / 1000,
+    sender: "You",
+  });
+  if (input) input.value = "";
+  if (state.page === "chat") renderChat();
   try {
     await api("/chat/send", {
       method: "POST",
       body: JSON.stringify({ message: text }),
     });
-    if (input) input.value = "";
   } catch (e) {
     toast("Failed to send: " + e.message, "error");
   }
   state.chatSending = false;
+  if (state.page === "chat") renderChat();
 }
 
 // ---------------------------------------------------------------------------
@@ -1307,47 +1330,254 @@ function renderStatus() {
   `;
 }
 
+// ---------------------------------------------------------------------------
+// Markdown rendering (lightweight)
+// ---------------------------------------------------------------------------
+function renderMarkdown(text) {
+  if (!text) return "";
+  let html = esc(text);
+  // Code blocks: ```lang\ncode\n```
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const id = "cb-" + Math.random().toString(36).slice(2, 8);
+    return `<div class="md-code-block"><div class="md-code-header"><span class="md-code-lang">${lang || "code"}</span><button class="md-code-copy" onclick="copyCodeBlock('${id}')">Copy</button></div><pre id="${id}"><code>${code.trim()}</code></pre></div>`;
+  });
+  // Inline code: `code`
+  html = html.replace(/`([^`\n]+)`/g, '<code class="md-inline-code">$1</code>');
+  // Bold: **text**
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  // Italic: *text*
+  html = html.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
+  // Headers: ### text
+  html = html.replace(/^### (.+)$/gm, '<div class="md-h3">$1</div>');
+  html = html.replace(/^## (.+)$/gm, '<div class="md-h2">$1</div>');
+  html = html.replace(/^# (.+)$/gm, '<div class="md-h1">$1</div>');
+  // Unordered lists: - item
+  html = html.replace(/^- (.+)$/gm, '<div class="md-li">&bull; $1</div>');
+  // Ordered lists: 1. item
+  html = html.replace(/^\d+\. (.+)$/gm, '<div class="md-li md-oli">$1</div>');
+  // Horizontal rule
+  html = html.replace(/^---$/gm, '<hr class="md-hr">');
+  // Line breaks (preserve paragraphs)
+  html = html.replace(/\n\n/g, '</p><p class="md-p">');
+  html = html.replace(/\n/g, "<br>");
+  html = '<p class="md-p">' + html + "</p>";
+  return html;
+}
+
+function copyCodeBlock(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent).then(() => {
+    const btn = el.parentElement.querySelector(".md-code-copy");
+    if (btn) { btn.textContent = "Copied!"; setTimeout(() => btn.textContent = "Copy", 2000); }
+  }).catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// Canvas panel (code/output viewer)
+// ---------------------------------------------------------------------------
+function openCanvas(content, title, lang) {
+  state.canvasOpen = true;
+  state.canvasContent = content;
+  state.canvasTitle = title || "Output";
+  state.canvasLang = lang || "";
+  renderCanvasPanel();
+}
+
+function closeCanvas() {
+  state.canvasOpen = false;
+  renderCanvasPanel();
+}
+
+function renderCanvasPanel() {
+  let panel = document.getElementById("canvas-panel");
+  if (!state.canvasOpen) {
+    if (panel) panel.classList.remove("open");
+    document.querySelector(".chat-main")?.classList.remove("canvas-active");
+    return;
+  }
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "canvas-panel";
+    panel.className = "canvas-panel";
+    document.querySelector(".chat-layout")?.appendChild(panel);
+  }
+  panel.classList.add("open");
+  document.querySelector(".chat-main")?.classList.add("canvas-active");
+  const id = "canvas-code-" + Math.random().toString(36).slice(2, 8);
+  panel.innerHTML = `
+    <div class="canvas-header">
+      <div class="canvas-title">${esc(state.canvasTitle)}</div>
+      <div class="canvas-actions">
+        <button class="btn btn-sm btn-outline" onclick="copyCodeBlock('${id}')">Copy</button>
+        <button class="btn btn-sm btn-outline" onclick="closeCanvas()">&times;</button>
+      </div>
+    </div>
+    <div class="canvas-body">
+      <pre id="${id}"><code>${esc(state.canvasContent)}</code></pre>
+    </div>
+  `;
+}
+
+// Extract code blocks from a message to make them openable in canvas
+function extractCodeBlocks(text) {
+  const blocks = [];
+  const re = /```(\w*)\n([\s\S]*?)```/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    blocks.push({ lang: m[1] || "code", code: m[2].trim() });
+  }
+  return blocks;
+}
+
+// ---------------------------------------------------------------------------
+// Chat rendering (Claude-like)
+// ---------------------------------------------------------------------------
 function renderChat() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "chat") return;
 
-  const msgs = state.chatMessages.map(m => {
-    const isUser = m.role === "user";
-    const align = isUser ? "flex-end" : "flex-start";
-    const bg = isUser ? "var(--accent-dim)" : "var(--bg-card)";
-    const border = isUser ? "var(--accent)" : "var(--border)";
-    const sender = m.sender || (isUser ? "You" : "Agent42");
-    const time = m.timestamp ? timeSince(m.timestamp) : "";
-    // Simple line-break rendering for agent output
-    const content = esc(m.content).replace(/\n/g, "<br>");
-    return `
-      <div class="chat-msg" style="align-self:${align}">
-        <div class="chat-bubble" style="background:${bg};border:1px solid ${border}">
-          <div class="chat-sender" style="color:${isUser ? "var(--accent)" : "var(--success)"}">${esc(sender)} <span class="chat-time">${time}</span></div>
-          <div class="chat-text">${content}</div>
-          ${m.task_id ? `<div class="chat-task-link"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : ""}
+  // Welcome screen when no messages
+  if (state.chatMessages.length === 0 && !state.chatSending) {
+    el.innerHTML = `
+      <div class="chat-layout">
+        <div class="chat-main">
+          <div class="chat-welcome">
+            <div class="chat-welcome-icon">42</div>
+            <h2>Chat with Agent42</h2>
+            <p>Ask questions, request tasks, or explore what Agent42 can do for you.</p>
+            <div class="chat-suggestions">
+              <button class="chat-suggestion" onclick="applySuggestion('What tasks are currently running?')">What tasks are running?</button>
+              <button class="chat-suggestion" onclick="applySuggestion('Help me write a Python script to process CSV files')">Write a Python script</button>
+              <button class="chat-suggestion" onclick="applySuggestion('Review the security configuration of this project')">Security review</button>
+              <button class="chat-suggestion" onclick="applySuggestion('Explain the architecture of this codebase')">Explain the architecture</button>
+            </div>
+          </div>
+          <div class="chat-composer">
+            <div class="chat-composer-inner">
+              <textarea id="chat-input" class="chat-textarea" rows="1" placeholder="Message Agent42..."
+                        oninput="autoGrowTextarea(this)" onkeydown="handleChatKeydown(event)"></textarea>
+              <button class="chat-send-btn" onclick="sendChatMessage()" title="Send message">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+              </button>
+            </div>
+            <div class="chat-composer-hint">Enter to send, Shift+Enter for new line</div>
+          </div>
         </div>
-      </div>`;
+      </div>
+    `;
+    return;
+  }
+
+  // Build messages
+  const msgs = state.chatMessages.map((m, i) => {
+    const isUser = m.role === "user";
+    const sender = m.sender || (isUser ? "You" : "Agent42");
+    const time = m.timestamp ? formatChatTime(m.timestamp) : "";
+    const codeBlocks = isUser ? [] : extractCodeBlocks(m.content || "");
+    const content = isUser ? esc(m.content).replace(/\n/g, "<br>") : renderMarkdown(m.content);
+
+    if (isUser) {
+      return `
+        <div class="chat-msg chat-msg-user">
+          <div class="chat-msg-content">
+            <div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div>
+            <div class="chat-msg-body chat-msg-body-user">${content}</div>
+          </div>
+          <div class="chat-avatar chat-avatar-user">U</div>
+        </div>`;
+    } else {
+      const canvasButtons = codeBlocks.map((b, j) =>
+        `<button class="chat-canvas-btn" onclick="openCanvas(state.chatMessages[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
+      ).join("");
+      return `
+        <div class="chat-msg chat-msg-agent">
+          <div class="chat-avatar chat-avatar-agent">42</div>
+          <div class="chat-msg-content">
+            <div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div>
+            <div class="chat-msg-body chat-msg-body-agent">${content}</div>
+            ${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}
+            ${m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : ""}
+          </div>
+        </div>`;
+    }
   }).join("");
 
+  // Store code blocks on state for canvas access
+  state.chatMessages.forEach(m => {
+    if (m.role !== "user") m.__codeBlocks = extractCodeBlocks(m.content || "");
+  });
+
+  // Typing indicator
+  const typingHtml = state.chatSending ? `
+    <div class="chat-msg chat-msg-agent">
+      <div class="chat-avatar chat-avatar-agent">42</div>
+      <div class="chat-msg-content">
+        <div class="chat-typing">
+          <span class="chat-typing-dot"></span>
+          <span class="chat-typing-dot"></span>
+          <span class="chat-typing-dot"></span>
+        </div>
+      </div>
+    </div>
+  ` : "";
+
   el.innerHTML = `
-    <div class="chat-container">
-      <div class="chat-messages" id="chat-messages">
-        ${msgs || '<div class="chat-empty">No messages yet. Send a message to start a conversation with Agent42.</div>'}
+    <div class="chat-layout">
+      <div class="chat-main ${state.canvasOpen ? "canvas-active" : ""}">
+        <div class="chat-messages" id="chat-messages">
+          ${msgs}
+          ${typingHtml}
+        </div>
+        <div class="chat-composer">
+          <div class="chat-composer-inner">
+            <textarea id="chat-input" class="chat-textarea" rows="1" placeholder="Message Agent42..."
+                      oninput="autoGrowTextarea(this)" onkeydown="handleChatKeydown(event)"
+                      ${state.chatSending ? "disabled" : ""}></textarea>
+            <button class="chat-send-btn" onclick="sendChatMessage()" ${state.chatSending ? "disabled" : ""} title="Send message">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+            </button>
+          </div>
+          <div class="chat-composer-hint">Enter to send, Shift+Enter for new line</div>
+        </div>
       </div>
-      <div class="chat-input-bar">
-        <input type="text" id="chat-input" placeholder="Ask Agent42 anything..."
-               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage()}"
-               ${state.chatSending ? "disabled" : ""}>
-        <button class="btn btn-primary" onclick="sendChatMessage()" ${state.chatSending ? "disabled" : ""}>
-          ${state.chatSending ? "Sending..." : "Send"}
-        </button>
-      </div>
+      <div id="canvas-panel" class="canvas-panel ${state.canvasOpen ? "open" : ""}"></div>
     </div>
   `;
   // Auto-scroll to bottom
   const msgContainer = document.getElementById("chat-messages");
   if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
+  // Re-render canvas if open
+  if (state.canvasOpen) renderCanvasPanel();
+}
+
+function formatChatTime(ts) {
+  const d = new Date(ts * 1000);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  if (isToday) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function autoGrowTextarea(el) {
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, 200) + "px";
+}
+
+function handleChatKeydown(event) {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    sendChatMessage();
+  }
+}
+
+function applySuggestion(text) {
+  const input = document.getElementById("chat-input");
+  if (input) {
+    input.value = text;
+    autoGrowTextarea(input);
+    input.focus();
+  }
 }
 
 function renderSettings() {
@@ -1624,7 +1854,6 @@ function render() {
         <div class="sidebar-brand">Agent<span class="num">42</span></div>
         <nav class="sidebar-nav">
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks')">&#127919; Mission Control</a>
-          <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks')">&#128203; Tasks</a>
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status')">&#128200; Status</a>
           <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals')">&#128274; Approvals ${approvalBadge}</a>
           <a href="#" data-page="chat" class="${state.page === "chat" ? "active" : ""}" onclick="event.preventDefault();navigate('chat')">&#128172; Chat</a>
@@ -1640,8 +1869,7 @@ function render() {
       </aside>
       <div class="main">
         <div class="topbar">
-          <h2>${{ tasks: "Mission Control", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail", chat: "Chat" }[state.page] || "Dashboard"}</h2>
-          <h2>${{ tasks: "Tasks", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? '<button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button><button class="btn btn-outline btn-sm" style="margin-left:0.5rem" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>' : ""}
           </div>
