@@ -222,3 +222,132 @@ class TestSetupCompleteEndpoint:
         assert data["memory_backend"] == "qdrant_redis"
         assert data["setup_task_id"]  # non-empty
         assert data["token"]  # JWT returned
+
+
+# ---------------------------------------------------------------------------
+# Change password endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestChangePasswordEndpoint:
+    """Integration tests for POST /api/settings/password."""
+
+    @pytest.fixture()
+    def _password_settings(self):
+        """Set a known bcrypt hash so we can verify the current password."""
+        from core.config import settings
+
+        orig_hash = settings.dashboard_password_hash
+        orig_pass = settings.dashboard_password
+        known_hash = pwd_context.hash("oldpassword123")
+        object.__setattr__(settings, "dashboard_password_hash", known_hash)
+        object.__setattr__(settings, "dashboard_password", "")
+        yield
+        object.__setattr__(settings, "dashboard_password_hash", orig_hash)
+        object.__setattr__(settings, "dashboard_password", orig_pass)
+
+    @pytest.fixture()
+    def _app(self, tmp_path):
+        from core.approval_gate import ApprovalGate
+        from core.task_queue import TaskQueue
+        from dashboard.server import create_app
+        from dashboard.websocket_manager import WebSocketManager
+
+        tq = TaskQueue(tasks_json_path=str(tmp_path / "tasks.json"))
+        ws = WebSocketManager()
+        ag = ApprovalGate(ws)
+        return create_app(tq, ws, ag)
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_password_settings")
+    async def test_change_password_success(self, _app):
+        """Changing password with correct current password should succeed."""
+        from httpx import ASGITransport, AsyncClient
+
+        from core.config import settings
+        from dashboard.auth import create_token
+
+        token = create_token(settings.dashboard_username)
+
+        with (
+            patch("dashboard.server._update_env_file"),
+            patch("dashboard.server.Settings.reload_from_env"),
+        ):
+            transport = ASGITransport(app=_app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/settings/password",
+                    json={
+                        "current_password": "oldpassword123",
+                        "new_password": "newpassword456",
+                    },
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["token"]  # New JWT returned
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_password_settings")
+    async def test_change_password_wrong_current(self, _app):
+        """Changing password with wrong current password should fail."""
+        from httpx import ASGITransport, AsyncClient
+
+        from core.config import settings
+        from dashboard.auth import create_token
+
+        token = create_token(settings.dashboard_username)
+
+        transport = ASGITransport(app=_app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/settings/password",
+                json={
+                    "current_password": "wrongpassword",
+                    "new_password": "newpassword456",
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_password_settings")
+    async def test_change_password_too_short(self, _app):
+        """New password shorter than 8 chars should be rejected."""
+        from httpx import ASGITransport, AsyncClient
+
+        from core.config import settings
+        from dashboard.auth import create_token
+
+        token = create_token(settings.dashboard_username)
+
+        transport = ASGITransport(app=_app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/settings/password",
+                json={
+                    "current_password": "oldpassword123",
+                    "new_password": "short",
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_password_settings")
+    async def test_change_password_unauthenticated(self, _app):
+        """Attempting to change password without auth should fail."""
+        from httpx import ASGITransport, AsyncClient
+
+        transport = ASGITransport(app=_app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/settings/password",
+                json={
+                    "current_password": "oldpassword123",
+                    "new_password": "newpassword456",
+                },
+            )
+        # 401 for missing credentials (no Bearer token provided)
+        assert resp.status_code in (401, 403)

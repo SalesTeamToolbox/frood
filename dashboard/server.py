@@ -84,6 +84,8 @@ class TaskCreateRequest(BaseModel):
     task_type: str = "coding"
     priority: int = 0
     context_window: str = "default"
+    repo_id: str = ""
+    branch: str = ""
 
 
 # Passwords treated as unconfigured — trigger the setup wizard
@@ -135,6 +137,11 @@ class KeyUpdateRequest(BaseModel):
 
 class SettingsUpdateRequest(BaseModel):
     settings: dict[str, str]
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
 
 
 # Settings that can be changed from the dashboard (non-secret, non-security).
@@ -220,6 +227,7 @@ def create_app(
     heartbeat=None,
     key_store=None,
     app_manager=None,
+    repo_manager=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -462,6 +470,49 @@ def create_app(
         logger.info(f"Successful login for '{req.username}' from {client_ip}")
         return {"token": create_token(req.username)}
 
+    @app.post("/api/settings/password")
+    async def change_password(
+        req: ChangePasswordRequest,
+        request: Request,
+        _admin: AuthContext = Depends(require_admin),
+    ):
+        """Change the dashboard password. Requires current password verification."""
+        client_ip = request.client.host if request.client else "unknown"
+
+        if not check_rate_limit(client_ip):
+            raise HTTPException(
+                status_code=429,
+                detail="Too many attempts. Try again in 1 minute.",
+            )
+
+        if not verify_password(req.current_password):
+            logger.warning(
+                "Failed password change attempt from %s — wrong current password", client_ip
+            )
+            raise HTTPException(status_code=401, detail="Current password is incorrect.")
+
+        new_password = req.new_password.strip()
+        if len(new_password) < 8:
+            raise HTTPException(
+                status_code=400,
+                detail="New password must be at least 8 characters.",
+            )
+
+        new_hash = pwd_context.hash(new_password)
+        env_path = Path(__file__).parent.parent / ".env"
+        _update_env_file(
+            env_path,
+            {
+                "DASHBOARD_PASSWORD_HASH": new_hash,
+                "DASHBOARD_PASSWORD": "",
+            },
+        )
+        Settings.reload_from_env()
+
+        logger.info("Password changed successfully from %s", client_ip)
+        token = create_token(settings.dashboard_username)
+        return {"status": "ok", "token": token, "message": "Password changed successfully."}
+
     # -- Tasks -----------------------------------------------------------------
 
     @app.get("/api/tasks")
@@ -477,6 +528,8 @@ def create_app(
             priority=req.priority,
             context_window=req.context_window,
             origin_device_id=auth.device_id,
+            repo_id=req.repo_id,
+            branch=req.branch,
         )
         await task_queue.add(task)
         return task.to_dict()
@@ -972,6 +1025,83 @@ def create_app(
                 # but we validate and log for future use
         except WebSocketDisconnect:
             ws_manager.disconnect(ws)
+
+    # -- Repositories ----------------------------------------------------------
+
+    if repo_manager:
+
+        class RepoCreateRequest(BaseModel):
+            name: str
+            source: str = "local"  # "local" or "github"
+            local_path: str = ""  # for source=local
+            github_repo: str = ""  # for source=github (owner/repo)
+            default_branch: str = "main"
+            tags: list[str] = []
+
+        @app.get("/api/repos")
+        async def list_repos(_user: str = Depends(get_current_user)):
+            """List all connected repositories."""
+            return [r.to_dict() for r in repo_manager.list_repos()]
+
+        @app.post("/api/repos")
+        async def create_repo(req: RepoCreateRequest, _admin: AuthContext = Depends(require_admin)):
+            """Add a repository (local path or clone from GitHub)."""
+            if req.source == "github":
+                if not req.github_repo:
+                    raise HTTPException(400, "github_repo is required for source=github")
+                repo = await repo_manager.add_from_github(
+                    github_repo=req.github_repo,
+                    default_branch=req.default_branch,
+                    tags=req.tags,
+                )
+            else:
+                if not req.local_path:
+                    raise HTTPException(400, "local_path is required for source=local")
+                repo = await repo_manager.add_local(
+                    name=req.name,
+                    local_path=req.local_path,
+                    default_branch=req.default_branch,
+                    tags=req.tags,
+                )
+            return repo.to_dict()
+
+        @app.get("/api/repos/{repo_id}")
+        async def get_repo(repo_id: str, _user: str = Depends(get_current_user)):
+            """Get a single repository by ID."""
+            repo = repo_manager.get(repo_id)
+            if not repo:
+                raise HTTPException(404, "Repository not found")
+            return repo.to_dict()
+
+        @app.delete("/api/repos/{repo_id}")
+        async def delete_repo(repo_id: str, _admin: AuthContext = Depends(require_admin)):
+            """Remove a repository from the registry."""
+            try:
+                await repo_manager.remove(repo_id)
+            except ValueError as e:
+                raise HTTPException(404, str(e))
+            return {"status": "removed"}
+
+        @app.get("/api/repos/{repo_id}/branches")
+        async def list_repo_branches(repo_id: str, _user: str = Depends(get_current_user)):
+            """List branches for a repository."""
+            branches = await repo_manager.list_branches(repo_id)
+            return {"branches": branches}
+
+        @app.post("/api/repos/{repo_id}/sync")
+        async def sync_repo(repo_id: str, _user: str = Depends(get_current_user)):
+            """Fetch latest changes for a repository."""
+            try:
+                msg = await repo_manager.sync_repo(repo_id)
+            except ValueError as e:
+                raise HTTPException(404, str(e))
+            return {"status": "ok", "message": msg}
+
+        @app.get("/api/github/repos")
+        async def list_github_repos(_admin: AuthContext = Depends(require_admin)):
+            """List repos from the connected GitHub account."""
+            repos = await repo_manager.list_github_repos()
+            return {"repos": repos}
 
     # -- Apps Platform ---------------------------------------------------------
 

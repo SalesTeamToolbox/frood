@@ -42,6 +42,11 @@ const state = {
   envSettings: {},
   envEdits: {},
   envSaving: false,
+  // Repositories
+  repos: [],
+  repoBranches: {},
+  githubRepos: [],
+  githubLoading: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -370,6 +375,20 @@ async function loadTasks() {
   } catch { state.tasks = []; }
 }
 
+async function loadRepos() {
+  try {
+    state.repos = (await api("/repos")) || [];
+  } catch { state.repos = []; }
+}
+
+async function loadRepoBranches(repoId) {
+  if (state.repoBranches[repoId]) return;
+  try {
+    const data = await api(`/repos/${repoId}/branches`);
+    state.repoBranches[repoId] = data.branches || [];
+  } catch { state.repoBranches[repoId] = []; }
+}
+
 async function loadApprovals() {
   try {
     state.approvals = (await api("/approvals")) || [];
@@ -464,6 +483,40 @@ async function saveEnvSettings() {
   renderSettingsPanel();
 }
 
+async function changePassword() {
+  const errEl = document.getElementById("cp-error");
+  const btn = document.getElementById("cp-btn");
+  const currentPass = document.getElementById("cp-current")?.value || "";
+  const newPass = document.getElementById("cp-new")?.value || "";
+  const confirmPass = document.getElementById("cp-confirm")?.value || "";
+  if (errEl) errEl.textContent = "";
+
+  if (!currentPass) { if (errEl) errEl.textContent = "Current password is required."; return; }
+  if (newPass.length < 8) { if (errEl) errEl.textContent = "New password must be at least 8 characters."; return; }
+  if (newPass !== confirmPass) { if (errEl) errEl.textContent = "New passwords do not match."; return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = "Changing..."; }
+  try {
+    const data = await api("/settings/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPass, new_password: newPass }),
+    });
+    if (data.token) {
+      state.token = data.token;
+      localStorage.setItem("agent42_token", data.token);
+    }
+    toast("Password changed successfully.", "success");
+    if (document.getElementById("cp-current")) document.getElementById("cp-current").value = "";
+    if (document.getElementById("cp-new")) document.getElementById("cp-new").value = "";
+    if (document.getElementById("cp-confirm")) document.getElementById("cp-confirm").value = "";
+  } catch (e) {
+    if (errEl) errEl.textContent = e.message || "Failed to change password.";
+    toast("Failed to change password: " + e.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Change Password"; }
+  }
+}
+
 async function loadChatMessages() {
   try {
     state.chatMessages = (await api("/chat/messages")) || [];
@@ -537,11 +590,14 @@ function doLogout() {
   render();
 }
 
-async function doCreateTask(title, description, taskType) {
+async function doCreateTask(title, description, taskType, repoId, branch) {
   try {
+    const body = { title, description, task_type: taskType };
+    if (repoId) body.repo_id = repoId;
+    if (branch) body.branch = branch;
     await api("/tasks", {
       method: "POST",
-      body: JSON.stringify({ title, description, task_type: taskType }),
+      body: JSON.stringify(body),
     });
     await loadTasks();
     renderTasks();
@@ -730,6 +786,7 @@ function showCreateTaskModal() {
     "coding","debugging","research","refactoring","documentation",
     "marketing","email","design","content","strategy","data_analysis","project_management"
   ];
+  const repoOptions = state.repos.map((r) => `<option value="${esc(r.id)}">${esc(r.name)} (${esc(r.default_branch)})</option>`).join("");
   showModal(`
     <div class="modal">
       <div class="modal-header"><h3>Create Task</h3>
@@ -751,6 +808,22 @@ function showCreateTaskModal() {
           </select>
           <div class="help">The task type determines which model, critic, and skills are used.</div>
         </div>
+        ${state.repos.length > 0 ? `
+        <div class="form-group">
+          <label for="ct-repo">Repository</label>
+          <select id="ct-repo" onchange="onTaskRepoChange(this.value)">
+            <option value="">None (default)</option>
+            ${repoOptions}
+          </select>
+          <div class="help">Select the repo the agent should work in.</div>
+        </div>
+        <div class="form-group" id="ct-branch-group" style="display:none">
+          <label for="ct-branch">Branch</label>
+          <select id="ct-branch">
+            <option value="">Default branch</option>
+          </select>
+        </div>
+        ` : ""}
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
@@ -761,13 +834,33 @@ function showCreateTaskModal() {
   document.getElementById("ct-title")?.focus();
 }
 
+async function onTaskRepoChange(repoId) {
+  const branchGroup = document.getElementById("ct-branch-group");
+  const branchSelect = document.getElementById("ct-branch");
+  if (!repoId) {
+    if (branchGroup) branchGroup.style.display = "none";
+    return;
+  }
+  if (branchGroup) branchGroup.style.display = "";
+  // Load branches if not cached
+  await loadRepoBranches(repoId);
+  const branches = state.repoBranches[repoId] || [];
+  if (branchSelect) {
+    const repo = state.repos.find((r) => r.id === repoId);
+    const defBranch = repo ? repo.default_branch : "main";
+    branchSelect.innerHTML = branches.map((b) => `<option value="${esc(b)}" ${b === defBranch ? "selected" : ""}>${esc(b)}</option>`).join("") || `<option value="">${esc(defBranch)}</option>`;
+  }
+}
+
 function submitCreateTask() {
   const title = document.getElementById("ct-title")?.value?.trim();
   const desc = document.getElementById("ct-desc")?.value?.trim();
   const type = document.getElementById("ct-type")?.value;
+  const repoId = document.getElementById("ct-repo")?.value || "";
+  const branch = document.getElementById("ct-branch")?.value || "";
   if (!title) return toast("Title is required", "error");
   if (!desc) return toast("Description is required", "error");
-  doCreateTask(title, desc, type);
+  doCreateTask(title, desc, type, repoId, branch);
 }
 
 function showReviewModal(task) {
@@ -862,8 +955,6 @@ function renderTasks() {
           ${["coding","debugging","research","refactoring","documentation","marketing","email","design","content","strategy","data_analysis","project_management"].map(t=>`<option value="${t}" ${state.filterType===t?"selected":""}>${t.replace("_"," ")}</option>`).join("")}
         </select>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button>
-      <button class="btn btn-outline btn-sm" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>
     </div>
     <div id="board-area"></div>
   `;
@@ -919,6 +1010,7 @@ function renderKanbanBoard() {
               <div class="card-meta">
                 <span class="priority-dot p${t.priority||0}"></span>
                 <span class="badge-type">${esc(t.task_type)}</span>
+                ${t.repo_id ? `<span style="color:var(--accent)">${esc((state.repos.find(r=>r.id===t.repo_id)||{}).name||"repo")}${t.branch ? ":"+esc(t.branch) : ""}</span>` : ""}
                 ${t.assigned_agent ? `<span>${esc(t.assigned_agent)}</span>` : ""}
                 ${(t.comments||[]).length > 0 ? `<span>${(t.comments||[]).length} comments</span>` : ""}
               </div>
@@ -1580,12 +1672,178 @@ function applySuggestion(text) {
   }
 }
 
+function renderReposPanel() {
+  const repoRows = state.repos.map((r) => `
+    <tr>
+      <td><strong>${esc(r.name)}</strong></td>
+      <td><code style="font-size:0.8rem">${esc(r.github_repo || r.url || r.local_path)}</code></td>
+      <td>${esc(r.default_branch)}</td>
+      <td><span class="status-badge status-${r.status === "active" ? "running" : r.status === "error" ? "failed" : "pending"}">${esc(r.status)}</span></td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="syncRepo('${esc(r.id)}')">Sync</button>
+        <button class="btn btn-danger btn-sm" onclick="removeRepo('${esc(r.id)}','${esc(r.name)}')">Remove</button>
+      </td>
+    </tr>
+  `).join("");
+
+  const ghRepoRows = state.githubRepos.map((r) => {
+    const alreadyAdded = state.repos.some((lr) => lr.github_repo === r.full_name);
+    return `
+    <tr>
+      <td><strong>${esc(r.name)}</strong> ${r.private ? '<span style="color:var(--warning);font-size:0.75rem">private</span>' : ""}</td>
+      <td style="font-size:0.8rem;color:var(--text-muted)">${esc(r.description).substring(0, 60)}</td>
+      <td>${esc(r.default_branch)}</td>
+      <td>${esc(r.language)}</td>
+      <td>${alreadyAdded ? '<span style="color:var(--success)">Added</span>' : `<button class="btn btn-primary btn-sm" onclick="addGithubRepo('${esc(r.full_name)}','${esc(r.default_branch)}')">Add</button>`}</td>
+    </tr>`;
+  }).join("");
+
+  return `
+    <h3>Repositories</h3>
+    <p class="section-desc">Connect project repositories for agents to work in. Add local repos or clone from GitHub.</p>
+
+    ${settingSecret("GITHUB_TOKEN", "GitHub Token", "Personal Access Token for listing and cloning repos. Create at github.com/settings/tokens (repo scope).")}
+    <div class="form-group" style="margin-top:0.5rem">
+      <button class="btn btn-primary btn-sm" id="save-keys-btn" onclick="saveApiKeys()" ${Object.keys(state.keyEdits).length === 0 || state.keySaving ? "disabled" : ""}>
+        ${state.keySaving ? "Saving..." : "Save Token"}
+      </button>
+    </div>
+
+    <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Connected Repositories</h4>
+    ${state.repos.length > 0 ? `
+    <div style="overflow-x:auto">
+      <table class="table">
+        <thead><tr><th>Name</th><th>Source</th><th>Branch</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>${repoRows}</tbody>
+      </table>
+    </div>
+    ` : '<p style="color:var(--text-muted);font-size:0.9rem">No repositories connected yet. Add a local repo or connect GitHub below.</p>'}
+
+    <div style="display:flex;gap:0.75rem;margin:1rem 0;flex-wrap:wrap">
+      <button class="btn btn-outline btn-sm" onclick="showAddLocalRepoModal()">+ Add Local Repo</button>
+      <button class="btn btn-outline btn-sm" onclick="fetchGithubRepos()" ${state.githubLoading ? "disabled" : ""}>
+        ${state.githubLoading ? "Loading..." : "Browse GitHub Repos"}
+      </button>
+    </div>
+
+    ${state.githubRepos.length > 0 ? `
+    <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">GitHub Repositories</h4>
+    <div style="overflow-x:auto;max-height:400px;overflow-y:auto">
+      <table class="table">
+        <thead><tr><th>Name</th><th>Description</th><th>Branch</th><th>Lang</th><th></th></tr></thead>
+        <tbody>${ghRepoRows}</tbody>
+      </table>
+    </div>
+    ` : ""}
+  `;
+}
+
+async function fetchGithubRepos() {
+  state.githubLoading = true;
+  renderSettingsPanel();
+  try {
+    const data = await api("/github/repos");
+    state.githubRepos = data.repos || [];
+  } catch (err) {
+    toast(err.message || "Failed to load GitHub repos", "error");
+    state.githubRepos = [];
+  }
+  state.githubLoading = false;
+  renderSettingsPanel();
+}
+
+async function addGithubRepo(fullName, defaultBranch) {
+  try {
+    await api("/repos", {
+      method: "POST",
+      body: JSON.stringify({ name: fullName.split("/").pop(), source: "github", github_repo: fullName, default_branch: defaultBranch }),
+    });
+    await loadRepos();
+    renderSettingsPanel();
+    toast("Repository added", "success");
+  } catch (err) {
+    toast(err.message || "Failed to add repo", "error");
+  }
+}
+
+function showAddLocalRepoModal() {
+  showModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>Add Local Repository</h3>
+        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="lr-name">Name</label>
+          <input type="text" id="lr-name" placeholder="my-project">
+        </div>
+        <div class="form-group">
+          <label for="lr-path">Local Path</label>
+          <input type="text" id="lr-path" placeholder="/home/user/projects/my-project">
+          <div class="help">Absolute path to an existing git repository on this server.</div>
+        </div>
+        <div class="form-group">
+          <label for="lr-branch">Default Branch</label>
+          <input type="text" id="lr-branch" value="main" placeholder="main">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitAddLocalRepo()">Add</button>
+      </div>
+    </div>
+  `);
+  document.getElementById("lr-name")?.focus();
+}
+
+async function submitAddLocalRepo() {
+  const name = document.getElementById("lr-name")?.value?.trim();
+  const path = document.getElementById("lr-path")?.value?.trim();
+  const branch = document.getElementById("lr-branch")?.value?.trim() || "main";
+  if (!name) return toast("Name is required", "error");
+  if (!path) return toast("Path is required", "error");
+  try {
+    await api("/repos", {
+      method: "POST",
+      body: JSON.stringify({ name, source: "local", local_path: path, default_branch: branch }),
+    });
+    await loadRepos();
+    closeModal();
+    renderSettingsPanel();
+    toast("Repository added", "success");
+  } catch (err) {
+    toast(err.message || "Failed to add repo", "error");
+  }
+}
+
+async function syncRepo(repoId) {
+  try {
+    const data = await api(`/repos/${repoId}/sync`, { method: "POST" });
+    toast(data.message || "Synced", "success");
+  } catch (err) {
+    toast(err.message || "Sync failed", "error");
+  }
+}
+
+async function removeRepo(repoId, name) {
+  if (!confirm(`Remove repository "${name}"? This only unlinks it — local files are preserved.`)) return;
+  try {
+    await api(`/repos/${repoId}`, { method: "DELETE" });
+    await loadRepos();
+    renderSettingsPanel();
+    toast("Repository removed", "success");
+  } catch (err) {
+    toast(err.message || "Failed to remove", "error");
+  }
+}
+
 function renderSettings() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "settings") return;
 
   const tabs = [
     { id: "providers", label: "LLM Providers" },
+    { id: "repos", label: "Repositories" },
     { id: "channels", label: "Channels" },
     { id: "security", label: "Security" },
     { id: "orchestrator", label: "Orchestrator" },
@@ -1633,6 +1891,7 @@ function renderSettingsPanel() {
         <div class="help" style="margin-top:0.5rem">Keys saved here override <code>.env</code> values and take effect immediately for new API calls.</div>
       </div>
     `,
+    repos: () => renderReposPanel(),
     channels: () => `
       <h3>Communication Channels</h3>
       <p class="section-desc">Configure channels for receiving tasks via chat. Each channel requires its own API credentials.</p>
@@ -1664,7 +1923,25 @@ function renderSettingsPanel() {
       <h3>Security</h3>
       <p class="section-desc">Authentication, rate limiting, and sandbox settings for the dashboard and agent execution.</p>
 
-      <h4 style="margin:1rem 0 0.75rem;font-size:0.95rem">Dashboard Authentication</h4>
+      <h4 style="margin:1rem 0 0.75rem;font-size:0.95rem">Change Password</h4>
+      <div class="form-group">
+        <label for="cp-current">Current Password</label>
+        <input type="password" id="cp-current" placeholder="Enter current password" autocomplete="current-password">
+      </div>
+      <div class="form-group">
+        <label for="cp-new">New Password</label>
+        <input type="password" id="cp-new" placeholder="At least 8 characters" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label for="cp-confirm">Confirm New Password</label>
+        <input type="password" id="cp-confirm" placeholder="Re-enter new password" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <div id="cp-error" style="color:var(--danger);font-size:0.85rem;min-height:1.2em"></div>
+        <button class="btn btn-primary" id="cp-btn" onclick="changePassword()">Change Password</button>
+      </div>
+
+      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Dashboard Authentication</h4>
       ${settingReadonly("DASHBOARD_USERNAME", "Username", "Default: admin")}
       ${settingSecret("DASHBOARD_PASSWORD_HASH", "Password Hash (bcrypt)", 'Generate: python -c "import bcrypt; print(bcrypt.hashpw(b\'yourpassword\', bcrypt.gensalt()).decode())"')}
       <div class="form-group">
@@ -1813,7 +2090,7 @@ function updateEnvSaveBtn() {
 // Main render
 // ---------------------------------------------------------------------------
 async function loadAll() {
-  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages()]);
+  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages(), loadRepos()]);
   await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadStatus()]);
 }
 
