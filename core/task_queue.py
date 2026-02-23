@@ -225,6 +225,10 @@ class Task:
     position: int = 0  # Kanban column ordering
     context_window: str = "default"  # default | large | max
 
+    # Multi-repository support — which repo and branch the agent should work on
+    repo_id: str = ""  # Repository ID from RepoManager (empty = default/legacy)
+    branch: str = ""  # Target branch (empty = repo's default_branch)
+
     def add_comment(self, author: str, text: str):
         self.comments.append(
             {

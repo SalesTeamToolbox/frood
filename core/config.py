@@ -200,6 +200,11 @@ class Settings:
     apps_require_auth_default: bool = False  # Default require_auth for new apps
     apps_monitor_interval: int = 15  # Seconds between health-check polls
 
+    # Multi-repository management
+    github_token: str = ""  # GitHub PAT for repo operations (fallback: APPS_GITHUB_TOKEN)
+    repos_json_path: str = ".agent42/repos.json"
+    repos_clone_dir: str = ".agent42/repos"  # Base directory for cloned repos
+
     # Security scanning (scheduled)
     security_scan_enabled: bool = True
     security_scan_interval: str = "8h"  # e.g. "8h", "6h", "12h"
@@ -326,6 +331,10 @@ class Settings:
             images_dir=os.getenv("IMAGES_DIR", ".agent42/images"),
             # Device gateway auth
             devices_file=os.getenv("DEVICES_FILE", ".agent42/devices.jsonl"),
+            # Multi-repository management
+            github_token=os.getenv("GITHUB_TOKEN", os.getenv("APPS_GITHUB_TOKEN", "")),
+            repos_json_path=os.getenv("REPOS_JSON_PATH", ".agent42/repos.json"),
+            repos_clone_dir=os.getenv("REPOS_CLONE_DIR", ".agent42/repos"),
             # Security scanning
             security_scan_enabled=os.getenv("SECURITY_SCAN_ENABLED", "true").lower()
             in ("true", "1", "yes"),
