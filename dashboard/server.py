@@ -137,6 +137,11 @@ class SettingsUpdateRequest(BaseModel):
     settings: dict[str, str]
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 # Settings that can be changed from the dashboard (non-secret, non-security).
 # Security-critical settings (sandbox, password, JWT) are deliberately excluded.
 _DASHBOARD_EDITABLE_SETTINGS = {
@@ -461,6 +466,47 @@ def create_app(
 
         logger.info(f"Successful login for '{req.username}' from {client_ip}")
         return {"token": create_token(req.username)}
+
+    @app.post("/api/settings/password")
+    async def change_password(
+        req: ChangePasswordRequest,
+        request: Request,
+        _admin: AuthContext = Depends(require_admin),
+    ):
+        """Change the dashboard password. Requires current password verification."""
+        client_ip = request.client.host if request.client else "unknown"
+
+        if not check_rate_limit(client_ip):
+            raise HTTPException(
+                status_code=429,
+                detail="Too many attempts. Try again in 1 minute.",
+            )
+
+        if not verify_password(req.current_password):
+            logger.warning("Failed password change attempt from %s — wrong current password", client_ip)
+            raise HTTPException(status_code=401, detail="Current password is incorrect.")
+
+        new_password = req.new_password.strip()
+        if len(new_password) < 8:
+            raise HTTPException(
+                status_code=400,
+                detail="New password must be at least 8 characters.",
+            )
+
+        new_hash = pwd_context.hash(new_password)
+        env_path = Path(__file__).parent.parent / ".env"
+        _update_env_file(
+            env_path,
+            {
+                "DASHBOARD_PASSWORD_HASH": new_hash,
+                "DASHBOARD_PASSWORD": "",
+            },
+        )
+        Settings.reload_from_env()
+
+        logger.info("Password changed successfully from %s", client_ip)
+        token = create_token(settings.dashboard_username)
+        return {"status": "ok", "token": token, "message": "Password changed successfully."}
 
     # -- Tasks -----------------------------------------------------------------
 

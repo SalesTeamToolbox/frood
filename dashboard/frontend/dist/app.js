@@ -464,6 +464,40 @@ async function saveEnvSettings() {
   renderSettingsPanel();
 }
 
+async function changePassword() {
+  const errEl = document.getElementById("cp-error");
+  const btn = document.getElementById("cp-btn");
+  const currentPass = document.getElementById("cp-current")?.value || "";
+  const newPass = document.getElementById("cp-new")?.value || "";
+  const confirmPass = document.getElementById("cp-confirm")?.value || "";
+  if (errEl) errEl.textContent = "";
+
+  if (!currentPass) { if (errEl) errEl.textContent = "Current password is required."; return; }
+  if (newPass.length < 8) { if (errEl) errEl.textContent = "New password must be at least 8 characters."; return; }
+  if (newPass !== confirmPass) { if (errEl) errEl.textContent = "New passwords do not match."; return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = "Changing..."; }
+  try {
+    const data = await api("/settings/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPass, new_password: newPass }),
+    });
+    if (data.token) {
+      state.token = data.token;
+      localStorage.setItem("agent42_token", data.token);
+    }
+    toast("Password changed successfully.", "success");
+    if (document.getElementById("cp-current")) document.getElementById("cp-current").value = "";
+    if (document.getElementById("cp-new")) document.getElementById("cp-new").value = "";
+    if (document.getElementById("cp-confirm")) document.getElementById("cp-confirm").value = "";
+  } catch (e) {
+    if (errEl) errEl.textContent = e.message || "Failed to change password.";
+    toast("Failed to change password: " + e.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Change Password"; }
+  }
+}
+
 async function loadChatMessages() {
   try {
     state.chatMessages = (await api("/chat/messages")) || [];
@@ -1664,7 +1698,25 @@ function renderSettingsPanel() {
       <h3>Security</h3>
       <p class="section-desc">Authentication, rate limiting, and sandbox settings for the dashboard and agent execution.</p>
 
-      <h4 style="margin:1rem 0 0.75rem;font-size:0.95rem">Dashboard Authentication</h4>
+      <h4 style="margin:1rem 0 0.75rem;font-size:0.95rem">Change Password</h4>
+      <div class="form-group">
+        <label for="cp-current">Current Password</label>
+        <input type="password" id="cp-current" placeholder="Enter current password" autocomplete="current-password">
+      </div>
+      <div class="form-group">
+        <label for="cp-new">New Password</label>
+        <input type="password" id="cp-new" placeholder="At least 8 characters" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label for="cp-confirm">Confirm New Password</label>
+        <input type="password" id="cp-confirm" placeholder="Re-enter new password" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <div id="cp-error" style="color:var(--danger);font-size:0.85rem;min-height:1.2em"></div>
+        <button class="btn btn-primary" id="cp-btn" onclick="changePassword()">Change Password</button>
+      </div>
+
+      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Dashboard Authentication</h4>
       ${settingReadonly("DASHBOARD_USERNAME", "Username", "Default: admin")}
       ${settingSecret("DASHBOARD_PASSWORD_HASH", "Password Hash (bcrypt)", 'Generate: python -c "import bcrypt; print(bcrypt.hashpw(b\'yourpassword\', bcrypt.gensalt()).decode())"')}
       <div class="form-group">
