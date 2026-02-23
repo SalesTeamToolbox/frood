@@ -486,7 +486,9 @@ def create_app(
             )
 
         if not verify_password(req.current_password):
-            logger.warning("Failed password change attempt from %s — wrong current password", client_ip)
+            logger.warning(
+                "Failed password change attempt from %s — wrong current password", client_ip
+            )
             raise HTTPException(status_code=401, detail="Current password is incorrect.")
 
         new_password = req.new_password.strip()

@@ -269,7 +269,10 @@ class TestChangePasswordEndpoint:
 
         token = create_token(settings.dashboard_username)
 
-        with patch("dashboard.server._update_env_file"), patch("dashboard.server.Settings.reload_from_env"):
+        with (
+            patch("dashboard.server._update_env_file"),
+            patch("dashboard.server.Settings.reload_from_env"),
+        ):
             transport = ASGITransport(app=_app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post(
