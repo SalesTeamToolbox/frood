@@ -144,7 +144,7 @@ async function handleSetupStep3() {
       await loadAll();
       render();
       if (data.setup_task_id) {
-        toast("Welcome! A setup task has been queued for Docker services.", "success");
+        toast("Welcome! A setup task has been queued to verify memory services.", "success");
       } else {
         toast("Welcome to Agent42!", "success");
       }
@@ -228,7 +228,7 @@ function renderSetupWizard() {
           <div class="memory-option-radio"></div>
           <div class="memory-option-body">
             <div class="memory-option-title">Qdrant + Redis</div>
-            <div class="memory-option-desc">Full semantic search + fast session caching. Requires Docker for both services.</div>
+            <div class="memory-option-desc">Full semantic search + fast session caching. Services may already be running if installed via install-server.sh.</div>
             <div class="memory-option-tag">Full Power</div>
           </div>
         </div>
@@ -242,7 +242,7 @@ function renderSetupWizard() {
     const mem = result.memory_backend || "skip";
     let extraMsg = "";
     if (mem === "qdrant_redis" && result.setup_task_id) {
-      extraMsg = `<p class="setup-desc" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">A setup task has been queued to guide you through starting the Docker services.</p>`;
+      extraMsg = `<p class="setup-desc" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">A setup task has been queued to verify the memory services are running.</p>`;
     } else if (mem === "qdrant_embedded") {
       extraMsg = `<p class="setup-desc" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">Embedded Qdrant enabled. Run <code style="background:var(--bg-tertiary);padding:0.1em 0.3em;border-radius:3px">pip install qdrant-client</code> if not installed yet.</p>`;
     }

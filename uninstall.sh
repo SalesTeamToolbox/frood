@@ -196,13 +196,14 @@ fi
 
 # ── Step 5: Remove firewall rules ───────────────────────────────────────────
 if $HAS_SYSTEMD && command -v ufw &>/dev/null; then
-    # Check if there's a deny rule for the Agent42 port
-    if sudo ufw status 2>/dev/null | grep -q "8002.*DENY"; then
-        info "Removing UFW firewall rule for port 8002..."
-        sudo ufw delete deny 8002/tcp 2>/dev/null || true
-        info "Firewall rule removed"
-        echo ""
-    fi
+    # Remove any Agent42-related deny rules (check common ports)
+    for port in 8000 8001 8002; do
+        if sudo ufw status 2>/dev/null | grep -q "${port}.*DENY"; then
+            info "Removing UFW firewall rule for port ${port}..."
+            sudo ufw delete deny "${port}/tcp" 2>/dev/null || true
+            info "Firewall rule removed for port ${port}"
+        fi
+    done
 fi
 
 # ── Step 6: Remove Agent42 files ────────────────────────────────────────────
