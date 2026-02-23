@@ -774,6 +774,9 @@ class Agent42:
         if self.app_manager:
             await self.app_manager.load()
             logger.info(f"  Apps loaded: {len(self.app_manager.list_apps())}")
+            await self.app_manager.start_monitor(
+                interval=float(settings.apps_monitor_interval),
+            )
         await self._setup_channels()
         await self._setup_mcp()
 
@@ -883,6 +886,8 @@ class Agent42:
         self.security_scanner.stop()
         await self.channel_manager.stop_all()
         await self.mcp_manager.disconnect_all()
+        if self.app_manager:
+            await self.app_manager.shutdown()
 
     def _validate_env(self):
         """Validate required configuration before starting."""

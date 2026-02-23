@@ -567,6 +567,7 @@ See `.env.example` for the complete list of configuration variables.
 | `APPS_PORT_RANGE_END` | Dynamic port allocation end | `9199` |
 | `APPS_MAX_RUNNING` | Max simultaneously running apps | `5` |
 | `APPS_AUTO_RESTART` | Restart crashed apps | `true` |
+| `APPS_MONITOR_INTERVAL` | Seconds between health-check polls | `15` |
 | `APPS_DEFAULT_RUNTIME` | Default runtime for new apps | `python` |
 | `APPS_GIT_ENABLED_DEFAULT` | Enable git for new apps by default | `false` |
 | `APPS_GITHUB_TOKEN` | GitHub PAT for repo creation/push | *(disabled)* |

@@ -173,6 +173,11 @@ class AppManager:
         self._data_path = self._apps_dir / "apps.json"
         self._port_lock = asyncio.Lock()
 
+        # Background monitor state
+        self._monitor_task: asyncio.Task | None = None
+        self._monitor_stop: asyncio.Event = asyncio.Event()
+        self._monitor_interval: float = 15.0
+
     # -- Persistence -----------------------------------------------------------
 
     async def load(self):
@@ -1153,10 +1158,114 @@ class AppManager:
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    # -- Background monitor ---------------------------------------------------
+
+    async def start_monitor(self, interval: float = 15.0):
+        """Start the background health-check loop.
+
+        Polls every *interval* seconds, detects crashed processes, and
+        auto-restarts apps that have ``auto_restart`` enabled.
+        """
+        if self._monitor_task is not None:
+            return  # Already running
+        self._monitor_interval = interval
+        self._monitor_stop = asyncio.Event()
+        self._monitor_task = asyncio.create_task(self._monitor_loop())
+        logger.info("App monitor started (interval=%.0fs)", interval)
+
+    async def stop_monitor(self):
+        """Signal the monitor loop to stop and wait for it to finish."""
+        if self._monitor_task is None:
+            return
+        self._monitor_stop.set()
+        self._monitor_task.cancel()
+        try:
+            await self._monitor_task
+        except asyncio.CancelledError:
+            pass
+        self._monitor_task = None
+        logger.info("App monitor stopped")
+
+    async def _monitor_loop(self):
+        """Periodically check running apps and restart crashed ones."""
+        while not self._monitor_stop.is_set():
+            try:
+                await self._check_and_restart()
+            except Exception as exc:
+                logger.warning("App monitor tick failed: %s", exc)
+            try:
+                await asyncio.wait_for(
+                    self._monitor_stop.wait(), timeout=self._monitor_interval,
+                )
+                break  # stop event was set
+            except TimeoutError:
+                pass  # normal timeout — loop again
+
+    async def _check_and_restart(self):
+        """Single pass: find crashed processes and restart eligible apps."""
+        for app_id, app in list(self._apps.items()):
+            if app.status != AppStatus.RUNNING.value:
+                continue
+            # Static apps have no process to crash
+            if app.runtime == AppRuntime.STATIC.value:
+                continue
+
+            process = self._processes.get(app_id)
+            if process is not None and process.returncode is None:
+                continue  # still alive
+
+            # Process has exited — capture stderr for diagnostics
+            stderr_text = ""
+            if process is not None:
+                try:
+                    _, stderr_bytes = await asyncio.wait_for(
+                        process.communicate(), timeout=2.0,
+                    )
+                    stderr_text = (stderr_bytes or b"").decode(errors="replace")[-500:]
+                except Exception:
+                    pass
+                self._processes.pop(app_id, None)
+
+            logger.warning(
+                "App '%s' (%s) crashed (exit=%s). stderr: %s",
+                app.name, app_id,
+                process.returncode if process else "?",
+                stderr_text[:200] or "(empty)",
+            )
+
+            if app.auto_restart and self._auto_restart:
+                try:
+                    # Reset state so start() accepts the app
+                    app.status = AppStatus.STOPPED.value
+                    app.pid = 0
+                    app.url = ""
+                    app.updated_at = time.time()
+                    await self._persist()
+                    await self.start(app_id)
+                    logger.info("Auto-restarted app '%s' (%s)", app.name, app_id)
+                except Exception as e:
+                    app.status = AppStatus.ERROR.value
+                    app.error = f"Auto-restart failed: {e}"
+                    app.updated_at = time.time()
+                    await self._persist()
+                    logger.error(
+                        "Auto-restart failed for app '%s': %s", app.name, e,
+                    )
+            else:
+                app.status = AppStatus.ERROR.value
+                app.error = f"Process exited (code={process.returncode if process else '?'})"
+                if stderr_text:
+                    app.error += f": {stderr_text[:200]}"
+                app.pid = 0
+                app.url = ""
+                app.updated_at = time.time()
+                await self._persist()
+
     # -- Shutdown --------------------------------------------------------------
 
     async def shutdown(self):
-        """Stop all running apps gracefully."""
+        """Stop all running apps and the monitor gracefully."""
+        await self.stop_monitor()
         running = [
             app_id
             for app_id, app in self._apps.items()
