@@ -407,6 +407,38 @@ async function loadSkills() {
   } catch { state.skills = []; }
 }
 
+async function toggleTool(name, enabled) {
+  try {
+    await api(`/tools/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    });
+    await loadTools();
+    renderTools();
+    toast(`Tool '${name}' ${enabled ? "enabled" : "disabled"}`, "success");
+  } catch (e) {
+    toast("Failed to update tool: " + e.message, "error");
+    await loadTools();
+    renderTools();
+  }
+}
+
+async function toggleSkill(name, enabled) {
+  try {
+    await api(`/skills/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    });
+    await loadSkills();
+    renderSkills();
+    toast(`Skill '${name}' ${enabled ? "enabled" : "disabled"}`, "success");
+  } catch (e) {
+    toast("Failed to update skill: " + e.message, "error");
+    await loadSkills();
+    renderSkills();
+  }
+}
+
 async function loadChannels() {
   try {
     state.channels = (await api("/channels")) || [];
@@ -1234,20 +1266,30 @@ function renderTools() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "tools") return;
 
-  const rows = state.tools.map((t) => `
-    <tr>
+  const rows = state.tools.map((t) => {
+    const enabled = t.enabled !== false;
+    const toggleId = `tool-toggle-${esc(t.name)}`;
+    return `
+    <tr style="${enabled ? "" : "opacity:0.55"}">
       <td style="font-weight:600">${esc(t.name)}</td>
       <td style="color:var(--text-secondary)">${esc(t.description || "")}</td>
+      <td style="text-align:center">
+        <label class="toggle-switch" title="${enabled ? "Disable" : "Enable"} ${esc(t.name)}">
+          <input type="checkbox" id="${toggleId}" ${enabled ? "checked" : ""}
+            onchange="toggleTool('${esc(t.name)}', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
     </tr>
-  `).join("");
+  `}).join("");
 
   el.innerHTML = `
     <div class="card">
       <div class="card-header"><h3>Registered Tools (${state.tools.length})</h3></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Description</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="2"><div class="empty-state">No tools registered</div></td></tr>`}</tbody>
+          <thead><tr><th>Name</th><th>Description</th><th style="text-align:center;width:80px">Enabled</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="3"><div class="empty-state">No tools registered</div></td></tr>`}</tbody>
         </table>
       </div>
     </div>
@@ -1258,22 +1300,32 @@ function renderSkills() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "skills") return;
 
-  const rows = state.skills.map((s) => `
-    <tr>
+  const rows = state.skills.map((s) => {
+    const enabled = s.enabled !== false;
+    const toggleId = `skill-toggle-${esc(s.name)}`;
+    return `
+    <tr style="${enabled ? "" : "opacity:0.55"}">
       <td style="font-weight:600">${esc(s.name)}</td>
       <td style="color:var(--text-secondary)">${esc(s.description || "")}</td>
       <td>${(s.task_types || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ")}</td>
       <td>${s.always_load ? '<span style="color:var(--success)">Always</span>' : ""}</td>
+      <td style="text-align:center">
+        <label class="toggle-switch" title="${enabled ? "Disable" : "Enable"} ${esc(s.name)}">
+          <input type="checkbox" id="${toggleId}" ${enabled ? "checked" : ""}
+            onchange="toggleSkill('${esc(s.name)}', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
     </tr>
-  `).join("");
+  `}).join("");
 
   el.innerHTML = `
     <div class="card">
       <div class="card-header"><h3>Loaded Skills (${state.skills.length})</h3></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Description</th><th>Task Types</th><th>Auto-load</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="4"><div class="empty-state">No skills loaded</div></td></tr>`}</tbody>
+          <thead><tr><th>Name</th><th>Description</th><th>Task Types</th><th>Auto-load</th><th style="text-align:center;width:80px">Enabled</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="5"><div class="empty-state">No skills loaded</div></td></tr>`}</tbody>
         </table>
       </div>
     </div>

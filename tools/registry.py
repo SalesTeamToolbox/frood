@@ -18,6 +18,7 @@ class ToolRegistry:
     def __init__(self, rate_limiter=None):
         self._tools: dict[str, Tool] = {}
         self._rate_limiter = rate_limiter
+        self._disabled: set[str] = set()
 
     def register(self, tool: Tool):
         """Register a tool."""
@@ -32,11 +33,29 @@ class ToolRegistry:
         """Get a tool by name."""
         return self._tools.get(name)
 
+    def set_enabled(self, name: str, enabled: bool) -> bool:
+        """Enable or disable a tool by name. Returns True if tool exists."""
+        if name not in self._tools:
+            return False
+        if enabled:
+            self._disabled.discard(name)
+        else:
+            self._disabled.add(name)
+        logger.info(f"Tool '{name}' {'enabled' if enabled else 'disabled'}")
+        return True
+
+    def is_enabled(self, name: str) -> bool:
+        """Return True if the tool exists and is not disabled."""
+        return name in self._tools and name not in self._disabled
+
     async def execute(self, name: str, agent_id: str = "default", **kwargs) -> ToolResult:
         """Execute a tool by name with the given parameters."""
         tool = self._tools.get(name)
         if not tool:
             return ToolResult(error=f"Unknown tool: {name}", success=False)
+
+        if name in self._disabled:
+            return ToolResult(error=f"Tool '{name}' is disabled", success=False)
 
         # Rate limit check
         if self._rate_limiter:
@@ -58,9 +77,20 @@ class ToolRegistry:
         return result
 
     def all_schemas(self) -> list[dict]:
-        """Get OpenAI function-calling schemas for all tools."""
-        return [tool.to_schema() for tool in self._tools.values()]
+        """Get OpenAI function-calling schemas for all enabled tools."""
+        return [
+            tool.to_schema()
+            for tool in self._tools.values()
+            if tool.name not in self._disabled
+        ]
 
     def list_tools(self) -> list[dict]:
         """List all registered tools with metadata."""
-        return [{"name": t.name, "description": t.description} for t in self._tools.values()]
+        return [
+            {
+                "name": t.name,
+                "description": t.description,
+                "enabled": t.name not in self._disabled,
+            }
+            for t in self._tools.values()
+        ]
