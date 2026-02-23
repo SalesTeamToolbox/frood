@@ -144,6 +144,10 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
+class ToggleRequest(BaseModel):
+    enabled: bool
+
+
 # Settings that can be changed from the dashboard (non-secret, non-security).
 # Security-critical settings (sandbox, password, JWT) are deliberately excluded.
 _DASHBOARD_EDITABLE_SETTINGS = {
@@ -215,6 +219,38 @@ def _update_env_file(env_path: Path, updates: dict[str, str]) -> None:
     env_path.write_text("\n".join(new_lines) + "\n")
 
 
+# ---------------------------------------------------------------------------
+# Tool / skill toggle state persistence
+# ---------------------------------------------------------------------------
+
+_TOGGLE_STATE_FILE = Path(__file__).parent.parent / "data" / "tool_skill_state.json"
+
+
+def _load_toggle_state() -> dict:
+    """Load persisted enabled/disabled state for tools and skills."""
+    import json
+
+    if _TOGGLE_STATE_FILE.exists():
+        try:
+            return json.loads(_TOGGLE_STATE_FILE.read_text())
+        except Exception:
+            pass
+    return {"disabled_tools": [], "disabled_skills": []}
+
+
+def _save_toggle_state(disabled_tools: list[str], disabled_skills: list[str]) -> None:
+    """Persist the current enabled/disabled state to disk."""
+    import json
+
+    _TOGGLE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _TOGGLE_STATE_FILE.write_text(
+        json.dumps(
+            {"disabled_tools": sorted(disabled_tools), "disabled_skills": sorted(disabled_skills)},
+            indent=2,
+        )
+    )
+
+
 def create_app(
     task_queue: TaskQueue,
     ws_manager: WebSocketManager,
@@ -244,9 +280,18 @@ def create_app(
         CORSMiddleware,
         allow_origins=cors_origins if cors_origins else [],
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
+
+    # Apply persisted tool/skill toggle state
+    _toggle_state = _load_toggle_state()
+    if tool_registry:
+        for name in _toggle_state.get("disabled_tools", []):
+            tool_registry.set_enabled(name, False)
+    if skill_loader:
+        for name in _toggle_state.get("disabled_skills", []):
+            skill_loader.set_enabled(name, False)
 
     # -- Health ----------------------------------------------------------------
 
@@ -800,6 +845,25 @@ def create_app(
             return tool_registry.list_tools()
         return []
 
+    @app.patch("/api/tools/{name}")
+    async def toggle_tool(
+        name: str, req: ToggleRequest, _admin: AuthContext = Depends(require_admin)
+    ):
+        """Enable or disable a tool by name (admin only)."""
+        if not tool_registry:
+            raise HTTPException(status_code=503, detail="Tool registry not available")
+        if not tool_registry.set_enabled(name, req.enabled):
+            raise HTTPException(status_code=404, detail=f"Tool '{name}' not found")
+        # Persist updated state
+        disabled = [t["name"] for t in tool_registry.list_tools() if not t["enabled"]]
+        disabled_skills: list[str] = []
+        if skill_loader:
+            disabled_skills = [
+                s.name for s in skill_loader.all_skills() if not skill_loader.is_enabled(s.name)
+            ]
+        _save_toggle_state(disabled, disabled_skills)
+        return {"name": name, "enabled": req.enabled}
+
     # -- Skills (Phase 3) -----------------------------------------------------
 
     @app.get("/api/skills")
@@ -811,10 +875,30 @@ def create_app(
                     "description": s.description,
                     "always_load": s.always_load,
                     "task_types": s.task_types,
+                    "enabled": skill_loader.is_enabled(s.name),
                 }
                 for s in skill_loader.all_skills()
             ]
         return []
+
+    @app.patch("/api/skills/{name}")
+    async def toggle_skill(
+        name: str, req: ToggleRequest, _admin: AuthContext = Depends(require_admin)
+    ):
+        """Enable or disable a skill by name (admin only)."""
+        if not skill_loader:
+            raise HTTPException(status_code=503, detail="Skill loader not available")
+        if not skill_loader.set_enabled(name, req.enabled):
+            raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+        # Persist updated state
+        disabled_skills = [
+            s.name for s in skill_loader.all_skills() if not skill_loader.is_enabled(s.name)
+        ]
+        disabled_tools: list[str] = []
+        if tool_registry:
+            disabled_tools = [t["name"] for t in tool_registry.list_tools() if not t["enabled"]]
+        _save_toggle_state(disabled_tools, disabled_skills)
+        return {"name": name, "enabled": req.enabled}
 
     # -- Settings (API Keys) --------------------------------------------------
 

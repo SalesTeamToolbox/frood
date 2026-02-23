@@ -108,6 +108,7 @@ class SkillLoader:
     def __init__(self, skill_dirs: list[str | Path]):
         self.skill_dirs = [Path(d) for d in skill_dirs]
         self._skills: dict[str, Skill] = {}
+        self._disabled: set[str] = set()
 
     def load_all(self) -> dict[str, Skill]:
         """Scan all skill directories and load SKILL.md files."""
@@ -143,16 +144,33 @@ class SkillLoader:
         """Get a loaded skill by name."""
         return self._skills.get(name)
 
+    def set_enabled(self, name: str, enabled: bool) -> bool:
+        """Enable or disable a skill by name. Returns True if skill exists."""
+        if name not in self._skills:
+            return False
+        if enabled:
+            self._disabled.discard(name)
+        else:
+            self._disabled.add(name)
+        logger.info(f"Skill '{name}' {'enabled' if enabled else 'disabled'}")
+        return True
+
+    def is_enabled(self, name: str) -> bool:
+        """Return True if the skill exists and is not disabled."""
+        return name in self._skills and name not in self._disabled
+
     def get_for_task_type(self, task_type: str) -> list[Skill]:
-        """Get all skills relevant to a task type."""
+        """Get all enabled skills relevant to a task type."""
         result = []
         for skill in self._skills.values():
+            if skill.name in self._disabled:
+                continue
             if skill.always_load or (skill.task_types and task_type in skill.task_types):
                 result.append(skill)
         return result
 
     def all_skills(self) -> list[Skill]:
-        """Return all loaded skills."""
+        """Return all loaded skills (including disabled)."""
         return list(self._skills.values())
 
     def build_skill_context(self, task_type: str) -> str:
