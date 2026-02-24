@@ -401,6 +401,8 @@ class Agent:
             task.description,
             f"\nWorking directory: {worktree_path}",
         ]
+        if task.project_id:
+            parts.append(f"\nProject ID: {task.project_id}")
 
         extensions = self._CODE_EXTENSIONS if is_code_task else self._NONCODE_EXTENSIONS
 

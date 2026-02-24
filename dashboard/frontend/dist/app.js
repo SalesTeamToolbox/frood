@@ -2299,6 +2299,9 @@ function renderProjectsBoard() {
             <span class="progress-text">${done}/${total} tasks</span>
           </div>
           ${p.tags?.length ? `<div class="project-card-tags">${p.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
+          <div class="project-card-actions" onclick="event.stopPropagation()">
+            <button class="btn btn-outline btn-xs" onclick="showCreateTaskModal('${p.id}')">+ Add Task</button>
+          </div>
         </div>`;
     }).join("");
 

@@ -25,6 +25,7 @@ from core.interview_questions import (
     get_round_sequence,
 )
 from core.project_spec import ProjectSpecGenerator
+from core.task_queue import Task, TaskType
 from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.project_interview")
@@ -43,11 +44,12 @@ class ProjectInterviewTool(Tool):
         list      — List all interview sessions
     """
 
-    def __init__(self, workspace_path: str = ".", router=None, outputs_dir: str = ""):
+    def __init__(self, workspace_path: str = ".", router=None, outputs_dir: str = "", task_queue=None):
         self._workspace = workspace_path
         self._router = router
         self._outputs_dir = outputs_dir or ".agent42/outputs"
         self._spec_generator = ProjectSpecGenerator(router=router)
+        self._task_queue = task_queue
 
     @property
     def name(self) -> str:
@@ -128,6 +130,11 @@ class ProjectInterviewTool(Tool):
                     "description": "Repository URL or path (optional, for start)",
                     "default": "",
                 },
+                "pm_project_id": {
+                    "type": "string",
+                    "description": "ProjectManager project ID to link subtasks to (optional, for start)",
+                    "default": "",
+                },
             },
             "required": ["action"],
         }
@@ -144,13 +151,14 @@ class ProjectInterviewTool(Tool):
         section: str = "",
         content: str = "",
         repo_url: str = "",
+        pm_project_id: str = "",
         **kwargs,
     ) -> ToolResult:
         if not action:
             return ToolResult(error="Action is required", success=False)
 
         if action == "start":
-            return await self._start(task_id, description, project_type, complexity, repo_url)
+            return await self._start(task_id, description, project_type, complexity, repo_url, pm_project_id)
         elif action == "respond":
             return await self._respond(project_id, response)
         elif action == "status":
@@ -175,6 +183,7 @@ class ProjectInterviewTool(Tool):
         project_type: str,
         complexity: str,
         repo_url: str,
+        pm_project_id: str = "",
     ) -> ToolResult:
         """Start a new interview session."""
         if not description:
@@ -218,6 +227,7 @@ class ProjectInterviewTool(Tool):
             "spec_version": 0,
             "repo_url": repo_url,
             "existing_codebase_summary": "",
+            "pm_project_id": pm_project_id,
         }
 
         # Persist
@@ -516,16 +526,50 @@ class ProjectInterviewTool(Tool):
         project_data["updated_at"] = time.time()
         await self._save_project(project_id, project_data)
 
-        # Save subtasks for the orchestrator to pick up
+        # Save subtasks for reference
         subtasks_path = self._project_dir(project_id) / "subtasks.json"
         async with aiofiles.open(subtasks_path, "w") as f:
             await f.write(json.dumps(subtasks, indent=2))
 
+        # Create Task objects in the queue if task_queue is wired up
+        pm_project_id = project_data.get("pm_project_id", "")
+        created_task_ids: list[str] = []
+        if self._task_queue and pm_project_id:
+            for st in subtasks:
+                type_str = st.get("task_type", "coding").upper()
+                tt = (
+                    TaskType[type_str]
+                    if type_str in TaskType.__members__
+                    else TaskType.CODING
+                )
+                new_task = Task(
+                    title=st.get("title", "Untitled subtask"),
+                    description=st.get("description", ""),
+                    task_type=tt,
+                    project_id=pm_project_id,
+                    project_spec_path=str(spec_path),
+                )
+                await self._task_queue.add(new_task)
+                created_task_ids.append(new_task.id)
+            logger.info(
+                "Created %d subtasks for project %s (interview %s)",
+                len(created_task_ids),
+                pm_project_id,
+                project_id,
+            )
+
         # Format subtask summary
+        tasks_note = (
+            f"\n**Tasks created in queue:** {len(created_task_ids)}"
+            if created_task_ids
+            else "\n*Note: Subtasks saved to JSON — add a task_queue to auto-create them.*"
+        )
         lines = [
             "## Spec Approved — Subtasks Generated\n",
             f"**Project:** `{project_id}`",
-            f"**Subtasks:** {len(subtasks)}\n",
+            f"**Subtasks:** {len(subtasks)}",
+            tasks_note,
+            "",
         ]
         for i, st in enumerate(subtasks):
             deps = st.get("depends_on", [])
@@ -541,8 +585,8 @@ class ProjectInterviewTool(Tool):
         lines.append(
             f"\nSpec path: `{spec_path}`\n"
             f"Subtasks path: `{subtasks_path}`\n\n"
-            f"The subtasks should now be created in the task queue, each referencing "
-            f"the PROJECT_SPEC.md for context."
+            f"The tasks are now in the queue and will be picked up by the coding agents. "
+            f"You can track progress in Mission Control → Projects."
         )
 
         return ToolResult(output="\n".join(lines), success=True)
