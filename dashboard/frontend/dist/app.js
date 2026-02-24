@@ -2300,11 +2300,11 @@ function renderProjectsBoard() {
     }).join("");
 
     return `
-      <div class="kanban-col">
-        <div class="kanban-col-header" style="border-top:3px solid ${statusColors[s]}">
-          <span>${statusLabels[s]}</span><span class="kanban-count">${items.length}</span>
+      <div class="kanban-column" style="border-top:3px solid ${statusColors[s]}">
+        <div class="kanban-column-header">
+          <span>${statusLabels[s]}</span><span class="count">${items.length}</span>
         </div>
-        <div class="kanban-col-body">${cards || '<div class="kanban-empty">No projects</div>'}</div>
+        <div class="kanban-column-body">${cards || '<div style="color:var(--text-muted);font-size:0.8rem;text-align:center;padding:1rem">No projects</div>'}</div>
       </div>`;
   }).join("");
 
