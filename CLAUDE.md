@@ -131,6 +131,15 @@ during Claude Code sessions without manual activation.
 | App Mode | `internal` (Agent42 system tool) or `external` (app being developed for public release) |
 | App Visibility | `private` (dashboard-only), `unlisted` (anyone with URL), `public` (listed openly) |
 | App API | Agent-to-app HTTP interaction — lets Agent42 call a running app's endpoints via `app_api` |
+| Project Interview | Structured discovery process (`tools/project_interview.py`) for complex project-level tasks |
+| Project Spec | `PROJECT_SPEC.md` — central specification document produced by the interview, referenced by all subtasks |
+| Interview Questions | `core/interview_questions.py` — question banks organized by project type and theme |
+| Spec Generator | `core/project_spec.py` — synthesizes interview data into PROJECT_SPEC.md and decomposes into subtasks |
+| PM Skill | `skills/builtins/project-interview/` — guides the agent through the interview workflow |
+| App Runtime | How an app runs: `static`, `python`, `node`, or `docker` |
+| App Mode | `internal` (Agent42 system tool) or `external` (app being developed for public release) |
+| App Visibility | `private` (dashboard-only), `unlisted` (anyone with URL), `public` (listed openly) |
+| App API | Agent-to-app HTTP interaction — lets Agent42 call a running app's endpoints via `app_api` |
 
 ---
 
@@ -181,7 +190,9 @@ agent42/
 │   ├── notification_service.py # Webhook and email notifications
 │   ├── url_policy.py       # URL allowlist/denylist for SSRF protection
 │   ├── complexity.py       # Task complexity estimation
-│   └── app_manager.py      # App lifecycle management (create, build, run, stop)
+│   ├── app_manager.py      # App lifecycle management (create, build, run, stop)
+│   ├── interview_questions.py # Question banks for project discovery interviews
+│   └── project_spec.py     # PROJECT_SPEC.md generator and subtask decomposer
 │
 ├── providers/              # LLM provider registry
 │   └── registry.py         # ProviderSpec, ModelSpec, spending tracker, 6 providers
@@ -229,7 +240,8 @@ agent42/
 │   ├── tunnel_tool.py      # Tunnel manager (cloudflared, serveo, localhost.run)
 │   ├── knowledge_tool.py   # Knowledge base / RAG (import, chunk, query)
 │   ├── vision_tool.py      # Image analysis (Pillow compress, LLM vision API)
-│   └── app_tool.py         # App lifecycle management tool (create, start, stop)
+│   ├── app_tool.py         # App lifecycle management tool (create, start, stop)
+│   └── project_interview.py # Project discovery interview + spec generation
 │
 ├── skills/                 # Pluggable skill system
 │   ├── loader.py           # SKILL.md discovery, YAML frontmatter parsing
@@ -245,7 +257,8 @@ agent42/
 │       ├── docker-deploy/  # Dockerfile, docker-compose, registry workflows
 │       ├── cms-deploy/     # Ghost, Strapi, general CMS patterns
 │       ├── app-builder/   # Build complete web apps from descriptions
-│       └── ... (40 total)
+│       ├── project-interview/ # Structured discovery interviews + spec generation
+│       └── ... (41 total)
 │
 ├── memory/                 # Persistence and semantic search
 │   ├── store.py            # MEMORY.md + HISTORY.md two-layer pattern
@@ -269,8 +282,8 @@ agent42/
 │   └── email_channel.py    # IMAP/SMTP email integration
 │
 ├── deploy/                 # Production deployment
-│   ├── install-server.sh   # Full server setup (nginx, SSL, systemd, firewall)
-│   └── nginx-agent42.conf  # Reverse proxy with rate limiting + security headers
+│   ├── install-server.sh   # Full server setup (Redis, Qdrant, nginx, SSL, systemd, firewall)
+│   └── nginx-agent42.conf  # Reverse proxy template (__DOMAIN__/__PORT__ placeholders)
 │
 ├── apps/                   # User-created applications (auto-created)
 │   ├── <app-id>/           # Each app in its own directory
@@ -575,6 +588,15 @@ See `.env.example` for the complete list of configuration variables.
 | `APPS_DEFAULT_MODE` | Default mode for new apps (`internal`/`external`) | `internal` |
 | `APPS_REQUIRE_AUTH_DEFAULT` | Require dashboard auth by default for new apps | `false` |
 
+### Project Interview Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `PROJECT_INTERVIEW_ENABLED` | Enable structured project discovery interviews | `true` |
+| `PROJECT_INTERVIEW_MODE` | Gating mode: `auto` (complexity-based), `always`, `never` | `auto` |
+| `PROJECT_INTERVIEW_MAX_ROUNDS` | Maximum interview rounds | `4` |
+| `PROJECT_INTERVIEW_MIN_COMPLEXITY` | Minimum complexity to trigger: `moderate` or `complex` | `moderate` |
+
 See `.env.example` for the complete list of 80+ configuration variables.
 
 ---
@@ -763,10 +785,10 @@ Include *what* and *why*, not just *what*.
 
 ```bash
 git clone <repo> agent42 && cd agent42
-bash setup.sh                    # Creates .venv, installs deps, creates .env
-nano .env                        # Set OPENROUTER_API_KEY + DASHBOARD_PASSWORD
+bash setup.sh                    # Creates .venv, installs deps, builds frontend
 source .venv/bin/activate
 python agent42.py                # http://localhost:8000
+# Open browser — setup wizard handles password, API key, and memory
 ```
 
 ### Production (Server)
@@ -775,11 +797,13 @@ python agent42.py                # http://localhost:8000
 scp -r agent42/ user@server:~/agent42
 ssh user@server
 cd ~/agent42
-bash deploy/install-server.sh    # nginx + SSL + systemd + firewall
+bash deploy/install-server.sh    # Prompts for domain, installs Redis + Qdrant + nginx + SSL + systemd
+# Open https://yourdomain.com — setup wizard handles password and API key
 ```
 
-The install script handles: setup.sh, .env configuration, nginx reverse proxy,
-Let's Encrypt SSL, systemd service, UFW firewall. See `deploy/install-server.sh`.
+The install script handles: setup.sh, Redis (apt), Qdrant (binary + systemd),
+nginx reverse proxy (templated), Let's Encrypt SSL, Agent42 systemd service,
+UFW firewall. Redis and Qdrant URLs are pre-configured in .env.
 
 **Service commands:**
 ```bash
@@ -826,8 +850,14 @@ docker compose down              # Stop
 | 20 | Tests | `cryptography` panics with `_cffi_backend` error | Install `cffi` (`pip install cffi`) before running dashboard/auth tests |
 | 21 | Apps | App entry point missing PORT/HOST env var reading | Always read `os.environ.get("PORT", "8080")` — AppManager sets these |
 | 22 | Apps | New `TaskType` not in `FREE_ROUTING` dict | Add routing entry to `agents/model_router.py` `FREE_ROUTING` for every new TaskType |
-| 23 | Apps | `APPS_GITHUB_TOKEN` leaked to app subprocess | Token is in `_sanitize_env()` blocked list; never passed to child processes |
-| 24 | Formatting | CI fails with `ruff format --check` after merge | Always run `make format` (or `ruff format .`) before committing — especially after merges that touch multiple files |
+| 23 | Formatting | CI fails with `ruff format --check` after merge | Always run `make format` (or `ruff format .`) before committing — especially after merges that touch multiple files |
+| 24 | Deploy | Hardcoded domain/port in install scripts and nginx config | Use `__DOMAIN__`/`__PORT__` placeholders in `nginx-agent42.conf`; `install-server.sh` prompts for values and sed-replaces |
+| 25 | Deploy | Install scripts leak interactive output when composed | Use `--quiet` flag when calling `setup.sh` from `install-server.sh` to suppress banners and prompts |
+| 26 | Dashboard | CSP `script-src 'self'` blocks all inline event handlers (`onclick`, `onsubmit`) | CSP must include `'unsafe-inline'` in `script-src` because `app.js` uses innerHTML with 55+ inline handlers |
+| 27 | Startup | `agent42.log` owned by root (from systemd) blocks `deploy` user startup | Catch `PermissionError` on `FileHandler`; fall back to stdout-only logging |
+| 28 | Auth | `passlib 1.7.4` crashes with `bcrypt >= 4.1` (wrap-bug detection hashes >72-byte secret) | Use `bcrypt` directly via `_BcryptContext` wrapper in `dashboard/auth.py`; do not use `passlib` |
+| 29 | Interview | New `TaskType.PROJECT_SETUP` not in `_TASK_TYPE_KEYWORDS` — it's triggered via complexity gating, not keywords | Detection flows through `ComplexityAssessor.needs_project_setup` and `IntentClassifier.needs_project_setup`, not keyword matching |
+| 30 | Interview | Project interview tool stores state in `PROJECT.json` — if outputs dir changes, sessions are lost | Always use `settings.outputs_dir` consistently; sessions are keyed by `project_id` subdirectory |
 
 ---
 

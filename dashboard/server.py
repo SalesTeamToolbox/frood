@@ -51,7 +51,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'"
         )
         response.headers["Permissions-Policy"] = (
@@ -83,6 +84,8 @@ class TaskCreateRequest(BaseModel):
     task_type: str = "coding"
     priority: int = 0
     context_window: str = "default"
+    repo_id: str = ""
+    branch: str = ""
 
 
 # Passwords treated as unconfigured — trigger the setup wizard
@@ -132,6 +135,51 @@ class KeyUpdateRequest(BaseModel):
     keys: dict[str, str]
 
 
+class SettingsUpdateRequest(BaseModel):
+    settings: dict[str, str]
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class ToggleRequest(BaseModel):
+    enabled: bool
+
+
+# Settings that can be changed from the dashboard (non-secret, non-security).
+# Security-critical settings (sandbox, password, JWT) are deliberately excluded.
+_DASHBOARD_EDITABLE_SETTINGS = {
+    "MAX_CONCURRENT_AGENTS",
+    "MAX_DAILY_API_SPEND_USD",
+    "DEFAULT_REPO_PATH",
+    "TASKS_JSON_PATH",
+    "MCP_SERVERS_JSON",
+    "CRON_JOBS_PATH",
+    "MEMORY_DIR",
+    "SESSIONS_DIR",
+    "OUTPUTS_DIR",
+    "TEMPLATES_DIR",
+    "IMAGES_DIR",
+    "SKILLS_DIRS",
+    "DISCORD_GUILD_IDS",
+    "EMAIL_IMAP_HOST",
+    "EMAIL_IMAP_PORT",
+    "EMAIL_SMTP_HOST",
+    "EMAIL_SMTP_PORT",
+    "LOGIN_RATE_LIMIT",
+    "MAX_WEBSOCKET_CONNECTIONS",
+    "CORS_ALLOWED_ORIGINS",
+    "DASHBOARD_HOST",
+    "DASHBOARD_USERNAME",
+    "CUSTOM_TOOLS_DIR",
+    "MODEL_TRIAL_PERCENTAGE",
+    "MODEL_CATALOG_REFRESH_HOURS",
+    "MODEL_RESEARCH_ENABLED",
+}
+
+
 def _update_env_file(env_path: Path, updates: dict[str, str]) -> None:
     """Update or add key=value pairs in a .env file.
 
@@ -171,6 +219,38 @@ def _update_env_file(env_path: Path, updates: dict[str, str]) -> None:
     env_path.write_text("\n".join(new_lines) + "\n")
 
 
+# ---------------------------------------------------------------------------
+# Tool / skill toggle state persistence
+# ---------------------------------------------------------------------------
+
+_TOGGLE_STATE_FILE = Path(__file__).parent.parent / "data" / "tool_skill_state.json"
+
+
+def _load_toggle_state() -> dict:
+    """Load persisted enabled/disabled state for tools and skills."""
+    import json
+
+    if _TOGGLE_STATE_FILE.exists():
+        try:
+            return json.loads(_TOGGLE_STATE_FILE.read_text())
+        except Exception:
+            pass
+    return {"disabled_tools": [], "disabled_skills": []}
+
+
+def _save_toggle_state(disabled_tools: list[str], disabled_skills: list[str]) -> None:
+    """Persist the current enabled/disabled state to disk."""
+    import json
+
+    _TOGGLE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _TOGGLE_STATE_FILE.write_text(
+        json.dumps(
+            {"disabled_tools": sorted(disabled_tools), "disabled_skills": sorted(disabled_skills)},
+            indent=2,
+        )
+    )
+
+
 def create_app(
     task_queue: TaskQueue,
     ws_manager: WebSocketManager,
@@ -183,6 +263,7 @@ def create_app(
     heartbeat=None,
     key_store=None,
     app_manager=None,
+    repo_manager=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -199,9 +280,18 @@ def create_app(
         CORSMiddleware,
         allow_origins=cors_origins if cors_origins else [],
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
+
+    # Apply persisted tool/skill toggle state
+    _toggle_state = _load_toggle_state()
+    if tool_registry:
+        for name in _toggle_state.get("disabled_tools", []):
+            tool_registry.set_enabled(name, False)
+    if skill_loader:
+        for name in _toggle_state.get("disabled_skills", []):
+            skill_loader.set_enabled(name, False)
 
     # -- Health ----------------------------------------------------------------
 
@@ -249,9 +339,14 @@ def create_app(
             "uptime_seconds": 0,
             "memory_mb": 0,
             "tools_registered": 0,
-            **{k: v for k, v in cap.items() if k != "configured_max"},
+            **{
+                k: v
+                for k, v in cap.items()
+                if k not in ("configured_max", "auto_mode", "effective_max", "reason")
+            },
             "effective_max_agents": cap["effective_max"],
             "configured_max_agents": cap["configured_max"],
+            "capacity_auto_mode": cap.get("auto_mode", False),
             "capacity_reason": cap["reason"],
         }
 
@@ -341,20 +436,20 @@ def create_app(
                     "REDIS_URL": "redis://localhost:6379/0",
                 },
             )
-            # Auto-queue a task to install pip packages and guide Docker setup
+            # Auto-queue a task to verify memory backend connectivity
             setup_task = Task(
-                title="Set up enhanced memory (Qdrant + Redis)",
+                title="Verify enhanced memory (Qdrant + Redis)",
                 description=(
                     "The setup wizard selected Qdrant + Redis for enhanced memory.\n\n"
-                    "Please complete the following steps:\n\n"
-                    "1. Install the Python client libraries:\n"
-                    "   pip install qdrant-client 'redis[hiredis]'\n\n"
-                    "2. Start the Docker services (run these in a terminal):\n"
-                    "   docker run -d --name qdrant -p 6333:6333 qdrant/qdrant\n"
-                    "   docker run -d --name redis -p 6379:6379 redis:alpine\n\n"
-                    "3. Verify connectivity — confirm both services are reachable at\n"
-                    "   http://localhost:6333 (Qdrant) and redis://localhost:6379 (Redis).\n\n"
-                    "4. Restart Agent42 to pick up the new .env settings.\n\n"
+                    "If you used the production installer (deploy/install-server.sh),\n"
+                    "Redis and Qdrant are already running as system services.\n\n"
+                    "Verify connectivity:\n"
+                    "  - Qdrant: curl http://localhost:6333/healthz\n"
+                    "  - Redis:  redis-cli ping\n\n"
+                    "If running locally without the installer, start them manually:\n"
+                    "  sudo apt install redis-server\n"
+                    "  # See docs for Qdrant installation\n\n"
+                    "Restart Agent42 to pick up the new .env settings.\n\n"
                     "The .env file has already been configured with:\n"
                     "  QDRANT_URL=http://localhost:6333\n"
                     "  QDRANT_ENABLED=true\n"
@@ -420,6 +515,49 @@ def create_app(
         logger.info(f"Successful login for '{req.username}' from {client_ip}")
         return {"token": create_token(req.username)}
 
+    @app.post("/api/settings/password")
+    async def change_password(
+        req: ChangePasswordRequest,
+        request: Request,
+        _admin: AuthContext = Depends(require_admin),
+    ):
+        """Change the dashboard password. Requires current password verification."""
+        client_ip = request.client.host if request.client else "unknown"
+
+        if not check_rate_limit(client_ip):
+            raise HTTPException(
+                status_code=429,
+                detail="Too many attempts. Try again in 1 minute.",
+            )
+
+        if not verify_password(req.current_password):
+            logger.warning(
+                "Failed password change attempt from %s — wrong current password", client_ip
+            )
+            raise HTTPException(status_code=401, detail="Current password is incorrect.")
+
+        new_password = req.new_password.strip()
+        if len(new_password) < 8:
+            raise HTTPException(
+                status_code=400,
+                detail="New password must be at least 8 characters.",
+            )
+
+        new_hash = pwd_context.hash(new_password)
+        env_path = Path(__file__).parent.parent / ".env"
+        _update_env_file(
+            env_path,
+            {
+                "DASHBOARD_PASSWORD_HASH": new_hash,
+                "DASHBOARD_PASSWORD": "",
+            },
+        )
+        Settings.reload_from_env()
+
+        logger.info("Password changed successfully from %s", client_ip)
+        token = create_token(settings.dashboard_username)
+        return {"status": "ok", "token": token, "message": "Password changed successfully."}
+
     # -- Tasks -----------------------------------------------------------------
 
     @app.get("/api/tasks")
@@ -435,6 +573,8 @@ def create_app(
             priority=req.priority,
             context_window=req.context_window,
             origin_device_id=auth.device_id,
+            repo_id=req.repo_id,
+            branch=req.branch,
         )
         await task_queue.add(task)
         return task.to_dict()
@@ -705,6 +845,25 @@ def create_app(
             return tool_registry.list_tools()
         return []
 
+    @app.patch("/api/tools/{name}")
+    async def toggle_tool(
+        name: str, req: ToggleRequest, _admin: AuthContext = Depends(require_admin)
+    ):
+        """Enable or disable a tool by name (admin only)."""
+        if not tool_registry:
+            raise HTTPException(status_code=503, detail="Tool registry not available")
+        if not tool_registry.set_enabled(name, req.enabled):
+            raise HTTPException(status_code=404, detail=f"Tool '{name}' not found")
+        # Persist updated state
+        disabled = [t["name"] for t in tool_registry.list_tools() if not t["enabled"]]
+        disabled_skills: list[str] = []
+        if skill_loader:
+            disabled_skills = [
+                s.name for s in skill_loader.all_skills() if not skill_loader.is_enabled(s.name)
+            ]
+        _save_toggle_state(disabled, disabled_skills)
+        return {"name": name, "enabled": req.enabled}
+
     # -- Skills (Phase 3) -----------------------------------------------------
 
     @app.get("/api/skills")
@@ -716,10 +875,30 @@ def create_app(
                     "description": s.description,
                     "always_load": s.always_load,
                     "task_types": s.task_types,
+                    "enabled": skill_loader.is_enabled(s.name),
                 }
                 for s in skill_loader.all_skills()
             ]
         return []
+
+    @app.patch("/api/skills/{name}")
+    async def toggle_skill(
+        name: str, req: ToggleRequest, _admin: AuthContext = Depends(require_admin)
+    ):
+        """Enable or disable a skill by name (admin only)."""
+        if not skill_loader:
+            raise HTTPException(status_code=503, detail="Skill loader not available")
+        if not skill_loader.set_enabled(name, req.enabled):
+            raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+        # Persist updated state
+        disabled_skills = [
+            s.name for s in skill_loader.all_skills() if not skill_loader.is_enabled(s.name)
+        ]
+        disabled_tools: list[str] = []
+        if tool_registry:
+            disabled_tools = [t["name"] for t in tool_registry.list_tools() if not t["enabled"]]
+        _save_toggle_state(disabled_tools, disabled_skills)
+        return {"name": name, "enabled": req.enabled}
 
     # -- Settings (API Keys) --------------------------------------------------
 
@@ -756,6 +935,45 @@ def create_app(
         # automatically via os.getenv() in _build_client().
         return {"status": "ok", "updated": updated, "errors": errors}
 
+    # -- Settings (Editable .env) ----------------------------------------------
+
+    @app.get("/api/settings/env")
+    async def get_env_settings(_admin: AuthContext = Depends(require_admin)):
+        """Get current values for dashboard-editable settings."""
+        import os
+
+        result: dict[str, str] = {}
+        for key in _DASHBOARD_EDITABLE_SETTINGS:
+            result[key] = os.getenv(key, "")
+        return result
+
+    @app.put("/api/settings/env")
+    async def update_env_settings(
+        req: SettingsUpdateRequest, _admin: AuthContext = Depends(require_admin)
+    ):
+        """Update .env settings and hot-reload the config."""
+        import os
+
+        env_path = Path(__file__).parent.parent / ".env"
+        errors = []
+        updated = []
+
+        updates = {}
+        for key, value in req.settings.items():
+            if key not in _DASHBOARD_EDITABLE_SETTINGS:
+                errors.append(f"{key} is not editable from the dashboard")
+                continue
+            updates[key] = value.strip()
+            updated.append(key)
+
+        if updates:
+            _update_env_file(env_path, updates)
+            for key, value in updates.items():
+                os.environ[key] = value
+            Settings.reload_from_env()
+
+        return {"status": "ok", "updated": updated, "errors": errors}
+
     # -- Channels (Phase 2) ---------------------------------------------------
 
     @app.get("/api/channels")
@@ -763,6 +981,68 @@ def create_app(
         if channel_manager:
             return channel_manager.list_channels()
         return []
+
+    # -- Chat ------------------------------------------------------------------
+
+    # Chat history is stored on ws_manager.chat_messages so agent42.py
+    # can also append assistant messages (ensuring reload persistence).
+    _chat_messages = ws_manager.chat_messages
+
+    class ChatSendRequest(BaseModel):
+        message: str
+
+    @app.get("/api/chat/messages")
+    async def get_chat_messages(_user: str = Depends(get_current_user)):
+        """Return the dashboard chat history."""
+        return _chat_messages[-200:]  # Last 200 messages
+
+    @app.post("/api/chat/send")
+    async def send_chat_message(
+        req: ChatSendRequest, auth: AuthContext = Depends(get_auth_context)
+    ):
+        """Send a message in the dashboard chat.
+
+        Creates a task from the user's message so an agent processes it.
+        The agent's result is posted back as an assistant message via the
+        task_update callback.
+        """
+        import time as _time
+        import uuid as _uuid
+
+        text = req.message.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="Message cannot be empty.")
+        if len(text) > 4000:
+            raise HTTPException(status_code=400, detail="Message too long (max 4000 chars).")
+
+        msg_id = _uuid.uuid4().hex[:12]
+        user_msg = {
+            "id": msg_id,
+            "role": "user",
+            "content": text,
+            "timestamp": _time.time(),
+            "sender": auth.user,
+        }
+        _chat_messages.append(user_msg)
+        await ws_manager.broadcast("chat_message", user_msg)
+
+        # Infer task type from message
+        from core.task_queue import infer_task_type
+
+        task_type = infer_task_type(text)
+
+        task = Task(
+            title=text[:120] + ("..." if len(text) > 120 else ""),
+            description=text,
+            task_type=task_type,
+            priority=1,
+            origin_channel="dashboard_chat",
+            origin_channel_id="chat",
+            origin_metadata={"chat_msg_id": msg_id},
+        )
+        await task_queue.add(task)
+
+        return {"status": "ok", "message": user_msg, "task_id": task.id}
 
     # -- WebSocket -------------------------------------------------------------
 
@@ -829,6 +1109,83 @@ def create_app(
                 # but we validate and log for future use
         except WebSocketDisconnect:
             ws_manager.disconnect(ws)
+
+    # -- Repositories ----------------------------------------------------------
+
+    if repo_manager:
+
+        class RepoCreateRequest(BaseModel):
+            name: str
+            source: str = "local"  # "local" or "github"
+            local_path: str = ""  # for source=local
+            github_repo: str = ""  # for source=github (owner/repo)
+            default_branch: str = "main"
+            tags: list[str] = []
+
+        @app.get("/api/repos")
+        async def list_repos(_user: str = Depends(get_current_user)):
+            """List all connected repositories."""
+            return [r.to_dict() for r in repo_manager.list_repos()]
+
+        @app.post("/api/repos")
+        async def create_repo(req: RepoCreateRequest, _admin: AuthContext = Depends(require_admin)):
+            """Add a repository (local path or clone from GitHub)."""
+            if req.source == "github":
+                if not req.github_repo:
+                    raise HTTPException(400, "github_repo is required for source=github")
+                repo = await repo_manager.add_from_github(
+                    github_repo=req.github_repo,
+                    default_branch=req.default_branch,
+                    tags=req.tags,
+                )
+            else:
+                if not req.local_path:
+                    raise HTTPException(400, "local_path is required for source=local")
+                repo = await repo_manager.add_local(
+                    name=req.name,
+                    local_path=req.local_path,
+                    default_branch=req.default_branch,
+                    tags=req.tags,
+                )
+            return repo.to_dict()
+
+        @app.get("/api/repos/{repo_id}")
+        async def get_repo(repo_id: str, _user: str = Depends(get_current_user)):
+            """Get a single repository by ID."""
+            repo = repo_manager.get(repo_id)
+            if not repo:
+                raise HTTPException(404, "Repository not found")
+            return repo.to_dict()
+
+        @app.delete("/api/repos/{repo_id}")
+        async def delete_repo(repo_id: str, _admin: AuthContext = Depends(require_admin)):
+            """Remove a repository from the registry."""
+            try:
+                await repo_manager.remove(repo_id)
+            except ValueError as e:
+                raise HTTPException(404, str(e))
+            return {"status": "removed"}
+
+        @app.get("/api/repos/{repo_id}/branches")
+        async def list_repo_branches(repo_id: str, _user: str = Depends(get_current_user)):
+            """List branches for a repository."""
+            branches = await repo_manager.list_branches(repo_id)
+            return {"branches": branches}
+
+        @app.post("/api/repos/{repo_id}/sync")
+        async def sync_repo(repo_id: str, _user: str = Depends(get_current_user)):
+            """Fetch latest changes for a repository."""
+            try:
+                msg = await repo_manager.sync_repo(repo_id)
+            except ValueError as e:
+                raise HTTPException(404, str(e))
+            return {"status": "ok", "message": msg}
+
+        @app.get("/api/github/repos")
+        async def list_github_repos(_admin: AuthContext = Depends(require_admin)):
+            """List repos from the connected GitHub account."""
+            repos = await repo_manager.list_github_repos()
+            return {"repos": repos}
 
     # -- Apps Platform ---------------------------------------------------------
 

@@ -15,10 +15,10 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from core.config import settings
 from core.device_auth import API_KEY_PREFIX, DeviceStore
@@ -28,7 +28,28 @@ logger = logging.getLogger("agent42.auth")
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+class _BcryptContext:
+    """Minimal bcrypt wrapper replacing passlib.CryptContext.
+
+    passlib 1.7.4 is incompatible with bcrypt >= 4.1 (its internal
+    wrap-bug detection hashes a >72-byte secret, which newer bcrypt
+    rejects with ValueError).  Using bcrypt directly avoids this.
+    """
+
+    @staticmethod
+    def hash(secret: str) -> str:
+        return bcrypt.hashpw(secret.encode(), bcrypt.gensalt()).decode()
+
+    @staticmethod
+    def verify(secret: str, hashed: str) -> bool:
+        try:
+            return bcrypt.checkpw(secret.encode(), hashed.encode())
+        except (ValueError, TypeError):
+            return False
+
+
+pwd_context = _BcryptContext()
 security = HTTPBearer()
 
 # Rate limiting: track login attempts per IP

@@ -33,6 +33,23 @@ const state = {
   apiKeys: {},
   keyEdits: {},
   keySaving: false,
+  // Chat
+  chatMessages: [],
+  chatInput: "",
+  chatSending: false,
+  canvasOpen: false,
+  canvasContent: "",
+  canvasTitle: "",
+  canvasLang: "",
+  // Editable settings
+  envSettings: {},
+  envEdits: {},
+  envSaving: false,
+  // Repositories
+  repos: [],
+  repoBranches: {},
+  githubRepos: [],
+  githubLoading: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -147,7 +164,7 @@ async function handleSetupStep3() {
       await loadAll();
       render();
       if (data.setup_task_id) {
-        toast("Welcome! A setup task has been queued for Docker services.", "success");
+        toast("Welcome! A setup task has been queued to verify memory services.", "success");
       } else {
         toast("Welcome to Agent42!", "success");
       }
@@ -231,7 +248,7 @@ function renderSetupWizard() {
           <div class="memory-option-radio"></div>
           <div class="memory-option-body">
             <div class="memory-option-title">Qdrant + Redis</div>
-            <div class="memory-option-desc">Full semantic search + fast session caching. Requires Docker for both services.</div>
+            <div class="memory-option-desc">Full semantic search + fast session caching. Services may already be running if installed via install-server.sh.</div>
             <div class="memory-option-tag">Full Power</div>
           </div>
         </div>
@@ -245,7 +262,7 @@ function renderSetupWizard() {
     const mem = result.memory_backend || "skip";
     let extraMsg = "";
     if (mem === "qdrant_redis" && result.setup_task_id) {
-      extraMsg = `<p class="setup-desc" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">A setup task has been queued to guide you through starting the Docker services.</p>`;
+      extraMsg = `<p class="setup-desc" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">A setup task has been queued to verify the memory services are running.</p>`;
     } else if (mem === "qdrant_embedded") {
       extraMsg = `<p class="setup-desc" style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted)">Embedded Qdrant enabled. Run <code style="background:var(--bg-tertiary);padding:0.1em 0.3em;border-radius:3px">pip install qdrant-client</code> if not installed yet.</p>`;
     }
@@ -332,6 +349,18 @@ function handleWSMessage(msg) {
     if (state.page === "apps") renderApps();
   } else if (msg.type === "agent_stall") {
     toast(`Agent stalled: ${msg.data.task_id}`, "error");
+  } else if (msg.type === "chat_message") {
+    // Deduplicate: if we optimistically added this user message, replace with server version
+    if (msg.data.role === "user") {
+      const idx = state.chatMessages.findIndex(m => m.id?.startsWith("local-") && m.content === msg.data.content);
+      if (idx >= 0) { state.chatMessages[idx] = msg.data; }
+      else { state.chatMessages.push(msg.data); }
+    } else {
+      state.chatMessages.push(msg.data);
+      // Agent responded — clear typing indicator
+      state.chatSending = false;
+    }
+    if (state.page === "chat") renderChat();
   }
 }
 
@@ -355,6 +384,20 @@ async function loadTasks() {
   } catch { state.tasks = []; }
 }
 
+async function loadRepos() {
+  try {
+    state.repos = (await api("/repos")) || [];
+  } catch { state.repos = []; }
+}
+
+async function loadRepoBranches(repoId) {
+  if (state.repoBranches[repoId]) return;
+  try {
+    const data = await api(`/repos/${repoId}/branches`);
+    state.repoBranches[repoId] = data.branches || [];
+  } catch { state.repoBranches[repoId] = []; }
+}
+
 async function loadApprovals() {
   try {
     state.approvals = (await api("/approvals")) || [];
@@ -371,6 +414,38 @@ async function loadSkills() {
   try {
     state.skills = (await api("/skills")) || [];
   } catch { state.skills = []; }
+}
+
+async function toggleTool(name, enabled) {
+  try {
+    await api(`/tools/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    });
+    await loadTools();
+    renderTools();
+    toast(`Tool '${name}' ${enabled ? "enabled" : "disabled"}`, "success");
+  } catch (e) {
+    toast("Failed to update tool: " + e.message, "error");
+    await loadTools();
+    renderTools();
+  }
+}
+
+async function toggleSkill(name, enabled) {
+  try {
+    await api(`/skills/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    });
+    await loadSkills();
+    renderSkills();
+    toast(`Skill '${name}' ${enabled ? "enabled" : "disabled"}`, "success");
+  } catch (e) {
+    toast("Failed to update skill: " + e.message, "error");
+    await loadSkills();
+    renderSkills();
+  }
 }
 
 async function loadChannels() {
@@ -431,6 +506,97 @@ async function saveApiKeys() {
   renderSettingsPanel();
 }
 
+async function loadEnvSettings() {
+  try {
+    state.envSettings = (await api("/settings/env")) || {};
+  } catch { state.envSettings = {}; }
+}
+
+async function saveEnvSettings() {
+  state.envSaving = true;
+  renderSettingsPanel();
+  try {
+    await api("/settings/env", {
+      method: "PUT",
+      body: JSON.stringify({ settings: state.envEdits }),
+    });
+    state.envEdits = {};
+    await loadEnvSettings();
+    toast("Settings saved. Some changes may require a restart.", "success");
+  } catch (e) {
+    toast("Failed to save: " + e.message, "error");
+  }
+  state.envSaving = false;
+  renderSettingsPanel();
+}
+
+async function changePassword() {
+  const errEl = document.getElementById("cp-error");
+  const btn = document.getElementById("cp-btn");
+  const currentPass = document.getElementById("cp-current")?.value || "";
+  const newPass = document.getElementById("cp-new")?.value || "";
+  const confirmPass = document.getElementById("cp-confirm")?.value || "";
+  if (errEl) errEl.textContent = "";
+
+  if (!currentPass) { if (errEl) errEl.textContent = "Current password is required."; return; }
+  if (newPass.length < 8) { if (errEl) errEl.textContent = "New password must be at least 8 characters."; return; }
+  if (newPass !== confirmPass) { if (errEl) errEl.textContent = "New passwords do not match."; return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = "Changing..."; }
+  try {
+    const data = await api("/settings/password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPass, new_password: newPass }),
+    });
+    if (data.token) {
+      state.token = data.token;
+      localStorage.setItem("agent42_token", data.token);
+    }
+    toast("Password changed successfully.", "success");
+    if (document.getElementById("cp-current")) document.getElementById("cp-current").value = "";
+    if (document.getElementById("cp-new")) document.getElementById("cp-new").value = "";
+    if (document.getElementById("cp-confirm")) document.getElementById("cp-confirm").value = "";
+  } catch (e) {
+    if (errEl) errEl.textContent = e.message || "Failed to change password.";
+    toast("Failed to change password: " + e.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Change Password"; }
+  }
+}
+
+async function loadChatMessages() {
+  try {
+    state.chatMessages = (await api("/chat/messages")) || [];
+  } catch { state.chatMessages = []; }
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById("chat-input");
+  const text = (input?.value || "").trim();
+  if (!text || state.chatSending) return;
+  state.chatSending = true;
+  // Optimistic: add user message immediately
+  state.chatMessages.push({
+    id: "local-" + Date.now(),
+    role: "user",
+    content: text,
+    timestamp: Date.now() / 1000,
+    sender: "You",
+  });
+  if (input) input.value = "";
+  if (state.page === "chat") renderChat();
+  try {
+    await api("/chat/send", {
+      method: "POST",
+      body: JSON.stringify({ message: text }),
+    });
+  } catch (e) {
+    toast("Failed to send: " + e.message, "error");
+  }
+  state.chatSending = false;
+  if (state.page === "chat") renderChat();
+}
+
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
@@ -471,11 +637,14 @@ function doLogout() {
   render();
 }
 
-async function doCreateTask(title, description, taskType) {
+async function doCreateTask(title, description, taskType, repoId, branch) {
   try {
+    const body = { title, description, task_type: taskType };
+    if (repoId) body.repo_id = repoId;
+    if (branch) body.branch = branch;
     await api("/tasks", {
       method: "POST",
-      body: JSON.stringify({ title, description, task_type: taskType }),
+      body: JSON.stringify(body),
     });
     await loadTasks();
     renderTasks();
@@ -664,6 +833,7 @@ function showCreateTaskModal() {
     "coding","debugging","research","refactoring","documentation",
     "marketing","email","design","content","strategy","data_analysis","project_management"
   ];
+  const repoOptions = state.repos.map((r) => `<option value="${esc(r.id)}">${esc(r.name)} (${esc(r.default_branch)})</option>`).join("");
   showModal(`
     <div class="modal">
       <div class="modal-header"><h3>Create Task</h3>
@@ -685,6 +855,22 @@ function showCreateTaskModal() {
           </select>
           <div class="help">The task type determines which model, critic, and skills are used.</div>
         </div>
+        ${state.repos.length > 0 ? `
+        <div class="form-group">
+          <label for="ct-repo">Repository</label>
+          <select id="ct-repo" onchange="onTaskRepoChange(this.value)">
+            <option value="">None (default)</option>
+            ${repoOptions}
+          </select>
+          <div class="help">Select the repo the agent should work in.</div>
+        </div>
+        <div class="form-group" id="ct-branch-group" style="display:none">
+          <label for="ct-branch">Branch</label>
+          <select id="ct-branch">
+            <option value="">Default branch</option>
+          </select>
+        </div>
+        ` : ""}
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
@@ -695,13 +881,33 @@ function showCreateTaskModal() {
   document.getElementById("ct-title")?.focus();
 }
 
+async function onTaskRepoChange(repoId) {
+  const branchGroup = document.getElementById("ct-branch-group");
+  const branchSelect = document.getElementById("ct-branch");
+  if (!repoId) {
+    if (branchGroup) branchGroup.style.display = "none";
+    return;
+  }
+  if (branchGroup) branchGroup.style.display = "";
+  // Load branches if not cached
+  await loadRepoBranches(repoId);
+  const branches = state.repoBranches[repoId] || [];
+  if (branchSelect) {
+    const repo = state.repos.find((r) => r.id === repoId);
+    const defBranch = repo ? repo.default_branch : "main";
+    branchSelect.innerHTML = branches.map((b) => `<option value="${esc(b)}" ${b === defBranch ? "selected" : ""}>${esc(b)}</option>`).join("") || `<option value="">${esc(defBranch)}</option>`;
+  }
+}
+
 function submitCreateTask() {
   const title = document.getElementById("ct-title")?.value?.trim();
   const desc = document.getElementById("ct-desc")?.value?.trim();
   const type = document.getElementById("ct-type")?.value;
+  const repoId = document.getElementById("ct-repo")?.value || "";
+  const branch = document.getElementById("ct-branch")?.value || "";
   if (!title) return toast("Title is required", "error");
   if (!desc) return toast("Description is required", "error");
-  doCreateTask(title, desc, type);
+  doCreateTask(title, desc, type, repoId, branch);
 }
 
 function showReviewModal(task) {
@@ -898,8 +1104,6 @@ function renderTasks() {
           ${["coding","debugging","research","refactoring","documentation","marketing","email","design","content","strategy","data_analysis","project_management"].map(t=>`<option value="${t}" ${state.filterType===t?"selected":""}>${t.replace("_"," ")}</option>`).join("")}
         </select>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button>
-      <button class="btn btn-outline btn-sm" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>
     </div>
     <div id="board-area"></div>
   `;
@@ -955,6 +1159,7 @@ function renderKanbanBoard() {
               <div class="card-meta">
                 <span class="priority-dot p${t.priority||0}"></span>
                 <span class="badge-type">${esc(t.task_type)}</span>
+                ${t.repo_id ? `<span style="color:var(--accent)">${esc((state.repos.find(r=>r.id===t.repo_id)||{}).name||"repo")}${t.branch ? ":"+esc(t.branch) : ""}</span>` : ""}
                 ${t.assigned_agent ? `<span>${esc(t.assigned_agent)}</span>` : ""}
                 ${(t.comments||[]).length > 0 ? `<span>${(t.comments||[]).length} comments</span>` : ""}
               </div>
@@ -1178,20 +1383,30 @@ function renderTools() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "tools") return;
 
-  const rows = state.tools.map((t) => `
-    <tr>
+  const rows = state.tools.map((t) => {
+    const enabled = t.enabled !== false;
+    const toggleId = `tool-toggle-${esc(t.name)}`;
+    return `
+    <tr style="${enabled ? "" : "opacity:0.55"}">
       <td style="font-weight:600">${esc(t.name)}</td>
       <td style="color:var(--text-secondary)">${esc(t.description || "")}</td>
+      <td style="text-align:center">
+        <label class="toggle-switch" title="${enabled ? "Disable" : "Enable"} ${esc(t.name)}">
+          <input type="checkbox" id="${toggleId}" ${enabled ? "checked" : ""}
+            onchange="toggleTool('${esc(t.name)}', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
     </tr>
-  `).join("");
+  `}).join("");
 
   el.innerHTML = `
     <div class="card">
       <div class="card-header"><h3>Registered Tools (${state.tools.length})</h3></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Description</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="2"><div class="empty-state">No tools registered</div></td></tr>`}</tbody>
+          <thead><tr><th>Name</th><th>Description</th><th style="text-align:center;width:80px">Enabled</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="3"><div class="empty-state">No tools registered</div></td></tr>`}</tbody>
         </table>
       </div>
     </div>
@@ -1202,22 +1417,32 @@ function renderSkills() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "skills") return;
 
-  const rows = state.skills.map((s) => `
-    <tr>
+  const rows = state.skills.map((s) => {
+    const enabled = s.enabled !== false;
+    const toggleId = `skill-toggle-${esc(s.name)}`;
+    return `
+    <tr style="${enabled ? "" : "opacity:0.55"}">
       <td style="font-weight:600">${esc(s.name)}</td>
       <td style="color:var(--text-secondary)">${esc(s.description || "")}</td>
       <td>${(s.task_types || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ")}</td>
       <td>${s.always_load ? '<span style="color:var(--success)">Always</span>' : ""}</td>
+      <td style="text-align:center">
+        <label class="toggle-switch" title="${enabled ? "Disable" : "Enable"} ${esc(s.name)}">
+          <input type="checkbox" id="${toggleId}" ${enabled ? "checked" : ""}
+            onchange="toggleSkill('${esc(s.name)}', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
     </tr>
-  `).join("");
+  `}).join("");
 
   el.innerHTML = `
     <div class="card">
       <div class="card-header"><h3>Loaded Skills (${state.skills.length})</h3></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Description</th><th>Task Types</th><th>Auto-load</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="4"><div class="empty-state">No skills loaded</div></td></tr>`}</tbody>
+          <thead><tr><th>Name</th><th>Description</th><th>Task Types</th><th>Auto-load</th><th style="text-align:center;width:80px">Enabled</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="5"><div class="empty-state">No skills loaded</div></td></tr>`}</tbody>
         </table>
       </div>
     </div>
@@ -1408,7 +1633,7 @@ function renderStatus() {
     <div class="capacity-banner">
       <div class="capacity-number">${effMax}</div>
       <div class="capacity-detail">
-        <div class="capacity-title">Dynamic Agent Capacity (configured max: ${cfgMax})</div>
+        <div class="capacity-title">Dynamic Agent Capacity ${s.capacity_auto_mode ? "(auto-scaled from hardware)" : `(configured max: ${cfgMax})`}</div>
         <div class="capacity-reason">${esc(s.capacity_reason || "Calculating...")}</div>
       </div>
     </div>
@@ -1480,12 +1705,428 @@ function renderStatus() {
   `;
 }
 
+// ---------------------------------------------------------------------------
+// Markdown rendering (lightweight)
+// ---------------------------------------------------------------------------
+function renderMarkdown(text) {
+  if (!text) return "";
+  let html = esc(text);
+  // Code blocks: ```lang\ncode\n```
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const id = "cb-" + Math.random().toString(36).slice(2, 8);
+    return `<div class="md-code-block"><div class="md-code-header"><span class="md-code-lang">${lang || "code"}</span><button class="md-code-copy" onclick="copyCodeBlock('${id}')">Copy</button></div><pre id="${id}"><code>${code.trim()}</code></pre></div>`;
+  });
+  // Inline code: `code`
+  html = html.replace(/`([^`\n]+)`/g, '<code class="md-inline-code">$1</code>');
+  // Bold: **text**
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  // Italic: *text*
+  html = html.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
+  // Headers: ### text
+  html = html.replace(/^### (.+)$/gm, '<div class="md-h3">$1</div>');
+  html = html.replace(/^## (.+)$/gm, '<div class="md-h2">$1</div>');
+  html = html.replace(/^# (.+)$/gm, '<div class="md-h1">$1</div>');
+  // Unordered lists: - item
+  html = html.replace(/^- (.+)$/gm, '<div class="md-li">&bull; $1</div>');
+  // Ordered lists: 1. item
+  html = html.replace(/^\d+\. (.+)$/gm, '<div class="md-li md-oli">$1</div>');
+  // Horizontal rule
+  html = html.replace(/^---$/gm, '<hr class="md-hr">');
+  // Line breaks (preserve paragraphs)
+  html = html.replace(/\n\n/g, '</p><p class="md-p">');
+  html = html.replace(/\n/g, "<br>");
+  html = '<p class="md-p">' + html + "</p>";
+  return html;
+}
+
+function copyCodeBlock(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent).then(() => {
+    const btn = el.parentElement.querySelector(".md-code-copy");
+    if (btn) { btn.textContent = "Copied!"; setTimeout(() => btn.textContent = "Copy", 2000); }
+  }).catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// Canvas panel (code/output viewer)
+// ---------------------------------------------------------------------------
+function openCanvas(content, title, lang) {
+  state.canvasOpen = true;
+  state.canvasContent = content;
+  state.canvasTitle = title || "Output";
+  state.canvasLang = lang || "";
+  renderCanvasPanel();
+}
+
+function closeCanvas() {
+  state.canvasOpen = false;
+  renderCanvasPanel();
+}
+
+function renderCanvasPanel() {
+  let panel = document.getElementById("canvas-panel");
+  if (!state.canvasOpen) {
+    if (panel) panel.classList.remove("open");
+    document.querySelector(".chat-main")?.classList.remove("canvas-active");
+    return;
+  }
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "canvas-panel";
+    panel.className = "canvas-panel";
+    document.querySelector(".chat-layout")?.appendChild(panel);
+  }
+  panel.classList.add("open");
+  document.querySelector(".chat-main")?.classList.add("canvas-active");
+  const id = "canvas-code-" + Math.random().toString(36).slice(2, 8);
+  panel.innerHTML = `
+    <div class="canvas-header">
+      <div class="canvas-title">${esc(state.canvasTitle)}</div>
+      <div class="canvas-actions">
+        <button class="btn btn-sm btn-outline" onclick="copyCodeBlock('${id}')">Copy</button>
+        <button class="btn btn-sm btn-outline" onclick="closeCanvas()">&times;</button>
+      </div>
+    </div>
+    <div class="canvas-body">
+      <pre id="${id}"><code>${esc(state.canvasContent)}</code></pre>
+    </div>
+  `;
+}
+
+// Extract code blocks from a message to make them openable in canvas
+function extractCodeBlocks(text) {
+  const blocks = [];
+  const re = /```(\w*)\n([\s\S]*?)```/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    blocks.push({ lang: m[1] || "code", code: m[2].trim() });
+  }
+  return blocks;
+}
+
+// ---------------------------------------------------------------------------
+// Chat rendering (Claude-like)
+// ---------------------------------------------------------------------------
+function renderChat() {
+  const el = document.getElementById("page-content");
+  if (!el || state.page !== "chat") return;
+
+  // Welcome screen when no messages
+  if (state.chatMessages.length === 0 && !state.chatSending) {
+    el.innerHTML = `
+      <div class="chat-layout">
+        <div class="chat-main">
+          <div class="chat-welcome">
+            <div class="chat-welcome-icon">42</div>
+            <h2>Chat with Agent42</h2>
+            <p>Ask questions, request tasks, or explore what Agent42 can do for you.</p>
+            <div class="chat-suggestions">
+              <button class="chat-suggestion" onclick="applySuggestion('What tasks are currently running?')">What tasks are running?</button>
+              <button class="chat-suggestion" onclick="applySuggestion('Help me write a Python script to process CSV files')">Write a Python script</button>
+              <button class="chat-suggestion" onclick="applySuggestion('Review the security configuration of this project')">Security review</button>
+              <button class="chat-suggestion" onclick="applySuggestion('Explain the architecture of this codebase')">Explain the architecture</button>
+            </div>
+          </div>
+          <div class="chat-composer">
+            <div class="chat-composer-inner">
+              <textarea id="chat-input" class="chat-textarea" rows="1" placeholder="Message Agent42..."
+                        oninput="autoGrowTextarea(this)" onkeydown="handleChatKeydown(event)"></textarea>
+              <button class="chat-send-btn" onclick="sendChatMessage()" title="Send message">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+              </button>
+            </div>
+            <div class="chat-composer-hint">Enter to send, Shift+Enter for new line</div>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  // Build messages
+  const msgs = state.chatMessages.map((m, i) => {
+    const isUser = m.role === "user";
+    const sender = m.sender || (isUser ? "You" : "Agent42");
+    const time = m.timestamp ? formatChatTime(m.timestamp) : "";
+    const codeBlocks = isUser ? [] : extractCodeBlocks(m.content || "");
+    const content = isUser ? esc(m.content).replace(/\n/g, "<br>") : renderMarkdown(m.content);
+
+    if (isUser) {
+      return `
+        <div class="chat-msg chat-msg-user">
+          <div class="chat-msg-content">
+            <div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div>
+            <div class="chat-msg-body chat-msg-body-user">${content}</div>
+          </div>
+          <div class="chat-avatar chat-avatar-user">U</div>
+        </div>`;
+    } else {
+      const canvasButtons = codeBlocks.map((b, j) =>
+        `<button class="chat-canvas-btn" onclick="openCanvas(state.chatMessages[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
+      ).join("");
+      return `
+        <div class="chat-msg chat-msg-agent">
+          <div class="chat-avatar chat-avatar-agent">42</div>
+          <div class="chat-msg-content">
+            <div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div>
+            <div class="chat-msg-body chat-msg-body-agent">${content}</div>
+            ${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}
+            ${m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : ""}
+          </div>
+        </div>`;
+    }
+  }).join("");
+
+  // Store code blocks on state for canvas access
+  state.chatMessages.forEach(m => {
+    if (m.role !== "user") m.__codeBlocks = extractCodeBlocks(m.content || "");
+  });
+
+  // Typing indicator
+  const typingHtml = state.chatSending ? `
+    <div class="chat-msg chat-msg-agent">
+      <div class="chat-avatar chat-avatar-agent">42</div>
+      <div class="chat-msg-content">
+        <div class="chat-typing">
+          <span class="chat-typing-dot"></span>
+          <span class="chat-typing-dot"></span>
+          <span class="chat-typing-dot"></span>
+        </div>
+      </div>
+    </div>
+  ` : "";
+
+  el.innerHTML = `
+    <div class="chat-layout">
+      <div class="chat-main ${state.canvasOpen ? "canvas-active" : ""}">
+        <div class="chat-messages" id="chat-messages">
+          ${msgs}
+          ${typingHtml}
+        </div>
+        <div class="chat-composer">
+          <div class="chat-composer-inner">
+            <textarea id="chat-input" class="chat-textarea" rows="1" placeholder="Message Agent42..."
+                      oninput="autoGrowTextarea(this)" onkeydown="handleChatKeydown(event)"
+                      ${state.chatSending ? "disabled" : ""}></textarea>
+            <button class="chat-send-btn" onclick="sendChatMessage()" ${state.chatSending ? "disabled" : ""} title="Send message">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+            </button>
+          </div>
+          <div class="chat-composer-hint">Enter to send, Shift+Enter for new line</div>
+        </div>
+      </div>
+      <div id="canvas-panel" class="canvas-panel ${state.canvasOpen ? "open" : ""}"></div>
+    </div>
+  `;
+  // Auto-scroll to bottom
+  const msgContainer = document.getElementById("chat-messages");
+  if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
+  // Re-render canvas if open
+  if (state.canvasOpen) renderCanvasPanel();
+}
+
+function formatChatTime(ts) {
+  const d = new Date(ts * 1000);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  if (isToday) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function autoGrowTextarea(el) {
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, 200) + "px";
+}
+
+function handleChatKeydown(event) {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    sendChatMessage();
+  }
+}
+
+function applySuggestion(text) {
+  const input = document.getElementById("chat-input");
+  if (input) {
+    input.value = text;
+    autoGrowTextarea(input);
+    input.focus();
+  }
+}
+
+function renderReposPanel() {
+  const repoRows = state.repos.map((r) => `
+    <tr>
+      <td><strong>${esc(r.name)}</strong></td>
+      <td><code style="font-size:0.8rem">${esc(r.github_repo || r.url || r.local_path)}</code></td>
+      <td>${esc(r.default_branch)}</td>
+      <td><span class="status-badge status-${r.status === "active" ? "running" : r.status === "error" ? "failed" : "pending"}">${esc(r.status)}</span></td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="syncRepo('${esc(r.id)}')">Sync</button>
+        <button class="btn btn-danger btn-sm" onclick="removeRepo('${esc(r.id)}','${esc(r.name)}')">Remove</button>
+      </td>
+    </tr>
+  `).join("");
+
+  const ghRepoRows = state.githubRepos.map((r) => {
+    const alreadyAdded = state.repos.some((lr) => lr.github_repo === r.full_name);
+    return `
+    <tr>
+      <td><strong>${esc(r.name)}</strong> ${r.private ? '<span style="color:var(--warning);font-size:0.75rem">private</span>' : ""}</td>
+      <td style="font-size:0.8rem;color:var(--text-muted)">${esc(r.description).substring(0, 60)}</td>
+      <td>${esc(r.default_branch)}</td>
+      <td>${esc(r.language)}</td>
+      <td>${alreadyAdded ? '<span style="color:var(--success)">Added</span>' : `<button class="btn btn-primary btn-sm" onclick="addGithubRepo('${esc(r.full_name)}','${esc(r.default_branch)}')">Add</button>`}</td>
+    </tr>`;
+  }).join("");
+
+  return `
+    <h3>Repositories</h3>
+    <p class="section-desc">Connect project repositories for agents to work in. Add local repos or clone from GitHub.</p>
+
+    ${settingSecret("GITHUB_TOKEN", "GitHub Token", "Personal Access Token for listing and cloning repos. Create at github.com/settings/tokens (repo scope).")}
+    <div class="form-group" style="margin-top:0.5rem">
+      <button class="btn btn-primary btn-sm" id="save-keys-btn" onclick="saveApiKeys()" ${Object.keys(state.keyEdits).length === 0 || state.keySaving ? "disabled" : ""}>
+        ${state.keySaving ? "Saving..." : "Save Token"}
+      </button>
+    </div>
+
+    <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Connected Repositories</h4>
+    ${state.repos.length > 0 ? `
+    <div style="overflow-x:auto">
+      <table class="table">
+        <thead><tr><th>Name</th><th>Source</th><th>Branch</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>${repoRows}</tbody>
+      </table>
+    </div>
+    ` : '<p style="color:var(--text-muted);font-size:0.9rem">No repositories connected yet. Add a local repo or connect GitHub below.</p>'}
+
+    <div style="display:flex;gap:0.75rem;margin:1rem 0;flex-wrap:wrap">
+      <button class="btn btn-outline btn-sm" onclick="showAddLocalRepoModal()">+ Add Local Repo</button>
+      <button class="btn btn-outline btn-sm" onclick="fetchGithubRepos()" ${state.githubLoading ? "disabled" : ""}>
+        ${state.githubLoading ? "Loading..." : "Browse GitHub Repos"}
+      </button>
+    </div>
+
+    ${state.githubRepos.length > 0 ? `
+    <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">GitHub Repositories</h4>
+    <div style="overflow-x:auto;max-height:400px;overflow-y:auto">
+      <table class="table">
+        <thead><tr><th>Name</th><th>Description</th><th>Branch</th><th>Lang</th><th></th></tr></thead>
+        <tbody>${ghRepoRows}</tbody>
+      </table>
+    </div>
+    ` : ""}
+  `;
+}
+
+async function fetchGithubRepos() {
+  state.githubLoading = true;
+  renderSettingsPanel();
+  try {
+    const data = await api("/github/repos");
+    state.githubRepos = data.repos || [];
+  } catch (err) {
+    toast(err.message || "Failed to load GitHub repos", "error");
+    state.githubRepos = [];
+  }
+  state.githubLoading = false;
+  renderSettingsPanel();
+}
+
+async function addGithubRepo(fullName, defaultBranch) {
+  try {
+    await api("/repos", {
+      method: "POST",
+      body: JSON.stringify({ name: fullName.split("/").pop(), source: "github", github_repo: fullName, default_branch: defaultBranch }),
+    });
+    await loadRepos();
+    renderSettingsPanel();
+    toast("Repository added", "success");
+  } catch (err) {
+    toast(err.message || "Failed to add repo", "error");
+  }
+}
+
+function showAddLocalRepoModal() {
+  showModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>Add Local Repository</h3>
+        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="lr-name">Name</label>
+          <input type="text" id="lr-name" placeholder="my-project">
+        </div>
+        <div class="form-group">
+          <label for="lr-path">Local Path</label>
+          <input type="text" id="lr-path" placeholder="/home/user/projects/my-project">
+          <div class="help">Absolute path to an existing git repository on this server.</div>
+        </div>
+        <div class="form-group">
+          <label for="lr-branch">Default Branch</label>
+          <input type="text" id="lr-branch" value="main" placeholder="main">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitAddLocalRepo()">Add</button>
+      </div>
+    </div>
+  `);
+  document.getElementById("lr-name")?.focus();
+}
+
+async function submitAddLocalRepo() {
+  const name = document.getElementById("lr-name")?.value?.trim();
+  const path = document.getElementById("lr-path")?.value?.trim();
+  const branch = document.getElementById("lr-branch")?.value?.trim() || "main";
+  if (!name) return toast("Name is required", "error");
+  if (!path) return toast("Path is required", "error");
+  try {
+    await api("/repos", {
+      method: "POST",
+      body: JSON.stringify({ name, source: "local", local_path: path, default_branch: branch }),
+    });
+    await loadRepos();
+    closeModal();
+    renderSettingsPanel();
+    toast("Repository added", "success");
+  } catch (err) {
+    toast(err.message || "Failed to add repo", "error");
+  }
+}
+
+async function syncRepo(repoId) {
+  try {
+    const data = await api(`/repos/${repoId}/sync`, { method: "POST" });
+    toast(data.message || "Synced", "success");
+  } catch (err) {
+    toast(err.message || "Sync failed", "error");
+  }
+}
+
+async function removeRepo(repoId, name) {
+  if (!confirm(`Remove repository "${name}"? This only unlinks it — local files are preserved.`)) return;
+  try {
+    await api(`/repos/${repoId}`, { method: "DELETE" });
+    await loadRepos();
+    renderSettingsPanel();
+    toast("Repository removed", "success");
+  } catch (err) {
+    toast(err.message || "Failed to remove", "error");
+  }
+}
+
 function renderSettings() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "settings") return;
 
   const tabs = [
     { id: "providers", label: "LLM Providers" },
+    { id: "repos", label: "Repositories" },
     { id: "channels", label: "Channels" },
     { id: "security", label: "Security" },
     { id: "orchestrator", label: "Orchestrator" },
@@ -1533,6 +2174,7 @@ function renderSettingsPanel() {
         <div class="help" style="margin-top:0.5rem">Keys saved here override <code>.env</code> values and take effect immediately for new API calls.</div>
       </div>
     `,
+    repos: () => renderReposPanel(),
     channels: () => `
       <h3>Communication Channels</h3>
       <p class="section-desc">Configure channels for receiving tasks via chat. Each channel requires its own API credentials.</p>
@@ -1558,14 +2200,33 @@ function renderSettingsPanel() {
       <div class="form-group" style="margin-top:1rem">
         <div class="help">Active channels: ${state.channels.length > 0 ? state.channels.map((c) => `<strong>${esc(c.type || c.name || c)}</strong>`).join(", ") : "<em>None configured</em>"}</div>
       </div>
+      ${_envSaveBtn()}
     `,
     security: () => `
       <h3>Security</h3>
       <p class="section-desc">Authentication, rate limiting, and sandbox settings for the dashboard and agent execution.</p>
 
-      <h4 style="margin:1rem 0 0.75rem;font-size:0.95rem">Dashboard Authentication</h4>
+      <h4 style="margin:1rem 0 0.75rem;font-size:0.95rem">Change Password</h4>
+      <div class="form-group">
+        <label for="cp-current">Current Password</label>
+        <input type="password" id="cp-current" placeholder="Enter current password" autocomplete="current-password">
+      </div>
+      <div class="form-group">
+        <label for="cp-new">New Password</label>
+        <input type="password" id="cp-new" placeholder="At least 8 characters" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label for="cp-confirm">Confirm New Password</label>
+        <input type="password" id="cp-confirm" placeholder="Re-enter new password" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <div id="cp-error" style="color:var(--danger);font-size:0.85rem;min-height:1.2em"></div>
+        <button class="btn btn-primary" id="cp-btn" onclick="changePassword()">Change Password</button>
+      </div>
+
+      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Dashboard Authentication</h4>
       ${settingReadonly("DASHBOARD_USERNAME", "Username", "Default: admin")}
-      ${settingSecret("DASHBOARD_PASSWORD_HASH", "Password Hash (bcrypt)", 'Generate: python -c "from passlib.context import CryptContext; print(CryptContext([\'bcrypt\']).hash(\'yourpassword\'))"')}
+      ${settingSecret("DASHBOARD_PASSWORD_HASH", "Password Hash (bcrypt)", 'Generate: python -c "import bcrypt; print(bcrypt.hashpw(b\'yourpassword\', bcrypt.gensalt()).decode())"')}
       <div class="form-group">
         <div class="help" style="color:var(--warning)">Use DASHBOARD_PASSWORD_HASH (bcrypt) in production. DASHBOARD_PASSWORD (plaintext) is for development only.</div>
       </div>
@@ -1581,17 +2242,19 @@ function renderSettingsPanel() {
       <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">CORS &amp; Network</h4>
       ${settingReadonly("CORS_ALLOWED_ORIGINS", "Allowed origins", "Comma-separated. Empty = same-origin only (most secure).")}
       ${settingReadonly("DASHBOARD_HOST", "Dashboard bind address", "Default: 127.0.0.1 (localhost only). Use 0.0.0.0 for remote access behind a reverse proxy.")}
+      ${_envSaveBtn()}
     `,
     orchestrator: () => `
       <h3>Orchestrator</h3>
       <p class="section-desc">Controls how Agent42 processes tasks, including concurrency limits and spending controls.</p>
 
-      ${settingReadonly("MAX_CONCURRENT_AGENTS", "Max concurrent agents", "Default: 3. How many agents can run simultaneously. Higher values use more memory and API calls.")}
+      ${settingReadonly("MAX_CONCURRENT_AGENTS", "Max concurrent agents", "Default: 0 (auto). When 0, capacity is dynamically determined by CPU/memory. Set a positive number to cap the maximum.")}
       ${settingReadonly("MAX_DAILY_API_SPEND_USD", "Daily API spend limit (USD)", "Default: 0 (unlimited). Set a positive value to cap daily spending across all providers.")}
       ${settingReadonly("DEFAULT_REPO_PATH", "Repository path", "The project directory agents work in.")}
       ${settingReadonly("TASKS_JSON_PATH", "Tasks file path", "Default: tasks.json. Persisted task queue file.")}
       ${settingReadonly("MCP_SERVERS_JSON", "MCP servers config", "Path to JSON file defining MCP server connections.")}
       ${settingReadonly("CRON_JOBS_PATH", "Cron jobs file", "Default: cron_jobs.json. Scheduled task definitions.")}
+      ${_envSaveBtn()}
     `,
     storage: () => `
       <h3>Storage &amp; Paths</h3>
@@ -1603,6 +2266,7 @@ function renderSettingsPanel() {
       ${settingReadonly("TEMPLATES_DIR", "Templates directory", "Default: .agent42/templates. Content templates for reuse.")}
       ${settingReadonly("IMAGES_DIR", "Images directory", "Default: .agent42/images. Generated images from image_gen tool.")}
       ${settingReadonly("SKILLS_DIRS", "Extra skill directories", "Comma-separated paths. Skills are auto-discovered from these + builtins.")}
+      ${_envSaveBtn()}
     `,
   };
 
@@ -1663,24 +2327,54 @@ function updateSaveBtn() {
   }
 }
 
-function settingReadonly(envVar, label, help) {
+function _envSaveBtn() {
+  const hasEdits = Object.keys(state.envEdits).some(k => state.envEdits[k] !== (state.envSettings[k] || ""));
+  return `
+    <div class="form-group" style="margin-top:1.5rem">
+      <button class="btn btn-primary" id="save-env-btn" onclick="saveEnvSettings()" ${!hasEdits || state.envSaving ? "disabled" : ""}>
+        ${state.envSaving ? "Saving..." : "Save Settings"}
+      </button>
+      <div class="help" style="margin-top:0.5rem">Changes are written to <code>.env</code> and hot-reloaded. Some settings may require a restart.</div>
+    </div>
+  `;
+}
+
+function settingEditable(envVar, label, help) {
+  const current = state.envSettings[envVar] || "";
+  const edited = state.envEdits[envVar];
+  const displayVal = edited !== undefined ? edited : current;
+  const isChanged = edited !== undefined && edited !== current;
   return `
     <div class="form-group">
       <label>${esc(label)}</label>
-      <input type="text" value="(set via environment)" disabled style="font-family:var(--mono)">
+      <input type="text" value="${esc(displayVal)}" style="font-family:var(--mono);${isChanged ? "border-color:var(--accent)" : ""}"
+             oninput="state.envEdits['${envVar}']=this.value;updateEnvSaveBtn()">
       ${help ? `<div class="help">${help}</div>` : ""}
-      <div class="secret-status not-configured">
-        Environment variable: <code>${esc(envVar)}</code>
+      <div class="secret-status ${current ? "configured" : "not-configured"}">
+        <code>${esc(envVar)}</code>${current ? "" : " (not set)"}
       </div>
     </div>
   `;
+}
+
+function settingReadonly(envVar, label, help) {
+  return settingEditable(envVar, label, help);
+}
+
+function updateEnvSaveBtn() {
+  const btn = document.getElementById("save-env-btn");
+  if (btn) {
+    const hasEdits = Object.keys(state.envEdits).some(k => state.envEdits[k] !== state.envSettings[k]);
+    btn.disabled = !hasEdits || state.envSaving;
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Main render
 // ---------------------------------------------------------------------------
 async function loadAll() {
-  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadStatus(), loadApps()]);
+  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages(), loadRepos()]);
+  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadStatus()]);
 }
 
 function render() {
@@ -1722,7 +2416,7 @@ function render() {
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks')">&#127919; Mission Control</a>
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status')">&#128200; Status</a>
           <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals')">&#128274; Approvals ${approvalBadge}</a>
-          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps')">&#128187; Apps${state.apps.filter(a => a.status === "running").length ? ' <span class=\"badge\">' + state.apps.filter(a => a.status === "running").length + '</span>' : ''}</a>
+          <a href="#" data-page="chat" class="${state.page === "chat" ? "active" : ""}" onclick="event.preventDefault();navigate('chat')">&#128172; Chat</a>
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools')">&#128295; Tools</a>
           <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills')">&#9889; Skills</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings')">&#9881; Settings</a>
@@ -1735,7 +2429,7 @@ function render() {
       </aside>
       <div class="main">
         <div class="topbar">
-          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", apps: "Apps", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? '<button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button><button class="btn btn-outline btn-sm" style="margin-left:0.5rem" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>' : ""}
             ${state.page === "apps" ? '<button class="btn btn-primary btn-sm" onclick="showCreateAppModal()">+ New App</button>' : ""}
@@ -1751,7 +2445,7 @@ function render() {
     tasks: renderTasks,
     status: renderStatus,
     approvals: renderApprovals,
-    apps: renderApps,
+    chat: renderChat,
     tools: renderTools,
     skills: renderSkills,
     settings: renderSettings,

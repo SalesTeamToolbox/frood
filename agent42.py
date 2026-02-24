@@ -49,6 +49,7 @@ from core.heartbeat import HeartbeatService
 from core.intent_classifier import IntentClassifier, PendingClarification
 from core.key_store import KeyStore
 from core.rate_limiter import ToolLimit, ToolRateLimiter
+from core.repo_manager import RepositoryManager
 from core.sandbox import WorkspaceSandbox
 from core.security_scanner import ScheduledSecurityScanner
 from core.task_queue import Task, TaskQueue, TaskStatus, TaskType, infer_task_type
@@ -106,14 +107,16 @@ from tools.workflow_tool import WorkflowTool
 # -- Logging -------------------------------------------------------------------
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format=LOG_FORMAT,
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("agent42.log"),
-    ],
-)
+_log_handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+try:
+    _log_handlers.append(logging.FileHandler("agent42.log"))
+except PermissionError:
+    print(
+        "WARNING: Cannot write to agent42.log (permission denied) — logging to stdout only.",
+        file=sys.stderr,
+    )
+
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, handlers=_log_handlers)
 logger = logging.getLogger("agent42")
 
 
@@ -152,6 +155,14 @@ class Agent42:
         )
         self.ws_manager = WebSocketManager()
         self.worktree_manager = WorktreeManager(str(self.repo_path)) if self.has_repo else None
+
+        # Multi-repository manager
+        self.repo_manager = RepositoryManager(
+            repos_json_path=settings.repos_json_path,
+            clone_dir=settings.repos_clone_dir,
+            github_token=settings.github_token,
+        )
+
         self._active_count = 0
         self._active_lock = asyncio.Lock()
         self.approval_gate = ApprovalGate(
@@ -419,6 +430,18 @@ class Agent42:
         if self.app_manager:
             self.tool_registry.register(AppTool(self.app_manager))
 
+        # Project interview tool (for structured project discovery)
+        if settings.project_interview_enabled:
+            from tools.project_interview import ProjectInterviewTool
+
+            self.tool_registry.register(
+                ProjectInterviewTool(
+                    workspace_path=workspace,
+                    router=router,
+                    outputs_dir=settings.outputs_dir,
+                )
+            )
+
     async def _setup_channels(self):
         """Configure and register enabled channels based on settings."""
         # Discord
@@ -587,6 +610,17 @@ class Agent42:
         """
         task_type = force_type or infer_task_type(description)
 
+        # Project interview detection: route complex project-level tasks through
+        # the interview flow instead of going directly to execution.
+        if (
+            settings.project_interview_enabled
+            and settings.project_interview_mode != "never"
+            and classification
+            and getattr(classification, "needs_project_setup", False)
+            and task_type in (TaskType.CODING, TaskType.APP_CREATE, TaskType.APP_UPDATE)
+        ):
+            task_type = TaskType.PROJECT_SETUP
+
         # Smart resource allocation: inject team directive for complex tasks
         task_description = description
         team_name = ""
@@ -641,6 +675,43 @@ class Agent42:
         completes or fails.
         """
         await self.ws_manager.broadcast("task_update", task.to_dict())
+
+        # Dashboard chat: broadcast agent response back as a chat message
+        if task.origin_channel == "dashboard_chat" and task.status in (
+            TaskStatus.REVIEW,
+            TaskStatus.DONE,
+        ):
+            import time as _time
+            import uuid as _uuid
+
+            content = task.result or "(completed with no output)"
+            chat_msg = {
+                "id": _uuid.uuid4().hex[:12],
+                "role": "assistant",
+                "content": content,
+                "timestamp": _time.time(),
+                "sender": "Agent42",
+                "task_id": task.id,
+            }
+            self.ws_manager.chat_messages.append(chat_msg)
+            await self.ws_manager.broadcast("chat_message", chat_msg)
+            return  # Don't also send via channel manager
+
+        if task.origin_channel == "dashboard_chat" and task.status == TaskStatus.FAILED:
+            import time as _time
+            import uuid as _uuid
+
+            chat_msg = {
+                "id": _uuid.uuid4().hex[:12],
+                "role": "assistant",
+                "content": f"Sorry, I encountered an error: {task.error}",
+                "timestamp": _time.time(),
+                "sender": "Agent42",
+                "task_id": task.id,
+            }
+            self.ws_manager.chat_messages.append(chat_msg)
+            await self.ws_manager.broadcast("chat_message", chat_msg)
+            return
 
         # Route results back to originating channel
         if task.origin_channel and task.status in (TaskStatus.REVIEW, TaskStatus.DONE):
@@ -713,10 +784,23 @@ class Agent42:
                 await asyncio.sleep(10)
 
             try:
+                # Select worktree manager: task-specific repo or default
+                wt_manager = self.worktree_manager
+                if task.repo_id and self.repo_manager:
+                    try:
+                        wt_manager = self.repo_manager.get_worktree_manager(task.repo_id)
+                    except ValueError as e:
+                        logger.warning(
+                            "Task %s repo_id %s not found, using default: %s",
+                            task.id,
+                            task.repo_id,
+                            e,
+                        )
+
                 agent = Agent(
                     task=task,
                     task_queue=self.task_queue,
-                    worktree_manager=self.worktree_manager,
+                    worktree_manager=wt_manager,
                     approval_gate=self.approval_gate,
                     emit=self.emit,
                     skill_loader=self.skill_loader,
@@ -775,6 +859,9 @@ class Agent42:
 
         # Load tasks and initialize subsystems
         await self.task_queue.load_from_file()
+        await self.repo_manager.load()
+        if self.repo_manager.list_repos():
+            logger.info(f"  Repos loaded: {len(self.repo_manager.list_repos())}")
         if self.app_manager:
             await self.app_manager.load()
             logger.info(f"  Apps loaded: {len(self.app_manager.list_apps())}")
@@ -823,6 +910,7 @@ class Agent42:
                 heartbeat=self.heartbeat,
                 key_store=self.key_store,
                 app_manager=self.app_manager,
+                repo_manager=self.repo_manager,
             )
             config = uvicorn.Config(
                 app,

@@ -58,7 +58,7 @@ class Settings:
 
     # Orchestrator
     default_repo_path: str | None = None
-    max_concurrent_agents: int = 3
+    max_concurrent_agents: int = 0  # 0 = auto (dynamic based on CPU/memory)
     tasks_json_path: str = "tasks.json"
 
     # Security (Phase 1)
@@ -200,6 +200,16 @@ class Settings:
     apps_require_auth_default: bool = False  # Default require_auth for new apps
     apps_monitor_interval: int = 15  # Seconds between health-check polls
 
+    # Project interview
+    project_interview_enabled: bool = True
+    project_interview_mode: str = "auto"  # auto=complexity-based, always, never
+    project_interview_max_rounds: int = 4
+    project_interview_min_complexity: str = "moderate"  # moderate or complex
+    # Multi-repository management
+    github_token: str = ""  # GitHub PAT for repo operations (fallback: APPS_GITHUB_TOKEN)
+    repos_json_path: str = ".agent42/repos.json"
+    repos_clone_dir: str = ".agent42/repos"  # Base directory for cloned repos
+
     # Security scanning (scheduled)
     security_scan_enabled: bool = True
     security_scan_interval: str = "8h"  # e.g. "8h", "6h", "12h"
@@ -243,7 +253,7 @@ class Settings:
             cors_allowed_origins=os.getenv("CORS_ALLOWED_ORIGINS", ""),
             # Orchestrator
             default_repo_path=_resolve_repo_path(os.getenv("DEFAULT_REPO_PATH", "")),
-            max_concurrent_agents=int(os.getenv("MAX_CONCURRENT_AGENTS", "3")),
+            max_concurrent_agents=int(os.getenv("MAX_CONCURRENT_AGENTS", "0")),
             tasks_json_path=os.getenv("TASKS_JSON_PATH", "tasks.json"),
             # Security
             sandbox_enabled=os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes"),
@@ -326,6 +336,18 @@ class Settings:
             images_dir=os.getenv("IMAGES_DIR", ".agent42/images"),
             # Device gateway auth
             devices_file=os.getenv("DEVICES_FILE", ".agent42/devices.jsonl"),
+            # Project interview
+            project_interview_enabled=os.getenv("PROJECT_INTERVIEW_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
+            project_interview_mode=os.getenv("PROJECT_INTERVIEW_MODE", "auto"),
+            project_interview_max_rounds=int(os.getenv("PROJECT_INTERVIEW_MAX_ROUNDS", "4")),
+            project_interview_min_complexity=os.getenv(
+                "PROJECT_INTERVIEW_MIN_COMPLEXITY", "moderate"
+            ),
+            # Multi-repository management
+            github_token=os.getenv("GITHUB_TOKEN", os.getenv("APPS_GITHUB_TOKEN", "")),
+            repos_json_path=os.getenv("REPOS_JSON_PATH", ".agent42/repos.json"),
+            repos_clone_dir=os.getenv("REPOS_CLONE_DIR", ".agent42/repos"),
             # Security scanning
             security_scan_enabled=os.getenv("SECURITY_SCAN_ENABLED", "true").lower()
             in ("true", "1", "yes"),
@@ -469,8 +491,8 @@ class Settings:
         if self.dashboard_password and not self.dashboard_password_hash:
             warnings.append(
                 "Using plaintext DASHBOARD_PASSWORD. Set DASHBOARD_PASSWORD_HASH "
-                'for production. Generate: python -c "from passlib.context import '
-                "CryptContext; print(CryptContext(['bcrypt']).hash('yourpassword'))\""
+                'for production. Generate: python -c "import bcrypt; '
+                "print(bcrypt.hashpw(b'yourpassword', bcrypt.gensalt()).decode())\""
             )
         # Diagnostic info (never log the actual password)
         if self.dashboard_password:
