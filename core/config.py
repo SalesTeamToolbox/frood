@@ -136,6 +136,10 @@ class Settings:
     memory_dir: str = ".agent42/memory"
     sessions_dir: str = ".agent42/sessions"
 
+    # Scope change detection
+    scope_detection_enabled: bool = True
+    scope_detection_confidence_threshold: float = 0.5
+
     # Qdrant vector database (optional — enhances semantic search)
     qdrant_url: str = ""  # e.g. "http://localhost:6333" for Docker, or empty for embedded
     qdrant_api_key: str = ""  # API key for Qdrant Cloud or authenticated instances
@@ -185,6 +189,16 @@ class Settings:
     # Vision / image analysis
     vision_max_image_mb: int = 10
     vision_model: str = ""  # Override model for vision tasks (empty = auto-detect)
+
+    # Chat sessions
+    chat_sessions_dir: str = ".agent42/chat_sessions"
+
+    # Projects
+    projects_dir: str = ".agent42/projects"
+
+    # GitHub OAuth (device flow)
+    github_client_id: str = ""
+    github_oauth_token: str = ""  # Stored after OAuth completes
 
     # Apps platform
     apps_enabled: bool = True
@@ -315,6 +329,12 @@ class Settings:
             # Memory
             memory_dir=os.getenv("MEMORY_DIR", ".agent42/memory"),
             sessions_dir=os.getenv("SESSIONS_DIR", ".agent42/sessions"),
+            # Scope change detection
+            scope_detection_enabled=os.getenv("SCOPE_DETECTION_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
+            scope_detection_confidence_threshold=float(
+                os.getenv("SCOPE_DETECTION_CONFIDENCE_THRESHOLD", "0.5")
+            ),
             # Qdrant
             qdrant_url=os.getenv("QDRANT_URL", ""),
             qdrant_api_key=os.getenv("QDRANT_API_KEY", ""),
@@ -374,6 +394,13 @@ class Settings:
             # Vision / image analysis
             vision_max_image_mb=int(os.getenv("VISION_MAX_IMAGE_MB", "10")),
             vision_model=os.getenv("VISION_MODEL", ""),
+            # Chat sessions
+            chat_sessions_dir=os.getenv("CHAT_SESSIONS_DIR", ".agent42/chat_sessions"),
+            # Projects
+            projects_dir=os.getenv("PROJECTS_DIR", ".agent42/projects"),
+            # GitHub OAuth
+            github_client_id=os.getenv("GITHUB_CLIENT_ID", ""),
+            github_oauth_token=os.getenv("GITHUB_OAUTH_TOKEN", ""),
             # Apps platform
             apps_enabled=os.getenv("APPS_ENABLED", "true").lower() in ("true", "1", "yes"),
             apps_dir=os.getenv("APPS_DIR", "apps"),

@@ -9,6 +9,7 @@ API keys use the ``ak_`` prefix so the auth layer can distinguish them from
 JWT tokens at a glance.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -122,17 +123,27 @@ class DeviceStore:
     # -- Persistence ----------------------------------------------------------
 
     def _persist(self, event_type: str, device: Device):
-        """Append an event to the JSONL store."""
+        """Append an event to the JSONL store (non-blocking when event loop is running)."""
         entry = {
             "timestamp": time.time(),
             "event": event_type,
             **asdict(device),
         }
+        line = json.dumps(entry, default=str) + "\n"
+
+        def _write():
+            try:
+                with open(self._path, "a") as f:
+                    f.write(line)
+            except OSError as e:
+                logger.error(f"Failed to write device store: {e}")
+
         try:
-            with open(self._path, "a") as f:
-                f.write(json.dumps(entry, default=str) + "\n")
-        except OSError as e:
-            logger.error(f"Failed to write device store: {e}")
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(None, _write)
+        except RuntimeError:
+            # No running event loop (e.g., during tests) — write synchronously
+            _write()
 
     def _load(self):
         """Replay JSONL events to rebuild in-memory state."""

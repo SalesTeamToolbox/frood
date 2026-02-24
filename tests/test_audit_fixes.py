@@ -23,7 +23,9 @@ class TestIterationRetry:
     @pytest.mark.asyncio
     async def test_retry_succeeds_on_second_attempt(self):
         """Should retry on failure and succeed."""
-        self.router.complete = AsyncMock(side_effect=[Exception("timeout"), "success output"])
+        self.router.complete = AsyncMock(
+            side_effect=[Exception("timeout"), ("success output", None)]
+        )
         result = await self.engine._complete_with_retry("test-model", [], retries=2)
         assert result == "success output"
         assert self.router.complete.call_count == 2
@@ -35,7 +37,7 @@ class TestIterationRetry:
             side_effect=[
                 Exception("fail 1"),
                 Exception("fail 2"),
-                "fallback output",  # This is the fallback call
+                ("fallback output", None),  # This is the fallback call
             ]
         )
         result = await self.engine._complete_with_retry("test-model", [], retries=2)
@@ -60,7 +62,7 @@ class TestIterationRetry:
             call_count += 1
             if call_count == 1:
                 raise Exception("transient error")
-            return "APPROVED: Looks good"
+            return ("APPROVED: Looks good", None)
 
         self.router.complete = flaky_complete
         history = await self.engine.run(
@@ -117,8 +119,8 @@ class TestConvergenceDetection:
             call_num += 1
             if "reviewer" in str(model) or "critic" in str(model).lower():
                 # Critic always gives same feedback
-                return "NEEDS WORK: Add error handling for null inputs"
-            return f"Here is my output v{call_num}"
+                return ("NEEDS WORK: Add error handling for null inputs", None)
+            return (f"Here is my output v{call_num}", None)
 
         router.complete = mock_complete
         engine = IterationEngine(router)

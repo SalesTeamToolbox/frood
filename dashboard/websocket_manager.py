@@ -75,7 +75,8 @@ class WebSocketManager:
         for conn in self._connections:
             try:
                 await conn.ws.send_text(message)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"WebSocket send failed (connection will be removed): {e}")
                 dead.append(conn)
 
         for conn in dead:
@@ -90,7 +91,10 @@ class WebSocketManager:
             if conn.device_id == device_id:
                 try:
                     await conn.ws.send_text(message)
-                except Exception:
+                except Exception as e:
+                    logger.debug(
+                        f"WebSocket send failed for device {device_id} (connection will be removed): {e}"
+                    )
                     dead.append(conn)
 
         for conn in dead:

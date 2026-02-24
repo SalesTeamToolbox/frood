@@ -119,6 +119,7 @@ during Claude Code sessions without manual activation.
 | Worktree | Git worktree per agent for isolated filesystem access |
 | Free-First | Default routing uses $0 models via OpenRouter; premium only if admin configures |
 | Spending Tracker | Daily API cost cap enforced across all providers |
+| Token Accumulator | `TokenAccumulator` in `agents/iteration_engine.py` — collects per-model token usage during a task's iteration engine run |
 | SSH Tool | Remote shell execution via `asyncssh` with host allowlist and approval gate |
 | Tunnel Manager | Expose local ports via cloudflared/serveo/localhost.run with TTL auto-expiry |
 | Knowledge Base | RAG tool for importing documents, chunking, and semantic query via embeddings |
@@ -131,6 +132,16 @@ during Claude Code sessions without manual activation.
 | App Mode | `internal` (Agent42 system tool) or `external` (app being developed for public release) |
 | App Visibility | `private` (dashboard-only), `unlisted` (anyone with URL), `public` (listed openly) |
 | App API | Agent-to-app HTTP interaction — lets Agent42 call a running app's endpoints via `app_api` |
+| Scope Detection | Detects when a user's message changes topic from the active conversation scope, triggering a new branch/task |
+| Active Scope | `ScopeInfo` in `core/intent_classifier.py` — tracks the current conversation topic per channel session |
+| Scope Analysis | `ScopeAnalysis` in `core/intent_classifier.py` — result of scope change detection (continuation vs change) |
+| Chat Session | A persistent named conversation (chat or code type) with JSONL message storage |
+| Chat Session Manager | `core/chat_session_manager.py` — session CRUD, message persistence, auto-titling |
+| Code Page | Coding-focused chat interface with project setup flow (local/remote deploy, GitHub repo) |
+| Project | A higher-level grouping of related tasks with aggregate progress tracking |
+| Project Manager | `core/project_manager.py` — project CRUD, task aggregation, Kanban board view |
+| GitHub Device Auth | `core/github_oauth.py` — OAuth device flow for GitHub repo creation |
+| Mission Control | Tabbed view ("Tasks" + "Projects") for managing work items and project progress |
 | Project Interview | Structured discovery process (`tools/project_interview.py`) for complex project-level tasks |
 | Project Spec | `PROJECT_SPEC.md` — central specification document produced by the interview, referenced by all subtasks |
 | Interview Questions | `core/interview_questions.py` — question banks organized by project type and theme |
@@ -191,6 +202,9 @@ agent42/
 │   ├── url_policy.py       # URL allowlist/denylist for SSRF protection
 │   ├── complexity.py       # Task complexity estimation
 │   ├── app_manager.py      # App lifecycle management (create, build, run, stop)
+│   ├── chat_session_manager.py # Multi-session chat persistence (JSONL per session)
+│   ├── project_manager.py  # Project CRUD, task aggregation, Kanban board
+│   └── github_oauth.py     # GitHub OAuth device flow for repo creation
 │   ├── interview_questions.py # Question banks for project discovery interviews
 │   └── project_spec.py     # PROJECT_SPEC.md generator and subtask decomposer
 │
@@ -537,6 +551,13 @@ Model selection in `model_router.py` uses a 4-layer resolution chain:
 | `MODEL_RESEARCH_ENABLED` | Enable web benchmark research | `true` |
 | `MODEL_RESEARCH_INTERVAL_HOURS` | Research fetch interval | `168` (weekly) |
 
+### Scope Detection Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `SCOPE_DETECTION_ENABLED` | Enable scope change detection between messages | `true` |
+| `SCOPE_DETECTION_CONFIDENCE_THRESHOLD` | Below this confidence, ask user to confirm scope change | `0.5` |
+
 ### Optional Backends
 
 | Variable | Purpose | Default |
@@ -588,6 +609,24 @@ See `.env.example` for the complete list of configuration variables.
 | `APPS_DEFAULT_MODE` | Default mode for new apps (`internal`/`external`) | `internal` |
 | `APPS_REQUIRE_AUTH_DEFAULT` | Require dashboard auth by default for new apps | `false` |
 
+### Chat Session Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `CHAT_SESSIONS_DIR` | Directory for session JSONL storage | `.agent42/chat_sessions` |
+
+### Project Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `PROJECTS_DIR` | Directory for project data | `.agent42/projects` |
+
+### GitHub OAuth Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `GITHUB_CLIENT_ID` | GitHub OAuth App Client ID (device flow) | *(disabled)* |
+| `GITHUB_OAUTH_TOKEN` | Token stored after device flow auth | *(auto-populated)* |
 ### Project Interview Settings
 
 | Variable | Purpose | Default |
@@ -856,8 +895,14 @@ docker compose down              # Stop
 | 26 | Dashboard | CSP `script-src 'self'` blocks all inline event handlers (`onclick`, `onsubmit`) | CSP must include `'unsafe-inline'` in `script-src` because `app.js` uses innerHTML with 55+ inline handlers |
 | 27 | Startup | `agent42.log` owned by root (from systemd) blocks `deploy` user startup | Catch `PermissionError` on `FileHandler`; fall back to stdout-only logging |
 | 28 | Auth | `passlib 1.7.4` crashes with `bcrypt >= 4.1` (wrap-bug detection hashes >72-byte secret) | Use `bcrypt` directly via `_BcryptContext` wrapper in `dashboard/auth.py`; do not use `passlib` |
-| 29 | Interview | New `TaskType.PROJECT_SETUP` not in `_TASK_TYPE_KEYWORDS` — it's triggered via complexity gating, not keywords | Detection flows through `ComplexityAssessor.needs_project_setup` and `IntentClassifier.needs_project_setup`, not keyword matching |
-| 30 | Interview | Project interview tool stores state in `PROJECT.json` — if outputs dir changes, sessions are lost | Always use `settings.outputs_dir` consistently; sessions are keyed by `project_id` subdirectory |
+| 29 | Tokens | `router.complete()` returns `(str, dict\|None)` tuple, not plain `str` | Always unpack: `text, usage = await router.complete(...)` or `text, _ = ...` if usage not needed |
+| 30 | Session | `SessionManager.get_messages()` does not exist — use `get_history()` | Call `get_history(channel_type, channel_id, max_messages=N)` instead |
+| 31 | Scope | Scope detection LLM call adds latency to every message | Scope check only runs when an active scope exists and task is not yet DONE/FAILED |
+| 32 | Interview | New `TaskType.PROJECT_SETUP` not in `_TASK_TYPE_KEYWORDS` — it's triggered via complexity gating, not keywords | Detection flows through `ComplexityAssessor.needs_project_setup` and `IntentClassifier.needs_project_setup`, not keyword matching |
+| 33 | Interview | Project interview tool stores state in `PROJECT.json` — if outputs dir changes, sessions are lost | Always use `settings.outputs_dir` consistently; sessions are keyed by `project_id` subdirectory |
+| 34 | Dataclass | Duplicate field name in a `@dataclass` silently shadows the first definition — Python does not raise an error | Search for duplicate field names when adding fields to `Task` or other dataclasses; ruff does not catch this |
+| 35 | Subprocess | `asyncio.wait_for(proc.communicate(), timeout=N)` cancels the coroutine but orphans the subprocess on `TimeoutError` | Always wrap in `try/except TimeoutError`, then call `proc.kill()` + `await proc.wait()` to reap the process |
+| 36 | Async | `asyncio.get_event_loop()` is deprecated since Python 3.10; raises `DeprecationWarning` and may fail if no current loop | Use `asyncio.get_running_loop()` inside coroutines; use `asyncio.new_event_loop()` in non-async startup code |
 
 ---
 

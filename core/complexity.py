@@ -193,7 +193,9 @@ class ComplexityAssessor:
             },
         ]
 
-        response = await self.router.complete(self.model, messages, temperature=0.1, max_tokens=200)
+        response, _ = await self.router.complete(
+            self.model, messages, temperature=0.1, max_tokens=200
+        )
 
         return self._parse_response(response, description, task_type)
 

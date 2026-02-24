@@ -14,6 +14,7 @@ const state = {
   selectedTask: null,
   wsConnected: false,
   settingsTab: "providers",
+  tokenStats: null,
   tools: [],
   skills: [],
   channels: [],
@@ -26,11 +27,14 @@ const state = {
   filterPriority: "",
   filterType: "",
   status: {},
+  // Apps
+  apps: [],
+  appFilter: "",  // "" = all, "running", "stopped", "building", etc.
   // API key management
   apiKeys: {},
   keyEdits: {},
   keySaving: false,
-  // Chat
+  // Chat (multi-session)
   chatMessages: [],
   chatInput: "",
   chatSending: false,
@@ -38,6 +42,25 @@ const state = {
   canvasContent: "",
   canvasTitle: "",
   canvasLang: "",
+  chatSessions: [],
+  currentSessionId: "",
+  currentSessionMessages: [],
+  // Code page
+  codeSessions: [],
+  codeCurrentSessionId: "",
+  codeCurrentMessages: [],
+  codeSetupStep: 0,  // 0=not started, 1=mode, 2=config, 3=done
+  codeSending: false,
+  codeCanvasOpen: true,
+  // Projects
+  projects: [],
+  selectedProject: null,
+  missionControlTab: "tasks",  // "tasks" or "projects"
+  projectViewMode: "kanban",
+  // GitHub
+  githubConnected: false,
+  githubDeviceCode: null,
+  githubPolling: false,
   // Editable settings
   envSettings: {},
   envEdits: {},
@@ -333,25 +356,70 @@ function handleWSMessage(msg) {
       state.selectedTask = msg.data;
       renderDetail();
     }
-    // Update stats
+    // Update stats (including token usage)
     renderStats();
+    loadTokenStats();
   } else if (msg.type === "system_health") {
     state.status = msg.data;
     if (state.page === "status") renderStatus();
+  } else if (msg.type === "app_status") {
+    // Real-time app status update
+    const idx = state.apps.findIndex((a) => a.id === msg.data.id);
+    if (idx >= 0) state.apps[idx] = msg.data;
+    else state.apps.unshift(msg.data);
+    if (state.page === "apps") renderApps();
   } else if (msg.type === "agent_stall") {
     toast(`Agent stalled: ${msg.data.task_id}`, "error");
-  } else if (msg.type === "chat_message") {
-    // Deduplicate: if we optimistically added this user message, replace with server version
-    if (msg.data.role === "user") {
-      const idx = state.chatMessages.findIndex(m => m.id?.startsWith("local-") && m.content === msg.data.content);
-      if (idx >= 0) { state.chatMessages[idx] = msg.data; }
-      else { state.chatMessages.push(msg.data); }
-    } else {
-      state.chatMessages.push(msg.data);
-      // Agent responded — clear typing indicator
-      state.chatSending = false;
+  } else if (msg.type === "project_update") {
+    const idx = state.projects.findIndex(p => p.id === msg.data.id);
+    if (idx >= 0) state.projects[idx] = msg.data;
+    else state.projects.unshift(msg.data);
+    if (state.page === "tasks" && state.missionControlTab === "projects") renderMissionControl();
+    if (state.page === "projectDetail" && state.selectedProject?.id === msg.data.id) {
+      state.selectedProject = msg.data;
+      renderProjectDetail();
     }
-    if (state.page === "chat") renderChat();
+  } else if (msg.type === "chat_message") {
+    const sid = msg.data.session_id || "";
+    // Route to chat or code page based on session
+    if (sid && sid === state.currentSessionId) {
+      // Active chat session
+      if (msg.data.role === "user") {
+        const idx = state.currentSessionMessages.findIndex(m => m.id?.startsWith("local-") && m.content === msg.data.content);
+        if (idx >= 0) state.currentSessionMessages[idx] = msg.data;
+        else state.currentSessionMessages.push(msg.data);
+      } else {
+        state.currentSessionMessages.push(msg.data);
+        state.chatSending = false;
+      }
+      if (state.page === "chat") renderChat();
+    } else if (sid && sid === state.codeCurrentSessionId) {
+      // Active code session
+      if (msg.data.role === "user") {
+        const idx = state.codeCurrentMessages.findIndex(m => m.id?.startsWith("local-") && m.content === msg.data.content);
+        if (idx >= 0) state.codeCurrentMessages[idx] = msg.data;
+        else state.codeCurrentMessages.push(msg.data);
+      } else {
+        state.codeCurrentMessages.push(msg.data);
+        state.codeSending = false;
+      }
+      if (state.page === "code") renderCode();
+    } else if (!sid) {
+      // Legacy messages without session_id (backward compat)
+      if (msg.data.role === "user") {
+        const idx = state.chatMessages.findIndex(m => m.id?.startsWith("local-") && m.content === msg.data.content);
+        if (idx >= 0) state.chatMessages[idx] = msg.data;
+        else state.chatMessages.push(msg.data);
+      } else {
+        state.chatMessages.push(msg.data);
+        state.chatSending = false;
+      }
+      if (state.page === "chat") renderChat();
+    } else {
+      // Message for a non-active session — update unread badge
+      const session = state.chatSessions.find(s => s.id === sid) || state.codeSessions.find(s => s.id === sid);
+      if (session) session._unread = (session._unread || 0) + 1;
+    }
   }
 }
 
@@ -375,6 +443,10 @@ async function loadTasks() {
   } catch { state.tasks = []; }
 }
 
+async function loadTokenStats() {
+  try {
+    state.tokenStats = (await api("/stats/tokens")) || null;
+  } catch { state.tokenStats = null; }
 async function loadRepos() {
   try {
     state.repos = (await api("/repos")) || [];
@@ -407,6 +479,38 @@ async function loadSkills() {
   } catch { state.skills = []; }
 }
 
+async function toggleTool(name, enabled) {
+  try {
+    await api(`/tools/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    });
+    await loadTools();
+    renderTools();
+    toast(`Tool '${name}' ${enabled ? "enabled" : "disabled"}`, "success");
+  } catch (e) {
+    toast("Failed to update tool: " + e.message, "error");
+    await loadTools();
+    renderTools();
+  }
+}
+
+async function toggleSkill(name, enabled) {
+  try {
+    await api(`/skills/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    });
+    await loadSkills();
+    renderSkills();
+    toast(`Skill '${name}' ${enabled ? "enabled" : "disabled"}`, "success");
+  } catch (e) {
+    toast("Failed to update skill: " + e.message, "error");
+    await loadSkills();
+    renderSkills();
+  }
+}
+
 async function loadChannels() {
   try {
     state.channels = (await api("/channels")) || [];
@@ -435,6 +539,12 @@ async function loadApiKeys() {
   try {
     state.apiKeys = (await api("/settings/keys")) || {};
   } catch { state.apiKeys = {}; }
+}
+
+async function loadApps() {
+  try {
+    state.apps = (await api("/apps")) || [];
+  } catch { state.apps = []; }
 }
 
 async function saveApiKeys() {
@@ -523,6 +633,187 @@ async function loadChatMessages() {
   } catch { state.chatMessages = []; }
 }
 
+// -- Chat sessions --
+async function loadChatSessions() {
+  try {
+    state.chatSessions = (await api("/chat/sessions?type=chat")) || [];
+  } catch { state.chatSessions = []; }
+}
+
+async function loadCodeSessions() {
+  try {
+    state.codeSessions = (await api("/chat/sessions?type=code")) || [];
+  } catch { state.codeSessions = []; }
+}
+
+async function createChatSession(sessionType) {
+  try {
+    const session = await api("/chat/sessions", {
+      method: "POST",
+      body: JSON.stringify({ title: "", session_type: sessionType }),
+    });
+    if (sessionType === "chat") {
+      state.chatSessions.unshift(session);
+      await switchChatSession(session.id);
+    } else {
+      state.codeSessions.unshift(session);
+      await switchCodeSession(session.id);
+    }
+    return session;
+  } catch (e) {
+    toast("Failed to create session: " + e.message, "error");
+    return null;
+  }
+}
+
+async function switchChatSession(sessionId) {
+  state.currentSessionId = sessionId;
+  try {
+    state.currentSessionMessages = (await api(`/chat/sessions/${sessionId}/messages`)) || [];
+  } catch { state.currentSessionMessages = []; }
+  const session = state.chatSessions.find(s => s.id === sessionId);
+  if (session) session._unread = 0;
+  if (state.page === "chat") renderChat();
+}
+
+async function switchCodeSession(sessionId) {
+  state.codeCurrentSessionId = sessionId;
+  state.codeSetupStep = 0;
+  try {
+    state.codeCurrentMessages = (await api(`/chat/sessions/${sessionId}/messages`)) || [];
+    const session = state.codeSessions.find(s => s.id === sessionId);
+    if (session) {
+      session._unread = 0;
+      // Check if setup is needed
+      if (session.session_type === "code" && !session.deployment_target) {
+        state.codeSetupStep = 1;
+      } else {
+        state.codeSetupStep = 3;
+      }
+    }
+  } catch { state.codeCurrentMessages = []; }
+  if (state.page === "code") renderCode();
+}
+
+async function sendSessionMessage(sessionId, isCode) {
+  const inputId = isCode ? "code-chat-input" : "chat-input";
+  const input = document.getElementById(inputId);
+  const text = (input?.value || "").trim();
+  if (!text) return;
+  if (isCode) { if (state.codeSending) return; state.codeSending = true; }
+  else { if (state.chatSending) return; state.chatSending = true; }
+
+  const messages = isCode ? state.codeCurrentMessages : state.currentSessionMessages;
+  messages.push({
+    id: "local-" + Date.now(),
+    role: "user",
+    content: text,
+    timestamp: Date.now() / 1000,
+    sender: "You",
+    session_id: sessionId,
+  });
+  if (input) input.value = "";
+  if (isCode && state.page === "code") renderCode();
+  else if (!isCode && state.page === "chat") renderChat();
+
+  try {
+    await api(`/chat/sessions/${sessionId}/send`, {
+      method: "POST",
+      body: JSON.stringify({ message: text }),
+    });
+  } catch (e) {
+    toast("Failed to send: " + e.message, "error");
+  }
+  if (isCode) state.codeSending = false;
+  else state.chatSending = false;
+  if (isCode && state.page === "code") renderCode();
+  else if (!isCode && state.page === "chat") renderChat();
+}
+
+async function deleteChatSession(sessionId, sessionType) {
+  if (!confirm("Delete this conversation?")) return;
+  try {
+    await api(`/chat/sessions/${sessionId}`, { method: "DELETE" });
+    if (sessionType === "chat") {
+      state.chatSessions = state.chatSessions.filter(s => s.id !== sessionId);
+      if (state.currentSessionId === sessionId) {
+        state.currentSessionId = "";
+        state.currentSessionMessages = [];
+      }
+    } else {
+      state.codeSessions = state.codeSessions.filter(s => s.id !== sessionId);
+      if (state.codeCurrentSessionId === sessionId) {
+        state.codeCurrentSessionId = "";
+        state.codeCurrentMessages = [];
+        state.codeSetupStep = 0;
+      }
+    }
+    if (state.page === "chat") renderChat();
+    if (state.page === "code") renderCode();
+  } catch (e) { toast("Delete failed: " + e.message, "error"); }
+}
+
+// -- Projects --
+async function loadProjects() {
+  try {
+    state.projects = (await api("/projects")) || [];
+  } catch { state.projects = []; }
+}
+
+async function loadGitHubStatus() {
+  try {
+    const res = await api("/github/status");
+    state.githubConnected = res?.connected || false;
+  } catch { state.githubConnected = false; }
+}
+
+async function submitCodeSetup(sessionId) {
+  const mode = document.querySelector('input[name="code-mode"]:checked')?.value || "local";
+  const runtime = document.getElementById("code-runtime")?.value || "python";
+  const appName = document.getElementById("code-app-name")?.value || "Untitled";
+  const sshHost = document.getElementById("code-ssh-host")?.value || "";
+  const ghRepoName = document.getElementById("code-gh-repo")?.value || "";
+
+  try {
+    const result = await api(`/chat/sessions/${sessionId}/setup`, {
+      method: "POST",
+      body: JSON.stringify({
+        mode, runtime, app_name: appName,
+        ssh_host: sshHost, github_repo_name: ghRepoName,
+      }),
+    });
+    // Update session in local state
+    const idx = state.codeSessions.findIndex(s => s.id === sessionId);
+    if (idx >= 0) state.codeSessions[idx] = result;
+    state.codeSetupStep = 3;
+    renderCode();
+  } catch (e) {
+    toast("Setup failed: " + e.message, "error");
+  }
+}
+
+async function createProject() {
+  const name = document.getElementById("project-name")?.value?.trim();
+  const desc = document.getElementById("project-desc")?.value?.trim() || "";
+  if (!name) { toast("Project name required", "error"); return; }
+  try {
+    const project = await api("/projects", {
+      method: "POST",
+      body: JSON.stringify({ name, description: desc }),
+    });
+    state.projects.unshift(project);
+    closeModal();
+    renderMissionControl();
+    toast("Project created", "success");
+  } catch (e) { toast("Failed: " + e.message, "error"); }
+}
+
+async function loadProjectTasks(projectId) {
+  try {
+    return (await api(`/projects/${projectId}/tasks`)) || [];
+  } catch { return []; }
+}
+
 async function sendChatMessage() {
   const input = document.getElementById("chat-input");
   const text = (input?.value || "").trim();
@@ -600,7 +891,8 @@ async function doCreateTask(title, description, taskType, repoId, branch) {
       body: JSON.stringify(body),
     });
     await loadTasks();
-    renderTasks();
+    if (state.page === "tasks") renderMissionControl();
+    else if (state.page === "projectDetail") renderProjectDetail();
     closeModal();
     toast("Task created", "success");
   } catch (err) {
@@ -781,11 +1073,19 @@ function closeModal() {
   if (el) el.remove();
 }
 
-function showCreateTaskModal() {
+function showCreateTaskModal(projectId) {
   const types = [
     "coding","debugging","research","refactoring","documentation",
     "marketing","email","design","content","strategy","data_analysis","project_management"
   ];
+  const projectOpts = state.projects.length ? `
+    <div class="form-group">
+      <label for="ct-project">Project</label>
+      <select id="ct-project">
+        <option value="">None (standalone task)</option>
+        ${state.projects.map((p) => `<option value="${p.id}"${projectId === p.id ? ' selected' : ''}>${esc(p.name)}</option>`).join("")}
+      </select>
+    </div>` : '';
   const repoOptions = state.repos.map((r) => `<option value="${esc(r.id)}">${esc(r.name)} (${esc(r.default_branch)})</option>`).join("");
   showModal(`
     <div class="modal">
@@ -808,6 +1108,7 @@ function showCreateTaskModal() {
           </select>
           <div class="help">The task type determines which model, critic, and skills are used.</div>
         </div>
+        ${projectOpts}
         ${state.repos.length > 0 ? `
         <div class="form-group">
           <label for="ct-repo">Repository</label>
@@ -856,6 +1157,10 @@ function submitCreateTask() {
   const title = document.getElementById("ct-title")?.value?.trim();
   const desc = document.getElementById("ct-desc")?.value?.trim();
   const type = document.getElementById("ct-type")?.value;
+  const projectId = document.getElementById("ct-project")?.value || "";
+  if (!title) return toast("Title is required", "error");
+  if (!desc) return toast("Description is required", "error");
+  doCreateTask(title, desc, type, projectId);
   const repoId = document.getElementById("ct-repo")?.value || "";
   const branch = document.getElementById("ct-branch")?.value || "";
   if (!title) return toast("Title is required", "error");
@@ -890,6 +1195,108 @@ function submitReview(taskId, approved) {
   doSubmitReview(taskId, feedback, approved);
 }
 
+function showCreateAppModal() {
+  const runtimes = ["python", "node", "static", "docker"];
+  showModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>Create App</h3>
+        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="ca-name">App Name</label>
+          <input type="text" id="ca-name" placeholder="My Awesome App">
+        </div>
+        <div class="form-group">
+          <label for="ca-desc">Description</label>
+          <textarea id="ca-desc" rows="3" placeholder="Describe what this app should do..."></textarea>
+        </div>
+        <div class="form-group">
+          <label for="ca-runtime">Runtime</label>
+          <select id="ca-runtime">
+            ${runtimes.map((r) => `<option value="${r}">${r}</option>`).join("")}
+          </select>
+          <div class="help">Python = Flask/FastAPI, Node = Express/Next, Static = HTML/CSS/JS, Docker = custom container.</div>
+        </div>
+        <div class="form-group">
+          <label for="ca-tags">Tags (comma-separated)</label>
+          <input type="text" id="ca-tags" placeholder="dashboard, api, internal">
+        </div>
+        <div class="form-group">
+          <label for="ca-mode">Mode</label>
+          <select id="ca-mode">
+            <option value="internal">Internal (Agent42 system tool)</option>
+            <option value="external">External (public release)</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitCreateApp()">Create &amp; Build</button>
+      </div>
+    </div>
+  `);
+  document.getElementById("ca-name")?.focus();
+}
+
+async function submitCreateApp() {
+  const name = document.getElementById("ca-name")?.value?.trim();
+  const description = document.getElementById("ca-desc")?.value?.trim();
+  const runtime = document.getElementById("ca-runtime")?.value;
+  const tagsRaw = document.getElementById("ca-tags")?.value?.trim() || "";
+  const app_mode = document.getElementById("ca-mode")?.value || "internal";
+  if (!name) return toast("App name is required", "error");
+  if (!description) return toast("Description is required", "error");
+  const tags = tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : [];
+  try {
+    const res = await api("/apps", {
+      method: "POST",
+      body: JSON.stringify({ name, description, runtime, tags, app_mode }),
+    });
+    closeModal();
+    toast(`App "${name}" created — building now`, "success");
+    await loadApps();
+    navigate("apps");
+  } catch (err) { toast(err.message, "error"); }
+}
+
+function showAppUpdateModal(appId, appName) {
+  showModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>Update: ${esc(appName)}</h3>
+        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="au-desc">Describe the changes</label>
+          <textarea id="au-desc" rows="4" placeholder="What should be changed or added..."></textarea>
+          <div class="help">An agent will read the existing app and apply your requested changes.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitAppUpdate('${appId}')">Submit Update</button>
+      </div>
+    </div>
+  `);
+  document.getElementById("au-desc")?.focus();
+}
+
+async function submitAppUpdate(appId) {
+  const description = document.getElementById("au-desc")?.value?.trim();
+  if (!description) return toast("Description is required", "error");
+  try {
+    await api(`/apps/${appId}/update`, {
+      method: "POST",
+      body: JSON.stringify({ description }),
+    });
+    closeModal();
+    toast("Update task created", "success");
+    await loadApps();
+    renderApps();
+  } catch (err) { toast(err.message, "error"); }
+}
+
 // ---------------------------------------------------------------------------
 // Rendering helpers
 // ---------------------------------------------------------------------------
@@ -912,6 +1319,13 @@ function timeSince(ts) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+function formatNumber(n) {
+  if (n == null) return "-";
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+  if (n >= 1000) return (n / 1000).toFixed(1) + "K";
+  return String(n);
+}
+
 // ---------------------------------------------------------------------------
 // Page renderers
 // ---------------------------------------------------------------------------
@@ -922,6 +1336,9 @@ function renderStats() {
   const counts = { pending: 0, assigned: 0, running: 0, review: 0, blocked: 0, done: 0, failed: 0, archived: 0 };
   state.tasks.forEach((t) => { if (counts[t.status] !== undefined) counts[t.status]++; });
   const active = counts.pending + counts.assigned + counts.running + counts.review + counts.blocked;
+  const ts = state.tokenStats;
+  const tokenDisplay = ts ? formatNumber(ts.total_tokens) : "-";
+  const costDisplay = ts ? "$" + ts.daily_spend_usd.toFixed(4) : "-";
   el.innerHTML = `
     <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value">${state.tasks.length}</div></div>
     <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value text-info">${active}</div></div>
@@ -929,6 +1346,8 @@ function renderStats() {
     <div class="stat-card"><div class="stat-label">Review</div><div class="stat-value" style="color:var(--accent)">${counts.review}</div></div>
     <div class="stat-card"><div class="stat-label">Blocked</div><div class="stat-value text-danger">${counts.blocked}</div></div>
     <div class="stat-card"><div class="stat-label">Done</div><div class="stat-value text-success">${counts.done}</div></div>
+    <div class="stat-card"><div class="stat-label">Tokens</div><div class="stat-value" style="font-family:var(--mono)">${tokenDisplay}</div></div>
+    <div class="stat-card"><div class="stat-label">Cost (24h)</div><div class="stat-value" style="font-family:var(--mono)">${costDisplay}</div></div>
   `;
 }
 
@@ -1013,6 +1432,7 @@ function renderKanbanBoard() {
                 ${t.repo_id ? `<span style="color:var(--accent)">${esc((state.repos.find(r=>r.id===t.repo_id)||{}).name||"repo")}${t.branch ? ":"+esc(t.branch) : ""}</span>` : ""}
                 ${t.assigned_agent ? `<span>${esc(t.assigned_agent)}</span>` : ""}
                 ${(t.comments||[]).length > 0 ? `<span>${(t.comments||[]).length} comments</span>` : ""}
+                ${t.token_usage?.total_tokens ? `<span class="badge-tokens" title="Tokens used">${formatNumber(t.token_usage.total_tokens)} tok</span>` : ""}
               </div>
             </div>
           `).join("")}
@@ -1036,7 +1456,7 @@ function renderListView() {
 
   let rows = "";
   if (filtered.length === 0) {
-    rows = `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">&#128203;</div><h3>No tasks</h3></div></td></tr>`;
+    rows = `<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">&#128203;</div><h3>No tasks</h3></div></td></tr>`;
   } else {
     rows = filtered.map((t) => `
       <tr>
@@ -1047,6 +1467,7 @@ function renderListView() {
         <td>${statusBadge(t.status)}</td>
         <td><span class="badge-type">${esc(t.task_type)}</span></td>
         <td style="color:var(--text-muted)">${esc(t.assigned_agent || '-')}</td>
+        <td style="font-family:var(--mono);font-size:0.8rem;color:var(--text-muted)">${t.token_usage?.total_tokens ? formatNumber(t.token_usage.total_tokens) : "-"}</td>
         <td style="color:var(--text-muted)">${timeSince(t.created_at)}</td>
         <td>
           ${t.status === "review" ? `<button class="btn btn-sm btn-success" onclick="event.stopPropagation();doApproveTask('${t.id}')">Approve</button>` : ""}
@@ -1063,7 +1484,7 @@ function renderListView() {
     <div class="card">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Type</th><th>Agent</th><th>Created</th><th>Actions</th></tr></thead>
+          <thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Type</th><th>Agent</th><th>Tokens</th><th>Created</th><th>Actions</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
@@ -1126,6 +1547,7 @@ function renderDetail() {
           <div class="detail-item"><label>Status</label><div class="value">${statusBadge(t.status)}</div></div>
           <div class="detail-item"><label>Type</label><div class="value"><span class="badge-type">${esc(t.task_type)}</span></div></div>
           <div class="detail-item"><label>Iterations</label><div class="value">${t.iterations || 0} / ${t.max_iterations || "?"}</div></div>
+          ${t.token_usage?.total_tokens ? `<div class="detail-item"><label>Tokens</label><div class="value" style="font-family:var(--mono)">${formatNumber(t.token_usage.total_tokens)} <span style="color:var(--text-muted);font-size:0.8rem">(${formatNumber(t.token_usage.total_prompt_tokens)} in / ${formatNumber(t.token_usage.total_completion_tokens)} out)</span></div></div>` : ""}
           <div class="detail-item"><label>Created</label><div class="value">${new Date(t.created_at * 1000).toLocaleString()}</div></div>
           <div class="detail-item"><label>Updated</label><div class="value">${new Date(t.updated_at * 1000).toLocaleString()}</div></div>
           ${t.origin_channel ? `<div class="detail-item"><label>Origin</label><div class="value">${esc(t.origin_channel)}</div></div>` : ""}
@@ -1166,6 +1588,30 @@ function renderDetail() {
         </div>
       </div>
     </div>
+
+    ${t.token_usage?.by_model && Object.keys(t.token_usage.by_model).length > 0 ? `
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-header"><h3>Token Usage by Model</h3></div>
+      <div class="card-body">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Model</th><th>Calls</th><th>Prompt</th><th>Completion</th><th>Total</th></tr></thead>
+            <tbody>
+              ${Object.entries(t.token_usage.by_model).map(([model, d]) => `
+                <tr>
+                  <td style="font-family:var(--mono);font-size:0.8rem">${esc(model)}</td>
+                  <td>${d.calls}</td>
+                  <td>${formatNumber(d.prompt_tokens)}</td>
+                  <td>${formatNumber(d.completion_tokens)}</td>
+                  <td><strong>${formatNumber(d.prompt_tokens + d.completion_tokens)}</strong></td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    ` : ""}
 
     <div class="card">
       <div class="card-header"><h3>Actions</h3></div>
@@ -1234,20 +1680,30 @@ function renderTools() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "tools") return;
 
-  const rows = state.tools.map((t) => `
-    <tr>
+  const rows = state.tools.map((t) => {
+    const enabled = t.enabled !== false;
+    const toggleId = `tool-toggle-${esc(t.name)}`;
+    return `
+    <tr style="${enabled ? "" : "opacity:0.55"}">
       <td style="font-weight:600">${esc(t.name)}</td>
       <td style="color:var(--text-secondary)">${esc(t.description || "")}</td>
+      <td style="text-align:center">
+        <label class="toggle-switch" title="${enabled ? "Disable" : "Enable"} ${esc(t.name)}">
+          <input type="checkbox" id="${toggleId}" ${enabled ? "checked" : ""}
+            onchange="toggleTool('${esc(t.name)}', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
     </tr>
-  `).join("");
+  `}).join("");
 
   el.innerHTML = `
     <div class="card">
       <div class="card-header"><h3>Registered Tools (${state.tools.length})</h3></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Description</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="2"><div class="empty-state">No tools registered</div></td></tr>`}</tbody>
+          <thead><tr><th>Name</th><th>Description</th><th style="text-align:center;width:80px">Enabled</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="3"><div class="empty-state">No tools registered</div></td></tr>`}</tbody>
         </table>
       </div>
     </div>
@@ -1258,26 +1714,150 @@ function renderSkills() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "skills") return;
 
-  const rows = state.skills.map((s) => `
-    <tr>
+  const rows = state.skills.map((s) => {
+    const enabled = s.enabled !== false;
+    const toggleId = `skill-toggle-${esc(s.name)}`;
+    return `
+    <tr style="${enabled ? "" : "opacity:0.55"}">
       <td style="font-weight:600">${esc(s.name)}</td>
       <td style="color:var(--text-secondary)">${esc(s.description || "")}</td>
       <td>${(s.task_types || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ")}</td>
       <td>${s.always_load ? '<span style="color:var(--success)">Always</span>' : ""}</td>
+      <td style="text-align:center">
+        <label class="toggle-switch" title="${enabled ? "Disable" : "Enable"} ${esc(s.name)}">
+          <input type="checkbox" id="${toggleId}" ${enabled ? "checked" : ""}
+            onchange="toggleSkill('${esc(s.name)}', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
     </tr>
-  `).join("");
+  `}).join("");
 
   el.innerHTML = `
     <div class="card">
       <div class="card-header"><h3>Loaded Skills (${state.skills.length})</h3></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Description</th><th>Task Types</th><th>Auto-load</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="4"><div class="empty-state">No skills loaded</div></td></tr>`}</tbody>
+          <thead><tr><th>Name</th><th>Description</th><th>Task Types</th><th>Auto-load</th><th style="text-align:center;width:80px">Enabled</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="5"><div class="empty-state">No skills loaded</div></td></tr>`}</tbody>
         </table>
       </div>
     </div>
   `;
+}
+
+function renderApps() {
+  const el = document.getElementById("page-content");
+  if (!el || state.page !== "apps") return;
+
+  const filtered = state.appFilter
+    ? state.apps.filter((a) => a.status === state.appFilter)
+    : state.apps;
+
+  // Status counts for filter chips
+  const counts = { all: state.apps.length, running: 0, building: 0, ready: 0, stopped: 0, draft: 0, error: 0 };
+  state.apps.forEach((a) => { if (counts[a.status] !== undefined) counts[a.status]++; });
+
+  const filterChips = ["", "running", "building", "ready", "stopped", "draft", "error"]
+    .filter((f) => f === "" || counts[f] > 0)
+    .map((f) => {
+      const label = f || "all";
+      const count = f ? counts[f] : counts.all;
+      const active = state.appFilter === f ? "active" : "";
+      return `<button class="chip ${active}" onclick="state.appFilter='${f}';renderApps()">${label} <span class="chip-count">${count}</span></button>`;
+    }).join("");
+
+  const cards = filtered.map((app) => {
+    const statusClass = `badge-${app.status}`;
+    const isRunning = app.status === "running";
+    const isStopped = app.status === "stopped" || app.status === "ready";
+    const isBuilding = app.status === "building";
+    const isError = app.status === "error";
+
+    const actions = [];
+    if (isRunning) {
+      actions.push(`<button class="btn btn-outline btn-xs" onclick="appAction('${app.id}','stop')">Stop</button>`);
+      actions.push(`<button class="btn btn-outline btn-xs" onclick="appAction('${app.id}','restart')">Restart</button>`);
+      if (app.url) actions.push(`<a href="${esc(app.url)}" target="_blank" class="btn btn-primary btn-xs">Open</a>`);
+    } else if (isStopped) {
+      actions.push(`<button class="btn btn-primary btn-xs" onclick="appAction('${app.id}','start')">Start</button>`);
+    }
+    if (!isBuilding) {
+      actions.push(`<button class="btn btn-outline btn-xs" onclick="showAppUpdateModal('${app.id}','${esc(app.name)}')">Update</button>`);
+    }
+    actions.push(`<button class="btn btn-outline btn-xs" onclick="showAppLogs('${app.id}','${esc(app.name)}')">Logs</button>`);
+    actions.push(`<button class="btn btn-outline btn-xs btn-danger-text" onclick="appAction('${app.id}','delete')">Delete</button>`);
+
+    const runtimeIcon = { static: "&#128196;", python: "&#128013;", node: "&#9889;", docker: "&#128051;" }[app.runtime] || "&#128187;";
+    const modeLabel = app.app_mode === "external" ? '<span class="badge-type">external</span>' : "";
+    const tagsHtml = (app.tags || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ");
+
+    return `
+      <div class="app-card ${isError ? 'app-card-error' : ''} ${isRunning ? 'app-card-running' : ''}">
+        <div class="app-card-header">
+          <div class="app-card-icon">${app.icon || runtimeIcon}</div>
+          <div class="app-card-title">
+            <h4>${esc(app.name)}</h4>
+            <span class="badge-status ${statusClass}">${app.status}</span>
+            ${modeLabel}
+          </div>
+        </div>
+        <p class="app-card-desc">${esc(app.description) || '<span style="color:var(--text-muted)">No description</span>'}</p>
+        <div class="app-card-meta">
+          <span title="Runtime">${runtimeIcon} ${esc(app.runtime)}</span>
+          ${app.port ? `<span title="Port">:${app.port}</span>` : ""}
+          <span title="Created">${timeSince(app.created_at)}</span>
+          ${tagsHtml}
+        </div>
+        <div class="app-card-actions">${actions.join("")}</div>
+      </div>
+    `;
+  }).join("");
+
+  el.innerHTML = `
+    <div class="apps-stats-row">
+      <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value">${state.apps.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Running</div><div class="stat-value text-success">${counts.running}</div></div>
+      <div class="stat-card"><div class="stat-label">Building</div><div class="stat-value text-warning">${counts.building}</div></div>
+      <div class="stat-card"><div class="stat-label">Errors</div><div class="stat-value text-danger">${counts.error}</div></div>
+    </div>
+    <div class="apps-filters">${filterChips}</div>
+    ${filtered.length ? `<div class="apps-grid">${cards}</div>` : '<div class="empty-state" style="padding:3rem;text-align:center"><p style="font-size:1.1rem;margin-bottom:1rem">No apps yet</p><p style="color:var(--text-muted)">Create your first app to get started.</p><button class="btn btn-primary" style="margin-top:1rem" onclick="showCreateAppModal()">+ Create App</button></div>'}
+  `;
+}
+
+async function appAction(appId, action) {
+  try {
+    if (action === "delete") {
+      if (!confirm("Archive this app? It can't be undone.")) return;
+    }
+    const method = action === "delete" ? "DELETE" : "POST";
+    const path = action === "delete" ? `/apps/${appId}` : `/apps/${appId}/${action}`;
+    await api(path, { method });
+    toast(`App ${action} successful`, "success");
+    await loadApps();
+    renderApps();
+  } catch (err) { toast(err.message, "error"); }
+}
+
+async function showAppLogs(appId, name) {
+  try {
+    const data = await api(`/apps/${appId}/logs?lines=100`);
+    const logs = data?.logs || "No logs available.";
+    showModal(`
+      <div class="modal" style="max-width:700px">
+        <div class="modal-header"><h3>Logs: ${esc(name)}</h3>
+          <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <pre class="app-logs-pre">${esc(logs)}</pre>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" onclick="closeModal()">Close</button>
+        </div>
+      </div>
+    `);
+  } catch (err) { toast(err.message, "error"); }
 }
 
 function renderStatus() {
@@ -1529,20 +2109,48 @@ function renderChat() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "chat") return;
 
-  // Welcome screen when no messages
-  if (state.chatMessages.length === 0 && !state.chatSending) {
+  const sessions = state.chatSessions;
+  const hasSession = !!state.currentSessionId;
+
+  // Session sidebar
+  const sessionList = sessions.map(s => {
+    const isActive = s.id === state.currentSessionId;
+    const unread = s._unread ? `<span class="session-unread">${s._unread}</span>` : "";
+    const title = s.title || "New Chat";
+    return `
+      <div class="session-item ${isActive ? 'active' : ''}" onclick="switchChatSession('${s.id}')">
+        <span class="session-title">${esc(title)}</span>
+        ${unread}
+        <button class="session-delete" onclick="event.stopPropagation();deleteChatSession('${s.id}','chat')" title="Delete">&times;</button>
+      </div>`;
+  }).join("");
+
+  // Determine which messages to show
+  const messages = hasSession ? state.currentSessionMessages : state.chatMessages;
+  const sendFn = hasSession
+    ? `sendSessionMessage('${state.currentSessionId}',false)`
+    : "sendChatMessage()";
+  const keydownFn = hasSession
+    ? `if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendSessionMessage('${state.currentSessionId}',false)}`
+    : "handleChatKeydown(event)";
+
+  // Welcome / empty
+  if (!hasSession && messages.length === 0 && !state.chatSending) {
     el.innerHTML = `
       <div class="chat-layout">
+        <div class="session-sidebar">
+          <button class="btn btn-primary btn-sm session-new-btn" onclick="createChatSession('chat')">+ New Chat</button>
+          <div class="session-list">${sessionList}</div>
+        </div>
         <div class="chat-main">
           <div class="chat-welcome">
             <div class="chat-welcome-icon">42</div>
             <h2>Chat with Agent42</h2>
-            <p>Ask questions, request tasks, or explore what Agent42 can do for you.</p>
+            <p>Start a new conversation or pick up where you left off.</p>
             <div class="chat-suggestions">
+              <button class="chat-suggestion" onclick="createChatSession('chat')">+ New Chat</button>
               <button class="chat-suggestion" onclick="applySuggestion('What tasks are currently running?')">What tasks are running?</button>
-              <button class="chat-suggestion" onclick="applySuggestion('Help me write a Python script to process CSV files')">Write a Python script</button>
-              <button class="chat-suggestion" onclick="applySuggestion('Review the security configuration of this project')">Security review</button>
-              <button class="chat-suggestion" onclick="applySuggestion('Explain the architecture of this codebase')">Explain the architecture</button>
+              <button class="chat-suggestion" onclick="applySuggestion('Help me write a Python script')">Write a Python script</button>
             </div>
           </div>
           <div class="chat-composer">
@@ -1553,80 +2161,48 @@ function renderChat() {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
               </button>
             </div>
-            <div class="chat-composer-hint">Enter to send, Shift+Enter for new line</div>
           </div>
         </div>
-      </div>
-    `;
+      </div>`;
     return;
   }
 
   // Build messages
-  const msgs = state.chatMessages.map((m, i) => {
+  const msgs = messages.map((m, i) => {
     const isUser = m.role === "user";
     const sender = m.sender || (isUser ? "You" : "Agent42");
     const time = m.timestamp ? formatChatTime(m.timestamp) : "";
     const codeBlocks = isUser ? [] : extractCodeBlocks(m.content || "");
     const content = isUser ? esc(m.content).replace(/\n/g, "<br>") : renderMarkdown(m.content);
+    const msgArray = hasSession ? "state.currentSessionMessages" : "state.chatMessages";
 
     if (isUser) {
-      return `
-        <div class="chat-msg chat-msg-user">
-          <div class="chat-msg-content">
-            <div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div>
-            <div class="chat-msg-body chat-msg-body-user">${content}</div>
-          </div>
-          <div class="chat-avatar chat-avatar-user">U</div>
-        </div>`;
-    } else {
-      const canvasButtons = codeBlocks.map((b, j) =>
-        `<button class="chat-canvas-btn" onclick="openCanvas(state.chatMessages[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
-      ).join("");
-      return `
-        <div class="chat-msg chat-msg-agent">
-          <div class="chat-avatar chat-avatar-agent">42</div>
-          <div class="chat-msg-content">
-            <div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div>
-            <div class="chat-msg-body chat-msg-body-agent">${content}</div>
-            ${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}
-            ${m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : ""}
-          </div>
-        </div>`;
+      return `<div class="chat-msg chat-msg-user"><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-user">${content}</div></div><div class="chat-avatar chat-avatar-user">U</div></div>`;
     }
+    const canvasButtons = codeBlocks.map((b, j) =>
+      `<button class="chat-canvas-btn" onclick="openCanvas(${msgArray}[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
+    ).join("");
+    return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent">42</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : ""}</div></div>`;
   }).join("");
 
-  // Store code blocks on state for canvas access
-  state.chatMessages.forEach(m => {
-    if (m.role !== "user") m.__codeBlocks = extractCodeBlocks(m.content || "");
-  });
+  messages.forEach(m => { if (m.role !== "user") m.__codeBlocks = extractCodeBlocks(m.content || ""); });
 
-  // Typing indicator
-  const typingHtml = state.chatSending ? `
-    <div class="chat-msg chat-msg-agent">
-      <div class="chat-avatar chat-avatar-agent">42</div>
-      <div class="chat-msg-content">
-        <div class="chat-typing">
-          <span class="chat-typing-dot"></span>
-          <span class="chat-typing-dot"></span>
-          <span class="chat-typing-dot"></span>
-        </div>
-      </div>
-    </div>
-  ` : "";
+  const typingHtml = state.chatSending ? `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent">42</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
 
   el.innerHTML = `
     <div class="chat-layout">
+      <div class="session-sidebar">
+        <button class="btn btn-primary btn-sm session-new-btn" onclick="createChatSession('chat')">+ New Chat</button>
+        <div class="session-list">${sessionList}</div>
+      </div>
       <div class="chat-main ${state.canvasOpen ? "canvas-active" : ""}">
-        <div class="chat-messages" id="chat-messages">
-          ${msgs}
-          ${typingHtml}
-        </div>
+        <div class="chat-messages" id="chat-messages">${msgs}${typingHtml}</div>
         <div class="chat-composer">
           <div class="chat-composer-inner">
             <textarea id="chat-input" class="chat-textarea" rows="1" placeholder="Message Agent42..."
-                      oninput="autoGrowTextarea(this)" onkeydown="handleChatKeydown(event)"
+                      oninput="autoGrowTextarea(this)" onkeydown="${keydownFn}"
                       ${state.chatSending ? "disabled" : ""}></textarea>
-            <button class="chat-send-btn" onclick="sendChatMessage()" ${state.chatSending ? "disabled" : ""} title="Send message">
+            <button class="chat-send-btn" onclick="${sendFn}" ${state.chatSending ? "disabled" : ""} title="Send message">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
             </button>
           </div>
@@ -1636,10 +2212,8 @@ function renderChat() {
       <div id="canvas-panel" class="canvas-panel ${state.canvasOpen ? "open" : ""}"></div>
     </div>
   `;
-  // Auto-scroll to bottom
   const msgContainer = document.getElementById("chat-messages");
   if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
-  // Re-render canvas if open
   if (state.canvasOpen) renderCanvasPanel();
 }
 
@@ -1671,6 +2245,350 @@ function applySuggestion(text) {
     input.focus();
   }
 }
+
+// ---------------------------------------------------------------------------
+// Mission Control (tabbed: Tasks | Projects)
+// ---------------------------------------------------------------------------
+function renderMissionControl() {
+  const el = document.getElementById("page-content");
+  if (!el || state.page !== "tasks") return;
+
+  const isProjects = state.missionControlTab === "projects";
+  el.innerHTML = `
+    <div class="mc-tabs">
+      <button class="mc-tab ${!isProjects ? 'active' : ''}" onclick="state.missionControlTab='tasks';renderMissionControl()">Tasks</button>
+      <button class="mc-tab ${isProjects ? 'active' : ''}" onclick="state.missionControlTab='projects';renderMissionControl()">Projects</button>
+    </div>
+    <div id="mc-content"></div>
+  `;
+
+  if (isProjects) renderProjectsBoard();
+  else renderTasks();
+}
+
+function renderProjectsBoard() {
+  const el = document.getElementById("mc-content") || document.getElementById("page-content");
+  if (!el) return;
+
+  const statuses = ["planning", "active", "paused", "completed"];
+  const statusLabels = { planning: "Planning", active: "Active", paused: "Paused", completed: "Completed" };
+  const statusColors = { planning: "var(--info)", active: "var(--success)", paused: "var(--warning)", completed: "var(--text-muted)" };
+
+  const columns = statuses.map(s => {
+    const items = state.projects.filter(p => p.status === s);
+    const cards = items.map(p => {
+      const stats = p.stats || {};
+      const total = stats.total || 0;
+      const done = stats.done || 0;
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      const priorityDot = p.priority > 0 ? `<span class="priority-dot priority-${p.priority}"></span>` : "";
+      return `
+        <div class="project-card" onclick="state.selectedProject=state.projects.find(x=>x.id==='${p.id}');navigate('projectDetail')">
+          <div class="project-card-header">
+            ${priorityDot}
+            <span class="project-card-name">${esc(p.name)}</span>
+          </div>
+          ${p.description ? `<div class="project-card-desc">${esc(p.description).substring(0, 80)}</div>` : ""}
+          <div class="project-card-progress">
+            <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${statusColors[s]}"></div></div>
+            <span class="progress-text">${done}/${total} tasks</span>
+          </div>
+          ${p.tags?.length ? `<div class="project-card-tags">${p.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
+        </div>`;
+    }).join("");
+
+    return `
+      <div class="kanban-col">
+        <div class="kanban-col-header" style="border-top:3px solid ${statusColors[s]}">
+          <span>${statusLabels[s]}</span><span class="kanban-count">${items.length}</span>
+        </div>
+        <div class="kanban-col-body">${cards || '<div class="kanban-empty">No projects</div>'}</div>
+      </div>`;
+  }).join("");
+
+  el.innerHTML = `<div class="kanban-board">${columns}</div>`;
+}
+
+function renderProjectDetail() {
+  const el = document.getElementById("page-content");
+  if (!el) return;
+  const p = state.selectedProject;
+  if (!p) { navigate("tasks"); return; }
+
+  const stats = p.stats || {};
+  const total = stats.total || 0;
+  const done = stats.done || 0;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+
+  el.innerHTML = `
+    <div style="margin-bottom:1rem">
+      <a href="#" onclick="event.preventDefault();navigate('tasks')" style="color:var(--text-muted)">&larr; Back to Mission Control</a>
+    </div>
+    <div class="card" style="margin-bottom:1rem">
+      <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
+        <h3 style="margin:0;flex:1">${esc(p.name)}</h3>
+        <span class="status-badge status-${p.status}">${p.status}</span>
+        <select onchange="updateProjectStatus('${p.id}',this.value)" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.25rem 0.5rem">
+          ${["planning","active","paused","completed"].map(s => `<option value="${s}" ${p.status === s ? "selected" : ""}>${s}</option>`).join("")}
+        </select>
+      </div>
+      ${p.description ? `<p style="color:var(--text-secondary);margin-bottom:1rem">${esc(p.description)}</p>` : ""}
+      <div class="project-card-progress" style="margin-bottom:1rem">
+        <div class="progress-bar" style="height:8px"><div class="progress-fill" style="width:${pct}%"></div></div>
+        <span class="progress-text">${done}/${total} tasks done (${pct}%)</span>
+      </div>
+      ${p.github_repo ? `<div style="color:var(--text-muted);font-size:0.85rem">GitHub: ${esc(p.github_repo)}</div>` : ""}
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+        <h4 style="margin:0">Tasks</h4>
+        <button class="btn btn-primary btn-sm" onclick="showCreateTaskModal('${p.id}')">+ Add Task</button>
+      </div>
+      <div id="project-tasks-list">Loading...</div>
+    </div>
+  `;
+
+  loadProjectTasks(p.id).then(tasks => {
+    const container = document.getElementById("project-tasks-list");
+    if (!container) return;
+    if (!tasks.length) { container.innerHTML = '<div style="color:var(--text-muted)">No tasks yet</div>'; return; }
+    container.innerHTML = tasks.map(t => `
+      <div class="task-row" onclick="state.selectedTask=state.tasks.find(x=>x.id==='${t.id}')||${JSON.stringify(t).replace(/'/g, "\\'")};navigate('detail')" style="cursor:pointer">
+        <span class="status-badge status-${t.status}">${t.status}</span>
+        <span style="flex:1;margin-left:0.5rem">${esc(t.title)}</span>
+      </div>
+    `).join("");
+  });
+}
+
+async function updateProjectStatus(projectId, status) {
+  try {
+    const updated = await api(`/projects/${projectId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+    const idx = state.projects.findIndex(p => p.id === projectId);
+    if (idx >= 0) state.projects[idx] = updated;
+    if (state.selectedProject?.id === projectId) state.selectedProject = updated;
+  } catch (e) { toast("Failed: " + e.message, "error"); }
+}
+
+function showCreateProjectModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "modal-overlay";
+  overlay.onclick = (e) => { if (e.target === overlay) closeModal(); };
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>New Project</h3>
+      <div class="form-group">
+        <label>Project Name</label>
+        <input type="text" id="project-name" placeholder="e.g., Website Redesign" autofocus>
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="project-desc" rows="3" placeholder="What is this project about?"></textarea>
+      </div>
+      <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="createProject()">Create</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+// ---------------------------------------------------------------------------
+// Code Page
+// ---------------------------------------------------------------------------
+function renderCode() {
+  const el = document.getElementById("page-content");
+  if (!el || state.page !== "code") return;
+
+  const sessions = state.codeSessions;
+  const hasSession = !!state.codeCurrentSessionId;
+  const currentSession = sessions.find(s => s.id === state.codeCurrentSessionId);
+
+  // Session sidebar
+  const sessionList = sessions.map(s => {
+    const isActive = s.id === state.codeCurrentSessionId;
+    const unread = s._unread ? `<span class="session-unread">${s._unread}</span>` : "";
+    const title = s.title || "New Code";
+    return `
+      <div class="session-item ${isActive ? 'active' : ''}" onclick="switchCodeSession('${s.id}')">
+        <span class="session-title">${esc(title)}</span>
+        ${unread}
+        <button class="session-delete" onclick="event.stopPropagation();deleteChatSession('${s.id}','code')" title="Delete">&times;</button>
+      </div>`;
+  }).join("");
+
+  // Code setup flow or chat
+  let mainContent = "";
+  if (!hasSession) {
+    mainContent = `
+      <div class="code-welcome">
+        <h2 style="margin-bottom:0.5rem">Code with Agent42</h2>
+        <p style="color:var(--text-secondary);margin-bottom:1.5rem">Start a new coding session to build projects with AI assistance.</p>
+        <button class="btn btn-primary" onclick="createChatSession('code')">+ New Coding Session</button>
+      </div>`;
+  } else if (state.codeSetupStep === 1 || state.codeSetupStep === 2) {
+    mainContent = renderCodeSetupHTML(state.codeCurrentSessionId);
+  } else {
+    mainContent = renderCodeChatHTML();
+  }
+
+  el.innerHTML = `
+    <div class="code-layout">
+      <div class="session-sidebar">
+        <button class="btn btn-primary btn-sm session-new-btn" onclick="createChatSession('code')">+ New Session</button>
+        <div class="session-list">${sessionList}</div>
+      </div>
+      <div class="code-main">
+        ${mainContent}
+      </div>
+    </div>
+  `;
+
+  if (hasSession && state.codeSetupStep >= 3) {
+    const msgContainer = document.getElementById("code-messages");
+    if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
+    if (state.codeCanvasOpen) renderCodeCanvasPanel();
+  }
+}
+
+function renderCodeSetupHTML(sessionId) {
+  if (state.codeSetupStep === 1) {
+    return `
+      <div class="code-setup">
+        <h3>Project Setup</h3>
+        <p style="color:var(--text-secondary);margin-bottom:1.5rem">Where will this project run?</p>
+        <div class="setup-cards">
+          <label class="setup-card">
+            <input type="radio" name="code-mode" value="local" checked>
+            <div class="setup-card-content">
+              <div class="setup-card-icon">&#128187;</div>
+              <div class="setup-card-title">Local App</div>
+              <div class="setup-card-desc">Build and run on this server using Agent42's app platform</div>
+            </div>
+          </label>
+          <label class="setup-card">
+            <input type="radio" name="code-mode" value="remote">
+            <div class="setup-card-content">
+              <div class="setup-card-icon">&#9729;&#65039;</div>
+              <div class="setup-card-title">Remote Server</div>
+              <div class="setup-card-desc">Deploy to a remote server via SSH connection</div>
+            </div>
+          </label>
+        </div>
+        <button class="btn btn-primary" style="margin-top:1.5rem" onclick="state.codeSetupStep=2;renderCode()">Continue</button>
+      </div>`;
+  }
+
+  const mode = document.querySelector('input[name="code-mode"]:checked')?.value || "local";
+  if (state.codeSetupStep === 2) {
+    const localFields = `
+      <div class="form-group">
+        <label>App Name</label>
+        <input type="text" id="code-app-name" placeholder="my-awesome-app">
+      </div>
+      <div class="form-group">
+        <label>Runtime</label>
+        <select id="code-runtime">
+          <option value="python">Python (Flask/FastAPI)</option>
+          <option value="node">Node.js (Express/Next.js)</option>
+          <option value="static">Static (HTML/CSS/JS)</option>
+        </select>
+      </div>`;
+
+    const remoteFields = `
+      <div class="form-group">
+        <label>SSH Host</label>
+        <input type="text" id="code-ssh-host" placeholder="user@hostname">
+        <div class="help">Must be in SSH_ALLOWED_HOSTS</div>
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" id="code-deploy-now"> Deploy immediately after setup</label>
+      </div>`;
+
+    return `
+      <div class="code-setup">
+        <h3>${mode === "local" ? "Local App Setup" : "Remote Server Setup"}</h3>
+        ${mode === "local" ? localFields : remoteFields}
+        <div class="form-group">
+          <label>GitHub Repository (optional)</label>
+          <input type="text" id="code-gh-repo" placeholder="my-project">
+          <div class="help">${state.githubConnected ? "Connected to GitHub" : "Connect GitHub in Settings to enable"}</div>
+        </div>
+        <div style="display:flex;gap:0.5rem;margin-top:1.5rem">
+          <button class="btn btn-outline" onclick="state.codeSetupStep=1;renderCode()">Back</button>
+          <button class="btn btn-primary" onclick="submitCodeSetup('${sessionId}')">Start Coding</button>
+        </div>
+      </div>`;
+  }
+  return "";
+}
+
+function renderCodeChatHTML() {
+  const messages = state.codeCurrentMessages;
+  const session = state.codeSessions.find(s => s.id === state.codeCurrentSessionId);
+
+  const msgs = messages.map((m, i) => {
+    const isUser = m.role === "user";
+    const sender = m.sender || (isUser ? "You" : "Agent42");
+    const time = m.timestamp ? formatChatTime(m.timestamp) : "";
+    const content = isUser ? esc(m.content).replace(/\n/g, "<br>") : renderMarkdown(m.content);
+
+    if (isUser) {
+      return `<div class="chat-msg chat-msg-user"><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-user">${content}</div></div><div class="chat-avatar chat-avatar-user">U</div></div>`;
+    }
+    const codeBlocks = extractCodeBlocks(m.content || "");
+    const canvasButtons = codeBlocks.map((b, j) =>
+      `<button class="chat-canvas-btn" onclick="openCanvas(state.codeCurrentMessages[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
+    ).join("");
+    return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim);color:var(--success)">42</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}</div></div>`;
+  }).join("");
+
+  messages.forEach(m => { if (m.role !== "user") m.__codeBlocks = extractCodeBlocks(m.content || ""); });
+
+  const typingHtml = state.codeSending ? `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim);color:var(--success)">42</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
+
+  const sessionInfo = session?.deployment_target ? `<div class="code-session-info"><span>${session.deployment_target === "local" ? "Local" : "Remote"}</span>${session.github_repo ? ` <span>&#8226; ${esc(session.github_repo)}</span>` : ""}</div>` : "";
+
+  return `
+    <div class="code-chat-area ${state.codeCanvasOpen ? 'canvas-active' : ''}">
+      <div class="code-chat-panel">
+        ${sessionInfo}
+        <div class="chat-messages" id="code-messages">${msgs}${typingHtml}</div>
+        <div class="chat-composer">
+          <div class="chat-composer-inner">
+            <textarea id="code-chat-input" class="chat-textarea code-textarea" rows="1" placeholder="Describe what you want to build..."
+                      oninput="autoGrowTextarea(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendSessionMessage('${state.codeCurrentSessionId}',true)}"
+                      ${state.codeSending ? "disabled" : ""}></textarea>
+            <button class="chat-send-btn" onclick="sendSessionMessage('${state.codeCurrentSessionId}',true)" ${state.codeSending ? "disabled" : ""}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="code-canvas-panel" class="canvas-panel ${state.codeCanvasOpen ? 'open' : ''}"></div>
+    </div>`;
+}
+
+function renderCodeCanvasPanel() {
+  const panel = document.getElementById("code-canvas-panel");
+  if (!panel || !state.canvasContent) return;
+  panel.innerHTML = `
+    <div class="canvas-header">
+      <span>${esc(state.canvasTitle || "Code")}</span>
+      <button class="canvas-close" onclick="state.codeCanvasOpen=false;renderCode()">&times;</button>
+    </div>
+    <pre class="canvas-code"><code>${esc(state.canvasContent)}</code></pre>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-session Chat (updated renderChat)
+// ---------------------------------------------------------------------------
 
 function renderReposPanel() {
   const repoRows = state.repos.map((r) => `
@@ -2090,6 +3008,8 @@ function updateEnvSaveBtn() {
 // Main render
 // ---------------------------------------------------------------------------
 async function loadAll() {
+  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages(), loadTokenStats()]);
+  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages(), loadChatSessions(), loadCodeSessions(), loadProjects(), loadGitHubStatus()]);
   await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages(), loadRepos()]);
   await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadStatus()]);
 }
@@ -2134,6 +3054,7 @@ function render() {
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status')">&#128200; Status</a>
           <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals')">&#128274; Approvals ${approvalBadge}</a>
           <a href="#" data-page="chat" class="${state.page === "chat" ? "active" : ""}" onclick="event.preventDefault();navigate('chat')">&#128172; Chat</a>
+          <a href="#" data-page="code" class="${state.page === "code" ? "active" : ""}" onclick="event.preventDefault();navigate('code')">&#128187; Code</a>
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools')">&#128295; Tools</a>
           <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills')">&#9889; Skills</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings')">&#9881; Settings</a>
@@ -2146,9 +3067,14 @@ function render() {
       </aside>
       <div class="main">
         <div class="topbar">
-          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
+            ${state.page === "tasks" ? `
+              <button class="btn btn-primary btn-sm" onclick="${state.missionControlTab === 'projects' ? 'showCreateProjectModal()' : 'showCreateTaskModal()'}">+ New ${state.missionControlTab === 'projects' ? 'Project' : 'Task'}</button>
+              <button class="btn btn-outline btn-sm" style="margin-left:0.5rem" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>
+            ` : ""}
             ${state.page === "tasks" ? '<button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button><button class="btn btn-outline btn-sm" style="margin-left:0.5rem" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>' : ""}
+            ${state.page === "apps" ? '<button class="btn btn-primary btn-sm" onclick="showCreateAppModal()">+ New App</button>' : ""}
           </div>
         </div>
         <div class="content" id="page-content"></div>
@@ -2158,14 +3084,16 @@ function render() {
 
   // Render page content
   const renderers = {
-    tasks: renderTasks,
+    tasks: renderMissionControl,
     status: renderStatus,
     approvals: renderApprovals,
     chat: renderChat,
+    code: renderCode,
     tools: renderTools,
     skills: renderSkills,
     settings: renderSettings,
     detail: renderDetail,
+    projectDetail: renderProjectDetail,
   };
   (renderers[state.page] || renderTasks)();
 }

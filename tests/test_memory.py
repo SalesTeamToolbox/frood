@@ -443,3 +443,123 @@ class TestJsonEmbeddingEviction:
         # Should keep the newest (timestamps 3, 4, 5, 6, 7)
         assert store._entries[0].text == "entry 3"
         assert store._entries[-1].text == "entry 7"
+
+
+class TestScopeTracking:
+    """Test active scope tracking in SessionManager."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.mgr = SessionManager(self.tmpdir)
+
+    def test_no_active_scope_initially(self):
+        scope = self.mgr.get_active_scope("discord", "123")
+        assert scope is None
+
+    def test_set_and_get_scope(self):
+        from core.intent_classifier import ScopeInfo
+        from core.task_queue import TaskType
+
+        scope = ScopeInfo(
+            scope_id="abc",
+            summary="Fix login bug",
+            task_type=TaskType.DEBUGGING,
+            task_id="abc",
+        )
+        self.mgr.set_active_scope("discord", "123", scope)
+        retrieved = self.mgr.get_active_scope("discord", "123")
+        assert retrieved is not None
+        assert retrieved.scope_id == "abc"
+        assert retrieved.summary == "Fix login bug"
+        assert retrieved.task_type == TaskType.DEBUGGING
+
+    def test_scope_persists_to_file(self):
+        from core.intent_classifier import ScopeInfo
+        from core.task_queue import TaskType
+
+        scope = ScopeInfo(
+            scope_id="xyz",
+            summary="Build dashboard",
+            task_type=TaskType.CODING,
+            task_id="xyz",
+        )
+        self.mgr.set_active_scope("slack", "chan1", scope)
+
+        # New manager instance should load scope from disk
+        mgr2 = SessionManager(self.tmpdir)
+        retrieved = mgr2.get_active_scope("slack", "chan1")
+        assert retrieved is not None
+        assert retrieved.scope_id == "xyz"
+        assert retrieved.summary == "Build dashboard"
+
+    def test_clear_scope(self):
+        from core.intent_classifier import ScopeInfo
+        from core.task_queue import TaskType
+
+        scope = ScopeInfo(
+            scope_id="abc",
+            summary="Fix login bug",
+            task_type=TaskType.DEBUGGING,
+            task_id="abc",
+        )
+        self.mgr.set_active_scope("discord", "123", scope)
+        self.mgr.clear_active_scope("discord", "123")
+        assert self.mgr.get_active_scope("discord", "123") is None
+
+    def test_clear_scope_removes_file(self):
+        from core.intent_classifier import ScopeInfo
+        from core.task_queue import TaskType
+
+        scope = ScopeInfo(
+            scope_id="abc",
+            summary="Fix login",
+            task_type=TaskType.DEBUGGING,
+            task_id="abc",
+        )
+        self.mgr.set_active_scope("discord", "123", scope)
+        self.mgr.clear_active_scope("discord", "123")
+
+        # File should be gone — new manager should see no scope
+        mgr2 = SessionManager(self.tmpdir)
+        assert mgr2.get_active_scope("discord", "123") is None
+
+    def test_clear_session_also_clears_scope(self):
+        from core.intent_classifier import ScopeInfo
+        from core.task_queue import TaskType
+
+        scope = ScopeInfo(
+            scope_id="abc",
+            summary="Fix login",
+            task_type=TaskType.DEBUGGING,
+            task_id="abc",
+        )
+        self.mgr.set_active_scope("test", "ch1", scope)
+        self.mgr.add_message("test", "ch1", SessionMessage(role="user", content="hello"))
+
+        # clear_session should also clear the scope
+        self.mgr.clear_session("test", "ch1")
+        assert self.mgr.get_active_scope("test", "ch1") is None
+
+    def test_separate_scopes_per_session(self):
+        from core.intent_classifier import ScopeInfo
+        from core.task_queue import TaskType
+
+        scope1 = ScopeInfo(
+            scope_id="a",
+            summary="Debug login",
+            task_type=TaskType.DEBUGGING,
+            task_id="a",
+        )
+        scope2 = ScopeInfo(
+            scope_id="b",
+            summary="Write docs",
+            task_type=TaskType.DOCUMENTATION,
+            task_id="b",
+        )
+        self.mgr.set_active_scope("discord", "chan1", scope1)
+        self.mgr.set_active_scope("discord", "chan2", scope2)
+
+        r1 = self.mgr.get_active_scope("discord", "chan1")
+        r2 = self.mgr.get_active_scope("discord", "chan2")
+        assert r1.scope_id == "a"
+        assert r2.scope_id == "b"

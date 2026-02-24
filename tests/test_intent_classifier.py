@@ -2,7 +2,13 @@
 
 import pytest
 
-from core.intent_classifier import ClassificationResult, IntentClassifier, PendingClarification
+from core.intent_classifier import (
+    ClassificationResult,
+    IntentClassifier,
+    PendingClarification,
+    ScopeAnalysis,
+    ScopeInfo,
+)
 from core.task_queue import TaskType
 
 
@@ -272,3 +278,180 @@ class TestLearnerToolRecommendations:
         assert "Total tool calls: 4" in section
         assert "100%" in section  # content_analyzer success rate
         assert "0%" in section  # web_search success rate
+
+
+class TestScopeInfo:
+    """Test ScopeInfo dataclass serialization."""
+
+    def test_to_dict(self):
+        scope = ScopeInfo(
+            scope_id="abc123",
+            summary="Fix login bug",
+            task_type=TaskType.DEBUGGING,
+            task_id="abc123",
+            started_at=1000.0,
+            message_count=3,
+        )
+        d = scope.to_dict()
+        assert d["scope_id"] == "abc123"
+        assert d["summary"] == "Fix login bug"
+        assert d["task_type"] == "debugging"
+        assert d["task_id"] == "abc123"
+        assert d["started_at"] == 1000.0
+        assert d["message_count"] == 3
+
+    def test_from_dict(self):
+        data = {
+            "scope_id": "xyz789",
+            "summary": "Build dashboard",
+            "task_type": "coding",
+            "task_id": "xyz789",
+            "started_at": 2000.0,
+            "message_count": 1,
+        }
+        scope = ScopeInfo.from_dict(data)
+        assert scope.scope_id == "xyz789"
+        assert scope.task_type == TaskType.CODING
+        assert scope.message_count == 1
+
+    def test_round_trip(self):
+        scope = ScopeInfo(
+            scope_id="rt1",
+            summary="Refactor auth module",
+            task_type=TaskType.REFACTORING,
+            task_id="rt1",
+        )
+        restored = ScopeInfo.from_dict(scope.to_dict())
+        assert restored.scope_id == scope.scope_id
+        assert restored.summary == scope.summary
+        assert restored.task_type == scope.task_type
+        assert restored.task_id == scope.task_id
+
+
+class TestScopeAnalysis:
+    """Test ScopeAnalysis dataclass."""
+
+    def test_defaults(self):
+        analysis = ScopeAnalysis(
+            is_continuation=True,
+            confidence=0.9,
+            new_scope_summary="Same topic",
+            reasoning="Related follow-up",
+        )
+        assert analysis.is_continuation
+        assert not analysis.uncertain
+
+    def test_uncertain_flag(self):
+        analysis = ScopeAnalysis(
+            is_continuation=True,
+            confidence=0.3,
+            new_scope_summary="Unclear",
+            reasoning="Not sure",
+            uncertain=True,
+        )
+        assert analysis.uncertain
+
+
+class TestScopeDetection:
+    """Test scope change detection logic in IntentClassifier."""
+
+    @pytest.fixture
+    def classifier(self):
+        return IntentClassifier(router=None)
+
+    def test_keyword_scope_check_same_type_is_continuation(self, classifier):
+        scope = ScopeInfo(
+            scope_id="x",
+            summary="Fix login bug",
+            task_type=TaskType.DEBUGGING,
+            task_id="x",
+        )
+        result = classifier._keyword_scope_check("Fix the password reset too", scope)
+        # "fix" is a debugging keyword — same type as active scope
+        assert result.is_continuation
+
+    def test_keyword_scope_check_different_type_is_change(self, classifier):
+        scope = ScopeInfo(
+            scope_id="x",
+            summary="Fix login bug",
+            task_type=TaskType.DEBUGGING,
+            task_id="x",
+        )
+        result = classifier._keyword_scope_check(
+            "Create a marketing campaign for our launch", scope
+        )
+        assert not result.is_continuation
+
+    def test_keyword_scope_check_followup_words_are_continuation(self, classifier):
+        scope = ScopeInfo(
+            scope_id="x",
+            summary="Fix login bug",
+            task_type=TaskType.DEBUGGING,
+            task_id="x",
+        )
+        # "now" is a continuation signal
+        result = classifier._keyword_scope_check("Now deploy it to production", scope)
+        assert result.is_continuation
+
+    def test_keyword_scope_check_thanks_is_continuation(self, classifier):
+        scope = ScopeInfo(
+            scope_id="x",
+            summary="Write blog post",
+            task_type=TaskType.CONTENT,
+            task_id="x",
+        )
+        result = classifier._keyword_scope_check("Thanks, looks good!", scope)
+        assert result.is_continuation
+
+    def test_parse_scope_response_valid(self, classifier):
+        response = (
+            '{"is_continuation": false, "confidence": 0.9, '
+            '"new_scope_summary": "Build dashboard", '
+            '"reasoning": "Different topic"}'
+        )
+        result = classifier._parse_scope_response(response)
+        assert not result.is_continuation
+        assert result.confidence == 0.9
+        assert result.new_scope_summary == "Build dashboard"
+
+    def test_parse_scope_response_with_fences(self, classifier):
+        response = (
+            "```json\n"
+            '{"is_continuation": true, "confidence": 0.85, '
+            '"new_scope_summary": "Same topic", '
+            '"reasoning": "Related follow-up"}\n'
+            "```"
+        )
+        result = classifier._parse_scope_response(response)
+        assert result.is_continuation
+        assert result.confidence == 0.85
+
+    def test_parse_scope_response_invalid_json_defaults_to_continuation(self, classifier):
+        response = "This is not valid JSON"
+        result = classifier._parse_scope_response(response)
+        # Should default to continuation (safe default) with uncertain flag
+        assert result.is_continuation
+        assert result.uncertain
+
+    def test_parse_scope_response_low_confidence(self, classifier):
+        response = (
+            '{"is_continuation": true, "confidence": 0.3, '
+            '"new_scope_summary": "Unclear", "reasoning": "Not sure"}'
+        )
+        result = classifier._parse_scope_response(response)
+        # Low confidence — the caller sets uncertain based on threshold
+        assert result.confidence == 0.3
+
+    @pytest.mark.asyncio
+    async def test_detect_scope_change_no_router_uses_fallback(self):
+        classifier = IntentClassifier(router=None)
+        scope = ScopeInfo(
+            scope_id="x",
+            summary="Fix login bug",
+            task_type=TaskType.DEBUGGING,
+            task_id="x",
+        )
+        result = await classifier.detect_scope_change("Create a social media campaign", scope)
+        assert isinstance(result, ScopeAnalysis)
+        # "social media" → marketing, different from debugging → scope change
+        assert not result.is_continuation

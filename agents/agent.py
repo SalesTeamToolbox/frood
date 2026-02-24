@@ -13,7 +13,7 @@ import textwrap
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from agents.iteration_engine import IterationEngine, IterationResult
+from agents.iteration_engine import IterationEngine, IterationResult, TokenAccumulator
 from agents.learner import Learner
 from agents.model_router import ModelRouter
 from core.approval_gate import ApprovalGate
@@ -187,6 +187,7 @@ class Agent:
             task_context = await self._build_context(task, worktree_path)
 
             # Run iteration engine with task-type-aware critic
+            token_acc = TokenAccumulator()
             history = await self.engine.run(
                 task_description=task_context,
                 primary_model=routing["primary"],
@@ -196,7 +197,11 @@ class Agent:
                 on_iteration=self._on_iteration,
                 task_type=task.task_type.value,
                 task_id=task.id,
+                token_accumulator=token_acc,
             )
+
+            # Store token usage on the task for persistence and dashboard display
+            task.token_usage = history.token_usage
 
             if needs_worktree:
                 # Generate REVIEW.md and commit for code tasks
@@ -253,6 +258,7 @@ class Agent:
                     "task_id": task.id,
                     "iterations": history.total_iterations,
                     "worktree": str(worktree_path),
+                    "token_usage": task.token_usage,
                 },
             )
 
@@ -421,13 +427,29 @@ class Agent:
     @staticmethod
     def _generate_review(task: Task, history, diff: str) -> str:
         """Generate REVIEW.md for human + Claude Code review."""
+        token_section = ""
+        usage = getattr(history, "token_usage", {})
+        if usage and usage.get("total_tokens"):
+            lines = [
+                f"Total: {usage['total_tokens']:,} tokens "
+                f"({usage.get('total_prompt_tokens', 0):,} prompt + "
+                f"{usage.get('total_completion_tokens', 0):,} completion)",
+            ]
+            by_model = usage.get("by_model", {})
+            if by_model:
+                lines.append("\nBy model:")
+                for model, data in by_model.items():
+                    total = data.get("prompt_tokens", 0) + data.get("completion_tokens", 0)
+                    lines.append(f"- {model}: {total:,} tokens ({data.get('calls', 0)} calls)")
+            token_section = "\n## Token Usage\n\n" + "\n".join(lines) + "\n"
+
         return textwrap.dedent(f"""\
             # Review: {task.title}
 
             **Task ID:** {task.id}
             **Type:** {task.task_type.value}
             **Iterations:** {history.total_iterations}
-
+            {token_section}
             ## Task Description
 
             {task.description}

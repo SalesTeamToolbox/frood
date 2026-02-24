@@ -18,6 +18,8 @@ import re
 import shutil
 from pathlib import Path
 
+import aiofiles
+
 logger = logging.getLogger("agent42.worktree")
 
 # Use user-specific directory instead of world-readable /tmp
@@ -134,10 +136,10 @@ class WorktreeManager:
                 added_patterns.append(pattern)
 
         if added_patterns:
-            with open(gitignore_path, "a") as f:
-                f.write("\n# Agent42 safety rules\n")
+            async with aiofiles.open(gitignore_path, "a") as f:
+                await f.write("\n# Agent42 safety rules\n")
                 for p in added_patterns:
-                    f.write(f"{p}\n")
+                    await f.write(f"{p}\n")
 
         add_proc = await asyncio.create_subprocess_exec(
             "git",

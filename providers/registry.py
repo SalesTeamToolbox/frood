@@ -368,8 +368,12 @@ class ProviderRegistry:
         messages: list[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
-    ) -> str:
-        """Send a chat completion and return the response text."""
+    ) -> tuple[str, dict | None]:
+        """Send a chat completion and return (response_text, usage_dict).
+
+        The usage_dict contains model_key, prompt_tokens, and completion_tokens
+        when available, or None if the API did not return usage data.
+        """
         from core.config import settings as _settings
 
         if not spending_tracker.check_limit(_settings.max_daily_api_spend_usd):
@@ -391,13 +395,19 @@ class ProviderRegistry:
 
         content = response.choices[0].message.content or ""
         usage = response.usage
+        usage_dict = None
         if usage:
             spending_tracker.record_usage(model_key, usage.prompt_tokens, usage.completion_tokens)
+            usage_dict = {
+                "model_key": model_key,
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+            }
             logger.info(
                 f"[{model_key}] {usage.prompt_tokens}+{usage.completion_tokens} tokens "
                 f"(daily: ${spending_tracker.daily_spend_usd:.4f})"
             )
-        return content
+        return content, usage_dict
 
     async def complete_with_tools(
         self,
