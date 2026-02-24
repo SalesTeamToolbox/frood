@@ -266,8 +266,8 @@ class ModelRouter:
         messages: list[dict],
         temperature: float | None = None,
         max_tokens: int | None = None,
-    ) -> str:
-        """Send a chat completion request and return the response text."""
+    ) -> tuple[str, dict | None]:
+        """Send a chat completion request and return (response_text, usage_dict)."""
         return await self.registry.complete(
             model_key, messages, temperature=temperature, max_tokens=max_tokens
         )

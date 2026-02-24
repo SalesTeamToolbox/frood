@@ -14,6 +14,7 @@ const state = {
   selectedTask: null,
   wsConnected: false,
   settingsTab: "providers",
+  tokenStats: null,
   tools: [],
   skills: [],
   channels: [],
@@ -355,8 +356,9 @@ function handleWSMessage(msg) {
       state.selectedTask = msg.data;
       renderDetail();
     }
-    // Update stats
+    // Update stats (including token usage)
     renderStats();
+    loadTokenStats();
   } else if (msg.type === "system_health") {
     state.status = msg.data;
     if (state.page === "status") renderStatus();
@@ -441,6 +443,10 @@ async function loadTasks() {
   } catch { state.tasks = []; }
 }
 
+async function loadTokenStats() {
+  try {
+    state.tokenStats = (await api("/stats/tokens")) || null;
+  } catch { state.tokenStats = null; }
 async function loadRepos() {
   try {
     state.repos = (await api("/repos")) || [];
@@ -1313,6 +1319,13 @@ function timeSince(ts) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+function formatNumber(n) {
+  if (n == null) return "-";
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+  if (n >= 1000) return (n / 1000).toFixed(1) + "K";
+  return String(n);
+}
+
 // ---------------------------------------------------------------------------
 // Page renderers
 // ---------------------------------------------------------------------------
@@ -1323,6 +1336,9 @@ function renderStats() {
   const counts = { pending: 0, assigned: 0, running: 0, review: 0, blocked: 0, done: 0, failed: 0, archived: 0 };
   state.tasks.forEach((t) => { if (counts[t.status] !== undefined) counts[t.status]++; });
   const active = counts.pending + counts.assigned + counts.running + counts.review + counts.blocked;
+  const ts = state.tokenStats;
+  const tokenDisplay = ts ? formatNumber(ts.total_tokens) : "-";
+  const costDisplay = ts ? "$" + ts.daily_spend_usd.toFixed(4) : "-";
   el.innerHTML = `
     <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value">${state.tasks.length}</div></div>
     <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value text-info">${active}</div></div>
@@ -1330,6 +1346,8 @@ function renderStats() {
     <div class="stat-card"><div class="stat-label">Review</div><div class="stat-value" style="color:var(--accent)">${counts.review}</div></div>
     <div class="stat-card"><div class="stat-label">Blocked</div><div class="stat-value text-danger">${counts.blocked}</div></div>
     <div class="stat-card"><div class="stat-label">Done</div><div class="stat-value text-success">${counts.done}</div></div>
+    <div class="stat-card"><div class="stat-label">Tokens</div><div class="stat-value" style="font-family:var(--mono)">${tokenDisplay}</div></div>
+    <div class="stat-card"><div class="stat-label">Cost (24h)</div><div class="stat-value" style="font-family:var(--mono)">${costDisplay}</div></div>
   `;
 }
 
@@ -1414,6 +1432,7 @@ function renderKanbanBoard() {
                 ${t.repo_id ? `<span style="color:var(--accent)">${esc((state.repos.find(r=>r.id===t.repo_id)||{}).name||"repo")}${t.branch ? ":"+esc(t.branch) : ""}</span>` : ""}
                 ${t.assigned_agent ? `<span>${esc(t.assigned_agent)}</span>` : ""}
                 ${(t.comments||[]).length > 0 ? `<span>${(t.comments||[]).length} comments</span>` : ""}
+                ${t.token_usage?.total_tokens ? `<span class="badge-tokens" title="Tokens used">${formatNumber(t.token_usage.total_tokens)} tok</span>` : ""}
               </div>
             </div>
           `).join("")}
@@ -1437,7 +1456,7 @@ function renderListView() {
 
   let rows = "";
   if (filtered.length === 0) {
-    rows = `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">&#128203;</div><h3>No tasks</h3></div></td></tr>`;
+    rows = `<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">&#128203;</div><h3>No tasks</h3></div></td></tr>`;
   } else {
     rows = filtered.map((t) => `
       <tr>
@@ -1448,6 +1467,7 @@ function renderListView() {
         <td>${statusBadge(t.status)}</td>
         <td><span class="badge-type">${esc(t.task_type)}</span></td>
         <td style="color:var(--text-muted)">${esc(t.assigned_agent || '-')}</td>
+        <td style="font-family:var(--mono);font-size:0.8rem;color:var(--text-muted)">${t.token_usage?.total_tokens ? formatNumber(t.token_usage.total_tokens) : "-"}</td>
         <td style="color:var(--text-muted)">${timeSince(t.created_at)}</td>
         <td>
           ${t.status === "review" ? `<button class="btn btn-sm btn-success" onclick="event.stopPropagation();doApproveTask('${t.id}')">Approve</button>` : ""}
@@ -1464,7 +1484,7 @@ function renderListView() {
     <div class="card">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Type</th><th>Agent</th><th>Created</th><th>Actions</th></tr></thead>
+          <thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Type</th><th>Agent</th><th>Tokens</th><th>Created</th><th>Actions</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
@@ -1527,6 +1547,7 @@ function renderDetail() {
           <div class="detail-item"><label>Status</label><div class="value">${statusBadge(t.status)}</div></div>
           <div class="detail-item"><label>Type</label><div class="value"><span class="badge-type">${esc(t.task_type)}</span></div></div>
           <div class="detail-item"><label>Iterations</label><div class="value">${t.iterations || 0} / ${t.max_iterations || "?"}</div></div>
+          ${t.token_usage?.total_tokens ? `<div class="detail-item"><label>Tokens</label><div class="value" style="font-family:var(--mono)">${formatNumber(t.token_usage.total_tokens)} <span style="color:var(--text-muted);font-size:0.8rem">(${formatNumber(t.token_usage.total_prompt_tokens)} in / ${formatNumber(t.token_usage.total_completion_tokens)} out)</span></div></div>` : ""}
           <div class="detail-item"><label>Created</label><div class="value">${new Date(t.created_at * 1000).toLocaleString()}</div></div>
           <div class="detail-item"><label>Updated</label><div class="value">${new Date(t.updated_at * 1000).toLocaleString()}</div></div>
           ${t.origin_channel ? `<div class="detail-item"><label>Origin</label><div class="value">${esc(t.origin_channel)}</div></div>` : ""}
@@ -1567,6 +1588,30 @@ function renderDetail() {
         </div>
       </div>
     </div>
+
+    ${t.token_usage?.by_model && Object.keys(t.token_usage.by_model).length > 0 ? `
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-header"><h3>Token Usage by Model</h3></div>
+      <div class="card-body">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Model</th><th>Calls</th><th>Prompt</th><th>Completion</th><th>Total</th></tr></thead>
+            <tbody>
+              ${Object.entries(t.token_usage.by_model).map(([model, d]) => `
+                <tr>
+                  <td style="font-family:var(--mono);font-size:0.8rem">${esc(model)}</td>
+                  <td>${d.calls}</td>
+                  <td>${formatNumber(d.prompt_tokens)}</td>
+                  <td>${formatNumber(d.completion_tokens)}</td>
+                  <td><strong>${formatNumber(d.prompt_tokens + d.completion_tokens)}</strong></td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    ` : ""}
 
     <div class="card">
       <div class="card-header"><h3>Actions</h3></div>
@@ -2963,6 +3008,7 @@ function updateEnvSaveBtn() {
 // Main render
 // ---------------------------------------------------------------------------
 async function loadAll() {
+  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages(), loadTokenStats()]);
   await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages(), loadChatSessions(), loadCodeSessions(), loadProjects(), loadGitHubStatus()]);
   await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages(), loadRepos()]);
   await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadStatus()]);

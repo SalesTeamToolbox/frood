@@ -54,12 +54,40 @@ class IterationResult:
 
 
 @dataclass
+class TokenAccumulator:
+    """Accumulates token usage across LLM calls within a task."""
+
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    by_model: dict = field(default_factory=dict)
+
+    def record(self, model_key: str, prompt_tokens: int, completion_tokens: int):
+        """Record token usage from a single LLM call."""
+        self.total_prompt_tokens += prompt_tokens
+        self.total_completion_tokens += completion_tokens
+        if model_key not in self.by_model:
+            self.by_model[model_key] = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+        self.by_model[model_key]["prompt_tokens"] += prompt_tokens
+        self.by_model[model_key]["completion_tokens"] += completion_tokens
+        self.by_model[model_key]["calls"] += 1
+
+    def to_dict(self) -> dict:
+        return {
+            "total_prompt_tokens": self.total_prompt_tokens,
+            "total_completion_tokens": self.total_completion_tokens,
+            "total_tokens": self.total_prompt_tokens + self.total_completion_tokens,
+            "by_model": dict(self.by_model),
+        }
+
+
+@dataclass
 class IterationHistory:
     """Full history of all iterations for a task."""
 
     iterations: list[IterationResult] = field(default_factory=list)
     final_output: str = ""
     total_iterations: int = 0
+    token_usage: dict = field(default_factory=dict)
 
     def summary(self) -> str:
         lines = [f"Total iterations: {self.total_iterations}"]
@@ -192,7 +220,12 @@ class IterationEngine:
         last_error = None
         for attempt in range(retries):
             try:
-                return await self.router.complete(model, messages)
+                text, usage = await self.router.complete(model, messages)
+                if usage and self._token_acc:
+                    self._token_acc.record(
+                        usage["model_key"], usage["prompt_tokens"], usage["completion_tokens"]
+                    )
+                return text
             except SpendingLimitExceeded:
                 raise  # Don't retry spending limits
             except Exception as e:
@@ -208,7 +241,12 @@ class IterationEngine:
         if model != FALLBACK_MODEL:
             logger.warning(f"Falling back to {FALLBACK_MODEL} after {retries} failures")
             try:
-                return await self.router.complete(FALLBACK_MODEL, messages)
+                text, usage = await self.router.complete(FALLBACK_MODEL, messages)
+                if usage and self._token_acc:
+                    self._token_acc.record(
+                        usage["model_key"], usage["prompt_tokens"], usage["completion_tokens"]
+                    )
+                return text
             except Exception as e:
                 logger.error(f"Fallback model also failed: {e}")
 
@@ -340,6 +378,7 @@ class IterationEngine:
         on_iteration: callable = None,
         task_type: str = "coding",
         task_id: str = "",
+        token_accumulator: TokenAccumulator | None = None,
     ) -> IterationHistory:
         """
         Execute the iteration loop with tool calling support.
@@ -355,7 +394,9 @@ class IterationEngine:
             max_iterations: Hard cap on iteration count.
             system_prompt: Optional system-level context.
             on_iteration: Optional async callback(IterationResult) for live updates.
+            token_accumulator: Optional accumulator for per-task token tracking.
         """
+        self._token_acc = token_accumulator or TokenAccumulator()
         history = IterationHistory()
         messages = []
 
@@ -390,6 +431,7 @@ class IterationEngine:
                     if strategy == "error":
                         history.final_output = primary_output
                         history.total_iterations = i
+                        history.token_usage = self._token_acc.to_dict()
                         return history
                     elif strategy == "truncate_oldest" and len(messages) > 3:
                         # Keep system prompt + first user msg + latest 2 messages
@@ -458,6 +500,7 @@ class IterationEngine:
                 logger.info(f"Critic approved at iteration {i}")
                 history.final_output = primary_output
                 history.total_iterations = i
+                history.token_usage = self._token_acc.to_dict()
                 return history
 
             # Feed critic feedback back to primary for revision
@@ -475,6 +518,7 @@ class IterationEngine:
         # Max iterations reached — use the last output
         history.final_output = primary_output
         history.total_iterations = max_iterations
+        history.token_usage = self._token_acc.to_dict()
         logger.warning(f"Max iterations ({max_iterations}) reached without full approval")
         return history
 
@@ -503,6 +547,12 @@ class IterationEngine:
             response = await self._complete_with_tools_retry(
                 model, working_messages, current_schemas
             )
+
+            # Record token usage from tool-calling response
+            if response.usage and self._token_acc:
+                self._token_acc.record(
+                    model, response.usage.prompt_tokens, response.usage.completion_tokens
+                )
 
             choice = response.choices[0]
             message = choice.message

@@ -710,6 +710,41 @@ def create_app(
         """Get recent activity feed (last 200 events)."""
         return _activity_feed[-200:]
 
+    # -- Token Usage Stats ----------------------------------------------------
+
+    @app.get("/api/stats/tokens")
+    async def get_token_stats(_user: str = Depends(get_current_user)):
+        """Get aggregate token usage across all tasks."""
+        from providers.registry import spending_tracker
+
+        total_tokens = 0
+        total_prompt = 0
+        total_completion = 0
+        by_model: dict = {}
+
+        for task in task_queue.all_tasks():
+            usage = task.token_usage
+            if not usage:
+                continue
+            total_tokens += usage.get("total_tokens", 0)
+            total_prompt += usage.get("total_prompt_tokens", 0)
+            total_completion += usage.get("total_completion_tokens", 0)
+            for model_key, model_data in usage.get("by_model", {}).items():
+                if model_key not in by_model:
+                    by_model[model_key] = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+                by_model[model_key]["prompt_tokens"] += model_data.get("prompt_tokens", 0)
+                by_model[model_key]["completion_tokens"] += model_data.get("completion_tokens", 0)
+                by_model[model_key]["calls"] += model_data.get("calls", 0)
+
+        return {
+            "total_tokens": total_tokens,
+            "total_prompt_tokens": total_prompt,
+            "total_completion_tokens": total_completion,
+            "by_model": by_model,
+            "daily_spend_usd": spending_tracker.daily_spend_usd,
+            "daily_tokens": spending_tracker.daily_tokens,
+        }
+
     # -- Notification config endpoint -----------------------------------------
 
     @app.get("/api/notifications/config")

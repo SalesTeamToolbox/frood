@@ -187,6 +187,11 @@ select { cursor: pointer; }
   display: inline-block; padding: 0.15rem 0.5rem; border-radius: var(--radius-sm);
   font-size: 0.75rem; background: var(--bg-hover); color: var(--text-secondary);
 }
+.badge-tokens {
+  display: inline-block; padding: 0.1rem 0.35rem; border-radius: var(--radius-sm);
+  font-size: 0.7rem; font-family: var(--mono); color: var(--text-muted);
+  background: var(--bg-surface);
+}
 
 /* ---------- Stats Row ---------- */
 

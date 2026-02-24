@@ -226,6 +226,7 @@ class Task:
     project_id: str = ""  # Associated project (empty = standalone task)
     position: int = 0  # Kanban column ordering
     context_window: str = "default"  # default | large | max
+    token_usage: dict = field(default_factory=dict)  # Per-task token tracking by model
 
     # Project interview fields
     project_id: str = ""  # Links task to a project interview session
