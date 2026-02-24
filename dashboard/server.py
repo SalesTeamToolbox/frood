@@ -1587,6 +1587,7 @@ def create_app(
             return result
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
+
     # -- Repositories ----------------------------------------------------------
 
     if repo_manager:

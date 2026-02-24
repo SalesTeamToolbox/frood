@@ -416,11 +416,11 @@ class TestScopeDetection:
 
     def test_parse_scope_response_with_fences(self, classifier):
         response = (
-            '```json\n'
+            "```json\n"
             '{"is_continuation": true, "confidence": 0.85, '
             '"new_scope_summary": "Same topic", '
             '"reasoning": "Related follow-up"}\n'
-            '```'
+            "```"
         )
         result = classifier._parse_scope_response(response)
         assert result.is_continuation
@@ -451,9 +451,7 @@ class TestScopeDetection:
             task_type=TaskType.DEBUGGING,
             task_id="x",
         )
-        result = await classifier.detect_scope_change(
-            "Create a social media campaign", scope
-        )
+        result = await classifier.detect_scope_change("Create a social media campaign", scope)
         assert isinstance(result, ScopeAnalysis)
         # "social media" → marketing, different from debugging → scope change
         assert not result.is_continuation

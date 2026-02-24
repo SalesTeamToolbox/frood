@@ -6,6 +6,7 @@ notification.
 """
 
 import tempfile
+
 import pytest
 
 from channels.base import InboundMessage
@@ -18,7 +19,9 @@ from core.task_queue import Task, TaskQueue, TaskStatus, TaskType
 from memory.session import SessionManager
 
 
-def _make_inbound(content: str, channel_type: str = "discord", channel_id: str = "ch1") -> InboundMessage:
+def _make_inbound(
+    content: str, channel_type: str = "discord", channel_id: str = "ch1"
+) -> InboundMessage:
     """Helper to build an InboundMessage for testing."""
     return InboundMessage(
         channel_type=channel_type,

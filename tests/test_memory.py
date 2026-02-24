@@ -534,9 +534,7 @@ class TestScopeTracking:
             task_id="abc",
         )
         self.mgr.set_active_scope("test", "ch1", scope)
-        self.mgr.add_message(
-            "test", "ch1", SessionMessage(role="user", content="hello")
-        )
+        self.mgr.add_message("test", "ch1", SessionMessage(role="user", content="hello"))
 
         # clear_session should also clear the scope
         self.mgr.clear_session("test", "ch1")
