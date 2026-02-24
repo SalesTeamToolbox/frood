@@ -79,9 +79,7 @@ class ToolRegistry:
     def all_schemas(self) -> list[dict]:
         """Get OpenAI function-calling schemas for all enabled tools."""
         return [
-            tool.to_schema()
-            for tool in self._tools.values()
-            if tool.name not in self._disabled
+            tool.to_schema() for tool in self._tools.values() if tool.name not in self._disabled
         ]
 
     def list_tools(self) -> list[dict]:
