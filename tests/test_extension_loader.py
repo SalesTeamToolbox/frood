@@ -1,7 +1,5 @@
 """Tests for ExtensionLoader — agent execution lifecycle hooks."""
 
-
-
 from agents.extension_loader import ExtensionLoader
 
 

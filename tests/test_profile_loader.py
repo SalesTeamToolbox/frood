@@ -1,7 +1,5 @@
 """Tests for ProfileLoader — agent profile management."""
 
-
-
 from agents.profile_loader import (
     ProfileLoader,
     _parse_simple_yaml,

@@ -321,6 +321,7 @@ def create_app(
     repo_manager=None,
     profile_loader=None,
     intervention_queues: dict | None = None,
+    github_account_store=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -1232,7 +1233,12 @@ def create_app(
             to_install.append("redis[hiredis]")
 
         if not to_install:
-            return {"status": "ok", "installed": [], "errors": [], "message": "All packages already installed."}
+            return {
+                "status": "ok",
+                "installed": [],
+                "errors": [],
+                "message": "All packages already installed.",
+            }
 
         installed, errors = await _pip_install(to_install)
         return {
@@ -1527,7 +1533,11 @@ def create_app(
 
             # Detect explicit "create a project" intent from the code page and route
             # it through the project interview flow (PROJECT_SETUP task type).
-            if session.session_type == "code" and settings.project_interview_enabled and settings.project_interview_mode != "never":
+            if (
+                session.session_type == "code"
+                and settings.project_interview_enabled
+                and settings.project_interview_mode != "never"
+            ):
                 _project_keywords = (
                     "create a project",
                     "start a project",
@@ -1933,6 +1943,71 @@ def create_app(
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
 
+    # -- GitHub multi-account management ---------------------------------------
+
+    if github_account_store:
+
+        class GitHubAccountAddRequest(BaseModel):
+            label: str = ""
+            token: str
+
+        @app.get("/api/github/accounts")
+        async def list_github_accounts(_admin: AuthContext = Depends(require_admin)):
+            """List all saved GitHub accounts (tokens masked)."""
+            return github_account_store.list_accounts()
+
+        @app.post("/api/github/accounts")
+        async def add_github_account(
+            req: GitHubAccountAddRequest,
+            _admin: AuthContext = Depends(require_admin),
+        ):
+            """Add a GitHub account by PAT.  The username is verified via the API."""
+            if not req.token.strip():
+                raise HTTPException(status_code=400, detail="token is required")
+
+            # Verify token + fetch username
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(
+                        "https://api.github.com/user",
+                        headers={
+                            "Authorization": f"Bearer {req.token.strip()}",
+                            "Accept": "application/vnd.github+json",
+                        },
+                    )
+                if resp.status_code == 200:
+                    username = resp.json().get("login", "")
+                elif resp.status_code == 401:
+                    raise HTTPException(status_code=401, detail="Invalid GitHub token")
+                else:
+                    username = ""
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
+
+            label = req.label.strip() or username
+            acct = github_account_store.add_account(label, req.token.strip(), username)
+            # Also inject into os.environ as GITHUB_TOKEN if nothing is set there yet
+            import os
+
+            if not os.environ.get("GITHUB_TOKEN"):
+                os.environ["GITHUB_TOKEN"] = req.token.strip()
+            return acct
+
+        @app.delete("/api/github/accounts/{account_id}")
+        async def remove_github_account(
+            account_id: str,
+            _admin: AuthContext = Depends(require_admin),
+        ):
+            """Remove a GitHub account by id."""
+            removed = github_account_store.remove_account(account_id)
+            if not removed:
+                raise HTTPException(status_code=404, detail="Account not found")
+            return {"status": "ok"}
+
     # -- Repositories ----------------------------------------------------------
 
     if repo_manager:
@@ -1944,6 +2019,7 @@ def create_app(
             github_repo: str = ""  # for source=github (owner/repo)
             default_branch: str = "main"
             tags: list[str] = []
+            account_id: str = ""  # optional: which GitHub account to use
 
         @app.get("/api/repos")
         async def list_repos(_user: str = Depends(get_current_user)):
@@ -1956,10 +2032,15 @@ def create_app(
             if req.source == "github":
                 if not req.github_repo:
                     raise HTTPException(400, "github_repo is required for source=github")
+                # Resolve which token to use: account_id > default
+                account_token = ""
+                if req.account_id and github_account_store:
+                    account_token = github_account_store.get_token(req.account_id)
                 repo = await repo_manager.add_from_github(
                     github_repo=req.github_repo,
                     default_branch=req.default_branch,
                     tags=req.tags,
+                    token=account_token,
                 )
             else:
                 if not req.local_path:
@@ -2005,8 +2086,34 @@ def create_app(
             return {"status": "ok", "message": msg}
 
         @app.get("/api/github/repos")
-        async def list_github_repos(_admin: AuthContext = Depends(require_admin)):
-            """List repos from the connected GitHub account."""
+        async def list_github_repos(
+            account_id: str = "",
+            _admin: AuthContext = Depends(require_admin),
+        ):
+            """List repos from connected GitHub accounts.
+
+            If account_id is specified, only list repos for that account.
+            Otherwise, merge repos from all accounts (default token + stored accounts).
+            """
+            if account_id and github_account_store:
+                tok = github_account_store.get_token(account_id)
+                repos = await repo_manager.list_github_repos(token=tok)
+                return {"repos": repos}
+
+            if github_account_store:
+                all_tokens = github_account_store.get_all_tokens()
+                if all_tokens:
+                    seen: set[str] = set()
+                    merged: list[dict] = []
+                    for _acct_id, tok in all_tokens:
+                        for repo in await repo_manager.list_github_repos(token=tok):
+                            key = repo.get("full_name", "")
+                            if key not in seen:
+                                seen.add(key)
+                                merged.append(repo)
+                    return {"repos": merged}
+
+            # Fall back to default token
             repos = await repo_manager.list_github_repos()
             return {"repos": repos}
 

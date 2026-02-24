@@ -176,9 +176,16 @@ class RepositoryManager:
         default_branch: str = "main",
         tags: list | None = None,
         clone_path: str | None = None,
+        token: str = "",
     ) -> Repository:
-        """Clone a GitHub repository and register it."""
-        if not self._github_token:
+        """Clone a GitHub repository and register it.
+
+        Args:
+            token: Override token for this operation.  Falls back to the
+                   token supplied at RepositoryManager init time.
+        """
+        effective_token = token or self._github_token
+        if not effective_token:
             raise ValueError("GitHub token is required to clone repositories")
 
         # Determine clone destination
@@ -191,7 +198,7 @@ class RepositoryManager:
         if slug in existing_slugs:
             slug = f"{slug}-{uuid.uuid4().hex[:4]}"
 
-        clone_url = f"https://x-access-token:{self._github_token}@github.com/{github_repo}.git"
+        clone_url = f"https://x-access-token:{effective_token}@github.com/{github_repo}.git"
 
         repo = Repository(
             name=repo_name,
