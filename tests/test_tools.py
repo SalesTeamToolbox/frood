@@ -114,6 +114,39 @@ class TestToolRegistry:
         tools = self.registry.list_tools()
         assert len(tools) == 1
         assert tools[0]["name"] == "mock_tool"
+        assert tools[0]["enabled"] is True
+
+    def test_set_enabled_disable(self):
+        self.registry.register(MockTool())
+        result = self.registry.set_enabled("mock_tool", False)
+        assert result is True
+        assert self.registry.is_enabled("mock_tool") is False
+        tools = self.registry.list_tools()
+        assert tools[0]["enabled"] is False
+
+    def test_set_enabled_reenable(self):
+        self.registry.register(MockTool())
+        self.registry.set_enabled("mock_tool", False)
+        self.registry.set_enabled("mock_tool", True)
+        assert self.registry.is_enabled("mock_tool") is True
+
+    def test_set_enabled_unknown_tool(self):
+        result = self.registry.set_enabled("nonexistent", False)
+        assert result is False
+
+    def test_all_schemas_excludes_disabled(self):
+        self.registry.register(MockTool())
+        self.registry.set_enabled("mock_tool", False)
+        schemas = self.registry.all_schemas()
+        assert len(schemas) == 0
+
+    @pytest.mark.asyncio
+    async def test_execute_disabled_tool_returns_error(self):
+        self.registry.register(MockTool())
+        self.registry.set_enabled("mock_tool", False)
+        result = await self.registry.execute("mock_tool", input="test")
+        assert result.success is False
+        assert "disabled" in result.error
 
 
 class TestShellTool:

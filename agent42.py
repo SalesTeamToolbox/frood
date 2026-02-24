@@ -42,13 +42,16 @@ from channels.manager import ChannelManager
 from core.app_manager import AppManager
 from core.approval_gate import ApprovalGate
 from core.capacity import compute_effective_capacity
+from core.chat_session_manager import ChatSessionManager
 from core.command_filter import DEFAULT_ALLOWLIST, CommandFilter
 from core.config import settings
 from core.device_auth import DeviceStore
 from core.heartbeat import HeartbeatService
 from core.intent_classifier import IntentClassifier, PendingClarification, ScopeInfo
 from core.key_store import KeyStore
+from core.project_manager import ProjectManager
 from core.rate_limiter import ToolLimit, ToolRateLimiter
+from core.repo_manager import RepositoryManager
 from core.sandbox import WorkspaceSandbox
 from core.security_scanner import ScheduledSecurityScanner
 from core.task_queue import Task, TaskQueue, TaskStatus, TaskType, infer_task_type
@@ -154,6 +157,14 @@ class Agent42:
         )
         self.ws_manager = WebSocketManager()
         self.worktree_manager = WorktreeManager(str(self.repo_path)) if self.has_repo else None
+
+        # Multi-repository manager
+        self.repo_manager = RepositoryManager(
+            repos_json_path=settings.repos_json_path,
+            clone_dir=settings.repos_clone_dir,
+            github_token=settings.github_token,
+        )
+
         self._active_count = 0
         self._active_lock = asyncio.Lock()
         self.approval_gate = ApprovalGate(
@@ -220,6 +231,13 @@ class Agent42:
             )
             if settings.apps_enabled
             else None
+        )
+
+        # Chat sessions and projects
+        self.chat_session_manager = ChatSessionManager(self.data_dir / settings.chat_sessions_dir)
+        self.project_manager = ProjectManager(
+            self.data_dir / settings.projects_dir,
+            self.task_queue,
         )
 
         self._register_tools()
@@ -421,6 +439,18 @@ class Agent42:
         # Apps platform (enabled by default)
         if self.app_manager:
             self.tool_registry.register(AppTool(self.app_manager))
+
+        # Project interview tool (for structured project discovery)
+        if settings.project_interview_enabled:
+            from tools.project_interview import ProjectInterviewTool
+
+            self.tool_registry.register(
+                ProjectInterviewTool(
+                    workspace_path=workspace,
+                    router=router,
+                    outputs_dir=settings.outputs_dir,
+                )
+            )
 
     async def _setup_channels(self):
         """Configure and register enabled channels based on settings."""
@@ -747,6 +777,17 @@ class Agent42:
         """
         task_type = force_type or infer_task_type(description)
 
+        # Project interview detection: route complex project-level tasks through
+        # the interview flow instead of going directly to execution.
+        if (
+            settings.project_interview_enabled
+            and settings.project_interview_mode != "never"
+            and classification
+            and getattr(classification, "needs_project_setup", False)
+            and task_type in (TaskType.CODING, TaskType.APP_CREATE, TaskType.APP_UPDATE)
+        ):
+            task_type = TaskType.PROJECT_SETUP
+
         # Smart resource allocation: inject team directive for complex tasks
         task_description = description
         team_name = ""
@@ -814,9 +855,17 @@ class Agent42:
         """Broadcast task state changes to all dashboard clients.
 
         Also routes results back to the originating channel when a task
-        completes or fails.
+        completes or fails. Supports session-scoped chat and project stats.
         """
         await self.ws_manager.broadcast("task_update", task.to_dict())
+
+        # Project stats update: refresh and broadcast when task has a project
+        if task.project_id and self.project_manager:
+            project = await self.project_manager.get(task.project_id)
+            if project:
+                d = project.to_dict()
+                d["stats"] = self.project_manager.project_stats(task.project_id)
+                await self.ws_manager.broadcast("project_update", d)
 
         # Dashboard chat: broadcast agent response back as a chat message
         if task.origin_channel == "dashboard_chat" and task.status in (
@@ -826,6 +875,7 @@ class Agent42:
             import time as _time
             import uuid as _uuid
 
+            session_id = task.origin_metadata.get("chat_session_id", "")
             content = task.result or "(completed with no output)"
             chat_msg = {
                 "id": _uuid.uuid4().hex[:12],
@@ -834,8 +884,13 @@ class Agent42:
                 "timestamp": _time.time(),
                 "sender": "Agent42",
                 "task_id": task.id,
+                "session_id": session_id,
             }
-            self.ws_manager.chat_messages.append(chat_msg)
+            # Persist to session if we have a session manager and session_id
+            if session_id and self.chat_session_manager:
+                await self.chat_session_manager.add_message(session_id, chat_msg)
+            else:
+                self.ws_manager.chat_messages.append(chat_msg)
             await self.ws_manager.broadcast("chat_message", chat_msg)
             return  # Don't also send via channel manager
 
@@ -843,6 +898,7 @@ class Agent42:
             import time as _time
             import uuid as _uuid
 
+            session_id = task.origin_metadata.get("chat_session_id", "")
             chat_msg = {
                 "id": _uuid.uuid4().hex[:12],
                 "role": "assistant",
@@ -850,8 +906,12 @@ class Agent42:
                 "timestamp": _time.time(),
                 "sender": "Agent42",
                 "task_id": task.id,
+                "session_id": session_id,
             }
-            self.ws_manager.chat_messages.append(chat_msg)
+            if session_id and self.chat_session_manager:
+                await self.chat_session_manager.add_message(session_id, chat_msg)
+            else:
+                self.ws_manager.chat_messages.append(chat_msg)
             await self.ws_manager.broadcast("chat_message", chat_msg)
             return
 
@@ -926,10 +986,23 @@ class Agent42:
                 await asyncio.sleep(10)
 
             try:
+                # Select worktree manager: task-specific repo or default
+                wt_manager = self.worktree_manager
+                if task.repo_id and self.repo_manager:
+                    try:
+                        wt_manager = self.repo_manager.get_worktree_manager(task.repo_id)
+                    except ValueError as e:
+                        logger.warning(
+                            "Task %s repo_id %s not found, using default: %s",
+                            task.id,
+                            task.repo_id,
+                            e,
+                        )
+
                 agent = Agent(
                     task=task,
                     task_queue=self.task_queue,
-                    worktree_manager=self.worktree_manager,
+                    worktree_manager=wt_manager,
                     approval_gate=self.approval_gate,
                     emit=self.emit,
                     skill_loader=self.skill_loader,
@@ -988,12 +1061,22 @@ class Agent42:
 
         # Load tasks and initialize subsystems
         await self.task_queue.load_from_file()
+        await self.repo_manager.load()
+        if self.repo_manager.list_repos():
+            logger.info(f"  Repos loaded: {len(self.repo_manager.list_repos())}")
         if self.app_manager:
             await self.app_manager.load()
             logger.info(f"  Apps loaded: {len(self.app_manager.list_apps())}")
             await self.app_manager.start_monitor(
                 interval=float(settings.apps_monitor_interval),
             )
+        await self.chat_session_manager.load()
+        await self.project_manager.load()
+        logger.info(
+            "  Chat sessions: %d, Projects: %d",
+            len(self.chat_session_manager.list_sessions(include_archived=True)),
+            len(self.project_manager.list_projects(include_archived=True)),
+        )
         await self._setup_channels()
         await self._setup_mcp()
 
@@ -1036,6 +1119,9 @@ class Agent42:
                 heartbeat=self.heartbeat,
                 key_store=self.key_store,
                 app_manager=self.app_manager,
+                chat_session_manager=self.chat_session_manager,
+                project_manager=self.project_manager,
+                repo_manager=self.repo_manager,
             )
             config = uvicorn.Config(
                 app,

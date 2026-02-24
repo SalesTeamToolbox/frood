@@ -40,7 +40,8 @@ Respond with ONLY a JSON object (no markdown, no extra text):
   "suggested_tools": [<list of tool names that might help, or empty>],
   "reasoning": "<one sentence explaining your classification>",
   "recommended_mode": "<single_agent or team>",
-  "recommended_team": "<team name if team mode, or empty string>"
+  "recommended_team": "<team name if team mode, or empty string>",
+  "needs_project_setup": <true or false>
 }}
 
 Rules:
@@ -55,6 +56,10 @@ Rules:
   recommend "team" mode with the appropriate team name
 - For focused single-deliverable tasks, recommend "single_agent"
 - Only recommend "team" when the task clearly involves multiple domains or steps
+- Set needs_project_setup=true when the request describes building a new system,
+  platform, or application from scratch, or adding a major feature that spans
+  multiple components. Simple bug fixes, small changes, and single-file edits
+  do NOT need project setup.
 """
 
 
@@ -81,6 +86,8 @@ class ClassificationResult:
     # Resource allocation
     recommended_mode: str = "single_agent"  # "single_agent" or "team"
     recommended_team: str = ""  # team name or ""
+    # Project interview gating
+    needs_project_setup: bool = False  # True if task is complex enough for discovery
 
 
 @dataclass
@@ -330,6 +337,8 @@ class IntentClassifier:
                     "more details about what you'd like me to help with?"
                 )
 
+        needs_project_setup = bool(data.get("needs_project_setup", False))
+
         return ClassificationResult(
             task_type=task_type,
             confidence=confidence,
@@ -340,6 +349,7 @@ class IntentClassifier:
             used_llm=True,
             recommended_mode=recommended_mode,
             recommended_team=recommended_team,
+            needs_project_setup=needs_project_setup,
         )
 
     @staticmethod

@@ -39,6 +39,7 @@ Updated automatically by the learning engine and manually by developers.
 - **Always run `ruff format .` before committing.** CI runs `ruff format --check .` and fails on unformatted files. This is especially important after merges that touch multiple files — merged code may not be formatted even if each branch was individually clean.
 - The `make format` target runs `ruff format .` and is the quickest way to fix formatting.
 - The `make check` target runs both `make lint` and tests together — use as a pre-push gate.
+- **Inline `from` imports inside functions/methods must also be isort-sorted (ruff I001).** Third-party imports (e.g. `httpx`) must come before local imports (e.g. `core.*`, `dashboard.*`), separated by a blank line — even when the imports are inside a function body. `ruff check --fix` will auto-correct these.
 
 ## Testing Patterns
 

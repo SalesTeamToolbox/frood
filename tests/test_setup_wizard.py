@@ -262,13 +262,17 @@ class TestChangePasswordEndpoint:
     @pytest.mark.usefixtures("_password_settings")
     async def test_change_password_success(self, _app):
         """Changing password with correct current password should succeed."""
+        from httpx import ASGITransport, AsyncClient
+
         from core.config import settings
         from dashboard.auth import create_token
-        from httpx import ASGITransport, AsyncClient
 
         token = create_token(settings.dashboard_username)
 
-        with patch("dashboard.server._update_env_file"), patch("dashboard.server.Settings.reload_from_env"):
+        with (
+            patch("dashboard.server._update_env_file"),
+            patch("dashboard.server.Settings.reload_from_env"),
+        ):
             transport = ASGITransport(app=_app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post(
@@ -288,9 +292,10 @@ class TestChangePasswordEndpoint:
     @pytest.mark.usefixtures("_password_settings")
     async def test_change_password_wrong_current(self, _app):
         """Changing password with wrong current password should fail."""
+        from httpx import ASGITransport, AsyncClient
+
         from core.config import settings
         from dashboard.auth import create_token
-        from httpx import ASGITransport, AsyncClient
 
         token = create_token(settings.dashboard_username)
 
@@ -310,9 +315,10 @@ class TestChangePasswordEndpoint:
     @pytest.mark.usefixtures("_password_settings")
     async def test_change_password_too_short(self, _app):
         """New password shorter than 8 chars should be rejected."""
+        from httpx import ASGITransport, AsyncClient
+
         from core.config import settings
         from dashboard.auth import create_token
-        from httpx import ASGITransport, AsyncClient
 
         token = create_token(settings.dashboard_username)
 

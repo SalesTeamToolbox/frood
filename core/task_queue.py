@@ -52,6 +52,7 @@ class TaskType(str, Enum):
     PROJECT_MANAGEMENT = "project_management"
     APP_CREATE = "app_create"
     APP_UPDATE = "app_update"
+    PROJECT_SETUP = "project_setup"
 
 
 # Keyword-based task type inference for channel messages
@@ -222,8 +223,16 @@ class Task:
     comments: list = field(default_factory=list)  # [{author, text, timestamp}]
     blocked_reason: str = ""
     parent_task_id: str = ""
+    project_id: str = ""  # Associated project (empty = standalone task)
     position: int = 0  # Kanban column ordering
     context_window: str = "default"  # default | large | max
+
+    # Project interview fields
+    project_id: str = ""  # Links task to a project interview session
+    project_spec_path: str = ""  # Path to PROJECT_SPEC.md for subtask context
+    # Multi-repository support — which repo and branch the agent should work on
+    repo_id: str = ""  # Repository ID from RepoManager (empty = default/legacy)
+    branch: str = ""  # Target branch (empty = repo's default_branch)
 
     def add_comment(self, author: str, text: str):
         self.comments.append(

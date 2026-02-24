@@ -190,6 +190,16 @@ class Settings:
     vision_max_image_mb: int = 10
     vision_model: str = ""  # Override model for vision tasks (empty = auto-detect)
 
+    # Chat sessions
+    chat_sessions_dir: str = ".agent42/chat_sessions"
+
+    # Projects
+    projects_dir: str = ".agent42/projects"
+
+    # GitHub OAuth (device flow)
+    github_client_id: str = ""
+    github_oauth_token: str = ""  # Stored after OAuth completes
+
     # Apps platform
     apps_enabled: bool = True
     apps_dir: str = "apps"
@@ -203,6 +213,16 @@ class Settings:
     apps_default_mode: str = "internal"  # Default mode: "internal" or "external"
     apps_require_auth_default: bool = False  # Default require_auth for new apps
     apps_monitor_interval: int = 15  # Seconds between health-check polls
+
+    # Project interview
+    project_interview_enabled: bool = True
+    project_interview_mode: str = "auto"  # auto=complexity-based, always, never
+    project_interview_max_rounds: int = 4
+    project_interview_min_complexity: str = "moderate"  # moderate or complex
+    # Multi-repository management
+    github_token: str = ""  # GitHub PAT for repo operations (fallback: APPS_GITHUB_TOKEN)
+    repos_json_path: str = ".agent42/repos.json"
+    repos_clone_dir: str = ".agent42/repos"  # Base directory for cloned repos
 
     # Security scanning (scheduled)
     security_scan_enabled: bool = True
@@ -336,6 +356,18 @@ class Settings:
             images_dir=os.getenv("IMAGES_DIR", ".agent42/images"),
             # Device gateway auth
             devices_file=os.getenv("DEVICES_FILE", ".agent42/devices.jsonl"),
+            # Project interview
+            project_interview_enabled=os.getenv("PROJECT_INTERVIEW_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
+            project_interview_mode=os.getenv("PROJECT_INTERVIEW_MODE", "auto"),
+            project_interview_max_rounds=int(os.getenv("PROJECT_INTERVIEW_MAX_ROUNDS", "4")),
+            project_interview_min_complexity=os.getenv(
+                "PROJECT_INTERVIEW_MIN_COMPLEXITY", "moderate"
+            ),
+            # Multi-repository management
+            github_token=os.getenv("GITHUB_TOKEN", os.getenv("APPS_GITHUB_TOKEN", "")),
+            repos_json_path=os.getenv("REPOS_JSON_PATH", ".agent42/repos.json"),
+            repos_clone_dir=os.getenv("REPOS_CLONE_DIR", ".agent42/repos"),
             # Security scanning
             security_scan_enabled=os.getenv("SECURITY_SCAN_ENABLED", "true").lower()
             in ("true", "1", "yes"),
@@ -362,6 +394,13 @@ class Settings:
             # Vision / image analysis
             vision_max_image_mb=int(os.getenv("VISION_MAX_IMAGE_MB", "10")),
             vision_model=os.getenv("VISION_MODEL", ""),
+            # Chat sessions
+            chat_sessions_dir=os.getenv("CHAT_SESSIONS_DIR", ".agent42/chat_sessions"),
+            # Projects
+            projects_dir=os.getenv("PROJECTS_DIR", ".agent42/projects"),
+            # GitHub OAuth
+            github_client_id=os.getenv("GITHUB_CLIENT_ID", ""),
+            github_oauth_token=os.getenv("GITHUB_OAUTH_TOKEN", ""),
             # Apps platform
             apps_enabled=os.getenv("APPS_ENABLED", "true").lower() in ("true", "1", "yes"),
             apps_dir=os.getenv("APPS_DIR", "apps"),
