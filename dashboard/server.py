@@ -12,6 +12,7 @@ Security features:
 Extended with endpoints for providers, tools, skills, channels, and devices.
 """
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -39,6 +40,48 @@ from dashboard.auth import (
 from dashboard.websocket_manager import WebSocketManager
 
 logger = logging.getLogger("agent42.server")
+
+
+async def _pip_install(packages: list[str]) -> tuple[list[str], list[str]]:
+    """Install pip packages using the current Python interpreter.
+
+    Returns (installed, errors) — errors is non-empty on failure.
+    Non-fatal: errors are logged but callers decide how to handle them.
+    """
+    import sys
+
+    installed: list[str] = []
+    errors: list[str] = []
+    for package in packages:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-q",
+                package,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+            if proc.returncode == 0:
+                installed.append(package)
+            else:
+                msg = stderr.decode().strip()
+                logger.warning("pip install %s failed: %s", package, msg)
+                errors.append(f"{package}: {msg[:200]}")
+        except TimeoutError:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
+            errors.append(f"{package}: install timed out")
+        except Exception as exc:
+            logger.warning("pip install %s error: %s", package, exc)
+            errors.append(f"{package}: {exc}")
+    return installed, errors
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -441,6 +484,7 @@ def create_app(
                     "QDRANT_LOCAL_PATH": ".agent42/qdrant",
                 },
             )
+            await _pip_install(["qdrant-client"])
         elif memory_backend == "qdrant_redis":
             _update_env_file(
                 env_path,
@@ -450,6 +494,7 @@ def create_app(
                     "REDIS_URL": "redis://localhost:6379/0",
                 },
             )
+            await _pip_install(["qdrant-client", "redis[hiredis]"])
             # Auto-queue a task to verify memory backend connectivity
             setup_task = Task(
                 title="Verify enhanced memory (Qdrant + Redis)",
@@ -1093,8 +1138,6 @@ def create_app(
     @app.get("/api/settings/storage")
     async def get_storage_status(_admin: AuthContext = Depends(require_admin)):
         """Return the active storage backend configuration and live connectivity status."""
-        import asyncio
-
         # Determine configured backend mode from settings
         qdrant_enabled = settings.qdrant_enabled
         qdrant_url = settings.qdrant_url
@@ -1168,6 +1211,34 @@ def create_app(
                 "url": redis_url or None,
                 "status": redis_status,
             },
+        }
+
+    @app.post("/api/settings/storage/install-packages")
+    async def install_storage_packages(_admin: AuthContext = Depends(require_admin)):
+        """Install missing Python packages for the configured storage backend.
+
+        Installs qdrant-client if Qdrant is enabled and the package is absent.
+        Installs redis[hiredis] if a Redis URL is configured and the package is absent.
+        Requires admin auth. Returns lists of installed packages and any errors.
+        """
+        import importlib.util
+
+        to_install: list[str] = []
+
+        if settings.qdrant_enabled and importlib.util.find_spec("qdrant_client") is None:
+            to_install.append("qdrant-client")
+
+        if settings.redis_url and importlib.util.find_spec("redis") is None:
+            to_install.append("redis[hiredis]")
+
+        if not to_install:
+            return {"status": "ok", "installed": [], "errors": [], "message": "All packages already installed."}
+
+        installed, errors = await _pip_install(to_install)
+        return {
+            "status": "ok" if not errors else "partial",
+            "installed": installed,
+            "errors": errors,
         }
 
     # -- Channels (Phase 2) ---------------------------------------------------
