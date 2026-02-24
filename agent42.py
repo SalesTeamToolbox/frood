@@ -732,9 +732,7 @@ class Agent42:
         Notifies the user that a scope change was detected and a new branch
         will be created for the new work.
         """
-        old_scope = self.session_manager.get_active_scope(
-            message.channel_type, message.channel_id
-        )
+        old_scope = self.session_manager.get_active_scope(message.channel_type, message.channel_id)
         old_summary = old_scope.summary if old_scope else "previous work"
 
         # Create new task (no parent link — this is a fresh scope)
@@ -747,7 +745,7 @@ class Agent42:
 
         # Prepend scope change notice to the standard task-created message
         scope_notice = (
-            f"Scope change detected — switching from \"{old_summary}\" to a new topic. "
+            f'Scope change detected — switching from "{old_summary}" to a new topic. '
             f"A new branch will be created for this work.\n\n"
         )
         return OutboundMessage(
@@ -826,12 +824,8 @@ class Agent42:
                 task_type=task_type,
                 task_id=task.id,
             )
-            self.session_manager.set_active_scope(
-                message.channel_type, message.channel_id, scope
-            )
-            logger.info(
-                f"Active scope set: {task.id} — {description[:60]}"
-            )
+            self.session_manager.set_active_scope(message.channel_type, message.channel_id, scope)
+            logger.info(f"Active scope set: {task.id} — {description[:60]}")
 
         # Log to memory (semantic indexing for cross-session search)
         await self.memory_store.log_event_semantic(

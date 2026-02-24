@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+import aiofiles
+
 logger = logging.getLogger("agent42.approval")
 
 
@@ -62,8 +64,8 @@ class ApprovalGate:
         self._log_path = Path(log_path)
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _log_event(self, event_type: str, key: str, **details):
-        """Append an event to the JSONL audit log."""
+    async def _log_event(self, event_type: str, key: str, **details):
+        """Append an event to the JSONL audit log (non-blocking)."""
         entry = {
             "timestamp": time.time(),
             "event": event_type,
@@ -71,8 +73,8 @@ class ApprovalGate:
             **details,
         }
         try:
-            with open(self._log_path, "a") as f:
-                f.write(json.dumps(entry, default=str) + "\n")
+            async with aiofiles.open(self._log_path, "a") as f:
+                await f.write(json.dumps(entry, default=str) + "\n")
         except OSError as e:
             logger.error(f"Failed to write approval log: {e}")
 
@@ -94,7 +96,7 @@ class ApprovalGate:
         self._pending[key] = req
 
         logger.info(f"Approval requested: {key} — {description}")
-        self._log_event(
+        await self._log_event(
             "requested",
             key,
             task_id=task_id,
@@ -108,7 +110,7 @@ class ApprovalGate:
         except TimeoutError:
             logger.warning(f"Approval timed out after {self.timeout}s: {key} — auto-denying")
             req.approved = False
-            self._log_event("timeout", key, task_id=task_id, action=action.value)
+            await self._log_event("timeout", key, task_id=task_id, action=action.value)
 
         self._pending.pop(key, None)
         return req.approved is True
@@ -121,7 +123,11 @@ class ApprovalGate:
             req.approved = True
             req._event.set()
             logger.info(f"AUDIT: Approved {key} by {user or 'unknown'}")
-            self._log_event("approved", key, task_id=task_id, action=action, user=user or "unknown")
+            asyncio.ensure_future(
+                self._log_event(
+                    "approved", key, task_id=task_id, action=action, user=user or "unknown"
+                )
+            )
 
     def deny(self, task_id: str, action: str, user: str = ""):
         """Deny a pending request (called from dashboard)."""
@@ -131,7 +137,11 @@ class ApprovalGate:
             req.approved = False
             req._event.set()
             logger.info(f"AUDIT: Denied {key} by {user or 'unknown'}")
-            self._log_event("denied", key, task_id=task_id, action=action, user=user or "unknown")
+            asyncio.ensure_future(
+                self._log_event(
+                    "denied", key, task_id=task_id, action=action, user=user or "unknown"
+                )
+            )
 
     def pending_requests(self) -> list[dict]:
         """List all pending approval requests for the dashboard."""

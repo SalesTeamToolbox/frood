@@ -219,7 +219,7 @@ class ProjectSpecGenerator:
             },
         ]
 
-        response = await self.router.complete(
+        response, _ = await self.router.complete(
             self.model, messages, temperature=0.3, max_tokens=3000
         )
 
@@ -356,7 +356,7 @@ class ProjectSpecGenerator:
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": "Decompose this specification into subtasks."},
             ]
-            response = await self.router.complete(
+            response, _ = await self.router.complete(
                 self.model, messages, temperature=0.2, max_tokens=2000
             )
             subtasks = self._parse_json_response(response)
