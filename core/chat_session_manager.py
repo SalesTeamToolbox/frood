@@ -201,8 +201,8 @@ class ChatSessionManager:
         content = message.get("content", "")
         session.last_message_preview = content[:100] if content else ""
 
-        # Auto-generate title from first user message
-        if session.message_count == 1 and message.get("role") == "user":
+        # Auto-generate title from first user message (only if title is still default)
+        if session.message_count == 1 and message.get("role") == "user" and session.title == "New Chat":
             session.title = content[:60] + ("..." if len(content) > 60 else "")
 
         await self._persist()
