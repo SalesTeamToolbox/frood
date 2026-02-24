@@ -351,7 +351,7 @@ function handleWSMessage(msg) {
     const idx = state.tasks.findIndex((t) => t.id === msg.data.id);
     if (idx >= 0) state.tasks[idx] = msg.data;
     else state.tasks.unshift(msg.data);
-    if (state.page === "tasks") renderTasks();
+    if (state.page === "tasks") renderMissionControl();
     if (state.page === "detail" && state.selectedTask?.id === msg.data.id) {
       state.selectedTask = msg.data;
       renderDetail();
@@ -907,7 +907,7 @@ async function doApproveTask(taskId) {
     await api(`/tasks/${taskId}/approve`, { method: "POST" });
     await loadTasks();
     toast("Task approved", "success");
-    if (state.page === "tasks") renderTasks();
+    if (state.page === "tasks") renderMissionControl();
     if (state.page === "detail") {
       state.selectedTask = state.tasks.find((t) => t.id === taskId);
       renderDetail();
@@ -920,7 +920,7 @@ async function doCancelTask(taskId) {
     await api(`/tasks/${taskId}/cancel`, { method: "POST" });
     await loadTasks();
     toast("Task cancelled", "success");
-    if (state.page === "tasks") renderTasks();
+    if (state.page === "tasks") renderMissionControl();
     if (state.page === "detail") {
       state.selectedTask = state.tasks.find((t) => t.id === taskId);
       renderDetail();
@@ -933,7 +933,7 @@ async function doRetryTask(taskId) {
     await api(`/tasks/${taskId}/retry`, { method: "POST" });
     await loadTasks();
     toast("Task retried", "success");
-    if (state.page === "tasks") renderTasks();
+    if (state.page === "tasks") renderMissionControl();
   } catch (err) { toast(err.message, "error"); }
 }
 
@@ -961,7 +961,7 @@ async function doMoveTask(taskId, newStatus, position = 0) {
       body: JSON.stringify({ status: newStatus, position }),
     });
     await loadTasks();
-    if (state.page === "tasks") renderTasks();
+    if (state.page === "tasks") renderMissionControl();
     toast(`Task moved to ${newStatus}`, "success");
   } catch (err) { toast(err.message, "error"); }
 }
@@ -988,7 +988,7 @@ async function doSetPriority(taskId, priority) {
       body: JSON.stringify({ priority }),
     });
     await loadTasks();
-    if (state.page === "tasks") renderTasks();
+    if (state.page === "tasks") renderMissionControl();
   } catch (err) { toast(err.message, "error"); }
 }
 
@@ -999,7 +999,7 @@ async function doBlockTask(taskId, reason) {
       body: JSON.stringify({ reason }),
     });
     await loadTasks();
-    if (state.page === "tasks") renderTasks();
+    if (state.page === "tasks") renderMissionControl();
     toast("Task blocked", "info");
   } catch (err) { toast(err.message, "error"); }
 }
@@ -1008,7 +1008,7 @@ async function doUnblockTask(taskId) {
   try {
     await api(`/tasks/${taskId}/unblock`, { method: "PATCH" });
     await loadTasks();
-    if (state.page === "tasks") renderTasks();
+    if (state.page === "tasks") renderMissionControl();
     toast("Task unblocked", "success");
   } catch (err) { toast(err.message, "error"); }
 }
@@ -1017,7 +1017,7 @@ async function doArchiveTask(taskId) {
   try {
     await api(`/tasks/${taskId}/archive`, { method: "POST" });
     await loadTasks();
-    if (state.page === "tasks") renderTasks();
+    if (state.page === "tasks") renderMissionControl();
     toast("Task archived", "info");
   } catch (err) { toast(err.message, "error"); }
 }
@@ -1354,7 +1354,7 @@ function renderStats() {
 }
 
 function renderTasks() {
-  const el = document.getElementById("page-content");
+  const el = document.getElementById("mc-content") || document.getElementById("page-content");
   if (!el || state.page !== "tasks") return;
 
   el.innerHTML = `
