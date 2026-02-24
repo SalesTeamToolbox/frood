@@ -411,8 +411,7 @@ class IntentClassifier:
         system_prompt = SCOPE_DETECTION_PROMPT
 
         context_parts = [
-            f"Current active scope: {active_scope.summary} "
-            f"(type: {active_scope.task_type.value})"
+            f"Current active scope: {active_scope.summary} (type: {active_scope.task_type.value})"
         ]
 
         if conversation_history:
@@ -429,7 +428,7 @@ class IntentClassifier:
             {"role": "user", "content": "\n\n".join(context_parts)},
         ]
 
-        response = await self.router.complete(
+        response, _ = await self.router.complete(
             self.model, messages, temperature=0.1, max_tokens=200
         )
         return self._parse_scope_response(response)

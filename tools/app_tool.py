@@ -420,7 +420,12 @@ class AppTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return ToolResult(error="pip install timed out after 120s", success=False)
             output = stdout.decode() if stdout else ""
             errors = stderr.decode() if stderr else ""
             if proc.returncode != 0:
@@ -439,7 +444,12 @@ class AppTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return ToolResult(error="npm install timed out after 120s", success=False)
             output = stdout.decode() if stdout else ""
             if proc.returncode != 0:
                 errors = stderr.decode() if stderr else ""

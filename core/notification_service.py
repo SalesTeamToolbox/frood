@@ -229,7 +229,7 @@ class NotificationService:
         )
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, self._send_smtp, subject, body)
             logger.info(f"Email sent: {payload.event} -> {len(self._email_recipients)} recipients")
         except Exception as e:

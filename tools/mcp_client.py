@@ -195,7 +195,7 @@ class MCPConnection:
             "params": params,
         }
 
-        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[msg_id] = future
 
         if self._proc and self._proc.stdin:

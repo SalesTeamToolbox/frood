@@ -5,6 +5,7 @@ Consolidates all URL validation into a single module used by web_search, http_cl
 and browser tools. Inspired by OpenClaw v2026.2.12 hostname allowlist security fixes.
 """
 
+import asyncio
 import ipaddress
 import json
 import logging
@@ -132,18 +133,28 @@ class UrlPolicy:
             return None
 
     def _audit_log(self, url: str, agent_id: str, reason: str):
-        """Append blocked request to JSONL audit log."""
+        """Append blocked request to JSONL audit log (non-blocking when event loop is running)."""
         entry = {
             "timestamp": time.time(),
             "url": url,
             "agent_id": agent_id,
             "reason": reason,
         }
+        line = json.dumps(entry) + "\n"
+
+        def _write():
+            try:
+                with open(self._audit_path, "a") as f:
+                    f.write(line)
+            except OSError as e:
+                logger.error(f"Failed to write URL audit log: {e}")
+
         try:
-            with open(self._audit_path, "a") as f:
-                f.write(json.dumps(entry) + "\n")
-        except OSError as e:
-            logger.error(f"Failed to write URL audit log: {e}")
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(None, _write)
+        except RuntimeError:
+            # No running event loop (e.g., during tests) — write synchronously
+            _write()
         logger.warning(f"URL blocked: {url} (agent={agent_id}) — {reason}")
 
     def reset_agent_counts(self, agent_id: str | None = None):

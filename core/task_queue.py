@@ -223,13 +223,14 @@ class Task:
     comments: list = field(default_factory=list)  # [{author, text, timestamp}]
     blocked_reason: str = ""
     parent_task_id: str = ""
-    project_id: str = ""  # Associated project (empty = standalone task)
+    project_id: str = (
+        ""  # Associated project (empty = standalone task); also links to project interview session
+    )
     position: int = 0  # Kanban column ordering
     context_window: str = "default"  # default | large | max
     token_usage: dict = field(default_factory=dict)  # Per-task token tracking by model
 
     # Project interview fields
-    project_id: str = ""  # Links task to a project interview session
     project_spec_path: str = ""  # Path to PROJECT_SPEC.md for subtask context
     # Multi-repository support — which repo and branch the agent should work on
     repo_id: str = ""  # Repository ID from RepoManager (empty = default/legacy)
