@@ -31,7 +31,8 @@ class TestLearnerReflection:
                 "Always check the test suite before committing.\n\n"
                 "## Memory Update\n"
                 "- [Project Conventions] - Run pytest with --strict-markers\n"
-                "- [Common Patterns] - API uses /api/v1/{resource} format\n"
+                "- [Common Patterns] - API uses /api/v1/{resource} format\n",
+                None,
             )
         )
 
@@ -66,7 +67,8 @@ class TestLearnerReflection:
                 "## Lesson Learned\n"
                 "Check requirements.txt before running data processing tasks.\n\n"
                 "## Memory Update\n"
-                "- [Common Patterns] - This project requires pandas for data tasks\n"
+                "- [Common Patterns] - This project requires pandas for data tasks\n",
+                None,
             )
         )
 
@@ -92,7 +94,8 @@ class TestLearnerReflection:
                 "## What Worked\n- Everything\n\n"
                 "## What Didn't Work\n- Nothing\n\n"
                 "## Lesson Learned\nNothing new.\n\n"
-                "## Memory Update\nNONE\n"
+                "## Memory Update\nNONE\n",
+                None,
             )
         )
 
@@ -116,7 +119,8 @@ class TestLearnerReflection:
                 "## What Worked\n- Good\n\n"
                 "## What Didn't Work\n- Nothing\n\n"
                 "## Lesson Learned\nA lesson.\n\n"
-                "## Memory Update\nNONE\n"
+                "## Memory Update\nNONE\n",
+                None,
             )
         )
 
