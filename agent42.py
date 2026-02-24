@@ -35,8 +35,10 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
 from agents.agent import Agent
+from agents.extension_loader import ExtensionLoader
 from agents.learner import Learner
 from agents.model_router import ModelRouter
+from agents.profile_loader import ProfileLoader
 from channels.base import InboundMessage, OutboundMessage
 from channels.manager import ChannelManager
 from core.app_manager import AppManager
@@ -66,6 +68,7 @@ from memory.session import SessionManager
 from memory.store import MemoryStore
 from skills.loader import SkillLoader
 from tools.app_tool import AppTool
+from tools.behaviour_tool import BehaviourTool
 from tools.browser_tool import BrowserTool
 from tools.code_intel import CodeIntelTool
 from tools.content_analyzer import ContentAnalyzerTool
@@ -84,6 +87,7 @@ from tools.image_gen import ImageGenTool
 from tools.knowledge_tool import KnowledgeTool
 from tools.linter_tool import LinterTool
 from tools.mcp_client import MCPManager
+from tools.notify_tool import NotifyUserTool
 from tools.outline_tool import OutlineTool
 from tools.persona_tool import PersonaTool
 from tools.plugin_loader import PluginLoader
@@ -167,6 +171,8 @@ class Agent42:
 
         self._active_count = 0
         self._active_lock = asyncio.Lock()
+        # Per-task intervention queues for mid-task user feedback (Agent Zero-inspired)
+        self._intervention_queues: dict[str, asyncio.Queue] = {}
         self.approval_gate = ApprovalGate(
             self.task_queue,
             log_path=settings.approval_log_path,
@@ -199,6 +205,24 @@ class Agent42:
             skill_dirs.append(Path(extra))
         self.skill_loader = SkillLoader(skill_dirs)
         self.skill_loader.load_all()
+
+        # Agent profiles (Agent Zero-inspired) — configurable agent personas
+        profile_dirs = []
+        if settings.agent_profiles_dir:
+            p = Path(settings.agent_profiles_dir)
+            if not p.is_absolute():
+                p = self.data_dir / p
+            profile_dirs.append(p)
+        self.profile_loader = ProfileLoader(extra_dirs=profile_dirs if profile_dirs else None)
+        self.profile_loader.load_all()
+
+        # Agent execution extensions (Agent Zero-inspired) — lifecycle hook plugins
+        ext_dir = None
+        if settings.extensions_dir:
+            ext_dir = Path(settings.extensions_dir)
+            if not ext_dir.is_absolute():
+                ext_dir = self.data_dir / ext_dir
+        self.extension_loader = ExtensionLoader(extensions_dir=ext_dir)
 
         # Phase 4: Tools (with optional rate limiting)
         rate_limiter = None
@@ -383,6 +407,10 @@ class Agent42:
         self.tool_registry.register(WebFetchTool())
         self.tool_registry.register(CronTool(self.cron_scheduler))
         self.tool_registry.register(SubagentTool(self.task_queue))
+
+        # Agent Zero-inspired tools
+        self.tool_registry.register(BehaviourTool(memory_dir=self.data_dir / settings.memory_dir))
+        self.tool_registry.register(NotifyUserTool(ws_manager=self.ws_manager))
 
         # Development tools
         self.tool_registry.register(GitTool(workspace))
@@ -979,6 +1007,10 @@ class Agent42:
                 )
                 await asyncio.sleep(10)
 
+            # Create per-task intervention queue for mid-task user feedback
+            intervention_queue: asyncio.Queue = asyncio.Queue()
+            self._intervention_queues[task.id] = intervention_queue
+
             try:
                 # Select worktree manager: task-specific repo or default
                 wt_manager = self.worktree_manager
@@ -1003,12 +1035,17 @@ class Agent42:
                     memory_store=self.memory_store,
                     workspace_skills_dir=self.workspace_skills_dir,
                     tool_registry=self.tool_registry,
+                    profile_loader=self.profile_loader,
+                    extension_loader=self.extension_loader,
+                    intervention_queue=intervention_queue,
                 )
                 await agent.run()
                 self.heartbeat.mark_complete(task.id)
             finally:
                 async with self._active_lock:
                     self._active_count -= 1
+                # Remove intervention queue once the agent is done
+                self._intervention_queues.pop(task.id, None)
         except Exception:
             self.heartbeat.mark_failed(task.id)
             raise
@@ -1116,6 +1153,8 @@ class Agent42:
                 chat_session_manager=self.chat_session_manager,
                 project_manager=self.project_manager,
                 repo_manager=self.repo_manager,
+                profile_loader=self.profile_loader,
+                intervention_queues=self._intervention_queues,
             )
             config = uvicorn.Config(
                 app,

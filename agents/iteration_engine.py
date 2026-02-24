@@ -202,12 +202,18 @@ class IterationEngine:
     """Run the primary -> tool exec -> critic -> revise loop."""
 
     def __init__(
-        self, router: ModelRouter, tool_registry=None, approval_gate=None, agent_id: str = "default"
+        self,
+        router: ModelRouter,
+        tool_registry=None,
+        approval_gate=None,
+        agent_id: str = "default",
+        extension_loader=None,
     ):
         self.router = router
         self.tool_registry = tool_registry
         self.approval_gate = approval_gate
         self.agent_id = agent_id
+        self.extension_loader = extension_loader
 
     def _is_model_unavailable(self, error: Exception) -> bool:
         """Return True for 404/endpoint-not-found errors that should not be retried."""
@@ -378,12 +384,20 @@ class IterationEngine:
                         )
                         continue
 
+            # Call before_tool_call extension hooks
+            if self.extension_loader and self.extension_loader.has_extensions:
+                arguments = self.extension_loader.call_before_tool_call(tool_name, arguments)
+
             logger.info(f"Executing tool: {tool_name}({list(arguments.keys())})")
             result = await self.tool_registry.execute(
                 tool_name,
                 agent_id=self.agent_id,
                 **arguments,
             )
+
+            # Call after_tool_call extension hooks
+            if self.extension_loader and self.extension_loader.has_extensions:
+                result = self.extension_loader.call_after_tool_call(tool_name, result)
 
             records.append(
                 ToolCallRecord(
@@ -435,6 +449,7 @@ class IterationEngine:
         task_type: str = "coding",
         task_id: str = "",
         token_accumulator: TokenAccumulator | None = None,
+        intervention_queue: asyncio.Queue | None = None,
     ) -> IterationHistory:
         """
         Execute the iteration loop with tool calling support.
@@ -451,6 +466,7 @@ class IterationEngine:
             system_prompt: Optional system-level context.
             on_iteration: Optional async callback(IterationResult) for live updates.
             token_accumulator: Optional accumulator for per-task token tracking.
+            intervention_queue: Optional queue for mid-task user feedback messages.
         """
         self._token_acc = token_accumulator or TokenAccumulator()
         history = IterationHistory()
@@ -470,6 +486,28 @@ class IterationEngine:
 
         for i in range(1, max_iterations + 1):
             logger.info(f"Iteration {i}/{max_iterations} — primary: {primary_model}")
+
+            # Drain any pending user interventions and inject as user messages
+            if intervention_queue:
+                while True:
+                    try:
+                        feedback = intervention_queue.get_nowait()
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"[USER INTERVENTION] The user has provided the following "
+                                    f"feedback. Incorporate it into your work:\n\n{feedback}"
+                                ),
+                            }
+                        )
+                        logger.info(f"Intervention injected for task {task_id}: {feedback[:80]}")
+                    except asyncio.QueueEmpty:
+                        break
+
+            # Call before_iteration extension hooks
+            if self.extension_loader and self.extension_loader.has_extensions:
+                messages = self.extension_loader.call_before_iteration(messages, i)
 
             # Context window overflow guard (OpenClaw feature)
             try:
@@ -512,6 +550,10 @@ class IterationEngine:
             else:
                 # Text-only mode (no tools or model doesn't support tools)
                 primary_output = await self._complete_with_retry(primary_model, messages)
+
+            # Call after_iteration extension hooks
+            if self.extension_loader and self.extension_loader.has_extensions:
+                primary_output = self.extension_loader.call_after_iteration(primary_output, i)
 
             result = IterationResult(
                 iteration=i,

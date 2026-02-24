@@ -236,6 +236,9 @@ class Task:
     repo_id: str = ""  # Repository ID from RepoManager (empty = default/legacy)
     branch: str = ""  # Target branch (empty = repo's default_branch)
 
+    # Agent profile (Agent Zero-inspired) — which persona/mode the agent runs as
+    profile: str = ""  # Profile name (empty = use AGENT_DEFAULT_PROFILE setting)
+
     def add_comment(self, author: str, text: str):
         self.comments.append(
             {
