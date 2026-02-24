@@ -12,7 +12,8 @@
       {
         "matcher": "Write|Edit",
         "hooks": [
-          ".claude/hooks/security-monitor.py"
+          ".claude/hooks/security-monitor.py",
+          ".claude/hooks/format-on-write.py"
         ]
       }
     ],
