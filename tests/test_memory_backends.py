@@ -270,7 +270,8 @@ Some stuff happened.
             return_value=(
                 "## Summary\nDiscussed Python project.\n\n"
                 "## Key Topics\n- Python\n- Testing\n\n"
-                "## Important Details\n- Uses pytest"
+                "## Important Details\n- Uses pytest",
+                None,
             )
         )
 
