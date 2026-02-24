@@ -477,6 +477,7 @@ class Agent42:
                     workspace_path=workspace,
                     router=router,
                     outputs_dir=settings.outputs_dir,
+                    task_queue=self.task_queue,
                 )
             )
 

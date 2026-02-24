@@ -65,6 +65,8 @@ const state = {
   envSettings: {},
   envEdits: {},
   envSaving: false,
+  // Storage backend status
+  storageStatus: null,
   // Repositories
   repos: [],
   repoBranches: {},
@@ -575,6 +577,12 @@ async function loadEnvSettings() {
   try {
     state.envSettings = (await api("/settings/env")) || {};
   } catch { state.envSettings = {}; }
+}
+
+async function loadStorageStatus() {
+  try {
+    state.storageStatus = (await api("/settings/storage")) || null;
+  } catch { state.storageStatus = null; }
 }
 
 async function saveEnvSettings() {
@@ -2299,6 +2307,9 @@ function renderProjectsBoard() {
             <span class="progress-text">${done}/${total} tasks</span>
           </div>
           ${p.tags?.length ? `<div class="project-card-tags">${p.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
+          <div class="project-card-actions" onclick="event.stopPropagation()">
+            <button class="btn btn-outline btn-xs" onclick="showCreateTaskModal('${p.id}')">+ Add Task</button>
+          </div>
         </div>`;
     }).join("");
 
@@ -2930,9 +2941,50 @@ function renderSettingsPanel() {
       ${settingReadonly("CRON_JOBS_PATH", "Cron jobs file", "Default: cron_jobs.json. Scheduled task definitions.")}
       ${_envSaveBtn()}
     `,
-    storage: () => `
+    storage: () => {
+      const ss = state.storageStatus;
+      const modeLabels = {
+        file: "File-based (no Qdrant/Redis)",
+        qdrant_embedded: "Qdrant embedded + file sessions",
+        qdrant_server: "Qdrant server + file sessions",
+        qdrant_redis: "Qdrant + Redis (full semantic search & session caching)",
+      };
+      const statusBadge = (s) => {
+        const map = {
+          connected: ["ok", "Connected"],
+          embedded_ok: ["ok", "Embedded (local)"],
+          disabled: ["muted", "Disabled"],
+          not_installed: ["warn", "Package not installed"],
+          unreachable: ["error", "Unreachable"],
+        };
+        const [cls, label] = map[s] || ["muted", s];
+        const colors = { ok: "#22c55e", warn: "#f59e0b", error: "#ef4444", muted: "var(--text-muted)" };
+        return `<span style="color:${colors[cls]};font-weight:600;font-size:0.82rem">${esc(label)}</span>`;
+      };
+      const backendSection = ss ? `
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">
+          <div style="font-weight:600;margin-bottom:0.6rem;font-size:0.9rem">Active Storage Backend</div>
+          <div style="margin-bottom:0.5rem;color:var(--text-muted);font-size:0.85rem">${esc(modeLabels[ss.mode] || ss.mode)}</div>
+          <table style="width:100%;border-collapse:collapse;font-size:0.84rem">
+            <tr>
+              <td style="padding:0.3rem 0;color:var(--text-muted);width:120px">Qdrant</td>
+              <td>${statusBadge(ss.qdrant.status)}${ss.qdrant.url ? ` &mdash; <code style="font-size:0.8rem">${esc(ss.qdrant.url)}</code>` : ss.qdrant.local_path ? ` &mdash; <code style="font-size:0.8rem">${esc(ss.qdrant.local_path)}</code>` : ""}</td>
+            </tr>
+            <tr>
+              <td style="padding:0.3rem 0;color:var(--text-muted)">Redis</td>
+              <td>${statusBadge(ss.redis.status)}${ss.redis.url ? ` &mdash; <code style="font-size:0.8rem">${esc(ss.redis.url)}</code>` : ""}</td>
+            </tr>
+          </table>
+          <div style="margin-top:0.75rem;font-size:0.78rem;color:var(--text-muted)">
+            Backend is configured in <code>.env</code>. To change it, edit <code>QDRANT_ENABLED</code>, <code>QDRANT_URL</code>, and <code>REDIS_URL</code> and restart Agent42.
+            <a href="#" onclick="loadStorageStatus().then(renderSettingsPanel);return false" style="margin-left:0.5rem">Refresh</a>
+          </div>
+        </div>` : `<div style="color:var(--text-muted);font-size:0.85rem;margin-bottom:1rem">Storage status unavailable.</div>`;
+      return `
       <h3>Storage &amp; Paths</h3>
       <p class="section-desc">Directories where Agent42 stores memory, outputs, templates, and generated media.</p>
+
+      ${backendSection}
 
       ${settingReadonly("MEMORY_DIR", "Memory directory", "Default: .agent42/memory. Persistent memory and learning data.")}
       ${settingReadonly("SESSIONS_DIR", "Sessions directory", "Default: .agent42/sessions. Channel conversation history.")}
@@ -2941,7 +2993,7 @@ function renderSettingsPanel() {
       ${settingReadonly("IMAGES_DIR", "Images directory", "Default: .agent42/images. Generated images from image_gen tool.")}
       ${settingReadonly("SKILLS_DIRS", "Extra skill directories", "Comma-separated paths. Skills are auto-discovered from these + builtins.")}
       ${_envSaveBtn()}
-    `,
+    `; },
   };
 
   el.innerHTML = (panels[state.settingsTab] || panels.providers)();
@@ -3049,7 +3101,7 @@ function updateEnvSaveBtn() {
 async function loadAll() {
   await Promise.all([
     loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(),
-    loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(),
+    loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(),
     loadChatMessages(), loadTokenStats(), loadChatSessions(), loadCodeSessions(),
     loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(),
   ]);
