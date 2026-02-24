@@ -1164,12 +1164,13 @@ def create_app(
             message: str
 
         class ChatSessionSetupRequest(BaseModel):
-            mode: str = "local"  # "local" or "remote"
+            mode: str = "local"  # "local", "remote", or "github"
             runtime: str = "python"
             app_name: str = ""
             ssh_host: str = ""
             deploy_now: bool = False
             github_repo_name: str = ""
+            github_clone_url: str = ""
             github_private: bool = True
 
         @app.get("/api/chat/sessions")
@@ -1329,7 +1330,39 @@ def create_app(
                     )
                 updates["ssh_host"] = req.ssh_host
 
-            if req.github_repo_name:
+            if req.mode == "github":
+                # GitHub repository mode — create new repo or record clone URL
+                github_token = settings.github_oauth_token if hasattr(settings, "github_oauth_token") else ""
+                if req.github_repo_name and not req.github_clone_url:
+                    # Create a new GitHub repo if connected
+                    if github_token:
+                        from core.github_oauth import GitHubDeviceAuth
+                        try:
+                            repo_info = await GitHubDeviceAuth.create_repo(
+                                token=github_token,
+                                name=req.github_repo_name,
+                                private=req.github_private,
+                            )
+                            updates["github_repo"] = repo_info["full_name"]
+                            updates["github_clone_url"] = repo_info["clone_url"]
+                        except Exception as exc:
+                            logger.warning("GitHub repo creation failed: %s", exc)
+                            updates["github_repo"] = req.github_repo_name
+                    else:
+                        updates["github_repo"] = req.github_repo_name
+                elif req.github_clone_url:
+                    updates["github_clone_url"] = req.github_clone_url
+                    updates["github_repo"] = req.github_repo_name or req.github_clone_url.rstrip("/").split("/")[-1].removesuffix(".git")
+                # Also create a local app to work in while connected to GitHub
+                if app_manager:
+                    app_name = updates.get("github_repo", req.github_repo_name or "github-project").split("/")[-1]
+                    new_app = await app_manager.create(
+                        name=app_name,
+                        runtime=req.runtime,
+                    )
+                    updates["app_id"] = new_app.id
+
+            if req.mode != "github" and req.github_repo_name:
                 updates["github_repo"] = req.github_repo_name
 
             session = await chat_session_manager.update(session_id, **updates)
