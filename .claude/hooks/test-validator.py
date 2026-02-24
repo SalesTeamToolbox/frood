@@ -12,11 +12,66 @@ Hook protocol:
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 
 # Directories that should have test coverage
 COVERED_DIRS = ["core", "agents", "tools", "providers"]
+
+
+def find_ruff(project_dir):
+    """Locate the ruff executable, preferring the project venv."""
+    candidates = [
+        os.path.join(project_dir, ".venv", "bin", "ruff"),
+        os.path.join(project_dir, "venv", "bin", "ruff"),
+        shutil.which("ruff"),
+    ]
+    for path in candidates:
+        if path and os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return None
+
+
+def run_lint_checks(project_dir):
+    """Run ruff format check and ruff check; return (passed, messages)."""
+    ruff = find_ruff(project_dir)
+    if not ruff:
+        return True, ["ruff not found — skipping lint gate"]
+
+    messages = []
+    passed = True
+
+    for args, label in [
+        (["format", "--check", "."], "ruff format --check"),
+        (["check", "."], "ruff check"),
+    ]:
+        try:
+            result = subprocess.run(
+                [ruff, *args],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            messages.append(f"{label}: timed out")
+            continue
+        except OSError as e:
+            messages.append(f"{label}: {e}")
+            continue
+
+        if result.returncode != 0:
+            passed = False
+            out = (result.stdout + result.stderr).strip()
+            messages.append(f"FAILED {label}:")
+            for line in out.splitlines()[:15]:
+                messages.append(f"  {line}")
+            messages.append("  Fix: ruff format . && ruff check --fix .")
+        else:
+            messages.append(f"PASSED {label}")
+
+    return passed, messages
 
 
 def check_test_coverage(project_dir):
@@ -77,6 +132,19 @@ def main():
     # Only run on Stop events
     if event.get("hook_event_name") != "Stop":
         sys.exit(0)
+
+    print("\n[test-validator] Running lint checks...", file=sys.stderr)
+
+    # Run lint/format checks first
+    lint_passed, lint_messages = run_lint_checks(project_dir)
+    for msg in lint_messages:
+        print(f"[test-validator] {msg}", file=sys.stderr)
+
+    if not lint_passed:
+        print(
+            "[test-validator] WARNING: Fix lint/format issues before pushing to avoid CI failures.",
+            file=sys.stderr,
+        )
 
     print("\n[test-validator] Running test suite...", file=sys.stderr)
 
