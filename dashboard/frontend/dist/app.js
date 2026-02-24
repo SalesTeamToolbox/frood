@@ -26,6 +26,9 @@ const state = {
   filterPriority: "",
   filterType: "",
   status: {},
+  // Apps
+  apps: [],
+  appFilter: "",  // "" = all, "running", "stopped", "building", etc.
   // API key management
   apiKeys: {},
   keyEdits: {},
@@ -321,6 +324,12 @@ function handleWSMessage(msg) {
   } else if (msg.type === "system_health") {
     state.status = msg.data;
     if (state.page === "status") renderStatus();
+  } else if (msg.type === "app_status") {
+    // Real-time app status update
+    const idx = state.apps.findIndex((a) => a.id === msg.data.id);
+    if (idx >= 0) state.apps[idx] = msg.data;
+    else state.apps.unshift(msg.data);
+    if (state.page === "apps") renderApps();
   } else if (msg.type === "agent_stall") {
     toast(`Agent stalled: ${msg.data.task_id}`, "error");
   }
@@ -392,6 +401,12 @@ async function loadApiKeys() {
   try {
     state.apiKeys = (await api("/settings/keys")) || {};
   } catch { state.apiKeys = {}; }
+}
+
+async function loadApps() {
+  try {
+    state.apps = (await api("/apps")) || [];
+  } catch { state.apps = []; }
 }
 
 async function saveApiKeys() {
@@ -714,6 +729,108 @@ function showReviewModal(task) {
 function submitReview(taskId, approved) {
   const feedback = document.getElementById("rv-feedback")?.value?.trim() || "";
   doSubmitReview(taskId, feedback, approved);
+}
+
+function showCreateAppModal() {
+  const runtimes = ["python", "node", "static", "docker"];
+  showModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>Create App</h3>
+        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="ca-name">App Name</label>
+          <input type="text" id="ca-name" placeholder="My Awesome App">
+        </div>
+        <div class="form-group">
+          <label for="ca-desc">Description</label>
+          <textarea id="ca-desc" rows="3" placeholder="Describe what this app should do..."></textarea>
+        </div>
+        <div class="form-group">
+          <label for="ca-runtime">Runtime</label>
+          <select id="ca-runtime">
+            ${runtimes.map((r) => `<option value="${r}">${r}</option>`).join("")}
+          </select>
+          <div class="help">Python = Flask/FastAPI, Node = Express/Next, Static = HTML/CSS/JS, Docker = custom container.</div>
+        </div>
+        <div class="form-group">
+          <label for="ca-tags">Tags (comma-separated)</label>
+          <input type="text" id="ca-tags" placeholder="dashboard, api, internal">
+        </div>
+        <div class="form-group">
+          <label for="ca-mode">Mode</label>
+          <select id="ca-mode">
+            <option value="internal">Internal (Agent42 system tool)</option>
+            <option value="external">External (public release)</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitCreateApp()">Create &amp; Build</button>
+      </div>
+    </div>
+  `);
+  document.getElementById("ca-name")?.focus();
+}
+
+async function submitCreateApp() {
+  const name = document.getElementById("ca-name")?.value?.trim();
+  const description = document.getElementById("ca-desc")?.value?.trim();
+  const runtime = document.getElementById("ca-runtime")?.value;
+  const tagsRaw = document.getElementById("ca-tags")?.value?.trim() || "";
+  const app_mode = document.getElementById("ca-mode")?.value || "internal";
+  if (!name) return toast("App name is required", "error");
+  if (!description) return toast("Description is required", "error");
+  const tags = tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : [];
+  try {
+    const res = await api("/apps", {
+      method: "POST",
+      body: JSON.stringify({ name, description, runtime, tags, app_mode }),
+    });
+    closeModal();
+    toast(`App "${name}" created — building now`, "success");
+    await loadApps();
+    navigate("apps");
+  } catch (err) { toast(err.message, "error"); }
+}
+
+function showAppUpdateModal(appId, appName) {
+  showModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>Update: ${esc(appName)}</h3>
+        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="au-desc">Describe the changes</label>
+          <textarea id="au-desc" rows="4" placeholder="What should be changed or added..."></textarea>
+          <div class="help">An agent will read the existing app and apply your requested changes.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitAppUpdate('${appId}')">Submit Update</button>
+      </div>
+    </div>
+  `);
+  document.getElementById("au-desc")?.focus();
+}
+
+async function submitAppUpdate(appId) {
+  const description = document.getElementById("au-desc")?.value?.trim();
+  if (!description) return toast("Description is required", "error");
+  try {
+    await api(`/apps/${appId}/update`, {
+      method: "POST",
+      body: JSON.stringify({ description }),
+    });
+    closeModal();
+    toast("Update task created", "success");
+    await loadApps();
+    renderApps();
+  } catch (err) { toast(err.message, "error"); }
 }
 
 // ---------------------------------------------------------------------------
@@ -1107,6 +1224,120 @@ function renderSkills() {
   `;
 }
 
+function renderApps() {
+  const el = document.getElementById("page-content");
+  if (!el || state.page !== "apps") return;
+
+  const filtered = state.appFilter
+    ? state.apps.filter((a) => a.status === state.appFilter)
+    : state.apps;
+
+  // Status counts for filter chips
+  const counts = { all: state.apps.length, running: 0, building: 0, ready: 0, stopped: 0, draft: 0, error: 0 };
+  state.apps.forEach((a) => { if (counts[a.status] !== undefined) counts[a.status]++; });
+
+  const filterChips = ["", "running", "building", "ready", "stopped", "draft", "error"]
+    .filter((f) => f === "" || counts[f] > 0)
+    .map((f) => {
+      const label = f || "all";
+      const count = f ? counts[f] : counts.all;
+      const active = state.appFilter === f ? "active" : "";
+      return `<button class="chip ${active}" onclick="state.appFilter='${f}';renderApps()">${label} <span class="chip-count">${count}</span></button>`;
+    }).join("");
+
+  const cards = filtered.map((app) => {
+    const statusClass = `badge-${app.status}`;
+    const isRunning = app.status === "running";
+    const isStopped = app.status === "stopped" || app.status === "ready";
+    const isBuilding = app.status === "building";
+    const isError = app.status === "error";
+
+    const actions = [];
+    if (isRunning) {
+      actions.push(`<button class="btn btn-outline btn-xs" onclick="appAction('${app.id}','stop')">Stop</button>`);
+      actions.push(`<button class="btn btn-outline btn-xs" onclick="appAction('${app.id}','restart')">Restart</button>`);
+      if (app.url) actions.push(`<a href="${esc(app.url)}" target="_blank" class="btn btn-primary btn-xs">Open</a>`);
+    } else if (isStopped) {
+      actions.push(`<button class="btn btn-primary btn-xs" onclick="appAction('${app.id}','start')">Start</button>`);
+    }
+    if (!isBuilding) {
+      actions.push(`<button class="btn btn-outline btn-xs" onclick="showAppUpdateModal('${app.id}','${esc(app.name)}')">Update</button>`);
+    }
+    actions.push(`<button class="btn btn-outline btn-xs" onclick="showAppLogs('${app.id}','${esc(app.name)}')">Logs</button>`);
+    actions.push(`<button class="btn btn-outline btn-xs btn-danger-text" onclick="appAction('${app.id}','delete')">Delete</button>`);
+
+    const runtimeIcon = { static: "&#128196;", python: "&#128013;", node: "&#9889;", docker: "&#128051;" }[app.runtime] || "&#128187;";
+    const modeLabel = app.app_mode === "external" ? '<span class="badge-type">external</span>' : "";
+    const tagsHtml = (app.tags || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ");
+
+    return `
+      <div class="app-card ${isError ? 'app-card-error' : ''} ${isRunning ? 'app-card-running' : ''}">
+        <div class="app-card-header">
+          <div class="app-card-icon">${app.icon || runtimeIcon}</div>
+          <div class="app-card-title">
+            <h4>${esc(app.name)}</h4>
+            <span class="badge-status ${statusClass}">${app.status}</span>
+            ${modeLabel}
+          </div>
+        </div>
+        <p class="app-card-desc">${esc(app.description) || '<span style="color:var(--text-muted)">No description</span>'}</p>
+        <div class="app-card-meta">
+          <span title="Runtime">${runtimeIcon} ${esc(app.runtime)}</span>
+          ${app.port ? `<span title="Port">:${app.port}</span>` : ""}
+          <span title="Created">${timeSince(app.created_at)}</span>
+          ${tagsHtml}
+        </div>
+        <div class="app-card-actions">${actions.join("")}</div>
+      </div>
+    `;
+  }).join("");
+
+  el.innerHTML = `
+    <div class="apps-stats-row">
+      <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value">${state.apps.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Running</div><div class="stat-value text-success">${counts.running}</div></div>
+      <div class="stat-card"><div class="stat-label">Building</div><div class="stat-value text-warning">${counts.building}</div></div>
+      <div class="stat-card"><div class="stat-label">Errors</div><div class="stat-value text-danger">${counts.error}</div></div>
+    </div>
+    <div class="apps-filters">${filterChips}</div>
+    ${filtered.length ? `<div class="apps-grid">${cards}</div>` : '<div class="empty-state" style="padding:3rem;text-align:center"><p style="font-size:1.1rem;margin-bottom:1rem">No apps yet</p><p style="color:var(--text-muted)">Create your first app to get started.</p><button class="btn btn-primary" style="margin-top:1rem" onclick="showCreateAppModal()">+ Create App</button></div>'}
+  `;
+}
+
+async function appAction(appId, action) {
+  try {
+    if (action === "delete") {
+      if (!confirm("Archive this app? It can't be undone.")) return;
+    }
+    const method = action === "delete" ? "DELETE" : "POST";
+    const path = action === "delete" ? `/apps/${appId}` : `/apps/${appId}/${action}`;
+    await api(path, { method });
+    toast(`App ${action} successful`, "success");
+    await loadApps();
+    renderApps();
+  } catch (err) { toast(err.message, "error"); }
+}
+
+async function showAppLogs(appId, name) {
+  try {
+    const data = await api(`/apps/${appId}/logs?lines=100`);
+    const logs = data?.logs || "No logs available.";
+    showModal(`
+      <div class="modal" style="max-width:700px">
+        <div class="modal-header"><h3>Logs: ${esc(name)}</h3>
+          <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <pre class="app-logs-pre">${esc(logs)}</pre>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" onclick="closeModal()">Close</button>
+        </div>
+      </div>
+    `);
+  } catch (err) { toast(err.message, "error"); }
+}
+
 function renderStatus() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "status") return;
@@ -1449,8 +1680,7 @@ function settingReadonly(envVar, label, help) {
 // Main render
 // ---------------------------------------------------------------------------
 async function loadAll() {
-  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys()]);
-  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadStatus()]);
+  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadStatus(), loadApps()]);
 }
 
 function render() {
@@ -1490,9 +1720,9 @@ function render() {
         <div class="sidebar-brand">Agent<span class="num">42</span></div>
         <nav class="sidebar-nav">
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks')">&#127919; Mission Control</a>
-          <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks')">&#128203; Tasks</a>
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status')">&#128200; Status</a>
           <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals')">&#128274; Approvals ${approvalBadge}</a>
+          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps')">&#128187; Apps${state.apps.filter(a => a.status === "running").length ? ' <span class=\"badge\">' + state.apps.filter(a => a.status === "running").length + '</span>' : ''}</a>
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools')">&#128295; Tools</a>
           <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills')">&#9889; Skills</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings')">&#9881; Settings</a>
@@ -1505,10 +1735,10 @@ function render() {
       </aside>
       <div class="main">
         <div class="topbar">
-          <h2>${{ tasks: "Mission Control", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail" }[state.page] || "Dashboard"}</h2>
-          <h2>${{ tasks: "Tasks", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", apps: "Apps", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? '<button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button><button class="btn btn-outline btn-sm" style="margin-left:0.5rem" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>' : ""}
+            ${state.page === "apps" ? '<button class="btn btn-primary btn-sm" onclick="showCreateAppModal()">+ New App</button>' : ""}
           </div>
         </div>
         <div class="content" id="page-content"></div>
@@ -1521,6 +1751,7 @@ function render() {
     tasks: renderTasks,
     status: renderStatus,
     approvals: renderApprovals,
+    apps: renderApps,
     tools: renderTools,
     skills: renderSkills,
     settings: renderSettings,
