@@ -1349,10 +1349,45 @@ def create_app(
             await chat_session_manager.add_message(session_id, user_msg)
             await ws_manager.broadcast("chat_message", user_msg)
 
+            # For code sessions, don't create a new task while one is already active
+            if session.session_type == "code":
+                _active_statuses = {TaskStatus.PENDING, TaskStatus.ASSIGNED, TaskStatus.RUNNING}
+                _existing = next(
+                    (
+                        t
+                        for t in task_queue.all_tasks()
+                        if t.origin_metadata.get("chat_session_id") == session_id
+                        and t.status in _active_statuses
+                    ),
+                    None,
+                )
+                if _existing:
+                    return {
+                        "status": "queued",
+                        "message": user_msg,
+                        "task_id": _existing.id,
+                        "note": "Agent is still working on a previous task in this session.",
+                    }
+
             # Infer task type from message
             from core.task_queue import infer_task_type
 
             task_type = infer_task_type(text)
+
+            # For code sessions without a project, auto-create one on first message
+            if session.session_type == "code" and not session.project_id and project_manager:
+                _proj = await project_manager.create(
+                    name=session.title or text[:60],
+                    description=f"Auto-created for code session {session_id}",
+                    chat_session_id=session_id,
+                    status="active",
+                )
+                session = await chat_session_manager.update(session_id, project_id=_proj.id)
+                logger.info(
+                    "Auto-created project %s for code session %s on first message",
+                    _proj.id,
+                    session_id,
+                )
 
             task = Task(
                 title=text[:120] + ("..." if len(text) > 120 else ""),
@@ -1448,6 +1483,27 @@ def create_app(
 
             if req.mode != "github" and req.github_repo_name:
                 updates["github_repo"] = req.github_repo_name
+
+            # Auto-create a Project for this code session so tasks get linked
+            if project_manager and not session.project_id:
+                proj_name = (
+                    req.app_name
+                    or updates.get("github_repo", "").split("/")[-1]
+                    or session.title
+                    or "Code Session"
+                )
+                new_project = await project_manager.create(
+                    name=proj_name,
+                    description=f"Auto-created for code session {session_id}",
+                    chat_session_id=session_id,
+                    app_id=updates.get("app_id", ""),
+                    github_repo=updates.get("github_repo", ""),
+                    status="active",
+                )
+                updates["project_id"] = new_project.id
+                logger.info(
+                    "Auto-created project %s for code session %s", new_project.id, session_id
+                )
 
             session = await chat_session_manager.update(session_id, **updates)
             return session.to_dict()
