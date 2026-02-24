@@ -140,8 +140,9 @@ class TestProviderCompleteReturnsUsage:
         with (
             patch.object(registry, "get_client", return_value=mock_client),
             patch.object(registry, "get_model") as mock_get_model,
-            patch("providers.registry.spending_tracker"),
+            patch("providers.registry.spending_tracker") as mock_tracker,
         ):
+            mock_tracker.daily_spend_usd = 0.0
             mock_spec = MagicMock()
             mock_spec.model_id = "test-model"
             mock_spec.provider = "openrouter"
