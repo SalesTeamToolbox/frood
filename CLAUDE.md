@@ -131,6 +131,13 @@ during Claude Code sessions without manual activation.
 | App Mode | `internal` (Agent42 system tool) or `external` (app being developed for public release) |
 | App Visibility | `private` (dashboard-only), `unlisted` (anyone with URL), `public` (listed openly) |
 | App API | Agent-to-app HTTP interaction — lets Agent42 call a running app's endpoints via `app_api` |
+| Chat Session | A persistent named conversation (chat or code type) with JSONL message storage |
+| Chat Session Manager | `core/chat_session_manager.py` — session CRUD, message persistence, auto-titling |
+| Code Page | Coding-focused chat interface with project setup flow (local/remote deploy, GitHub repo) |
+| Project | A higher-level grouping of related tasks with aggregate progress tracking |
+| Project Manager | `core/project_manager.py` — project CRUD, task aggregation, Kanban board view |
+| GitHub Device Auth | `core/github_oauth.py` — OAuth device flow for GitHub repo creation |
+| Mission Control | Tabbed view ("Tasks" + "Projects") for managing work items and project progress |
 | Project Interview | Structured discovery process (`tools/project_interview.py`) for complex project-level tasks |
 | Project Spec | `PROJECT_SPEC.md` — central specification document produced by the interview, referenced by all subtasks |
 | Interview Questions | `core/interview_questions.py` — question banks organized by project type and theme |
@@ -191,6 +198,9 @@ agent42/
 │   ├── url_policy.py       # URL allowlist/denylist for SSRF protection
 │   ├── complexity.py       # Task complexity estimation
 │   ├── app_manager.py      # App lifecycle management (create, build, run, stop)
+│   ├── chat_session_manager.py # Multi-session chat persistence (JSONL per session)
+│   ├── project_manager.py  # Project CRUD, task aggregation, Kanban board
+│   └── github_oauth.py     # GitHub OAuth device flow for repo creation
 │   ├── interview_questions.py # Question banks for project discovery interviews
 │   └── project_spec.py     # PROJECT_SPEC.md generator and subtask decomposer
 │
@@ -588,6 +598,24 @@ See `.env.example` for the complete list of configuration variables.
 | `APPS_DEFAULT_MODE` | Default mode for new apps (`internal`/`external`) | `internal` |
 | `APPS_REQUIRE_AUTH_DEFAULT` | Require dashboard auth by default for new apps | `false` |
 
+### Chat Session Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `CHAT_SESSIONS_DIR` | Directory for session JSONL storage | `.agent42/chat_sessions` |
+
+### Project Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `PROJECTS_DIR` | Directory for project data | `.agent42/projects` |
+
+### GitHub OAuth Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `GITHUB_CLIENT_ID` | GitHub OAuth App Client ID (device flow) | *(disabled)* |
+| `GITHUB_OAUTH_TOKEN` | Token stored after device flow auth | *(auto-populated)* |
 ### Project Interview Settings
 
 | Variable | Purpose | Default |
