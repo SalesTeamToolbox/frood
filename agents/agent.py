@@ -8,6 +8,7 @@ Integrates skills (Phase 3), tools (Phase 4), memory (Phase 6),
 and self-learning (post-task reflection + failure analysis).
 """
 
+import asyncio
 import logging
 import textwrap
 from collections.abc import Awaitable, Callable
@@ -21,6 +22,7 @@ from core.task_queue import Task, TaskQueue, TaskType
 from core.worktree_manager import WorktreeManager
 from memory.store import MemoryStore
 from skills.loader import SkillLoader
+from tools.behaviour_tool import load_behaviour_rules
 
 logger = logging.getLogger("agent42.agent")
 
@@ -119,6 +121,9 @@ class Agent:
         memory_store: MemoryStore | None = None,
         workspace_skills_dir: Path | None = None,
         tool_registry=None,
+        profile_loader=None,
+        extension_loader=None,
+        intervention_queue: asyncio.Queue | None = None,
     ):
         self.task = task
         self.task_queue = task_queue
@@ -127,11 +132,15 @@ class Agent:
         self.emit = emit
         self.router = ModelRouter()
         self.tool_registry = tool_registry
+        self.profile_loader = profile_loader
+        self.extension_loader = extension_loader
+        self.intervention_queue = intervention_queue
         self.engine = IterationEngine(
             self.router,
             tool_registry=tool_registry,
             approval_gate=approval_gate,
             agent_id=task.id,
+            extension_loader=extension_loader,
         )
         self.skill_loader = skill_loader
         self.memory_store = memory_store
@@ -180,8 +189,9 @@ class Agent:
             # Get model routing for this task type
             routing = self.router.get_routing(task.task_type, context_window=task.context_window)
 
-            # Build system prompt (with skill overrides)
+            # Build system prompt (with skill overrides, profile, and behaviour rules)
             system_prompt = self._build_system_prompt(task)
+            system_prompt = await self._apply_system_prompt_enhancements(system_prompt, task)
 
             # Build task context with file contents, skills, and memory
             task_context = await self._build_context(task, worktree_path)
@@ -198,6 +208,7 @@ class Agent:
                 task_type=task.task_type.value,
                 task_id=task.id,
                 token_accumulator=token_acc,
+                intervention_queue=self.intervention_queue,
             )
 
             # Store token usage on the task for persistence and dashboard display
@@ -319,6 +330,53 @@ class Agent:
                     return skill.system_prompt_override
 
         return SYSTEM_PROMPTS.get(task_type_str, SYSTEM_PROMPTS["coding"])
+
+    async def _apply_system_prompt_enhancements(self, prompt: str, task: Task) -> str:
+        """Apply profile overlay, behaviour rules, and extension hooks to the system prompt.
+
+        Called after _build_system_prompt() to layer in Agent Zero-inspired features:
+        1. Extension before_system_prompt hook
+        2. Active agent profile overlay
+        3. Persistent behaviour rules from memory/behaviour.md
+        4. Extension after_system_prompt hook
+        """
+        task_type_str = task.task_type.value
+
+        # Extension: before_system_prompt
+        if self.extension_loader and self.extension_loader.has_extensions:
+            prompt = self.extension_loader.call_before_system_prompt(prompt, task_type_str)
+
+        # Agent profile overlay — apply profile for this task
+        profile = self._resolve_profile(task)
+        if profile and profile.prompt_overlay:
+            prompt = f"{prompt}\n\n{profile.prompt_overlay}"
+
+        # Behaviour rules — persistent rules from memory/behaviour.md
+        if self.memory_store:
+            try:
+                from core.config import settings as _cfg
+
+                behaviour = await load_behaviour_rules(_cfg.memory_dir)
+                if behaviour:
+                    prompt = prompt + behaviour
+            except Exception as e:
+                logger.debug(f"Could not load behaviour rules: {e}")
+
+        # Extension: after_system_prompt
+        if self.extension_loader and self.extension_loader.has_extensions:
+            prompt = self.extension_loader.call_after_system_prompt(prompt)
+
+        return prompt
+
+    def _resolve_profile(self, task: Task):
+        """Return the active AgentProfile for this task, or None if unavailable."""
+        if not self.profile_loader:
+            return None
+        # Task-specific profile takes precedence over default
+        profile_name = task.profile if task.profile else None
+        if profile_name:
+            return self.profile_loader.get(profile_name)
+        return self.profile_loader.get_default()
 
     # Max bytes of file content to include in context
     _MAX_FILE_SIZE = 30_000  # ~30KB per file

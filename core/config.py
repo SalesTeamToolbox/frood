@@ -230,6 +230,13 @@ class Settings:
     security_scan_min_severity: str = "medium"  # low, medium, high, critical
     security_scan_github_issues: bool = True
 
+    # Agent profiles (Agent Zero-inspired)
+    agent_default_profile: str = "developer"  # Name of the default agent profile
+    agent_profiles_dir: str = ""  # Extra directory for user-defined profiles
+
+    # Agent execution extensions (Agent Zero-inspired)
+    extensions_dir: str = ""  # Directory for execution lifecycle hook plugins
+
     @classmethod
     def from_env(cls) -> "Settings":
         # Enforce secure JWT secret
@@ -375,6 +382,11 @@ class Settings:
             security_scan_min_severity=os.getenv("SECURITY_SCAN_MIN_SEVERITY", "medium"),
             security_scan_github_issues=os.getenv("SECURITY_SCAN_GITHUB_ISSUES", "true").lower()
             in ("true", "1", "yes"),
+            # Agent profiles
+            agent_default_profile=os.getenv("AGENT_DEFAULT_PROFILE", "developer"),
+            agent_profiles_dir=os.getenv("AGENT_PROFILES_DIR", ""),
+            # Agent execution extensions
+            extensions_dir=os.getenv("EXTENSIONS_DIR", ""),
             # SSH remote shell
             ssh_enabled=os.getenv("SSH_ENABLED", "false").lower() in ("true", "1", "yes"),
             ssh_allowed_hosts=os.getenv("SSH_ALLOWED_HOSTS", ""),

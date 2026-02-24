@@ -87,10 +87,19 @@ class TaskCreateRequest(BaseModel):
     project_id: str = ""
     repo_id: str = ""
     branch: str = ""
+    profile: str = ""  # Agent profile name (empty = use default)
 
 
 # Passwords treated as unconfigured — trigger the setup wizard
 _INSECURE_PASSWORDS = {"", "changeme-right-now"}
+
+
+class InterventionRequest(BaseModel):
+    message: str
+
+
+class UserInputResponse(BaseModel):
+    response: str
 
 
 class TaskMoveRequest(BaseModel):
@@ -267,6 +276,8 @@ def create_app(
     chat_session_manager=None,
     project_manager=None,
     repo_manager=None,
+    profile_loader=None,
+    intervention_queues: dict | None = None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -579,6 +590,7 @@ def create_app(
             project_id=req.project_id,
             repo_id=req.repo_id,
             branch=req.branch,
+            profile=req.profile,
         )
         await task_queue.add(task)
         return task.to_dict()
@@ -700,6 +712,71 @@ def create_app(
         task.archive()
         await task_queue._persist()
         return {"status": "archived"}
+
+    # -- Mid-Task Intervention (Agent Zero-inspired) ---------------------------
+
+    @app.post("/api/tasks/{task_id}/intervene")
+    async def intervene_task(
+        task_id: str, req: InterventionRequest, _user: str = Depends(get_current_user)
+    ):
+        """Inject a user feedback message into a running agent's iteration loop.
+
+        The message is queued and consumed at the start of the next iteration,
+        allowing real-time course correction without stopping the agent.
+        """
+        task = task_queue.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if not req.message or not req.message.strip():
+            raise HTTPException(status_code=400, detail="Intervention message cannot be empty")
+
+        queue = (intervention_queues or {}).get(task_id)
+        if queue is None:
+            raise HTTPException(
+                status_code=409,
+                detail="No active agent for this task. Task may not be running.",
+            )
+
+        await queue.put(req.message.strip())
+        await ws_manager.broadcast(
+            "agent_intervention_received",
+            {"task_id": task_id, "message": req.message.strip()},
+        )
+        return {"status": "queued", "message": req.message.strip()}
+
+    @app.post("/api/tasks/{task_id}/input")
+    async def provide_task_input(
+        task_id: str, req: UserInputResponse, _user: str = Depends(get_current_user)
+    ):
+        """Provide a response to the agent's input request (notify_user request_input).
+
+        The agent will receive this response and continue execution.
+        """
+        from tools.notify_tool import resolve_input
+
+        resolved = resolve_input(task_id, req.response)
+        if not resolved:
+            raise HTTPException(status_code=409, detail="No pending input request for this task.")
+        return {"status": "resolved", "response": req.response}
+
+    # -- Agent Profiles (Agent Zero-inspired) ----------------------------------
+
+    @app.get("/api/profiles")
+    async def list_profiles(_user: str = Depends(get_current_user)):
+        """List all available agent profiles."""
+        if not profile_loader:
+            return []
+        return [p.to_dict() for p in profile_loader.all_profiles()]
+
+    @app.get("/api/profiles/{name}")
+    async def get_profile(name: str, _user: str = Depends(get_current_user)):
+        """Get a specific agent profile by name."""
+        if not profile_loader:
+            raise HTTPException(status_code=404, detail="Profile system not available")
+        profile = profile_loader.get(name)
+        if not profile:
+            raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+        return {**profile.to_dict(), "prompt_overlay": profile.prompt_overlay}
 
     # -- Activity Feed --------------------------------------------------------
 
@@ -1332,11 +1409,14 @@ def create_app(
 
             if req.mode == "github":
                 # GitHub repository mode — create new repo or record clone URL
-                github_token = settings.github_oauth_token if hasattr(settings, "github_oauth_token") else ""
+                github_token = (
+                    settings.github_oauth_token if hasattr(settings, "github_oauth_token") else ""
+                )
                 if req.github_repo_name and not req.github_clone_url:
                     # Create a new GitHub repo if connected
                     if github_token:
                         from core.github_oauth import GitHubDeviceAuth
+
                         try:
                             repo_info = await GitHubDeviceAuth.create_repo(
                                 token=github_token,
@@ -1352,10 +1432,14 @@ def create_app(
                         updates["github_repo"] = req.github_repo_name
                 elif req.github_clone_url:
                     updates["github_clone_url"] = req.github_clone_url
-                    updates["github_repo"] = req.github_repo_name or req.github_clone_url.rstrip("/").split("/")[-1].removesuffix(".git")
+                    updates["github_repo"] = req.github_repo_name or req.github_clone_url.rstrip(
+                        "/"
+                    ).split("/")[-1].removesuffix(".git")
                 # Also create a local app to work in while connected to GitHub
                 if app_manager:
-                    app_name = updates.get("github_repo", req.github_repo_name or "github-project").split("/")[-1]
+                    app_name = updates.get(
+                        "github_repo", req.github_repo_name or "github-project"
+                    ).split("/")[-1]
                     new_app = await app_manager.create(
                         name=app_name,
                         runtime=req.runtime,
