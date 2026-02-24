@@ -100,16 +100,15 @@ def check_rate_limit(client_ip: str) -> bool:
     window = 60.0  # 1 minute window
     max_attempts = settings.login_rate_limit
 
-    if client_ip not in _login_attempts:
-        _login_attempts[client_ip] = []
+    # Prune old attempts (using .get avoids creating empty entries for unseen IPs)
+    recent = [t for t in _login_attempts.get(client_ip, []) if now - t < window]
 
-    # Prune old attempts
-    _login_attempts[client_ip] = [t for t in _login_attempts[client_ip] if now - t < window]
-
-    if len(_login_attempts[client_ip]) >= max_attempts:
+    if len(recent) >= max_attempts:
+        _login_attempts[client_ip] = recent
         return False
 
-    _login_attempts[client_ip].append(now)
+    recent.append(now)
+    _login_attempts[client_ip] = recent
     return True
 
 

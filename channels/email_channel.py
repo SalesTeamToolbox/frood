@@ -52,14 +52,29 @@ class EmailChannel(BaseChannel):
             self._task.cancel()
         logger.info("Email channel stopped")
 
+    @staticmethod
+    def _is_valid_email(address: str) -> bool:
+        """Basic email address validation to prevent header injection."""
+        # Reject addresses containing newlines, carriage returns, or null bytes
+        if any(c in address for c in ("\n", "\r", "\x00")):
+            return False
+        # Must contain exactly one @ with non-empty local and domain parts
+        parts = address.split("@")
+        return len(parts) == 2 and all(parts)
+
     async def send(self, message: OutboundMessage):
         """Send an email via SMTP."""
         if not self.smtp_host:
             logger.error("SMTP not configured — cannot send email")
             return
 
+        recipient = message.channel_id  # channel_id = recipient email
+        if not self._is_valid_email(recipient):
+            logger.error(f"Invalid recipient email address, refusing to send: {recipient!r}")
+            return
+
         msg = email.mime.text.MIMEText(message.content, "plain", "utf-8")
-        msg["To"] = message.channel_id  # channel_id = recipient email
+        msg["To"] = recipient
         msg["From"] = self.smtp_user
         msg["Subject"] = message.metadata.get("subject", "Agent42 Response")
 
@@ -69,7 +84,7 @@ class EmailChannel(BaseChannel):
             msg["In-Reply-To"] = in_reply_to
             msg["References"] = in_reply_to
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._send_smtp, msg)
 
     def _send_smtp(self, msg: email.mime.text.MIMEText):
@@ -89,7 +104,7 @@ class EmailChannel(BaseChannel):
         """Poll IMAP inbox for new messages."""
         while self._running:
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 messages = await loop.run_in_executor(None, self._fetch_new_emails)
                 for inbound in messages:
                     await self._enqueue(inbound)
