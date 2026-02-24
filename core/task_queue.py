@@ -222,6 +222,7 @@ class Task:
     comments: list = field(default_factory=list)  # [{author, text, timestamp}]
     blocked_reason: str = ""
     parent_task_id: str = ""
+    project_id: str = ""  # Associated project (empty = standalone task)
     position: int = 0  # Kanban column ordering
     context_window: str = "default"  # default | large | max
 

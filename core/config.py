@@ -186,6 +186,16 @@ class Settings:
     vision_max_image_mb: int = 10
     vision_model: str = ""  # Override model for vision tasks (empty = auto-detect)
 
+    # Chat sessions
+    chat_sessions_dir: str = ".agent42/chat_sessions"
+
+    # Projects
+    projects_dir: str = ".agent42/projects"
+
+    # GitHub OAuth (device flow)
+    github_client_id: str = ""
+    github_oauth_token: str = ""  # Stored after OAuth completes
+
     # Apps platform
     apps_enabled: bool = True
     apps_dir: str = "apps"
@@ -352,6 +362,13 @@ class Settings:
             # Vision / image analysis
             vision_max_image_mb=int(os.getenv("VISION_MAX_IMAGE_MB", "10")),
             vision_model=os.getenv("VISION_MODEL", ""),
+            # Chat sessions
+            chat_sessions_dir=os.getenv("CHAT_SESSIONS_DIR", ".agent42/chat_sessions"),
+            # Projects
+            projects_dir=os.getenv("PROJECTS_DIR", ".agent42/projects"),
+            # GitHub OAuth
+            github_client_id=os.getenv("GITHUB_CLIENT_ID", ""),
+            github_oauth_token=os.getenv("GITHUB_OAUTH_TOKEN", ""),
             # Apps platform
             apps_enabled=os.getenv("APPS_ENABLED", "true").lower() in ("true", "1", "yes"),
             apps_dir=os.getenv("APPS_DIR", "apps"),
