@@ -6,19 +6,16 @@ notification.
 """
 
 import tempfile
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 
-from channels.base import InboundMessage, OutboundMessage
+from channels.base import InboundMessage
 from core.intent_classifier import (
-    ClassificationResult,
     IntentClassifier,
     ScopeAnalysis,
     ScopeInfo,
 )
 from core.task_queue import Task, TaskQueue, TaskStatus, TaskType
-from memory.session import SessionManager, SessionMessage
+from memory.session import SessionManager
 
 
 def _make_inbound(content: str, channel_type: str = "discord", channel_id: str = "ch1") -> InboundMessage:
