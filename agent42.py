@@ -48,6 +48,7 @@ from core.chat_session_manager import ChatSessionManager
 from core.command_filter import DEFAULT_ALLOWLIST, CommandFilter
 from core.config import settings
 from core.device_auth import DeviceStore
+from core.github_accounts import GitHubAccountStore
 from core.heartbeat import HeartbeatService
 from core.intent_classifier import IntentClassifier, PendingClarification, ScopeInfo
 from core.key_store import KeyStore
@@ -331,6 +332,11 @@ class Agent42:
         # Admin-configured API keys (override .env values)
         self.key_store = KeyStore(self.data_dir / ".agent42" / "settings.json")
         self.key_store.inject_into_environ()
+
+        # Multi-account GitHub credential store
+        self.github_account_store = GitHubAccountStore(
+            self.data_dir / ".agent42" / "github_accounts.json"
+        )
 
         # Dynamic model routing components (must be before Learner for injection)
         from agents.model_catalog import ModelCatalog
@@ -1156,6 +1162,7 @@ class Agent42:
                 repo_manager=self.repo_manager,
                 profile_loader=self.profile_loader,
                 intervention_queues=self._intervention_queues,
+                github_account_store=self.github_account_store,
             )
             config = uvicorn.Config(
                 app,
