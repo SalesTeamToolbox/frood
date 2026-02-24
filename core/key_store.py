@@ -26,6 +26,7 @@ ADMIN_CONFIGURABLE_KEYS = frozenset(
         "REPLICATE_API_TOKEN",
         "LUMA_API_KEY",
         "BRAVE_API_KEY",
+        "GITHUB_TOKEN",
     }
 )
 

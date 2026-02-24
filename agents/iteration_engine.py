@@ -272,9 +272,7 @@ class IterationEngine:
             except Exception as e:
                 last_error = e
                 if self._is_model_unavailable(e):
-                    logger.warning(
-                        f"Model {model} unavailable (404), skipping retries: {e}"
-                    )
+                    logger.warning(f"Model {model} unavailable (404), skipping retries: {e}")
                     break
                 wait = 2**attempt  # 1s, 2s, 4s
                 logger.warning(
@@ -321,9 +319,7 @@ class IterationEngine:
                 raise  # Don't retry spending limits
             except Exception as e:
                 if self._is_model_unavailable(e):
-                    logger.warning(
-                        f"Tool model {model} unavailable (404), skipping retries: {e}"
-                    )
+                    logger.warning(f"Tool model {model} unavailable (404), skipping retries: {e}")
                     break
                 wait = 2**attempt
                 logger.warning(

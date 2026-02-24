@@ -61,6 +61,12 @@ const state = {
   githubConnected: false,
   githubDeviceCode: null,
   githubPolling: false,
+  // GitHub multi-account management
+  githubAccounts: [],
+  githubAccountsLoading: false,
+  githubAccountAdding: false,
+  githubAccountNewLabel: "",
+  githubAccountNewToken: "",
   // Editable settings
   envSettings: {},
   envEdits: {},
@@ -456,6 +462,12 @@ async function loadRepos() {
   try {
     state.repos = (await api("/repos")) || [];
   } catch { state.repos = []; }
+}
+
+async function loadGithubAccounts() {
+  try {
+    state.githubAccounts = (await api("/github/accounts")) || [];
+  } catch { state.githubAccounts = []; }
 }
 
 async function loadRepoBranches(repoId) {
@@ -2685,14 +2697,37 @@ function renderReposPanel() {
     </tr>`;
   }).join("");
 
+  const accountRows = state.githubAccounts.map(a => `
+    <tr>
+      <td><strong>${esc(a.label)}</strong>${a.username ? ` <span style="color:var(--text-muted);font-size:0.8rem">@${esc(a.username)}</span>` : ""}</td>
+      <td style="font-family:monospace;font-size:0.8rem;color:var(--text-muted)">${esc(a.masked_token)}</td>
+      <td><button class="btn btn-outline btn-sm" style="color:var(--error)" onclick="removeGithubAccount('${esc(a.id)}')">Remove</button></td>
+    </tr>`).join("");
+
   return `
     <h3>Repositories</h3>
     <p class="section-desc">Connect project repositories for agents to work in. Add local repos or clone from GitHub.</p>
 
-    ${settingSecret("GITHUB_TOKEN", "GitHub Token", "Personal Access Token for listing and cloning repos. Create at github.com/settings/tokens (repo scope).")}
-    <div class="form-group" style="margin-top:0.5rem">
-      <button class="btn btn-primary btn-sm" id="save-keys-btn" onclick="saveApiKeys()" ${Object.keys(state.keyEdits).length === 0 || state.keySaving ? "disabled" : ""}>
-        ${state.keySaving ? "Saving..." : "Save Token"}
+    <h4 style="margin:0 0 0.75rem;font-size:0.95rem">GitHub Accounts</h4>
+    <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.75rem">Connect one or more GitHub accounts using Personal Access Tokens (PAT). Create tokens at <strong>github.com/settings/tokens</strong> with <code>repo</code> scope.</p>
+
+    ${state.githubAccounts.length > 0 ? `
+    <table class="table" style="margin-bottom:1rem">
+      <thead><tr><th>Account</th><th>Token</th><th></th></tr></thead>
+      <tbody>${accountRows}</tbody>
+    </table>` : '<p style="color:var(--text-muted);font-size:0.9rem;margin-bottom:0.75rem">No GitHub accounts connected yet.</p>'}
+
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-end;margin-bottom:1.5rem">
+      <div class="form-group" style="margin:0;flex:1;min-width:140px">
+        <label style="font-size:0.8rem">Label (optional)</label>
+        <input type="text" id="gh-acct-label" placeholder="e.g. personal or my-org" style="width:100%">
+      </div>
+      <div class="form-group" style="margin:0;flex:2;min-width:200px">
+        <label style="font-size:0.8rem">Personal Access Token</label>
+        <input type="password" id="gh-acct-token" placeholder="ghp_..." style="width:100%">
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="addGithubAccount()" ${state.githubAccountAdding ? "disabled" : ""} style="white-space:nowrap">
+        ${state.githubAccountAdding ? "Connecting..." : "+ Add Account"}
       </button>
     </div>
 
@@ -2739,17 +2774,56 @@ async function fetchGithubRepos() {
   renderSettingsPanel();
 }
 
-async function addGithubRepo(fullName, defaultBranch) {
+async function addGithubRepo(fullName, defaultBranch, accountId) {
   try {
     await api("/repos", {
       method: "POST",
-      body: JSON.stringify({ name: fullName.split("/").pop(), source: "github", github_repo: fullName, default_branch: defaultBranch }),
+      body: JSON.stringify({
+        name: fullName.split("/").pop(),
+        source: "github",
+        github_repo: fullName,
+        default_branch: defaultBranch,
+        account_id: accountId || "",
+      }),
     });
     await loadRepos();
     renderSettingsPanel();
     toast("Repository added", "success");
   } catch (err) {
     toast(err.message || "Failed to add repo", "error");
+  }
+}
+
+async function addGithubAccount() {
+  const token = document.getElementById("gh-acct-token")?.value?.trim();
+  const label = document.getElementById("gh-acct-label")?.value?.trim() || "";
+  if (!token) return toast("Token is required", "error");
+  state.githubAccountAdding = true;
+  renderSettingsPanel();
+  try {
+    await api("/github/accounts", {
+      method: "POST",
+      body: JSON.stringify({ token, label }),
+    });
+    state.githubAccountNewLabel = "";
+    state.githubAccountNewToken = "";
+    await loadGithubAccounts();
+    toast("GitHub account connected", "success");
+  } catch (err) {
+    toast(err.message || "Failed to add account", "error");
+  }
+  state.githubAccountAdding = false;
+  renderSettingsPanel();
+}
+
+async function removeGithubAccount(accountId) {
+  try {
+    await api(`/github/accounts/${accountId}`, { method: "DELETE" });
+    await loadGithubAccounts();
+    renderSettingsPanel();
+    toast("Account removed", "success");
+  } catch (err) {
+    toast(err.message || "Failed to remove account", "error");
   }
 }
 
@@ -3129,7 +3203,7 @@ async function loadAll() {
     loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(),
     loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(),
     loadChatMessages(), loadTokenStats(), loadChatSessions(), loadCodeSessions(),
-    loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(),
+    loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(), loadGithubAccounts(),
   ]);
 }
 
