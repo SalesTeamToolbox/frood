@@ -105,7 +105,6 @@ class IterationHistory:
         return "\n".join(lines)
 
 
-FALLBACK_MODEL = "or-free-llama4-maverick"  # General-purpose fallback
 MAX_RETRIES = 3
 MAX_TOOL_ROUNDS = 10  # Max tool call rounds per iteration
 SIMILARITY_THRESHOLD = 0.85  # For convergence detection
@@ -210,13 +209,49 @@ class IterationEngine:
         self.approval_gate = approval_gate
         self.agent_id = agent_id
 
+    def _is_model_unavailable(self, error: Exception) -> bool:
+        """Return True for 404/endpoint-not-found errors that should not be retried."""
+        msg = str(error).lower()
+        return "404" in msg or "no endpoints found" in msg or "endpoint not found" in msg
+
+    def _get_fallback_models(self, exclude: set[str]) -> list[str]:
+        """Return an ordered list of fallback free models from the live registry.
+
+        Queries router.free_models() so the list reflects whatever models are
+        currently registered (including any auto-discovered catalog models).
+        Falls back to a static list if the registry is unreachable or empty.
+        """
+        static = [
+            "or-free-llama-70b",
+            "or-free-deepseek-chat",
+            "or-free-gemma-27b",
+            "or-free-mistral-small",
+            "or-free-gemini-flash",
+        ]
+        try:
+            all_free = self.router.free_models()
+            keys = [m["key"] for m in all_free if isinstance(m, dict) and m.get("key")]
+            available = [k for k in keys if k not in exclude]
+            if available:
+                return available[:4]
+        except Exception:
+            pass
+        # Static last-resort list when registry is unreachable or returns no models
+        return [m for m in static if m not in exclude]
+
     async def _complete_with_retry(
         self,
         model: str,
         messages: list[dict],
         retries: int = MAX_RETRIES,
     ) -> str:
-        """Call router.complete with exponential backoff retry and model fallback."""
+        """Call router.complete with exponential backoff retry and dynamic model fallback.
+
+        404 / endpoint-not-found errors skip retries immediately and go straight
+        to the fallback chain, since retrying a missing model wastes API quota.
+        The fallback chain is built dynamically from the live registry so the
+        engine adapts automatically when models become available or unavailable.
+        """
         last_error = None
         for attempt in range(retries):
             try:
@@ -230,6 +265,11 @@ class IterationEngine:
                 raise  # Don't retry spending limits
             except Exception as e:
                 last_error = e
+                if self._is_model_unavailable(e):
+                    logger.warning(
+                        f"Model {model} unavailable (404), skipping retries: {e}"
+                    )
+                    break
                 wait = 2**attempt  # 1s, 2s, 4s
                 logger.warning(
                     f"API call failed (attempt {attempt + 1}/{retries}, "
@@ -237,20 +277,24 @@ class IterationEngine:
                 )
                 await asyncio.sleep(wait)
 
-        # All retries failed — try fallback model once
-        if model != FALLBACK_MODEL:
-            logger.warning(f"Falling back to {FALLBACK_MODEL} after {retries} failures")
+        # Try fallback models from the live registry
+        tried: set[str] = {model}
+        for fallback in self._get_fallback_models(exclude=tried):
             try:
-                text, usage = await self.router.complete(FALLBACK_MODEL, messages)
+                logger.warning(f"Primary model failed; trying fallback: {fallback}")
+                text, usage = await self.router.complete(fallback, messages)
                 if usage and self._token_acc:
                     self._token_acc.record(
                         usage["model_key"], usage["prompt_tokens"], usage["completion_tokens"]
                     )
                 return text
             except Exception as e:
-                logger.error(f"Fallback model also failed: {e}")
+                logger.warning(f"Fallback {fallback} also failed: {e}")
+                tried.add(fallback)
+                if not self._is_model_unavailable(e):
+                    break  # Non-404 error: stop iterating through fallbacks
 
-        raise RuntimeError(f"API call failed after {retries} retries + fallback: {last_error}")
+        raise RuntimeError(f"API call failed after {retries} retries + fallbacks: {last_error}")
 
     async def _complete_with_tools_retry(
         self,
@@ -259,15 +303,22 @@ class IterationEngine:
         tools: list[dict],
         retries: int = MAX_RETRIES,
     ):
-        """Call router.complete_with_tools with retry logic."""
-        _last_error = None
+        """Call router.complete_with_tools with retry logic and dynamic fallback.
+
+        On 404 errors, skips retries immediately. On full failure, degrades to
+        text-only mode using the first available fallback model from the registry.
+        """
         for attempt in range(retries):
             try:
                 return await self.router.complete_with_tools(model, messages, tools)
             except SpendingLimitExceeded:
                 raise  # Don't retry spending limits
             except Exception as e:
-                _last_error = e
+                if self._is_model_unavailable(e):
+                    logger.warning(
+                        f"Tool model {model} unavailable (404), skipping retries: {e}"
+                    )
+                    break
                 wait = 2**attempt
                 logger.warning(
                     f"Tool API call failed (attempt {attempt + 1}/{retries}, "
@@ -275,9 +326,14 @@ class IterationEngine:
                 )
                 await asyncio.sleep(wait)
 
-        # Fallback without tools (degrade to text-only)
-        logger.warning(f"Tool calling failed after {retries} retries, falling back to text-only")
-        return await self.router.complete_with_tools(FALLBACK_MODEL, messages, [])
+        # Fallback: try available models in text-only mode (degrade gracefully)
+        tried: set[str] = {model}
+        fallbacks = self._get_fallback_models(exclude=tried)
+        fallback = fallbacks[0] if fallbacks else "or-free-llama-70b"
+        logger.warning(
+            f"Tool calling failed after {retries} retries, degrading to text-only with {fallback}"
+        )
+        return await self.router.complete_with_tools(fallback, messages, [])
 
     async def _execute_tool_calls(self, tool_calls, task_id: str = "") -> list[ToolCallRecord]:
         """Execute tool calls from the LLM response and return records."""

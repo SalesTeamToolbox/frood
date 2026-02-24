@@ -39,7 +39,7 @@ FREE_ROUTING: dict[TaskType, dict] = {
         "max_iterations": 10,
     },
     TaskType.RESEARCH: {
-        "primary": "or-free-llama4-maverick",  # Llama 4 Maverick — GPT-4+ level
+        "primary": "or-free-llama-70b",  # Llama 3.3 70B — reliable general-purpose
         "critic": "or-free-deepseek-chat",  # DeepSeek Chat for second opinion
         "max_iterations": 5,
     },
@@ -49,12 +49,12 @@ FREE_ROUTING: dict[TaskType, dict] = {
         "max_iterations": 8,
     },
     TaskType.DOCUMENTATION: {
-        "primary": "or-free-llama4-maverick",  # Llama 4 — strong writing
+        "primary": "or-free-llama-70b",  # Llama 3.3 70B — reliable general-purpose writing
         "critic": "or-free-gemma-27b",  # Gemma 27B — fast verification
         "max_iterations": 4,
     },
     TaskType.MARKETING: {
-        "primary": "or-free-llama4-maverick",  # Llama 4 — creative + general
+        "primary": "or-free-llama-70b",  # Llama 3.3 70B — creative + general
         "critic": "or-free-deepseek-chat",  # DeepSeek Chat v3.1
         "max_iterations": 6,
     },
@@ -64,18 +64,18 @@ FREE_ROUTING: dict[TaskType, dict] = {
         "max_iterations": 3,
     },
     TaskType.DESIGN: {
-        "primary": "or-free-llama4-maverick",  # Strong visual/creative reasoning
+        "primary": "or-free-llama-70b",  # Llama 3.3 70B — strong visual/creative reasoning
         "critic": "or-free-deepseek-chat",
         "max_iterations": 5,
     },
     TaskType.CONTENT: {
-        "primary": "or-free-llama4-maverick",  # Best free model for writing
+        "primary": "or-free-llama-70b",  # Llama 3.3 70B — reliable general-purpose writing
         "critic": "or-free-gemma-27b",  # Fast editorial check
         "max_iterations": 6,
     },
     TaskType.STRATEGY: {
         "primary": "or-free-deepseek-r1",  # Deep reasoning for strategy
-        "critic": "or-free-llama4-maverick",
+        "critic": "or-free-deepseek-chat",  # Alternative perspective on strategy
         "max_iterations": 5,
     },
     TaskType.DATA_ANALYSIS: {
@@ -84,7 +84,7 @@ FREE_ROUTING: dict[TaskType, dict] = {
         "max_iterations": 6,
     },
     TaskType.PROJECT_MANAGEMENT: {
-        "primary": "or-free-llama4-maverick",
+        "primary": "or-free-llama-70b",  # Llama 3.3 70B — reliable general-purpose
         "critic": "or-free-gemma-27b",
         "max_iterations": 4,
     },
@@ -99,7 +99,7 @@ FREE_ROUTING: dict[TaskType, dict] = {
         "max_iterations": 8,
     },
     TaskType.PROJECT_SETUP: {
-        "primary": "or-free-llama4-maverick",  # Strong conversational + structured output
+        "primary": "or-free-llama-70b",  # Llama 3.3 70B — conversational + structured output
         "critic": "or-free-deepseek-chat",  # Second opinion on spec completeness
         "max_iterations": 3,  # Low — mostly conversation, not iteration-heavy
     },
