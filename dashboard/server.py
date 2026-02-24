@@ -84,6 +84,9 @@ class TaskCreateRequest(BaseModel):
     task_type: str = "coding"
     priority: int = 0
     context_window: str = "default"
+    project_id: str = ""
+    repo_id: str = ""
+    branch: str = ""
 
 
 # Passwords treated as unconfigured — trigger the setup wizard
@@ -140,6 +143,10 @@ class SettingsUpdateRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
+
+
+class ToggleRequest(BaseModel):
+    enabled: bool
 
 
 # Settings that can be changed from the dashboard (non-secret, non-security).
@@ -213,6 +220,38 @@ def _update_env_file(env_path: Path, updates: dict[str, str]) -> None:
     env_path.write_text("\n".join(new_lines) + "\n")
 
 
+# ---------------------------------------------------------------------------
+# Tool / skill toggle state persistence
+# ---------------------------------------------------------------------------
+
+_TOGGLE_STATE_FILE = Path(__file__).parent.parent / "data" / "tool_skill_state.json"
+
+
+def _load_toggle_state() -> dict:
+    """Load persisted enabled/disabled state for tools and skills."""
+    import json
+
+    if _TOGGLE_STATE_FILE.exists():
+        try:
+            return json.loads(_TOGGLE_STATE_FILE.read_text())
+        except Exception:
+            pass
+    return {"disabled_tools": [], "disabled_skills": []}
+
+
+def _save_toggle_state(disabled_tools: list[str], disabled_skills: list[str]) -> None:
+    """Persist the current enabled/disabled state to disk."""
+    import json
+
+    _TOGGLE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _TOGGLE_STATE_FILE.write_text(
+        json.dumps(
+            {"disabled_tools": sorted(disabled_tools), "disabled_skills": sorted(disabled_skills)},
+            indent=2,
+        )
+    )
+
+
 def create_app(
     task_queue: TaskQueue,
     ws_manager: WebSocketManager,
@@ -225,6 +264,9 @@ def create_app(
     heartbeat=None,
     key_store=None,
     app_manager=None,
+    chat_session_manager=None,
+    project_manager=None,
+    repo_manager=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -241,9 +283,18 @@ def create_app(
         CORSMiddleware,
         allow_origins=cors_origins if cors_origins else [],
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
+
+    # Apply persisted tool/skill toggle state
+    _toggle_state = _load_toggle_state()
+    if tool_registry:
+        for name in _toggle_state.get("disabled_tools", []):
+            tool_registry.set_enabled(name, False)
+    if skill_loader:
+        for name in _toggle_state.get("disabled_skills", []):
+            skill_loader.set_enabled(name, False)
 
     # -- Health ----------------------------------------------------------------
 
@@ -525,6 +576,9 @@ def create_app(
             priority=req.priority,
             context_window=req.context_window,
             origin_device_id=auth.device_id,
+            project_id=req.project_id,
+            repo_id=req.repo_id,
+            branch=req.branch,
         )
         await task_queue.add(task)
         return task.to_dict()
@@ -830,6 +884,25 @@ def create_app(
             return tool_registry.list_tools()
         return []
 
+    @app.patch("/api/tools/{name}")
+    async def toggle_tool(
+        name: str, req: ToggleRequest, _admin: AuthContext = Depends(require_admin)
+    ):
+        """Enable or disable a tool by name (admin only)."""
+        if not tool_registry:
+            raise HTTPException(status_code=503, detail="Tool registry not available")
+        if not tool_registry.set_enabled(name, req.enabled):
+            raise HTTPException(status_code=404, detail=f"Tool '{name}' not found")
+        # Persist updated state
+        disabled = [t["name"] for t in tool_registry.list_tools() if not t["enabled"]]
+        disabled_skills: list[str] = []
+        if skill_loader:
+            disabled_skills = [
+                s.name for s in skill_loader.all_skills() if not skill_loader.is_enabled(s.name)
+            ]
+        _save_toggle_state(disabled, disabled_skills)
+        return {"name": name, "enabled": req.enabled}
+
     # -- Skills (Phase 3) -----------------------------------------------------
 
     @app.get("/api/skills")
@@ -841,10 +914,30 @@ def create_app(
                     "description": s.description,
                     "always_load": s.always_load,
                     "task_types": s.task_types,
+                    "enabled": skill_loader.is_enabled(s.name),
                 }
                 for s in skill_loader.all_skills()
             ]
         return []
+
+    @app.patch("/api/skills/{name}")
+    async def toggle_skill(
+        name: str, req: ToggleRequest, _admin: AuthContext = Depends(require_admin)
+    ):
+        """Enable or disable a skill by name (admin only)."""
+        if not skill_loader:
+            raise HTTPException(status_code=503, detail="Skill loader not available")
+        if not skill_loader.set_enabled(name, req.enabled):
+            raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+        # Persist updated state
+        disabled_skills = [
+            s.name for s in skill_loader.all_skills() if not skill_loader.is_enabled(s.name)
+        ]
+        disabled_tools: list[str] = []
+        if tool_registry:
+            disabled_tools = [t["name"] for t in tool_registry.list_tools() if not t["enabled"]]
+        _save_toggle_state(disabled_tools, disabled_skills)
+        return {"name": name, "enabled": req.enabled}
 
     # -- Settings (API Keys) --------------------------------------------------
 
@@ -1055,6 +1148,521 @@ def create_app(
                 # but we validate and log for future use
         except WebSocketDisconnect:
             ws_manager.disconnect(ws)
+
+    # -- Chat Sessions ---------------------------------------------------------
+
+    if chat_session_manager:
+
+        class ChatSessionCreateRequest(BaseModel):
+            title: str = ""
+            session_type: str = "chat"
+
+        class ChatSessionUpdateRequest(BaseModel):
+            title: str = ""
+
+        class ChatSessionSendRequest(BaseModel):
+            message: str
+
+        class ChatSessionSetupRequest(BaseModel):
+            mode: str = "local"  # "local" or "remote"
+            runtime: str = "python"
+            app_name: str = ""
+            ssh_host: str = ""
+            deploy_now: bool = False
+            github_repo_name: str = ""
+            github_private: bool = True
+
+        @app.get("/api/chat/sessions")
+        async def list_chat_sessions(
+            type: str = "",
+            _user: str = Depends(get_current_user),
+        ):
+            """List chat sessions, optionally filtered by type."""
+            sessions = chat_session_manager.list_sessions(session_type=type)
+            return [s.to_dict() for s in sessions]
+
+        @app.post("/api/chat/sessions")
+        async def create_chat_session(
+            req: ChatSessionCreateRequest,
+            _user: str = Depends(get_current_user),
+        ):
+            """Create a new chat session."""
+            session = await chat_session_manager.create(
+                title=req.title or "New Chat",
+                session_type=req.session_type,
+            )
+            return session.to_dict()
+
+        @app.get("/api/chat/sessions/{session_id}")
+        async def get_chat_session(
+            session_id: str,
+            _user: str = Depends(get_current_user),
+        ):
+            """Get chat session details."""
+            session = await chat_session_manager.get(session_id)
+            if not session:
+                raise HTTPException(status_code=404, detail="Session not found")
+            return session.to_dict()
+
+        @app.patch("/api/chat/sessions/{session_id}")
+        async def update_chat_session(
+            session_id: str,
+            req: ChatSessionUpdateRequest,
+            _user: str = Depends(get_current_user),
+        ):
+            """Update a chat session (rename)."""
+            session = await chat_session_manager.update(session_id, title=req.title)
+            if not session:
+                raise HTTPException(status_code=404, detail="Session not found")
+            return session.to_dict()
+
+        @app.delete("/api/chat/sessions/{session_id}")
+        async def delete_chat_session(
+            session_id: str,
+            _user: str = Depends(get_current_user),
+        ):
+            """Archive/delete a chat session."""
+            result = await chat_session_manager.delete(session_id)
+            if not result:
+                raise HTTPException(status_code=404, detail="Session not found")
+            return {"status": "deleted"}
+
+        @app.get("/api/chat/sessions/{session_id}/messages")
+        async def get_session_messages(
+            session_id: str,
+            limit: int = 200,
+            _user: str = Depends(get_current_user),
+        ):
+            """Get messages for a chat session."""
+            session = await chat_session_manager.get(session_id)
+            if not session:
+                raise HTTPException(status_code=404, detail="Session not found")
+            return await chat_session_manager.get_messages(session_id, limit=limit)
+
+        @app.post("/api/chat/sessions/{session_id}/send")
+        async def send_session_message(
+            session_id: str,
+            req: ChatSessionSendRequest,
+            auth: AuthContext = Depends(get_auth_context),
+        ):
+            """Send a message in a specific chat session."""
+            import time as _time
+            import uuid as _uuid
+
+            session = await chat_session_manager.get(session_id)
+            if not session:
+                raise HTTPException(status_code=404, detail="Session not found")
+
+            text = req.message.strip()
+            if not text:
+                raise HTTPException(status_code=400, detail="Message cannot be empty.")
+            if len(text) > 4000:
+                raise HTTPException(status_code=400, detail="Message too long (max 4000 chars).")
+
+            msg_id = _uuid.uuid4().hex[:12]
+            user_msg = {
+                "id": msg_id,
+                "role": "user",
+                "content": text,
+                "timestamp": _time.time(),
+                "sender": auth.user,
+                "session_id": session_id,
+            }
+            await chat_session_manager.add_message(session_id, user_msg)
+            await ws_manager.broadcast("chat_message", user_msg)
+
+            # Infer task type from message
+            from core.task_queue import infer_task_type
+
+            task_type = infer_task_type(text)
+
+            task = Task(
+                title=text[:120] + ("..." if len(text) > 120 else ""),
+                description=text,
+                task_type=task_type,
+                priority=1,
+                origin_channel="dashboard_chat",
+                origin_channel_id="chat",
+                origin_metadata={
+                    "chat_msg_id": msg_id,
+                    "chat_session_id": session_id,
+                },
+            )
+            # Link to project if session has one
+            if session.project_id:
+                task.project_id = session.project_id
+
+            await task_queue.add(task)
+
+            return {"status": "ok", "message": user_msg, "task_id": task.id}
+
+        @app.post("/api/chat/sessions/{session_id}/setup")
+        async def setup_code_session(
+            session_id: str,
+            req: ChatSessionSetupRequest,
+            _user: str = Depends(get_current_user),
+        ):
+            """Configure a code session's project setup."""
+            session = await chat_session_manager.get(session_id)
+            if not session:
+                raise HTTPException(status_code=404, detail="Session not found")
+            if session.session_type != "code":
+                raise HTTPException(status_code=400, detail="Only code sessions support setup")
+
+            updates = {"deployment_target": req.mode}
+
+            if req.mode == "local" and app_manager:
+                # Create a local app via AppManager
+                new_app = await app_manager.create(
+                    name=req.app_name or "Untitled Project",
+                    runtime=req.runtime,
+                )
+                updates["app_id"] = new_app.id
+
+            if req.mode == "remote":
+                # Validate SSH host
+                allowed = settings.get_ssh_allowed_hosts()
+                if allowed and req.ssh_host not in allowed:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"SSH host '{req.ssh_host}' not in allowed hosts",
+                    )
+                updates["ssh_host"] = req.ssh_host
+
+            if req.github_repo_name:
+                updates["github_repo"] = req.github_repo_name
+
+            session = await chat_session_manager.update(session_id, **updates)
+            return session.to_dict()
+
+    # -- Projects --------------------------------------------------------------
+
+    if project_manager:
+
+        class ProjectCreateRequest(BaseModel):
+            name: str
+            description: str = ""
+            tags: list[str] = []
+            priority: int = 0
+
+        class ProjectUpdateRequest(BaseModel):
+            name: str = ""
+            description: str = ""
+            tags: list[str] | None = None
+            priority: int | None = None
+            color: str = ""
+
+        class ProjectStatusRequest(BaseModel):
+            status: str
+
+        class ProjectTaskCreateRequest(BaseModel):
+            title: str
+            description: str
+            task_type: str = "coding"
+            priority: int = 0
+
+        @app.get("/api/projects")
+        async def list_projects(
+            include_archived: bool = False,
+            _user: str = Depends(get_current_user),
+        ):
+            """List all projects."""
+            projects = project_manager.list_projects(include_archived=include_archived)
+            result = []
+            for p in projects:
+                d = p.to_dict()
+                d["stats"] = project_manager.project_stats(p.id)
+                result.append(d)
+            return result
+
+        @app.post("/api/projects")
+        async def create_project(
+            req: ProjectCreateRequest,
+            _user: str = Depends(get_current_user),
+        ):
+            """Create a new project."""
+            project = await project_manager.create(
+                name=req.name,
+                description=req.description,
+                tags=req.tags,
+                priority=req.priority,
+            )
+            d = project.to_dict()
+            d["stats"] = project_manager.project_stats(project.id)
+            await ws_manager.broadcast("project_update", d)
+            return d
+
+        @app.get("/api/projects/board")
+        async def projects_board(_user: str = Depends(get_current_user)):
+            """Get projects grouped by status for Kanban board."""
+            return project_manager.board()
+
+        @app.get("/api/projects/{project_id}")
+        async def get_project(
+            project_id: str,
+            _user: str = Depends(get_current_user),
+        ):
+            """Get project details with stats."""
+            project = await project_manager.get(project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+            d = project.to_dict()
+            d["stats"] = project_manager.project_stats(project_id)
+            return d
+
+        @app.patch("/api/projects/{project_id}")
+        async def update_project(
+            project_id: str,
+            req: ProjectUpdateRequest,
+            _user: str = Depends(get_current_user),
+        ):
+            """Update project fields."""
+            updates = {}
+            if req.name:
+                updates["name"] = req.name
+            if req.description:
+                updates["description"] = req.description
+            if req.tags is not None:
+                updates["tags"] = req.tags
+            if req.priority is not None:
+                updates["priority"] = req.priority
+            if req.color:
+                updates["color"] = req.color
+
+            project = await project_manager.update(project_id, **updates)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+            d = project.to_dict()
+            d["stats"] = project_manager.project_stats(project_id)
+            await ws_manager.broadcast("project_update", d)
+            return d
+
+        @app.patch("/api/projects/{project_id}/status")
+        async def update_project_status(
+            project_id: str,
+            req: ProjectStatusRequest,
+            _user: str = Depends(get_current_user),
+        ):
+            """Change project status."""
+            project = await project_manager.set_status(project_id, req.status)
+            if not project:
+                raise HTTPException(status_code=400, detail="Invalid status or project not found")
+            d = project.to_dict()
+            d["stats"] = project_manager.project_stats(project_id)
+            await ws_manager.broadcast("project_update", d)
+            return d
+
+        @app.delete("/api/projects/{project_id}")
+        async def delete_project(
+            project_id: str,
+            _user: str = Depends(get_current_user),
+        ):
+            """Archive a project."""
+            result = await project_manager.archive(project_id)
+            if not result:
+                raise HTTPException(status_code=404, detail="Project not found")
+            return {"status": "archived"}
+
+        @app.get("/api/projects/{project_id}/tasks")
+        async def get_project_tasks(
+            project_id: str,
+            _user: str = Depends(get_current_user),
+        ):
+            """List tasks for a project."""
+            project = await project_manager.get(project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+            tasks = project_manager.get_project_tasks(project_id)
+            return [t.to_dict() for t in tasks]
+
+        @app.post("/api/projects/{project_id}/tasks")
+        async def create_project_task(
+            project_id: str,
+            req: ProjectTaskCreateRequest,
+            _user: str = Depends(get_current_user),
+        ):
+            """Create a task linked to a project."""
+            project = await project_manager.get(project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+
+            task = Task(
+                title=req.title,
+                description=req.description,
+                task_type=TaskType[req.task_type.upper()]
+                if req.task_type.upper() in TaskType.__members__
+                else TaskType.CODING,
+                priority=req.priority,
+                project_id=project_id,
+            )
+            await task_queue.add(task)
+            await ws_manager.broadcast("task_update", task.to_dict())
+            return task.to_dict()
+
+    # -- GitHub OAuth ----------------------------------------------------------
+
+    class GitHubDeviceStartRequest(BaseModel):
+        pass  # No params needed
+
+    class GitHubPollRequest(BaseModel):
+        device_code: str
+
+    @app.get("/api/github/status")
+    async def github_status(_user: str = Depends(get_current_user)):
+        """Check if GitHub is configured."""
+        return {
+            "connected": bool(settings.github_oauth_token),
+            "client_id_configured": bool(settings.github_client_id),
+        }
+
+    @app.post("/api/github/device-auth/start")
+    async def github_device_start(_user: str = Depends(get_current_user)):
+        """Start GitHub OAuth device flow."""
+        if not settings.github_client_id:
+            raise HTTPException(
+                status_code=400,
+                detail="GITHUB_CLIENT_ID not configured. Set it in Settings.",
+            )
+        from core.github_oauth import GitHubDeviceAuth
+
+        auth = GitHubDeviceAuth(settings.github_client_id)
+        try:
+            result = await auth.start_device_flow()
+            return result
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
+
+    @app.post("/api/github/device-auth/poll")
+    async def github_device_poll(
+        req: GitHubPollRequest,
+        _user: str = Depends(get_current_user),
+    ):
+        """Poll for GitHub OAuth token."""
+        if not settings.github_client_id:
+            raise HTTPException(status_code=400, detail="GITHUB_CLIENT_ID not configured.")
+
+        from core.github_oauth import GitHubDeviceAuth
+
+        auth = GitHubDeviceAuth(settings.github_client_id)
+        try:
+            token = await auth.poll_for_token(req.device_code)
+            if token:
+                # Save token to .env
+                env_path = Path(__file__).parent.parent / ".env"
+                GitHubDeviceAuth.save_token(token, env_path)
+                Settings.reload_from_env()
+                # Get user info
+                user_info = await GitHubDeviceAuth.get_user(token)
+                return {"status": "authorized", "user": user_info}
+            return {"status": "pending"}
+        except TimeoutError as e:
+            return {"status": "expired", "error": str(e)}
+        except PermissionError as e:
+            return {"status": "denied", "error": str(e)}
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
+
+    @app.post("/api/github/create-repo")
+    async def github_create_repo(
+        name: str,
+        private: bool = True,
+        description: str = "",
+        _user: str = Depends(get_current_user),
+    ):
+        """Create a GitHub repo using the stored OAuth token."""
+        if not settings.github_oauth_token:
+            raise HTTPException(
+                status_code=400, detail="GitHub not connected. Use device auth first."
+            )
+
+        from core.github_oauth import GitHubDeviceAuth
+
+        try:
+            result = await GitHubDeviceAuth.create_repo(
+                token=settings.github_oauth_token,
+                name=name,
+                private=private,
+                description=description,
+            )
+            return result
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
+    # -- Repositories ----------------------------------------------------------
+
+    if repo_manager:
+
+        class RepoCreateRequest(BaseModel):
+            name: str
+            source: str = "local"  # "local" or "github"
+            local_path: str = ""  # for source=local
+            github_repo: str = ""  # for source=github (owner/repo)
+            default_branch: str = "main"
+            tags: list[str] = []
+
+        @app.get("/api/repos")
+        async def list_repos(_user: str = Depends(get_current_user)):
+            """List all connected repositories."""
+            return [r.to_dict() for r in repo_manager.list_repos()]
+
+        @app.post("/api/repos")
+        async def create_repo(req: RepoCreateRequest, _admin: AuthContext = Depends(require_admin)):
+            """Add a repository (local path or clone from GitHub)."""
+            if req.source == "github":
+                if not req.github_repo:
+                    raise HTTPException(400, "github_repo is required for source=github")
+                repo = await repo_manager.add_from_github(
+                    github_repo=req.github_repo,
+                    default_branch=req.default_branch,
+                    tags=req.tags,
+                )
+            else:
+                if not req.local_path:
+                    raise HTTPException(400, "local_path is required for source=local")
+                repo = await repo_manager.add_local(
+                    name=req.name,
+                    local_path=req.local_path,
+                    default_branch=req.default_branch,
+                    tags=req.tags,
+                )
+            return repo.to_dict()
+
+        @app.get("/api/repos/{repo_id}")
+        async def get_repo(repo_id: str, _user: str = Depends(get_current_user)):
+            """Get a single repository by ID."""
+            repo = repo_manager.get(repo_id)
+            if not repo:
+                raise HTTPException(404, "Repository not found")
+            return repo.to_dict()
+
+        @app.delete("/api/repos/{repo_id}")
+        async def delete_repo(repo_id: str, _admin: AuthContext = Depends(require_admin)):
+            """Remove a repository from the registry."""
+            try:
+                await repo_manager.remove(repo_id)
+            except ValueError as e:
+                raise HTTPException(404, str(e))
+            return {"status": "removed"}
+
+        @app.get("/api/repos/{repo_id}/branches")
+        async def list_repo_branches(repo_id: str, _user: str = Depends(get_current_user)):
+            """List branches for a repository."""
+            branches = await repo_manager.list_branches(repo_id)
+            return {"branches": branches}
+
+        @app.post("/api/repos/{repo_id}/sync")
+        async def sync_repo(repo_id: str, _user: str = Depends(get_current_user)):
+            """Fetch latest changes for a repository."""
+            try:
+                msg = await repo_manager.sync_repo(repo_id)
+            except ValueError as e:
+                raise HTTPException(404, str(e))
+            return {"status": "ok", "message": msg}
+
+        @app.get("/api/github/repos")
+        async def list_github_repos(_admin: AuthContext = Depends(require_admin)):
+            """List repos from the connected GitHub account."""
+            repos = await repo_manager.list_github_repos()
+            return {"repos": repos}
 
     # -- Apps Platform ---------------------------------------------------------
 

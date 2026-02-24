@@ -42,13 +42,16 @@ from channels.manager import ChannelManager
 from core.app_manager import AppManager
 from core.approval_gate import ApprovalGate
 from core.capacity import compute_effective_capacity
+from core.chat_session_manager import ChatSessionManager
 from core.command_filter import DEFAULT_ALLOWLIST, CommandFilter
 from core.config import settings
 from core.device_auth import DeviceStore
 from core.heartbeat import HeartbeatService
-from core.intent_classifier import IntentClassifier, PendingClarification
+from core.intent_classifier import IntentClassifier, PendingClarification, ScopeInfo
 from core.key_store import KeyStore
+from core.project_manager import ProjectManager
 from core.rate_limiter import ToolLimit, ToolRateLimiter
+from core.repo_manager import RepositoryManager
 from core.sandbox import WorkspaceSandbox
 from core.security_scanner import ScheduledSecurityScanner
 from core.task_queue import Task, TaskQueue, TaskStatus, TaskType, infer_task_type
@@ -154,6 +157,14 @@ class Agent42:
         )
         self.ws_manager = WebSocketManager()
         self.worktree_manager = WorktreeManager(str(self.repo_path)) if self.has_repo else None
+
+        # Multi-repository manager
+        self.repo_manager = RepositoryManager(
+            repos_json_path=settings.repos_json_path,
+            clone_dir=settings.repos_clone_dir,
+            github_token=settings.github_token,
+        )
+
         self._active_count = 0
         self._active_lock = asyncio.Lock()
         self.approval_gate = ApprovalGate(
@@ -220,6 +231,13 @@ class Agent42:
             )
             if settings.apps_enabled
             else None
+        )
+
+        # Chat sessions and projects
+        self.chat_session_manager = ChatSessionManager(self.data_dir / settings.chat_sessions_dir)
+        self.project_manager = ProjectManager(
+            self.data_dir / settings.projects_dir,
+            self.task_queue,
         )
 
         self._register_tools()
@@ -346,6 +364,7 @@ class Agent42:
         # Phase 9: Context-aware intent classification
         self.intent_classifier = IntentClassifier(router=ModelRouter())
         self._pending_clarifications: dict[str, PendingClarification] = {}
+        self._pending_scope_clarifications: dict[str, dict] = {}
 
         # Wire up callbacks
         self.task_queue.on_update(self._on_task_update)
@@ -420,6 +439,18 @@ class Agent42:
         # Apps platform (enabled by default)
         if self.app_manager:
             self.tool_registry.register(AppTool(self.app_manager))
+
+        # Project interview tool (for structured project discovery)
+        if settings.project_interview_enabled:
+            from tools.project_interview import ProjectInterviewTool
+
+            self.tool_registry.register(
+                ProjectInterviewTool(
+                    workspace_path=workspace,
+                    router=router,
+                    outputs_dir=settings.outputs_dir,
+                )
+            )
 
     async def _setup_channels(self):
         """Configure and register enabled channels based on settings."""
@@ -501,6 +532,10 @@ class Agent42:
         Uses LLM-based intent classification with conversation history.
         If the intent is ambiguous, sends a clarification question back to the
         channel instead of creating a task immediately.
+
+        When scope detection is enabled and an active scope exists, detects
+        whether the new message continues the current scope or represents a
+        topic change that warrants a new branch/task.
         """
         logger.info(f"[{message.channel_type}] {message.sender_name}: {message.content[:100]}")
 
@@ -528,9 +563,35 @@ class Agent42:
             combined = f"{pending.original_message}\n\nUser clarification: {message.content}"
             return await self._create_task_from_message(combined, message, force_type=None)
 
+        # Check if this is a response to a pending scope clarification
+        scope_clarification_key = (
+            f"scope:{message.channel_type}:{message.channel_id}:{message.sender_id}"
+        )
+        pending_scope = self._pending_scope_clarifications.get(scope_clarification_key)
+        if pending_scope:
+            del self._pending_scope_clarifications[scope_clarification_key]
+            user_answer = message.content.strip().lower()
+            if user_answer in ("yes", "y", "new", "new topic", "different"):
+                # User confirmed scope change — create new scope and task
+                return await self._handle_scope_change(
+                    pending_scope["original_message"],
+                    message,
+                    pending_scope["classification"],
+                    pending_scope["scope_analysis"],
+                )
+            else:
+                # User says it's the same scope — continue with existing scope
+                return await self._create_task_from_message(
+                    pending_scope["original_message"],
+                    message,
+                    force_type=pending_scope["classification"].task_type,
+                    classification=pending_scope["classification"],
+                    parent_task_id=pending_scope["active_scope"].task_id,
+                )
+
         # Get conversation history for context-aware classification
-        history = self.session_manager.get_messages(
-            message.channel_type, message.channel_id, limit=10
+        history = self.session_manager.get_history(
+            message.channel_type, message.channel_id, max_messages=10
         )
         history_dicts = [{"role": m.role, "content": m.content} for m in history] if history else []
 
@@ -566,12 +627,134 @@ class Agent42:
                 metadata=message.metadata,
             )
 
-        # Classification is confident — create task
+        # Scope change detection: check if this message is a new topic
+        if settings.scope_detection_enabled:
+            active_scope = self.session_manager.get_active_scope(
+                message.channel_type, message.channel_id
+            )
+
+            if active_scope and self._should_check_scope(
+                active_scope, message.channel_type, message.channel_id
+            ):
+                scope_analysis = await self.intent_classifier.detect_scope_change(
+                    message.content,
+                    active_scope,
+                    conversation_history=history_dicts,
+                    confidence_threshold=settings.scope_detection_confidence_threshold,
+                )
+
+                logger.info(
+                    f"Scope analysis: continuation={scope_analysis.is_continuation}, "
+                    f"confidence={scope_analysis.confidence:.2f}, "
+                    f"uncertain={scope_analysis.uncertain}"
+                )
+
+                if scope_analysis.uncertain:
+                    # Not sure — ask the user
+                    self._pending_scope_clarifications[scope_clarification_key] = {
+                        "original_message": message.content,
+                        "classification": classification,
+                        "scope_analysis": scope_analysis,
+                        "active_scope": active_scope,
+                    }
+                    return OutboundMessage(
+                        channel_type=message.channel_type,
+                        channel_id=message.channel_id,
+                        content=(
+                            f"I noticed this might be a different topic from what we've "
+                            f"been working on ({active_scope.summary}). Should I create "
+                            f"a new branch/task for this, or is this related to the "
+                            f"current work? (yes = new topic / no = same topic)"
+                        ),
+                        metadata=message.metadata,
+                    )
+
+                if not scope_analysis.is_continuation:
+                    # Scope change detected — new branch/task
+                    return await self._handle_scope_change(
+                        message.content,
+                        message,
+                        classification,
+                        scope_analysis,
+                    )
+
+                # Continuation — link to existing scope via parent_task_id
+                active_scope.message_count += 1
+                self.session_manager.set_active_scope(
+                    message.channel_type, message.channel_id, active_scope
+                )
+                return await self._create_task_from_message(
+                    message.content,
+                    message,
+                    force_type=classification.task_type,
+                    classification=classification,
+                    parent_task_id=active_scope.task_id,
+                )
+
+        # No active scope or scope detection disabled — create task and set scope
         return await self._create_task_from_message(
             message.content,
             message,
             force_type=classification.task_type,
             classification=classification,
+        )
+
+    def _should_check_scope(
+        self,
+        active_scope: ScopeInfo,
+        channel_type: str,
+        channel_id: str,
+    ) -> bool:
+        """Determine if scope checking is warranted.
+
+        Returns False (and auto-clears the scope) when the active scope's
+        task has already completed, failed, or been archived.
+        """
+        task = self.task_queue.get(active_scope.task_id)
+        if task and task.status in (TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.ARCHIVED):
+            self.session_manager.clear_active_scope(channel_type, channel_id)
+            logger.info(
+                f"Auto-cleared stale scope {active_scope.scope_id} "
+                f"(task {active_scope.task_id} is {task.status.value})"
+            )
+            return False
+        return True
+
+    async def _handle_scope_change(
+        self,
+        description: str,
+        message: InboundMessage,
+        classification,
+        scope_analysis,
+    ) -> OutboundMessage:
+        """Handle a detected scope change by creating a new task and updating scope.
+
+        Notifies the user that a scope change was detected and a new branch
+        will be created for the new work.
+        """
+        old_scope = self.session_manager.get_active_scope(
+            message.channel_type, message.channel_id
+        )
+        old_summary = old_scope.summary if old_scope else "previous work"
+
+        # Create new task (no parent link — this is a fresh scope)
+        result = await self._create_task_from_message(
+            description,
+            message,
+            force_type=classification.task_type,
+            classification=classification,
+        )
+
+        # Prepend scope change notice to the standard task-created message
+        scope_notice = (
+            f"Scope change detected — switching from \"{old_summary}\" to a new topic. "
+            f"A new branch will be created for this work.\n\n"
+        )
+        return OutboundMessage(
+            channel_type=result.channel_type,
+            channel_id=result.channel_id,
+            content=scope_notice + result.content,
+            metadata=result.metadata,
         )
 
     async def _create_task_from_message(
@@ -580,14 +763,30 @@ class Agent42:
         message: InboundMessage,
         force_type: TaskType | None = None,
         classification=None,
+        parent_task_id: str = "",
     ) -> OutboundMessage:
         """Create a task from a channel message with the given (or inferred) type.
 
         If the classification recommends a team, injects a resource allocation
         directive into the task description so the executing agent knows to use
         the team tool.
+
+        When ``parent_task_id`` is provided the new task is linked to the
+        parent (scope continuation).  When omitted (new root task), the
+        active scope for the session is established automatically.
         """
         task_type = force_type or infer_task_type(description)
+
+        # Project interview detection: route complex project-level tasks through
+        # the interview flow instead of going directly to execution.
+        if (
+            settings.project_interview_enabled
+            and settings.project_interview_mode != "never"
+            and classification
+            and getattr(classification, "needs_project_setup", False)
+            and task_type in (TaskType.CODING, TaskType.APP_CREATE, TaskType.APP_UPDATE)
+        ):
+            task_type = TaskType.PROJECT_SETUP
 
         # Smart resource allocation: inject team directive for complex tasks
         task_description = description
@@ -615,8 +814,24 @@ class Agent42:
             origin_channel=message.channel_type,
             origin_channel_id=message.channel_id,
             origin_metadata=message.metadata,
+            parent_task_id=parent_task_id,
         )
         await self.task_queue.add(task)
+
+        # Set active scope for new root tasks (no parent = new scope)
+        if not parent_task_id and settings.scope_detection_enabled:
+            scope = ScopeInfo(
+                scope_id=task.id,
+                summary=description[:100],
+                task_type=task_type,
+                task_id=task.id,
+            )
+            self.session_manager.set_active_scope(
+                message.channel_type, message.channel_id, scope
+            )
+            logger.info(
+                f"Active scope set: {task.id} — {description[:60]}"
+            )
 
         # Log to memory (semantic indexing for cross-session search)
         await self.memory_store.log_event_semantic(
@@ -640,9 +855,17 @@ class Agent42:
         """Broadcast task state changes to all dashboard clients.
 
         Also routes results back to the originating channel when a task
-        completes or fails.
+        completes or fails. Supports session-scoped chat and project stats.
         """
         await self.ws_manager.broadcast("task_update", task.to_dict())
+
+        # Project stats update: refresh and broadcast when task has a project
+        if task.project_id and self.project_manager:
+            project = await self.project_manager.get(task.project_id)
+            if project:
+                d = project.to_dict()
+                d["stats"] = self.project_manager.project_stats(task.project_id)
+                await self.ws_manager.broadcast("project_update", d)
 
         # Dashboard chat: broadcast agent response back as a chat message
         if task.origin_channel == "dashboard_chat" and task.status in (
@@ -652,6 +875,7 @@ class Agent42:
             import time as _time
             import uuid as _uuid
 
+            session_id = task.origin_metadata.get("chat_session_id", "")
             content = task.result or "(completed with no output)"
             chat_msg = {
                 "id": _uuid.uuid4().hex[:12],
@@ -660,8 +884,13 @@ class Agent42:
                 "timestamp": _time.time(),
                 "sender": "Agent42",
                 "task_id": task.id,
+                "session_id": session_id,
             }
-            self.ws_manager.chat_messages.append(chat_msg)
+            # Persist to session if we have a session manager and session_id
+            if session_id and self.chat_session_manager:
+                await self.chat_session_manager.add_message(session_id, chat_msg)
+            else:
+                self.ws_manager.chat_messages.append(chat_msg)
             await self.ws_manager.broadcast("chat_message", chat_msg)
             return  # Don't also send via channel manager
 
@@ -669,6 +898,7 @@ class Agent42:
             import time as _time
             import uuid as _uuid
 
+            session_id = task.origin_metadata.get("chat_session_id", "")
             chat_msg = {
                 "id": _uuid.uuid4().hex[:12],
                 "role": "assistant",
@@ -676,8 +906,12 @@ class Agent42:
                 "timestamp": _time.time(),
                 "sender": "Agent42",
                 "task_id": task.id,
+                "session_id": session_id,
             }
-            self.ws_manager.chat_messages.append(chat_msg)
+            if session_id and self.chat_session_manager:
+                await self.chat_session_manager.add_message(session_id, chat_msg)
+            else:
+                self.ws_manager.chat_messages.append(chat_msg)
             await self.ws_manager.broadcast("chat_message", chat_msg)
             return
 
@@ -752,10 +986,23 @@ class Agent42:
                 await asyncio.sleep(10)
 
             try:
+                # Select worktree manager: task-specific repo or default
+                wt_manager = self.worktree_manager
+                if task.repo_id and self.repo_manager:
+                    try:
+                        wt_manager = self.repo_manager.get_worktree_manager(task.repo_id)
+                    except ValueError as e:
+                        logger.warning(
+                            "Task %s repo_id %s not found, using default: %s",
+                            task.id,
+                            task.repo_id,
+                            e,
+                        )
+
                 agent = Agent(
                     task=task,
                     task_queue=self.task_queue,
-                    worktree_manager=self.worktree_manager,
+                    worktree_manager=wt_manager,
                     approval_gate=self.approval_gate,
                     emit=self.emit,
                     skill_loader=self.skill_loader,
@@ -814,12 +1061,22 @@ class Agent42:
 
         # Load tasks and initialize subsystems
         await self.task_queue.load_from_file()
+        await self.repo_manager.load()
+        if self.repo_manager.list_repos():
+            logger.info(f"  Repos loaded: {len(self.repo_manager.list_repos())}")
         if self.app_manager:
             await self.app_manager.load()
             logger.info(f"  Apps loaded: {len(self.app_manager.list_apps())}")
             await self.app_manager.start_monitor(
                 interval=float(settings.apps_monitor_interval),
             )
+        await self.chat_session_manager.load()
+        await self.project_manager.load()
+        logger.info(
+            "  Chat sessions: %d, Projects: %d",
+            len(self.chat_session_manager.list_sessions(include_archived=True)),
+            len(self.project_manager.list_projects(include_archived=True)),
+        )
         await self._setup_channels()
         await self._setup_mcp()
 
@@ -862,6 +1119,9 @@ class Agent42:
                 heartbeat=self.heartbeat,
                 key_store=self.key_store,
                 app_manager=self.app_manager,
+                chat_session_manager=self.chat_session_manager,
+                project_manager=self.project_manager,
+                repo_manager=self.repo_manager,
             )
             config = uvicorn.Config(
                 app,

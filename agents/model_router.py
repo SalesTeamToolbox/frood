@@ -98,6 +98,11 @@ FREE_ROUTING: dict[TaskType, dict] = {
         "critic": "or-free-devstral",  # Devstral — multi-file awareness for updates
         "max_iterations": 8,
     },
+    TaskType.PROJECT_SETUP: {
+        "primary": "or-free-llama4-maverick",  # Strong conversational + structured output
+        "critic": "or-free-deepseek-chat",  # Second opinion on spec completeness
+        "max_iterations": 3,  # Low — mostly conversation, not iteration-heavy
+    },
 }
 
 

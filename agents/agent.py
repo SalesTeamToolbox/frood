@@ -92,6 +92,13 @@ SYSTEM_PROMPTS = {
         "the entire app. Preserve existing functionality. After changes, restart "
         "the app and verify it still works."
     ),
+    "project_setup": (
+        "You are a senior project manager conducting a discovery interview. "
+        "Use the project_interview tool to guide the conversation. Ask questions "
+        "in themed batches of 3-5. Listen carefully to answers, follow up on vague "
+        "responses, and build toward a comprehensive PROJECT_SPEC.md. Be conversational "
+        "but thorough — this spec will drive all subsequent development work."
+    ),
 }
 
 # Task types that require git worktrees — all others use output directories
@@ -400,6 +407,20 @@ class Agent:
             tool_recs = self.learner.get_tool_recommendations(task.task_type.value)
             if tool_recs:
                 parts.append(f"\n{tool_recs}")
+
+        # Include PROJECT_SPEC.md when task is linked to a project interview
+        if task.project_spec_path:
+            spec_path = Path(task.project_spec_path)
+            if spec_path.exists():
+                try:
+                    spec_content = spec_path.read_text(encoding="utf-8", errors="replace")
+                    parts.append(
+                        f"\n## Project Specification\n\n"
+                        f"This task is part of a larger project. Follow the spec below:\n\n"
+                        f"{spec_content}"
+                    )
+                except Exception:
+                    pass
 
         return "\n".join(parts)
 
