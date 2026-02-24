@@ -44,7 +44,9 @@ class ProjectInterviewTool(Tool):
         list      — List all interview sessions
     """
 
-    def __init__(self, workspace_path: str = ".", router=None, outputs_dir: str = "", task_queue=None):
+    def __init__(
+        self, workspace_path: str = ".", router=None, outputs_dir: str = "", task_queue=None
+    ):
         self._workspace = workspace_path
         self._router = router
         self._outputs_dir = outputs_dir or ".agent42/outputs"
@@ -158,7 +160,9 @@ class ProjectInterviewTool(Tool):
             return ToolResult(error="Action is required", success=False)
 
         if action == "start":
-            return await self._start(task_id, description, project_type, complexity, repo_url, pm_project_id)
+            return await self._start(
+                task_id, description, project_type, complexity, repo_url, pm_project_id
+            )
         elif action == "respond":
             return await self._respond(project_id, response)
         elif action == "status":
@@ -537,11 +541,7 @@ class ProjectInterviewTool(Tool):
         if self._task_queue and pm_project_id:
             for st in subtasks:
                 type_str = st.get("task_type", "coding").upper()
-                tt = (
-                    TaskType[type_str]
-                    if type_str in TaskType.__members__
-                    else TaskType.CODING
-                )
+                tt = TaskType[type_str] if type_str in TaskType.__members__ else TaskType.CODING
                 new_task = Task(
                     title=st.get("title", "Untitled subtask"),
                     description=st.get("description", ""),

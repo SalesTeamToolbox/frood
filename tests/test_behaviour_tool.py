@@ -1,6 +1,5 @@
 """Tests for BehaviourTool — persistent agent behaviour rules."""
 
-
 from tools.behaviour_tool import BehaviourTool, load_behaviour_rules
 
 
