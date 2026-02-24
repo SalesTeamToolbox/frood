@@ -67,6 +67,7 @@ const state = {
   envSaving: false,
   // Storage backend status
   storageStatus: null,
+  storageInstalling: false,
   // Repositories
   repos: [],
   repoBranches: {},
@@ -583,6 +584,24 @@ async function loadStorageStatus() {
   try {
     state.storageStatus = (await api("/settings/storage")) || null;
   } catch { state.storageStatus = null; }
+}
+
+async function installStoragePackages() {
+  state.storageInstalling = true;
+  renderSettingsPanel();
+  try {
+    const result = await api("/settings/storage/install-packages", { method: "POST" });
+    if (result.errors && result.errors.length) {
+      toast("Install failed: " + result.errors.join("; "), "error");
+    } else {
+      toast("Packages installed. Restart Agent42 to activate the storage backend.", "success");
+    }
+    await loadStorageStatus();
+  } catch (e) {
+    toast("Install failed: " + e.message, "error");
+  }
+  state.storageInstalling = false;
+  renderSettingsPanel();
 }
 
 async function saveEnvSettings() {
@@ -2972,6 +2991,13 @@ function renderSettingsPanel() {
               <td>${statusBadge(ss.redis.status)}${ss.redis.url ? ` &mdash; <code style="font-size:0.8rem">${esc(ss.redis.url)}</code>` : ""}</td>
             </tr>
           </table>
+          ${(ss.qdrant.status === "not_installed" || ss.redis.status === "not_installed") ? `
+          <div style="margin-top:0.85rem">
+            <button onclick="installStoragePackages()" ${state.storageInstalling ? "disabled" : ""} style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:0.45rem 1rem;font-size:0.84rem;cursor:pointer;opacity:${state.storageInstalling ? "0.6" : "1"}">
+              ${state.storageInstalling ? "Installing&hellip;" : "Install missing packages"}
+            </button>
+            <span style="margin-left:0.75rem;font-size:0.78rem;color:var(--text-muted)">Installs <code>qdrant-client</code>${ss.redis.status === "not_installed" ? " and <code>redis[hiredis]</code>" : ""} via pip. Agent42 restart required after install.</span>
+          </div>` : ""}
           <div style="margin-top:0.75rem;font-size:0.78rem;color:var(--text-muted)">
             Backend is configured in <code>.env</code>. To change it, edit <code>QDRANT_ENABLED</code>, <code>QDRANT_URL</code>, and <code>REDIS_URL</code> and restart Agent42.
             <a href="#" onclick="loadStorageStatus().then(renderSettingsPanel);return false" style="margin-left:0.5rem">Refresh</a>
