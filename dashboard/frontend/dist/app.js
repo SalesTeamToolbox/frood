@@ -3010,10 +3010,12 @@ function updateEnvSaveBtn() {
 // Main render
 // ---------------------------------------------------------------------------
 async function loadAll() {
-  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages(), loadTokenStats()]);
-  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages(), loadChatSessions(), loadCodeSessions(), loadProjects(), loadGitHubStatus()]);
-  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages(), loadRepos()]);
-  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadStatus()]);
+  await Promise.all([
+    loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(),
+    loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(),
+    loadChatMessages(), loadTokenStats(), loadChatSessions(), loadCodeSessions(),
+    loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(),
+  ]);
 }
 
 function render() {
