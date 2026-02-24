@@ -447,6 +447,8 @@ async function loadTokenStats() {
   try {
     state.tokenStats = (await api("/stats/tokens")) || null;
   } catch { state.tokenStats = null; }
+}
+
 async function loadRepos() {
   try {
     state.repos = (await api("/repos")) || [];
