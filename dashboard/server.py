@@ -1370,9 +1370,30 @@ def create_app(
                     }
 
             # Infer task type from message
-            from core.task_queue import infer_task_type
+            from core.task_queue import TaskType, infer_task_type
 
             task_type = infer_task_type(text)
+
+            # Detect explicit "create a project" intent from the code page and route
+            # it through the project interview flow (PROJECT_SETUP task type).
+            if session.session_type == "code" and settings.project_interview_enabled and settings.project_interview_mode != "never":
+                _project_keywords = (
+                    "create a project",
+                    "start a project",
+                    "new project",
+                    "build a project",
+                    "create project",
+                    "start project",
+                    "i want to create a project",
+                    "i want to start a project",
+                    "let's create a project",
+                    "let's start a project",
+                    "plan a project",
+                    "kickoff a project",
+                    "kick off a project",
+                )
+                if any(kw in text.lower() for kw in _project_keywords):
+                    task_type = TaskType.PROJECT_SETUP
 
             # For code sessions without a project, auto-create one on first message
             if session.session_type == "code" and not session.project_id and project_manager:

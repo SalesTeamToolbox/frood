@@ -32,8 +32,9 @@ Use the `project_interview` tool to manage the interview:
 
 1. **Start the session:**
    ```
-   project_interview start --task_id=<task_id> --description="<user's request>" --project_type=<new_project|new_feature> --complexity=<complexity>
+   project_interview start --task_id=<task_id> --description="<user's request>" --project_type=<new_project|new_feature> --complexity=<complexity> --pm_project_id=<Project ID from task context>
    ```
+   Pass `pm_project_id` using the "Project ID:" value shown in the task context above. This links the generated subtasks to the right project in the kanban board.
 
 2. **Present each question batch to the user.** The tool returns themed batches of 3-5 questions. Present them conversationally:
    - "Let me ask a few questions about [theme]..."
@@ -74,9 +75,9 @@ If the user wants changes:
 Once the user approves:
 
 1. `project_interview approve --project_id=<id>`
-2. The tool generates ordered subtasks with dependencies
-3. Present the subtask plan to the user
-4. Each subtask will be created in the task queue, referencing the PROJECT_SPEC.md
+2. The tool generates ordered subtasks with dependencies **and automatically adds them to the task queue** (linked to the project via `pm_project_id` you provided at start)
+3. Present the subtask plan to the user — the coding agents will now pick up each task in order
+4. Tell the user they can track progress in Mission Control → Projects
 
 ## Interview Best Practices
 

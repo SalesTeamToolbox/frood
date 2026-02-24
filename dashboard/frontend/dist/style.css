@@ -1066,6 +1066,8 @@ td.task-title:hover { color: var(--accent); }
 }
 .progress-text { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
 .project-card-tags { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.project-card-actions { display: flex; justify-content: flex-end; margin-top: 0.5rem; }
+.btn-xs { padding: 0.15rem 0.45rem; font-size: 0.72rem; }
 .tag {
   background: var(--bg-input);
   color: var(--text-secondary);
