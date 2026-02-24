@@ -176,7 +176,7 @@ Rules:
 class ProjectSpecGenerator:
     """Generates, validates, and manages PROJECT_SPEC.md documents."""
 
-    def __init__(self, router=None, model: str = "or-free-llama4-maverick"):
+    def __init__(self, router=None, model: str = "or-free-llama-70b"):
         self.router = router
         self.model = model
 
