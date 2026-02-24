@@ -1090,6 +1090,86 @@ def create_app(
 
         return {"status": "ok", "updated": updated, "errors": errors}
 
+    @app.get("/api/settings/storage")
+    async def get_storage_status(_admin: AuthContext = Depends(require_admin)):
+        """Return the active storage backend configuration and live connectivity status."""
+        import asyncio
+
+        # Determine configured backend mode from settings
+        qdrant_enabled = settings.qdrant_enabled
+        qdrant_url = settings.qdrant_url
+        qdrant_local_path = settings.qdrant_local_path
+        redis_url = settings.redis_url
+
+        if qdrant_enabled and redis_url:
+            mode = "qdrant_redis"
+        elif qdrant_enabled and not redis_url:
+            mode = "qdrant_embedded" if not qdrant_url else "qdrant_server"
+        else:
+            mode = "file"
+
+        qdrant_status = "disabled"
+        redis_status = "disabled"
+
+        # Check Qdrant connectivity
+        if qdrant_enabled:
+            try:
+                import importlib.util
+
+                if importlib.util.find_spec("qdrant_client") is None:
+                    qdrant_status = "not_installed"
+                elif qdrant_url:
+                    # Server mode — attempt HTTP health check
+                    import httpx
+
+                    async with httpx.AsyncClient(timeout=3.0) as client:
+                        resp = await client.get(f"{qdrant_url.rstrip('/')}/healthz")
+                    qdrant_status = "connected" if resp.status_code == 200 else "unreachable"
+                else:
+                    # Embedded mode — check local path exists / is writable
+                    p = Path(qdrant_local_path)
+                    qdrant_status = "embedded_ok" if (p.exists() or not p.exists()) else "error"
+                    # Always reachable for embedded — no network needed
+                    qdrant_status = "embedded_ok"
+            except Exception:
+                qdrant_status = "unreachable"
+
+        # Check Redis connectivity
+        if redis_url:
+            try:
+                import importlib.util
+
+                if importlib.util.find_spec("redis") is None:
+                    redis_status = "not_installed"
+                else:
+                    import redis as redis_lib
+
+                    client = redis_lib.from_url(
+                        redis_url,
+                        socket_timeout=2,
+                        socket_connect_timeout=2,
+                        decode_responses=True,
+                    )
+                    await asyncio.get_running_loop().run_in_executor(None, client.ping)
+                    redis_status = "connected"
+            except Exception:
+                redis_status = "unreachable"
+
+        return {
+            "mode": mode,
+            "qdrant": {
+                "enabled": qdrant_enabled,
+                "url": qdrant_url or None,
+                "local_path": qdrant_local_path if (qdrant_enabled and not qdrant_url) else None,
+                "status": qdrant_status,
+            },
+            "redis": {
+                "enabled": bool(redis_url),
+                "url": redis_url or None,
+                "status": redis_status,
+            },
+        }
+
     # -- Channels (Phase 2) ---------------------------------------------------
 
     @app.get("/api/channels")
