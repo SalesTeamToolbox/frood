@@ -205,7 +205,11 @@ class TestSetupCompleteEndpoint:
         env_path = tmp_path / ".env"
         env_path.write_text("")
 
-        with patch("dashboard.server._update_env_file"):
+        with (
+            patch("dashboard.server._update_env_file"),
+            patch("dashboard.server._pip_install", return_value=([], [])),
+            patch("dashboard.server.Settings.reload_from_env"),
+        ):
             transport = ASGITransport(app=_app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post(

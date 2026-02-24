@@ -233,7 +233,8 @@ class TestLearnerSkillCreation:
                 "---\n"
                 "# API Testing Skill\n\n"
                 "Always use pytest with the --asyncio-mode=auto flag.\n"
-                "Check response status codes AND body content.\n"
+                "Check response status codes AND body content.\n",
+                None,
             )
         )
 
@@ -250,7 +251,7 @@ class TestLearnerSkillCreation:
 
     @pytest.mark.asyncio
     async def test_no_skill_needed(self):
-        self.router.complete = AsyncMock(return_value="NO_SKILL_NEEDED")
+        self.router.complete = AsyncMock(return_value=("NO_SKILL_NEEDED", None))
 
         learner = Learner(self.router, self.memory, skills_dir=self.skills_dir)
         result = await learner.check_for_skill_creation(existing_skill_names=[])
@@ -273,7 +274,8 @@ class TestLearnerSkillCreation:
                 "description: A test skill\n"
                 "task_types: [coding]\n"
                 "---\n"
-                "# Test\nDo the thing.\n"
+                "# Test\nDo the thing.\n",
+                None,
             )
         )
 
