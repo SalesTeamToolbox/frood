@@ -36,10 +36,12 @@ Updated automatically by the learning engine and manually by developers.
 
 ## CI / Formatting Patterns
 
-- **Always run `ruff format .` before committing.** CI runs `ruff format --check .` and fails on unformatted files. This is especially important after merges that touch multiple files — merged code may not be formatted even if each branch was individually clean.
-- The `make format` target runs `ruff format .` and is the quickest way to fix formatting.
+- **Auto-enforced:** `format-on-write.py` (PostToolUse hook) runs `ruff format` + `ruff check --fix` on every `.py` file immediately after a Write or Edit. You should see `[format-on-write] <file> formatted and lint-clean` feedback after each edit. If you see lint warnings instead, fix them before committing.
+- **Auto-checked at Stop:** `test-validator.py` runs `ruff format --check` and `ruff check` before the test suite. Lint failures appear as `[test-validator] FAILED ruff ...` with fix instructions.
+- **Manual fix if needed:** `ruff format . && ruff check --fix .` (or `make format`) resolves all auto-fixable issues in one shot.
 - The `make check` target runs both `make lint` and tests together — use as a pre-push gate.
 - **Inline `from` imports inside functions/methods must also be isort-sorted (ruff I001).** Third-party imports (e.g. `httpx`) must come before local imports (e.g. `core.*`, `dashboard.*`), separated by a blank line — even when the imports are inside a function body. `ruff check --fix` will auto-correct these.
+- **After merges:** Merged code may not be formatted even if each branch was clean. The Stop hook catches this, but you can also run `make format` proactively after any merge.
 
 ## Testing Patterns
 
