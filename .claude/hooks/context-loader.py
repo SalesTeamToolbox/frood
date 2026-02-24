@@ -3,7 +3,8 @@
 
 Triggered on UserPromptSubmit. Analyzes the prompt to detect what area of
 the codebase is being worked on, then outputs relevant patterns and lessons
-from .claude/lessons.md to stderr for Claude to use.
+from .claude/lessons.md and reference docs from .claude/reference/ to stderr
+for Claude to use.
 
 Hook protocol:
 - Receives JSON on stdin with hook_event_name, project_dir, user_prompt
@@ -161,6 +162,46 @@ WORK_TYPE_KEYWORDS = {
         "files": ["memory/"],
         "section": "Memory Patterns",
     },
+    "deployment": {
+        "keywords": [
+            "deploy",
+            "install",
+            "nginx",
+            "systemd",
+            "docker",
+            "production",
+            "server",
+            "compose",
+        ],
+        "files": ["deploy/", "Dockerfile", "docker-compose.yml"],
+        "section": "Deployment Patterns",
+    },
+    "structure": {
+        "keywords": [
+            "structure",
+            "architecture",
+            "overview",
+            "onboarding",
+            "where is",
+            "find file",
+            "project layout",
+        ],
+        "files": [],
+        "section": None,
+    },
+}
+
+# Map work types to reference files loaded from .claude/reference/
+REFERENCE_FILES = {
+    "tools": ["terminology.md", "new-components.md", "conventions.md"],
+    "skills": ["terminology.md", "new-components.md", "conventions.md"],
+    "providers": ["terminology.md", "new-components.md"],
+    "config": ["configuration.md"],
+    "dashboard": ["terminology.md"],
+    "deployment": ["deployment.md", "configuration.md"],
+    "security": ["terminology.md"],
+    "memory": ["terminology.md"],
+    "structure": ["project-structure.md", "terminology.md"],
 }
 
 
@@ -220,6 +261,33 @@ def load_lessons(project_dir, sections):
     return "\n".join(relevant).strip()
 
 
+def load_reference_files(project_dir, work_types):
+    """Load relevant reference files for detected work types."""
+    ref_dir = os.path.join(project_dir, ".claude", "reference")
+    if not os.path.isdir(ref_dir):
+        return ""
+
+    files_to_load = set()
+    for wt in work_types:
+        for fname in REFERENCE_FILES.get(wt, []):
+            files_to_load.add(fname)
+
+    if not files_to_load:
+        return ""
+
+    parts = []
+    for fname in sorted(files_to_load):
+        path = os.path.join(ref_dir, fname)
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    parts.append(f.read().strip())
+            except OSError:
+                continue
+
+    return "\n\n".join(parts)
+
+
 def main():
     try:
         event = json.loads(sys.stdin.read())
@@ -252,17 +320,24 @@ def main():
     sections = set()
     for wt in work_types:
         config = WORK_TYPE_KEYWORDS.get(wt, {})
-        if "section" in config:
-            sections.add(config["section"])
+        section = config.get("section") if isinstance(config, dict) else None
+        if section:
+            sections.add(section)
 
     lessons = load_lessons(project_dir, sections)
 
-    if lessons:
+    # Load relevant reference files
+    references = load_reference_files(project_dir, work_types)
+
+    if lessons or references:
         print(
             f"[context-loader] Detected work types: {', '.join(sorted(work_types))}",
             file=sys.stderr,
         )
-        print(f"[context-loader] Relevant patterns:\n{lessons}", file=sys.stderr)
+        if lessons:
+            print(f"[context-loader] Relevant patterns:\n{lessons}", file=sys.stderr)
+        if references:
+            print(f"[context-loader] Reference docs:\n{references}", file=sys.stderr)
 
     sys.exit(0)
 
