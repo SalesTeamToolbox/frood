@@ -26,6 +26,9 @@ const state = {
   filterPriority: "",
   filterType: "",
   status: {},
+  // Apps
+  apps: [],
+  appFilter: "",  // "" = all, "running", "stopped", "building", etc.
   // API key management
   apiKeys: {},
   keyEdits: {},
@@ -61,6 +64,11 @@ const state = {
   envSettings: {},
   envEdits: {},
   envSaving: false,
+  // Repositories
+  repos: [],
+  repoBranches: {},
+  githubRepos: [],
+  githubLoading: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -352,6 +360,12 @@ function handleWSMessage(msg) {
   } else if (msg.type === "system_health") {
     state.status = msg.data;
     if (state.page === "status") renderStatus();
+  } else if (msg.type === "app_status") {
+    // Real-time app status update
+    const idx = state.apps.findIndex((a) => a.id === msg.data.id);
+    if (idx >= 0) state.apps[idx] = msg.data;
+    else state.apps.unshift(msg.data);
+    if (state.page === "apps") renderApps();
   } else if (msg.type === "agent_stall") {
     toast(`Agent stalled: ${msg.data.task_id}`, "error");
   } else if (msg.type === "project_update") {
@@ -427,6 +441,20 @@ async function loadTasks() {
   } catch { state.tasks = []; }
 }
 
+async function loadRepos() {
+  try {
+    state.repos = (await api("/repos")) || [];
+  } catch { state.repos = []; }
+}
+
+async function loadRepoBranches(repoId) {
+  if (state.repoBranches[repoId]) return;
+  try {
+    const data = await api(`/repos/${repoId}/branches`);
+    state.repoBranches[repoId] = data.branches || [];
+  } catch { state.repoBranches[repoId] = []; }
+}
+
 async function loadApprovals() {
   try {
     state.approvals = (await api("/approvals")) || [];
@@ -443,6 +471,38 @@ async function loadSkills() {
   try {
     state.skills = (await api("/skills")) || [];
   } catch { state.skills = []; }
+}
+
+async function toggleTool(name, enabled) {
+  try {
+    await api(`/tools/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    });
+    await loadTools();
+    renderTools();
+    toast(`Tool '${name}' ${enabled ? "enabled" : "disabled"}`, "success");
+  } catch (e) {
+    toast("Failed to update tool: " + e.message, "error");
+    await loadTools();
+    renderTools();
+  }
+}
+
+async function toggleSkill(name, enabled) {
+  try {
+    await api(`/skills/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    });
+    await loadSkills();
+    renderSkills();
+    toast(`Skill '${name}' ${enabled ? "enabled" : "disabled"}`, "success");
+  } catch (e) {
+    toast("Failed to update skill: " + e.message, "error");
+    await loadSkills();
+    renderSkills();
+  }
 }
 
 async function loadChannels() {
@@ -473,6 +533,12 @@ async function loadApiKeys() {
   try {
     state.apiKeys = (await api("/settings/keys")) || {};
   } catch { state.apiKeys = {}; }
+}
+
+async function loadApps() {
+  try {
+    state.apps = (await api("/apps")) || [];
+  } catch { state.apps = []; }
 }
 
 async function saveApiKeys() {
@@ -809,10 +875,11 @@ function doLogout() {
   render();
 }
 
-async function doCreateTask(title, description, taskType, projectId) {
+async function doCreateTask(title, description, taskType, repoId, branch) {
   try {
     const body = { title, description, task_type: taskType };
-    if (projectId) body.project_id = projectId;
+    if (repoId) body.repo_id = repoId;
+    if (branch) body.branch = branch;
     await api("/tasks", {
       method: "POST",
       body: JSON.stringify(body),
@@ -1013,6 +1080,7 @@ function showCreateTaskModal(projectId) {
         ${state.projects.map((p) => `<option value="${p.id}"${projectId === p.id ? ' selected' : ''}>${esc(p.name)}</option>`).join("")}
       </select>
     </div>` : '';
+  const repoOptions = state.repos.map((r) => `<option value="${esc(r.id)}">${esc(r.name)} (${esc(r.default_branch)})</option>`).join("");
   showModal(`
     <div class="modal">
       <div class="modal-header"><h3>Create Task</h3>
@@ -1035,6 +1103,22 @@ function showCreateTaskModal(projectId) {
           <div class="help">The task type determines which model, critic, and skills are used.</div>
         </div>
         ${projectOpts}
+        ${state.repos.length > 0 ? `
+        <div class="form-group">
+          <label for="ct-repo">Repository</label>
+          <select id="ct-repo" onchange="onTaskRepoChange(this.value)">
+            <option value="">None (default)</option>
+            ${repoOptions}
+          </select>
+          <div class="help">Select the repo the agent should work in.</div>
+        </div>
+        <div class="form-group" id="ct-branch-group" style="display:none">
+          <label for="ct-branch">Branch</label>
+          <select id="ct-branch">
+            <option value="">Default branch</option>
+          </select>
+        </div>
+        ` : ""}
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
@@ -1045,6 +1129,24 @@ function showCreateTaskModal(projectId) {
   document.getElementById("ct-title")?.focus();
 }
 
+async function onTaskRepoChange(repoId) {
+  const branchGroup = document.getElementById("ct-branch-group");
+  const branchSelect = document.getElementById("ct-branch");
+  if (!repoId) {
+    if (branchGroup) branchGroup.style.display = "none";
+    return;
+  }
+  if (branchGroup) branchGroup.style.display = "";
+  // Load branches if not cached
+  await loadRepoBranches(repoId);
+  const branches = state.repoBranches[repoId] || [];
+  if (branchSelect) {
+    const repo = state.repos.find((r) => r.id === repoId);
+    const defBranch = repo ? repo.default_branch : "main";
+    branchSelect.innerHTML = branches.map((b) => `<option value="${esc(b)}" ${b === defBranch ? "selected" : ""}>${esc(b)}</option>`).join("") || `<option value="">${esc(defBranch)}</option>`;
+  }
+}
+
 function submitCreateTask() {
   const title = document.getElementById("ct-title")?.value?.trim();
   const desc = document.getElementById("ct-desc")?.value?.trim();
@@ -1053,6 +1155,11 @@ function submitCreateTask() {
   if (!title) return toast("Title is required", "error");
   if (!desc) return toast("Description is required", "error");
   doCreateTask(title, desc, type, projectId);
+  const repoId = document.getElementById("ct-repo")?.value || "";
+  const branch = document.getElementById("ct-branch")?.value || "";
+  if (!title) return toast("Title is required", "error");
+  if (!desc) return toast("Description is required", "error");
+  doCreateTask(title, desc, type, repoId, branch);
 }
 
 function showReviewModal(task) {
@@ -1080,6 +1187,108 @@ function showReviewModal(task) {
 function submitReview(taskId, approved) {
   const feedback = document.getElementById("rv-feedback")?.value?.trim() || "";
   doSubmitReview(taskId, feedback, approved);
+}
+
+function showCreateAppModal() {
+  const runtimes = ["python", "node", "static", "docker"];
+  showModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>Create App</h3>
+        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="ca-name">App Name</label>
+          <input type="text" id="ca-name" placeholder="My Awesome App">
+        </div>
+        <div class="form-group">
+          <label for="ca-desc">Description</label>
+          <textarea id="ca-desc" rows="3" placeholder="Describe what this app should do..."></textarea>
+        </div>
+        <div class="form-group">
+          <label for="ca-runtime">Runtime</label>
+          <select id="ca-runtime">
+            ${runtimes.map((r) => `<option value="${r}">${r}</option>`).join("")}
+          </select>
+          <div class="help">Python = Flask/FastAPI, Node = Express/Next, Static = HTML/CSS/JS, Docker = custom container.</div>
+        </div>
+        <div class="form-group">
+          <label for="ca-tags">Tags (comma-separated)</label>
+          <input type="text" id="ca-tags" placeholder="dashboard, api, internal">
+        </div>
+        <div class="form-group">
+          <label for="ca-mode">Mode</label>
+          <select id="ca-mode">
+            <option value="internal">Internal (Agent42 system tool)</option>
+            <option value="external">External (public release)</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitCreateApp()">Create &amp; Build</button>
+      </div>
+    </div>
+  `);
+  document.getElementById("ca-name")?.focus();
+}
+
+async function submitCreateApp() {
+  const name = document.getElementById("ca-name")?.value?.trim();
+  const description = document.getElementById("ca-desc")?.value?.trim();
+  const runtime = document.getElementById("ca-runtime")?.value;
+  const tagsRaw = document.getElementById("ca-tags")?.value?.trim() || "";
+  const app_mode = document.getElementById("ca-mode")?.value || "internal";
+  if (!name) return toast("App name is required", "error");
+  if (!description) return toast("Description is required", "error");
+  const tags = tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : [];
+  try {
+    const res = await api("/apps", {
+      method: "POST",
+      body: JSON.stringify({ name, description, runtime, tags, app_mode }),
+    });
+    closeModal();
+    toast(`App "${name}" created — building now`, "success");
+    await loadApps();
+    navigate("apps");
+  } catch (err) { toast(err.message, "error"); }
+}
+
+function showAppUpdateModal(appId, appName) {
+  showModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>Update: ${esc(appName)}</h3>
+        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="au-desc">Describe the changes</label>
+          <textarea id="au-desc" rows="4" placeholder="What should be changed or added..."></textarea>
+          <div class="help">An agent will read the existing app and apply your requested changes.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitAppUpdate('${appId}')">Submit Update</button>
+      </div>
+    </div>
+  `);
+  document.getElementById("au-desc")?.focus();
+}
+
+async function submitAppUpdate(appId) {
+  const description = document.getElementById("au-desc")?.value?.trim();
+  if (!description) return toast("Description is required", "error");
+  try {
+    await api(`/apps/${appId}/update`, {
+      method: "POST",
+      body: JSON.stringify({ description }),
+    });
+    closeModal();
+    toast("Update task created", "success");
+    await loadApps();
+    renderApps();
+  } catch (err) { toast(err.message, "error"); }
 }
 
 // ---------------------------------------------------------------------------
@@ -1147,8 +1356,6 @@ function renderTasks() {
           ${["coding","debugging","research","refactoring","documentation","marketing","email","design","content","strategy","data_analysis","project_management"].map(t=>`<option value="${t}" ${state.filterType===t?"selected":""}>${t.replace("_"," ")}</option>`).join("")}
         </select>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button>
-      <button class="btn btn-outline btn-sm" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>
     </div>
     <div id="board-area"></div>
   `;
@@ -1204,6 +1411,7 @@ function renderKanbanBoard() {
               <div class="card-meta">
                 <span class="priority-dot p${t.priority||0}"></span>
                 <span class="badge-type">${esc(t.task_type)}</span>
+                ${t.repo_id ? `<span style="color:var(--accent)">${esc((state.repos.find(r=>r.id===t.repo_id)||{}).name||"repo")}${t.branch ? ":"+esc(t.branch) : ""}</span>` : ""}
                 ${t.assigned_agent ? `<span>${esc(t.assigned_agent)}</span>` : ""}
                 ${(t.comments||[]).length > 0 ? `<span>${(t.comments||[]).length} comments</span>` : ""}
               </div>
@@ -1427,20 +1635,30 @@ function renderTools() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "tools") return;
 
-  const rows = state.tools.map((t) => `
-    <tr>
+  const rows = state.tools.map((t) => {
+    const enabled = t.enabled !== false;
+    const toggleId = `tool-toggle-${esc(t.name)}`;
+    return `
+    <tr style="${enabled ? "" : "opacity:0.55"}">
       <td style="font-weight:600">${esc(t.name)}</td>
       <td style="color:var(--text-secondary)">${esc(t.description || "")}</td>
+      <td style="text-align:center">
+        <label class="toggle-switch" title="${enabled ? "Disable" : "Enable"} ${esc(t.name)}">
+          <input type="checkbox" id="${toggleId}" ${enabled ? "checked" : ""}
+            onchange="toggleTool('${esc(t.name)}', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
     </tr>
-  `).join("");
+  `}).join("");
 
   el.innerHTML = `
     <div class="card">
       <div class="card-header"><h3>Registered Tools (${state.tools.length})</h3></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Description</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="2"><div class="empty-state">No tools registered</div></td></tr>`}</tbody>
+          <thead><tr><th>Name</th><th>Description</th><th style="text-align:center;width:80px">Enabled</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="3"><div class="empty-state">No tools registered</div></td></tr>`}</tbody>
         </table>
       </div>
     </div>
@@ -1451,26 +1669,150 @@ function renderSkills() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "skills") return;
 
-  const rows = state.skills.map((s) => `
-    <tr>
+  const rows = state.skills.map((s) => {
+    const enabled = s.enabled !== false;
+    const toggleId = `skill-toggle-${esc(s.name)}`;
+    return `
+    <tr style="${enabled ? "" : "opacity:0.55"}">
       <td style="font-weight:600">${esc(s.name)}</td>
       <td style="color:var(--text-secondary)">${esc(s.description || "")}</td>
       <td>${(s.task_types || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ")}</td>
       <td>${s.always_load ? '<span style="color:var(--success)">Always</span>' : ""}</td>
+      <td style="text-align:center">
+        <label class="toggle-switch" title="${enabled ? "Disable" : "Enable"} ${esc(s.name)}">
+          <input type="checkbox" id="${toggleId}" ${enabled ? "checked" : ""}
+            onchange="toggleSkill('${esc(s.name)}', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
     </tr>
-  `).join("");
+  `}).join("");
 
   el.innerHTML = `
     <div class="card">
       <div class="card-header"><h3>Loaded Skills (${state.skills.length})</h3></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Description</th><th>Task Types</th><th>Auto-load</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="4"><div class="empty-state">No skills loaded</div></td></tr>`}</tbody>
+          <thead><tr><th>Name</th><th>Description</th><th>Task Types</th><th>Auto-load</th><th style="text-align:center;width:80px">Enabled</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="5"><div class="empty-state">No skills loaded</div></td></tr>`}</tbody>
         </table>
       </div>
     </div>
   `;
+}
+
+function renderApps() {
+  const el = document.getElementById("page-content");
+  if (!el || state.page !== "apps") return;
+
+  const filtered = state.appFilter
+    ? state.apps.filter((a) => a.status === state.appFilter)
+    : state.apps;
+
+  // Status counts for filter chips
+  const counts = { all: state.apps.length, running: 0, building: 0, ready: 0, stopped: 0, draft: 0, error: 0 };
+  state.apps.forEach((a) => { if (counts[a.status] !== undefined) counts[a.status]++; });
+
+  const filterChips = ["", "running", "building", "ready", "stopped", "draft", "error"]
+    .filter((f) => f === "" || counts[f] > 0)
+    .map((f) => {
+      const label = f || "all";
+      const count = f ? counts[f] : counts.all;
+      const active = state.appFilter === f ? "active" : "";
+      return `<button class="chip ${active}" onclick="state.appFilter='${f}';renderApps()">${label} <span class="chip-count">${count}</span></button>`;
+    }).join("");
+
+  const cards = filtered.map((app) => {
+    const statusClass = `badge-${app.status}`;
+    const isRunning = app.status === "running";
+    const isStopped = app.status === "stopped" || app.status === "ready";
+    const isBuilding = app.status === "building";
+    const isError = app.status === "error";
+
+    const actions = [];
+    if (isRunning) {
+      actions.push(`<button class="btn btn-outline btn-xs" onclick="appAction('${app.id}','stop')">Stop</button>`);
+      actions.push(`<button class="btn btn-outline btn-xs" onclick="appAction('${app.id}','restart')">Restart</button>`);
+      if (app.url) actions.push(`<a href="${esc(app.url)}" target="_blank" class="btn btn-primary btn-xs">Open</a>`);
+    } else if (isStopped) {
+      actions.push(`<button class="btn btn-primary btn-xs" onclick="appAction('${app.id}','start')">Start</button>`);
+    }
+    if (!isBuilding) {
+      actions.push(`<button class="btn btn-outline btn-xs" onclick="showAppUpdateModal('${app.id}','${esc(app.name)}')">Update</button>`);
+    }
+    actions.push(`<button class="btn btn-outline btn-xs" onclick="showAppLogs('${app.id}','${esc(app.name)}')">Logs</button>`);
+    actions.push(`<button class="btn btn-outline btn-xs btn-danger-text" onclick="appAction('${app.id}','delete')">Delete</button>`);
+
+    const runtimeIcon = { static: "&#128196;", python: "&#128013;", node: "&#9889;", docker: "&#128051;" }[app.runtime] || "&#128187;";
+    const modeLabel = app.app_mode === "external" ? '<span class="badge-type">external</span>' : "";
+    const tagsHtml = (app.tags || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ");
+
+    return `
+      <div class="app-card ${isError ? 'app-card-error' : ''} ${isRunning ? 'app-card-running' : ''}">
+        <div class="app-card-header">
+          <div class="app-card-icon">${app.icon || runtimeIcon}</div>
+          <div class="app-card-title">
+            <h4>${esc(app.name)}</h4>
+            <span class="badge-status ${statusClass}">${app.status}</span>
+            ${modeLabel}
+          </div>
+        </div>
+        <p class="app-card-desc">${esc(app.description) || '<span style="color:var(--text-muted)">No description</span>'}</p>
+        <div class="app-card-meta">
+          <span title="Runtime">${runtimeIcon} ${esc(app.runtime)}</span>
+          ${app.port ? `<span title="Port">:${app.port}</span>` : ""}
+          <span title="Created">${timeSince(app.created_at)}</span>
+          ${tagsHtml}
+        </div>
+        <div class="app-card-actions">${actions.join("")}</div>
+      </div>
+    `;
+  }).join("");
+
+  el.innerHTML = `
+    <div class="apps-stats-row">
+      <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value">${state.apps.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Running</div><div class="stat-value text-success">${counts.running}</div></div>
+      <div class="stat-card"><div class="stat-label">Building</div><div class="stat-value text-warning">${counts.building}</div></div>
+      <div class="stat-card"><div class="stat-label">Errors</div><div class="stat-value text-danger">${counts.error}</div></div>
+    </div>
+    <div class="apps-filters">${filterChips}</div>
+    ${filtered.length ? `<div class="apps-grid">${cards}</div>` : '<div class="empty-state" style="padding:3rem;text-align:center"><p style="font-size:1.1rem;margin-bottom:1rem">No apps yet</p><p style="color:var(--text-muted)">Create your first app to get started.</p><button class="btn btn-primary" style="margin-top:1rem" onclick="showCreateAppModal()">+ Create App</button></div>'}
+  `;
+}
+
+async function appAction(appId, action) {
+  try {
+    if (action === "delete") {
+      if (!confirm("Archive this app? It can't be undone.")) return;
+    }
+    const method = action === "delete" ? "DELETE" : "POST";
+    const path = action === "delete" ? `/apps/${appId}` : `/apps/${appId}/${action}`;
+    await api(path, { method });
+    toast(`App ${action} successful`, "success");
+    await loadApps();
+    renderApps();
+  } catch (err) { toast(err.message, "error"); }
+}
+
+async function showAppLogs(appId, name) {
+  try {
+    const data = await api(`/apps/${appId}/logs?lines=100`);
+    const logs = data?.logs || "No logs available.";
+    showModal(`
+      <div class="modal" style="max-width:700px">
+        <div class="modal-header"><h3>Logs: ${esc(name)}</h3>
+          <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <pre class="app-logs-pre">${esc(logs)}</pre>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" onclick="closeModal()">Close</button>
+        </div>
+      </div>
+    `);
+  } catch (err) { toast(err.message, "error"); }
 }
 
 function renderStatus() {
@@ -2203,12 +2545,178 @@ function renderCodeCanvasPanel() {
 // Multi-session Chat (updated renderChat)
 // ---------------------------------------------------------------------------
 
+function renderReposPanel() {
+  const repoRows = state.repos.map((r) => `
+    <tr>
+      <td><strong>${esc(r.name)}</strong></td>
+      <td><code style="font-size:0.8rem">${esc(r.github_repo || r.url || r.local_path)}</code></td>
+      <td>${esc(r.default_branch)}</td>
+      <td><span class="status-badge status-${r.status === "active" ? "running" : r.status === "error" ? "failed" : "pending"}">${esc(r.status)}</span></td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="syncRepo('${esc(r.id)}')">Sync</button>
+        <button class="btn btn-danger btn-sm" onclick="removeRepo('${esc(r.id)}','${esc(r.name)}')">Remove</button>
+      </td>
+    </tr>
+  `).join("");
+
+  const ghRepoRows = state.githubRepos.map((r) => {
+    const alreadyAdded = state.repos.some((lr) => lr.github_repo === r.full_name);
+    return `
+    <tr>
+      <td><strong>${esc(r.name)}</strong> ${r.private ? '<span style="color:var(--warning);font-size:0.75rem">private</span>' : ""}</td>
+      <td style="font-size:0.8rem;color:var(--text-muted)">${esc(r.description).substring(0, 60)}</td>
+      <td>${esc(r.default_branch)}</td>
+      <td>${esc(r.language)}</td>
+      <td>${alreadyAdded ? '<span style="color:var(--success)">Added</span>' : `<button class="btn btn-primary btn-sm" onclick="addGithubRepo('${esc(r.full_name)}','${esc(r.default_branch)}')">Add</button>`}</td>
+    </tr>`;
+  }).join("");
+
+  return `
+    <h3>Repositories</h3>
+    <p class="section-desc">Connect project repositories for agents to work in. Add local repos or clone from GitHub.</p>
+
+    ${settingSecret("GITHUB_TOKEN", "GitHub Token", "Personal Access Token for listing and cloning repos. Create at github.com/settings/tokens (repo scope).")}
+    <div class="form-group" style="margin-top:0.5rem">
+      <button class="btn btn-primary btn-sm" id="save-keys-btn" onclick="saveApiKeys()" ${Object.keys(state.keyEdits).length === 0 || state.keySaving ? "disabled" : ""}>
+        ${state.keySaving ? "Saving..." : "Save Token"}
+      </button>
+    </div>
+
+    <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Connected Repositories</h4>
+    ${state.repos.length > 0 ? `
+    <div style="overflow-x:auto">
+      <table class="table">
+        <thead><tr><th>Name</th><th>Source</th><th>Branch</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>${repoRows}</tbody>
+      </table>
+    </div>
+    ` : '<p style="color:var(--text-muted);font-size:0.9rem">No repositories connected yet. Add a local repo or connect GitHub below.</p>'}
+
+    <div style="display:flex;gap:0.75rem;margin:1rem 0;flex-wrap:wrap">
+      <button class="btn btn-outline btn-sm" onclick="showAddLocalRepoModal()">+ Add Local Repo</button>
+      <button class="btn btn-outline btn-sm" onclick="fetchGithubRepos()" ${state.githubLoading ? "disabled" : ""}>
+        ${state.githubLoading ? "Loading..." : "Browse GitHub Repos"}
+      </button>
+    </div>
+
+    ${state.githubRepos.length > 0 ? `
+    <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">GitHub Repositories</h4>
+    <div style="overflow-x:auto;max-height:400px;overflow-y:auto">
+      <table class="table">
+        <thead><tr><th>Name</th><th>Description</th><th>Branch</th><th>Lang</th><th></th></tr></thead>
+        <tbody>${ghRepoRows}</tbody>
+      </table>
+    </div>
+    ` : ""}
+  `;
+}
+
+async function fetchGithubRepos() {
+  state.githubLoading = true;
+  renderSettingsPanel();
+  try {
+    const data = await api("/github/repos");
+    state.githubRepos = data.repos || [];
+  } catch (err) {
+    toast(err.message || "Failed to load GitHub repos", "error");
+    state.githubRepos = [];
+  }
+  state.githubLoading = false;
+  renderSettingsPanel();
+}
+
+async function addGithubRepo(fullName, defaultBranch) {
+  try {
+    await api("/repos", {
+      method: "POST",
+      body: JSON.stringify({ name: fullName.split("/").pop(), source: "github", github_repo: fullName, default_branch: defaultBranch }),
+    });
+    await loadRepos();
+    renderSettingsPanel();
+    toast("Repository added", "success");
+  } catch (err) {
+    toast(err.message || "Failed to add repo", "error");
+  }
+}
+
+function showAddLocalRepoModal() {
+  showModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>Add Local Repository</h3>
+        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="lr-name">Name</label>
+          <input type="text" id="lr-name" placeholder="my-project">
+        </div>
+        <div class="form-group">
+          <label for="lr-path">Local Path</label>
+          <input type="text" id="lr-path" placeholder="/home/user/projects/my-project">
+          <div class="help">Absolute path to an existing git repository on this server.</div>
+        </div>
+        <div class="form-group">
+          <label for="lr-branch">Default Branch</label>
+          <input type="text" id="lr-branch" value="main" placeholder="main">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitAddLocalRepo()">Add</button>
+      </div>
+    </div>
+  `);
+  document.getElementById("lr-name")?.focus();
+}
+
+async function submitAddLocalRepo() {
+  const name = document.getElementById("lr-name")?.value?.trim();
+  const path = document.getElementById("lr-path")?.value?.trim();
+  const branch = document.getElementById("lr-branch")?.value?.trim() || "main";
+  if (!name) return toast("Name is required", "error");
+  if (!path) return toast("Path is required", "error");
+  try {
+    await api("/repos", {
+      method: "POST",
+      body: JSON.stringify({ name, source: "local", local_path: path, default_branch: branch }),
+    });
+    await loadRepos();
+    closeModal();
+    renderSettingsPanel();
+    toast("Repository added", "success");
+  } catch (err) {
+    toast(err.message || "Failed to add repo", "error");
+  }
+}
+
+async function syncRepo(repoId) {
+  try {
+    const data = await api(`/repos/${repoId}/sync`, { method: "POST" });
+    toast(data.message || "Synced", "success");
+  } catch (err) {
+    toast(err.message || "Sync failed", "error");
+  }
+}
+
+async function removeRepo(repoId, name) {
+  if (!confirm(`Remove repository "${name}"? This only unlinks it — local files are preserved.`)) return;
+  try {
+    await api(`/repos/${repoId}`, { method: "DELETE" });
+    await loadRepos();
+    renderSettingsPanel();
+    toast("Repository removed", "success");
+  } catch (err) {
+    toast(err.message || "Failed to remove", "error");
+  }
+}
+
 function renderSettings() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "settings") return;
 
   const tabs = [
     { id: "providers", label: "LLM Providers" },
+    { id: "repos", label: "Repositories" },
     { id: "channels", label: "Channels" },
     { id: "security", label: "Security" },
     { id: "orchestrator", label: "Orchestrator" },
@@ -2256,6 +2764,7 @@ function renderSettingsPanel() {
         <div class="help" style="margin-top:0.5rem">Keys saved here override <code>.env</code> values and take effect immediately for new API calls.</div>
       </div>
     `,
+    repos: () => renderReposPanel(),
     channels: () => `
       <h3>Communication Channels</h3>
       <p class="section-desc">Configure channels for receiving tasks via chat. Each channel requires its own API credentials.</p>
@@ -2455,6 +2964,7 @@ function updateEnvSaveBtn() {
 // ---------------------------------------------------------------------------
 async function loadAll() {
   await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages(), loadChatSessions(), loadCodeSessions(), loadProjects(), loadGitHubStatus()]);
+  await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadChatMessages(), loadRepos()]);
   await Promise.all([loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(), loadHealth(), loadStatus()]);
 }
 
@@ -2517,6 +3027,8 @@ function render() {
               <button class="btn btn-primary btn-sm" onclick="${state.missionControlTab === 'projects' ? 'showCreateProjectModal()' : 'showCreateTaskModal()'}">+ New ${state.missionControlTab === 'projects' ? 'Project' : 'Task'}</button>
               <button class="btn btn-outline btn-sm" style="margin-left:0.5rem" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>
             ` : ""}
+            ${state.page === "tasks" ? '<button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ New Task</button><button class="btn btn-outline btn-sm" style="margin-left:0.5rem" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>' : ""}
+            ${state.page === "apps" ? '<button class="btn btn-primary btn-sm" onclick="showCreateAppModal()">+ New App</button>' : ""}
           </div>
         </div>
         <div class="content" id="page-content"></div>

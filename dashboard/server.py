@@ -85,6 +85,8 @@ class TaskCreateRequest(BaseModel):
     priority: int = 0
     context_window: str = "default"
     project_id: str = ""
+    repo_id: str = ""
+    branch: str = ""
 
 
 # Passwords treated as unconfigured — trigger the setup wizard
@@ -141,6 +143,10 @@ class SettingsUpdateRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
+
+
+class ToggleRequest(BaseModel):
+    enabled: bool
 
 
 # Settings that can be changed from the dashboard (non-secret, non-security).
@@ -214,6 +220,38 @@ def _update_env_file(env_path: Path, updates: dict[str, str]) -> None:
     env_path.write_text("\n".join(new_lines) + "\n")
 
 
+# ---------------------------------------------------------------------------
+# Tool / skill toggle state persistence
+# ---------------------------------------------------------------------------
+
+_TOGGLE_STATE_FILE = Path(__file__).parent.parent / "data" / "tool_skill_state.json"
+
+
+def _load_toggle_state() -> dict:
+    """Load persisted enabled/disabled state for tools and skills."""
+    import json
+
+    if _TOGGLE_STATE_FILE.exists():
+        try:
+            return json.loads(_TOGGLE_STATE_FILE.read_text())
+        except Exception:
+            pass
+    return {"disabled_tools": [], "disabled_skills": []}
+
+
+def _save_toggle_state(disabled_tools: list[str], disabled_skills: list[str]) -> None:
+    """Persist the current enabled/disabled state to disk."""
+    import json
+
+    _TOGGLE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _TOGGLE_STATE_FILE.write_text(
+        json.dumps(
+            {"disabled_tools": sorted(disabled_tools), "disabled_skills": sorted(disabled_skills)},
+            indent=2,
+        )
+    )
+
+
 def create_app(
     task_queue: TaskQueue,
     ws_manager: WebSocketManager,
@@ -228,6 +266,7 @@ def create_app(
     app_manager=None,
     chat_session_manager=None,
     project_manager=None,
+    repo_manager=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -244,9 +283,18 @@ def create_app(
         CORSMiddleware,
         allow_origins=cors_origins if cors_origins else [],
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
+
+    # Apply persisted tool/skill toggle state
+    _toggle_state = _load_toggle_state()
+    if tool_registry:
+        for name in _toggle_state.get("disabled_tools", []):
+            tool_registry.set_enabled(name, False)
+    if skill_loader:
+        for name in _toggle_state.get("disabled_skills", []):
+            skill_loader.set_enabled(name, False)
 
     # -- Health ----------------------------------------------------------------
 
@@ -529,6 +577,8 @@ def create_app(
             context_window=req.context_window,
             origin_device_id=auth.device_id,
             project_id=req.project_id,
+            repo_id=req.repo_id,
+            branch=req.branch,
         )
         await task_queue.add(task)
         return task.to_dict()
@@ -799,6 +849,25 @@ def create_app(
             return tool_registry.list_tools()
         return []
 
+    @app.patch("/api/tools/{name}")
+    async def toggle_tool(
+        name: str, req: ToggleRequest, _admin: AuthContext = Depends(require_admin)
+    ):
+        """Enable or disable a tool by name (admin only)."""
+        if not tool_registry:
+            raise HTTPException(status_code=503, detail="Tool registry not available")
+        if not tool_registry.set_enabled(name, req.enabled):
+            raise HTTPException(status_code=404, detail=f"Tool '{name}' not found")
+        # Persist updated state
+        disabled = [t["name"] for t in tool_registry.list_tools() if not t["enabled"]]
+        disabled_skills: list[str] = []
+        if skill_loader:
+            disabled_skills = [
+                s.name for s in skill_loader.all_skills() if not skill_loader.is_enabled(s.name)
+            ]
+        _save_toggle_state(disabled, disabled_skills)
+        return {"name": name, "enabled": req.enabled}
+
     # -- Skills (Phase 3) -----------------------------------------------------
 
     @app.get("/api/skills")
@@ -810,10 +879,30 @@ def create_app(
                     "description": s.description,
                     "always_load": s.always_load,
                     "task_types": s.task_types,
+                    "enabled": skill_loader.is_enabled(s.name),
                 }
                 for s in skill_loader.all_skills()
             ]
         return []
+
+    @app.patch("/api/skills/{name}")
+    async def toggle_skill(
+        name: str, req: ToggleRequest, _admin: AuthContext = Depends(require_admin)
+    ):
+        """Enable or disable a skill by name (admin only)."""
+        if not skill_loader:
+            raise HTTPException(status_code=503, detail="Skill loader not available")
+        if not skill_loader.set_enabled(name, req.enabled):
+            raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+        # Persist updated state
+        disabled_skills = [
+            s.name for s in skill_loader.all_skills() if not skill_loader.is_enabled(s.name)
+        ]
+        disabled_tools: list[str] = []
+        if tool_registry:
+            disabled_tools = [t["name"] for t in tool_registry.list_tools() if not t["enabled"]]
+        _save_toggle_state(disabled_tools, disabled_skills)
+        return {"name": name, "enabled": req.enabled}
 
     # -- Settings (API Keys) --------------------------------------------------
 
@@ -1463,6 +1552,82 @@ def create_app(
             return result
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
+    # -- Repositories ----------------------------------------------------------
+
+    if repo_manager:
+
+        class RepoCreateRequest(BaseModel):
+            name: str
+            source: str = "local"  # "local" or "github"
+            local_path: str = ""  # for source=local
+            github_repo: str = ""  # for source=github (owner/repo)
+            default_branch: str = "main"
+            tags: list[str] = []
+
+        @app.get("/api/repos")
+        async def list_repos(_user: str = Depends(get_current_user)):
+            """List all connected repositories."""
+            return [r.to_dict() for r in repo_manager.list_repos()]
+
+        @app.post("/api/repos")
+        async def create_repo(req: RepoCreateRequest, _admin: AuthContext = Depends(require_admin)):
+            """Add a repository (local path or clone from GitHub)."""
+            if req.source == "github":
+                if not req.github_repo:
+                    raise HTTPException(400, "github_repo is required for source=github")
+                repo = await repo_manager.add_from_github(
+                    github_repo=req.github_repo,
+                    default_branch=req.default_branch,
+                    tags=req.tags,
+                )
+            else:
+                if not req.local_path:
+                    raise HTTPException(400, "local_path is required for source=local")
+                repo = await repo_manager.add_local(
+                    name=req.name,
+                    local_path=req.local_path,
+                    default_branch=req.default_branch,
+                    tags=req.tags,
+                )
+            return repo.to_dict()
+
+        @app.get("/api/repos/{repo_id}")
+        async def get_repo(repo_id: str, _user: str = Depends(get_current_user)):
+            """Get a single repository by ID."""
+            repo = repo_manager.get(repo_id)
+            if not repo:
+                raise HTTPException(404, "Repository not found")
+            return repo.to_dict()
+
+        @app.delete("/api/repos/{repo_id}")
+        async def delete_repo(repo_id: str, _admin: AuthContext = Depends(require_admin)):
+            """Remove a repository from the registry."""
+            try:
+                await repo_manager.remove(repo_id)
+            except ValueError as e:
+                raise HTTPException(404, str(e))
+            return {"status": "removed"}
+
+        @app.get("/api/repos/{repo_id}/branches")
+        async def list_repo_branches(repo_id: str, _user: str = Depends(get_current_user)):
+            """List branches for a repository."""
+            branches = await repo_manager.list_branches(repo_id)
+            return {"branches": branches}
+
+        @app.post("/api/repos/{repo_id}/sync")
+        async def sync_repo(repo_id: str, _user: str = Depends(get_current_user)):
+            """Fetch latest changes for a repository."""
+            try:
+                msg = await repo_manager.sync_repo(repo_id)
+            except ValueError as e:
+                raise HTTPException(404, str(e))
+            return {"status": "ok", "message": msg}
+
+        @app.get("/api/github/repos")
+        async def list_github_repos(_admin: AuthContext = Depends(require_admin)):
+            """List repos from the connected GitHub account."""
+            repos = await repo_manager.list_github_repos()
+            return {"repos": repos}
 
     # -- Apps Platform ---------------------------------------------------------
 

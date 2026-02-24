@@ -300,3 +300,60 @@ class TestSkillExtensions:
         assert "Custom branding rules" in seo.instructions
         assert "design" in seo.task_types
         assert "content" in seo.task_types
+
+
+class TestSkillLoaderToggle:
+    """Tests for runtime enable/disable of skills."""
+
+    def test_is_enabled_default(self, tmp_path):
+        _write_skill(tmp_path, "s", "---\nname: s\ntask_types: [coding]\n---\n\nInstructions.")
+        loader = SkillLoader([tmp_path])
+        loader.load_all()
+        assert loader.is_enabled("s") is True
+
+    def test_set_enabled_disable(self, tmp_path):
+        _write_skill(tmp_path, "s", "---\nname: s\ntask_types: [coding]\n---\n\nInstructions.")
+        loader = SkillLoader([tmp_path])
+        loader.load_all()
+        result = loader.set_enabled("s", False)
+        assert result is True
+        assert loader.is_enabled("s") is False
+
+    def test_set_enabled_reenable(self, tmp_path):
+        _write_skill(tmp_path, "s", "---\nname: s\ntask_types: [coding]\n---\n\nInstructions.")
+        loader = SkillLoader([tmp_path])
+        loader.load_all()
+        loader.set_enabled("s", False)
+        loader.set_enabled("s", True)
+        assert loader.is_enabled("s") is True
+
+    def test_set_enabled_unknown_returns_false(self, tmp_path):
+        loader = SkillLoader([tmp_path])
+        loader.load_all()
+        assert loader.set_enabled("does-not-exist", False) is False
+
+    def test_disabled_skill_excluded_from_task_type(self, tmp_path):
+        _write_skill(tmp_path, "s1", "---\nname: s1\ntask_types: [coding]\n---\n\nS1.")
+        _write_skill(tmp_path, "s2", "---\nname: s2\ntask_types: [coding]\n---\n\nS2.")
+        loader = SkillLoader([tmp_path])
+        loader.load_all()
+        loader.set_enabled("s1", False)
+        active = loader.get_for_task_type("coding")
+        assert len(active) == 1
+        assert active[0].name == "s2"
+
+    def test_disabled_always_load_skill_excluded(self, tmp_path):
+        _write_skill(tmp_path, "always", "---\nname: always\nalways: true\n---\n\nAlways.")
+        loader = SkillLoader([tmp_path])
+        loader.load_all()
+        loader.set_enabled("always", False)
+        active = loader.get_for_task_type("anything")
+        assert len(active) == 0
+
+    def test_all_skills_includes_disabled(self, tmp_path):
+        _write_skill(tmp_path, "s", "---\nname: s\ntask_types: [coding]\n---\n\nInstructions.")
+        loader = SkillLoader([tmp_path])
+        loader.load_all()
+        loader.set_enabled("s", False)
+        all_skills = loader.all_skills()
+        assert len(all_skills) == 1
