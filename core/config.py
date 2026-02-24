@@ -136,6 +136,10 @@ class Settings:
     memory_dir: str = ".agent42/memory"
     sessions_dir: str = ".agent42/sessions"
 
+    # Scope change detection
+    scope_detection_enabled: bool = True
+    scope_detection_confidence_threshold: float = 0.5
+
     # Qdrant vector database (optional — enhances semantic search)
     qdrant_url: str = ""  # e.g. "http://localhost:6333" for Docker, or empty for embedded
     qdrant_api_key: str = ""  # API key for Qdrant Cloud or authenticated instances
@@ -325,6 +329,12 @@ class Settings:
             # Memory
             memory_dir=os.getenv("MEMORY_DIR", ".agent42/memory"),
             sessions_dir=os.getenv("SESSIONS_DIR", ".agent42/sessions"),
+            # Scope change detection
+            scope_detection_enabled=os.getenv("SCOPE_DETECTION_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
+            scope_detection_confidence_threshold=float(
+                os.getenv("SCOPE_DETECTION_CONFIDENCE_THRESHOLD", "0.5")
+            ),
             # Qdrant
             qdrant_url=os.getenv("QDRANT_URL", ""),
             qdrant_api_key=os.getenv("QDRANT_API_KEY", ""),

@@ -131,6 +131,9 @@ during Claude Code sessions without manual activation.
 | App Mode | `internal` (Agent42 system tool) or `external` (app being developed for public release) |
 | App Visibility | `private` (dashboard-only), `unlisted` (anyone with URL), `public` (listed openly) |
 | App API | Agent-to-app HTTP interaction — lets Agent42 call a running app's endpoints via `app_api` |
+| Scope Detection | Detects when a user's message changes topic from the active conversation scope, triggering a new branch/task |
+| Active Scope | `ScopeInfo` in `core/intent_classifier.py` — tracks the current conversation topic per channel session |
+| Scope Analysis | `ScopeAnalysis` in `core/intent_classifier.py` — result of scope change detection (continuation vs change) |
 | Chat Session | A persistent named conversation (chat or code type) with JSONL message storage |
 | Chat Session Manager | `core/chat_session_manager.py` — session CRUD, message persistence, auto-titling |
 | Code Page | Coding-focused chat interface with project setup flow (local/remote deploy, GitHub repo) |
@@ -547,6 +550,13 @@ Model selection in `model_router.py` uses a 4-layer resolution chain:
 | `MODEL_RESEARCH_ENABLED` | Enable web benchmark research | `true` |
 | `MODEL_RESEARCH_INTERVAL_HOURS` | Research fetch interval | `168` (weekly) |
 
+### Scope Detection Settings
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `SCOPE_DETECTION_ENABLED` | Enable scope change detection between messages | `true` |
+| `SCOPE_DETECTION_CONFIDENCE_THRESHOLD` | Below this confidence, ask user to confirm scope change | `0.5` |
+
 ### Optional Backends
 
 | Variable | Purpose | Default |
@@ -884,6 +894,8 @@ docker compose down              # Stop
 | 26 | Dashboard | CSP `script-src 'self'` blocks all inline event handlers (`onclick`, `onsubmit`) | CSP must include `'unsafe-inline'` in `script-src` because `app.js` uses innerHTML with 55+ inline handlers |
 | 27 | Startup | `agent42.log` owned by root (from systemd) blocks `deploy` user startup | Catch `PermissionError` on `FileHandler`; fall back to stdout-only logging |
 | 28 | Auth | `passlib 1.7.4` crashes with `bcrypt >= 4.1` (wrap-bug detection hashes >72-byte secret) | Use `bcrypt` directly via `_BcryptContext` wrapper in `dashboard/auth.py`; do not use `passlib` |
+| 29 | Session | `SessionManager.get_messages()` does not exist — use `get_history()` | Call `get_history(channel_type, channel_id, max_messages=N)` instead |
+| 30 | Scope | Scope detection LLM call adds latency to every message | Scope check only runs when an active scope exists and task is not yet DONE/FAILED |
 | 29 | Interview | New `TaskType.PROJECT_SETUP` not in `_TASK_TYPE_KEYWORDS` — it's triggered via complexity gating, not keywords | Detection flows through `ComplexityAssessor.needs_project_setup` and `IntentClassifier.needs_project_setup`, not keyword matching |
 | 30 | Interview | Project interview tool stores state in `PROJECT.json` — if outputs dir changes, sessions are lost | Always use `settings.outputs_dir` consistently; sessions are keyed by `project_id` subdirectory |
 

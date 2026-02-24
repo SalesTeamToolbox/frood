@@ -44,6 +44,7 @@ class SessionManager:
         self.sessions_dir = Path(sessions_dir)
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self._sessions: dict[str, list[SessionMessage]] = {}
+        self._active_scopes: dict = {}  # key -> ScopeInfo (lazy import to avoid circular)
         self._redis = redis_backend  # RedisSessionBackend (optional)
         self._consolidation = consolidation_pipeline  # ConsolidationPipeline (optional)
 
@@ -159,7 +160,7 @@ class SessionManager:
         return [{"role": m.role, "content": m.content} for m in messages]
 
     def clear_session(self, channel_type: str, channel_id: str):
-        """Clear a session's history."""
+        """Clear a session's history and active scope."""
         key = self._session_key(channel_type, channel_id)
         self._sessions.pop(key, None)
         path = self._session_path(key)
@@ -170,7 +171,80 @@ class SessionManager:
         if self._redis and self._redis.is_available:
             self._redis.clear_session(channel_type, channel_id)
 
+        # Clear the active scope for this session
+        self.clear_active_scope(channel_type, channel_id)
+
         logger.info(f"Session cleared: {key}")
+
+    # ------------------------------------------------------------------
+    # Active scope tracking
+    # ------------------------------------------------------------------
+
+    def _scope_path(self, key: str) -> Path:
+        """Get the JSON sidecar file path for a session's active scope."""
+        safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
+        return self.sessions_dir / f"{safe_key}.scope.json"
+
+    def get_active_scope(self, channel_type: str, channel_id: str):
+        """Get the active scope for a session, if any.
+
+        Returns a ScopeInfo instance or None.
+        """
+        key = self._session_key(channel_type, channel_id)
+        if key not in self._active_scopes:
+            self._active_scopes[key] = self._load_scope(key)
+        return self._active_scopes.get(key)
+
+    def set_active_scope(self, channel_type: str, channel_id: str, scope) -> None:
+        """Set or update the active scope for a session.
+
+        Args:
+            channel_type: The channel type (e.g., "discord", "slack").
+            channel_id: The channel/chat ID.
+            scope: A ScopeInfo instance.
+        """
+        key = self._session_key(channel_type, channel_id)
+        self._active_scopes[key] = scope
+        self._persist_scope(key, scope)
+
+    def clear_active_scope(self, channel_type: str, channel_id: str) -> None:
+        """Clear the active scope for a session."""
+        key = self._session_key(channel_type, channel_id)
+        self._active_scopes.pop(key, None)
+        scope_path = self._scope_path(key)
+        if scope_path.exists():
+            try:
+                scope_path.unlink()
+            except OSError as e:
+                logger.warning(f"Failed to remove scope file {scope_path}: {e}")
+
+    def _load_scope(self, key: str):
+        """Load a scope from its JSON sidecar file.
+
+        Returns a ScopeInfo instance or None.
+        """
+        path = self._scope_path(key)
+        if not path.exists():
+            return None
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.loads(f.read())
+            # Lazy import to avoid circular dependency
+            from core.intent_classifier import ScopeInfo
+
+            return ScopeInfo.from_dict(data)
+        except Exception as e:
+            logger.warning(f"Failed to load scope for {key}: {e}")
+            return None
+
+    def _persist_scope(self, key: str, scope) -> None:
+        """Persist a scope to its JSON sidecar file."""
+        path = self._scope_path(key)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(scope.to_dict()))
+        except Exception as e:
+            logger.error(f"Failed to persist scope for {key}: {e}")
 
     def _load_session(self, key: str) -> list[SessionMessage]:
         """Load a session from its JSONL file."""
