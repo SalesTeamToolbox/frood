@@ -224,6 +224,7 @@ class Task:
     parent_task_id: str = ""
     position: int = 0  # Kanban column ordering
     context_window: str = "default"  # default | large | max
+    token_usage: dict = field(default_factory=dict)  # Per-task token tracking by model
 
     def add_comment(self, author: str, text: str):
         self.comments.append(

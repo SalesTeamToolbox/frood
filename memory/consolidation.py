@@ -124,7 +124,9 @@ class ConsolidationPipeline:
         )
 
         try:
-            summary_text = await self.router.complete(model, [{"role": "user", "content": prompt}])
+            summary_text, _ = await self.router.complete(
+                model, [{"role": "user", "content": prompt}]
+            )
         except Exception as e:
             logger.warning(f"Consolidation: summarization failed — {e}")
             return None

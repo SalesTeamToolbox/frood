@@ -147,7 +147,7 @@ class Learner:
         )
 
         try:
-            reflection = await self.router.complete(
+            reflection, _ = await self.router.complete(
                 self.reflection_model,
                 [{"role": "user", "content": prompt}],
             )
@@ -214,7 +214,7 @@ class Learner:
         )
 
         try:
-            response = await self.router.complete(
+            response, _ = await self.router.complete(
                 self.reflection_model,
                 [{"role": "user", "content": prompt}],
             )

@@ -249,7 +249,7 @@ class ImageGenTool(Tool):
         )
 
         try:
-            enhanced = await self._router.complete(
+            enhanced, _ = await self._router.complete(
                 PROMPT_REVIEWER_MODEL,
                 [{"role": "user", "content": review_prompt}],
                 temperature=0.3,

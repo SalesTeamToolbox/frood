@@ -173,7 +173,9 @@ class IntentClassifier:
                 }
             )
 
-        response = await self.router.complete(self.model, messages, temperature=0.1, max_tokens=300)
+        response, _ = await self.router.complete(
+            self.model, messages, temperature=0.1, max_tokens=300
+        )
 
         return self._parse_response(response, message)
 

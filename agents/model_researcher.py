@@ -182,7 +182,7 @@ class ModelResearcher:
             )
 
             try:
-                response = await router.complete(
+                response, _ = await router.complete(
                     "or-free-deepseek-chat",  # Use cheap model for analysis
                     [
                         {"role": "system", "content": RESEARCH_SYSTEM_PROMPT},
