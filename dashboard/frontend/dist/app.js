@@ -775,6 +775,8 @@ async function submitCodeSetup(sessionId) {
   const appName = document.getElementById("code-app-name")?.value || "Untitled";
   const sshHost = document.getElementById("code-ssh-host")?.value || "";
   const ghRepoName = document.getElementById("code-gh-repo")?.value || "";
+  const ghCloneUrl = document.getElementById("code-gh-clone-url")?.value || "";
+  const ghPrivate = document.getElementById("code-gh-private")?.checked ?? true;
 
   try {
     const result = await api(`/chat/sessions/${sessionId}/setup`, {
@@ -782,6 +784,7 @@ async function submitCodeSetup(sessionId) {
       body: JSON.stringify({
         mode, runtime, app_name: appName,
         ssh_host: sshHost, github_repo_name: ghRepoName,
+        github_clone_url: ghCloneUrl, github_private: ghPrivate,
       }),
     });
     // Update session in local state
@@ -2481,6 +2484,14 @@ function renderCodeSetupHTML(sessionId) {
               <div class="setup-card-desc">Deploy to a remote server via SSH connection</div>
             </div>
           </label>
+          <label class="setup-card">
+            <input type="radio" name="code-mode" value="github">
+            <div class="setup-card-content">
+              <div class="setup-card-icon">&#128025;</div>
+              <div class="setup-card-title">GitHub Repository</div>
+              <div class="setup-card-desc">Connect to a GitHub repo — create new or clone existing</div>
+            </div>
+          </label>
         </div>
         <button class="btn btn-primary" style="margin-top:1.5rem" onclick="state.codeSetupStep=2;renderCode()">Continue</button>
       </div>`;
@@ -2512,15 +2523,40 @@ function renderCodeSetupHTML(sessionId) {
         <label><input type="checkbox" id="code-deploy-now"> Deploy immediately after setup</label>
       </div>`;
 
+    const githubFields = `
+      <div class="form-group">
+        <label>Repository Name</label>
+        <input type="text" id="code-gh-repo" placeholder="my-project">
+        <div class="help">${state.githubConnected ? "A new repo will be created under your GitHub account" : '<a href="#" onclick="openSettings();return false">Connect GitHub in Settings</a> to enable repo creation'}</div>
+      </div>
+      <div class="form-group">
+        <label>Or clone an existing repo</label>
+        <input type="text" id="code-gh-clone-url" placeholder="https://github.com/user/repo.git">
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" id="code-gh-private" checked> Private repository</label>
+      </div>
+      <div class="form-group">
+        <label>Runtime</label>
+        <select id="code-runtime">
+          <option value="python">Python (Flask/FastAPI)</option>
+          <option value="node">Node.js (Express/Next.js)</option>
+          <option value="static">Static (HTML/CSS/JS)</option>
+        </select>
+      </div>`;
+
+    const titles = { local: "Local App Setup", remote: "Remote Server Setup", github: "GitHub Repository Setup" };
+
     return `
       <div class="code-setup">
-        <h3>${mode === "local" ? "Local App Setup" : "Remote Server Setup"}</h3>
-        ${mode === "local" ? localFields : remoteFields}
+        <h3>${titles[mode] || "Project Setup"}</h3>
+        ${mode === "local" ? localFields : mode === "github" ? githubFields : remoteFields}
+        ${mode !== "github" ? `
         <div class="form-group">
           <label>GitHub Repository (optional)</label>
           <input type="text" id="code-gh-repo" placeholder="my-project">
           <div class="help">${state.githubConnected ? "Connected to GitHub" : "Connect GitHub in Settings to enable"}</div>
-        </div>
+        </div>` : ""}
         <div style="display:flex;gap:0.5rem;margin-top:1.5rem">
           <button class="btn btn-outline" onclick="state.codeSetupStep=1;renderCode()">Back</button>
           <button class="btn btn-primary" onclick="submitCodeSetup('${sessionId}')">Start Coding</button>
@@ -2554,7 +2590,8 @@ function renderCodeChatHTML() {
 
   const typingHtml = state.codeSending ? `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim);color:var(--success)">42</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
 
-  const sessionInfo = session?.deployment_target ? `<div class="code-session-info"><span>${session.deployment_target === "local" ? "Local" : "Remote"}</span>${session.github_repo ? ` <span>&#8226; ${esc(session.github_repo)}</span>` : ""}</div>` : "";
+  const deployLabel = { local: "Local", remote: "Remote", github: "GitHub" }[session?.deployment_target] || session?.deployment_target || "";
+  const sessionInfo = session?.deployment_target ? `<div class="code-session-info"><span>${deployLabel}</span>${session.github_repo ? ` <span>&#8226; ${esc(session.github_repo)}</span>` : ""}</div>` : "";
 
   return `
     <div class="code-chat-area ${state.codeCanvasOpen ? 'canvas-active' : ''}">
