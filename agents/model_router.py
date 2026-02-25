@@ -17,6 +17,7 @@ import logging
 import os
 from pathlib import Path
 
+from core.config import settings
 from core.task_queue import TaskType
 from providers.registry import ProviderRegistry
 
@@ -143,22 +144,45 @@ class ModelRouter:
         override = self._check_admin_override(task_type)
         if override:
             logger.info("Admin override for %s: %s", task_type.value, override)
-            return override
-
-        # 2. Dynamic routing from outcome tracking + research
-        dynamic = self._check_dynamic_routing(task_type)
-        if dynamic:
-            logger.info(
-                "Dynamic routing for %s: primary=%s (confidence=%.2f, n=%d)",
-                task_type.value,
-                dynamic.get("primary", "?"),
-                dynamic.get("confidence", 0),
-                dynamic.get("sample_size", 0),
-            )
-            routing = dynamic.copy()
+            routing = override
         else:
-            # 4. Hardcoded free defaults
-            routing = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING]).copy()
+            # 2. Dynamic routing from outcome tracking + research
+            dynamic = self._check_dynamic_routing(task_type)
+            if dynamic:
+                logger.info(
+                    "Dynamic routing for %s: primary=%s (confidence=%.2f, n=%d)",
+                    task_type.value,
+                    dynamic.get("primary", "?"),
+                    dynamic.get("confidence", 0),
+                    dynamic.get("sample_size", 0),
+                )
+                routing = dynamic.copy()
+            else:
+                # 4. Hardcoded free defaults
+                routing = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING]).copy()
+
+        # Validate that the primary model's provider is configured; if not, fallback to OpenRouter free model
+        primary_model = routing.get("primary")
+        if primary_model:
+            try:
+                spec = self.registry.get_model(primary_model)
+                provider = spec.provider
+                api_key_field = f"{provider.value.lower()}_api_key"
+                api_key = getattr(settings, api_key_field, "")
+                if not api_key:
+                    logger.warning(
+                        f"Model {primary_model} requires provider {provider.value} but "
+                        f"{api_key_field} is not set. Falling back to OpenRouter free model for {task_type.value}."
+                    )
+                    # Fallback to the default OpenRouter free model for this task type
+                    fallback = FREE_ROUTING.get(task_type)
+                    if fallback:
+                        routing = fallback.copy()
+                    else:
+                        routing = FREE_ROUTING[TaskType.CODING].copy()
+            except ValueError:
+                logger.warning(f"Unknown model {primary_model}, falling back to default free routing")
+                routing = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING]).copy()
 
         # 3. Trial injection — maybe swap primary for an unproven model
         trial_model = self._check_trial(task_type)
