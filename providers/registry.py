@@ -340,6 +340,8 @@ class ProviderRegistry:
         api_key = getattr(settings, f"{provider_type.value.lower()}_api_key", "")
         base_url = os.getenv(f"{provider_type.value.upper()}_BASE_URL", spec.base_url)
 
+        logger.debug(f"Provider: {provider_type}, API Key: {api_key}, Base URL: {base_url}")
+
         if not api_key:
             logger.error(f"{spec.api_key_env} not set — {spec.display_name} models will fail")
             raise ValueError(f"{spec.api_key_env} not set — {spec.display_name} models will fail")
