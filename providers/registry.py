@@ -12,6 +12,8 @@ from enum import Enum
 
 from openai import AsyncOpenAI
 
+from core.config import settings
+
 logger = logging.getLogger("agent42.providers")
 
 
@@ -337,7 +339,8 @@ class ProviderRegistry:
         if not spec:
             raise ValueError(f"Unknown provider: {provider_type}")
 
-        api_key = os.getenv(spec.api_key_env, "")
+        # Use settings object instead of os.getenv to respect runtime updates
+        api_key = getattr(settings, f"{provider_type.value.lower()}_api_key", "")
         base_url = os.getenv(f"{provider_type.value.upper()}_BASE_URL", spec.base_url)
 
         if not api_key:
@@ -374,13 +377,11 @@ class ProviderRegistry:
         The usage_dict contains model_key, prompt_tokens, and completion_tokens
         when available, or None if the API did not return usage data.
         """
-        from core.config import settings as _settings
-
-        if not spending_tracker.check_limit(_settings.max_daily_api_spend_usd):
+        if not spending_tracker.check_limit(settings.max_daily_api_spend_usd):
             raise SpendingLimitExceeded(
                 f"Daily API spending limit reached "
                 f"(${spending_tracker.daily_spend_usd:.2f} / "
-                f"${_settings.max_daily_api_spend_usd:.2f})"
+                f"${settings.max_daily_api_spend_usd:.2f})"
             )
 
         spec = self.get_model(model_key)
@@ -421,13 +422,11 @@ class ProviderRegistry:
 
         Returns the full response object so callers can inspect tool_calls.
         """
-        from core.config import settings as _settings
-
-        if not spending_tracker.check_limit(_settings.max_daily_api_spend_usd):
+        if not spending_tracker.check_limit(settings.max_daily_api_spend_usd):
             raise SpendingLimitExceeded(
                 f"Daily API spending limit reached "
                 f"(${spending_tracker.daily_spend_usd:.2f} / "
-                f"${_settings.max_daily_api_spend_usd:.2f})"
+                f"${settings.max_daily_api_spend_usd:.2f})"
             )
 
         spec = self.get_model(model_key)
@@ -458,7 +457,7 @@ class ProviderRegistry:
         """List all providers and their availability status."""
         result = []
         for ptype, spec in PROVIDERS.items():
-            api_key = os.getenv(spec.api_key_env, "")
+            api_key = getattr(settings, f"{ptype.value.lower()}_api_key", "")
             result.append(
                 {
                     "provider": ptype.value,
@@ -474,13 +473,14 @@ class ProviderRegistry:
         result = []
         for key, spec in MODELS.items():
             provider = PROVIDERS.get(spec.provider)
+            api_key = getattr(settings, f"{spec.provider.value.lower()}_api_key", "") if provider else ""
             result.append(
                 {
                     "key": key,
                     "model_id": spec.model_id,
                     "provider": spec.provider.value,
                     "display_name": spec.display_name or key,
-                    "configured": bool(os.getenv(provider.api_key_env, "")) if provider else False,
+                    "configured": bool(api_key),
                 }
             )
         return result
