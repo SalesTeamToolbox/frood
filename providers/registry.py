@@ -24,6 +24,8 @@ class SpendingLimitExceeded(RuntimeError):
 
 
 class ProviderType(str, Enum):
+    """Provider type enumeration."""
+
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     DEEPSEEK = "deepseek"
@@ -33,28 +35,12 @@ class ProviderType(str, Enum):
     CUSTOM = "custom"
 
 
-@dataclass(frozen=True)
-class ProviderSpec:
-    """Declarative provider specification."""
-
-    provider_type: ProviderType
-    base_url: str
-    api_key_env: str  # Environment variable name for the API key
-    display_name: str = ""
-    default_model: str = ""
-    supports_streaming: bool = True
-    supports_function_calling: bool = True
-    max_tokens_default: int = 4096
-    requires_model_prefix: bool = False  # Some gateways need provider/ prefix
-    model_prefix: str = ""  # e.g. "anthropic/" for OpenRouter
-
-
 class ModelTier(str, Enum):
     """Cost tier for model selection strategy."""
 
-    FREE = "free"  # $0 models (OpenRouter free tier)
-    CHEAP = "cheap"  # Low-cost models (GPT-4o-mini, Haiku, etc.)
-    PREMIUM = "premium"  # Full-price frontier models (GPT-4o, Sonnet, etc.)
+    FREE = "free"
+    CHEAP = "cheap"
+    PREMIUM = "premium"
 
 
 @dataclass(frozen=True)
@@ -70,7 +56,19 @@ class ModelSpec:
     max_context_tokens: int = 128000
 
 
-# -- Provider catalog ---------------------------------------------------------
+@dataclass(frozen=True)
+class ProviderSpec:
+    """Provider configuration specification."""
+
+    provider_type: ProviderType
+    base_url: str
+    api_key_env: str
+    display_name: str
+    default_model: str
+    requires_model_prefix: bool = False
+    supports_function_calling: bool = True
+
+
 PROVIDERS: dict[ProviderType, ProviderSpec] = {
     ProviderType.OPENAI: ProviderSpec(
         provider_type=ProviderType.OPENAI,
@@ -119,7 +117,7 @@ PROVIDERS: dict[ProviderType, ProviderSpec] = {
     ),
 }
 
-# -- Model catalog ------------------------------------------------------------
+
 MODELS: dict[str, ModelSpec] = {
     # ═══════════════════════════════════════════════════════════════════════════
     # FREE TIER — $0 models for bulk agent work (default for all task types)
@@ -323,7 +321,6 @@ class SpendingTracker:
         return sum(self._daily_tokens.values())
 
 
-# Shared spending tracker
 spending_tracker = SpendingTracker()
 
 
@@ -473,7 +470,11 @@ class ProviderRegistry:
         result = []
         for key, spec in MODELS.items():
             provider = PROVIDERS.get(spec.provider)
-            api_key = getattr(settings, f"{spec.provider.value.lower()}_api_key", "") if provider else ""
+            api_key = (
+                getattr(settings, f"{spec.provider.value.lower()}_api_key", "")
+                if provider
+                else ""
+            )
             result.append(
                 {
                     "key": key,

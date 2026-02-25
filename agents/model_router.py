@@ -159,30 +159,9 @@ class ModelRouter:
                 routing = dynamic.copy()
             else:
                 # 4. Hardcoded free defaults
-                routing = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING]).copy()
-
-        # Validate that the primary model's provider is configured; if not, fallback to OpenRouter free model
-        primary_model = routing.get("primary")
-        if primary_model:
-            try:
-                spec = self.registry.get_model(primary_model)
-                provider = spec.provider
-                api_key_field = f"{provider.value.lower()}_api_key"
-                api_key = getattr(settings, api_key_field, "")
-                if not api_key:
-                    logger.warning(
-                        f"Model {primary_model} requires provider {provider.value} but "
-                        f"{api_key_field} is not set. Falling back to OpenRouter free model for {task_type.value}."
-                    )
-                    # Fallback to the default OpenRouter free model for this task type
-                    fallback = FREE_ROUTING.get(task_type)
-                    if fallback:
-                        routing = fallback.copy()
-                    else:
-                        routing = FREE_ROUTING[TaskType.CODING].copy()
-            except ValueError:
-                logger.warning(f"Unknown model {primary_model}, falling back to default free routing")
-                routing = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING]).copy()
+                routing = FREE_ROUTING.get(
+                    task_type, FREE_ROUTING[TaskType.CODING]
+                ).copy()
 
         # 3. Trial injection — maybe swap primary for an unproven model
         trial_model = self._check_trial(task_type)
@@ -206,6 +185,47 @@ class ModelRouter:
             free_large = [m for m in large_models if m["tier"] == "free"]
             if free_large:
                 routing["primary"] = free_large[0]["key"]
+
+        # After all modifications, ensure the primary model is available (in registry and API key set)
+        primary_model = routing.get("primary")
+        if primary_model:
+            try:
+                spec = self.registry.get_model(primary_model)
+                provider = spec.provider
+                api_key_field = f"{provider.value.lower()}_api_key"
+                api_key = getattr(settings, api_key_field, "")
+                if not api_key:
+                    raise ValueError(f"API key {api_key_field} not set for provider {provider.value}")
+            except ValueError as e:
+                logger.warning(
+                    f"Model {primary_model} is not available: {e}. "
+                    "Attempting to find a fallback free model."
+                )
+                # Try to find any free model that is available
+                for model in self.registry.free_models():
+                    try:
+                        spec = self.registry.get_model(model["key"])
+                        provider = spec.provider
+                        api_key_field = f"{provider.value.lower()}_api_key"
+                        api_key = getattr(settings, api_key_field, "")
+                        if api_key:
+                            routing["primary"] = model["key"]
+                            logger.info(f"Fell back to free model {model['key']}")
+                            break
+                    except ValueError:
+                        continue
+                else:
+                    # No free model with API key found, use the task type's free routing as last resort
+                    fallback = FREE_ROUTING.get(task_type)
+                    routing = (
+                        fallback.copy()
+                        if fallback
+                        else FREE_ROUTING[TaskType.CODING].copy()
+                    )
+                    logger.error(
+                        f"No available free model found for {task_type.value}. "
+                        "Using fallback routing, but it may fail."
+                    )
 
         return routing
 
