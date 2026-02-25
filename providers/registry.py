@@ -54,6 +54,19 @@ class ModelSpec:
     max_context_tokens: int = 128000
 
 
+@dataclass(frozen=True)
+class ProviderSpec:
+    """Provider configuration specification."""
+
+    provider_type: ProviderType
+    base_url: str
+    api_key_env: str
+    display_name: str
+    default_model: str
+    requires_model_prefix: bool = False
+    supports_function_calling: bool = True
+
+
 # -- Provider catalog ---------------------------------------------------------
 
 PROVIDERS: dict[ProviderType, ProviderSpec] = {
