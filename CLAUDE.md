@@ -401,6 +401,7 @@ class TestWorkspaceSandbox:
 | 35 | Subprocess | `asyncio.wait_for(proc.communicate(), timeout=N)` cancels the coroutine but orphans the subprocess on `TimeoutError` | Always wrap in `try/except TimeoutError`, then call `proc.kill()` + `await proc.wait()` to reap the process |
 | 36 | Async | `asyncio.get_event_loop()` is deprecated since Python 3.10; raises `DeprecationWarning` and may fail if no current loop | Use `asyncio.get_running_loop()` inside coroutines; use `asyncio.new_event_loop()` in non-async startup code |
 | 37 | Tokens | CLAUDE.md loaded on every API call wastes ~5K tokens of rarely-needed reference content | Reference docs extracted to `.claude/reference/` and loaded on-demand by `context-loader.py` hook |
+| 38 | Providers | `_build_client()` reading `settings.xxx_api_key` misses admin-configured keys — `settings` is frozen at import time, before `KeyStore.inject_into_environ()` runs | Use `os.getenv(spec.api_key_env, "")` in `_build_client()` and related methods so runtime admin keys are picked up |
 
 ---
 

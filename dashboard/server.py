@@ -1092,9 +1092,12 @@ def create_app(
                 key_store.set_key(env_var, value)
             updated.append(env_var)
 
-        # Keys are injected into os.environ by set_key/delete_key, so new
-        # ProviderRegistry clients (created per-agent-run) will pick them up
-        # automatically via os.getenv() in _build_client().
+        # Keys are injected into os.environ by set_key/delete_key.
+        # _build_client() reads from os.getenv(spec.api_key_env) so new
+        # ProviderRegistry instances (created per-agent-run) pick up the
+        # change immediately. Reload settings so that any code reading
+        # settings.xxx_api_key directly also sees the new value.
+        Settings.reload_from_env()
         return {"status": "ok", "updated": updated, "errors": errors}
 
     # -- Settings (Editable .env) ----------------------------------------------

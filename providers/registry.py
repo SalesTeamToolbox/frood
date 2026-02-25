@@ -336,8 +336,12 @@ class ProviderRegistry:
         if not spec:
             raise ValueError(f"Unknown provider: {provider_type}")
 
-        # Use settings object instead of os.getenv to respect runtime updates
-        api_key = getattr(settings, f"{provider_type.value.lower()}_api_key", "")
+        # Use os.getenv so both .env values (loaded at startup via load_dotenv) and
+        # admin-configured keys (injected by KeyStore.inject_into_environ at startup,
+        # or updated at runtime by KeyStore.set_key) are picked up correctly.
+        # Reading from the `settings` frozen dataclass is wrong here because settings
+        # is created at import time, before KeyStore.inject_into_environ() runs.
+        api_key = os.getenv(spec.api_key_env, "")
         base_url = os.getenv(f"{provider_type.value.upper()}_BASE_URL", spec.base_url)
 
         if not api_key:
@@ -455,7 +459,7 @@ class ProviderRegistry:
         """List all providers and their availability status."""
         result = []
         for ptype, spec in PROVIDERS.items():
-            api_key = getattr(settings, f"{ptype.value.lower()}_api_key", "")
+            api_key = os.getenv(spec.api_key_env, "")
             result.append(
                 {
                     "provider": ptype.value,
@@ -471,11 +475,7 @@ class ProviderRegistry:
         result = []
         for key, spec in MODELS.items():
             provider = PROVIDERS.get(spec.provider)
-            api_key = (
-                getattr(settings, f"{spec.provider.value.lower()}_api_key", "")
-                if provider
-                else ""
-            )
+            api_key = os.getenv(provider.api_key_env, "") if provider else ""
             result.append(
                 {
                     "key": key,
