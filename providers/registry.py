@@ -346,23 +346,6 @@ class ProviderRegistry:
 
         return AsyncOpenAI(base_url=base_url, api_key=api_key)
 
-    def get_client(self, provider_type: ProviderType) -> AsyncOpenAI:
-        """Get or create a client for a provider."""
-        if provider_type not in self._clients:
-            self._clients[provider_type] = self._build_client(provider_type)
-        return self._clients[provider_type]
-
-    def clear_cache(self):
-        """Clear cached clients so they rebuild with fresh API keys on next use."""
-        self._clients.clear()
-
-    def get_model(self, model_key: str) -> ModelSpec:
-        """Resolve a model key to its spec."""
-        spec = MODELS.get(model_key)
-        if not spec:
-            raise ValueError(f"Unknown model: {model_key}. Available: {list(MODELS.keys())}")
-        return spec
-
     async def complete(
         self,
         model_key: str,
