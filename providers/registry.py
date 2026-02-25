@@ -24,6 +24,8 @@ class SpendingLimitExceeded(RuntimeError):
 
 
 class ProviderType(str, Enum):
+    """Provider type enumeration."""
+
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     DEEPSEEK = "deepseek"
