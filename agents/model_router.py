@@ -212,11 +212,7 @@ class ModelRouter:
                 else:
                     # No free model with API key found, use the task type's free routing as last resort
                     fallback = FREE_ROUTING.get(task_type)
-                    routing = (
-                        fallback.copy()
-                        if fallback
-                        else FREE_ROUTING[TaskType.CODING].copy()
-                    )
+                    routing = fallback.copy() if fallback else FREE_ROUTING[TaskType.CODING].copy()
                     logger.error(
                         f"No available free model found for {task_type.value}. "
                         "Using fallback routing, but it may fail."

@@ -36,9 +36,7 @@ class ProviderType(str, Enum):
 class ModelTier(str, Enum):
     """Cost tier for model selection strategy."""
 
-    FREE = "free"  # $0 models (OpenRouter free tier)
-    CHEAP = "cheap"  # Low-cost models (GPT-4o-mini, Haiku, etc.)
-    PREMIUM = "premium"  # Full-price frontier models (GPT-4o, Sonnet, etc.)
+    pass
 
 
 @dataclass(frozen=True)
@@ -66,8 +64,6 @@ class ProviderSpec:
     requires_model_prefix: bool = False
     supports_function_calling: bool = True
 
-
-# -- Provider catalog ---------------------------------------------------------
 
 PROVIDERS: dict[ProviderType, ProviderSpec] = {
     ProviderType.OPENAI: ProviderSpec(
@@ -117,7 +113,6 @@ PROVIDERS: dict[ProviderType, ProviderSpec] = {
     ),
 }
 
-# -- Model catalog ------------------------------------------------------------
 
 MODELS: dict[str, ModelSpec] = {
     # ═══════════════════════════════════════════════════════════════════════════
@@ -322,8 +317,6 @@ class SpendingTracker:
         return sum(self._daily_tokens.values())
 
 
-# Shared spending tracker
-
 spending_tracker = SpendingTracker()
 
 
@@ -473,11 +466,7 @@ class ProviderRegistry:
         result = []
         for key, spec in MODELS.items():
             provider = PROVIDERS.get(spec.provider)
-            api_key = (
-                getattr(settings, f"{spec.provider.value.lower()}_api_key", "")
-                if provider
-                else ""
-            )
+            api_key = getattr(settings, f"{spec.provider.value.lower()}_api_key", "") if provider else ""
             result.append(
                 {
                     "key": key,
