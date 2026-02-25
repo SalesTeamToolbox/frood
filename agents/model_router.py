@@ -159,7 +159,9 @@ class ModelRouter:
                 routing = dynamic.copy()
             else:
                 # 4. Hardcoded free defaults
-                routing = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING]).copy()
+                routing = FREE_ROUTING.get(
+                    task_type, FREE_ROUTING[TaskType.CODING]
+                ).copy()
 
         # 3. Trial injection — maybe swap primary for an unproven model
         trial_model = self._check_trial(task_type)
@@ -195,7 +197,10 @@ class ModelRouter:
                 if not api_key:
                     raise ValueError(f"API key {api_key_field} not set for provider {provider.value}")
             except ValueError as e:
-                logger.warning(f"Model {primary_model} is not available: {e}. Attempting to find a fallback free model.")
+                logger.warning(
+                    f"Model {primary_model} is not available: {e}. "
+                    "Attempting to find a fallback free model."
+                )
                 # Try to find any free model that is available
                 for model in self.registry.free_models():
                     try:

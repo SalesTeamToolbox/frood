@@ -36,9 +36,9 @@ class ProviderType(str, Enum):
 class ModelTier(str, Enum):
     """Cost tier for model selection strategy."""
 
-    FREE = "free"  # $0 models (OpenRouter free tier)
-    CHEAP = "cheap"  # Low-cost models (GPT-4o-mini, Haiku, etc.)
-    PREMIUM = "premium"  # Full-price frontier models (GPT-4o, Sonnet, etc.)
+    FREE = "free"
+    CHEAP = "cheap"
+    PREMIUM = "premium"
 
 
 @dataclass(frozen=True)
@@ -66,8 +66,6 @@ class ProviderSpec:
     requires_model_prefix: bool = False
     supports_function_calling: bool = True
 
-
-# -- Provider catalog ---------------------------------------------------------
 
 PROVIDERS: dict[ProviderType, ProviderSpec] = {
     ProviderType.OPENAI: ProviderSpec(
@@ -117,7 +115,6 @@ PROVIDERS: dict[ProviderType, ProviderSpec] = {
     ),
 }
 
-# -- Model catalog ------------------------------------------------------------
 
 MODELS: dict[str, ModelSpec] = {
     # ═══════════════════════════════════════════════════════════════════════════
@@ -321,8 +318,6 @@ class SpendingTracker:
     def daily_tokens(self) -> int:
         return sum(self._daily_tokens.values())
 
-
-# Shared spending tracker
 
 spending_tracker = SpendingTracker()
 
