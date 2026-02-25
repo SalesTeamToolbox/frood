@@ -341,9 +341,10 @@ class ProviderRegistry:
         base_url = os.getenv(f"{provider_type.value.upper()}_BASE_URL", spec.base_url)
 
         if not api_key:
-            logger.warning(f"{spec.api_key_env} not set — {spec.display_name} models will fail")
+            logger.error(f"{spec.api_key_env} not set — {spec.display_name} models will fail")
+            raise ValueError(f"{spec.api_key_env} not set — {spec.display_name} models will fail")
 
-        return AsyncOpenAI(base_url=base_url, api_key=api_key or "not-set")
+        return AsyncOpenAI(base_url=base_url, api_key=api_key)
 
     def get_client(self, provider_type: ProviderType) -> AsyncOpenAI:
         """Get or create a client for a provider."""
