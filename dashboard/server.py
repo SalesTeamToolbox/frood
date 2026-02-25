@@ -2098,6 +2098,8 @@ def create_app(
             if account_id and github_account_store:
                 tok = github_account_store.get_token(account_id)
                 repos = await repo_manager.list_github_repos(token=tok)
+                for repo in repos:
+                    repo["account_id"] = account_id
                 return {"repos": repos}
 
             if github_account_store:
@@ -2105,11 +2107,12 @@ def create_app(
                 if all_tokens:
                     seen: set[str] = set()
                     merged: list[dict] = []
-                    for _acct_id, tok in all_tokens:
+                    for acct_id, tok in all_tokens:
                         for repo in await repo_manager.list_github_repos(token=tok):
                             key = repo.get("full_name", "")
                             if key not in seen:
                                 seen.add(key)
+                                repo["account_id"] = acct_id
                                 merged.append(repo)
                     return {"repos": merged}
 

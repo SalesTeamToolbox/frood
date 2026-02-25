@@ -2693,7 +2693,7 @@ function renderReposPanel() {
       <td style="font-size:0.8rem;color:var(--text-muted)">${esc(r.description).substring(0, 60)}</td>
       <td>${esc(r.default_branch)}</td>
       <td>${esc(r.language)}</td>
-      <td>${alreadyAdded ? '<span style="color:var(--success)">Added</span>' : `<button class="btn btn-primary btn-sm" onclick="addGithubRepo('${esc(r.full_name)}','${esc(r.default_branch)}')">Add</button>`}</td>
+      <td>${alreadyAdded ? '<span style="color:var(--success)">Added</span>' : `<button class="btn btn-primary btn-sm" onclick="addGithubRepo('${esc(r.full_name)}','${esc(r.default_branch)}','${esc(r.account_id || "")}')">Add</button>`}</td>
     </tr>`;
   }).join("");
 
