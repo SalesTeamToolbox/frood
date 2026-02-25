@@ -466,7 +466,11 @@ class ProviderRegistry:
         result = []
         for key, spec in MODELS.items():
             provider = PROVIDERS.get(spec.provider)
-            api_key = getattr(settings, f"{spec.provider.value.lower()}_api_key", "") if provider else ""
+            api_key = (
+                getattr(settings, f"{spec.provider.value.lower()}_api_key", "")
+                if provider
+                else ""
+            )
             result.append(
                 {
                     "key": key,
