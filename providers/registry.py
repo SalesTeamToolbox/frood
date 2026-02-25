@@ -36,7 +36,9 @@ class ProviderType(str, Enum):
 class ModelTier(str, Enum):
     """Cost tier for model selection strategy."""
 
-    pass
+    FREE = "free"
+    CHEAP = "cheap"
+    PREMIUM = "premium"
 
 
 @dataclass(frozen=True)
