@@ -23,6 +23,7 @@ Dashboard: http://localhost:8000 (default)
 
 import argparse
 import asyncio
+import atexit
 import json
 import logging
 import signal
@@ -125,6 +126,9 @@ except PermissionError:
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, handlers=_log_handlers)
 logger = logging.getLogger("agent42")
+
+# Ensure exit is always logged even if the finally block or signal handling is bypassed
+atexit.register(lambda: print("Agent42 process exiting (atexit)", flush=True))
 
 
 class Agent42:
@@ -1402,12 +1406,17 @@ def main():
         _run_clone(args)
     else:
         # Default: start the orchestrator (existing behavior)
-        orchestrator = Agent42(
-            repo_path=args.repo or None,
-            dashboard_port=args.port,
-            headless=args.no_dashboard,
-            max_agents=args.max_agents,
-        )
+        print("Agent42 initializing...", flush=True)
+        try:
+            orchestrator = Agent42(
+                repo_path=args.repo or None,
+                dashboard_port=args.port,
+                headless=args.no_dashboard,
+                max_agents=args.max_agents,
+            )
+        except Exception as exc:
+            logger.critical("Agent42 failed to initialize: %s", exc, exc_info=True)
+            sys.exit(1)
 
         loop = asyncio.new_event_loop()
 
@@ -1416,6 +1425,9 @@ def main():
 
         try:
             loop.run_until_complete(orchestrator.start())
+        except Exception as exc:
+            logger.critical("Agent42 crashed: %s", exc, exc_info=True)
+            sys.exit(1)
         finally:
             loop.close()
             logger.info("Agent42 stopped")
