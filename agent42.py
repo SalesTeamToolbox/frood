@@ -23,6 +23,7 @@ Dashboard: http://localhost:8000 (default)
 
 import argparse
 import asyncio
+import atexit
 import json
 import logging
 import signal
@@ -125,6 +126,9 @@ except PermissionError:
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, handlers=_log_handlers)
 logger = logging.getLogger("agent42")
+
+# Ensure exit is always logged even if the finally block or signal handling is bypassed
+atexit.register(lambda: print("Agent42 process exiting (atexit)", flush=True))
 
 
 class Agent42:
@@ -1014,3 +1018,183 @@ class Agent42:
         for p in registry.available_providers():
             if not p["configured"]:
                 logger.debug(f"Provider not configured: {p['display_name']}")
+
+
+def _run_backup(args):
+    """Handle the 'backup' subcommand."""
+    from core.portability import create_backup
+
+    base = str(Path.cwd())
+    try:
+        path = create_backup(
+            base_path=base,
+            output_path=args.output,
+            include_worktrees=args.include_worktrees,
+        )
+        print(f"Backup created: {path}")
+    except Exception as e:
+        logger.error("Backup failed: %s", e)
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+def _run_restore(args):
+    """Handle the 'restore' subcommand."""
+    from core.portability import restore_backup
+
+    try:
+        manifest = restore_backup(
+            archive_path=args.archive,
+            target_path=args.target,
+            skip_secrets=args.skip_secrets,
+        )
+        print(f"Restored backup to {args.target}")
+        print(f"  Archive created: {manifest.created_at}")
+        print(f"  Categories: {', '.join(manifest.categories)}")
+        print(f"  Files: {manifest.file_count}")
+    except Exception as e:
+        logger.error("Restore failed: %s", e)
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+def _run_clone(args):
+    """Handle the 'clone' subcommand."""
+    from core.portability import create_clone
+
+    base = str(Path.cwd())
+    try:
+        path = create_clone(
+            base_path=base,
+            output_path=args.output,
+            include_skills=args.include_skills,
+        )
+        print(f"Clone package created: {path}")
+        print("  Next steps on the target node:")
+        print("  1. Extract the archive")
+        print("  2. Rename .env.template to .env and fill in secrets")
+        print("  3. Run: bash setup.sh")
+    except Exception as e:
+        logger.error("Clone failed: %s", e)
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Agent42 — The answer to all your tasks")
+    subparsers = parser.add_subparsers(dest="command")
+
+    # Server args (also on the root parser for backward compatibility)
+    parser.add_argument(
+        "--repo",
+        default=settings.default_repo_path or "",
+        help="Path to the git repository (optional — configure via dashboard)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Dashboard port (default: 8000)",
+    )
+    parser.add_argument(
+        "--no-dashboard",
+        action="store_true",
+        help="Run headless without the web dashboard",
+    )
+    parser.add_argument(
+        "--max-agents",
+        type=int,
+        default=None,
+        help=f"Max concurrent agents (default: {settings.max_concurrent_agents})",
+    )
+
+    # Backup subcommand
+    backup_parser = subparsers.add_parser(
+        "backup", help="Create a full backup archive of Agent42 data"
+    )
+    backup_parser.add_argument(
+        "-o",
+        "--output",
+        default=".",
+        help="Output directory for the archive (default: current directory)",
+    )
+    backup_parser.add_argument(
+        "--include-worktrees",
+        action="store_true",
+        help="Include git worktrees in the backup (can be large)",
+    )
+
+    # Restore subcommand
+    restore_parser = subparsers.add_parser(
+        "restore", help="Restore Agent42 data from a backup archive"
+    )
+    restore_parser.add_argument(
+        "archive",
+        help="Path to the backup archive (.tar.gz)",
+    )
+    restore_parser.add_argument(
+        "--target",
+        default=".",
+        help="Target directory to restore into (default: current directory)",
+    )
+    restore_parser.add_argument(
+        "--skip-secrets",
+        action="store_true",
+        help="Skip restoring .env and settings.json",
+    )
+
+    # Clone subcommand
+    clone_parser = subparsers.add_parser(
+        "clone", help="Create a clone package for deploying to a new node"
+    )
+    clone_parser.add_argument(
+        "-o",
+        "--output",
+        default=".",
+        help="Output directory for the archive (default: current directory)",
+    )
+    clone_parser.add_argument(
+        "--include-skills",
+        action="store_true",
+        help="Include user-installed skills from skills/workspace/",
+    )
+
+    args = parser.parse_args()
+
+    if args.command == "backup":
+        _run_backup(args)
+    elif args.command == "restore":
+        _run_restore(args)
+    elif args.command == "clone":
+        _run_clone(args)
+    else:
+        # Default: start the orchestrator (existing behavior)
+        print("Agent42 initializing...", flush=True)
+        try:
+            orchestrator = Agent42(
+                repo_path=args.repo or None,
+                dashboard_port=args.port,
+                headless=args.no_dashboard,
+                max_agents=args.max_agents,
+            )
+        except Exception as exc:
+            logger.critical("Agent42 failed to initialize: %s", exc, exc_info=True)
+            sys.exit(1)
+
+        loop = asyncio.new_event_loop()
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, lambda: loop.create_task(orchestrator.shutdown()))
+
+        try:
+            loop.run_until_complete(orchestrator.start())
+        except Exception as exc:
+            logger.critical("Agent42 crashed: %s", exc, exc_info=True)
+            sys.exit(1)
+        finally:
+            loop.close()
+            logger.info("Agent42 stopped")
+
+
+if __name__ == "__main__":
+    main()
