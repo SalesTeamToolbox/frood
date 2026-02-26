@@ -344,28 +344,13 @@ class ProviderRegistry:
         api_key = os.getenv(spec.api_key_env, "")
         base_url = os.getenv(f"{provider_type.value.upper()}_BASE_URL", spec.base_url)
 
+        logger.debug(f"Provider: {provider_type}, API Key: {api_key}, Base URL: {base_url}")
+
         if not api_key:
             logger.error(f"{spec.api_key_env} not set — {spec.display_name} models will fail")
             raise ValueError(f"{spec.api_key_env} not set — {spec.display_name} models will fail")
 
         return AsyncOpenAI(base_url=base_url, api_key=api_key)
-
-    def get_client(self, provider_type: ProviderType) -> AsyncOpenAI:
-        """Get or create a client for a provider."""
-        if provider_type not in self._clients:
-            self._clients[provider_type] = self._build_client(provider_type)
-        return self._clients[provider_type]
-
-    def clear_cache(self):
-        """Clear cached clients so they rebuild with fresh API keys on next use."""
-        self._clients.clear()
-
-    def get_model(self, model_key: str) -> ModelSpec:
-        """Resolve a model key to its spec."""
-        spec = MODELS.get(model_key)
-        if not spec:
-            raise ValueError(f"Unknown model: {model_key}. Available: {list(MODELS.keys())}")
-        return spec
 
     async def complete(
         self,
