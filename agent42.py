@@ -1014,5 +1014,3 @@ class Agent42:
         for p in registry.available_providers():
             if not p["configured"]:
                 logger.debug(f"Provider not configured: {p['display_name']}")
-
-dashboard\frontend\dist\index.html
