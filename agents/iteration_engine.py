@@ -12,11 +12,12 @@ convergence detection to avoid wasting tokens on stuck loops.
 import asyncio
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 
 from agents.model_router import ModelRouter
 from core.approval_gate import ProtectedAction
-from providers.registry import SpendingLimitExceeded
+from providers.registry import PROVIDERS, ProviderType, SpendingLimitExceeded
 
 logger = logging.getLogger("agent42.iteration")
 
@@ -220,12 +221,23 @@ class IterationEngine:
         msg = str(error).lower()
         return "404" in msg or "no endpoints found" in msg or "endpoint not found" in msg
 
-    def _get_fallback_models(self, exclude: set[str]) -> list[str]:
-        """Return an ordered list of fallback free models from the live registry.
+    def _is_auth_error(self, error: Exception) -> bool:
+        """Return True for 401/auth errors that should not be retried (key is wrong/missing)."""
+        msg = str(error).lower()
+        return (
+            "401" in msg
+            or "unauthorized" in msg
+            or "invalid api key" in msg
+            or "authentication" in msg
+            or "forbidden" in msg and "403" in msg
+        )
 
-        Queries router.free_models() so the list reflects whatever models are
-        currently registered (including any auto-discovered catalog models).
-        Falls back to a static list if the registry is unreachable or empty.
+    def _get_fallback_models(self, exclude: set[str]) -> list[str]:
+        """Return an ordered list of fallback models from the live registry.
+
+        Tries OpenRouter free models first, then configured native provider
+        models (Gemini, OpenAI, Anthropic, DeepSeek) as cross-provider
+        failover when the primary provider's key is invalid or unavailable.
         """
         static = [
             "or-free-llama-70b",
@@ -234,16 +246,34 @@ class IterationEngine:
             "or-free-mistral-small",
             "or-free-gemini-flash",
         ]
+        candidates: list[str] = []
         try:
             all_free = self.router.free_models()
             keys = [m["key"] for m in all_free if isinstance(m, dict) and m.get("key")]
-            available = [k for k in keys if k not in exclude]
-            if available:
-                return available[:4]
+            candidates = [k for k in keys if k not in exclude]
         except Exception:
             pass
-        # Static last-resort list when registry is unreachable or returns no models
-        return [m for m in static if m not in exclude]
+
+        if not candidates:
+            candidates = [m for m in static if m not in exclude]
+
+        # Append configured native provider models as cross-provider fallbacks.
+        # These kick in when the entire primary provider (e.g. OpenRouter) is
+        # down or has an invalid key — they use independent API keys.
+        native_fallbacks: list[tuple[ProviderType, str]] = [
+            (ProviderType.GEMINI, "gemini-2-flash"),
+            (ProviderType.OPENAI, "gpt-4o-mini"),
+            (ProviderType.ANTHROPIC, "claude-haiku"),
+            (ProviderType.DEEPSEEK, "deepseek-chat"),
+        ]
+        for provider_type, model_key in native_fallbacks:
+            if model_key in exclude or model_key in candidates:
+                continue
+            spec = PROVIDERS.get(provider_type)
+            if spec and os.getenv(spec.api_key_env):
+                candidates.append(model_key)
+
+        return candidates[:8]  # Allow up to 8 fallbacks for full cross-provider coverage
 
     async def _complete_with_retry(
         self,
@@ -253,10 +283,11 @@ class IterationEngine:
     ) -> str:
         """Call router.complete with exponential backoff retry and dynamic model fallback.
 
-        404 / endpoint-not-found errors skip retries immediately and go straight
-        to the fallback chain, since retrying a missing model wastes API quota.
-        The fallback chain is built dynamically from the live registry so the
-        engine adapts automatically when models become available or unavailable.
+        404 / endpoint-not-found and 401 / auth errors skip retries immediately
+        and go straight to the fallback chain, since retrying these wastes quota.
+        The fallback chain includes OpenRouter free models first, then any
+        configured native provider models (Gemini, OpenAI, etc.) for
+        cross-provider failover when the primary provider key is invalid.
         """
         last_error = None
         for attempt in range(retries):
@@ -274,6 +305,9 @@ class IterationEngine:
                 if self._is_model_unavailable(e):
                     logger.warning(f"Model {model} unavailable (404), skipping retries: {e}")
                     break
+                if self._is_auth_error(e):
+                    logger.warning(f"Auth error for {model} (401), skipping retries: {e}")
+                    break
                 wait = 2**attempt  # 1s, 2s, 4s
                 logger.warning(
                     f"API call failed (attempt {attempt + 1}/{retries}, "
@@ -281,7 +315,7 @@ class IterationEngine:
                 )
                 await asyncio.sleep(wait)
 
-        # Try fallback models from the live registry
+        # Try fallback models — OpenRouter free first, then configured native providers
         tried: set[str] = {model}
         for fallback in self._get_fallback_models(exclude=tried):
             try:
@@ -292,11 +326,12 @@ class IterationEngine:
                         usage["model_key"], usage["prompt_tokens"], usage["completion_tokens"]
                     )
                 return text
+            except SpendingLimitExceeded:
+                raise
             except Exception as e:
                 logger.warning(f"Fallback {fallback} also failed: {e}")
                 tried.add(fallback)
-                if not self._is_model_unavailable(e):
-                    break  # Non-404 error: stop iterating through fallbacks
+                # Continue trying remaining fallbacks — a different provider may succeed
 
         raise RuntimeError(f"API call failed after {retries} retries + fallbacks: {last_error}")
 
@@ -309,8 +344,9 @@ class IterationEngine:
     ):
         """Call router.complete_with_tools with retry logic and dynamic fallback.
 
-        On 404 errors, skips retries immediately. On full failure, degrades to
-        text-only mode using the first available fallback model from the registry.
+        On 404 or 401 errors, skips retries immediately. On full failure,
+        degrades to text-only mode using the first available fallback model,
+        including configured native providers for cross-provider failover.
         """
         for attempt in range(retries):
             try:
@@ -320,6 +356,9 @@ class IterationEngine:
             except Exception as e:
                 if self._is_model_unavailable(e):
                     logger.warning(f"Tool model {model} unavailable (404), skipping retries: {e}")
+                    break
+                if self._is_auth_error(e):
+                    logger.warning(f"Auth error for tool model {model} (401), skipping retries: {e}")
                     break
                 wait = 2**attempt
                 logger.warning(
