@@ -39,7 +39,8 @@ class ChatSession:
     # Code-page specific fields
     project_id: str = ""
     app_id: str = ""
-    deployment_target: str = ""  # "local" or "remote"
+    repo_id: str = ""  # Links to a RepositoryManager repo
+    deployment_target: str = ""  # "local", "remote", or "github"
     ssh_host: str = ""
     github_repo: str = ""
     archived: bool = False
