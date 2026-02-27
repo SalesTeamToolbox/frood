@@ -52,14 +52,14 @@ from core.config import settings
 from core.device_auth import DeviceStore
 from core.github_accounts import GitHubAccountStore
 from core.heartbeat import HeartbeatService
-from core.intent_classifier import IntentClassifier, PendingClarification
+from core.intent_classifier import IntentClassifier, PendingClarification, ScopeInfo
 from core.key_store import KeyStore
 from core.project_manager import ProjectManager
 from core.rate_limiter import ToolLimit, ToolRateLimiter
 from core.repo_manager import RepositoryManager
 from core.sandbox import WorkspaceSandbox
 from core.security_scanner import ScheduledSecurityScanner
-from core.task_queue import Task, TaskQueue, TaskStatus, TaskType
+from core.task_queue import Task, TaskQueue, TaskStatus, TaskType, infer_task_type
 from core.worktree_manager import WorktreeManager
 from dashboard.auth import init_device_store
 from dashboard.server import create_app
@@ -738,6 +738,141 @@ class Agent42:
             message,
             force_type=classification.task_type,
             classification=classification,
+        )
+
+    def _should_check_scope(
+        self,
+        active_scope: ScopeInfo,
+        channel_type: str,
+        channel_id: str,
+    ) -> bool:
+        """Determine if scope checking is warranted.
+
+        Returns False (and auto-clears the scope) when the active scope's
+        task has already completed, failed, or been archived.
+        """
+        task = self.task_queue.get(active_scope.task_id)
+        if task and task.status in (TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.ARCHIVED):
+            self.session_manager.clear_active_scope(channel_type, channel_id)
+            logger.info(
+                f"Auto-cleared stale scope {active_scope.scope_id} "
+                f"(task {active_scope.task_id} is {task.status.value})"
+            )
+            return False
+        return True
+
+    async def _handle_scope_change(
+        self,
+        description: str,
+        message: InboundMessage,
+        classification,
+        scope_analysis,
+    ) -> OutboundMessage:
+        """Handle a detected scope change by creating a new task and updating scope.
+
+        Notifies the user that a scope change was detected and a new branch
+        will be created for the new work.
+        """
+        old_scope = self.session_manager.get_active_scope(message.channel_type, message.channel_id)
+        old_summary = old_scope.summary if old_scope else "previous work"
+
+        # Create new task (no parent link — this is a fresh scope)
+        result = await self._create_task_from_message(
+            description,
+            message,
+            force_type=classification.task_type,
+            classification=classification,
+        )
+
+        # Prepend scope change notice to the standard task-created message
+        scope_notice = (
+            f'Scope change detected — switching from "{old_summary}" to a new topic. '
+            f"A new branch will be created for this work.\n\n"
+        )
+        return OutboundMessage(
+            channel_type=result.channel_type,
+            channel_id=result.channel_id,
+            content=scope_notice + result.content,
+            metadata=result.metadata,
+        )
+
+    async def _create_task_from_message(
+        self,
+        description: str,
+        message: InboundMessage,
+        force_type: TaskType | None = None,
+        classification=None,
+        parent_task_id: str = "",
+    ) -> OutboundMessage:
+        """Create a task from a channel message with the given (or inferred) type.
+
+        If the classification recommends a team, injects a resource allocation
+        directive into the task description so the executing agent knows to use
+        the team tool.
+
+        When ``parent_task_id`` is provided the new task is linked to the
+        parent (scope continuation).  When omitted (new root task), the
+        active scope for the session is established automatically.
+        """
+        task_type = force_type or infer_task_type(description)
+
+        # Smart resource allocation: inject team directive for complex tasks
+        task_description = description
+        team_name = ""
+        if (
+            classification
+            and classification.recommended_mode == "team"
+            and classification.recommended_team
+        ):
+            team_name = classification.recommended_team
+            task_description = (
+                f"{description}\n\n"
+                f"---\n"
+                f"RESOURCE ALLOCATION: This task has been assessed as requiring "
+                f"team collaboration.\n"
+                f"Use the 'team' tool with action='run', name='{team_name}', "
+                f"and the task description above to execute with the {team_name}.\n"
+                f"The team's Manager will coordinate the roles automatically."
+            )
+
+        task = Task(
+            title=f"[{message.channel_type}] {description[:60]}",
+            description=task_description,
+            task_type=task_type,
+            origin_channel=message.channel_type,
+            origin_channel_id=message.channel_id,
+            origin_metadata=message.metadata,
+            parent_task_id=parent_task_id,
+        )
+        await self.task_queue.add(task)
+
+        # Set active scope for new root tasks (no parent = new scope)
+        if not parent_task_id and settings.scope_detection_enabled:
+            scope = ScopeInfo(
+                scope_id=task.id,
+                summary=description[:100],
+                task_type=task_type,
+                task_id=task.id,
+            )
+            self.session_manager.set_active_scope(message.channel_type, message.channel_id, scope)
+            logger.info(f"Active scope set: {task.id} — {description[:60]}")
+
+        # Log to memory (semantic indexing for cross-session search)
+        await self.memory_store.log_event_semantic(
+            "channel_message",
+            f"From {message.sender_name} via {message.channel_type}",
+            description[:500],
+        )
+
+        mode_str = f"team: {team_name}" if team_name else "single agent"
+        return OutboundMessage(
+            channel_type=message.channel_type,
+            channel_id=message.channel_id,
+            content=(
+                f"Task created: {task.id} (type: {task_type.value}, "
+                f"mode: {mode_str}) — I'm working on it."
+            ),
+            metadata=message.metadata,
         )
 
     async def _on_task_update(self, task):
