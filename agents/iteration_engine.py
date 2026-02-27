@@ -229,8 +229,7 @@ class IterationEngine:
             or "unauthorized" in msg
             or "invalid api key" in msg
             or "authentication" in msg
-            or "forbidden" in msg
-            and "403" in msg
+            or ("forbidden" in msg and "403" in msg)
         )
 
     def _get_fallback_models(self, exclude: set[str]) -> list[str]:

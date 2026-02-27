@@ -12,9 +12,7 @@ Routing priority:
   4. OpenRouter free models (hardcoded defaults) — fallback
 """
 
-import json
 import logging
-import os
 from pathlib import Path
 
 from core.config import settings  # Added import

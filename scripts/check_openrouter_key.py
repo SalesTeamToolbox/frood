@@ -75,7 +75,8 @@ try:
     asyncio.run(test_key())
 except ImportError:
     print("[test] httpx not installed — testing with urllib instead")
-    import urllib.request, urllib.error
+    import urllib.error
+    import urllib.request
 
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/models",

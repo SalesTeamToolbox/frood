@@ -52,14 +52,14 @@ from core.config import settings
 from core.device_auth import DeviceStore
 from core.github_accounts import GitHubAccountStore
 from core.heartbeat import HeartbeatService
-from core.intent_classifier import IntentClassifier, PendingClarification, ScopeInfo
+from core.intent_classifier import IntentClassifier, PendingClarification
 from core.key_store import KeyStore
 from core.project_manager import ProjectManager
 from core.rate_limiter import ToolLimit, ToolRateLimiter
 from core.repo_manager import RepositoryManager
 from core.sandbox import WorkspaceSandbox
 from core.security_scanner import ScheduledSecurityScanner
-from core.task_queue import Task, TaskQueue, TaskStatus, TaskType, infer_task_type
+from core.task_queue import Task, TaskQueue, TaskStatus, TaskType
 from core.worktree_manager import WorktreeManager
 from dashboard.auth import init_device_store
 from dashboard.server import create_app

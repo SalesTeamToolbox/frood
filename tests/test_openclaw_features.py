@@ -643,8 +643,11 @@ class TestExtendedContextWindow:
         assert routing["primary"] == "or-free-qwen-coder"
 
     def test_get_routing_with_max_context_prefers_large_models(self):
-        router = ModelRouter()
-        routing = router.get_routing(TaskType.CODING, context_window="max")
+        # OPENROUTER_API_KEY must be set so the context-window-adapted model
+        # isn't rejected by the API key validation step in get_routing().
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test-dummy"}):
+            router = ModelRouter()
+            routing = router.get_routing(TaskType.CODING, context_window="max")
         # Should select a model with large context (>= 500K tokens)
         registry = ProviderRegistry()
         large_keys = {m["key"] for m in registry.models_by_min_context(500_000)}
@@ -652,8 +655,9 @@ class TestExtendedContextWindow:
             assert routing["primary"] in large_keys
 
     def test_get_routing_with_large_context(self):
-        router = ModelRouter()
-        routing = router.get_routing(TaskType.RESEARCH, context_window="large")
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test-dummy"}):
+            router = ModelRouter()
+            routing = router.get_routing(TaskType.RESEARCH, context_window="large")
         # Should select a model with >= 200K context
         registry = ProviderRegistry()
         large_keys = {m["key"] for m in registry.models_by_min_context(200_000)}
