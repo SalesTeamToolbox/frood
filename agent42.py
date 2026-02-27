@@ -748,6 +748,25 @@ class Agent42:
         """
         await self.ws_manager.broadcast("task_update", task.to_dict())
 
+        # Dashboard chat: broadcast thinking/done state so the frontend can
+        # show a typing indicator while the agent is processing.
+        if task.origin_channel == "dashboard_chat":
+            session_id = task.origin_metadata.get("chat_session_id", "")
+            if task.status == TaskStatus.RUNNING:
+                await self.ws_manager.broadcast(
+                    "chat_thinking",
+                    {"session_id": session_id, "task_id": task.id, "thinking": True},
+                )
+            elif task.status in (
+                TaskStatus.REVIEW,
+                TaskStatus.DONE,
+                TaskStatus.FAILED,
+            ):
+                await self.ws_manager.broadcast(
+                    "chat_thinking",
+                    {"session_id": session_id, "task_id": task.id, "thinking": False},
+                )
+
         # Project stats update: refresh and broadcast when task has a project
         if task.project_id and self.project_manager:
             project = await self.project_manager.get(task.project_id)
@@ -1084,7 +1103,9 @@ class Agent42:
                         for m in summary["unhealthy_models"]:
                             logger.warning(
                                 "Unhealthy model: %s — %s (%s)",
-                                m["key"], m["status"], m.get("error", ""),
+                                m["key"],
+                                m["status"],
+                                m.get("error", ""),
                             )
                     first_run = False
             except Exception as e:

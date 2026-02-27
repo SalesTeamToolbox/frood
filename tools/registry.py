@@ -48,18 +48,28 @@ class ToolRegistry:
         """Return True if the tool exists and is not disabled."""
         return name in self._tools and name not in self._disabled
 
-    async def execute(self, name: str, agent_id: str = "default", **kwargs) -> ToolResult:
-        """Execute a tool by name with the given parameters."""
-        tool = self._tools.get(name)
-        if not tool:
-            return ToolResult(error=f"Unknown tool: {name}", success=False)
+    async def execute(self, tool_name: str, agent_id: str = "default", **kwargs) -> ToolResult:
+        """Execute a tool by name with the given parameters.
 
-        if name in self._disabled:
-            return ToolResult(error=f"Tool '{name}' is disabled", success=False)
+        Args:
+            tool_name: Name of the registered tool to execute.
+            agent_id: Agent identifier for rate limiting.
+            **kwargs: Arguments forwarded to the tool's execute() method.
+
+        Note: The first parameter is named ``tool_name`` (not ``name``) to
+        avoid collisions when callers spread LLM-provided arguments via
+        ``**kwargs`` — many tools declare a ``name`` parameter.
+        """
+        tool = self._tools.get(tool_name)
+        if not tool:
+            return ToolResult(error=f"Unknown tool: {tool_name}", success=False)
+
+        if tool_name in self._disabled:
+            return ToolResult(error=f"Tool '{tool_name}' is disabled", success=False)
 
         # Rate limit check
         if self._rate_limiter:
-            allowed, reason = self._rate_limiter.check(name, agent_id)
+            allowed, reason = self._rate_limiter.check(tool_name, agent_id)
             if not allowed:
                 logger.warning(f"Rate limited: {reason}")
                 return ToolResult(error=reason, success=False)
@@ -67,12 +77,12 @@ class ToolRegistry:
         try:
             result = await tool.execute(**kwargs)
         except Exception as e:
-            logger.error(f"Tool {name} failed: {e}", exc_info=True)
+            logger.error(f"Tool {tool_name} failed: {e}", exc_info=True)
             return ToolResult(error=str(e), success=False)
 
         # Record successful call for rate limiting
         if self._rate_limiter:
-            self._rate_limiter.record(name, agent_id)
+            self._rate_limiter.record(tool_name, agent_id)
 
         return result
 

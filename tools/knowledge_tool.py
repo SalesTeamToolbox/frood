@@ -381,16 +381,51 @@ class KnowledgeTool(Tool):
                 return ToolResult(output="No results found in knowledge base.")
 
             lines = [f"Found {len(results)} results:\n"]
+            full_texts = []
             for i, r in enumerate(results, 1):
                 source = r.get("metadata", {}).get("file_name", r.get("section", "unknown"))
                 score = r.get("score", 0)
-                text = r.get("text", "")[:300]
-                lines.append(f"[{i}] ({score:.3f}) {source}\n    {text}\n")
+                text = r.get("text", "")
+                lines.append(f"[{i}] ({score:.3f}) {source}\n    {text[:300]}\n")
+                full_texts.append(text)
+
+            # RLM enhancement: if combined results are large, process through
+            # RLM for intelligent synthesis instead of raw chunk delivery
+            combined = "\n\n".join(full_texts)
+            rlm_output = await self._try_rlm_synthesis(query, combined)
+            if rlm_output:
+                return ToolResult(
+                    output=(f"Found {len(results)} results (RLM-synthesized):\n\n{rlm_output}")
+                )
 
             return ToolResult(output="\n".join(lines))
 
         # Fallback: simple text search across stored chunks
         return await self._fallback_search(query, top_k)
+
+    async def _try_rlm_synthesis(self, query: str, combined_text: str) -> str | None:
+        """Attempt RLM synthesis of large knowledge results.
+
+        Returns synthesized text, or None if RLM is unavailable or context
+        is below threshold.
+        """
+        try:
+            from providers.rlm_provider import RLMProvider
+
+            provider = RLMProvider()
+            if not provider.should_use_rlm(combined_text):
+                return None
+
+            result = await provider.complete(
+                query=f"Answer this question using the provided knowledge base results: {query}",
+                context=combined_text,
+                task_type="research",
+            )
+            if result and result.get("response"):
+                return result["response"]
+        except Exception as e:
+            logger.debug("RLM synthesis unavailable: %s", e)
+        return None
 
     async def _fallback_search(self, query: str, top_k: int) -> ToolResult:
         """Simple keyword search when no embedding API is available."""
