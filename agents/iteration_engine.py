@@ -507,8 +507,12 @@ class IterationEngine:
         )
         return await self.router.complete_with_tools(fallback, messages, [])
 
-    async def _execute_tool_calls(self, tool_calls, task_id: str = "") -> list[ToolCallRecord]:
+    async def _execute_tool_calls(
+        self, tool_calls, task_id: str = "", task_type: str = "coding"
+    ) -> list[ToolCallRecord]:
         """Execute tool calls from the LLM response and return records."""
+        from tools.registry import _CODE_ONLY_TOOLS, _CODE_TASK_TYPES
+
         records = []
         if not self.tool_registry or not tool_calls:
             return records
@@ -523,6 +527,22 @@ class IterationEngine:
                         tool_name=tool_name,
                         arguments={},
                         result="Invalid JSON in tool arguments",
+                        success=False,
+                    )
+                )
+                continue
+
+            # Enforce task-type tool restrictions at execution time.
+            # Free LLMs sometimes hallucinate tool calls for tools not in the
+            # provided schema — this guard prevents code-only tools from
+            # running during non-code tasks (content, marketing, email, etc.).
+            if task_type not in _CODE_TASK_TYPES and tool_name in _CODE_ONLY_TOOLS:
+                logger.warning(f"Blocked tool '{tool_name}' — not available for {task_type} tasks")
+                records.append(
+                    ToolCallRecord(
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        result=f"Tool '{tool_name}' is not available for {task_type} tasks",
                         success=False,
                     )
                 )
@@ -727,6 +747,7 @@ class IterationEngine:
                     tool_schemas,
                     all_tool_records,
                     task_id=task_id,
+                    task_type=task_type,
                 )
             else:
                 # Text-only mode (no tools or model doesn't support tools)
@@ -810,6 +831,7 @@ class IterationEngine:
         tool_schemas: list[dict],
         all_tool_records: list[ToolCallRecord],
         task_id: str = "",
+        task_type: str = "coding",
     ) -> str:
         """Run the tool-calling loop until the model produces a text response.
 
@@ -821,10 +843,13 @@ class IterationEngine:
         working_messages = list(messages)
 
         for round_num in range(MAX_TOOL_ROUNDS):
-            # Re-fetch schemas each round so dynamically created tools are visible
-            current_schemas = (
-                self.tool_registry.all_schemas() if self.tool_registry else tool_schemas
-            )
+            # Re-fetch schemas each round so dynamically created tools are
+            # visible, but respect task-type filtering — non-code tasks must
+            # not see code-only tools like shell, git, security_analyzer, etc.
+            if self.tool_registry and hasattr(self.tool_registry, "schemas_for_task_type"):
+                current_schemas = self.tool_registry.schemas_for_task_type(task_type)
+            else:
+                current_schemas = tool_schemas
             response = await self._complete_with_tools_retry(
                 model, working_messages, current_schemas
             )
@@ -860,7 +885,9 @@ class IterationEngine:
             ]
             working_messages.append(assistant_msg)
 
-            records = await self._execute_tool_calls(message.tool_calls, task_id=task_id)
+            records = await self._execute_tool_calls(
+                message.tool_calls, task_id=task_id, task_type=task_type
+            )
             all_tool_records.extend(records)
 
             # Add tool results as tool response messages

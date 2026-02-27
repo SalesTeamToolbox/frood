@@ -481,7 +481,7 @@ class TaskQueue:
         queued_ids: set[str] = set()
         for item in data:
             task = Task.from_dict(item)
-            if task.status == TaskStatus.RUNNING:
+            if task.status in (TaskStatus.RUNNING, TaskStatus.ASSIGNED):
                 task.status = TaskStatus.PENDING
                 logger.info(f"Reset interrupted task {task.id} to pending")
             self._tasks[task.id] = task
