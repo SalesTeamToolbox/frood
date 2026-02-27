@@ -431,6 +431,10 @@ class TestWorkspaceSandbox:
 | 59 | RLM | `rlm.completion()` is synchronous — calling it directly blocks the async event loop | Always wrap in `loop.run_in_executor(None, lambda: rlm.completion(...))` with `asyncio.wait_for` timeout |
 | 60 | RLM | RLM recursive sub-calls can produce runaway costs (10x+ expected) | Enforce `RLM_COST_LIMIT` per query and check global `SpendingTracker` before each RLM call |
 | 61 | RLM | `rlms` package not installed but `RLM_ENABLED=true` — import fails at runtime | All `from rlm import ...` is inside method bodies behind try/except ImportError; `should_use_rlm()` returns False gracefully |
+| 62 | Memory | Memory is global — all tasks write to one MEMORY.md regardless of project | Use `ProjectMemoryStore` (created per-project under `projects_dir/{id}/`); falls through to global for standalone tasks |
+| 63 | Critic | Critic only sees task + output text — misses tool usage context | `_critic_pass` now receives `tool_records` and `iteration_num`; includes compact tool summary for the critic |
+| 64 | Context | Tool results accumulate unbounded in iteration loop — context rot | `_compact_tool_messages` truncates old tool messages to 200 chars when total exceeds 50K chars; last 2 tool messages kept intact |
+| 65 | Teams | Team/subagent tasks don't inherit `project_id` — learnings scatter to global | `TeamTool`, `SubagentTool`, and manager tasks now propagate `project_id` from parent context |
 
 ---
 

@@ -49,6 +49,7 @@ class Project:
     assigned_team: str = ""
     priority: int = 0  # 0=normal, 1=high, 2=urgent
     color: str = ""  # Kanban card accent color
+    memory_dir: str = ""  # Path to project-specific memory directory
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -184,6 +185,39 @@ class ProjectManager:
             "blocked": blocked,
             "review": review,
         }
+
+    def get_project_memory(
+        self,
+        project_id: str,
+        global_store=None,
+        qdrant_store=None,
+        redis_backend=None,
+    ):
+        """Get a ProjectMemoryStore for a project.
+
+        Returns None if the project doesn't exist or global_store is missing.
+        Lazily initializes the project's memory directory.
+        """
+        project = self._projects.get(project_id)
+        if not project or not global_store:
+            return None
+
+        from memory.project_memory import ProjectMemoryStore
+
+        base_dir = self._dir
+        memory = ProjectMemoryStore(
+            project_id=project_id,
+            base_dir=base_dir,
+            global_store=global_store,
+            qdrant_store=qdrant_store,
+            redis_backend=redis_backend,
+        )
+
+        # Persist the memory_dir reference on the project if not set
+        if not project.memory_dir:
+            project.memory_dir = str(base_dir / "projects" / project_id)
+
+        return memory
 
     def board(self) -> dict[str, list[dict]]:
         """Group projects by status for Kanban board view.

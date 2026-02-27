@@ -54,7 +54,12 @@ class SubagentTool(Tool):
         }
 
     async def execute(
-        self, title: str = "", description: str = "", task_type: str = "coding", **kwargs
+        self,
+        title: str = "",
+        description: str = "",
+        task_type: str = "coding",
+        project_id: str = "",
+        **kwargs,
     ) -> ToolResult:
         if not title or not description:
             return ToolResult(error="title and description are required", success=False)
@@ -72,6 +77,7 @@ class SubagentTool(Tool):
             description=description,
             task_type=task_type_enum,
             max_iterations=MAX_SUBAGENT_ITERATIONS,
+            project_id=project_id,
         )
 
         await self._task_queue.add(task)
