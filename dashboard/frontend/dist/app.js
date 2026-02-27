@@ -572,10 +572,11 @@ async function saveApiKeys() {
     for (const [envVar, value] of Object.entries(state.keyEdits)) {
       if (value !== undefined) keys[envVar] = value;
     }
-    await api("/settings/keys", {
+    const result = await api("/settings/keys", {
       method: "PUT",
       body: JSON.stringify({ keys }),
     });
+    if (result === null) return; // 401 auth error — user was redirected to login
     state.keyEdits = {};
     await loadApiKeys();
     toast("API keys saved successfully", "success");
@@ -3140,21 +3141,24 @@ function settingSecret(envVar, label, help, highlight = false) {
   const masked = keyInfo.masked_value || "";
 
   const hasEdit = state.keyEdits[envVar] !== undefined;
-  const statusClass = configured ? "configured" : "not-configured";
-  const statusText = configured
-    ? (source === "admin" ? `Configured via admin UI (${esc(masked)})` : `Configured via .env (${esc(masked)})`)
-    : "Not configured";
+  const willBeCleared = hasEdit && state.keyEdits[envVar] === '';
+  const statusClass = willBeCleared ? "not-configured" : (configured ? "configured" : "not-configured");
+  const statusText = willBeCleared
+    ? "Will be cleared — click Save API Keys to confirm"
+    : (configured
+      ? (source === "admin" ? `Configured via admin UI (${esc(masked)})` : `Configured via .env (${esc(masked)})`)
+      : "Not configured");
 
   return `
     <div class="form-group">
       <label>${esc(label)}</label>
       <div class="secret-input" style="display:flex;gap:0.5rem;align-items:center">
         <input type="password"
-               placeholder="${configured ? "Enter new value to override" : "Enter API key"}"
+               placeholder="${willBeCleared ? "— will be cleared on save —" : (configured ? "Enter new value to override" : "Enter API key")}"
                value="${hasEdit ? esc(state.keyEdits[envVar]) : ""}"
                oninput="state.keyEdits['${envVar}']=this.value;updateSaveBtn()"
-               style="font-family:var(--mono);flex:1;${highlight ? "border-color:var(--accent)" : ""}">
-        ${configured && source === "admin" ? `<button class="btn btn-sm" onclick="state.keyEdits['${envVar}']='';updateSaveBtn()" title="Clear admin-set key" style="white-space:nowrap">Clear</button>` : ""}
+               style="font-family:var(--mono);flex:1;${highlight || willBeCleared ? "border-color:var(--accent)" : ""}">
+        ${configured && source === "admin" ? `<button class="btn btn-sm" onclick="${willBeCleared ? `delete state.keyEdits['${envVar}']` : `state.keyEdits['${envVar}']=''`};renderSettingsPanel()" title="${willBeCleared ? "Undo clear" : "Clear admin-set key"}" style="white-space:nowrap">${willBeCleared ? "Undo" : "Clear"}</button>` : ""}
       </div>
       ${help ? `<div class="help">${help}</div>` : ""}
       <div class="secret-status ${statusClass}">${statusText}</div>
