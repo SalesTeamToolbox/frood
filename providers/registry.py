@@ -64,7 +64,7 @@ class ProviderSpec:
     base_url: str
     api_key_env: str
     display_name: str
-    default_model: str
+    default_model: str = ""
     requires_model_prefix: bool = False
     supports_function_calling: bool = True
 
@@ -329,6 +329,19 @@ class ProviderRegistry:
 
     def __init__(self):
         self._clients: dict[ProviderType, AsyncOpenAI] = {}
+
+    def get_model(self, model_key: str) -> ModelSpec:
+        """Look up a ModelSpec by key. Raises ValueError if not found."""
+        spec = MODELS.get(model_key)
+        if not spec:
+            raise ValueError(f"Unknown model: {model_key!r}")
+        return spec
+
+    def get_client(self, provider_type: ProviderType) -> AsyncOpenAI:
+        """Return a cached AsyncOpenAI client for a provider, creating it if needed."""
+        if provider_type not in self._clients:
+            self._clients[provider_type] = self._build_client(provider_type)
+        return self._clients[provider_type]
 
     def _build_client(self, provider_type: ProviderType) -> AsyncOpenAI:
         """Create an OpenAI-compatible client for a provider."""
