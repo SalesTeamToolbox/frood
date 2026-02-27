@@ -643,10 +643,15 @@ class IterationEngine:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": task_description})
 
-        # Get tool schemas if registry is available
+        # Get tool schemas filtered by task type — non-code tasks only see
+        # general-purpose tools, preventing free LLMs from calling irrelevant
+        # tools like security_analyzer or test_runner for creative tasks.
         tool_schemas = []
         if self.tool_registry:
-            tool_schemas = self.tool_registry.all_schemas()
+            if hasattr(self.tool_registry, "schemas_for_task_type"):
+                tool_schemas = self.tool_registry.schemas_for_task_type(task_type)
+            else:
+                tool_schemas = self.tool_registry.all_schemas()
 
         prev_feedback = ""
         primary_output = ""

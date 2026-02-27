@@ -11,6 +11,39 @@ from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.registry")
 
+# Tools that are only relevant for code/technical task types.
+# Non-code tasks (content, marketing, email, strategy, etc.) should not
+# see these tools — free LLMs often call them inappropriately when they
+# appear in the schema (e.g., running security scans when asked for a poem).
+_CODE_ONLY_TOOLS = {
+    "shell",
+    "git",
+    "grep",
+    "diff",
+    "test_runner",
+    "linter",
+    "code_intel",
+    "dependency_audit",
+    "docker",
+    "python_exec",
+    "repo_map",
+    "pr_generator",
+    "security_analyzer",
+    "file_watcher",
+    "ssh",
+    "tunnel",
+}
+
+# Task types that should receive the full tool set (including code tools)
+_CODE_TASK_TYPES = {
+    "coding",
+    "debugging",
+    "refactoring",
+    "app_create",
+    "app_update",
+    "project_setup",
+}
+
 
 class ToolRegistry:
     """Manages all available tools for agent execution."""
@@ -90,6 +123,26 @@ class ToolRegistry:
         """Get OpenAI function-calling schemas for all enabled tools."""
         return [
             tool.to_schema() for tool in self._tools.values() if tool.name not in self._disabled
+        ]
+
+    def schemas_for_task_type(self, task_type: str) -> list[dict]:
+        """Get tool schemas filtered by task type.
+
+        Non-code task types (content, marketing, email, etc.) only receive
+        general-purpose tools — code-specific tools like shell, git, security
+        analyzer, and test runner are excluded.  This prevents free LLMs from
+        calling irrelevant tools (e.g., running a security scan when asked
+        to write a poem).
+
+        Code task types receive the full tool set.
+        """
+        if task_type in _CODE_TASK_TYPES:
+            return self.all_schemas()
+
+        return [
+            tool.to_schema()
+            for tool in self._tools.values()
+            if tool.name not in self._disabled and tool.name not in _CODE_ONLY_TOOLS
         ]
 
     def list_tools(self) -> list[dict]:
