@@ -409,6 +409,9 @@ class TestWorkspaceSandbox:
 | 43 | Routing | Policy routing overrides dynamic routing results | Policy only runs when `dynamic` is None; dynamic routing takes precedence |
 | 44 | Catalog | OR pricing is per-token not per-million | Multiply by 1,000,000 before comparing to $/M thresholds |
 | 45 | Routing | "balanced" mode degrades silently to free-only when OR balance check fails | Network error on `/api/v1/auth/key` always returns `is_free_tier=True` — safe but silent; check logs for `"Failed to check OpenRouter account"` warnings |
+| 46 | Embeddings | OpenRouter `/embeddings` endpoint returns 401 "User not found" for free-tier keys | Auto-detect skips OpenRouter; only OpenAI is used for embeddings. Set `OPENAI_API_KEY` or explicit `EMBEDDING_PROVIDER` |
+| 47 | Embeddings | `build_context_semantic` crashes the entire task when embedding API fails at runtime | Wrapped `embeddings.search()` in try/except; falls back to `build_context()` on failure |
+| 48 | Providers | `ProviderRegistry._clients` cached stale API keys forever — admin key updates had no effect | `get_client()` now tracks the key used per client and rebuilds when `os.environ` key changes |
 
 ---
 

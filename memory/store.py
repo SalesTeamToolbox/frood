@@ -286,8 +286,15 @@ class MemoryStore:
         parts.append("## Persistent Memory\n")
         parts.append("\n".join(memory_lines))
 
-        # Add semantically relevant context from memory + history
-        results = await self.embeddings.search(query, top_k=top_k)
+        # Add semantically relevant context from memory + history.
+        # Gracefully degrade to non-semantic context if the embedding API
+        # fails at runtime (e.g. invalid key, provider outage).
+        try:
+            results = await self.embeddings.search(query, top_k=top_k)
+        except Exception as e:
+            logger.warning("Semantic search failed, falling back to basic context: %s", e)
+            return self.build_context(max_memory_lines=max_memory_lines)
+
         if results:
             parts.append("\n## Relevant Context (semantic search)\n")
             for r in results:
@@ -297,10 +304,14 @@ class MemoryStore:
                 parts.append("")
 
         # Add relevant past conversations (Qdrant only)
-        conv_results = await self.embeddings.search_conversations(
-            query,
-            top_k=3,
-        )
+        try:
+            conv_results = await self.embeddings.search_conversations(
+                query,
+                top_k=3,
+            )
+        except Exception as e:
+            logger.warning("Conversation search failed: %s", e)
+            conv_results = []
         if conv_results:
             parts.append("\n## Related Past Conversations\n")
             for r in conv_results:
