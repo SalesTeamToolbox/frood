@@ -455,3 +455,85 @@ class TestScopeDetection:
         assert isinstance(result, ScopeAnalysis)
         # "social media" → marketing, different from debugging → scope change
         assert not result.is_continuation
+
+
+class TestChatClassification:
+    """Tests covering the chat endpoint classification fix.
+
+    Previously, the /api/chat/send endpoint used keyword-only matching which
+    defaulted to CODING for any message without recognised keywords.  The fix
+    injects IntentClassifier so the LLM is used instead.
+    """
+
+    @pytest.mark.asyncio
+    async def test_keyword_fallback_defaults_to_coding_for_unknown(self):
+        """Keyword classifier still defaults to CODING when no keywords match."""
+        classifier = IntentClassifier(router=None)
+        result = await classifier.classify("What time is it?")
+        assert result.task_type == TaskType.CODING
+        assert not result.used_llm
+
+    @pytest.mark.asyncio
+    async def test_llm_classifier_overrides_coding_default(self):
+        """LLM router correctly classifies non-coding questions."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_router = MagicMock()
+        mock_router.complete = AsyncMock(
+            return_value=(
+                '{"task_type": "research", "confidence": 0.92, '
+                '"needs_clarification": false, "clarification_question": "", '
+                '"suggested_tools": [], "reasoning": "General question", '
+                '"recommended_mode": "single_agent", "recommended_team": "", '
+                '"needs_project_setup": false}',
+                None,
+            )
+        )
+        classifier = IntentClassifier(router=mock_router)
+        result = await classifier.classify("What time is it?")
+        assert result.task_type == TaskType.RESEARCH
+        assert result.used_llm
+        mock_router.complete.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_llm_classifier_passes_conversation_history(self):
+        """Conversation history is forwarded to the LLM."""
+        from unittest.mock import AsyncMock, MagicMock, call
+
+        mock_router = MagicMock()
+        mock_router.complete = AsyncMock(
+            return_value=(
+                '{"task_type": "strategy", "confidence": 0.88, '
+                '"needs_clarification": false, "clarification_question": "", '
+                '"suggested_tools": [], "reasoning": "Strategy follow-up", '
+                '"recommended_mode": "single_agent", "recommended_team": "", '
+                '"needs_project_setup": false}',
+                None,
+            )
+        )
+        classifier = IntentClassifier(router=mock_router)
+        history = [
+            {"role": "user", "content": "Tell me about our market position"},
+            {"role": "assistant", "content": "Your market position is strong in X..."},
+        ]
+        result = await classifier.classify("Now build a SWOT plan", conversation_history=history)
+        assert result.task_type == TaskType.STRATEGY
+        assert result.used_llm
+        # Verify the call included messages (system + user with history)
+        call_args = mock_router.complete.call_args
+        messages = call_args[0][1]  # second positional arg is messages list
+        assert len(messages) >= 2  # system prompt + user message with history
+        assert any("Conversation history" in m.get("content", "") for m in messages)
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_falls_back_to_keyword(self):
+        """If the LLM fails, keyword fallback is used."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_router = MagicMock()
+        mock_router.complete = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
+        classifier = IntentClassifier(router=mock_router)
+        result = await classifier.classify("Do a SWOT analysis")
+        # keyword match: "swot" → strategy
+        assert result.task_type == TaskType.STRATEGY
+        assert not result.used_llm

@@ -435,6 +435,10 @@ class TestWorkspaceSandbox:
 | 63 | Tools | Free LLMs hallucinate tool calls not in schema — `_execute_tool_calls` had no task-type guard | Added execution-time enforcement: `_CODE_ONLY_TOOLS` blocked for non-`_CODE_TASK_TYPES` in `_execute_tool_calls()` |
 | 64 | Async | `SessionManager.add_message()` and `set_active_scope()` used blocking `open()` from async handlers | Converted write-path methods to async with `aiofiles`; callers must use `await` |
 | 65 | Tasks | ASSIGNED tasks never re-queued on restart — only RUNNING was reset to PENDING | `load_from_file()` now resets both RUNNING and ASSIGNED to PENDING |
+| 66 | Memory | Memory is global — all tasks write to one MEMORY.md regardless of project | Use `ProjectMemoryStore` (created per-project under `projects_dir/{id}/`); falls through to global for standalone tasks |
+| 67 | Critic | Critic only sees task + output text — misses tool usage context | `_critic_pass` now receives `tool_records` and `iteration_num`; includes compact tool summary for the critic |
+| 68 | Context | Tool results accumulate unbounded in iteration loop — context rot | `_compact_tool_messages` truncates old tool messages to 200 chars when total exceeds 50K chars; last 2 tool messages kept intact |
+| 69 | Teams | Team/subagent tasks don't inherit `project_id` — learnings scatter to global | `TeamTool`, `SubagentTool`, and manager tasks now propagate `project_id` from parent context |
 
 ---
 

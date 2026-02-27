@@ -1048,6 +1048,16 @@ class Agent42:
                             e,
                         )
 
+                # Resolve project-scoped memory if the task belongs to a project
+                project_memory = None
+                if task.project_id and self.project_manager and settings.project_memory_enabled:
+                    project_memory = self.project_manager.get_project_memory(
+                        task.project_id,
+                        global_store=self.memory_store,
+                        qdrant_store=self._qdrant_store,
+                        redis_backend=self._redis_backend,
+                    )
+
                 agent = Agent(
                     task=task,
                     task_queue=self.task_queue,
@@ -1056,6 +1066,7 @@ class Agent42:
                     emit=self.emit,
                     skill_loader=self.skill_loader,
                     memory_store=self.memory_store,
+                    project_memory=project_memory,
                     workspace_skills_dir=self.workspace_skills_dir,
                     tool_registry=self.tool_registry,
                     profile_loader=self.profile_loader,
@@ -1180,6 +1191,8 @@ class Agent42:
                 intervention_queues=self._intervention_queues,
                 github_account_store=self.github_account_store,
                 model_catalog=self.model_catalog,
+                intent_classifier=self.intent_classifier,
+                memory_store=self.memory_store,
             )
             config = uvicorn.Config(
                 app,

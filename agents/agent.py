@@ -20,6 +20,7 @@ from agents.model_router import ModelRouter
 from core.approval_gate import ApprovalGate
 from core.task_queue import Task, TaskQueue, TaskType
 from core.worktree_manager import WorktreeManager
+from memory.project_memory import ProjectMemoryStore
 from memory.store import MemoryStore
 from providers.rlm_provider import RLMProvider
 from skills.loader import SkillLoader
@@ -120,6 +121,7 @@ class Agent:
         emit: Callable[[str, dict], Awaitable[None]],
         skill_loader: SkillLoader | None = None,
         memory_store: MemoryStore | None = None,
+        project_memory: ProjectMemoryStore | None = None,
         workspace_skills_dir: Path | None = None,
         tool_registry=None,
         profile_loader=None,
@@ -145,9 +147,15 @@ class Agent:
         )
         self.skill_loader = skill_loader
         self.memory_store = memory_store
+        self.project_memory = project_memory
         self.rlm_provider = RLMProvider()
         self.learner = (
-            Learner(self.router, memory_store, skills_dir=workspace_skills_dir)
+            Learner(
+                self.router,
+                memory_store,
+                project_memory=project_memory,
+                skills_dir=workspace_skills_dir,
+            )
             if memory_store
             else None
         )
@@ -258,6 +266,7 @@ class Agent:
                 task_id=task.id,
                 token_accumulator=token_acc,
                 intervention_queue=self.intervention_queue,
+                rlm_provider=self.rlm_provider,
             )
 
             # Store token usage on the task for persistence and dashboard display
@@ -506,18 +515,20 @@ class Agent:
             if skill_context:
                 parts.append(f"\n{skill_context}")
 
-        # Include memory context (Phase 6) — semantic when available
-        if self.memory_store:
+        # Include memory context (Phase 6) — project-scoped when available
+        # Project memory merges project-specific + global context automatically.
+        memory_source = self.project_memory or self.memory_store
+        if memory_source:
             try:
-                if self.memory_store.semantic_available:
-                    memory_context = await self.memory_store.build_context_semantic(
+                if memory_source.semantic_available:
+                    memory_context = await memory_source.build_context_semantic(
                         query=task.description,
                     )
                 else:
-                    memory_context = self.memory_store.build_context()
+                    memory_context = memory_source.build_context()
             except Exception as e:
                 logger.warning("Memory context failed, using basic fallback: %s", e)
-                memory_context = self.memory_store.build_context()
+                memory_context = memory_source.build_context()
             if memory_context.strip():
                 parts.append(f"\n{memory_context}")
 
