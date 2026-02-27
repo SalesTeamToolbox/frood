@@ -707,12 +707,53 @@ def create_app(
     async def add_comment(
         task_id: str, req: TaskCommentRequest, _user: str = Depends(get_current_user)
     ):
-        """Add a comment to a task thread."""
+        """Add a comment to a task thread.
+
+        Comments are stored on the task AND routed to the running agent
+        (via intervention queue) so Agent42 can act on them.  A task_update
+        broadcast ensures all connected clients (including open chat views)
+        see the new comment in real time.
+        """
         task = task_queue.get(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
-        task.add_comment(req.author or _user, req.text)
-        await task_queue._persist()
+        author = req.author or _user
+        task.add_comment(author, req.text)
+        await task_queue._persist(task)
+
+        # Route the comment text to the running agent so it can act on it
+        active_statuses = {TaskStatus.PENDING, TaskStatus.ASSIGNED, TaskStatus.RUNNING}
+        if task.status in active_statuses:
+            await task_queue.route_message_to_task(
+                task,
+                req.text,
+                author,
+                intervention_queues or {},
+            )
+
+        # Broadcast task update so all clients (task view + chat) refresh
+        await ws_manager.broadcast("task_update", task.to_dict())
+
+        # If this task originated from a chat session, also mirror the
+        # comment as a chat message so the chat view stays in sync.
+        session_id = task.origin_metadata.get("chat_session_id", "")
+        if session_id and chat_session_manager:
+            import time as _time
+            import uuid as _uuid
+
+            chat_msg = {
+                "id": _uuid.uuid4().hex[:12],
+                "role": "user",
+                "content": req.text,
+                "timestamp": _time.time(),
+                "sender": author,
+                "session_id": session_id,
+                "source": "task_comment",
+                "task_id": task_id,
+            }
+            await chat_session_manager.add_message(session_id, chat_msg)
+            await ws_manager.broadcast("chat_message", chat_msg)
+
         return {"status": "comment_added", "comments": len(task.comments)}
 
     @app.patch("/api/tasks/{task_id}/assign")
