@@ -21,6 +21,7 @@ from providers.registry import ModelSpec, ModelTier, ProviderRegistry, ProviderT
 logger = logging.getLogger("agent42.model_catalog")
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+OPENROUTER_AUTH_URL = "https://openrouter.ai/api/v1/auth/key"
 
 # Capabilities we care about when categorizing models
 _CODING_KEYWORDS = re.compile(r"code|coder|dev|stral", re.IGNORECASE)
@@ -100,11 +101,15 @@ class ModelCatalog:
         self,
         cache_path: Path | str = "data/model_catalog.json",
         refresh_hours: float = 24.0,
+        balance_check_hours: float = 1.0,
     ):
         self.cache_path = Path(cache_path)
         self.refresh_interval_seconds = refresh_hours * 3600
+        self.balance_check_interval_seconds = balance_check_hours * 3600.0
         self._entries: list[CatalogEntry] = []
         self._last_refresh: float = 0.0
+        self._account_status: dict | None = None
+        self._account_last_checked: float = 0.0
 
         # Load from cache on init
         self._load_cache()
@@ -199,6 +204,195 @@ class ModelCatalog:
         if new_keys:
             logger.info("Registered %d new free model(s) from catalog", len(new_keys))
         return new_keys
+
+    # -- Account & validation -------------------------------------------------
+
+    async def check_account(self, api_key: str = "") -> dict:
+        """Check OpenRouter account status (free tier, remaining balance).
+
+        Caches the result for ``balance_check_interval_seconds``.  On any
+        failure returns a safe default that prevents paid model selection.
+        """
+        now = time.time()
+        if (
+            self._account_status is not None
+            and (now - self._account_last_checked) < self.balance_check_interval_seconds
+        ):
+            return {**self._account_status, "cached": True}
+
+        if not api_key:
+            result = {
+                "is_free_tier": True,
+                "limit_remaining": None,
+                "rate_limit": {},
+                "cached": False,
+                "error": "No API key provided",
+            }
+            self._account_status = result
+            self._account_last_checked = now
+            return result
+
+        try:
+            headers = {"Authorization": f"Bearer {api_key}"}
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(OPENROUTER_AUTH_URL, headers=headers)
+                resp.raise_for_status()
+                data = resp.json().get("data", {})
+
+            result = {
+                "is_free_tier": data.get("is_free_tier", True),
+                "limit_remaining": data.get("limit_remaining"),
+                "rate_limit": data.get("rate_limit", {}),
+                "cached": False,
+                "error": None,
+            }
+        except Exception as e:
+            logger.warning("Failed to check OpenRouter account: %s", e)
+            result = {
+                "is_free_tier": True,
+                "limit_remaining": None,
+                "rate_limit": {},
+                "cached": False,
+                "error": str(e),
+            }
+
+        self._account_status = result
+        self._account_last_checked = now
+        return result
+
+    @property
+    def openrouter_account_status(self) -> dict | None:
+        """Return the last cached account status, or None if never checked."""
+        return self._account_status
+
+    def validate_primary_models(self, registry) -> dict[str, str | None]:
+        """Check whether FREE_ROUTING model IDs exist in the live catalog.
+
+        Returns ``{model_key: replacement_key_or_none}`` for models that are
+        missing from the catalog.  Informational only — does NOT modify the
+        registry.
+        """
+        from agents.model_router import FREE_ROUTING
+
+        catalog_ids = {e.model_id for e in self._entries}
+        if not catalog_ids:
+            return {}
+
+        results: dict[str, str | None] = {}
+        for _task_type, routing in FREE_ROUTING.items():
+            model_key = routing.get("primary", "")
+            if not model_key:
+                continue
+            try:
+                spec = registry.get_model(model_key)
+            except ValueError:
+                continue
+            if spec.provider.value != "openrouter":
+                continue
+            if spec.model_id in catalog_ids:
+                continue
+            # Model is missing from catalog — try to find replacement
+            replacement = self._find_best_replacement(spec, catalog_ids)
+            results[model_key] = replacement
+            logger.warning(
+                "Model %s (%s) not found in catalog%s",
+                model_key,
+                spec.model_id,
+                f" — suggested replacement: {replacement}" if replacement else "",
+            )
+
+        return results
+
+    def _find_best_replacement(self, missing_spec, catalog_ids: set) -> str | None:
+        """Find the best catalog-available replacement for a missing model."""
+        # Infer category from model name
+        category = "general"
+        if _CODING_KEYWORDS.search(missing_spec.model_id):
+            category = "coding"
+        elif _REASONING_KEYWORDS.search(missing_spec.model_id):
+            category = "reasoning"
+
+        candidates = [
+            e
+            for e in self._entries
+            if e.is_free and e.inferred_category() == category and e.model_id in catalog_ids
+        ]
+        if not candidates:
+            return None
+
+        # Prefer models with larger context windows
+        candidates.sort(key=lambda e: e.context_length, reverse=True)
+        slug = _slug_from_model_id(candidates[0].model_id)
+        return f"or-free-{slug}"
+
+    def register_paid_models(self, registry, max_prompt_price_per_m: float = 5.0) -> list[str]:
+        """Register affordable paid OR models that aren't already known.
+
+        ``max_prompt_price_per_m`` is the per-million-token price ceiling
+        (e.g. 5.0 = $5/M tokens).  Returns the list of newly registered
+        model keys.
+        """
+        from providers.registry import MODELS
+
+        existing_ids = {spec.model_id for spec in MODELS.values()}
+        new_keys: list[str] = []
+
+        for entry in self._entries:
+            if entry.is_free:
+                continue
+            if entry.model_id in existing_ids:
+                continue
+            try:
+                prompt_per_m = float(entry.prompt_price) * 1_000_000
+            except (ValueError, TypeError):
+                continue
+            if prompt_per_m > max_prompt_price_per_m:
+                continue
+
+            slug = _slug_from_model_id(entry.model_id)
+            key = f"or-paid-{slug}"
+
+            try:
+                registry.get_model(key)
+                continue  # Already registered (slug collision)
+            except ValueError:
+                pass
+
+            tier = ModelTier.CHEAP if prompt_per_m < 1.0 else ModelTier.PREMIUM
+            spec = ModelSpec(
+                model_id=entry.model_id,
+                provider=ProviderType.OPENROUTER,
+                max_tokens=4096,
+                display_name=f"{entry.name} (paid, discovered)",
+                tier=tier,
+                max_context_tokens=entry.context_length or 128000,
+            )
+            registry.register_model(key, spec)
+            new_keys.append(key)
+            logger.info(
+                "Auto-registered paid model: %s → %s (tier=%s, $%.2f/M)",
+                key,
+                entry.model_id,
+                tier.value,
+                prompt_per_m,
+            )
+
+        if new_keys:
+            logger.info("Registered %d new paid model(s) from catalog", len(new_keys))
+        return new_keys
+
+    def get_model_prices(self) -> dict[str, tuple[float, float]]:
+        """Return ``{model_id: (prompt_per_token, completion_per_token)}``."""
+        prices: dict[str, tuple[float, float]] = {}
+        for entry in self._entries:
+            try:
+                prices[entry.model_id] = (
+                    float(entry.prompt_price),
+                    float(entry.completion_price),
+                )
+            except (ValueError, TypeError):
+                continue
+        return prices
 
     # -- Cache ----------------------------------------------------------------
 

@@ -74,6 +74,9 @@ const state = {
   // Storage backend status
   storageStatus: null,
   storageInstalling: false,
+  // OpenRouter account status
+  orStatus: null,
+  orStatusLoading: false,
   // Repositories
   repos: [],
   repoBranches: {},
@@ -2969,6 +2972,22 @@ function renderSettingsPanel() {
         </button>
         <div class="help" style="margin-top:0.5rem">Keys saved here override <code>.env</code> values and take effect immediately for new API calls.</div>
       </div>
+
+      <h3 style="margin-top:2rem">OpenRouter Account Status</h3>
+      ${state.orStatus ? `
+        <div class="form-group">
+          <div class="secret-status ${state.orStatus.account && !state.orStatus.account.is_free_tier ? "configured" : "not-configured"}">
+            <strong>Tier:</strong> ${state.orStatus.account ? (state.orStatus.account.is_free_tier ? "Free" : "Paid") : "Unknown"}
+            ${state.orStatus.account && state.orStatus.account.limit_remaining !== null && state.orStatus.account.limit_remaining !== undefined ? ` &mdash; <strong>Credits remaining:</strong> $${Number(state.orStatus.account.limit_remaining).toFixed(2)}` : ""}
+            ${state.orStatus.account && state.orStatus.account.error ? ` &mdash; <span style="color:var(--danger)">${esc(state.orStatus.account.error)}</span>` : ""}
+          </div>
+          <div class="help" style="margin-top:0.5rem">
+            <strong>Policy:</strong> ${esc(state.orStatus.policy)} &mdash;
+            <strong>Paid models registered:</strong> ${state.orStatus.paid_models_registered}
+            &mdash; <a href="#" onclick="loadOrStatus().then(()=>renderSettingsPanel());return false">Refresh</a>
+          </div>
+        </div>
+      ` : `<div class="help">${state.orStatusLoading ? "Loading..." : "Status not available. Configure an OpenRouter API key first."}</div>`}
     `,
     repos: () => renderReposPanel(),
     channels: () => `
@@ -3050,6 +3069,22 @@ function renderSettingsPanel() {
       ${settingReadonly("TASKS_JSON_PATH", "Tasks file path", "Default: tasks.json. Persisted task queue file.")}
       ${settingReadonly("MCP_SERVERS_JSON", "MCP servers config", "Path to JSON file defining MCP server connections.")}
       ${settingReadonly("CRON_JOBS_PATH", "Cron jobs file", "Default: cron_jobs.json. Scheduled task definitions.")}
+
+      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Model Routing Policy</h4>
+      ${settingSelect("MODEL_ROUTING_POLICY", "Routing policy", [
+        {value: "free_only", label: "Free only — only free OpenRouter models"},
+        {value: "balanced", label: "Balanced — upgrade complex tasks when OR credits available"},
+        {value: "performance", label: "Performance — best model regardless of cost"},
+      ], "Controls whether Agent42 uses paid models when OpenRouter credits are available.")}
+
+      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Dynamic Model Routing</h4>
+      ${settingEditable("MODEL_TRIAL_PERCENTAGE", "Trial percentage", "Default: 10. Percentage of tasks randomly assigned to unproven models for evaluation (0-100).")}
+      ${settingEditable("MODEL_CATALOG_REFRESH_HOURS", "Catalog refresh interval (hours)", "Default: 24. How often to sync the model catalog from OpenRouter.")}
+      ${settingSelect("MODEL_RESEARCH_ENABLED", "Benchmark research", [
+        {value: "true", label: "Enabled"},
+        {value: "false", label: "Disabled"},
+      ], "Enable web benchmark research from authoritative sources (LMSys, HuggingFace).")}
+      ${settingEditable("OPENROUTER_BALANCE_CHECK_HOURS", "Balance check interval (hours)", "Default: 1. How often to re-check OpenRouter account balance.")}
       ${_envSaveBtn()}
     `,
     storage: () => {
@@ -3208,6 +3243,35 @@ function settingReadonly(envVar, label, help) {
   return settingEditable(envVar, label, help);
 }
 
+function settingSelect(envVar, label, options, help) {
+  const current = state.envSettings[envVar] || "";
+  const edited = state.envEdits[envVar];
+  const displayVal = edited !== undefined ? edited : current;
+  const isChanged = edited !== undefined && edited !== current;
+  return `
+    <div class="form-group">
+      <label>${esc(label)}</label>
+      <select style="font-family:var(--mono);${isChanged ? "border-color:var(--accent)" : ""}"
+              onchange="state.envEdits['${envVar}']=this.value;updateEnvSaveBtn()">
+        ${options.map(opt => `<option value="${esc(opt.value)}"${displayVal === opt.value ? " selected" : ""}>${esc(opt.label)}</option>`).join("")}
+      </select>
+      ${help ? `<div class="help">${help}</div>` : ""}
+      <div class="secret-status ${current ? "configured" : "not-configured"}">
+        <code>${esc(envVar)}</code>${current ? "" : " (not set)"}
+      </div>
+    </div>
+  `;
+}
+
+async function loadOrStatus() {
+  state.orStatusLoading = true;
+  try {
+    const resp = await apiFetch("/settings/openrouter-status");
+    if (resp.ok) state.orStatus = await resp.json();
+  } catch (e) { /* non-critical */ }
+  state.orStatusLoading = false;
+}
+
 function updateEnvSaveBtn() {
   const btn = document.getElementById("save-env-btn");
   if (btn) {
@@ -3224,7 +3288,7 @@ async function loadAll() {
     loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(),
     loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(),
     loadChatMessages(), loadTokenStats(), loadChatSessions(), loadCodeSessions(),
-    loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(), loadGithubAccounts(),
+    loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(), loadGithubAccounts(), loadOrStatus(),
   ]);
 }
 
