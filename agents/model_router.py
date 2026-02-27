@@ -33,12 +33,12 @@ logger = logging.getLogger("agent42.router")
 FREE_ROUTING: dict[TaskType, dict] = {
     TaskType.CODING: {
         "primary": "gemini-2-flash",  # Gemini Flash — fast, 1M context, generous free tier
-        "critic": "or-free-devstral",  # Devstral 123B — code-aware second opinion
+        "critic": "or-free-qwen-coder",  # Qwen3 Coder 480B — code-aware second opinion
         "max_iterations": 8,
     },
     TaskType.DEBUGGING: {
         "primary": "gemini-2-flash",  # Gemini Flash — fast reasoning + 1M context for large codebases
-        "critic": "or-free-devstral",  # Devstral — multi-file awareness
+        "critic": "or-free-qwen-coder",  # Qwen3 Coder — multi-file awareness
         "max_iterations": 10,
     },
     TaskType.RESEARCH: {
@@ -48,7 +48,7 @@ FREE_ROUTING: dict[TaskType, dict] = {
     },
     TaskType.REFACTORING: {
         "primary": "gemini-2-flash",  # Gemini Flash — code-capable + 1M context
-        "critic": "or-free-devstral",  # Devstral — multi-file project awareness
+        "critic": "or-free-qwen-coder",  # Qwen3 Coder — multi-file project awareness
         "max_iterations": 8,
     },
     TaskType.DOCUMENTATION: {
@@ -93,12 +93,12 @@ FREE_ROUTING: dict[TaskType, dict] = {
     },
     TaskType.APP_CREATE: {
         "primary": "gemini-2-flash",  # Gemini Flash — fast code generation + 1M context
-        "critic": "or-free-devstral",  # Devstral — thorough code review
+        "critic": "or-free-qwen-coder",  # Qwen3 Coder — thorough code review
         "max_iterations": 12,  # Apps need more iterations to build fully
     },
     TaskType.APP_UPDATE: {
         "primary": "gemini-2-flash",  # Gemini Flash — 1M context for existing codebases
-        "critic": "or-free-devstral",  # Devstral — multi-file awareness for updates
+        "critic": "or-free-qwen-coder",  # Qwen3 Coder — multi-file awareness for updates
         "max_iterations": 8,
     },
     TaskType.PROJECT_SETUP: {
