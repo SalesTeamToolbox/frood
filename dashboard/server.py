@@ -232,6 +232,8 @@ _DASHBOARD_EDITABLE_SETTINGS = {
     "MODEL_RESEARCH_ENABLED",
     "MODEL_ROUTING_POLICY",
     "OPENROUTER_BALANCE_CHECK_HOURS",
+    # Project-scoped memory
+    "PROJECT_MEMORY_ENABLED",
     # RLM (Recursive Language Models)
     "RLM_ENABLED",
     "RLM_THRESHOLD_TOKENS",
@@ -335,6 +337,7 @@ def create_app(
     intervention_queues: dict | None = None,
     github_account_store=None,
     model_catalog=None,
+    memory_store=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -1936,6 +1939,31 @@ def create_app(
             await task_queue.add(task)
             await ws_manager.broadcast("task_update", task.to_dict())
             return task.to_dict()
+
+    # -- Project Memory --------------------------------------------------------
+
+    @app.get("/api/projects/{project_id}/memory")
+    async def get_project_memory(
+        project_id: str,
+        _user: str = Depends(get_current_user),
+    ):
+        """Return project memory contents for dashboard display."""
+        project = await project_manager.get(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        pm = project_manager.get_project_memory(
+            project_id,
+            global_store=memory_store,
+        )
+        if not pm:
+            return {"memory": "", "history": "", "project_id": project_id}
+
+        return {
+            "memory": pm.read_memory(),
+            "history": pm._store.read_history(),
+            "project_id": project_id,
+        }
 
     # -- GitHub OAuth ----------------------------------------------------------
 

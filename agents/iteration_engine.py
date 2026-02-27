@@ -616,6 +616,7 @@ class IterationEngine:
         task_id: str = "",
         token_accumulator: TokenAccumulator | None = None,
         intervention_queue: asyncio.Queue | None = None,
+        rlm_provider=None,
     ) -> IterationHistory:
         """
         Execute the iteration loop with tool calling support.
@@ -633,6 +634,7 @@ class IterationEngine:
             on_iteration: Optional async callback(IterationResult) for live updates.
             token_accumulator: Optional accumulator for per-task token tracking.
             intervention_queue: Optional queue for mid-task user feedback messages.
+            rlm_provider: Optional RLMProvider for mid-iteration context recompression.
         """
         self._token_acc = token_accumulator or TokenAccumulator()
         self._failed_models = set()  # Reset per-task failed model tracking
@@ -675,6 +677,13 @@ class IterationEngine:
             # Call before_iteration extension hooks
             if self.extension_loader and self.extension_loader.has_extensions:
                 messages = self.extension_loader.call_before_iteration(messages, i)
+
+            # RLM mid-iteration recompression — compress before overflow guard
+            # fires, preserving key findings while reducing context size.
+            if i > 1 and rlm_provider:
+                est_tokens_rlm = sum(len(str(m.get("content", ""))) for m in messages) // 4
+                if rlm_provider.should_use_rlm_recompress(est_tokens_rlm):
+                    messages = await self._rlm_recompress(rlm_provider, messages, task_description)
 
             # Context window overflow guard (OpenClaw feature)
             try:
@@ -728,13 +737,15 @@ class IterationEngine:
                 tool_calls=all_tool_records,
             )
 
-            # Critic pass (if configured)
+            # Critic pass (if configured) — enriched with tool usage summary
             if critic_model:
                 critic_feedback = await self._critic_pass(
                     critic_model,
                     task_description,
                     primary_output,
                     task_type=task_type,
+                    tool_records=all_tool_records,
+                    iteration_num=i,
                 )
                 result.critic_feedback = critic_feedback
                 result.approved = self._is_approved(critic_feedback)
@@ -859,6 +870,9 @@ class IterationEngine:
 
             logger.info(f"Tool round {round_num + 1}: {len(records)} calls, continuing...")
 
+            # Compact old tool messages if accumulated context is too large
+            self._compact_tool_messages(working_messages)
+
         # Max tool rounds reached — ask model for final answer without tools
         working_messages.append(
             {
@@ -876,20 +890,121 @@ class IterationEngine:
         original_task: str,
         output: str,
         task_type: str = "coding",
+        tool_records: list[ToolCallRecord] | None = None,
+        iteration_num: int = 0,
     ) -> str:
-        """Have the critic model review the primary's output."""
+        """Have the critic model review the primary's output.
+
+        When tool_records are provided, a compact summary of tool calls is
+        included so the critic can evaluate tool usage effectiveness — not
+        just the final text output.
+        """
         critic_prompt = CRITIC_PROMPTS.get(task_type, _DEFAULT_CRITIC_PROMPT)
+
+        # Build enriched user context for the critic
+        user_parts = [f"Original task:\n{original_task}"]
+        if iteration_num > 0:
+            user_parts.append(f"\n(Iteration {iteration_num})")
+        user_parts.append(f"\n\nOutput to review:\n{output}")
+
+        if tool_records:
+            tool_summary = self._build_tool_summary(tool_records)
+            user_parts.append(f"\n\nTools used during this iteration:\n{tool_summary}")
+
         messages = [
-            {
-                "role": "system",
-                "content": critic_prompt,
-            },
-            {
-                "role": "user",
-                "content": (f"Original task:\n{original_task}\n\nOutput to review:\n{output}"),
-            },
+            {"role": "system", "content": critic_prompt},
+            {"role": "user", "content": "".join(user_parts)},
         ]
         return await self._complete_with_retry(critic_model, messages)
+
+    @staticmethod
+    def _build_tool_summary(records: list[ToolCallRecord]) -> str:
+        """Compact summary of tool calls — name, success/fail, output preview."""
+        lines = []
+        for r in records:
+            status = "OK" if r.success else "FAIL"
+            preview = (r.result or "")[:100].replace("\n", " ")
+            lines.append(f"- {r.tool_name}: {status} — {preview}")
+        return "\n".join(lines) if lines else "(no tools called)"
+
+    # Max total characters in tool result messages before compaction triggers
+    MAX_TOOL_CONTEXT_CHARS = 50_000  # ~12.5K tokens
+
+    @staticmethod
+    def _compact_tool_messages(messages: list[dict]) -> None:
+        """Truncate old tool result messages to prevent context rot.
+
+        Keeps the most recent 2 tool results intact; truncates older ones
+        to 200 characters. Only triggers when total tool content exceeds
+        MAX_TOOL_CONTEXT_CHARS.
+        """
+        tool_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+        if len(tool_indices) <= 2:
+            return
+
+        total = sum(len(str(messages[i].get("content", ""))) for i in tool_indices)
+        if total <= IterationEngine.MAX_TOOL_CONTEXT_CHARS:
+            return
+
+        # Compact all but last 2 tool messages
+        for idx in tool_indices[:-2]:
+            content = str(messages[idx].get("content", ""))
+            if len(content) > 200:
+                messages[idx]["content"] = content[:200] + "... (truncated)"
+
+        compacted = len(tool_indices) - 2
+        logger.info("Compacted %d old tool messages (%d chars → budget)", compacted, total)
+
+    @staticmethod
+    async def _rlm_recompress(rlm_provider, messages: list[dict], task_description: str) -> list:
+        """Compress intermediate messages via RLM when context exceeds threshold.
+
+        Preserves the system prompt and original task, replaces intermediate
+        assistant/tool messages with a compressed summary.
+        """
+        # Only compress if there are enough intermediate messages to justify it
+        if len(messages) <= 3:
+            return messages
+
+        # Extract all intermediate messages (skip system + first task)
+        work_content = "\n\n".join(
+            f"[{m['role']}]: {str(m.get('content', ''))[:2000]}" for m in messages[2:]
+        )
+
+        try:
+            result = await rlm_provider.complete(
+                query=(
+                    "Summarize the work done so far on this task, preserving "
+                    "key findings, decisions, tool results, and any code changes:\n"
+                    f"{task_description[:500]}"
+                ),
+                context=work_content,
+                task_type="research",
+            )
+        except Exception as e:
+            logger.warning("RLM recompression failed: %s", e)
+            return messages
+
+        if result and result.get("response"):
+            compressed = [
+                messages[0],  # system prompt
+                messages[1],  # original task
+                {
+                    "role": "user",
+                    "content": (
+                        f"## Progress Summary (RLM-compressed)\n"
+                        f"{result['response']}\n\n"
+                        f"Continue working on the task based on the progress above."
+                    ),
+                },
+            ]
+            logger.info(
+                "RLM recompressed context: %d messages → 3 messages",
+                len(messages),
+            )
+            return compressed
+
+        return messages  # Fallback: no compression
 
     @staticmethod
     def _is_approved(critic_feedback: str) -> bool:
