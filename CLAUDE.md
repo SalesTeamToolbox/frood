@@ -422,6 +422,8 @@ class TestWorkspaceSandbox:
 | 50 | Routing | Gemini daily quota exhaustion (`limit: 0`) retried every iteration — 5-7s waste per call | `_failed_models` set tracks 429/404 models per-task; subsequent iterations skip them instantly |
 | 51 | Fallback | `_get_fallback_models` included `gemini-2-flash` even when it just failed as primary (same-provider retry) | `_failed_models` propagated to `exclude` param — models that failed in any iteration are excluded from all fallbacks |
 | 52 | Catalog | `or-free-devstral` free period ended (404 "free Devstral 2 period has ended") | Replaced with `or-free-qwen-coder` (Qwen3 Coder 480B) in all FREE_ROUTING critic slots |
+| 53 | Retry | OpenRouter 402 "API key USD spend limit exceeded" from Venice backend not caught — fell through to generic retry | Added `_is_payment_error()` detecting 402/spend-limit; skips retries + adds to `_failed_models` like 429 |
+| 54 | Registry | Dead `or-free-devstral` still in MODELS dict — appeared in fallback list via `free_models()` even after removal from FREE_ROUTING | Removed from MODELS; removing from FREE_ROUTING alone is not enough — `_get_fallback_models` iterates all free models |
 
 ---
 
