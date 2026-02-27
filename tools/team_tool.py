@@ -107,10 +107,14 @@ class TeamContext:
     role_outputs: dict[str, str] = field(default_factory=dict)
     role_feedback: dict[str, str] = field(default_factory=dict)
     team_notes: list[str] = field(default_factory=list)
+    project_id: str = ""
 
     def build_role_context(self, current_role: str) -> str:
         """Build context string for a specific role."""
         parts = [f"## Task\n{self.task_description}"]
+
+        if self.project_id:
+            parts.append(f"## Project\nThis task is part of project: {self.project_id}")
 
         if self.manager_plan:
             parts.append(f"## Manager's Execution Plan\n{self.manager_plan}")
@@ -413,6 +417,7 @@ class TeamTool(Tool):
         roles: list = None,
         task: str = "",
         run_id: str = "",
+        project_id: str = "",
         **kwargs,
     ) -> ToolResult:
         if not action:
@@ -421,7 +426,7 @@ class TeamTool(Tool):
         if action == "compose":
             return self._compose(name, description, workflow, roles or [])
         elif action == "run":
-            return await self._run(name, task)
+            return await self._run(name, task, project_id=project_id)
         elif action == "status":
             return self._status(run_id)
         elif action == "list":
@@ -463,7 +468,7 @@ class TeamTool(Tool):
     # Team execution — Manager-coordinated
     # ------------------------------------------------------------------
 
-    async def _run(self, name: str, task_description: str) -> ToolResult:
+    async def _run(self, name: str, task_description: str, project_id: str = "") -> ToolResult:
         if not name:
             return ToolResult(error="name is required for run", success=False)
         if name not in self._teams:
@@ -498,13 +503,14 @@ class TeamTool(Tool):
 
         try:
             # -- Phase 1: Manager plans the execution --
-            manager_plan = await self._manager_plan(task_description, roles)
+            manager_plan = await self._manager_plan(task_description, roles, project_id)
             run_state["manager_plan"] = manager_plan
 
             # Build shared team context
             team_ctx = TeamContext(
                 task_description=task_description,
                 manager_plan=manager_plan,
+                project_id=project_id,
             )
 
             # -- Phase 2: Execute team workflow --
@@ -519,7 +525,9 @@ class TeamTool(Tool):
             run_state["role_results"] = results
 
             # -- Phase 3: Manager reviews all outputs --
-            manager_review = await self._manager_review(task_description, manager_plan, results)
+            manager_review = await self._manager_review(
+                task_description, manager_plan, results, project_id
+            )
             run_state["manager_review"] = manager_review
 
             # -- Phase 4: Handle revision requests --
@@ -530,7 +538,9 @@ class TeamTool(Tool):
                 run_state["role_results"] = results
 
                 # Re-review after revisions
-                manager_review = await self._manager_review(task_description, manager_plan, results)
+                manager_review = await self._manager_review(
+                    task_description, manager_plan, results, project_id
+                )
                 run_state["manager_review"] = manager_review
 
             # Extract quality score
@@ -570,7 +580,7 @@ class TeamTool(Tool):
     # Manager phases
     # ------------------------------------------------------------------
 
-    async def _manager_plan(self, task_description: str, roles: list) -> str:
+    async def _manager_plan(self, task_description: str, roles: list, project_id: str = "") -> str:
         """Manager creates an execution plan before team roles run."""
         from core.task_queue import Task, TaskType
 
@@ -591,12 +601,15 @@ class TeamTool(Tool):
             title=f"[manager:plan] {task_description[:50]}",
             description=full_description,
             task_type=TaskType.PROJECT_MANAGEMENT,
+            project_id=project_id,
         )
         await self._task_queue.add(task_obj)
         output = await self._wait_for_task(task_obj.id)
         return output
 
-    async def _manager_review(self, task_description: str, manager_plan: str, results: dict) -> str:
+    async def _manager_review(
+        self, task_description: str, manager_plan: str, results: dict, project_id: str = ""
+    ) -> str:
         """Manager reviews all role outputs and synthesizes a final deliverable."""
         from core.task_queue import Task, TaskType
 
@@ -616,6 +629,7 @@ class TeamTool(Tool):
             title=f"[manager:review] {task_description[:50]}",
             description=review_prompt,
             task_type=TaskType.PROJECT_MANAGEMENT,
+            project_id=project_id,
         )
         await self._task_queue.add(task_obj)
         output = await self._wait_for_task(task_obj.id)
@@ -674,6 +688,7 @@ class TeamTool(Tool):
                 title=f"[team:{role_name}:revision] {team_ctx.task_description[:40]}",
                 description=full_description,
                 task_type=task_type_enum,
+                project_id=team_ctx.project_id,
             )
             await self._task_queue.add(task_obj)
             output = await self._wait_for_task(task_obj.id)
@@ -717,6 +732,7 @@ class TeamTool(Tool):
                 title=f"[team:{role_name}] {task_description[:50]}",
                 description=full_description,
                 task_type=task_type_enum,
+                project_id=team_ctx.project_id,
             )
             await self._task_queue.add(task_obj)
 
@@ -755,6 +771,7 @@ class TeamTool(Tool):
                 title=f"[team:{role_name}] {task_description[:50]}",
                 description=full_description,
                 task_type=task_type_enum,
+                project_id=team_ctx.project_id,
             )
             await self._task_queue.add(task_obj)
             task_ids[role_name] = task_obj.id
@@ -810,6 +827,7 @@ class TeamTool(Tool):
                 title=f"[team:{role_name}] {task_description[:50]}",
                 description=full_description,
                 task_type=task_type_enum,
+                project_id=team_ctx.project_id,
             )
             await self._task_queue.add(task_obj)
             output = await self._wait_for_task(task_obj.id)

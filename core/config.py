@@ -239,6 +239,9 @@ class Settings:
     # Agent execution extensions (Agent Zero-inspired)
     extensions_dir: str = ""  # Directory for execution lifecycle hook plugins
 
+    # Project-scoped memory
+    project_memory_enabled: bool = True
+
     # RLM (Recursive Language Models — MIT CSAIL)
     rlm_enabled: bool = True
     rlm_threshold_tokens: int = 50_000
@@ -407,6 +410,9 @@ class Settings:
             agent_profiles_dir=os.getenv("AGENT_PROFILES_DIR", ""),
             # Agent execution extensions
             extensions_dir=os.getenv("EXTENSIONS_DIR", ""),
+            # Project-scoped memory
+            project_memory_enabled=os.getenv("PROJECT_MEMORY_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
             # RLM (Recursive Language Models)
             rlm_enabled=os.getenv("RLM_ENABLED", "true").lower() in ("true", "1", "yes"),
             rlm_threshold_tokens=int(os.getenv("RLM_THRESHOLD_TOKENS", "50000")),
