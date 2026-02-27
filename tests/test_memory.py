@@ -234,6 +234,22 @@ class TestEmbeddingStore:
         assert store.entry_count() == 2
 
 
+    def test_openrouter_only_key_disables_embeddings(self):
+        """When only OPENROUTER_API_KEY is set (no OPENAI_API_KEY), embeddings
+        should be disabled because OpenRouter doesn't support /embeddings."""
+        env = {"OPENROUTER_API_KEY": "sk-or-test-key"}
+        with patch.dict("os.environ", env, clear=True):
+            store = EmbeddingStore(self.store_path)
+            assert store.is_available is False
+
+    def test_openai_key_enables_embeddings(self):
+        """When OPENAI_API_KEY is set, embeddings should be available."""
+        env = {"OPENAI_API_KEY": "sk-openai-test-key"}
+        with patch.dict("os.environ", env, clear=True):
+            store = EmbeddingStore(self.store_path)
+            assert store.is_available is True
+
+
 class TestEmbeddingStoreWithMockAPI:
     """Tests that mock the embedding API to test search logic."""
 
@@ -341,6 +357,33 @@ class TestMemoryStoreSemanticFallback:
         results = await self.store.semantic_search("deploy", top_k=5)
         assert len(results) > 0
         assert any("deploy" in r["text"].lower() for r in results)
+
+
+class TestSemanticRuntimeFallback:
+    """Test that build_context_semantic degrades gracefully when the
+    embeddings API fails at runtime (e.g. invalid key, provider outage)."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.store = MemoryStore(self.tmpdir)
+        self.store.update_memory("Test memory content for fallback")
+
+    @pytest.mark.asyncio
+    async def test_build_context_semantic_falls_back_on_api_error(self):
+        """When embeddings.search() raises, build_context_semantic should
+        return basic context instead of crashing."""
+        # Make embeddings look available but fail at call time
+        self.store.embeddings._client = "fake"  # truthy
+        self.store.embeddings._model = "test-model"
+
+        with patch.object(
+            self.store.embeddings,
+            "search",
+            side_effect=RuntimeError("Error code: 401 - User not found."),
+        ):
+            result = await self.store.build_context_semantic("test query")
+        # Should return basic context, not raise
+        assert "Persistent Memory" in result or "Test memory content" in result
 
 
 class TestHistoryRotation:

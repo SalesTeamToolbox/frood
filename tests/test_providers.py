@@ -1,5 +1,8 @@
 """Tests for Phase 5: Provider registry."""
 
+import os
+from unittest.mock import patch
+
 import pytest
 
 from providers.registry import (
@@ -88,3 +91,26 @@ class TestProviderRegistry:
     def test_openrouter_models_exist(self):
         or_models = [k for k, v in MODELS.items() if v.provider == ProviderType.OPENROUTER]
         assert len(or_models) >= 3
+
+    def test_client_cache_rebuilds_on_key_change(self):
+        """Cached client is rebuilt when the API key changes in os.environ."""
+        registry = ProviderRegistry()
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-old-key-1234"}):
+            client1 = registry.get_client(ProviderType.OPENROUTER)
+            # Same key — should return the cached client
+            client2 = registry.get_client(ProviderType.OPENROUTER)
+            assert client1 is client2
+
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-new-key-5678"}):
+            # Key changed — should rebuild
+            client3 = registry.get_client(ProviderType.OPENROUTER)
+            assert client3 is not client1
+
+    def test_invalidate_client_forces_rebuild(self):
+        """invalidate_client() clears the cache so next get_client() rebuilds."""
+        registry = ProviderRegistry()
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test-key-9999"}):
+            client1 = registry.get_client(ProviderType.OPENROUTER)
+            registry.invalidate_client(ProviderType.OPENROUTER)
+            client2 = registry.get_client(ProviderType.OPENROUTER)
+            assert client2 is not client1
