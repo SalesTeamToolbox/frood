@@ -428,6 +428,9 @@ class TestWorkspaceSandbox:
 | 56 | Registry | 5 dead OpenRouter free models still in MODELS dict — 404s on every health check and appeared in fallback lists | Remove dead models from MODELS dict AND static fallback list in `iteration_engine.py`; pitfall #54 only covered devstral, same pattern recurred for deepseek-r1, llama4-maverick, gemini-flash, gemini-pro |
 | 57 | Tools | `test_runner.py` uses `"python"` but production server only has `python3` — `FileNotFoundError: No such file or directory: 'python'` | Use `sys.executable` instead of hardcoded `"python"` for subprocess calls |
 | 58 | Providers | `gemini-2.0-flash` deprecated by Google (404 "no longer available to new users") — all 15 task types fail on primary model | Updated `MODELS["gemini-2-flash"]` model_id to `gemini-2.5-flash`; internal key `gemini-2-flash` unchanged |
+| 59 | RLM | `rlm.completion()` is synchronous — calling it directly blocks the async event loop | Always wrap in `loop.run_in_executor(None, lambda: rlm.completion(...))` with `asyncio.wait_for` timeout |
+| 60 | RLM | RLM recursive sub-calls can produce runaway costs (10x+ expected) | Enforce `RLM_COST_LIMIT` per query and check global `SpendingTracker` before each RLM call |
+| 61 | RLM | `rlms` package not installed but `RLM_ENABLED=true` — import fails at runtime | All `from rlm import ...` is inside method bodies behind try/except ImportError; `should_use_rlm()` returns False gracefully |
 
 ---
 

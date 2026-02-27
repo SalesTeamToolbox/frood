@@ -476,14 +476,9 @@ class ModelCatalog:
             model_key: str, model_id: str, base_url: str, auth_key: str
         ) -> tuple[str, dict]:
             async with semaphore:
-                return model_key, await self._ping_single_model(
-                    model_id, base_url, auth_key
-                )
+                return model_key, await self._ping_single_model(model_id, base_url, auth_key)
 
-        tasks = [
-            _ping_model(key, mid, url, akey)
-            for key, mid, url, akey in models_to_check
-        ]
+        tasks = [_ping_model(key, mid, url, akey) for key, mid, url, akey in models_to_check]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         now = time.time()
@@ -501,23 +496,22 @@ class ModelCatalog:
         # Log summary
         ok = sum(1 for s in self._health_status.values() if s.get("status") == self.STATUS_OK)
         unavail = sum(
-            1 for s in self._health_status.values()
-            if s.get("status") == self.STATUS_UNAVAILABLE
+            1 for s in self._health_status.values() if s.get("status") == self.STATUS_UNAVAILABLE
         )
         rate_limited = sum(
-            1 for s in self._health_status.values()
-            if s.get("status") == self.STATUS_RATE_LIMITED
+            1 for s in self._health_status.values() if s.get("status") == self.STATUS_RATE_LIMITED
         )
         logger.info(
             "Health check complete: %d ok, %d unavailable, %d rate-limited (of %d checked)",
-            ok, unavail, rate_limited, len(models_to_check),
+            ok,
+            unavail,
+            rate_limited,
+            len(models_to_check),
         )
 
         return self._health_status
 
-    async def _ping_single_model(
-        self, model_id: str, base_url: str, api_key: str
-    ) -> dict:
+    async def _ping_single_model(self, model_id: str, base_url: str, api_key: str) -> dict:
         """Send a minimal completion request to test model availability."""
         url = f"{base_url}/chat/completions"
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -614,9 +608,9 @@ class ModelCatalog:
         return {
             "total_checked": len(self._health_status),
             "last_check": self._last_health_check,
-            "last_check_age_hours": round(
-                (time.time() - self._last_health_check) / 3600, 1
-            ) if self._last_health_check else None,
+            "last_check_age_hours": round((time.time() - self._last_health_check) / 3600, 1)
+            if self._last_health_check
+            else None,
             "by_status": by_status,
             "unhealthy_models": [
                 {"key": k, "status": v.get("status"), "error": v.get("error", "")}

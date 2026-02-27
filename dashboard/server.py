@@ -232,6 +232,16 @@ _DASHBOARD_EDITABLE_SETTINGS = {
     "MODEL_RESEARCH_ENABLED",
     "MODEL_ROUTING_POLICY",
     "OPENROUTER_BALANCE_CHECK_HOURS",
+    # RLM (Recursive Language Models)
+    "RLM_ENABLED",
+    "RLM_THRESHOLD_TOKENS",
+    "RLM_ENVIRONMENT",
+    "RLM_MAX_DEPTH",
+    "RLM_MAX_ITERATIONS",
+    "RLM_VERBOSE",
+    "RLM_COST_LIMIT",
+    "RLM_TIMEOUT_SECONDS",
+    "RLM_LOG_DIR",
 }
 
 
@@ -1187,6 +1197,17 @@ def create_app(
         api_key = os.getenv("OPENROUTER_API_KEY", "")
         await model_catalog.health_check(api_key=api_key)
         return model_catalog.get_health_summary()
+
+    @app.get("/api/settings/rlm-status")
+    async def get_rlm_status(_: AuthContext = Depends(require_admin)):
+        """Return RLM (Recursive Language Model) status and configuration."""
+        try:
+            from providers.rlm_provider import RLMProvider
+
+            provider = RLMProvider()
+            return provider.get_status()
+        except Exception as e:
+            return {"enabled": False, "error": str(e)}
 
     @app.get("/api/settings/storage")
     async def get_storage_status(_admin: AuthContext = Depends(require_admin)):

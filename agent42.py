@@ -1084,7 +1084,9 @@ class Agent42:
                         for m in summary["unhealthy_models"]:
                             logger.warning(
                                 "Unhealthy model: %s — %s (%s)",
-                                m["key"], m["status"], m.get("error", ""),
+                                m["key"],
+                                m["status"],
+                                m.get("error", ""),
                             )
                     first_run = False
             except Exception as e:

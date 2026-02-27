@@ -239,6 +239,20 @@ class Settings:
     # Agent execution extensions (Agent Zero-inspired)
     extensions_dir: str = ""  # Directory for execution lifecycle hook plugins
 
+    # RLM (Recursive Language Models — MIT CSAIL)
+    rlm_enabled: bool = True
+    rlm_threshold_tokens: int = 50_000
+    rlm_environment: str = "local"  # local | docker | modal | prime
+    rlm_max_depth: int = 3
+    rlm_max_iterations: int = 20
+    rlm_root_model: str = ""  # Override root model (empty = auto)
+    rlm_sub_model: str = ""  # Override sub-call model (empty = auto)
+    rlm_log_dir: str = ".agent42/rlm_logs"
+    rlm_verbose: bool = False
+    rlm_cost_limit: float = 1.00  # USD per query
+    rlm_timeout_seconds: int = 300
+    rlm_docker_image: str = "python:3.11-slim"
+
     @classmethod
     def from_env(cls) -> "Settings":
         # Enforce secure JWT secret
@@ -393,6 +407,19 @@ class Settings:
             agent_profiles_dir=os.getenv("AGENT_PROFILES_DIR", ""),
             # Agent execution extensions
             extensions_dir=os.getenv("EXTENSIONS_DIR", ""),
+            # RLM (Recursive Language Models)
+            rlm_enabled=os.getenv("RLM_ENABLED", "true").lower() in ("true", "1", "yes"),
+            rlm_threshold_tokens=int(os.getenv("RLM_THRESHOLD_TOKENS", "50000")),
+            rlm_environment=os.getenv("RLM_ENVIRONMENT", "local"),
+            rlm_max_depth=int(os.getenv("RLM_MAX_DEPTH", "3")),
+            rlm_max_iterations=int(os.getenv("RLM_MAX_ITERATIONS", "20")),
+            rlm_root_model=os.getenv("RLM_ROOT_MODEL", ""),
+            rlm_sub_model=os.getenv("RLM_SUB_MODEL", ""),
+            rlm_log_dir=os.getenv("RLM_LOG_DIR", ".agent42/rlm_logs"),
+            rlm_verbose=os.getenv("RLM_VERBOSE", "false").lower() in ("true", "1", "yes"),
+            rlm_cost_limit=float(os.getenv("RLM_COST_LIMIT", "1.00")),
+            rlm_timeout_seconds=int(os.getenv("RLM_TIMEOUT_SECONDS", "300")),
+            rlm_docker_image=os.getenv("RLM_DOCKER_IMAGE", "python:3.11-slim"),
             # SSH remote shell
             ssh_enabled=os.getenv("SSH_ENABLED", "false").lower() in ("true", "1", "yes"),
             ssh_allowed_hosts=os.getenv("SSH_ALLOWED_HOSTS", ""),

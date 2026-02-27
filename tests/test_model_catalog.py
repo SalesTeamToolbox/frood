@@ -498,24 +498,18 @@ class TestHealthCheck:
     def test_is_model_healthy_rate_limited(self, tmp_path):
         """Rate-limited models are still considered healthy (they exist, just throttled)."""
         catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
-        catalog._health_status = {
-            "throttled-model": {"status": ModelCatalog.STATUS_RATE_LIMITED}
-        }
+        catalog._health_status = {"throttled-model": {"status": ModelCatalog.STATUS_RATE_LIMITED}}
         assert catalog.is_model_healthy("throttled-model") is True
 
     def test_is_model_unhealthy_unavailable(self, tmp_path):
         """404/unavailable models are unhealthy."""
         catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
-        catalog._health_status = {
-            "dead-model": {"status": ModelCatalog.STATUS_UNAVAILABLE}
-        }
+        catalog._health_status = {"dead-model": {"status": ModelCatalog.STATUS_UNAVAILABLE}}
         assert catalog.is_model_healthy("dead-model") is False
 
     def test_is_model_unhealthy_auth_error(self, tmp_path):
         catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
-        catalog._health_status = {
-            "auth-model": {"status": ModelCatalog.STATUS_AUTH_ERROR}
-        }
+        catalog._health_status = {"auth-model": {"status": ModelCatalog.STATUS_AUTH_ERROR}}
         assert catalog.is_model_healthy("auth-model") is False
 
     def test_unhealthy_model_keys(self, tmp_path):
@@ -552,7 +546,12 @@ class TestHealthCheck:
         catalog1 = ModelCatalog(cache_path=tmp_path / "catalog.json")
         catalog1._health_status = {
             "model-a": {"status": "ok", "latency_ms": 200, "error": "", "last_checked": 1000.0},
-            "model-b": {"status": "unavailable", "latency_ms": 50, "error": "404", "last_checked": 1000.0},
+            "model-b": {
+                "status": "unavailable",
+                "latency_ms": 50,
+                "error": "404",
+                "last_checked": 1000.0,
+            },
         }
         catalog1._last_health_check = 1000.0
         catalog1._save_health_cache()
@@ -668,8 +667,10 @@ class TestHealthCheck:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("agents.model_catalog.httpx.AsyncClient", return_value=mock_client), \
-             patch.dict("os.environ", {"OPENROUTER_API_KEY": "sk-test-key"}):
+        with (
+            patch("agents.model_catalog.httpx.AsyncClient", return_value=mock_client),
+            patch.dict("os.environ", {"OPENROUTER_API_KEY": "sk-test-key"}),
+        ):
             result = await catalog.health_check(api_key="sk-test-key")
 
         # Should have checked at least some OR free models
