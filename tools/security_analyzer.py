@@ -14,6 +14,21 @@ from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.security_analyzer")
 
+# Directories excluded from OWASP/secrets scanning to reduce false positives.
+# These contain legitimate uses of dangerous patterns (tests, security tooling).
+_SCAN_EXCLUDE_DIRS = {"tests", ".claude"}
+
+# Files excluded from scanning — they contain detection patterns that match themselves.
+_SCAN_EXCLUDE_FILES = {
+    "security_analyzer.py",
+    "security_audit.py",
+    "security_scanner.py",
+}
+
+# Additional dirs excluded from OWASP scan only — dashboard frontend uses
+# innerHTML by design (CSP requires 'unsafe-inline', see CLAUDE.md pitfall #26).
+_OWASP_EXCLUDE_DIRS = _SCAN_EXCLUDE_DIRS | {"dashboard"}
+
 # Risk levels
 RISK_NONE = "none"
 RISK_LOW = "low"
@@ -346,7 +361,14 @@ class SecurityAnalyzerTool(Tool):
         workspace_real = os.path.realpath(self._workspace)
 
         # Walk workspace, skip hidden dirs and common non-text dirs
-        skip_dirs = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox"}
+        skip_dirs = {
+            ".git",
+            ".venv",
+            "venv",
+            "node_modules",
+            "__pycache__",
+            ".tox",
+        } | _SCAN_EXCLUDE_DIRS
         for root, dirs, files in os.walk(workspace_real):
             dirs[:] = [d for d in dirs if d not in skip_dirs]
             for fname in files:
@@ -368,6 +390,8 @@ class SecurityAnalyzerTool(Tool):
                         ".whl",
                     )
                 ):
+                    continue
+                if fname in _SCAN_EXCLUDE_FILES:
                     continue
                 fpath = os.path.join(root, fname)
                 rel_path = os.path.relpath(fpath, workspace_real)
@@ -401,7 +425,7 @@ class SecurityAnalyzerTool(Tool):
                 RISK_CRITICAL,
             ),
             (
-                r"f['\"].*\{.*\}.*(?:SELECT|INSERT|UPDATE|DELETE)",
+                r"f['\"].*\{.*\}.*(?:SELECT|INSERT|UPDATE|DELETE)\s",
                 "SQL Injection — f-string in SQL query",
                 RISK_CRITICAL,
             ),
@@ -412,21 +436,29 @@ class SecurityAnalyzerTool(Tool):
                 "Command Injection — subprocess with shell=True",
                 RISK_CRITICAL,
             ),
-            # XSS
-            (r"innerHTML\s*=", "XSS — innerHTML assignment", RISK_CRITICAL),
+            # XSS (single pattern — avoids double-counting from overlapping regexes)
             (r"\.innerHTML\s*\+?=", "XSS — innerHTML assignment", RISK_CRITICAL),
         ]
 
         findings = []
         workspace_real = os.path.realpath(self._workspace)
 
-        skip_dirs = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox"}
+        skip_dirs = {
+            ".git",
+            ".venv",
+            "venv",
+            "node_modules",
+            "__pycache__",
+            ".tox",
+        } | _OWASP_EXCLUDE_DIRS
         for root, dirs, files in os.walk(workspace_real):
             dirs[:] = [d for d in dirs if d not in skip_dirs]
             for fname in files:
                 if not fname.endswith(
                     (".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".htm", ".php", ".rb")
                 ):
+                    continue
+                if fname in _SCAN_EXCLUDE_FILES:
                     continue
                 fpath = os.path.join(root, fname)
                 rel_path = os.path.relpath(fpath, workspace_real)
