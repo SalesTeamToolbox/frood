@@ -454,7 +454,9 @@ class IterationEngine:
             return await self.router.complete_with_tools(fallback, messages, [])
 
         last_error = None
+        attempts_made = 0
         for attempt in range(retries):
+            attempts_made = attempt + 1
             try:
                 return await self.router.complete_with_tools(model, messages, tools)
             except SpendingLimitExceeded:
@@ -500,7 +502,8 @@ class IterationEngine:
             fallbacks = [f for f in fallbacks if not f.startswith("or-")]
         fallback = fallbacks[0] if fallbacks else "or-free-auto"
         logger.warning(
-            f"Tool calling failed after {retries} retries, degrading to text-only with {fallback}"
+            f"Tool calling failed after {attempts_made} attempt(s) (model={model}), "
+            f"degrading to text-only with {fallback}"
         )
         return await self.router.complete_with_tools(fallback, messages, [])
 
