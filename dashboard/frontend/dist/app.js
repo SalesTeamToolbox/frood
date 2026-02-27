@@ -2325,8 +2325,8 @@ function renderMissionControl() {
   const isProjects = state.missionControlTab === "projects";
   el.innerHTML = `
     <div class="mc-tabs">
-      <button class="mc-tab ${!isProjects ? 'active' : ''}" onclick="state.missionControlTab='tasks';renderMissionControl()">Tasks</button>
       <button class="mc-tab ${isProjects ? 'active' : ''}" onclick="state.missionControlTab='projects';renderMissionControl()">Projects</button>
+      <button class="mc-tab ${!isProjects ? 'active' : ''}" onclick="state.missionControlTab='tasks';renderMissionControl()">Tasks</button>
     </div>
     <div id="mc-content"></div>
   `;
@@ -3389,6 +3389,7 @@ function render() {
           <a href="#" data-page="code" class="${state.page === "code" ? "active" : ""}" onclick="event.preventDefault();navigate('code')">&#128187; Code</a>
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools')">&#128295; Tools</a>
           <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills')">&#9889; Skills</a>
+          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps')">&#128640; Apps</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings')">&#9881; Settings</a>
         </nav>
         <div class="sidebar-footer">
@@ -3399,7 +3400,7 @@ function render() {
       </aside>
       <div class="main">
         <div class="topbar">
-          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", apps: "Apps", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? `
               <button class="btn btn-primary btn-sm" onclick="${state.missionControlTab === 'projects' ? 'showCreateProjectModal()' : 'showCreateTaskModal()'}">+ New ${state.missionControlTab === 'projects' ? 'Project' : 'Task'}</button>
@@ -3422,6 +3423,7 @@ function render() {
     code: renderCode,
     tools: renderTools,
     skills: renderSkills,
+    apps: renderApps,
     settings: renderSettings,
     detail: renderDetail,
     projectDetail: renderProjectDetail,
