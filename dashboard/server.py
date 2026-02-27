@@ -337,6 +337,7 @@ def create_app(
     intervention_queues: dict | None = None,
     github_account_store=None,
     model_catalog=None,
+    model_evaluator=None,
     intent_classifier=None,
     memory_store=None,
 ) -> FastAPI:
@@ -883,6 +884,192 @@ def create_app(
             "by_model": by_model,
             "daily_spend_usd": spending_tracker.daily_spend_usd,
             "daily_tokens": spending_tracker.daily_tokens,
+        }
+
+    # -- Reports (admin analytics) -------------------------------------------
+
+    @app.get("/api/reports")
+    async def get_reports(_: AuthContext = Depends(require_admin)):
+        """Aggregate analytics data for the Reports page."""
+        from providers.registry import spending_tracker
+
+        all_tasks = task_queue.all_tasks()
+
+        # -- LLM usage (per-model token breakdown) --
+        model_agg: dict[str, dict] = {}
+        total_tokens = 0
+        total_prompt = 0
+        total_completion = 0
+        type_agg: dict[str, dict] = {}
+        status_counts: dict[str, int] = {}
+
+        for task in all_tasks:
+            # Status counts
+            s = task.status.value if hasattr(task.status, "value") else str(task.status)
+            status_counts[s] = status_counts.get(s, 0) + 1
+
+            # Task-type aggregation
+            tt = task.task_type.value if hasattr(task.task_type, "value") else str(task.task_type)
+            if tt not in type_agg:
+                type_agg[tt] = {
+                    "type": tt,
+                    "total": 0,
+                    "done": 0,
+                    "failed": 0,
+                    "running": 0,
+                    "pending": 0,
+                    "total_iterations": 0,
+                    "total_tokens": 0,
+                }
+            type_agg[tt]["total"] += 1
+            type_agg[tt][s] = type_agg[tt].get(s, 0) + 1
+            type_agg[tt]["total_iterations"] += getattr(task, "iterations", 0) or 0
+
+            # Token usage
+            usage = task.token_usage
+            if not usage or not isinstance(usage, dict):
+                continue
+            t_tok = usage.get("total_tokens", 0)
+            t_p = usage.get("total_prompt_tokens", 0)
+            t_c = usage.get("total_completion_tokens", 0)
+            total_tokens += t_tok
+            total_prompt += t_p
+            total_completion += t_c
+            type_agg[tt]["total_tokens"] += t_tok
+
+            for model_key, mdata in usage.get("by_model", {}).items():
+                if model_key not in model_agg:
+                    model_agg[model_key] = {
+                        "model_key": model_key,
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                        "calls": 0,
+                        "estimated_cost_usd": 0.0,
+                    }
+                mp = mdata.get("prompt_tokens", 0)
+                mc = mdata.get("completion_tokens", 0)
+                model_agg[model_key]["prompt_tokens"] += mp
+                model_agg[model_key]["completion_tokens"] += mc
+                model_agg[model_key]["total_tokens"] += mp + mc
+                model_agg[model_key]["calls"] += mdata.get("calls", 0)
+
+        # Estimate costs per model using spending tracker pricing
+        for mk, md in model_agg.items():
+            # Look up actual pricing if available
+            price = spending_tracker._model_prices.get(mk)
+            if price:
+                md["estimated_cost_usd"] = round(
+                    md["prompt_tokens"] * price[0] + md["completion_tokens"] * price[1], 6
+                )
+            else:
+                # Conservative fallback: $5/$15 per million tokens
+                md["estimated_cost_usd"] = round(
+                    (md["prompt_tokens"] * 5.0 + md["completion_tokens"] * 15.0) / 1_000_000, 6
+                )
+
+        llm_usage = sorted(model_agg.values(), key=lambda m: m["total_tokens"], reverse=True)
+
+        # Task type breakdown with success rates
+        task_types = []
+        for td in sorted(type_agg.values(), key=lambda t: t["total"], reverse=True):
+            done = td.get("done", 0)
+            failed = td.get("failed", 0)
+            completed = done + failed
+            td["success_rate"] = round(done / completed, 3) if completed > 0 else 0.0
+            avg_iter = td["total_iterations"] / td["total"] if td["total"] > 0 else 0
+            td["avg_iterations"] = round(avg_iter, 1)
+            task_types.append(td)
+
+        # -- Model performance (from evaluator) --
+        model_perf = []
+        if model_evaluator:
+            for stats in model_evaluator._stats.values():
+                model_perf.append(stats.to_dict())
+            model_perf.sort(key=lambda m: m.get("composite_score", 0), reverse=True)
+
+        # -- Connectivity / health --
+        connectivity: dict = {"summary": {}, "models": {}}
+        if model_catalog:
+            connectivity["summary"] = model_catalog.get_health_summary()
+            connectivity["models"] = model_catalog._health_status
+
+        # -- Project breakdown --
+        project_list = []
+        if project_manager:
+            for proj in project_manager.all_projects():
+                pstats = project_manager.project_stats(proj.id)
+                project_list.append(
+                    {
+                        "id": proj.id,
+                        "name": proj.name,
+                        "status": proj.status,
+                        "total_tasks": pstats.get("total", 0),
+                        "done": pstats.get("done", 0),
+                        "failed": pstats.get("failed", 0),
+                        "running": pstats.get("running", 0),
+                        "pending": pstats.get("pending", 0),
+                    }
+                )
+
+        # -- Tools & skills summary --
+        tools_summary = {"total": 0, "enabled": 0}
+        if tool_registry:
+            all_tools = tool_registry.all_schemas()
+            tools_summary["total"] = len(all_tools)
+            tools_summary["enabled"] = sum(1 for t in all_tools if t.get("enabled", True))
+
+        skills_summary = {"total": 0, "enabled": 0, "skills": []}
+        if skill_loader:
+            all_skills = skill_loader.all_skills()
+            skills_summary["total"] = len(all_skills)
+            skills_summary["enabled"] = sum(1 for s in all_skills if s.enabled is not False)
+            skills_summary["skills"] = [
+                {
+                    "name": s.name,
+                    "description": getattr(s, "description", ""),
+                    "task_types": getattr(s, "task_types", []),
+                    "enabled": getattr(s, "enabled", True),
+                }
+                for s in all_skills
+            ]
+
+        # Total cost across all models
+        total_cost = round(sum(m["estimated_cost_usd"] for m in llm_usage), 4)
+
+        # Done / failed for overall success rate
+        total_done = status_counts.get("done", 0)
+        total_failed = status_counts.get("failed", 0)
+        total_completed = total_done + total_failed
+        overall_success_rate = (
+            round(total_done / total_completed, 3) if total_completed > 0 else 0.0
+        )
+
+        return {
+            "token_usage": {
+                "total_tokens": total_tokens,
+                "total_prompt_tokens": total_prompt,
+                "total_completion_tokens": total_completion,
+                "daily_tokens": spending_tracker.daily_tokens,
+                "daily_spend_usd": spending_tracker.daily_spend_usd,
+            },
+            "llm_usage": llm_usage,
+            "costs": {
+                "daily_spend_usd": spending_tracker.daily_spend_usd,
+                "total_estimated_usd": total_cost,
+                "by_model": llm_usage,  # same list, includes estimated_cost_usd
+            },
+            "connectivity": connectivity,
+            "model_performance": model_perf,
+            "task_breakdown": {
+                "total": len(all_tasks),
+                "by_status": status_counts,
+                "by_type": task_types,
+                "overall_success_rate": overall_success_rate,
+            },
+            "project_breakdown": project_list,
+            "tools": tools_summary,
+            "skills": skills_summary,
         }
 
     # -- Notification config endpoint -----------------------------------------
