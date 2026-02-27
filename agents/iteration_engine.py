@@ -251,7 +251,12 @@ class IterationEngine:
 
         Native providers are listed first because they use independent API keys
         and typically have higher rate limits than OpenRouter's free tier.
+
+        Models marked unhealthy by the health check system are skipped.
         """
+        # Get unhealthy models from catalog health checks (if available)
+        unhealthy = self._get_unhealthy_models()
+
         # Native providers — tried first (independent keys, better rate limits)
         native_fallbacks: list[tuple[ProviderType, str]] = [
             (ProviderType.GEMINI, "gemini-2-flash"),
@@ -261,7 +266,7 @@ class IterationEngine:
         ]
         native_candidates: list[str] = []
         for provider_type, model_key in native_fallbacks:
-            if model_key in exclude:
+            if model_key in exclude or model_key in unhealthy:
                 continue
             spec = PROVIDERS.get(provider_type)
             if spec and os.getenv(spec.api_key_env):
@@ -279,14 +284,24 @@ class IterationEngine:
         try:
             all_free = self.router.free_models()
             keys = [m["key"] for m in all_free if isinstance(m, dict) and m.get("key")]
-            openrouter_candidates = [k for k in keys if k not in exclude]
+            openrouter_candidates = [k for k in keys if k not in exclude and k not in unhealthy]
         except Exception:
             pass
 
         if not openrouter_candidates:
-            openrouter_candidates = [m for m in static if m not in exclude]
+            openrouter_candidates = [m for m in static if m not in exclude and m not in unhealthy]
 
         return native_candidates + openrouter_candidates[:8]
+
+    def _get_unhealthy_models(self) -> set[str]:
+        """Get the set of unhealthy model keys from the catalog health check."""
+        try:
+            catalog = getattr(self.router, "_catalog", None)
+            if catalog:
+                return catalog.unhealthy_model_keys()
+        except Exception:
+            pass
+        return set()
 
     async def _complete_with_retry(
         self,

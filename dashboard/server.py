@@ -1166,6 +1166,28 @@ def create_app(
         paid_count = len([k for k in MODELS if k.startswith("or-paid-")]) if model_catalog else 0
         return {"policy": policy, "account": account, "paid_models_registered": paid_count}
 
+    @app.get("/api/models/health")
+    async def get_model_health(_: AuthContext = Depends(require_admin)):
+        """Return model health check results and summary."""
+        if not model_catalog:
+            return {"error": "Model catalog not available", "summary": {}, "models": {}}
+        summary = model_catalog.get_health_summary()
+        return {
+            "summary": summary,
+            "models": model_catalog._health_status,
+        }
+
+    @app.post("/api/models/health-check")
+    async def trigger_health_check(_: AuthContext = Depends(require_admin)):
+        """Manually trigger a model health check."""
+        import os
+
+        if not model_catalog:
+            return {"error": "Model catalog not available"}
+        api_key = os.getenv("OPENROUTER_API_KEY", "")
+        await model_catalog.health_check(api_key=api_key)
+        return model_catalog.get_health_summary()
+
     @app.get("/api/settings/storage")
     async def get_storage_status(_admin: AuthContext = Depends(require_admin)):
         """Return the active storage backend configuration and live connectivity status."""

@@ -210,12 +210,24 @@ class ModelRouter:
             if free_large:
                 routing["primary"] = free_large[0]["key"]
 
-        # For known registry models (not admin overrides), verify the provider API key is set.
+        # For known registry models (not admin overrides), verify the provider API key is set
+        # and the model is healthy (not recently marked as 404/unavailable by health check).
         # Use os.getenv() — not getattr(settings, ...) — so admin-configured keys are visible.
         # settings is a frozen dataclass set at import time, before KeyStore.inject_into_environ().
         # Unknown models (dynamic/catalog, not in MODELS dict) pass through without validation.
         primary_model = routing.get("primary")
         if primary_model and not is_admin_override:
+            # Health check gate: if the catalog knows this model is down, swap proactively
+            if self._catalog and not self._catalog.is_model_healthy(primary_model):
+                logger.warning(
+                    "Model %s is unhealthy (health check), finding healthy alternative",
+                    primary_model,
+                )
+                replacement = self._find_healthy_free_model(exclude={primary_model})
+                if replacement:
+                    routing["primary"] = replacement
+                    primary_model = replacement
+
             try:
                 spec = self.registry.get_model(primary_model)
                 # Model is known — check that its provider API key is actually set
@@ -235,20 +247,10 @@ class ModelRouter:
                         f"Model {primary_model} is not available: {e}. "
                         "Attempting to find a fallback free model."
                     )
-                    # Try to find any free model that is available
-                    for model in self.registry.free_models():
-                        try:
-                            spec = self.registry.get_model(model["key"])
-                            provider_spec = PROVIDERS.get(spec.provider)
-                            api_key = (
-                                os.getenv(provider_spec.api_key_env, "") if provider_spec else ""
-                            )
-                            if api_key:
-                                routing["primary"] = model["key"]
-                                logger.info(f"Fell back to free model {model['key']}")
-                                break
-                        except ValueError:
-                            continue
+                    replacement = self._find_healthy_free_model(exclude={primary_model})
+                    if replacement:
+                        routing["primary"] = replacement
+                        logger.info(f"Fell back to free model {replacement}")
                     else:
                         # No free model with API key found — use task-type default as last resort
                         fallback = FREE_ROUTING.get(task_type)
@@ -261,6 +263,26 @@ class ModelRouter:
                         )
 
         return routing
+
+    def _find_healthy_free_model(self, exclude: set[str] | None = None) -> str | None:
+        """Find a free model that is both API-key-configured and health-check-healthy."""
+        exclude = exclude or set()
+        for model in self.registry.free_models():
+            key = model["key"]
+            if key in exclude:
+                continue
+            # Check health if catalog is available
+            if self._catalog and not self._catalog.is_model_healthy(key):
+                continue
+            try:
+                spec = self.registry.get_model(key)
+                provider_spec = PROVIDERS.get(spec.provider)
+                api_key = os.getenv(provider_spec.api_key_env, "") if provider_spec else ""
+                if api_key:
+                    return key
+            except ValueError:
+                continue
+        return None
 
     def _check_policy_routing(self, task_type: TaskType) -> dict | None:
         """Apply policy-based routing when OR credits are available.

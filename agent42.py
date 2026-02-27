@@ -1037,9 +1037,10 @@ class Agent42:
         await asyncio.gather(*tasks_to_run)
 
     async def _model_catalog_refresh_loop(self):
-        """Periodically refresh the OpenRouter model catalog."""
+        """Periodically refresh the OpenRouter model catalog and run health checks."""
         from providers.registry import ProviderRegistry, spending_tracker
 
+        first_run = True
         while not self._shutdown_event.is_set():
             try:
                 api_key = os.getenv("OPENROUTER_API_KEY", "")
@@ -1073,6 +1074,19 @@ class Agent42:
 
                     # Rerank after catalog refresh
                     self.model_evaluator.rerank_all()
+
+                # Run health check on startup and periodically (every 6h)
+                if first_run or self.model_catalog.needs_health_check():
+                    logger.info("Running model health check...")
+                    await self.model_catalog.health_check(api_key=api_key)
+                    summary = self.model_catalog.get_health_summary()
+                    if summary.get("unhealthy_models"):
+                        for m in summary["unhealthy_models"]:
+                            logger.warning(
+                                "Unhealthy model: %s — %s (%s)",
+                                m["key"], m["status"], m.get("error", ""),
+                            )
+                    first_run = False
             except Exception as e:
                 logger.warning("Model catalog refresh failed (non-critical): %s", e)
 
