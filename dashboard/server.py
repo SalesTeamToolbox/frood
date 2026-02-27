@@ -1376,8 +1376,23 @@ def create_app(
         _chat_messages.append(user_msg)
         await ws_manager.broadcast("chat_message", user_msg)
 
+        # Route to active task if one exists for dashboard chat
+        _existing = task_queue.find_active_task(
+            origin_channel="dashboard_chat",
+            origin_channel_id="chat",
+        )
+        if _existing:
+            await task_queue.route_message_to_task(
+                _existing,
+                text,
+                auth.user,
+                intervention_queues or {},
+            )
+            return {"status": "queued", "message": user_msg, "task_id": _existing.id}
+
         # Classify task type — use LLM classifier with conversation history when
         # available; fall back to keyword matching if no classifier is injected.
+        classification = None
         if intent_classifier is not None:
             history = [
                 {"role": m["role"], "content": m["content"]}
@@ -1391,6 +1406,7 @@ def create_app(
 
             task_type = infer_task_type(text)
 
+        # No active task — create new one
         task = Task(
             title=text[:120] + ("..." if len(text) > 120 else ""),
             description=text,
@@ -1400,6 +1416,17 @@ def create_app(
             origin_channel_id="chat",
             origin_metadata={"chat_msg_id": msg_id},
         )
+
+        # Smart project creation: only create a project when the classifier
+        # determines this is an ongoing goal (not simple Q&A).
+        if classification and classification.needs_project and project_manager:
+            _proj = await project_manager.create(
+                name=text[:60],
+                description="Auto-created for dashboard chat goal",
+                status="active",
+            )
+            task.project_id = _proj.id
+
         await task_queue.add(task)
 
         return {"status": "ok", "message": user_msg, "task_id": task.id}
@@ -1594,25 +1621,21 @@ def create_app(
             await chat_session_manager.add_message(session_id, user_msg)
             await ws_manager.broadcast("chat_message", user_msg)
 
-            # For code sessions, don't create a new task while one is already active
-            if session.session_type == "code":
-                _active_statuses = {TaskStatus.PENDING, TaskStatus.ASSIGNED, TaskStatus.RUNNING}
-                _existing = next(
-                    (
-                        t
-                        for t in task_queue.all_tasks()
-                        if t.origin_metadata.get("chat_session_id") == session_id
-                        and t.status in _active_statuses
-                    ),
-                    None,
+            # For ALL session types, route to active task if one exists
+            _existing = task_queue.find_active_task(session_id=session_id)
+            if _existing:
+                await task_queue.route_message_to_task(
+                    _existing,
+                    text,
+                    auth.user,
+                    intervention_queues or {},
                 )
-                if _existing:
-                    return {
-                        "status": "queued",
-                        "message": user_msg,
-                        "task_id": _existing.id,
-                        "note": "Agent is still working on a previous task in this session.",
-                    }
+                return {
+                    "status": "queued",
+                    "message": user_msg,
+                    "task_id": _existing.id,
+                    "note": "Message delivered to active task.",
+                }
 
             # Infer task type from message
             from core.task_queue import TaskType, infer_task_type

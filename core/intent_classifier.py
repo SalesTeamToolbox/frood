@@ -41,7 +41,8 @@ Respond with ONLY a JSON object (no markdown, no extra text):
   "reasoning": "<one sentence explaining your classification>",
   "recommended_mode": "<single_agent or team>",
   "recommended_team": "<team name if team mode, or empty string>",
-  "needs_project_setup": <true or false>
+  "needs_project_setup": <true or false>,
+  "needs_project": <true or false>
 }}
 
 Rules:
@@ -60,6 +61,11 @@ Rules:
   platform, or application from scratch, or adding a major feature that spans
   multiple components. Simple bug fixes, small changes, and single-file edits
   do NOT need project setup.
+- Set needs_project=true when the request describes an ongoing goal, recurring process,
+  or multi-step objective that will span multiple interactions (e.g. "research X daily
+  and report", "build me an app", "organize my files and process them"). Simple one-off
+  questions, quick lookups, and casual conversation do NOT need a project.
+  If needs_project_setup is true, needs_project is also always true.
 """
 
 
@@ -88,6 +94,8 @@ class ClassificationResult:
     recommended_team: str = ""  # team name or ""
     # Project interview gating
     needs_project_setup: bool = False  # True if task is complex enough for discovery
+    # Smart project grouping — ongoing goals get a project container
+    needs_project: bool = False  # True if the request represents an ongoing goal
 
 
 @dataclass
@@ -340,6 +348,7 @@ class IntentClassifier:
                 )
 
         needs_project_setup = bool(data.get("needs_project_setup", False))
+        needs_project = bool(data.get("needs_project", False)) or needs_project_setup
 
         return ClassificationResult(
             task_type=task_type,
@@ -352,6 +361,7 @@ class IntentClassifier:
             recommended_mode=recommended_mode,
             recommended_team=recommended_team,
             needs_project_setup=needs_project_setup,
+            needs_project=needs_project,
         )
 
     @staticmethod

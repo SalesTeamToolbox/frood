@@ -719,11 +719,29 @@ class Agent42:
                         scope_analysis,
                     )
 
-                # Continuation — link to existing scope via parent_task_id
+                # Continuation — route to active task instead of creating a new one
                 active_scope.message_count += 1
                 self.session_manager.set_active_scope(
                     message.channel_type, message.channel_id, active_scope
                 )
+                _existing = self.task_queue.find_active_task(
+                    origin_channel=message.channel_type,
+                    origin_channel_id=message.channel_id,
+                )
+                if _existing:
+                    await self.task_queue.route_message_to_task(
+                        _existing,
+                        message.content,
+                        message.sender_name,
+                        self._intervention_queues,
+                    )
+                    return OutboundMessage(
+                        channel_type=message.channel_type,
+                        channel_id=message.channel_id,
+                        content=f"Message added to active task {_existing.id}.",
+                        metadata=message.metadata,
+                    )
+                # Fallback: no active task found despite scope — create child task
                 return await self._create_task_from_message(
                     message.content,
                     message,
@@ -732,7 +750,26 @@ class Agent42:
                     parent_task_id=active_scope.task_id,
                 )
 
-        # No active scope or scope detection disabled — create task and set scope
+        # No active scope or scope detection disabled — check for active task first
+        _existing = self.task_queue.find_active_task(
+            origin_channel=message.channel_type,
+            origin_channel_id=message.channel_id,
+        )
+        if _existing:
+            await self.task_queue.route_message_to_task(
+                _existing,
+                message.content,
+                message.sender_name,
+                self._intervention_queues,
+            )
+            return OutboundMessage(
+                channel_type=message.channel_type,
+                channel_id=message.channel_id,
+                content=f"Message added to active task {_existing.id}.",
+                metadata=message.metadata,
+            )
+
+        # No active task — create new task and set scope
         return await self._create_task_from_message(
             message.content,
             message,
@@ -1031,6 +1068,14 @@ class Agent42:
             # Create per-task intervention queue for mid-task user feedback
             intervention_queue: asyncio.Queue = asyncio.Queue()
             self._intervention_queues[task.id] = intervention_queue
+
+            # Drain messages buffered while the task was PENDING
+            if task.pending_messages:
+                n = len(task.pending_messages)
+                for pm in task.pending_messages:
+                    await intervention_queue.put(pm["content"])
+                task.pending_messages.clear()
+                logger.info("Drained %d pending messages for task %s", n, task.id)
 
             try:
                 # Select worktree manager: task-specific repo or default
