@@ -287,9 +287,26 @@ class SpendingTracker:
         self._daily_tokens: dict[str, int] = {}  # date -> total tokens
         self._daily_cost_usd: float = 0.0
         self._current_date: str = ""
+        self._model_prices: dict[str, tuple[float, float]] = {}
+        # model_id -> (prompt_per_token, completion_per_token)
 
-    def record_usage(self, model_key: str, prompt_tokens: int, completion_tokens: int):
-        """Record token usage for spending tracking."""
+    def update_model_prices(self, prices: dict[str, tuple[float, float]]) -> None:
+        """Update per-model pricing from catalog data."""
+        self._model_prices.update(prices)
+
+    def record_usage(
+        self,
+        model_key: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        model_id: str = "",
+    ):
+        """Record token usage for spending tracking.
+
+        If ``model_id`` is provided and pricing data is available, uses
+        actual per-model pricing.  Otherwise falls back to conservative
+        premium-tier estimate.
+        """
         import datetime
 
         today = datetime.date.today().isoformat()
@@ -301,9 +318,13 @@ class SpendingTracker:
         total = prompt_tokens + completion_tokens
         self._daily_tokens[today] = self._daily_tokens.get(today, 0) + total
 
-        # Rough cost estimation (conservative — uses premium pricing)
-        # Actual cost depends on model, but this provides a safety ceiling
-        estimated_cost = (prompt_tokens * 5.0 + completion_tokens * 15.0) / 1_000_000
+        if model_id and model_id in self._model_prices:
+            prompt_price, completion_price = self._model_prices[model_id]
+            estimated_cost = prompt_tokens * prompt_price + completion_tokens * completion_price
+        else:
+            # Rough cost estimation (conservative — uses premium pricing)
+            # Actual cost depends on model, but this provides a safety ceiling
+            estimated_cost = (prompt_tokens * 5.0 + completion_tokens * 15.0) / 1_000_000
         self._daily_cost_usd += estimated_cost
 
     def check_limit(self, limit_usd: float) -> bool:
@@ -398,7 +419,9 @@ class ProviderRegistry:
         usage = response.usage
         usage_dict = None
         if usage:
-            spending_tracker.record_usage(model_key, usage.prompt_tokens, usage.completion_tokens)
+            spending_tracker.record_usage(
+                model_key, usage.prompt_tokens, usage.completion_tokens, model_id=spec.model_id
+            )
             usage_dict = {
                 "model_key": model_key,
                 "prompt_tokens": usage.prompt_tokens,
@@ -445,7 +468,9 @@ class ProviderRegistry:
 
         usage = response.usage
         if usage:
-            spending_tracker.record_usage(model_key, usage.prompt_tokens, usage.completion_tokens)
+            spending_tracker.record_usage(
+                model_key, usage.prompt_tokens, usage.completion_tokens, model_id=spec.model_id
+            )
             logger.info(
                 f"[{model_key}] {usage.prompt_tokens}+{usage.completion_tokens} tokens "
                 f"(daily: ${spending_tracker.daily_spend_usd:.4f})"

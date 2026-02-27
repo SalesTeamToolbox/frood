@@ -131,6 +131,8 @@ class Settings:
     model_min_trials: int = 5  # Min task completions before model gets ranked
     model_research_enabled: bool = True  # Enable web benchmark research
     model_research_interval_hours: float = 168.0  # How often to research benchmarks (168h = weekly)
+    model_routing_policy: str = "balanced"  # free_only | balanced | performance
+    openrouter_balance_check_hours: float = 1.0  # How often to re-check OR account balance
 
     # Memory (Phase 6)
     memory_dir: str = ".agent42/memory"
@@ -333,6 +335,10 @@ class Settings:
             model_research_enabled=os.getenv("MODEL_RESEARCH_ENABLED", "true").lower()
             in ("true", "1", "yes"),
             model_research_interval_hours=float(os.getenv("MODEL_RESEARCH_INTERVAL_HOURS", "168")),
+            model_routing_policy=os.getenv("MODEL_ROUTING_POLICY", "balanced"),
+            openrouter_balance_check_hours=float(
+                os.getenv("OPENROUTER_BALANCE_CHECK_HOURS", "1.0")
+            ),
             # Memory
             memory_dir=os.getenv("MEMORY_DIR", ".agent42/memory"),
             sessions_dir=os.getenv("SESSIONS_DIR", ".agent42/sessions"),

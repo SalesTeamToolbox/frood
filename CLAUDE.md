@@ -405,6 +405,10 @@ class TestWorkspaceSandbox:
 | 39 | Fallback | `_complete_with_retry` retried 401 auth errors 3×, wasting quota; fallback chain only tried OpenRouter models even when Gemini/OpenAI keys were set | `_is_auth_error()` skips retries like 404 does; `_get_fallback_models()` appends native provider models (Gemini, OpenAI, etc.) when their `api_key_env` is set; fallback loop continues on all errors instead of breaking early |
 | 40 | Debugging | Spending hours tracing production failures through code before checking server logs | **Always run `tail -100 ~/agent42/agent42.log` and `journalctl -u agent42 -n 100 --no-pager` first** — the log nearly always pinpoints the exact failure in seconds |
 | 41 | Init | `Agent42.__init__()` calls `self.task_queue.on_update(self._on_task_update)` but `_on_task_update` was stripped from `origin/main` — service crashes with `AttributeError` and exits code 0 | Restore `agent42.py` from the branch: `git fetch origin && git checkout origin/dev -- agent42.py && sudo systemctl restart agent42` |
+| 42 | Routing | `limit_remaining: null` in OR API misread as "no credits" | `null` = no per-key limit (uses account balance); only `0.0` = exhausted; always check `is_free_tier` first |
+| 43 | Routing | Policy routing overrides dynamic routing results | Policy only runs when `dynamic` is None; dynamic routing takes precedence |
+| 44 | Catalog | OR pricing is per-token not per-million | Multiply by 1,000,000 before comparing to $/M thresholds |
+| 45 | Routing | "balanced" mode degrades silently to free-only when OR balance check fails | Network error on `/api/v1/auth/key` always returns `is_free_tier=True` — safe but silent; check logs for `"Failed to check OpenRouter account"` warnings |
 
 ---
 
