@@ -335,6 +335,7 @@ def create_app(
     intervention_queues: dict | None = None,
     github_account_store=None,
     model_catalog=None,
+    intent_classifier=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -1372,10 +1373,20 @@ def create_app(
         _chat_messages.append(user_msg)
         await ws_manager.broadcast("chat_message", user_msg)
 
-        # Infer task type from message
-        from core.task_queue import infer_task_type
+        # Classify task type — use LLM classifier with conversation history when
+        # available; fall back to keyword matching if no classifier is injected.
+        if intent_classifier is not None:
+            history = [
+                {"role": m["role"], "content": m["content"]}
+                for m in _chat_messages[-10:]
+                if m.get("role") in ("user", "assistant") and m.get("content")
+            ]
+            classification = await intent_classifier.classify(text, conversation_history=history)
+            task_type = classification.task_type
+        else:
+            from core.task_queue import infer_task_type
 
-        task_type = infer_task_type(text)
+            task_type = infer_task_type(text)
 
         task = Task(
             title=text[:120] + ("..." if len(text) > 120 else ""),
