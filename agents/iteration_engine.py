@@ -367,13 +367,18 @@ class IterationEngine:
         On 404 or 401 errors, skips retries immediately. On full failure,
         degrades to text-only mode using the first available fallback model,
         including configured native providers for cross-provider failover.
+        When the primary model fails with a 401 auth error, OpenRouter fallbacks
+        are skipped (the invalid key is provider-wide) and native providers
+        (Gemini, OpenAI, etc.) are tried directly.
         """
+        last_error = None
         for attempt in range(retries):
             try:
                 return await self.router.complete_with_tools(model, messages, tools)
             except SpendingLimitExceeded:
                 raise  # Don't retry spending limits
             except Exception as e:
+                last_error = e
                 if self._is_model_unavailable(e):
                     logger.warning(f"Tool model {model} unavailable (404), skipping retries: {e}")
                     break
@@ -387,9 +392,14 @@ class IterationEngine:
                 )
                 await asyncio.sleep(wait)
 
-        # Fallback: try available models in text-only mode (degrade gracefully)
+        # Fallback: try available models in text-only mode (degrade gracefully).
+        # If primary auth failed, skip OpenRouter fallbacks — the invalid key is
+        # provider-wide, so they will all fail too. Jump straight to native providers.
+        primary_auth_failed = last_error is not None and self._is_auth_error(last_error)
         tried: set[str] = {model}
         fallbacks = self._get_fallback_models(exclude=tried)
+        if primary_auth_failed:
+            fallbacks = [f for f in fallbacks if not f.startswith("or-")]
         fallback = fallbacks[0] if fallbacks else "or-free-llama-70b"
         logger.warning(
             f"Tool calling failed after {retries} retries, degrading to text-only with {fallback}"
