@@ -93,12 +93,14 @@ class Learner:
         self,
         router: ModelRouter,
         memory_store: MemoryStore,
+        project_memory=None,
         skills_dir: Path | None = None,
         reflection_model: str = "or-free-deepseek-chat",
         model_evaluator=None,
     ):
         self.router = router
         self.memory = memory_store
+        self.project_memory = project_memory
         self.skills_dir = skills_dir
         self.reflection_model = reflection_model
         self._model_evaluator = model_evaluator
@@ -155,21 +157,33 @@ class Learner:
             logger.warning(f"Reflection failed (non-critical): {e}")
             return {"skipped": True, "reason": str(e)}
 
-        # Parse and apply memory updates
+        # Parse and apply memory updates — write to project memory if available,
+        # AND always to global memory for cross-project learning.
         memory_updates = self._parse_memory_updates(reflection)
+        target = self.project_memory if self.project_memory else self.memory
         for section, content in memory_updates:
-            self.memory.append_to_section(section, content)
+            target.append_to_section(section, content)
             logger.info(f"Memory updated [{section}]: {content[:80]}")
+        # Also log to global memory when writing to project memory
+        if self.project_memory:
+            for section, content in memory_updates:
+                self.memory.append_to_section(section, content)
 
         # Extract the lesson learned
         lesson = self._extract_lesson(reflection)
 
-        # Log the reflection event (with semantic indexing)
+        # Log the reflection event (with semantic indexing) — to both stores
         await self.memory.log_event_semantic(
             "reflection",
             f"Post-task reflection for '{title}' ({task_type})",
             f"Outcome: {outcome}\nLesson: {lesson}\nMemory updates: {len(memory_updates)}",
         )
+        if self.project_memory:
+            await self.project_memory.log_event_semantic(
+                "reflection",
+                f"Post-task reflection for '{title}' ({task_type})",
+                f"Outcome: {outcome}\nLesson: {lesson}\nMemory updates: {len(memory_updates)}",
+            )
 
         # Record model outcome for dynamic routing evaluation
         if self._model_evaluator and model_key:

@@ -306,6 +306,19 @@ class RLMProvider:
             return 3
         return 0
 
+    def should_use_rlm_recompress(self, current_tokens: int) -> bool:
+        """Check if mid-iteration recompression is worthwhile.
+
+        Fires at 60% of the context window (before the overflow guard at 80%)
+        to proactively compress accumulated tool results and conversation.
+        """
+        if not self.config.enabled:
+            return False
+        if not self._check_cost_limit():
+            return False
+        # Recompress when at 60% of the typical 128K context window
+        return current_tokens > 60_000
+
     def get_status(self) -> dict:
         """Return current RLM provider status for dashboard display."""
         return {
