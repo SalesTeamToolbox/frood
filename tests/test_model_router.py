@@ -151,7 +151,11 @@ class TestPolicyRoutingPerformance:
 class TestGetRoutingWithPolicy:
     def test_free_only_uses_free_routing_defaults(self):
         router = ModelRouter()
-        with patch.dict(os.environ, {"MODEL_ROUTING_POLICY": "free_only"}, clear=False):
+        with patch.dict(
+            os.environ,
+            {"MODEL_ROUTING_POLICY": "free_only", "GEMINI_API_KEY": "test-key"},
+            clear=False,
+        ):
             with _patch_policy("free_only"):
                 routing = router.get_routing(TaskType.CODING)
         # Should use FREE_ROUTING defaults

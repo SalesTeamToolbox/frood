@@ -242,14 +242,20 @@ else:
 from memory.redis_session import RedisSessionStore
 ```
 
-### Dynamic Model Routing (4-Layer)
+### Dynamic Model Routing (5-Layer)
 
-Model selection in `model_router.py` uses a 4-layer resolution chain:
+Model selection in `model_router.py` uses a 5-layer resolution chain:
 
 1. **Admin override** — `AGENT42_{TYPE}_MODEL` env vars (highest priority)
 2. **Dynamic routing** — `data/dynamic_routing.json` written by `ModelEvaluator` based on outcome data
 3. **Trial injection** — Unproven models randomly assigned (`MODEL_TRIAL_PERCENTAGE`, default 10%)
-4. **Hardcoded defaults** — `FREE_ROUTING` dict (lowest priority fallback)
+4. **Policy routing** — `balanced`/`performance` mode upgrades to paid models when OR credits available
+5. **Hardcoded defaults** — `FREE_ROUTING` dict: Gemini Flash primary, OR free models as critic/fallback
+
+**Default model strategy:** Gemini 2.0 Flash is the base LLM (generous free tier: 1500 RPD).
+OpenRouter free models serve as critic / secondary to distribute across providers.
+`get_routing()` auto-falls back to OR free models if `GEMINI_API_KEY` is not set.
+Admin can set `AGENT42_CODING_MODEL=claude-opus-4-6` (etc.) for premium models on specific tasks.
 
 **Never hardcode premium models as defaults.** The dynamic system self-improves:
 - `ModelCatalog` syncs free models from OpenRouter API (default every 24h)

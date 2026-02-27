@@ -637,10 +637,11 @@ class TestExtendedContextWindow:
             assert m["max_context_tokens"] >= 500_000
 
     def test_get_routing_default_context_unchanged(self):
-        router = ModelRouter()
-        routing = router.get_routing(TaskType.CODING)
-        # Default routing should use the standard coding model
-        assert routing["primary"] == "or-free-qwen-coder"
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
+            router = ModelRouter()
+            routing = router.get_routing(TaskType.CODING)
+        # Default routing should use Gemini Flash as the standard coding model
+        assert routing["primary"] == "gemini-2-flash"
 
     def test_get_routing_with_max_context_prefers_large_models(self):
         # OPENROUTER_API_KEY must be set so the context-window-adapted model
