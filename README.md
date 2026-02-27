@@ -353,18 +353,18 @@ One API key, zero cost. These models are used by default for all task types:
 
 | Task Type | Primary Model | Critic Model | Max Iterations |
 |---|---|---|---|
-| coding | Gemini 2.0 Flash | Qwen3 Coder 480B | 8 |
-| debugging | Gemini 2.0 Flash | Qwen3 Coder 480B | 10 |
-| research | Gemini 2.0 Flash | Llama 3.3 70B | 5 |
-| refactoring | Gemini 2.0 Flash | Qwen3 Coder 480B | 8 |
-| documentation | Gemini 2.0 Flash | Gemma 3 27B | 4 |
-| marketing | Gemini 2.0 Flash | Llama 3.3 70B | 6 |
-| email | Gemini 2.0 Flash | — | 3 |
-| design | Gemini 2.0 Flash | Llama 3.3 70B | 5 |
-| content | Gemini 2.0 Flash | Gemma 3 27B | 6 |
-| strategy | Gemini 2.0 Flash | Llama 3.3 70B | 5 |
-| data_analysis | Gemini 2.0 Flash | Qwen3 Coder 480B | 6 |
-| project_management | Gemini 2.0 Flash | Gemma 3 27B | 4 |
+| coding | Gemini 2.5 Flash | Qwen3 Coder 480B | 8 |
+| debugging | Gemini 2.5 Flash | Qwen3 Coder 480B | 10 |
+| research | Gemini 2.5 Flash | Llama 3.3 70B | 5 |
+| refactoring | Gemini 2.5 Flash | Qwen3 Coder 480B | 8 |
+| documentation | Gemini 2.5 Flash | Gemma 3 27B | 4 |
+| marketing | Gemini 2.5 Flash | Llama 3.3 70B | 6 |
+| email | Gemini 2.5 Flash | — | 3 |
+| design | Gemini 2.5 Flash | Llama 3.3 70B | 5 |
+| content | Gemini 2.5 Flash | Gemma 3 27B | 6 |
+| strategy | Gemini 2.5 Flash | Llama 3.3 70B | 5 |
+| data_analysis | Gemini 2.5 Flash | Qwen3 Coder 480B | 6 |
+| project_management | Gemini 2.5 Flash | Gemma 3 27B | 4 |
 
 ### Dynamic Routing (Self-Improving)
 
@@ -417,7 +417,7 @@ All accessible with a single free OpenRouter API key:
 | Llama 4 Maverick | `meta-llama/llama-4-maverick:free` | Research, writing, general |
 | Llama 3.3 70B | `meta-llama/llama-3.3-70b-instruct:free` | General purpose |
 | Gemini 2.5 Pro | `google/gemini-2.5-pro-exp-03-25:free` | Complex tasks |
-| Gemini 2.0 Flash | `google/gemini-2.0-flash-exp:free` | Long context (1M tokens) |
+| Gemini Flash | `google/gemini-2.0-flash-exp:free` | Long context (1M tokens) |
 | Mistral Small 3.1 | `mistralai/mistral-small-3.1-24b-instruct:free` | Fast, lightweight tasks |
 | Gemma 3 27B | `google/gemma-3-27b-it:free` | Fast verification |
 | Nemotron 30B | `nvidia/nemotron-3-nano-30b-a3b:free` | General purpose |

@@ -97,7 +97,7 @@ PROVIDERS: dict[ProviderType, ProviderSpec] = {
         base_url="https://generativelanguage.googleapis.com/v1beta/openai",
         api_key_env="GEMINI_API_KEY",
         display_name="Google Gemini",
-        default_model="gemini-2.0-flash",
+        default_model="gemini-2.5-flash",
     ),
     ProviderType.OPENROUTER: ProviderSpec(
         provider_type=ProviderType.OPENROUTER,
@@ -157,6 +157,22 @@ MODELS: dict[str, ModelSpec] = {
     ),
     # or-free-gemini-flash removed — 404 "No endpoints found for google/gemini-2.0-flash-exp:free"
     # or-free-gemini-pro removed — 404 "No endpoints found for google/gemini-2.5-pro-exp-03-25:free"
+    "or-free-gemini-flash": ModelSpec(
+        "google/gemini-2.0-flash-exp:free",
+        ProviderType.OPENROUTER,
+        max_tokens=8192,
+        display_name="Gemini Flash (free, 1M ctx)",
+        tier=ModelTier.FREE,
+        max_context_tokens=1000000,
+    ),
+    "or-free-gemini-pro": ModelSpec(
+        "google/gemini-2.5-pro-exp-03-25:free",
+        ProviderType.OPENROUTER,
+        max_tokens=8192,
+        display_name="Gemini 2.5 Pro (free)",
+        tier=ModelTier.FREE,
+        max_context_tokens=1000000,
+    ),
     "or-free-mistral-small": ModelSpec(
         "mistralai/mistral-small-3.1-24b-instruct:free",
         ProviderType.OPENROUTER,
@@ -189,9 +205,9 @@ MODELS: dict[str, ModelSpec] = {
         tier=ModelTier.CHEAP,
     ),
     "gemini-2-flash": ModelSpec(
-        "gemini-2.0-flash",
+        "gemini-2.5-flash",
         ProviderType.GEMINI,
-        display_name="Gemini 2.0 Flash",
+        display_name="Gemini 2.5 Flash",
         tier=ModelTier.CHEAP,
         max_context_tokens=1000000,
     ),

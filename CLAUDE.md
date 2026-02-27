@@ -252,7 +252,7 @@ Model selection in `model_router.py` uses a 5-layer resolution chain:
 4. **Policy routing** — `balanced`/`performance` mode upgrades to paid models when OR credits available
 5. **Hardcoded defaults** — `FREE_ROUTING` dict: Gemini Flash primary, OR free models as critic/fallback
 
-**Default model strategy:** Gemini 2.0 Flash is the base LLM (generous free tier: 1500 RPD).
+**Default model strategy:** Gemini 2.5 Flash is the base LLM (generous free tier: 500 RPM).
 OpenRouter free models serve as critic / secondary to distribute across providers.
 `get_routing()` auto-falls back to OR free models if `GEMINI_API_KEY` is not set.
 Admin can set `AGENT42_CODING_MODEL=claude-opus-4-6` (etc.) for premium models on specific tasks.
@@ -427,6 +427,7 @@ class TestWorkspaceSandbox:
 | 55 | Security | OWASP/secrets scanner flags test files, security tools, and dashboard frontend as false positive vulnerabilities (177 CRITICAL) | Added `_SCAN_EXCLUDE_DIRS`, `_SCAN_EXCLUDE_FILES`, `_OWASP_EXCLUDE_DIRS` to `security_analyzer.py`; removed duplicate innerHTML regex; fixed overly-broad f-string SQL regex matching "deleted"/"updated" |
 | 56 | Registry | 5 dead OpenRouter free models still in MODELS dict — 404s on every health check and appeared in fallback lists | Remove dead models from MODELS dict AND static fallback list in `iteration_engine.py`; pitfall #54 only covered devstral, same pattern recurred for deepseek-r1, llama4-maverick, gemini-flash, gemini-pro |
 | 57 | Tools | `test_runner.py` uses `"python"` but production server only has `python3` — `FileNotFoundError: No such file or directory: 'python'` | Use `sys.executable` instead of hardcoded `"python"` for subprocess calls |
+| 58 | Providers | `gemini-2.0-flash` deprecated by Google (404 "no longer available to new users") — all 15 task types fail on primary model | Updated `MODELS["gemini-2-flash"]` model_id to `gemini-2.5-flash`; internal key `gemini-2-flash` unchanged |
 
 ---
 
