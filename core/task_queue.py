@@ -221,6 +221,9 @@ class Task:
     priority: int = 0  # 0=normal, 1=high, 2=urgent
     tags: list = field(default_factory=list)
     comments: list = field(default_factory=list)  # [{author, text, timestamp}]
+    pending_messages: list = field(
+        default_factory=list
+    )  # Buffered user messages before agent starts
     blocked_reason: str = ""
     parent_task_id: str = ""
     project_id: str = (
@@ -244,6 +247,17 @@ class Task:
             {
                 "author": author,
                 "text": text,
+                "timestamp": time.time(),
+            }
+        )
+        self.updated_at = time.time()
+
+    def add_pending_message(self, content: str, sender: str = "user"):
+        """Buffer a user message for delivery when the agent starts."""
+        self.pending_messages.append(
+            {
+                "content": content,
+                "sender": sender,
                 "timestamp": time.time(),
             }
         )
@@ -403,6 +417,52 @@ class TaskQueue:
 
     def all_tasks(self) -> list[Task]:
         return sorted(self._tasks.values(), key=lambda t: t.created_at, reverse=True)
+
+    def find_active_task(
+        self,
+        origin_channel: str = "",
+        origin_channel_id: str = "",
+        session_id: str = "",
+    ) -> Task | None:
+        """Find the most recent active task for a session or channel.
+
+        Matches on session_id (via origin_metadata["chat_session_id"]) if provided,
+        otherwise on origin_channel + origin_channel_id.
+        Returns the most recently created active task, or None.
+        """
+        active_statuses = {TaskStatus.PENDING, TaskStatus.ASSIGNED, TaskStatus.RUNNING}
+        candidates = []
+        for t in self._tasks.values():
+            if t.status not in active_statuses:
+                continue
+            if session_id:
+                if t.origin_metadata.get("chat_session_id") == session_id:
+                    candidates.append(t)
+            elif t.origin_channel == origin_channel and t.origin_channel_id == origin_channel_id:
+                candidates.append(t)
+        if not candidates:
+            return None
+        return max(candidates, key=lambda t: t.created_at)
+
+    async def route_message_to_task(
+        self,
+        task: Task,
+        content: str,
+        sender: str,
+        intervention_queues: dict,
+    ) -> None:
+        """Route a follow-up message to an active task.
+
+        If the task is RUNNING and has an intervention queue, inject directly.
+        Otherwise (PENDING/ASSIGNED), buffer in pending_messages for delivery
+        when the agent starts.
+        """
+        queue = intervention_queues.get(task.id)
+        if queue is not None:
+            await queue.put(content)
+        else:
+            task.add_pending_message(content, sender=sender)
+            await self._persist(task)
 
     def board(self) -> dict[str, list[dict]]:
         """Group tasks by status for Kanban board view."""
