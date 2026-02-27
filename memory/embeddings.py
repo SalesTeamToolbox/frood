@@ -98,10 +98,11 @@ class EmbeddingStore:
                 )
                 return
 
-        # Auto-detect: try providers in order of preference
+        # Auto-detect: try providers in order of preference.
+        # OpenRouter is excluded — its free tier does not support the
+        # /embeddings endpoint (returns 401 "User not found").
         for provider, model in [
             ("openai", EMBEDDING_MODELS["openai"]),
-            ("openrouter", EMBEDDING_MODELS["openrouter"]),
         ]:
             base_url, api_key = self._provider_config(provider)
             if api_key:

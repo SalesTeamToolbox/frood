@@ -346,10 +346,15 @@ spending_tracker = SpendingTracker()
 
 
 class ProviderRegistry:
-    """Manages provider clients and model resolution."""
+    """Manages provider clients and model resolution.
+
+    Clients are cached per provider but automatically rebuilt when the
+    API key in os.environ changes (e.g. admin updates key via dashboard).
+    """
 
     def __init__(self):
         self._clients: dict[ProviderType, AsyncOpenAI] = {}
+        self._client_keys: dict[ProviderType, str] = {}  # key used when client was built
 
     def get_model(self, model_key: str) -> ModelSpec:
         """Look up a ModelSpec by key. Raises ValueError if not found."""
@@ -359,10 +364,28 @@ class ProviderRegistry:
         return spec
 
     def get_client(self, provider_type: ProviderType) -> AsyncOpenAI:
-        """Return a cached AsyncOpenAI client for a provider, creating it if needed."""
-        if provider_type not in self._clients:
-            self._clients[provider_type] = self._build_client(provider_type)
+        """Return a cached AsyncOpenAI client for a provider, rebuilding if the key changed."""
+        spec = PROVIDERS.get(provider_type)
+        current_key = os.getenv(spec.api_key_env, "") if spec else ""
+
+        cached_key = self._client_keys.get(provider_type, "")
+        if provider_type in self._clients and cached_key == current_key:
+            return self._clients[provider_type]
+
+        # Key changed or client not yet created — (re)build
+        if provider_type in self._clients:
+            logger.info(
+                "API key changed for %s — rebuilding client",
+                provider_type.value,
+            )
+        self._clients[provider_type] = self._build_client(provider_type)
+        self._client_keys[provider_type] = current_key
         return self._clients[provider_type]
+
+    def invalidate_client(self, provider_type: ProviderType) -> None:
+        """Remove a cached client so it is rebuilt on next use."""
+        self._clients.pop(provider_type, None)
+        self._client_keys.pop(provider_type, None)
 
     def _build_client(self, provider_type: ProviderType) -> AsyncOpenAI:
         """Create an OpenAI-compatible client for a provider."""
