@@ -41,7 +41,8 @@ class TestScopeChangeFlow:
         self.session_mgr = SessionManager(self.tmpdir)
         self.task_queue = TaskQueue(tasks_json_path=f"{self.tmpdir}/tasks.json")
 
-    def test_first_message_creates_scope(self):
+    @pytest.mark.asyncio
+    async def test_first_message_creates_scope(self):
         """When no active scope exists, creating a task should set the scope."""
         assert self.session_mgr.get_active_scope("discord", "ch1") is None
 
@@ -51,13 +52,14 @@ class TestScopeChangeFlow:
             task_type=TaskType.DEBUGGING,
             task_id="task1",
         )
-        self.session_mgr.set_active_scope("discord", "ch1", scope)
+        await self.session_mgr.set_active_scope("discord", "ch1", scope)
 
         active = self.session_mgr.get_active_scope("discord", "ch1")
         assert active is not None
         assert active.task_id == "task1"
 
-    def test_continuation_uses_parent_task_id(self):
+    @pytest.mark.asyncio
+    async def test_continuation_uses_parent_task_id(self):
         """Follow-up messages within scope should be linked via parent_task_id."""
         # Set up an active scope
         scope = ScopeInfo(
@@ -66,7 +68,7 @@ class TestScopeChangeFlow:
             task_type=TaskType.DEBUGGING,
             task_id="root1",
         )
-        self.session_mgr.set_active_scope("discord", "ch1", scope)
+        await self.session_mgr.set_active_scope("discord", "ch1", scope)
 
         # Create a continuation task with parent_task_id
         task = Task(
@@ -87,7 +89,8 @@ class TestScopeChangeFlow:
         )
         assert task.parent_task_id == ""
 
-    def test_scope_change_notification_content(self):
+    @pytest.mark.asyncio
+    async def test_scope_change_notification_content(self):
         """The scope change notification should mention the old topic."""
         old_scope = ScopeInfo(
             scope_id="old1",
@@ -95,7 +98,7 @@ class TestScopeChangeFlow:
             task_type=TaskType.DEBUGGING,
             task_id="old1",
         )
-        self.session_mgr.set_active_scope("discord", "ch1", old_scope)
+        await self.session_mgr.set_active_scope("discord", "ch1", old_scope)
 
         # Simulate scope change message
         scope_analysis = ScopeAnalysis(
@@ -140,7 +143,8 @@ class TestScopeChangeFlow:
         assert "Fix login bug" in msg
         assert "new branch" in msg
 
-    def test_scope_detection_disabled_skips_check(self):
+    @pytest.mark.asyncio
+    async def test_scope_detection_disabled_skips_check(self):
         """When scope detection is disabled, no scope analysis should occur."""
         classifier = IntentClassifier(router=None)
 
@@ -151,7 +155,7 @@ class TestScopeChangeFlow:
             task_type=TaskType.DEBUGGING,
             task_id="x",
         )
-        self.session_mgr.set_active_scope("discord", "ch1", scope)
+        await self.session_mgr.set_active_scope("discord", "ch1", scope)
 
         # Scope should exist
         assert self.session_mgr.get_active_scope("discord", "ch1") is not None
@@ -178,7 +182,7 @@ class TestScopeChangeFlow:
             task_type=TaskType.CODING,
             task_id=task.id,
         )
-        self.session_mgr.set_active_scope("discord", "ch1", scope)
+        await self.session_mgr.set_active_scope("discord", "ch1", scope)
 
         # The task is now in REVIEW status — check _should_check_scope logic
         retrieved_task = self.task_queue.get(task.id)
@@ -239,7 +243,8 @@ class TestScopeChangeFlow:
         assert isinstance(result, ScopeAnalysis)
         assert result.is_continuation  # "also" is a continuation signal
 
-    def test_scope_update_increments_message_count(self):
+    @pytest.mark.asyncio
+    async def test_scope_update_increments_message_count(self):
         """Continuations should increment the scope's message count."""
         scope = ScopeInfo(
             scope_id="x",
@@ -248,12 +253,12 @@ class TestScopeChangeFlow:
             task_id="x",
             message_count=2,
         )
-        self.session_mgr.set_active_scope("discord", "ch1", scope)
+        await self.session_mgr.set_active_scope("discord", "ch1", scope)
 
         # Simulate continuation: increment and re-save
         active = self.session_mgr.get_active_scope("discord", "ch1")
         active.message_count += 1
-        self.session_mgr.set_active_scope("discord", "ch1", active)
+        await self.session_mgr.set_active_scope("discord", "ch1", active)
 
         refreshed = self.session_mgr.get_active_scope("discord", "ch1")
         assert refreshed.message_count == 3

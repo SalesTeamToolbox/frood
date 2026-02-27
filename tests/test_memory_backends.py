@@ -308,34 +308,37 @@ class TestSessionManagerWithRedis:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
 
-    def test_session_manager_without_redis(self):
+    @pytest.mark.asyncio
+    async def test_session_manager_without_redis(self):
         """SessionManager works normally without Redis backend."""
         mgr = SessionManager(self.tmpdir)
         msg = SessionMessage(role="user", content="hello")
-        mgr.add_message("test", "ch1", msg)
+        await mgr.add_message("test", "ch1", msg)
         history = mgr.get_history("test", "ch1")
         assert len(history) == 1
         assert history[0].content == "hello"
 
-    def test_session_manager_with_unavailable_redis(self):
+    @pytest.mark.asyncio
+    async def test_session_manager_with_unavailable_redis(self):
         """SessionManager degrades gracefully with unavailable Redis."""
         mock_redis = MagicMock()
         mock_redis.is_available = False
 
         mgr = SessionManager(self.tmpdir, redis_backend=mock_redis)
         msg = SessionMessage(role="user", content="hello")
-        mgr.add_message("test", "ch1", msg)
+        await mgr.add_message("test", "ch1", msg)
         history = mgr.get_history("test", "ch1")
         assert len(history) == 1
 
-    def test_clear_session_clears_redis(self):
+    @pytest.mark.asyncio
+    async def test_clear_session_clears_redis(self):
         """Clearing a session also clears Redis cache."""
         mock_redis = MagicMock()
         mock_redis.is_available = True
 
         mgr = SessionManager(self.tmpdir, redis_backend=mock_redis)
         msg = SessionMessage(role="user", content="hello")
-        mgr.add_message("test", "ch1", msg)
+        await mgr.add_message("test", "ch1", msg)
         mgr.clear_session("test", "ch1")
 
         mock_redis.clear_session.assert_called_with("test", "ch1")

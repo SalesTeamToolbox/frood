@@ -2,7 +2,7 @@
 name: tool-creator
 description: Create new tools at runtime when existing tools can't handle the task.
 always: false
-task_types: [coding, debugging, research, data_analysis, refactoring]
+task_types: [coding, debugging, refactoring]
 ---
 
 # Tool Creator
