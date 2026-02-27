@@ -252,6 +252,22 @@ class IterationEngine:
             or "quota" in msg
         )
 
+    def _is_payment_error(self, error: Exception) -> bool:
+        """Return True for 402 Payment Required / spending-limit errors.
+
+        OpenRouter returns 402 when a backend provider (e.g. Venice) rejects
+        because the API key's USD spending limit was exceeded. The key belongs
+        to OpenRouter (is_byok=False), so this is an infrastructure issue on
+        the OR side — retrying the same model is pointless.
+        """
+        msg = str(error).lower()
+        return (
+            "402" in msg
+            or "spend limit" in msg
+            or "spending limit" in msg
+            or "payment required" in msg
+        )
+
     def _get_fallback_models(self, exclude: set[str]) -> list[str]:
         """Return an ordered list of fallback models for cross-provider failover.
 
@@ -324,6 +340,7 @@ class IterationEngine:
         Errors that skip retries immediately (go straight to fallback):
         - 404 / endpoint-not-found — model doesn't exist
         - 401 / auth errors — key is wrong (retrying wastes quota)
+        - 402 / payment error — provider spending limit hit (OR infrastructure issue)
         - 429 / rate-limited — model at RPM cap (retrying the *same* model wastes time)
 
         Models that fail are tracked in ``_failed_models`` for the lifetime of the
@@ -356,9 +373,11 @@ class IterationEngine:
                     self._failed_models.add(model)
                     break
                 if self._is_rate_limited(e):
-                    logger.warning(
-                        f"Model {model} rate-limited (429), switching to fallback: {e}"
-                    )
+                    logger.warning(f"Model {model} rate-limited (429), switching to fallback: {e}")
+                    self._failed_models.add(model)
+                    break
+                if self._is_payment_error(e):
+                    logger.warning(f"Model {model} payment error (402), switching to fallback: {e}")
                     self._failed_models.add(model)
                     break
                 wait = 2**attempt  # 1s, 2s, 4s
@@ -408,9 +427,7 @@ class IterationEngine:
                     primary_auth_failed = True
                 # Continue trying remaining fallbacks — a different provider may succeed
 
-        raise RuntimeError(
-            f"API call failed — all models exhausted (tried: {tried}): {last_error}"
-        )
+        raise RuntimeError(f"API call failed — all models exhausted (tried: {tried}): {last_error}")
 
     async def _complete_with_tools_retry(
         self,
@@ -421,7 +438,7 @@ class IterationEngine:
     ):
         """Call router.complete_with_tools with retry logic and dynamic fallback.
 
-        Skips retries immediately for 404, 401, and 429 errors.
+        Skips retries immediately for 404, 401, 402, and 429 errors.
         On full failure, degrades to text-only mode using the first available
         fallback model. When auth fails, OpenRouter fallbacks are skipped
         (invalid key is provider-wide) and native providers are tried directly.
@@ -457,6 +474,12 @@ class IterationEngine:
                 if self._is_rate_limited(e):
                     logger.warning(
                         f"Tool model {model} rate-limited (429), switching to fallback: {e}"
+                    )
+                    self._failed_models.add(model)
+                    break
+                if self._is_payment_error(e):
+                    logger.warning(
+                        f"Tool model {model} payment error (402), switching to fallback: {e}"
                     )
                     self._failed_models.add(model)
                     break
