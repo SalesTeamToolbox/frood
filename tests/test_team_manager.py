@@ -607,14 +607,17 @@ class TestBackwardCompatibility:
         assert "my-research" in tool._teams
 
     def test_builtin_teams_unchanged(self):
-        """All 5 built-in teams still exist with correct structures."""
-        assert len(BUILTIN_TEAMS) == 5
+        """All 8 built-in teams still exist with correct structures."""
+        assert len(BUILTIN_TEAMS) == 8
         expected = {
             "research-team",
             "marketing-team",
             "content-team",
             "design-review",
             "strategy-team",
+            "code-review-team",
+            "dev-team",
+            "qa-team",
         }
         assert set(BUILTIN_TEAMS.keys()) == expected
         for name, team in BUILTIN_TEAMS.items():

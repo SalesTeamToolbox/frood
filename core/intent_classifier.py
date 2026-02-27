@@ -28,7 +28,7 @@ optional conversation history, classify the request into one of these task types
 {task_types}
 
 Also determine whether this task needs a single agent or a full team.
-Available teams: research-team, marketing-team, content-team, design-review, strategy-team
+Available teams: research-team, marketing-team, content-team, design-review, strategy-team, code-review-team, dev-team, qa-team
 
 Respond with ONLY a JSON object (no markdown, no extra text):
 
@@ -75,6 +75,9 @@ _VALID_TEAMS = {
     "content-team",
     "design-review",
     "strategy-team",
+    "code-review-team",
+    "dev-team",
+    "qa-team",
 }
 
 
