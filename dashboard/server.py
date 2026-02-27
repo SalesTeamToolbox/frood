@@ -847,7 +847,7 @@ def create_app(
 
         for task in task_queue.all_tasks():
             usage = task.token_usage
-            if not usage:
+            if not usage or not isinstance(usage, dict):
                 continue
             total_tokens += usage.get("total_tokens", 0)
             total_prompt += usage.get("total_prompt_tokens", 0)

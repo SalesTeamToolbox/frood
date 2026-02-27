@@ -154,9 +154,9 @@ MODELS: dict[str, ModelSpec] = {
         tier=ModelTier.FREE,
     ),
     "or-free-deepseek-chat": ModelSpec(
-        "deepseek/deepseek-chat-v3.1:free",
+        "deepseek/deepseek-chat-v3-0324:free",
         ProviderType.OPENROUTER,
-        display_name="DeepSeek Chat v3.1 (free)",
+        display_name="DeepSeek Chat V3 0324 (free)",
         tier=ModelTier.FREE,
     ),
     # General-purpose
