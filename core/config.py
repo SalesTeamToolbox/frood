@@ -555,10 +555,30 @@ class Settings:
         Uses object.__setattr__ to update the frozen dataclass in-place,
         ensuring all modules that imported ``settings`` by name see the
         new values without needing to re-import.
+
+        After loading the .env file, admin-configured keys from
+        .agent42/settings.json are re-applied so they are never overwritten
+        by placeholder values that may exist in .env (e.g. the setup wizard
+        writes ``OPENROUTER_API_KEY=sk-or-xxxxx`` as a placeholder, and any
+        call to reload_from_env would restore that placeholder, discarding the
+        real key the user saved via the admin UI).
         """
         from dotenv import load_dotenv
 
         load_dotenv(Path(__file__).parent.parent / ".env", override=True)
+
+        # Re-apply admin-configured keys after load_dotenv so .env placeholders
+        # cannot silently overwrite them.
+        _key_store_path = Path(__file__).parent.parent / ".agent42" / "settings.json"
+        if _key_store_path.exists():
+            try:
+                _admin_keys = json.loads(_key_store_path.read_text()).get("api_keys", {})
+                for _k, _v in _admin_keys.items():
+                    if _k and _v:
+                        os.environ[_k] = _v
+            except Exception:
+                pass  # Non-fatal — .env values are used as fallback
+
         new = cls.from_env()
         for field_name in cls.__dataclass_fields__:
             object.__setattr__(settings, field_name, getattr(new, field_name))
