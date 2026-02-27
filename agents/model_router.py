@@ -9,7 +9,8 @@ Routing priority:
   1. Admin override (TASK_TYPE_MODEL env var) — always wins
   2. Dynamic routing (from outcome tracking + research) — data-driven
   3. Trial model injection (small % of tasks) — evaluates new models
-  4. OpenRouter free models (hardcoded defaults) — fallback
+  4. Policy routing (balanced/performance) — upgrades when credits available
+  5. OpenRouter free models (hardcoded defaults) — fallback
 """
 
 import json
@@ -106,6 +107,21 @@ FREE_ROUTING: dict[TaskType, dict] = {
 }
 
 
+# Task types complex enough to justify paid models in "balanced" mode
+_COMPLEX_TASK_TYPES = frozenset(
+    {
+        TaskType.CODING,
+        TaskType.DEBUGGING,
+        TaskType.APP_CREATE,
+        TaskType.APP_UPDATE,
+        TaskType.REFACTORING,
+        TaskType.STRATEGY,
+        TaskType.DATA_ANALYSIS,
+    }
+)
+_VALID_POLICIES = frozenset({"free_only", "balanced", "performance"})
+
+
 class ModelRouter:
     """Free-first model router with admin overrides and dynamic ranking.
 
@@ -113,12 +129,14 @@ class ModelRouter:
     1. Admin env var override: AGENT42_CODING_MODEL, AGENT42_CODING_CRITIC, etc.
     2. Dynamic routing: data-driven rankings from task outcomes + research
     3. Trial injection: unproven models tested on a small % of tasks
-    4. Hardcoded FREE_ROUTING defaults (fallback)
+    4. Policy routing: balanced/performance — upgrades when OR credits available
+    5. Hardcoded FREE_ROUTING defaults (fallback)
     """
 
-    def __init__(self, evaluator=None, routing_file: str = ""):
+    def __init__(self, evaluator=None, routing_file: str = "", catalog=None):
         self.registry = ProviderRegistry()
         self._evaluator = evaluator
+        self._catalog = catalog  # May be None; policy routing skips gracefully
         self._routing_file = routing_file or self._default_routing_file()
         self._dynamic_cache: dict | None = None
         self._dynamic_cache_mtime: float = 0.0
@@ -158,10 +176,14 @@ class ModelRouter:
                 )
                 routing = dynamic.copy()
             else:
-                # 4. Hardcoded free defaults
-                routing = FREE_ROUTING.get(
-                    task_type, FREE_ROUTING[TaskType.CODING]
-                ).copy()
+                # 5. Hardcoded free defaults
+                routing = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING]).copy()
+
+        # 4. Policy routing — upgrade to paid models when credits are available
+        if not is_admin_override and not dynamic:
+            policy_routing = self._check_policy_routing(task_type)
+            if policy_routing:
+                routing = policy_routing
 
         # 3. Trial injection — maybe swap primary for an unproven model
         trial_model = self._check_trial(task_type)
@@ -229,9 +251,7 @@ class ModelRouter:
                         # No free model with API key found — use task-type default as last resort
                         fallback = FREE_ROUTING.get(task_type)
                         routing = (
-                            fallback.copy()
-                            if fallback
-                            else FREE_ROUTING[TaskType.CODING].copy()
+                            fallback.copy() if fallback else FREE_ROUTING[TaskType.CODING].copy()
                         )
                         logger.error(
                             f"No available free model found for {task_type.value}. "
@@ -239,6 +259,149 @@ class ModelRouter:
                         )
 
         return routing
+
+    def _check_policy_routing(self, task_type: TaskType) -> dict | None:
+        """Apply policy-based routing when OR credits are available.
+
+        Returns a routing dict to use instead of FREE_ROUTING defaults,
+        or None to keep the default.
+        """
+        try:
+            from core.config import settings
+
+            policy = settings.model_routing_policy
+        except Exception:
+            policy = os.getenv("MODEL_ROUTING_POLICY", "balanced")
+
+        if policy not in _VALID_POLICIES:
+            logger.warning("Unknown routing policy %r — treating as 'balanced'", policy)
+            policy = "balanced"
+
+        if policy == "free_only":
+            return None
+
+        if self._catalog is None:
+            return None
+
+        account = self._catalog.openrouter_account_status
+        if account is None:
+            return None
+
+        if policy == "balanced":
+            if task_type not in _COMPLEX_TASK_TYPES:
+                return None
+            if account.get("is_free_tier", True):
+                return None
+            limit_remaining = account.get("limit_remaining")
+            if limit_remaining is not None and limit_remaining <= 0:
+                return None
+            return self._select_best_paid_model(task_type)
+
+        if policy == "performance":
+            if account.get("is_free_tier", True):
+                return None
+            limit_remaining = account.get("limit_remaining")
+            if limit_remaining is not None and limit_remaining <= 0:
+                return None
+            return self._select_best_available_model(task_type)
+
+        return None
+
+    def _get_best_free_score(self, task_type: TaskType) -> float:
+        """Get the best composite score among free models for a task type."""
+        if not self._evaluator:
+            return 0.5
+        free_keys = {m["key"] for m in self.registry.free_models()}
+        best = 0.5
+        for (mk, tt), stats in self._evaluator._stats.items():
+            if tt == task_type.value and mk in free_keys:
+                score = stats.composite_score
+                if score > best:
+                    best = score
+        return best
+
+    def _select_best_paid_model(self, task_type: TaskType) -> dict | None:
+        """Select the best paid OR model if it's significantly better than free."""
+        from providers.registry import MODELS
+
+        paid_keys = [k for k in MODELS if k.startswith("or-paid-")]
+        if not paid_keys:
+            return None
+
+        best_key = None
+        best_score = 0.0
+        for key in paid_keys:
+            spec = MODELS[key]
+            score = self._get_model_score(key, task_type, spec.tier)
+            if score > best_score:
+                best_score = score
+                best_key = key
+
+        if not best_key:
+            return None
+
+        free_score = self._get_best_free_score(task_type)
+        if best_score <= free_score + 0.1:
+            return None  # Not significantly better — stay free
+
+        free_default = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING])
+        logger.info(
+            "Policy routing (balanced): upgrading %s to %s (score=%.2f vs free=%.2f)",
+            task_type.value,
+            best_key,
+            best_score,
+            free_score,
+        )
+        return {
+            "primary": best_key,
+            "critic": free_default.get("critic"),
+            "max_iterations": free_default.get("max_iterations", 8),
+        }
+
+    def _select_best_available_model(self, task_type: TaskType) -> dict | None:
+        """Select the best model across all available providers."""
+        from providers.registry import MODELS
+
+        best_key = None
+        best_score = 0.0
+        for key, spec in MODELS.items():
+            provider_spec = PROVIDERS.get(spec.provider)
+            if not provider_spec:
+                continue
+            api_key = os.getenv(provider_spec.api_key_env, "")
+            if not api_key:
+                continue
+            score = self._get_model_score(key, task_type, spec.tier)
+            if score > best_score:
+                best_score = score
+                best_key = key
+
+        if not best_key:
+            return None
+
+        free_default = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING])
+        logger.info(
+            "Policy routing (performance): %s → %s (score=%.2f)",
+            task_type.value,
+            best_key,
+            best_score,
+        )
+        return {
+            "primary": best_key,
+            "critic": free_default.get("critic"),
+            "max_iterations": free_default.get("max_iterations", 8),
+        }
+
+    def _get_model_score(self, key: str, task_type: TaskType, tier) -> float:
+        """Get composite score for a model, falling back to tier-based estimate."""
+        from providers.registry import ModelTier
+
+        if self._evaluator:
+            stats = self._evaluator._stats.get((key, task_type.value))
+            if stats and stats.composite_score > 0:
+                return stats.composite_score
+        # Tier-based default scores
+        return {ModelTier.PREMIUM: 0.7, ModelTier.CHEAP: 0.5, ModelTier.FREE: 0.3}.get(tier, 0.3)
 
     def record_outcome(
         self,

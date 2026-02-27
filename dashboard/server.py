@@ -230,6 +230,8 @@ _DASHBOARD_EDITABLE_SETTINGS = {
     "MODEL_TRIAL_PERCENTAGE",
     "MODEL_CATALOG_REFRESH_HOURS",
     "MODEL_RESEARCH_ENABLED",
+    "MODEL_ROUTING_POLICY",
+    "OPENROUTER_BALANCE_CHECK_HOURS",
 }
 
 
@@ -322,6 +324,7 @@ def create_app(
     profile_loader=None,
     intervention_queues: dict | None = None,
     github_account_store=None,
+    model_catalog=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -1128,7 +1131,17 @@ def create_app(
             if key not in _DASHBOARD_EDITABLE_SETTINGS:
                 errors.append(f"{key} is not editable from the dashboard")
                 continue
-            updates[key] = value.strip()
+            stripped = value.strip()
+            if key == "MODEL_ROUTING_POLICY" and stripped not in {
+                "free_only",
+                "balanced",
+                "performance",
+            }:
+                errors.append(
+                    "MODEL_ROUTING_POLICY must be one of: free_only, balanced, performance"
+                )
+                continue
+            updates[key] = stripped
             updated.append(key)
 
         if updates:
@@ -1138,6 +1151,20 @@ def create_app(
             Settings.reload_from_env()
 
         return {"status": "ok", "updated": updated, "errors": errors}
+
+    @app.get("/api/settings/openrouter-status")
+    async def get_openrouter_status(_: AuthContext = Depends(require_admin)):
+        """Return OpenRouter account status and routing policy info."""
+        import os
+
+        from providers.registry import MODELS
+
+        policy = os.getenv("MODEL_ROUTING_POLICY", "balanced")
+        account = model_catalog.openrouter_account_status if model_catalog else None
+        if account is None and model_catalog and os.getenv("OPENROUTER_API_KEY"):
+            account = await model_catalog.check_account(api_key=os.getenv("OPENROUTER_API_KEY", ""))
+        paid_count = len([k for k in MODELS if k.startswith("or-paid-")]) if model_catalog else 0
+        return {"policy": policy, "account": account, "paid_models_registered": paid_count}
 
     @app.get("/api/settings/storage")
     async def get_storage_status(_admin: AuthContext = Depends(require_admin)):
@@ -1634,9 +1661,7 @@ def create_app(
                     # Use an already-connected repo from Settings
                     existing_repo = repo_manager.get(req.repo_id)
                     if not existing_repo:
-                        raise HTTPException(
-                            status_code=404, detail="Repository not found"
-                        )
+                        raise HTTPException(status_code=404, detail="Repository not found")
                     updates["repo_id"] = existing_repo.id
                     updates["github_repo"] = existing_repo.github_repo or existing_repo.name
                 elif req.github_clone_url:

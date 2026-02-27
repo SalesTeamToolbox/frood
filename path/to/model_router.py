@@ -12,9 +12,7 @@ Routing priority:
   4. OpenRouter free models (hardcoded defaults) — fallback
 """
 
-import json
 import logging
-import os
 from pathlib import Path
 
 from core.config import settings  # Added import
@@ -241,7 +239,9 @@ class ModelRouter:
                 api_key_field = f"{provider.value.lower()}_api_key"
                 api_key = getattr(settings, api_key_field, "")
                 if not api_key:
-                    raise ValueError(f"API key {api_key_field} not set for provider {provider.value}")
+                    raise ValueError(
+                        f"API key {api_key_field} not set for provider {provider.value}"
+                    )
             except ValueError as e:
                 logger.warning(
                     f"Model {primary_model} is not available: {e}. "
@@ -263,11 +263,7 @@ class ModelRouter:
                 else:
                     # No free model with API key found, use the task type's free routing as last resort
                     fallback = FREE_ROUTING.get(task_type)
-                    routing = (
-                        fallback.copy()
-                        if fallback
-                        else FREE_ROUTING[TaskType.CODING].copy()
-                    )
+                    routing = fallback.copy() if fallback else FREE_ROUTING[TaskType.CODING].copy()
                     logger.error(
                         f"No available free model found for {task_type.value}. "
                         "Using fallback routing, but it may fail."

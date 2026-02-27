@@ -26,6 +26,7 @@ import asyncio
 import atexit
 import json
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
@@ -51,14 +52,14 @@ from core.config import settings
 from core.device_auth import DeviceStore
 from core.github_accounts import GitHubAccountStore
 from core.heartbeat import HeartbeatService
-from core.intent_classifier import IntentClassifier, PendingClarification, ScopeInfo
+from core.intent_classifier import IntentClassifier, PendingClarification
 from core.key_store import KeyStore
 from core.project_manager import ProjectManager
 from core.rate_limiter import ToolLimit, ToolRateLimiter
 from core.repo_manager import RepositoryManager
 from core.sandbox import WorkspaceSandbox
 from core.security_scanner import ScheduledSecurityScanner
-from core.task_queue import Task, TaskQueue, TaskStatus, TaskType, infer_task_type
+from core.task_queue import Task, TaskQueue, TaskStatus, TaskType
 from core.worktree_manager import WorktreeManager
 from dashboard.auth import init_device_store
 from dashboard.server import create_app
@@ -353,6 +354,7 @@ class Agent42:
         self.model_catalog = ModelCatalog(
             cache_path=data_dir / "model_catalog.json",
             refresh_hours=settings.model_catalog_refresh_hours,
+            balance_check_hours=settings.openrouter_balance_check_hours,
         )
         self.model_evaluator = ModelEvaluator(
             performance_path=data_dir / "model_performance.json",
@@ -373,7 +375,7 @@ class Agent42:
         # Self-learning (with model evaluator for outcome tracking)
         self.workspace_skills_dir = self.data_dir / "skills" / "workspace"
         self.learner = Learner(
-            router=ModelRouter(evaluator=self.model_evaluator),
+            router=ModelRouter(evaluator=self.model_evaluator, catalog=self.model_catalog),
             memory_store=self.memory_store,
             skills_dir=self.workspace_skills_dir,
             model_evaluator=self.model_evaluator,
@@ -1021,6 +1023,7 @@ class Agent42:
                 profile_loader=self.profile_loader,
                 intervention_queues=self._intervention_queues,
                 github_account_store=self.github_account_store,
+                model_catalog=self.model_catalog,
             )
             config = uvicorn.Config(
                 app,
@@ -1035,15 +1038,39 @@ class Agent42:
 
     async def _model_catalog_refresh_loop(self):
         """Periodically refresh the OpenRouter model catalog."""
-        from providers.registry import ProviderRegistry
+        from providers.registry import ProviderRegistry, spending_tracker
 
         while not self._shutdown_event.is_set():
             try:
+                api_key = os.getenv("OPENROUTER_API_KEY", "")
                 if self.model_catalog.needs_refresh():
-                    await self.model_catalog.refresh(api_key=settings.openrouter_api_key)
-                    new_models = self.model_catalog.register_new_models(ProviderRegistry())
+                    await self.model_catalog.refresh(api_key=api_key)
+                    registry = ProviderRegistry()
+                    new_models = self.model_catalog.register_new_models(registry)
                     if new_models:
                         logger.info("Discovered %d new free model(s)", len(new_models))
+
+                    # Update spending tracker with actual model prices
+                    spending_tracker.update_model_prices(self.model_catalog.get_model_prices())
+
+                    # Validate primary models against live catalog
+                    stale = self.model_catalog.validate_primary_models(registry)
+                    stale_warnings = {k: v for k, v in stale.items() if v}
+                    if stale_warnings:
+                        logger.warning(
+                            "Stale model(s) with suggested replacements: %s",
+                            stale_warnings,
+                        )
+
+                    # Register paid models if policy allows
+                    policy = os.getenv("MODEL_ROUTING_POLICY", "balanced")
+                    if policy != "free_only" and api_key:
+                        account = await self.model_catalog.check_account(api_key=api_key)
+                        if not account.get("is_free_tier", True):
+                            paid = self.model_catalog.register_paid_models(registry)
+                            if paid:
+                                logger.info("Registered %d paid model(s)", len(paid))
+
                     # Rerank after catalog refresh
                     self.model_evaluator.rerank_all()
             except Exception as e:
