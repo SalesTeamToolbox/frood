@@ -49,7 +49,7 @@ class TestIterationRetry:
     async def test_retry_raises_after_all_attempts_fail(self):
         """If all retries AND fallback fail, should raise RuntimeError."""
         self.router.complete = AsyncMock(side_effect=Exception("always fails"))
-        with pytest.raises(RuntimeError, match="API call failed after"):
+        with pytest.raises(RuntimeError, match="API call failed"):
             await self.engine._complete_with_retry("or-free-llama4-maverick", [], retries=2)
 
     @pytest.mark.asyncio

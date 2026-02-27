@@ -215,6 +215,10 @@ class IterationEngine:
         self.approval_gate = approval_gate
         self.agent_id = agent_id
         self.extension_loader = extension_loader
+        # Models that failed during the current task — excluded from fallback attempts.
+        # Reset at the start of each run(). Prevents wasting time retrying models
+        # that are known-broken (e.g. Gemini daily quota exhausted, OR model 404'd).
+        self._failed_models: set[str] = set()
 
     def _is_model_unavailable(self, error: Exception) -> bool:
         """Return True for 404/endpoint-not-found errors that should not be retried."""
@@ -233,14 +237,20 @@ class IterationEngine:
         )
 
     def _is_rate_limited(self, error: Exception) -> bool:
-        """Return True for 429 rate-limit errors.
+        """Return True for 429 rate-limit / quota-exhausted errors.
 
-        OpenRouter free models have strict per-model RPM limits (e.g. 8 RPM).
-        Retrying the *same* model wastes time — the caller should switch to
-        a fallback model immediately.
+        Covers both OpenRouter RPM limits and Gemini daily quota exhaustion
+        (RESOURCE_EXHAUSTED with limit: 0). Retrying the *same* model wastes
+        time — the caller should switch to a fallback model immediately.
         """
         msg = str(error).lower()
-        return "429" in msg or "rate limit" in msg or "rate_limit" in msg
+        return (
+            "429" in msg
+            or "rate limit" in msg
+            or "rate_limit" in msg
+            or "resource_exhausted" in msg
+            or "quota" in msg
+        )
 
     def _get_fallback_models(self, exclude: set[str]) -> list[str]:
         """Return an ordered list of fallback models for cross-provider failover.
@@ -315,7 +325,15 @@ class IterationEngine:
         - 404 / endpoint-not-found — model doesn't exist
         - 401 / auth errors — key is wrong (retrying wastes quota)
         - 429 / rate-limited — model at RPM cap (retrying the *same* model wastes time)
+
+        Models that fail are tracked in ``_failed_models`` for the lifetime of the
+        task so they are excluded from fallback lists in subsequent iterations.
         """
+        # If this model already failed in a previous iteration, skip straight to fallback
+        if model in self._failed_models:
+            logger.info(f"Model {model} failed earlier this task, skipping to fallback")
+            return await self._complete_from_fallbacks(model, messages)
+
         last_error = None
         for attempt in range(retries):
             try:
@@ -331,14 +349,17 @@ class IterationEngine:
                 last_error = e
                 if self._is_model_unavailable(e):
                     logger.warning(f"Model {model} unavailable (404), skipping retries: {e}")
+                    self._failed_models.add(model)
                     break
                 if self._is_auth_error(e):
                     logger.warning(f"Auth error for {model} (401), skipping retries: {e}")
+                    self._failed_models.add(model)
                     break
                 if self._is_rate_limited(e):
                     logger.warning(
                         f"Model {model} rate-limited (429), switching to fallback: {e}"
                     )
+                    self._failed_models.add(model)
                     break
                 wait = 2**attempt  # 1s, 2s, 4s
                 logger.warning(
@@ -347,12 +368,21 @@ class IterationEngine:
                 )
                 await asyncio.sleep(wait)
 
-        # Try fallback models — OpenRouter free first, then configured native providers.
-        # If the primary model failed with a 401 auth error, all OpenRouter fallbacks
-        # will also fail with the same error (invalid key is provider-wide).  Skip them
-        # immediately so native providers (Gemini, OpenAI, etc.) are reached quickly.
+        return await self._complete_from_fallbacks(model, messages, last_error)
+
+    async def _complete_from_fallbacks(
+        self,
+        failed_model: str,
+        messages: list[dict],
+        last_error: Exception | None = None,
+    ) -> str:
+        """Try fallback models after the primary model failed.
+
+        Skips models already known to be broken (tracked in _failed_models).
+        When auth fails, all OpenRouter models are skipped (provider-wide key).
+        """
         primary_auth_failed = last_error is not None and self._is_auth_error(last_error)
-        tried: set[str] = {model}
+        tried: set[str] = self._failed_models | {failed_model}
         for fallback in self._get_fallback_models(exclude=tried):
             # Skip OpenRouter models when the OR key is known to be invalid
             if primary_auth_failed and fallback.startswith("or-"):
@@ -372,12 +402,15 @@ class IterationEngine:
             except Exception as e:
                 logger.warning(f"Fallback {fallback} also failed: {e}")
                 tried.add(fallback)
+                self._failed_models.add(fallback)
                 # If a fallback OR model also gets 401, skip remaining OR models too
                 if self._is_auth_error(e) and fallback.startswith("or-"):
                     primary_auth_failed = True
                 # Continue trying remaining fallbacks — a different provider may succeed
 
-        raise RuntimeError(f"API call failed after {retries} retries + fallbacks: {last_error}")
+        raise RuntimeError(
+            f"API call failed — all models exhausted (tried: {tried}): {last_error}"
+        )
 
     async def _complete_with_tools_retry(
         self,
@@ -392,7 +425,17 @@ class IterationEngine:
         On full failure, degrades to text-only mode using the first available
         fallback model. When auth fails, OpenRouter fallbacks are skipped
         (invalid key is provider-wide) and native providers are tried directly.
+        Failed models are tracked in ``_failed_models`` across iterations.
         """
+        # If this model already failed earlier in this task, skip straight to fallback
+        if model in self._failed_models:
+            logger.info(f"Tool model {model} failed earlier this task, using fallback")
+            tried = self._failed_models | {model}
+            fallbacks = self._get_fallback_models(exclude=tried)
+            fallback = fallbacks[0] if fallbacks else "or-free-auto"
+            logger.warning(f"Degrading to text-only with {fallback}")
+            return await self.router.complete_with_tools(fallback, messages, [])
+
         last_error = None
         for attempt in range(retries):
             try:
@@ -403,16 +446,19 @@ class IterationEngine:
                 last_error = e
                 if self._is_model_unavailable(e):
                     logger.warning(f"Tool model {model} unavailable (404), skipping retries: {e}")
+                    self._failed_models.add(model)
                     break
                 if self._is_auth_error(e):
                     logger.warning(
                         f"Auth error for tool model {model} (401), skipping retries: {e}"
                     )
+                    self._failed_models.add(model)
                     break
                 if self._is_rate_limited(e):
                     logger.warning(
                         f"Tool model {model} rate-limited (429), switching to fallback: {e}"
                     )
+                    self._failed_models.add(model)
                     break
                 wait = 2**attempt
                 logger.warning(
@@ -425,11 +471,11 @@ class IterationEngine:
         # If primary auth failed, skip OpenRouter fallbacks — the invalid key is
         # provider-wide, so they will all fail too. Jump straight to native providers.
         primary_auth_failed = last_error is not None and self._is_auth_error(last_error)
-        tried: set[str] = {model}
+        tried: set[str] = self._failed_models | {model}
         fallbacks = self._get_fallback_models(exclude=tried)
         if primary_auth_failed:
             fallbacks = [f for f in fallbacks if not f.startswith("or-")]
-        fallback = fallbacks[0] if fallbacks else "or-free-llama-70b"
+        fallback = fallbacks[0] if fallbacks else "or-free-auto"
         logger.warning(
             f"Tool calling failed after {retries} retries, degrading to text-only with {fallback}"
         )
@@ -563,6 +609,7 @@ class IterationEngine:
             intervention_queue: Optional queue for mid-task user feedback messages.
         """
         self._token_acc = token_accumulator or TokenAccumulator()
+        self._failed_models = set()  # Reset per-task failed model tracking
         history = IterationHistory()
         messages = []
 

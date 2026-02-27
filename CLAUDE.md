@@ -418,6 +418,10 @@ class TestWorkspaceSandbox:
 | 46 | Embeddings | OpenRouter `/embeddings` endpoint returns 401 "User not found" for free-tier keys | Auto-detect skips OpenRouter; only OpenAI is used for embeddings. Set `OPENAI_API_KEY` or explicit `EMBEDDING_PROVIDER` |
 | 47 | Embeddings | `build_context_semantic` crashes the entire task when embedding API fails at runtime | Wrapped `embeddings.search()` in try/except; falls back to `build_context()` on failure |
 | 48 | Providers | `ProviderRegistry._clients` cached stale API keys forever — admin key updates had no effect | `get_client()` now tracks the key used per client and rebuilds when `os.environ` key changes |
+| 49 | Retry | OpenAI SDK default `max_retries=2` adds ~2s of hidden retries before our code sees a 429 | Set `max_retries=0` in `_build_client()` — our `_complete_with_retry` handles retries/fallback |
+| 50 | Routing | Gemini daily quota exhaustion (`limit: 0`) retried every iteration — 5-7s waste per call | `_failed_models` set tracks 429/404 models per-task; subsequent iterations skip them instantly |
+| 51 | Fallback | `_get_fallback_models` included `gemini-2-flash` even when it just failed as primary (same-provider retry) | `_failed_models` propagated to `exclude` param — models that failed in any iteration are excluded from all fallbacks |
+| 52 | Catalog | `or-free-devstral` free period ended (404 "free Devstral 2 period has ended") | Replaced with `or-free-qwen-coder` (Qwen3 Coder 480B) in all FREE_ROUTING critic slots |
 
 ---
 

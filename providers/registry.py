@@ -407,7 +407,7 @@ class ProviderRegistry:
             logger.error(f"{spec.api_key_env} not set — {spec.display_name} models will fail")
             raise ValueError(f"{spec.api_key_env} not set — {spec.display_name} models will fail")
 
-        return AsyncOpenAI(base_url=base_url, api_key=api_key)
+        return AsyncOpenAI(base_url=base_url, api_key=api_key, max_retries=0)
 
     async def complete(
         self,
