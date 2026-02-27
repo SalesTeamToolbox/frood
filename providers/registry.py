@@ -138,13 +138,7 @@ MODELS: dict[str, ModelSpec] = {
         display_name="Qwen3 Coder 480B (free)",
         tier=ModelTier.FREE,
     ),
-    "or-free-devstral": ModelSpec(
-        "mistralai/devstral-2512:free",
-        ProviderType.OPENROUTER,
-        max_tokens=8192,
-        display_name="Devstral 123B (free)",
-        tier=ModelTier.FREE,
-    ),
+    # or-free-devstral removed — free period ended (404 "free Devstral 2 period has ended")
     # Reasoning specialists
     "or-free-deepseek-r1": ModelSpec(
         "deepseek/deepseek-r1-0528:free",

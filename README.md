@@ -20,8 +20,8 @@ Inbound Channel  ->  Task Queue  ->  Agent Loop  ->  Critic Pass  ->  REVIEW.md 
 
 **Free-first strategy** — all agent work defaults to $0 models via OpenRouter:
 
-- **Coding**: Qwen3 Coder 480B (primary) + Devstral 123B (critic)
-- **Debugging**: DeepSeek R1 0528 (primary) + Devstral 123B (critic)
+- **Coding**: Gemini Flash (primary) + Qwen3 Coder 480B (critic)
+- **Debugging**: Gemini Flash (primary) + Qwen3 Coder 480B (critic)
 - **Research**: Llama 4 Maverick (primary) + DeepSeek Chat v3.1 (critic)
 - **Marketing/Content/Design**: Llama 4 Maverick + task-aware critics
 - **Image/Video**: FLUX (free), DALL-E 3, Replicate, Luma (premium)
@@ -353,18 +353,18 @@ One API key, zero cost. These models are used by default for all task types:
 
 | Task Type | Primary Model | Critic Model | Max Iterations |
 |---|---|---|---|
-| coding | Qwen3 Coder 480B | Devstral 123B | 8 |
-| debugging | DeepSeek R1 0528 | Devstral 123B | 10 |
-| research | Llama 4 Maverick | DeepSeek Chat v3.1 | 5 |
-| refactoring | Qwen3 Coder 480B | Devstral 123B | 8 |
-| documentation | Llama 4 Maverick | Gemma 3 27B | 4 |
-| marketing | Llama 4 Maverick | DeepSeek Chat v3.1 | 6 |
-| email | Mistral Small 3.1 | — | 3 |
-| design | Llama 4 Maverick | DeepSeek Chat v3.1 | 5 |
-| content | Llama 4 Maverick | Gemma 3 27B | 6 |
-| strategy | DeepSeek R1 0528 | Llama 4 Maverick | 5 |
-| data_analysis | Qwen3 Coder 480B | DeepSeek Chat v3.1 | 6 |
-| project_management | Llama 4 Maverick | Gemma 3 27B | 4 |
+| coding | Gemini 2.0 Flash | Qwen3 Coder 480B | 8 |
+| debugging | Gemini 2.0 Flash | Qwen3 Coder 480B | 10 |
+| research | Gemini 2.0 Flash | Llama 3.3 70B | 5 |
+| refactoring | Gemini 2.0 Flash | Qwen3 Coder 480B | 8 |
+| documentation | Gemini 2.0 Flash | Gemma 3 27B | 4 |
+| marketing | Gemini 2.0 Flash | Llama 3.3 70B | 6 |
+| email | Gemini 2.0 Flash | — | 3 |
+| design | Gemini 2.0 Flash | Llama 3.3 70B | 5 |
+| content | Gemini 2.0 Flash | Gemma 3 27B | 6 |
+| strategy | Gemini 2.0 Flash | Llama 3.3 70B | 5 |
+| data_analysis | Gemini 2.0 Flash | Qwen3 Coder 480B | 6 |
+| project_management | Gemini 2.0 Flash | Gemma 3 27B | 4 |
 
 ### Dynamic Routing (Self-Improving)
 
@@ -412,7 +412,6 @@ All accessible with a single free OpenRouter API key:
 | Model | ID | Best For |
 |---|---|---|
 | Qwen3 Coder 480B | `qwen/qwen3-coder:free` | Coding, agentic tool use |
-| Devstral 123B | `mistralai/devstral-2512:free` | Multi-file coding, refactoring |
 | DeepSeek R1 0528 | `deepseek/deepseek-r1-0528:free` | Reasoning, debugging, math |
 | DeepSeek Chat v3.1 | `deepseek/deepseek-chat-v3.1:free` | General chat, hybrid reasoning |
 | Llama 4 Maverick | `meta-llama/llama-4-maverick:free` | Research, writing, general |

@@ -75,6 +75,89 @@ class TestIterationRetry:
         assert history.final_output is not None
 
 
+class TestPaymentErrorDetection:
+    """Tests for 402 Payment Required / spending-limit error handling."""
+
+    def setup_method(self):
+        self.router = MagicMock()
+        self.engine = IterationEngine(self.router)
+
+    def test_detects_402_status_code(self):
+        """Should detect 402 status code as payment error."""
+        err = Exception("Error code: 402 - Provider returned error")
+        assert self.engine._is_payment_error(err) is True
+
+    def test_detects_spending_limit_message(self):
+        """Should detect spending limit keywords."""
+        err = Exception("API key USD spend limit exceeded")
+        assert self.engine._is_payment_error(err) is True
+
+    def test_detects_payment_required_message(self):
+        """Should detect 'payment required' phrasing."""
+        err = Exception("Payment required: insufficient credits")
+        assert self.engine._is_payment_error(err) is True
+
+    def test_normal_error_is_not_payment(self):
+        """Normal errors should not be detected as payment errors."""
+        err = Exception("Connection timeout")
+        assert self.engine._is_payment_error(err) is False
+
+    def test_429_is_not_payment(self):
+        """429 rate limit should not be detected as payment error."""
+        err = Exception("Error code: 429 - rate limited")
+        assert self.engine._is_payment_error(err) is False
+
+    @pytest.mark.asyncio
+    async def test_402_skips_retries_and_falls_to_fallback(self):
+        """A 402 error should immediately skip retries and use fallback."""
+        call_models = []
+
+        async def mock_complete(model, messages, **kwargs):
+            call_models.append(model)
+            if model == "test-model":
+                raise Exception(
+                    "Error code: 402 - {'error': {'message': 'Provider returned error', "
+                    "'code': 402, 'metadata': {'raw': 'API key USD spend limit exceeded'}}}"
+                )
+            return ("fallback success", None)
+
+        self.router.complete = mock_complete
+        result = await self.engine._complete_with_retry("test-model", [], retries=3)
+        assert result == "fallback success"
+        # Should only try test-model once (no retries), then fallback
+        assert call_models.count("test-model") == 1
+        assert "test-model" in self.engine._failed_models
+
+    @pytest.mark.asyncio
+    async def test_402_model_tracked_in_failed_models(self):
+        """A 402 failure should add the model to _failed_models for this task."""
+        self.router.complete = AsyncMock(
+            side_effect=[
+                Exception("Error code: 402 - spend limit exceeded"),
+                ("ok", None),
+            ]
+        )
+        await self.engine._complete_with_retry("test-model", [], retries=3)
+        assert "test-model" in self.engine._failed_models
+
+    @pytest.mark.asyncio
+    async def test_402_model_skipped_on_subsequent_iterations(self):
+        """A model that got 402 should be skipped immediately in later calls."""
+        self.engine._failed_models.add("test-model")
+
+        call_models = []
+
+        async def mock_complete(model, messages, **kwargs):
+            call_models.append(model)
+            return ("ok", None)
+
+        self.router.complete = mock_complete
+        result = await self.engine._complete_with_retry("test-model", [], retries=3)
+        assert result == "ok"
+        # test-model should NOT appear in call_models — it was skipped
+        assert "test-model" not in call_models
+
+
 class TestConvergenceDetection:
     """Tests for stuck loop detection."""
 
