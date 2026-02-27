@@ -1,7 +1,5 @@
 """Tests for ProjectManager — project CRUD and task aggregation."""
 
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
 
 from core.project_manager import Project, ProjectManager
@@ -199,57 +197,11 @@ class TestProjectManager:
         assert project.assigned_team == "team-alpha"
 
     @pytest.mark.asyncio
-    async def test_archive_project_with_app_archives_app(self, manager):
-        """Archiving a project with app_id also archives the associated app."""
+    async def test_archive_project_preserves_app_id(self, manager):
+        """Archiving a project does not remove the app_id — the app lives on independently."""
         project = await manager.create(name="App Project", app_id="abc123")
-
-        mock_app_manager = MagicMock()
-        mock_app_manager.delete = AsyncMock()
-
-        result = await manager.archive(project.id, app_manager=mock_app_manager)
-
-        assert result is True
-        mock_app_manager.delete.assert_awaited_once_with("abc123")
-        fetched = await manager.get(project.id)
-        assert fetched.status == "archived"
-
-    @pytest.mark.asyncio
-    async def test_archive_project_with_app_not_found(self, manager):
-        """Archiving a project continues successfully even if the app is missing."""
-        project = await manager.create(name="Missing App Project", app_id="missing")
-
-        mock_app_manager = MagicMock()
-        mock_app_manager.delete = AsyncMock(side_effect=ValueError("App not found"))
-
-        result = await manager.archive(project.id, app_manager=mock_app_manager)
-
+        result = await manager.archive(project.id)
         assert result is True
         fetched = await manager.get(project.id)
         assert fetched.status == "archived"
-
-    @pytest.mark.asyncio
-    async def test_archive_project_without_app_id(self, manager):
-        """Archiving a project with no app_id does not call app_manager."""
-        project = await manager.create(name="No App Project")
-
-        mock_app_manager = MagicMock()
-        mock_app_manager.delete = AsyncMock()
-
-        result = await manager.archive(project.id, app_manager=mock_app_manager)
-
-        assert result is True
-        mock_app_manager.delete.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_delete_project_with_app_archives_app(self, manager):
-        """Permanently deleting a project with app_id also archives the associated app."""
-        project = await manager.create(name="Delete App Project", app_id="xyz789")
-
-        mock_app_manager = MagicMock()
-        mock_app_manager.delete = AsyncMock()
-
-        result = await manager.delete(project.id, app_manager=mock_app_manager)
-
-        assert result is True
-        mock_app_manager.delete.assert_awaited_once_with("xyz789")
-        assert await manager.get(project.id) is None
+        assert fetched.app_id == "abc123"

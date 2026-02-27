@@ -144,37 +144,15 @@ class ProjectManager:
             return None
         return await self.update(project_id, status=status)
 
-    async def archive(self, project_id: str, app_manager=None) -> bool:
-        """Archive a project and its associated app (if any)."""
-        project = self._projects.get(project_id)
-        if not project:
-            return False
-        if project.app_id and app_manager:
-            try:
-                await app_manager.delete(project.app_id)
-            except ValueError:
-                logger.warning(
-                    "App %s not found when archiving project %s",
-                    project.app_id,
-                    project_id,
-                )
+    async def archive(self, project_id: str) -> bool:
+        """Archive a project."""
         result = await self.set_status(project_id, ProjectStatus.ARCHIVED.value)
         return result is not None
 
-    async def delete(self, project_id: str, app_manager=None) -> bool:
-        """Permanently delete a project and its associated app (if any)."""
-        project = self._projects.get(project_id)
-        if not project:
+    async def delete(self, project_id: str) -> bool:
+        """Permanently delete a project."""
+        if project_id not in self._projects:
             return False
-        if project.app_id and app_manager:
-            try:
-                await app_manager.delete(project.app_id)
-            except ValueError:
-                logger.warning(
-                    "App %s not found when deleting project %s",
-                    project.app_id,
-                    project_id,
-                )
         del self._projects[project_id]
         await self._persist()
         logger.info("Deleted project %s", project_id)

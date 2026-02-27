@@ -1909,8 +1909,8 @@ def create_app(
             project_id: str,
             _user: str = Depends(get_current_user),
         ):
-            """Archive a project and its associated app (if any)."""
-            result = await project_manager.archive(project_id, app_manager=app_manager)
+            """Archive a project."""
+            result = await project_manager.archive(project_id)
             if not result:
                 raise HTTPException(status_code=404, detail="Project not found")
             return {"status": "archived"}
@@ -2338,10 +2338,10 @@ def create_app(
 
         @app.delete("/api/apps/{app_id}")
         async def delete_app(app_id: str, _user: str = Depends(get_current_user)):
-            """Archive an app."""
+            """Permanently delete an app and remove its files."""
             try:
-                await app_manager.delete(app_id)
-                return {"status": "archived"}
+                await app_manager.delete_permanently(app_id)
+                return {"status": "deleted"}
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
 
