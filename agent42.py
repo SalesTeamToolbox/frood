@@ -738,6 +738,97 @@ class Agent42:
             classification=classification,
         )
 
+    async def _on_task_update(self, task):
+        """Broadcast task state changes to all dashboard clients.
+
+        Also routes results back to the originating channel when a task
+        completes or fails. Supports session-scoped chat and project stats.
+        """
+        await self.ws_manager.broadcast("task_update", task.to_dict())
+
+        # Project stats update: refresh and broadcast when task has a project
+        if task.project_id and self.project_manager:
+            project = await self.project_manager.get(task.project_id)
+            if project:
+                d = project.to_dict()
+                d["stats"] = self.project_manager.project_stats(task.project_id)
+                await self.ws_manager.broadcast("project_update", d)
+
+        # Dashboard chat: broadcast agent response back as a chat message
+        if task.origin_channel == "dashboard_chat" and task.status in (
+            TaskStatus.REVIEW,
+            TaskStatus.DONE,
+        ):
+            import time as _time
+            import uuid as _uuid
+
+            session_id = task.origin_metadata.get("chat_session_id", "")
+            content = task.result or "(completed with no output)"
+            chat_msg = {
+                "id": _uuid.uuid4().hex[:12],
+                "role": "assistant",
+                "content": content,
+                "timestamp": _time.time(),
+                "sender": "Agent42",
+                "task_id": task.id,
+                "session_id": session_id,
+            }
+            # Persist to session if we have a session manager and session_id
+            if session_id and self.chat_session_manager:
+                await self.chat_session_manager.add_message(session_id, chat_msg)
+            else:
+                self.ws_manager.chat_messages.append(chat_msg)
+            await self.ws_manager.broadcast("chat_message", chat_msg)
+            return  # Don't also send via channel manager
+
+        if task.origin_channel == "dashboard_chat" and task.status == TaskStatus.FAILED:
+            import time as _time
+            import uuid as _uuid
+
+            session_id = task.origin_metadata.get("chat_session_id", "")
+            chat_msg = {
+                "id": _uuid.uuid4().hex[:12],
+                "role": "assistant",
+                "content": f"Sorry, I encountered an error: {task.error}",
+                "timestamp": _time.time(),
+                "sender": "Agent42",
+                "task_id": task.id,
+                "session_id": session_id,
+            }
+            if session_id and self.chat_session_manager:
+                await self.chat_session_manager.add_message(session_id, chat_msg)
+            else:
+                self.ws_manager.chat_messages.append(chat_msg)
+            await self.ws_manager.broadcast("chat_message", chat_msg)
+            return
+
+        # Route results back to originating channel
+        if task.origin_channel and task.status in (TaskStatus.REVIEW, TaskStatus.DONE):
+            content = f"Task **{task.title}** completed.\n\n"
+            if task.result:
+                # Truncate long results for chat
+                result_preview = task.result[:1500]
+                if len(task.result) > 1500:
+                    result_preview += "\n... (truncated — see dashboard for full output)"
+                content += result_preview
+
+            outbound = OutboundMessage(
+                channel_type=task.origin_channel,
+                channel_id=task.origin_channel_id,
+                content=content,
+                metadata=task.origin_metadata,
+            )
+            await self.channel_manager.send(outbound)
+
+        elif task.origin_channel and task.status == TaskStatus.FAILED:
+            outbound = OutboundMessage(
+                channel_type=task.origin_channel,
+                channel_id=task.origin_channel_id,
+                content=f"Task **{task.title}** failed: {task.error}",
+                metadata=task.origin_metadata,
+            )
+            await self.channel_manager.send(outbound)
+
     async def emit(self, event_type: str, data: dict):
         """Push events from agents to the dashboard via WebSocket."""
         await self.ws_manager.broadcast(event_type, data)
