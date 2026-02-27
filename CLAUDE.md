@@ -424,6 +424,7 @@ class TestWorkspaceSandbox:
 | 52 | Catalog | `or-free-devstral` free period ended (404 "free Devstral 2 period has ended") | Replaced with `or-free-qwen-coder` (Qwen3 Coder 480B) in all FREE_ROUTING critic slots |
 | 53 | Retry | OpenRouter 402 "API key USD spend limit exceeded" from Venice backend not caught — fell through to generic retry | Added `_is_payment_error()` detecting 402/spend-limit; skips retries + adds to `_failed_models` like 429 |
 | 54 | Registry | Dead `or-free-devstral` still in MODELS dict — appeared in fallback list via `free_models()` even after removal from FREE_ROUTING | Removed from MODELS; removing from FREE_ROUTING alone is not enough — `_get_fallback_models` iterates all free models |
+| 55 | Security | OWASP/secrets scanner flags test files, security tools, and dashboard frontend as false positive vulnerabilities (177 CRITICAL) | Added `_SCAN_EXCLUDE_DIRS`, `_SCAN_EXCLUDE_FILES`, `_OWASP_EXCLUDE_DIRS` to `security_analyzer.py`; removed duplicate innerHTML regex; fixed overly-broad f-string SQL regex matching "deleted"/"updated" |
 
 ---
 
