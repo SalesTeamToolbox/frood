@@ -2957,15 +2957,46 @@ function renderSettingsPanel() {
   const panels = {
     providers: () => `
       <h3>LLM Providers</h3>
-      <p class="section-desc">API keys for language model providers. Agent42 uses free models by default (via OpenRouter) and falls back to premium providers when configured.</p>
-      ${settingSecret("OPENROUTER_API_KEY", "OpenRouter API Key", "Primary provider. Free models available without a key. Get one at openrouter.ai/keys.", true)}
-      ${settingSecret("OPENAI_API_KEY", "OpenAI API Key", "Required for DALL-E image generation and GPT models. Get one at platform.openai.com.")}
-      ${settingSecret("ANTHROPIC_API_KEY", "Anthropic API Key", "For Claude models. Get one at console.anthropic.com.")}
-      ${settingSecret("DEEPSEEK_API_KEY", "DeepSeek API Key", "For DeepSeek Coder models. Get one at platform.deepseek.com.")}
-      ${settingSecret("GEMINI_API_KEY", "Gemini API Key", "For Google Gemini models. Get one at aistudio.google.com.")}
+      <p class="section-desc">Configure API keys for language model providers. Agent42 intelligently routes tasks to the best available model based on your configured keys.</p>
+
+      <div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">
+        <h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">How Model Routing Works</h4>
+        <div class="help" style="line-height:1.7">
+          Agent42 selects models using a <strong>5-layer priority chain</strong>:<br>
+          <strong>1. Admin Override</strong> &mdash; Set <code>AGENT42_CODING_MODEL</code>, <code>AGENT42_CODING_CRITIC</code>, etc. in Orchestrator tab to force a specific model for any task type (e.g., <code>claude-opus-4-6</code> for final code review).<br>
+          <strong>2. Dynamic Routing</strong> &mdash; Agent42 tracks task outcomes and automatically promotes models that perform well.<br>
+          <strong>3. Trial Injection</strong> &mdash; A small % of tasks test unproven models to discover better options.<br>
+          <strong>4. Policy Routing</strong> &mdash; In <em>balanced</em> or <em>performance</em> mode, complex tasks upgrade to paid models when OpenRouter credits are available.<br>
+          <strong>5. Free Defaults</strong> &mdash; <strong>Gemini Flash</strong> (primary) + <strong>OpenRouter free models</strong> (critic/fallback).
+        </div>
+      </div>
+
+      <div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">
+        <h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">Fallback Chain</h4>
+        <div class="help" style="line-height:1.7">
+          When a model fails (rate-limited, unavailable, auth error), Agent42 automatically tries the next available provider:<br>
+          <strong>Gemini Flash</strong> (free tier: 1,500 req/day, 1M context) &rarr;
+          <strong>OpenRouter free models</strong> (diverse but rate-limited) &rarr;
+          <strong>OpenAI / Anthropic / DeepSeek</strong> (if keys configured).<br>
+          Rate-limited models (429) are skipped instantly &mdash; no wasted retries. Auth errors (401) skip the entire provider.
+        </div>
+      </div>
+
+      <h4 style="margin:0 0 0.75rem;font-size:0.95rem">Primary Providers</h4>
+      ${settingSecret("GEMINI_API_KEY", "Gemini API Key (Recommended)", "Default primary model. Generous free tier: 1,500 requests/day for Flash, 1M token context. Get one at aistudio.google.com.", true)}
+      ${settingSecret("OPENROUTER_API_KEY", "OpenRouter API Key", "200+ models via one key. Free models used as critic/fallback. Paid models activated when credits are available. Get one at openrouter.ai/keys.", true)}
+
+      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Premium Providers (Optional)</h4>
+      <div class="help" style="margin-bottom:0.75rem">Set these to enable premium models for admin overrides (e.g., <code>AGENT42_CODING_MODEL=claude-opus-4-6</code>).</div>
+      ${settingSecret("ANTHROPIC_API_KEY", "Anthropic API Key", "For Claude Opus/Sonnet models. Get one at console.anthropic.com.")}
+      ${settingSecret("OPENAI_API_KEY", "OpenAI API Key", "For GPT-4o, o1, and DALL-E image generation. Get one at platform.openai.com.")}
+      ${settingSecret("DEEPSEEK_API_KEY", "DeepSeek API Key", "For DeepSeek Coder/R1 models. Get one at platform.deepseek.com.")}
+
+      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Media & Search</h4>
       ${settingSecret("REPLICATE_API_TOKEN", "Replicate API Token", "For FLUX image generation and CogVideoX video. Get one at replicate.com.")}
       ${settingSecret("LUMA_API_KEY", "Luma AI API Key", "For Luma Ray2 premium video generation.")}
       ${settingSecret("BRAVE_API_KEY", "Brave Search API Key", "For web search tool. Get one at brave.com/search/api.")}
+
       <div class="form-group" style="margin-top:1.5rem">
         <button class="btn btn-primary" id="save-keys-btn" onclick="saveApiKeys()" ${Object.keys(state.keyEdits).length === 0 || state.keySaving ? "disabled" : ""}>
           ${state.keySaving ? "Saving..." : "Save API Keys"}
@@ -2985,6 +3016,10 @@ function renderSettingsPanel() {
             <strong>Policy:</strong> ${esc(state.orStatus.policy)} &mdash;
             <strong>Paid models registered:</strong> ${state.orStatus.paid_models_registered}
             &mdash; <a href="#" onclick="loadOrStatus().then(()=>renderSettingsPanel());return false">Refresh</a>
+          </div>
+          <div class="help" style="margin-top:0.25rem">
+            When policy is <em>balanced</em>, complex tasks (coding, debugging, app creation) auto-upgrade to paid models when credits are available.
+            Set policy to <em>free_only</em> in Orchestrator tab to disable paid upgrades, or <em>performance</em> to always prefer the best model.
           </div>
         </div>
       ` : `<div class="help">${state.orStatusLoading ? "Loading..." : "Status not available. Configure an OpenRouter API key first."}</div>`}

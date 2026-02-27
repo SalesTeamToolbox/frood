@@ -1,4 +1,4 @@
-"""Tests for agents/model_catalog.py — OpenRouter catalog sync."""
+"""Tests for agents/model_catalog.py — OpenRouter catalog sync and health checks."""
 
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -459,3 +459,221 @@ class TestSpendingTrackerPricing:
         tracker.record_usage("key", 1000, 500)
         expected = (1000 * 5.0 + 500 * 15.0) / 1_000_000
         assert tracker.daily_spend_usd == pytest.approx(expected, abs=0.0001)
+
+
+class TestHealthCheck:
+    """Tests for model health check functionality."""
+
+    def test_needs_health_check_when_empty(self, tmp_path):
+        """Should need health check when no checks have been done."""
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+        assert catalog.needs_health_check() is True
+
+    def test_needs_health_check_after_interval(self, tmp_path):
+        """Should need health check after the interval expires."""
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+        catalog._health_status = {"some-model": {"status": "ok"}}
+        catalog._last_health_check = time.time() - (7 * 3600)  # 7 hours ago
+        assert catalog.needs_health_check() is True
+
+    def test_no_health_check_within_interval(self, tmp_path):
+        """Should NOT need health check within the interval."""
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+        catalog._health_status = {"some-model": {"status": "ok"}}
+        catalog._last_health_check = time.time() - (1 * 3600)  # 1 hour ago
+        assert catalog.needs_health_check() is False
+
+    def test_is_model_healthy_unchecked(self, tmp_path):
+        """Unchecked models are assumed healthy (optimistic default)."""
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+        assert catalog.is_model_healthy("never-checked-model") is True
+
+    def test_is_model_healthy_ok(self, tmp_path):
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+        catalog._health_status = {
+            "good-model": {"status": ModelCatalog.STATUS_OK, "latency_ms": 500}
+        }
+        assert catalog.is_model_healthy("good-model") is True
+
+    def test_is_model_healthy_rate_limited(self, tmp_path):
+        """Rate-limited models are still considered healthy (they exist, just throttled)."""
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+        catalog._health_status = {
+            "throttled-model": {"status": ModelCatalog.STATUS_RATE_LIMITED}
+        }
+        assert catalog.is_model_healthy("throttled-model") is True
+
+    def test_is_model_unhealthy_unavailable(self, tmp_path):
+        """404/unavailable models are unhealthy."""
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+        catalog._health_status = {
+            "dead-model": {"status": ModelCatalog.STATUS_UNAVAILABLE}
+        }
+        assert catalog.is_model_healthy("dead-model") is False
+
+    def test_is_model_unhealthy_auth_error(self, tmp_path):
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+        catalog._health_status = {
+            "auth-model": {"status": ModelCatalog.STATUS_AUTH_ERROR}
+        }
+        assert catalog.is_model_healthy("auth-model") is False
+
+    def test_unhealthy_model_keys(self, tmp_path):
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+        catalog._health_status = {
+            "ok-model": {"status": ModelCatalog.STATUS_OK},
+            "dead-model": {"status": ModelCatalog.STATUS_UNAVAILABLE},
+            "rate-model": {"status": ModelCatalog.STATUS_RATE_LIMITED},
+            "err-model": {"status": ModelCatalog.STATUS_ERROR},
+        }
+        unhealthy = catalog.unhealthy_model_keys()
+        assert "dead-model" in unhealthy
+        assert "err-model" in unhealthy
+        assert "ok-model" not in unhealthy
+        assert "rate-model" not in unhealthy
+
+    def test_health_summary(self, tmp_path):
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+        catalog._last_health_check = time.time()
+        catalog._health_status = {
+            "m1": {"status": "ok"},
+            "m2": {"status": "ok"},
+            "m3": {"status": "unavailable", "error": "404"},
+        }
+        summary = catalog.get_health_summary()
+        assert summary["total_checked"] == 3
+        assert summary["by_status"]["ok"] == 2
+        assert summary["by_status"]["unavailable"] == 1
+        assert len(summary["unhealthy_models"]) == 1
+        assert summary["unhealthy_models"][0]["key"] == "m3"
+
+    def test_health_cache_roundtrip(self, tmp_path):
+        """Health status should persist and load from disk."""
+        catalog1 = ModelCatalog(cache_path=tmp_path / "catalog.json")
+        catalog1._health_status = {
+            "model-a": {"status": "ok", "latency_ms": 200, "error": "", "last_checked": 1000.0},
+            "model-b": {"status": "unavailable", "latency_ms": 50, "error": "404", "last_checked": 1000.0},
+        }
+        catalog1._last_health_check = 1000.0
+        catalog1._save_health_cache()
+
+        catalog2 = ModelCatalog(cache_path=tmp_path / "catalog.json")
+        assert len(catalog2._health_status) == 2
+        assert catalog2._health_status["model-a"]["status"] == "ok"
+        assert catalog2._health_status["model-b"]["status"] == "unavailable"
+        assert catalog2._last_health_check == 1000.0
+
+    @pytest.mark.asyncio
+    async def test_ping_single_model_ok(self, tmp_path):
+        """Successful ping returns STATUS_OK."""
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = '{"choices": [{"message": {"content": ""}}]}'
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_resp
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agents.model_catalog.httpx.AsyncClient", return_value=mock_client):
+            result = await catalog._ping_single_model(
+                "test/model:free", "https://api.example.com/v1", "sk-test"
+            )
+
+        assert result["status"] == ModelCatalog.STATUS_OK
+        assert result["latency_ms"] >= 0
+
+    @pytest.mark.asyncio
+    async def test_ping_single_model_404(self, tmp_path):
+        """404 response returns STATUS_UNAVAILABLE."""
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+        mock_resp.text = "No endpoints found"
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_resp
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agents.model_catalog.httpx.AsyncClient", return_value=mock_client):
+            result = await catalog._ping_single_model(
+                "test/missing:free", "https://api.example.com/v1", "sk-test"
+            )
+
+        assert result["status"] == ModelCatalog.STATUS_UNAVAILABLE
+
+    @pytest.mark.asyncio
+    async def test_ping_single_model_429(self, tmp_path):
+        """429 response returns STATUS_RATE_LIMITED."""
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 429
+        mock_resp.text = "Rate limit exceeded"
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_resp
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agents.model_catalog.httpx.AsyncClient", return_value=mock_client):
+            result = await catalog._ping_single_model(
+                "test/throttled:free", "https://api.example.com/v1", "sk-test"
+            )
+
+        assert result["status"] == ModelCatalog.STATUS_RATE_LIMITED
+
+    @pytest.mark.asyncio
+    async def test_ping_single_model_timeout(self, tmp_path):
+        """Timeout returns STATUS_TIMEOUT."""
+        import httpx as _httpx
+
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = _httpx.TimeoutException("Request timed out")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agents.model_catalog.httpx.AsyncClient", return_value=mock_client):
+            result = await catalog._ping_single_model(
+                "test/slow:free", "https://api.example.com/v1", "sk-test"
+            )
+
+        assert result["status"] == ModelCatalog.STATUS_TIMEOUT
+
+    @pytest.mark.asyncio
+    async def test_health_check_no_keys(self, tmp_path):
+        """Health check with no API keys configured does nothing."""
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+        with patch.dict("os.environ", {}, clear=True):
+            result = await catalog.health_check(api_key="")
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_health_check_pings_or_models(self, tmp_path):
+        """Health check pings registered free OR models."""
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = "{}"
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_resp
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("agents.model_catalog.httpx.AsyncClient", return_value=mock_client), \
+             patch.dict("os.environ", {"OPENROUTER_API_KEY": "sk-test-key"}):
+            result = await catalog.health_check(api_key="sk-test-key")
+
+        # Should have checked at least some OR free models
+        assert len(result) > 0
+        # All mocked as 200, so all should be OK
+        for status in result.values():
+            assert status["status"] == ModelCatalog.STATUS_OK

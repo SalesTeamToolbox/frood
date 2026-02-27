@@ -232,38 +232,32 @@ class IterationEngine:
             or ("forbidden" in msg and "403" in msg)
         )
 
-    def _get_fallback_models(self, exclude: set[str]) -> list[str]:
-        """Return an ordered list of fallback models from the live registry.
+    def _is_rate_limited(self, error: Exception) -> bool:
+        """Return True for 429 rate-limit errors.
 
-        Tries OpenRouter free models first, then configured native provider
-        models (Gemini, OpenAI, Anthropic, DeepSeek) as cross-provider
-        failover when the primary provider's key is invalid or unavailable.
-
-        Native providers are always included in the returned list regardless of
-        how many OpenRouter free models exist — the dynamic OR list is capped at
-        8 so that native providers are never pushed beyond the limit.
+        OpenRouter free models have strict per-model RPM limits (e.g. 8 RPM).
+        Retrying the *same* model wastes time — the caller should switch to
+        a fallback model immediately.
         """
-        static = [
-            "or-free-llama-70b",
-            "or-free-deepseek-chat",
-            "or-free-gemma-27b",
-            "or-free-mistral-small",
-            "or-free-gemini-flash",
-        ]
-        openrouter_candidates: list[str] = []
-        try:
-            all_free = self.router.free_models()
-            keys = [m["key"] for m in all_free if isinstance(m, dict) and m.get("key")]
-            openrouter_candidates = [k for k in keys if k not in exclude]
-        except Exception:
-            pass
+        msg = str(error).lower()
+        return "429" in msg or "rate limit" in msg or "rate_limit" in msg
 
-        if not openrouter_candidates:
-            openrouter_candidates = [m for m in static if m not in exclude]
+    def _get_fallback_models(self, exclude: set[str]) -> list[str]:
+        """Return an ordered list of fallback models for cross-provider failover.
 
-        # Collect configured native provider models as cross-provider fallbacks.
-        # These kick in when the entire primary provider (e.g. OpenRouter) is
-        # down or has an invalid key — they use independent API keys.
+        Priority order:
+        1. Configured native providers (Gemini first — generous free tier)
+        2. OpenRouter free models (diverse but rate-limited)
+
+        Native providers are listed first because they use independent API keys
+        and typically have higher rate limits than OpenRouter's free tier.
+
+        Models marked unhealthy by the health check system are skipped.
+        """
+        # Get unhealthy models from catalog health checks (if available)
+        unhealthy = self._get_unhealthy_models()
+
+        # Native providers — tried first (independent keys, better rate limits)
         native_fallbacks: list[tuple[ProviderType, str]] = [
             (ProviderType.GEMINI, "gemini-2-flash"),
             (ProviderType.OPENAI, "gpt-4o-mini"),
@@ -272,16 +266,42 @@ class IterationEngine:
         ]
         native_candidates: list[str] = []
         for provider_type, model_key in native_fallbacks:
-            if model_key in exclude or model_key in openrouter_candidates:
+            if model_key in exclude or model_key in unhealthy:
                 continue
             spec = PROVIDERS.get(provider_type)
             if spec and os.getenv(spec.api_key_env):
                 native_candidates.append(model_key)
 
-        # Cap OpenRouter candidates at 8 so native providers are always reachable.
-        # Previously, the dynamic OR list had 12+ entries and the [:8] cap silently
-        # excluded Gemini/OpenAI/etc., making them unreachable when OR auth fails.
-        return openrouter_candidates[:8] + native_candidates
+        # OpenRouter free models — tried second
+        static = [
+            "or-free-auto",
+            "or-free-llama-70b",
+            "or-free-gemma-27b",
+            "or-free-mistral-small",
+            "or-free-gemini-flash",
+        ]
+        openrouter_candidates: list[str] = []
+        try:
+            all_free = self.router.free_models()
+            keys = [m["key"] for m in all_free if isinstance(m, dict) and m.get("key")]
+            openrouter_candidates = [k for k in keys if k not in exclude and k not in unhealthy]
+        except Exception:
+            pass
+
+        if not openrouter_candidates:
+            openrouter_candidates = [m for m in static if m not in exclude and m not in unhealthy]
+
+        return native_candidates + openrouter_candidates[:8]
+
+    def _get_unhealthy_models(self) -> set[str]:
+        """Get the set of unhealthy model keys from the catalog health check."""
+        try:
+            catalog = getattr(self.router, "_catalog", None)
+            if catalog:
+                return catalog.unhealthy_model_keys()
+        except Exception:
+            pass
+        return set()
 
     async def _complete_with_retry(
         self,
@@ -291,11 +311,10 @@ class IterationEngine:
     ) -> str:
         """Call router.complete with exponential backoff retry and dynamic model fallback.
 
-        404 / endpoint-not-found and 401 / auth errors skip retries immediately
-        and go straight to the fallback chain, since retrying these wastes quota.
-        The fallback chain includes OpenRouter free models first, then any
-        configured native provider models (Gemini, OpenAI, etc.) for
-        cross-provider failover when the primary provider key is invalid.
+        Errors that skip retries immediately (go straight to fallback):
+        - 404 / endpoint-not-found — model doesn't exist
+        - 401 / auth errors — key is wrong (retrying wastes quota)
+        - 429 / rate-limited — model at RPM cap (retrying the *same* model wastes time)
         """
         last_error = None
         for attempt in range(retries):
@@ -315,6 +334,11 @@ class IterationEngine:
                     break
                 if self._is_auth_error(e):
                     logger.warning(f"Auth error for {model} (401), skipping retries: {e}")
+                    break
+                if self._is_rate_limited(e):
+                    logger.warning(
+                        f"Model {model} rate-limited (429), switching to fallback: {e}"
+                    )
                     break
                 wait = 2**attempt  # 1s, 2s, 4s
                 logger.warning(
@@ -364,12 +388,10 @@ class IterationEngine:
     ):
         """Call router.complete_with_tools with retry logic and dynamic fallback.
 
-        On 404 or 401 errors, skips retries immediately. On full failure,
-        degrades to text-only mode using the first available fallback model,
-        including configured native providers for cross-provider failover.
-        When the primary model fails with a 401 auth error, OpenRouter fallbacks
-        are skipped (the invalid key is provider-wide) and native providers
-        (Gemini, OpenAI, etc.) are tried directly.
+        Skips retries immediately for 404, 401, and 429 errors.
+        On full failure, degrades to text-only mode using the first available
+        fallback model. When auth fails, OpenRouter fallbacks are skipped
+        (invalid key is provider-wide) and native providers are tried directly.
         """
         last_error = None
         for attempt in range(retries):
@@ -385,6 +407,11 @@ class IterationEngine:
                 if self._is_auth_error(e):
                     logger.warning(
                         f"Auth error for tool model {model} (401), skipping retries: {e}"
+                    )
+                    break
+                if self._is_rate_limited(e):
+                    logger.warning(
+                        f"Tool model {model} rate-limited (429), switching to fallback: {e}"
                     )
                     break
                 wait = 2**attempt

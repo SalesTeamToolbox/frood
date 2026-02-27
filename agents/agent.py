@@ -453,11 +453,15 @@ class Agent:
 
         # Include memory context (Phase 6) — semantic when available
         if self.memory_store:
-            if self.memory_store.semantic_available:
-                memory_context = await self.memory_store.build_context_semantic(
-                    query=task.description,
-                )
-            else:
+            try:
+                if self.memory_store.semantic_available:
+                    memory_context = await self.memory_store.build_context_semantic(
+                        query=task.description,
+                    )
+                else:
+                    memory_context = self.memory_store.build_context()
+            except Exception as e:
+                logger.warning("Memory context failed, using basic fallback: %s", e)
                 memory_context = self.memory_store.build_context()
             if memory_context.strip():
                 parts.append(f"\n{memory_context}")

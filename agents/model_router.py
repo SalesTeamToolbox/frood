@@ -1,16 +1,16 @@
 """
 Model router — maps task types to the best model for the job.
 
-Free-first strategy: uses OpenRouter free models for bulk agent work.
-Premium models only used when admin explicitly configures them for
-specific task types or for final reviews.
+Free-first strategy: uses Gemini free tier as the base LLM (generous
+free quota), with OpenRouter free models as secondary and paid models
+as optional upgrades when the admin configures them.
 
 Routing priority:
   1. Admin override (TASK_TYPE_MODEL env var) — always wins
   2. Dynamic routing (from outcome tracking + research) — data-driven
   3. Trial model injection (small % of tasks) — evaluates new models
-  4. Policy routing (balanced/performance) — upgrades when credits available
-  5. OpenRouter free models (hardcoded defaults) — fallback
+  4. Policy routing (balanced/performance) — upgrades when OR credits available
+  5. Hardcoded defaults: Gemini free → OR free models (fallback)
 """
 
 import json
@@ -25,83 +25,85 @@ logger = logging.getLogger("agent42.router")
 
 
 # -- Default routing: free models for everything ------------------------------
-# These are the defaults when no admin override is set.
-# OpenRouter free models are preferred as they need only one API key.
+# Uses Gemini free tier as the base (generous free quota: 1500 RPD for Flash,
+# 50 RPD for Pro). OpenRouter free models serve as critic / secondary to
+# distribute load across providers. The get_routing() validation automatically
+# falls back to OR free models if GEMINI_API_KEY is not set.
 
 FREE_ROUTING: dict[TaskType, dict] = {
     TaskType.CODING: {
-        "primary": "or-free-qwen-coder",  # Qwen3 Coder 480B — strongest free coder
-        "critic": "or-free-deepseek-r1",  # DeepSeek R1 0528 — best free reasoner
+        "primary": "gemini-2-flash",  # Gemini Flash — fast, 1M context, generous free tier
+        "critic": "or-free-devstral",  # Devstral 123B — code-aware second opinion
         "max_iterations": 8,
     },
     TaskType.DEBUGGING: {
-        "primary": "or-free-deepseek-r1",  # DeepSeek R1 — reasoning for root cause
-        "critic": "or-free-devstral",  # Devstral 123B — multi-file awareness
+        "primary": "gemini-2-flash",  # Gemini Flash — fast reasoning + 1M context for large codebases
+        "critic": "or-free-devstral",  # Devstral — multi-file awareness
         "max_iterations": 10,
     },
     TaskType.RESEARCH: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — reliable general-purpose
-        "critic": "or-free-deepseek-chat",  # DeepSeek Chat for second opinion
+        "primary": "gemini-2-flash",  # Gemini Flash — strong general-purpose
+        "critic": "or-free-llama-70b",  # Llama 3.3 70B — second opinion
         "max_iterations": 5,
     },
     TaskType.REFACTORING: {
-        "primary": "or-free-qwen-coder",  # Qwen3 Coder — best for code changes
+        "primary": "gemini-2-flash",  # Gemini Flash — code-capable + 1M context
         "critic": "or-free-devstral",  # Devstral — multi-file project awareness
         "max_iterations": 8,
     },
     TaskType.DOCUMENTATION: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — reliable general-purpose writing
+        "primary": "gemini-2-flash",  # Gemini Flash — reliable general-purpose writing
         "critic": "or-free-gemma-27b",  # Gemma 27B — fast verification
         "max_iterations": 4,
     },
     TaskType.MARKETING: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — creative + general
-        "critic": "or-free-deepseek-chat",  # DeepSeek Chat v3.1
+        "primary": "gemini-2-flash",  # Gemini Flash — creative + general
+        "critic": "or-free-llama-70b",  # Llama 3.3 70B — second opinion
         "max_iterations": 6,
     },
     TaskType.EMAIL: {
-        "primary": "or-free-mistral-small",  # Mistral Small 3.1 — fast + precise
+        "primary": "gemini-2-flash",  # Gemini Flash — fast + precise
         "critic": None,
         "max_iterations": 3,
     },
     TaskType.DESIGN: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — strong visual/creative reasoning
-        "critic": "or-free-deepseek-chat",
+        "primary": "gemini-2-flash",  # Gemini Flash — visual/creative reasoning
+        "critic": "or-free-llama-70b",
         "max_iterations": 5,
     },
     TaskType.CONTENT: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — reliable general-purpose writing
+        "primary": "gemini-2-flash",  # Gemini Flash — reliable writing
         "critic": "or-free-gemma-27b",  # Fast editorial check
         "max_iterations": 6,
     },
     TaskType.STRATEGY: {
-        "primary": "or-free-deepseek-r1",  # Deep reasoning for strategy
-        "critic": "or-free-deepseek-chat",  # Alternative perspective on strategy
+        "primary": "gemini-2-flash",  # Gemini Flash — strong reasoning
+        "critic": "or-free-llama-70b",  # Alternative perspective on strategy
         "max_iterations": 5,
     },
     TaskType.DATA_ANALYSIS: {
-        "primary": "or-free-qwen-coder",  # Good with data/code/tables
-        "critic": "or-free-deepseek-chat",
+        "primary": "gemini-2-flash",  # Gemini Flash — good with data/code/tables
+        "critic": "or-free-qwen-coder",  # Qwen Coder — data-aware reviewer
         "max_iterations": 6,
     },
     TaskType.PROJECT_MANAGEMENT: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — reliable general-purpose
+        "primary": "gemini-2-flash",  # Gemini Flash — reliable general-purpose
         "critic": "or-free-gemma-27b",
         "max_iterations": 4,
     },
     TaskType.APP_CREATE: {
-        "primary": "or-free-qwen-coder",  # Qwen3 Coder — best for full-stack app generation
-        "critic": "or-free-deepseek-r1",  # DeepSeek R1 — thorough code review
+        "primary": "gemini-2-flash",  # Gemini Flash — fast code generation + 1M context
+        "critic": "or-free-devstral",  # Devstral — thorough code review
         "max_iterations": 12,  # Apps need more iterations to build fully
     },
     TaskType.APP_UPDATE: {
-        "primary": "or-free-qwen-coder",
+        "primary": "gemini-2-flash",  # Gemini Flash — 1M context for existing codebases
         "critic": "or-free-devstral",  # Devstral — multi-file awareness for updates
         "max_iterations": 8,
     },
     TaskType.PROJECT_SETUP: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — conversational + structured output
-        "critic": "or-free-deepseek-chat",  # Second opinion on spec completeness
+        "primary": "gemini-2-flash",  # Gemini Flash — conversational + structured output
+        "critic": "or-free-llama-70b",  # Second opinion on spec completeness
         "max_iterations": 3,  # Low — mostly conversation, not iteration-heavy
     },
 }
@@ -208,12 +210,24 @@ class ModelRouter:
             if free_large:
                 routing["primary"] = free_large[0]["key"]
 
-        # For known registry models (not admin overrides), verify the provider API key is set.
+        # For known registry models (not admin overrides), verify the provider API key is set
+        # and the model is healthy (not recently marked as 404/unavailable by health check).
         # Use os.getenv() — not getattr(settings, ...) — so admin-configured keys are visible.
         # settings is a frozen dataclass set at import time, before KeyStore.inject_into_environ().
         # Unknown models (dynamic/catalog, not in MODELS dict) pass through without validation.
         primary_model = routing.get("primary")
         if primary_model and not is_admin_override:
+            # Health check gate: if the catalog knows this model is down, swap proactively
+            if self._catalog and not self._catalog.is_model_healthy(primary_model):
+                logger.warning(
+                    "Model %s is unhealthy (health check), finding healthy alternative",
+                    primary_model,
+                )
+                replacement = self._find_healthy_free_model(exclude={primary_model})
+                if replacement:
+                    routing["primary"] = replacement
+                    primary_model = replacement
+
             try:
                 spec = self.registry.get_model(primary_model)
                 # Model is known — check that its provider API key is actually set
@@ -233,20 +247,10 @@ class ModelRouter:
                         f"Model {primary_model} is not available: {e}. "
                         "Attempting to find a fallback free model."
                     )
-                    # Try to find any free model that is available
-                    for model in self.registry.free_models():
-                        try:
-                            spec = self.registry.get_model(model["key"])
-                            provider_spec = PROVIDERS.get(spec.provider)
-                            api_key = (
-                                os.getenv(provider_spec.api_key_env, "") if provider_spec else ""
-                            )
-                            if api_key:
-                                routing["primary"] = model["key"]
-                                logger.info(f"Fell back to free model {model['key']}")
-                                break
-                        except ValueError:
-                            continue
+                    replacement = self._find_healthy_free_model(exclude={primary_model})
+                    if replacement:
+                        routing["primary"] = replacement
+                        logger.info(f"Fell back to free model {replacement}")
                     else:
                         # No free model with API key found — use task-type default as last resort
                         fallback = FREE_ROUTING.get(task_type)
@@ -259,6 +263,26 @@ class ModelRouter:
                         )
 
         return routing
+
+    def _find_healthy_free_model(self, exclude: set[str] | None = None) -> str | None:
+        """Find a free model that is both API-key-configured and health-check-healthy."""
+        exclude = exclude or set()
+        for model in self.registry.free_models():
+            key = model["key"]
+            if key in exclude:
+                continue
+            # Check health if catalog is available
+            if self._catalog and not self._catalog.is_model_healthy(key):
+                continue
+            try:
+                spec = self.registry.get_model(key)
+                provider_spec = PROVIDERS.get(spec.provider)
+                api_key = os.getenv(provider_spec.api_key_env, "") if provider_spec else ""
+                if api_key:
+                    return key
+            except ValueError:
+                continue
+        return None
 
     def _check_policy_routing(self, task_type: TaskType) -> dict | None:
         """Apply policy-based routing when OR credits are available.

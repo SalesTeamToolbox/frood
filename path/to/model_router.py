@@ -1,15 +1,16 @@
 """
 Model router — maps task types to the best model for the job.
 
-Free-first strategy: uses OpenRouter free models for bulk agent work.
-Premium models only used when admin explicitly configures them for
-specific task types or for final reviews.
+Free-first strategy: uses Gemini free tier as the base LLM (generous
+free quota), with OpenRouter free models as secondary and paid models
+as optional upgrades when the admin configures them.
 
 Routing priority:
   1. Admin override (TASK_TYPE_MODEL env var) — always wins
   2. Dynamic routing (from outcome tracking + research) — data-driven
   3. Trial model injection (small % of tasks) — evaluates new models
-  4. OpenRouter free models (hardcoded defaults) — fallback
+  4. Policy routing (balanced/performance) — upgrades when OR credits available
+  5. Hardcoded defaults: Gemini free → OR free models (fallback)
 """
 
 import logging
@@ -23,84 +24,86 @@ logger = logging.getLogger("agent42.router")
 
 
 # -- Default routing: free models for everything ------------------------------
-# These are the defaults when no admin override is set.
-# OpenRouter free models are preferred as they need only one API key.
+# Uses Gemini free tier as the base (generous free quota: 1500 RPD for Flash,
+# 50 RPD for Pro). OpenRouter free models serve as critic / secondary to
+# distribute load across providers. The get_routing() validation automatically
+# falls back to OR free models if GEMINI_API_KEY is not set.
 
 FREE_ROUTING: dict[TaskType, dict] = {
     TaskType.CODING: {
-        "primary": "or-free-qwen-coder",  # Qwen3 Coder 480B — strongest free coder
-        "critic": "or-free-deepseek-r1",  # DeepSeek R1 0528 — best free reasoner
+        "primary": "gemini-2-flash",
+        "critic": "or-free-devstral",
         "max_iterations": 8,
     },
     TaskType.DEBUGGING: {
-        "primary": "or-free-deepseek-r1",  # DeepSeek R1 — reasoning for root cause
-        "critic": "or-free-devstral",  # Devstral 123B — multi-file awareness
+        "primary": "gemini-2-flash",
+        "critic": "or-free-devstral",
         "max_iterations": 10,
     },
     TaskType.RESEARCH: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — reliable general-purpose
-        "critic": "or-free-deepseek-chat",  # DeepSeek Chat for second opinion
+        "primary": "gemini-2-flash",
+        "critic": "or-free-llama-70b",
         "max_iterations": 5,
     },
     TaskType.REFACTORING: {
-        "primary": "or-free-qwen-coder",  # Qwen3 Coder — best for code changes
-        "critic": "or-free-devstral",  # Devstral — multi-file project awareness
+        "primary": "gemini-2-flash",
+        "critic": "or-free-devstral",
         "max_iterations": 8,
     },
     TaskType.DOCUMENTATION: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — reliable general-purpose writing
-        "critic": "or-free-gemma-27b",  # Gemma 27B — fast verification
+        "primary": "gemini-2-flash",
+        "critic": "or-free-gemma-27b",
         "max_iterations": 4,
     },
     TaskType.MARKETING: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — creative + general
-        "critic": "or-free-deepseek-chat",  # DeepSeek Chat v3.1
+        "primary": "gemini-2-flash",
+        "critic": "or-free-llama-70b",
         "max_iterations": 6,
     },
     TaskType.EMAIL: {
-        "primary": "or-free-mistral-small",  # Mistral Small 3.1 — fast + precise
+        "primary": "gemini-2-flash",
         "critic": None,
         "max_iterations": 3,
     },
     TaskType.DESIGN: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — strong visual/creative reasoning
-        "critic": "or-free-deepseek-chat",
+        "primary": "gemini-2-flash",
+        "critic": "or-free-llama-70b",
         "max_iterations": 5,
     },
     TaskType.CONTENT: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — reliable general-purpose writing
-        "critic": "or-free-gemma-27b",  # Fast editorial check
+        "primary": "gemini-2-flash",
+        "critic": "or-free-gemma-27b",
         "max_iterations": 6,
     },
     TaskType.STRATEGY: {
-        "primary": "or-free-deepseek-r1",  # Deep reasoning for strategy
-        "critic": "or-free-deepseek-chat",  # Alternative perspective on strategy
+        "primary": "gemini-2-flash",
+        "critic": "or-free-llama-70b",
         "max_iterations": 5,
     },
     TaskType.DATA_ANALYSIS: {
-        "primary": "or-free-qwen-coder",  # Good with data/code/tables
-        "critic": "or-free-deepseek-chat",
+        "primary": "gemini-2-flash",
+        "critic": "or-free-qwen-coder",
         "max_iterations": 6,
     },
     TaskType.PROJECT_MANAGEMENT: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — reliable general-purpose
+        "primary": "gemini-2-flash",
         "critic": "or-free-gemma-27b",
         "max_iterations": 4,
     },
     TaskType.APP_CREATE: {
-        "primary": "or-free-qwen-coder",  # Qwen3 Coder — best for full-stack app generation
-        "critic": "or-free-deepseek-r1",  # DeepSeek R1 — thorough code review
-        "max_iterations": 12,  # Apps need more iterations to build fully
+        "primary": "gemini-2-flash",
+        "critic": "or-free-devstral",
+        "max_iterations": 12,
     },
     TaskType.APP_UPDATE: {
-        "primary": "or-free-qwen-coder",
-        "critic": "or-free-devstral",  # Devstral — multi-file awareness for updates
+        "primary": "gemini-2-flash",
+        "critic": "or-free-devstral",
         "max_iterations": 8,
     },
     TaskType.PROJECT_SETUP: {
-        "primary": "or-free-llama-70b",  # Llama 3.3 70B — conversational + structured output
-        "critic": "or-free-deepseek-chat",  # Second opinion on spec completeness
-        "max_iterations": 3,  # Low — mostly conversation, not iteration-heavy
+        "primary": "gemini-2-flash",
+        "critic": "or-free-llama-70b",
+        "max_iterations": 3,
     },
 }
 
