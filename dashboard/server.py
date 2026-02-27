@@ -1409,6 +1409,7 @@ def create_app(
             github_repo_name: str = ""
             github_clone_url: str = ""
             github_private: bool = True
+            repo_id: str = ""  # Use an already-connected repo from Settings
 
         @app.get("/api/chat/sessions")
         async def list_chat_sessions(
@@ -1628,12 +1629,28 @@ def create_app(
                 updates["ssh_host"] = req.ssh_host
 
             if req.mode == "github":
-                # GitHub repository mode — create new repo or record clone URL
-                github_token = (
-                    settings.github_oauth_token if hasattr(settings, "github_oauth_token") else ""
-                )
-                if req.github_repo_name and not req.github_clone_url:
+                # GitHub repository mode — use connected repo, create new, or clone URL
+                if req.repo_id and repo_manager:
+                    # Use an already-connected repo from Settings
+                    existing_repo = repo_manager.get(req.repo_id)
+                    if not existing_repo:
+                        raise HTTPException(
+                            status_code=404, detail="Repository not found"
+                        )
+                    updates["repo_id"] = existing_repo.id
+                    updates["github_repo"] = existing_repo.github_repo or existing_repo.name
+                elif req.github_clone_url:
+                    updates["github_clone_url"] = req.github_clone_url
+                    updates["github_repo"] = req.github_repo_name or req.github_clone_url.rstrip(
+                        "/"
+                    ).split("/")[-1].removesuffix(".git")
+                elif req.github_repo_name:
                     # Create a new GitHub repo if connected
+                    github_token = (
+                        settings.github_oauth_token
+                        if hasattr(settings, "github_oauth_token")
+                        else ""
+                    )
                     if github_token:
                         from core.github_oauth import GitHubDeviceAuth
 
@@ -1650,13 +1667,8 @@ def create_app(
                             updates["github_repo"] = req.github_repo_name
                     else:
                         updates["github_repo"] = req.github_repo_name
-                elif req.github_clone_url:
-                    updates["github_clone_url"] = req.github_clone_url
-                    updates["github_repo"] = req.github_repo_name or req.github_clone_url.rstrip(
-                        "/"
-                    ).split("/")[-1].removesuffix(".git")
-                # Also create a local app to work in while connected to GitHub
-                if app_manager:
+                # Create a local app to work in (only when not using a connected repo)
+                if not req.repo_id and app_manager:
                     app_name = updates.get(
                         "github_repo", req.github_repo_name or "github-project"
                     ).split("/")[-1]

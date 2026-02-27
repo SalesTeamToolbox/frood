@@ -816,6 +816,7 @@ async function submitCodeSetup(sessionId) {
   const ghRepoName = document.getElementById("code-gh-repo")?.value || "";
   const ghCloneUrl = document.getElementById("code-gh-clone-url")?.value || "";
   const ghPrivate = document.getElementById("code-gh-private")?.checked ?? true;
+  const repoId = document.getElementById("code-repo-id")?.value || "";
 
   try {
     const result = await api(`/chat/sessions/${sessionId}/setup`, {
@@ -824,6 +825,7 @@ async function submitCodeSetup(sessionId) {
         mode, runtime, app_name: appName,
         ssh_host: sshHost, github_repo_name: ghRepoName,
         github_clone_url: ghCloneUrl, github_private: ghPrivate,
+        repo_id: repoId,
       }),
     });
     // Update session in local state
@@ -2565,14 +2567,29 @@ function renderCodeSetupHTML(sessionId) {
         <label><input type="checkbox" id="code-deploy-now"> Deploy immediately after setup</label>
       </div>`;
 
+    const connectedRepoOptions = state.repos.filter(r => r.status === "active").map(r =>
+      `<option value="${esc(r.id)}">${esc(r.name)}${r.github_repo ? " (" + esc(r.github_repo) + ")" : ""}</option>`
+    ).join("");
+
     const githubFields = `
+      ${connectedRepoOptions ? `
       <div class="form-group">
-        <label>Repository Name</label>
+        <label>Use a connected repository</label>
+        <select id="code-repo-id">
+          <option value="">-- Select a repo from Settings --</option>
+          ${connectedRepoOptions}
+        </select>
+        <div class="help">Repos connected in Settings are ready to code on and submit PRs</div>
+      </div>
+      <div style="text-align:center;color:var(--text-muted);margin:0.75rem 0;font-size:0.85rem">— or create / clone —</div>
+      ` : ""}
+      <div class="form-group">
+        <label>Create new repository</label>
         <input type="text" id="code-gh-repo" placeholder="my-project">
         <div class="help">${state.githubConnected ? "A new repo will be created under your GitHub account" : '<a href="#" onclick="openSettings();return false">Connect GitHub in Settings</a> to enable repo creation'}</div>
       </div>
       <div class="form-group">
-        <label>Or clone an existing repo</label>
+        <label>Or clone by URL</label>
         <input type="text" id="code-gh-clone-url" placeholder="https://github.com/user/repo.git">
       </div>
       <div class="form-group">
