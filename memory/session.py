@@ -17,6 +17,8 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import aiofiles
+
 logger = logging.getLogger("agent42.memory.session")
 
 
@@ -61,7 +63,7 @@ class SessionManager:
     # Max messages per session before pruning
     MAX_SESSION_MESSAGES = 500
 
-    def add_message(self, channel_type: str, channel_id: str, message: SessionMessage):
+    async def add_message(self, channel_type: str, channel_id: str, message: SessionMessage):
         """Add a message to a session and persist it.
 
         Write-through pattern: writes to both JSONL (durable) and Redis (cache).
@@ -95,22 +97,22 @@ class SessionManager:
                 )
 
             self._sessions[key] = self._sessions[key][-self.MAX_SESSION_MESSAGES :]
-            self._rewrite_session(key)
+            await self._rewrite_session(key)
             return
 
         # Append to JSONL file
         path = self._session_path(key)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(asdict(message)) + "\n")
+        async with aiofiles.open(path, "a", encoding="utf-8") as f:
+            await f.write(json.dumps(asdict(message)) + "\n")
 
-    def _rewrite_session(self, key: str):
+    async def _rewrite_session(self, key: str):
         """Rewrite the entire session file (used after pruning)."""
         path = self._session_path(key)
         messages = self._sessions.get(key, [])
         try:
-            with open(path, "w", encoding="utf-8") as f:
+            async with aiofiles.open(path, "w", encoding="utf-8") as f:
                 for msg in messages:
-                    f.write(json.dumps(asdict(msg)) + "\n")
+                    await f.write(json.dumps(asdict(msg)) + "\n")
             logger.info(f"Session pruned: {key} ({len(messages)} messages kept)")
         except Exception as e:
             logger.error(f"Failed to rewrite session {key}: {e}")
@@ -195,7 +197,7 @@ class SessionManager:
             self._active_scopes[key] = self._load_scope(key)
         return self._active_scopes.get(key)
 
-    def set_active_scope(self, channel_type: str, channel_id: str, scope) -> None:
+    async def set_active_scope(self, channel_type: str, channel_id: str, scope) -> None:
         """Set or update the active scope for a session.
 
         Args:
@@ -205,7 +207,7 @@ class SessionManager:
         """
         key = self._session_key(channel_type, channel_id)
         self._active_scopes[key] = scope
-        self._persist_scope(key, scope)
+        await self._persist_scope(key, scope)
 
     def clear_active_scope(self, channel_type: str, channel_id: str) -> None:
         """Clear the active scope for a session."""
@@ -237,12 +239,12 @@ class SessionManager:
             logger.warning(f"Failed to load scope for {key}: {e}")
             return None
 
-    def _persist_scope(self, key: str, scope) -> None:
+    async def _persist_scope(self, key: str, scope) -> None:
         """Persist a scope to its JSON sidecar file."""
         path = self._scope_path(key)
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(json.dumps(scope.to_dict()))
+            async with aiofiles.open(path, "w", encoding="utf-8") as f:
+                await f.write(json.dumps(scope.to_dict()))
         except Exception as e:
             logger.error(f"Failed to persist scope for {key}: {e}")
 

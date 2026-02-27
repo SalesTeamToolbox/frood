@@ -71,27 +71,32 @@ class TestSessionManager:
         self.tmpdir = tempfile.mkdtemp()
         self.mgr = SessionManager(self.tmpdir)
 
-    def test_add_and_get_message(self):
+    @pytest.mark.asyncio
+    async def test_add_and_get_message(self):
         msg = SessionMessage(role="user", content="Hello", channel_type="discord", sender_id="u1")
-        self.mgr.add_message("discord", "chan1", msg)
+        await self.mgr.add_message("discord", "chan1", msg)
 
         history = self.mgr.get_history("discord", "chan1")
         assert len(history) == 1
         assert history[0].content == "Hello"
 
-    def test_multiple_messages(self):
-        self.mgr.add_message("slack", "c1", SessionMessage(role="user", content="Hi"))
-        self.mgr.add_message("slack", "c1", SessionMessage(role="assistant", content="Hello!"))
-        self.mgr.add_message("slack", "c1", SessionMessage(role="user", content="Thanks"))
+    @pytest.mark.asyncio
+    async def test_multiple_messages(self):
+        await self.mgr.add_message("slack", "c1", SessionMessage(role="user", content="Hi"))
+        await self.mgr.add_message(
+            "slack", "c1", SessionMessage(role="assistant", content="Hello!")
+        )
+        await self.mgr.add_message("slack", "c1", SessionMessage(role="user", content="Thanks"))
 
         history = self.mgr.get_history("slack", "c1")
         assert len(history) == 3
         assert history[0].role == "user"
         assert history[1].role == "assistant"
 
-    def test_separate_sessions(self):
-        self.mgr.add_message("discord", "chan1", SessionMessage(role="user", content="A"))
-        self.mgr.add_message("discord", "chan2", SessionMessage(role="user", content="B"))
+    @pytest.mark.asyncio
+    async def test_separate_sessions(self):
+        await self.mgr.add_message("discord", "chan1", SessionMessage(role="user", content="A"))
+        await self.mgr.add_message("discord", "chan2", SessionMessage(role="user", content="B"))
 
         h1 = self.mgr.get_history("discord", "chan1")
         h2 = self.mgr.get_history("discord", "chan2")
@@ -100,28 +105,32 @@ class TestSessionManager:
         assert h1[0].content == "A"
         assert h2[0].content == "B"
 
-    def test_max_messages_limit(self):
+    @pytest.mark.asyncio
+    async def test_max_messages_limit(self):
         for i in range(100):
-            self.mgr.add_message("test", "ch", SessionMessage(role="user", content=f"msg{i}"))
+            await self.mgr.add_message("test", "ch", SessionMessage(role="user", content=f"msg{i}"))
 
         history = self.mgr.get_history("test", "ch", max_messages=10)
         assert len(history) == 10
         assert history[-1].content == "msg99"
 
-    def test_get_messages_as_dicts(self):
-        self.mgr.add_message("test", "ch", SessionMessage(role="user", content="hi"))
+    @pytest.mark.asyncio
+    async def test_get_messages_as_dicts(self):
+        await self.mgr.add_message("test", "ch", SessionMessage(role="user", content="hi"))
         dicts = self.mgr.get_messages_as_dicts("test", "ch")
         assert len(dicts) == 1
         assert dicts[0] == {"role": "user", "content": "hi"}
 
-    def test_clear_session(self):
-        self.mgr.add_message("test", "ch", SessionMessage(role="user", content="hi"))
+    @pytest.mark.asyncio
+    async def test_clear_session(self):
+        await self.mgr.add_message("test", "ch", SessionMessage(role="user", content="hi"))
         self.mgr.clear_session("test", "ch")
         history = self.mgr.get_history("test", "ch")
         assert len(history) == 0
 
-    def test_persistence_across_instances(self):
-        self.mgr.add_message("test", "ch", SessionMessage(role="user", content="persisted"))
+    @pytest.mark.asyncio
+    async def test_persistence_across_instances(self):
+        await self.mgr.add_message("test", "ch", SessionMessage(role="user", content="persisted"))
 
         # New instance should load from disk
         mgr2 = SessionManager(self.tmpdir)
@@ -498,7 +507,8 @@ class TestScopeTracking:
         scope = self.mgr.get_active_scope("discord", "123")
         assert scope is None
 
-    def test_set_and_get_scope(self):
+    @pytest.mark.asyncio
+    async def test_set_and_get_scope(self):
         from core.intent_classifier import ScopeInfo
         from core.task_queue import TaskType
 
@@ -508,14 +518,15 @@ class TestScopeTracking:
             task_type=TaskType.DEBUGGING,
             task_id="abc",
         )
-        self.mgr.set_active_scope("discord", "123", scope)
+        await self.mgr.set_active_scope("discord", "123", scope)
         retrieved = self.mgr.get_active_scope("discord", "123")
         assert retrieved is not None
         assert retrieved.scope_id == "abc"
         assert retrieved.summary == "Fix login bug"
         assert retrieved.task_type == TaskType.DEBUGGING
 
-    def test_scope_persists_to_file(self):
+    @pytest.mark.asyncio
+    async def test_scope_persists_to_file(self):
         from core.intent_classifier import ScopeInfo
         from core.task_queue import TaskType
 
@@ -525,7 +536,7 @@ class TestScopeTracking:
             task_type=TaskType.CODING,
             task_id="xyz",
         )
-        self.mgr.set_active_scope("slack", "chan1", scope)
+        await self.mgr.set_active_scope("slack", "chan1", scope)
 
         # New manager instance should load scope from disk
         mgr2 = SessionManager(self.tmpdir)
@@ -534,7 +545,8 @@ class TestScopeTracking:
         assert retrieved.scope_id == "xyz"
         assert retrieved.summary == "Build dashboard"
 
-    def test_clear_scope(self):
+    @pytest.mark.asyncio
+    async def test_clear_scope(self):
         from core.intent_classifier import ScopeInfo
         from core.task_queue import TaskType
 
@@ -544,11 +556,12 @@ class TestScopeTracking:
             task_type=TaskType.DEBUGGING,
             task_id="abc",
         )
-        self.mgr.set_active_scope("discord", "123", scope)
+        await self.mgr.set_active_scope("discord", "123", scope)
         self.mgr.clear_active_scope("discord", "123")
         assert self.mgr.get_active_scope("discord", "123") is None
 
-    def test_clear_scope_removes_file(self):
+    @pytest.mark.asyncio
+    async def test_clear_scope_removes_file(self):
         from core.intent_classifier import ScopeInfo
         from core.task_queue import TaskType
 
@@ -558,14 +571,15 @@ class TestScopeTracking:
             task_type=TaskType.DEBUGGING,
             task_id="abc",
         )
-        self.mgr.set_active_scope("discord", "123", scope)
+        await self.mgr.set_active_scope("discord", "123", scope)
         self.mgr.clear_active_scope("discord", "123")
 
         # File should be gone — new manager should see no scope
         mgr2 = SessionManager(self.tmpdir)
         assert mgr2.get_active_scope("discord", "123") is None
 
-    def test_clear_session_also_clears_scope(self):
+    @pytest.mark.asyncio
+    async def test_clear_session_also_clears_scope(self):
         from core.intent_classifier import ScopeInfo
         from core.task_queue import TaskType
 
@@ -575,14 +589,15 @@ class TestScopeTracking:
             task_type=TaskType.DEBUGGING,
             task_id="abc",
         )
-        self.mgr.set_active_scope("test", "ch1", scope)
-        self.mgr.add_message("test", "ch1", SessionMessage(role="user", content="hello"))
+        await self.mgr.set_active_scope("test", "ch1", scope)
+        await self.mgr.add_message("test", "ch1", SessionMessage(role="user", content="hello"))
 
         # clear_session should also clear the scope
         self.mgr.clear_session("test", "ch1")
         assert self.mgr.get_active_scope("test", "ch1") is None
 
-    def test_separate_scopes_per_session(self):
+    @pytest.mark.asyncio
+    async def test_separate_scopes_per_session(self):
         from core.intent_classifier import ScopeInfo
         from core.task_queue import TaskType
 
@@ -598,8 +613,8 @@ class TestScopeTracking:
             task_type=TaskType.DOCUMENTATION,
             task_id="b",
         )
-        self.mgr.set_active_scope("discord", "chan1", scope1)
-        self.mgr.set_active_scope("discord", "chan2", scope2)
+        await self.mgr.set_active_scope("discord", "chan1", scope1)
+        await self.mgr.set_active_scope("discord", "chan2", scope2)
 
         r1 = self.mgr.get_active_scope("discord", "chan1")
         r2 = self.mgr.get_active_scope("discord", "chan2")

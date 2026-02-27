@@ -431,6 +431,10 @@ class TestWorkspaceSandbox:
 | 59 | RLM | `rlm.completion()` is synchronous — calling it directly blocks the async event loop | Always wrap in `loop.run_in_executor(None, lambda: rlm.completion(...))` with `asyncio.wait_for` timeout |
 | 60 | RLM | RLM recursive sub-calls can produce runaway costs (10x+ expected) | Enforce `RLM_COST_LIMIT` per query and check global `SpendingTracker` before each RLM call |
 | 61 | RLM | `rlms` package not installed but `RLM_ENABLED=true` — import fails at runtime | All `from rlm import ...` is inside method bodies behind try/except ImportError; `should_use_rlm()` returns False gracefully |
+| 62 | Tools | `_run_tool_loop` re-fetched `all_schemas()` every round, bypassing task-type filtering — non-code tasks got code tools after first tool call | Use `schemas_for_task_type(task_type)` in the tool loop instead of `all_schemas()` |
+| 63 | Tools | Free LLMs hallucinate tool calls not in schema — `_execute_tool_calls` had no task-type guard | Added execution-time enforcement: `_CODE_ONLY_TOOLS` blocked for non-`_CODE_TASK_TYPES` in `_execute_tool_calls()` |
+| 64 | Async | `SessionManager.add_message()` and `set_active_scope()` used blocking `open()` from async handlers | Converted write-path methods to async with `aiofiles`; callers must use `await` |
+| 65 | Tasks | ASSIGNED tasks never re-queued on restart — only RUNNING was reset to PENDING | `load_from_file()` now resets both RUNNING and ASSIGNED to PENDING |
 
 ---
 

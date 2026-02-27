@@ -583,7 +583,7 @@ class Agent42:
         # Store in session history
         from memory.session import SessionMessage
 
-        self.session_manager.add_message(
+        await self.session_manager.add_message(
             message.channel_type,
             message.channel_id,
             SessionMessage(
@@ -721,7 +721,7 @@ class Agent42:
 
                 # Continuation — link to existing scope via parent_task_id
                 active_scope.message_count += 1
-                self.session_manager.set_active_scope(
+                await self.session_manager.set_active_scope(
                     message.channel_type, message.channel_id, active_scope
                 )
                 return await self._create_task_from_message(
@@ -854,7 +854,9 @@ class Agent42:
                 task_type=task_type,
                 task_id=task.id,
             )
-            self.session_manager.set_active_scope(message.channel_type, message.channel_id, scope)
+            await self.session_manager.set_active_scope(
+                message.channel_type, message.channel_id, scope
+            )
             logger.info(f"Active scope set: {task.id} — {description[:60]}")
 
         # Log to memory (semantic indexing for cross-session search)

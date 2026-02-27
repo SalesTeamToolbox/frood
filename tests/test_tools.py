@@ -149,6 +149,69 @@ class TestToolRegistry:
         assert "disabled" in result.error
 
 
+class MockCodeTool(Tool):
+    """A mock tool whose name is in _CODE_ONLY_TOOLS for task-type filtering tests."""
+
+    @property
+    def name(self):
+        return "shell"
+
+    @property
+    def description(self):
+        return "Mock shell tool"
+
+    @property
+    def parameters(self):
+        return {"type": "object", "properties": {"command": {"type": "string"}}}
+
+    async def execute(self, command: str = "", **kwargs):
+        return ToolResult(output=f"Ran: {command}")
+
+
+class TestTaskTypeFiltering:
+    """Test that schemas_for_task_type properly filters code-only tools."""
+
+    def setup_method(self):
+        self.registry = ToolRegistry()
+        self.registry.register(MockTool())  # general-purpose tool
+        self.registry.register(MockCodeTool())  # code-only tool (name="shell")
+
+    def test_code_task_sees_all_tools(self):
+        """Code task types should see all tools including code-only ones."""
+        from tools.registry import _CODE_TASK_TYPES
+
+        for task_type in _CODE_TASK_TYPES:
+            schemas = self.registry.schemas_for_task_type(task_type)
+            names = {s["function"]["name"] for s in schemas}
+            assert "shell" in names, f"Code task '{task_type}' should see 'shell'"
+            assert "mock_tool" in names
+
+    def test_non_code_task_excludes_code_tools(self):
+        """Non-code task types should NOT see code-only tools."""
+        for task_type in ("content", "marketing", "email", "strategy", "research"):
+            schemas = self.registry.schemas_for_task_type(task_type)
+            names = {s["function"]["name"] for s in schemas}
+            assert "shell" not in names, f"Non-code task '{task_type}' should NOT see 'shell'"
+            assert "mock_tool" in names  # general-purpose still visible
+
+    def test_disabled_tool_excluded_from_filtered_schemas(self):
+        """Disabled tools are excluded even for code task types."""
+        self.registry.set_enabled("shell", False)
+        schemas = self.registry.schemas_for_task_type("coding")
+        names = {s["function"]["name"] for s in schemas}
+        assert "shell" not in names
+
+    def test_all_code_only_tools_listed(self):
+        """Every tool in _CODE_ONLY_TOOLS should be a recognized code tool name."""
+        from tools.registry import _CODE_ONLY_TOOLS
+
+        # These are the tools that should be restricted — verify the set is non-empty
+        assert len(_CODE_ONLY_TOOLS) > 0
+        # shell, git, security_analyzer should all be in the set
+        for expected in ("shell", "git", "security_analyzer", "test_runner"):
+            assert expected in _CODE_ONLY_TOOLS
+
+
 class TestShellTool:
     @pytest.mark.asyncio
     async def test_safe_command(self):
