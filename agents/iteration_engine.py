@@ -229,7 +229,8 @@ class IterationEngine:
             or "unauthorized" in msg
             or "invalid api key" in msg
             or "authentication" in msg
-            or "forbidden" in msg and "403" in msg
+            or "forbidden" in msg
+            and "403" in msg
         )
 
     def _get_fallback_models(self, exclude: set[str]) -> list[str]:
@@ -383,7 +384,9 @@ class IterationEngine:
                     logger.warning(f"Tool model {model} unavailable (404), skipping retries: {e}")
                     break
                 if self._is_auth_error(e):
-                    logger.warning(f"Auth error for tool model {model} (401), skipping retries: {e}")
+                    logger.warning(
+                        f"Auth error for tool model {model} (401), skipping retries: {e}"
+                    )
                     break
                 wait = 2**attempt
                 logger.warning(

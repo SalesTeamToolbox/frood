@@ -18,6 +18,7 @@ from pathlib import Path
 # --- 1. Load .env (same as agent42.py does at startup) ----------------------
 try:
     from dotenv import load_dotenv
+
     env_path = Path(__file__).parent.parent / ".env"
     load_dotenv(env_path, override=True)
     print(f"[dotenv] .env file: {'found' if env_path.exists() else 'NOT found'}")
@@ -75,6 +76,7 @@ try:
 except ImportError:
     print("[test] httpx not installed — testing with urllib instead")
     import urllib.request, urllib.error
+
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/models",
         headers={"Authorization": f"Bearer {env_key}"},
