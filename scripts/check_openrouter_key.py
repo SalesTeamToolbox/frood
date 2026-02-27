@@ -78,12 +78,15 @@ except ImportError:
     import urllib.error
     import urllib.request
 
+    _url = "https://openrouter.ai/api/v1/models"
+    if not _url.startswith(("https://", "http://")):
+        raise ValueError(f"Unsupported URL scheme: {_url}")
     req = urllib.request.Request(
-        "https://openrouter.ai/api/v1/models",
+        _url,
         headers={"Authorization": f"Bearer {env_key}"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with urllib.request.urlopen(req, timeout=15) as r:  # nosec B310
             data = json.loads(r.read())
             print(f"[test] SUCCESS — {len(data.get('data', []))} models")
     except urllib.error.HTTPError as e:
