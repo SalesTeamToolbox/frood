@@ -139,14 +139,9 @@ MODELS: dict[str, ModelSpec] = {
         tier=ModelTier.FREE,
     ),
     # or-free-devstral removed — free period ended (404 "free Devstral 2 period has ended")
+    # or-free-deepseek-r1 removed — 404 "No endpoints found for deepseek/deepseek-r1-0528:free"
+    # or-free-llama4-maverick removed — 404 "No endpoints found for meta-llama/llama-4-maverick:free"
     # Reasoning specialists
-    "or-free-deepseek-r1": ModelSpec(
-        "deepseek/deepseek-r1-0528:free",
-        ProviderType.OPENROUTER,
-        temperature=0.2,
-        display_name="DeepSeek R1 0528 (free)",
-        tier=ModelTier.FREE,
-    ),
     "or-free-deepseek-chat": ModelSpec(
         "meta-llama/llama-3.3-70b-instruct:free",
         ProviderType.OPENROUTER,
@@ -154,18 +149,14 @@ MODELS: dict[str, ModelSpec] = {
         tier=ModelTier.FREE,
     ),
     # General-purpose
-    "or-free-llama4-maverick": ModelSpec(
-        "meta-llama/llama-4-maverick:free",
-        ProviderType.OPENROUTER,
-        display_name="Llama 4 Maverick (free)",
-        tier=ModelTier.FREE,
-    ),
     "or-free-llama-70b": ModelSpec(
         "meta-llama/llama-3.3-70b-instruct:free",
         ProviderType.OPENROUTER,
         display_name="Llama 3.3 70B (free)",
         tier=ModelTier.FREE,
     ),
+    # or-free-gemini-flash removed — 404 "No endpoints found for google/gemini-2.0-flash-exp:free"
+    # or-free-gemini-pro removed — 404 "No endpoints found for google/gemini-2.5-pro-exp-03-25:free"
     "or-free-gemini-flash": ModelSpec(
         "google/gemini-2.0-flash-exp:free",
         ProviderType.OPENROUTER,
@@ -239,7 +230,7 @@ MODELS: dict[str, ModelSpec] = {
         tier=ModelTier.PREMIUM,
     ),
     "gemini-2-pro": ModelSpec(
-        "gemini-2.5-pro-preview-05-06",
+        "gemini-2.5-pro",
         ProviderType.GEMINI,
         display_name="Gemini 2.5 Pro",
         tier=ModelTier.PREMIUM,

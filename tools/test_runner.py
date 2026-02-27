@@ -8,6 +8,7 @@ Returns structured pass/fail/error counts and failure details.
 import asyncio
 import json
 import logging
+import sys
 
 from tools.base import Tool, ToolResult
 
@@ -120,7 +121,7 @@ class TestRunnerTool(Tool):
         return "pytest"  # Default
 
     async def _run_pytest(self, path: str, filter_: str, verbose: bool) -> ToolResult:
-        cmd = ["python", "-m", "pytest"]
+        cmd = [sys.executable, "-m", "pytest"]
         if verbose:
             cmd.append("-v")
         cmd.append("--tb=short")

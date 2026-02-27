@@ -644,9 +644,10 @@ class TestExtendedContextWindow:
         assert routing["primary"] == "gemini-2-flash"
 
     def test_get_routing_with_max_context_prefers_large_models(self):
-        # OPENROUTER_API_KEY must be set so the context-window-adapted model
-        # isn't rejected by the API key validation step in get_routing().
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test-dummy"}):
+        # GEMINI_API_KEY needed because the large-context free OR models
+        # (gemini-flash, gemini-pro) were removed — real large-context models
+        # are native Gemini (gemini-2-flash, gemini-2-pro).
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "OPENROUTER_API_KEY": "sk-test-dummy"}):
             router = ModelRouter()
             routing = router.get_routing(TaskType.CODING, context_window="max")
         # Should select a model with large context (>= 500K tokens)
@@ -656,7 +657,7 @@ class TestExtendedContextWindow:
             assert routing["primary"] in large_keys
 
     def test_get_routing_with_large_context(self):
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test-dummy"}):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "OPENROUTER_API_KEY": "sk-test-dummy"}):
             router = ModelRouter()
             routing = router.get_routing(TaskType.RESEARCH, context_window="large")
         # Should select a model with >= 200K context

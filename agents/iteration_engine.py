@@ -304,7 +304,7 @@ class IterationEngine:
             "or-free-llama-70b",
             "or-free-gemma-27b",
             "or-free-mistral-small",
-            "or-free-gemini-flash",
+            "or-free-qwen-coder",
         ]
         openrouter_candidates: list[str] = []
         try:
