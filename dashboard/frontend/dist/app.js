@@ -432,6 +432,20 @@ function handleWSMessage(msg) {
       const session = state.chatSessions.find(s => s.id === sid) || state.codeSessions.find(s => s.id === sid);
       if (session) session._unread = (session._unread || 0) + 1;
     }
+  } else if (msg.type === "chat_thinking") {
+    // Agent started/stopped processing a chat task — show/hide typing indicator
+    const sid = msg.data.session_id || "";
+    const thinking = msg.data.thinking;
+    if (sid && sid === state.currentSessionId) {
+      state.chatSending = thinking;
+      if (state.page === "chat") renderChat();
+    } else if (sid && sid === state.codeCurrentSessionId) {
+      state.codeSending = thinking;
+      if (state.page === "code") renderCode();
+    } else if (!sid) {
+      state.chatSending = thinking;
+      if (state.page === "chat") renderChat();
+    }
   }
 }
 
@@ -766,13 +780,16 @@ async function sendSessionMessage(sessionId, isCode) {
       method: "POST",
       body: JSON.stringify({ message: text }),
     });
+    // Don't reset sending state here — the WebSocket "chat_thinking" event
+    // will set it to true when the agent starts and false when it finishes.
   } catch (e) {
     toast("Failed to send: " + e.message, "error");
+    // Only reset on error so the typing indicator disappears
+    if (isCode) state.codeSending = false;
+    else state.chatSending = false;
+    if (isCode && state.page === "code") renderCode();
+    else if (!isCode && state.page === "chat") renderChat();
   }
-  if (isCode) state.codeSending = false;
-  else state.chatSending = false;
-  if (isCode && state.page === "code") renderCode();
-  else if (!isCode && state.page === "chat") renderChat();
 }
 
 async function deleteChatSession(sessionId, sessionType) {
@@ -884,11 +901,13 @@ async function sendChatMessage() {
       method: "POST",
       body: JSON.stringify({ message: text }),
     });
+    // Don't reset chatSending here — the WebSocket "chat_thinking" event
+    // controls the typing indicator based on actual agent processing state.
   } catch (e) {
     toast("Failed to send: " + e.message, "error");
+    state.chatSending = false;
+    if (state.page === "chat") renderChat();
   }
-  state.chatSending = false;
-  if (state.page === "chat") renderChat();
 }
 
 // ---------------------------------------------------------------------------
