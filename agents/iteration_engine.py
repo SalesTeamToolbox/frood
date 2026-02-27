@@ -238,6 +238,10 @@ class IterationEngine:
         Tries OpenRouter free models first, then configured native provider
         models (Gemini, OpenAI, Anthropic, DeepSeek) as cross-provider
         failover when the primary provider's key is invalid or unavailable.
+
+        Native providers are always included in the returned list regardless of
+        how many OpenRouter free models exist — the dynamic OR list is capped at
+        8 so that native providers are never pushed beyond the limit.
         """
         static = [
             "or-free-llama-70b",
@@ -246,18 +250,18 @@ class IterationEngine:
             "or-free-mistral-small",
             "or-free-gemini-flash",
         ]
-        candidates: list[str] = []
+        openrouter_candidates: list[str] = []
         try:
             all_free = self.router.free_models()
             keys = [m["key"] for m in all_free if isinstance(m, dict) and m.get("key")]
-            candidates = [k for k in keys if k not in exclude]
+            openrouter_candidates = [k for k in keys if k not in exclude]
         except Exception:
             pass
 
-        if not candidates:
-            candidates = [m for m in static if m not in exclude]
+        if not openrouter_candidates:
+            openrouter_candidates = [m for m in static if m not in exclude]
 
-        # Append configured native provider models as cross-provider fallbacks.
+        # Collect configured native provider models as cross-provider fallbacks.
         # These kick in when the entire primary provider (e.g. OpenRouter) is
         # down or has an invalid key — they use independent API keys.
         native_fallbacks: list[tuple[ProviderType, str]] = [
@@ -266,14 +270,18 @@ class IterationEngine:
             (ProviderType.ANTHROPIC, "claude-haiku"),
             (ProviderType.DEEPSEEK, "deepseek-chat"),
         ]
+        native_candidates: list[str] = []
         for provider_type, model_key in native_fallbacks:
-            if model_key in exclude or model_key in candidates:
+            if model_key in exclude or model_key in openrouter_candidates:
                 continue
             spec = PROVIDERS.get(provider_type)
             if spec and os.getenv(spec.api_key_env):
-                candidates.append(model_key)
+                native_candidates.append(model_key)
 
-        return candidates[:8]  # Allow up to 8 fallbacks for full cross-provider coverage
+        # Cap OpenRouter candidates at 8 so native providers are always reachable.
+        # Previously, the dynamic OR list had 12+ entries and the [:8] cap silently
+        # excluded Gemini/OpenAI/etc., making them unreachable when OR auth fails.
+        return openrouter_candidates[:8] + native_candidates
 
     async def _complete_with_retry(
         self,
@@ -315,9 +323,18 @@ class IterationEngine:
                 )
                 await asyncio.sleep(wait)
 
-        # Try fallback models — OpenRouter free first, then configured native providers
+        # Try fallback models — OpenRouter free first, then configured native providers.
+        # If the primary model failed with a 401 auth error, all OpenRouter fallbacks
+        # will also fail with the same error (invalid key is provider-wide).  Skip them
+        # immediately so native providers (Gemini, OpenAI, etc.) are reached quickly.
+        primary_auth_failed = last_error is not None and self._is_auth_error(last_error)
         tried: set[str] = {model}
         for fallback in self._get_fallback_models(exclude=tried):
+            # Skip OpenRouter models when the OR key is known to be invalid
+            if primary_auth_failed and fallback.startswith("or-"):
+                logger.debug(f"Skipping OR fallback {fallback} — provider auth failure")
+                tried.add(fallback)
+                continue
             try:
                 logger.warning(f"Primary model failed; trying fallback: {fallback}")
                 text, usage = await self.router.complete(fallback, messages)
@@ -331,6 +348,9 @@ class IterationEngine:
             except Exception as e:
                 logger.warning(f"Fallback {fallback} also failed: {e}")
                 tried.add(fallback)
+                # If a fallback OR model also gets 401, skip remaining OR models too
+                if self._is_auth_error(e) and fallback.startswith("or-"):
+                    primary_auth_failed = True
                 # Continue trying remaining fallbacks — a different provider may succeed
 
         raise RuntimeError(f"API call failed after {retries} retries + fallbacks: {last_error}")
