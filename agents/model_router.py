@@ -17,9 +17,8 @@ import logging
 import os
 from pathlib import Path
 
-from core.config import settings
 from core.task_queue import TaskType
-from providers.registry import ProviderRegistry
+from providers.registry import PROVIDERS, ProviderRegistry
 
 logger = logging.getLogger("agent42.router")
 
@@ -140,8 +139,9 @@ class ModelRouter:
         When context_window is "large" or "max", prefer models with larger
         context windows (e.g. Gemini Flash 1M) over the default task-type model.
         """
-        # 1. Admin env var override — always wins
+        # 1. Admin env var override — always wins; skip API key validation for explicit overrides
         override = self._check_admin_override(task_type)
+        is_admin_override = override is not None
         if override:
             logger.info("Admin override for %s: %s", task_type.value, override)
             routing = override
@@ -186,46 +186,57 @@ class ModelRouter:
             if free_large:
                 routing["primary"] = free_large[0]["key"]
 
-        # After all modifications, ensure the primary model is available (in registry and API key set)
+        # For known registry models (not admin overrides), verify the provider API key is set.
+        # Use os.getenv() — not getattr(settings, ...) — so admin-configured keys are visible.
+        # settings is a frozen dataclass set at import time, before KeyStore.inject_into_environ().
+        # Unknown models (dynamic/catalog, not in MODELS dict) pass through without validation.
         primary_model = routing.get("primary")
-        if primary_model:
+        if primary_model and not is_admin_override:
             try:
                 spec = self.registry.get_model(primary_model)
-                provider = spec.provider
-                api_key_field = f"{provider.value.lower()}_api_key"
-                api_key = getattr(settings, api_key_field, "")
+                # Model is known — check that its provider API key is actually set
+                provider_spec = PROVIDERS.get(spec.provider)
+                api_key = os.getenv(provider_spec.api_key_env, "") if provider_spec else ""
                 if not api_key:
-                    raise ValueError(f"API key {api_key_field} not set for provider {provider.value}")
+                    raise ValueError(
+                        f"API key {provider_spec.api_key_env if provider_spec else '?'} "
+                        f"not set for provider {spec.provider.value}"
+                    )
             except ValueError as e:
-                logger.warning(
-                    f"Model {primary_model} is not available: {e}. "
-                    "Attempting to find a fallback free model."
-                )
-                # Try to find any free model that is available
-                for model in self.registry.free_models():
-                    try:
-                        spec = self.registry.get_model(model["key"])
-                        provider = spec.provider
-                        api_key_field = f"{provider.value.lower()}_api_key"
-                        api_key = getattr(settings, api_key_field, "")
-                        if api_key:
-                            routing["primary"] = model["key"]
-                            logger.info(f"Fell back to free model {model['key']}")
-                            break
-                    except ValueError:
-                        continue
+                if "Unknown model" in str(e):
+                    # Model not in registry (e.g. dynamic/catalog model) — pass through
+                    pass
                 else:
-                    # No free model with API key found, use the task type's free routing as last resort
-                    fallback = FREE_ROUTING.get(task_type)
-                    routing = (
-                        fallback.copy()
-                        if fallback
-                        else FREE_ROUTING[TaskType.CODING].copy()
+                    logger.warning(
+                        f"Model {primary_model} is not available: {e}. "
+                        "Attempting to find a fallback free model."
                     )
-                    logger.error(
-                        f"No available free model found for {task_type.value}. "
-                        "Using fallback routing, but it may fail."
-                    )
+                    # Try to find any free model that is available
+                    for model in self.registry.free_models():
+                        try:
+                            spec = self.registry.get_model(model["key"])
+                            provider_spec = PROVIDERS.get(spec.provider)
+                            api_key = (
+                                os.getenv(provider_spec.api_key_env, "") if provider_spec else ""
+                            )
+                            if api_key:
+                                routing["primary"] = model["key"]
+                                logger.info(f"Fell back to free model {model['key']}")
+                                break
+                        except ValueError:
+                            continue
+                    else:
+                        # No free model with API key found — use task-type default as last resort
+                        fallback = FREE_ROUTING.get(task_type)
+                        routing = (
+                            fallback.copy()
+                            if fallback
+                            else FREE_ROUTING[TaskType.CODING].copy()
+                        )
+                        logger.error(
+                            f"No available free model found for {task_type.value}. "
+                            "Using fallback routing, but it may fail."
+                        )
 
         return routing
 
