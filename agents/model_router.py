@@ -535,6 +535,49 @@ class ModelRouter:
             max_tokens=max_tokens,
         )
 
+    def get_rlm_models(self, task_type: TaskType) -> dict:
+        """Return recommended root and sub models for RLM processing.
+
+        RLM works best with code-capable models that can navigate the REPL
+        environment.  Returns ``{"root": model_key, "sub": model_key}``.
+        """
+        from providers.rlm_provider import RLM_TIER_1, RLM_TIER_2
+
+        routing = self.get_routing(task_type)
+        primary = routing.get("primary", "")
+
+        # If primary is already RLM-capable, use it as root
+        if primary in RLM_TIER_1 or primary in RLM_TIER_2:
+            root = primary
+        else:
+            # Select the best available RLM-capable model
+            root = primary
+            for candidate in ("or-free-qwen-coder", "gemini-2-flash", "gpt-4o-mini"):
+                try:
+                    spec = self.registry.get_model(candidate)
+                    provider_spec = PROVIDERS.get(spec.provider)
+                    if provider_spec and os.getenv(provider_spec.api_key_env, ""):
+                        root = candidate
+                        break
+                except ValueError:
+                    continue
+
+        # Sub-model for recursive calls — prefer cheaper/faster
+        sub = root
+        for candidate in ("gemini-2-flash", "gpt-4o-mini", "or-free-qwen-coder"):
+            if candidate == root:
+                continue
+            try:
+                spec = self.registry.get_model(candidate)
+                provider_spec = PROVIDERS.get(spec.provider)
+                if provider_spec and os.getenv(provider_spec.api_key_env, ""):
+                    sub = candidate
+                    break
+            except ValueError:
+                continue
+
+        return {"root": root, "sub": sub}
+
     def available_providers(self) -> list[dict]:
         """List all providers and their availability."""
         return self.registry.available_providers()

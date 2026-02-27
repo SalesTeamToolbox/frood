@@ -21,6 +21,7 @@ from core.approval_gate import ApprovalGate
 from core.task_queue import Task, TaskQueue, TaskType
 from core.worktree_manager import WorktreeManager
 from memory.store import MemoryStore
+from providers.rlm_provider import RLMProvider
 from skills.loader import SkillLoader
 from tools.behaviour_tool import load_behaviour_rules
 
@@ -144,6 +145,7 @@ class Agent:
         )
         self.skill_loader = skill_loader
         self.memory_store = memory_store
+        self.rlm_provider = RLMProvider()
         self.learner = (
             Learner(self.router, memory_store, skills_dir=workspace_skills_dir)
             if memory_store
@@ -196,6 +198,53 @@ class Agent:
             # Build task context with file contents, skills, and memory
             task_context = await self._build_context(task, worktree_path)
 
+            # RLM integration: if context exceeds the token threshold, use RLM
+            # to pre-process and distill the large context before the iteration
+            # engine.  The RLM decomposes the corpus via a REPL environment
+            # and returns a focused summary — avoiding context window overflow.
+            rlm_metadata = None
+            if self.rlm_provider.should_use_rlm(task_context, task.task_type.value):
+                rlm_query = (
+                    f"Analyze the following task and its context thoroughly.\n\n"
+                    f"Task: {task.title}\n\n"
+                    f"Instructions: {task.description}\n\n"
+                    f"Extract and organize the most relevant information needed "
+                    f"to complete this task. Focus on key code sections, "
+                    f"specifications, requirements, and constraints."
+                )
+                rlm_result = await self.rlm_provider.complete(
+                    query=rlm_query,
+                    context=task_context,
+                    task_type=task.task_type.value,
+                )
+                if rlm_result is not None:
+                    logger.info(
+                        "RLM pre-processed context for task %s: %dk→%dk chars",
+                        task.id,
+                        len(task_context) // 1000,
+                        len(rlm_result["response"]) // 1000,
+                    )
+                    # Wrap the RLM-distilled context with the original task details
+                    task_context = (
+                        f"# Task: {task.title}\n\n"
+                        f"{task.description}\n\n"
+                        f"Working directory: {worktree_path}\n\n"
+                        f"## RLM-Processed Context\n\n"
+                        f"The following context was extracted from a large corpus "
+                        f"(~{rlm_result['estimated_context_tokens'] // 1000}k tokens) "
+                        f"using recursive language model decomposition:\n\n"
+                        f"{rlm_result['response']}"
+                    )
+                    rlm_metadata = rlm_result.get("metadata")
+                    await self.emit(
+                        "rlm_complete",
+                        {
+                            "task_id": task.id,
+                            "elapsed": rlm_result.get("elapsed_seconds", 0),
+                            "original_tokens": rlm_result.get("estimated_context_tokens", 0),
+                        },
+                    )
+
             # Run iteration engine with task-type-aware critic
             token_acc = TokenAccumulator()
             history = await self.engine.run(
@@ -213,6 +262,12 @@ class Agent:
 
             # Store token usage on the task for persistence and dashboard display
             task.token_usage = history.token_usage
+            if rlm_metadata:
+                task.token_usage["rlm"] = {
+                    "used": True,
+                    "metadata": rlm_metadata,
+                    "cost_usd": self.rlm_provider.total_cost_usd,
+                }
 
             if needs_worktree:
                 # Generate REVIEW.md and commit for code tasks

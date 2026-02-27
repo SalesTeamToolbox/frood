@@ -233,7 +233,6 @@ class TestEmbeddingStore:
         store = EmbeddingStore(self.store_path)
         assert store.entry_count() == 2
 
-
     def test_openrouter_only_key_disables_embeddings(self):
         """When only OPENROUTER_API_KEY is set (no OPENAI_API_KEY), embeddings
         should be disabled because OpenRouter doesn't support /embeddings."""

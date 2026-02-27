@@ -31,6 +31,9 @@ Pillow>=10.0.0
 # PDF parsing (knowledge base / RAG)
 pypdf>=3.0.0
 
+# Recursive Language Models (MIT CSAIL — long-context processing)
+rlms>=0.1.0
+
 # ── Optional memory backends (install as needed) ───────────────────────
 # Qdrant:    pip install qdrant-client         (vector DB for semantic search)
 # Redis:     pip install redis[hiredis]        (session cache + embedding cache)

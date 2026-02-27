@@ -345,6 +345,50 @@ for changes every 30 seconds, or restart to load immediately.
 python agent42.py --repo /path/to/project --port 8000 --max-agents 2
 ```
 
+## Recursive Language Models (RLM)
+
+Agent42 integrates MIT CSAIL's [Recursive Language Models](https://arxiv.org/abs/2512.24601)
+(RLM) for processing inputs far beyond model context windows. When a task's
+context exceeds a configurable threshold (default: 50K tokens), RLM
+automatically activates — treating the large context as an external variable
+in a REPL environment that the model can programmatically inspect, decompose,
+and recursively process.
+
+### How It Works
+
+1. **Context-as-Variable** — Instead of stuffing massive prompts into the LLM,
+   the text is stored as a Python variable. The model receives only the query +
+   metadata about the variable.
+2. **REPL Environment** — The root model writes Python code to inspect the
+   context: slicing, regex, chunking, and pulling only relevant pieces into its
+   active window.
+3. **Recursive Sub-Calls** — The root model can call itself (or another LLM)
+   recursively to process sub-sections, then synthesize results.
+
+### Configuration
+
+```bash
+RLM_ENABLED=true                  # Master toggle
+RLM_THRESHOLD_TOKENS=50000        # Context size to trigger RLM (tokens)
+RLM_ENVIRONMENT=local             # REPL env: local, docker, modal, prime
+RLM_MAX_DEPTH=3                   # Max recursion depth
+RLM_MAX_ITERATIONS=20             # Max REPL iterations
+RLM_COST_LIMIT=1.00               # Max cost per query (USD)
+RLM_TIMEOUT_SECONDS=300           # Per-query timeout
+```
+
+### RLM-Capable Models
+
+| Tier | Models | Use Case |
+|------|--------|----------|
+| 1 (Best) | Qwen3-Coder, Claude Sonnet, GPT-4o | RLM root model |
+| 2 (Good) | Gemini Flash, GPT-4o-mini, DeepSeek Chat | Sub-calls, cheaper tasks |
+| 3 (Not recommended) | Llama 70B, Gemma 27B | Lack code generation for REPL |
+
+Install the RLM library: `pip install rlms`
+
+---
+
 ## Model Routing
 
 ### Default (Free) Routing — OpenRouter
