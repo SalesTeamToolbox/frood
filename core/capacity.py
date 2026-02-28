@@ -44,7 +44,7 @@ def _read_meminfo() -> tuple[float, float]:
         except (OSError, ValueError, IndexError):
             pass
 
-    # Fallback: os.sysconf
+    # Fallback: os.sysconf (Unix) or psutil/ctypes (Windows)
     try:
         page_size = os.sysconf("SC_PAGE_SIZE")
         total_pages = os.sysconf("SC_PHYS_PAGES")
@@ -52,7 +52,31 @@ def _read_meminfo() -> tuple[float, float]:
         total_mb = (total_pages * page_size) / (1024 * 1024)
         avail_mb = (avail_pages * page_size) / (1024 * 1024)
         return total_mb, avail_mb
-    except (ValueError, OSError):
+    except (ValueError, OSError, AttributeError):
+        pass
+
+    # Windows fallback via ctypes
+    try:
+        import ctypes
+
+        class _MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        stat = _MEMORYSTATUSEX()
+        stat.dwLength = ctypes.sizeof(stat)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+        return stat.ullTotalPhys / (1024 * 1024), stat.ullAvailPhys / (1024 * 1024)
+    except (AttributeError, OSError):
         return 0.0, 0.0
 
 
@@ -77,7 +101,7 @@ def compute_effective_capacity(configured_max: int) -> dict:
     # --- CPU ---
     try:
         load_1m, load_5m, load_15m = os.getloadavg()
-    except OSError:
+    except (OSError, AttributeError):
         load_1m = load_5m = load_15m = 0.0
 
     cpu_cores = os.cpu_count() or 1
