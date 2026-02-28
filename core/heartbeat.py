@@ -114,6 +114,8 @@ class HeartbeatService:
         on_heartbeat=None,
         notification_service=None,
         configured_max_agents: int = 4,
+        task_queue=None,
+        tool_registry=None,
     ):
         self._interval = interval
         self._agents: dict[str, AgentHeartbeat] = {}
@@ -121,6 +123,8 @@ class HeartbeatService:
         self._on_heartbeat = on_heartbeat  # async callback(SystemHealth)
         self._notification_service = notification_service  # NotificationService (OpenClaw feature)
         self._configured_max_agents = configured_max_agents
+        self._task_queue = task_queue
+        self._tool_registry = tool_registry
         self._start_time = time.monotonic()
         self._running = False
         self._task: asyncio.Task | None = None
@@ -209,7 +213,7 @@ class HeartbeatService:
                 import ctypes
                 import ctypes.wintypes
 
-                # Use GetProcessMemoryInfo via Windows API
+                # Use GetProcessMemoryInfo via Windows psapi
                 class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
                     _fields_ = [
                         ("cb", ctypes.wintypes.DWORD),
@@ -226,7 +230,13 @@ class HeartbeatService:
 
                 counters = PROCESS_MEMORY_COUNTERS()
                 counters.cb = ctypes.sizeof(counters)
-                psapi = ctypes.windll.psapi
+                psapi = ctypes.WinDLL("psapi")
+                psapi.GetProcessMemoryInfo.argtypes = [
+                    ctypes.wintypes.HANDLE,
+                    ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
+                    ctypes.wintypes.DWORD,
+                ]
+                psapi.GetProcessMemoryInfo.restype = ctypes.wintypes.BOOL
                 handle = ctypes.windll.kernel32.GetCurrentProcess()
                 if psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
                     health.memory_mb = counters.WorkingSetSize / (1024 * 1024)
@@ -295,7 +305,10 @@ class HeartbeatService:
 
                 # Broadcast health
                 if self._on_heartbeat:
-                    health = self.get_health()
+                    health = self.get_health(
+                        task_queue=self._task_queue,
+                        tool_registry=self._tool_registry,
+                    )
                     await self._on_heartbeat(health)
 
                 # Clean up completed/failed agents older than 10 minutes
