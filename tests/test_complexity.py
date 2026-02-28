@@ -147,14 +147,43 @@ class TestTeamMatching:
         team = self.assessor._best_team_for_type(TaskType.RESEARCH)
         assert team in ("research-team", "strategy-team")
 
-    def test_unknown_type_defaults_to_research(self):
+    def test_coding_maps_to_coding_team(self):
         team = self.assessor._best_team_for_type(TaskType.CODING)
-        assert team == "research-team"  # coding not in any team map
+        assert team in ("code-review-team", "dev-team", "qa-team")
+
+    def test_debugging_maps_to_qa_team(self):
+        team = self.assessor._best_team_for_type(TaskType.DEBUGGING)
+        assert team == "qa-team"
+
+    def test_refactoring_maps_to_code_review_team(self):
+        team = self.assessor._best_team_for_type(TaskType.REFACTORING)
+        assert team == "code-review-team"
+
+    def test_app_create_maps_to_dev_team(self):
+        team = self.assessor._best_team_for_type(TaskType.APP_CREATE)
+        assert team == "dev-team"
+
+    def test_unknown_type_defaults_to_research(self):
+        team = self.assessor._best_team_for_type(TaskType.EMAIL)
+        assert team in ("marketing-team", "research-team")
 
     def test_all_teams_are_valid(self):
         for team_name in TEAM_TASK_MAP:
             assert isinstance(team_name, str)
             assert len(team_name) > 0
+
+    def test_team_task_map_includes_coding_teams(self):
+        assert "code-review-team" in TEAM_TASK_MAP
+        assert "dev-team" in TEAM_TASK_MAP
+        assert "qa-team" in TEAM_TASK_MAP
+
+    def test_coding_teams_cover_code_types(self):
+        all_covered = set()
+        for team in ("code-review-team", "dev-team", "qa-team"):
+            all_covered.update(TEAM_TASK_MAP[team])
+        assert "coding" in all_covered
+        assert "debugging" in all_covered
+        assert "refactoring" in all_covered
 
 
 class TestKeywordSignals:

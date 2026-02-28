@@ -326,6 +326,124 @@ BUILTIN_TEAMS: dict[str, dict] = {
             },
         ],
     },
+    "code-review-team": {
+        "name": "code-review-team",
+        "description": "Code review team: developer → reviewer → tester (sequential)",
+        "workflow": "sequential",
+        "roles": [
+            {
+                "name": "developer",
+                "task_type": "coding",
+                "prompt": (
+                    "You are the lead developer. Implement the requested changes "
+                    "following existing project patterns. Write clean, well-structured "
+                    "code with proper error handling and type hints."
+                ),
+            },
+            {
+                "name": "reviewer",
+                "task_type": "coding",
+                "prompt": (
+                    "You are the code reviewer. Review the implementation for "
+                    "correctness, security vulnerabilities, code smells, and "
+                    "adherence to project conventions. Use severity levels: "
+                    "critical, major, minor, nit. Provide specific line "
+                    "references and fix suggestions."
+                ),
+            },
+            {
+                "name": "tester",
+                "task_type": "coding",
+                "prompt": (
+                    "You are the QA engineer. Write comprehensive tests covering "
+                    "happy paths, edge cases, and error paths. Run the existing "
+                    "test suite to verify no regressions. Report coverage gaps."
+                ),
+            },
+        ],
+    },
+    "dev-team": {
+        "name": "dev-team",
+        "description": "Development team: architect → parallel backend + frontend devs → integrator",
+        "workflow": "fan_out_fan_in",
+        "roles": [
+            {
+                "name": "architect",
+                "task_type": "coding",
+                "prompt": (
+                    "You are the software architect. Analyze the requirements and "
+                    "create a technical design: component breakdown, data flow, "
+                    "API contracts, and file structure. Specify what backend-dev "
+                    "and frontend-dev should build."
+                ),
+            },
+            {
+                "name": "backend-dev",
+                "task_type": "coding",
+                "prompt": (
+                    "You are the backend developer. Implement server-side logic, "
+                    "API endpoints, data models, and business rules per the "
+                    "architect's design."
+                ),
+                "parallel_group": "implementation",
+            },
+            {
+                "name": "frontend-dev",
+                "task_type": "coding",
+                "prompt": (
+                    "You are the frontend developer. Implement UI components, "
+                    "client-side logic, and API integration per the architect's "
+                    "design."
+                ),
+                "parallel_group": "implementation",
+            },
+            {
+                "name": "integrator",
+                "task_type": "coding",
+                "prompt": (
+                    "You are the integration engineer. Merge backend and frontend "
+                    "work, resolve conflicts, write integration tests, and verify "
+                    "the full system works end-to-end."
+                ),
+            },
+        ],
+    },
+    "qa-team": {
+        "name": "qa-team",
+        "description": "QA team: analyzer → test-writer → security-auditor (sequential)",
+        "workflow": "sequential",
+        "roles": [
+            {
+                "name": "analyzer",
+                "task_type": "debugging",
+                "prompt": (
+                    "You are the code analyzer. Examine the codebase for bugs, "
+                    "code smells, performance issues, and technical debt. "
+                    "Prioritize findings by severity and impact."
+                ),
+            },
+            {
+                "name": "test-writer",
+                "task_type": "coding",
+                "prompt": (
+                    "You are the test engineer. Based on the analysis, write "
+                    "targeted tests that cover identified issues, edge cases, "
+                    "and regression scenarios. Aim for high coverage of critical "
+                    "paths."
+                ),
+            },
+            {
+                "name": "security-auditor",
+                "task_type": "coding",
+                "prompt": (
+                    "You are the security auditor. Review code for OWASP Top 10 "
+                    "vulnerabilities, insecure dependencies, secret exposure, "
+                    "and injection risks. Provide remediation steps for each "
+                    "finding."
+                ),
+            },
+        ],
+    },
 }
 
 
