@@ -1915,7 +1915,7 @@ function renderApps() {
 async function appAction(appId, action) {
   try {
     if (action === "delete") {
-      if (!confirm("Archive this app? It can't be undone.")) return;
+      if (!confirm("Permanently delete this app and all its files? This cannot be undone.")) return;
     }
     const method = action === "delete" ? "DELETE" : "POST";
     const path = action === "delete" ? `/apps/${appId}` : `/apps/${appId}/${action}`;
@@ -2420,6 +2420,7 @@ function renderProjectDetail() {
         <select onchange="updateProjectStatus('${p.id}',this.value)" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.25rem 0.5rem">
           ${["planning","active","paused","completed"].map(s => `<option value="${s}" ${p.status === s ? "selected" : ""}>${s}</option>`).join("")}
         </select>
+        <button class="btn btn-outline btn-sm btn-danger-text" onclick="archiveProject('${p.id}')">Archive</button>
       </div>
       ${p.description ? `<p style="color:var(--text-secondary);margin-bottom:1rem">${esc(p.description)}</p>` : ""}
       <div class="project-card-progress" style="margin-bottom:1rem">
@@ -2459,6 +2460,17 @@ async function updateProjectStatus(projectId, status) {
     const idx = state.projects.findIndex(p => p.id === projectId);
     if (idx >= 0) state.projects[idx] = updated;
     if (state.selectedProject?.id === projectId) state.selectedProject = updated;
+  } catch (e) { toast("Failed: " + e.message, "error"); }
+}
+
+async function archiveProject(projectId) {
+  if (!confirm("Archive this project? It will be hidden from the board. Any linked app continues running independently.")) return;
+  try {
+    await api(`/projects/${projectId}`, { method: "DELETE" });
+    state.projects = state.projects.filter(p => p.id !== projectId);
+    state.selectedProject = null;
+    toast("Project archived", "info");
+    navigate("tasks");
   } catch (e) { toast("Failed: " + e.message, "error"); }
 }
 
