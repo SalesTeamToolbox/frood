@@ -1,6 +1,12 @@
-# 🛸 Agent42
+# Agent42
 
-**Don't Panic.** The answer to life, the universe, and all your tasks.
+<p align="center">
+  <img src="dashboard/frontend/dist/assets/agent42-logo-light.svg" alt="Agent42" width="240">
+</p>
+
+<p align="center">
+  <strong>Don't Panic.</strong> The answer to life, the universe, and all your tasks.
+</p>
 
 > *"The Guide says there is an art to flying, or rather a knack.
 > The knack lies in learning how to throw yourself at the ground and miss."*
@@ -301,7 +307,7 @@ pip install redis[hiredis]
 | Variable | Description |
 |---|---|
 | `CUSTOM_TOOLS_DIR` | Directory for auto-discovered custom tool plugins |
-| `BRAVE_API_KEY` | Brave Search API key (for web search tool) |
+| `BRAVE_API_KEY` | Brave Search API key (optional — DuckDuckGo fallback works without it) |
 | `MCP_SERVERS_JSON` | Path to MCP servers config (JSON) |
 | `CRON_JOBS_PATH` | Path to persistent cron jobs file |
 | `REPLICATE_API_TOKEN` | Replicate API token (for image/video generation) |
@@ -422,12 +428,13 @@ One API key, zero cost. These models are used by default for all task types:
 ### Dynamic Routing (Self-Improving)
 
 Agent42 automatically discovers, evaluates, and promotes the best free models
-over time using a 4-layer resolution chain:
+over time using a 5-layer resolution chain:
 
 1. **Admin override** — `AGENT42_{TYPE}_MODEL` env vars (highest priority)
 2. **Dynamic routing** — `data/dynamic_routing.json` written by ModelEvaluator based on actual task outcomes
 3. **Trial injection** — Unproven models are randomly assigned to a percentage of tasks to gather performance data
-4. **Hardcoded defaults** — `FREE_ROUTING` dict (lowest priority fallback)
+4. **Policy routing** — `balanced`/`performance` mode upgrades to paid models when OpenRouter credits are available
+5. **Hardcoded defaults** — `FREE_ROUTING` dict (lowest priority fallback)
 
 **How it works:**
 - **ModelCatalog** syncs free models from the OpenRouter API every 24 hours (configurable)
@@ -445,6 +452,20 @@ over time using a 4-layer resolution chain:
 | `MODEL_MIN_TRIALS` | `5` | Minimum completions before a model is ranked |
 | `MODEL_RESEARCH_ENABLED` | `true` | Enable web benchmark research |
 | `MODEL_RESEARCH_INTERVAL_HOURS` | `168` | Research fetch interval (default: weekly) |
+
+### L1/L2 Tier System
+
+Agent42 supports two-tier model routing for balancing cost with quality:
+
+- **L1 (Standard)** — Free/admin models handle standard work. All tasks default to L1
+- **L2 (Premium)** — Premium models (Claude Sonnet, GPT-4o) provide senior review and refinement. Tasks can be escalated from L1 to L2 for complex work
+
+The L2 tier is only available when a premium API key is configured. The dashboard
+automatically hides L2 options when no premium key is set. If an L2 task fails,
+the original L1 task is automatically reset to REVIEW status for recovery.
+
+Team roles default to L1 to prevent runaway premium token usage — only explicitly
+configured roles use L2.
 
 ### Admin Overrides
 
@@ -551,7 +572,7 @@ Agents have access to a sandboxed tool registry:
 | `shell` | Sandboxed command execution (with command filter) |
 | `read_file` / `write_file` / `edit_file` | Filesystem operations (workspace-restricted) |
 | `list_dir` | Directory listing |
-| `web_search` | Brave Search API integration |
+| `web_search` | Web search (Brave API with DuckDuckGo fallback — zero config) |
 | `http_client` | HTTP requests to external APIs |
 | `python_exec` | Sandboxed Python execution |
 | `subagent` | Spawn focused sub-agents for parallel work |
@@ -697,8 +718,9 @@ Agent42 maintains persistent memory and learns from every task:
 
 ### Persistent Memory
 - **Structured memory** — key/value sections in `MEMORY.md` (project context, preferences, learned patterns)
+- **Project-scoped memory** — each project gets its own `MEMORY.md` and `HISTORY.md`, isolated from global memory. Project learnings are queried first (60% context budget), with global knowledge as fallback (40%)
 - **Event log** — append-only `HISTORY.md` for audit trail
-- **Session history** — per-conversation message history with configurable limits
+- **Session history** — per-conversation message history with configurable limits. Chat sessions load full conversation history so the agent maintains context across messages
 - **Semantic search** — vector embeddings for similarity-based memory retrieval (auto-detects OpenAI or OpenRouter embedding APIs; falls back to grep)
 
 ### Enhanced Memory Backends (optional)
@@ -778,9 +800,11 @@ agents from blocking indefinitely when nobody is watching the dashboard.
 ### API Retry with Fallback
 
 All LLM API calls use exponential backoff retry (3 attempts: 1s, 2s, 4s). If
-all retries fail, the engine automatically falls back to a different model
-(Llama 4 Maverick) before giving up. This prevents a single API timeout from
-killing an entire task.
+all retries fail, the engine automatically falls back through all available
+providers (OpenRouter free models, plus native Gemini/OpenAI/Anthropic if keys
+are configured). Failed models are tracked per-task and excluded from subsequent
+iterations and fallback attempts, preventing retry waste. Auth errors (401) and
+payment errors (402) skip retries entirely.
 
 ### Convergence Detection
 
@@ -809,7 +833,7 @@ keyword matching for reliable classification:
 - "load CSV spreadsheet" → data_analysis
 - "create a project timeline" → project_management
 
-Supports all 12 task types with correct model routing for each.
+Supports all 15 task types with correct model routing for each.
 
 ### Non-Code Agent Mode
 
@@ -820,11 +844,22 @@ marketing, email), the agent skips git worktree creation and instead:
 - Saves output as `output.md` instead of `REVIEW.md`
 - Skips git commit/diff steps
 
+### Structured Planning (GSD Framework)
+
+For complex multi-step projects, Agent42 uses structured plan specifications:
+
+- **Plan specifications** — Manager agents create JSON plans with file lists, acceptance criteria, and task dependencies
+- **Wave-based execution** — Tasks are topologically sorted into dependency waves; independent tasks run in parallel
+- **Goal-backward verification** — Checks observable truths (files exist, tests pass) rather than trusting self-reports
+- **Plan peer review** — Plans are reviewed before execution to catch structural gaps early
+- **State persistence** — `STATE.md` files enable session recovery if context boundaries are crossed
+- **Context management** — Accumulated context is capped to prevent unbounded growth; old tool messages are compacted when context exceeds 50K characters
+
 ### Task Recovery on Restart
 
-Tasks that were in RUNNING state when the orchestrator shut down are automatically
-reset to PENDING on restart, so they get re-dispatched. Duplicate enqueuing is
-prevented by tracking queued task IDs.
+Tasks that were in RUNNING or ASSIGNED state when the orchestrator shut down are
+automatically reset to PENDING on restart, so they get re-dispatched. Duplicate
+enqueuing is prevented by tracking queued task IDs.
 
 ### Worktree Cleanup
 
@@ -857,7 +892,7 @@ agent42/
 │   └── portability.py         # Backup/restore/clone operations
 ├── agents/
 │   ├── agent.py               # Per-task agent orchestration (code + non-code modes)
-│   ├── model_router.py        # 4-layer model selection (admin → dynamic → trial → default)
+│   ├── model_router.py        # 5-layer model selection (admin → dynamic → trial → policy → default)
 │   ├── model_catalog.py       # OpenRouter catalog sync, free model auto-discovery
 │   ├── model_evaluator.py     # Outcome tracking, composite scoring, trial system
 │   ├── model_researcher.py    # Web benchmark research (LMSys, HuggingFace, etc.)
@@ -922,6 +957,7 @@ agent42/
 │       └── ... (40 total)
 ├── memory/
 │   ├── store.py               # Structured memory + event log
+│   ├── project_memory.py      # Project-scoped memory (per-project MEMORY.md/HISTORY.md)
 │   ├── session.py             # Per-conversation session history (Redis-cached)
 │   ├── embeddings.py          # Pluggable vector store + semantic search
 │   ├── qdrant_store.py        # Qdrant vector DB backend (HNSW search, collections)
@@ -933,8 +969,9 @@ agent42/
 │   ├── websocket_manager.py   # Real-time broadcast (device-tracked connections)
 │   └── frontend/dist/         # SPA dashboard (vanilla JS, no build step)
 │       ├── index.html         # Entry point
-│       ├── app.js             # Full SPA (setup wizard, login, tasks, settings)
-│       └── style.css          # Dark theme CSS
+│       ├── app.js             # Full SPA (setup wizard, login, tasks, chat, code, reports, settings)
+│       ├── style.css          # Dark theme CSS (responsive, 3 breakpoints)
+│       └── assets/            # Brand assets (geometric robot avatar, logos, favicon)
 ├── deploy/                    # Production deployment
 │   ├── install-server.sh      # Full server setup (Redis, Qdrant, nginx, SSL, systemd, firewall)
 │   └── nginx-agent42.conf     # Reverse proxy template (__DOMAIN__/__PORT__ placeholders)
@@ -943,7 +980,7 @@ agent42/
 │   ├── model_performance.json # Per-model outcome tracking
 │   ├── model_research.json    # Web benchmark research scores
 │   └── dynamic_routing.json   # Data-driven model routing overrides
-├── tests/                     # 1000+ tests across 30+ test files
+├── tests/                     # 1700+ tests across 30+ test files
 ├── .github/workflows/         # CI/CD (test, lint, security)
 ├── Dockerfile                 # Container build (Python 3.12-slim)
 ├── docker-compose.yml         # Dev stack (Agent42 + Redis + Qdrant)
@@ -1127,6 +1164,9 @@ Simple tasks ("Fix the login bug") run as single agents with zero overhead. Comp
 | content-team | sequential | writer → editor → SEO optimizer |
 | design-review | sequential | designer → critic → brand reviewer |
 | strategy-team | fan_out_fan_in | market-researcher + competitive-researcher → strategist → presenter |
+| code-review-team | sequential | developer → reviewer → tester |
+| dev-team | fan_out_fan_in | architect → backend-dev + frontend-dev → integrator |
+| qa-team | sequential | analyzer → test-writer → security-auditor |
 
 Clone any built-in team to customize roles and workflow for your needs.
 
@@ -1171,11 +1211,16 @@ skills, and settings.
 ### Features
 
 - **Login** — JWT-based authentication with bcrypt password hashing
-- **Task Management** — Create, view, approve, cancel, retry tasks with real-time status updates
-- **Task Detail** — Full task info: status, type, iterations, description, output/error
+- **Mission Control** — Create, view, approve, cancel, retry tasks with real-time status updates. Tabs for Tasks, Projects, and Activity feed
+- **Task Detail** — Full task info: status, type, iterations, description, output/error. Post comments that route to the running agent in real time
+- **Chat with Agent42** — Conversational interface with session management, conversation history, and inline code block rendering with canvas support
+- **Code with Agent42** — Dedicated coding sessions with project setup flow and AI-assisted development
+- **Projects** — Group related tasks under projects with scoped memory, archiving, and associated app management
+- **Reports** — LLM usage analytics: per-model token breakdown, cost estimates, task statistics by type/status, and performance metrics
 - **Approvals** — Approve or deny agent operations (email send, git push, file delete) from the dashboard
 - **Review with Feedback** — Approve or request changes on completed tasks; feedback is stored in agent memory for learning
 - **Tools & Skills** — View all registered tools and loaded skills
+- **Apps** — Build and deploy web applications directly on the server via the app platform
 - **Settings** — Organized into 5 tabs with clear descriptions for every setting:
   - **LLM Providers** — API keys for OpenRouter, OpenAI, Anthropic, DeepSeek, Gemini, Replicate, Luma, Brave
   - **Channels** — Discord, Slack, Telegram, Email (IMAP/SMTP) configuration
@@ -1183,7 +1228,7 @@ skills, and settings.
   - **Orchestrator** — Concurrent agents, spending limits, repo path, task file, MCP, cron
   - **Storage & Paths** — Memory, sessions, outputs, templates, images, skills directories
 - **WebSocket** — Real-time updates with exponential backoff reconnection
-- **Responsive** — Mobile-friendly layout with sidebar navigation
+- **Responsive** — Full mobile-friendly design with hamburger navigation, touch-friendly targets (44px min), and three responsive breakpoints (1024px, 768px, 480px)
 
 LLM provider API keys can be configured directly through the Settings page (admin only).
 Other settings are displayed as read-only with their environment variable names and help text.
