@@ -1039,12 +1039,20 @@ async function doAddComment(taskId, text) {
       method: "POST",
       body: JSON.stringify({ text, author: "admin" }),
     });
+    // Task update arrives via WebSocket (task_update event) which
+    // refreshes state.tasks and re-renders the detail view automatically.
+    // We still do a manual loadTasks() as a fallback for non-WS clients.
     await loadTasks();
     if (state.selectedTask?.id === taskId) {
       state.selectedTask = state.tasks.find((t) => t.id === taskId);
       renderDetail();
+      // Auto-scroll comment thread to bottom
+      const thread = document.querySelector(".comment-thread");
+      if (thread) thread.scrollTop = thread.scrollHeight;
     }
-    toast("Comment added", "success");
+    const task = state.tasks.find((t) => t.id === taskId);
+    const isActive = task && ["pending", "assigned", "running"].includes(task.status);
+    toast(isActive ? "Message sent to agent" : "Comment added", "success");
   } catch (err) { toast(err.message, "error"); }
 }
 
@@ -1595,6 +1603,7 @@ function renderDetail() {
 
   const result = t.result || t.error || "(no output yet)";
   const isReview = t.status === "review";
+  const isActive = ["pending", "assigned", "running"].includes(t.status);
 
   el.innerHTML = `
     <div style="margin-bottom:1rem">
@@ -1640,20 +1649,24 @@ function renderDetail() {
     </div>
 
     <div class="card" style="margin-bottom:1.5rem">
-      <div class="card-header"><h3>Comments (${(t.comments||[]).length})</h3></div>
+      <div class="card-header">
+        <h3>${isActive ? "Messages" : "Comments"} (${(t.comments||[]).length})</h3>
+        ${isActive ? '<span style="font-size:0.75rem;color:var(--success);font-weight:500">Agent is listening</span>' : ""}
+      </div>
       <div class="card-body">
-        <div class="comment-thread" style="max-height:200px;overflow-y:auto;margin-bottom:0.75rem">
+        <div class="comment-thread" style="max-height:300px;overflow-y:auto;margin-bottom:0.75rem">
           ${(t.comments||[]).map(c => `
             <div style="padding:0.5rem;border-bottom:1px solid var(--border)">
               <span style="font-weight:600;color:var(--accent);font-size:0.8rem">${esc(c.author)}</span>
               <span style="color:var(--text-muted);font-size:0.7rem;margin-left:0.5rem">${c.timestamp ? timeSince(c.timestamp) : ""}</span>
               <div style="margin-top:0.2rem;font-size:0.85rem">${esc(c.text)}</div>
             </div>
-          `).join("") || '<div style="color:var(--text-muted);font-size:0.85rem">No comments yet</div>'}
+          `).join("") || '<div style="color:var(--text-muted);font-size:0.85rem">No messages yet</div>'}
         </div>
+        ${isActive ? '<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem">Messages here are sent directly to the agent working on this task.</div>' : ""}
         <div style="display:flex;gap:0.5rem">
-          <input type="text" id="comment-input" placeholder="Add a comment..." style="flex:1">
-          <button class="btn btn-primary btn-sm" onclick="submitComment('${t.id}')">Post</button>
+          <input type="text" id="comment-input" placeholder="${isActive ? "Send a message to the agent..." : "Add a comment..."}" style="flex:1" onkeydown="if(event.key==='Enter'){submitComment('${t.id}');event.preventDefault()}">
+          <button class="btn btn-primary btn-sm" onclick="submitComment('${t.id}')">${isActive ? "Send" : "Post"}</button>
         </div>
       </div>
     </div>

@@ -439,6 +439,7 @@ class TestWorkspaceSandbox:
 | 67 | Critic | Critic only sees task + output text — misses tool usage context | `_critic_pass` now receives `tool_records` and `iteration_num`; includes compact tool summary for the critic |
 | 68 | Context | Tool results accumulate unbounded in iteration loop — context rot | `_compact_tool_messages` truncates old tool messages to 200 chars when total exceeds 50K chars; last 2 tool messages kept intact |
 | 69 | Teams | Team/subagent tasks don't inherit `project_id` — learnings scatter to global | `TeamTool`, `SubagentTool`, and manager tasks now propagate `project_id` from parent context |
+| 70 | Comments | Task comments (`POST /api/tasks/{id}/comment`) were stored but never routed to the running agent or broadcast to chat | Comment endpoint now calls `route_message_to_task()` for active tasks, broadcasts `task_update`, and mirrors to chat session via `chat_message` event |
 
 ---
 
