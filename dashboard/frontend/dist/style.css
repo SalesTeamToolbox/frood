@@ -1459,3 +1459,104 @@ body.towel-day .sidebar-brand::after {
 body.towel-day .dont-panic-watermark {
   opacity: 0.4; color: var(--a42-teal);
 }
+
+/* ---------- Agent Profiles ---------- */
+
+.agents-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+.agent-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.25rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+}
+.agent-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+.agent-card-default { border-left: 3px solid var(--a42-gold); }
+
+.agent-card-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+.agent-card-title { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.agent-card-title h4 { margin: 0; font-size: 1rem; font-weight: 600; }
+
+.agent-card-desc {
+  font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.4;
+}
+
+.agent-card-meta { display: flex; flex-direction: column; gap: 0.4rem; }
+.agent-card-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+
+.badge-tier {
+  display: inline-block; padding: 0.1rem 0.45rem; border-radius: var(--radius-sm);
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.badge-l1 { background: rgba(60, 191, 174, 0.15); color: var(--a42-teal); }
+.badge-l2 { background: rgba(232, 168, 56, 0.15); color: var(--a42-gold); }
+.badge-default { background: rgba(232, 168, 56, 0.12); color: var(--a42-gold); }
+
+/* Agent detail view */
+.agent-detail { max-width: 800px; }
+.agent-detail-topbar {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 1.5rem; flex-wrap: wrap; gap: 0.75rem;
+}
+.agent-detail-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.agent-detail-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.5rem;
+}
+.agent-detail-header {
+  display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+.agent-detail-header h3 { margin: 0; font-size: 1.25rem; font-weight: 700; }
+.agent-detail-section { margin-bottom: 1.25rem; }
+.agent-detail-section h4 {
+  font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: 0.05em; margin-bottom: 0.5rem;
+}
+
+.agent-persona-content {
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 1rem;
+  font-family: var(--mono); font-size: 0.82rem; line-height: 1.6;
+  color: var(--text-secondary); white-space: pre-wrap; max-height: 400px;
+  overflow-y: auto;
+}
+
+/* Chat Persona card */
+.persona-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius); padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+.persona-card-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;
+}
+.persona-preview {
+  font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5;
+  white-space: pre-wrap;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.persona-reference {
+  margin-top: 0.75rem;
+}
+
+/* Checkbox grid for modals */
+.checkbox-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.3rem 0.75rem;
+}
+.checkbox-label {
+  display: flex; align-items: center; gap: 0.4rem;
+  font-size: 0.82rem; color: var(--text-secondary); cursor: pointer;
+}
+
+@media (max-width: 900px) { .agents-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); } }
+@media (max-width: 600px) { .agents-grid { grid-template-columns: 1fr; } }
