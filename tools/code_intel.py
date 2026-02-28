@@ -1,7 +1,7 @@
 """
 Code intelligence tool — AST-aware code navigation and search.
 
-Inspired by Aider's tree-sitter repo mapping and AutoCodeRover's
+AST-aware code navigation with tree-sitter repo mapping and
 structure-aware search. Provides class/function/method search rather
 than just text grep.
 

@@ -51,4 +51,3 @@ docker-compose.override.yml
 
 # Editor
 *.code-workspace
-.aider*
