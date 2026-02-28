@@ -1,29 +1,39 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 60" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 64" fill="none">
   <!-- Agent42 Logo — Dark text variant -->
-  <!-- "42" mark with subtle hitchhiking thumb in the "4" -->
-  <g>
-    <!-- Interconnected nodes background motif -->
-    <circle cx="30" cy="30" r="26" fill="none" stroke="#E8A838" stroke-width="2" opacity="0.2"/>
-    <circle cx="30" cy="30" r="22" fill="none" stroke="#E8A838" stroke-width="1" opacity="0.1"/>
+  <!-- Cheerful robot head mark with "42" visor — the anti-Marvin -->
+  <g transform="translate(4, 2)">
+    <!-- Robot head outline -->
+    <rect x="6" y="12" width="48" height="40" rx="10" fill="#1a1d27" stroke="#E8A838" stroke-width="2"/>
 
-    <!-- "4" with thumb-like serif at top -->
-    <path d="M20 42V38L34 14H40V38H46V42H40V50H35V42H20Z" fill="#1a1d27"/>
-    <path d="M25 38L35 18V38H25Z" fill="#E8A838" opacity="0.15"/>
-    <path d="M35 38V18L25 38H35Z" fill="none" stroke="#1a1d27" stroke-width="0.5" opacity="0.3"/>
+    <!-- Antenna — cheerful upward arc -->
+    <line x1="30" y1="12" x2="30" y2="4" stroke="#E8A838" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="30" cy="3" r="3" fill="#E8A838"/>
 
-    <!-- "2" -->
-    <path d="M50 16C50 14 52 12 56 12C60 12 63 14 63 18C63 22 58 28 50 36H64V42H44V38C54 28 58 22 58 18C58 16 57 15 56 15C55 15 54 16 54 18H50V16Z" fill="#1a1d27"/>
+    <!-- Visor band — shows "42" as the robot's display -->
+    <rect x="12" y="22" width="36" height="16" rx="4" fill="#E8A838" opacity="0.15"/>
+    <text x="20" y="35" font-family="'SF Mono', 'Fira Code', 'Consolas', monospace" font-size="14" font-weight="800" fill="#E8A838" letter-spacing="1">42</text>
 
-    <!-- Subtle thumb element on top-right of "4" -->
-    <ellipse cx="40" cy="13" rx="2.5" ry="3.5" fill="#E8A838" opacity="0.6" transform="rotate(-15 40 13)"/>
+    <!-- Happy eyes above visor — upward arcs (smiling eyes) -->
+    <path d="M20 20 Q23 17 26 20" fill="none" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M34 20 Q37 17 40 20" fill="none" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
+
+    <!-- Cheerful mouth — wide smile -->
+    <path d="M20 44 Q30 50 40 44" fill="none" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
+
+    <!-- Side ear/sensors -->
+    <rect x="2" y="26" width="4" height="10" rx="2" fill="#E8A838" opacity="0.5"/>
+    <rect x="54" y="26" width="4" height="10" rx="2" fill="#E8A838" opacity="0.5"/>
+
+    <!-- Hitchhiker thumb subtly integrated as right antenna flourish -->
+    <ellipse cx="34" cy="2" rx="2" ry="3" fill="#E8A838" opacity="0.5" transform="rotate(20 34 2)"/>
   </g>
 
   <!-- "Agent" text -->
-  <text x="78" y="32" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="600" fill="#1a1d27" letter-spacing="-0.5">Agent</text>
+  <text x="76" y="38" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="26" font-weight="600" fill="#1a1d27" letter-spacing="-0.5">Agent</text>
 
-  <!-- "42" text accent -->
-  <text x="146" y="32" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="800" fill="#E8A838" letter-spacing="-0.5">42</text>
+  <!-- "42" text accent — part of the wordmark, not duplicating the robot mark -->
+  <text x="168" y="38" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="26" font-weight="800" fill="#E8A838" letter-spacing="-0.5">42</text>
 
   <!-- Subtle tagline -->
-  <text x="78" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="8" fill="#8f98aa" letter-spacing="0.5">DON'T PANIC</text>
+  <text x="76" y="54" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9" fill="#8f98aa" letter-spacing="0.5">DON'T PANIC</text>
 </svg>

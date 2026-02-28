@@ -98,9 +98,14 @@ const TAGLINES = [
   "Time is an illusion. Lunchtime doubly so. Deadlines triply.",
   "Now with 100% more towels than competing platforms.",
   "A Whose-Who\u2019s Guide to Getting Things Done.",
-  "It\u2019s just a flesh wound.",
-  "We are the knights who say\u2026 Ni!",
+  "So long, and thanks for all the tasks.",
+  "I love deadlines. I love the whooshing noise they make as they go by.",
+  "This must be Thursday. I never could get the hang of Thursdays.",
+  "Would it save you a lot of time if I just gave up and went mad now?",
 ];
+
+// Agent42 robot avatar SVG — cheerful, optimistic (the anti-Marvin)
+const AGENT42_AVATAR = `<img src="/assets/agent42-avatar.svg" alt="42" width="20" height="20" style="border-radius:50%">`;
 
 const STATUS_FLAVOR = {
   pending: "Waiting in the Infinite Improbability Queue\u2026",
@@ -2328,7 +2333,7 @@ function buildChatMsgHtml(m, idx, msgArrayName, isCode) {
     `<button class="chat-canvas-btn" onclick="openCanvas(${msgArrayName}[${idx}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
   ).join("");
   const taskRef = !isCode && m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : "";
-  return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent"${avatarStyle}>42</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div></div>`;
+  return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent"${avatarStyle}>${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div></div>`;
 }
 
 // Scroll chat to bottom reliably (after browser paint)
@@ -2400,7 +2405,7 @@ function updateChatTypingIndicator(show, isCode) {
 function _insertTypingIndicator(container, isCode) {
   const avatarStyle = isCode ? ' style="background:var(--success-dim);color:var(--success)"' : "";
   container.insertAdjacentHTML("beforeend",
-    `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-avatar chat-avatar-agent"${avatarStyle}>42</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>`
+    `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-avatar chat-avatar-agent"${avatarStyle}>${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>`
   );
 }
 
@@ -2481,12 +2486,12 @@ function renderChat() {
     const canvasButtons = codeBlocks.map((b, j) =>
       `<button class="chat-canvas-btn" onclick="openCanvas(${msgArray}[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
     ).join("");
-    return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent">42</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : ""}</div></div>`;
+    return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent">${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : ""}</div></div>`;
   }).join("");
 
   messages.forEach(m => { if (m.role !== "user") m.__codeBlocks = extractCodeBlocks(m.content || ""); });
 
-  const typingHtml = state.chatSending ? `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-avatar chat-avatar-agent">42</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
+  const typingHtml = state.chatSending ? `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-avatar chat-avatar-agent">${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
 
   el.innerHTML = `
     <div class="chat-layout">
@@ -2905,12 +2910,12 @@ function renderCodeChatHTML() {
     const canvasButtons = codeBlocks.map((b, j) =>
       `<button class="chat-canvas-btn" onclick="openCanvas(state.codeCurrentMessages[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
     ).join("");
-    return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim);color:var(--success)">42</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}</div></div>`;
+    return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim)">${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}</div></div>`;
   }).join("");
 
   messages.forEach(m => { if (m.role !== "user") m.__codeBlocks = extractCodeBlocks(m.content || ""); });
 
-  const typingHtml = state.codeSending ? `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim);color:var(--success)">42</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
+  const typingHtml = state.codeSending ? `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim)">${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
 
   const deployLabel = { local: "Local", remote: "Remote", github: "GitHub" }[session?.deployment_target] || session?.deployment_target || "";
   const sessionInfo = session?.deployment_target ? `<div class="code-session-info"><span>${deployLabel}</span>${session.github_repo ? ` <span>&#8226; ${esc(session.github_repo)}</span>` : ""}</div>` : "";
@@ -3933,7 +3938,7 @@ function render() {
     <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeMobileSidebar()"></div>
     <div class="app-layout">
       <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand"><img src="/assets/agent42-logo-light.svg" alt="Agent42" height="28" onerror="this.outerHTML='Agent<span class=&quot;num&quot;>42</span>'"></div>
+        <div class="sidebar-brand"><img src="/assets/agent42-logo-light.svg" alt="Agent42" height="36" onerror="this.outerHTML='Agent<span class=&quot;num&quot;>42</span>'"></div>
         <nav class="sidebar-nav">
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks');closeMobileSidebar()">&#127919; Mission Control</a>
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status');closeMobileSidebar()">&#128200; Status</a>

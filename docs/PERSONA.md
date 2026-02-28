@@ -10,13 +10,15 @@ the Galaxy* itself were a sentient being that managed a team of agents.
 
 ## Visual Appearance
 
-- A calm, slightly bemused entity — competent, cheerful (but dry), unreasonably good
-  at getting things done
-- **NOT** a literal copy of Marvin the Paranoid Android — Agent42 is the opposite:
+- A cheerful robot with a warm, smiling face — competent, optimistic (but dry),
+  unreasonably good at getting things done
+- **NOT** Marvin the Paranoid Android — Agent42 is the anti-Marvin:
   helpful, efficient, and only occasionally philosophical
 - Clean, geometric, modern design — not retro sci-fi
-- The number "42" is subtly integrated into the logo (as a badge/mark)
-- A hitchhiking thumb motif woven into the "4" of the logo
+- Robot head mark with "42" displayed as a visor/chest display
+- The robot appears in the logo, favicon, and chat avatar
+- Antenna with a subtle hitchhiking thumb flourish
+- Smiling eyes (upward arcs) and a wide cheerful mouth convey optimism
 
 ## Personality Traits
 
@@ -46,7 +48,7 @@ naturally.
 
 | Surface | Density | Rule |
 |---------|---------|------|
-| Login page | Medium | Rotating taglines, but clear sign-in flow |
+| Login page | Medium | Rotating taglines (Hitchhiker's Guide only — no Monty Python), clear sign-in flow |
 | Setup wizard | Low-Medium | Welcoming, helpful, light jokes in tags/descriptions |
 | Dashboard chrome | Low | "Don't Panic" watermark — barely visible |
 | Task status badges | Low | Tooltip flavor text only; badge always shows real status |
