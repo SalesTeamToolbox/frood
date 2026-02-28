@@ -195,3 +195,13 @@ class TestProjectManager:
         assert project.priority == 2
         assert project.github_repo == "user/repo"
         assert project.assigned_team == "team-alpha"
+
+    @pytest.mark.asyncio
+    async def test_archive_project_preserves_app_id(self, manager):
+        """Archiving a project does not remove the app_id — the app lives on independently."""
+        project = await manager.create(name="App Project", app_id="abc123")
+        result = await manager.archive(project.id)
+        assert result is True
+        fetched = await manager.get(project.id)
+        assert fetched.status == "archived"
+        assert fetched.app_id == "abc123"
