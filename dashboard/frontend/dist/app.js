@@ -51,7 +51,7 @@ const state = {
   codeCurrentMessages: [],
   codeSetupStep: 0,  // 0=not started, 1=mode, 2=config, 3=done
   codeSending: false,
-  codeCanvasOpen: true,
+  codeCanvasOpen: false,
   // Projects
   projects: [],
   selectedProject: null,
@@ -65,8 +65,6 @@ const state = {
   githubAccounts: [],
   githubAccountsLoading: false,
   githubAccountAdding: false,
-  githubAccountNewLabel: "",
-  githubAccountNewToken: "",
   // Editable settings
   envSettings: {},
   envEdits: {},
@@ -2250,7 +2248,7 @@ function copyCodeBlock(id) {
   const el = document.getElementById(id);
   if (!el) return;
   navigator.clipboard.writeText(el.textContent).then(() => {
-    const btn = el.parentElement.querySelector(".md-code-copy");
+    const btn = el.parentElement?.querySelector(".md-code-copy");
     if (btn) { btn.textContent = "Copied!"; setTimeout(() => btn.textContent = "Copy", 2000); }
   }).catch(() => {});
 }
@@ -2855,7 +2853,7 @@ function renderCodeSetupHTML(sessionId) {
       <div class="form-group">
         <label>Create new repository</label>
         <input type="text" id="code-gh-repo" placeholder="my-project">
-        <div class="help">${state.githubConnected ? "A new repo will be created under your GitHub account" : '<a href="#" onclick="openSettings();return false">Connect GitHub in Settings</a> to enable repo creation'}</div>
+        <div class="help">${state.githubConnected ? "A new repo will be created under your GitHub account" : '<a href="#" onclick="navigate(\'settings\');return false">Connect GitHub in Settings</a> to enable repo creation'}</div>
       </div>
       <div class="form-group">
         <label>Or clone by URL</label>
@@ -3866,9 +3864,8 @@ function settingSelect(envVar, label, options, help) {
 async function loadOrStatus() {
   state.orStatusLoading = true;
   try {
-    const resp = await apiFetch("/settings/openrouter-status");
-    if (resp.ok) state.orStatus = await resp.json();
-  } catch (e) { /* non-critical */ }
+    state.orStatus = (await api("/settings/openrouter-status")) || null;
+  } catch (e) { state.orStatus = null; }
   state.orStatusLoading = false;
 }
 
@@ -3949,6 +3946,7 @@ function render() {
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
           <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills');closeMobileSidebar()">&#9889; Skills</a>
           <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Apps</a>
+          <a href="#" data-page="reports" class="${state.page === "reports" ? "active" : ""}" onclick="event.preventDefault();navigate('reports');closeMobileSidebar()">&#128202; Reports</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings');closeMobileSidebar()">&#9881; Settings</a>
         </nav>
         <div class="sidebar-footer">
@@ -3963,7 +3961,7 @@ function render() {
           <button class="hamburger-btn" onclick="toggleMobileSidebar()" aria-label="Open menu">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
-          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", apps: "Apps", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", apps: "Apps", reports: "Reports", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? `
               <button class="btn btn-primary btn-sm" onclick="${state.missionControlTab === 'projects' ? 'showCreateProjectModal()' : 'showCreateTaskModal()'}">+ New ${state.missionControlTab === 'projects' ? 'Project' : 'Task'}</button>

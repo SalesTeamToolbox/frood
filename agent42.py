@@ -993,6 +993,16 @@ class Agent42:
         """
         await self.ws_manager.broadcast("task_update", task.to_dict())
 
+        # Record to activity feed for the dashboard sidebar
+        record = getattr(self.ws_manager, "record_activity", None)
+        if record:
+            status = task.status.value if hasattr(task.status, "value") else str(task.status)
+            record(
+                event=f"task_{status}",
+                title=getattr(task, "title", ""),
+                task_id=getattr(task, "id", ""),
+            )
+
         # Dashboard chat: broadcast thinking/done state so the frontend can
         # show a typing indicator while the agent is processing.
         if task.origin_channel == "dashboard_chat":
