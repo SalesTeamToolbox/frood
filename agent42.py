@@ -1687,8 +1687,9 @@ def main():
 
         loop = asyncio.new_event_loop()
 
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, lambda: loop.create_task(orchestrator.shutdown()))
+        if sys.platform != "win32":
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, lambda: loop.create_task(orchestrator.shutdown()))
 
         try:
             loop.run_until_complete(orchestrator.start())

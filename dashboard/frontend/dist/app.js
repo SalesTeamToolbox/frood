@@ -279,7 +279,9 @@ function renderSetupWizard() {
   let body = "";
   if (s === 1) {
     body = `
-      <h2>Welcome to Agent<span style="color:var(--accent)">42</span></h2>
+      <div class="login-logo">
+        <img src="/assets/agent42-logo-light.svg" alt="Agent42" onerror="this.outerHTML='<h1>Agent<span style=&quot;color:var(--accent)&quot;>42</span></h1>'">
+      </div>
       <p class="setup-subtitle">The answer to life, the universe, and all your tasks.</p>
       <p class="setup-desc">Welcome, hoopy frood. Let\u2019s secure the Guide with a passphrase.</p>
       ${steps}
