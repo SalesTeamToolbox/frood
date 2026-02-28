@@ -390,6 +390,7 @@ class Agent:
         profile_loader=None,
         extension_loader=None,
         intervention_queue: asyncio.Queue | None = None,
+        chat_session_manager=None,
     ):
         self.task = task
         self.task_queue = task_queue
@@ -401,6 +402,7 @@ class Agent:
         self.profile_loader = profile_loader
         self.extension_loader = extension_loader
         self.intervention_queue = intervention_queue
+        self.chat_session_manager = chat_session_manager
         self.engine = IterationEngine(
             self.router,
             tool_registry=tool_registry,
@@ -832,6 +834,34 @@ class Agent:
                 memory_context = memory_source.build_context()
             if memory_context.strip():
                 parts.append(f"\n{memory_context}")
+
+        # Include conversation history from dashboard chat session
+        if self.chat_session_manager:
+            session_id = (task.origin_metadata or {}).get("chat_session_id", "")
+            if session_id:
+                try:
+                    chat_history = await self.chat_session_manager.get_messages(
+                        session_id, limit=20
+                    )
+                    if len(chat_history) > 1:
+                        history_lines = []
+                        for msg in chat_history[:-1]:
+                            role = msg.get("role", "user")
+                            content = msg.get("content", "")
+                            if content:
+                                preview = content[:500]
+                                if len(content) > 500:
+                                    preview += "..."
+                                history_lines.append(f"[{role}]: {preview}")
+                        if history_lines:
+                            parts.append(
+                                "\n## Conversation History\n\n"
+                                "The user sent this message as part of an ongoing "
+                                "conversation. Recent chat history for context:\n\n"
+                                + "\n".join(history_lines)
+                            )
+                except Exception as e:
+                    logger.debug("Could not load chat history: %s", e)
 
         # Include tool usage recommendations from prior learning (Phase 9)
         if self.learner:
