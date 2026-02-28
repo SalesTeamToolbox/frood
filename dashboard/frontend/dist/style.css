@@ -859,12 +859,12 @@ td.task-title:hover { color: var(--accent); }
   padding: 2rem; text-align: center;
 }
 .chat-welcome-icon {
-  font-size: 3rem; font-weight: 800; color: var(--accent);
   background: var(--accent-dim); border: 2px solid var(--accent);
   width: 80px; height: 80px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.25rem; overflow: hidden;
 }
+.chat-welcome-icon img { border-radius: 50%; }
 .chat-welcome h2 { font-size: 1.3rem; margin-bottom: 0.5rem; }
 .chat-welcome p { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 2rem; max-width: 400px; }
 
@@ -1112,7 +1112,8 @@ td.task-title:hover { color: var(--accent); }
     width: 100%; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 200;
   }
   .chat-suggestions { grid-template-columns: 1fr; }
-  .chat-welcome-icon { width: 60px; height: 60px; font-size: 2.2rem; }
+  .chat-welcome-icon { width: 60px; height: 60px; }
+  .chat-welcome-icon img { width: 48px; height: 48px; }
   .chat-welcome h2 { font-size: 1.1rem; }
   .chat-composer-inner { border-radius: 10px; padding: 0.4rem 0.4rem 0.4rem 0.75rem; }
 

@@ -2448,7 +2448,7 @@ function renderChat() {
         </div>
         <div class="chat-main">
           <div class="chat-welcome">
-            <div class="chat-welcome-icon">42</div>
+            <div class="chat-welcome-icon"><img src="/assets/agent42-avatar.svg" alt="Agent42" width="64" height="64"></div>
             <h2>Chat with Agent42</h2>
             <p>Start a new conversation or pick up where you left off.</p>
             <div class="chat-suggestions">
@@ -2745,6 +2745,7 @@ function renderCode() {
   if (!hasSession) {
     mainContent = `
       <div class="code-welcome">
+        <div class="chat-welcome-icon" style="background:var(--success-dim);border-color:var(--success)"><img src="/assets/agent42-avatar.svg" alt="Agent42" width="64" height="64"></div>
         <h2 style="margin-bottom:0.5rem">Code with Agent42</h2>
         <p style="color:var(--text-secondary);margin-bottom:1.5rem">Start a new coding session to build projects with AI assistance.</p>
         <button class="btn btn-primary" onclick="createChatSession('code')">+ New Coding Session</button>
