@@ -1,6 +1,10 @@
-"""Tests for ChatSessionManager — session CRUD and JSONL message persistence."""
+"""Tests for ChatSessionManager — session CRUD and JSONL message persistence.
+
+Also tests Agent._build_context() integration with chat history.
+"""
 
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -226,3 +230,179 @@ class TestChatSessionManager:
             msg = json.loads(line)
             assert "role" in msg
             assert "content" in msg
+
+
+class TestAgentChatHistoryContext:
+    """Tests for Agent._build_context() chat history integration."""
+
+    @pytest.mark.asyncio
+    async def test_build_context_includes_chat_history(self, tmp_path):
+        """When chat_session_manager is provided and origin_metadata has a
+        chat_session_id, _build_context() should include conversation history."""
+        from core.task_queue import Task, TaskType
+
+        sessions_dir = tmp_path / "sessions"
+        manager = ChatSessionManager(sessions_dir)
+        session = await manager.create(title="Context Test")
+
+        # Add prior conversation messages
+        await manager.add_message(session.id, {"role": "user", "content": "What is Python?"})
+        await manager.add_message(
+            session.id,
+            {"role": "assistant", "content": "Python is a programming language."},
+        )
+        await manager.add_message(session.id, {"role": "user", "content": "Tell me more about it."})
+
+        task = Task(
+            title="Follow-up question",
+            description="Tell me more about it.",
+            task_type=TaskType.RESEARCH,
+            origin_metadata={"chat_session_id": session.id},
+        )
+
+        # Create a minimal Agent with mocked dependencies
+        with (
+            patch("agents.agent.ModelRouter"),
+            patch("agents.agent.IterationEngine"),
+            patch("agents.agent.RLMProvider"),
+        ):
+            from agents.agent import Agent
+
+            agent = Agent(
+                task=task,
+                task_queue=MagicMock(),
+                worktree_manager=None,
+                approval_gate=MagicMock(),
+                emit=AsyncMock(),
+                chat_session_manager=manager,
+            )
+
+            worktree = tmp_path / "worktree"
+            worktree.mkdir()
+
+            context = await agent._build_context(task, worktree)
+
+            assert "Conversation History" in context
+            assert "What is Python?" in context
+            assert "Python is a programming language." in context
+            # Current message ("Tell me more about it") should be excluded
+            # from the history section (it's already the task description)
+
+    @pytest.mark.asyncio
+    async def test_build_context_no_session_manager(self, tmp_path):
+        """When chat_session_manager is None, _build_context() should not
+        include a conversation history section."""
+        from core.task_queue import Task, TaskType
+
+        task = Task(
+            title="Solo question",
+            description="What is the meaning of life?",
+            task_type=TaskType.RESEARCH,
+            origin_metadata={"chat_session_id": "some-session"},
+        )
+
+        with (
+            patch("agents.agent.ModelRouter"),
+            patch("agents.agent.IterationEngine"),
+            patch("agents.agent.RLMProvider"),
+        ):
+            from agents.agent import Agent
+
+            agent = Agent(
+                task=task,
+                task_queue=MagicMock(),
+                worktree_manager=None,
+                approval_gate=MagicMock(),
+                emit=AsyncMock(),
+                chat_session_manager=None,
+            )
+
+            worktree = tmp_path / "worktree"
+            worktree.mkdir()
+
+            context = await agent._build_context(task, worktree)
+
+            assert "Conversation History" not in context
+
+    @pytest.mark.asyncio
+    async def test_build_context_no_session_id_in_metadata(self, tmp_path):
+        """When origin_metadata has no chat_session_id, _build_context()
+        should not include a conversation history section."""
+        from core.task_queue import Task, TaskType
+
+        sessions_dir = tmp_path / "sessions"
+        manager = ChatSessionManager(sessions_dir)
+
+        task = Task(
+            title="No session ID",
+            description="Random question",
+            task_type=TaskType.RESEARCH,
+            origin_metadata={"chat_msg_id": "msg123"},  # No session_id
+        )
+
+        with (
+            patch("agents.agent.ModelRouter"),
+            patch("agents.agent.IterationEngine"),
+            patch("agents.agent.RLMProvider"),
+        ):
+            from agents.agent import Agent
+
+            agent = Agent(
+                task=task,
+                task_queue=MagicMock(),
+                worktree_manager=None,
+                approval_gate=MagicMock(),
+                emit=AsyncMock(),
+                chat_session_manager=manager,
+            )
+
+            worktree = tmp_path / "worktree"
+            worktree.mkdir()
+
+            context = await agent._build_context(task, worktree)
+
+            assert "Conversation History" not in context
+
+    @pytest.mark.asyncio
+    async def test_build_context_single_message_no_history(self, tmp_path):
+        """When the session has only one message (the current one),
+        no history section should be added."""
+        from core.task_queue import Task, TaskType
+
+        sessions_dir = tmp_path / "sessions"
+        manager = ChatSessionManager(sessions_dir)
+        session = await manager.create(title="Single Msg")
+
+        # Only one message — the current one
+        await manager.add_message(session.id, {"role": "user", "content": "First message ever"})
+
+        task = Task(
+            title="First question",
+            description="First message ever",
+            task_type=TaskType.RESEARCH,
+            origin_metadata={"chat_session_id": session.id},
+        )
+
+        with (
+            patch("agents.agent.ModelRouter"),
+            patch("agents.agent.IterationEngine"),
+            patch("agents.agent.RLMProvider"),
+        ):
+            from agents.agent import Agent
+
+            agent = Agent(
+                task=task,
+                task_queue=MagicMock(),
+                worktree_manager=None,
+                approval_gate=MagicMock(),
+                emit=AsyncMock(),
+                chat_session_manager=manager,
+            )
+
+            worktree = tmp_path / "worktree"
+            worktree.mkdir()
+
+            context = await agent._build_context(task, worktree)
+
+            # Only 1 message — no history section expected
+            assert "Conversation History" not in context

@@ -724,6 +724,15 @@ class IterationEngine:
                         f"(limit: {max_ctx}, strategy: {strategy})"
                     )
                     if strategy == "error":
+                        if not primary_output.strip():
+                            primary_output = (
+                                "I was unable to complete this task because the "
+                                "context became too large for the model's context "
+                                f"window (~{est_tokens:,} tokens estimated, "
+                                f"limit: {max_ctx:,}). Consider breaking this "
+                                "into smaller subtasks, or switching to the "
+                                "'truncate_oldest' context overflow strategy."
+                            )
                         history.final_output = primary_output
                         history.total_iterations = i
                         history.token_usage = self._token_acc.to_dict()

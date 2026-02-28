@@ -445,6 +445,8 @@ class TestWorkspaceSandbox:
 | 73 | Teams | Team roles inherit tier from parent — L2 team = all premium tokens | Team roles default to L1 via `TeamContext.tier`; only explicitly configured roles use L2 |
 | 74 | Serialization | `tier` field not surviving Task persist/restore | `to_dict()`/`from_dict()` handles via `asdict()` — new string fields serialize automatically |
 | 75 | Comments | Task comments (`POST /api/tasks/{id}/comment`) were stored but never routed to the running agent or broadcast to chat | Comment endpoint now calls `route_message_to_task()` for active tasks, broadcasts `task_update`, and mirrors to chat session via `chat_message` event |
+| 76 | Context | Context overflow "error" strategy returns empty output when `primary_output` is still `""` | Guard: `if not primary_output.strip(): primary_output = "Context too large..."` before setting `history.final_output` |
+| 77 | Chat | Agent processes dashboard chat messages in isolation — no conversation history | Pass `chat_session_manager` to Agent; load history in `_build_context()` via `origin_metadata["chat_session_id"]` |
 
 ---
 
