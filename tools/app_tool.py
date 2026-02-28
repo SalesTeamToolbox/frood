@@ -408,6 +408,9 @@ class AppTool(Tool):
         if app.runtime == AppRuntime.PYTHON.value:
             reqs = app_path / "requirements.txt"
             if not reqs.exists():
+                # Agents sometimes place requirements.txt inside src/
+                reqs = app_path / "src" / "requirements.txt"
+            if not reqs.exists():
                 return ToolResult(output="No requirements.txt found — nothing to install")
 
             proc = await asyncio.create_subprocess_exec(

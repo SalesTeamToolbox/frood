@@ -452,6 +452,9 @@ def create_app(
         from core.capacity import compute_effective_capacity
 
         cap = compute_effective_capacity(settings.max_concurrent_agents)
+        tools_count = 0
+        if tool_registry:
+            tools_count = len(tool_registry.list_tools())
         return {
             "active_agents": 0,
             "stalled_agents": 0,
@@ -460,7 +463,7 @@ def create_app(
             "tasks_failed": 0,
             "uptime_seconds": 0,
             "memory_mb": 0,
-            "tools_registered": 0,
+            "tools_registered": tools_count,
             **{
                 k: v
                 for k, v in cap.items()
@@ -1142,6 +1145,26 @@ def create_app(
     @app.get("/api/reports")
     async def get_reports(_: AuthContext = Depends(require_admin)):
         """Aggregate analytics data for the Reports page."""
+        try:
+            return await _build_reports()
+        except Exception as e:
+            logger.error(f"Reports endpoint error: {e}")
+            return {
+                "token_usage": {"total_tokens": 0, "total_prompt_tokens": 0,
+                                "total_completion_tokens": 0, "daily_tokens": 0,
+                                "daily_spend_usd": 0.0},
+                "llm_usage": [],
+                "costs": {"daily_spend_usd": 0.0, "total_estimated_usd": 0.0, "by_model": []},
+                "connectivity": {"summary": {}, "models": {}},
+                "model_performance": [],
+                "task_breakdown": {"total": 0, "by_status": {}, "by_type": [],
+                                   "overall_success_rate": 0.0},
+                "project_breakdown": [],
+                "tools": {"total": 0, "enabled": 0},
+                "skills": {"total": 0, "enabled": 0, "skills": []},
+            }
+
+    async def _build_reports():
         from providers.registry import spending_tracker
 
         all_tasks = task_queue.all_tasks()
