@@ -1333,3 +1333,60 @@ td.task-title:hover { color: var(--accent); }
 .status-archived { background: var(--bg-input); color: var(--text-muted); }
 .status-failed { background: var(--danger-dim); color: var(--danger); }
 .status-pending { background: var(--bg-input); color: var(--text-secondary); }
+
+/* ---------- Reports Page ---------- */
+.reports-tabs {
+  display: flex; gap: 0; margin-bottom: 1.5rem;
+  border-bottom: 2px solid var(--border);
+}
+.reports-tab {
+  background: none; border: none; color: var(--text-muted);
+  padding: 0.6rem 1.25rem; font-size: 0.95rem; cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.reports-tab:hover { color: var(--text-primary); }
+.reports-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.reports-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+.reports-section { margin-bottom: 1.5rem; }
+.reports-section-title {
+  font-size: 0.85rem; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  margin-bottom: 0.75rem; padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* CSS horizontal bar charts */
+.bar-cell { position: relative; min-width: 100px; height: 22px; }
+.bar-fill {
+  position: absolute; top: 0; left: 0; height: 100%;
+  border-radius: 3px; background: var(--accent-dim);
+  transition: width 0.3s;
+}
+.bar-fill.bar-success { background: var(--success-dim); }
+.bar-fill.bar-danger { background: var(--danger-dim); }
+.bar-fill.bar-warning { background: var(--warning-dim); }
+.bar-fill.bar-info { background: var(--info-dim); }
+.bar-label {
+  position: relative; z-index: 1; padding: 0 8px;
+  font-size: 0.8rem; font-family: var(--mono);
+  line-height: 22px; white-space: nowrap;
+}
+
+/* Health status dots */
+.health-dot {
+  display: inline-block; width: 8px; height: 8px;
+  border-radius: 50%; margin-right: 0.35rem; vertical-align: middle;
+}
+.health-dot.h-ok { background: var(--success); }
+.health-dot.h-unavailable { background: var(--danger); }
+.health-dot.h-rate_limited { background: var(--warning); }
+.health-dot.h-timeout { background: var(--warning); }
+.health-dot.h-error { background: var(--danger); }
+.health-dot.h-auth_error { background: var(--danger); }
+
+/* Report stat cards (override for wider grid) */
+.reports-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+
+@media (max-width: 900px) { .reports-grid { grid-template-columns: 1fr; } }

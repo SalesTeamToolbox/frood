@@ -249,6 +249,9 @@ class TestResourceAllocation:
             "content-team",
             "design-review",
             "strategy-team",
+            "code-review-team",
+            "dev-team",
+            "qa-team",
         }
         assert expected == _VALID_TEAMS
 
@@ -498,7 +501,7 @@ class TestChatClassification:
     @pytest.mark.asyncio
     async def test_llm_classifier_passes_conversation_history(self):
         """Conversation history is forwarded to the LLM."""
-        from unittest.mock import AsyncMock, MagicMock, call
+        from unittest.mock import AsyncMock, MagicMock
 
         mock_router = MagicMock()
         mock_router.complete = AsyncMock(

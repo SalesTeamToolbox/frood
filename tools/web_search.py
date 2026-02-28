@@ -1,12 +1,14 @@
 """
-Web search tool — Brave Search API integration.
+Web search tool — Brave Search API with DuckDuckGo fallback.
 
 Provides web search capabilities for research tasks.
-Requires a BRAVE_API_KEY environment variable.
+Uses Brave Search API as primary (requires BRAVE_API_KEY), with automatic
+fallback to DuckDuckGo HTML search when Brave is unavailable.
 """
 
 import logging
 import os
+import re
 
 import httpx
 
@@ -15,10 +17,11 @@ from tools.base import Tool, ToolResult
 logger = logging.getLogger("agent42.tools.web_search")
 
 BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+DDG_HTML_URL = "https://html.duckduckgo.com/html/"
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API."""
+    """Search the web using Brave Search API with DuckDuckGo fallback."""
 
     @property
     def name(self) -> str:
@@ -44,15 +47,24 @@ class WebSearchTool(Tool):
         }
 
     async def execute(self, query: str = "", count: int = 5, **kwargs) -> ToolResult:
-        api_key = os.getenv("BRAVE_API_KEY", "")
-        if not api_key:
-            return ToolResult(error="BRAVE_API_KEY not configured", success=False)
-
         if not query:
             return ToolResult(error="No search query provided", success=False)
 
         count = max(1, min(10, count))
 
+        # Try Brave Search first (if API key available)
+        api_key = os.getenv("BRAVE_API_KEY", "")
+        if api_key:
+            result = await self._brave_search(query, count, api_key)
+            if result.success:
+                return result
+            logger.warning(f"Brave Search failed, trying DuckDuckGo fallback: {result.error}")
+
+        # Fallback: DuckDuckGo HTML (no API key required)
+        return await self._duckduckgo_search(query, count)
+
+    async def _brave_search(self, query: str, count: int, api_key: str) -> ToolResult:
+        """Search using Brave Search API."""
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -72,21 +84,77 @@ class WebSearchTool(Tool):
             if not results:
                 return ToolResult(output="No results found.")
 
-            lines = []
-            for i, r in enumerate(results[:count], 1):
-                lines.append(f"{i}. **{r.get('title', '')}**")
-                lines.append(f"   {r.get('url', '')}")
-                desc = r.get("description", "")
-                if desc:
-                    lines.append(f"   {desc}")
-                lines.append("")
-
-            return ToolResult(output="\n".join(lines))
+            return ToolResult(output=self._format_results(results, count))
 
         except httpx.HTTPStatusError as e:
             return ToolResult(error=f"Search API error: {e.response.status_code}", success=False)
         except Exception as e:
-            return ToolResult(error=f"Search failed: {e}", success=False)
+            return ToolResult(error=f"Brave search failed: {e}", success=False)
+
+    async def _duckduckgo_search(self, query: str, count: int) -> ToolResult:
+        """Fallback search using DuckDuckGo HTML endpoint (no API key needed)."""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    DDG_HTML_URL,
+                    data={"q": query},
+                    headers={"User-Agent": "Agent42/1.0"},
+                    timeout=15.0,
+                )
+                response.raise_for_status()
+
+            results = self._parse_ddg_html(response.text, count)
+
+            if not results:
+                return ToolResult(output="No results found.")
+
+            return ToolResult(output=self._format_results(results, count))
+
+        except Exception as e:
+            return ToolResult(error=f"DuckDuckGo search failed: {e}", success=False)
+
+    @staticmethod
+    def _parse_ddg_html(html: str, max_results: int) -> list[dict]:
+        """Parse DuckDuckGo HTML search results into structured data."""
+        results = []
+
+        # DDG HTML results are in <a class="result__a"> for title/URL
+        # and <a class="result__snippet"> for descriptions
+        link_pattern = re.compile(
+            r'<a\s+[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>',
+            re.DOTALL,
+        )
+        snippet_pattern = re.compile(
+            r'<a\s+[^>]*class="result__snippet"[^>]*>(.*?)</a>',
+            re.DOTALL,
+        )
+
+        links = link_pattern.findall(html)
+        snippets = snippet_pattern.findall(html)
+
+        for i, (url, title) in enumerate(links[:max_results]):
+            # Strip HTML tags from title
+            title = re.sub(r"<[^>]+>", "", title).strip()
+            snippet = ""
+            if i < len(snippets):
+                snippet = re.sub(r"<[^>]+>", "", snippets[i]).strip()
+            if url and title and url.startswith("http"):
+                results.append({"title": title, "url": url, "description": snippet})
+
+        return results
+
+    @staticmethod
+    def _format_results(results: list[dict], count: int) -> str:
+        """Format search results into readable output."""
+        lines = []
+        for i, r in enumerate(results[:count], 1):
+            lines.append(f"{i}. **{r.get('title', '')}**")
+            lines.append(f"   {r.get('url', '')}")
+            desc = r.get("description", "")
+            if desc:
+                lines.append(f"   {desc}")
+            lines.append("")
+        return "\n".join(lines)
 
 
 # URL policy: consolidated SSRF + allowlist/denylist from core module
