@@ -1136,6 +1136,29 @@ function navigate(page, data) {
 }
 
 // ---------------------------------------------------------------------------
+// Mobile sidebar toggle
+// ---------------------------------------------------------------------------
+function toggleMobileSidebar() {
+  const sidebar = document.getElementById("sidebar");
+  const backdrop = document.getElementById("sidebar-backdrop");
+  if (!sidebar) return;
+  const isOpen = sidebar.classList.contains("mobile-open");
+  if (isOpen) {
+    closeMobileSidebar();
+  } else {
+    sidebar.classList.add("mobile-open");
+    if (backdrop) backdrop.classList.add("visible");
+  }
+}
+
+function closeMobileSidebar() {
+  const sidebar = document.getElementById("sidebar");
+  const backdrop = document.getElementById("sidebar-backdrop");
+  if (sidebar) sidebar.classList.remove("mobile-open");
+  if (backdrop) backdrop.classList.remove("visible");
+}
+
+// ---------------------------------------------------------------------------
 // Modals
 // ---------------------------------------------------------------------------
 function showModal(html) {
@@ -3715,20 +3738,20 @@ function render() {
   const approvalBadge = state.approvals.length > 0 ? `<span class="badge">${state.approvals.length}</span>` : "";
 
   root.innerHTML = `
+    <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeMobileSidebar()"></div>
     <div class="app-layout">
-      <aside class="sidebar">
+      <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">Agent<span class="num">42</span></div>
         <nav class="sidebar-nav">
-          <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks')">&#127919; Mission Control</a>
-          <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status')">&#128200; Status</a>
-          <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals')">&#128274; Approvals ${approvalBadge}</a>
-          <a href="#" data-page="chat" class="${state.page === "chat" ? "active" : ""}" onclick="event.preventDefault();navigate('chat')">&#128172; Chat</a>
-          <a href="#" data-page="code" class="${state.page === "code" ? "active" : ""}" onclick="event.preventDefault();navigate('code')">&#128187; Code</a>
-          <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools')">&#128295; Tools</a>
-          <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills')">&#9889; Skills</a>
-          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps')">&#128640; Apps</a>
-          <a href="#" data-page="reports" class="${state.page === "reports" ? "active" : ""}" onclick="event.preventDefault();navigate('reports')">&#128202; Reports</a>
-          <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings')">&#9881; Settings</a>
+          <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks');closeMobileSidebar()">&#127919; Mission Control</a>
+          <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status');closeMobileSidebar()">&#128200; Status</a>
+          <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals');closeMobileSidebar()">&#128274; Approvals ${approvalBadge}</a>
+          <a href="#" data-page="chat" class="${state.page === "chat" ? "active" : ""}" onclick="event.preventDefault();navigate('chat');closeMobileSidebar()">&#128172; Chat</a>
+          <a href="#" data-page="code" class="${state.page === "code" ? "active" : ""}" onclick="event.preventDefault();navigate('code');closeMobileSidebar()">&#128187; Code</a>
+          <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
+          <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills');closeMobileSidebar()">&#9889; Skills</a>
+          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Apps</a>
+          <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings');closeMobileSidebar()">&#9881; Settings</a>
         </nav>
         <div class="sidebar-footer">
           <span id="ws-dot" class="ws-dot ${state.wsConnected ? "connected" : "disconnected"}"></span>
@@ -3738,7 +3761,10 @@ function render() {
       </aside>
       <div class="main">
         <div class="topbar">
-          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", apps: "Apps", reports: "Reports", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
+          <button class="hamburger-btn" onclick="toggleMobileSidebar()" aria-label="Open menu">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", apps: "Apps", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? `
               <button class="btn btn-primary btn-sm" onclick="${state.missionControlTab === 'projects' ? 'showCreateProjectModal()' : 'showCreateTaskModal()'}">+ New ${state.missionControlTab === 'projects' ? 'Project' : 'Task'}</button>
