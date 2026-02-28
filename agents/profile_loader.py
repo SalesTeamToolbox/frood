@@ -108,6 +108,54 @@ class ProfileLoader:
         """Return all loaded profiles."""
         return list(self._profiles.values())
 
+    def save_profile(
+        self,
+        name: str,
+        description: str,
+        preferred_skills: list[str],
+        preferred_task_types: list[str],
+        prompt_overlay: str,
+    ) -> Path:
+        """Save a profile to the built-in profiles directory.
+
+        Builds markdown content (YAML frontmatter + body) matching existing
+        format, writes to disk, and reloads all profiles.
+
+        Returns the file path.
+        """
+        skills_str = ", ".join(preferred_skills) if preferred_skills else ""
+        tasks_str = ", ".join(preferred_task_types) if preferred_task_types else ""
+        content = (
+            f"---\n"
+            f"name: {name}\n"
+            f"description: {description}\n"
+            f"preferred_skills: [{skills_str}]\n"
+            f"preferred_task_types: [{tasks_str}]\n"
+            f"---\n\n"
+            f"{prompt_overlay}\n"
+        )
+        path = _BUILTIN_PROFILES_DIR / f"{name}.md"
+        path.write_text(content, encoding="utf-8")
+        self.load_all()
+        return path
+
+    def delete_profile(self, name: str) -> bool:
+        """Delete a profile by name.
+
+        Removes the file from disk and reloads all profiles.
+        Returns True if deleted, False if profile not found.
+        """
+        profile = self.get(name)
+        if not profile or not profile.source_path:
+            return False
+        try:
+            Path(profile.source_path).unlink()
+        except FileNotFoundError:
+            return False
+        self._profiles.pop(name, None)
+        self.load_all()
+        return True
+
     def _parse_profile(self, path: Path) -> AgentProfile | None:
         """Parse a profile Markdown file with YAML frontmatter."""
         try:

@@ -123,11 +123,15 @@ class ApprovalGate:
             req.approved = True
             req._event.set()
             logger.info(f"AUDIT: Approved {key} by {user or 'unknown'}")
-            asyncio.ensure_future(
-                self._log_event(
-                    "approved", key, task_id=task_id, action=action, user=user or "unknown"
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self._log_event(
+                        "approved", key, task_id=task_id, action=action, user=user or "unknown"
+                    )
                 )
-            )
+            except RuntimeError:
+                pass  # No running loop — skip async audit log
 
     def deny(self, task_id: str, action: str, user: str = ""):
         """Deny a pending request (called from dashboard)."""
@@ -137,11 +141,15 @@ class ApprovalGate:
             req.approved = False
             req._event.set()
             logger.info(f"AUDIT: Denied {key} by {user or 'unknown'}")
-            asyncio.ensure_future(
-                self._log_event(
-                    "denied", key, task_id=task_id, action=action, user=user or "unknown"
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self._log_event(
+                        "denied", key, task_id=task_id, action=action, user=user or "unknown"
+                    )
                 )
-            )
+            except RuntimeError:
+                pass  # No running loop — skip async audit log
 
     def pending_requests(self) -> list[dict]:
         """List all pending approval requests for the dashboard."""

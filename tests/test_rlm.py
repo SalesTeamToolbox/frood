@@ -237,15 +237,16 @@ class TestRLMProviderComplete:
     @pytest.mark.asyncio
     async def test_returns_none_on_timeout(self):
         """Graceful fallback on timeout."""
-        import asyncio
+        import time
 
         large = "x" * 10_000
         config = RLMConfig(enabled=True, threshold_tokens=100, timeout_seconds=0)
         provider = RLMProvider(config=config)
 
-        # Mock the RLM instance to simulate a slow call
+        # Mock the RLM instance to simulate a slow synchronous call
+        # (rlm.completion is sync, wrapped in run_in_executor)
         mock_rlm = MagicMock()
-        mock_rlm.completion.side_effect = lambda **kw: asyncio.sleep(10)
+        mock_rlm.completion.side_effect = lambda **kw: time.sleep(10)
         provider._rlm_instance = mock_rlm
 
         result = await provider.complete(query="summarize", context=large)

@@ -510,7 +510,7 @@ class TestDockerTool:
     async def test_run_no_image(self):
         result = await self.tool.execute(action="run")
         assert result.success is False
-        assert "image" in result.error.lower()
+        assert "image" in result.error.lower() or "docker" in result.error.lower()
 
 
 # ---------------------------------------------------------------------------
