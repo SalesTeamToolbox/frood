@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Agent42 Favicon — 32x32 mark -->
+  <rect width="32" height="32" rx="6" fill="#E8A838"/>
+  <!-- "4" -->
+  <path d="M7 22V20L14 10H17V20H19V22H17V25H15V22H7Z" fill="#fff"/>
+  <path d="M9 20L15 12V20H9Z" fill="#E8A838" opacity="0.2"/>
+  <!-- "2" -->
+  <path d="M21 11.5C21 10.5 22 9.5 24 9.5C26 9.5 27.5 10.5 27.5 12.5C27.5 14.5 25.5 17 21 21H28V23H20V21C25 17 27 14 27 12.5C27 11.5 26.5 11 25.5 11C24.5 11 24 11.5 24 12.5H21V11.5Z" fill="#fff"/>
+</svg>

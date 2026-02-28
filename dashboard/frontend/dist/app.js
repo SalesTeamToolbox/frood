@@ -89,6 +89,48 @@ const state = {
 };
 
 // ---------------------------------------------------------------------------
+// Brand personality
+// ---------------------------------------------------------------------------
+const TAGLINES = [
+  "Don\u2019t Panic.",
+  "The Answer to Life, the Universe, and All Your Tasks.",
+  "Mostly Harmless.",
+  "Time is an illusion. Lunchtime doubly so. Deadlines triply.",
+  "Now with 100% more towels than competing platforms.",
+  "A Whose-Who\u2019s Guide to Getting Things Done.",
+  "It\u2019s just a flesh wound.",
+  "We are the knights who say\u2026 Ni!",
+];
+
+const STATUS_FLAVOR = {
+  pending: "Waiting in the Infinite Improbability Queue\u2026",
+  assigned: "Towel at the ready.",
+  running: "An agent is on it. Towel at the ready.",
+  review: "Awaiting human review.",
+  blocked: "Stuck. Like a sofa in a staircase.",
+  done: "The Answer has been computed.",
+  failed: "Even Deep Thought had bad days.",
+  cancelled: "Probably for the best \u2014 the Vogons were getting involved.",
+  archived: "Filed in the Galactic Archives.",
+};
+
+function randomFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function isTowelDay() { const d = new Date(); return d.getMonth() === 4 && d.getDate() === 25; }
+
+let _taglineIdx = Math.floor(Math.random() * TAGLINES.length);
+function rotateTagline() {
+  const el = document.getElementById("login-tagline");
+  if (!el) return;
+  el.style.opacity = "0";
+  setTimeout(() => {
+    _taglineIdx = (_taglineIdx + 1) % TAGLINES.length;
+    el.textContent = TAGLINES[_taglineIdx];
+    el.style.opacity = "1";
+  }, 800);
+}
+setInterval(rotateTagline, 8000);
+
+// ---------------------------------------------------------------------------
 // API helpers
 // ---------------------------------------------------------------------------
 const API = "/api";
@@ -202,7 +244,7 @@ async function handleSetupStep3() {
       if (data.setup_task_id) {
         toast("Welcome! A setup task has been queued to verify memory services.", "success");
       } else {
-        toast("Welcome to Agent42!", "success");
+        toast("Welcome, hitchhiker! The Guide is ready.", "success");
       }
     }, 4000);
   } catch (err) {
@@ -229,13 +271,13 @@ function renderSetupWizard() {
     body = `
       <h2>Welcome to Agent<span style="color:var(--accent)">42</span></h2>
       <p class="setup-subtitle">The answer to life, the universe, and all your tasks.</p>
-      <p class="setup-desc">Let's secure your dashboard with a password.</p>
+      <p class="setup-desc">Welcome, hoopy frood. Let\u2019s secure the Guide with a passphrase.</p>
       ${steps}
       <div id="setup-error" style="color:var(--danger);font-size:0.85rem;min-height:1.2em;margin-bottom:0.25rem"></div>
       <form onsubmit="event.preventDefault();handleSetupStep1()">
         <div class="form-group">
           <label for="setup-pass">Dashboard Password</label>
-          <input type="password" id="setup-pass" placeholder="At least 8 characters" autofocus autocomplete="new-password">
+          <input type="password" id="setup-pass" placeholder="At least 8 characters (more improbable is better)" autofocus autocomplete="new-password">
         </div>
         <div class="form-group">
           <label for="setup-pass-confirm">Confirm Password</label>
@@ -246,7 +288,7 @@ function renderSetupWizard() {
   } else if (s === 2) {
     body = `
       <h2>API Key <span style="color:var(--text-muted);font-weight:400;font-size:0.9rem">(optional)</span></h2>
-      <p class="setup-desc">Agent42 uses OpenRouter for LLM access. Free models work without a key, but adding one unlocks 200+ models.</p>
+      <p class="setup-desc">Agent42 uses OpenRouter for LLM access. Free models work without a key, but adding one unlocks 200+ models. It\u2019s like upgrading from a towel to a Sub-Etha Sens-O-Matic.</p>
       ${steps}
       <div id="setup-error" style="color:var(--danger);font-size:0.85rem;min-height:1.2em;margin-bottom:0.25rem"></div>
       <div class="form-group">
@@ -269,7 +311,7 @@ function renderSetupWizard() {
           <div class="memory-option-radio"></div>
           <div class="memory-option-body">
             <div class="memory-option-title">Skip</div>
-            <div class="memory-option-desc">Use file-based memory. No extra setup needed.</div>
+            <div class="memory-option-desc">File-based (perfectly adequate for smaller universes).</div>
           </div>
         </div>
         <div class="memory-option" data-choice="qdrant_embedded" onclick="_selectMemoryOption('qdrant_embedded')">
@@ -277,7 +319,7 @@ function renderSetupWizard() {
           <div class="memory-option-body">
             <div class="memory-option-title">Qdrant Embedded</div>
             <div class="memory-option-desc">Vector semantic search stored locally. No Docker needed &mdash; just a pip install.</div>
-            <div class="memory-option-tag">Easiest</div>
+            <div class="memory-option-tag">Mostly Painless</div>
           </div>
         </div>
         <div class="memory-option" data-choice="qdrant_redis" onclick="_selectMemoryOption('qdrant_redis')">
@@ -285,7 +327,7 @@ function renderSetupWizard() {
           <div class="memory-option-body">
             <div class="memory-option-title">Qdrant + Redis</div>
             <div class="memory-option-desc">Full semantic search + fast session caching. Services may already be running if installed via install-server.sh.</div>
-            <div class="memory-option-tag">Full Power</div>
+            <div class="memory-option-tag">Infinite Improbability Drive</div>
           </div>
         </div>
       </div>
@@ -306,8 +348,8 @@ function renderSetupWizard() {
       ${steps}
       <div style="text-align:center;padding:2rem 0">
         <div style="font-size:3rem;margin-bottom:0.75rem">&#9989;</div>
-        <h2>You're All Set!</h2>
-        <p class="setup-desc" style="margin-bottom:0">Dashboard secured. Loading Mission Control\u2026</p>
+        <h2>Don\u2019t Panic \u2014 You\u2019re All Set!</h2>
+        <p class="setup-desc" style="margin-bottom:0">You are now a hoopy frood who really knows where their towel is. Loading Mission Control\u2026</p>
         ${extraMsg}
       </div>`;
   }
@@ -375,6 +417,11 @@ function handleWSMessage(msg) {
     // Update stats (including token usage)
     renderStats();
     loadTokenStats();
+    // First task completion celebration
+    if (msg.data.status === "done" && !localStorage.getItem("a42_first_done")) {
+      localStorage.setItem("a42_first_done", "1");
+      toast("And there was much rejoicing. (yaay)", "success");
+    }
   } else if (msg.type === "system_health") {
     state.status = msg.data;
     if (state.page === "status") renderStatus();
@@ -385,7 +432,7 @@ function handleWSMessage(msg) {
     else state.apps.unshift(msg.data);
     if (state.page === "apps") renderApps();
   } else if (msg.type === "agent_stall") {
-    toast(`Agent stalled: ${msg.data.task_id}`, "error");
+    toast(`Agent stalled on ${msg.data.task_id}. For a moment, nothing happened.`, "error");
   } else if (msg.type === "project_update") {
     const idx = state.projects.findIndex(p => p.id === msg.data.id);
     if (idx >= 0) state.projects[idx] = msg.data;
@@ -487,7 +534,7 @@ function updateWSIndicator() {
     dot.className = `ws-dot ${state.wsConnected ? "connected" : "disconnected"}`;
   }
   if (label) {
-    label.textContent = state.wsConnected ? "Connected" : "Disconnected";
+    label.textContent = state.wsConnected ? "Connected to the Guide" : "Disconnected";
   }
 }
 
@@ -985,7 +1032,7 @@ async function doLogin(username, password) {
     connectWS();
     await loadAll();
     render();
-    toast("Logged in successfully", "success");
+    toast("Don\u2019t Panic \u2014 you\u2019re in.", "success");
   } catch (err) {
     if (errEl) errEl.textContent = err.message;
     toast(err.message, "error");
@@ -1014,7 +1061,7 @@ async function doCreateTask(title, description, taskType, repoId, branch) {
     if (state.page === "tasks") renderMissionControl();
     else if (state.page === "projectDetail") renderProjectDetail();
     closeModal();
-    toast("Task created", "success");
+    toast("Task created. An agent has been dispatched. Don\u2019t Panic.", "success");
   } catch (err) {
     toast(err.message, "error");
   }
@@ -1037,7 +1084,7 @@ async function doCancelTask(taskId) {
   try {
     await api(`/tasks/${taskId}/cancel`, { method: "POST" });
     await loadTasks();
-    toast("Task cancelled", "success");
+    toast("Task cancelled. Probably for the best.", "success");
     if (state.page === "tasks") renderMissionControl();
     if (state.page === "detail") {
       state.selectedTask = state.tasks.find((t) => t.id === taskId);
@@ -1050,7 +1097,7 @@ async function doRetryTask(taskId) {
   try {
     await api(`/tasks/${taskId}/retry`, { method: "POST" });
     await loadTasks();
-    toast("Task retried", "success");
+    toast("Task retried. It\u2019s not dead yet!", "success");
     if (state.page === "tasks") renderMissionControl();
   } catch (err) { toast(err.message, "error"); }
 }
@@ -1126,7 +1173,7 @@ async function doBlockTask(taskId, reason) {
     });
     await loadTasks();
     if (state.page === "tasks") renderMissionControl();
-    toast("Task blocked", "info");
+    toast("Task blocked. Stuck behind a Vogon queue.", "info");
   } catch (err) { toast(err.message, "error"); }
 }
 
@@ -1135,7 +1182,7 @@ async function doUnblockTask(taskId) {
     await api(`/tasks/${taskId}/unblock`, { method: "PATCH" });
     await loadTasks();
     if (state.page === "tasks") renderMissionControl();
-    toast("Task unblocked", "success");
+    toast("Task unblocked. The Vogons have moved on.", "success");
   } catch (err) { toast(err.message, "error"); }
 }
 
@@ -1246,11 +1293,11 @@ function showCreateTaskModal(projectId) {
       <div class="modal-body">
         <div class="form-group">
           <label for="ct-title">Title</label>
-          <input type="text" id="ct-title" placeholder="Brief task description">
+          <input type="text" id="ct-title" placeholder="Describe your task. Be more specific than 'What is the meaning of life?'">
         </div>
         <div class="form-group">
           <label for="ct-desc">Description</label>
-          <textarea id="ct-desc" rows="4" placeholder="Detailed instructions for the agent..."></textarea>
+          <textarea id="ct-desc" rows="4" placeholder="Detailed instructions for the agent. The Guide appreciates specifics..."></textarea>
         </div>
         <div class="form-group">
           <label for="ct-type">Task Type</label>
@@ -1459,7 +1506,8 @@ function esc(str) {
 }
 
 function statusBadge(status) {
-  return `<span class="badge-status badge-${status}">${status}</span>`;
+  const flavor = STATUS_FLAVOR[status] || "";
+  return `<span class="badge-status badge-${status}" title="${flavor}">${status}</span>`;
 }
 
 function timeSince(ts) {
@@ -1607,7 +1655,7 @@ function renderListView() {
 
   let rows = "";
   if (filtered.length === 0) {
-    rows = `<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">&#128203;</div><h3>No tasks</h3></div></td></tr>`;
+    rows = `<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">&#128203;</div><h3>No tasks in the queue</h3><p>The universe is momentarily at peace. Create one?</p></div></td></tr>`;
   } else {
     rows = filtered.map((t) => `
       <tr>
@@ -1658,7 +1706,7 @@ function renderActivitySidebar() {
       <button class="btn btn-icon btn-outline" onclick="state.activityOpen=false;renderActivitySidebar()">&times;</button>
     </div>
     <div class="activity-list">
-      ${state.activityFeed.length === 0 ? '<div style="padding:1rem;color:var(--text-muted);text-align:center">No recent activity</div>' : ""}
+      ${state.activityFeed.length === 0 ? '<div style="padding:1rem;color:var(--text-muted);text-align:center">No recent activity. The universe is suspiciously quiet.</div>' : ""}
       ${state.activityFeed.slice(-50).reverse().map(a => `
         <div class="activity-item">
           <div>${esc(a.event || a.type || "event")}: ${esc(a.title || a.task_id || "")}</div>
@@ -1696,7 +1744,7 @@ function renderDetail() {
       <div class="card-body">
         <div class="detail-grid">
           <div class="detail-item"><label>ID</label><div class="value" style="font-family:var(--mono)">${esc(t.id)}</div></div>
-          <div class="detail-item"><label>Status</label><div class="value">${statusBadge(t.status)}</div></div>
+          <div class="detail-item"><label>Status</label><div class="value">${statusBadge(t.status)}<div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;font-style:italic">${STATUS_FLAVOR[t.status] || ""}</div></div></div>
           <div class="detail-item"><label>Type</label><div class="value"><span class="badge-type">${esc(t.task_type)}</span></div></div>
           <div class="detail-item"><label>Iterations</label><div class="value">${t.iterations || 0} / ${t.max_iterations || "?"}</div></div>
           ${t.token_usage?.total_tokens ? `<div class="detail-item"><label>Tokens</label><div class="value" style="font-family:var(--mono)">${formatNumber(t.token_usage.total_tokens)} <span style="color:var(--text-muted);font-size:0.8rem">(${formatNumber(t.token_usage.total_prompt_tokens)} in / ${formatNumber(t.token_usage.total_completion_tokens)} out)</span></div></div>` : ""}
@@ -1805,11 +1853,12 @@ function renderApprovals() {
 
   let content = "";
   if (state.approvals.length === 0) {
-    content = `<div class="empty-state"><div class="empty-icon">&#9989;</div><h3>No pending approvals</h3><p>Approval requests from agents will appear here.</p></div>`;
+    content = `<div class="empty-state"><div class="empty-icon">&#9989;</div><h3>No pending approvals</h3><p>All clear. No Vogon bureaucracy today.</p></div>`;
   } else {
     content = state.approvals.map((a) => `
       <div class="approval-card">
         <div class="approval-info">
+          <div style="font-size:0.75rem;color:var(--text-muted);font-style:italic;margin-bottom:0.25rem">None shall pass\u2026 without your approval.</div>
           <div class="approval-action">${esc(a.action || "Unknown action")}</div>
           <div class="approval-desc">${esc(a.description || "")}</div>
           <div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)">
@@ -1978,7 +2027,7 @@ function renderApps() {
       <div class="stat-card"><div class="stat-label">Errors</div><div class="stat-value text-danger">${counts.error}</div></div>
     </div>
     <div class="apps-filters">${filterChips}</div>
-    ${filtered.length ? `<div class="apps-grid">${cards}</div>` : '<div class="empty-state" style="padding:3rem;text-align:center"><p style="font-size:1.1rem;margin-bottom:1rem">No apps yet</p><p style="color:var(--text-muted)">Create your first app to get started.</p><button class="btn btn-primary" style="margin-top:1rem" onclick="showCreateAppModal()">+ Create App</button></div>'}
+    ${filtered.length ? `<div class="apps-grid">${cards}</div>` : '<div class="empty-state" style="padding:3rem;text-align:center"><p style="font-size:1.1rem;margin-bottom:1rem">No apps yet</p><p style="color:var(--text-muted)">In the beginning there were no apps. This has since been rectified.</p><button class="btn btn-primary" style="margin-top:1rem" onclick="showCreateAppModal()">+ Create App</button></div>'}
   `;
 }
 
@@ -2597,7 +2646,7 @@ function renderProjectDetail() {
         <h4 style="margin:0">Tasks</h4>
         <button class="btn btn-primary btn-sm" onclick="showCreateTaskModal('${p.id}')">+ Add Task</button>
       </div>
-      <div id="project-tasks-list">Loading...</div>
+      <div id="project-tasks-list">Consulting the Guide...</div>
     </div>
   `;
 
@@ -3449,6 +3498,7 @@ function renderSettings() {
         </div>
         <div id="settings-panel" class="settings-panel"></div>
       </div>
+      <div style="text-align:center;padding:1rem;color:var(--text-muted);font-size:0.72rem;font-style:italic">\u201cAnd now for something completely different\u2026\u201d these are your settings.</div>
     </div>
   `;
   renderSettingsPanel();
@@ -3854,8 +3904,10 @@ function render() {
     root.innerHTML = `
       <div class="login-page">
         <div class="login-card">
-          <h1>Agent<span style="color:var(--accent)">42</span></h1>
-          <div class="subtitle">The answer to life, the universe, and all your tasks.</div>
+          <div class="login-logo">
+            <img src="/assets/agent42-logo-light.svg" alt="Agent42" onerror="this.outerHTML='<h1>Agent<span style=&quot;color:var(--accent)&quot;>42</span></h1>'">
+          </div>
+          <div class="subtitle tagline-rotate" id="login-tagline">${TAGLINES[_taglineIdx]}</div>
           <form onsubmit="event.preventDefault();doLogin(document.getElementById('login-user').value,document.getElementById('login-pass').value)">
             <div id="login-error" style="color:#ef4444;font-size:0.85rem;min-height:1.2em;margin-bottom:0.25rem"></div>
             <div class="form-group">
@@ -3864,10 +3916,11 @@ function render() {
             </div>
             <div class="form-group">
               <label for="login-pass">Password</label>
-              <input type="password" id="login-pass" autocomplete="current-password" autofocus>
+              <input type="password" id="login-pass" placeholder="Your improbability passphrase..." autocomplete="current-password" autofocus>
             </div>
             <button type="submit" class="btn btn-primary btn-full" style="margin-top:0.5rem">Sign In</button>
           </form>
+          <div class="login-footer-text">A mostly harmless orchestrator</div>
         </div>
       </div>
     `;
@@ -3880,7 +3933,7 @@ function render() {
     <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeMobileSidebar()"></div>
     <div class="app-layout">
       <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand">Agent<span class="num">42</span></div>
+        <div class="sidebar-brand"><img src="/assets/agent42-logo-light.svg" alt="Agent42" height="28" onerror="this.outerHTML='Agent<span class=&quot;num&quot;>42</span>'"></div>
         <nav class="sidebar-nav">
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks');closeMobileSidebar()">&#127919; Mission Control</a>
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status');closeMobileSidebar()">&#128200; Status</a>
@@ -3894,8 +3947,9 @@ function render() {
         </nav>
         <div class="sidebar-footer">
           <span id="ws-dot" class="ws-dot ${state.wsConnected ? "connected" : "disconnected"}"></span>
-          <span id="ws-label">${state.wsConnected ? "Connected" : "Disconnected"}</span>
+          <span id="ws-label">${state.wsConnected ? "Connected to the Guide" : "Disconnected"}</span>
           <br><a href="#" onclick="event.preventDefault();doLogout()" style="font-size:0.8rem;color:var(--text-muted)">Logout</a>
+          <div class="dont-panic-watermark">DON'T PANIC</div>
         </div>
       </aside>
       <div class="main">
@@ -3945,6 +3999,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     connectWS();
   }
   render();
+  // Towel Day Easter Egg (May 25)
+  if (isTowelDay()) {
+    document.body.classList.add("towel-day");
+    if (state.token && !localStorage.getItem("towelday_" + new Date().getFullYear())) {
+      setTimeout(() => {
+        toast("\ud83e\udde3 Happy Towel Day! A towel is about the most massively useful thing an interstellar hitchhiker can have.", "info");
+        localStorage.setItem("towelday_" + new Date().getFullYear(), "1");
+      }, 3000);
+    }
+  }
   // Auto-refresh approvals every 30s
   setInterval(async () => {
     if (state.token) {
