@@ -13,6 +13,7 @@ Usage (via CLI):
 import json
 import logging
 import os
+import sys
 import re
 import shutil
 import stat
@@ -277,7 +278,7 @@ def restore_backup(
         for item in extract_dir.rglob("*"):
             if item.is_file() and item.name != MANIFEST_FILENAME:
                 rel = item.relative_to(extract_dir)
-                rel_str = str(rel)
+                rel_str = str(rel).replace(os.sep, "/")
 
                 if skip_secrets and rel_str in secret_paths:
                     logger.info("Skipping secret file: %s", rel_str)
@@ -288,7 +289,7 @@ def restore_backup(
                 shutil.copy2(str(item), str(dest))
 
                 # Restore restrictive permissions for settings.json
-                if rel_str == ".agent42/settings.json":
+                if rel_str == ".agent42/settings.json" and sys.platform != "win32":
                     os.chmod(str(dest), stat.S_IRUSR | stat.S_IWUSR)  # 0o600
 
         logger.info(

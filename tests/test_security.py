@@ -1,6 +1,7 @@
 """Tests for hardened security: shell, command filter, auth, SSRF, worktree."""
 
 import logging
+import sys
 import tempfile
 
 import pytest
@@ -25,12 +26,14 @@ class TestShellPathEnforcement:
         assert result.success is True
         assert "hello" in result.output
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="/usr/bin/env not available on Windows")
     @pytest.mark.asyncio
     async def test_allows_system_binaries(self):
         result = await self.tool.execute(command="/usr/bin/env echo hello")
         assert result.success is True
         assert "hello" in result.output
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="/tmp not available on Windows")
     @pytest.mark.asyncio
     async def test_blocks_tmp_paths(self):
         """Tmp paths should be blocked — agents should use workspace-local temp files."""
@@ -38,6 +41,7 @@ class TestShellPathEnforcement:
         assert result.success is False
         assert "Sandbox" in result.error
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="/dev/null not available on Windows")
     @pytest.mark.asyncio
     async def test_allows_dev_null(self):
         result = await self.tool.execute(command="echo test > /dev/null")
@@ -662,17 +666,20 @@ class TestShellTmpBlocked:
         self.sandbox = WorkspaceSandbox(self.tmpdir)
         self.tool = ShellTool(self.sandbox, CommandFilter())
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Unix /tmp path not available on Windows")
     @pytest.mark.asyncio
     async def test_tmp_is_blocked(self):
         result = await self.tool.execute(command="cat /tmp/some_file")
         assert result.success is False
         assert "Sandbox" in result.error
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="/dev/null not available on Windows")
     @pytest.mark.asyncio
     async def test_dev_null_still_allowed(self):
         result = await self.tool.execute(command="echo test > /dev/null")
         assert result.success is True
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="/usr/bin/env not available on Windows")
     @pytest.mark.asyncio
     async def test_usr_bin_still_allowed(self):
         result = await self.tool.execute(command="/usr/bin/env echo hello")

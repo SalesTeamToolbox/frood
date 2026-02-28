@@ -10,8 +10,9 @@ from core.task_queue import TaskType
 class TestModelRouterDynamicRouting:
     """Tests for the dynamic routing layer in ModelRouter."""
 
-    def test_hardcoded_fallback(self):
+    def test_hardcoded_fallback(self, monkeypatch):
         """Without dynamic routing or admin override, should use FREE_ROUTING."""
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
         router = ModelRouter()
         routing = router.get_routing(TaskType.CODING)
         assert routing["primary"] == FREE_ROUTING[TaskType.CODING]["primary"]
@@ -74,8 +75,9 @@ class TestModelRouterDynamicRouting:
         routing = router.get_routing(TaskType.CODING)
         assert routing["primary"] == "admin-choice"
 
-    def test_dynamic_routing_missing_task_type(self, tmp_path):
+    def test_dynamic_routing_missing_task_type(self, tmp_path, monkeypatch):
         """Task types not in dynamic routing should fall back to hardcoded."""
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
         routing_file = tmp_path / "routing.json"
         routing_file.write_text(
             json.dumps(
@@ -96,8 +98,9 @@ class TestModelRouterDynamicRouting:
         routing = router.get_routing(TaskType.RESEARCH)
         assert routing["primary"] == FREE_ROUTING[TaskType.RESEARCH]["primary"]
 
-    def test_dynamic_routing_invalid_file(self, tmp_path):
+    def test_dynamic_routing_invalid_file(self, tmp_path, monkeypatch):
         """Invalid JSON in routing file should fall back gracefully."""
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
         routing_file = tmp_path / "routing.json"
         routing_file.write_text("not json")
 
@@ -105,8 +108,9 @@ class TestModelRouterDynamicRouting:
         routing = router.get_routing(TaskType.CODING)
         assert routing["primary"] == FREE_ROUTING[TaskType.CODING]["primary"]
 
-    def test_dynamic_routing_no_file(self, tmp_path):
+    def test_dynamic_routing_no_file(self, tmp_path, monkeypatch):
         """Non-existent routing file should fall back to hardcoded."""
+        monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
         router = ModelRouter(routing_file=str(tmp_path / "nonexistent.json"))
         routing = router.get_routing(TaskType.CODING)
         assert routing["primary"] == FREE_ROUTING[TaskType.CODING]["primary"]
