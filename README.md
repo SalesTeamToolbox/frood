@@ -1,6 +1,10 @@
-# Agent42
+# 🛸 Agent42
 
-**The answer to life, the universe, and all your tasks.**
+**Don't Panic.** The answer to life, the universe, and all your tasks.
+
+> *"The Guide says there is an art to flying, or rather a knack.
+> The knack lies in learning how to throw yourself at the ground and miss."*
+> — The same applies to multi-agent orchestration.
 
 A multi-agent orchestrator platform. Free models handle the iterative work;
 Claude Code (or human review) gates the final output before anything ships.
@@ -13,9 +17,12 @@ you throw at it. Spin up teams of agents to collaborate, critique, and iterate.
 
 ```
 Inbound Channel  ->  Task Queue  ->  Agent Loop  ->  Critic Pass  ->  REVIEW.md  ->  You + Claude Code  ->  Ship
-(Slack/Discord/     (priority +      (free LLMs     (independent     (diff, logs,    (human approval
- Telegram/Email/     concurrency)     via OpenRouter) second opinion)  critic notes)   gate)
+(Slack/Discord/     (priority +      (free LLMs     (independent     (diff, logs,    (human approval       (Don't
+ Telegram/Email/     concurrency)     via OpenRouter) second opinion)  critic notes)   gate)                Panic)
  Dashboard/CLI)
+(Infinite            (The Answer      (Mostly         (Towel           (The only human                      (🚀)
+ Improbability        Engine)          Harmless)       Included)        in the loop)
+ Queue)
 ```
 
 **Free-first strategy** — all agent work defaults to $0 models via OpenRouter:
@@ -31,7 +38,7 @@ Inbound Channel  ->  Task Queue  ->  Agent Loop  ->  Critic Pass  ->  REVIEW.md 
 Premium models (GPT-4o, Claude Sonnet, Gemini Pro) available for admin-configured
 task types — see [Model Routing](#model-routing).
 
-## Quick Start
+## Quick Start (Don't Panic)
 
 ### Prerequisites
 
@@ -147,6 +154,8 @@ produces output for your review.
 | Port 8000 already in use | Use `--port 8080` flag: `python agent42.py --repo /path --port 8080` |
 | Frontend not loading | Re-run: `cd dashboard/frontend && npm install && npm run build` |
 | Login fails after restart | Set `JWT_SECRET` in `.env` (the setup wizard does this automatically) |
+| Everything is broken | Don't Panic. Grab your towel. `bash setup.sh` |
+| "It's only a flesh wound" | Task failed but partially completed? Check `.agent42/outputs/` for salvageable work |
 
 ### Minimum Setup (free, no credit card)
 
@@ -682,7 +691,7 @@ to prevent staging attack payloads outside the sandbox. This prevents
 
 Admins can add extra deny patterns or switch to allowlist-only mode.
 
-## Memory & Learning
+## Memory & Learning (Total Perspective Vortex)
 
 Agent42 maintains persistent memory and learns from every task:
 
@@ -1208,7 +1217,7 @@ Agent42 supports persistent API key authentication for multiple devices
 - **Manage devices** — `GET /api/devices` lists all registered devices with
   online status. `DELETE /api/devices/{id}` revokes access instantly.
 
-## Security
+## Security (Contrariwise, Vogons Can't Get In)
 
 Agent42 is designed to run safely on a shared VPS alongside other services
 (your website, databases, etc.). The agent cannot access anything outside its
@@ -1263,3 +1272,14 @@ related env vars.
 - Set `CORS_ALLOWED_ORIGINS` to your domain
 - Set `MAX_DAILY_API_SPEND_USD` to cap API costs
 - Keep `SANDBOX_ENABLED=true` and `WORKSPACE_RESTRICT=true`
+
+---
+
+*So long, and thanks for all the tasks.* 🐬
+
+Named after the Answer to the Ultimate Question of Life, the Universe, and Everything.
+Agent42 doesn't know the Question either, but it'll complete your sprint backlog while
+the philosophers argue about it.
+
+Built with Python. The language, not the snake. Though if you understand the reference,
+you're our kind of people.
