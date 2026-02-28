@@ -192,6 +192,46 @@ class TestDevicePersistence:
         store = DeviceStore(self.store_path)
         assert len(store.list_devices()) == 0
 
+    def test_reload_skips_device_with_empty_api_key_hash(self):
+        # Register a device to get a valid device_id and raw_key
+        store1 = DeviceStore(self.store_path)
+        d, raw_key = store1.register("Valid Device", "laptop")
+        device_id = d.device_id
+        valid_key_hash = _hash_key(raw_key)
+
+        # Manually create a malformed entry with an empty api_key_hash
+        malformed_entry = {
+            "timestamp": time.time(),
+            "event": "registered",
+            "device_id": device_id,
+            "name": "Malformed Device",
+            "device_type": "other",
+            "api_key_hash": "",  # This is the malformed part
+            "created_at": time.time(),
+            "last_seen": time.time(),
+            "is_revoked": False,
+            "capabilities": ["monitor"],
+        }
+        # Overwrite the store file with the malformed entry
+        self.store_path.write_text(json.dumps(malformed_entry) + "\n")
+
+        # Create a new store instance to trigger _load
+        store2 = DeviceStore(self.store_path)
+
+        # The device should exist in _devices but not be discoverable via its API key hash
+        assert store2.get(device_id) is not None
+        assert store2.get(device_id).name == "Malformed Device" # The malformed entry overwrites the valid one
+
+        # Attempt to validate the original raw_key, which should now fail
+        # because the device with the valid hash was effectively removed from _hash_to_id
+        validated_device = store2.validate_api_key(raw_key)
+        assert validated_device is None
+        # Additional assertion to confirm the bug: if it were to return a device,
+        # its api_key_hash should match the valid_key_hash.
+        # This will fail if the malformed device is returned.
+        if validated_device:
+            assert validated_device.api_key_hash == valid_key_hash
+
     def test_reload_no_file(self):
         store = DeviceStore(self.store_path)
         assert len(store.list_devices()) == 0
