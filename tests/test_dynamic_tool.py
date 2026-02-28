@@ -17,7 +17,9 @@ from tools.registry import ToolRegistry
 class TestDynamicTool:
     """Tests for the DynamicTool class."""
 
-    def _make_tool(self, code: str, name: str = "test_tool", **kwargs):
+    def _make_tool(self, code: str, name: str = "test_tool", workspace=None, **kwargs):
+        import tempfile
+
         return DynamicTool(
             tool_name=name,
             tool_description="A test tool",
@@ -31,7 +33,7 @@ class TestDynamicTool:
                 },
             ),
             code=code,
-            workspace_path="/tmp",  # nosec B108
+            workspace_path=workspace or tempfile.gettempdir(),
         )
 
     def test_name_prefix(self):
@@ -92,7 +94,9 @@ class TestCreateToolTool:
 
     def setup_method(self):
         self.registry = ToolRegistry()
-        self.creator = CreateToolTool(self.registry, workspace_path="/tmp")  # nosec B108
+        import tempfile
+
+        self.creator = CreateToolTool(self.registry, workspace_path=tempfile.gettempdir())
         self.registry.register(self.creator)
 
     @pytest.mark.asyncio

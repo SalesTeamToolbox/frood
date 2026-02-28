@@ -644,6 +644,62 @@ task types. The base skill's instructions appear first, followed by all extensio
 43 built-in skills total. Skills are matched to tasks by `task_types` frontmatter
 and injected into the agent's system prompt automatically.
 
+## Agent Profiles
+
+Agent profiles are configurable personas that shape how agents approach their
+work. Each profile defines preferred skills, task type affinities, and a system
+prompt overlay that guides the agent's behavior — like giving Marvin a purpose
+(though he'd still complain about it).
+
+Profiles are Markdown files with YAML frontmatter stored in `agents/profiles/`:
+
+```markdown
+---
+name: developer
+description: Software development focused agent
+preferred_skills: [coding, debugging, testing]
+preferred_task_types: [CODING, DEBUGGING, REFACTORING]
+---
+
+## Developer Profile
+
+You are a senior software engineer. Your guiding principles are...
+```
+
+### Built-in Profiles
+
+| Profile | Tier | Task Types | Description |
+|---|---|---|---|
+| `developer` | L1 | CODING, DEBUGGING, REFACTORING, APP_CREATE, APP_UPDATE | Software development — coding, testing, shipping production-ready code |
+| `researcher` | L1 | RESEARCH, DOCUMENTATION, DATA_ANALYSIS, STRATEGY | Deep research, analysis, and synthesis |
+| `writer` | L1 | CONTENT, EMAIL, MARKETING, DOCUMENTATION | Content creation, documentation, and communications |
+| `data-analyst` | L1 | DATA_ANALYSIS, RESEARCH, DOCUMENTATION | Data analysis, visualization, and statistical reasoning |
+| `security-auditor` | L1 | CODING, DEBUGGING, RESEARCH | Security-focused code review and vulnerability assessment |
+| `l2-reviewer` | L2 | CODING, DEBUGGING, REFACTORING, APP_CREATE, APP_UPDATE | Premium-tier senior code review and refinement |
+| `l2-strategist` | L2 | RESEARCH, STRATEGY, MARKETING, CONTENT, DESIGN, DATA_ANALYSIS, PROJECT_MANAGEMENT, DOCUMENTATION, EMAIL | Premium-tier strategic planning and project orchestration |
+
+### Dashboard Management
+
+The dashboard **Agents** page provides full CRUD management for profiles:
+
+- **Grid view** — All profiles displayed as cards with tier badges (L1/L2), default indicator, task type chips, and skill chips
+- **Detail view** — Click any card to see full configuration including persona instructions, with skills cross-referenced against the loaded skill registry
+- **Create** — Add custom profiles with name, description, task types (checkbox grid), preferred skills, and persona instructions
+- **Edit** — Modify any profile's description, task types, skills, or persona text
+- **Set Default** — Change which profile is used for new tasks (updates `AGENT_DEFAULT_PROFILE` in `.env`)
+- **Delete** — Remove custom profiles (the current default profile cannot be deleted)
+
+### Configuration
+
+Set the default profile via environment variable or dashboard:
+
+```bash
+AGENT_DEFAULT_PROFILE=developer  # Default agent persona (or set via dashboard)
+```
+
+Custom profile directories can be added via `AGENT_PROFILES_DIR` for
+organization-specific profiles that live outside the main repository.
+
 ## Tools
 
 Agents have access to a sandboxed tool registry:
@@ -1392,6 +1448,7 @@ skills, and settings.
 - **Approvals** — Approve or deny agent operations (email send, git push, file delete) from the dashboard
 - **Review with Feedback** — Approve or request changes on completed tasks; feedback is stored in agent memory for learning
 - **Tools & Skills** — View all registered tools and loaded skills
+- **Agent Profiles** — View, create, edit, and delete agent personality profiles. Set the default profile, inspect preferred skills and task types, and view persona instructions. Cards show L1/L2 tier badges and default status at a glance
 - **Apps** — Build and deploy web applications directly on the server via the app platform
 - **Settings** — Organized into 5 tabs with clear descriptions for every setting:
   - **LLM Providers** — API keys for OpenRouter, OpenAI, Anthropic, DeepSeek, Gemini, Replicate, Luma, Brave
