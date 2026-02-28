@@ -671,6 +671,66 @@ def create_app(
         await task_queue.approve(task_id)
         return {"status": "approved"}
 
+    @app.post("/api/tasks/{task_id}/escalate")
+    async def escalate_to_l2(task_id: str, _user: str = Depends(get_current_user)):
+        """Escalate an L1-completed task to L2 premium review."""
+        task = task_queue.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task.status not in (TaskStatus.REVIEW, TaskStatus.DONE):
+            raise HTTPException(
+                status_code=400,
+                detail="Only completed/review tasks can be escalated",
+            )
+        if task.tier == "L2":
+            raise HTTPException(status_code=400, detail="Task is already at L2 tier")
+
+        # Check L2 routing availability
+        from agents.model_router import ModelRouter
+
+        router = ModelRouter()
+        l2_routing = router.get_l2_routing(task.task_type)
+        if not l2_routing:
+            raise HTTPException(
+                status_code=400,
+                detail="L2 tier not available — premium API key not configured",
+            )
+
+        # Create L2 review task
+        from core.task_queue import Task as TaskModel
+
+        l2_task = TaskModel(
+            title=f"[L2 Review] {task.title}",
+            description=task.description,
+            task_type=task.task_type,
+            tier="L2",
+            l1_result=task.result or "",
+            escalated_from=task.id,
+            project_id=task.project_id,
+            origin_channel=task.origin_channel,
+            origin_channel_id=task.origin_channel_id,
+            origin_device_id=task.origin_device_id,
+            repo_id=task.repo_id,
+            branch=task.branch,
+        )
+        await task_queue.add(l2_task)
+        return {"task_id": l2_task.id, "status": "escalated"}
+
+    @app.get("/api/l2/status")
+    async def l2_status(_user: str = Depends(get_current_user)):
+        """Check L2 tier availability for the dashboard UI."""
+        from agents.model_router import ModelRouter
+
+        router = ModelRouter()
+        available_types = []
+        for tt in TaskType:
+            if router.get_l2_routing(tt) is not None:
+                available_types.append(tt.value)
+        return {
+            "l2_enabled": bool(available_types),
+            "available_task_types": available_types,
+        }
+
     @app.post("/api/tasks/{task_id}/cancel")
     async def cancel_task(task_id: str, _user: str = Depends(get_current_user)):
         """Cancel a pending or running task."""
@@ -1633,6 +1693,50 @@ def create_app(
             from core.task_queue import infer_task_type
 
             task_type = infer_task_type(text)
+
+        # Conversational mode: respond directly without creating a task
+        if classification and classification.is_conversational and settings.conversational_enabled:
+            try:
+                from agents.agent import GENERAL_ASSISTANT_PROMPT
+                from agents.model_router import ModelRouter
+
+                _conv_router = ModelRouter()
+                _conv_model = settings.conversational_model
+                if not _conv_model:
+                    _conv_routing = _conv_router.get_routing(TaskType.EMAIL)
+                    _conv_model = _conv_routing["primary"]
+
+                _conv_messages = [{"role": "system", "content": GENERAL_ASSISTANT_PROMPT}]
+                for h in history[-10:]:
+                    _conv_messages.append(h)
+                _conv_messages.append({"role": "user", "content": text})
+
+                _conv_text, _ = await asyncio.wait_for(
+                    _conv_router.complete(_conv_model, _conv_messages),
+                    timeout=30.0,
+                )
+                if _conv_text:
+                    _reply_msg = {
+                        "id": _uuid.uuid4().hex[:12],
+                        "role": "assistant",
+                        "content": _conv_text,
+                        "timestamp": _time.time(),
+                        "sender": "Agent42",
+                    }
+                    _chat_messages.append(_reply_msg)
+                    await ws_manager.broadcast("chat_message", _reply_msg)
+
+                    # Persist to chat session if available
+                    if req.session_id and chat_session_manager:
+                        await chat_session_manager.add_message(req.session_id, user_msg)
+                        await chat_session_manager.add_message(req.session_id, _reply_msg)
+
+                    return {"status": "ok", "message": user_msg, "reply": _reply_msg}
+            except Exception as _conv_err:
+                logger.warning(
+                    "Dashboard conversational response failed, falling back to task: %s",
+                    _conv_err,
+                )
 
         # No active task — create new one
         task = Task(
