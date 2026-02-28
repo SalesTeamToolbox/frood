@@ -38,6 +38,8 @@ body {
   color: var(--text-primary);
   line-height: 1.5;
   min-height: 100vh;
+  -webkit-text-size-adjust: 100%;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 a { color: var(--accent); text-decoration: none; }
@@ -947,26 +949,183 @@ td.task-title:hover { color: var(--accent); }
 }
 .md-code-block code { font-family: var(--mono); }
 
+/* ---------- Hamburger Menu Button ---------- */
+
+.hamburger-btn {
+  display: none; /* Hidden on desktop */
+  background: none; border: none; color: var(--text-primary);
+  cursor: pointer; padding: 0.4rem; margin-right: 0.5rem;
+  border-radius: var(--radius-sm); flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.hamburger-btn:hover { background: var(--bg-hover); }
+.hamburger-btn svg { display: block; }
+
+/* Sidebar overlay backdrop (mobile only) */
+.sidebar-backdrop {
+  display: none;
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+  z-index: 99; opacity: 0; transition: opacity 0.2s;
+}
+.sidebar-backdrop.visible { display: block; opacity: 1; }
+
 /* ---------- Responsive ---------- */
 
-@media (max-width: 768px) {
-  .sidebar { display: none; }
-  .main { margin-left: 0; }
-  .stats-row { grid-template-columns: 1fr 1fr; }
-  .detail-grid { grid-template-columns: 1fr; }
-  .settings-grid { grid-template-columns: 1fr; }
-  .settings-nav { display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); }
-  .settings-nav a { white-space: nowrap; }
+/* Tablet breakpoint */
+@media (max-width: 1024px) {
+  .stats-row { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  .apps-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+  .canvas-panel.open { width: 50%; }
+  .chat-main.canvas-active { flex: 0 0 50%; }
   .setting-row { grid-template-columns: 1fr; }
+  .setup-cards { grid-template-columns: 1fr; }
+}
+
+/* Mobile breakpoint */
+@media (max-width: 768px) {
+  html { font-size: 14px; }
+
+  /* Hamburger visible */
+  .hamburger-btn { display: flex; align-items: center; justify-content: center; }
+
+  /* Sidebar: hidden by default, shown as overlay when toggled */
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    z-index: 100;
+  }
+  .sidebar.mobile-open { transform: translateX(0); }
+
+  /* Main content takes full width */
+  .main { margin-left: 0; }
+
+  /* Topbar adjustments */
+  .topbar { padding: 0.6rem 1rem; gap: 0.5rem; }
+  .topbar h2 { font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar-actions .btn { font-size: 0.78rem; padding: 0.35rem 0.65rem; }
+
+  /* Content area */
+  .content { padding: 1rem; }
+
+  /* Stats */
+  .stats-row { grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .stat-card { padding: 0.75rem 1rem; }
+  .stat-card .stat-value { font-size: 1.4rem; }
+
+  /* Detail grids */
+  .detail-grid { grid-template-columns: 1fr; }
   .status-grid { grid-template-columns: 1fr; }
+
+  /* Settings */
+  .settings-grid { grid-template-columns: 1fr; min-height: auto; }
+  .settings-nav {
+    display: flex; overflow-x: auto; border-right: none;
+    border-bottom: 1px solid var(--border); padding: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+  .settings-nav a { white-space: nowrap; padding: 0.6rem 1rem; }
+  .setting-row { grid-template-columns: 1fr; }
+  .settings-panel { padding: 1rem; }
+
+  /* Tables */
+  .table-wrap { margin: 0 -1rem; }
+  th, td { padding: 0.6rem 0.75rem; font-size: 0.82rem; }
+
+  /* Cards */
+  .card-header { padding: 0.75rem 1rem; }
+  .card-body { padding: 1rem; }
+
+  /* Apps */
   .apps-grid { grid-template-columns: 1fr; }
-  .chat-msg-content { max-width: 95%; }
+  .apps-stats-row { grid-template-columns: repeat(2, 1fr); }
+
+  /* Kanban */
+  .kanban-board { min-height: 300px; }
+  .kanban-column { flex: 0 0 200px; }
+
+  /* Kanban controls */
+  .kanban-controls { gap: 0.5rem; }
+  .kanban-controls .filter-bar { flex-basis: 100%; }
+  .kanban-controls .filter-bar select { min-width: 100px; flex: 1; }
+
+  /* Approval cards */
+  .approval-card { flex-direction: column; gap: 0.75rem; }
+  .approval-card .approval-btns { width: 100%; justify-content: flex-end; }
+
+  /* Chat */
+  .chat-layout { height: calc(100vh - 6rem); }
+  .chat-msg-content { max-width: 90%; }
   .chat-main.canvas-active { flex: 1; }
-  .canvas-panel.open { width: 100%; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 200; }
+  .canvas-panel.open {
+    width: 100%; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 200;
+  }
   .chat-suggestions { grid-template-columns: 1fr; }
+  .chat-welcome-icon { width: 60px; height: 60px; font-size: 2.2rem; }
+  .chat-welcome h2 { font-size: 1.1rem; }
+  .chat-composer-inner { border-radius: 10px; padding: 0.4rem 0.4rem 0.4rem 0.75rem; }
+
+  /* Session sidebar */
   .session-sidebar { display: none; }
-  .code-layout { grid-template-columns: 1fr !important; }
+
+  /* Code layout */
+  .code-layout { flex-direction: column; height: auto; min-height: calc(100vh - 6rem); }
+  .code-chat-area { flex-direction: column; }
   .code-chat-area.canvas-active { flex-direction: column; }
+  .code-chat-area.canvas-active .canvas-panel { flex: none; height: 50vh; }
+
+  /* Modals */
+  .modal { max-width: calc(100vw - 2rem); max-height: 90vh; overflow-y: auto; }
+  .modal-header { padding: 0.75rem 1rem; }
+  .modal-body { padding: 1rem; }
+  .modal-footer { padding: 0.75rem 1rem; flex-wrap: wrap; }
+  .task-detail-modal { max-width: calc(100vw - 2rem); }
+
+  /* Toast */
+  .toast-container { left: 1rem; right: 1rem; top: auto; bottom: 1rem; align-items: stretch; }
+  .toast { max-width: none; }
+
+  /* Setup wizard */
+  .setup-wizard { max-width: 100%; padding: 0 0.5rem; }
+  .setup-steps { gap: 0; }
+  .setup-step-line { width: 24px; margin: 0 0.25rem; margin-bottom: 1.2rem; }
+  .setup-step .step-label { font-size: 0.6rem; }
+  .setup-cards { grid-template-columns: 1fr; }
+
+  /* Login */
+  .login-card { padding: 1.5rem; }
+
+  /* Capacity banner */
+  .capacity-banner { flex-direction: column; text-align: center; gap: 0.5rem; padding: 0.75rem 1rem; }
+  .capacity-number { font-size: 1.5rem; }
+
+  /* Activity sidebar full screen overlay on mobile */
+  .activity-sidebar { width: 100%; }
+
+  /* Tabs */
+  .mc-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .mc-tab { padding: 0.5rem 0.75rem; font-size: 0.85rem; white-space: nowrap; }
+
+  /* Touch-friendly: minimum 44px tap targets */
+  .sidebar-nav a { padding: 0.75rem 1rem; min-height: 44px; }
+  .btn { min-height: 36px; }
+  .chip { min-height: 36px; }
+  .kanban-card { padding: 0.75rem; }
+  .memory-option { padding: 0.85rem 1rem; }
+
+  /* Slot legend wrapping */
+  .slot-legend { flex-wrap: wrap; gap: 0.5rem; }
+}
+
+/* Small phone breakpoint */
+@media (max-width: 480px) {
+  .stats-row { grid-template-columns: 1fr; }
+  .apps-stats-row { grid-template-columns: 1fr; }
+  .topbar h2 { font-size: 0.9rem; }
+  .kanban-column { flex: 0 0 180px; }
+  .chat-msg-content { max-width: 95%; }
+  .detail-result { font-size: 0.78rem; }
+  .app-card-actions { flex-direction: column; }
+  .app-card-actions .btn { width: 100%; justify-content: center; }
 }
 
 /* ---------- Session Sidebar ---------- */
