@@ -598,6 +598,11 @@ class ModelCatalog:
             if status.get("status") not in (self.STATUS_OK, self.STATUS_RATE_LIMITED, None)
         }
 
+    @property
+    def health_status(self) -> dict[str, dict]:
+        """Return the per-model health status dict."""
+        return self._health_status
+
     def get_health_summary(self) -> dict:
         """Return a summary of model health for dashboard/API."""
         by_status: dict[str, int] = {}

@@ -657,6 +657,7 @@ def create_app(
             profile=req.profile,
         )
         await task_queue.add(task)
+        _record_activity(event="task_created", title=task.title, task_id=task.id)
         return task.to_dict()
 
     @app.get("/api/tasks/{task_id}")
@@ -946,6 +947,19 @@ def create_app(
     # -- Activity Feed --------------------------------------------------------
 
     _activity_feed: list[dict] = []
+    _MAX_ACTIVITY = 500
+
+    def _record_activity(event: str, title: str = "", task_id: str = "", extra: dict | None = None):
+        """Append an event to the in-memory activity feed (capped at _MAX_ACTIVITY)."""
+        import time as _t
+
+        entry: dict = {"event": event, "title": title, "task_id": task_id, "timestamp": _t.time()}
+        if extra:
+            entry.update(extra)
+        _activity_feed.append(entry)
+        # Trim to keep memory bounded
+        if len(_activity_feed) > _MAX_ACTIVITY:
+            del _activity_feed[: len(_activity_feed) - _MAX_ACTIVITY]
 
     @app.get("/api/activity")
     async def get_activity(_user: str = Depends(get_current_user)):
@@ -1085,7 +1099,7 @@ def create_app(
         # -- Model performance (from evaluator) --
         model_perf = []
         if model_evaluator:
-            for stats in model_evaluator._stats.values():
+            for stats in model_evaluator.all_stats():
                 model_perf.append(stats.to_dict())
             model_perf.sort(key=lambda m: m.get("composite_score", 0), reverse=True)
 
@@ -1093,7 +1107,7 @@ def create_app(
         connectivity: dict = {"summary": {}, "models": {}}
         if model_catalog:
             connectivity["summary"] = model_catalog.get_health_summary()
-            connectivity["models"] = model_catalog._health_status
+            connectivity["models"] = model_catalog.health_status
 
         # -- Project breakdown --
         project_list = []
@@ -1476,7 +1490,7 @@ def create_app(
         summary = model_catalog.get_health_summary()
         return {
             "summary": summary,
-            "models": model_catalog._health_status,
+            "models": model_catalog.health_status,
         }
 
     @app.post("/api/models/health-check")
@@ -1628,6 +1642,7 @@ def create_app(
 
     class ChatSendRequest(BaseModel):
         message: str
+        session_id: str = ""
 
     @app.get("/api/chat/messages")
     async def get_chat_messages(_user: str = Depends(get_current_user)):
@@ -1681,12 +1696,12 @@ def create_app(
         # Classify task type — use LLM classifier with conversation history when
         # available; fall back to keyword matching if no classifier is injected.
         classification = None
+        history = [
+            {"role": m["role"], "content": m["content"]}
+            for m in _chat_messages[-10:]
+            if m.get("role") in ("user", "assistant") and m.get("content")
+        ]
         if intent_classifier is not None:
-            history = [
-                {"role": m["role"], "content": m["content"]}
-                for m in _chat_messages[-10:]
-                if m.get("role") in ("user", "assistant") and m.get("content")
-            ]
             classification = await intent_classifier.classify(text, conversation_history=history)
             task_type = classification.task_type
         else:
@@ -2317,6 +2332,7 @@ def create_app(
             )
             await task_queue.add(task)
             await ws_manager.broadcast("task_update", task.to_dict())
+            _record_activity(event="task_created", title=task.title, task_id=task.id)
             return task.to_dict()
 
     # -- Project Memory --------------------------------------------------------
@@ -2893,5 +2909,8 @@ def create_app(
 
     if FRONTEND_DIR.exists():
         app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True))
+
+    # Expose activity feed helper so agent42.py can record events via ws_manager
+    ws_manager.record_activity = _record_activity  # type: ignore[attr-defined]
 
     return app
