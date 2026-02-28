@@ -201,13 +201,44 @@ class HeartbeatService:
         if tool_registry:
             health.tools_registered = len(tool_registry.list_tools())
 
-        # Get process memory usage
+        # Get process memory usage (cross-platform)
         try:
-            import resource
+            import sys
 
-            usage = resource.getrusage(resource.RUSAGE_SELF)
-            health.memory_mb = usage.ru_maxrss / 1024  # KB to MB on Linux
-        except (ImportError, AttributeError):
+            if sys.platform == "win32":
+                import ctypes
+                import ctypes.wintypes
+
+                # Use GetProcessMemoryInfo via Windows API
+                class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+                    _fields_ = [
+                        ("cb", ctypes.wintypes.DWORD),
+                        ("PageFaultCount", ctypes.wintypes.DWORD),
+                        ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t),
+                        ("PeakPagefileUsage", ctypes.c_size_t),
+                    ]
+
+                counters = PROCESS_MEMORY_COUNTERS()
+                counters.cb = ctypes.sizeof(counters)
+                psapi = ctypes.windll.psapi
+                handle = ctypes.windll.kernel32.GetCurrentProcess()
+                if psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+                    health.memory_mb = counters.WorkingSetSize / (1024 * 1024)
+            else:
+                import resource
+
+                usage = resource.getrusage(resource.RUSAGE_SELF)
+                if sys.platform == "darwin":
+                    health.memory_mb = usage.ru_maxrss / (1024 * 1024)  # bytes on macOS
+                else:
+                    health.memory_mb = usage.ru_maxrss / 1024  # KB on Linux
+        except (ImportError, AttributeError, OSError):
             pass
 
         return health

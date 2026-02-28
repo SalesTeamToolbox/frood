@@ -60,6 +60,8 @@ Rules:
 - If the message is vague (e.g. "help me with this"), set needs_clarification=true
 - Use conversation history to understand context (e.g. if they were discussing
   marketing and say "now write it up", that's a content task)
+- Requests to build, create, or make apps/tools/websites/dashboards = app_create
+  (especially when a framework name like Flask, Django, React, Express is mentioned)
 - Default to "coding" only if the request clearly involves code
 - For complex multi-step tasks (campaigns, full projects, comprehensive analysis),
   recommend "team" mode with the appropriate team name

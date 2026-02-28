@@ -463,8 +463,10 @@ class AppManager:
         env["PORT"] = str(port)
         env["HOST"] = "127.0.0.1"
 
-        # Check for requirements.txt and install deps
+        # Check for requirements.txt and install deps (also check src/)
         reqs = app_path / "requirements.txt"
+        if not reqs.exists():
+            reqs = app_path / "src" / "requirements.txt"
         if reqs.exists():
             proc = await asyncio.create_subprocess_exec(
                 "pip",

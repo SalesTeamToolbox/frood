@@ -393,8 +393,12 @@ function connectWS() {
 
   ws.onopen = () => {
     state.wsConnected = true;
-    wsRetries = 0;
     updateWSIndicator();
+    if (wsRetries > 0) {
+      // Reconnecting after disconnect — reload data that may have changed
+      loadChatSessions(); loadCodeSessions(); loadTasks(); loadStatus();
+    }
+    wsRetries = 0;
   };
 
   ws.onmessage = (e) => {
@@ -1076,9 +1080,10 @@ function doLogout() {
   render();
 }
 
-async function doCreateTask(title, description, taskType, repoId, branch) {
+async function doCreateTask(title, description, taskType, projectId, repoId, branch) {
   try {
     const body = { title, description, task_type: taskType };
+    if (projectId) body.project_id = projectId;
     if (repoId) body.repo_id = repoId;
     if (branch) body.branch = branch;
     await api("/tasks", {
@@ -1384,14 +1389,11 @@ function submitCreateTask() {
   const desc = document.getElementById("ct-desc")?.value?.trim();
   const type = document.getElementById("ct-type")?.value;
   const projectId = document.getElementById("ct-project")?.value || "";
-  if (!title) return toast("Title is required", "error");
-  if (!desc) return toast("Description is required", "error");
-  doCreateTask(title, desc, type, projectId);
   const repoId = document.getElementById("ct-repo")?.value || "";
   const branch = document.getElementById("ct-branch")?.value || "";
   if (!title) return toast("Title is required", "error");
   if (!desc) return toast("Description is required", "error");
-  doCreateTask(title, desc, type, repoId, branch);
+  doCreateTask(title, desc, type, projectId, repoId, branch);
 }
 
 function showReviewModal(task) {
