@@ -449,6 +449,8 @@ class TestWorkspaceSandbox:
 | 77 | Waves | Circular dependencies in plan tasks cause infinite loop in `compute_waves()` | Topological sort must detect cycles and raise `ValueError` — tested in `test_plan_spec.py` |
 | 78 | State | `STATE.md` grows unbounded with `accumulated_context` field | Cap at `_MAX_ACCUMULATED_CONTEXT_CHARS` (10K chars); `StateManager.save_state()` enforces this |
 | 79 | Context | Context budget estimation uses chars/4 approximation, not actual tokens | Sufficient for threshold detection (50%/70%); not for exact token accounting |
+| 80 | Context | Context overflow "error" strategy returns empty output when `primary_output` is still `""` | Guard: `if not primary_output.strip(): primary_output = "Context too large..."` before setting `history.final_output` |
+| 81 | Chat | Agent processes dashboard chat messages in isolation — no conversation history | Pass `chat_session_manager` to Agent; load history in `_build_context()` via `origin_metadata["chat_session_id"]` |
 
 ---
 

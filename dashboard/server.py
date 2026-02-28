@@ -1738,10 +1738,23 @@ def create_app(
                     _conv_err,
                 )
 
-        # No active task — create new one
+        # No active task — create new one.
+        # Include recent conversation context so the agent is aware of prior
+        # messages exchanged in this (non-session) chat window.
+        task_description = text
+        if len(_chat_messages) > 1:
+            prior = [m for m in _chat_messages[-11:-1] if m.get("content")]
+            if prior:
+                history_lines = [
+                    f"[{m.get('role', 'user')}]: {m.get('content', '')[:300]}" for m in prior
+                ]
+                task_description = f"{text}\n\n## Prior Conversation Context\n\n" + "\n".join(
+                    history_lines
+                )
+
         task = Task(
             title=text[:120] + ("..." if len(text) > 120 else ""),
-            description=text,
+            description=task_description,
             task_type=task_type,
             priority=1,
             origin_channel="dashboard_chat",

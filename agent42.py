@@ -1243,6 +1243,7 @@ class Agent42:
                     extension_loader=self.extension_loader,
                     intervention_queue=intervention_queue,
                     state_manager=self.state_manager,
+                    chat_session_manager=self.chat_session_manager,
                 )
                 await agent.run()
                 self.heartbeat.mark_complete(task.id)
