@@ -270,6 +270,11 @@ class Agent42:
             self.task_queue,
         )
 
+        # Project state manager for session recovery (GSD-inspired)
+        from core.state_manager import StateManager
+
+        self.state_manager = StateManager(self.data_dir / settings.projects_dir)
+
         self._register_tools()
 
         # Phase 4b: Custom tool plugins (auto-discovery from CUSTOM_TOOLS_DIR)
@@ -1237,6 +1242,7 @@ class Agent42:
                     profile_loader=self.profile_loader,
                     extension_loader=self.extension_loader,
                     intervention_queue=intervention_queue,
+                    state_manager=self.state_manager,
                 )
                 await agent.run()
                 self.heartbeat.mark_complete(task.id)

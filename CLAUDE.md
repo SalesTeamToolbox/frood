@@ -445,6 +445,10 @@ class TestWorkspaceSandbox:
 | 73 | Teams | Team roles inherit tier from parent — L2 team = all premium tokens | Team roles default to L1 via `TeamContext.tier`; only explicitly configured roles use L2 |
 | 74 | Serialization | `tier` field not surviving Task persist/restore | `to_dict()`/`from_dict()` handles via `asdict()` — new string fields serialize automatically |
 | 75 | Comments | Task comments (`POST /api/tasks/{id}/comment`) were stored but never routed to the running agent or broadcast to chat | Comment endpoint now calls `route_message_to_task()` for active tasks, broadcasts `task_update`, and mirrors to chat session via `chat_message` event |
+| 76 | Plans | Manager LLM returns free-text instead of JSON `PlanSpecification` | Always fall back to legacy unstructured path; parse with try/except in `_parse_plan_json()` |
+| 77 | Waves | Circular dependencies in plan tasks cause infinite loop in `compute_waves()` | Topological sort must detect cycles and raise `ValueError` — tested in `test_plan_spec.py` |
+| 78 | State | `STATE.md` grows unbounded with `accumulated_context` field | Cap at `_MAX_ACCUMULATED_CONTEXT_CHARS` (10K chars); `StateManager.save_state()` enforces this |
+| 79 | Context | Context budget estimation uses chars/4 approximation, not actual tokens | Sufficient for threshold detection (50%/70%); not for exact token accounting |
 
 ---
 

@@ -1,7 +1,10 @@
 """Tests for the TeamTool — multi-agent team orchestration."""
 
+import json
+
 import pytest
 
+from core.plan_spec import PlanTask
 from core.task_queue import TaskStatus
 from tools.team_tool import BUILTIN_TEAMS, TeamTool
 
@@ -207,3 +210,123 @@ class TestTeamToolBuiltins:
         team = BUILTIN_TEAMS["strategy-team"]
         parallel_roles = [r for r in team["roles"] if r.get("parallel_group")]
         assert len(parallel_roles) >= 2, "Strategy team should have parallel research roles"
+
+
+class TestStructuredPlanParsing:
+    """Test _parse_plan_json on TeamTool."""
+
+    def setup_method(self):
+        self.queue = MockTaskQueue()
+        self.tool = TeamTool(self.queue)
+
+    def test_parse_valid_json(self):
+        plan_json = json.dumps(
+            {
+                "goal": "Build the thing",
+                "observable_truths": ["It works"],
+                "required_artifacts": ["output.py"],
+                "required_wiring": [],
+                "tasks": [
+                    {
+                        "id": "T1",
+                        "title": "Code it",
+                        "description": "Write code",
+                        "role": "coder",
+                        "task_type": "coding",
+                        "files_to_read": [],
+                        "files_to_modify": ["output.py"],
+                        "verification_commands": ["pytest"],
+                        "acceptance_criteria": ["Tests pass"],
+                        "depends_on": [],
+                    }
+                ],
+            }
+        )
+        spec = self.tool._parse_plan_json(plan_json)
+        assert spec is not None
+        assert spec.goal == "Build the thing"
+        assert len(spec.tasks) == 1
+        assert spec.tasks[0].id == "T1"
+
+    def test_parse_json_with_code_fences(self):
+        plan_json = '```json\n{"goal": "Test", "tasks": [{"id": "T1", "title": "X"}]}\n```'
+        spec = self.tool._parse_plan_json(plan_json)
+        assert spec is not None
+        assert spec.goal == "Test"
+
+    def test_parse_json_embedded_in_text(self):
+        text = (
+            "Here is the plan:\n\n"
+            '{"goal": "Test", "tasks": [{"id": "T1", "title": "X"}]}\n\n'
+            "That should work."
+        )
+        spec = self.tool._parse_plan_json(text)
+        assert spec is not None
+        assert spec.goal == "Test"
+
+    def test_parse_invalid_json_returns_none(self):
+        spec = self.tool._parse_plan_json("This is not JSON at all")
+        assert spec is None
+
+    def test_parse_json_without_tasks_returns_none(self):
+        spec = self.tool._parse_plan_json('{"goal": "No tasks here"}')
+        assert spec is None
+
+    def test_parse_empty_string_returns_none(self):
+        spec = self.tool._parse_plan_json("")
+        assert spec is None
+
+
+class TestBuildExecutorPrompt:
+    """Test _build_executor_prompt on TeamTool."""
+
+    def test_basic_prompt(self):
+        from tools.team_tool import TeamContext
+
+        task = PlanTask(
+            id="T1",
+            title="Build models",
+            description="Create User and Post models",
+            role="coder",
+            files_to_read=["schema.sql"],
+            files_to_modify=["models.py"],
+            verification_commands=["pytest tests/test_models.py"],
+            acceptance_criteria=["User model has email field"],
+        )
+        ctx = TeamContext(
+            task_description="Build a blog",
+            manager_plan="Plan here",
+            project_id="proj1",
+        )
+        prompt = TeamTool._build_executor_prompt(task, ctx, {})
+        assert "# Task: Build models" in prompt
+        assert "Create User and Post models" in prompt
+        assert "schema.sql" in prompt
+        assert "models.py" in prompt
+        assert "pytest tests/test_models.py" in prompt
+        assert "User model has email field" in prompt
+
+    def test_prompt_with_dependency_outputs(self):
+        from tools.team_tool import TeamContext
+
+        task = PlanTask(
+            id="T2",
+            title="Build API",
+            description="Create endpoints",
+            role="coder",
+            depends_on=["T1"],
+        )
+        ctx = TeamContext(
+            task_description="Build a blog",
+            manager_plan="Plan",
+        )
+        prior_results = {
+            "T1": {
+                "output": "Models created successfully",
+                "title": "Build models",
+            }
+        }
+        prompt = TeamTool._build_executor_prompt(task, ctx, prior_results)
+        assert "Prior Task Outputs" in prompt
+        assert "Build models (completed)" in prompt
+        assert "Models created successfully" in prompt

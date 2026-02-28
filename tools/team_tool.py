@@ -26,8 +26,12 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from tools.base import Tool, ToolResult
+
+if TYPE_CHECKING:
+    from core.plan_spec import PlanSpecification, PlanTask
 
 logger = logging.getLogger("agent42.tools.team")
 
@@ -44,19 +48,79 @@ MAX_REVISIONS_PER_ROLE = 1  # prevent infinite loops
 MANAGER_PLAN_PROMPT = """\
 You are the Team Manager / Project Coordinator.
 
-Your job in this PLANNING phase is to:
-1. Analyze the task and break it into clear subtasks for each team role
-2. For each role listed below, specify:
-   - What they should focus on
-   - Expected deliverables
-   - Quality criteria
-3. Identify dependencies between roles
-4. Output a structured execution plan
+Your job in this PLANNING phase is to produce a STRUCTURED EXECUTION PLAN.
+The plan must be detailed enough that any agent could execute it without
+asking clarifying questions.
+
+For each task in the plan, specify ALL of the following:
+1. **Title and description** — clear, unambiguous instructions
+2. **Files to read** — exact file paths the executor needs as input
+3. **Files to modify/create** — expected output artifacts
+4. **Verification steps** — concrete commands or checks to verify the task succeeded
+5. **Acceptance criteria** — observable conditions that prove correctness
+6. **Dependencies** — which other tasks must complete first (by task ID)
+
+CONSTRAINTS:
+- Maximum 2-3 tasks per role per wave (keep tasks small and focused)
+- Each task should target <= {context_budget}% context window utilisation
+- Include goal-backward verification: what must be TRUE for the overall goal?
+
+Test your plan: "Could a different agent execute each task without asking questions?"
+If not, add more specificity.
 
 Team roles:
 {role_descriptions}
 
-Be specific and actionable. The roles will follow your plan.
+Respond with ONLY a JSON object matching this schema:
+{{
+  "goal": "<what overall success looks like>",
+  "observable_truths": ["<testable behaviour that must hold>", ...],
+  "required_artifacts": ["<file or object that must exist>", ...],
+  "required_wiring": ["<component A connects to component B>", ...],
+  "tasks": [
+    {{
+      "id": "T1",
+      "title": "<short title>",
+      "description": "<detailed instructions>",
+      "role": "<role name>",
+      "task_type": "<coding|research|content|etc>",
+      "files_to_read": ["path/to/file"],
+      "files_to_modify": ["path/to/output"],
+      "verification_commands": ["pytest tests/test_x.py -v"],
+      "acceptance_criteria": ["File X exists and contains Y"],
+      "depends_on": [],
+      "estimated_context_pct": 30
+    }}
+  ]
+}}
+"""
+
+# Default context budget percentage for structured plans
+_DEFAULT_CONTEXT_BUDGET = 50
+
+PLAN_CHECKER_PROMPT = """\
+You are a Plan Reviewer. Your job is to peer-review an execution plan
+BEFORE agents start working. Catch problems early to avoid wasted effort.
+
+Check for:
+1. AMBIGUITY: Could any task be interpreted two different ways?
+2. MISSING FILES: Are all input files listed? Do output paths make sense?
+3. GAP ANALYSIS: Does the plan actually achieve the stated goal?
+4. DEPENDENCY ERRORS: Are dependencies correct? Could more tasks be parallel?
+5. CONTEXT BUDGET: Will any task likely exceed 50% context utilisation?
+6. VERIFICATION GAPS: Can every acceptance criterion actually be tested?
+7. OBSERVABLE TRUTHS: Do the listed truths cover the goal adequately?
+
+Plan to review:
+{plan_json}
+
+Original task:
+{task_description}
+
+Respond with:
+PLAN_STATUS: APPROVED | NEEDS_REVISION
+ISSUES: (list each issue on its own line, if any)
+SUGGESTIONS: (list improvements, if any)
 """
 
 MANAGER_REVIEW_PROMPT = """\
@@ -632,14 +696,65 @@ class TeamTool(Tool):
                 project_id=project_id,
             )
 
-            # -- Phase 2: Execute team workflow --
-            if workflow == "parallel":
-                results = await self._run_parallel(roles, task_description, team_ctx)
-            elif workflow == "fan_out_fan_in":
-                results = await self._run_fan_out_fan_in(roles, task_description, team_ctx)
-            else:
-                # sequential and pipeline both run in order
-                results = await self._run_sequential(roles, task_description, team_ctx)
+            # -- Phase 1.5: Try structured plan path (GSD-inspired) --
+            plan_spec = self._parse_plan_json(manager_plan)
+            used_structured_path = False
+
+            if plan_spec:
+                plan_spec.project_id = project_id
+
+                # Plan checker — skip for small teams (1-2 roles)
+                if len(roles) > 2:
+                    approved, notes = await self._check_plan(
+                        plan_spec, task_description, project_id
+                    )
+                    plan_spec.reviewed = approved
+                    plan_spec.reviewer_notes = notes
+
+                    if not approved:
+                        # Re-plan once with checker feedback
+                        logger.info("Plan checker requested revision — re-planning")
+                        revision_prompt = (
+                            f"Your previous plan was reviewed and needs revision.\n\n"
+                            f"Reviewer feedback:\n{notes}\n\n"
+                            f"Please produce a revised plan addressing the issues above."
+                        )
+                        team_ctx.shared_notes = revision_prompt
+                        manager_plan = await self._manager_plan(
+                            f"{task_description}\n\n{revision_prompt}",
+                            roles,
+                            project_id,
+                        )
+                        run_state["manager_plan"] = manager_plan
+                        team_ctx.manager_plan = manager_plan
+                        plan_spec = self._parse_plan_json(manager_plan)
+                        if plan_spec:
+                            plan_spec.project_id = project_id
+                            plan_spec.reviewed = True
+                            plan_spec.reviewer_notes = "Re-planned after checker feedback"
+
+                if plan_spec:
+                    # -- Phase 2 (structured): Wave-based execution --
+                    results = await self._run_waves(plan_spec, team_ctx)
+                    used_structured_path = True
+
+                    # Remap results to role-keyed dict for manager review
+                    role_results: dict[str, dict] = {}
+                    for task_id, result_data in results.items():
+                        role = result_data.get("role", task_id)
+                        key = f"{role}:{task_id}"
+                        role_results[key] = result_data
+                    results = role_results
+
+            if not used_structured_path:
+                # -- Phase 2 (legacy): Execute team workflow --
+                if workflow == "parallel":
+                    results = await self._run_parallel(roles, task_description, team_ctx)
+                elif workflow == "fan_out_fan_in":
+                    results = await self._run_fan_out_fan_in(roles, task_description, team_ctx)
+                else:
+                    # sequential and pipeline both run in order
+                    results = await self._run_sequential(roles, task_description, team_ctx)
 
             run_state["role_results"] = results
 
@@ -668,10 +783,14 @@ class TeamTool(Tool):
                 run_state["quality_score"] = int(quality_match.group(1))
 
             run_state["status"] = "completed"
+            if plan_spec:
+                run_state["structured_plan"] = True
 
             # -- Build final aggregated output --
             output_parts = [f"# Team Run: {name} (run_id: {run_id})\n"]
             output_parts.append(f"**Workflow:** {workflow}\n")
+            if used_structured_path:
+                output_parts.append("**Execution mode:** Structured (wave-based)\n")
             output_parts.append(f"**Task:** {task_description}\n")
             output_parts.append(f"\n## Manager's Plan\n{manager_plan}\n")
 
@@ -700,7 +819,12 @@ class TeamTool(Tool):
     # ------------------------------------------------------------------
 
     async def _manager_plan(self, task_description: str, roles: list, project_id: str = "") -> str:
-        """Manager creates an execution plan before team roles run."""
+        """Manager creates an execution plan before team roles run.
+
+        The prompt asks for structured JSON output.  If the model fails to
+        produce valid JSON the raw text is returned and the caller falls
+        back to the legacy unstructured path.
+        """
         from core.task_queue import Task, TaskType
 
         role_desc_parts = []
@@ -712,7 +836,10 @@ class TeamTool(Tool):
             )
         role_descriptions = "\n".join(role_desc_parts)
 
-        plan_prompt = MANAGER_PLAN_PROMPT.format(role_descriptions=role_descriptions)
+        plan_prompt = MANAGER_PLAN_PROMPT.format(
+            role_descriptions=role_descriptions,
+            context_budget=_DEFAULT_CONTEXT_BUDGET,
+        )
 
         full_description = f"{plan_prompt}\n\n## Task to Plan\n{task_description}"
 
@@ -977,6 +1104,189 @@ class TeamTool(Tool):
             await asyncio.sleep(POLL_INTERVAL)
 
         return "(role timed out)"
+
+    # ------------------------------------------------------------------
+    # Structured plan parsing and checking
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_plan_json(manager_output: str) -> "PlanSpecification | None":
+        """Try to parse the manager's output as a structured PlanSpecification.
+
+        Returns None if parsing fails (caller should fall back to legacy path).
+        """
+        from core.plan_spec import PlanSpecification
+
+        # Strip markdown code fences if present
+        text = manager_output.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            # Remove first and last fence lines
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            text = "\n".join(lines)
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            # Try to extract JSON from mixed text
+            start = text.find("{")
+            end = text.rfind("}")
+            if start == -1 or end == -1:
+                return None
+            try:
+                data = json.loads(text[start : end + 1])
+            except json.JSONDecodeError:
+                return None
+
+        if not isinstance(data, dict) or "tasks" not in data:
+            return None
+
+        try:
+            data["plan_id"] = data.get("plan_id", uuid.uuid4().hex[:10])
+            return PlanSpecification.from_dict(data)
+        except Exception as e:
+            logger.warning("Failed to parse structured plan: %s", e)
+            return None
+
+    async def _check_plan(
+        self,
+        plan_spec: "PlanSpecification",
+        task_description: str,
+        project_id: str = "",
+    ) -> tuple[bool, str]:
+        """Have a plan checker review the plan before execution.
+
+        Returns (approved, reviewer_notes).
+        """
+        from core.task_queue import Task, TaskType
+
+        prompt = PLAN_CHECKER_PROMPT.format(
+            plan_json=json.dumps(plan_spec.to_dict(), indent=2),
+            task_description=task_description,
+        )
+        task_obj = Task(
+            title=f"[plan-checker] {task_description[:50]}",
+            description=prompt,
+            task_type=TaskType.PROJECT_MANAGEMENT,
+            project_id=project_id,
+        )
+        await self._task_queue.add(task_obj)
+        output = await self._wait_for_task(task_obj.id)
+
+        approved = "PLAN_STATUS: APPROVED" in output
+        return approved, output
+
+    # ------------------------------------------------------------------
+    # Wave-based execution
+    # ------------------------------------------------------------------
+
+    async def _run_waves(
+        self,
+        plan: "PlanSpecification",
+        team_ctx: "TeamContext",
+    ) -> dict[str, dict]:
+        """Execute plan tasks in dependency-ordered waves.
+
+        Within each wave: tasks run in parallel.
+        Between waves: sequential (each wave waits for the previous).
+        """
+        from core.task_queue import Task, TaskType
+
+        waves = plan.compute_waves()
+        results: dict[str, dict] = {}
+
+        for wave_num in sorted(waves.keys()):
+            wave_tasks = waves[wave_num]
+            logger.info("Starting wave %d with %d tasks", wave_num, len(wave_tasks))
+
+            # Submit all tasks in this wave in parallel
+            task_ids: dict[str, tuple[str, PlanTask]] = {}
+            for plan_task in wave_tasks:
+                executor_prompt = self._build_executor_prompt(plan_task, team_ctx, results)
+
+                try:
+                    task_type_enum = TaskType(plan_task.task_type)
+                except ValueError:
+                    task_type_enum = TaskType.RESEARCH
+
+                task_obj = Task(
+                    title=f"[wave:{wave_num}:{plan_task.role}] {plan_task.title}",
+                    description=executor_prompt,
+                    task_type=task_type_enum,
+                    project_id=team_ctx.project_id,
+                )
+                await self._task_queue.add(task_obj)
+                task_ids[plan_task.id] = (task_obj.id, plan_task)
+
+            # Wait for all tasks in this wave
+            for plan_task_id, (queue_task_id, plan_task) in task_ids.items():
+                output = await self._wait_for_task(queue_task_id)
+                results[plan_task_id] = {
+                    "output": output,
+                    "task_id": queue_task_id,
+                    "role": plan_task.role,
+                    "title": plan_task.title,
+                }
+                team_ctx.role_outputs[plan_task.role] = output
+
+        return results
+
+    @staticmethod
+    def _build_executor_prompt(
+        plan_task: "PlanTask",
+        team_ctx: "TeamContext",
+        prior_results: dict,
+    ) -> str:
+        """Build an executor prompt from a plan task.
+
+        The plan IS the prompt — structured enough that the executor
+        doesn't need to ask clarifying questions.
+        """
+        parts = [
+            f"# Task: {plan_task.title}\n",
+            plan_task.description,
+        ]
+
+        if plan_task.files_to_read:
+            parts.append(
+                "\n## Files to Read\n" + "\n".join(f"- `{f}`" for f in plan_task.files_to_read)
+            )
+
+        if plan_task.files_to_modify:
+            parts.append(
+                "\n## Files to Create/Modify\n"
+                + "\n".join(f"- `{f}`" for f in plan_task.files_to_modify)
+            )
+
+        if plan_task.verification_commands:
+            parts.append(
+                "\n## Verification Commands\nRun these to verify your work:\n"
+                + "\n".join(f"```\n{cmd}\n```" for cmd in plan_task.verification_commands)
+            )
+
+        if plan_task.acceptance_criteria:
+            parts.append(
+                "\n## Acceptance Criteria\n"
+                + "\n".join(f"- [ ] {c}" for c in plan_task.acceptance_criteria)
+            )
+
+        # Include outputs from dependency tasks
+        if plan_task.depends_on and prior_results:
+            dep_parts = []
+            for dep_id in plan_task.depends_on:
+                if dep_id in prior_results:
+                    dep = prior_results[dep_id]
+                    dep_parts.append(f"### {dep['title']} (completed)\n{dep['output'][:2000]}")
+            if dep_parts:
+                parts.append("\n## Prior Task Outputs (dependencies)\n" + "\n\n".join(dep_parts))
+
+        # Include team context
+        if plan_task.role:
+            ctx = team_ctx.build_role_context(plan_task.role)
+            if ctx:
+                parts.append(f"\n## Team Context\n{ctx}")
+
+        return "\n\n".join(parts)
 
     # ------------------------------------------------------------------
     # Utility actions (unchanged from original)

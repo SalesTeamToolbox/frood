@@ -710,6 +710,29 @@ class IterationEngine:
                 if rlm_provider.should_use_rlm_recompress(est_tokens_rlm):
                     messages = await self._rlm_recompress(rlm_provider, messages, task_description)
 
+            # Context budget awareness (GSD-inspired) — proactively
+            # compact before quality degrades, rather than only reacting
+            # when the window overflows.
+            try:
+                from core.config import settings as _budget_cfg
+
+                _max_ctx = _budget_cfg.max_context_tokens
+            except ImportError:
+                _max_ctx = 128_000
+            utilization = self._estimate_context_utilization(messages, _max_ctx)
+            if utilization > self.CONTEXT_CRITICAL_PCT:
+                logger.warning(
+                    "Context utilization at %.0f%% — aggressive compaction triggered",
+                    utilization,
+                )
+                self._compact_tool_messages(messages)
+                self._compact_conversation_messages(messages)
+            elif utilization > self.CONTEXT_QUALITY_WARNING_PCT:
+                logger.info(
+                    "Context utilization at %.0f%% — quality may degrade",
+                    utilization,
+                )
+
             # Context window overflow guard (OpenClaw feature)
             try:
                 from core.config import settings as _cfg
@@ -1043,3 +1066,134 @@ class IterationEngine:
         """Check if the critic approved the output."""
         first_line = critic_feedback.strip().split("\n")[0].upper()
         return first_line.startswith("APPROVED")
+
+    # ------------------------------------------------------------------
+    # Goal-backward verification (GSD-inspired)
+    # ------------------------------------------------------------------
+
+    _GOAL_VERIFICATION_PROMPT = """\
+You are a Goal Verification Agent. Your job is NOT to review output quality
+(that's the critic's job). Your job is to verify that the GOAL has been
+achieved by checking observable truths.
+
+Goal: {goal}
+
+Observable truths that must be TRUE for this goal to work:
+{observable_truths}
+
+Required artifacts that must exist:
+{required_artifacts}
+
+Required wiring (connections between components):
+{required_wiring}
+
+Actual outputs produced:
+{outputs}
+
+For each observable truth, required artifact, and required wiring item:
+1. State whether it is VERIFIED, PARTIALLY_MET, or MISSING
+2. Provide evidence or explain what is missing
+
+Final verdict:
+GOAL_STATUS: ACHIEVED | GAPS_FOUND | FAILED
+GAPS: (list each gap, if any)
+"""
+
+    async def verify_goal(
+        self,
+        goal: str,
+        observable_truths: list[str],
+        required_artifacts: list[str],
+        required_wiring: list[str],
+        outputs: dict[str, str],
+        model: str,
+    ) -> tuple[bool, str, list[str]]:
+        """Goal-backward verification: check observable truths, not just task completion.
+
+        Returns (achieved, full_response, list_of_gaps).
+        """
+        truths_text = "\n".join(f"- {t}" for t in observable_truths) or "(none specified)"
+        artifacts_text = "\n".join(f"- {a}" for a in required_artifacts) or "(none specified)"
+        wiring_text = "\n".join(f"- {w}" for w in required_wiring) or "(none specified)"
+
+        outputs_text = ""
+        for name, output in outputs.items():
+            outputs_text += f"\n### {name}\n{output[:3000]}\n"
+
+        prompt = self._GOAL_VERIFICATION_PROMPT.format(
+            goal=goal,
+            observable_truths=truths_text,
+            required_artifacts=artifacts_text,
+            required_wiring=wiring_text,
+            outputs=outputs_text,
+        )
+
+        messages = [
+            {"role": "system", "content": "You are a goal verification agent."},
+            {"role": "user", "content": prompt},
+        ]
+
+        try:
+            text, _ = await self.router.complete(
+                messages=messages,
+                model=model,
+                task_type="project_management",
+            )
+        except Exception as e:
+            logger.warning("Goal verification failed: %s", e)
+            return True, f"(verification skipped: {e})", []
+
+        achieved = "GOAL_STATUS: ACHIEVED" in text
+        gaps: list[str] = []
+        if "GAPS:" in text:
+            gaps_section = text.split("GAPS:")[-1].strip()
+            for line in gaps_section.split("\n"):
+                line = line.strip().lstrip("- ")
+                if line:
+                    gaps.append(line)
+
+        return achieved, text, gaps
+
+    # ------------------------------------------------------------------
+    # Context budget awareness (GSD-inspired)
+    # ------------------------------------------------------------------
+
+    # Quality thresholds (from GSD research):
+    #   0-30% = peak quality
+    #   30-50% = acceptable
+    #   50-70% = quality degradation begins
+    #   70%+ = hallucination risk
+    CONTEXT_QUALITY_WARNING_PCT = 50
+    CONTEXT_CRITICAL_PCT = 70
+
+    @staticmethod
+    def _estimate_context_utilization(messages: list[dict], max_tokens: int = 128_000) -> float:
+        """Estimate current context utilisation as a percentage (0-100).
+
+        Uses chars/4 as a rough token approximation — sufficient for
+        threshold detection, not for exact accounting.
+        """
+        est_tokens = sum(len(str(m.get("content", ""))) for m in messages) // 4
+        return (est_tokens / max_tokens) * 100 if max_tokens > 0 else 0.0
+
+    @staticmethod
+    def _compact_conversation_messages(messages: list[dict]) -> None:
+        """Truncate old conversation messages when context budget is critical.
+
+        Keeps system prompt (index 0), original task (index 1), and the
+        last 3 exchanges (6 messages) intact.  Older messages are truncated
+        to a short summary line.
+        """
+        if len(messages) <= 8:
+            return
+
+        # Keep [0:2] (system + task) and [-6:] (last 3 exchanges)
+        for i in range(2, len(messages) - 6):
+            content = str(messages[i].get("content", ""))
+            if len(content) > 300:
+                role = messages[i].get("role", "unknown")
+                messages[i]["content"] = (
+                    f"[{role} message truncated — {len(content)} chars → 100 chars] "
+                    + content[:100]
+                    + "..."
+                )
