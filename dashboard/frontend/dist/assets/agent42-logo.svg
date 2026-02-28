@@ -1,39 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 64" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 56" fill="none">
   <!-- Agent42 Logo — Dark text variant -->
-  <!-- Cheerful robot head mark with "42" visor — the anti-Marvin -->
-  <g transform="translate(4, 2)">
-    <!-- Robot head outline -->
-    <rect x="6" y="12" width="48" height="40" rx="10" fill="#1a1d27" stroke="#E8A838" stroke-width="2"/>
-
-    <!-- Antenna — cheerful upward arc -->
-    <line x1="30" y1="12" x2="30" y2="4" stroke="#E8A838" stroke-width="2" stroke-linecap="round"/>
-    <circle cx="30" cy="3" r="3" fill="#E8A838"/>
-
-    <!-- Visor band — shows "42" as the robot's display -->
-    <rect x="12" y="22" width="36" height="16" rx="4" fill="#E8A838" opacity="0.15"/>
-    <text x="20" y="35" font-family="'SF Mono', 'Fira Code', 'Consolas', monospace" font-size="14" font-weight="800" fill="#E8A838" letter-spacing="1">42</text>
-
-    <!-- Happy eyes above visor — upward arcs (smiling eyes) -->
-    <path d="M20 20 Q23 17 26 20" fill="none" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
-    <path d="M34 20 Q37 17 40 20" fill="none" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
-
-    <!-- Cheerful mouth — wide smile -->
-    <path d="M20 44 Q30 50 40 44" fill="none" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
-
-    <!-- Side ear/sensors -->
-    <rect x="2" y="26" width="4" height="10" rx="2" fill="#E8A838" opacity="0.5"/>
-    <rect x="54" y="26" width="4" height="10" rx="2" fill="#E8A838" opacity="0.5"/>
-
-    <!-- Hitchhiker thumb subtly integrated as right antenna flourish -->
-    <ellipse cx="34" cy="2" rx="2" ry="3" fill="#E8A838" opacity="0.5" transform="rotate(20 34 2)"/>
-  </g>
+  <!-- Layout: "Agent 42" text + geometric robot avatar on right -->
 
   <!-- "Agent" text -->
-  <text x="76" y="38" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="26" font-weight="600" fill="#1a1d27" letter-spacing="-0.5">Agent</text>
+  <text x="8" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="26" font-weight="600" fill="#1a1d27" letter-spacing="-0.5">Agent</text>
 
-  <!-- "42" text accent — part of the wordmark, not duplicating the robot mark -->
-  <text x="168" y="38" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="26" font-weight="800" fill="#E8A838" letter-spacing="-0.5">42</text>
+  <!-- "42" text accent -->
+  <text x="100" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="26" font-weight="800" fill="#E8A838" letter-spacing="-0.5">42</text>
 
   <!-- Subtle tagline -->
-  <text x="76" y="54" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9" fill="#8f98aa" letter-spacing="0.5">DON'T PANIC</text>
+  <text x="8" y="49" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9" fill="#8f98aa" letter-spacing="0.5">DON'T PANIC</text>
+
+  <!-- Geometric robot avatar — right side -->
+  <g transform="translate(152, 2)">
+    <circle cx="26" cy="26" r="24" fill="#E8A838" fill-opacity="0.08" stroke="#E8A838" stroke-width="1.5"/>
+
+    <!-- Antenna -->
+    <line x1="26" y1="10" x2="26" y2="5" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
+    <circle cx="26" cy="4" r="2" fill="#E8A838"/>
+
+    <!-- Robot head -->
+    <rect x="14" y="10" width="24" height="22" rx="6" fill="none" stroke="#E8A838" stroke-width="1.5"/>
+
+    <!-- Happy arc eyes -->
+    <path d="M19 19 Q22 16 25 19" fill="none" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M27 19 Q30 16 33 19" fill="none" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
+
+    <!-- Confident smile -->
+    <path d="M19 27 Q26 32 33 27" fill="none" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
+
+    <!-- Ear sensors -->
+    <rect x="10" y="18" width="4" height="6" rx="2" fill="#E8A838" opacity="0.5"/>
+    <rect x="38" y="18" width="4" height="6" rx="2" fill="#E8A838" opacity="0.5"/>
+  </g>
 </svg>
