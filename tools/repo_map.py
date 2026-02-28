@@ -1,7 +1,7 @@
 """
 Repository map tool — generate structural codebase maps.
 
-Inspired by Aider's tree-sitter repository mapping. Produces a compact
+Tree-sitter based repository mapping. Produces a compact
 representation of the codebase showing file structure, class hierarchies,
 and function signatures — giving LLMs efficient context about the project
 without reading every file.
@@ -46,7 +46,7 @@ class RepoMapTool(Tool):
         return (
             "Generate a structural map of the codebase: file tree, class/function "
             "signatures, and project structure. Gives efficient context without "
-            "reading entire files. Inspired by Aider's repository mapping."
+            "reading entire files."
         )
 
     @property
