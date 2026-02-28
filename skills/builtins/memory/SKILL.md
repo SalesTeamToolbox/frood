@@ -27,10 +27,15 @@ uses HNSW indexing for sub-millisecond results across four collections: memory,
 history, conversations, and knowledge.
 
 ## Cross-Session Recall
-When Qdrant is configured, conversations from any channel are indexed and
-searchable. Old sessions are automatically summarized before pruning so
-knowledge is preserved. You can recall past conversations across channels
-(e.g., "What did we discuss about the API design?").
+When Qdrant is configured, conversations from this installation are indexed
+and searchable. Old sessions are automatically summarized before pruning so
+knowledge is preserved.
+
+**Important:** Memory is strictly local to this installation. You have no
+access to conversations or data from other Agent42 instances. Only reference
+past conversations if they appear in your retrieved context — never claim to
+remember something that is not in your actual conversation history or memory
+files.
 
 ## Session Caching
 When Redis is configured, active sessions are cached in memory for fast access
@@ -43,3 +48,5 @@ also cached to reduce costs.
 - Keep MEMORY.md concise — summarize, don't duplicate.
 - HISTORY.md is append-only — never edit past entries.
 - Use semantic search when looking for specific past context.
+- **Never fabricate memories.** If you cannot find relevant context via memory
+  or search, say so. Do not invent prior conversations, decisions, or events.
