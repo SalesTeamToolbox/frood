@@ -390,6 +390,7 @@ class Agent:
         profile_loader=None,
         extension_loader=None,
         intervention_queue: asyncio.Queue | None = None,
+        state_manager=None,
         chat_session_manager=None,
     ):
         self.task = task
@@ -402,6 +403,7 @@ class Agent:
         self.profile_loader = profile_loader
         self.extension_loader = extension_loader
         self.intervention_queue = intervention_queue
+        self.state_manager = state_manager
         self.chat_session_manager = chat_session_manager
         self.engine = IterationEngine(
             self.router,
@@ -573,6 +575,13 @@ class Agent:
 
             # Transition task to review
             await self.task_queue.complete(task.id, result=history.final_output)
+
+            # Update project state for session recovery (GSD-inspired)
+            if task.project_id and self.state_manager:
+                try:
+                    await self.state_manager.update_task_completion(task.project_id, task.id)
+                except Exception as e:
+                    logger.warning("Failed to update project state: %s", e)
 
             # Post-task learning: reflect on what worked + check for skill creation
             if self.learner:
@@ -882,6 +891,15 @@ class Agent:
                     )
                 except Exception:
                     pass
+
+        # Include project state for session recovery (GSD-inspired)
+        if task.project_id and self.state_manager:
+            try:
+                state = await self.state_manager.load_state(task.project_id)
+                if state:
+                    parts.append(f"\n## Project State (session recovery)\n\n{state.to_markdown()}")
+            except Exception as e:
+                logger.debug("Could not load project state: %s", e)
 
         return "\n".join(parts)
 
