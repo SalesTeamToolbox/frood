@@ -400,37 +400,58 @@ function handleWSMessage(msg) {
     // Route to chat or code page based on session
     if (sid && sid === state.currentSessionId) {
       // Active chat session
+      let needsAppend = false;
       if (msg.data.role === "user") {
         const idx = state.currentSessionMessages.findIndex(m => m.id?.startsWith("local-") && m.content === msg.data.content);
         if (idx >= 0) state.currentSessionMessages[idx] = msg.data;
-        else state.currentSessionMessages.push(msg.data);
+        else { state.currentSessionMessages.push(msg.data); needsAppend = true; }
       } else {
         state.currentSessionMessages.push(msg.data);
         state.chatSending = false;
+        needsAppend = true;
       }
-      if (state.page === "chat") renderChat();
+      if (state.page === "chat") {
+        if (needsAppend) {
+          if (!appendChatMsgToDOM(msg.data, state.currentSessionMessages, false)) renderChat();
+          else updateChatTypingIndicator(state.chatSending, false);
+        }
+      }
     } else if (sid && sid === state.codeCurrentSessionId) {
       // Active code session
+      let needsAppend = false;
       if (msg.data.role === "user") {
         const idx = state.codeCurrentMessages.findIndex(m => m.id?.startsWith("local-") && m.content === msg.data.content);
         if (idx >= 0) state.codeCurrentMessages[idx] = msg.data;
-        else state.codeCurrentMessages.push(msg.data);
+        else { state.codeCurrentMessages.push(msg.data); needsAppend = true; }
       } else {
         state.codeCurrentMessages.push(msg.data);
         state.codeSending = false;
+        needsAppend = true;
       }
-      if (state.page === "code") renderCode();
+      if (state.page === "code") {
+        if (needsAppend) {
+          if (!appendChatMsgToDOM(msg.data, state.codeCurrentMessages, true)) renderCode();
+          else updateChatTypingIndicator(state.codeSending, true);
+        }
+      }
     } else if (!sid) {
       // Legacy messages without session_id (backward compat)
+      let needsAppend = false;
       if (msg.data.role === "user") {
         const idx = state.chatMessages.findIndex(m => m.id?.startsWith("local-") && m.content === msg.data.content);
         if (idx >= 0) state.chatMessages[idx] = msg.data;
-        else state.chatMessages.push(msg.data);
+        else { state.chatMessages.push(msg.data); needsAppend = true; }
       } else {
         state.chatMessages.push(msg.data);
         state.chatSending = false;
+        needsAppend = true;
       }
-      if (state.page === "chat") renderChat();
+      if (state.page === "chat") {
+        if (needsAppend) {
+          if (!appendChatMsgToDOM(msg.data, state.chatMessages, false)) renderChat();
+          else updateChatTypingIndicator(state.chatSending, false);
+        }
+      }
     } else {
       // Message for a non-active session — update unread badge
       const session = state.chatSessions.find(s => s.id === sid) || state.codeSessions.find(s => s.id === sid);
@@ -442,13 +463,19 @@ function handleWSMessage(msg) {
     const thinking = msg.data.thinking;
     if (sid && sid === state.currentSessionId) {
       state.chatSending = thinking;
-      if (state.page === "chat") renderChat();
+      if (state.page === "chat") {
+        if (!updateChatTypingIndicator(thinking, false)) renderChat();
+      }
     } else if (sid && sid === state.codeCurrentSessionId) {
       state.codeSending = thinking;
-      if (state.page === "code") renderCode();
+      if (state.page === "code") {
+        if (!updateChatTypingIndicator(thinking, true)) renderCode();
+      }
     } else if (!sid) {
       state.chatSending = thinking;
-      if (state.page === "chat") renderChat();
+      if (state.page === "chat") {
+        if (!updateChatTypingIndicator(thinking, false)) renderChat();
+      }
     }
   }
 }
@@ -767,17 +794,27 @@ async function sendSessionMessage(sessionId, isCode) {
   else { if (state.chatSending) return; state.chatSending = true; }
 
   const messages = isCode ? state.codeCurrentMessages : state.currentSessionMessages;
-  messages.push({
+  const newMsg = {
     id: "local-" + Date.now(),
     role: "user",
     content: text,
     timestamp: Date.now() / 1000,
     sender: "You",
     session_id: sessionId,
-  });
+  };
+  messages.push(newMsg);
   if (input) input.value = "";
-  if (isCode && state.page === "code") renderCode();
-  else if (!isCode && state.page === "chat") renderChat();
+
+  // Incremental append: only add the new message to the DOM instead of rebuilding everything
+  const onCorrectPage = isCode ? state.page === "code" : state.page === "chat";
+  if (onCorrectPage) {
+    if (!appendChatMsgToDOM(newMsg, messages, isCode)) {
+      // Container not found — fall back to full render
+      if (isCode) renderCode(); else renderChat();
+    } else {
+      updateChatTypingIndicator(true, isCode);
+    }
+  }
 
   try {
     await api(`/chat/sessions/${sessionId}/send`, {
@@ -891,15 +928,25 @@ async function sendChatMessage() {
   if (!text || state.chatSending) return;
   state.chatSending = true;
   // Optimistic: add user message immediately
-  state.chatMessages.push({
+  const newMsg = {
     id: "local-" + Date.now(),
     role: "user",
     content: text,
     timestamp: Date.now() / 1000,
     sender: "You",
-  });
+  };
+  state.chatMessages.push(newMsg);
   if (input) input.value = "";
-  if (state.page === "chat") renderChat();
+
+  // Incremental append: only add the new message to the DOM instead of rebuilding everything
+  if (state.page === "chat") {
+    if (!appendChatMsgToDOM(newMsg, state.chatMessages, false)) {
+      renderChat();
+    } else {
+      updateChatTypingIndicator(true, false);
+    }
+  }
+
   try {
     await api("/chat/send", {
       method: "POST",
@@ -2214,6 +2261,100 @@ function extractCodeBlocks(text) {
 // ---------------------------------------------------------------------------
 // Chat rendering (Claude-like)
 // ---------------------------------------------------------------------------
+
+// Build HTML for a single chat message (shared by full render and incremental append)
+function buildChatMsgHtml(m, idx, msgArrayName, isCode) {
+  const isUser = m.role === "user";
+  const sender = m.sender || (isUser ? "You" : "Agent42");
+  const time = m.timestamp ? formatChatTime(m.timestamp) : "";
+  const content = isUser ? esc(m.content).replace(/\n/g, "<br>") : renderMarkdown(m.content);
+
+  if (isUser) {
+    return `<div class="chat-msg chat-msg-user"><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-user">${content}</div></div><div class="chat-avatar chat-avatar-user">U</div></div>`;
+  }
+  const codeBlocks = extractCodeBlocks(m.content || "");
+  m.__codeBlocks = codeBlocks;
+  const avatarStyle = isCode ? ' style="background:var(--success-dim);color:var(--success)"' : "";
+  const canvasButtons = codeBlocks.map((b, j) =>
+    `<button class="chat-canvas-btn" onclick="openCanvas(${msgArrayName}[${idx}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
+  ).join("");
+  const taskRef = !isCode && m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : "";
+  return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent"${avatarStyle}>42</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div></div>`;
+}
+
+// Scroll chat to bottom reliably (after browser paint)
+function scrollChatToBottom(containerId) {
+  requestAnimationFrame(() => {
+    const c = document.getElementById(containerId || "chat-messages");
+    if (c) c.scrollTop = c.scrollHeight;
+  });
+}
+
+// Append a single message to the chat DOM without full re-render.
+// Returns true if successful, false if container not found (caller should fall back to full render).
+function appendChatMsgToDOM(msg, messages, isCode) {
+  const containerId = isCode ? "code-messages" : "chat-messages";
+  const container = document.getElementById(containerId);
+  if (!container) return false;
+
+  const hasSession = isCode ? !!state.codeCurrentSessionId : !!state.currentSessionId;
+  const msgArrayName = isCode
+    ? "state.codeCurrentMessages"
+    : (hasSession ? "state.currentSessionMessages" : "state.chatMessages");
+  const idx = messages.indexOf(msg);
+  const msgIdx = idx >= 0 ? idx : messages.length - 1;
+
+  const html = buildChatMsgHtml(msg, msgIdx, msgArrayName, isCode);
+
+  // Remove typing indicator before appending message
+  const typing = document.getElementById("chat-typing-indicator");
+  if (typing) typing.remove();
+
+  container.insertAdjacentHTML("beforeend", html);
+
+  // Re-add typing indicator if still sending
+  const isSending = isCode ? state.codeSending : state.chatSending;
+  if (isSending) {
+    _insertTypingIndicator(container, isCode);
+  }
+
+  scrollChatToBottom(containerId);
+  return true;
+}
+
+// Add or remove typing indicator without full re-render.
+// Returns true if the container exists (incremental update applied), false otherwise.
+function updateChatTypingIndicator(show, isCode) {
+  const containerId = isCode ? "code-messages" : "chat-messages";
+  const container = document.getElementById(containerId);
+  if (!container) return false;
+
+  const existing = document.getElementById("chat-typing-indicator");
+  if (show && !existing) {
+    _insertTypingIndicator(container, isCode);
+    scrollChatToBottom(containerId);
+  } else if (!show && existing) {
+    existing.remove();
+  }
+
+  // Update input/button disabled state
+  const inputId = isCode ? "code-chat-input" : "chat-input";
+  const input = document.getElementById(inputId);
+  if (input) input.disabled = show;
+  const sendBtn = input?.closest(".chat-composer-inner")?.querySelector(".chat-send-btn");
+  if (sendBtn) sendBtn.disabled = show;
+
+  return true;
+}
+
+// Internal: insert typing indicator element into container
+function _insertTypingIndicator(container, isCode) {
+  const avatarStyle = isCode ? ' style="background:var(--success-dim);color:var(--success)"' : "";
+  container.insertAdjacentHTML("beforeend",
+    `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-avatar chat-avatar-agent"${avatarStyle}>42</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>`
+  );
+}
+
 function renderChat() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "chat") return;
@@ -2296,7 +2437,7 @@ function renderChat() {
 
   messages.forEach(m => { if (m.role !== "user") m.__codeBlocks = extractCodeBlocks(m.content || ""); });
 
-  const typingHtml = state.chatSending ? `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent">42</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
+  const typingHtml = state.chatSending ? `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-avatar chat-avatar-agent">42</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
 
   el.innerHTML = `
     <div class="chat-layout">
@@ -2321,8 +2462,7 @@ function renderChat() {
       <div id="canvas-panel" class="canvas-panel ${state.canvasOpen ? "open" : ""}"></div>
     </div>
   `;
-  const msgContainer = document.getElementById("chat-messages");
-  if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
+  scrollChatToBottom("chat-messages");
   if (state.canvasOpen) renderCanvasPanel();
 }
 
@@ -2574,8 +2714,7 @@ function renderCode() {
   `;
 
   if (hasSession && state.codeSetupStep >= 3) {
-    const msgContainer = document.getElementById("code-messages");
-    if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
+    scrollChatToBottom("code-messages");
     if (state.codeCanvasOpen) renderCodeCanvasPanel();
   }
 }
@@ -2722,7 +2861,7 @@ function renderCodeChatHTML() {
 
   messages.forEach(m => { if (m.role !== "user") m.__codeBlocks = extractCodeBlocks(m.content || ""); });
 
-  const typingHtml = state.codeSending ? `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim);color:var(--success)">42</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
+  const typingHtml = state.codeSending ? `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim);color:var(--success)">42</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
 
   const deployLabel = { local: "Local", remote: "Remote", github: "GitHub" }[session?.deployment_target] || session?.deployment_target || "";
   const sessionInfo = session?.deployment_target ? `<div class="code-session-info"><span>${deployLabel}</span>${session.github_repo ? ` <span>&#8226; ${esc(session.github_repo)}</span>` : ""}</div>` : "";
