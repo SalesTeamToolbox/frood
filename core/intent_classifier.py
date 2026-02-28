@@ -83,6 +83,9 @@ _VALID_TEAMS = {
     "content-team",
     "design-review",
     "strategy-team",
+    "code-review-team",
+    "dev-team",
+    "qa-team",
 }
 
 

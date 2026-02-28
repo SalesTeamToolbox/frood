@@ -1356,6 +1356,7 @@ class Agent42:
                 intervention_queues=self._intervention_queues,
                 github_account_store=self.github_account_store,
                 model_catalog=self.model_catalog,
+                model_evaluator=self.model_evaluator,
                 intent_classifier=self.intent_classifier,
                 memory_store=self.memory_store,
             )

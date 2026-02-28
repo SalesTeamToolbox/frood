@@ -444,6 +444,7 @@ class TestWorkspaceSandbox:
 | 72 | Conversation | `_direct_response()` blocks event loop if model is slow | Wrapped in `asyncio.wait_for()` with 30s timeout; falls back to task creation on timeout/error |
 | 73 | Teams | Team roles inherit tier from parent — L2 team = all premium tokens | Team roles default to L1 via `TeamContext.tier`; only explicitly configured roles use L2 |
 | 74 | Serialization | `tier` field not surviving Task persist/restore | `to_dict()`/`from_dict()` handles via `asdict()` — new string fields serialize automatically |
+| 75 | Comments | Task comments (`POST /api/tasks/{id}/comment`) were stored but never routed to the running agent or broadcast to chat | Comment endpoint now calls `route_message_to_task()` for active tasks, broadcasts `task_update`, and mirrors to chat session via `chat_message` event |
 
 ---
 

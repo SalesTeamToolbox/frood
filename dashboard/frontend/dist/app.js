@@ -82,6 +82,10 @@ const state = {
   repoBranches: {},
   githubRepos: [],
   githubLoading: false,
+  // Reports
+  reportsData: null,
+  reportsLoading: false,
+  reportsTab: "overview",
 };
 
 // ---------------------------------------------------------------------------
@@ -1039,12 +1043,20 @@ async function doAddComment(taskId, text) {
       method: "POST",
       body: JSON.stringify({ text, author: "admin" }),
     });
+    // Task update arrives via WebSocket (task_update event) which
+    // refreshes state.tasks and re-renders the detail view automatically.
+    // We still do a manual loadTasks() as a fallback for non-WS clients.
     await loadTasks();
     if (state.selectedTask?.id === taskId) {
       state.selectedTask = state.tasks.find((t) => t.id === taskId);
       renderDetail();
+      // Auto-scroll comment thread to bottom
+      const thread = document.querySelector(".comment-thread");
+      if (thread) thread.scrollTop = thread.scrollHeight;
     }
-    toast("Comment added", "success");
+    const task = state.tasks.find((t) => t.id === taskId);
+    const isActive = task && ["pending", "assigned", "running"].includes(task.status);
+    toast(isActive ? "Message sent to agent" : "Comment added", "success");
   } catch (err) { toast(err.message, "error"); }
 }
 
@@ -1121,6 +1133,29 @@ function navigate(page, data) {
   document.querySelectorAll(".sidebar-nav a").forEach((a) => {
     a.classList.toggle("active", a.dataset.page === page);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Mobile sidebar toggle
+// ---------------------------------------------------------------------------
+function toggleMobileSidebar() {
+  const sidebar = document.getElementById("sidebar");
+  const backdrop = document.getElementById("sidebar-backdrop");
+  if (!sidebar) return;
+  const isOpen = sidebar.classList.contains("mobile-open");
+  if (isOpen) {
+    closeMobileSidebar();
+  } else {
+    sidebar.classList.add("mobile-open");
+    if (backdrop) backdrop.classList.add("visible");
+  }
+}
+
+function closeMobileSidebar() {
+  const sidebar = document.getElementById("sidebar");
+  const backdrop = document.getElementById("sidebar-backdrop");
+  if (sidebar) sidebar.classList.remove("mobile-open");
+  if (backdrop) backdrop.classList.remove("visible");
 }
 
 // ---------------------------------------------------------------------------
@@ -1595,6 +1630,7 @@ function renderDetail() {
 
   const result = t.result || t.error || "(no output yet)";
   const isReview = t.status === "review";
+  const isActive = ["pending", "assigned", "running"].includes(t.status);
 
   el.innerHTML = `
     <div style="margin-bottom:1rem">
@@ -1640,20 +1676,24 @@ function renderDetail() {
     </div>
 
     <div class="card" style="margin-bottom:1.5rem">
-      <div class="card-header"><h3>Comments (${(t.comments||[]).length})</h3></div>
+      <div class="card-header">
+        <h3>${isActive ? "Messages" : "Comments"} (${(t.comments||[]).length})</h3>
+        ${isActive ? '<span style="font-size:0.75rem;color:var(--success);font-weight:500">Agent is listening</span>' : ""}
+      </div>
       <div class="card-body">
-        <div class="comment-thread" style="max-height:200px;overflow-y:auto;margin-bottom:0.75rem">
+        <div class="comment-thread" style="max-height:300px;overflow-y:auto;margin-bottom:0.75rem">
           ${(t.comments||[]).map(c => `
             <div style="padding:0.5rem;border-bottom:1px solid var(--border)">
               <span style="font-weight:600;color:var(--accent);font-size:0.8rem">${esc(c.author)}</span>
               <span style="color:var(--text-muted);font-size:0.7rem;margin-left:0.5rem">${c.timestamp ? timeSince(c.timestamp) : ""}</span>
               <div style="margin-top:0.2rem;font-size:0.85rem">${esc(c.text)}</div>
             </div>
-          `).join("") || '<div style="color:var(--text-muted);font-size:0.85rem">No comments yet</div>'}
+          `).join("") || '<div style="color:var(--text-muted);font-size:0.85rem">No messages yet</div>'}
         </div>
+        ${isActive ? '<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem">Messages here are sent directly to the agent working on this task.</div>' : ""}
         <div style="display:flex;gap:0.5rem">
-          <input type="text" id="comment-input" placeholder="Add a comment..." style="flex:1">
-          <button class="btn btn-primary btn-sm" onclick="submitComment('${t.id}')">Post</button>
+          <input type="text" id="comment-input" placeholder="${isActive ? "Send a message to the agent..." : "Add a comment..."}" style="flex:1" onkeydown="if(event.key==='Enter'){submitComment('${t.id}');event.preventDefault()}">
+          <button class="btn btn-primary btn-sm" onclick="submitComment('${t.id}')">${isActive ? "Send" : "Post"}</button>
         </div>
       </div>
     </div>
@@ -1898,7 +1938,7 @@ function renderApps() {
 async function appAction(appId, action) {
   try {
     if (action === "delete") {
-      if (!confirm("Archive this app? It can't be undone.")) return;
+      if (!confirm("Permanently delete this app and all its files? This cannot be undone.")) return;
     }
     const method = action === "delete" ? "DELETE" : "POST";
     const path = action === "delete" ? `/apps/${appId}` : `/apps/${appId}/${action}`;
@@ -2403,6 +2443,7 @@ function renderProjectDetail() {
         <select onchange="updateProjectStatus('${p.id}',this.value)" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.25rem 0.5rem">
           ${["planning","active","paused","completed"].map(s => `<option value="${s}" ${p.status === s ? "selected" : ""}>${s}</option>`).join("")}
         </select>
+        <button class="btn btn-outline btn-sm btn-danger-text" onclick="archiveProject('${p.id}')">Archive</button>
       </div>
       ${p.description ? `<p style="color:var(--text-secondary);margin-bottom:1rem">${esc(p.description)}</p>` : ""}
       <div class="project-card-progress" style="margin-bottom:1rem">
@@ -2442,6 +2483,17 @@ async function updateProjectStatus(projectId, status) {
     const idx = state.projects.findIndex(p => p.id === projectId);
     if (idx >= 0) state.projects[idx] = updated;
     if (state.selectedProject?.id === projectId) state.selectedProject = updated;
+  } catch (e) { toast("Failed: " + e.message, "error"); }
+}
+
+async function archiveProject(projectId) {
+  if (!confirm("Archive this project? It will be hidden from the board. Any linked app continues running independently.")) return;
+  try {
+    await api(`/projects/${projectId}`, { method: "DELETE" });
+    state.projects = state.projects.filter(p => p.id !== projectId);
+    state.selectedProject = null;
+    toast("Project archived", "info");
+    navigate("tasks");
   } catch (e) { toast("Failed: " + e.message, "error"); }
 }
 
@@ -2938,6 +2990,305 @@ async function removeRepo(repoId, name) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Reports page
+// ---------------------------------------------------------------------------
+function switchReportsTab(tab) {
+  state.reportsTab = tab;
+  renderReports();
+}
+
+async function refreshReports() {
+  await loadReports();
+  renderReports();
+}
+
+function renderReports() {
+  const el = document.getElementById("page-content");
+  if (!el || state.page !== "reports") return;
+
+  const d = state.reportsData;
+  if (state.reportsLoading && !d) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted)">Loading reports...</div>';
+    return;
+  }
+  if (!d) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--text-muted)">No report data available. Make sure tasks have been run.</div>';
+    return;
+  }
+
+  const tab = state.reportsTab;
+  const tabs = [
+    { id: "overview", label: "Overview" },
+    { id: "llm", label: "LLM Usage" },
+    { id: "tasks", label: "Tasks & Projects" },
+  ];
+  const tabBar = `<div class="reports-tabs">${tabs.map(t =>
+    `<button class="reports-tab ${tab === t.id ? "active" : ""}" onclick="switchReportsTab('${t.id}')">${t.label}</button>`
+  ).join("")}<button class="btn btn-outline btn-sm" style="margin-left:auto;align-self:center" onclick="refreshReports()">Refresh</button></div>`;
+
+  let body = "";
+  if (tab === "overview") body = _renderReportsOverview(d);
+  else if (tab === "llm") body = _renderReportsLLM(d);
+  else if (tab === "tasks") body = _renderReportsTasks(d);
+
+  el.innerHTML = tabBar + body;
+}
+
+function _reportsBar(pct, label, cls) {
+  const p = Math.max(0, Math.min(100, pct || 0));
+  const c = cls ? " " + cls : "";
+  return `<div class="bar-cell"><div class="bar-fill${c}" style="width:${p}%"></div><span class="bar-label">${esc(String(label))}</span></div>`;
+}
+
+function _renderReportsOverview(d) {
+  const tb = d.task_breakdown || {};
+  const tu = d.token_usage || {};
+  const costs = d.costs || {};
+  const llm = d.llm_usage || [];
+  const conn = d.connectivity || {};
+  const byType = tb.by_type || [];
+  const byStatus = tb.by_status || {};
+  const projects = d.project_breakdown || [];
+  const tools = d.tools || {};
+  const skills = d.skills || {};
+
+  // Summary stat cards
+  const successPct = tb.overall_success_rate != null ? (tb.overall_success_rate * 100).toFixed(1) + "%" : "--";
+  const stats = `<div class="reports-stats">
+    <div class="stat-card"><div class="stat-label">Total Tasks</div><div class="stat-value">${tb.total || 0}</div></div>
+    <div class="stat-card"><div class="stat-label">Success Rate</div><div class="stat-value text-success">${successPct}</div></div>
+    <div class="stat-card"><div class="stat-label">Total Tokens</div><div class="stat-value" style="font-family:var(--mono)">${formatNumber(tu.total_tokens)}</div></div>
+    <div class="stat-card"><div class="stat-label">Est. Total Cost</div><div class="stat-value" style="font-family:var(--mono)">$${(costs.total_estimated_usd || 0).toFixed(4)}</div></div>
+    <div class="stat-card"><div class="stat-label">Daily Spend</div><div class="stat-value" style="font-family:var(--mono)">$${(tu.daily_spend_usd || 0).toFixed(4)}</div></div>
+    <div class="stat-card"><div class="stat-label">Models Used</div><div class="stat-value text-info">${llm.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Projects</div><div class="stat-value">${projects.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Tools</div><div class="stat-value">${tools.enabled || 0}/${tools.total || 0}</div></div>
+  </div>`;
+
+  // Top models table (top 10)
+  const maxTok = llm.length > 0 ? llm[0].total_tokens : 1;
+  const modelRows = llm.slice(0, 10).map(m => {
+    const pct = maxTok > 0 ? (m.total_tokens / maxTok * 100) : 0;
+    return `<tr>
+      <td style="font-weight:600;font-family:var(--mono);font-size:0.85rem">${esc(m.model_key)}</td>
+      <td style="text-align:right">${formatNumber(m.calls)}</td>
+      <td>${_reportsBar(pct, formatNumber(m.total_tokens), "")}</td>
+      <td style="text-align:right;font-family:var(--mono)">$${m.estimated_cost_usd.toFixed(4)}</td>
+    </tr>`;
+  }).join("");
+  const modelsTable = llm.length > 0 ? `<div class="card reports-section">
+    <div class="card-header"><h3>Top Models by Token Usage</h3></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Model</th><th style="text-align:right">Calls</th><th>Tokens</th><th style="text-align:right">Est. Cost</th></tr></thead>
+      <tbody>${modelRows}</tbody>
+    </table></div>
+  </div>` : "";
+
+  // Task type breakdown
+  const maxType = byType.length > 0 ? Math.max(...byType.map(t => t.total)) : 1;
+  const typeRows = byType.map(t => {
+    const pct = maxType > 0 ? (t.total / maxType * 100) : 0;
+    const sr = t.success_rate != null ? (t.success_rate * 100).toFixed(0) + "%" : "--";
+    const srCls = t.success_rate >= 0.8 ? "text-success" : t.success_rate >= 0.5 ? "text-warning" : "text-danger";
+    return `<tr>
+      <td style="font-weight:600">${esc(t.type)}</td>
+      <td>${_reportsBar(pct, t.total, "bar-info")}</td>
+      <td style="text-align:right">${t.done || 0}</td>
+      <td style="text-align:right">${t.failed || 0}</td>
+      <td style="text-align:right" class="${srCls}">${sr}</td>
+    </tr>`;
+  }).join("");
+  const typesTable = byType.length > 0 ? `<div class="card reports-section">
+    <div class="card-header"><h3>Task Type Breakdown</h3></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Type</th><th>Count</th><th style="text-align:right">Done</th><th style="text-align:right">Failed</th><th style="text-align:right">Success</th></tr></thead>
+      <tbody>${typeRows}</tbody>
+    </table></div>
+  </div>` : "";
+
+  // Connectivity summary
+  const hs = conn.summary || {};
+  const connBadges = Object.entries(hs).map(([k, v]) =>
+    `<span class="badge-status badge-${k === "ok" ? "done" : k === "unavailable" ? "failed" : "pending"}" style="margin-right:0.5rem">${esc(k)}: ${v}</span>`
+  ).join("");
+  const connCard = Object.keys(hs).length > 0 ? `<div class="card reports-section">
+    <div class="card-header"><h3>Model Connectivity</h3></div>
+    <div class="card-body">${connBadges || '<span style="color:var(--text-muted)">No health data</span>'}</div>
+  </div>` : "";
+
+  return stats + `<div class="reports-grid">${modelsTable}${typesTable}</div>${connCard}`;
+}
+
+function _renderReportsLLM(d) {
+  const llm = d.llm_usage || [];
+  const perf = d.model_performance || [];
+  const conn = d.connectivity || {};
+  const models = conn.models || {};
+
+  // Full model usage table
+  const maxTok = llm.length > 0 ? llm[0].total_tokens : 1;
+  const usageRows = llm.map(m => {
+    const pct = maxTok > 0 ? (m.total_tokens / maxTok * 100) : 0;
+    return `<tr>
+      <td style="font-weight:600;font-family:var(--mono);font-size:0.85rem">${esc(m.model_key)}</td>
+      <td style="text-align:right">${formatNumber(m.calls)}</td>
+      <td style="text-align:right;font-family:var(--mono)">${formatNumber(m.prompt_tokens)}</td>
+      <td style="text-align:right;font-family:var(--mono)">${formatNumber(m.completion_tokens)}</td>
+      <td>${_reportsBar(pct, formatNumber(m.total_tokens), "")}</td>
+      <td style="text-align:right;font-family:var(--mono)">$${m.estimated_cost_usd.toFixed(4)}</td>
+    </tr>`;
+  }).join("");
+  const usageTable = `<div class="card reports-section">
+    <div class="card-header"><h3>Model Token Usage</h3></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Model</th><th style="text-align:right">Calls</th><th style="text-align:right">Prompt</th><th style="text-align:right">Completion</th><th>Total</th><th style="text-align:right">Est. Cost</th></tr></thead>
+      <tbody>${usageRows || '<tr><td colspan="6"><div style="padding:1rem;color:var(--text-muted)">No usage data</div></td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+
+  // Model performance table
+  const perfRows = perf.map(m => {
+    const scorePct = (m.composite_score || 0) * 100;
+    const srPct = (m.success_rate || 0) * 100;
+    const srCls = srPct >= 80 ? "bar-success" : srPct >= 50 ? "bar-warning" : "bar-danger";
+    return `<tr>
+      <td style="font-weight:600;font-family:var(--mono);font-size:0.85rem">${esc(m.model_key)}</td>
+      <td>${esc(m.task_type)}</td>
+      <td style="text-align:right">${m.total_tasks}</td>
+      <td>${_reportsBar(srPct, srPct.toFixed(0) + "%", srCls)}</td>
+      <td style="text-align:right;font-family:var(--mono)">${(m.iteration_efficiency || 0).toFixed(2)}</td>
+      <td style="text-align:right;font-family:var(--mono)">${(m.critic_avg || 0).toFixed(2)}</td>
+      <td>${_reportsBar(scorePct, scorePct.toFixed(0) + "%", "bar-info")}</td>
+    </tr>`;
+  }).join("");
+  const perfTable = perf.length > 0 ? `<div class="card reports-section">
+    <div class="card-header"><h3>Model Performance (Evaluator)</h3></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Model</th><th>Task Type</th><th style="text-align:right">Tasks</th><th>Success Rate</th><th style="text-align:right">Iter. Eff.</th><th style="text-align:right">Critic Avg</th><th>Composite</th></tr></thead>
+      <tbody>${perfRows}</tbody>
+    </table></div>
+  </div>` : "";
+
+  // Connectivity / health table
+  const healthEntries = Object.entries(models);
+  const healthRows = healthEntries.map(([mk, info]) => {
+    const st = info.status || "unknown";
+    const dot = `<span class="health-dot h-${st}"></span>`;
+    const lat = info.latency_ms != null ? info.latency_ms.toFixed(0) + "ms" : "--";
+    const checked = info.last_checked ? new Date(info.last_checked * 1000).toLocaleString() : "--";
+    return `<tr>
+      <td style="font-family:var(--mono);font-size:0.85rem">${esc(mk)}</td>
+      <td>${dot}${esc(st)}</td>
+      <td style="text-align:right;font-family:var(--mono)">${lat}</td>
+      <td style="font-size:0.82rem;color:var(--text-muted)">${esc(checked)}</td>
+      <td style="font-size:0.82rem;color:var(--danger)">${esc(info.error || "")}</td>
+    </tr>`;
+  }).join("");
+  const healthTable = healthEntries.length > 0 ? `<div class="card reports-section">
+    <div class="card-header"><h3>Model Connectivity</h3></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Model</th><th>Status</th><th style="text-align:right">Latency</th><th>Last Checked</th><th>Error</th></tr></thead>
+      <tbody>${healthRows}</tbody>
+    </table></div>
+  </div>` : "";
+
+  return usageTable + perfTable + healthTable;
+}
+
+function _renderReportsTasks(d) {
+  const tb = d.task_breakdown || {};
+  const byType = tb.by_type || [];
+  const byStatus = tb.by_status || {};
+  const projects = d.project_breakdown || [];
+  const tools = d.tools || {};
+  const skills = d.skills || {};
+  const skillList = skills.skills || [];
+
+  // Status distribution stat cards
+  const statuses = ["pending", "assigned", "running", "review", "blocked", "done", "failed", "archived"];
+  const statusCards = `<div class="reports-stats">${statuses.map(s => {
+    const cnt = byStatus[s] || 0;
+    const cls = s === "done" ? "text-success" : s === "failed" ? "text-danger" : s === "running" ? "text-warning" : s === "blocked" ? "text-danger" : "";
+    return `<div class="stat-card"><div class="stat-label">${s}</div><div class="stat-value ${cls}">${cnt}</div></div>`;
+  }).join("")}</div>`;
+
+  // Task type table (full)
+  const maxType = byType.length > 0 ? Math.max(...byType.map(t => t.total)) : 1;
+  const typeRows = byType.map(t => {
+    const pct = maxType > 0 ? (t.total / maxType * 100) : 0;
+    const sr = t.success_rate != null ? (t.success_rate * 100).toFixed(0) + "%" : "--";
+    const srCls = t.success_rate >= 0.8 ? "text-success" : t.success_rate >= 0.5 ? "text-warning" : "text-danger";
+    return `<tr>
+      <td style="font-weight:600">${esc(t.type)}</td>
+      <td>${_reportsBar(pct, t.total, "bar-info")}</td>
+      <td style="text-align:right">${t.done || 0}</td>
+      <td style="text-align:right">${t.failed || 0}</td>
+      <td style="text-align:right" class="${srCls}">${sr}</td>
+      <td style="text-align:right;font-family:var(--mono)">${t.avg_iterations || 0}</td>
+      <td style="text-align:right;font-family:var(--mono)">${formatNumber(t.total_tokens)}</td>
+    </tr>`;
+  }).join("");
+  const typeTable = `<div class="card reports-section">
+    <div class="card-header"><h3>Task Types</h3></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Type</th><th>Count</th><th style="text-align:right">Done</th><th style="text-align:right">Failed</th><th style="text-align:right">Success</th><th style="text-align:right">Avg Iters</th><th style="text-align:right">Tokens</th></tr></thead>
+      <tbody>${typeRows || '<tr><td colspan="7"><div style="padding:1rem;color:var(--text-muted)">No tasks</div></td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+
+  // Projects table
+  const projRows = projects.map(p => {
+    const total = p.total_tasks || 0;
+    const donePct = total > 0 ? (p.done / total * 100) : 0;
+    return `<tr>
+      <td style="font-weight:600">${esc(p.name)}</td>
+      <td><span class="status-badge status-${p.status}">${esc(p.status)}</span></td>
+      <td style="text-align:right">${total}</td>
+      <td>${_reportsBar(donePct, p.done + "/" + total, "bar-success")}</td>
+      <td style="text-align:right">${p.failed || 0}</td>
+      <td style="text-align:right">${p.running || 0}</td>
+    </tr>`;
+  }).join("");
+  const projTable = projects.length > 0 ? `<div class="card reports-section">
+    <div class="card-header"><h3>Projects (${projects.length})</h3></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Project</th><th>Status</th><th style="text-align:right">Tasks</th><th>Progress</th><th style="text-align:right">Failed</th><th style="text-align:right">Running</th></tr></thead>
+      <tbody>${projRows}</tbody>
+    </table></div>
+  </div>` : "";
+
+  // Skills table
+  const skillRows = skillList.map(s => {
+    const types = (s.task_types || []).join(", ") || "all";
+    const en = s.enabled !== false;
+    return `<tr style="${en ? "" : "opacity:0.55"}">
+      <td style="font-weight:600">${esc(s.name)}</td>
+      <td style="font-size:0.85rem;color:var(--text-secondary)">${esc(s.description || "")}</td>
+      <td style="font-size:0.82rem;font-family:var(--mono)">${esc(types)}</td>
+      <td style="text-align:center">${en ? '<span style="color:var(--success)">On</span>' : '<span style="color:var(--text-muted)">Off</span>'}</td>
+    </tr>`;
+  }).join("");
+  const skillTable = skillList.length > 0 ? `<div class="card reports-section">
+    <div class="card-header"><h3>Skills (${skills.enabled || 0}/${skills.total || 0} enabled)</h3></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Skill</th><th>Description</th><th>Task Types</th><th style="text-align:center">Status</th></tr></thead>
+      <tbody>${skillRows}</tbody>
+    </table></div>
+  </div>` : "";
+
+  // Tools summary
+  const toolCard = `<div class="card reports-section">
+    <div class="card-header"><h3>Tools</h3></div>
+    <div class="card-body">
+      <span style="font-size:1.5rem;font-weight:700">${tools.enabled || 0}</span>
+      <span style="color:var(--text-muted)"> / ${tools.total || 0} enabled</span>
+    </div>
+  </div>`;
+
+  return statusCards + typeTable + `<div class="reports-grid">${projTable}${toolCard}</div>` + skillTable;
+}
+
 function renderSettings() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "settings") return;
@@ -3326,6 +3677,14 @@ async function loadOrStatus() {
   state.orStatusLoading = false;
 }
 
+async function loadReports() {
+  state.reportsLoading = true;
+  try {
+    state.reportsData = (await api("/reports")) || null;
+  } catch { state.reportsData = null; }
+  state.reportsLoading = false;
+}
+
 function updateEnvSaveBtn() {
   const btn = document.getElementById("save-env-btn");
   if (btn) {
@@ -3343,6 +3702,7 @@ async function loadAll() {
     loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(),
     loadChatMessages(), loadTokenStats(), loadChatSessions(), loadCodeSessions(),
     loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(), loadGithubAccounts(), loadOrStatus(),
+    loadReports(),
   ]);
 }
 
@@ -3378,19 +3738,20 @@ function render() {
   const approvalBadge = state.approvals.length > 0 ? `<span class="badge">${state.approvals.length}</span>` : "";
 
   root.innerHTML = `
+    <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeMobileSidebar()"></div>
     <div class="app-layout">
-      <aside class="sidebar">
+      <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">Agent<span class="num">42</span></div>
         <nav class="sidebar-nav">
-          <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks')">&#127919; Mission Control</a>
-          <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status')">&#128200; Status</a>
-          <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals')">&#128274; Approvals ${approvalBadge}</a>
-          <a href="#" data-page="chat" class="${state.page === "chat" ? "active" : ""}" onclick="event.preventDefault();navigate('chat')">&#128172; Chat</a>
-          <a href="#" data-page="code" class="${state.page === "code" ? "active" : ""}" onclick="event.preventDefault();navigate('code')">&#128187; Code</a>
-          <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools')">&#128295; Tools</a>
-          <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills')">&#9889; Skills</a>
-          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps')">&#128640; Apps</a>
-          <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings')">&#9881; Settings</a>
+          <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks');closeMobileSidebar()">&#127919; Mission Control</a>
+          <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status');closeMobileSidebar()">&#128200; Status</a>
+          <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals');closeMobileSidebar()">&#128274; Approvals ${approvalBadge}</a>
+          <a href="#" data-page="chat" class="${state.page === "chat" ? "active" : ""}" onclick="event.preventDefault();navigate('chat');closeMobileSidebar()">&#128172; Chat</a>
+          <a href="#" data-page="code" class="${state.page === "code" ? "active" : ""}" onclick="event.preventDefault();navigate('code');closeMobileSidebar()">&#128187; Code</a>
+          <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
+          <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills');closeMobileSidebar()">&#9889; Skills</a>
+          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Apps</a>
+          <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings');closeMobileSidebar()">&#9881; Settings</a>
         </nav>
         <div class="sidebar-footer">
           <span id="ws-dot" class="ws-dot ${state.wsConnected ? "connected" : "disconnected"}"></span>
@@ -3400,6 +3761,9 @@ function render() {
       </aside>
       <div class="main">
         <div class="topbar">
+          <button class="hamburger-btn" onclick="toggleMobileSidebar()" aria-label="Open menu">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
           <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", apps: "Apps", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? `
@@ -3424,6 +3788,7 @@ function render() {
     tools: renderTools,
     skills: renderSkills,
     apps: renderApps,
+    reports: renderReports,
     settings: renderSettings,
     detail: renderDetail,
     projectDetail: renderProjectDetail,

@@ -27,6 +27,9 @@ TEAM_TASK_MAP: dict[str, list[str]] = {
     "research-team": ["research", "strategy"],
     "strategy-team": ["strategy", "research"],
     "design-review": ["design"],
+    "code-review-team": ["coding", "refactoring"],
+    "dev-team": ["coding", "app_create", "app_update"],
+    "qa-team": ["debugging", "coding"],
 }
 
 # Keywords that signal multi-step / complex tasks
