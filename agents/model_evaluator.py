@@ -177,6 +177,10 @@ class ModelEvaluator:
             stats.total_tasks,
         )
 
+    def all_stats(self) -> list[ModelStats]:
+        """Return all recorded model stats (across all task types)."""
+        return list(self._stats.values())
+
     # -- Ranking & routing ----------------------------------------------------
 
     def get_ranking(self, task_type: str) -> list[ModelStats]:
