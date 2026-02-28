@@ -1,8 +1,8 @@
 """
 File watcher tool — monitor files and directories for changes.
 
-Inspired by Aider's file watching capability. Detects file modifications,
-creations, and deletions and can trigger actions on change.
+Detects file modifications, creations, and deletions and can trigger
+actions on change.
 """
 
 import hashlib

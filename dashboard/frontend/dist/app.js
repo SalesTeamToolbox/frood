@@ -30,6 +30,13 @@ const state = {
   // Apps
   apps: [],
   appFilter: "",  // "" = all, "running", "stopped", "building", etc.
+  // Agents
+  profiles: [],
+  defaultProfile: "",
+  selectedProfile: null,
+  agentsViewMode: "grid",  // "grid" or "detail"
+  personaCustom: "",
+  personaDefault: "",
   // API key management
   apiKeys: {},
   keyEdits: {},
@@ -660,6 +667,22 @@ async function loadApps() {
   try {
     state.apps = (await api("/apps")) || [];
   } catch { state.apps = []; }
+}
+
+async function loadProfiles() {
+  try {
+    const data = await api("/profiles");
+    state.profiles = data.profiles || [];
+    state.defaultProfile = data.default_profile || "";
+  } catch { state.profiles = []; state.defaultProfile = ""; }
+}
+
+async function loadPersona() {
+  try {
+    const data = await api("/persona");
+    state.personaCustom = data.custom_prompt || "";
+    state.personaDefault = data.default_prompt || "";
+  } catch { state.personaCustom = ""; state.personaDefault = ""; }
 }
 
 async function saveApiKeys() {
@@ -2065,6 +2088,354 @@ async function showAppLogs(appId, name) {
         </div>
       </div>
     `);
+  } catch (err) { toast(err.message, "error"); }
+}
+
+// ---------------------------------------------------------------------------
+// Agents page
+// ---------------------------------------------------------------------------
+function renderAgents() {
+  const el = document.getElementById("page-content");
+  if (!el || state.page !== "agents") return;
+
+  if (state.agentsViewMode === "detail" && state.selectedProfile) {
+    renderAgentDetail(el);
+    return;
+  }
+
+  // Stats
+  const total = state.profiles.length;
+  const l1Count = state.profiles.filter((p) => !p.name.startsWith("l2-")).length;
+  const l2Count = state.profiles.filter((p) => p.name.startsWith("l2-")).length;
+  const taskTypes = new Set();
+  state.profiles.forEach((p) => (p.preferred_task_types || []).forEach((t) => taskTypes.add(t)));
+
+  const cards = state.profiles.map((p) => {
+    const isDefault = p.name === state.defaultProfile;
+    const tier = p.name.startsWith("l2-") ? "L2" : "L1";
+    const tierClass = tier === "L2" ? "badge-l2" : "badge-l1";
+    const taskChips = (p.preferred_task_types || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ");
+    const skillChips = (p.preferred_skills || []).slice(0, 4).map((s) => `<span class="badge-type">${esc(s)}</span>`).join(" ");
+    const extra = (p.preferred_skills || []).length > 4 ? `<span class="badge-type">+${p.preferred_skills.length - 4}</span>` : "";
+
+    return `
+      <div class="agent-card ${isDefault ? 'agent-card-default' : ''}" onclick="loadProfileDetail('${esc(p.name)}')">
+        <div class="agent-card-header">
+          <div class="agent-card-title">
+            <h4>${esc(p.name)}</h4>
+            <span class="badge-tier ${tierClass}">${tier}</span>
+            ${isDefault ? '<span class="badge-tier badge-default">default</span>' : ''}
+          </div>
+        </div>
+        <p class="agent-card-desc">${esc(p.description) || '<span style="color:var(--text-muted)">No description</span>'}</p>
+        <div class="agent-card-meta">
+          <div class="agent-card-chips">${taskChips}</div>
+          <div class="agent-card-chips">${skillChips}${extra}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // NOTE: All interpolated values use esc() for XSS protection — this follows
+  // the existing innerHTML pattern used throughout this file (55+ inline handlers).
+  const isCustomPersona = !!state.personaCustom;
+  const activePersona = state.personaCustom || state.personaDefault || "";
+  const personaCard = `
+    <div class="persona-card">
+      <div class="persona-card-header">
+        <div style="display:flex;align-items:center;gap:0.75rem">
+          <h4 style="margin:0;font-size:1rem;font-weight:600">Chat Persona</h4>
+          <span class="badge-tier ${isCustomPersona ? 'badge-l2' : 'badge-l1'}">${isCustomPersona ? 'Custom' : 'Default'}</span>
+        </div>
+        <div style="display:flex;gap:0.5rem">
+          ${isCustomPersona ? '<button class="btn btn-outline btn-sm" onclick="resetPersona()">Reset to Default</button>' : ''}
+          <button class="btn btn-primary btn-sm" onclick="showEditPersonaModal()">Edit</button>
+        </div>
+      </div>
+      <div class="persona-preview">${esc(activePersona)}</div>
+    </div>
+  `;
+
+  el.innerHTML = `
+    ${personaCard}
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-label">Total Profiles</div><div class="stat-value">${total}</div></div>
+      <div class="stat-card"><div class="stat-label">L1 Agents</div><div class="stat-value text-info">${l1Count}</div></div>
+      <div class="stat-card"><div class="stat-label">L2 Agents</div><div class="stat-value text-warning">${l2Count}</div></div>
+      <div class="stat-card"><div class="stat-label">Task Types</div><div class="stat-value">${taskTypes.size}</div></div>
+    </div>
+    ${state.profiles.length ? `<div class="agents-grid">${cards}</div>` : '<div class="empty-state" style="padding:3rem;text-align:center"><p style="font-size:1.1rem;margin-bottom:1rem">No agent profiles found</p><p style="color:var(--text-muted)">Create your first agent profile to get started.</p><button class="btn btn-primary" style="margin-top:1rem" onclick="showCreateProfileModal()">+ Create Profile</button></div>'}
+  `;
+}
+
+function renderAgentDetail(el) {
+  const p = state.selectedProfile;
+  if (!p) return;
+
+  const tier = p.name.startsWith("l2-") ? "L2" : "L1";
+  const tierClass = tier === "L2" ? "badge-l2" : "badge-l1";
+  const isDefault = p.name === state.defaultProfile;
+
+  const taskChips = (p.preferred_task_types || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ");
+
+  // Cross-reference skills with loaded skills state
+  const skillsHtml = (p.preferred_skills || []).map((s) => {
+    const loaded = state.skills.find((sk) => sk.name === s);
+    const indicator = loaded ? (loaded.enabled !== false ? '&#9989;' : '&#10060;') : '&#10067;';
+    return `<span class="badge-type">${indicator} ${esc(s)}</span>`;
+  }).join(" ");
+
+  const personaHtml = p.prompt_overlay
+    ? `<div class="agent-detail-section"><h4>Persona Instructions</h4><div class="agent-persona-content">${esc(p.prompt_overlay)}</div></div>`
+    : '';
+
+  el.innerHTML = `
+    <div class="agent-detail">
+      <div class="agent-detail-topbar">
+        <button class="btn btn-outline btn-sm" onclick="state.agentsViewMode='grid';state.selectedProfile=null;render()">&#8592; Back to Profiles</button>
+        <div class="agent-detail-actions">
+          ${!isDefault ? `<button class="btn btn-outline btn-sm" onclick="setDefaultProfile('${esc(p.name)}')">Set as Default</button>` : '<span class="badge-tier badge-default">Current Default</span>'}
+          <button class="btn btn-outline btn-sm" onclick="showEditProfileModal('${esc(p.name)}')">Edit</button>
+          ${!isDefault ? `<button class="btn btn-outline btn-sm btn-danger-text" onclick="deleteProfile('${esc(p.name)}')">Delete</button>` : ''}
+        </div>
+      </div>
+      <div class="agent-detail-card">
+        <div class="agent-detail-header">
+          <h3>${esc(p.name)}</h3>
+          <span class="badge-tier ${tierClass}">${tier}</span>
+          ${isDefault ? '<span class="badge-tier badge-default">default</span>' : ''}
+        </div>
+        <p style="color:var(--text-secondary);margin-bottom:1.5rem">${esc(p.description)}</p>
+        <div class="agent-detail-section">
+          <h4>Task Types</h4>
+          <div class="agent-card-chips">${taskChips || '<span style="color:var(--text-muted)">None configured</span>'}</div>
+        </div>
+        <div class="agent-detail-section">
+          <h4>Preferred Skills</h4>
+          <div class="agent-card-chips">${skillsHtml || '<span style="color:var(--text-muted)">None configured</span>'}</div>
+        </div>
+        ${personaHtml}
+        ${p.source_path ? `<div class="agent-detail-section"><h4>Source</h4><code style="font-size:0.8rem;color:var(--text-muted)">${esc(p.source_path)}</code></div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+async function loadProfileDetail(name) {
+  try {
+    const profile = await api(`/profiles/${encodeURIComponent(name)}`);
+    state.selectedProfile = profile;
+    state.agentsViewMode = "detail";
+    render();
+  } catch (err) { toast(err.message, "error"); }
+}
+
+function showCreateProfileModal() {
+  const taskTypes = [
+    "CODING","DEBUGGING","REFACTORING","RESEARCH","DOCUMENTATION",
+    "MARKETING","EMAIL","DESIGN","CONTENT","STRATEGY","DATA_ANALYSIS","PROJECT_MANAGEMENT",
+    "APP_CREATE","APP_UPDATE"
+  ];
+  const checkboxes = taskTypes.map((t) => `<label class="checkbox-label"><input type="checkbox" value="${t}" class="cp-task-type"> ${t}</label>`).join("");
+  showModal(`
+    <div class="modal" style="max-width:560px">
+      <div class="modal-header"><h3>Create Profile</h3>
+        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="cp-name">Name</label>
+          <input type="text" id="cp-name" placeholder="my-custom-agent" pattern="[a-z0-9][a-z0-9-]*">
+          <div class="help">Lowercase letters, numbers, and hyphens only.</div>
+        </div>
+        <div class="form-group">
+          <label for="cp-desc">Description</label>
+          <input type="text" id="cp-desc" placeholder="A brief description of this agent profile">
+        </div>
+        <div class="form-group">
+          <label>Task Types</label>
+          <div class="checkbox-grid">${checkboxes}</div>
+        </div>
+        <div class="form-group">
+          <label for="cp-skills">Preferred Skills</label>
+          <input type="text" id="cp-skills" placeholder="coding, debugging, testing">
+          <div class="help">Comma-separated skill names.</div>
+        </div>
+        <div class="form-group">
+          <label for="cp-persona">Persona Instructions</label>
+          <textarea id="cp-persona" rows="6" placeholder="System prompt overlay for this agent profile..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="createProfile()">Create</button>
+      </div>
+    </div>
+  `);
+  document.getElementById("cp-name")?.focus();
+}
+
+function showEditPersonaModal() {
+  const active = state.personaCustom || state.personaDefault || "";
+  const defaultRef = state.personaDefault || "";
+  showModal(`
+    <div class="modal" style="max-width:640px">
+      <div class="modal-header"><h3>Edit Chat Persona</h3>
+        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="persona-prompt">System Prompt</label>
+          <textarea id="persona-prompt" rows="12" style="font-family:var(--font-mono);font-size:0.85rem">${esc(active)}</textarea>
+        </div>
+        <details class="persona-reference">
+          <summary style="cursor:pointer;font-size:0.85rem;color:var(--text-muted)">View default prompt</summary>
+          <pre style="white-space:pre-wrap;font-size:0.8rem;margin-top:0.5rem;padding:0.75rem;background:var(--bg-surface);border-radius:var(--radius-sm);max-height:200px;overflow-y:auto">${esc(defaultRef)}</pre>
+        </details>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        ${state.personaCustom ? '<button class="btn btn-outline" onclick="resetPersona()">Reset to Default</button>' : ''}
+        <button class="btn btn-primary" onclick="savePersona()">Save</button>
+      </div>
+    </div>
+  `);
+  document.getElementById("persona-prompt")?.focus();
+}
+
+async function savePersona() {
+  const prompt = document.getElementById("persona-prompt")?.value || "";
+  try {
+    await api("/persona", { method: "PUT", body: JSON.stringify({ prompt }) });
+    await loadPersona();
+    closeModal();
+    render();
+    toast("Chat persona updated.", "success");
+  } catch (err) { toast(err.message, "error"); }
+}
+
+async function resetPersona() {
+  try {
+    await api("/persona", { method: "PUT", body: JSON.stringify({ prompt: "" }) });
+    await loadPersona();
+    closeModal();
+    render();
+    toast("Chat persona reset to default.", "success");
+  } catch (err) { toast(err.message, "error"); }
+}
+
+function showEditProfileModal(name) {
+  const p = state.selectedProfile;
+  if (!p) return;
+  const taskTypes = [
+    "CODING","DEBUGGING","REFACTORING","RESEARCH","DOCUMENTATION",
+    "MARKETING","EMAIL","DESIGN","CONTENT","STRATEGY","DATA_ANALYSIS","PROJECT_MANAGEMENT",
+    "APP_CREATE","APP_UPDATE"
+  ];
+  const activeTypes = new Set(p.preferred_task_types || []);
+  const checkboxes = taskTypes.map((t) => `<label class="checkbox-label"><input type="checkbox" value="${t}" class="ep-task-type" ${activeTypes.has(t) ? 'checked' : ''}> ${t}</label>`).join("");
+  showModal(`
+    <div class="modal" style="max-width:560px">
+      <div class="modal-header"><h3>Edit Profile: ${esc(name)}</h3>
+        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" value="${esc(name)}" disabled style="opacity:0.6">
+        </div>
+        <div class="form-group">
+          <label for="ep-desc">Description</label>
+          <input type="text" id="ep-desc" value="${esc(p.description || '')}">
+        </div>
+        <div class="form-group">
+          <label>Task Types</label>
+          <div class="checkbox-grid">${checkboxes}</div>
+        </div>
+        <div class="form-group">
+          <label for="ep-skills">Preferred Skills</label>
+          <input type="text" id="ep-skills" value="${esc((p.preferred_skills || []).join(', '))}">
+          <div class="help">Comma-separated skill names.</div>
+        </div>
+        <div class="form-group">
+          <label for="ep-persona">Persona Instructions</label>
+          <textarea id="ep-persona" rows="6">${esc(p.prompt_overlay || '')}</textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="updateProfile('${esc(name)}')">Save</button>
+      </div>
+    </div>
+  `);
+}
+
+async function createProfile() {
+  const name = document.getElementById("cp-name")?.value?.trim();
+  const description = document.getElementById("cp-desc")?.value?.trim() || "";
+  const skillsRaw = document.getElementById("cp-skills")?.value?.trim() || "";
+  const persona = document.getElementById("cp-persona")?.value?.trim() || "";
+  const taskTypes = Array.from(document.querySelectorAll(".cp-task-type:checked")).map((cb) => cb.value);
+  const skills = skillsRaw ? skillsRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+
+  if (!name) { toast("Profile name is required", "error"); return; }
+
+  try {
+    await api("/profiles", {
+      method: "POST",
+      body: JSON.stringify({ name, description, preferred_skills: skills, preferred_task_types: taskTypes, prompt_overlay: persona }),
+    });
+    closeModal();
+    toast("Profile created", "success");
+    await loadProfiles();
+    render();
+  } catch (err) { toast(err.message, "error"); }
+}
+
+async function updateProfile(name) {
+  const description = document.getElementById("ep-desc")?.value?.trim();
+  const skillsRaw = document.getElementById("ep-skills")?.value?.trim() || "";
+  const persona = document.getElementById("ep-persona")?.value?.trim() || "";
+  const taskTypes = Array.from(document.querySelectorAll(".ep-task-type:checked")).map((cb) => cb.value);
+  const skills = skillsRaw ? skillsRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+
+  try {
+    const updated = await api(`/profiles/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify({ description, preferred_skills: skills, preferred_task_types: taskTypes, prompt_overlay: persona }),
+    });
+    closeModal();
+    toast("Profile updated", "success");
+    state.selectedProfile = updated;
+    await loadProfiles();
+    render();
+  } catch (err) { toast(err.message, "error"); }
+}
+
+async function deleteProfile(name) {
+  if (!confirm(`Delete profile "${name}"? This cannot be undone.`)) return;
+  try {
+    await api(`/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
+    toast("Profile deleted", "success");
+    state.agentsViewMode = "grid";
+    state.selectedProfile = null;
+    await loadProfiles();
+    render();
+  } catch (err) { toast(err.message, "error"); }
+}
+
+async function setDefaultProfile(name) {
+  try {
+    await api(`/profiles/default/${encodeURIComponent(name)}`, { method: "PUT" });
+    toast(`Default profile set to "${name}"`, "success");
+    state.defaultProfile = name;
+    await loadProfiles();
+    // Reload detail if viewing
+    if (state.agentsViewMode === "detail" && state.selectedProfile) {
+      await loadProfileDetail(name);
+    } else {
+      render();
+    }
   } catch (err) { toast(err.message, "error"); }
 }
 
@@ -3894,7 +4265,7 @@ async function loadAll() {
     loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(),
     loadChatMessages(), loadTokenStats(), loadChatSessions(), loadCodeSessions(),
     loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(), loadGithubAccounts(), loadOrStatus(),
-    loadReports(),
+    loadReports(), loadProfiles(), loadPersona(),
   ]);
 }
 
@@ -3945,6 +4316,7 @@ function render() {
           <a href="#" data-page="code" class="${state.page === "code" ? "active" : ""}" onclick="event.preventDefault();navigate('code');closeMobileSidebar()">&#128187; Code</a>
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
           <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills');closeMobileSidebar()">&#9889; Skills</a>
+          <a href="#" data-page="agents" class="${state.page === "agents" ? "active" : ""}" onclick="event.preventDefault();navigate('agents');closeMobileSidebar()">&#129302; Agents</a>
           <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Apps</a>
           <a href="#" data-page="reports" class="${state.page === "reports" ? "active" : ""}" onclick="event.preventDefault();navigate('reports');closeMobileSidebar()">&#128202; Reports</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings');closeMobileSidebar()">&#9881; Settings</a>
@@ -3961,12 +4333,13 @@ function render() {
           <button class="hamburger-btn" onclick="toggleMobileSidebar()" aria-label="Open menu">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
-          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", apps: "Apps", reports: "Reports", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", agents: "Agent Profiles", apps: "Apps", reports: "Reports", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? `
               <button class="btn btn-primary btn-sm" onclick="${state.missionControlTab === 'projects' ? 'showCreateProjectModal()' : 'showCreateTaskModal()'}">+ New ${state.missionControlTab === 'projects' ? 'Project' : 'Task'}</button>
               <button class="btn btn-outline btn-sm" style="margin-left:0.5rem" onclick="state.activityOpen=!state.activityOpen;renderActivitySidebar()">Activity</button>
             ` : ""}
+            ${state.page === "agents" && state.agentsViewMode === "grid" ? '<button class="btn btn-primary btn-sm" onclick="showCreateProfileModal()">+ New Profile</button>' : ""}
             ${state.page === "apps" ? '<button class="btn btn-primary btn-sm" onclick="showCreateAppModal()">+ New App</button>' : ""}
           </div>
         </div>
@@ -3984,6 +4357,7 @@ function render() {
     code: renderCode,
     tools: renderTools,
     skills: renderSkills,
+    agents: renderAgents,
     apps: renderApps,
     reports: renderReports,
     settings: renderSettings,

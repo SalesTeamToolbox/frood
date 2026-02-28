@@ -131,6 +131,23 @@ logger = logging.getLogger("agent42")
 # Ensure exit is always logged even if the finally block or signal handling is bypassed
 atexit.register(lambda: print("Agent42 process exiting (atexit)", flush=True))
 
+# -- Custom persona loader ----------------------------------------------------
+_PERSONA_FILE = Path(__file__).parent / "data" / "agent42_persona.json"
+
+
+def _load_custom_persona() -> str:
+    """Load the custom chat persona prompt from disk.
+
+    Returns the saved prompt string, or "" if no custom persona is set.
+    """
+    if _PERSONA_FILE.exists():
+        try:
+            data = json.loads(_PERSONA_FILE.read_text())
+            return data.get("prompt", "")
+        except Exception:
+            pass
+    return ""
+
 
 class Agent42:
     """Core orchestrator — manages tasks, agents, channels, tools, and dashboard."""
@@ -868,7 +885,8 @@ class Agent42:
             routing = router.get_routing(TaskType.EMAIL)
             model = routing["primary"]
 
-        messages = [{"role": "system", "content": GENERAL_ASSISTANT_PROMPT}]
+        _custom = _load_custom_persona()
+        messages = [{"role": "system", "content": _custom or GENERAL_ASSISTANT_PROMPT}]
         # Add recent conversation history for context
         for h in history_dicts[-10:]:
             messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})

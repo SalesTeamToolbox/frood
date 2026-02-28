@@ -201,6 +201,25 @@ class ToggleRequest(BaseModel):
     enabled: bool
 
 
+class ProfileCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+    preferred_skills: list[str] = []
+    preferred_task_types: list[str] = []
+    prompt_overlay: str = ""
+
+
+class ProfileUpdateRequest(BaseModel):
+    description: str | None = None
+    preferred_skills: list[str] | None = None
+    preferred_task_types: list[str] | None = None
+    prompt_overlay: str | None = None
+
+
+class PersonaUpdateRequest(BaseModel):
+    prompt: str
+
+
 # Settings that can be changed from the dashboard (non-secret, non-security).
 # Security-critical settings (sandbox, password, JWT) are deliberately excluded.
 _DASHBOARD_EDITABLE_SETTINGS = {
@@ -234,6 +253,8 @@ _DASHBOARD_EDITABLE_SETTINGS = {
     "OPENROUTER_BALANCE_CHECK_HOURS",
     # Project-scoped memory
     "PROJECT_MEMORY_ENABLED",
+    # Agent profiles
+    "AGENT_DEFAULT_PROFILE",
     # RLM (Recursive Language Models)
     "RLM_ENABLED",
     "RLM_THRESHOLD_TOKENS",
@@ -291,6 +312,31 @@ def _update_env_file(env_path: Path, updates: dict[str, str]) -> None:
 # ---------------------------------------------------------------------------
 
 _TOGGLE_STATE_FILE = Path(__file__).parent.parent / "data" / "tool_skill_state.json"
+_PERSONA_FILE = Path(__file__).parent.parent / "data" / "agent42_persona.json"
+
+
+def _load_persona() -> str:
+    """Load the custom chat persona prompt from disk.
+
+    Returns the saved prompt string, or "" if no custom persona is set.
+    """
+    import json
+
+    if _PERSONA_FILE.exists():
+        try:
+            data = json.loads(_PERSONA_FILE.read_text())
+            return data.get("prompt", "")
+        except Exception:
+            pass
+    return ""
+
+
+def _save_persona(prompt: str) -> None:
+    """Persist a custom chat persona prompt to disk."""
+    import json
+
+    _PERSONA_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _PERSONA_FILE.write_text(json.dumps({"prompt": prompt}, indent=2))
 
 
 def _load_toggle_state() -> dict:
@@ -929,10 +975,13 @@ def create_app(
 
     @app.get("/api/profiles")
     async def list_profiles(_user: str = Depends(get_current_user)):
-        """List all available agent profiles."""
+        """List all available agent profiles with default profile info."""
         if not profile_loader:
-            return []
-        return [p.to_dict() for p in profile_loader.all_profiles()]
+            return {"profiles": [], "default_profile": ""}
+        return {
+            "profiles": [p.to_dict() for p in profile_loader.all_profiles()],
+            "default_profile": settings.agent_default_profile,
+        }
 
     @app.get("/api/profiles/{name}")
     async def get_profile(name: str, _user: str = Depends(get_current_user)):
@@ -943,6 +992,93 @@ def create_app(
         if not profile:
             raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
         return {**profile.to_dict(), "prompt_overlay": profile.prompt_overlay}
+
+    @app.post("/api/profiles", status_code=201)
+    async def create_profile(req: ProfileCreateRequest, _user: str = Depends(require_admin)):
+        """Create a new agent profile."""
+        import re
+
+        if not profile_loader:
+            raise HTTPException(status_code=500, detail="Profile system not available")
+        if not re.match(r"^[a-z0-9][a-z0-9-]*$", req.name):
+            raise HTTPException(status_code=400, detail="Name must be lowercase alphanumeric with hyphens (e.g. 'my-profile')")
+        if profile_loader.get(req.name):
+            raise HTTPException(status_code=409, detail=f"Profile '{req.name}' already exists")
+        profile_loader.save_profile(
+            name=req.name,
+            description=req.description,
+            preferred_skills=req.preferred_skills,
+            preferred_task_types=req.preferred_task_types,
+            prompt_overlay=req.prompt_overlay,
+        )
+        profile = profile_loader.get(req.name)
+        return {**profile.to_dict(), "prompt_overlay": profile.prompt_overlay}
+
+    @app.put("/api/profiles/{name}")
+    async def update_profile(name: str, req: ProfileUpdateRequest, _user: str = Depends(require_admin)):
+        """Update an existing agent profile."""
+        if not profile_loader:
+            raise HTTPException(status_code=500, detail="Profile system not available")
+        existing = profile_loader.get(name)
+        if not existing:
+            raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+        profile_loader.save_profile(
+            name=name,
+            description=req.description if req.description is not None else existing.description,
+            preferred_skills=req.preferred_skills if req.preferred_skills is not None else existing.preferred_skills,
+            preferred_task_types=req.preferred_task_types if req.preferred_task_types is not None else existing.preferred_task_types,
+            prompt_overlay=req.prompt_overlay if req.prompt_overlay is not None else existing.prompt_overlay,
+        )
+        profile = profile_loader.get(name)
+        return {**profile.to_dict(), "prompt_overlay": profile.prompt_overlay}
+
+    @app.delete("/api/profiles/{name}")
+    async def delete_profile_endpoint(name: str, _user: str = Depends(require_admin)):
+        """Delete an agent profile."""
+        if not profile_loader:
+            raise HTTPException(status_code=500, detail="Profile system not available")
+        if settings.agent_default_profile == name:
+            raise HTTPException(status_code=400, detail="Cannot delete the current default profile")
+        if not profile_loader.delete_profile(name):
+            raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+        return {"status": "deleted"}
+
+    @app.put("/api/profiles/default/{name}")
+    async def set_default_profile(name: str, _user: str = Depends(require_admin)):
+        """Set the default agent profile."""
+        import os
+
+        if not profile_loader:
+            raise HTTPException(status_code=500, detail="Profile system not available")
+        if not profile_loader.get(name):
+            raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+        env_path = Path(__file__).parent.parent / ".env"
+        _update_env_file(env_path, {"AGENT_DEFAULT_PROFILE": name})
+        os.environ["AGENT_DEFAULT_PROFILE"] = name
+        return {"status": "ok", "default_profile": name}
+
+    # -- Chat Persona ---------------------------------------------------------
+
+    @app.get("/api/persona")
+    async def get_persona(_user: str = Depends(get_current_user)):
+        """Get the current chat persona prompt (custom and default)."""
+        from agents.agent import GENERAL_ASSISTANT_PROMPT
+
+        return {
+            "custom_prompt": _load_persona(),
+            "default_prompt": GENERAL_ASSISTANT_PROMPT,
+        }
+
+    @app.put("/api/persona")
+    async def update_persona(req: PersonaUpdateRequest, _user: str = Depends(require_admin)):
+        """Update or reset the chat persona prompt."""
+        if not req.prompt.strip():
+            # Empty prompt = revert to default
+            if _PERSONA_FILE.exists():
+                _PERSONA_FILE.unlink()
+        else:
+            _save_persona(req.prompt)
+        return {"status": "ok"}
 
     # -- Activity Feed --------------------------------------------------------
 
@@ -1721,7 +1857,8 @@ def create_app(
                     _conv_routing = _conv_router.get_routing(TaskType.EMAIL)
                     _conv_model = _conv_routing["primary"]
 
-                _conv_messages = [{"role": "system", "content": GENERAL_ASSISTANT_PROMPT}]
+                _custom = _load_persona()
+                _conv_messages = [{"role": "system", "content": _custom or GENERAL_ASSISTANT_PROMPT}]
                 for h in history[-10:]:
                     _conv_messages.append(h)
                 _conv_messages.append({"role": "user", "content": text})
