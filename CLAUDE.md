@@ -452,6 +452,13 @@ class TestWorkspaceSandbox:
 | 80 | Context | Context overflow "error" strategy returns empty output when `primary_output` is still `""` | Guard: `if not primary_output.strip(): primary_output = "Context too large..."` before setting `history.final_output` |
 | 81 | Chat | Agent processes dashboard chat messages in isolation — no conversation history | Pass `chat_session_manager` to Agent; load history in `_build_context()` via `origin_metadata["chat_session_id"]` |
 | 82 | Prompts | System prompts encouraged confabulation — "never say you don't know" + memory skill implied cross-server recall | Added truthfulness guardrails to `GENERAL_ASSISTANT_PROMPT`, `platform-identity`, and `memory` skills; agent must only reference actual context, never fabricate |
+| 83 | Dashboard | `submitCreateTask()` called `doCreateTask()` twice — copy-paste error with separate `projectId` and `repoId` calls | Merge all form fields into a single `doCreateTask(title, desc, type, projectId, repoId, branch)` call |
+| 84 | Apps | `install_deps` only checks `apps/{id}/requirements.txt` but agents sometimes place it in `apps/{id}/src/` | Check `src/requirements.txt` as fallback in both `AppTool._install_deps()` and `AppManager._start_python_app()` |
+| 85 | Classifier | "Build me a Flask app" misclassified as `marketing` by LLM — keyword fallback had no framework-specific terms | Add framework keywords (`flask app`, `django app`, etc.) to `APP_CREATE` in `_TASK_TYPE_KEYWORDS`; add classification rule to LLM prompt |
+| 86 | Dashboard | `/api/reports` crashes with 500 if any service (`model_evaluator`, `model_catalog`, etc.) throws | Wrap endpoint in try/except returning valid empty report structure on failure |
+| 87 | Heartbeat | `_monitor_loop` calls `get_health()` with no args — periodic WS broadcasts overwrite tools/tasks with 0 | Store `task_queue` and `tool_registry` on `HeartbeatService`; pass them in the broadcast loop |
+| 88 | Heartbeat | `ctypes.windll.psapi.GetProcessMemoryInfo` silently returns 0 on Windows (missing argtypes) | Use `ctypes.WinDLL("psapi")` with explicit `argtypes`/`restype`; also fix macOS `ru_maxrss` bytes-vs-KB conversion |
+| 89 | Dashboard | Chat session sidebar empty after server restart — WS reconnect doesn't reload data | Add `loadChatSessions(); loadCodeSessions(); loadTasks(); loadStatus();` to `ws.onopen` when `wsRetries > 0` |
 
 ---
 
