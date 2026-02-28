@@ -108,6 +108,7 @@ class TeamContext:
     role_feedback: dict[str, str] = field(default_factory=dict)
     team_notes: list[str] = field(default_factory=list)
     project_id: str = ""
+    tier: str = "L1"  # Default tier for team roles — prevents accidental premium spend
 
     def build_role_context(self, current_role: str) -> str:
         """Build context string for a specific role."""
@@ -689,6 +690,7 @@ class TeamTool(Tool):
                 description=full_description,
                 task_type=task_type_enum,
                 project_id=team_ctx.project_id,
+                tier=role.get("tier", team_ctx.tier),
             )
             await self._task_queue.add(task_obj)
             output = await self._wait_for_task(task_obj.id)
@@ -733,6 +735,7 @@ class TeamTool(Tool):
                 description=full_description,
                 task_type=task_type_enum,
                 project_id=team_ctx.project_id,
+                tier=role.get("tier", team_ctx.tier),
             )
             await self._task_queue.add(task_obj)
 
@@ -772,6 +775,7 @@ class TeamTool(Tool):
                 description=full_description,
                 task_type=task_type_enum,
                 project_id=team_ctx.project_id,
+                tier=role.get("tier", team_ctx.tier),
             )
             await self._task_queue.add(task_obj)
             task_ids[role_name] = task_obj.id
@@ -828,6 +832,7 @@ class TeamTool(Tool):
                 description=full_description,
                 task_type=task_type_enum,
                 project_id=team_ctx.project_id,
+                tier=role.get("tier", team_ctx.tier),
             )
             await self._task_queue.add(task_obj)
             output = await self._wait_for_task(task_obj.id)

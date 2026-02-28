@@ -27,7 +27,8 @@ optional conversation history, classify the request into one of these task types
 
 {task_types}
 
-Also determine whether this task needs a single agent or a full team.
+Also determine whether this is a simple conversational message that can be
+answered directly, or a substantial task that needs a specialized agent or team.
 Available teams: research-team, marketing-team, content-team, design-review, strategy-team
 
 Respond with ONLY a JSON object (no markdown, no extra text):
@@ -35,6 +36,7 @@ Respond with ONLY a JSON object (no markdown, no extra text):
 {{
   "task_type": "<one of the types above>",
   "confidence": <0.0 to 1.0>,
+  "is_conversational": <true or false>,
   "needs_clarification": <true or false>,
   "clarification_question": "<question to ask if ambiguous, or empty string>",
   "suggested_tools": [<list of tool names that might help, or empty>],
@@ -46,6 +48,12 @@ Respond with ONLY a JSON object (no markdown, no extra text):
 }}
 
 Rules:
+- is_conversational=true for messages that can be answered directly without tools
+  or file access: greetings ("hello", "hi"), thank-yous, simple factual questions
+  ("what is X?"), status checks ("what's the status of my tasks?"), clarification
+  responses, and general chitchat. These do NOT need a task.
+- is_conversational=false for requests that require substantial work: coding,
+  content creation, research, analysis, building things, etc.
 - confidence >= 0.8 means you are very sure
 - confidence 0.5-0.8 means likely but not certain
 - confidence < 0.5 means unclear — set needs_clarification=true
@@ -84,6 +92,7 @@ class ClassificationResult:
 
     task_type: TaskType
     confidence: float = 1.0
+    is_conversational: bool = False  # True for simple chat (no task creation needed)
     needs_clarification: bool = False
     clarification_question: str = ""
     suggested_tools: list[str] = field(default_factory=list)
@@ -347,12 +356,14 @@ class IntentClassifier:
                     "more details about what you'd like me to help with?"
                 )
 
+        is_conversational = bool(data.get("is_conversational", False))
         needs_project_setup = bool(data.get("needs_project_setup", False))
         needs_project = bool(data.get("needs_project", False)) or needs_project_setup
 
         return ClassificationResult(
             task_type=task_type,
             confidence=confidence,
+            is_conversational=is_conversational,
             needs_clarification=needs_clarification,
             clarification_question=clarification_question,
             suggested_tools=suggested_tools if isinstance(suggested_tools, list) else [],

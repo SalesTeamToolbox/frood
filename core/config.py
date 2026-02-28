@@ -242,6 +242,20 @@ class Settings:
     # Project-scoped memory
     project_memory_enabled: bool = True
 
+    # Conversational mode (direct responses without task creation)
+    conversational_enabled: bool = True  # Enable direct chat for simple messages
+    conversational_model: str = ""  # Model for direct responses (empty = primary free model)
+
+    # L1/L2 agent tier system
+    l1_default_model: str = ""  # Override L1 primary model (empty = use FREE_ROUTING)
+    l1_critic_model: str = ""  # Override L1 critic model
+    l2_enabled: bool = True  # Enable L2 premium tier (auto-disabled if no premium keys)
+    l2_default_model: str = ""  # Override L2 model (empty = per-task-type premium defaults)
+    l2_default_profile: str = ""  # Override L2 profile name (empty = auto-select)
+    l2_auto_escalate: bool = False  # Auto-escalate all L1 output to L2
+    l2_auto_escalate_task_types: str = ""  # Comma-separated types to auto-escalate (empty = all)
+    l2_task_types: str = ""  # Comma-separated types eligible for L2 (empty = all)
+
     # RLM (Recursive Language Models — MIT CSAIL)
     rlm_enabled: bool = True
     rlm_threshold_tokens: int = 50_000
@@ -413,6 +427,19 @@ class Settings:
             # Project-scoped memory
             project_memory_enabled=os.getenv("PROJECT_MEMORY_ENABLED", "true").lower()
             in ("true", "1", "yes"),
+            # Conversational mode
+            conversational_enabled=os.getenv("CONVERSATIONAL_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
+            conversational_model=os.getenv("CONVERSATIONAL_MODEL", ""),
+            # L1/L2 agent tier system
+            l1_default_model=os.getenv("L1_DEFAULT_MODEL", ""),
+            l1_critic_model=os.getenv("L1_CRITIC_MODEL", ""),
+            l2_enabled=os.getenv("L2_ENABLED", "true").lower() in ("true", "1", "yes"),
+            l2_default_model=os.getenv("L2_DEFAULT_MODEL", ""),
+            l2_default_profile=os.getenv("L2_DEFAULT_PROFILE", ""),
+            l2_auto_escalate=os.getenv("L2_AUTO_ESCALATE", "false").lower() in ("true", "1", "yes"),
+            l2_auto_escalate_task_types=os.getenv("L2_AUTO_ESCALATE_TASK_TYPES", ""),
+            l2_task_types=os.getenv("L2_TASK_TYPES", ""),
             # RLM (Recursive Language Models)
             rlm_enabled=os.getenv("RLM_ENABLED", "true").lower() in ("true", "1", "yes"),
             rlm_threshold_tokens=int(os.getenv("RLM_THRESHOLD_TOKENS", "50000")),

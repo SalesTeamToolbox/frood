@@ -439,6 +439,11 @@ class TestWorkspaceSandbox:
 | 67 | Critic | Critic only sees task + output text — misses tool usage context | `_critic_pass` now receives `tool_records` and `iteration_num`; includes compact tool summary for the critic |
 | 68 | Context | Tool results accumulate unbounded in iteration loop — context rot | `_compact_tool_messages` truncates old tool messages to 200 chars when total exceeds 50K chars; last 2 tool messages kept intact |
 | 69 | Teams | Team/subagent tasks don't inherit `project_id` — learnings scatter to global | `TeamTool`, `SubagentTool`, and manager tasks now propagate `project_id` from parent context |
+| 70 | Tiers | L2 enabled but no premium API key set — L2 runs on suggested defaults that may lack keys | `get_l2_routing()` verifies API key availability; returns None if premium key not set → L2 button hidden in dashboard |
+| 71 | Escalation | L2 task fails — original L1 task stuck forever | L2 task failure handler in `_on_task_update()` resets L1 source task back to REVIEW status |
+| 72 | Conversation | `_direct_response()` blocks event loop if model is slow | Wrapped in `asyncio.wait_for()` with 30s timeout; falls back to task creation on timeout/error |
+| 73 | Teams | Team roles inherit tier from parent — L2 team = all premium tokens | Team roles default to L1 via `TeamContext.tier`; only explicitly configured roles use L2 |
+| 74 | Serialization | `tier` field not surviving Task persist/restore | `to_dict()`/`from_dict()` handles via `asdict()` — new string fields serialize automatically |
 
 ---
 

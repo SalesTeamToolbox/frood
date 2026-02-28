@@ -242,6 +242,11 @@ class Task:
     # Agent profile (Agent Zero-inspired) — which persona/mode the agent runs as
     profile: str = ""  # Profile name (empty = use AGENT_DEFAULT_PROFILE setting)
 
+    # L1/L2 tier system — sub-agent hierarchy for model selection
+    tier: str = "L1"  # "L1" (standard/free) or "L2" (premium review)
+    l1_result: str = ""  # Stores L1 output when task is escalated to L2
+    escalated_from: str = ""  # Task ID of the L1 task that was escalated
+
     def add_comment(self, author: str, text: str):
         self.comments.append(
             {

@@ -109,6 +109,93 @@ FREE_ROUTING: dict[TaskType, dict] = {
 }
 
 
+# -- L2 routing: premium models for senior review (suggested defaults) --------
+# These are the suggested premium models for L2 review tasks. Admins can
+# override per-task-type via AGENT42_L2_CODING_MODEL etc., or globally
+# via L2_DEFAULT_MODEL. L2 runs review-and-refine passes, not full execution,
+# so max_iterations are low. No critic needed — L2 IS the final reviewer.
+# If the premium model's API key is not set, get_l2_routing() returns None
+# and L2 escalation is disabled for that task type.
+
+L2_ROUTING: dict[TaskType, dict] = {
+    TaskType.CODING: {
+        "primary": "claude-sonnet",  # Strong at code review and refinement
+        "critic": None,
+        "max_iterations": 3,
+    },
+    TaskType.DEBUGGING: {
+        "primary": "claude-sonnet",  # Good at reasoning about subtle bugs
+        "critic": None,
+        "max_iterations": 3,
+    },
+    TaskType.RESEARCH: {
+        "primary": "gpt-4o",  # Strong general reasoning
+        "critic": None,
+        "max_iterations": 2,
+    },
+    TaskType.REFACTORING: {
+        "primary": "claude-sonnet",  # Careful about preserving behavior
+        "critic": None,
+        "max_iterations": 3,
+    },
+    TaskType.DOCUMENTATION: {
+        "primary": "gpt-4o",  # Clear technical writing
+        "critic": None,
+        "max_iterations": 2,
+    },
+    TaskType.MARKETING: {
+        "primary": "gpt-4o",  # Creative + persuasive
+        "critic": None,
+        "max_iterations": 2,
+    },
+    TaskType.EMAIL: {
+        "primary": "gpt-4o",  # Concise professional writing
+        "critic": None,
+        "max_iterations": 2,
+    },
+    TaskType.DESIGN: {
+        "primary": "gpt-4o",  # Visual reasoning
+        "critic": None,
+        "max_iterations": 2,
+    },
+    TaskType.CONTENT: {
+        "primary": "gpt-4o",  # Strong writing
+        "critic": None,
+        "max_iterations": 2,
+    },
+    TaskType.STRATEGY: {
+        "primary": "gpt-4o",  # Strategic analysis
+        "critic": None,
+        "max_iterations": 2,
+    },
+    TaskType.DATA_ANALYSIS: {
+        "primary": "gpt-4o",  # Data reasoning
+        "critic": None,
+        "max_iterations": 2,
+    },
+    TaskType.PROJECT_MANAGEMENT: {
+        "primary": "gpt-4o",  # Structured planning
+        "critic": None,
+        "max_iterations": 2,
+    },
+    TaskType.APP_CREATE: {
+        "primary": "claude-sonnet",  # Strong at code generation review
+        "critic": None,
+        "max_iterations": 3,
+    },
+    TaskType.APP_UPDATE: {
+        "primary": "claude-sonnet",  # Careful with existing codebases
+        "critic": None,
+        "max_iterations": 3,
+    },
+    TaskType.PROJECT_SETUP: {
+        "primary": "gpt-4o",  # Conversational + structured
+        "critic": None,
+        "max_iterations": 2,
+    },
+}
+
+
 # Task types complex enough to justify paid models in "balanced" mode
 _COMPLEX_TASK_TYPES = frozenset(
     {
@@ -283,6 +370,73 @@ class ModelRouter:
             except ValueError:
                 continue
         return None
+
+    def get_l2_routing(self, task_type: TaskType) -> dict | None:
+        """Return L2 premium routing, or None if L2 is not configured/available.
+
+        Resolution order:
+        1. Per-task-type admin override: AGENT42_L2_CODING_MODEL, etc.
+        2. Global admin override: L2_DEFAULT_MODEL
+        3. Suggested L2 defaults from L2_ROUTING dict
+        4. None — if the selected model's API key is not set
+
+        Returns None if L2 is disabled or the premium model's API key is missing,
+        which signals callers to hide L2 escalation options.
+        """
+        from core.config import settings
+
+        if not settings.l2_enabled:
+            return None
+
+        # Check if this task type is eligible for L2
+        if settings.l2_task_types:
+            eligible = {t.strip() for t in settings.l2_task_types.split(",") if t.strip()}
+            if task_type.value not in eligible:
+                return None
+
+        # 1. Per-task-type L2 admin override: AGENT42_L2_CODING_MODEL, etc.
+        env_key = f"AGENT42_L2_{task_type.value.upper()}_MODEL"
+        per_type_model = os.getenv(env_key, "")
+        if per_type_model:
+            logger.info(
+                "L2 admin override for %s: %s (via %s)", task_type.value, per_type_model, env_key
+            )
+            return {
+                "primary": per_type_model,
+                "critic": None,
+                "max_iterations": 3,
+            }
+
+        # 2. Global L2 admin override
+        global_l2 = os.getenv("AGENT42_L2_MODEL", "") or settings.l2_default_model
+        if global_l2:
+            logger.info("L2 global override: %s", global_l2)
+            return {
+                "primary": global_l2,
+                "critic": None,
+                "max_iterations": 3,
+            }
+
+        # 3. Suggested L2 defaults
+        routing = L2_ROUTING.get(task_type, L2_ROUTING[TaskType.CODING]).copy()
+
+        # Verify the L2 model's API key is available
+        primary = routing.get("primary")
+        try:
+            spec = self.registry.get_model(primary)
+            provider_spec = PROVIDERS.get(spec.provider)
+            if not os.getenv(provider_spec.api_key_env, ""):
+                logger.debug(
+                    "L2 model %s unavailable — API key %s not set",
+                    primary,
+                    provider_spec.api_key_env if provider_spec else "?",
+                )
+                return None  # Premium key not configured
+        except ValueError:
+            logger.debug("L2 model %s not in registry — skipping", primary)
+            return None
+
+        return routing
 
     def _check_policy_routing(self, task_type: TaskType) -> dict | None:
         """Apply policy-based routing when OR credits are available.

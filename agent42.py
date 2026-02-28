@@ -645,8 +645,19 @@ class Agent42:
             f"Intent classification: {classification.task_type.value} "
             f"(confidence={classification.confidence:.2f}, "
             f"llm={classification.used_llm}, "
+            f"conversational={classification.is_conversational}, "
             f"clarify={classification.needs_clarification})"
         )
+
+        # Conversational mode: respond directly without creating a task
+        if classification.is_conversational and settings.conversational_enabled:
+            try:
+                response = await self._direct_response(message, history_dicts)
+                if response:
+                    return response
+            except Exception as e:
+                logger.warning(f"Direct response failed, falling back to task: {e}")
+                # Fall through to task creation
 
         # If ambiguous, ask for clarification
         if classification.needs_clarification and classification.clarification_question:
@@ -833,6 +844,61 @@ class Agent42:
             metadata=result.metadata,
         )
 
+    async def _direct_response(
+        self,
+        message: InboundMessage,
+        history_dicts: list[dict],
+    ) -> OutboundMessage | None:
+        """Respond directly to conversational messages without creating a task.
+
+        Uses the general assistant prompt with a fast free model for simple
+        messages like greetings, quick questions, and status checks.
+        Falls back to None on failure so the caller can create a task instead.
+        """
+        from agents.agent import GENERAL_ASSISTANT_PROMPT
+
+        router = ModelRouter()
+        model = settings.conversational_model
+        if not model:
+            routing = router.get_routing(TaskType.EMAIL)
+            model = routing["primary"]
+
+        messages = [{"role": "system", "content": GENERAL_ASSISTANT_PROMPT}]
+        # Add recent conversation history for context
+        for h in history_dicts[-10:]:
+            messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+        messages.append({"role": "user", "content": message.content})
+
+        text, _ = await asyncio.wait_for(
+            router.complete(model, messages),
+            timeout=30.0,
+        )
+
+        if not text:
+            return None
+
+        # Store assistant response in session history
+        from memory.session import SessionMessage
+
+        await self.session_manager.add_message(
+            message.channel_type,
+            message.channel_id,
+            SessionMessage(
+                role="assistant",
+                content=text,
+                channel_type=message.channel_type,
+            ),
+        )
+
+        logger.info("Direct conversational response (%d chars) via %s", len(text), model)
+
+        return OutboundMessage(
+            channel_type=message.channel_type,
+            channel_id=message.channel_id,
+            content=text,
+            metadata=message.metadata,
+        )
+
     async def _create_task_from_message(
         self,
         description: str,
@@ -996,6 +1062,60 @@ class Agent42:
                 self.ws_manager.chat_messages.append(chat_msg)
             await self.ws_manager.broadcast("chat_message", chat_msg)
             return
+
+        # L2 auto-escalation: when an L1 task completes, optionally escalate to L2
+        if (
+            task.tier == "L1"
+            and task.status in (TaskStatus.REVIEW, TaskStatus.DONE)
+            and settings.l2_auto_escalate
+        ):
+            # Check if this task type should be auto-escalated
+            should_escalate = True
+            if settings.l2_auto_escalate_task_types:
+                eligible = {
+                    t.strip() for t in settings.l2_auto_escalate_task_types.split(",") if t.strip()
+                }
+                should_escalate = task.task_type.value in eligible
+
+            if should_escalate:
+                _escalation_router = ModelRouter()
+                l2_routing = _escalation_router.get_l2_routing(task.task_type)
+                if l2_routing:
+                    l2_task = Task(
+                        title=f"[L2 Review] {task.title}",
+                        description=task.description,
+                        task_type=task.task_type,
+                        tier="L2",
+                        l1_result=task.result or "",
+                        escalated_from=task.id,
+                        project_id=task.project_id,
+                        origin_channel=task.origin_channel,
+                        origin_channel_id=task.origin_channel_id,
+                        origin_metadata=task.origin_metadata,
+                        origin_device_id=task.origin_device_id,
+                        repo_id=task.repo_id,
+                        branch=task.branch,
+                    )
+                    await self.task_queue.add(l2_task)
+                    logger.info(
+                        "Auto-escalated L1 task %s to L2 task %s",
+                        task.id,
+                        l2_task.id,
+                    )
+                    return  # Don't send results yet — wait for L2
+
+        # L2 failure recovery: if an L2 task fails, restore the L1 source to REVIEW
+        if task.tier == "L2" and task.status == TaskStatus.FAILED and task.escalated_from:
+            source_task = self.task_queue.get(task.escalated_from)
+            if source_task and source_task.status != TaskStatus.REVIEW:
+                source_task.status = TaskStatus.REVIEW
+                source_task.updated_at = __import__("time").time()
+                await self.task_queue.save()
+                logger.warning(
+                    "L2 task %s failed — restored L1 task %s to REVIEW",
+                    task.id,
+                    task.escalated_from,
+                )
 
         # Route results back to originating channel
         if task.origin_channel and task.status in (TaskStatus.REVIEW, TaskStatus.DONE):
