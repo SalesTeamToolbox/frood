@@ -1,7 +1,7 @@
 # Agent42
 
 <p align="center">
-  <img src="dashboard/frontend/dist/assets/agent42-logo-light.svg" alt="Agent42" width="240">
+  <img src="dashboard/frontend/dist/assets/agent42-logo.svg" alt="Agent42" width="240">
 </p>
 
 <p align="center">
@@ -31,18 +31,19 @@ Inbound Channel  ->  Task Queue  ->  Agent Loop  ->  Critic Pass  ->  REVIEW.md 
  Queue)
 ```
 
-**Free-first strategy** — all agent work defaults to $0 models via OpenRouter:
+**Free-first strategy** — all agent work defaults to $0 models via Gemini + OpenRouter:
 
-- **Coding**: Gemini Flash (primary) + Qwen3 Coder 480B (critic)
-- **Debugging**: Gemini Flash (primary) + Qwen3 Coder 480B (critic)
-- **Research**: Llama 4 Maverick (primary) + DeepSeek Chat v3.1 (critic)
-- **Marketing/Content/Design**: Llama 4 Maverick + task-aware critics
+- **Coding/Debugging**: Gemini 2.5 Flash (primary) + Qwen3 Coder 480B (critic)
+- **Research/Strategy/Design**: Gemini 2.5 Flash (primary) + Llama 3.3 70B (critic)
+- **Content/Docs/Planning**: Gemini 2.5 Flash (primary) + Gemma 3 27B (critic)
+- **App Building**: Gemini 2.5 Flash (primary) + Qwen3 Coder 480B (critic, 12 iterations)
 - **Image/Video**: FLUX (free), DALL-E 3, Replicate, Luma (premium)
+- **L2 Premium Review**: Claude Sonnet / GPT-4o for escalated tasks (optional)
 - **Review gate**: Human + Claude Code final review before anything ships
-- **Zero API cost**: One free OpenRouter API key unlocks 30+ models
+- **Zero API cost**: One free Gemini API key + one free OpenRouter key covers all 15 task types
 
-Premium models (GPT-4o, Claude Sonnet, Gemini Pro) available for admin-configured
-task types — see [Model Routing](#model-routing).
+Premium models (GPT-4o, Claude Sonnet, Gemini Pro) available via the [L1/L2 Tier System](#l1l2-tier-system)
+or admin overrides — see [Model Routing](#model-routing).
 
 ## Quick Start (Don't Panic)
 
@@ -108,7 +109,7 @@ python agent42.py --repo /path/to/your/project
 Other options:
 - `--port 8080` — Use a different dashboard port (default: 8000)
 - `--no-dashboard` — Headless mode (terminal only, no web UI)
-- `--max-agents 2` — Limit concurrent agents (default: 3)
+- `--max-agents 4` — Limit concurrent agents (default: auto, based on CPU/memory)
 
 #### 5. Complete setup in your browser
 
@@ -241,7 +242,7 @@ LLM provider API keys can also be configured through the dashboard admin UI
 | Variable | Default | Description |
 |---|---|---|
 | `OPENROUTER_API_KEY` | — | OpenRouter API key (primary, free) |
-| `MAX_CONCURRENT_AGENTS` | `3` | Max parallel agents (2-3 for 6GB VPS) |
+| `MAX_CONCURRENT_AGENTS` | `0` (auto) | Max parallel agents (0 = dynamic based on CPU/memory) |
 | `DEFAULT_REPO_PATH` | `.` | Git repo for worktrees |
 | `DASHBOARD_USERNAME` | `admin` | Dashboard login |
 | `DASHBOARD_PASSWORD` | — | Dashboard password (set via setup wizard) |
@@ -330,6 +331,37 @@ pip install redis[hiredis]
 | `TUNNEL_ALLOWED_PORTS` | *(empty — all allowed)* | Comma-separated allowed ports |
 | `TUNNEL_TTL_MINUTES` | `60` | Auto-shutdown TTL for tunnels |
 
+### L2 Premium Tier
+
+| Variable | Default | Description |
+|---|---|---|
+| `L2_ENABLED` | `true` | Enable L2 premium review tier |
+| `L2_DEFAULT_MODEL` | — | Override L2 model globally |
+| `L2_AUTO_ESCALATE` | `false` | Auto-escalate all L1 tasks to L2 |
+| `L2_AUTO_ESCALATE_TASK_TYPES` | — | Comma-separated task types to auto-escalate |
+| `L1_DEFAULT_MODEL` | — | Override L1 primary for all task types |
+| `L1_CRITIC_MODEL` | — | Override L1 critic for all task types |
+
+### Project Interview
+
+| Variable | Default | Description |
+|---|---|---|
+| `PROJECT_INTERVIEW_ENABLED` | `true` | Enable structured project discovery |
+| `PROJECT_INTERVIEW_MODE` | `auto` | Trigger mode: `auto`, `always`, or `never` |
+| `PROJECT_INTERVIEW_MAX_ROUNDS` | `4` | Max interview question rounds |
+| `PROJECT_INTERVIEW_MIN_COMPLEXITY` | `moderate` | Complexity threshold: `moderate` or `complex` |
+
+### Agent Behavior
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENT_DEFAULT_PROFILE` | `developer` | Default agent persona |
+| `CONVERSATIONAL_ENABLED` | `true` | Enable direct chat mode (no task creation) |
+| `CONVERSATIONAL_MODEL` | — | Model override for direct chat responses |
+| `PROJECT_MEMORY_ENABLED` | `true` | Per-project scoped memory (vs. global) |
+| `PROJECTS_DIR` | `.agent42/projects` | Project data directory |
+| `CHAT_SESSIONS_DIR` | `.agent42/chat_sessions` | Chat session storage |
+
 ### Knowledge & Vision
 
 | Variable | Default | Description |
@@ -355,9 +387,15 @@ user allowlists.
 Drop tasks into `tasks.json` (see `tasks.json.example`). The orchestrator polls
 for changes every 30 seconds, or restart to load immediately.
 
+### Via Chat
+
+The dashboard includes a conversational interface — chat directly with Agent42
+without creating a task. Simple questions get direct responses; complex requests
+automatically create tasks. Full conversation history is maintained per session.
+
 ### Via CLI
 ```bash
-python agent42.py --repo /path/to/project --port 8000 --max-agents 2
+python agent42.py --repo /path/to/project --port 8000 --max-agents 4
 ```
 
 ## Recursive Language Models (RLM)
@@ -424,6 +462,9 @@ One API key, zero cost. These models are used by default for all task types:
 | strategy | Gemini 2.5 Flash | Llama 3.3 70B | 5 |
 | data_analysis | Gemini 2.5 Flash | Qwen3 Coder 480B | 6 |
 | project_management | Gemini 2.5 Flash | Gemma 3 27B | 4 |
+| app_create | Gemini 2.5 Flash | Qwen3 Coder 480B | 12 |
+| app_update | Gemini 2.5 Flash | Qwen3 Coder 480B | 8 |
+| project_setup | Gemini 2.5 Flash | Llama 3.3 70B | 3 |
 
 ### Dynamic Routing (Self-Improving)
 
@@ -455,10 +496,25 @@ over time using a 5-layer resolution chain:
 
 ### L1/L2 Tier System
 
-Agent42 supports two-tier model routing for balancing cost with quality:
+Agent42 supports two-tier model routing — think of it as the difference between
+the Vogon Constructor Fleet (gets the job done, free) and the Heart of Gold
+(improbably good, costs actual money):
 
-- **L1 (Standard)** — Free/admin models handle standard work. All tasks default to L1
-- **L2 (Premium)** — Premium models (Claude Sonnet, GPT-4o) provide senior review and refinement. Tasks can be escalated from L1 to L2 for complex work
+- **L1 (Standard)** — Free models handle standard work. All tasks default to L1.
+  Full iteration loop with critic feedback (3-12 iterations depending on task type)
+- **L2 (Premium Review)** — Premium models (Claude Sonnet, GPT-4o) provide senior
+  review and refinement. Tasks can be escalated from L1 to L2 via the dashboard.
+  Low iteration count (2-3) — L2 IS the final reviewer, no separate critic needed
+
+**L2 model routing** (suggested defaults, override with `AGENT42_L2_{TYPE}_MODEL`):
+
+| Task Type | L2 Model | Max Iterations |
+|---|---|---|
+| coding, debugging, refactoring | Claude Sonnet | 3 |
+| app_create, app_update | Claude Sonnet | 3 |
+| research, documentation, marketing, email | GPT-4o | 2 |
+| design, content, strategy, data_analysis | GPT-4o | 2 |
+| project_management, project_setup | GPT-4o | 2 |
 
 The L2 tier is only available when a premium API key is configured. The dashboard
 automatically hides L2 options when no premium key is set. If an L2 task fails,
@@ -466,6 +522,9 @@ the original L1 task is automatically reset to REVIEW status for recovery.
 
 Team roles default to L1 to prevent runaway premium token usage — only explicitly
 configured roles use L2.
+
+Auto-escalation: Set `L2_AUTO_ESCALATE=true` to automatically promote all tasks,
+or `L2_AUTO_ESCALATE_TASK_TYPES=coding,debugging` for selective escalation.
 
 ### Admin Overrides
 
@@ -479,22 +538,31 @@ AGENT42_CODING_MAX_ITER=5                 # Limit to 5 iterations
 
 Pattern: `AGENT42_{TASK_TYPE}_MODEL`, `AGENT42_{TASK_TYPE}_CRITIC`, `AGENT42_{TASK_TYPE}_MAX_ITER`
 
-### Available Free Models (OpenRouter)
+### Available Free Models
 
-All accessible with a single free OpenRouter API key:
+Agent42 uses Gemini 2.5 Flash as the primary model (free via Google AI Studio,
+generous rate limits) and OpenRouter free models as critics and fallbacks:
+
+**Primary (Google AI Studio — free API key):**
 
 | Model | ID | Best For |
 |---|---|---|
-| Qwen3 Coder 480B | `qwen/qwen3-coder:free` | Coding, agentic tool use |
-| DeepSeek R1 0528 | `deepseek/deepseek-r1-0528:free` | Reasoning, debugging, math |
-| DeepSeek Chat v3.1 | `deepseek/deepseek-chat-v3.1:free` | General chat, hybrid reasoning |
-| Llama 4 Maverick | `meta-llama/llama-4-maverick:free` | Research, writing, general |
-| Llama 3.3 70B | `meta-llama/llama-3.3-70b-instruct:free` | General purpose |
-| Gemini 2.5 Pro | `google/gemini-2.5-pro-exp-03-25:free` | Complex tasks |
-| Gemini Flash | `google/gemini-2.0-flash-exp:free` | Long context (1M tokens) |
+| Gemini 2.5 Flash | `gemini-2.5-flash` | Primary for all 15 task types (1M context) |
+
+**Critics & Fallbacks (OpenRouter — free API key):**
+
+| Model | ID | Best For |
+|---|---|---|
+| Qwen3 Coder 480B | `qwen/qwen3-coder:free` | Code critic, agentic tool use |
+| Llama 3.3 70B | `meta-llama/llama-3.3-70b-instruct:free` | Research/strategy critic |
+| Gemma 3 27B | `google/gemma-3-27b-it:free` | Content/docs critic, fast verification |
 | Mistral Small 3.1 | `mistralai/mistral-small-3.1-24b-instruct:free` | Fast, lightweight tasks |
-| Gemma 3 27B | `google/gemma-3-27b-it:free` | Fast verification |
-| Nemotron 30B | `nvidia/nemotron-3-nano-30b-a3b:free` | General purpose |
+| Nemotron 30B | `nvidia/nemotron-3-nano-30b-a3b:free` | General purpose fallback |
+| OR Auto-Router | `openrouter/free` | Automatic free model selection |
+
+The `ModelCatalog` automatically discovers new free models from OpenRouter every
+24 hours. Dead models (DeepSeek R1, Llama 4 Maverick, Devstral — all 404'd) are
+automatically pruned from routing and fallback lists.
 
 ## Skills
 
@@ -532,33 +600,48 @@ task types. The base skill's instructions appear first, followed by all extensio
 | **github** | coding | PR creation, issue triage, code review |
 | **memory** | all | Read/update persistent agent memory |
 | **skill-creator** | all | Generate new skills from descriptions |
-| **weather** | research | Weather lookups (example skill) |
-| **content-writing** | content, marketing | Blog posts, articles, copywriting frameworks |
-| **design-review** | design | UI/UX review, accessibility, brand consistency |
-| **strategy-analysis** | strategy, research | SWOT, Porter's Five Forces, market analysis |
-| **data-analysis** | data_analysis | Data processing workflows, visualization |
-| **social-media** | marketing, content | Social media campaigns, platform guidelines |
-| **project-planning** | project_management | Project plans, sprints, roadmaps |
-| **presentation** | content, marketing, strategy | Slide decks, executive summaries |
-| **brand-guidelines** | design, marketing, content | Brand voice, visual identity |
-| **email-marketing** | email, marketing, content | Campaign sequences, deliverability |
-| **competitive-analysis** | strategy, research | Competitive matrix, positioning |
-| **seo** | content, marketing | On-page SEO, keyword research, optimization |
-| **geo** | design, content, marketing | Generative Engine Optimization — AI agent discoverability |
-| **server-management** | deployment | LAMP/LEMP stack, nginx, systemd, firewall hardening |
-| **wordpress** | deployment | WP-CLI, wp-config, themes, plugins, multisite, backups |
-| **docker-deploy** | deployment | Dockerfile best practices, docker-compose, registry workflows |
-| **cms-deploy** | deployment | Ghost, Strapi, and general CMS deployment patterns |
+| **tool-creator** | all | Generate new custom tools from descriptions |
 | **code-review** | coding | Code quality review with structured feedback |
 | **debugging** | debugging | Systematic debugging methodology |
 | **testing** | coding | Test strategy, coverage, test-driven development |
 | **refactoring** | refactoring | Safe refactoring patterns and techniques |
 | **documentation** | documentation | Technical writing, API docs, guides |
 | **security-audit** | coding | Security vulnerability assessment |
-| **tool-creator** | all | Generate new custom tools from descriptions |
 | **git-workflow** | coding | Branch strategy, commit conventions, merge workflows |
+| **api-design** | design, coding | API specification and design patterns |
+| **app-builder** | coding | Application building patterns and scaffolding |
+| **ci-cd** | deployment, coding | CI/CD pipeline configuration |
+| **database-migration** | coding, deployment | Database schema migrations |
+| **dependency-management** | coding, refactoring | Dependency version management |
+| **performance** | coding, debugging | Performance optimization techniques |
+| **monitoring** | deployment | System monitoring and observability |
+| **content-writing** | content, marketing | Blog posts, articles, copywriting frameworks |
+| **design-review** | design | UI/UX review, accessibility, brand consistency |
+| **strategy-analysis** | strategy, research | SWOT, Porter's Five Forces, market analysis |
+| **data-analysis** | data_analysis | Data processing workflows, visualization |
+| **social-media** | marketing, content | Social media campaigns, platform guidelines |
+| **project-planning** | project_management | Project plans, sprints, roadmaps |
+| **project-interview** | project_setup | Structured project discovery interviews |
+| **presentation** | content, marketing, strategy | Slide decks, executive summaries |
+| **brand-guidelines** | design, marketing, content | Brand voice, visual identity |
+| **email-marketing** | email, marketing, content | Campaign sequences, deliverability |
+| **email-writing** | email, content | Email composition and professional correspondence |
+| **competitive-analysis** | strategy, research | Competitive matrix, positioning |
+| **marketing** | marketing | Marketing strategy and campaign orchestration |
+| **research** | research | Research methodology and synthesis |
+| **seo** | content, marketing | On-page SEO, keyword research, optimization |
+| **geo** | design, content, marketing | Generative Engine Optimization — AI discoverability |
+| **platform-identity** | strategy, content | Platform and brand identity frameworks |
+| **standup-report** | project_management | Daily standup report generation |
+| **release-notes** | documentation, content | Release notes and changelog generation |
+| **server-management** | deployment | LAMP/LEMP stack, nginx, systemd, firewall hardening |
+| **wordpress** | deployment | WP-CLI, wp-config, themes, plugins, multisite, backups |
+| **docker-deploy** | deployment | Dockerfile best practices, docker-compose, registry |
+| **cms-deploy** | deployment | Ghost, Strapi, and general CMS deployment patterns |
+| **deployment** | deployment | General deployment patterns and infrastructure |
+| **weather** | research | Weather lookups (example skill) |
 
-40 built-in skills total. Skills are matched to tasks by `task_types` frontmatter
+43 built-in skills total. Skills are matched to tasks by `task_types` frontmatter
 and injected into the agent's system prompt automatically.
 
 ## Tools
@@ -569,34 +652,52 @@ Agents have access to a sandboxed tool registry:
 
 | Tool | Description |
 |---|---|
-| `shell` | Sandboxed command execution (with command filter) |
+| `shell` | Sandboxed command execution (with 6-layer command filter) |
 | `read_file` / `write_file` / `edit_file` | Filesystem operations (workspace-restricted) |
 | `list_dir` | Directory listing |
-| `web_search` | Web search (Brave API with DuckDuckGo fallback — zero config) |
-| `http_client` | HTTP requests to external APIs |
-| `python_exec` | Sandboxed Python execution |
+| `grep` | Pattern search across files (regex, file filtering) |
+| `diff` | Structured diff generation between files or versions |
+| `git` | Git operations (status, diff, log, branch, commit, add, checkout, show, stash, blame) — safer than shell for git work |
+| `web_search` / `web_fetch` | Web search (Brave API with DuckDuckGo fallback — zero config) + URL content fetching |
+| `http_client` | HTTP requests to external APIs (URL policy enforced) |
+| `python_exec` | Sandboxed Python execution (dangerous patterns blocked, secrets stripped) |
+| `run_tests` | Test runner (pytest, jest, vitest, or custom). Structured results with pass/fail counts |
+| `run_linter` | Linter execution (ruff, pylint, eslint, etc.) |
+| `code_intel` | Code intelligence — AST analysis, symbol extraction, semantic navigation |
 | `subagent` | Spawn focused sub-agents for parallel work |
-| `cron` | Schedule recurring tasks |
-| `repo_map` | Repository structure analysis |
-| `pr_generator` | Pull request generation |
-| `security_analyzer` | Security vulnerability scanning |
-| `workflow` | Multi-step workflow orchestration |
-| `summarizer` | Text and code summarization |
-| `file_watcher` | File change monitoring |
-| `browser` | Web browsing and screenshot |
-| `mcp_*` | MCP server tool proxying |
+| `cron` | Persistent task scheduling (cron expressions, intervals, one-shot, planned sequences) |
+| `repo_map` | Repository structure analysis (file tree, class/function signatures) |
+| `create_pr` | Pull request generation via gh CLI (structured descriptions, status checks) |
+| `security_analyze` | Security vulnerability scanning (risk levels, remediation advice) |
+| `security_audit` | Comprehensive security audit (OWASP, secrets, dependencies, 36 checks) |
+| `dependency_audit` | Audit project dependencies for vulnerabilities and outdated packages |
+| `workflow` | Multi-step workflow orchestration (define, run, list, show, delete) |
+| `summarize` | Text and code summarization (signatures, changes, errors, key sentences) |
+| `file_watcher` | File change monitoring with triggered actions |
+| `browser` | Web browsing, form interaction, and screenshots (Playwright) |
+| `notify_user` | Send notifications to the dashboard or external channels |
+| `mcp_*` | MCP server tool proxying (dynamic schema wrapping) |
 
 ### Non-Code Workflow Tools
 
 | Tool | Description |
 |---|---|
-| `team` | Multi-agent team orchestration (sequential, parallel, fan-out/fan-in, pipeline workflows). Built-in teams: research, marketing, content, design-review, strategy. Actions: compose, run, status, list, delete, describe, clone |
+| `team` | Multi-agent team orchestration (sequential, parallel, fan-out/fan-in, pipeline workflows). Built-in teams: research, marketing, content, design-review, strategy, code-review, dev, qa. Actions: compose, run, status, list, delete, describe, clone |
 | `content_analyzer` | Readability (Flesch-Kincaid), tone (formal/informal/persuasive), structure, keywords, compare, SEO analysis |
 | `data` | CSV/JSON loading, filtering, statistics, ASCII charts, group-by aggregation |
 | `template` | Document templates with variable substitution. Built-in: email-campaign, landing-page, press-release, executive-summary, project-brief. Actions include preview |
 | `outline` | Structured document outlines for articles, presentations, reports, proposals, campaigns, project plans |
 | `scoring` | Rubric-based content evaluation with weighted criteria. Built-in rubrics: marketing-copy, blog-post, email, research-report, design-brief. Includes improve action for rewrite suggestions |
 | `persona` | Audience persona management with demographics, goals, pain points, tone. Built-in: startup-founder, enterprise-buyer, developer, marketing-manager |
+| `behaviour` | Define and manage agent behaviors and personalities |
+
+### App & Project Tools
+
+| Tool | Description |
+|---|---|
+| `app` | Build and deploy web applications directly on the server. App lifecycle management (launch, configure, monitor) |
+| `project_interview` | Structured project discovery interviews. Rounds: overview → requirements → technical → constraints. Produces `PROJECT_SPEC.md` and decomposes into ordered subtasks. Actions: start, respond, status, get_spec, approve, list |
+| `create_tool` | Dynamically create custom tools from natural language descriptions at runtime |
 
 ### Media Generation Tools
 
@@ -611,10 +712,15 @@ Agents have access to a sandboxed tool registry:
 |---|---|
 | `ssh` | Remote shell execution via asyncssh. Host allowlist, command filtering, SFTP uploads/downloads, per-command timeout. Actions: connect, execute, upload, download, disconnect, list_connections. Requires approval gate for first connection to each host |
 | `tunnel` | Expose local ports to the internet via cloudflared, serveo, or localhost.run. Auto-expiry TTL (default 60 min), port allowlist enforcement. Actions: start, stop, status, list. Requires approval gate |
+| `docker` | Docker container management (build, run, exec, logs, prune) |
 | `knowledge` | Document import and RAG semantic querying. Supports PDF, CSV, HTML, Markdown, JSON, plain text. Configurable chunk size with overlap. Qdrant vector backend with filesystem keyword-search fallback. Actions: import_file, import_dir, query, list, delete |
 | `vision` | Image analysis via LLM vision APIs (OpenAI, Anthropic, OpenRouter). Automatic Pillow compression for cost efficiency. Supports PNG, JPG, GIF, WebP, BMP. Actions: analyze, describe, compare |
 
 SSH and tunnel tools are disabled by default — see [SSH & Tunnels](#ssh--tunnels) configuration.
+
+46 tools total across core, workflow, app, media, and infrastructure categories.
+Code-only tools are automatically filtered out for non-code task types to prevent
+free LLM hallucinations.
 
 ### Custom Tool Plugins
 
@@ -871,35 +977,49 @@ orphaned worktrees from filling up disk space.
 ```
 agent42/
 ├── agent42.py                 # Main entry point + orchestrator
-├── core/
-│   ├── config.py              # Centralized settings from .env
-│   ├── task_queue.py          # Priority queue + JSON/Redis persistence (12 task types)
+├── core/                      # Core services (29 modules)
+│   ├── config.py              # Frozen dataclass settings from .env (80+ vars)
+│   ├── task_queue.py          # Priority queue + JSON/Redis persistence (15 task types)
 │   ├── queue_backend.py       # Queue backend abstraction (JSON file + Redis)
 │   ├── intent_classifier.py   # LLM-based context-aware task classification
+│   ├── complexity.py          # Task complexity assessment + team recommendation
+│   ├── plan_spec.py           # Plan/wave execution specs with topological sort
+│   ├── state_manager.py       # Task state persistence (STATE.md, context management)
+│   ├── chat_session_manager.py # Chat history + conversation tracking
+│   ├── project_manager.py     # Project lifecycle management
+│   ├── project_spec.py        # Project specification generation
+│   ├── interview_questions.py # Project interview question bank
+│   ├── app_manager.py         # Multi-app orchestration
 │   ├── worktree_manager.py    # Git worktree lifecycle
+│   ├── repo_manager.py        # Git repository operations
 │   ├── approval_gate.py       # Protected operation intercept
 │   ├── heartbeat.py           # Agent health monitoring
 │   ├── command_filter.py      # Shell command safety filter (40+ deny patterns)
 │   ├── sandbox.py             # Workspace path restriction (symlink + null byte protection)
-│   ├── complexity.py          # Task complexity assessment + team recommendation
 │   ├── device_auth.py         # Multi-device API key registration and validation
 │   ├── key_store.py           # Admin-configured API key overrides (dashboard)
+│   ├── github_oauth.py        # GitHub OAuth integration
+│   ├── github_accounts.py     # GitHub account management
 │   ├── security_scanner.py    # Scheduled vulnerability scanning + GitHub issue reporting
 │   ├── rate_limiter.py        # Per-agent per-tool sliding-window rate limits
 │   ├── capacity.py            # Dynamic concurrency based on CPU/memory metrics
 │   ├── url_policy.py          # URL allowlist/denylist for SSRF protection
+│   ├── rlm_config.py          # Recursive Language Model configuration
 │   ├── notification_service.py # Webhook and email notifications
 │   └── portability.py         # Backup/restore/clone operations
-├── agents/
+├── agents/                    # Agent implementation (9 modules)
 │   ├── agent.py               # Per-task agent orchestration (code + non-code modes)
 │   ├── model_router.py        # 5-layer model selection (admin → dynamic → trial → policy → default)
 │   ├── model_catalog.py       # OpenRouter catalog sync, free model auto-discovery
 │   ├── model_evaluator.py     # Outcome tracking, composite scoring, trial system
 │   ├── model_researcher.py    # Web benchmark research (LMSys, HuggingFace, etc.)
 │   ├── iteration_engine.py    # Primary -> Critic -> Revise loop (task-aware critics)
-│   └── learner.py             # Self-learning: reflection + tool effectiveness tracking
-├── providers/
-│   └── registry.py            # Declarative LLM provider + model catalog
+│   ├── learner.py             # Self-learning: reflection + tool effectiveness tracking
+│   ├── profile_loader.py      # Agent persona/profile loading
+│   └── extension_loader.py    # Dynamic extension/plugin loading
+├── providers/                 # LLM provider integration
+│   ├── registry.py            # Declarative LLM provider + model catalog (6 providers)
+│   └── rlm_provider.py        # Recursive Language Model integration
 ├── channels/
 │   ├── base.py                # Channel base class + message types
 │   ├── manager.py             # Multi-channel routing
@@ -907,26 +1027,34 @@ agent42/
 │   ├── discord_channel.py     # Discord bot
 │   ├── telegram_channel.py    # Telegram long-polling
 │   └── email_channel.py       # IMAP/SMTP
-├── tools/
+├── tools/                     # 46 tool implementations
 │   ├── base.py                # Tool + ToolExtension base classes, result types
-│   ├── registry.py            # Tool registration + dispatch
+│   ├── registry.py            # Tool registration + task-type filtering + dispatch
 │   ├── context.py             # ToolContext dependency injection for plugin tools
 │   ├── plugin_loader.py       # Auto-discovers custom Tool/ToolExtension subclasses
 │   ├── shell.py               # Sandboxed shell execution
 │   ├── filesystem.py          # read/write/edit/list operations
-│   ├── web_search.py          # Brave Search integration
+│   ├── grep_tool.py           # Pattern search across files
+│   ├── diff_tool.py           # Structured diff generation
+│   ├── git_tool.py            # Git operations (safe alternative to shell)
+│   ├── web_search.py          # Brave Search + DuckDuckGo fallback + URL fetch
 │   ├── http_client.py         # HTTP requests (URL policy enforced)
 │   ├── python_exec.py         # Sandboxed Python execution
+│   ├── test_runner.py         # Test runner (pytest, jest, vitest, custom)
+│   ├── linter_tool.py         # Linter execution (ruff, pylint, eslint)
+│   ├── code_intel.py          # Code intelligence (AST analysis, symbols)
 │   ├── subagent.py            # Sub-agent spawning
 │   ├── cron.py                # Scheduled tasks (recurring, one-time, planned sequences)
 │   ├── repo_map.py            # Repository structure analysis
 │   ├── pr_generator.py        # Pull request generation
 │   ├── security_analyzer.py   # Security vulnerability scanning
 │   ├── security_audit.py      # Security posture auditing (36 checks)
+│   ├── dependency_audit.py    # Dependency vulnerability scanning
 │   ├── workflow_tool.py       # Multi-step workflows
 │   ├── summarizer_tool.py     # Text/code summarization
 │   ├── file_watcher.py        # File change monitoring
-│   ├── browser_tool.py        # Web browsing + screenshots
+│   ├── browser_tool.py        # Web browsing + screenshots (Playwright)
+│   ├── notify_tool.py         # Dashboard + channel notifications
 │   ├── mcp_client.py          # MCP server tool proxying
 │   ├── team_tool.py           # Multi-agent team orchestration
 │   ├── content_analyzer.py    # Readability, tone, structure, SEO analysis
@@ -935,26 +1063,35 @@ agent42/
 │   ├── outline_tool.py        # Structured document outlines
 │   ├── scoring_tool.py        # Rubric-based content evaluation + improvement
 │   ├── persona_tool.py        # Audience persona management
+│   ├── behaviour_tool.py      # Agent behavior/personality management
 │   ├── image_gen.py           # AI image generation (free-first)
 │   ├── video_gen.py           # AI video generation (async)
+│   ├── app_tool.py            # App building + deployment + lifecycle
+│   ├── project_interview.py   # Structured project discovery interviews
+│   ├── dynamic_tool.py        # Runtime dynamic tool creation
+│   ├── docker_tool.py         # Docker container management
 │   ├── ssh_tool.py            # SSH remote shell (asyncssh, host allowlist, SFTP)
 │   ├── tunnel_tool.py         # Tunnel manager (cloudflared, serveo, localhost.run)
 │   ├── knowledge_tool.py      # Knowledge base / RAG (import, chunk, query)
 │   └── vision_tool.py         # Image analysis (Pillow compress, LLM vision API)
 ├── skills/
 │   ├── loader.py              # Skill discovery, frontmatter parser, extension merging
-│   └── builtins/              # Built-in skill templates (40 skills)
-│       ├── github/            ├── code-review/     ├── debugging/
-│       ├── testing/           ├── refactoring/     ├── documentation/
-│       ├── git-workflow/      ├── security-audit/  ├── deployment/
-│       ├── server-management/ ├── wordpress/       ├── docker-deploy/
-│       ├── cms-deploy/        ├── memory/          ├── skill-creator/
-│       ├── tool-creator/      ├── content-writing/ ├── design-review/
-│       ├── seo/               ├── geo/             ├── social-media/
-│       ├── brand-guidelines/  ├── email-marketing/ ├── competitive-analysis/
-│       ├── strategy-analysis/ ├── data-analysis/   ├── project-planning/
-│       ├── presentation/      ├── research/        ├── weather/
-│       └── ... (40 total)
+│   └── builtins/              # Built-in skill templates (43 skills)
+│       ├── api-design/        ├── app-builder/      ├── brand-guidelines/
+│       ├── ci-cd/             ├── cms-deploy/        ├── code-review/
+│       ├── competitive-analysis/ ├── content-writing/ ├── data-analysis/
+│       ├── database-migration/ ├── debugging/        ├── dependency-management/
+│       ├── deployment/        ├── design-review/     ├── docker-deploy/
+│       ├── documentation/     ├── email-marketing/   ├── email-writing/
+│       ├── geo/               ├── git-workflow/      ├── github/
+│       ├── marketing/         ├── memory/            ├── monitoring/
+│       ├── performance/       ├── platform-identity/ ├── presentation/
+│       ├── project-interview/ ├── project-planning/  ├── refactoring/
+│       ├── release-notes/     ├── research/          ├── security-audit/
+│       ├── seo/               ├── server-management/ ├── skill-creator/
+│       ├── social-media/      ├── standup-report/    ├── strategy-analysis/
+│       ├── testing/           ├── tool-creator/      ├── weather/
+│       └── wordpress/
 ├── memory/
 │   ├── store.py               # Structured memory + event log
 │   ├── project_memory.py      # Project-scoped memory (per-project MEMORY.md/HISTORY.md)
@@ -980,7 +1117,7 @@ agent42/
 │   ├── model_performance.json # Per-model outcome tracking
 │   ├── model_research.json    # Web benchmark research scores
 │   └── dynamic_routing.json   # Data-driven model routing overrides
-├── tests/                     # 1700+ tests across 30+ test files
+├── tests/                     # 1700+ tests across 70 test files
 ├── .github/workflows/         # CI/CD (test, lint, security)
 ├── Dockerfile                 # Container build (Python 3.12-slim)
 ├── docker-compose.yml         # Dev stack (Agent42 + Redis + Qdrant)
@@ -1105,6 +1242,41 @@ After uninstalling, follow the [Quick Start](#quick-start) instructions to
 perform a fresh installation. If you backed up your `.env` file (the script
 offers this), restore it after running `setup.sh` to preserve your API keys
 and settings.
+
+## Project Interview (Don't Panic, We'll Ask the Right Questions)
+
+For complex tasks, Agent42 conducts a structured discovery interview before
+writing a single line of code. Think of it as the Hitchhiker's Guide entry
+for your project — thorough, occasionally surprising, and much more useful
+than a towel.
+
+### How It Works
+
+1. **Complexity detection** — The `ComplexityAssessor` evaluates incoming tasks.
+   Simple tasks ("fix the login bug") go straight to work. Complex tasks
+   ("build a SaaS dashboard with auth, billing, and analytics") trigger the
+   interview flow
+2. **Structured rounds** — The interview asks targeted questions across 2-4
+   rounds depending on complexity:
+   - **Overview** — Problem statement, goals, target users
+   - **Requirements** — Features, scope, must-haves vs nice-to-haves
+   - **Technical** — Tech stack, integrations, architecture preferences
+   - **Constraints** (complex only) — Budget, timeline, risks, compliance
+3. **Spec generation** — Answers are synthesized into a `PROJECT_SPEC.md` with
+   requirements, architecture, milestones, and acceptance criteria
+4. **Subtask decomposition** — The spec is decomposed into 4-10 ordered tasks
+   with dependencies (DAG structure), estimated iterations, and task types
+
+### Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `PROJECT_INTERVIEW_ENABLED` | `true` | Master toggle |
+| `PROJECT_INTERVIEW_MODE` | `auto` | `auto` = complexity-based, `always`, or `never` |
+| `PROJECT_INTERVIEW_MAX_ROUNDS` | `4` | Maximum question rounds |
+| `PROJECT_INTERVIEW_MIN_COMPLEXITY` | `moderate` | Trigger level: `moderate` or `complex` |
+
+Interview state persists to `PROJECT.json` — sessions survive restarts.
 
 ## Team Orchestration
 
