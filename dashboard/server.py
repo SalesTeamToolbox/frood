@@ -134,7 +134,7 @@ class TaskCreateRequest(BaseModel):
 
 
 # Passwords treated as unconfigured — trigger the setup wizard
-_INSECURE_PASSWORDS = {"", "changeme-right-now"}
+_INSECURE_PASSWORDS = {"", "changeme-right-now", "password", "123456", "admin"}
 
 
 class InterventionRequest(BaseModel):
@@ -482,7 +482,6 @@ def create_app(
         """Check if first-run setup is needed. Unauthenticated."""
         needs_setup = (
             not settings.dashboard_password_hash
-            and settings.dashboard_password in _INSECURE_PASSWORDS
         )
         return {"setup_needed": needs_setup}
 
@@ -609,7 +608,13 @@ def create_app(
     @app.post("/api/login")
     async def login(req: LoginRequest, request: Request):
         # Fail-secure: reject all logins when no password is configured
-        if not settings.dashboard_password and not settings.dashboard_password_hash:
+        if (
+            not settings.dashboard_password
+            and not settings.dashboard_password_hash
+        ) or (
+            settings.dashboard_password in _INSECURE_PASSWORDS
+            and not settings.dashboard_password_hash
+        ):
             logger.warning("Login attempt with no password configured — rejected")
             raise HTTPException(
                 status_code=401,

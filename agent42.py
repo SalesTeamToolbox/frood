@@ -408,6 +408,8 @@ class Agent42:
             on_stall=self._on_agent_stall,
             on_heartbeat=self._on_heartbeat,
             configured_max_agents=self.max_agents,
+            task_queue=self.task_queue,
+            tool_registry=self.tool_registry,
         )
 
         # Scheduled security scanning
