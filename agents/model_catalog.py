@@ -491,6 +491,13 @@ class ModelCatalog:
             self._health_status[model_key] = status_dict
 
         self._last_health_check = now
+
+        # Prune stale entries from previous checks (dead models removed from MODELS)
+        checked_keys = {k for k, _, _, _ in models_to_check}
+        stale = [k for k in self._health_status if k not in checked_keys]
+        for k in stale:
+            del self._health_status[k]
+
         self._save_health_cache()
 
         # Log summary
