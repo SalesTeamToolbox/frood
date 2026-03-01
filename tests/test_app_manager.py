@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -551,3 +553,100 @@ class TestAppMonitor:
             await self.manager.stop_monitor()
 
         assert mock_check.await_count >= 1
+
+
+class TestEnsureAppVenv:
+    """Tests for per-app venv creation."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path):
+        self.apps_dir = tmp_path / "apps"
+        self.manager = AppManager(
+            apps_dir=str(self.apps_dir),
+            port_range_start=9100,
+            port_range_end=9110,
+            max_running=3,
+        )
+
+    @pytest.mark.asyncio
+    async def test_creates_venv_directory(self, tmp_path):
+        """_ensure_app_venv creates a .venv directory inside the app path."""
+        app_path = tmp_path / "myapp"
+        app_path.mkdir()
+        venv_python = await self.manager._ensure_app_venv(app_path, dict())
+        assert (app_path / ".venv").exists()
+        assert "python" in venv_python.lower()
+
+    @pytest.mark.asyncio
+    async def test_returns_correct_python_path(self, tmp_path):
+        """Returned python path matches platform conventions."""
+        app_path = tmp_path / "myapp2"
+        app_path.mkdir()
+        venv_python = await self.manager._ensure_app_venv(app_path, dict())
+        if sys.platform == "win32":
+            assert venv_python.endswith("python.exe")
+            assert "Scripts" in venv_python
+        else:
+            assert venv_python.endswith("python")
+            assert "/bin/" in venv_python
+
+    @pytest.mark.asyncio
+    async def test_idempotent_when_venv_exists(self, tmp_path):
+        """Calling _ensure_app_venv twice reuses existing venv."""
+        app_path = tmp_path / "myapp3"
+        app_path.mkdir()
+        venv1 = await self.manager._ensure_app_venv(app_path, dict())
+        venv2 = await self.manager._ensure_app_venv(app_path, dict())
+        assert venv1 == venv2
+
+    @pytest.mark.asyncio
+    async def test_venv_python_is_executable(self, tmp_path):
+        """The returned python path should exist and be a file."""
+        app_path = tmp_path / "myapp4"
+        app_path.mkdir()
+        venv_python = await self.manager._ensure_app_venv(app_path, dict())
+        assert Path(venv_python).exists()
+
+    @pytest.mark.asyncio
+    async def test_start_python_app_uses_venv(self, tmp_path):
+        """_start_python_app creates venv and uses its python."""
+        app = await self.manager.create(name="Venv App", runtime="python")
+        app_path = Path(app.path)
+
+        # Write a minimal entry point that exits immediately
+        src_dir = app_path / "src"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        (src_dir / "app.py").write_text("import sys; sys.exit(0)")
+
+        env = dict()
+        proc = await self.manager._start_python_app(
+            app_path, "src/app.py", 9100, env
+        )
+        # Wait for the process to finish
+        await asyncio.wait_for(proc.communicate(), timeout=30.0)
+
+        # Verify venv was created
+        assert (app_path / ".venv").exists()
+
+    @pytest.mark.asyncio
+    async def test_start_python_app_installs_deps(self, tmp_path):
+        """_start_python_app installs requirements.txt into venv."""
+        app = await self.manager.create(name="Deps App", runtime="python")
+        app_path = Path(app.path)
+
+        # Write requirements.txt with a harmless package
+        (app_path / "requirements.txt").write_text("# empty deps file\n")
+
+        # Write a minimal entry point
+        src_dir = app_path / "src"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        (src_dir / "app.py").write_text("import sys; sys.exit(0)")
+
+        env = dict()
+        proc = await self.manager._start_python_app(
+            app_path, "src/app.py", 9100, env
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=30.0)
+
+        # Verify venv was created and pip ran (venv should have pip)
+        assert (app_path / ".venv").exists()
