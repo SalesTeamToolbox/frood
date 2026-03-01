@@ -1942,6 +1942,24 @@ def create_app(
                     history_lines
                 )
 
+        # Smart resource allocation: inject team directive for complex tasks
+        team_name = ""
+        if (
+            classification
+            and getattr(classification, "recommended_mode", "") == "team"
+            and getattr(classification, "recommended_team", "")
+        ):
+            team_name = classification.recommended_team
+            task_description = (
+                f"{task_description}\n\n"
+                f"---\n"
+                f"RESOURCE ALLOCATION: This task has been assessed as requiring "
+                f"team collaboration.\n"
+                f"Use the 'team' tool with action='run', name='{team_name}', "
+                f"and the task description above to execute with the {team_name}.\n"
+                f"The team's Manager will coordinate the roles automatically."
+            )
+
         task = Task(
             title=text[:120] + ("..." if len(text) > 120 else ""),
             description=task_description,
@@ -3104,11 +3122,27 @@ def create_app(
         if not detail:
             raise HTTPException(status_code=404, detail="Team run not found")
 
-        # Enrich with child task details from the queue
+        # Enrich with child task details from the queue.
+        # Use task_ids from the run state if available, otherwise scan queue
+        # for tasks with matching team_run_id (real-time while run is active).
         child_tasks = []
+        seen_ids: set[str] = set()
         for task_id in detail.get("task_ids", []):
             task = task_queue.get(task_id)
             if task:
+                seen_ids.add(task.id)
+                child_tasks.append({
+                    "id": task.id,
+                    "title": task.title,
+                    "status": task.status.value if hasattr(task.status, "value") else str(task.status),
+                    "role_name": getattr(task, "role_name", ""),
+                    "task_type": task.task_type.value if hasattr(task.task_type, "value") else str(task.task_type),
+                    "result": (task.result or "")[:500],
+                    "error": task.error or "",
+                })
+        # Scan queue for any tasks with this team_run_id not yet in task_ids
+        for task in task_queue.all_tasks():
+            if getattr(task, "team_run_id", "") == run_id and task.id not in seen_ids:
                 child_tasks.append({
                     "id": task.id,
                     "title": task.title,
