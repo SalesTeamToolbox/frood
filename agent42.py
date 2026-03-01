@@ -1289,8 +1289,16 @@ class Agent42:
             raise
 
     async def _process_queue(self):
-        """Pull tasks from the queue and dispatch agents. Respects concurrency limit."""
-        logger.info(f"Queue processor started (max concurrent: {self.max_agents})")
+        """Pull tasks from the queue and dispatch agents.
+
+        Respects concurrency limit and staggers dispatches to prevent
+        API rate-limit bursts when many tasks are queued simultaneously.
+        """
+        dispatch_delay = settings.agent_dispatch_delay
+        logger.info(
+            f"Queue processor started (max concurrent: {self.max_agents}, "
+            f"dispatch delay: {dispatch_delay}s)"
+        )
         running_tasks: set[asyncio.Task] = set()
 
         while not self._shutdown_event.is_set():
@@ -1300,6 +1308,9 @@ class Agent42:
                 running_tasks.add(t)
                 t.add_done_callback(running_tasks.discard)
                 logger.info(f"Dispatched task {task.id} ({len(running_tasks)} active)")
+                # Stagger dispatches to prevent API rate-limit bursts
+                if dispatch_delay > 0:
+                    await asyncio.sleep(dispatch_delay)
             except TimeoutError:
                 continue
             except Exception as e:
@@ -1531,64 +1542,7 @@ class Agent42:
                 logger.debug(f"Provider not configured: {p['display_name']}")
 
 
-def _run_backup(args):
-    """Handle the 'backup' subcommand."""
-    from core.portability import create_backup
-
-    base = str(Path.cwd())
-    try:
-        path = create_backup(
-            base_path=base,
-            output_path=args.output,
-            include_worktrees=args.include_worktrees,
-        )
-        print(f"Backup created: {path}")
-    except Exception as e:
-        logger.error("Backup failed: %s", e)
-        print(f"Error: {e}")
-        sys.exit(1)
-
-
-def _run_restore(args):
-    """Handle the 'restore' subcommand."""
-    from core.portability import restore_backup
-
-    try:
-        manifest = restore_backup(
-            archive_path=args.archive,
-            target_path=args.target,
-            skip_secrets=args.skip_secrets,
-        )
-        print(f"Restored backup to {args.target}")
-        print(f"  Archive created: {manifest.created_at}")
-        print(f"  Categories: {', '.join(manifest.categories)}")
-        print(f"  Files: {manifest.file_count}")
-    except Exception as e:
-        logger.error("Restore failed: %s", e)
-        print(f"Error: {e}")
-        sys.exit(1)
-
-
-def _run_clone(args):
-    """Handle the 'clone' subcommand."""
-    from core.portability import create_clone
-
-    base = str(Path.cwd())
-    try:
-        path = create_clone(
-            base_path=base,
-            output_path=args.output,
-            include_skills=args.include_skills,
-        )
-        print(f"Clone package created: {path}")
-        print("  Next steps on the target node:")
-        print("  1. Extract the archive")
-        print("  2. Rename .env.template to .env and fill in secrets")
-        print("  3. Run: bash setup.sh")
-    except Exception as e:
-        logger.error("Clone failed: %s", e)
-        print(f"Error: {e}")
-        sys.exit(1)
+from commands import BackupCommandHandler, RestoreCommandHandler, CloneCommandHandler, CommandHandler
 
 
 def main():
@@ -1672,12 +1626,15 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "backup":
-        _run_backup(args)
-    elif args.command == "restore":
-        _run_restore(args)
-    elif args.command == "clone":
-        _run_clone(args)
+    command_handlers: dict[str, CommandHandler] = {
+        "backup": BackupCommandHandler(),
+        "restore": RestoreCommandHandler(),
+        "clone": CloneCommandHandler(),
+    }
+
+    handler = command_handlers.get(args.command)
+    if handler:
+        handler.run(args)
     else:
         # Default: start the orchestrator (existing behavior)
         print("Agent42 initializing...", flush=True)

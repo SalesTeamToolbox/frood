@@ -1084,6 +1084,8 @@ function doLogout() {
 }
 
 async function doCreateTask(title, description, taskType, projectId, repoId, branch) {
+  if (state._creatingTask) return;
+  state._creatingTask = true;
   try {
     const body = { title, description, task_type: taskType };
     if (projectId) body.project_id = projectId;
@@ -1100,6 +1102,8 @@ async function doCreateTask(title, description, taskType, projectId, repoId, bra
     toast("Task created. An agent has been dispatched. Don\u2019t Panic.", "success");
   } catch (err) {
     toast(err.message, "error");
+  } finally {
+    state._creatingTask = false;
   }
 }
 
@@ -1625,19 +1629,22 @@ function getFilteredTasks() {
 function renderKanbanBoard() {
   const area = document.getElementById("board-area");
   if (!area) return;
-  const columns = [
-    { key: "pending", label: "Inbox" },
+  const allColumns = [
+    { key: "pending", label: "Inbox", alwaysShow: true },
     { key: "assigned", label: "Assigned" },
-    { key: "running", label: "In Progress" },
-    { key: "review", label: "Review" },
+    { key: "running", label: "In Progress", alwaysShow: true },
+    { key: "review", label: "Review", alwaysShow: true },
     { key: "blocked", label: "Blocked" },
-    { key: "done", label: "Done" },
+    { key: "done", label: "Done", alwaysShow: true },
+    { key: "failed", label: "Failed" },
     { key: "archived", label: "Archived" },
   ];
   const filtered = getFilteredTasks();
   const byStatus = {};
-  columns.forEach(c => byStatus[c.key] = []);
+  allColumns.forEach(c => byStatus[c.key] = []);
   filtered.forEach(t => { if (byStatus[t.status]) byStatus[t.status].push(t); });
+  // Hide empty columns unless they're always-show (core workflow columns)
+  const columns = allColumns.filter(c => c.alwaysShow || (byStatus[c.key] || []).length > 0);
 
   area.innerHTML = `<div class="kanban-board">${columns.map(col => {
     const tasks = byStatus[col.key] || [];
@@ -3699,16 +3706,32 @@ function renderReports() {
     { id: "llm", label: "LLM Usage" },
     { id: "tasks", label: "Tasks & Projects" },
   ];
-  const tabBar = `<div class="reports-tabs">${tabs.map(t =>
-    `<button class="reports-tab ${tab === t.id ? "active" : ""}" onclick="switchReportsTab('${t.id}')">${t.label}</button>`
-  ).join("")}<button class="btn btn-outline btn-sm" style="margin-left:auto;align-self:center" onclick="refreshReports()">Refresh</button></div>`;
+
+  // Only rebuild the full page (tab bar + body container) if not already
+  // rendered — on tab switch, just swap the body to prevent DOM detachment.
+  // Note: innerHTML is used with pre-escaped content (esc() applied in
+  // render helpers) — this is an internal dashboard, not user-facing HTML.
+  let bodyEl = el.querySelector(".reports-body");
+  if (!bodyEl) {
+    const tabBar = `<div class="reports-tabs">${tabs.map(t =>
+      `<button class="reports-tab ${tab === t.id ? "active" : ""}" onclick="switchReportsTab('${t.id}')">${t.label}</button>`
+    ).join("")}<button class="btn btn-outline btn-sm" style="margin-left:auto;align-self:center" onclick="refreshReports()">Refresh</button></div>`;
+    el.innerHTML = tabBar + '<div class="reports-body"></div>';
+    bodyEl = el.querySelector(".reports-body");
+  } else {
+    // Update active tab highlight without replacing tab bar DOM nodes
+    el.querySelectorAll(".reports-tab").forEach(btn => {
+      const btnTab = btn.getAttribute("onclick")?.match(/'([^']+)'/)?.[1];
+      btn.classList.toggle("active", btnTab === tab);
+    });
+  }
 
   let body = "";
   if (tab === "overview") body = _renderReportsOverview(d);
   else if (tab === "llm") body = _renderReportsLLM(d);
   else if (tab === "tasks") body = _renderReportsTasks(d);
 
-  el.innerHTML = tabBar + body;
+  bodyEl.innerHTML = body;
 }
 
 function _reportsBar(pct, label, cls) {
@@ -4270,11 +4293,12 @@ function settingSecret(envVar, label, help, highlight = false) {
     <div class="form-group">
       <label>${esc(label)}</label>
       <div class="secret-input" style="display:flex;gap:0.5rem;align-items:center">
-        <input type="password"
+        <input type="password" id="key-${envVar}"
                placeholder="${willBeCleared ? "— will be cleared on save —" : (configured ? "Enter new value to override" : "Enter API key")}"
                value="${hasEdit ? esc(state.keyEdits[envVar]) : ""}"
                oninput="state.keyEdits['${envVar}']=this.value;updateSaveBtn()"
                style="font-family:var(--mono);flex:1;${highlight || willBeCleared ? "border-color:var(--accent)" : ""}">
+        <button class="btn btn-sm" onclick="const inp=document.getElementById('key-${envVar}');inp.type=inp.type==='password'?'text':'password';this.textContent=inp.type==='password'?'Show':'Hide'" title="Toggle visibility" style="white-space:nowrap">Show</button>
         ${configured && source === "admin" ? `<button class="btn btn-sm" onclick="${willBeCleared ? `delete state.keyEdits['${envVar}']` : `state.keyEdits['${envVar}']=''`};renderSettingsPanel()" title="${willBeCleared ? "Undo clear" : "Clear admin-set key"}" style="white-space:nowrap">${willBeCleared ? "Undo" : "Clear"}</button>` : ""}
       </div>
       ${help ? `<div class="help">${help}</div>` : ""}

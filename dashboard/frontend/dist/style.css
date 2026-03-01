@@ -448,6 +448,15 @@ td.task-title:hover { color: var(--accent); }
 }
 .kanban-column-body {
   flex: 1; padding: 0.5rem; overflow-y: auto; min-height: 60px;
+  /* Scroll shadow indicators for long columns */
+  background:
+    linear-gradient(var(--bg-card) 30%, transparent),
+    linear-gradient(transparent, var(--bg-card) 70%) 0 100%,
+    radial-gradient(farthest-side at 50% 0, rgba(0,0,0,.12), transparent),
+    radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,.12), transparent) 0 100%;
+  background-repeat: no-repeat;
+  background-size: 100% 40px, 100% 40px, 100% 8px, 100% 8px;
+  background-attachment: local, local, scroll, scroll;
 }
 .kanban-column-body.drag-over { background: var(--accent-dim); }
 
@@ -1305,7 +1314,7 @@ td.task-title:hover { color: var(--accent); }
   display: flex;
   height: calc(100vh - 7rem);
 }
-.code-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.code-main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow-y: auto; }
 .code-welcome {
   flex: 1;
   display: flex;

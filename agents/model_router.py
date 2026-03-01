@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 
 from core.task_queue import TaskType
-from providers.registry import PROVIDERS, ProviderRegistry
+from providers.registry import PROVIDERS, ProviderRegistry, ProviderType
 
 logger = logging.getLogger("agent42.router")
 
@@ -274,6 +274,28 @@ class ModelRouter:
             if policy_routing:
                 routing = policy_routing
 
+        # 4b. Gemini Pro upgrade for complex task types — opt-in via
+        # GEMINI_PRO_FOR_COMPLEX=true. When enabled and GEMINI_API_KEY is set,
+        # upgrades complex task types from gemini-2-flash to gemini-2-pro.
+        if (
+            not is_admin_override
+            and task_type in _COMPLEX_TASK_TYPES
+            and routing.get("primary") == "gemini-2-flash"
+            and os.getenv("GEMINI_PRO_FOR_COMPLEX", "").lower() in ("true", "1", "yes")
+        ):
+            gemini_prov = PROVIDERS.get(ProviderType.GEMINI)
+            if gemini_prov and os.getenv(gemini_prov.api_key_env, ""):
+                # Only upgrade if gemini-2-pro is healthy
+                pro_healthy = True
+                if self._catalog and not self._catalog.is_model_healthy("gemini-2-pro"):
+                    pro_healthy = False
+                if pro_healthy:
+                    routing["primary"] = "gemini-2-pro"
+                    logger.info(
+                        "Upgraded %s to gemini-2-pro (complex task with Gemini key)",
+                        task_type.value,
+                    )
+
         # 3. Trial injection — maybe swap primary for an unproven model
         trial_model = self._check_trial(task_type)
         if trial_model:
@@ -348,6 +370,40 @@ class ModelRouter:
                             f"No available free model found for {task_type.value}. "
                             "Using fallback routing, but it may fail."
                         )
+
+        # Critic model validation: if the critic is an OR free model and its
+        # provider is unreliable (unhealthy / key missing), swap to a native
+        # provider model (Gemini) to avoid wasting time on failed OR attempts
+        # that just fall back to Gemini anyway.
+        critic_model = routing.get("critic")
+        if critic_model and not is_admin_override:
+            critic_ok = True
+            if self._catalog and not self._catalog.is_model_healthy(critic_model):
+                critic_ok = False
+            if critic_ok:
+                try:
+                    cspec = self.registry.get_model(critic_model)
+                    cprov = PROVIDERS.get(cspec.provider)
+                    if cprov and not os.getenv(cprov.api_key_env, ""):
+                        critic_ok = False
+                except ValueError:
+                    # Unknown model (dynamic/catalog) — pass through without validation
+                    pass
+            if not critic_ok:
+                # Try Gemini as critic if its key is set (fast, reliable)
+                gemini_prov = PROVIDERS.get(ProviderType.GEMINI)
+                if gemini_prov and os.getenv(gemini_prov.api_key_env, ""):
+                    routing["critic"] = "gemini-2-flash"
+                    logger.info(
+                        "Critic %s unavailable — upgraded to gemini-2-flash", critic_model
+                    )
+                else:
+                    # No reliable critic available — disable critic to avoid blocking
+                    routing["critic"] = None
+                    logger.warning(
+                        "Critic %s unavailable and no Gemini key — disabling critic",
+                        critic_model,
+                    )
 
         return routing
 

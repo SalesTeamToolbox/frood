@@ -618,17 +618,15 @@ def create_app(
     @app.post("/api/login")
     async def login(req: LoginRequest, request: Request):
         # Fail-secure: reject all logins when no password is configured
+        # (but allow hash-only auth when DASHBOARD_PASSWORD is empty)
         if (
-            not settings.dashboard_password
-            and not settings.dashboard_password_hash
-        ) or (
-            settings.dashboard_password in _INSECURE_PASSWORDS
-            and not settings.dashboard_password_hash
+            (not settings.dashboard_password and not settings.dashboard_password_hash)
+            or (settings.dashboard_password in _INSECURE_PASSWORDS and not settings.dashboard_password_hash)
         ):
-            logger.warning("Login attempt with no password configured — rejected")
+            logger.warning("Login attempt with no password configured or insecure plaintext password — rejected")
             raise HTTPException(
                 status_code=401,
-                detail="Dashboard login is disabled. Set DASHBOARD_PASSWORD or DASHBOARD_PASSWORD_HASH.",
+                detail="Dashboard login is disabled. Set DASHBOARD_PASSWORD or DASHBOARD_PASSWORD_HASH, or change insecure password.",
             )
 
         client_ip = request.client.host if request.client else "unknown"
@@ -1286,7 +1284,7 @@ def create_app(
         # -- Project breakdown --
         project_list = []
         if project_manager:
-            for proj in project_manager.all_projects():
+            for proj in project_manager.list_projects():
                 pstats = project_manager.project_stats(proj.id)
                 project_list.append(
                     {
@@ -1312,13 +1310,13 @@ def create_app(
         if skill_loader:
             all_skills = skill_loader.all_skills()
             skills_summary["total"] = len(all_skills)
-            skills_summary["enabled"] = sum(1 for s in all_skills if s.enabled is not False)
+            skills_summary["enabled"] = sum(1 for s in all_skills if skill_loader.is_enabled(s.name))
             skills_summary["skills"] = [
                 {
                     "name": s.name,
                     "description": getattr(s, "description", ""),
                     "task_types": getattr(s, "task_types", []),
-                    "enabled": getattr(s, "enabled", True),
+                    "enabled": skill_loader.is_enabled(s.name),
                 }
                 for s in all_skills
             ]

@@ -18,8 +18,9 @@ from core.task_queue import TaskType, infer_task_type
 
 logger = logging.getLogger("agent42.intent_classifier")
 
-# Use a fast, free model for classification — latency matters here
-CLASSIFIER_MODEL = "or-free-mistral-small"
+# Use Gemini Flash for reliable classification — OR free models are frequently
+# rate-limited (429) which causes misclassification via keyword fallback.
+CLASSIFIER_MODEL = "gemini-2-flash"
 
 CLASSIFICATION_PROMPT = """\
 You are a task classifier for an AI agent platform.  Given a user message and
