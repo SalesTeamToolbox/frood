@@ -138,9 +138,6 @@ MODELS: dict[str, ModelSpec] = {
         display_name="Qwen3 Coder 480B (free)",
         tier=ModelTier.FREE,
     ),
-    # or-free-devstral removed — free period ended (404 "free Devstral 2 period has ended")
-    # or-free-deepseek-r1 removed — 404 "No endpoints found for deepseek/deepseek-r1-0528:free"
-    # or-free-llama4-maverick removed — 404 "No endpoints found for meta-llama/llama-4-maverick:free"
     # Reasoning specialists
     "or-free-deepseek-chat": ModelSpec(
         "meta-llama/llama-3.3-70b-instruct:free",
@@ -155,8 +152,6 @@ MODELS: dict[str, ModelSpec] = {
         display_name="Llama 3.3 70B (free)",
         tier=ModelTier.FREE,
     ),
-    # or-free-gemini-flash removed — 404 "No endpoints found for google/gemini-2.0-flash-exp:free"
-    # or-free-gemini-pro removed — 404 "No endpoints found for google/gemini-2.5-pro-exp-03-25:free"
     "or-free-mistral-small": ModelSpec(
         "mistralai/mistral-small-3.1-24b-instruct:free",
         ProviderType.OPENROUTER,
