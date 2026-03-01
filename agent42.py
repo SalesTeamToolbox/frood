@@ -201,6 +201,7 @@ class Agent42:
             log_path=settings.approval_log_path,
         )
         self._shutdown_event = asyncio.Event()
+        self._uvicorn_server: uvicorn.Server | None = None
 
         # Phase 1: Security
         self.sandbox = WorkspaceSandbox(self.repo_path, enabled=settings.sandbox_enabled)
@@ -410,6 +411,7 @@ class Agent42:
             configured_max_agents=self.max_agents,
             task_queue=self.task_queue,
             tool_registry=self.tool_registry,
+            skill_loader=self.skill_loader,
         )
 
         # Scheduled security scanning
@@ -1404,6 +1406,7 @@ class Agent42:
                 log_level="warning",
             )
             server = uvicorn.Server(config)
+            self._uvicorn_server = server
             tasks_to_run.append(server.serve())
 
         await asyncio.gather(*tasks_to_run)
@@ -1498,6 +1501,8 @@ class Agent42:
         """Graceful shutdown."""
         logger.info("Agent42 shutting down...")
         self._shutdown_event.set()
+        if self._uvicorn_server:
+            self._uvicorn_server.should_exit = True
         self.heartbeat.stop()
         self.cron_scheduler.stop()
         self.security_scanner.stop()
