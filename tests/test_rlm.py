@@ -31,7 +31,7 @@ class TestRLMConfig:
     def test_defaults(self):
         config = RLMConfig()
         assert config.enabled is True
-        assert config.threshold_tokens == 50_000
+        assert config.threshold_tokens == 200_000
         assert config.environment == "local"
         assert config.max_depth == 3
         assert config.max_iterations == 20
@@ -53,7 +53,7 @@ class TestRLMConfig:
         with patch.dict(os.environ, {}, clear=False):
             config = RLMConfig.from_env()
         assert config.enabled is True
-        assert config.threshold_tokens == 50_000
+        assert config.threshold_tokens == 200_000
 
     def test_from_env_custom(self):
         env = {

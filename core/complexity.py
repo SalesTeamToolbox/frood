@@ -17,8 +17,10 @@ from core.task_queue import TaskType
 
 logger = logging.getLogger("agent42.complexity")
 
-# Same fast, free model used by IntentClassifier
-ASSESSOR_MODEL = "or-free-mistral-small"
+# Use Gemini Flash for reliable assessment — OR free models are frequently
+# rate-limited (429) which causes team detection to fall back to keyword
+# heuristics, preventing teams from forming for complex tasks.
+ASSESSOR_MODEL = "gemini-2-flash"
 
 # Available team names and what they cover
 TEAM_TASK_MAP: dict[str, list[str]] = {

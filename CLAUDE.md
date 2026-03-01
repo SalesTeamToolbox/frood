@@ -459,6 +459,10 @@ class TestWorkspaceSandbox:
 | 87 | Heartbeat | `_monitor_loop` calls `get_health()` with no args — periodic WS broadcasts overwrite tools/tasks with 0 | Store `task_queue` and `tool_registry` on `HeartbeatService`; pass them in the broadcast loop |
 | 88 | Heartbeat | `ctypes.windll.psapi.GetProcessMemoryInfo` silently returns 0 on Windows (missing argtypes) | Use `ctypes.WinDLL("psapi")` with explicit `argtypes`/`restype`; also fix macOS `ru_maxrss` bytes-vs-KB conversion |
 | 89 | Dashboard | Chat session sidebar empty after server restart — WS reconnect doesn't reload data | Add `loadChatSessions(); loadCodeSessions(); loadTasks(); loadStatus();` to `ws.onopen` when `wsRetries > 0` |
+| 90 | Routing | ComplexityAssessor, IntentClassifier, and Learner all used dead OR free models (`or-free-mistral-small`, `or-free-deepseek-chat`) — teams never formed, classification fell back to keywords, learning never happened | Route internal LLM consumers to `gemini-2-flash` (reliable, free tier); don't use OR free models for infrastructure-critical calls |
+| 91 | Routing | Critics tried dead OR free models first, then fell back to Gemini — wasted 5-7s per iteration on 429 retries | Validate critic health/API key in `get_routing()` and pre-upgrade to `gemini-2-flash` before task execution begins |
+| 92 | RLM | RLM threshold at 50K tokens triggered for most tasks, causing 3-5x token amplification and API rate-limit spikes | Raise `RLM_THRESHOLD_TOKENS` to 200K — RLM should only activate for genuinely massive contexts, not routine tasks |
+| 93 | Dispatch | Multiple agents dispatched simultaneously cause Gemini 1M TPM rate-limit spikes | Add `AGENT_DISPATCH_DELAY` (default 2.0s) to stagger agent launches in `_process_queue()` |
 
 ---
 

@@ -59,6 +59,7 @@ class Settings:
     # Orchestrator
     default_repo_path: str | None = None
     max_concurrent_agents: int = 0  # 0 = auto (dynamic based on CPU/memory)
+    agent_dispatch_delay: float = 2.0  # seconds between agent dispatches to prevent API burst
     tasks_json_path: str = "tasks.json"
 
     # Security (Phase 1)
@@ -308,6 +309,7 @@ class Settings:
             # Orchestrator
             default_repo_path=_resolve_repo_path(os.getenv("DEFAULT_REPO_PATH", "")),
             max_concurrent_agents=int(os.getenv("MAX_CONCURRENT_AGENTS", "0")),
+            agent_dispatch_delay=float(os.getenv("AGENT_DISPATCH_DELAY", "2.0")),
             tasks_json_path=os.getenv("TASKS_JSON_PATH", "tasks.json"),
             # Security
             sandbox_enabled=os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes"),

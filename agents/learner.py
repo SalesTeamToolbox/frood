@@ -95,7 +95,7 @@ class Learner:
         memory_store: MemoryStore,
         project_memory=None,
         skills_dir: Path | None = None,
-        reflection_model: str = "or-free-deepseek-chat",
+        reflection_model: str = "gemini-2-flash",
         model_evaluator=None,
     ):
         self.router = router

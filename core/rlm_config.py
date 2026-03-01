@@ -14,7 +14,7 @@ class RLMConfig:
     """Immutable RLM configuration derived from environment variables."""
 
     enabled: bool = True
-    threshold_tokens: int = 50_000
+    threshold_tokens: int = 200_000
     environment: str = "local"
     max_depth: int = 3
     max_iterations: int = 20
@@ -31,7 +31,7 @@ class RLMConfig:
         """Load RLM configuration from environment variables."""
         return cls(
             enabled=os.getenv("RLM_ENABLED", "true").lower() in ("true", "1", "yes"),
-            threshold_tokens=int(os.getenv("RLM_THRESHOLD_TOKENS", "50000")),
+            threshold_tokens=int(os.getenv("RLM_THRESHOLD_TOKENS", "200000")),
             environment=os.getenv("RLM_ENVIRONMENT", "local"),
             max_depth=int(os.getenv("RLM_MAX_DEPTH", "3")),
             max_iterations=int(os.getenv("RLM_MAX_ITERATIONS", "20")),
