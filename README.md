@@ -165,6 +165,7 @@ produces output for your review.
 | Login fails after restart | Set `JWT_SECRET` in `.env` (the setup wizard does this automatically) |
 | Everything is broken | Don't Panic. Grab your towel. `bash setup.sh` |
 | "It's only a flesh wound" | Task failed but partially completed? Check `.agent42/outputs/` for salvageable work |
+| "None shall pass!" | Command filter blocking a needed command? Add it to `COMMAND_FILTER_EXTRA_ALLOW` in `.env` |
 
 ### Minimum Setup (free, no credit card)
 
@@ -223,6 +224,7 @@ For direct provider access or premium models, add any of these API keys:
 
 - Python 3.11+
 - Node.js 18+ (for frontend build)
+- Playwright (auto-installed via `requirements.txt` for browser-based QA testing)
 - git with a repo that has a `dev` branch
 - [OpenRouter account](https://openrouter.ai) (free, no credit card required)
 
@@ -613,7 +615,8 @@ task types. The base skill's instructions appear first, followed by all extensio
 | **security-audit** | coding | Security vulnerability assessment |
 | **git-workflow** | coding | Branch strategy, commit conventions, merge workflows |
 | **api-design** | design, coding | API specification and design patterns |
-| **app-builder** | coding | Application building patterns and scaffolding |
+| **app-tester** | app_create, app_update, debugging | AI-driven QA testing workflow — smoke tests, visual analysis, browser flows, log monitoring |
+| **app-builder** | app_create, app_update | Application building with integrated testing — build, smoke test, fix-retest loop |
 | **ci-cd** | deployment, coding | CI/CD pipeline configuration |
 | **database-migration** | coding, deployment | Database schema migrations |
 | **dependency-management** | coding, refactoring | Dependency version management |
@@ -625,6 +628,7 @@ task types. The base skill's instructions appear first, followed by all extensio
 | **data-analysis** | data_analysis | Data processing workflows, visualization |
 | **social-media** | marketing, content | Social media campaigns, platform guidelines |
 | **project-planning** | project_management | Project plans, sprints, roadmaps |
+| **qa-team** | app_create, app_update | Multi-agent QA team (tester/developer/reviewer) for comprehensive app testing |
 | **project-interview** | project_setup | Structured project discovery interviews |
 | **presentation** | content, marketing, strategy | Slide decks, executive summaries |
 | **brand-guidelines** | design, marketing, content | Brand voice, visual identity |
@@ -645,7 +649,7 @@ task types. The base skill's instructions appear first, followed by all extensio
 | **deployment** | deployment | General deployment patterns and infrastructure |
 | **weather** | research | Weather lookups (example skill) |
 
-43 built-in skills total. Skills are matched to tasks by `task_types` frontmatter
+45 built-in skills total. Skills are matched to tasks by `task_types` frontmatter
 and injected into the agent's system prompt automatically.
 
 ## Agent Profiles
@@ -756,8 +760,29 @@ Agents have access to a sandboxed tool registry:
 | Tool | Description |
 |---|---|
 | `app` | Build and deploy web applications directly on the server. App lifecycle management (launch, configure, monitor) |
+| `app_test` | AI-driven QA testing for apps — smoke tests, visual analysis, browser flow testing, log monitoring, and QA reports. Actions: smoke_test, visual_check, check_logs, test_flow, health_check, generate_report |
 | `project_interview` | Structured project discovery interviews. Rounds: overview → requirements → technical → constraints. Produces `PROJECT_SPEC.md` and decomposes into ordered subtasks. Actions: start, respond, status, get_spec, approve, list |
 | `create_tool` | Dynamically create custom tools from natural language descriptions at runtime |
+
+### QA Testing (Nobody Expects the Spanish Inquisition!)
+
+Agent42's app testing sandbox connects browser automation, AI vision analysis, and
+log monitoring into an integrated QA workflow. When an agent builds an app, it doesn't
+just deploy and hope — it navigates to the app, screenshots it, analyzes the visuals,
+checks the logs, and fixes issues automatically.
+
+The `app_test` tool provides six testing actions:
+- **smoke_test** — Full end-to-end: health check → navigate → screenshot → vision analyze → check logs
+- **visual_check** — Screenshot any URL and analyze it with AI vision
+- **check_logs** — Scan app logs for errors, warnings, tracebacks, and 5xx codes
+- **test_flow** — Multi-step browser flows (navigate, click, fill forms, screenshot at each step)
+- **health_check** — HTTP connectivity and response time verification
+- **generate_report** — Aggregate all findings into a structured QA summary
+
+Graceful degradation: no Playwright → HTTP-only testing. No vision API key → screenshots
+saved for manual review. Like the Spanish Inquisition's three chief weapons, our testing
+has multiple fallback strategies... amongst our weaponry are health checks, visual analysis,
+log monitoring, and browser automation.
 
 ### Media Generation Tools
 
@@ -778,7 +803,7 @@ Agents have access to a sandboxed tool registry:
 
 SSH and tunnel tools are disabled by default — see [SSH & Tunnels](#ssh--tunnels) configuration.
 
-46 tools total across core, workflow, app, media, and infrastructure categories.
+47 tools total across core, workflow, app, media, and infrastructure categories.
 Code-only tools are automatically filtered out for non-code task types to prevent
 free LLM hallucinations.
 
@@ -934,9 +959,10 @@ Multi-channel inbound/outbound messaging:
 
 Each channel supports user allowlists to restrict who can submit tasks.
 
-## Review Gate
+## Review Gate (Bring Me a Shrubbery!)
 
 When a task completes, the dashboard shows a **READY** badge.
+The Knights Who Say Ni demand... a proper code review before deployment.
 The agent commits a `REVIEW.md` to the worktree containing:
 - Full iteration history
 - Lint/test results from every cycle
@@ -962,7 +988,7 @@ These operations pause the agent and show an approval modal in the dashboard:
 Approval requests timeout after 1 hour (configurable) and auto-deny to prevent
 agents from blocking indefinitely when nobody is watching the dashboard.
 
-## Reliability
+## Reliability (Always Look on the Bright Side)
 
 ### API Retry with Fallback
 
@@ -972,6 +998,7 @@ providers (OpenRouter free models, plus native Gemini/OpenAI/Anthropic if keys
 are configured). Failed models are tracked per-task and excluded from subsequent
 iterations and fallback attempts, preventing retry waste. Auth errors (401) and
 payment errors (402) skip retries entirely.
+As the Black Knight would say — some errors really are fatal, no matter how much you insist otherwise.
 
 **Smart critic fallback** — When OpenRouter critic models are rate-limited (429),
 the routing layer automatically upgrades the critic to Gemini Flash before task
@@ -984,8 +1011,9 @@ bursts when multiple tasks are queued simultaneously.
 ### Convergence Detection
 
 The iteration engine monitors critic feedback across iterations. When the critic
-repeats substantially similar feedback (>85% word overlap), the loop accepts the
-output and stops to avoid burning tokens on a stuck review cycle.
+repeats substantially similar feedback (>85% word overlap) — like a knight insisting
+"'Tis but a scratch" — the loop accepts the output and stops to avoid burning tokens
+on a stuck review cycle.
 
 ### Context-Aware Task Classification
 
