@@ -427,6 +427,22 @@ class IterationEngine:
                     primary_auth_failed = True
                 # Continue trying remaining fallbacks — a different provider may succeed
 
+        # Last resort: OR free auto-router picks from whatever free models are
+        # currently available.  Skip only when OR auth is known to be broken.
+        if not primary_auth_failed and "or-free-auto" not in tried:
+            try:
+                logger.warning("All fallbacks exhausted — last resort: or-free-auto")
+                text, usage = await self.router.complete("or-free-auto", messages)
+                if usage and self._token_acc:
+                    self._token_acc.record(
+                        usage["model_key"], usage["prompt_tokens"], usage["completion_tokens"]
+                    )
+                return text
+            except SpendingLimitExceeded:
+                raise
+            except Exception as e:
+                logger.warning(f"Last-resort or-free-auto also failed: {e}")
+
         raise RuntimeError(f"API call failed — all models exhausted (tried: {tried}): {last_error}")
 
     async def _complete_with_tools_retry(
