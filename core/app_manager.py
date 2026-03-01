@@ -24,6 +24,7 @@ import json
 import logging
 import re
 import shutil
+import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -456,6 +457,39 @@ class AppManager:
             await self._persist()
             raise
 
+    async def _ensure_app_venv(self, app_path: Path, env: dict) -> str:
+        """Create a per-app venv if it doesn't exist. Return path to its Python."""
+        venv_dir = app_path / ".venv"
+        # Platform-appropriate python path inside the venv
+        if sys.platform == "win32":
+            venv_python = str(venv_dir / "Scripts" / "python.exe")
+        else:
+            venv_python = str(venv_dir / "bin" / "python")
+
+        if not venv_dir.exists():
+            logger.info("Creating venv for app at %s", app_path)
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-m",
+                "venv",
+                str(venv_dir),
+                cwd=str(app_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            try:
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                raise RuntimeError("venv creation timed out after 60s")
+            if proc.returncode != 0:
+                err = stderr.decode() if stderr else "unknown error"
+                raise RuntimeError(f"venv creation failed: {err}")
+
+        return venv_python
+
     async def _start_python_app(
         self, app_path: Path, entry_point: str, port: int, env: dict
     ) -> asyncio.subprocess.Process:
@@ -463,12 +497,16 @@ class AppManager:
         env["PORT"] = str(port)
         env["HOST"] = "127.0.0.1"
 
+        venv_python = await self._ensure_app_venv(app_path, env)
+
         # Check for requirements.txt and install deps (also check src/)
         reqs = app_path / "requirements.txt"
         if not reqs.exists():
             reqs = app_path / "src" / "requirements.txt"
         if reqs.exists():
             proc = await asyncio.create_subprocess_exec(
+                venv_python,
+                "-m",
                 "pip",
                 "install",
                 "-q",
@@ -479,11 +517,20 @@ class AppManager:
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
             )
-            await asyncio.wait_for(proc.communicate(), timeout=120.0)
+            try:
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                logger.warning("pip install timed out for %s", app_path)
+            else:
+                if proc.returncode != 0:
+                    err = stderr.decode() if stderr else ""
+                    logger.warning("pip install failed for %s: %s", app_path, err)
 
         entry = app_path / entry_point
         return await asyncio.create_subprocess_exec(
-            "python",
+            venv_python,
             str(entry),
             cwd=str(app_path),
             stdout=asyncio.subprocess.PIPE,
