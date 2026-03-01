@@ -468,6 +468,9 @@ class TestWorkspaceSandbox:
 | 96 | Dashboard | `project_manager.all_projects()` renamed to `list_projects()` — `/api/reports` crashes with AttributeError | Check method names against current API when refactoring; `server.py` calls must match `project_manager` interface |
 | 97 | Dashboard | `skill.enabled` attribute doesn't exist — use `skill_loader.is_enabled(s.name)` instead | Skills don't have an `enabled` field; enablement is managed by the SkillLoader, not the Skill object |
 | 98 | Search | Brave Search returns 422 on production — API key or query format issue | `web_search` tool has DuckDuckGo fallback; search still works but with lower quality results. Check `BRAVE_API_KEY` in `.env` |
+| 99 | AppTest | `AppTestTool._findings` accumulates across calls — stale findings leak into reports | Call `generate_report` to consume and clear findings, or check `_findings` list is reset between test sessions |
+| 100 | AppTest | `app_test smoke_test` returns success even when health check fails | Tool always returns `ToolResult(success=True)` for completed checks — failures are in the output text and findings, not in `success=False` |
+| 101 | Critic | Visual critic sends multimodal `content` (list of dicts) but some models only accept string content | `_extract_screenshot_b64` returns None on any failure — critic falls back to text-only; only vision-capable models get image |
 
 ---
 

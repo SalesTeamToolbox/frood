@@ -51,7 +51,28 @@ Write the complete application code using filesystem tools (`write_file`, `edit_
    ```
    app install_deps --app_id <id>
    ```
-2. Review your code for obvious errors before launching.
+2. Start the app to test it:
+   ```
+   app start --app_id <id>
+   ```
+3. Run a smoke test to verify the app works:
+   ```
+   app_test smoke_test --app_id <id>
+   ```
+   This navigates to the app, takes a screenshot, analyzes it visually, and checks logs for errors.
+4. **Fix-retest loop** (up to 3 cycles): If the smoke test reveals issues:
+   - Read the error details and relevant source files
+   - Fix the code
+   - Restart the app: `app restart --app_id <id>`
+   - Re-run: `app_test smoke_test --app_id <id>`
+5. For multi-page apps, test important flows:
+   ```
+   app_test test_flow --steps [{"action": "navigate", "url": "http://localhost:<port>/page2"}, {"action": "screenshot", "value": "Verify page 2"}]
+   ```
+6. Check logs are clean:
+   ```
+   app_test check_logs --app_id <id>
+   ```
 
 ### Phase 5: Launch
 
@@ -59,11 +80,7 @@ Write the complete application code using filesystem tools (`write_file`, `edit_
    ```
    app mark_ready --app_id <id> --version "1.0.0"
    ```
-2. Start the app:
-   ```
-   app start --app_id <id>
-   ```
-3. Report the URL to the user.
+2. Report the URL to the user.
 
 ### Phase 6 (Optional): GitHub Integration
 
