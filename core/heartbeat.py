@@ -57,11 +57,14 @@ class SystemHealth:
     active_agents: int = 0
     stalled_agents: int = 0
     tasks_pending: int = 0
+    tasks_running: int = 0
+    tasks_review: int = 0
     tasks_completed: int = 0
     tasks_failed: int = 0
     uptime_seconds: float = 0
     memory_mb: float = 0
     tools_registered: int = 0
+    skills_registered: int = 0
 
     # CPU metrics
     cpu_load_1m: float = 0.0
@@ -85,11 +88,14 @@ class SystemHealth:
             "active_agents": self.active_agents,
             "stalled_agents": self.stalled_agents,
             "tasks_pending": self.tasks_pending,
+            "tasks_running": self.tasks_running,
+            "tasks_review": self.tasks_review,
             "tasks_completed": self.tasks_completed,
             "tasks_failed": self.tasks_failed,
             "uptime_seconds": round(self.uptime_seconds, 1),
             "memory_mb": round(self.memory_mb, 1),
             "tools_registered": self.tools_registered,
+            "skills_registered": self.skills_registered,
             "cpu_load_1m": self.cpu_load_1m,
             "cpu_load_5m": self.cpu_load_5m,
             "cpu_load_15m": self.cpu_load_15m,
@@ -116,6 +122,7 @@ class HeartbeatService:
         configured_max_agents: int = 4,
         task_queue=None,
         tool_registry=None,
+        skill_loader=None,
     ):
         self._interval = interval
         self._agents: dict[str, AgentHeartbeat] = {}
@@ -125,6 +132,7 @@ class HeartbeatService:
         self._configured_max_agents = configured_max_agents
         self._task_queue = task_queue
         self._tool_registry = tool_registry
+        self._skill_loader = skill_loader
         self._start_time = time.monotonic()
         self._running = False
         self._task: asyncio.Task | None = None
@@ -170,7 +178,7 @@ class HeartbeatService:
     def stalled_agents(self) -> list[AgentHeartbeat]:
         return [hb for hb in self._agents.values() if hb.status == "running" and hb.is_stalled]
 
-    def get_health(self, task_queue=None, tool_registry=None) -> SystemHealth:
+    def get_health(self, task_queue=None, tool_registry=None, skill_loader=None) -> SystemHealth:
         """Get a snapshot of overall system health."""
         from core.capacity import compute_effective_capacity
 
@@ -198,12 +206,17 @@ class HeartbeatService:
 
         if task_queue:
             stats = task_queue.stats() if hasattr(task_queue, "stats") else {}
-            health.tasks_pending = stats.get("pending", 0)
-            health.tasks_completed = stats.get("completed", 0)
+            health.tasks_pending = stats.get("pending", 0) + stats.get("assigned", 0)
+            health.tasks_running = stats.get("running", 0)
+            health.tasks_review = stats.get("review", 0)
+            health.tasks_completed = stats.get("done", 0)
             health.tasks_failed = stats.get("failed", 0)
 
         if tool_registry:
             health.tools_registered = len(tool_registry.list_tools())
+
+        if skill_loader:
+            health.skills_registered = len(skill_loader.all_skills())
 
         # Get process memory usage (cross-platform)
         try:
@@ -308,6 +321,7 @@ class HeartbeatService:
                     health = self.get_health(
                         task_queue=self._task_queue,
                         tool_registry=self._tool_registry,
+                        skill_loader=self._skill_loader,
                     )
                     await self._on_heartbeat(health)
 

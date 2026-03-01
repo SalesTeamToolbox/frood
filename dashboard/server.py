@@ -446,24 +446,34 @@ def create_app(
     async def get_status(_user: str = Depends(get_current_user)):
         """Full platform status with system metrics and dynamic capacity."""
         if heartbeat:
-            health = heartbeat.get_health(task_queue=task_queue, tool_registry=tool_registry)
+            health = heartbeat.get_health(
+                task_queue=task_queue,
+                tool_registry=tool_registry,
+                skill_loader=skill_loader,
+            )
             return health.to_dict()
         # Fallback when heartbeat is not available
         from core.capacity import compute_effective_capacity
 
         cap = compute_effective_capacity(settings.max_concurrent_agents)
         tools_count = 0
+        skills_count = 0
         if tool_registry:
             tools_count = len(tool_registry.list_tools())
+        if skill_loader:
+            skills_count = len(skill_loader.all_skills())
         return {
             "active_agents": 0,
             "stalled_agents": 0,
             "tasks_pending": 0,
+            "tasks_running": 0,
+            "tasks_review": 0,
             "tasks_completed": 0,
             "tasks_failed": 0,
             "uptime_seconds": 0,
             "memory_mb": 0,
             "tools_registered": tools_count,
+            "skills_registered": skills_count,
             **{
                 k: v
                 for k, v in cap.items()
@@ -3069,6 +3079,87 @@ def create_app(
                 )
             except httpx.TimeoutException:
                 raise HTTPException(status_code=504, detail=f"App '{slug}' timed out")
+
+    # -- Team Runs (multi-agent collaboration monitoring) ----------------------
+
+    @app.get("/api/team-runs")
+    async def list_team_runs(_user: str = Depends(get_current_user)):
+        """List all team runs with summary info."""
+        if not tool_registry:
+            return []
+        team_tool = tool_registry.get("team")
+        if not team_tool or not hasattr(team_tool, "get_all_runs"):
+            return []
+        return team_tool.get_all_runs()
+
+    @app.get("/api/team-runs/{run_id}")
+    async def get_team_run(run_id: str, _user: str = Depends(get_current_user)):
+        """Get detailed info for a single team run, including child tasks."""
+        if not tool_registry:
+            raise HTTPException(status_code=404, detail="Tool registry not available")
+        team_tool = tool_registry.get("team")
+        if not team_tool or not hasattr(team_tool, "get_run_detail"):
+            raise HTTPException(status_code=404, detail="Team tool not available")
+        detail = team_tool.get_run_detail(run_id)
+        if not detail:
+            raise HTTPException(status_code=404, detail="Team run not found")
+
+        # Enrich with child task details from the queue
+        child_tasks = []
+        for task_id in detail.get("task_ids", []):
+            task = task_queue.get(task_id)
+            if task:
+                child_tasks.append({
+                    "id": task.id,
+                    "title": task.title,
+                    "status": task.status.value if hasattr(task.status, "value") else str(task.status),
+                    "role_name": getattr(task, "role_name", ""),
+                    "task_type": task.task_type.value if hasattr(task.task_type, "value") else str(task.task_type),
+                    "result": (task.result or "")[:500],
+                    "error": task.error or "",
+                })
+        detail["child_tasks"] = child_tasks
+        return detail
+
+    @app.get("/api/tasks/{task_id}/team-context")
+    async def get_task_team_context(task_id: str, _user: str = Depends(get_current_user)):
+        """Get team context for a task — its team run, sibling tasks, and role."""
+        task = task_queue.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        team_run_id = getattr(task, "team_run_id", "")
+        if not team_run_id:
+            return {"is_team_task": False}
+
+        # Find sibling tasks in the same team run
+        siblings = []
+        if hasattr(task_queue, "_tasks"):
+            for t in task_queue._tasks.values():
+                if getattr(t, "team_run_id", "") == team_run_id and t.id != task_id:
+                    siblings.append({
+                        "id": t.id,
+                        "title": t.title,
+                        "status": t.status.value if hasattr(t.status, "value") else str(t.status),
+                        "role_name": getattr(t, "role_name", ""),
+                    })
+
+        # Get team run detail if available
+        run_detail = None
+        if tool_registry:
+            team_tool = tool_registry.get("team")
+            if team_tool and hasattr(team_tool, "get_run_detail"):
+                run_detail = team_tool.get_run_detail(team_run_id)
+
+        return {
+            "is_team_task": True,
+            "team_run_id": team_run_id,
+            "team_name": getattr(task, "team_name", ""),
+            "role_name": getattr(task, "role_name", ""),
+            "siblings": siblings,
+            "run_status": run_detail.get("status") if run_detail else None,
+            "run_workflow": run_detail.get("workflow") if run_detail else None,
+        }
 
     # -- Static files (React frontend) ----------------------------------------
 

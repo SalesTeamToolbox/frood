@@ -56,7 +56,7 @@ class GitHubDeviceAuth:
                 "user_code": data["user_code"],
                 "verification_uri": data["verification_uri"],
                 "device_code": data["device_code"],
-                "expires_in": data.get("expires_in", 900),
+                "expires_in": data.get("expires_in", 1800),
                 "interval": data.get("interval", 5),
             }
 

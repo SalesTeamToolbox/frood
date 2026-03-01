@@ -91,6 +91,9 @@ const state = {
   reportsData: null,
   reportsLoading: false,
   reportsTab: "overview",
+  // Teams
+  teamRuns: [],
+  selectedTeamRun: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -1660,6 +1663,7 @@ function renderKanbanBoard() {
                 <span class="badge-type">${esc(t.task_type)}</span>
                 ${t.repo_id ? `<span style="color:var(--accent)">${esc((state.repos.find(r=>r.id===t.repo_id)||{}).name||"repo")}${t.branch ? ":"+esc(t.branch) : ""}</span>` : ""}
                 ${t.assigned_agent ? `<span>${esc(t.assigned_agent)}</span>` : ""}
+                ${t.team_run_id ? `<span style="color:var(--a42-gold)" title="Team: ${esc(t.team_name)}">${esc(t.team_name)}/${esc(t.role_name)}</span>` : ""}
                 ${(t.comments||[]).length > 0 ? `<span>${(t.comments||[]).length} comments</span>` : ""}
                 ${t.token_usage?.total_tokens ? `<span class="badge-tokens" title="Tokens used">${formatNumber(t.token_usage.total_tokens)} tok</span>` : ""}
               </div>
@@ -1782,6 +1786,7 @@ function renderDetail() {
           <div class="detail-item"><label>Updated</label><div class="value">${new Date(t.updated_at * 1000).toLocaleString()}</div></div>
           ${t.origin_channel ? `<div class="detail-item"><label>Origin</label><div class="value">${esc(t.origin_channel)}</div></div>` : ""}
           ${t.worktree_path ? `<div class="detail-item"><label>Workspace</label><div class="value" style="font-family:var(--mono);font-size:0.8rem">${esc(t.worktree_path)}</div></div>` : ""}
+          ${t.team_run_id ? `<div class="detail-item"><label>Team</label><div class="value"><a href="#" onclick="event.preventDefault();viewTeamRun('${esc(t.team_run_id)}')">${esc(t.team_name || "team")} / ${esc(t.role_name || "")}</a></div></div>` : ""}
         </div>
       </div>
     </div>
@@ -2443,6 +2448,107 @@ async function setDefaultProfile(name) {
   } catch (err) { toast(err.message, "error"); }
 }
 
+// ---------------------------------------------------------------------------
+// Teams Page — Multi-Agent Team Collaboration Monitoring
+// ---------------------------------------------------------------------------
+// NOTE: All interpolated values use esc() for XSS protection — this follows
+// the existing innerHTML pattern used throughout this file (55+ inline handlers).
+
+function renderTeams() {
+  const el = document.getElementById("page-content");
+  if (!el || state.page !== "teams") return;
+
+  if (state.selectedTeamRun) {
+    renderTeamRunDetail(el);
+    return;
+  }
+
+  el.innerHTML = '<div class="teams-page"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem"><h3 style="margin:0">Team Runs</h3><button class="btn btn-outline btn-sm" onclick="loadTeamRuns()">Refresh</button></div><div id="team-runs-list"><p style="color:var(--text-muted)">Loading team runs...</p></div></div>';
+  loadTeamRuns();
+}
+
+async function loadTeamRuns() {
+  try {
+    const runs = await api("/team-runs");
+    state.teamRuns = runs || [];
+    const container = document.getElementById("team-runs-list");
+    if (!container) return;
+
+    if (state.teamRuns.length === 0) {
+      container.innerHTML = '<div class="empty-state"><p>No team runs yet.</p><p style="color:var(--text-muted);font-size:0.85rem">Team runs are created when tasks trigger multi-agent team workflows (research-team, content-team, etc.)</p></div>';
+      return;
+    }
+
+    container.innerHTML = state.teamRuns.map(function(run) {
+      var statusClass = run.status === "completed" ? "text-success" : run.status === "running" ? "text-warning" : run.status === "failed" ? "text-danger" : "";
+      var started = run.started_at ? new Date(run.started_at * 1000).toLocaleString() : "";
+      var duration = run.completed_at && run.started_at ? Math.round(run.completed_at - run.started_at) + "s" : run.status === "running" ? "in progress" : "";
+      var taskCount = (run.task_ids || []).length;
+      var qualityBadge = run.quality_score ? '<span class="badge-tier">' + run.quality_score + '/10</span>' : "";
+      return '<div class="team-run-card" onclick="viewTeamRun(\'' + esc(run.run_id) + '\')"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div><h4 style="margin:0 0 0.25rem 0">' + esc(run.team) + '</h4><p style="margin:0;font-size:0.85rem;color:var(--text-muted)">' + esc((run.task || "").substring(0, 100)) + '</p></div><div style="display:flex;gap:0.5rem;align-items:center"><span class="badge-tier ' + statusClass + '">' + esc(run.status) + '</span>' + qualityBadge + '</div></div><div style="display:flex;gap:1.5rem;margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)"><span>Workflow: ' + esc(run.workflow) + '</span><span>Tasks: ' + taskCount + '</span><span>Started: ' + started + '</span><span>Duration: ' + duration + '</span></div></div>';
+    }).join("");
+  } catch (err) {
+    var container = document.getElementById("team-runs-list");
+    if (container) container.innerHTML = '<p class="text-danger">Failed to load team runs: ' + esc(err.message) + '</p>';
+  }
+}
+
+async function viewTeamRun(runId) {
+  try {
+    var detail = await api("/team-runs/" + runId);
+    state.selectedTeamRun = detail;
+    render();
+  } catch (err) { toast(err.message, "error"); }
+}
+
+function renderTeamRunDetail(el) {
+  var run = state.selectedTeamRun;
+  if (!run) return;
+
+  var statusClass = run.status === "completed" ? "text-success" : run.status === "running" ? "text-warning" : run.status === "failed" ? "text-danger" : "";
+  var started = run.started_at ? new Date(run.started_at * 1000).toLocaleString() : "";
+  var completed = run.completed_at ? new Date(run.completed_at * 1000).toLocaleString() : "";
+  var duration = run.completed_at && run.started_at ? Math.round(run.completed_at - run.started_at) + "s" : "in progress";
+
+  var childTasks = (run.child_tasks || []).map(function(t) {
+    var tStatusClass = t.status === "done" || t.status === "review" ? "text-success" : t.status === "running" ? "text-warning" : t.status === "failed" ? "text-danger" : "text-muted";
+    return '<div class="team-task-row"><span class="badge-tier ' + tStatusClass + '" style="min-width:60px;text-align:center">' + esc(t.status) + '</span><span class="badge-type">' + esc(t.role_name || t.task_type) + '</span><span style="flex:1">' + esc(t.title) + '</span></div>';
+  }).join("");
+
+  var roleResults = Object.entries(run.role_results || {}).map(function(entry) {
+    var role = entry[0], data = entry[1];
+    var output = (data.output || "").substring(0, 1000);
+    var revised = data.revised ? '<span class="badge-tier badge-l2">Revised</span>' : "";
+    return '<div class="team-role-result"><div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem"><h5 style="margin:0">' + esc(role) + '</h5>' + revised + '</div><div class="team-output-preview">' + esc(output) + '</div></div>';
+  }).join("");
+
+  var html = '<div class="teams-page">';
+  html += '<div style="margin-bottom:1rem"><button class="btn btn-outline btn-sm" onclick="state.selectedTeamRun=null;render()">Back to Team Runs</button></div>';
+  html += '<div class="team-run-header"><h3 style="margin:0">' + esc(run.team) + ' <span class="badge-tier ' + statusClass + '">' + esc(run.status) + '</span></h3>';
+  html += '<p style="margin:0.5rem 0;color:var(--text-muted)">' + esc(run.task) + '</p>';
+  html += '<div style="display:flex;gap:1.5rem;font-size:0.85rem;color:var(--text-muted)">';
+  html += '<span>Run ID: ' + esc(run.run_id) + '</span><span>Workflow: ' + esc(run.workflow) + '</span>';
+  html += '<span>Started: ' + started + '</span><span>Completed: ' + completed + '</span><span>Duration: ' + duration + '</span>';
+  if (run.quality_score) html += '<span>Quality: ' + run.quality_score + '/10</span>';
+  html += '</div></div>';
+
+  html += '<div class="team-section"><h4>Task Timeline (' + (run.child_tasks || []).length + ' tasks)</h4>';
+  html += '<div class="team-tasks-timeline">' + (childTasks || '<p style="color:var(--text-muted)">No child tasks found</p>') + '</div></div>';
+
+  if (run.manager_plan) {
+    html += '<div class="team-section"><h4>Manager Plan</h4><div class="team-output-preview">' + esc((run.manager_plan || "").substring(0, 2000)) + '</div></div>';
+  }
+
+  html += '<div class="team-section"><h4>Role Results</h4>' + (roleResults || '<p style="color:var(--text-muted)">No role results yet</p>') + '</div>';
+
+  if (run.manager_review) {
+    html += '<div class="team-section"><h4>Manager Review</h4><div class="team-output-preview">' + esc((run.manager_review || "").substring(0, 2000)) + '</div></div>';
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
 function renderStatus() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "status") return;
@@ -2575,7 +2681,10 @@ function renderStatus() {
           <div class="card-body">
             <div class="status-metric-row"><span class="metric-label">Uptime</span><span class="metric-value">${formatUptime(uptime)}</span></div>
             <div class="status-metric-row"><span class="metric-label">Tools Registered</span><span class="metric-value">${s.tools_registered || 0}</span></div>
+            <div class="status-metric-row"><span class="metric-label">Skills Registered</span><span class="metric-value">${s.skills_registered || 0}</span></div>
             <div class="status-metric-row"><span class="metric-label">Tasks Pending</span><span class="metric-value text-info">${s.tasks_pending || 0}</span></div>
+            <div class="status-metric-row"><span class="metric-label">Tasks Running</span><span class="metric-value text-warning">${s.tasks_running || 0}</span></div>
+            <div class="status-metric-row"><span class="metric-label">Tasks Review</span><span class="metric-value text-purple">${s.tasks_review || 0}</span></div>
             <div class="status-metric-row"><span class="metric-label">Tasks Completed</span><span class="metric-value text-success">${s.tasks_completed || 0}</span></div>
             <div class="status-metric-row"><span class="metric-label">Tasks Failed</span><span class="metric-value text-danger">${s.tasks_failed || 0}</span></div>
           </div>
@@ -4321,6 +4430,7 @@ function render() {
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
           <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills');closeMobileSidebar()">&#9889; Skills</a>
           <a href="#" data-page="agents" class="${state.page === "agents" ? "active" : ""}" onclick="event.preventDefault();navigate('agents');closeMobileSidebar()">&#129302; Agents</a>
+          <a href="#" data-page="teams" class="${state.page === "teams" ? "active" : ""}" onclick="event.preventDefault();navigate('teams');closeMobileSidebar()">&#129309; Teams</a>
           <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Apps</a>
           <a href="#" data-page="reports" class="${state.page === "reports" ? "active" : ""}" onclick="event.preventDefault();navigate('reports');closeMobileSidebar()">&#128202; Reports</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings');closeMobileSidebar()">&#9881; Settings</a>
@@ -4362,6 +4472,7 @@ function render() {
     tools: renderTools,
     skills: renderSkills,
     agents: renderAgents,
+    teams: renderTeams,
     apps: renderApps,
     reports: renderReports,
     settings: renderSettings,

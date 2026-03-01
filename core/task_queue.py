@@ -258,6 +258,11 @@ class Task:
     l1_result: str = ""  # Stores L1 output when task is escalated to L2
     escalated_from: str = ""  # Task ID of the L1 task that was escalated
 
+    # Team collaboration tracking
+    team_run_id: str = ""  # Parent team run ID (empty = not a team task)
+    team_name: str = ""  # Which team (e.g. "content-team", "research-team")
+    role_name: str = ""  # Role within team (e.g. "researcher", "writer", "manager:plan")
+
     def add_comment(self, author: str, text: str):
         self.comments.append(
             {
