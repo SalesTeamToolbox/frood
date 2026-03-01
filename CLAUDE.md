@@ -463,6 +463,11 @@ class TestWorkspaceSandbox:
 | 91 | Routing | Critics tried dead OR free models first, then fell back to Gemini — wasted 5-7s per iteration on 429 retries | Validate critic health/API key in `get_routing()` and pre-upgrade to `gemini-2-flash` before task execution begins |
 | 92 | RLM | RLM threshold at 50K tokens triggered for most tasks, causing 3-5x token amplification and API rate-limit spikes | Raise `RLM_THRESHOLD_TOKENS` to 200K — RLM should only activate for genuinely massive contexts, not routine tasks |
 | 93 | Dispatch | Multiple agents dispatched simultaneously cause Gemini 1M TPM rate-limit spikes | Add `AGENT_DISPATCH_DELAY` (default 2.0s) to stagger agent launches in `_process_queue()` |
+| 94 | Deploy | `agent42.py` refactored command handlers into `commands.py` but file wasn't committed — `ModuleNotFoundError` on production startup | Always verify new module files are staged before pushing; `git status` shows untracked files that may be required imports |
+| 95 | Auth | Bcrypt password hash in `.env` doesn't match intended password after manual edits — login silently fails with 401 | Regenerate hash on server: `python3 -c "import bcrypt; print(bcrypt.hashpw(b'password', bcrypt.gensalt()).decode())"` and update `.env`; restart service |
+| 96 | Dashboard | `project_manager.all_projects()` renamed to `list_projects()` — `/api/reports` crashes with AttributeError | Check method names against current API when refactoring; `server.py` calls must match `project_manager` interface |
+| 97 | Dashboard | `skill.enabled` attribute doesn't exist — use `skill_loader.is_enabled(s.name)` instead | Skills don't have an `enabled` field; enablement is managed by the SkillLoader, not the Skill object |
+| 98 | Search | Brave Search returns 422 on production — API key or query format issue | `web_search` tool has DuckDuckGo fallback; search still works but with lower quality results. Check `BRAVE_API_KEY` in `.env` |
 
 ---
 
