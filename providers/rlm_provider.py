@@ -40,7 +40,6 @@ RLM_TIER_2 = frozenset(
         "gemini-2-flash",
         "deepseek-chat",
         "or-free-deepseek-chat",
-        "or-free-gemini-flash",
     }
 )
 RLM_NOT_RECOMMENDED = frozenset(
