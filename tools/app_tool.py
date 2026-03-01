@@ -413,7 +413,15 @@ class AppTool(Tool):
             if not reqs.exists():
                 return ToolResult(output="No requirements.txt found — nothing to install")
 
+            # Use per-app venv to avoid "externally-managed-environment" errors
+            try:
+                venv_python = await self._manager._ensure_app_venv(app_path, dict())
+            except RuntimeError as e:
+                return ToolResult(error=f"Failed to create app venv: {e}", success=False)
+
             proc = await asyncio.create_subprocess_exec(
+                venv_python,
+                "-m",
                 "pip",
                 "install",
                 "-q",
@@ -433,7 +441,7 @@ class AppTool(Tool):
             errors = stderr.decode() if stderr else ""
             if proc.returncode != 0:
                 return ToolResult(error=f"pip install failed:\n{errors}", success=False)
-            return ToolResult(output=f"Dependencies installed.\n{output}")
+            return ToolResult(output=f"Dependencies installed (in app venv).\n{output}")
 
         elif app.runtime == AppRuntime.NODE.value:
             pkg = app_path / "package.json"
