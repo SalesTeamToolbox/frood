@@ -1560,3 +1560,29 @@ body.towel-day .dont-panic-watermark {
 
 @media (max-width: 900px) { .agents-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); } }
 @media (max-width: 600px) { .agents-grid { grid-template-columns: 1fr; } }
+
+/* Team Runs */
+.teams-page { max-width: 1000px; }
+.team-run-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 1rem; margin-bottom: 0.75rem; cursor: pointer; transition: border-color 0.15s;
+}
+.team-run-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+.team-run-header { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+.team-section { margin-bottom: 1.5rem; }
+.team-section h4 { margin: 0 0 0.75rem 0; font-size: 1rem; font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+.team-task-row {
+  display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border); font-size: 0.85rem;
+}
+.team-task-row:last-child { border-bottom: none; }
+.team-tasks-timeline { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.team-role-result {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 0.75rem; margin-bottom: 0.5rem;
+}
+.team-output-preview {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  padding: 0.75rem; font-size: 0.82rem; white-space: pre-wrap; word-break: break-word;
+  max-height: 300px; overflow-y: auto; color: var(--text-secondary);
+}

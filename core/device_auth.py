@@ -109,6 +109,12 @@ class DeviceStore:
         device = self._devices.get(device_id)
         if not device:
             return False
+        
+        # Remove the hash from the lookup to prevent timing attacks and ensure
+        # the key is no longer discoverable via its hash.
+        if device.api_key_hash in self._hash_to_id:
+            del self._hash_to_id[device.api_key_hash]
+
         device.is_revoked = True
         self._persist("revoked", device)
         logger.info(f"Device revoked: {device_id} ({device.name})")
@@ -187,5 +193,10 @@ class DeviceStore:
 
 
 def _hash_key(raw_key: str) -> str:
-    """SHA-256 hash of an API key for storage."""
+    """
+    Hashes an API key for storage.
+    TODO: Replace SHA-256 with a stronger, adaptive hashing algorithm like bcrypt or Argon2
+    for better protection against offline brute-force attacks.
+    """
+    # For now, keeping SHA-256 for compatibility, but this should be upgraded.
     return hashlib.sha256(raw_key.encode()).hexdigest()

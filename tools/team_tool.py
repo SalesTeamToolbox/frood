@@ -26,6 +26,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tools.base import Tool, ToolResult
@@ -519,6 +520,8 @@ class TeamTool(Tool):
         self._task_queue = task_queue
         self._teams: dict[str, dict] = dict(BUILTIN_TEAMS)
         self._runs: dict[str, dict] = {}  # run_id -> run state
+        self._current_run_id: str = ""  # Set during _run() for child task tagging
+        self._current_team_name: str = ""  # Set during _run() for child task tagging
 
     @property
     def name(self) -> str:
@@ -681,8 +684,14 @@ class TeamTool(Tool):
             "manager_review": "",
             "revisions": [],
             "quality_score": 0,
+            "project_id": project_id,
+            "task_ids": [],  # All child task IDs for tracking
         }
         self._runs[run_id] = run_state
+
+        # Set current run context for child task tagging
+        self._current_run_id = run_id
+        self._current_team_name = name
 
         try:
             # -- Phase 1: Manager plans the execution --
@@ -807,12 +816,141 @@ class TeamTool(Tool):
 
             final = "\n".join(output_parts)
             run_state["final_output"] = final
+            run_state["completed_at"] = time.time()
+
+            # Collect child task IDs
+            run_state["task_ids"] = self._collect_child_task_ids(run_id)
+
+            # Persist run state
+            await self._persist_run(run_id)
+
             return ToolResult(output=final)
 
         except Exception as e:
             run_state["status"] = "failed"
             run_state["error"] = str(e)
+            run_state["completed_at"] = time.time()
+            run_state["task_ids"] = self._collect_child_task_ids(run_id)
+            await self._persist_run(run_id)
             return ToolResult(error=f"Team run failed: {e}", success=False)
+
+        finally:
+            self._current_run_id = ""
+            self._current_team_name = ""
+
+    # ------------------------------------------------------------------
+    # Run persistence & child task tracking
+    # ------------------------------------------------------------------
+
+    def _collect_child_task_ids(self, run_id: str) -> list[str]:
+        """Find all tasks in the queue belonging to this team run."""
+        task_ids = []
+        if hasattr(self._task_queue, "_tasks"):
+            for task in self._task_queue._tasks.values():
+                if getattr(task, "team_run_id", "") == run_id:
+                    task_ids.append(task.id)
+        return task_ids
+
+    async def _persist_run(self, run_id: str):
+        """Save team run state to disk for persistence across restarts."""
+        import aiofiles
+
+        run_state = self._runs.get(run_id)
+        if not run_state:
+            return
+
+        runs_dir = Path("data/team_runs")
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        run_file = runs_dir / f"{run_id}.json"
+
+        # Serialize run state (skip non-serializable fields)
+        save_data = {}
+        for key, value in run_state.items():
+            if key == "role_results":
+                # Simplify role results — keep output and task_id
+                simplified = {}
+                for role, result in value.items():
+                    if isinstance(result, dict):
+                        simplified[role] = {
+                            "output": result.get("output", "")[:2000],  # Cap output size
+                            "task_id": result.get("task_id", ""),
+                            "revised": result.get("revised", False),
+                        }
+                save_data[key] = simplified
+            elif key == "final_output":
+                save_data[key] = value[:5000] if value else ""  # Cap for storage
+            else:
+                save_data[key] = value
+
+        try:
+            async with aiofiles.open(str(run_file), "w") as f:
+                await f.write(json.dumps(save_data, indent=2, default=str))
+        except Exception as e:
+            logger.error(f"Failed to persist team run {run_id}: {e}")
+
+    @classmethod
+    async def load_persisted_runs(cls) -> dict[str, dict]:
+        """Load all persisted team runs from disk."""
+        import aiofiles
+
+        runs = {}
+        runs_dir = Path("data/team_runs")
+        if not runs_dir.exists():
+            return runs
+
+        for run_file in runs_dir.glob("*.json"):
+            try:
+                async with aiofiles.open(str(run_file), "r") as f:
+                    data = json.loads(await f.read())
+                    runs[data["run_id"]] = data
+            except Exception as e:
+                logger.warning(f"Failed to load team run {run_file.name}: {e}")
+
+        return runs
+
+    def get_all_runs(self) -> list[dict]:
+        """Get all runs (in-memory + persisted) as a list sorted by start time."""
+        all_runs = {}
+        # In-memory runs take precedence
+        for run_id, run_state in self._runs.items():
+            all_runs[run_id] = {
+                "run_id": run_state.get("run_id", run_id),
+                "team": run_state.get("team", ""),
+                "workflow": run_state.get("workflow", ""),
+                "task": run_state.get("task", ""),
+                "started_at": run_state.get("started_at", 0),
+                "completed_at": run_state.get("completed_at"),
+                "status": run_state.get("status", "unknown"),
+                "quality_score": run_state.get("quality_score", 0),
+                "project_id": run_state.get("project_id", ""),
+                "task_ids": run_state.get("task_ids", []),
+                "revisions": run_state.get("revisions", []),
+            }
+        return sorted(all_runs.values(), key=lambda r: r.get("started_at", 0), reverse=True)
+
+    def get_run_detail(self, run_id: str) -> dict | None:
+        """Get full detail for a single team run."""
+        run_state = self._runs.get(run_id)
+        if not run_state:
+            return None
+
+        return {
+            "run_id": run_state.get("run_id", run_id),
+            "team": run_state.get("team", ""),
+            "workflow": run_state.get("workflow", ""),
+            "task": run_state.get("task", ""),
+            "started_at": run_state.get("started_at", 0),
+            "completed_at": run_state.get("completed_at"),
+            "status": run_state.get("status", "unknown"),
+            "quality_score": run_state.get("quality_score", 0),
+            "project_id": run_state.get("project_id", ""),
+            "task_ids": run_state.get("task_ids", []),
+            "revisions": run_state.get("revisions", []),
+            "manager_plan": run_state.get("manager_plan", ""),
+            "manager_review": run_state.get("manager_review", ""),
+            "role_results": run_state.get("role_results", {}),
+            "final_output": run_state.get("final_output", ""),
+        }
 
     # ------------------------------------------------------------------
     # Manager phases
@@ -848,6 +986,9 @@ class TeamTool(Tool):
             description=full_description,
             task_type=TaskType.PROJECT_MANAGEMENT,
             project_id=project_id,
+            team_run_id=self._current_run_id,
+            team_name=self._current_team_name,
+            role_name="manager:plan",
         )
         await self._task_queue.add(task_obj)
         output = await self._wait_for_task(task_obj.id)
@@ -876,6 +1017,9 @@ class TeamTool(Tool):
             description=review_prompt,
             task_type=TaskType.PROJECT_MANAGEMENT,
             project_id=project_id,
+            team_run_id=self._current_run_id,
+            team_name=self._current_team_name,
+            role_name="manager:review",
         )
         await self._task_queue.add(task_obj)
         output = await self._wait_for_task(task_obj.id)
@@ -936,6 +1080,9 @@ class TeamTool(Tool):
                 task_type=task_type_enum,
                 project_id=team_ctx.project_id,
                 tier=role.get("tier", team_ctx.tier),
+                team_run_id=self._current_run_id,
+                team_name=self._current_team_name,
+                role_name=f"{role_name}:revision",
             )
             await self._task_queue.add(task_obj)
             output = await self._wait_for_task(task_obj.id)
@@ -981,6 +1128,9 @@ class TeamTool(Tool):
                 task_type=task_type_enum,
                 project_id=team_ctx.project_id,
                 tier=role.get("tier", team_ctx.tier),
+                team_run_id=self._current_run_id,
+                team_name=self._current_team_name,
+                role_name=role_name,
             )
             await self._task_queue.add(task_obj)
 
@@ -1021,6 +1171,9 @@ class TeamTool(Tool):
                 task_type=task_type_enum,
                 project_id=team_ctx.project_id,
                 tier=role.get("tier", team_ctx.tier),
+                team_run_id=self._current_run_id,
+                team_name=self._current_team_name,
+                role_name=role_name,
             )
             await self._task_queue.add(task_obj)
             task_ids[role_name] = task_obj.id
@@ -1078,6 +1231,9 @@ class TeamTool(Tool):
                 task_type=task_type_enum,
                 project_id=team_ctx.project_id,
                 tier=role.get("tier", team_ctx.tier),
+                team_run_id=self._current_run_id,
+                team_name=self._current_team_name,
+                role_name=role_name,
             )
             await self._task_queue.add(task_obj)
             output = await self._wait_for_task(task_obj.id)
@@ -1169,6 +1325,9 @@ class TeamTool(Tool):
             description=prompt,
             task_type=TaskType.PROJECT_MANAGEMENT,
             project_id=project_id,
+            team_run_id=self._current_run_id,
+            team_name=self._current_team_name,
+            role_name="plan-checker",
         )
         await self._task_queue.add(task_obj)
         output = await self._wait_for_task(task_obj.id)
@@ -1214,6 +1373,9 @@ class TeamTool(Tool):
                     description=executor_prompt,
                     task_type=task_type_enum,
                     project_id=team_ctx.project_id,
+                    team_run_id=self._current_run_id,
+                    team_name=self._current_team_name,
+                    role_name=plan_task.role,
                 )
                 await self._task_queue.add(task_obj)
                 task_ids[plan_task.id] = (task_obj.id, plan_task)
