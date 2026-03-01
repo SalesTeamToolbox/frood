@@ -52,6 +52,31 @@ docker-compose.override.yml
 # Editor
 *.code-workspace
 
-# Local test files
+# Local test/scratch files
 sieve_primes.py
 test_sieve_primes.py
+live_test.py
+live_browser_test.js
+test_deploy.py
+test_production.py
+test_full_production.py
+test_coding.py
+test_research.py
+test_team.py
+test_team2.py
+dummy_test.py
+
+# Agent output / scratch files
+analysis/
+api_docs/
+final_report/
+report/
+research/
+screenshots/
+test-results/
+.planning/
+skills/workspace/
+
+# Claude Code local settings
+.claude/settings.local.json
+MEMORY.md
