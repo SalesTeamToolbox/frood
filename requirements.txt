@@ -28,6 +28,9 @@ asyncssh>=2.14.0
 # Image processing (vision analysis)
 Pillow>=10.0.0
 
+# Browser automation (app testing, screenshots)
+playwright>=1.40.0
+
 # PDF parsing (knowledge base / RAG)
 pypdf>=3.0.0
 
