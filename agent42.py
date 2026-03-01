@@ -70,6 +70,7 @@ from memory.redis_session import RedisConfig, RedisSessionBackend
 from memory.session import SessionManager
 from memory.store import MemoryStore
 from skills.loader import SkillLoader
+from tools.app_test_tool import AppTestTool
 from tools.app_tool import AppTool
 from tools.behaviour_tool import BehaviourTool
 from tools.browser_tool import BrowserTool
@@ -505,6 +506,7 @@ class Agent42:
         # Apps platform (enabled by default)
         if self.app_manager:
             self.tool_registry.register(AppTool(self.app_manager))
+            self.tool_registry.register(AppTestTool(self.app_manager, self.sandbox))
 
         # Project interview tool (for structured project discovery)
         if settings.project_interview_enabled:

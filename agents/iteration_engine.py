@@ -948,6 +948,9 @@ class IterationEngine:
         messages.append({"role": "assistant", "content": final})
         return final
 
+    # Task types that benefit from visual critic feedback
+    _VISUAL_TASK_TYPES = {"app_create", "app_update"}
+
     async def _critic_pass(
         self,
         critic_model: str,
@@ -962,6 +965,9 @@ class IterationEngine:
         When tool_records are provided, a compact summary of tool calls is
         included so the critic can evaluate tool usage effectiveness — not
         just the final text output.
+
+        For app_create/app_update tasks, if a screenshot was captured during
+        tool execution, it is included as a vision image for visual QA.
         """
         critic_prompt = CRITIC_PROMPTS.get(task_type, _DEFAULT_CRITIC_PROMPT)
 
@@ -975,11 +981,81 @@ class IterationEngine:
             tool_summary = self._build_tool_summary(tool_records)
             user_parts.append(f"\n\nTools used during this iteration:\n{tool_summary}")
 
-        messages = [
-            {"role": "system", "content": critic_prompt},
-            {"role": "user", "content": "".join(user_parts)},
-        ]
+        # For app tasks, try to include the last screenshot for visual critic
+        screenshot_b64 = None
+        if task_type in self._VISUAL_TASK_TYPES and tool_records:
+            screenshot_b64 = self._extract_screenshot_b64(tool_records)
+
+        if screenshot_b64:
+            # Enhance critic prompt with visual evaluation instructions
+            critic_prompt += (
+                " Additionally, a screenshot of the running application is provided. "
+                "Evaluate the visual quality: layout correctness, styling, readability, "
+                "broken elements, error messages on screen, and overall polish."
+            )
+            # Build multimodal message with image
+            user_content = [
+                {"type": "text", "text": "".join(user_parts)},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{screenshot_b64}"},
+                },
+            ]
+            messages = [
+                {"role": "system", "content": critic_prompt},
+                {"role": "user", "content": user_content},
+            ]
+        else:
+            messages = [
+                {"role": "system", "content": critic_prompt},
+                {"role": "user", "content": "".join(user_parts)},
+            ]
+
         return await self._complete_with_retry(critic_model, messages)
+
+    @staticmethod
+    def _extract_screenshot_b64(records: list[ToolCallRecord]) -> str | None:
+        """Extract and encode the last screenshot from tool records.
+
+        Scans tool results for screenshot file paths (from app_test or browser
+        tool calls), loads the most recent one, compresses it, and returns
+        a base64-encoded string. Returns None on any failure.
+        """
+        import re
+
+        screenshot_path = None
+        # Look for screenshot paths in tool results (most recent last)
+        path_pattern = re.compile(r"Screenshot[:\s]+(.+\.png)", re.IGNORECASE)
+        for record in reversed(records):
+            if record.tool_name in ("app_test", "browser") and record.result:
+                match = path_pattern.search(record.result)
+                if match:
+                    screenshot_path = match.group(1).strip()
+                    break
+
+        if not screenshot_path:
+            return None
+
+        try:
+            import base64
+            from pathlib import Path
+
+            from tools.vision_tool import _compress_image
+
+            path = Path(screenshot_path)
+            if not path.exists():
+                logger.debug("Screenshot path not found: %s", screenshot_path)
+                return None
+
+            raw_data = path.read_bytes()
+            compressed, _ = _compress_image(raw_data)
+            return base64.b64encode(compressed).decode("utf-8")
+        except ImportError:
+            logger.debug("Pillow not available for screenshot compression")
+            return None
+        except Exception as e:
+            logger.debug("Failed to load screenshot for critic: %s", e)
+            return None
 
     @staticmethod
     def _build_tool_summary(records: list[ToolCallRecord]) -> str:
