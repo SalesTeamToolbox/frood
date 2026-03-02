@@ -85,7 +85,7 @@ Plans:
   2. Two Together AI ModelSpec entries exist (together-deepseek-v3, together-llama-70b) classified as ModelTier.CHEAP
   3. SpendingTracker has credit-based pricing for Together AI models (not $0 — this is a credits provider)
   4. Unit tests for Together AI ProviderSpec, ModelSpec, and pricing entries pass
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 - [ ] 05-01-PLAN.md — Register Together AI ProviderSpec + 2 ModelSpecs + pricing + config
 - [ ] 05-02-PLAN.md — Unit tests for Together AI registration and SpendingTracker pricing
@@ -114,5 +114,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 2. Groq Integration | 2/2 | Complete   | 2026-03-02 |
 | 3. Mistral Integration | 2/2 | Complete   | 2026-03-02 |
 | 4. SambaNova Integration | 2/2 | Complete   | 2026-03-02 |
-| 5. Together AI Integration | 0/2 | Planning complete | - |
+| 5. Together AI Integration | 1/2 | In Progress|  |
 | 6. Routing + Config Finalization | 0/TBD | Not started | - |

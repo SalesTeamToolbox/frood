@@ -37,9 +37,9 @@
 
 ### Together AI Integration
 
-- [ ] **TOGR-01**: Register ProviderType.TOGETHER with ProviderSpec (base_url: `https://api.together.xyz/v1`, api_key_env: `TOGETHER_API_KEY`)
-- [ ] **TOGR-02**: Register ModelSpec entries — `together-deepseek-v3` (DeepSeek-V3-0324), `together-llama-70b` (meta-llama/Llama-3.3-70B-Instruct-Turbo), classified as ModelTier.CHEAP
-- [ ] **TOGR-03**: Add credit-based pricing to SpendingTracker for Together AI models
+- [x] **TOGR-01**: Register ProviderType.TOGETHER with ProviderSpec (base_url: `https://api.together.xyz/v1`, api_key_env: `TOGETHER_API_KEY`)
+- [x] **TOGR-02**: Register ModelSpec entries — `together-deepseek-v3` (DeepSeek-V3-0324), `together-llama-70b` (meta-llama/Llama-3.3-70B-Instruct-Turbo), classified as ModelTier.CHEAP
+- [x] **TOGR-03**: Add credit-based pricing to SpendingTracker for Together AI models
 
 ### Routing
 
@@ -133,9 +133,9 @@
 | SAMB-05 | Phase 4 | Complete |
 | INFR-03 | Phase 4 | Complete |
 | TEST-03 | Phase 4 | Complete |
-| TOGR-01 | Phase 5 | Pending |
-| TOGR-02 | Phase 5 | Pending |
-| TOGR-03 | Phase 5 | Pending |
+| TOGR-01 | Phase 5 | Complete |
+| TOGR-02 | Phase 5 | Complete |
+| TOGR-03 | Phase 5 | Complete |
 | ROUT-01 | Phase 6 | Pending |
 | ROUT-02 | Phase 6 | Pending |
 | ROUT-03 | Phase 6 | Pending |

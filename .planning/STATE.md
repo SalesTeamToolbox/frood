@@ -2,39 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-last_updated: "2026-03-02T21:30:51.389Z"
-progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 8
-  completed_plans: 8
----
-
----
-gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: unknown
-last_updated: "2026-03-02T21:26:41.038Z"
-progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 8
-  completed_plans: 8
----
-
----
-gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
 status: in_progress
-last_updated: "2026-03-02T20:24:00.000Z"
+last_updated: "2026-03-02T22:08:07Z"
 progress:
   total_phases: 6
-  completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
+  completed_phases: 4
+  total_plans: 10
+  completed_plans: 9
 ---
 
 # Project State
@@ -44,16 +18,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-01)
 
 **Core value:** Agent42 must always operate on free-tier LLMs with enough provider diversity that no single outage stops the platform
-**Current focus:** Phase 4 - SambaNova Integration
+**Current focus:** Phase 5 - Together AI Integration
 
 ## Current Position
 
-Phase: 4 of 6 (SambaNova Integration) — COMPLETE
-Plan: 2 of 2 in current phase
-Status: Phase 4 complete — all 16 SambaNova tests pass, suite 1916 green, ready for Phase 5
-Last activity: 2026-03-02 — Phase 4 plan 02 complete (16 tests: registration, transforms, spending tracker)
+Phase: 5 of 6 (Together AI Integration) — IN PROGRESS
+Plan: 1 of 2 in current phase — COMPLETE
+Status: Phase 5 plan 01 complete — Together AI ProviderSpec, 2 ModelSpecs, pricing, and Settings field registered
+Last activity: 2026-03-02 — Phase 5 plan 01 complete (2 tasks: registry + config/env)
 
-Progress: [████████░░] 67%
+Progress: [█████████░] 75%
 
 ## Performance Metrics
 
@@ -77,6 +51,7 @@ Progress: [████████░░] 67%
 *Updated after each plan completion*
 | Phase 04-sambanova-integration P01 | 8 | 2 tasks | 3 files |
 | Phase 04-sambanova-integration P02 | 8 | 2 tasks | 2 files |
+| Phase 05-together-ai-integration P01 | 5 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -101,6 +76,9 @@ Recent decisions affecting current work:
 - [Phase 04-sambanova-integration]: SambaNova _BUILTIN_PRICES keys must be mixed-case (Meta-Llama-3.3-70B-Instruct, DeepSeek-V3-0324) to match ModelSpec.model_id exactly — case mismatch triggers /15 conservative fallback
 - [Phase 04-sambanova-integration]: deepcopy used in SAMB-05 strict removal to avoid mutating caller's original tool list — first provider requiring tool list mutation
 - [Phase 04-sambanova-integration]: TestSambanovaTransforms uses patch.object on async client to capture kwargs — no spending tracker mock needed since mock bypasses API entirely
+- [Phase 05-together-ai-integration]: Together AI _BUILTIN_PRICES keys use org/ namespace prefix (deepseek-ai/DeepSeek-V3, meta-llama/Llama-3.3-70B-Instruct-Turbo) — must match ModelSpec.model_id exactly, case-sensitive; mismatch triggers $5/$15 conservative fallback
+- [Phase 05-together-ai-integration]: ProviderType.TOGETHER enum value pre-existed from Phase 1 (INFR-01) — only ProviderSpec and ModelSpecs added in Plan 01, no enum modification needed
+- [Phase 05-together-ai-integration]: Together AI is fully OpenAI spec-compliant — no request transforms needed (no temp clamp, no stream workaround, no strict removal)
 
 ### Pending Todos
 
@@ -115,5 +93,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-02
-Stopped at: Phase 4 complete (04-02-PLAN.md done) — 16 SambaNova tests, 1916 suite green, ready for Phase 5 (Together AI)
+Stopped at: Completed 05-01-PLAN.md (Phase 5 plan 01 complete — ready for Phase 5 plan 02 test coverage)
 Resume file: None
