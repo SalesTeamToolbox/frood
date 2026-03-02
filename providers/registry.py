@@ -156,6 +156,13 @@ PROVIDERS: dict[ProviderType, ProviderSpec] = {
         display_name="SambaNova",
         supports_function_calling=True,
     ),
+    ProviderType.TOGETHER: ProviderSpec(
+        provider_type=ProviderType.TOGETHER,
+        base_url="https://api.together.xyz/v1",
+        api_key_env="TOGETHER_API_KEY",
+        display_name="Together AI",
+        supports_function_calling=True,
+    ),
 }
 
 
@@ -335,6 +342,26 @@ MODELS: dict[str, ModelSpec] = {
         tier=ModelTier.CHEAP,
         max_context_tokens=131072,
     ),
+    # Together AI (credits-based, funded account required -- OpenAI-compatible endpoint)
+    # NOTE: Together AI uses "org/ModelName" namespaced model IDs
+    "together-deepseek-v3": ModelSpec(
+        "deepseek-ai/DeepSeek-V3",    # Serves DeepSeek-V3-0324 weights (updated March 2025)
+        ProviderType.TOGETHER,
+        max_tokens=4096,
+        temperature=0.3,
+        display_name="DeepSeek V3 (Together AI)",
+        tier=ModelTier.CHEAP,
+        max_context_tokens=128000,
+    ),
+    "together-llama-70b": ModelSpec(
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        ProviderType.TOGETHER,
+        max_tokens=4096,
+        temperature=0.3,
+        display_name="Llama 3.3 70B Turbo (Together AI)",
+        tier=ModelTier.CHEAP,
+        max_context_tokens=131000,
+    ),
     # ═══════════════════════════════════════════════════════════════════════════
     # PREMIUM TIER — frontier models for final reviews, complex tasks, admin-selected
     # ═══════════════════════════════════════════════════════════════════════════
@@ -422,6 +449,10 @@ class SpendingTracker:
         # CRITICAL: Keys are MIXED CASE — must match ModelSpec.model_id exactly
         "Meta-Llama-3.3-70B-Instruct": (0.60e-6, 1.20e-6),     # ~$0.60/M in, $1.20/M out
         "DeepSeek-V3-0324": (0.80e-6, 1.60e-6),                 # ~$0.80/M in, $1.60/M out
+        # Together AI -- credits-based (CHEAP tier), per-token pricing
+        # Keys include org/ prefix -- must match ModelSpec.model_id exactly
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo": (0.88e-6, 0.88e-6),  # $0.88/M in+out
+        "deepseek-ai/DeepSeek-V3": (0.60e-6, 1.70e-6),                   # $0.60/M in, $1.70/M out
     }
 
     def __init__(self):
