@@ -277,7 +277,9 @@ class EmbeddingStore:
         """Semantic search: find the most relevant entries for a query.
 
         When Qdrant is available, uses HNSW-indexed search with payload
-        filtering. Falls back to JSON linear scan otherwise.
+        filtering. Falls back to JSON linear scan if Qdrant is unavailable
+        **or if the Qdrant search fails at runtime** (e.g. server went down
+        after init).
 
         Args:
             query: Search query text
@@ -289,43 +291,68 @@ class EmbeddingStore:
         """
         # Prefer Qdrant when available
         if self._qdrant and self._qdrant.is_available:
-            from memory.qdrant_store import QdrantStore
+            try:
+                query_vector = await self.embed_text(query)
+                return self._search_qdrant(query_vector, top_k, source_filter, collection)
+            except Exception as e:
+                logger.warning("Qdrant search failed, falling through to JSON fallback: %s", e)
+                # Fall through to JSON scan below
 
-            query_vector = await self.embed_text(query)
-
-            if collection:
-                return self._qdrant.search(
-                    collection,
-                    query_vector,
-                    top_k=top_k,
-                    source_filter=source_filter,
-                )
-
-            # Search across memory and history collections
-            memory_results = self._qdrant.search(
-                QdrantStore.MEMORY,
-                query_vector,
-                top_k=top_k,
-                source_filter=source_filter,
-            )
-            history_results = self._qdrant.search(
-                QdrantStore.HISTORY,
-                query_vector,
-                top_k=top_k,
-                source_filter=source_filter,
-            )
-
-            # Merge and re-sort by score
-            combined = memory_results + history_results
-            combined.sort(key=lambda x: x["score"], reverse=True)
-            return combined[:top_k]
-
-        # Fallback: JSON linear scan
+        # Fallback: JSON linear scan — check entries before calling the
+        # embedding API to avoid unnecessary API calls on empty stores.
         self._load()
         if not self._entries:
             return []
-
         query_vector = await self.embed_text(query)
+        return self._search_json(query_vector, top_k, source_filter)
+
+    def _search_qdrant(
+        self,
+        query_vector: list[float],
+        top_k: int,
+        source_filter: str,
+        collection: str,
+    ) -> list[dict]:
+        """Search via Qdrant backend. Raises on failure so caller can fall back."""
+        from memory.qdrant_store import QdrantStore
+
+        if collection:
+            return self._qdrant.search(
+                collection,
+                query_vector,
+                top_k=top_k,
+                source_filter=source_filter,
+            )
+
+        # Search across memory and history collections
+        memory_results = self._qdrant.search(
+            QdrantStore.MEMORY,
+            query_vector,
+            top_k=top_k,
+            source_filter=source_filter,
+        )
+        history_results = self._qdrant.search(
+            QdrantStore.HISTORY,
+            query_vector,
+            top_k=top_k,
+            source_filter=source_filter,
+        )
+
+        # Merge and re-sort by score
+        combined = memory_results + history_results
+        combined.sort(key=lambda x: x["score"], reverse=True)
+        return combined[:top_k]
+
+    def _search_json(
+        self,
+        query_vector: list[float],
+        top_k: int,
+        source_filter: str,
+    ) -> list[dict]:
+        """Fallback: JSON linear scan with cosine similarity."""
+        self._load()
+        if not self._entries:
+            return []
 
         scored = []
         for entry in self._entries:
@@ -351,7 +378,7 @@ class EmbeddingStore:
         """Index the contents of MEMORY.md for semantic search.
 
         Splits by sections and indexes each section as a chunk.
-        Writes to Qdrant when available, otherwise to JSON.
+        Writes to Qdrant when available, falls back to JSON on failure.
         """
         chunks = self._split_into_chunks(memory_text, source="memory")
         if not chunks:
@@ -362,13 +389,16 @@ class EmbeddingStore:
 
         # Store in Qdrant if available
         if self._qdrant and self._qdrant.is_available:
-            from memory.qdrant_store import QdrantStore
+            try:
+                from memory.qdrant_store import QdrantStore
 
-            self._qdrant.clear_collection(QdrantStore.MEMORY)
-            payloads = [{"source": "memory", "section": c.get("section", "")} for c in chunks]
-            count = self._qdrant.upsert_vectors(QdrantStore.MEMORY, texts, vectors, payloads)
-            logger.info(f"Indexed {count} memory chunks → Qdrant")
-            return count
+                self._qdrant.clear_collection(QdrantStore.MEMORY)
+                payloads = [{"source": "memory", "section": c.get("section", "")} for c in chunks]
+                count = self._qdrant.upsert_vectors(QdrantStore.MEMORY, texts, vectors, payloads)
+                logger.info(f"Indexed {count} memory chunks → Qdrant")
+                return count
+            except Exception as e:
+                logger.warning("Qdrant index_memory failed, falling back to JSON: %s", e)
 
         # Fallback: JSON store
         self._load()
@@ -392,7 +422,7 @@ class EmbeddingStore:
     async def index_history_entry(self, event_type: str, summary: str, details: str = ""):
         """Index a single history event for semantic search.
 
-        Writes to Qdrant when available, otherwise to JSON.
+        Writes to Qdrant when available, falls back to JSON on failure.
         """
         text = f"{event_type}: {summary}"
         if details:
@@ -400,16 +430,19 @@ class EmbeddingStore:
 
         # Store in Qdrant if available
         if self._qdrant and self._qdrant.is_available:
-            from memory.qdrant_store import QdrantStore
+            try:
+                from memory.qdrant_store import QdrantStore
 
-            vector = await self.embed_text(text)
-            self._qdrant.upsert_single(
-                QdrantStore.HISTORY,
-                text,
-                vector,
-                {"source": "history", "section": event_type},
-            )
-            return
+                vector = await self.embed_text(text)
+                self._qdrant.upsert_single(
+                    QdrantStore.HISTORY,
+                    text,
+                    vector,
+                    {"source": "history", "section": event_type},
+                )
+                return
+            except Exception as e:
+                logger.warning("Qdrant index_history failed, falling back to JSON: %s", e)
 
         # Fallback: JSON store
         await self.add_entry(text, source="history", section=event_type)
