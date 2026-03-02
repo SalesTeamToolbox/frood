@@ -80,12 +80,16 @@ analysis/
 api_docs/
 final_report/
 report/
-research/
+/research/
 screenshots/
 test-results/
-.planning/
+
 skills/workspace/
 
 # Claude Code local settings
 .claude/settings.local.json
 MEMORY.md
+
+# Auto-resume ephemeral state
+.claude/handoff.json
+.claude/handoff-complete

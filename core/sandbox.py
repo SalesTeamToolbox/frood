@@ -28,6 +28,11 @@ class WorkspaceSandbox:
     def __init__(self, allowed_dir: str | Path, enabled: bool = True):
         self.allowed_dir = Path(allowed_dir).resolve()
         self.enabled = enabled
+        if not self.enabled:
+            logger.critical(
+                "SECURITY: Sandbox is DISABLED — all file paths are unrestricted. "
+                "Set SANDBOX_ENABLED=true for production use."
+            )
 
     def resolve_path(self, path: str | Path) -> Path:
         """Resolve a path and verify it's within the sandbox.
