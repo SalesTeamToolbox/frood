@@ -642,6 +642,55 @@ class TestMistralSpendingTracker:
         assert tracker.daily_tokens == 3000
 
 
+class TestSambanovaSpendingTracker:
+    """Phase 4: SambaNova models — CHEAP tier, non-zero pricing."""
+
+    def test_sambanova_llama_builtin_prices_exist(self):
+        """Meta-Llama-3.3-70B-Instruct has explicit pricing in _BUILTIN_PRICES."""
+        from providers.registry import SpendingTracker
+
+        assert "Meta-Llama-3.3-70B-Instruct" in SpendingTracker._BUILTIN_PRICES
+        prompt_price, completion_price = SpendingTracker._BUILTIN_PRICES["Meta-Llama-3.3-70B-Instruct"]
+        assert prompt_price > 0.0
+        assert completion_price > 0.0
+
+    def test_sambanova_deepseek_builtin_prices_exist(self):
+        """DeepSeek-V3-0324 has explicit pricing in _BUILTIN_PRICES."""
+        from providers.registry import SpendingTracker
+
+        assert "DeepSeek-V3-0324" in SpendingTracker._BUILTIN_PRICES
+        prompt_price, completion_price = SpendingTracker._BUILTIN_PRICES["DeepSeek-V3-0324"]
+        assert prompt_price > 0.0
+        assert completion_price > 0.0
+
+    def test_sambanova_llama_incurs_cost(self):
+        """SambaNova Llama usage records non-zero spend."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        tracker.record_usage("sambanova-llama-70b", 10000, 5000,
+                             model_id="Meta-Llama-3.3-70B-Instruct")
+        assert tracker.daily_spend_usd > 0.0
+
+    def test_sambanova_deepseek_incurs_cost(self):
+        """SambaNova DeepSeek usage records non-zero spend."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        tracker.record_usage("sambanova-deepseek-v3", 10000, 5000,
+                             model_id="DeepSeek-V3-0324")
+        assert tracker.daily_spend_usd > 0.0
+
+    def test_sambanova_tokens_tracked(self):
+        """Token counts are tracked for SambaNova models."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        tracker.record_usage("sambanova-llama-70b", 1000, 500,
+                             model_id="Meta-Llama-3.3-70B-Instruct")
+        assert tracker.daily_tokens == 1500
+
+
 class TestHealthCheck:
     """Tests for model health check functionality."""
 
