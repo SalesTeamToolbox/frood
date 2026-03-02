@@ -128,6 +128,13 @@ PROVIDERS: dict[ProviderType, ProviderSpec] = {
         display_name="Cerebras",
         default_model="llama3.1-8b",
     ),
+    ProviderType.GROQ: ProviderSpec(
+        provider_type=ProviderType.GROQ,
+        base_url="https://api.groq.com/openai/v1",
+        api_key_env="GROQ_API_KEY",
+        display_name="Groq",
+        supports_function_calling=True,
+    ),
 }
 
 
@@ -212,6 +219,31 @@ MODELS: dict[str, ModelSpec] = {
         display_name="ZAI-GLM 4.7 (Cerebras)",
         tier=ModelTier.FREE,
         max_context_tokens=65000,
+    ),
+    # Groq free models (OpenAI-compatible, 30 RPM free plan, no credit card required)
+    "groq-llama-70b": ModelSpec(
+        "llama-3.3-70b-versatile",
+        ProviderType.GROQ,
+        max_tokens=8192,
+        display_name="Llama 3.3 70B (Groq)",
+        tier=ModelTier.FREE,
+        max_context_tokens=131000,   # 131,072 per official docs
+    ),
+    "groq-gpt-oss-120b": ModelSpec(
+        "openai/gpt-oss-120b",       # IMPORTANT: includes "openai/" namespace prefix
+        ProviderType.GROQ,
+        max_tokens=8192,
+        display_name="GPT-OSS 120B (Groq)",
+        tier=ModelTier.FREE,
+        max_context_tokens=131000,   # 131,072 per official docs
+    ),
+    "groq-llama-8b": ModelSpec(
+        "llama-3.1-8b-instant",
+        ProviderType.GROQ,
+        max_tokens=4096,
+        display_name="Llama 3.1 8B Instant (Groq)",
+        tier=ModelTier.FREE,
+        max_context_tokens=131000,   # 131,072 per official docs
     ),
     # ═══════════════════════════════════════════════════════════════════════════
     # CHEAP TIER — low-cost models for when free isn't enough
@@ -308,6 +340,10 @@ class SpendingTracker:
         "qwen-3-235b-a22b-instruct-2507": (0.0, 0.0),
         "llama3.1-8b": (0.0, 0.0),
         "zai-glm-4.7": (0.0, 0.0),
+        # Groq free plan -- $0 (rate-limited by Groq, no credit card required)
+        "llama-3.3-70b-versatile": (0.0, 0.0),
+        "openai/gpt-oss-120b": (0.0, 0.0),    # includes "openai/" prefix -- must match ModelSpec.model_id exactly
+        "llama-3.1-8b-instant": (0.0, 0.0),
     }
 
     def __init__(self):
