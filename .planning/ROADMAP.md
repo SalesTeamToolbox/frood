@@ -101,7 +101,7 @@ Plans:
   4. Setting GEMINI_FREE_TIER=false excludes Gemini from FREE_ROUTING and free fallback candidates
   5. Setting OPENROUTER_FREE_ONLY=true restricts OpenRouter calls to :free-suffix models only
   6. All new API key variables and config flags are in Settings dataclass, from_env(), and .env.example with accurate free-vs-credits documentation
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 - [ ] 06-01-PLAN.md — Config flags + FREE_ROUTING updates + provider-diverse fallback + CHEAP fallback + health check extension
 - [ ] 06-02-PLAN.md — Unit tests for routing updates, config flags, fallback diversity, and multi-provider integration
@@ -118,4 +118,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 3. Mistral Integration | 2/2 | Complete   | 2026-03-02 |
 | 4. SambaNova Integration | 2/2 | Complete   | 2026-03-02 |
 | 5. Together AI Integration | 2/2 | Complete   | 2026-03-02 |
-| 6. Routing + Config Finalization | 0/2 | Not started | - |
+| 6. Routing + Config Finalization | 1/2 | In Progress|  |

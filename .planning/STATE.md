@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-02T22:20:50.119Z"
+last_updated: "2026-03-02T22:57:12.174Z"
 progress:
-  total_phases: 5
+  total_phases: 6
   completed_phases: 5
-  total_plans: 10
-  completed_plans: 10
+  total_plans: 12
+  completed_plans: 11
 ---
 
 ---
@@ -31,16 +31,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-01)
 
 **Core value:** Agent42 must always operate on free-tier LLMs with enough provider diversity that no single outage stops the platform
-**Current focus:** Phase 5 - Together AI Integration
+**Current focus:** Phase 6 - Routing and Config Finalization
 
 ## Current Position
 
-Phase: 5 of 6 (Together AI Integration) — COMPLETE
-Plan: 2 of 2 in current phase — COMPLETE
-Status: Phase 5 plan 02 complete — Together AI test coverage: 11 tests (6 registration + 5 spending tracker), full suite 1927 passed
-Last activity: 2026-03-02 — Phase 5 plan 02 complete (2 tasks: test_providers.py + test_model_catalog.py)
+Phase: 6 of 6 (Routing and Config Finalization) — IN PROGRESS
+Plan: 1 of 2 in current phase — COMPLETE
+Status: Phase 6 plan 01 complete — multi-provider routing (Cerebras/Groq/Codestral), CHEAP fallback, config flags, health checks extended; full suite 1927 passed
+Last activity: 2026-03-02 — Phase 6 plan 01 complete (2 tasks: model_router.py + model_catalog.py)
 
-Progress: [█████████░] 83%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [█████████░] 83%
 | Phase 04-sambanova-integration P02 | 8 | 2 tasks | 2 files |
 | Phase 05-together-ai-integration P01 | 5 | 2 tasks | 3 files |
 | Phase 05-together-ai-integration P02 | 4 | 2 tasks | 2 files |
+| Phase 06-routing-config-finalization P01 | 17 | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -94,6 +95,9 @@ Recent decisions affecting current work:
 - [Phase 05-together-ai-integration]: ProviderType.TOGETHER enum value pre-existed from Phase 1 (INFR-01) — only ProviderSpec and ModelSpecs added in Plan 01, no enum modification needed
 - [Phase 05-together-ai-integration]: Together AI is fully OpenAI spec-compliant — no request transforms needed (no temp clamp, no stream workaround, no strict removal)
 - [Phase 05-together-ai-integration]: Together AI _BUILTIN_PRICES keys use org/ namespace prefix (deepseek-ai/DeepSeek-V3, meta-llama/Llama-3.3-70B-Instruct-Turbo) -- must match ModelSpec.model_id exactly for correct pricing lookup
+- [Phase 06-routing-config-finalization]: Cerebras primary for coding/debugging/app_create (3000 tok/s), Groq for research/content/strategy (131K ctx), Codestral critic for all code tasks
+- [Phase 06-routing-config-finalization]: Provider-diverse round-robin in _find_healthy_free_model prevents single-provider exhaustion; CHEAP-tier fallback (SambaNova, Together AI) after free models exhausted
+- [Phase 06-routing-config-finalization]: GEMINI_FREE_TIER and OPENROUTER_FREE_ONLY flags added to Settings; health_check extended to CHEAP tier (SambaNova + Together AI); Gemini handled by dedicated special-case block
 
 ### Pending Todos
 
@@ -108,5 +112,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-02
-Stopped at: Completed 05-02-PLAN.md (Phase 5 plan 02 complete — ready for Phase 6)
+Stopped at: Completed 06-01-PLAN.md (Phase 6 plan 01 complete — ready for Phase 6 plan 02)
 Resume file: None
