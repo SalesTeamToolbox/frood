@@ -1,0 +1,160 @@
+# Requirements: Agent42 Free LLM Provider Expansion
+
+**Defined:** 2026-03-01
+**Core Value:** Agent42 must always operate on free-tier LLMs with enough diversity and quality that no single provider outage stops the platform.
+
+## v1 Requirements
+
+### Cerebras Integration
+
+- [ ] **CERE-01**: Register ProviderType.CEREBRAS with ProviderSpec (base_url: `https://api.cerebras.ai/v1`, api_key_env: `CEREBRAS_API_KEY`)
+- [ ] **CERE-02**: Register 4 ModelSpec entries — `cerebras-gpt-oss-120b` (primary, 65K context, 3000 tok/s), `cerebras-qwen3-235b` (critic, 65K context, 1400 tok/s), `cerebras-llama-8b` (quick, 128K context, 1800 tok/s), `cerebras-zai-glm` (reasoning, 32K context, 100 RPD limit)
+- [ ] **CERE-03**: All Cerebras models classified as ModelTier.FREE
+- [ ] **CERE-04**: Add $0 pricing entries to SpendingTracker `_BUILTIN_PRICES` for all Cerebras model IDs
+
+### Groq Integration
+
+- [ ] **GROQ-01**: Register ProviderType.GROQ with ProviderSpec (base_url: `https://api.groq.com/openai/v1`, api_key_env: `GROQ_API_KEY`)
+- [ ] **GROQ-02**: Register ModelSpec entries — `groq-llama-70b` (131K context, 280 tok/s, 1K RPM), `groq-gpt-oss-120b` (131K context, 500 tok/s, 1K RPM), `groq-llama-8b` (131K context, 560 tok/s, 1K RPM)
+- [ ] **GROQ-03**: All Groq models classified as ModelTier.FREE
+- [ ] **GROQ-04**: Add $0 pricing entries to SpendingTracker for all Groq model IDs
+
+### Mistral Integration
+
+- [ ] **MIST-01**: Register ProviderType.MISTRAL with ProviderSpec (base_url: `https://api.mistral.ai/v1`, api_key_env: `MISTRAL_API_KEY`)
+- [ ] **MIST-02**: Register ProviderType.MISTRAL_CODESTRAL with ProviderSpec (base_url: `https://codestral.mistral.ai/v1`, api_key_env: `CODESTRAL_API_KEY`) — separate free endpoint
+- [ ] **MIST-03**: Register Codestral ModelSpec entries on MISTRAL_CODESTRAL provider — `codestral-latest` (32K context, 30 RPM free), classified as ModelTier.FREE
+- [ ] **MIST-04**: Register La Plateforme ModelSpec entries on MISTRAL provider — `mistral-large-latest`, `mistral-small-latest`, classified as ModelTier.CHEAP (2 RPM free tier)
+- [ ] **MIST-05**: Add $0 pricing for Codestral free models, actual pricing for La Plateforme models in SpendingTracker
+
+### SambaNova Integration
+
+- [ ] **SAMB-01**: Register ProviderType.SAMBANOVA with ProviderSpec (base_url: `https://api.sambanova.ai/v1`, api_key_env: `SAMBANOVA_API_KEY`)
+- [ ] **SAMB-02**: Register ModelSpec entries — `sambanova-llama-70b` (Meta-Llama-3.3-70B-Instruct), `sambanova-deepseek-v3` (DeepSeek-V3.1), classified as ModelTier.CHEAP
+- [ ] **SAMB-03**: Clamp temperature to max 1.0 for SambaNova requests (provider rejects >1.0)
+- [ ] **SAMB-04**: Force `stream=False` when tools are present for SambaNova (streaming tool calls have broken `index` field)
+- [ ] **SAMB-05**: Strip `strict: true` from tool definitions for SambaNova (not supported — only `strict: false`)
+
+### Together AI Integration
+
+- [ ] **TOGR-01**: Register ProviderType.TOGETHER with ProviderSpec (base_url: `https://api.together.xyz/v1`, api_key_env: `TOGETHER_API_KEY`)
+- [ ] **TOGR-02**: Register ModelSpec entries — `together-deepseek-v3` (DeepSeek-V3-0324), `together-llama-70b` (meta-llama/Llama-3.3-70B-Instruct-Turbo), classified as ModelTier.CHEAP
+- [ ] **TOGR-03**: Add credit-based pricing to SpendingTracker for Together AI models
+
+### Routing
+
+- [ ] **ROUT-01**: Update FREE_ROUTING to use Cerebras as primary for speed-critical task types (coding, debugging, app_create)
+- [ ] **ROUT-02**: Use Codestral (Mistral free endpoint) as code critic for coding/debugging/refactoring task types
+- [ ] **ROUT-03**: Use Groq models as primary for research/content/strategy task types
+- [ ] **ROUT-04**: Update fallback chain with provider-diversity awareness — cycle through different providers before trying multiple models on the same provider
+- [ ] **ROUT-05**: Add SambaNova and Together AI models to fallback chain as CHEAP-tier options (after free models exhausted)
+
+### Configuration
+
+- [ ] **CONF-01**: Add `GEMINI_FREE_TIER` setting (bool, default true) — when false, exclude Gemini from FREE_ROUTING and fallback chain free models
+- [ ] **CONF-02**: Add `OPENROUTER_FREE_ONLY` setting (bool, default false) — when true, only route to models with `:free` suffix on OpenRouter, never paid models
+- [ ] **CONF-03**: Add all new API key variables to Settings dataclass and `from_env()` method
+- [ ] **CONF-04**: Update `.env.example` with all new provider API keys and config flags with documentation
+
+### Infrastructure
+
+- [ ] **INFR-01**: Add ProviderType enum values for CEREBRAS, GROQ, MISTRAL, MISTRAL_CODESTRAL, SAMBANOVA, TOGETHER
+- [ ] **INFR-02**: Extend SpendingTracker free-model detection beyond `or-free-` prefix / `:free` suffix to cover new providers
+- [ ] **INFR-03**: Add provider-specific request transforms (SambaNova temp clamp, SambaNova stream=False for tools, SambaNova strict removal)
+- [ ] **INFR-04**: Health checks in model_catalog.py cover new providers (minimal completion test per provider)
+- [ ] **INFR-05**: Graceful degradation — missing API keys for any new provider must not crash Agent42, just skip that provider
+
+### Testing
+
+- [ ] **TEST-01**: Unit tests for each new ProviderSpec/ModelSpec registration
+- [ ] **TEST-02**: Unit tests for SpendingTracker pricing with new provider models
+- [ ] **TEST-03**: Unit tests for SambaNova request transforms (temp clamp, stream=False, strict removal)
+- [ ] **TEST-04**: Unit tests for GEMINI_FREE_TIER and OPENROUTER_FREE_ONLY config flags
+- [ ] **TEST-05**: Unit tests for updated fallback chain with provider diversity
+- [ ] **TEST-06**: Integration test for routing with multiple providers configured
+
+## v2 Requirements
+
+### Dynamic Provider Selection
+
+- **DYNM-01**: Auto-detect provider free tier status at runtime (try a request, classify based on response)
+- **DYNM-02**: Weighted rotation based on remaining quota per provider (not just round-robin)
+- **DYNM-03**: Provider performance benchmarking — track latency/quality per provider and auto-optimize
+
+### Additional Providers
+
+- **ADDL-01**: Cloudflare Workers AI integration (free tier, limited)
+- **ADDL-02**: NVIDIA NIM integration cleanup (partially in codebase)
+- **ADDL-03**: Fireworks AI integration (DeepSeek R1, high RPM with card)
+
+### Advanced Features
+
+- **ADVN-01**: Per-provider rate limit tracking with sliding window
+- **ADVN-02**: Dashboard UI for provider health status and quota usage
+- **ADVN-03**: Provider cost comparison report in admin panel
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| Custom fine-tuned models on new providers | Complexity, not needed for free-tier goal |
+| Paid tier integration for new providers | Free/credits-only in this milestone |
+| Cerebras Code (Pro/Max plans) | Product offering, not API integration |
+| SambaNova Enterprise tier | Overkill for Agent42's use case |
+| Provider-native SDKs | All use OpenAI-compatible API via AsyncOpenAI |
+| Embedding support on new providers | Only OpenAI used for embeddings currently |
+
+## Traceability
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| CERE-01 | Phase 1 | Pending |
+| CERE-02 | Phase 1 | Pending |
+| CERE-03 | Phase 1 | Pending |
+| CERE-04 | Phase 1 | Pending |
+| INFR-01 | Phase 1 | Pending |
+| INFR-02 | Phase 1 | Pending |
+| INFR-05 | Phase 1 | Pending |
+| TEST-01 | Phase 1 | Pending |
+| TEST-02 | Phase 1 | Pending |
+| GROQ-01 | Phase 2 | Pending |
+| GROQ-02 | Phase 2 | Pending |
+| GROQ-03 | Phase 2 | Pending |
+| GROQ-04 | Phase 2 | Pending |
+| MIST-01 | Phase 3 | Pending |
+| MIST-02 | Phase 3 | Pending |
+| MIST-03 | Phase 3 | Pending |
+| MIST-04 | Phase 3 | Pending |
+| MIST-05 | Phase 3 | Pending |
+| SAMB-01 | Phase 4 | Pending |
+| SAMB-02 | Phase 4 | Pending |
+| SAMB-03 | Phase 4 | Pending |
+| SAMB-04 | Phase 4 | Pending |
+| SAMB-05 | Phase 4 | Pending |
+| INFR-03 | Phase 4 | Pending |
+| TEST-03 | Phase 4 | Pending |
+| TOGR-01 | Phase 5 | Pending |
+| TOGR-02 | Phase 5 | Pending |
+| TOGR-03 | Phase 5 | Pending |
+| ROUT-01 | Phase 6 | Pending |
+| ROUT-02 | Phase 6 | Pending |
+| ROUT-03 | Phase 6 | Pending |
+| ROUT-04 | Phase 6 | Pending |
+| ROUT-05 | Phase 6 | Pending |
+| CONF-01 | Phase 6 | Pending |
+| CONF-02 | Phase 6 | Pending |
+| CONF-03 | Phase 6 | Pending |
+| CONF-04 | Phase 6 | Pending |
+| INFR-04 | Phase 6 | Pending |
+| TEST-04 | Phase 6 | Pending |
+| TEST-05 | Phase 6 | Pending |
+| TEST-06 | Phase 6 | Pending |
+
+**Coverage:**
+- v1 requirements: 39 total
+- Mapped to phases: 39
+- Unmapped: 0
+
+---
+*Requirements defined: 2026-03-01*
+*Last updated: 2026-03-01 after roadmap creation — TEST-01 assigned to Phase 1 (each provider phase includes its own registration tests); traceability sorted by phase*

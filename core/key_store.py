@@ -13,6 +13,8 @@ import stat
 import threading
 from pathlib import Path
 
+from core.encryption import decrypt_value, encrypt_value
+
 logger = logging.getLogger("agent42.key_store")
 
 # API key env var names that can be set via the admin UI
@@ -45,14 +47,19 @@ class KeyStore:
 
     # -- persistence -----------------------------------------------------------
 
+    @staticmethod
+    def _jwt_secret() -> str:
+        return os.getenv("JWT_SECRET", "")
+
     def _load(self):
-        """Load keys from JSON file."""
+        """Load keys from JSON file, decrypting any encrypted values."""
         if not self._path.exists():
             return
         try:
+            secret = self._jwt_secret()
             data = json.loads(self._path.read_text())
             self._keys = {
-                k: v
+                k: decrypt_value(v, secret)
                 for k, v in data.get("api_keys", {}).items()
                 if k in ADMIN_CONFIGURABLE_KEYS and isinstance(v, str) and v
             }
@@ -60,9 +67,12 @@ class KeyStore:
             logger.error("Failed to load key store: %s", e)
 
     def _persist(self):
-        """Write keys to JSON file with restrictive permissions."""
+        """Write keys to JSON file with encryption and restrictive permissions."""
+        secret = self._jwt_secret()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps({"api_keys": self._keys}, indent=2))
+        # Encrypt values before writing
+        stored = {k: encrypt_value(v, secret) if secret else v for k, v in self._keys.items()}
+        self._path.write_text(json.dumps({"api_keys": stored}, indent=2))
         try:
             self._path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         except OSError:
