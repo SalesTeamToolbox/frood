@@ -25,6 +25,7 @@ ADMIN_CONFIGURABLE_KEYS = frozenset(
         "ANTHROPIC_API_KEY",
         "DEEPSEEK_API_KEY",
         "GEMINI_API_KEY",
+        "CEREBRAS_API_KEY",
         "REPLICATE_API_TOKEN",
         "LUMA_API_KEY",
         "BRAVE_API_KEY",
