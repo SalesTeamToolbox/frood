@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-02T21:19:47.332Z"
+last_updated: "2026-03-02T21:26:41.038Z"
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 8
-  completed_plans: 7
+  completed_plans: 8
 ---
 
 ---
@@ -35,12 +35,12 @@ See: .planning/PROJECT.md (updated 2026-03-01)
 
 ## Current Position
 
-Phase: 3 of 6 (Mistral Integration) — COMPLETE
+Phase: 4 of 6 (SambaNova Integration) — COMPLETE
 Plan: 2 of 2 in current phase
-Status: Phase 3 complete, verified (7/7) — ready for Phase 4
-Last activity: 2026-03-02 — Phase 3 verified (7/7 must-haves passed)
+Status: Phase 4 complete — all 16 SambaNova tests pass, suite 1916 green, ready for Phase 5
+Last activity: 2026-03-02 — Phase 4 plan 02 complete (16 tests: registration, transforms, spending tracker)
 
-Progress: [██████░░░░] 50%
+Progress: [████████░░] 67%
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Progress: [██████░░░░] 50%
 
 *Updated after each plan completion*
 | Phase 04-sambanova-integration P01 | 8 | 2 tasks | 3 files |
+| Phase 04-sambanova-integration P02 | 8 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,7 @@ Recent decisions affecting current work:
 - [Phase 04-sambanova-integration]: SambaNova PROVIDERS entry already existed from Phase 1 (INFR-01) — only ModelSpecs, pricing, and transforms were added in Phase 4
 - [Phase 04-sambanova-integration]: SambaNova _BUILTIN_PRICES keys must be mixed-case (Meta-Llama-3.3-70B-Instruct, DeepSeek-V3-0324) to match ModelSpec.model_id exactly — case mismatch triggers /15 conservative fallback
 - [Phase 04-sambanova-integration]: deepcopy used in SAMB-05 strict removal to avoid mutating caller's original tool list — first provider requiring tool list mutation
+- [Phase 04-sambanova-integration]: TestSambanovaTransforms uses patch.object on async client to capture kwargs — no spending tracker mock needed since mock bypasses API entirely
 
 ### Pending Todos
 
@@ -100,5 +102,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-02
-Stopped at: Phase 3 verified (7/7 passed), ready to plan Phase 4 (SambaNova Integration)
+Stopped at: Phase 4 complete (04-02-PLAN.md done) — 16 SambaNova tests, 1916 suite green, ready for Phase 5 (Together AI)
 Resume file: None

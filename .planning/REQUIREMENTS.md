@@ -68,7 +68,7 @@
 
 - [x] **TEST-01**: Unit tests for each new ProviderSpec/ModelSpec registration
 - [x] **TEST-02**: Unit tests for SpendingTracker pricing with new provider models
-- [ ] **TEST-03**: Unit tests for SambaNova request transforms (temp clamp, stream=False, strict removal)
+- [x] **TEST-03**: Unit tests for SambaNova request transforms (temp clamp, stream=False, strict removal)
 - [ ] **TEST-04**: Unit tests for GEMINI_FREE_TIER and OPENROUTER_FREE_ONLY config flags
 - [ ] **TEST-05**: Unit tests for updated fallback chain with provider diversity
 - [ ] **TEST-06**: Integration test for routing with multiple providers configured
@@ -132,7 +132,7 @@
 | SAMB-04 | Phase 4 | Complete |
 | SAMB-05 | Phase 4 | Complete |
 | INFR-03 | Phase 4 | Complete |
-| TEST-03 | Phase 4 | Pending |
+| TEST-03 | Phase 4 | Complete |
 | TOGR-01 | Phase 5 | Pending |
 | TOGR-02 | Phase 5 | Pending |
 | TOGR-03 | Phase 5 | Pending |
