@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-02T20:23:52.002Z"
+last_updated: "2026-03-02T21:19:47.332Z"
 progress:
-  total_phases: 3
+  total_phases: 4
   completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
+  total_plans: 8
+  completed_plans: 7
 ---
 
 ---
@@ -16,9 +16,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-03-02T20:18:00Z"
+last_updated: "2026-03-02T20:24:00.000Z"
 progress:
-  total_phases: 3
+  total_phases: 6
   completed_phases: 3
   total_plans: 6
   completed_plans: 6
@@ -31,14 +31,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-01)
 
 **Core value:** Agent42 must always operate on free-tier LLMs with enough provider diversity that no single outage stops the platform
-**Current focus:** Phase 3 - Mistral Integration
+**Current focus:** Phase 4 - SambaNova Integration
 
 ## Current Position
 
 Phase: 3 of 6 (Mistral Integration) — COMPLETE
-Plan: 2 of 2 in current phase (03-01 complete, 03-02 complete)
-Status: Phase 3 complete — all 2 plans executed
-Last activity: 2026-03-02 — 03-02 executed (Mistral test coverage)
+Plan: 2 of 2 in current phase
+Status: Phase 3 complete, verified (7/7) — ready for Phase 4
+Last activity: 2026-03-02 — Phase 3 verified (7/7 must-haves passed)
 
 Progress: [██████░░░░] 50%
 
@@ -62,6 +62,7 @@ Progress: [██████░░░░] 50%
 - Trend: stable
 
 *Updated after each plan completion*
+| Phase 04-sambanova-integration P01 | 8 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,9 @@ Recent decisions affecting current work:
 - 03-01: Codestral placed in FREE tier (dedicated free API, 30 RPM) — max_context_tokens=32000 per REQUIREMENTS.md (256K unverified)
 - 03-01: La Plateforme pricing conservative: $2.00/$6.00 per M for mistral-large-latest, $0.20/$0.60 for mistral-small-latest
 - 03-02: Mistral requires 8-test registration class (not 6) because dual providers need independent client-build and graceful-failure tests; mixed pricing is key differentiator (Codestral $0, La Plateforme non-zero)
+- [Phase 04-sambanova-integration]: SambaNova PROVIDERS entry already existed from Phase 1 (INFR-01) — only ModelSpecs, pricing, and transforms were added in Phase 4
+- [Phase 04-sambanova-integration]: SambaNova _BUILTIN_PRICES keys must be mixed-case (Meta-Llama-3.3-70B-Instruct, DeepSeek-V3-0324) to match ModelSpec.model_id exactly — case mismatch triggers /15 conservative fallback
+- [Phase 04-sambanova-integration]: deepcopy used in SAMB-05 strict removal to avoid mutating caller's original tool list — first provider requiring tool list mutation
 
 ### Pending Todos
 
@@ -96,5 +100,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-02
-Stopped at: Completed 03-02-PLAN.md (Mistral test coverage) — Phase 3 complete
+Stopped at: Phase 3 verified (7/7 passed), ready to plan Phase 4 (SambaNova Integration)
 Resume file: None
