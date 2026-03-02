@@ -264,6 +264,10 @@ class Settings:
     l2_auto_escalate_task_types: str = ""  # Comma-separated types to auto-escalate (empty = all)
     l2_task_types: str = ""  # Comma-separated types eligible for L2 (empty = all)
 
+    # Provider routing flags (Phase 6)
+    gemini_free_tier: bool = True  # When false, Gemini excluded from FREE_ROUTING and fallback
+    openrouter_free_only: bool = False  # When true, only OR :free suffix models are routed
+
     # RLM (Recursive Language Models — MIT CSAIL)
     rlm_enabled: bool = True
     rlm_threshold_tokens: int = 200_000
@@ -403,6 +407,9 @@ class Settings:
             openrouter_balance_check_hours=float(
                 os.getenv("OPENROUTER_BALANCE_CHECK_HOURS", "1.0")
             ),
+            gemini_free_tier=os.getenv("GEMINI_FREE_TIER", "true").lower() in ("true", "1", "yes"),
+            openrouter_free_only=os.getenv("OPENROUTER_FREE_ONLY", "false").lower()
+            in ("true", "1", "yes"),
             # Memory
             memory_dir=os.getenv("MEMORY_DIR", ".agent42/memory"),
             sessions_dir=os.getenv("SESSIONS_DIR", ".agent42/sessions"),

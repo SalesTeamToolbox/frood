@@ -151,14 +151,20 @@ class TestPolicyRoutingPerformance:
 class TestGetRoutingWithPolicy:
     def test_free_only_uses_free_routing_defaults(self):
         router = ModelRouter()
+        # Provide API keys for both the FREE_ROUTING default (Cerebras) and a fallback
+        # (Gemini) so get_routing() resolves without falling back to paid models.
         with patch.dict(
             os.environ,
-            {"MODEL_ROUTING_POLICY": "free_only", "GEMINI_API_KEY": "test-key"},
+            {
+                "MODEL_ROUTING_POLICY": "free_only",
+                "CEREBRAS_API_KEY": "test-cerebras-key",
+                "GEMINI_API_KEY": "test-key",
+            },
             clear=False,
         ):
             with _patch_policy("free_only"):
                 routing = router.get_routing(TaskType.CODING)
-        # Should use FREE_ROUTING defaults
+        # Should use FREE_ROUTING defaults — Cerebras primary for coding
         default = FREE_ROUTING[TaskType.CODING]
         assert routing["primary"] == default["primary"]
 

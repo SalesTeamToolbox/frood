@@ -31,26 +31,50 @@ logger = logging.getLogger("agent42.router")
 # falls back to OR free models if GEMINI_API_KEY is not set.
 
 FREE_ROUTING: dict[TaskType, dict] = {
+    # -- Code-focused tasks: Cerebras primary (3000 tok/s), Codestral critic (code-aware) --
     TaskType.CODING: {
-        "primary": "gemini-2-flash",  # Gemini Flash — fast, 1M context, generous free tier
-        "critic": "or-free-qwen-coder",  # Qwen3 Coder 480B — code-aware second opinion
+        "primary": "cerebras-gpt-oss-120b",  # Cerebras — 3000 tok/s, excellent for iteration
+        "critic": "mistral-codestral",  # Codestral — dedicated code review, genuinely free
         "max_iterations": 8,
     },
     TaskType.DEBUGGING: {
-        "primary": "gemini-2-flash",  # Gemini Flash — fast reasoning + 1M context for large codebases
-        "critic": "or-free-qwen-coder",  # Qwen3 Coder — multi-file awareness
+        "primary": "cerebras-gpt-oss-120b",  # Cerebras — fast reasoning for bug analysis
+        "critic": "mistral-codestral",  # Codestral — code-aware second opinion
         "max_iterations": 10,
     },
-    TaskType.RESEARCH: {
-        "primary": "gemini-2-flash",  # Gemini Flash — strong general-purpose
-        "critic": "or-free-llama-70b",  # Llama 3.3 70B — second opinion
-        "max_iterations": 5,
-    },
     TaskType.REFACTORING: {
-        "primary": "gemini-2-flash",  # Gemini Flash — code-capable + 1M context
-        "critic": "or-free-qwen-coder",  # Qwen3 Coder — multi-file project awareness
+        "primary": "gemini-2-flash",  # Gemini Flash — 1M context for multi-file refactoring
+        "critic": "mistral-codestral",  # Codestral — code-aware multi-file reviewer
         "max_iterations": 8,
     },
+    # -- Research/writing tasks: Groq primary (280-500 tok/s, 131K context) --
+    TaskType.RESEARCH: {
+        "primary": "groq-llama-70b",  # Groq Llama 70B — fast, 131K context, strong reasoning
+        "critic": "or-free-llama-70b",  # Llama 3.3 70B — independent second opinion
+        "max_iterations": 5,
+    },
+    TaskType.CONTENT: {
+        "primary": "groq-llama-70b",  # Groq Llama 70B — fast generation for content tasks
+        "critic": "or-free-gemma-27b",  # Gemma 27B — editorial check
+        "max_iterations": 6,
+    },
+    TaskType.STRATEGY: {
+        "primary": "groq-gpt-oss-120b",  # Groq GPT-OSS 120B — 500 tok/s, strong reasoning
+        "critic": "or-free-llama-70b",  # Llama 3.3 70B — alternative strategic perspective
+        "max_iterations": 5,
+    },
+    # -- App building: Cerebras primary (speed critical), Codestral critic --
+    TaskType.APP_CREATE: {
+        "primary": "cerebras-gpt-oss-120b",  # Cerebras — 3000 tok/s for fast code generation
+        "critic": "mistral-codestral",  # Codestral — thorough code review
+        "max_iterations": 12,  # Apps need more iterations to build fully
+    },
+    TaskType.APP_UPDATE: {
+        "primary": "gemini-2-flash",  # Gemini Flash — 1M context for existing codebases
+        "critic": "or-free-qwen-coder",  # Qwen3 Coder — multi-file awareness for updates
+        "max_iterations": 8,
+    },
+    # -- General tasks: Gemini Flash primary (1M context, reliable) --
     TaskType.DOCUMENTATION: {
         "primary": "gemini-2-flash",  # Gemini Flash — reliable general-purpose writing
         "critic": "or-free-gemma-27b",  # Gemma 27B — fast verification
@@ -71,16 +95,6 @@ FREE_ROUTING: dict[TaskType, dict] = {
         "critic": "or-free-llama-70b",
         "max_iterations": 5,
     },
-    TaskType.CONTENT: {
-        "primary": "gemini-2-flash",  # Gemini Flash — reliable writing
-        "critic": "or-free-gemma-27b",  # Fast editorial check
-        "max_iterations": 6,
-    },
-    TaskType.STRATEGY: {
-        "primary": "gemini-2-flash",  # Gemini Flash — strong reasoning
-        "critic": "or-free-llama-70b",  # Alternative perspective on strategy
-        "max_iterations": 5,
-    },
     TaskType.DATA_ANALYSIS: {
         "primary": "gemini-2-flash",  # Gemini Flash — good with data/code/tables
         "critic": "or-free-qwen-coder",  # Qwen Coder — data-aware reviewer
@@ -90,16 +104,6 @@ FREE_ROUTING: dict[TaskType, dict] = {
         "primary": "gemini-2-flash",  # Gemini Flash — reliable general-purpose
         "critic": "or-free-gemma-27b",
         "max_iterations": 4,
-    },
-    TaskType.APP_CREATE: {
-        "primary": "gemini-2-flash",  # Gemini Flash — fast code generation + 1M context
-        "critic": "or-free-qwen-coder",  # Qwen3 Coder — thorough code review
-        "max_iterations": 12,  # Apps need more iterations to build fully
-    },
-    TaskType.APP_UPDATE: {
-        "primary": "gemini-2-flash",  # Gemini Flash — 1M context for existing codebases
-        "critic": "or-free-qwen-coder",  # Qwen3 Coder — multi-file awareness for updates
-        "max_iterations": 8,
     },
     TaskType.PROJECT_SETUP: {
         "primary": "gemini-2-flash",  # Gemini Flash — conversational + structured output
@@ -274,6 +278,45 @@ class ModelRouter:
             if policy_routing:
                 routing = policy_routing
 
+        # Config flag enforcement (CONF-01, CONF-02): apply GEMINI_FREE_TIER and
+        # OPENROUTER_FREE_ONLY overrides to the selected routing. Admin overrides
+        # always beat config flags — the is_admin_override guard is checked first.
+        if not is_admin_override:
+            from core.config import settings as _cfg
+
+            primary_candidate = routing.get("primary", "")
+            # GEMINI_FREE_TIER=false: if Gemini was selected, find a non-Gemini replacement
+            if not _cfg.gemini_free_tier and primary_candidate == "gemini-2-flash":
+                replacement = self._find_healthy_free_model(exclude={"gemini-2-flash"})
+                if replacement:
+                    logger.info(
+                        "GEMINI_FREE_TIER=false: replaced gemini-2-flash with %s for %s",
+                        replacement,
+                        task_type.value,
+                    )
+                    routing["primary"] = replacement
+            # OPENROUTER_FREE_ONLY=true: if an OR model without :free suffix was selected,
+            # find a replacement (the new _find_healthy_free_model already enforces this
+            # in fallback searches, but policy/dynamic routing may have set a non-free OR model)
+            elif _cfg.openrouter_free_only and primary_candidate:
+                try:
+                    _spec = self.registry.get_model(primary_candidate)
+                    if (
+                        _spec.provider == ProviderType.OPENROUTER
+                        and not _spec.model_id.endswith(":free")
+                    ):
+                        replacement = self._find_healthy_free_model(exclude={primary_candidate})
+                        if replacement:
+                            logger.info(
+                                "OPENROUTER_FREE_ONLY=true: replaced %s with %s for %s",
+                                primary_candidate,
+                                replacement,
+                                task_type.value,
+                            )
+                            routing["primary"] = replacement
+                except ValueError:
+                    pass  # Unknown model — pass through
+
         # 4b. Gemini Pro upgrade for complex task types — opt-in via
         # GEMINI_PRO_FOR_COMPLEX=true. When enabled and GEMINI_API_KEY is set,
         # upgrades complex task types from gemini-2-flash to gemini-2-pro.
@@ -333,6 +376,9 @@ class ModelRouter:
                     primary_model,
                 )
                 replacement = self._find_healthy_free_model(exclude={primary_model})
+                if not replacement:
+                    logger.info("No free model available, trying CHEAP-tier fallback")
+                    replacement = self._find_healthy_cheap_model(exclude={primary_model})
                 if replacement:
                     routing["primary"] = replacement
                     primary_model = replacement
@@ -361,15 +407,24 @@ class ModelRouter:
                         routing["primary"] = replacement
                         logger.info(f"Fell back to free model {replacement}")
                     else:
-                        # No free model with API key found — use task-type default as last resort
-                        fallback = FREE_ROUTING.get(task_type)
-                        routing = (
-                            fallback.copy() if fallback else FREE_ROUTING[TaskType.CODING].copy()
-                        )
-                        logger.error(
-                            f"No available free model found for {task_type.value}. "
-                            "Using fallback routing, but it may fail."
-                        )
+                        # No free model available — try CHEAP-tier before giving up
+                        logger.info("No free model available, trying CHEAP-tier fallback")
+                        cheap = self._find_healthy_cheap_model(exclude={primary_model})
+                        if cheap:
+                            routing["primary"] = cheap
+                            logger.info(f"Fell back to CHEAP-tier model {cheap}")
+                        else:
+                            # No free or CHEAP model found — use task-type default as last resort
+                            fallback = FREE_ROUTING.get(task_type)
+                            routing = (
+                                fallback.copy()
+                                if fallback
+                                else FREE_ROUTING[TaskType.CODING].copy()
+                            )
+                            logger.error(
+                                f"No available model found for {task_type.value}. "
+                                "Using fallback routing, but it may fail."
+                            )
 
         # Critic model validation: if the critic is an OR free model and its
         # provider is unreliable (unhealthy / key missing), swap to a native
@@ -407,24 +462,101 @@ class ModelRouter:
 
         return routing
 
-    def _find_healthy_free_model(self, exclude: set[str] | None = None) -> str | None:
-        """Find a free model that is both API-key-configured and health-check-healthy."""
+    def _find_healthy_free_model(
+        self,
+        exclude: set[str] | None = None,
+        skip_providers: set[ProviderType] | None = None,
+    ) -> str | None:
+        """Find a healthy, API-key-configured free model using provider-diverse round-robin.
+
+        Groups models by provider and alternates across providers so that the
+        fallback chain prefers different providers before repeating any single one.
+        Respects GEMINI_FREE_TIER and OPENROUTER_FREE_ONLY config flags (loaded
+        inside the method for test patchability).
+        """
+        from core.config import settings
+
         exclude = exclude or set()
+        skip_providers = set(skip_providers) if skip_providers else set()
+
+        # Apply config flag: GEMINI_FREE_TIER=false excludes Gemini from fallback
+        if not settings.gemini_free_tier:
+            skip_providers.add(ProviderType.GEMINI)
+
+        # Group all free models by provider (preserving registry insertion order within each group)
+        from collections import defaultdict
+
+        provider_groups: dict[ProviderType, list[str]] = defaultdict(list)
         for model in self.registry.free_models():
             key = model["key"]
             if key in exclude:
                 continue
-            # Check health if catalog is available
-            if self._catalog and not self._catalog.is_model_healthy(key):
-                continue
             try:
                 spec = self.registry.get_model(key)
-                provider_spec = PROVIDERS.get(spec.provider)
-                api_key = os.getenv(provider_spec.api_key_env, "") if provider_spec else ""
-                if api_key:
-                    return key
             except ValueError:
                 continue
+            if spec.provider in skip_providers:
+                continue
+            # Apply OPENROUTER_FREE_ONLY: skip OR models without :free suffix
+            if settings.openrouter_free_only and spec.provider == ProviderType.OPENROUTER:
+                if not spec.model_id.endswith(":free"):
+                    continue
+            provider_groups[spec.provider].append(key)
+
+        # Round-robin across providers: pick one model per provider per pass
+        # This ensures fallback diversity before exhausting any single provider
+        provider_queues = list(provider_groups.values())
+        indices = [0] * len(provider_queues)  # current position per provider
+        any_remaining = True
+        while any_remaining:
+            any_remaining = False
+            for i, queue in enumerate(provider_queues):
+                idx = indices[i]
+                if idx >= len(queue):
+                    continue
+                any_remaining = True
+                key = queue[idx]
+                indices[i] += 1
+                # Health check gate
+                if self._catalog and not self._catalog.is_model_healthy(key):
+                    continue
+                # API key check
+                try:
+                    spec = self.registry.get_model(key)
+                    provider_spec = PROVIDERS.get(spec.provider)
+                    api_key = os.getenv(provider_spec.api_key_env, "") if provider_spec else ""
+                    if api_key:
+                        return key
+                except ValueError:
+                    continue
+        return None
+
+    def _find_healthy_cheap_model(self, exclude: set[str] | None = None) -> str | None:
+        """Find a CHEAP-tier model (non-Gemini) with a configured API key.
+
+        Used as a fallback when all free models are exhausted. Gemini is
+        excluded here because it is already handled by _find_healthy_free_model
+        via the Gemini special-case health check block.
+        """
+        from providers.registry import MODELS, ModelTier
+
+        exclude = exclude or set()
+        for key, spec in MODELS.items():
+            if spec.tier != ModelTier.CHEAP:
+                continue
+            if key in exclude:
+                continue
+            # Skip Gemini — already covered by the free-model path's Gemini block
+            if spec.provider == ProviderType.GEMINI:
+                continue
+            if self._catalog and not self._catalog.is_model_healthy(key):
+                continue
+            provider_spec = PROVIDERS.get(spec.provider)
+            if not provider_spec:
+                continue
+            api_key = os.getenv(provider_spec.api_key_env, "")
+            if api_key:
+                return key
         return None
 
     def get_l2_routing(self, task_type: TaskType) -> dict | None:
