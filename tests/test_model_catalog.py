@@ -958,3 +958,104 @@ class TestHealthCheck:
         # All mocked as 200, so all should be OK
         for status in result.values():
             assert status["status"] == ModelCatalog.STATUS_OK
+
+
+class TestHealthCheckCheapTier:
+    """INFR-04: Verify CHEAP-tier models are included in health_check when API keys are set."""
+
+    @pytest.mark.asyncio
+    async def test_cheap_tier_included_in_health_check(self, tmp_path):
+        """SambaNova and Together AI models are health-checked when their API keys are set."""
+        import os
+
+        from providers.registry import MODELS, ProviderType
+
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = "{}"
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_resp
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("agents.model_catalog.httpx.AsyncClient", return_value=mock_client),
+            patch.dict(
+                "os.environ",
+                {
+                    "SAMBANOVA_API_KEY": "test-sambanova-key",
+                    "TOGETHER_API_KEY": "test-together-key",
+                },
+            ),
+        ):
+            result = await catalog.health_check()
+
+        # Verify SambaNova and Together AI model keys appear in health check results
+        checked_keys = set(result.keys())
+        sambanova_keys = {
+            k for k, spec in MODELS.items() if spec.provider == ProviderType.SAMBANOVA
+        }
+        together_keys = {
+            k for k, spec in MODELS.items() if spec.provider == ProviderType.TOGETHER
+        }
+
+        # At least one SambaNova and one Together AI model should have been checked
+        assert len(sambanova_keys & checked_keys) > 0, (
+            f"No SambaNova models in health check results. Checked: {checked_keys}"
+        )
+        assert len(together_keys & checked_keys) > 0, (
+            f"No Together AI models in health check results. Checked: {checked_keys}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_cheap_tier_skipped_without_key(self, tmp_path):
+        """SambaNova models are not health-checked when SAMBANOVA_API_KEY is absent."""
+        from providers.registry import MODELS, ProviderType
+
+        catalog = ModelCatalog(cache_path=tmp_path / "catalog.json")
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = "{}"
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_resp
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        # Do NOT set SAMBANOVA_API_KEY or TOGETHER_API_KEY
+        env_clear = {
+            "SAMBANOVA_API_KEY": "",
+            "TOGETHER_API_KEY": "",
+            "GEMINI_API_KEY": "",
+            "OPENROUTER_API_KEY": "",
+            "CEREBRAS_API_KEY": "",
+            "GROQ_API_KEY": "",
+            "CODESTRAL_API_KEY": "",
+            "MISTRAL_API_KEY": "",
+        }
+
+        with (
+            patch("agents.model_catalog.httpx.AsyncClient", return_value=mock_client),
+            patch.dict("os.environ", env_clear),
+        ):
+            result = await catalog.health_check()
+
+        # No models should be checked when all keys are absent (empty string = not set)
+        checked_keys = set(result.keys())
+        sambanova_keys = {
+            k for k, spec in MODELS.items() if spec.provider == ProviderType.SAMBANOVA
+        }
+        together_keys = {
+            k for k, spec in MODELS.items() if spec.provider == ProviderType.TOGETHER
+        }
+
+        assert len(sambanova_keys & checked_keys) == 0, (
+            f"SambaNova models checked without API key: {sambanova_keys & checked_keys}"
+        )
+        assert len(together_keys & checked_keys) == 0, (
+            f"Together AI models checked without API key: {together_keys & checked_keys}"
+        )
