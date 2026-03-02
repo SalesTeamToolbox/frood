@@ -135,6 +135,20 @@ PROVIDERS: dict[ProviderType, ProviderSpec] = {
         display_name="Groq",
         supports_function_calling=True,
     ),
+    ProviderType.MISTRAL: ProviderSpec(
+        provider_type=ProviderType.MISTRAL,
+        base_url="https://api.mistral.ai/v1",
+        api_key_env="MISTRAL_API_KEY",
+        display_name="Mistral La Plateforme",
+        supports_function_calling=True,
+    ),
+    ProviderType.MISTRAL_CODESTRAL: ProviderSpec(
+        provider_type=ProviderType.MISTRAL_CODESTRAL,
+        base_url="https://codestral.mistral.ai/v1",
+        api_key_env="CODESTRAL_API_KEY",
+        display_name="Mistral Codestral (free)",
+        supports_function_calling=True,
+    ),
 }
 
 
@@ -245,6 +259,15 @@ MODELS: dict[str, ModelSpec] = {
         tier=ModelTier.FREE,
         max_context_tokens=131000,   # 131,072 per official docs
     ),
+    # Mistral Codestral free endpoint (codestral.mistral.ai -- genuinely free, 30 RPM)
+    "mistral-codestral": ModelSpec(
+        "codestral-latest",
+        ProviderType.MISTRAL_CODESTRAL,
+        max_tokens=8192,
+        display_name="Codestral (Mistral free)",
+        tier=ModelTier.FREE,
+        max_context_tokens=32000,    # 32K per REQUIREMENTS.md spec (some sources report 256K)
+    ),
     # ═══════════════════════════════════════════════════════════════════════════
     # CHEAP TIER — low-cost models for when free isn't enough
     # ═══════════════════════════════════════════════════════════════════════════
@@ -266,6 +289,23 @@ MODELS: dict[str, ModelSpec] = {
     ),
     "deepseek-chat": ModelSpec(
         "deepseek-chat", ProviderType.DEEPSEEK, display_name="DeepSeek Chat", tier=ModelTier.CHEAP
+    ),
+    # Mistral La Plateforme (api.mistral.ai -- credits-based, 2 RPM on free experiment plan)
+    "mistral-large": ModelSpec(
+        "mistral-large-latest",
+        ProviderType.MISTRAL,
+        max_tokens=4096,
+        display_name="Mistral Large (La Plateforme)",
+        tier=ModelTier.CHEAP,
+        max_context_tokens=128000,   # 128K context
+    ),
+    "mistral-small": ModelSpec(
+        "mistral-small-latest",
+        ProviderType.MISTRAL,
+        max_tokens=4096,
+        display_name="Mistral Small (La Plateforme)",
+        tier=ModelTier.CHEAP,
+        max_context_tokens=128000,   # 128K context
     ),
     # ═══════════════════════════════════════════════════════════════════════════
     # PREMIUM TIER — frontier models for final reviews, complex tasks, admin-selected
@@ -344,6 +384,12 @@ class SpendingTracker:
         "llama-3.3-70b-versatile": (0.0, 0.0),
         "openai/gpt-oss-120b": (0.0, 0.0),    # includes "openai/" prefix -- must match ModelSpec.model_id exactly
         "llama-3.1-8b-instant": (0.0, 0.0),
+        # Mistral Codestral free endpoint -- $0 (dedicated free API, 30 RPM)
+        "codestral-latest": (0.0, 0.0),
+        # Mistral La Plateforme -- actual pricing (CHEAP tier, credits required)
+        # Conservative estimates: mistral-large-latest may alias to $2/$6 or $0.50/$1.50 version
+        "mistral-large-latest": (2.0e-6, 6.0e-6),     # ~$2.00/M in, $6.00/M out
+        "mistral-small-latest": (0.20e-6, 0.60e-6),    # ~$0.20/M in, $0.60/M out
     }
 
     def __init__(self):
