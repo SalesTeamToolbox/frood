@@ -43,25 +43,25 @@
 
 ### Routing
 
-- [ ] **ROUT-01**: Update FREE_ROUTING to use Cerebras as primary for speed-critical task types (coding, debugging, app_create)
-- [ ] **ROUT-02**: Use Codestral (Mistral free endpoint) as code critic for coding/debugging/refactoring task types
-- [ ] **ROUT-03**: Use Groq models as primary for research/content/strategy task types
-- [ ] **ROUT-04**: Update fallback chain with provider-diversity awareness — cycle through different providers before trying multiple models on the same provider
-- [ ] **ROUT-05**: Add SambaNova and Together AI models to fallback chain as CHEAP-tier options (after free models exhausted)
+- [x] **ROUT-01**: Update FREE_ROUTING to use Cerebras as primary for speed-critical task types (coding, debugging, app_create)
+- [x] **ROUT-02**: Use Codestral (Mistral free endpoint) as code critic for coding/debugging/refactoring task types
+- [x] **ROUT-03**: Use Groq models as primary for research/content/strategy task types
+- [x] **ROUT-04**: Update fallback chain with provider-diversity awareness — cycle through different providers before trying multiple models on the same provider
+- [x] **ROUT-05**: Add SambaNova and Together AI models to fallback chain as CHEAP-tier options (after free models exhausted)
 
 ### Configuration
 
-- [ ] **CONF-01**: Add `GEMINI_FREE_TIER` setting (bool, default true) — when false, exclude Gemini from FREE_ROUTING and fallback chain free models
-- [ ] **CONF-02**: Add `OPENROUTER_FREE_ONLY` setting (bool, default false) — when true, only route to models with `:free` suffix on OpenRouter, never paid models
-- [ ] **CONF-03**: Add all new API key variables to Settings dataclass and `from_env()` method
-- [ ] **CONF-04**: Update `.env.example` with all new provider API keys and config flags with documentation
+- [x] **CONF-01**: Add `GEMINI_FREE_TIER` setting (bool, default true) — when false, exclude Gemini from FREE_ROUTING and fallback chain free models
+- [x] **CONF-02**: Add `OPENROUTER_FREE_ONLY` setting (bool, default false) — when true, only route to models with `:free` suffix on OpenRouter, never paid models
+- [x] **CONF-03**: Add all new API key variables to Settings dataclass and `from_env()` method
+- [x] **CONF-04**: Update `.env.example` with all new provider API keys and config flags with documentation
 
 ### Infrastructure
 
 - [x] **INFR-01**: Add ProviderType enum values for CEREBRAS, GROQ, MISTRAL, MISTRAL_CODESTRAL, SAMBANOVA, TOGETHER
 - [x] **INFR-02**: Extend SpendingTracker free-model detection beyond `or-free-` prefix / `:free` suffix to cover new providers
 - [x] **INFR-03**: Add provider-specific request transforms (SambaNova temp clamp, SambaNova stream=False for tools, SambaNova strict removal)
-- [ ] **INFR-04**: Health checks in model_catalog.py cover new providers (minimal completion test per provider)
+- [x] **INFR-04**: Health checks in model_catalog.py cover new providers (minimal completion test per provider)
 - [x] **INFR-05**: Graceful degradation — missing API keys for any new provider must not crash Agent42, just skip that provider
 
 ### Testing
@@ -136,16 +136,16 @@
 | TOGR-01 | Phase 5 | Complete |
 | TOGR-02 | Phase 5 | Complete |
 | TOGR-03 | Phase 5 | Complete |
-| ROUT-01 | Phase 6 | Pending |
-| ROUT-02 | Phase 6 | Pending |
-| ROUT-03 | Phase 6 | Pending |
-| ROUT-04 | Phase 6 | Pending |
-| ROUT-05 | Phase 6 | Pending |
-| CONF-01 | Phase 6 | Pending |
-| CONF-02 | Phase 6 | Pending |
-| CONF-03 | Phase 6 | Pending |
-| CONF-04 | Phase 6 | Pending |
-| INFR-04 | Phase 6 | Pending |
+| ROUT-01 | Phase 6 | Complete |
+| ROUT-02 | Phase 6 | Complete |
+| ROUT-03 | Phase 6 | Complete |
+| ROUT-04 | Phase 6 | Complete |
+| ROUT-05 | Phase 6 | Complete |
+| CONF-01 | Phase 6 | Complete |
+| CONF-02 | Phase 6 | Complete |
+| CONF-03 | Phase 6 | Complete |
+| CONF-04 | Phase 6 | Complete |
+| INFR-04 | Phase 6 | Complete |
 | TEST-04 | Phase 6 | Pending |
 | TEST-05 | Phase 6 | Pending |
 | TEST-06 | Phase 6 | Pending |
