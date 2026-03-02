@@ -1,7 +1,7 @@
 """Tests for Phase 5: Provider registry."""
 
 import os
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -9,6 +9,7 @@ from providers.registry import (
     MODELS,
     PROVIDERS,
     ModelSpec,
+    ModelTier,
     ProviderRegistry,
     ProviderSpec,
     ProviderType,
@@ -17,7 +18,7 @@ from providers.registry import (
 
 class TestProviderRegistry:
     def test_all_providers_registered(self):
-        expected = {"openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm", "cerebras", "groq", "mistral", "mistral_codestral"}
+        expected = {"openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm", "cerebras", "groq", "mistral", "mistral_codestral", "sambanova"}
         actual = {p.value for p in PROVIDERS.keys()}
         assert expected.issubset(actual)
 
@@ -290,3 +291,199 @@ class TestMistralRegistration:
         with patch.dict(os.environ, {"CODESTRAL_API_KEY": ""}, clear=False):
             with pytest.raises(ValueError, match="CODESTRAL_API_KEY not set"):
                 registry.get_client(ProviderType.MISTRAL_CODESTRAL)
+
+
+class TestSambanovaRegistration:
+    """Phase 4: SambaNova provider registration tests."""
+
+    def test_sambanova_provider_registered(self):
+        """SAMB-01: ProviderType.SAMBANOVA in PROVIDERS with correct base_url and api_key_env."""
+        spec = PROVIDERS[ProviderType.SAMBANOVA]
+        assert spec.base_url == "https://api.sambanova.ai/v1"
+        assert spec.api_key_env == "SAMBANOVA_API_KEY"
+        assert spec.display_name == "SambaNova"
+
+    def test_sambanova_models_registered(self):
+        """SAMB-02: Both SambaNova models registered with correct model_ids and CHEAP tier."""
+        for key, expected_id in [
+            ("sambanova-llama-70b", "Meta-Llama-3.3-70B-Instruct"),
+            ("sambanova-deepseek-v3", "DeepSeek-V3-0324"),
+        ]:
+            spec = MODELS[key]
+            assert spec.model_id == expected_id, f"{key} model_id mismatch"
+            assert spec.provider == ProviderType.SAMBANOVA
+            assert spec.tier == ModelTier.CHEAP, f"{key} should be CHEAP tier"
+
+    def test_sambanova_models_all_cheap_tier(self):
+        """All SambaNova models are CHEAP tier (credits required)."""
+        samb_models = [k for k, v in MODELS.items() if v.provider == ProviderType.SAMBANOVA]
+        assert len(samb_models) == 2
+        for key in samb_models:
+            assert MODELS[key].tier == ModelTier.CHEAP, f"{key} should be CHEAP"
+
+    def test_sambanova_context_windows(self):
+        """SAMB-02: Both SambaNova models have 128K context window."""
+        for key in ["sambanova-llama-70b", "sambanova-deepseek-v3"]:
+            assert MODELS[key].max_context_tokens == 131072, f"{key} wrong context"
+
+    def test_sambanova_client_builds_with_key(self):
+        """Client builds when SAMBANOVA_API_KEY is set."""
+        registry = ProviderRegistry()
+        with patch.dict(os.environ, {"SAMBANOVA_API_KEY": "test-key-1234"}):
+            client = registry.get_client(ProviderType.SAMBANOVA)
+            assert client is not None
+            assert client.base_url == "https://api.sambanova.ai/v1/"
+
+    def test_sambanova_client_raises_without_key(self):
+        """INFR-05: Client raises ValueError when SAMBANOVA_API_KEY is not set."""
+        registry = ProviderRegistry()
+        registry.invalidate_client(ProviderType.SAMBANOVA)
+        with patch.dict(os.environ, {"SAMBANOVA_API_KEY": ""}, clear=False):
+            with pytest.raises(ValueError, match="SAMBANOVA_API_KEY not set"):
+                registry.get_client(ProviderType.SAMBANOVA)
+
+
+class TestSambanovaTransforms:
+    """Phase 4: SambaNova request transform tests (SAMB-03, SAMB-04, SAMB-05 / INFR-03 / TEST-03)."""
+
+    @pytest.mark.asyncio
+    async def test_temperature_clamped_to_1_in_complete(self):
+        """SAMB-03: Temperature > 1.0 is clamped to 1.0 for SambaNova in complete()."""
+        registry = ProviderRegistry()
+        captured_kwargs = {}
+
+        async def mock_create(**kwargs):
+            captured_kwargs.update(kwargs)
+            mock_resp = MagicMock()
+            mock_resp.choices = [MagicMock()]
+            mock_resp.choices[0].message.content = "ok"
+            mock_resp.usage = None
+            return mock_resp
+
+        with patch.dict(os.environ, {"SAMBANOVA_API_KEY": "test-key"}):
+            client = registry.get_client(ProviderType.SAMBANOVA)
+            with patch.object(client.chat.completions, "create", side_effect=mock_create):
+                await registry.complete(
+                    "sambanova-llama-70b",
+                    messages=[{"role": "user", "content": "hi"}],
+                    temperature=1.5,
+                )
+        assert captured_kwargs["temperature"] <= 1.0, (
+            f"Expected temp <= 1.0, got {captured_kwargs['temperature']}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_temperature_not_clamped_for_other_providers(self):
+        """SAMB-03 negative: Temperature > 1.0 is NOT clamped for non-SambaNova providers."""
+        registry = ProviderRegistry()
+        captured_kwargs = {}
+
+        async def mock_create(**kwargs):
+            captured_kwargs.update(kwargs)
+            mock_resp = MagicMock()
+            mock_resp.choices = [MagicMock()]
+            mock_resp.choices[0].message.content = "ok"
+            mock_resp.usage = None
+            return mock_resp
+
+        with patch.dict(os.environ, {"CEREBRAS_API_KEY": "test-key"}):
+            client = registry.get_client(ProviderType.CEREBRAS)
+            with patch.object(client.chat.completions, "create", side_effect=mock_create):
+                await registry.complete(
+                    "cerebras-llama-8b",
+                    messages=[{"role": "user", "content": "hi"}],
+                    temperature=1.5,
+                )
+        assert captured_kwargs["temperature"] == pytest.approx(1.5), (
+            f"Non-SambaNova provider should not clamp temp, got {captured_kwargs['temperature']}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_stream_false_enforced_when_tools_present(self):
+        """SAMB-04: stream=False is set when SambaNova receives tool-bearing requests."""
+        registry = ProviderRegistry()
+        captured_kwargs = {}
+
+        async def mock_create(**kwargs):
+            captured_kwargs.update(kwargs)
+            mock_resp = MagicMock()
+            mock_resp.choices = [MagicMock()]
+            mock_resp.choices[0].message.content = "ok"
+            mock_resp.choices[0].message.tool_calls = None
+            mock_resp.usage = None
+            return mock_resp
+
+        tools = [{"type": "function", "function": {"name": "test_tool", "parameters": {}}}]
+        with patch.dict(os.environ, {"SAMBANOVA_API_KEY": "test-key"}):
+            client = registry.get_client(ProviderType.SAMBANOVA)
+            with patch.object(client.chat.completions, "create", side_effect=mock_create):
+                await registry.complete_with_tools(
+                    "sambanova-llama-70b",
+                    messages=[{"role": "user", "content": "hi"}],
+                    tools=tools,
+                )
+        assert captured_kwargs.get("stream") is False, (
+            f"Expected stream=False, got {captured_kwargs.get('stream')}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_strict_true_removed_from_tool_definitions(self):
+        """SAMB-05: strict: true is set to false in tool definitions for SambaNova."""
+        registry = ProviderRegistry()
+        captured_kwargs = {}
+
+        async def mock_create(**kwargs):
+            captured_kwargs.update(kwargs)
+            mock_resp = MagicMock()
+            mock_resp.choices = [MagicMock()]
+            mock_resp.choices[0].message.content = "ok"
+            mock_resp.choices[0].message.tool_calls = None
+            mock_resp.usage = None
+            return mock_resp
+
+        tools = [{"type": "function", "function": {"name": "test_tool", "strict": True, "parameters": {}}}]
+        with patch.dict(os.environ, {"SAMBANOVA_API_KEY": "test-key"}):
+            client = registry.get_client(ProviderType.SAMBANOVA)
+            with patch.object(client.chat.completions, "create", side_effect=mock_create):
+                await registry.complete_with_tools(
+                    "sambanova-llama-70b",
+                    messages=[{"role": "user", "content": "hi"}],
+                    tools=tools,
+                )
+        sent_tools = captured_kwargs.get("tools", [])
+        for tool in sent_tools:
+            fn_strict = tool.get("function", {}).get("strict")
+            assert fn_strict is not True, (
+                f"strict should not be True in sent tools, got {fn_strict}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_caller_tool_list_not_mutated(self):
+        """SAMB-05: The transform must not mutate the caller's original tool list."""
+        registry = ProviderRegistry()
+
+        async def mock_create(**kwargs):
+            mock_resp = MagicMock()
+            mock_resp.choices = [MagicMock()]
+            mock_resp.choices[0].message.content = "ok"
+            mock_resp.choices[0].message.tool_calls = None
+            mock_resp.usage = None
+            return mock_resp
+
+        original_tools = [{"type": "function", "function": {"name": "my_tool", "strict": True, "parameters": {}}}]
+        # Deep copy for comparison — original_tools must remain unchanged after the call
+        import copy
+        tools_snapshot = copy.deepcopy(original_tools)
+
+        with patch.dict(os.environ, {"SAMBANOVA_API_KEY": "test-key"}):
+            client = registry.get_client(ProviderType.SAMBANOVA)
+            with patch.object(client.chat.completions, "create", side_effect=mock_create):
+                await registry.complete_with_tools(
+                    "sambanova-llama-70b",
+                    messages=[{"role": "user", "content": "hi"}],
+                    tools=original_tools,
+                )
+        # Original list must not be mutated
+        assert original_tools == tools_snapshot, (
+            "Caller's tool list was mutated by the SambaNova strict-removal transform"
+        )
