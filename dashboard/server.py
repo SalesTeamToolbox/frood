@@ -2221,10 +2221,85 @@ def create_app(
                     "note": "Message delivered to active task.",
                 }
 
-            # Infer task type from message
+            # Classify intent — use LLM classifier when available
             from core.task_queue import TaskType, infer_task_type
 
-            task_type = infer_task_type(text)
+            classification = None
+            _sess_history = []
+            try:
+                _sess_msgs = await chat_session_manager.get_messages(session_id, limit=10)
+                _sess_history = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in _sess_msgs
+                    if m.get("role") in ("user", "assistant") and m.get("content")
+                ]
+            except Exception:
+                pass
+
+            if intent_classifier is not None:
+                classification = await intent_classifier.classify(
+                    text, conversation_history=_sess_history
+                )
+                task_type = classification.task_type
+            else:
+                task_type = infer_task_type(text)
+
+            # Conversational mode: respond directly without creating a task
+            if (
+                classification
+                and classification.is_conversational
+                and settings.conversational_enabled
+            ):
+                try:
+                    from agents.agent import GENERAL_ASSISTANT_PROMPT
+                    from agents.model_router import ModelRouter
+
+                    _sess_router = ModelRouter()
+                    _sess_model = settings.conversational_model
+                    if not _sess_model:
+                        _sess_routing = _sess_router.get_routing(TaskType.EMAIL)
+                        _sess_model = _sess_routing["primary"]
+
+                    _custom = _load_persona()
+                    _sess_system = _custom or GENERAL_ASSISTANT_PROMPT
+
+                    # Load memory context for conversational awareness
+                    from memory.store import build_conversational_memory_context
+
+                    _sess_mem = await build_conversational_memory_context(memory_store, text)
+                    if _sess_mem and _sess_mem.strip():
+                        _sess_system += "\n\n" + _sess_mem
+
+                    _sess_messages = [{"role": "system", "content": _sess_system}]
+                    for h in _sess_history[-10:]:
+                        _sess_messages.append(h)
+                    _sess_messages.append({"role": "user", "content": text})
+
+                    _sess_text, _ = await asyncio.wait_for(
+                        _sess_router.complete(_sess_model, _sess_messages),
+                        timeout=30.0,
+                    )
+                    if _sess_text:
+                        _sess_reply = {
+                            "id": _uuid.uuid4().hex[:12],
+                            "role": "assistant",
+                            "content": _sess_text,
+                            "timestamp": _time.time(),
+                            "sender": "Agent42",
+                            "session_id": session_id,
+                        }
+                        await chat_session_manager.add_message(session_id, _sess_reply)
+                        await ws_manager.broadcast("chat_message", _sess_reply)
+                        return {
+                            "status": "ok",
+                            "message": user_msg,
+                            "reply": _sess_reply,
+                        }
+                except Exception as _sess_conv_err:
+                    logger.warning(
+                        "Session conversational response failed, falling back to task: %s",
+                        _sess_conv_err,
+                    )
 
             # Detect explicit "create a project" intent from the code page and route
             # it through the project interview flow (PROJECT_SETUP task type).
