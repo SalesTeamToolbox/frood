@@ -112,6 +112,11 @@
 | CERE-02 | Phase 1 | Pending |
 | CERE-03 | Phase 1 | Pending |
 | CERE-04 | Phase 1 | Pending |
+| INFR-01 | Phase 1 | Pending |
+| INFR-02 | Phase 1 | Pending |
+| INFR-05 | Phase 1 | Pending |
+| TEST-01 | Phase 1 | Pending |
+| TEST-02 | Phase 1 | Pending |
 | GROQ-01 | Phase 2 | Pending |
 | GROQ-02 | Phase 2 | Pending |
 | GROQ-03 | Phase 2 | Pending |
@@ -126,6 +131,8 @@
 | SAMB-03 | Phase 4 | Pending |
 | SAMB-04 | Phase 4 | Pending |
 | SAMB-05 | Phase 4 | Pending |
+| INFR-03 | Phase 4 | Pending |
+| TEST-03 | Phase 4 | Pending |
 | TOGR-01 | Phase 5 | Pending |
 | TOGR-02 | Phase 5 | Pending |
 | TOGR-03 | Phase 5 | Pending |
@@ -138,14 +145,7 @@
 | CONF-02 | Phase 6 | Pending |
 | CONF-03 | Phase 6 | Pending |
 | CONF-04 | Phase 6 | Pending |
-| INFR-01 | Phase 1 | Pending |
-| INFR-02 | Phase 1 | Pending |
-| INFR-03 | Phase 4 | Pending |
 | INFR-04 | Phase 6 | Pending |
-| INFR-05 | Phase 1 | Pending |
-| TEST-01 | Phase 1-5 | Pending |
-| TEST-02 | Phase 1 | Pending |
-| TEST-03 | Phase 4 | Pending |
 | TEST-04 | Phase 6 | Pending |
 | TEST-05 | Phase 6 | Pending |
 | TEST-06 | Phase 6 | Pending |
@@ -153,8 +153,8 @@
 **Coverage:**
 - v1 requirements: 39 total
 - Mapped to phases: 39
-- Unmapped: 0 ✓
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-01*
-*Last updated: 2026-03-01 after initial definition*
+*Last updated: 2026-03-01 after roadmap creation — TEST-01 assigned to Phase 1 (each provider phase includes its own registration tests); traceability sorted by phase*
