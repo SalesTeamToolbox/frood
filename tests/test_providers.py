@@ -18,7 +18,7 @@ from providers.registry import (
 
 class TestProviderRegistry:
     def test_all_providers_registered(self):
-        expected = {"openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm", "cerebras", "groq", "mistral", "mistral_codestral", "sambanova"}
+        expected = {"openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm", "cerebras", "groq", "mistral", "mistral_codestral", "sambanova", "together"}
         actual = {p.value for p in PROVIDERS.keys()}
         assert expected.issubset(actual)
 
@@ -487,3 +487,53 @@ class TestSambanovaTransforms:
         assert original_tools == tools_snapshot, (
             "Caller's tool list was mutated by the SambaNova strict-removal transform"
         )
+
+
+class TestTogetherRegistration:
+    """Phase 5: Together AI provider registration tests."""
+
+    def test_together_provider_registered(self):
+        """TOGR-01: ProviderType.TOGETHER in PROVIDERS with correct base_url and api_key_env."""
+        spec = PROVIDERS[ProviderType.TOGETHER]
+        assert spec.base_url == "https://api.together.xyz/v1"
+        assert spec.api_key_env == "TOGETHER_API_KEY"
+        assert spec.display_name == "Together AI"
+
+    def test_together_models_registered(self):
+        """TOGR-02: Both Together AI models registered with correct model_ids and CHEAP tier."""
+        for key, expected_id in [
+            ("together-deepseek-v3", "deepseek-ai/DeepSeek-V3"),
+            ("together-llama-70b", "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+        ]:
+            spec = MODELS[key]
+            assert spec.model_id == expected_id, f"{key} model_id mismatch"
+            assert spec.provider == ProviderType.TOGETHER
+            assert spec.tier == ModelTier.CHEAP, f"{key} should be CHEAP tier"
+
+    def test_together_models_all_cheap_tier(self):
+        """All Together AI models are CHEAP tier (credits required)."""
+        together_models = [k for k, v in MODELS.items() if v.provider == ProviderType.TOGETHER]
+        assert len(together_models) == 2
+        for key in together_models:
+            assert MODELS[key].tier == ModelTier.CHEAP, f"{key} should be CHEAP"
+
+    def test_together_context_windows(self):
+        """TOGR-02: Together AI models have appropriate context windows."""
+        assert MODELS["together-deepseek-v3"].max_context_tokens == 128000
+        assert MODELS["together-llama-70b"].max_context_tokens == 131000
+
+    def test_together_client_builds_with_key(self):
+        """Client builds when TOGETHER_API_KEY is set."""
+        registry = ProviderRegistry()
+        with patch.dict(os.environ, {"TOGETHER_API_KEY": "test-key-1234"}):
+            client = registry.get_client(ProviderType.TOGETHER)
+            assert client is not None
+            assert client.base_url == "https://api.together.xyz/v1/"
+
+    def test_together_client_raises_without_key(self):
+        """INFR-05: Client raises ValueError when TOGETHER_API_KEY is not set."""
+        registry = ProviderRegistry()
+        registry.invalidate_client(ProviderType.TOGETHER)
+        with patch.dict(os.environ, {"TOGETHER_API_KEY": ""}, clear=False):
+            with pytest.raises(ValueError, match="TOGETHER_API_KEY not set"):
+                registry.get_client(ProviderType.TOGETHER)
