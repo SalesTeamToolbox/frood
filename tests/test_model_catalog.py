@@ -588,6 +588,60 @@ class TestGroqSpendingTracker:
         assert tracker.daily_tokens == 1500
 
 
+class TestMistralSpendingTracker:
+    """Phase 3: Mistral models — $0 for Codestral, actual pricing for La Plateforme."""
+
+    def test_codestral_builtin_prices_exist(self):
+        """codestral-latest has explicit $0 entry in _BUILTIN_PRICES."""
+        from providers.registry import SpendingTracker
+
+        assert "codestral-latest" in SpendingTracker._BUILTIN_PRICES
+        prompt_price, completion_price = SpendingTracker._BUILTIN_PRICES["codestral-latest"]
+        assert prompt_price == 0.0
+        assert completion_price == 0.0
+
+    def test_la_plateforme_builtin_prices_exist(self):
+        """mistral-large-latest and mistral-small-latest have non-zero pricing entries."""
+        from providers.registry import SpendingTracker
+
+        for model_id in ["mistral-large-latest", "mistral-small-latest"]:
+            assert model_id in SpendingTracker._BUILTIN_PRICES, (
+                f"{model_id} missing from _BUILTIN_PRICES"
+            )
+            prompt_price, completion_price = SpendingTracker._BUILTIN_PRICES[model_id]
+            assert prompt_price > 0.0, f"{model_id} prompt price should be > 0"
+            assert completion_price > 0.0, f"{model_id} completion price should be > 0"
+
+    def test_codestral_zero_cost(self):
+        """Codestral usage records $0 spend."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        tracker.record_usage("mistral-codestral", 50000, 25000,
+                             model_id="codestral-latest")
+        assert tracker.daily_spend_usd == 0.0
+
+    def test_mistral_large_incurs_cost(self):
+        """mistral-large-latest usage records non-zero spend (not a free model)."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        tracker.record_usage("mistral-large", 10000, 5000,
+                             model_id="mistral-large-latest")
+        assert tracker.daily_spend_usd > 0.0
+
+    def test_mistral_tokens_tracked(self):
+        """Token counts are tracked for both free and paid Mistral models."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        tracker.record_usage("mistral-codestral", 1000, 500,
+                             model_id="codestral-latest")
+        tracker.record_usage("mistral-small", 1000, 500,
+                             model_id="mistral-small-latest")
+        assert tracker.daily_tokens == 3000
+
+
 class TestHealthCheck:
     """Tests for model health check functionality."""
 
