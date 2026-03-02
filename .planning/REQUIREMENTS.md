@@ -69,9 +69,9 @@
 - [x] **TEST-01**: Unit tests for each new ProviderSpec/ModelSpec registration
 - [x] **TEST-02**: Unit tests for SpendingTracker pricing with new provider models
 - [x] **TEST-03**: Unit tests for SambaNova request transforms (temp clamp, stream=False, strict removal)
-- [ ] **TEST-04**: Unit tests for GEMINI_FREE_TIER and OPENROUTER_FREE_ONLY config flags
-- [ ] **TEST-05**: Unit tests for updated fallback chain with provider diversity
-- [ ] **TEST-06**: Integration test for routing with multiple providers configured
+- [x] **TEST-04**: Unit tests for GEMINI_FREE_TIER and OPENROUTER_FREE_ONLY config flags
+- [x] **TEST-05**: Unit tests for updated fallback chain with provider diversity
+- [x] **TEST-06**: Integration test for routing with multiple providers configured
 
 ## v2 Requirements
 
@@ -146,9 +146,9 @@
 | CONF-03 | Phase 6 | Complete |
 | CONF-04 | Phase 6 | Complete |
 | INFR-04 | Phase 6 | Complete |
-| TEST-04 | Phase 6 | Pending |
-| TEST-05 | Phase 6 | Pending |
-| TEST-06 | Phase 6 | Pending |
+| TEST-04 | Phase 6 | Complete (06-02) |
+| TEST-05 | Phase 6 | Complete (06-02) |
+| TEST-06 | Phase 6 | Complete (06-02) |
 
 **Coverage:**
 - v1 requirements: 39 total
