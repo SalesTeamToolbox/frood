@@ -29,11 +29,11 @@
 
 ### SambaNova Integration
 
-- [ ] **SAMB-01**: Register ProviderType.SAMBANOVA with ProviderSpec (base_url: `https://api.sambanova.ai/v1`, api_key_env: `SAMBANOVA_API_KEY`)
-- [ ] **SAMB-02**: Register ModelSpec entries — `sambanova-llama-70b` (Meta-Llama-3.3-70B-Instruct), `sambanova-deepseek-v3` (DeepSeek-V3.1), classified as ModelTier.CHEAP
-- [ ] **SAMB-03**: Clamp temperature to max 1.0 for SambaNova requests (provider rejects >1.0)
-- [ ] **SAMB-04**: Force `stream=False` when tools are present for SambaNova (streaming tool calls have broken `index` field)
-- [ ] **SAMB-05**: Strip `strict: true` from tool definitions for SambaNova (not supported — only `strict: false`)
+- [x] **SAMB-01**: Register ProviderType.SAMBANOVA with ProviderSpec (base_url: `https://api.sambanova.ai/v1`, api_key_env: `SAMBANOVA_API_KEY`)
+- [x] **SAMB-02**: Register ModelSpec entries — `sambanova-llama-70b` (Meta-Llama-3.3-70B-Instruct), `sambanova-deepseek-v3` (DeepSeek-V3.1), classified as ModelTier.CHEAP
+- [x] **SAMB-03**: Clamp temperature to max 1.0 for SambaNova requests (provider rejects >1.0)
+- [x] **SAMB-04**: Force `stream=False` when tools are present for SambaNova (streaming tool calls have broken `index` field)
+- [x] **SAMB-05**: Strip `strict: true` from tool definitions for SambaNova (not supported — only `strict: false`)
 
 ### Together AI Integration
 
@@ -60,7 +60,7 @@
 
 - [x] **INFR-01**: Add ProviderType enum values for CEREBRAS, GROQ, MISTRAL, MISTRAL_CODESTRAL, SAMBANOVA, TOGETHER
 - [x] **INFR-02**: Extend SpendingTracker free-model detection beyond `or-free-` prefix / `:free` suffix to cover new providers
-- [ ] **INFR-03**: Add provider-specific request transforms (SambaNova temp clamp, SambaNova stream=False for tools, SambaNova strict removal)
+- [x] **INFR-03**: Add provider-specific request transforms (SambaNova temp clamp, SambaNova stream=False for tools, SambaNova strict removal)
 - [ ] **INFR-04**: Health checks in model_catalog.py cover new providers (minimal completion test per provider)
 - [x] **INFR-05**: Graceful degradation — missing API keys for any new provider must not crash Agent42, just skip that provider
 
@@ -126,12 +126,12 @@
 | MIST-03 | Phase 3 | Complete (03-01) |
 | MIST-04 | Phase 3 | Complete (03-01) |
 | MIST-05 | Phase 3 | Complete (03-01) |
-| SAMB-01 | Phase 4 | Pending |
-| SAMB-02 | Phase 4 | Pending |
-| SAMB-03 | Phase 4 | Pending |
-| SAMB-04 | Phase 4 | Pending |
-| SAMB-05 | Phase 4 | Pending |
-| INFR-03 | Phase 4 | Pending |
+| SAMB-01 | Phase 4 | Complete |
+| SAMB-02 | Phase 4 | Complete |
+| SAMB-03 | Phase 4 | Complete |
+| SAMB-04 | Phase 4 | Complete |
+| SAMB-05 | Phase 4 | Complete |
+| INFR-03 | Phase 4 | Complete |
 | TEST-03 | Phase 4 | Pending |
 | TOGR-01 | Phase 5 | Pending |
 | TOGR-02 | Phase 5 | Pending |
