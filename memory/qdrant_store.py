@@ -66,10 +66,18 @@ class QdrantStore:
     CONVERSATIONS = "conversations"
     KNOWLEDGE = "knowledge"
 
+    # How long (seconds) to cache a successful health check before re-probing
+    _HEALTH_CHECK_TTL = 60.0
+    # How long (seconds) to suppress re-probing after a failed health check
+    _HEALTH_FAIL_TTL = 15.0
+
     def __init__(self, config: QdrantConfig):
         self.config = config
         self._client: QdrantClient | None = None
         self._initialized_collections: set[str] = set()
+        # Health-check cache: avoids hammering the server on every call
+        self._last_health_check: float = 0.0
+        self._last_health_ok: bool = False
 
         if not QDRANT_AVAILABLE:
             logger.info("Qdrant backend: qdrant-client not installed, unavailable")
@@ -82,7 +90,7 @@ class QdrantStore:
                 if config.api_key:
                     kwargs["api_key"] = config.api_key
                 self._client = QdrantClient(**kwargs)
-                logger.info(f"Qdrant backend: connected to server at {config.url}")
+                logger.info(f"Qdrant backend: connecting to server at {config.url}")
             else:
                 # Embedded mode: local file storage
                 self._client = QdrantClient(path=config.local_path)
@@ -91,10 +99,41 @@ class QdrantStore:
             logger.warning(f"Qdrant backend: failed to connect — {e}")
             self._client = None
 
+    def _check_health(self) -> bool:
+        """Probe the Qdrant server for actual connectivity.
+
+        Results are cached for ``_HEALTH_CHECK_TTL`` (success) or
+        ``_HEALTH_FAIL_TTL`` (failure) seconds to avoid per-call overhead.
+        Embedded mode always returns True (no network needed).
+        """
+        if self._client is None:
+            return False
+
+        # Embedded mode — always reachable, no network
+        if not self.config.url:
+            return True
+
+        now = time.time()
+        ttl = self._HEALTH_CHECK_TTL if self._last_health_ok else self._HEALTH_FAIL_TTL
+        if now - self._last_health_check < ttl:
+            return self._last_health_ok
+
+        try:
+            # Lightweight probe — get_collections is the cheapest RPC
+            self._client.get_collections()
+            self._last_health_ok = True
+            logger.debug("Qdrant health check: OK")
+        except Exception as e:
+            self._last_health_ok = False
+            logger.warning("Qdrant health check failed: %s", e)
+
+        self._last_health_check = now
+        return self._last_health_ok
+
     @property
     def is_available(self) -> bool:
-        """Whether the Qdrant backend is connected and usable."""
-        return self._client is not None
+        """Whether the Qdrant backend is connected and actually reachable."""
+        return self._check_health()
 
     def _collection_name(self, suffix: str) -> str:
         """Get the full collection name with prefix."""

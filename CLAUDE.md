@@ -478,6 +478,10 @@ class TestWorkspaceSandbox:
 | 106 | Security | `SANDBOX_ENABLED=false` silently disables all path restrictions | `config.py` force-enables sandbox when host is exposed or `SANDBOX_DISABLE_CONFIRM` not set; `sandbox.py` logs CRITICAL |
 | 107 | Security | `zipfile.extractall()` vulnerable to zip-slip (path traversal via `../`) | Validate every `zf.namelist()` entry: reject absolute paths, `..` components, and resolved paths outside target |
 | 108 | Security | Device API key hashes used plain SHA-256 (no secret) | `_hash_key()` uses HMAC-SHA256 keyed by JWT_SECRET; `validate_api_key()` auto-upgrades legacy SHA-256 hashes |
+| 109 | Memory | `QdrantStore.is_available` only checked `self._client is not None` — returned True even when server was unreachable | `is_available` now probes via `get_collections()` with cached TTL (60s success, 15s fail); embedded mode skips probe |
+| 110 | Memory | `EmbeddingStore.search()` took Qdrant path when `is_available=True` but never fell through to JSON on Qdrant failure | Refactored to try/except around Qdrant search; falls through to `_search_json()` on any exception |
+| 111 | Memory | Agent claims "stored in MEMORY.md" but has no tool to actually write — memory skill described the system but no corresponding tool existed | Created `tools/memory_tool.py` with store/recall/log/search actions; registered in `_register_tools()` |
+| 112 | Dashboard | Storage status showed configured mode ("Qdrant + Redis") even when Qdrant was unreachable | Endpoint now returns `effective_mode` based on actual connectivity; frontend shows degradation warning when `configured_mode != mode` |
 
 ---
 
