@@ -59,7 +59,10 @@ Plans:
   2. Codestral (MISTRAL_CODESTRAL provider) and La Plateforme (MISTRAL provider) are registered as separate providers with independent base URLs and API keys
   3. codestral-latest is classified ModelTier.FREE with $0 SpendingTracker pricing; mistral-large-latest and mistral-small-latest are classified ModelTier.CHEAP with actual pricing
   4. Unit tests for both Mistral ProviderSpec registrations and pricing entries pass
-**Plans**: TBD
+**Plans**: 1/2 plans
+Plans:
+- [x] 03-01-PLAN.md — Register 2 Mistral ProviderSpecs (MISTRAL + MISTRAL_CODESTRAL) + 3 ModelSpecs + pricing + config (DONE 2026-03-02)
+- [ ] 03-02-PLAN.md — Unit tests for Mistral dual-provider registration and SpendingTracker pricing
 
 ### Phase 4: SambaNova Integration
 **Goal**: SambaNova is registered as a credits-based provider with all three request transforms active — temperature clamping, stream=False for tools, and strict removal — preventing the known failure modes
@@ -106,7 +109,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation + Cerebras | 2/2 | Complete   | 2026-03-02 |
 | 2. Groq Integration | 2/2 | Complete   | 2026-03-02 |
-| 3. Mistral Integration | 0/TBD | Not started | - |
+| 3. Mistral Integration | 1/2 | In Progress | - |
 | 4. SambaNova Integration | 0/TBD | Not started | - |
 | 5. Together AI Integration | 0/TBD | Not started | - |
 | 6. Routing + Config Finalization | 0/TBD | Not started | - |

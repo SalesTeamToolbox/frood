@@ -21,11 +21,11 @@
 
 ### Mistral Integration
 
-- [ ] **MIST-01**: Register ProviderType.MISTRAL with ProviderSpec (base_url: `https://api.mistral.ai/v1`, api_key_env: `MISTRAL_API_KEY`)
-- [ ] **MIST-02**: Register ProviderType.MISTRAL_CODESTRAL with ProviderSpec (base_url: `https://codestral.mistral.ai/v1`, api_key_env: `CODESTRAL_API_KEY`) — separate free endpoint
-- [ ] **MIST-03**: Register Codestral ModelSpec entries on MISTRAL_CODESTRAL provider — `codestral-latest` (32K context, 30 RPM free), classified as ModelTier.FREE
-- [ ] **MIST-04**: Register La Plateforme ModelSpec entries on MISTRAL provider — `mistral-large-latest`, `mistral-small-latest`, classified as ModelTier.CHEAP (2 RPM free tier)
-- [ ] **MIST-05**: Add $0 pricing for Codestral free models, actual pricing for La Plateforme models in SpendingTracker
+- [x] **MIST-01**: Register ProviderType.MISTRAL with ProviderSpec (base_url: `https://api.mistral.ai/v1`, api_key_env: `MISTRAL_API_KEY`)
+- [x] **MIST-02**: Register ProviderType.MISTRAL_CODESTRAL with ProviderSpec (base_url: `https://codestral.mistral.ai/v1`, api_key_env: `CODESTRAL_API_KEY`) — separate free endpoint
+- [x] **MIST-03**: Register Codestral ModelSpec entries on MISTRAL_CODESTRAL provider — `codestral-latest` (32K context, 30 RPM free), classified as ModelTier.FREE
+- [x] **MIST-04**: Register La Plateforme ModelSpec entries on MISTRAL provider — `mistral-large-latest`, `mistral-small-latest`, classified as ModelTier.CHEAP (2 RPM free tier)
+- [x] **MIST-05**: Add $0 pricing for Codestral free models, actual pricing for La Plateforme models in SpendingTracker
 
 ### SambaNova Integration
 
@@ -121,11 +121,11 @@
 | GROQ-02 | Phase 2 | Complete (02-01) |
 | GROQ-03 | Phase 2 | Complete (02-01) |
 | GROQ-04 | Phase 2 | Complete (02-01) |
-| MIST-01 | Phase 3 | Pending |
-| MIST-02 | Phase 3 | Pending |
-| MIST-03 | Phase 3 | Pending |
-| MIST-04 | Phase 3 | Pending |
-| MIST-05 | Phase 3 | Pending |
+| MIST-01 | Phase 3 | Complete (03-01) |
+| MIST-02 | Phase 3 | Complete (03-01) |
+| MIST-03 | Phase 3 | Complete (03-01) |
+| MIST-04 | Phase 3 | Complete (03-01) |
+| MIST-05 | Phase 3 | Complete (03-01) |
 | SAMB-01 | Phase 4 | Pending |
 | SAMB-02 | Phase 4 | Pending |
 | SAMB-03 | Phase 4 | Pending |
