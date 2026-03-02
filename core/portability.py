@@ -13,10 +13,10 @@ Usage (via CLI):
 import json
 import logging
 import os
-import sys
 import re
 import shutil
 import stat
+import sys
 import tarfile
 import tempfile
 from dataclasses import asdict, dataclass, field
@@ -38,7 +38,7 @@ _BACKUP_CATEGORIES: dict[str, list[str]] = {
     "memory": [".agent42/memory"],
     "sessions": [".agent42/sessions"],
     "audit": [".agent42/approvals.jsonl", ".agent42/devices.jsonl"],
-    "secrets": [".env", ".agent42/settings.json"],
+    "secrets": [".env", ".agent42/settings.json", ".agent42/github_accounts.json"],
     "media": [".agent42/outputs", ".agent42/templates", ".agent42/images"],
     "qdrant": [".agent42/qdrant"],
     "skills": ["skills/workspace"],
@@ -148,6 +148,7 @@ def create_backup(
     base_path: str,
     output_path: str,
     include_worktrees: bool = False,
+    exclude_secrets: bool = False,
 ) -> str:
     """Create a full backup archive of Agent42 data.
 
@@ -172,6 +173,8 @@ def create_backup(
         categories_included = []
 
         for category, paths in _BACKUP_CATEGORIES.items():
+            if exclude_secrets and category == "secrets":
+                continue
             cat_count = 0
             for rel_path in paths:
                 src = base / rel_path

@@ -176,6 +176,7 @@ class Settings:
     ssh_default_key_path: str = ""  # Path to default SSH private key
     ssh_max_upload_mb: int = 50  # Max file transfer size in MB
     ssh_command_timeout: int = 120  # Per-command timeout in seconds
+    ssh_strict_host_key: bool = True  # Verify SSH host keys (disable only for trusted networks)
 
     # Tunnel manager
     tunnel_enabled: bool = False
@@ -259,7 +260,7 @@ class Settings:
 
     # RLM (Recursive Language Models — MIT CSAIL)
     rlm_enabled: bool = True
-    rlm_threshold_tokens: int = 50_000
+    rlm_threshold_tokens: int = 200_000
     rlm_environment: str = "local"  # local | docker | modal | prime
     rlm_max_depth: int = 3
     rlm_max_iterations: int = 20
@@ -291,6 +292,24 @@ class Settings:
                 "Set BROWSER_GATEWAY_TOKEN in .env for persistent browser sessions."
             )
 
+        # Sandbox hardening: force-enable when exposed or unconfirmed
+        sandbox_enabled = os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes")
+        dashboard_host = os.getenv("DASHBOARD_HOST", "127.0.0.1")
+        if not sandbox_enabled:
+            if dashboard_host != "127.0.0.1":
+                sandbox_enabled = True
+                logger.critical(
+                    "SECURITY: Forced SANDBOX_ENABLED=true — sandbox cannot be disabled "
+                    "when DASHBOARD_HOST is exposed (%s).",
+                    dashboard_host,
+                )
+            elif os.getenv("SANDBOX_DISABLE_CONFIRM", "") != "i-understand-the-risks":
+                sandbox_enabled = True
+                logger.warning(
+                    "SECURITY: Forced SANDBOX_ENABLED=true — set "
+                    "SANDBOX_DISABLE_CONFIRM=i-understand-the-risks to disable."
+                )
+
         return cls(
             # Provider API keys
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
@@ -304,7 +323,7 @@ class Settings:
             dashboard_password=os.getenv("DASHBOARD_PASSWORD", ""),
             dashboard_password_hash=os.getenv("DASHBOARD_PASSWORD_HASH", ""),
             jwt_secret=jwt_secret,
-            dashboard_host=os.getenv("DASHBOARD_HOST", "127.0.0.1"),
+            dashboard_host=dashboard_host,
             cors_allowed_origins=os.getenv("CORS_ALLOWED_ORIGINS", ""),
             # Orchestrator
             default_repo_path=_resolve_repo_path(os.getenv("DEFAULT_REPO_PATH", "")),
@@ -312,7 +331,7 @@ class Settings:
             agent_dispatch_delay=float(os.getenv("AGENT_DISPATCH_DELAY", "2.0")),
             tasks_json_path=os.getenv("TASKS_JSON_PATH", "tasks.json"),
             # Security
-            sandbox_enabled=os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes"),
+            sandbox_enabled=sandbox_enabled,
             workspace_restrict=os.getenv("WORKSPACE_RESTRICT", "true").lower()
             in ("true", "1", "yes"),
             command_filter_mode=os.getenv("COMMAND_FILTER_MODE", "deny"),
@@ -444,7 +463,7 @@ class Settings:
             l2_task_types=os.getenv("L2_TASK_TYPES", ""),
             # RLM (Recursive Language Models)
             rlm_enabled=os.getenv("RLM_ENABLED", "true").lower() in ("true", "1", "yes"),
-            rlm_threshold_tokens=int(os.getenv("RLM_THRESHOLD_TOKENS", "50000")),
+            rlm_threshold_tokens=int(os.getenv("RLM_THRESHOLD_TOKENS", "200000")),
             rlm_environment=os.getenv("RLM_ENVIRONMENT", "local"),
             rlm_max_depth=int(os.getenv("RLM_MAX_DEPTH", "3")),
             rlm_max_iterations=int(os.getenv("RLM_MAX_ITERATIONS", "20")),
@@ -461,6 +480,8 @@ class Settings:
             ssh_default_key_path=os.getenv("SSH_DEFAULT_KEY_PATH", ""),
             ssh_max_upload_mb=int(os.getenv("SSH_MAX_UPLOAD_MB", "50")),
             ssh_command_timeout=int(os.getenv("SSH_COMMAND_TIMEOUT", "120")),
+            ssh_strict_host_key=os.getenv("SSH_STRICT_HOST_KEY", "true").lower()
+            in ("true", "1", "yes"),
             # Tunnel manager
             tunnel_enabled=os.getenv("TUNNEL_ENABLED", "false").lower() in ("true", "1", "yes"),
             tunnel_provider=os.getenv("TUNNEL_PROVIDER", "auto"),

@@ -1543,6 +1543,18 @@ class Agent42:
             if not p["configured"]:
                 logger.debug(f"Provider not configured: {p['display_name']}")
 
+        # Security configuration warnings
+        if not settings.tool_rate_limiting_enabled:
+            logger.warning("SECURITY: Tool rate limiting is disabled (TOOL_RATE_LIMITING_ENABLED=false)")
+        if settings.max_daily_api_spend_usd == 0.0:
+            logger.warning("No daily API spend limit set (MAX_DAILY_API_SPEND_USD=0)")
+        if settings.dashboard_username == "admin" and settings.dashboard_host != "127.0.0.1":
+            logger.warning(
+                "SECURITY: Default 'admin' username on exposed host (%s). "
+                "Set DASHBOARD_USERNAME to a custom value.",
+                settings.dashboard_host,
+            )
+
 
 from commands import BackupCommandHandler, RestoreCommandHandler, CloneCommandHandler, CommandHandler
 

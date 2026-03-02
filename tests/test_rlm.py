@@ -405,7 +405,7 @@ class TestRLMSettings:
         from core.config import settings
 
         assert settings.rlm_enabled is True
-        assert settings.rlm_threshold_tokens == 50_000
+        assert settings.rlm_threshold_tokens == 200_000  # pitfall #92
         assert settings.rlm_environment == "local"
         assert settings.rlm_cost_limit == 1.00
 
