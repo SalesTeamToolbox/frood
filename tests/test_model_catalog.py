@@ -691,6 +691,56 @@ class TestSambanovaSpendingTracker:
         assert tracker.daily_tokens == 1500
 
 
+class TestTogetherSpendingTracker:
+    """Phase 5: Together AI models -- CHEAP tier, non-zero pricing."""
+
+    def test_together_llama_builtin_prices_exist(self):
+        """meta-llama/Llama-3.3-70B-Instruct-Turbo has explicit pricing in _BUILTIN_PRICES."""
+        from providers.registry import SpendingTracker
+
+        assert "meta-llama/Llama-3.3-70B-Instruct-Turbo" in SpendingTracker._BUILTIN_PRICES
+        prompt_price, completion_price = SpendingTracker._BUILTIN_PRICES["meta-llama/Llama-3.3-70B-Instruct-Turbo"]
+        assert prompt_price > 0.0
+        assert completion_price > 0.0
+
+    def test_together_deepseek_builtin_prices_exist(self):
+        """deepseek-ai/DeepSeek-V3 has explicit pricing in _BUILTIN_PRICES."""
+        from providers.registry import SpendingTracker
+
+        assert "deepseek-ai/DeepSeek-V3" in SpendingTracker._BUILTIN_PRICES
+        prompt_price, completion_price = SpendingTracker._BUILTIN_PRICES["deepseek-ai/DeepSeek-V3"]
+        assert prompt_price > 0.0
+        assert completion_price > 0.0
+
+    def test_together_llama_incurs_cost(self):
+        """Together AI Llama usage records non-zero spend."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        tracker.record_usage("together-llama-70b", 10000, 5000,
+                             model_id="meta-llama/Llama-3.3-70B-Instruct-Turbo")
+        assert tracker.daily_spend_usd > 0.0
+
+    def test_together_deepseek_incurs_cost(self):
+        """Together AI DeepSeek usage records non-zero spend."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        tracker.record_usage("together-deepseek-v3", 10000, 5000,
+                             model_id="deepseek-ai/DeepSeek-V3")
+        assert tracker.daily_spend_usd > 0.0
+
+    def test_together_not_free_model_detection(self):
+        """Together AI model IDs don't match or-free- prefix or :free suffix -- must have explicit pricing."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        # Confirm _get_price resolves to explicit entry, not $0 free detection
+        price = tracker._get_price("together-llama-70b", "meta-llama/Llama-3.3-70B-Instruct-Turbo")
+        assert price is not None
+        assert price[0] > 0.0  # Not free
+
+
 class TestHealthCheck:
     """Tests for model health check functionality."""
 
