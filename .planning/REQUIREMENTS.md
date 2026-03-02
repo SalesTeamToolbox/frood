@@ -14,10 +14,10 @@
 
 ### Groq Integration
 
-- [ ] **GROQ-01**: Register ProviderType.GROQ with ProviderSpec (base_url: `https://api.groq.com/openai/v1`, api_key_env: `GROQ_API_KEY`)
-- [ ] **GROQ-02**: Register ModelSpec entries — `groq-llama-70b` (131K context, 280 tok/s, 1K RPM), `groq-gpt-oss-120b` (131K context, 500 tok/s, 1K RPM), `groq-llama-8b` (131K context, 560 tok/s, 1K RPM)
-- [ ] **GROQ-03**: All Groq models classified as ModelTier.FREE
-- [ ] **GROQ-04**: Add $0 pricing entries to SpendingTracker for all Groq model IDs
+- [x] **GROQ-01**: Register ProviderType.GROQ with ProviderSpec (base_url: `https://api.groq.com/openai/v1`, api_key_env: `GROQ_API_KEY`)
+- [x] **GROQ-02**: Register ModelSpec entries — `groq-llama-70b` (131K context, 280 tok/s, 1K RPM), `groq-gpt-oss-120b` (131K context, 500 tok/s, 1K RPM), `groq-llama-8b` (131K context, 560 tok/s, 1K RPM)
+- [x] **GROQ-03**: All Groq models classified as ModelTier.FREE
+- [x] **GROQ-04**: Add $0 pricing entries to SpendingTracker for all Groq model IDs
 
 ### Mistral Integration
 
@@ -117,10 +117,10 @@
 | INFR-05 | Phase 1 | Complete (01-01) |
 | TEST-01 | Phase 1 | Complete (01-01) |
 | TEST-02 | Phase 1 | Complete (01-01) |
-| GROQ-01 | Phase 2 | Pending |
-| GROQ-02 | Phase 2 | Pending |
-| GROQ-03 | Phase 2 | Pending |
-| GROQ-04 | Phase 2 | Pending |
+| GROQ-01 | Phase 2 | Complete (02-01) |
+| GROQ-02 | Phase 2 | Complete (02-01) |
+| GROQ-03 | Phase 2 | Complete (02-01) |
+| GROQ-04 | Phase 2 | Complete (02-01) |
 | MIST-01 | Phase 3 | Pending |
 | MIST-02 | Phase 3 | Pending |
 | MIST-03 | Phase 3 | Pending |
