@@ -17,7 +17,7 @@ from providers.registry import (
 
 class TestProviderRegistry:
     def test_all_providers_registered(self):
-        expected = {"openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm", "cerebras", "groq"}
+        expected = {"openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm", "cerebras", "groq", "mistral", "mistral_codestral"}
         actual = {p.value for p in PROVIDERS.keys()}
         assert expected.issubset(actual)
 
@@ -216,3 +216,77 @@ class TestGroqRegistration:
         with patch.dict(os.environ, {"GROQ_API_KEY": ""}, clear=False):
             with pytest.raises(ValueError, match="GROQ_API_KEY not set"):
                 registry.get_client(ProviderType.GROQ)
+
+
+class TestMistralRegistration:
+    """Phase 3: Mistral dual-provider registration tests."""
+
+    def test_mistral_provider_registered(self):
+        """MIST-01: ProviderType.MISTRAL is in PROVIDERS with correct base_url and api_key_env."""
+        spec = PROVIDERS[ProviderType.MISTRAL]
+        assert spec.base_url == "https://api.mistral.ai/v1"
+        assert spec.api_key_env == "MISTRAL_API_KEY"
+        assert spec.display_name == "Mistral La Plateforme"
+
+    def test_mistral_codestral_provider_registered(self):
+        """MIST-02: ProviderType.MISTRAL_CODESTRAL is in PROVIDERS with correct base_url and api_key_env."""
+        spec = PROVIDERS[ProviderType.MISTRAL_CODESTRAL]
+        assert spec.base_url == "https://codestral.mistral.ai/v1"
+        assert spec.api_key_env == "CODESTRAL_API_KEY"
+        assert spec.display_name == "Mistral Codestral (free)"
+
+    def test_codestral_model_registered(self):
+        """MIST-03: codestral-latest is registered on MISTRAL_CODESTRAL provider as FREE."""
+        from providers.registry import ModelTier
+
+        spec = MODELS["mistral-codestral"]
+        assert spec.model_id == "codestral-latest"
+        assert spec.provider == ProviderType.MISTRAL_CODESTRAL
+        assert spec.tier == ModelTier.FREE
+        assert spec.max_context_tokens == 32000
+
+    def test_la_plateforme_models_registered(self):
+        """MIST-04: mistral-large and mistral-small are registered on MISTRAL provider as CHEAP."""
+        from providers.registry import ModelTier
+
+        for key, expected_id in [
+            ("mistral-large", "mistral-large-latest"),
+            ("mistral-small", "mistral-small-latest"),
+        ]:
+            spec = MODELS[key]
+            assert spec.model_id == expected_id, f"{key} model_id mismatch"
+            assert spec.provider == ProviderType.MISTRAL
+            assert spec.tier == ModelTier.CHEAP, f"{key} should be CHEAP tier"
+            assert spec.max_context_tokens == 128000
+
+    def test_mistral_client_builds_with_key(self):
+        """Client builds when MISTRAL_API_KEY is set."""
+        registry = ProviderRegistry()
+        with patch.dict(os.environ, {"MISTRAL_API_KEY": "test-key-1234"}):
+            client = registry.get_client(ProviderType.MISTRAL)
+            assert client is not None
+            assert client.base_url == "https://api.mistral.ai/v1/"
+
+    def test_codestral_client_builds_with_key(self):
+        """Client builds when CODESTRAL_API_KEY is set."""
+        registry = ProviderRegistry()
+        with patch.dict(os.environ, {"CODESTRAL_API_KEY": "test-key-5678"}):
+            client = registry.get_client(ProviderType.MISTRAL_CODESTRAL)
+            assert client is not None
+            assert client.base_url == "https://codestral.mistral.ai/v1/"
+
+    def test_mistral_client_raises_without_key(self):
+        """Client raises ValueError when MISTRAL_API_KEY is not set."""
+        registry = ProviderRegistry()
+        registry.invalidate_client(ProviderType.MISTRAL)
+        with patch.dict(os.environ, {"MISTRAL_API_KEY": ""}, clear=False):
+            with pytest.raises(ValueError, match="MISTRAL_API_KEY not set"):
+                registry.get_client(ProviderType.MISTRAL)
+
+    def test_codestral_client_raises_without_key(self):
+        """Client raises ValueError when CODESTRAL_API_KEY is not set."""
+        registry = ProviderRegistry()
+        registry.invalidate_client(ProviderType.MISTRAL_CODESTRAL)
+        with patch.dict(os.environ, {"CODESTRAL_API_KEY": ""}, clear=False):
+            with pytest.raises(ValueError, match="CODESTRAL_API_KEY not set"):
+                registry.get_client(ProviderType.MISTRAL_CODESTRAL)
