@@ -622,7 +622,7 @@ class TestCronStagger:
 # Extended Context Window Tests
 # ============================================================================
 
-from agents.model_router import ModelRouter
+from agents.model_router import FREE_ROUTING, ModelRouter
 from providers.registry import ProviderRegistry
 
 
@@ -637,38 +637,68 @@ class TestExtendedContextWindow:
             assert m["max_context_tokens"] >= 500_000
 
     def test_get_routing_default_context_unchanged(self):
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
+        # Set Cerebras key (now the CODING primary) and Gemini as fallback
+        with patch.dict(
+            os.environ,
+            {"CEREBRAS_API_KEY": "fake-cerebras-key", "GEMINI_API_KEY": "test-key"},
+        ):
             router = ModelRouter()
             routing = router.get_routing(TaskType.CODING)
-        # Default routing should use Gemini Flash as the standard coding model
-        assert routing["primary"] == "gemini-2-flash"
+        # Default routing should use Cerebras as the coding primary (ROUT-01)
+        assert routing["primary"] == FREE_ROUTING[TaskType.CODING]["primary"]
 
     def test_get_routing_with_max_context_prefers_large_models(self):
-        # GEMINI_API_KEY needed because the large-context free OR models
-        # (gemini-flash, gemini-pro) were removed — real large-context models
-        # are native Gemini (gemini-2-flash, gemini-2-pro).
+        # Set Cerebras key (CODING primary), Gemini key (large-context fallback),
+        # and OR key for any OR free-tier large models.
         with patch.dict(
-            os.environ, {"GEMINI_API_KEY": "test-key", "OPENROUTER_API_KEY": "sk-test-dummy"}
+            os.environ,
+            {
+                "CEREBRAS_API_KEY": "fake-cerebras-key",
+                "GEMINI_API_KEY": "test-key",
+                "OPENROUTER_API_KEY": "sk-test-dummy",
+            },
         ):
             router = ModelRouter()
             routing = router.get_routing(TaskType.CODING, context_window="max")
-        # Should select a model with large context (>= 500K tokens)
+        # context_window="max" selects a FREE-tier model with >= 500K context if one
+        # exists; if none do, the task-type default is used. Either way the routing
+        # dict must have a primary.
         registry = ProviderRegistry()
-        large_keys = {m["key"] for m in registry.models_by_min_context(500_000)}
-        if large_keys:
-            assert routing["primary"] in large_keys
+        free_large_keys = {
+            m["key"]
+            for m in registry.models_by_min_context(500_000)
+            if m["tier"] == "free"
+        }
+        if free_large_keys:
+            # If free large-context models exist, one should have been selected
+            assert routing["primary"] in free_large_keys
+        else:
+            # No free large-context models — task default is used
+            assert "primary" in routing
 
     def test_get_routing_with_large_context(self):
         with patch.dict(
-            os.environ, {"GEMINI_API_KEY": "test-key", "OPENROUTER_API_KEY": "sk-test-dummy"}
+            os.environ,
+            {
+                "GROQ_API_KEY": "fake-groq-key",
+                "GEMINI_API_KEY": "test-key",
+                "OPENROUTER_API_KEY": "sk-test-dummy",
+            },
         ):
             router = ModelRouter()
             routing = router.get_routing(TaskType.RESEARCH, context_window="large")
-        # Should select a model with >= 200K context
+        # context_window="large" selects a FREE-tier model with >= 200K context if one
+        # exists; if none do, the task-type default is used.
         registry = ProviderRegistry()
-        large_keys = {m["key"] for m in registry.models_by_min_context(200_000)}
-        if large_keys:
-            assert routing["primary"] in large_keys
+        free_large_keys = {
+            m["key"]
+            for m in registry.models_by_min_context(200_000)
+            if m["tier"] == "free"
+        }
+        if free_large_keys:
+            assert routing["primary"] in free_large_keys
+        else:
+            assert "primary" in routing
 
 
 # ============================================================================
