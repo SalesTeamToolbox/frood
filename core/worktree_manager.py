@@ -9,6 +9,7 @@ Security:
 - Task IDs are sanitized to prevent path traversal
 - Restrictive directory permissions (0o700)
 - git add uses explicit file tracking instead of -A to avoid staging secrets
+- All subprocess calls have 120s timeouts (pitfall #35)
 """
 
 import asyncio
@@ -41,6 +42,8 @@ _GIT_ADD_EXCLUDE = [
     "secrets*",
 ]
 
+_GIT_TIMEOUT = 120.0  # seconds
+
 
 def _sanitize_task_id(task_id: str) -> str:
     """Validate task ID to prevent path traversal attacks."""
@@ -50,6 +53,19 @@ def _sanitize_task_id(task_id: str) -> str:
             "Only alphanumeric characters, hyphens, and underscores are allowed."
         )
     return task_id
+
+
+async def _communicate_with_timeout(
+    proc: asyncio.subprocess.Process,
+    timeout: float = _GIT_TIMEOUT,
+) -> tuple[bytes, bytes]:
+    """Communicate with a subprocess, killing it on timeout (pitfall #35)."""
+    try:
+        return await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError(f"git command timed out after {timeout}s")
 
 
 class WorktreeManager:
@@ -75,18 +91,14 @@ class WorktreeManager:
             return worktree_path
 
         proc = await asyncio.create_subprocess_exec(
-            "git",
-            "worktree",
-            "add",
-            "-b",
-            branch_name,
-            str(worktree_path),
-            base_branch,
+            "git", "worktree", "add",
+            "-b", branch_name,
+            str(worktree_path), base_branch,
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        _, stderr = await _communicate_with_timeout(proc)
 
         if proc.returncode != 0:
             raise RuntimeError(f"git worktree add failed: {stderr.decode().strip()}")
@@ -104,14 +116,12 @@ class WorktreeManager:
             shutil.rmtree(worktree_path)
 
         proc = await asyncio.create_subprocess_exec(
-            "git",
-            "worktree",
-            "prune",
+            "git", "worktree", "prune",
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.communicate()
+        await _communicate_with_timeout(proc)
         logger.info(f"Removed worktree for task {task_id}")
 
     async def commit(self, task_id: str, message: str):
@@ -142,25 +152,20 @@ class WorktreeManager:
                     await f.write(f"{p}\n")
 
         add_proc = await asyncio.create_subprocess_exec(
-            "git",
-            "add",
-            ".",
+            "git", "add", ".",
             cwd=str(worktree_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await add_proc.communicate()
+        await _communicate_with_timeout(add_proc)
 
         commit_proc = await asyncio.create_subprocess_exec(
-            "git",
-            "commit",
-            "-m",
-            message,
+            "git", "commit", "-m", message,
             cwd=str(worktree_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await commit_proc.communicate()
+        _, stderr = await _communicate_with_timeout(commit_proc)
 
         if commit_proc.returncode != 0:
             err = stderr.decode().strip()
@@ -175,14 +180,12 @@ class WorktreeManager:
         """Return the full diff of a worktree against the base branch."""
         worktree_path = self._worktree_path(task_id)
         proc = await asyncio.create_subprocess_exec(
-            "git",
-            "diff",
-            base_branch,
+            "git", "diff", base_branch,
             cwd=str(worktree_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        stdout, _ = await _communicate_with_timeout(proc)
         return stdout.decode()
 
     async def push(self, task_id: str) -> str:
@@ -191,16 +194,12 @@ class WorktreeManager:
         branch_name = f"agent42/{task_id}"
 
         proc = await asyncio.create_subprocess_exec(
-            "git",
-            "push",
-            "-u",
-            "origin",
-            branch_name,
+            "git", "push", "-u", "origin", branch_name,
             cwd=str(worktree_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        _, stderr = await _communicate_with_timeout(proc)
 
         if proc.returncode != 0:
             raise RuntimeError(f"git push failed: {stderr.decode().strip()}")
@@ -214,42 +213,35 @@ class WorktreeManager:
 
         # Checkout base branch
         checkout = await asyncio.create_subprocess_exec(
-            "git",
-            "checkout",
-            base_branch,
+            "git", "checkout", base_branch,
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await checkout.communicate()
+        await _communicate_with_timeout(checkout)
         if checkout.returncode != 0:
             return False
 
         # Merge
-        merge = await asyncio.create_subprocess_exec(
-            "git",
-            "merge",
-            "--no-ff",
-            branch_name,
-            "-m",
-            f"Merge agent42/{task_id}: task complete",
+        merge_proc = await asyncio.create_subprocess_exec(
+            "git", "merge", "--no-ff", branch_name,
+            "-m", f"Merge agent42/{task_id}: task complete",
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await merge.communicate()
+        _, stderr = await _communicate_with_timeout(merge_proc)
 
-        if merge.returncode != 0:
+        if merge_proc.returncode != 0:
             logger.error(f"Merge failed for {task_id}: {stderr.decode().strip()}")
             # Abort the merge
-            await asyncio.create_subprocess_exec(
-                "git",
-                "merge",
-                "--abort",
+            abort = await asyncio.create_subprocess_exec(
+                "git", "merge", "--abort",
                 cwd=str(self.repo_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
+            await _communicate_with_timeout(abort)
             return False
 
         logger.info(f"Merged {branch_name} into {base_branch}")

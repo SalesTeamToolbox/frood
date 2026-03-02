@@ -279,22 +279,22 @@ class ScheduledSecurityScanner:
         """Find an existing open security-scan issue."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "gh",
-                "issue",
-                "list",
-                "--label",
-                "security-scan",
-                "--state",
-                "open",
-                "--json",
-                "number",
-                "--limit",
-                "1",
+                "gh", "issue", "list",
+                "--label", "security-scan",
+                "--state", "open",
+                "--json", "number",
+                "--limit", "1",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._workspace,
             )
-            stdout, stderr = await proc.communicate()
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                logger.warning("gh issue list timed out after 30s")
+                return None
             if proc.returncode != 0:
                 logger.warning(f"gh issue list failed: {stderr.decode().strip()}")
                 return None
@@ -319,7 +319,13 @@ class ScheduledSecurityScanner:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._workspace,
             )
-            stdout, stderr = await proc.communicate()
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                logger.warning("gh issue create timed out after 30s")
+                return
             if proc.returncode != 0:
                 logger.error(f"gh issue create failed: {stderr.decode().strip()}")
             else:
@@ -333,17 +339,20 @@ class ScheduledSecurityScanner:
         """Add a comment to an existing GitHub issue."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "gh",
-                "issue",
-                "comment",
+                "gh", "issue", "comment",
                 str(issue_number),
-                "--body",
-                body,
+                "--body", body,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._workspace,
             )
-            stdout, stderr = await proc.communicate()
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                logger.warning("gh issue comment timed out after 30s")
+                return
             if proc.returncode != 0:
                 logger.error(f"gh issue comment failed: {stderr.decode().strip()}")
         except FileNotFoundError:
@@ -355,17 +364,20 @@ class ScheduledSecurityScanner:
         """Close a GitHub issue with a comment."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "gh",
-                "issue",
-                "close",
+                "gh", "issue", "close",
                 str(issue_number),
-                "--comment",
-                comment,
+                "--comment", comment,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._workspace,
             )
-            stdout, stderr = await proc.communicate()
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                logger.warning("gh issue close timed out after 30s")
+                return
             if proc.returncode != 0:
                 logger.error(f"gh issue close failed: {stderr.decode().strip()}")
         except FileNotFoundError:

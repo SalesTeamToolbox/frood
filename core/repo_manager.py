@@ -198,7 +198,7 @@ class RepositoryManager:
         if slug in existing_slugs:
             slug = f"{slug}-{uuid.uuid4().hex[:4]}"
 
-        clone_url = f"https://x-access-token:{effective_token}@github.com/{github_repo}.git"
+        clone_url = f"https://github.com/{github_repo}.git"
 
         repo = Repository(
             name=repo_name,
@@ -405,11 +405,10 @@ class RepositoryManager:
     # -- Internal helpers ------------------------------------------------------
 
     async def _run_git(self, cwd: Path, *args: str) -> tuple[int, str, str]:
-        """Run a git command with sanitised environment."""
+        """Run a git command with sanitised environment and GIT_ASKPASS auth."""
+        from core.git_auth import git_askpass_env
+
         env = _sanitize_env()
-        if self._github_token:
-            env["GIT_ASKPASS"] = "echo"
-            env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_CONFIG_COUNT"] = "3"
         env["GIT_CONFIG_KEY_0"] = "commit.gpgsign"
         env["GIT_CONFIG_VALUE_0"] = "false"
@@ -418,15 +417,23 @@ class RepositoryManager:
         env["GIT_CONFIG_KEY_2"] = "user.email"
         env["GIT_CONFIG_VALUE_2"] = env.get("GIT_AUTHOR_EMAIL", "agent42@localhost")
 
-        proc = await asyncio.create_subprocess_exec(
-            "git",
-            *args,
-            cwd=str(cwd),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+        with git_askpass_env(self._github_token, env) as auth_env:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                *args,
+                cwd=str(cwd),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=auth_env,
+            )
+            try:
+                stdout_b, stderr_b = await asyncio.wait_for(
+                    proc.communicate(), timeout=120.0
+                )
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return 1, "", "git command timed out after 120s"
         stdout = stdout_b.decode() if stdout_b else ""
         stderr = stderr_b.decode() if stderr_b else ""
         return proc.returncode or 0, stdout, stderr

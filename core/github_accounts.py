@@ -4,11 +4,13 @@ Multi-account GitHub credential store.
 Stores multiple GitHub Personal Access Tokens (PATs) under user-defined
 labels in .agent42/github_accounts.json.  Each account has a stable UUID,
 a human-readable label, the GitHub username (fetched at add time), and the
-token itself.  Tokens are stored in plaintext — the file is chmod 600.
+token itself.  Tokens are encrypted at rest via Fernet when JWT_SECRET is set;
+legacy plaintext values are auto-migrated on next persist.
 """
 
 import json
 import logging
+import os
 import stat
 import threading
 import uuid
@@ -30,20 +32,38 @@ class GitHubAccountStore:
 
     # -- persistence -----------------------------------------------------------
 
+    @staticmethod
+    def _jwt_secret() -> str:
+        return os.getenv("JWT_SECRET", "")
+
     def _load(self):
         if not self._path.exists():
             return
         try:
+            from core.encryption import decrypt_value
+
+            secret = self._jwt_secret()
             data = json.loads(self._path.read_text())
             for acct in data.get("accounts", []):
                 if "id" in acct and "token" in acct:
+                    acct["token"] = decrypt_value(acct["token"], secret)
                     self._accounts[acct["id"]] = acct
         except (json.JSONDecodeError, OSError) as e:
             logger.error("Failed to load github accounts: %s", e)
 
     def _persist(self):
+        from core.encryption import encrypt_value
+
+        secret = self._jwt_secret()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"accounts": list(self._accounts.values())}
+        # Encrypt tokens before writing
+        accounts_out = []
+        for acct in self._accounts.values():
+            out = dict(acct)
+            if secret:
+                out["token"] = encrypt_value(acct["token"], secret)
+            accounts_out.append(out)
+        payload = {"accounts": accounts_out}
         self._path.write_text(json.dumps(payload, indent=2))
         try:
             self._path.chmod(stat.S_IRUSR | stat.S_IWUSR)

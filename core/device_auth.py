@@ -11,8 +11,10 @@ JWT tokens at a glance.
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
+import os
 import secrets
 import time
 import uuid
@@ -94,6 +96,21 @@ class DeviceStore:
 
         key_hash = _hash_key(raw_key)
         device_id = self._hash_to_id.get(key_hash)
+
+        # Legacy migration: if HMAC hash not found, try plain SHA-256
+        if not device_id:
+            legacy_hash = _legacy_hash_key(raw_key)
+            device_id = self._hash_to_id.get(legacy_hash)
+            if device_id:
+                # Upgrade hash from legacy SHA-256 to HMAC
+                device = self._devices.get(device_id)
+                if device and key_hash != legacy_hash:
+                    del self._hash_to_id[legacy_hash]
+                    self._hash_to_id[key_hash] = device_id
+                    device.api_key_hash = key_hash
+                    self._persist("hash_upgraded", device)
+                    logger.info("Upgraded device %s hash to HMAC-SHA256", device_id)
+
         if not device_id:
             return None
 
@@ -109,7 +126,7 @@ class DeviceStore:
         device = self._devices.get(device_id)
         if not device:
             return False
-        
+
         # Remove the hash from the lookup to prevent timing attacks and ensure
         # the key is no longer discoverable via its hash.
         if device.api_key_hash in self._hash_to_id:
@@ -193,10 +210,15 @@ class DeviceStore:
 
 
 def _hash_key(raw_key: str) -> str:
-    """
-    Hashes an API key for storage.
-    TODO: Replace SHA-256 with a stronger, adaptive hashing algorithm like bcrypt or Argon2
-    for better protection against offline brute-force attacks.
-    """
-    # For now, keeping SHA-256 for compatibility, but this should be upgraded.
+    """Hash an API key using HMAC-SHA256 (keyed by JWT_SECRET) or plain SHA-256 as fallback."""
+    jwt_secret = os.getenv("JWT_SECRET", "")
+    if jwt_secret:
+        return "hmac:" + hmac.new(
+            jwt_secret.encode(), raw_key.encode(), hashlib.sha256
+        ).hexdigest()
+    return hashlib.sha256(raw_key.encode()).hexdigest()
+
+
+def _legacy_hash_key(raw_key: str) -> str:
+    """Legacy plain SHA-256 hash for migration lookups."""
     return hashlib.sha256(raw_key.encode()).hexdigest()

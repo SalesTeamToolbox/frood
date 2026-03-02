@@ -745,12 +745,10 @@ class AppManager:
     # -- Git / GitHub integration ----------------------------------------------
 
     async def _run_git(self, app_path: Path, *args: str) -> tuple[int, str, str]:
-        """Run a git command in the app directory. Returns (returncode, stdout, stderr)."""
+        """Run a git command in the app directory with GIT_ASKPASS auth."""
+        from core.git_auth import git_askpass_env
+
         env = _sanitize_env()
-        # Use GitHub token for authentication if available
-        if self._github_token:
-            env["GIT_ASKPASS"] = "echo"
-            env["GIT_TERMINAL_PROMPT"] = "0"
         # Disable commit signing — app repos are local-only by default
         # Also set fallback author identity so commits work in headless/CI environments
         env["GIT_CONFIG_COUNT"] = "3"
@@ -760,15 +758,24 @@ class AppManager:
         env["GIT_CONFIG_VALUE_1"] = env.get("GIT_AUTHOR_NAME", "Agent42")
         env["GIT_CONFIG_KEY_2"] = "user.email"
         env["GIT_CONFIG_VALUE_2"] = env.get("GIT_AUTHOR_EMAIL", "agent42@localhost")
-        proc = await asyncio.create_subprocess_exec(
-            "git",
-            *args,
-            cwd=str(app_path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=60.0)
+
+        with git_askpass_env(self._github_token, env) as auth_env:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                *args,
+                cwd=str(app_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=auth_env,
+            )
+            try:
+                stdout_b, stderr_b = await asyncio.wait_for(
+                    proc.communicate(), timeout=60.0
+                )
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return 1, "", "git command timed out after 60s"
         stdout = stdout_b.decode() if stdout_b else ""
         stderr = stderr_b.decode() if stderr_b else ""
         return proc.returncode or 0, stdout, stderr
@@ -973,6 +980,8 @@ class AppManager:
         push_on_build: bool,
     ) -> str:
         """Create GitHub repo using the gh CLI."""
+        if not re.match(r"^[a-zA-Z0-9._-]+$", repo_name):
+            return f"Invalid repo name: '{repo_name}' — only alphanumeric, dots, hyphens, and underscores allowed"
         visibility = "--private" if private else "--public"
         env = _sanitize_env()
         if self._github_token:
@@ -1078,8 +1087,8 @@ class AppManager:
                 username = user_resp.json()["login"]
                 full_name = f"{username}/{repo_name}"
 
-        # Add remote
-        remote_url = f"https://x-access-token:{self._github_token}@github.com/{full_name}.git"
+        # Add remote (token is injected via GIT_ASKPASS in _run_git, not in the URL)
+        remote_url = f"https://github.com/{full_name}.git"
         # Check if origin already exists
         rc, _, _ = await self._run_git(app_path, "remote", "get-url", "origin")
         if rc == 0:
@@ -1114,11 +1123,9 @@ class AppManager:
 
         app_path = Path(app.path)
 
-        # Set up auth if token available
+        # Ensure remote URL uses clean HTTPS (auth via GIT_ASKPASS in _run_git)
         if self._github_token:
-            remote_url = (
-                f"https://x-access-token:{self._github_token}@github.com/{app.github_repo}.git"
-            )
+            remote_url = f"https://github.com/{app.github_repo}.git"
             await self._run_git(app_path, "remote", "set-url", "origin", remote_url)
 
         rc, out, err = await self._run_git(app_path, "push", "origin", "HEAD")
@@ -1204,6 +1211,18 @@ class AppManager:
 
         try:
             with zipfile.ZipFile(archive_path, "r") as zf:
+                # Zip slip protection: reject entries that escape the target directory
+                for member in zf.namelist():
+                    member_path = Path(member)
+                    if member_path.is_absolute() or ".." in member_path.parts:
+                        raise ValueError(
+                            f"Zip slip detected: '{member}' escapes target directory"
+                        )
+                    resolved = (temp_dir / member).resolve()
+                    if not str(resolved).startswith(str(temp_dir.resolve())):
+                        raise ValueError(
+                            f"Zip slip detected: '{member}' resolves outside target"
+                        )
                 zf.extractall(str(temp_dir))
 
             # Read manifest
