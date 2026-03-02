@@ -45,7 +45,10 @@ Plans:
   2. A task routed to a Groq model incurs $0 in SpendingTracker
   3. Three Groq ModelSpec entries exist (llama-70b, gpt-oss-120b, llama-8b) with correct context windows and throughput metadata
   4. Unit tests for Groq ProviderSpec, ModelSpec registration, and $0 pricing pass
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 02-01-PLAN.md — Register Groq provider + 3 ModelSpecs + $0 pricing + config
+- [ ] 02-02-PLAN.md — Unit tests for Groq registration and SpendingTracker pricing
 
 ### Phase 3: Mistral Integration
 **Goal**: Mistral's two-key architecture is registered — Codestral as a free code-specialist endpoint and La Plateforme as a rate-limited critic — with correct pricing and safeguards against primary-slot assignment
@@ -102,7 +105,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation + Cerebras | 2/2 | Complete   | 2026-03-02 |
-| 2. Groq Integration | 0/TBD | Not started | - |
+| 2. Groq Integration | 0/2 | Planned | - |
 | 3. Mistral Integration | 0/TBD | Not started | - |
 | 4. SambaNova Integration | 0/TBD | Not started | - |
 | 5. Together AI Integration | 0/TBD | Not started | - |
