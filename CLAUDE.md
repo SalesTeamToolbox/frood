@@ -472,6 +472,7 @@ class TestWorkspaceSandbox:
 | 100 | AppTest | `app_test smoke_test` returns success even when health check fails | Tool always returns `ToolResult(success=True)` for completed checks — failures are in the output text and findings, not in `success=False` |
 | 101 | Critic | Visual critic sends multimodal `content` (list of dicts) but some models only accept string content | `_extract_screenshot_b64` returns None on any failure — critic falls back to text-only; only vision-capable models get image |
 | 102 | Apps | `pip install` fails on Ubuntu 24+ with "externally-managed-environment" (PEP 668) | `_ensure_app_venv()` creates a per-app `.venv`; both `_start_python_app()` and `_install_deps()` use the venv's Python for pip and app execution |
+| 103 | Memory | `_direct_response()` and server.py conversational path skip memory loading — agent claims no memory of past conversations | Use `build_conversational_memory_context()` helper to inject MEMORY.md + HISTORY.md into system prompt for all response paths |
 
 ---
 

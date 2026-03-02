@@ -326,3 +326,47 @@ class MemoryStore:
                 parts.append("")
 
         return "\n".join(parts)
+
+
+async def build_conversational_memory_context(
+    memory_store: "MemoryStore | None",
+    query: str,
+    timeout: float = 5.0,
+    max_memory_lines: int = 30,
+    max_history_lines: int = 10,
+    top_k: int = 3,
+) -> str:
+    """Build lightweight memory context for conversational (non-task) responses.
+
+    Uses smaller budgets and a timeout on semantic search to keep latency low.
+    Returns empty string on failure (never raises).
+    """
+    if not memory_store:
+        return ""
+
+    import asyncio
+
+    try:
+        if memory_store.semantic_available:
+            return await asyncio.wait_for(
+                memory_store.build_context_semantic(
+                    query=query,
+                    top_k=top_k,
+                    max_memory_lines=max_memory_lines,
+                ),
+                timeout=timeout,
+            )
+        else:
+            return memory_store.build_context(
+                max_memory_lines=max_memory_lines,
+                max_history_lines=max_history_lines,
+            )
+    except Exception as e:
+        logger.warning("Conversational memory context failed: %s", e)
+        try:
+            return memory_store.build_context(
+                max_memory_lines=max_memory_lines,
+                max_history_lines=max_history_lines,
+            )
+        except Exception:
+            return ""
