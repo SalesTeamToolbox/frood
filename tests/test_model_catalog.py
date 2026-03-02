@@ -461,6 +461,69 @@ class TestSpendingTrackerPricing:
         assert tracker.daily_spend_usd == pytest.approx(expected, abs=0.0001)
 
 
+class TestCerebrasSpendingTracker:
+    """Phase 1: Cerebras models should have $0 pricing in SpendingTracker."""
+
+    def test_cerebras_builtin_prices_exist(self):
+        """All 4 Cerebras model_ids have explicit $0 entries in _BUILTIN_PRICES."""
+        from providers.registry import SpendingTracker
+
+        expected_ids = [
+            "gpt-oss-120b",
+            "qwen-3-235b-a22b-instruct-2507",
+            "llama3.1-8b",
+            "zai-glm-4.7",
+        ]
+        for model_id in expected_ids:
+            assert model_id in SpendingTracker._BUILTIN_PRICES, (
+                f"{model_id} missing from _BUILTIN_PRICES"
+            )
+            prompt_price, completion_price = SpendingTracker._BUILTIN_PRICES[model_id]
+            assert prompt_price == 0.0
+            assert completion_price == 0.0
+
+    def test_cerebras_zero_cost_recording(self):
+        """Recording Cerebras usage results in $0 spend."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        tracker.record_usage("cerebras-gpt-oss-120b", 50000, 25000, model_id="gpt-oss-120b")
+        assert tracker.daily_spend_usd == 0.0
+
+    def test_cerebras_all_models_zero_cost(self):
+        """All 4 Cerebras models record $0 cost."""
+        from providers.registry import SpendingTracker
+
+        models = [
+            ("cerebras-gpt-oss-120b", "gpt-oss-120b"),
+            ("cerebras-qwen3-235b", "qwen-3-235b-a22b-instruct-2507"),
+            ("cerebras-llama-8b", "llama3.1-8b"),
+            ("cerebras-zai-glm", "zai-glm-4.7"),
+        ]
+        tracker = SpendingTracker()
+        for model_key, model_id in models:
+            tracker.record_usage(model_key, 10000, 5000, model_id=model_id)
+        assert tracker.daily_spend_usd == 0.0
+
+    def test_cerebras_does_not_trip_spend_limit(self):
+        """50 tasks of Cerebras usage should not trip a $1 spend limit."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        for _ in range(50):
+            tracker.record_usage("cerebras-gpt-oss-120b", 10000, 5000, model_id="gpt-oss-120b")
+        assert tracker.check_limit(1.0) is True
+        assert tracker.daily_spend_usd == 0.0
+
+    def test_cerebras_tokens_tracked(self):
+        """Token counts are tracked even though cost is $0."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        tracker.record_usage("cerebras-llama-8b", 1000, 500, model_id="llama3.1-8b")
+        assert tracker.daily_tokens == 1500
+
+
 class TestHealthCheck:
     """Tests for model health check functionality."""
 

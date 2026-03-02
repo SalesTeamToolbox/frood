@@ -17,7 +17,7 @@ from providers.registry import (
 
 class TestProviderRegistry:
     def test_all_providers_registered(self):
-        expected = {"openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm"}
+        expected = {"openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm", "cerebras"}
         actual = {p.value for p in PROVIDERS.keys()}
         assert expected.issubset(actual)
 
@@ -114,3 +114,52 @@ class TestProviderRegistry:
             registry.invalidate_client(ProviderType.OPENROUTER)
             client2 = registry.get_client(ProviderType.OPENROUTER)
             assert client2 is not client1
+
+
+class TestCerebrasRegistration:
+    """Phase 1: Cerebras provider registration tests."""
+
+    def test_cerebras_provider_registered(self):
+        """Cerebras ProviderSpec is in PROVIDERS with correct base_url and api_key_env."""
+        spec = PROVIDERS[ProviderType.CEREBRAS]
+        assert spec.base_url == "https://api.cerebras.ai/v1"
+        assert spec.api_key_env == "CEREBRAS_API_KEY"
+        assert spec.display_name == "Cerebras"
+
+    def test_cerebras_models_registered(self):
+        """All 4 Cerebras models are registered with correct model_ids."""
+        expected = {
+            "cerebras-gpt-oss-120b": "gpt-oss-120b",
+            "cerebras-qwen3-235b": "qwen-3-235b-a22b-instruct-2507",
+            "cerebras-llama-8b": "llama3.1-8b",
+            "cerebras-zai-glm": "zai-glm-4.7",
+        }
+        for model_key, expected_id in expected.items():
+            spec = MODELS[model_key]
+            assert spec.model_id == expected_id, f"{model_key} model_id mismatch"
+            assert spec.provider == ProviderType.CEREBRAS
+
+    def test_cerebras_models_all_free_tier(self):
+        """All Cerebras models are classified as FREE tier."""
+        from providers.registry import ModelTier
+
+        cerebras_models = [k for k, v in MODELS.items() if v.provider == ProviderType.CEREBRAS]
+        assert len(cerebras_models) == 4
+        for key in cerebras_models:
+            assert MODELS[key].tier == ModelTier.FREE, f"{key} is not FREE tier"
+
+    def test_cerebras_client_builds_with_key(self):
+        """Client builds successfully when CEREBRAS_API_KEY is set."""
+        registry = ProviderRegistry()
+        with patch.dict(os.environ, {"CEREBRAS_API_KEY": "csk-test-key-1234"}):
+            client = registry.get_client(ProviderType.CEREBRAS)
+            assert client is not None
+            assert client.base_url == "https://api.cerebras.ai/v1/"
+
+    def test_cerebras_client_raises_without_key(self):
+        """Client raises ValueError when CEREBRAS_API_KEY is not set."""
+        registry = ProviderRegistry()
+        registry.invalidate_client(ProviderType.CEREBRAS)
+        with patch.dict(os.environ, {"CEREBRAS_API_KEY": ""}, clear=False):
+            with pytest.raises(ValueError, match="CEREBRAS_API_KEY not set"):
+                registry.get_client(ProviderType.CEREBRAS)
