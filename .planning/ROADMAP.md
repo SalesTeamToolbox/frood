@@ -13,7 +13,7 @@ Add five independent LLM inference providers (Cerebras, Groq, Mistral, SambaNova
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation + Cerebras** (2/2 plans) - Lay provider enum plumbing, fix SpendingTracker free-model detection, integrate Cerebras (genuinely free, fastest inference)
-- [ ] **Phase 2: Groq Integration** (1/2 plans) - Add Groq (genuinely free ~14K req/day, Llama 70B + GPT-OSS 120B)
+- [x] **Phase 2: Groq Integration** (1/2 plans) - Add Groq (genuinely free ~14K req/day, Llama 70B + GPT-OSS 120B) (completed 2026-03-02)
 - [ ] **Phase 3: Mistral Integration** - Add Mistral via two-key architecture (Codestral free endpoint + La Plateforme critic-only)
 - [ ] **Phase 4: SambaNova Integration** - Add SambaNova (credits-based) with request transforms for temp clamp, stream=False for tools, and strict removal
 - [ ] **Phase 5: Together AI Integration** - Add Together AI (credits-based, high-context Llama 4 Scout / DeepSeek V3)
@@ -45,7 +45,7 @@ Plans:
   2. A task routed to a Groq model incurs $0 in SpendingTracker
   3. Three Groq ModelSpec entries exist (llama-70b, gpt-oss-120b, llama-8b) with correct context windows and throughput metadata
   4. Unit tests for Groq ProviderSpec, ModelSpec registration, and $0 pricing pass
-**Plans:** 1/2 plans complete
+**Plans:** 2/2 plans complete
 Plans:
 - [x] 02-01-PLAN.md — Register Groq provider + 3 ModelSpecs + $0 pricing + config (DONE 2026-03-02)
 - [ ] 02-02-PLAN.md — Unit tests for Groq registration and SpendingTracker pricing
@@ -105,7 +105,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation + Cerebras | 2/2 | Complete   | 2026-03-02 |
-| 2. Groq Integration | 1/2 | In progress | - |
+| 2. Groq Integration | 2/2 | Complete   | 2026-03-02 |
 | 3. Mistral Integration | 0/TBD | Not started | - |
 | 4. SambaNova Integration | 0/TBD | Not started | - |
 | 5. Together AI Integration | 0/TBD | Not started | - |
