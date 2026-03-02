@@ -524,6 +524,70 @@ class TestCerebrasSpendingTracker:
         assert tracker.daily_tokens == 1500
 
 
+class TestGroqSpendingTracker:
+    """Phase 2: Groq models should have $0 pricing in SpendingTracker."""
+
+    def test_groq_builtin_prices_exist(self):
+        """All 3 Groq model_ids have explicit $0 entries in _BUILTIN_PRICES."""
+        from providers.registry import SpendingTracker
+
+        expected_ids = [
+            "llama-3.3-70b-versatile",
+            "openai/gpt-oss-120b",
+            "llama-3.1-8b-instant",
+        ]
+        for model_id in expected_ids:
+            assert model_id in SpendingTracker._BUILTIN_PRICES, (
+                f"{model_id} missing from _BUILTIN_PRICES"
+            )
+            prompt_price, completion_price = SpendingTracker._BUILTIN_PRICES[model_id]
+            assert prompt_price == 0.0
+            assert completion_price == 0.0
+
+    def test_groq_zero_cost_recording(self):
+        """Recording Groq usage results in $0 spend."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        tracker.record_usage("groq-llama-70b", 50000, 25000,
+                             model_id="llama-3.3-70b-versatile")
+        assert tracker.daily_spend_usd == 0.0
+
+    def test_groq_all_models_zero_cost(self):
+        """All 3 Groq models record $0 cost (including openai/gpt-oss-120b with namespace prefix)."""
+        from providers.registry import SpendingTracker
+
+        models = [
+            ("groq-llama-70b", "llama-3.3-70b-versatile"),
+            ("groq-gpt-oss-120b", "openai/gpt-oss-120b"),
+            ("groq-llama-8b", "llama-3.1-8b-instant"),
+        ]
+        tracker = SpendingTracker()
+        for model_key, model_id in models:
+            tracker.record_usage(model_key, 10000, 5000, model_id=model_id)
+        assert tracker.daily_spend_usd == 0.0
+
+    def test_groq_does_not_trip_spend_limit(self):
+        """50 tasks of Groq usage should not trip a $1 spend limit."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        for _ in range(50):
+            tracker.record_usage("groq-llama-70b", 8000, 2000,
+                                 model_id="llama-3.3-70b-versatile")
+        assert tracker.check_limit(1.0) is True
+        assert tracker.daily_spend_usd == 0.0
+
+    def test_groq_tokens_tracked(self):
+        """Token counts are tracked even though cost is $0."""
+        from providers.registry import SpendingTracker
+
+        tracker = SpendingTracker()
+        tracker.record_usage("groq-llama-8b", 1000, 500,
+                             model_id="llama-3.1-8b-instant")
+        assert tracker.daily_tokens == 1500
+
+
 class TestHealthCheck:
     """Tests for model health check functionality."""
 
