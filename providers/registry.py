@@ -247,6 +247,22 @@ MODELS: dict[str, ModelSpec] = {
 class SpendingTracker:
     """Tracks API spending to enforce daily limits."""
 
+    # Known per-token pricing for models not covered by the OR catalog.
+    # Source: https://ai.google.dev/gemini-api/docs/pricing (March 2026)
+    # Format: model_id -> (prompt_per_token, completion_per_token)
+    _BUILTIN_PRICES: dict[str, tuple[float, float]] = {
+        # Gemini 2.5 Flash — $0.15/M input, $0.60/M output (under 200K context)
+        "gemini-2.5-flash": (0.15e-6, 0.60e-6),
+        # Gemini 2.5 Pro — $1.25/M input, $10.00/M output (under 200K context)
+        "gemini-2.5-pro": (1.25e-6, 10.00e-6),
+        # GPT-4o Mini — $0.15/M input, $0.60/M output
+        "gpt-4o-mini": (0.15e-6, 0.60e-6),
+        # GPT-4o — $2.50/M input, $10.00/M output
+        "gpt-4o": (2.50e-6, 10.00e-6),
+        # DeepSeek Chat — $0.14/M input, $0.28/M output
+        "deepseek-chat": (0.14e-6, 0.28e-6),
+    }
+
     def __init__(self):
         self._daily_tokens: dict[str, int] = {}  # date -> total tokens
         self._daily_cost_usd: float = 0.0
@@ -258,6 +274,30 @@ class SpendingTracker:
         """Update per-model pricing from catalog data."""
         self._model_prices.update(prices)
 
+    def _get_price(self, model_key: str, model_id: str) -> tuple[float, float] | None:
+        """Look up per-token pricing for a model.
+
+        Resolution order:
+        1. Catalog prices (from OR API sync) — keyed by model_id
+        2. Built-in prices — keyed by model_id
+        3. Free model detection — model_key starts with "or-free-" or
+           model_id ends with ":free" → $0
+        4. None → caller decides (conservative fallback)
+        """
+        # 1. Catalog prices (populated by model_catalog.get_model_prices())
+        if model_id and model_id in self._model_prices:
+            return self._model_prices[model_id]
+
+        # 2. Built-in prices for known models
+        if model_id and model_id in self._BUILTIN_PRICES:
+            return self._BUILTIN_PRICES[model_id]
+
+        # 3. Free model detection — $0 cost
+        if model_key.startswith("or-free-") or (model_id and model_id.endswith(":free")):
+            return (0.0, 0.0)
+
+        return None
+
     def record_usage(
         self,
         model_key: str,
@@ -267,9 +307,9 @@ class SpendingTracker:
     ):
         """Record token usage for spending tracking.
 
-        If ``model_id`` is provided and pricing data is available, uses
-        actual per-model pricing.  Otherwise falls back to conservative
-        premium-tier estimate.
+        Uses actual per-model pricing when available.  Free models (OR free
+        tier, `:free` suffix) are tracked at $0.  Falls back to a
+        conservative estimate only for truly unknown models.
         """
         import datetime
 
@@ -282,12 +322,12 @@ class SpendingTracker:
         total = prompt_tokens + completion_tokens
         self._daily_tokens[today] = self._daily_tokens.get(today, 0) + total
 
-        if model_id and model_id in self._model_prices:
-            prompt_price, completion_price = self._model_prices[model_id]
+        price = self._get_price(model_key, model_id)
+        if price is not None:
+            prompt_price, completion_price = price
             estimated_cost = prompt_tokens * prompt_price + completion_tokens * completion_price
         else:
-            # Rough cost estimation (conservative — uses premium pricing)
-            # Actual cost depends on model, but this provides a safety ceiling
+            # Unknown model — conservative fallback ($5/$15 per M tokens)
             estimated_cost = (prompt_tokens * 5.0 + completion_tokens * 15.0) / 1_000_000
         self._daily_cost_usd += estimated_cost
 

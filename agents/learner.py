@@ -14,12 +14,47 @@ optionally to workspace skills (skills/workspace/).
 """
 
 import logging
+import time
 from pathlib import Path
 
 from agents.model_router import ModelRouter
 from memory.store import MemoryStore
 
 logger = logging.getLogger("agent42.learner")
+
+# ---------------------------------------------------------------------------
+# Global rate-limit backpressure — shared across all Learner instances.
+#
+# When any Learner call hits a 429/rate-limit, we record the timestamp and
+# suppress further LLM calls for a cooldown window.  This prevents the
+# Learner from wasting shared API quota during load spikes.
+# ---------------------------------------------------------------------------
+
+_RATE_LIMIT_COOLDOWN_S = 60  # Suppress learner LLM calls for 60s after a 429
+_last_rate_limit_time: float = 0.0
+
+
+def _record_rate_limit() -> None:
+    """Mark that a rate limit was just hit."""
+    global _last_rate_limit_time
+    _last_rate_limit_time = time.monotonic()
+
+
+def _is_rate_limited() -> bool:
+    """Return True if we're within the cooldown window after a rate limit."""
+    if _last_rate_limit_time == 0.0:
+        return False
+    elapsed = time.monotonic() - _last_rate_limit_time
+    return elapsed < _RATE_LIMIT_COOLDOWN_S
+
+
+def _is_rate_limit_error(error: Exception) -> bool:
+    """Check if an exception is a rate-limit / quota error."""
+    msg = str(error).lower()
+    return any(s in msg for s in (
+        "429", "rate limit", "rate_limit", "resource_exhausted",
+        "quota", "too many requests", "spend limit",
+    ))
 
 REFLECTION_PROMPT = """\
 You just completed a task. Analyze the outcome and extract lessons.
@@ -148,13 +183,22 @@ class Learner:
             tool_usage_section=tool_usage_section,
         )
 
+        # Skip LLM call if rate limits are hot — saves shared API quota
+        if _is_rate_limited():
+            logger.info("Learner reflection suppressed (rate-limit cooldown active)")
+            return {"skipped": True, "reason": "rate-limit cooldown"}
+
         try:
             reflection, _ = await self.router.complete(
                 self.reflection_model,
                 [{"role": "user", "content": prompt}],
             )
         except Exception as e:
-            logger.warning(f"Reflection failed (non-critical): {e}")
+            if _is_rate_limit_error(e):
+                _record_rate_limit()
+                logger.info("Learner reflection hit rate limit — suppressing for %ds", _RATE_LIMIT_COOLDOWN_S)
+            else:
+                logger.warning(f"Reflection failed (non-critical): {e}")
             return {"skipped": True, "reason": str(e)}
 
         # Parse and apply memory updates — write to project memory if available,
@@ -227,13 +271,22 @@ class Learner:
             existing_skills=", ".join(existing_skill_names) if existing_skill_names else "(none)",
         )
 
+        # Skip LLM call if rate limits are hot
+        if _is_rate_limited():
+            logger.info("Learner skill check suppressed (rate-limit cooldown active)")
+            return None
+
         try:
             response, _ = await self.router.complete(
                 self.reflection_model,
                 [{"role": "user", "content": prompt}],
             )
         except Exception as e:
-            logger.warning(f"Skill creation check failed (non-critical): {e}")
+            if _is_rate_limit_error(e):
+                _record_rate_limit()
+                logger.info("Learner skill check hit rate limit — suppressing for %ds", _RATE_LIMIT_COOLDOWN_S)
+            else:
+                logger.warning(f"Skill creation check failed (non-critical): {e}")
             return None
 
         if "CREATE_SKILL" not in response:

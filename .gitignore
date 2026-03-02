@@ -65,6 +65,8 @@ test_research.py
 test_team.py
 test_team2.py
 dummy_test.py
+load_test.py
+load_test_monitor.py
 
 # Agent output / scratch files
 analysis/
