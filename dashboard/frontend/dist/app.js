@@ -4197,6 +4197,7 @@ function renderSettingsPanel() {
       const ss = state.storageStatus;
       const modeLabels = {
         file: "File-based (no Qdrant/Redis)",
+        redis_only: "Redis + file (semantic search degraded)",
         qdrant_embedded: "Qdrant embedded + file sessions",
         qdrant_server: "Qdrant server + file sessions",
         qdrant_redis: "Qdrant + Redis (full semantic search & session caching)",
@@ -4213,10 +4214,12 @@ function renderSettingsPanel() {
         const colors = { ok: "#22c55e", warn: "#f59e0b", error: "#ef4444", muted: "var(--text-muted)" };
         return `<span style="color:${colors[cls]};font-weight:600;font-size:0.82rem">${esc(label)}</span>`;
       };
+      const isDegraded = ss && ss.configured_mode && ss.configured_mode !== ss.mode;
       const backendSection = ss ? `
         <div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">
           <div style="font-weight:600;margin-bottom:0.6rem;font-size:0.9rem">Active Storage Backend</div>
           <div style="margin-bottom:0.5rem;color:var(--text-muted);font-size:0.85rem">${esc(modeLabels[ss.mode] || ss.mode)}</div>
+          ${isDegraded ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:0.5rem 0.75rem;margin-bottom:0.65rem;font-size:0.82rem;color:#92400e">Degraded: configured as <strong>${esc(modeLabels[ss.configured_mode] || ss.configured_mode)}</strong> but one or more backends are unreachable. Memory system is using file-based fallback.</div>` : ""}
           <table style="width:100%;border-collapse:collapse;font-size:0.84rem">
             <tr>
               <td style="padding:0.3rem 0;color:var(--text-muted);width:120px">Qdrant</td>
