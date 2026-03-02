@@ -51,6 +51,7 @@ class Settings:
     groq_api_key: str = ""
     mistral_api_key: str = ""
     codestral_api_key: str = ""
+    sambanova_api_key: str = ""
 
     # Dashboard auth
     dashboard_username: str = "admin"
@@ -326,6 +327,7 @@ class Settings:
             groq_api_key=os.getenv("GROQ_API_KEY", ""),
             mistral_api_key=os.getenv("MISTRAL_API_KEY", ""),
             codestral_api_key=os.getenv("CODESTRAL_API_KEY", ""),
+            sambanova_api_key=os.getenv("SAMBANOVA_API_KEY", ""),
             # Dashboard
             dashboard_username=os.getenv("DASHBOARD_USERNAME", "admin"),
             dashboard_password=os.getenv("DASHBOARD_PASSWORD", ""),
