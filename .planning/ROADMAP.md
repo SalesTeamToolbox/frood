@@ -31,7 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. All 5 new ProviderType enum values exist and the registry can construct a client for Cerebras given a valid key
   4. SpendingTracker free-model detection works for Cerebras model IDs without relying on `or-free-` prefix or `:free` suffix naming
   5. Unit tests for Cerebras ProviderSpec, ModelSpec registration, and $0 pricing pass
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 Plans:
 - [x] 01-01-PLAN.md — Register Cerebras provider + enum plumbing + $0 pricing + config (DONE 2026-03-02)
 - [ ] 01-02-PLAN.md — Unit tests for Cerebras registration and SpendingTracker pricing
@@ -101,7 +101,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation + Cerebras | 1/2 | In progress | - |
+| 1. Foundation + Cerebras | 2/2 | Complete   | 2026-03-02 |
 | 2. Groq Integration | 0/TBD | Not started | - |
 | 3. Mistral Integration | 0/TBD | Not started | - |
 | 4. SambaNova Integration | 0/TBD | Not started | - |
