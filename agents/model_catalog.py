@@ -427,7 +427,7 @@ class ModelCatalog:
         return (time.time() - self._last_health_check) > self.HEALTH_CHECK_INTERVAL
 
     async def health_check(self, api_key: str = "") -> dict[str, dict]:
-        """Ping registered free models with a minimal completion request.
+        """Ping registered FREE and CHEAP-tier models with a minimal completion request.
 
         Sends ``{"messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}``
         to each model's provider API. Records status, latency, and errors.
@@ -435,15 +435,22 @@ class ModelCatalog:
         Models are checked concurrently (up to ``HEALTH_CHECK_CONCURRENCY`` at a
         time) to keep the total wall-clock time manageable.
 
+        FREE tier: all registered free models (Cerebras, Groq, Mistral Codestral, OR free).
+        CHEAP tier: SambaNova, Together AI, and other credits-based providers when
+        their API keys are configured. Gemini (CHEAP tier) is handled separately.
+
         Returns ``{model_key: {status, latency_ms, last_checked, error}}``.
         """
         from providers.registry import MODELS
 
         models_to_check: list[tuple[str, str, str, str]] = []  # (key, model_id, base_url, key_env)
 
-        # Collect all registered free OR models
+        # Collect all registered FREE and CHEAP-tier models (excluding Gemini — handled below)
         for key, spec in MODELS.items():
-            if spec.tier != ModelTier.FREE:
+            if spec.tier not in (ModelTier.FREE, ModelTier.CHEAP):
+                continue
+            # Skip Gemini — handled by special block below to preserve existing behavior
+            if spec.provider == ProviderType.GEMINI:
                 continue
             provider_spec = PROVIDERS.get(spec.provider)
             if not provider_spec:

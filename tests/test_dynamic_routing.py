@@ -12,6 +12,8 @@ class TestModelRouterDynamicRouting:
 
     def test_hardcoded_fallback(self, monkeypatch):
         """Without dynamic routing or admin override, should use FREE_ROUTING."""
+        # Set keys for both the FREE_ROUTING default (Cerebras) and Gemini fallback
+        monkeypatch.setenv("CEREBRAS_API_KEY", "fake-cerebras-key")
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
         router = ModelRouter()
         routing = router.get_routing(TaskType.CODING)
@@ -77,6 +79,8 @@ class TestModelRouterDynamicRouting:
 
     def test_dynamic_routing_missing_task_type(self, tmp_path, monkeypatch):
         """Task types not in dynamic routing should fall back to hardcoded."""
+        # Set keys for RESEARCH primary (Groq) and fallback (Gemini)
+        monkeypatch.setenv("GROQ_API_KEY", "fake-groq-key")
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
         routing_file = tmp_path / "routing.json"
         routing_file.write_text(
@@ -100,6 +104,8 @@ class TestModelRouterDynamicRouting:
 
     def test_dynamic_routing_invalid_file(self, tmp_path, monkeypatch):
         """Invalid JSON in routing file should fall back gracefully."""
+        # Set key for CODING primary (Cerebras) and fallback (Gemini)
+        monkeypatch.setenv("CEREBRAS_API_KEY", "fake-cerebras-key")
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
         routing_file = tmp_path / "routing.json"
         routing_file.write_text("not json")
@@ -110,6 +116,8 @@ class TestModelRouterDynamicRouting:
 
     def test_dynamic_routing_no_file(self, tmp_path, monkeypatch):
         """Non-existent routing file should fall back to hardcoded."""
+        # Set key for CODING primary (Cerebras) and fallback (Gemini)
+        monkeypatch.setenv("CEREBRAS_API_KEY", "fake-cerebras-key")
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
         router = ModelRouter(routing_file=str(tmp_path / "nonexistent.json"))
         routing = router.get_routing(TaskType.CODING)
