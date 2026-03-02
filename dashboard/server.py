@@ -490,9 +490,7 @@ def create_app(
     @app.get("/api/setup/status")
     async def setup_status():
         """Check if first-run setup is needed. Unauthenticated."""
-        needs_setup = (
-            not settings.dashboard_password_hash
-        )
+        needs_setup = not settings.dashboard_password_hash
         return {"setup_needed": needs_setup}
 
     @app.post("/api/setup/complete")
@@ -619,11 +617,13 @@ def create_app(
     async def login(req: LoginRequest, request: Request):
         # Fail-secure: reject all logins when no password is configured
         # (but allow hash-only auth when DASHBOARD_PASSWORD is empty)
-        if (
-            (not settings.dashboard_password and not settings.dashboard_password_hash)
-            or (settings.dashboard_password in _INSECURE_PASSWORDS and not settings.dashboard_password_hash)
+        if (not settings.dashboard_password and not settings.dashboard_password_hash) or (
+            settings.dashboard_password in _INSECURE_PASSWORDS
+            and not settings.dashboard_password_hash
         ):
-            logger.warning("Login attempt with no password configured or insecure plaintext password — rejected")
+            logger.warning(
+                "Login attempt with no password configured or insecure plaintext password — rejected"
+            )
             raise HTTPException(
                 status_code=401,
                 detail="Dashboard login is disabled. Set DASHBOARD_PASSWORD or DASHBOARD_PASSWORD_HASH, or change insecure password.",
@@ -1017,7 +1017,10 @@ def create_app(
         if not profile_loader:
             raise HTTPException(status_code=500, detail="Profile system not available")
         if not re.match(r"^[a-z0-9][a-z0-9-]*$", req.name):
-            raise HTTPException(status_code=400, detail="Name must be lowercase alphanumeric with hyphens (e.g. 'my-profile')")
+            raise HTTPException(
+                status_code=400,
+                detail="Name must be lowercase alphanumeric with hyphens (e.g. 'my-profile')",
+            )
         if profile_loader.get(req.name):
             raise HTTPException(status_code=409, detail=f"Profile '{req.name}' already exists")
         profile_loader.save_profile(
@@ -1031,7 +1034,9 @@ def create_app(
         return {**profile.to_dict(), "prompt_overlay": profile.prompt_overlay}
 
     @app.put("/api/profiles/{name}")
-    async def update_profile(name: str, req: ProfileUpdateRequest, _user: str = Depends(require_admin)):
+    async def update_profile(
+        name: str, req: ProfileUpdateRequest, _user: str = Depends(require_admin)
+    ):
         """Update an existing agent profile."""
         if not profile_loader:
             raise HTTPException(status_code=500, detail="Profile system not available")
@@ -1041,9 +1046,15 @@ def create_app(
         profile_loader.save_profile(
             name=name,
             description=req.description if req.description is not None else existing.description,
-            preferred_skills=req.preferred_skills if req.preferred_skills is not None else existing.preferred_skills,
-            preferred_task_types=req.preferred_task_types if req.preferred_task_types is not None else existing.preferred_task_types,
-            prompt_overlay=req.prompt_overlay if req.prompt_overlay is not None else existing.prompt_overlay,
+            preferred_skills=req.preferred_skills
+            if req.preferred_skills is not None
+            else existing.preferred_skills,
+            preferred_task_types=req.preferred_task_types
+            if req.preferred_task_types is not None
+            else existing.preferred_task_types,
+            prompt_overlay=req.prompt_overlay
+            if req.prompt_overlay is not None
+            else existing.prompt_overlay,
         )
         profile = profile_loader.get(name)
         return {**profile.to_dict(), "prompt_overlay": profile.prompt_overlay}
@@ -1163,15 +1174,23 @@ def create_app(
         except Exception as e:
             logger.error(f"Reports endpoint error: {e}")
             return {
-                "token_usage": {"total_tokens": 0, "total_prompt_tokens": 0,
-                                "total_completion_tokens": 0, "daily_tokens": 0,
-                                "daily_spend_usd": 0.0},
+                "token_usage": {
+                    "total_tokens": 0,
+                    "total_prompt_tokens": 0,
+                    "total_completion_tokens": 0,
+                    "daily_tokens": 0,
+                    "daily_spend_usd": 0.0,
+                },
                 "llm_usage": [],
                 "costs": {"daily_spend_usd": 0.0, "total_estimated_usd": 0.0, "by_model": []},
                 "connectivity": {"summary": {}, "models": {}},
                 "model_performance": [],
-                "task_breakdown": {"total": 0, "by_status": {}, "by_type": [],
-                                   "overall_success_rate": 0.0},
+                "task_breakdown": {
+                    "total": 0,
+                    "by_status": {},
+                    "by_type": [],
+                    "overall_success_rate": 0.0,
+                },
                 "project_breakdown": [],
                 "tools": {"total": 0, "enabled": 0},
                 "skills": {"total": 0, "enabled": 0, "skills": []},
@@ -1310,7 +1329,9 @@ def create_app(
         if skill_loader:
             all_skills = skill_loader.all_skills()
             skills_summary["total"] = len(all_skills)
-            skills_summary["enabled"] = sum(1 for s in all_skills if skill_loader.is_enabled(s.name))
+            skills_summary["enabled"] = sum(
+                1 for s in all_skills if skill_loader.is_enabled(s.name)
+            )
             skills_summary["skills"] = [
                 {
                     "name": s.name,
@@ -1894,7 +1915,16 @@ def create_app(
                     _conv_model = _conv_routing["primary"]
 
                 _custom = _load_persona()
-                _conv_messages = [{"role": "system", "content": _custom or GENERAL_ASSISTANT_PROMPT}]
+                _conv_system = _custom or GENERAL_ASSISTANT_PROMPT
+
+                # Load memory context for conversational awareness
+                from memory.store import build_conversational_memory_context
+
+                _mem_context = await build_conversational_memory_context(memory_store, text)
+                if _mem_context and _mem_context.strip():
+                    _conv_system += "\n\n" + _mem_context
+
+                _conv_messages = [{"role": "system", "content": _conv_system}]
                 for h in history[-10:]:
                     _conv_messages.append(h)
                 _conv_messages.append({"role": "user", "content": text})
@@ -1965,7 +1995,10 @@ def create_app(
             priority=1,
             origin_channel="dashboard_chat",
             origin_channel_id="chat",
-            origin_metadata={"chat_msg_id": msg_id},
+            origin_metadata={
+                "chat_msg_id": msg_id,
+                **({"chat_session_id": req.session_id} if req.session_id else {}),
+            },
         )
 
         # Smart project creation: only create a project when the classifier
@@ -3129,27 +3162,39 @@ def create_app(
             task = task_queue.get(task_id)
             if task:
                 seen_ids.add(task.id)
-                child_tasks.append({
-                    "id": task.id,
-                    "title": task.title,
-                    "status": task.status.value if hasattr(task.status, "value") else str(task.status),
-                    "role_name": getattr(task, "role_name", ""),
-                    "task_type": task.task_type.value if hasattr(task.task_type, "value") else str(task.task_type),
-                    "result": (task.result or "")[:500],
-                    "error": task.error or "",
-                })
+                child_tasks.append(
+                    {
+                        "id": task.id,
+                        "title": task.title,
+                        "status": task.status.value
+                        if hasattr(task.status, "value")
+                        else str(task.status),
+                        "role_name": getattr(task, "role_name", ""),
+                        "task_type": task.task_type.value
+                        if hasattr(task.task_type, "value")
+                        else str(task.task_type),
+                        "result": (task.result or "")[:500],
+                        "error": task.error or "",
+                    }
+                )
         # Scan queue for any tasks with this team_run_id not yet in task_ids
         for task in task_queue.all_tasks():
             if getattr(task, "team_run_id", "") == run_id and task.id not in seen_ids:
-                child_tasks.append({
-                    "id": task.id,
-                    "title": task.title,
-                    "status": task.status.value if hasattr(task.status, "value") else str(task.status),
-                    "role_name": getattr(task, "role_name", ""),
-                    "task_type": task.task_type.value if hasattr(task.task_type, "value") else str(task.task_type),
-                    "result": (task.result or "")[:500],
-                    "error": task.error or "",
-                })
+                child_tasks.append(
+                    {
+                        "id": task.id,
+                        "title": task.title,
+                        "status": task.status.value
+                        if hasattr(task.status, "value")
+                        else str(task.status),
+                        "role_name": getattr(task, "role_name", ""),
+                        "task_type": task.task_type.value
+                        if hasattr(task.task_type, "value")
+                        else str(task.task_type),
+                        "result": (task.result or "")[:500],
+                        "error": task.error or "",
+                    }
+                )
         detail["child_tasks"] = child_tasks
         return detail
 
@@ -3169,12 +3214,16 @@ def create_app(
         if hasattr(task_queue, "_tasks"):
             for t in task_queue._tasks.values():
                 if getattr(t, "team_run_id", "") == team_run_id and t.id != task_id:
-                    siblings.append({
-                        "id": t.id,
-                        "title": t.title,
-                        "status": t.status.value if hasattr(t.status, "value") else str(t.status),
-                        "role_name": getattr(t, "role_name", ""),
-                    })
+                    siblings.append(
+                        {
+                            "id": t.id,
+                            "title": t.title,
+                            "status": t.status.value
+                            if hasattr(t.status, "value")
+                            else str(t.status),
+                            "role_name": getattr(t, "role_name", ""),
+                        }
+                    )
 
         # Get team run detail if available
         run_detail = None
