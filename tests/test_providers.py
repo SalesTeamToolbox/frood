@@ -17,7 +17,7 @@ from providers.registry import (
 
 class TestProviderRegistry:
     def test_all_providers_registered(self):
-        expected = {"openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm", "cerebras"}
+        expected = {"openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm", "cerebras", "groq"}
         actual = {p.value for p in PROVIDERS.keys()}
         assert expected.issubset(actual)
 
@@ -163,3 +163,56 @@ class TestCerebrasRegistration:
         with patch.dict(os.environ, {"CEREBRAS_API_KEY": ""}, clear=False):
             with pytest.raises(ValueError, match="CEREBRAS_API_KEY not set"):
                 registry.get_client(ProviderType.CEREBRAS)
+
+
+class TestGroqRegistration:
+    """Phase 2: Groq provider registration tests."""
+
+    def test_groq_provider_registered(self):
+        """GROQ-01: ProviderSpec is in PROVIDERS with correct base_url and api_key_env."""
+        spec = PROVIDERS[ProviderType.GROQ]
+        assert spec.base_url == "https://api.groq.com/openai/v1"
+        assert spec.api_key_env == "GROQ_API_KEY"
+        assert spec.display_name == "Groq"
+
+    def test_groq_models_registered(self):
+        """GROQ-02: All 3 Groq models are registered with correct model_ids."""
+        expected = {
+            "groq-llama-70b": "llama-3.3-70b-versatile",
+            "groq-gpt-oss-120b": "openai/gpt-oss-120b",
+            "groq-llama-8b": "llama-3.1-8b-instant",
+        }
+        for model_key, expected_id in expected.items():
+            spec = MODELS[model_key]
+            assert spec.model_id == expected_id, f"{model_key} model_id mismatch"
+            assert spec.provider == ProviderType.GROQ
+
+    def test_groq_models_all_free_tier(self):
+        """GROQ-03: All Groq models are classified as FREE tier."""
+        from providers.registry import ModelTier
+
+        groq_models = [k for k, v in MODELS.items() if v.provider == ProviderType.GROQ]
+        assert len(groq_models) == 3
+        for key in groq_models:
+            assert MODELS[key].tier == ModelTier.FREE, f"{key} is not FREE tier"
+
+    def test_groq_context_windows(self):
+        """GROQ-02: All Groq models have 131K context window."""
+        for key in ["groq-llama-70b", "groq-gpt-oss-120b", "groq-llama-8b"]:
+            assert MODELS[key].max_context_tokens == 131000, f"{key} wrong context"
+
+    def test_groq_client_builds_with_key(self):
+        """Client builds successfully when GROQ_API_KEY is set."""
+        registry = ProviderRegistry()
+        with patch.dict(os.environ, {"GROQ_API_KEY": "gsk-test-key-1234"}):
+            client = registry.get_client(ProviderType.GROQ)
+            assert client is not None
+            assert client.base_url == "https://api.groq.com/openai/v1/"
+
+    def test_groq_client_raises_without_key(self):
+        """Client raises ValueError when GROQ_API_KEY is not set."""
+        registry = ProviderRegistry()
+        registry.invalidate_client(ProviderType.GROQ)
+        with patch.dict(os.environ, {"GROQ_API_KEY": ""}, clear=False):
+            with pytest.raises(ValueError, match="GROQ_API_KEY not set"):
+                registry.get_client(ProviderType.GROQ)
