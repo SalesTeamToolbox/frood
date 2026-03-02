@@ -4061,6 +4061,7 @@ function renderSettingsPanel() {
       ${settingSecret("ANTHROPIC_API_KEY", "Anthropic API Key", "For Claude Opus/Sonnet models. Get one at console.anthropic.com.")}
       ${settingSecret("OPENAI_API_KEY", "OpenAI API Key", "For GPT-4o, o1, and DALL-E image generation. Get one at platform.openai.com.")}
       ${settingSecret("DEEPSEEK_API_KEY", "DeepSeek API Key", "For DeepSeek Coder/R1 models. Get one at platform.deepseek.com.")}
+      ${settingSecret("CEREBRAS_API_KEY", "Cerebras API Key", "Free inference (~3000 tok/s). 4 models included. Get one at cloud.cerebras.ai.")}
 
       <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Media & Search</h4>
       ${settingSecret("REPLICATE_API_TOKEN", "Replicate API Token", "For FLUX image generation and CogVideoX video. Get one at replicate.com.")}
