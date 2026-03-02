@@ -35,7 +35,16 @@ _BLOCKED_IP_RANGES = [
     ipaddress.ip_network("::ffff:192.168.0.0/112"),
 ]
 
-_BLOCKED_HOSTNAMES = {"localhost", "localhost.localdomain", "local"}
+_BLOCKED_HOSTNAMES = {
+    "localhost",
+    "localhost.localdomain",
+    "local",
+    # Cloud provider metadata endpoints (SSRF targets)
+    "metadata.google.internal",  # GCP
+    "metadata.internal",  # GCP alt
+    "instance-data",  # AWS alt
+    "metadata",  # Generic cloud metadata
+}
 
 
 class UrlPolicy:
