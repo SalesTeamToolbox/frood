@@ -47,6 +47,7 @@ class Settings:
     gemini_api_key: str = ""
     openrouter_api_key: str = ""
     vllm_api_key: str = ""
+    cerebras_api_key: str = ""
 
     # Dashboard auth
     dashboard_username: str = "admin"
@@ -318,6 +319,7 @@ class Settings:
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
             vllm_api_key=os.getenv("VLLM_API_KEY", ""),
+            cerebras_api_key=os.getenv("CEREBRAS_API_KEY", ""),
             # Dashboard
             dashboard_username=os.getenv("DASHBOARD_USERNAME", "admin"),
             dashboard_password=os.getenv("DASHBOARD_PASSWORD", ""),

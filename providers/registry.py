@@ -32,6 +32,12 @@ class ProviderType(str, Enum):
     GEMINI = "gemini"
     OPENROUTER = "openrouter"
     VLLM = "vllm"
+    CEREBRAS = "cerebras"
+    GROQ = "groq"
+    MISTRAL = "mistral"
+    MISTRAL_CODESTRAL = "mistral_codestral"
+    SAMBANOVA = "sambanova"
+    TOGETHER = "together"
     CUSTOM = "custom"
 
 
@@ -115,6 +121,13 @@ PROVIDERS: dict[ProviderType, ProviderSpec] = {
         default_model="local-model",
         supports_function_calling=False,
     ),
+    ProviderType.CEREBRAS: ProviderSpec(
+        provider_type=ProviderType.CEREBRAS,
+        base_url="https://api.cerebras.ai/v1",
+        api_key_env="CEREBRAS_API_KEY",
+        display_name="Cerebras",
+        default_model="llama3.1-8b",
+    ),
 }
 
 
@@ -170,6 +183,35 @@ MODELS: dict[str, ModelSpec] = {
         ProviderType.OPENROUTER,
         display_name="Gemma 3 27B (free)",
         tier=ModelTier.FREE,
+    ),
+    # Cerebras free models (OpenAI-compatible, ~1000-3000 tok/s inference)
+    "cerebras-gpt-oss-120b": ModelSpec(
+        "gpt-oss-120b",
+        ProviderType.CEREBRAS,
+        display_name="GPT-OSS 120B (Cerebras)",
+        tier=ModelTier.FREE,
+        max_context_tokens=65000,
+    ),
+    "cerebras-qwen3-235b": ModelSpec(
+        "qwen-3-235b-a22b-instruct-2507",
+        ProviderType.CEREBRAS,
+        display_name="Qwen3 235B (Cerebras)",
+        tier=ModelTier.FREE,
+        max_context_tokens=65000,
+    ),
+    "cerebras-llama-8b": ModelSpec(
+        "llama3.1-8b",
+        ProviderType.CEREBRAS,
+        display_name="Llama 3.1 8B (Cerebras)",
+        tier=ModelTier.FREE,
+        max_context_tokens=8000,
+    ),
+    "cerebras-zai-glm": ModelSpec(
+        "zai-glm-4.7",
+        ProviderType.CEREBRAS,
+        display_name="ZAI-GLM 4.7 (Cerebras)",
+        tier=ModelTier.FREE,
+        max_context_tokens=65000,
     ),
     # ═══════════════════════════════════════════════════════════════════════════
     # CHEAP TIER — low-cost models for when free isn't enough
@@ -261,6 +303,11 @@ class SpendingTracker:
         "gpt-4o": (2.50e-6, 10.00e-6),
         # DeepSeek Chat — $0.14/M input, $0.28/M output
         "deepseek-chat": (0.14e-6, 0.28e-6),
+        # Cerebras free tier — $0 (1M tokens/day server-side limit)
+        "gpt-oss-120b": (0.0, 0.0),
+        "qwen-3-235b-a22b-instruct-2507": (0.0, 0.0),
+        "llama3.1-8b": (0.0, 0.0),
+        "zai-glm-4.7": (0.0, 0.0),
     }
 
     def __init__(self):
