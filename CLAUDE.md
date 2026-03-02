@@ -472,11 +472,12 @@ class TestWorkspaceSandbox:
 | 100 | AppTest | `app_test smoke_test` returns success even when health check fails | Tool always returns `ToolResult(success=True)` for completed checks — failures are in the output text and findings, not in `success=False` |
 | 101 | Critic | Visual critic sends multimodal `content` (list of dicts) but some models only accept string content | `_extract_screenshot_b64` returns None on any failure — critic falls back to text-only; only vision-capable models get image |
 | 102 | Apps | `pip install` fails on Ubuntu 24+ with "externally-managed-environment" (PEP 668) | `_ensure_app_venv()` creates a per-app `.venv`; both `_start_python_app()` and `_install_deps()` use the venv's Python for pip and app execution |
-| 103 | Security | GitHub tokens stored as plaintext in `github_accounts.json` and `settings.json` | Use `core.encryption.encrypt_value()`/`decrypt_value()` with Fernet; legacy plaintext auto-migrates on next persist |
-| 104 | Security | GitHub token embedded in clone/push URLs visible in `ps` and `/proc` | Use `core.git_auth.git_askpass_env()` context manager — token is injected via `GIT_ASKPASS` temp script, not URL |
-| 105 | Security | `SANDBOX_ENABLED=false` silently disables all path restrictions | `config.py` force-enables sandbox when host is exposed or `SANDBOX_DISABLE_CONFIRM` not set; `sandbox.py` logs CRITICAL |
-| 106 | Security | `zipfile.extractall()` vulnerable to zip-slip (path traversal via `../`) | Validate every `zf.namelist()` entry: reject absolute paths, `..` components, and resolved paths outside target |
-| 107 | Security | Device API key hashes used plain SHA-256 (no secret) | `_hash_key()` uses HMAC-SHA256 keyed by JWT_SECRET; `validate_api_key()` auto-upgrades legacy SHA-256 hashes |
+| 103 | Memory | `_direct_response()` and server.py conversational path skip memory loading — agent claims no memory of past conversations | Use `build_conversational_memory_context()` helper to inject MEMORY.md + HISTORY.md into system prompt for all response paths |
+| 104 | Security | GitHub tokens stored as plaintext in `github_accounts.json` and `settings.json` | Use `core.encryption.encrypt_value()`/`decrypt_value()` with Fernet; legacy plaintext auto-migrates on next persist |
+| 105 | Security | GitHub token embedded in clone/push URLs visible in `ps` and `/proc` | Use `core.git_auth.git_askpass_env()` context manager — token is injected via `GIT_ASKPASS` temp script, not URL |
+| 106 | Security | `SANDBOX_ENABLED=false` silently disables all path restrictions | `config.py` force-enables sandbox when host is exposed or `SANDBOX_DISABLE_CONFIRM` not set; `sandbox.py` logs CRITICAL |
+| 107 | Security | `zipfile.extractall()` vulnerable to zip-slip (path traversal via `../`) | Validate every `zf.namelist()` entry: reject absolute paths, `..` components, and resolved paths outside target |
+| 108 | Security | Device API key hashes used plain SHA-256 (no secret) | `_hash_key()` uses HMAC-SHA256 keyed by JWT_SECRET; `validate_api_key()` auto-upgrades legacy SHA-256 hashes |
 
 ---
 
