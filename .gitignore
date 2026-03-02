@@ -67,6 +67,13 @@ test_team2.py
 dummy_test.py
 load_test.py
 load_test_monitor.py
+test_app_task.py
+
+# Agent-generated app artifacts in repo root
+index.html
+script.js
+style.css
+solar_dashboard/
 
 # Agent output / scratch files
 analysis/
