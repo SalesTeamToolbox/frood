@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-03-02T22:08:07Z"
+last_updated: "2026-03-02T22:20:00Z"
 progress:
   total_phases: 6
   completed_phases: 4
-  total_plans: 10
-  completed_plans: 9
+  total_plans: 12
+  completed_plans: 10
 ---
 
 # Project State
@@ -22,12 +22,12 @@ See: .planning/PROJECT.md (updated 2026-03-01)
 
 ## Current Position
 
-Phase: 5 of 6 (Together AI Integration) — IN PROGRESS
-Plan: 1 of 2 in current phase — COMPLETE
-Status: Phase 5 plan 01 complete — Together AI ProviderSpec, 2 ModelSpecs, pricing, and Settings field registered
-Last activity: 2026-03-02 — Phase 5 plan 01 complete (2 tasks: registry + config/env)
+Phase: 5 of 6 (Together AI Integration) — COMPLETE
+Plan: 2 of 2 in current phase — COMPLETE
+Status: Phase 5 plan 02 complete — Together AI test coverage: 11 tests (6 registration + 5 spending tracker), full suite 1927 passed
+Last activity: 2026-03-02 — Phase 5 plan 02 complete (2 tasks: test_providers.py + test_model_catalog.py)
 
-Progress: [█████████░] 75%
+Progress: [█████████░] 83%
 
 ## Performance Metrics
 
@@ -52,6 +52,7 @@ Progress: [█████████░] 75%
 | Phase 04-sambanova-integration P01 | 8 | 2 tasks | 3 files |
 | Phase 04-sambanova-integration P02 | 8 | 2 tasks | 2 files |
 | Phase 05-together-ai-integration P01 | 5 | 2 tasks | 3 files |
+| Phase 05-together-ai-integration P02 | 4 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,7 @@ Recent decisions affecting current work:
 - [Phase 05-together-ai-integration]: Together AI _BUILTIN_PRICES keys use org/ namespace prefix (deepseek-ai/DeepSeek-V3, meta-llama/Llama-3.3-70B-Instruct-Turbo) — must match ModelSpec.model_id exactly, case-sensitive; mismatch triggers $5/$15 conservative fallback
 - [Phase 05-together-ai-integration]: ProviderType.TOGETHER enum value pre-existed from Phase 1 (INFR-01) — only ProviderSpec and ModelSpecs added in Plan 01, no enum modification needed
 - [Phase 05-together-ai-integration]: Together AI is fully OpenAI spec-compliant — no request transforms needed (no temp clamp, no stream workaround, no strict removal)
+- [Phase 05-together-ai-integration]: Together AI _BUILTIN_PRICES keys use org/ namespace prefix (deepseek-ai/DeepSeek-V3, meta-llama/Llama-3.3-70B-Instruct-Turbo) -- must match ModelSpec.model_id exactly for correct pricing lookup
 
 ### Pending Todos
 
@@ -93,5 +95,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-02
-Stopped at: Completed 05-01-PLAN.md (Phase 5 plan 01 complete — ready for Phase 5 plan 02 test coverage)
+Stopped at: Completed 05-02-PLAN.md (Phase 5 plan 02 complete — ready for Phase 6)
 Resume file: None

@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Groq Integration** (1/2 plans) - Add Groq (genuinely free ~14K req/day, Llama 70B + GPT-OSS 120B) (completed 2026-03-02)
 - [x] **Phase 3: Mistral Integration** - Add Mistral via two-key architecture (Codestral free endpoint + La Plateforme critic-only) (completed 2026-03-02)
 - [x] **Phase 4: SambaNova Integration** - Add SambaNova (credits-based) with request transforms for temp clamp, stream=False for tools, and strict removal (completed 2026-03-02)
-- [ ] **Phase 5: Together AI Integration** (2 plans) - Add Together AI (credits-based, high-context Llama 4 Scout / DeepSeek V3)
+- [x] **Phase 5: Together AI Integration** (2 plans) - Add Together AI (credits-based, high-context Llama 4 Scout / DeepSeek V3) (completed 2026-03-02)
 - [ ] **Phase 6: Routing + Config Finalization** - Smart FREE_ROUTING rotation across all providers, provider-diverse fallback chain, GEMINI_FREE_TIER and OPENROUTER_FREE_ONLY config flags
 
 ## Phase Details
@@ -85,7 +85,7 @@ Plans:
   2. Two Together AI ModelSpec entries exist (together-deepseek-v3, together-llama-70b) classified as ModelTier.CHEAP
   3. SpendingTracker has credit-based pricing for Together AI models (not $0 — this is a credits provider)
   4. Unit tests for Together AI ProviderSpec, ModelSpec, and pricing entries pass
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 - [ ] 05-01-PLAN.md — Register Together AI ProviderSpec + 2 ModelSpecs + pricing + config
 - [ ] 05-02-PLAN.md — Unit tests for Together AI registration and SpendingTracker pricing
@@ -114,5 +114,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 2. Groq Integration | 2/2 | Complete   | 2026-03-02 |
 | 3. Mistral Integration | 2/2 | Complete   | 2026-03-02 |
 | 4. SambaNova Integration | 2/2 | Complete   | 2026-03-02 |
-| 5. Together AI Integration | 1/2 | In Progress|  |
+| 5. Together AI Integration | 2/2 | Complete   | 2026-03-02 |
 | 6. Routing + Config Finalization | 0/TBD | Not started | - |
