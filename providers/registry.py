@@ -149,6 +149,13 @@ PROVIDERS: dict[ProviderType, ProviderSpec] = {
         display_name="Mistral Codestral (free)",
         supports_function_calling=True,
     ),
+    ProviderType.SAMBANOVA: ProviderSpec(
+        provider_type=ProviderType.SAMBANOVA,
+        base_url="https://api.sambanova.ai/v1",
+        api_key_env="SAMBANOVA_API_KEY",
+        display_name="SambaNova",
+        supports_function_calling=True,
+    ),
 }
 
 
@@ -307,6 +314,27 @@ MODELS: dict[str, ModelSpec] = {
         tier=ModelTier.CHEAP,
         max_context_tokens=128000,   # 128K context
     ),
+    # SambaNova (credits-based, funded account required — OpenAI-compatible endpoint)
+    # NOTE: SambaNova uses mixed-case model IDs — these must match exactly
+    # DeepSeek-V3-0324 is the dated release alias (more stable than DeepSeek-V3.1)
+    "sambanova-llama-70b": ModelSpec(
+        "Meta-Llama-3.3-70B-Instruct",
+        ProviderType.SAMBANOVA,
+        max_tokens=4096,
+        temperature=0.3,
+        display_name="Llama 3.3 70B (SambaNova)",
+        tier=ModelTier.CHEAP,
+        max_context_tokens=131072,   # 128K context window
+    ),
+    "sambanova-deepseek-v3": ModelSpec(
+        "DeepSeek-V3-0324",
+        ProviderType.SAMBANOVA,
+        max_tokens=4096,
+        temperature=0.3,
+        display_name="DeepSeek V3 (SambaNova)",
+        tier=ModelTier.CHEAP,
+        max_context_tokens=131072,
+    ),
     # ═══════════════════════════════════════════════════════════════════════════
     # PREMIUM TIER — frontier models for final reviews, complex tasks, admin-selected
     # ═══════════════════════════════════════════════════════════════════════════
@@ -390,6 +418,10 @@ class SpendingTracker:
         # Conservative estimates: mistral-large-latest may alias to $2/$6 or $0.50/$1.50 version
         "mistral-large-latest": (2.0e-6, 6.0e-6),     # ~$2.00/M in, $6.00/M out
         "mistral-small-latest": (0.20e-6, 0.60e-6),    # ~$0.20/M in, $0.60/M out
+        # SambaNova — credits-based (CHEAP tier), per-token pricing
+        # CRITICAL: Keys are MIXED CASE — must match ModelSpec.model_id exactly
+        "Meta-Llama-3.3-70B-Instruct": (0.60e-6, 1.20e-6),     # ~$0.60/M in, $1.20/M out
+        "DeepSeek-V3-0324": (0.80e-6, 1.60e-6),                 # ~$0.80/M in, $1.60/M out
     }
 
     def __init__(self):
@@ -564,10 +596,14 @@ class ProviderRegistry:
         spec = self.get_model(model_key)
         client = self.get_client(spec.provider)
 
+        resolved_temp = temperature if temperature is not None else spec.temperature
+        # SAMB-03: SambaNova rejects temperature > 1.0
+        if spec.provider == ProviderType.SAMBANOVA:
+            resolved_temp = min(resolved_temp, 1.0)
         response = await client.chat.completions.create(
             model=spec.model_id,
             messages=messages,
-            temperature=temperature if temperature is not None else spec.temperature,
+            temperature=resolved_temp,
             max_tokens=max_tokens or spec.max_tokens,
         )
 
@@ -611,14 +647,30 @@ class ProviderRegistry:
         spec = self.get_model(model_key)
         client = self.get_client(spec.provider)
 
+        resolved_temp = temperature if temperature is not None else spec.temperature
+        # SAMB-03: SambaNova rejects temperature > 1.0
+        if spec.provider == ProviderType.SAMBANOVA:
+            resolved_temp = min(resolved_temp, 1.0)
+
         kwargs = {
             "model": spec.model_id,
             "messages": messages,
-            "temperature": temperature if temperature is not None else spec.temperature,
+            "temperature": resolved_temp,
             "max_tokens": max_tokens or spec.max_tokens,
         }
         if tools:
+            # SAMB-05: SambaNova does not support strict: true in tool definitions
+            if spec.provider == ProviderType.SAMBANOVA:
+                import copy
+                tools = copy.deepcopy(tools)
+                for tool in tools:
+                    fn = tool.get("function", {})
+                    if fn.get("strict") is True:
+                        fn["strict"] = False
             kwargs["tools"] = tools
+            # SAMB-04: SambaNova streaming tool calls have broken index field
+            if spec.provider == ProviderType.SAMBANOVA:
+                kwargs["stream"] = False
 
         response = await client.chat.completions.create(**kwargs)
 
