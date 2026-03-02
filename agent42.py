@@ -892,7 +892,19 @@ class Agent42:
             model = routing["primary"]
 
         _custom = _load_custom_persona()
-        messages = [{"role": "system", "content": _custom or GENERAL_ASSISTANT_PROMPT}]
+        system_content = _custom or GENERAL_ASSISTANT_PROMPT
+
+        # Load persistent memory context so conversational responses
+        # can reference past interactions stored in MEMORY.md / HISTORY.md
+        from memory.store import build_conversational_memory_context
+
+        memory_context = await build_conversational_memory_context(
+            self.memory_store, message.content
+        )
+        if memory_context and memory_context.strip():
+            system_content += "\n\n" + memory_context
+
+        messages = [{"role": "system", "content": system_content}]
         # Add recent conversation history for context
         for h in history_dicts[-10:]:
             messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
@@ -1544,7 +1556,12 @@ class Agent42:
                 logger.debug(f"Provider not configured: {p['display_name']}")
 
 
-from commands import BackupCommandHandler, RestoreCommandHandler, CloneCommandHandler, CommandHandler
+from commands import (
+    BackupCommandHandler,
+    RestoreCommandHandler,
+    CloneCommandHandler,
+    CommandHandler,
+)
 
 
 def main():
