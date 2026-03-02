@@ -1771,8 +1771,25 @@ def create_app(
             except Exception:
                 redis_status = "unreachable"
 
+        # Compute effective operational mode: what is *actually* working right
+        # now, not just what is configured.  When Qdrant is configured but
+        # unreachable the system silently degrades to file/Redis-only — the
+        # dashboard should communicate that honestly.
+        qdrant_operational = qdrant_status in ("connected", "embedded_ok")
+        redis_operational = redis_status == "connected"
+
+        if qdrant_operational and redis_operational:
+            effective_mode = "qdrant_redis"
+        elif qdrant_operational and not redis_operational:
+            effective_mode = "qdrant_embedded" if not qdrant_url else "qdrant_server"
+        elif not qdrant_operational and redis_operational:
+            effective_mode = "redis_only"
+        else:
+            effective_mode = "file"
+
         return {
-            "mode": mode,
+            "mode": effective_mode,
+            "configured_mode": mode,
             "qdrant": {
                 "enabled": qdrant_enabled,
                 "url": qdrant_url or None,

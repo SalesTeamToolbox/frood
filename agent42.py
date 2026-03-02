@@ -91,6 +91,7 @@ from tools.image_gen import ImageGenTool
 from tools.knowledge_tool import KnowledgeTool
 from tools.linter_tool import LinterTool
 from tools.mcp_client import MCPManager
+from tools.memory_tool import MemoryTool
 from tools.notify_tool import NotifyUserTool
 from tools.outline_tool import OutlineTool
 from tools.persona_tool import PersonaTool
@@ -449,6 +450,7 @@ class Agent42:
 
         # Agent Zero-inspired tools
         self.tool_registry.register(BehaviourTool(memory_dir=self.data_dir / settings.memory_dir))
+        self.tool_registry.register(MemoryTool(memory_store=self.memory_store))
         self.tool_registry.register(NotifyUserTool(ws_manager=self.ws_manager))
 
         # Development tools
@@ -1557,7 +1559,9 @@ class Agent42:
 
         # Security configuration warnings
         if not settings.tool_rate_limiting_enabled:
-            logger.warning("SECURITY: Tool rate limiting is disabled (TOOL_RATE_LIMITING_ENABLED=false)")
+            logger.warning(
+                "SECURITY: Tool rate limiting is disabled (TOOL_RATE_LIMITING_ENABLED=false)"
+            )
         if settings.max_daily_api_spend_usd == 0.0:
             logger.warning("No daily API spend limit set (MAX_DAILY_API_SPEND_USD=0)")
         if settings.dashboard_username == "admin" and settings.dashboard_host != "127.0.0.1":
