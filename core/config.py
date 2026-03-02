@@ -49,6 +49,8 @@ class Settings:
     vllm_api_key: str = ""
     cerebras_api_key: str = ""
     groq_api_key: str = ""
+    mistral_api_key: str = ""
+    codestral_api_key: str = ""
 
     # Dashboard auth
     dashboard_username: str = "admin"
@@ -322,6 +324,8 @@ class Settings:
             vllm_api_key=os.getenv("VLLM_API_KEY", ""),
             cerebras_api_key=os.getenv("CEREBRAS_API_KEY", ""),
             groq_api_key=os.getenv("GROQ_API_KEY", ""),
+            mistral_api_key=os.getenv("MISTRAL_API_KEY", ""),
+            codestral_api_key=os.getenv("CODESTRAL_API_KEY", ""),
             # Dashboard
             dashboard_username=os.getenv("DASHBOARD_USERNAME", "admin"),
             dashboard_password=os.getenv("DASHBOARD_PASSWORD", ""),
