@@ -193,15 +193,17 @@ WORK_TYPE_KEYWORDS = {
 
 # Map work types to reference files loaded from .claude/reference/
 REFERENCE_FILES = {
-    "tools": ["terminology.md", "new-components.md", "conventions.md"],
+    "tools": ["terminology.md", "new-components.md", "conventions.md", "pitfalls-archive.md"],
     "skills": ["terminology.md", "new-components.md", "conventions.md"],
-    "providers": ["terminology.md", "new-components.md"],
-    "config": ["configuration.md"],
-    "dashboard": ["terminology.md"],
-    "deployment": ["deployment.md", "configuration.md"],
-    "security": ["terminology.md"],
-    "memory": ["terminology.md"],
+    "providers": ["terminology.md", "new-components.md", "pitfalls-archive.md"],
+    "config": ["configuration.md", "pitfalls-archive.md"],
+    "dashboard": ["terminology.md", "pitfalls-archive.md"],
+    "deployment": ["deployment.md", "configuration.md", "pitfalls-archive.md"],
+    "security": ["terminology.md", "pitfalls-archive.md"],
+    "memory": ["terminology.md", "pitfalls-archive.md"],
     "structure": ["project-structure.md", "terminology.md"],
+    "testing": ["pitfalls-archive.md"],
+    "async": ["pitfalls-archive.md"],
 }
 
 
