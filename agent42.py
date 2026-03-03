@@ -295,8 +295,6 @@ class Agent42:
 
         self.state_manager = StateManager(self.data_dir / settings.projects_dir)
 
-        self._register_tools()
-
         # Phase 4b: Custom tool plugins (auto-discovery from CUSTOM_TOOLS_DIR)
         if settings.custom_tools_dir:
             tool_context = ToolContext(
@@ -342,6 +340,9 @@ class Agent42:
             qdrant_store=self._qdrant_store,
             redis_backend=self._redis_backend,
         )
+
+        # Register tools now that memory_store is available
+        self._register_tools()
 
         consolidation = ConsolidationPipeline(
             model_router=ModelRouter(),
@@ -452,6 +453,7 @@ class Agent42:
         self.tool_registry.register(BehaviourTool(memory_dir=self.data_dir / settings.memory_dir))
         self.tool_registry.register(MemoryTool(memory_store=self.memory_store))
         self.tool_registry.register(NotifyUserTool(ws_manager=self.ws_manager))
+        self.tool_registry.register(MemoryTool(memory_store=self.memory_store))
 
         # Development tools
         self.tool_registry.register(GitTool(workspace))
