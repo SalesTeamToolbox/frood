@@ -139,7 +139,7 @@ info "Redis is running"
 # ── Step 4: Install Qdrant ───────────────────────────────────────────────────
 info "Step 4/7: Setting up Qdrant..."
 
-QDRANT_VERSION="1.13.2"
+QDRANT_VERSION="1.17.0"
 
 if ! systemctl is-active --quiet qdrant 2>/dev/null; then
     if [ ! -f /usr/local/bin/qdrant ]; then
@@ -152,7 +152,22 @@ if ! systemctl is-active --quiet qdrant 2>/dev/null; then
         info "Qdrant binary installed"
     fi
 
-    sudo mkdir -p /var/lib/qdrant/storage
+    sudo mkdir -p /var/lib/qdrant/{storage,snapshots}
+    sudo chown -R nobody:nogroup /var/lib/qdrant
+
+    # Qdrant v1.14+ requires config file instead of --storage-path CLI arg
+    sudo mkdir -p /etc/qdrant
+    sudo tee /etc/qdrant/config.yaml > /dev/null << 'QDRANT_CONFIG'
+storage:
+  storage_path: /var/lib/qdrant/storage
+
+service:
+  host: 127.0.0.1
+  http_port: 6333
+  grpc_port: 6334
+
+telemetry_disabled: true
+QDRANT_CONFIG
 
     sudo tee /etc/systemd/system/qdrant.service > /dev/null << 'QDRANT_UNIT'
 [Unit]
@@ -161,7 +176,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/qdrant --storage-path /var/lib/qdrant/storage
+WorkingDirectory=/var/lib/qdrant
+ExecStart=/usr/local/bin/qdrant --config-path /etc/qdrant/config.yaml
 Restart=on-failure
 RestartSec=5
 User=nobody
