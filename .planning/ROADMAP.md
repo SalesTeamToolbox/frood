@@ -119,7 +119,7 @@ Plans:
 | 9. Error Handling and User Feedback | v1.1 | 1/1 | Complete | 2026-03-06 |
 | 10. Visual Polish and Consistency | v1.1 | 0/1 | Deferred | -- |
 | 11. MCP Server Integration | 1/1 | Complete    | 2026-03-06 | -- |
-| 12. Security Gate Hook | 1/1 | Complete   | 2026-03-06 | -- |
+| 12. Security Gate Hook | 1/1 | Complete    | 2026-03-06 | -- |
 | 13. Scaffolding Skills | v1.2 | 0/? | Not started | -- |
 | 14. Operational Skills | v1.2 | 0/? | Not started | -- |
 | 15. Specialized Subagents | v1.2 | 0/? | Not started | -- |
