@@ -12,7 +12,7 @@ Requirements for milestone v1.3. Each maps to roadmap phases.
 - [x] **PROV-01**: User can configure StrongWall API key and have it used as L1 provider
 - [x] **PROV-02**: Agent42 handles non-streaming responses from StrongWall without errors
 - [ ] **PROV-03**: Chat messages from StrongWall display with simulated streaming UX
-- [ ] **PROV-04**: StrongWall health check detects availability and queue delays
+- [x] **PROV-04**: StrongWall health check detects availability and queue delays
 
 ### Tier Architecture
 
@@ -68,7 +68,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROV-01 | Phase 16 | Complete (16-01) |
 | PROV-02 | Phase 16 | Complete (16-01) |
 | PROV-03 | Phase 20 | Pending |
-| PROV-04 | Phase 16 | Pending |
+| PROV-04 | Phase 16 | Complete (16-02) |
 | TIER-01 | Phase 17 | Pending |
 | TIER-02 | Phase 17 | Pending |
 | TIER-03 | Phase 17 | Pending |
@@ -90,4 +90,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-03-06*
-*Last updated: 2026-03-06 (PROV-01, PROV-02 complete via 16-01)*
+*Last updated: 2026-03-06 (PROV-04 complete via 16-02, Phase 16 done)*

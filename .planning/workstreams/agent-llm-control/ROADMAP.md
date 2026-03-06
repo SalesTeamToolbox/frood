@@ -11,7 +11,7 @@ Restructure Agent42's model routing around L1 (workhorse) and L2 (premium) tiers
 - Integer phases (16, 17, ...): Planned milestone work
 - Decimal phases (16.1, 16.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 16: StrongWall Provider** - Integrate StrongWall.ai as OpenAI-compatible provider with health check and non-streaming response handling
+- [x] **Phase 16: StrongWall Provider** - Integrate StrongWall.ai as OpenAI-compatible provider with health check and non-streaming response handling
 - [ ] **Phase 17: Tier Routing Architecture** - Restructure model_router.py around L1/L2 tiers with new fallback chain
 - [ ] **Phase 18: Agent Config Backend** - Per-agent routing config storage, API endpoints, and inheritance from global defaults
 - [ ] **Phase 19: Agent Config Dashboard** - Settings page LLM Routing section and Agents page per-agent override UI
@@ -32,7 +32,7 @@ Restructure Agent42's model routing around L1 (workhorse) and L2 (premium) tiers
 
 Plans:
 - [x] 16-01-PLAN.md — Register StrongWall provider/model, enforce non-streaming for all requests
-- [ ] 16-02-PLAN.md — Provider health check polling, flat-rate cost tracking, dashboard integration
+- [x] 16-02-PLAN.md — Provider health check polling, flat-rate cost tracking, dashboard integration
 
 ### Phase 17: Tier Routing Architecture
 **Goal**: Model routing operates on L1/L2 tier concepts with StrongWall as default L1, Gemini/OR-paid as L2, and existing free providers as fallback
@@ -96,7 +96,7 @@ Phases execute in numeric order: 16 -> 17 -> 18 -> 19 -> 20
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 16. StrongWall Provider | 1/2 | In progress | - |
+| 16. StrongWall Provider | 2/2 | Complete | 2026-03-06 |
 | 17. Tier Routing Architecture | 0/2 | Not started | - |
 | 18. Agent Config Backend | 0/1 | Not started | - |
 | 19. Agent Config Dashboard | 0/2 | Not started | - |
@@ -104,4 +104,4 @@ Phases execute in numeric order: 16 -> 17 -> 18 -> 19 -> 20
 
 ---
 *Roadmap created: 2026-03-06*
-*Last updated: 2026-03-06 (16-01 complete)*
+*Last updated: 2026-03-06 (16-02 complete, Phase 16 done)*

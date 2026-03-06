@@ -4,14 +4,14 @@ workstream: agent-llm-control
 milestone: v1.3
 milestone_name: Agent LLM Control
 status: in_progress
-stopped_at: Completed 16-01-PLAN.md (StrongWall provider registration)
-last_updated: "2026-03-06T22:08:00Z"
-last_activity: 2026-03-06 — Executed 16-01 (StrongWall provider + model + non-streaming)
+stopped_at: Completed 16-02-PLAN.md (StrongWall health check + spending integration)
+last_updated: "2026-03-06T22:22:00Z"
+last_activity: 2026-03-06 — Executed 16-02 (health check + spending exemption + dashboard)
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 8
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -21,29 +21,29 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-06)
 
 **Core value:** Agent42 runs agents reliably with tiered provider routing (L1 workhorse -> free fallback -> L2 premium)
-**Current focus:** v1.3 Phase 16 — StrongWall Provider (plan 1 of 2 complete)
+**Current focus:** v1.3 Phase 16 complete -- Phase 17 next (Tier Routing Architecture)
 
 ## Current Position
 
-Phase: 16 of 20 (StrongWall Provider)
-Plan: 1 of 2 in current phase
-Status: Executing
-Last activity: 2026-03-06 — 16-01 complete (provider registration + non-streaming)
+Phase: 16 of 20 (StrongWall Provider) -- COMPLETE
+Plan: 2 of 2 in current phase (all complete)
+Status: Phase 16 complete, ready for Phase 17
+Last activity: 2026-03-06 — 16-02 complete (health check + spending + dashboard)
 
-Progress: [█░░░░░░░░░] 12%
+Progress: [██░░░░░░░░] 25%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 7min
-- Total execution time: 7min
+- Total plans completed: 2
+- Average duration: 7.5min
+- Total execution time: 15min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 16. StrongWall Provider | 1/2 | 7min | 7min |
+| 16. StrongWall Provider | 2/2 | 15min | 7.5min |
 
 *Updated after each plan completion*
 
@@ -54,6 +54,10 @@ Progress: [█░░░░░░░░░] 12%
 - [16-01] StrongWall stream=False for ALL requests (not just tool calls like SambaNova)
 - [16-01] Temperature clamp and strict=False shared with SambaNova in combined conditions
 - [16-01] Flat-rate $0 per-token in _BUILTIN_PRICES; monthly cost as separate config field
+- [16-02] Health check uses /v1/models endpoint (GET, no tokens consumed)
+- [16-02] Thresholds: <3s healthy, 3-5s degraded, >5s/error unhealthy
+- [16-02] Polling started in agent42.py (not server.py startup event) matching existing pattern
+- [16-02] Spending limit exemption via _FLAT_RATE_PROVIDERS set before check_limit()
 - StrongWall.ai ($16/mo unlimited Kimi K2.5) as L1 workhorse provider
 - L1/L2 tier architecture replaces free/cheap/paid mix
 - Gemini as default L2 (premium) provider
@@ -74,6 +78,6 @@ Progress: [█░░░░░░░░░] 12%
 
 ## Session Continuity
 
-Last session: 2026-03-06T22:08:00Z
-Stopped at: Completed 16-01-PLAN.md (StrongWall provider registration)
+Last session: 2026-03-06T22:22:00Z
+Stopped at: Completed 16-02-PLAN.md (StrongWall health check + spending integration)
 Resume file: None
