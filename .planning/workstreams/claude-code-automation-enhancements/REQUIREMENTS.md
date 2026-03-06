@@ -24,8 +24,8 @@ Requirements for Claude Code Automation Enhancements milestone. Each maps to roa
 - [x] **SKILL-01**: Developer can invoke `/test-coverage <module>` to generate a test file following project conventions (class-based, conftest fixtures, pytest-asyncio, mocked externals)
 - [x] **SKILL-02**: Developer can invoke `/add-provider` to scaffold a new LLM provider (ProviderSpec, ModelSpecs, Settings field, .env.example, tests) in one workflow
 - [x] **SKILL-03**: Developer can invoke `/add-tool` to scaffold a new tool (Tool ABC, registration in agent42.py, test file) with correct patterns
-- [ ] **SKILL-04**: Developer can invoke `/prod-check` to run all production health checks (systemd, logs, Qdrant, Redis, dashboard, disk) via SSH in one pass
-- [ ] **SKILL-05**: Claude can invoke the pitfall skill to auto-format and auto-number new entries in the CLAUDE.md pitfalls table
+- [x] **SKILL-04**: Developer can invoke `/prod-check` to run all production health checks (systemd, logs, Qdrant, Redis, dashboard, disk) via SSH in one pass
+- [x] **SKILL-05**: Claude can invoke the pitfall skill to auto-format and auto-number new entries in the CLAUDE.md pitfalls table
 
 ### Subagents
 
@@ -65,8 +65,8 @@ Requirements for Claude Code Automation Enhancements milestone. Each maps to roa
 | SKILL-01 | Phase 13 | Complete |
 | SKILL-02 | Phase 13 | Complete |
 | SKILL-03 | Phase 13 | Complete |
-| SKILL-04 | Phase 14 | Pending |
-| SKILL-05 | Phase 14 | Pending |
+| SKILL-04 | Phase 14 | Complete |
+| SKILL-05 | Phase 14 | Complete |
 | AGENT-01 | Phase 15 | Pending |
 | AGENT-02 | Phase 15 | Pending |
 | AGENT-03 | Phase 15 | Pending |
@@ -79,4 +79,4 @@ Requirements for Claude Code Automation Enhancements milestone. Each maps to roa
 
 ---
 *Requirements defined: 2026-03-05*
-*Last updated: 2026-03-06 after 13-01 plan execution*
+*Last updated: 2026-03-06 after 14-01 plan execution*
