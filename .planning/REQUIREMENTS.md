@@ -9,9 +9,9 @@ Requirements for Claude Code Automation Enhancements milestone. Each maps to roa
 
 ### MCP Servers
 
-- [ ] **MCP-01**: Developer can access live library documentation for any dependency (openai, fastapi, playwright, etc.) via context7 MCP server
-- [ ] **MCP-02**: Developer can manage GitHub PRs, issues, and CI status directly from Claude Code via GitHub MCP server
-- [ ] **MCP-03**: MCP server configurations are persisted in `.mcp.json` for cross-session and team sharing
+- [x] **MCP-01**: Developer can access live library documentation for any dependency (openai, fastapi, playwright, etc.) via context7 MCP server
+- [x] **MCP-02**: Developer can manage GitHub PRs, issues, and CI status directly from Claude Code via GitHub MCP server
+- [x] **MCP-03**: MCP server configurations are persisted in `.mcp.json` for cross-session and team sharing
 
 ### Hooks
 
@@ -56,9 +56,9 @@ Requirements for Claude Code Automation Enhancements milestone. Each maps to roa
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MCP-01 | Phase 11 | Pending |
-| MCP-02 | Phase 11 | Pending |
-| MCP-03 | Phase 11 | Pending |
+| MCP-01 | Phase 11 | Complete |
+| MCP-02 | Phase 11 | Complete |
+| MCP-03 | Phase 11 | Complete |
 | HOOK-01 | Phase 12 | Pending |
 | HOOK-02 | Phase 12 | Pending |
 | HOOK-03 | Phase 12 | Pending |

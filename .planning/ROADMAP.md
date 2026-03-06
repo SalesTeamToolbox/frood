@@ -38,7 +38,7 @@ See [v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md) for full details.
 
 **Milestone Goal:** Implement MCP servers, hooks, skills, and subagents to improve development velocity, catch production bugs earlier, and codify repetitive workflows
 
-- [ ] **Phase 11: MCP Server Integration** - Configure context7 and GitHub MCP servers for library docs and PR/issue management
+- [x] **Phase 11: MCP Server Integration** - Configure context7 and GitHub MCP servers for library docs and PR/issue management (completed 2026-03-06)
 - [ ] **Phase 12: Security Gate Hook** - Add PreToolUse hook that blocks edits to sensitive files without explicit confirmation
 - [ ] **Phase 13: Scaffolding Skills** - Create skills that generate test files, provider boilerplate, and tool boilerplate from project conventions
 - [ ] **Phase 14: Operational Skills** - Create skills for production health checks and pitfall table maintenance
@@ -116,7 +116,7 @@ Plans:
 | 8. Authentication Flow Improvements | v1.1 | 1/1 | Complete | 2026-03-05 |
 | 9. Error Handling and User Feedback | v1.1 | 1/1 | Complete | 2026-03-06 |
 | 10. Visual Polish and Consistency | v1.1 | 0/1 | Deferred | -- |
-| 11. MCP Server Integration | v1.2 | 0/1 | Planned | -- |
+| 11. MCP Server Integration | 1/1 | Complete   | 2026-03-06 | -- |
 | 12. Security Gate Hook | v1.2 | 0/? | Not started | -- |
 | 13. Scaffolding Skills | v1.2 | 0/? | Not started | -- |
 | 14. Operational Skills | v1.2 | 0/? | Not started | -- |
