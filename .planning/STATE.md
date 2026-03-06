@@ -1,33 +1,31 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Layout & Authentication Fixes
-status: phase_in_progress
-last_updated: "2026-03-06T04:18:48Z"
+milestone: v1.2
+milestone_name: Claude Code Automation Enhancements
+status: defining_requirements
+last_updated: "2026-03-06T04:30:00Z"
 progress:
-  total_phases: 4
-  completed_phases: 3
-  total_plans: 4
-  completed_plans: 4
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-04)
+See: .planning/PROJECT.md (updated 2026-03-05)
 
 **Core value:** Agent42 operates on free-tier LLMs with enough provider diversity that no single outage stops the platform
-**Current focus:** v1.1 Layout & Authentication Fixes
+**Current focus:** v1.2 Claude Code Automation Enhancements
 
 ## Current Position
 
-Phase: 9 - Error Handling and User Feedback ◆ **COMPLETE**
-Plan: 1 of 1 plans complete
-Status: 51 error handling tests passing, all features implemented
-Last activity: 2026-03-06 — Phase 9 executed (error taxonomy, structured API errors, loading indicators, timeout warnings)
-
-Progress: [█████████░] 90% — PHASE COMPLETE
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-05 — Milestone v1.2 started
 
 ## Accumulated Context
 
@@ -35,6 +33,7 @@ Progress: [█████████░] 90% — PHASE COMPLETE
 
 All v1.0 decisions logged in PROJECT.md Key Decisions table with outcomes.
 
+v1.1 decisions:
 - (09-01) Used iteration_engine._is_*_error() heuristics for consistent error classification
 - (09-01) All API errors return structured {error, message, action} JSON via global exception handler
 - (09-01) 200ms spinner threshold to prevent flicker on fast API calls
@@ -42,7 +41,7 @@ All v1.0 decisions logged in PROJECT.md Key Decisions table with outcomes.
 
 ### Pending Todos
 
-None — only Phase 10 (Visual Polish) remains.
+- v1.1 phase 10 (Visual Polish) deferred — return after v1.2
 
 ### Blockers/Concerns
 
@@ -57,6 +56,6 @@ Pre-existing test failures (out of scope):
 
 ## Session Continuity
 
-Last session: 2026-03-06
-Stopped at: Completed 09-01-PLAN.md (Error Handling and User Feedback)
+Last session: 2026-03-05
+Stopped at: Defining requirements for v1.2
 Resume file: None

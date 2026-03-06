@@ -28,16 +28,15 @@ Agent42 must always be able to operate on free-tier LLMs, with enough model dive
 
 ### Active
 
-## Current Milestone: v1.1 Layout & Authentication Fixes
+## Current Milestone: v1.2 Claude Code Automation Enhancements
 
-**Goal:** Fix real-time UI updates, authentication problems, and error handling to improve user experience
+**Goal:** Implement recommended Claude Code automations — MCP servers, hooks, skills, and subagents — to improve development velocity, catch production bugs earlier, and codify repetitive workflows
 
 **Target features:**
-- Real-time chat updates without page refresh
-- Proper user feedback during processing
-- Authentication issue resolution
-- Improved error messaging
-- Loading indicators and status feedback
+- MCP server integration (context7 for library docs, GitHub for PR/issue management)
+- PreToolUse security gate hook (block edits to sensitive files before they happen)
+- Developer workflow skills (test-coverage, add-provider, add-tool, prod-check, pitfall)
+- Specialized subagents (test-coverage-auditor, dependency-health, migration-impact, deploy-verifier)
 
 ### Out of Scope
 
@@ -88,4 +87,4 @@ Tech stack: Python 3.11+, FastAPI, AsyncOpenAI, aiofiles, pytest.
 | Provider-diverse round-robin | _find_healthy_free_model cycles providers before retrying same | ✓ Good — prevents quota exhaustion |
 
 ---
-*Last updated: 2026-03-02 after v1.0 milestone*
+*Last updated: 2026-03-05 after v1.2 milestone start*
