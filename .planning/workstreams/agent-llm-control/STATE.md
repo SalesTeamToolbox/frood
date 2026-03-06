@@ -70,6 +70,6 @@ Progress: [██░░░░░░░░] 25%
 
 ## Session Continuity
 
-Last session: 2026-03-06T22:22:00Z
-Stopped at: Completed 16-02-PLAN.md (StrongWall health check + spending integration)
-Resume file: None
+Last session: 2026-03-06
+Stopped at: Phase 17 context gathered
+Resume file: .planning/workstreams/agent-llm-control/phases/17-tier-routing-architecture/17-CONTEXT.md
