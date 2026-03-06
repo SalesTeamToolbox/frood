@@ -148,18 +148,71 @@ setInterval(rotateTagline, 8000);
 // ---------------------------------------------------------------------------
 const API = "/api";
 
+// Cross-tab auth synchronization
+const _authChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("agent42_auth") : null;
+if (_authChannel) {
+  _authChannel.onmessage = (ev) => {
+    if (ev.data?.type === "logout") {
+      state.token = "";
+      localStorage.removeItem("agent42_token");
+      if (ws) ws.close();
+      render();
+    } else if (ev.data?.type === "login" && ev.data?.token) {
+      state.token = ev.data.token;
+      localStorage.setItem("agent42_token", ev.data.token);
+      connectWS();
+      loadAll().then(render);
+    }
+  };
+}
+
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json" };
   if (state.token) headers["Authorization"] = `Bearer ${state.token}`;
   const res = await fetch(`${API}${path}`, { ...opts, headers });
   if (res.status === 401) {
+    // Try to get specific error code from response
+    let errorCode = "";
+    let errorMessage = "Session expired. Please log in again.";
+    try {
+      const data = await res.json();
+      if (data.detail?.code) {
+        errorCode = data.detail.code;
+        errorMessage = data.detail.message || errorMessage;
+      } else if (data.error) {
+        errorCode = data.error;
+        errorMessage = data.message || errorMessage;
+      }
+    } catch {}
+
     state.token = "";
     localStorage.removeItem("agent42_token");
+
+    // Broadcast logout to other tabs
+    if (_authChannel) {
+      _authChannel.postMessage({ type: "logout" });
+    }
+
     render();
+
+    // Show specific error message
+    const errEl = document.getElementById("login-error");
+    if (errEl) errEl.textContent = errorMessage;
+
     return null;
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
+    // Handle structured error responses: {error, message, action}
+    if (data.error && data.message) {
+      if (typeof showError === "function") {
+        showError(data.error, data.message, data.action || "");
+      }
+      const err = new Error(data.message);
+      err.code = data.error;
+      err.action = data.action || "";
+      throw err;
+    }
     throw new Error(data.detail || `HTTP ${res.status}`);
   }
   return res.json();
@@ -906,7 +959,8 @@ async function sendSessionMessage(sessionId, isCode) {
     // Don't reset sending state here — the WebSocket "chat_thinking" event
     // will set it to true when the agent starts and false when it finishes.
   } catch (e) {
-    toast("Failed to send: " + e.message, "error");
+    // Structured errors already shown by api(); only toast unstructured ones
+    if (!e.code) toast("Failed to send: " + e.message, "error");
     // Only reset on error so the typing indicator disappears
     if (isCode) state.codeSending = false;
     else state.chatSending = false;
@@ -1037,7 +1091,8 @@ async function sendChatMessage() {
     // Don't reset chatSending here — the WebSocket "chat_thinking" event
     // controls the typing indicator based on actual agent processing state.
   } catch (e) {
-    toast("Failed to send: " + e.message, "error");
+    // Structured errors already shown by api(); only toast unstructured ones
+    if (!e.code) toast("Failed to send: " + e.message, "error");
     state.chatSending = false;
     if (state.page === "chat") renderChat();
   }
@@ -1059,11 +1114,21 @@ async function doLogin(username, password) {
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
+      // Handle structured error responses from unified handler
+      if (data.error && data.message) {
+        throw new Error(data.message);
+      }
       throw new Error(data.detail || "Login failed");
     }
     const data = await res.json();
     state.token = data.token;
     localStorage.setItem("agent42_token", data.token);
+
+    // Broadcast login to other tabs
+    if (_authChannel) {
+      _authChannel.postMessage({ type: "login", token: data.token });
+    }
+
     connectWS();
     await loadAll();
     render();
@@ -1076,9 +1141,25 @@ async function doLogin(username, password) {
   }
 }
 
-function doLogout() {
+async function doLogout() {
+  // Call logout API to clear httpOnly cookie
+  try {
+    await fetch(`${API}/logout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (e) {
+    // Ignore errors - local logout still happens
+  }
+
   state.token = "";
   localStorage.removeItem("agent42_token");
+
+  // Broadcast logout to other tabs
+  if (_authChannel) {
+    _authChannel.postMessage({ type: "logout" });
+  }
+
   if (ws) ws.close();
   render();
 }
@@ -1086,6 +1167,12 @@ function doLogout() {
 async function doCreateTask(title, description, taskType, projectId, repoId, branch) {
   if (state._creatingTask) return;
   state._creatingTask = true;
+  const btn = document.querySelector(".modal .btn-primary, .modal button[type='submit']");
+  let loader = null;
+  if (btn && typeof LoadingIndicator !== "undefined") {
+    loader = new LoadingIndicator(btn);
+    loader.show();
+  }
   try {
     const body = { title, description, task_type: taskType };
     if (projectId) body.project_id = projectId;
@@ -1101,9 +1188,11 @@ async function doCreateTask(title, description, taskType, projectId, repoId, bra
     closeModal();
     toast("Task created. An agent has been dispatched. Don\u2019t Panic.", "success");
   } catch (err) {
-    toast(err.message, "error");
+    // Structured errors already shown by api(); only toast unstructured ones
+    if (!err.code) toast(err.message, "error");
   } finally {
     state._creatingTask = false;
+    if (loader) loader.hide();
   }
 }
 
