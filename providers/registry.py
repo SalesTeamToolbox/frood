@@ -651,15 +651,20 @@ class ProviderRegistry:
         client = self.get_client(spec.provider)
 
         resolved_temp = temperature if temperature is not None else spec.temperature
-        # SAMB-03: SambaNova rejects temperature > 1.0
-        if spec.provider == ProviderType.SAMBANOVA:
+        # SAMB-03 / STRONG-01: SambaNova and StrongWall reject temperature > 1.0
+        if spec.provider in (ProviderType.SAMBANOVA, ProviderType.STRONGWALL):
             resolved_temp = min(resolved_temp, 1.0)
-        response = await client.chat.completions.create(
-            model=spec.model_id,
-            messages=messages,
-            temperature=resolved_temp,
-            max_tokens=max_tokens or spec.max_tokens,
-        )
+
+        kwargs = {
+            "model": spec.model_id,
+            "messages": messages,
+            "temperature": resolved_temp,
+            "max_tokens": max_tokens or spec.max_tokens,
+        }
+        # STRONG-01: StrongWall does not support streaming
+        if spec.provider == ProviderType.STRONGWALL:
+            kwargs["stream"] = False
+        response = await client.chat.completions.create(**kwargs)
 
         content = response.choices[0].message.content or ""
         usage = response.usage
@@ -702,8 +707,8 @@ class ProviderRegistry:
         client = self.get_client(spec.provider)
 
         resolved_temp = temperature if temperature is not None else spec.temperature
-        # SAMB-03: SambaNova rejects temperature > 1.0
-        if spec.provider == ProviderType.SAMBANOVA:
+        # SAMB-03 / STRONG-01: SambaNova and StrongWall reject temperature > 1.0
+        if spec.provider in (ProviderType.SAMBANOVA, ProviderType.STRONGWALL):
             resolved_temp = min(resolved_temp, 1.0)
 
         kwargs = {
@@ -713,8 +718,8 @@ class ProviderRegistry:
             "max_tokens": max_tokens or spec.max_tokens,
         }
         if tools:
-            # SAMB-05: SambaNova does not support strict: true in tool definitions
-            if spec.provider == ProviderType.SAMBANOVA:
+            # SAMB-05 / STRONG-01: SambaNova and StrongWall do not support strict: true in tool definitions
+            if spec.provider in (ProviderType.SAMBANOVA, ProviderType.STRONGWALL):
                 import copy
                 tools = copy.deepcopy(tools)
                 for tool in tools:
@@ -725,6 +730,9 @@ class ProviderRegistry:
             # SAMB-04: SambaNova streaming tool calls have broken index field
             if spec.provider == ProviderType.SAMBANOVA:
                 kwargs["stream"] = False
+        # STRONG-01: StrongWall does not support streaming (all requests, not just tool calls)
+        if spec.provider == ProviderType.STRONGWALL:
+            kwargs["stream"] = False
 
         response = await client.chat.completions.create(**kwargs)
 
