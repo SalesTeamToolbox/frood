@@ -790,3 +790,14 @@ class TestStrongWallHealth:
         checker = ProviderHealthChecker()
         assert checker.get_status() == {}
         assert checker.get_status(ProviderType.STRONGWALL) == {}
+
+    def test_strongwall_graceful_degradation(self):
+        """Agent42 works without STRONGWALL_API_KEY — provider listed but unconfigured."""
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("STRONGWALL_API_KEY", None)
+            registry = ProviderRegistry()
+            providers = registry.available_providers()
+            sw = [p for p in providers if p["provider"] == "strongwall"]
+            assert len(sw) == 1
+            assert sw[0]["configured"] is False
+            # Should not raise — just listed as unconfigured
