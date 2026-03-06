@@ -1,7 +1,7 @@
 """Tests for Phase 5: Provider registry."""
 
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
@@ -10,6 +10,7 @@ from providers.registry import (
     PROVIDERS,
     ModelSpec,
     ModelTier,
+    ProviderHealthChecker,
     ProviderRegistry,
     ProviderSpec,
     ProviderType,
@@ -706,3 +707,85 @@ class TestStrongWallNonStreaming:
             assert fn_strict is not True, (
                 f"strict should not be True for StrongWall tools, got {fn_strict}"
             )
+
+
+class TestStrongWallHealth:
+    """Tests for StrongWall provider health check and spending exemption."""
+
+    def test_health_checker_no_key_returns_none(self):
+        """Health check is no-op when API key not set."""
+        checker = ProviderHealthChecker()
+        import asyncio
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("STRONGWALL_API_KEY", None)
+            result = asyncio.get_event_loop().run_until_complete(
+                checker.check(ProviderType.STRONGWALL)
+            )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_health_checker_healthy(self):
+        """Returns healthy when /v1/models responds quickly."""
+        checker = ProviderHealthChecker()
+        with patch("providers.registry.httpx.AsyncClient") as mock_client:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
+            mock_client.return_value.__aexit__ = AsyncMock()
+            mock_client.return_value.get = AsyncMock(return_value=mock_resp)
+            with patch.dict(os.environ, {"STRONGWALL_API_KEY": "test-key"}):
+                result = await checker.check(ProviderType.STRONGWALL)
+        assert result["status"] == "healthy"
+        assert result["error"] is None
+        assert "latency_ms" in result
+        assert "last_checked" in result
+
+    @pytest.mark.asyncio
+    async def test_health_checker_unhealthy_on_error(self):
+        """Returns unhealthy when request fails."""
+        checker = ProviderHealthChecker()
+        with patch("providers.registry.httpx.AsyncClient") as mock_client:
+            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
+            mock_client.return_value.__aexit__ = AsyncMock()
+            mock_client.return_value.get = AsyncMock(side_effect=Exception("Connection refused"))
+            with patch.dict(os.environ, {"STRONGWALL_API_KEY": "test-key"}):
+                result = await checker.check(ProviderType.STRONGWALL)
+        assert result["status"] == "unhealthy"
+        assert "Connection refused" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_health_checker_unhealthy_on_http_error(self):
+        """Returns unhealthy when API returns HTTP error."""
+        checker = ProviderHealthChecker()
+        with patch("providers.registry.httpx.AsyncClient") as mock_client:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 401
+            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
+            mock_client.return_value.__aexit__ = AsyncMock()
+            mock_client.return_value.get = AsyncMock(return_value=mock_resp)
+            with patch.dict(os.environ, {"STRONGWALL_API_KEY": "test-key"}):
+                result = await checker.check(ProviderType.STRONGWALL)
+        assert result["status"] == "unhealthy"
+        assert "HTTP 401" in result["error"]
+
+    def test_spending_tracker_flat_rate_exempt(self):
+        """Flat-rate provider model identified correctly."""
+        tracker = SpendingTracker()
+        assert tracker.is_flat_rate("strongwall-kimi-k2.5") is True
+        assert tracker.is_flat_rate("gemini-2-flash") is False
+        assert tracker.is_flat_rate("nonexistent") is False
+
+    def test_flat_rate_daily_cost(self):
+        """Flat-rate daily cost calculated from monthly."""
+        tracker = SpendingTracker()
+        rates = tracker.get_flat_rate_daily()
+        sw = rates.get("StrongWall (Kimi K2.5)")
+        assert sw is not None
+        assert sw["monthly_usd"] == 16.0
+        assert sw["daily_usd"] == 0.53
+
+    def test_get_status_empty_initially(self):
+        """get_status returns empty dict before any checks."""
+        checker = ProviderHealthChecker()
+        assert checker.get_status() == {}
+        assert checker.get_status(ProviderType.STRONGWALL) == {}
