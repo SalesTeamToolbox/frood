@@ -18,14 +18,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Claude Code Automation Enhancements
 status: in_progress
-stopped_at: Completed 13-02-PLAN.md
-last_updated: "2026-03-06T21:49:00Z"
-last_activity: 2026-03-06 — Phase 13 Plan 02 executed (add-provider skill)
+stopped_at: Completed 13-01-PLAN.md
+last_updated: "2026-03-06T21:51:00Z"
+last_activity: 2026-03-06 — Phase 13 complete (all scaffolding skills created)
 progress:
   total_phases: 5
-  completed_phases: 2
-  total_plans: 3
-  completed_plans: 3
+  completed_phases: 3
+  total_plans: 4
+  completed_plans: 4
 ---
 
 # Project State
@@ -35,23 +35,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-06)
 
 **Core value:** Agent42 operates on free-tier LLMs with enough provider diversity that no single outage stops the platform
-**Current focus:** v1.2 Phase 13 — Scaffolding Skills
+**Current focus:** v1.2 Phase 14 — Operational Skills
 
 ## Current Position
 
-Phase: 13 of 15 (Scaffolding Skills)
-Plan: 2/3 — in progress
-Status: Phase 13 plan 02 complete
-Last activity: 2026-03-06 — Phase 13 Plan 02 executed (add-provider skill)
+Phase: 14 of 15 (Operational Skills)
+Plan: 0/? — not started
+Status: Phase 13 complete, ready for Phase 14
+Last activity: 2026-03-06 — Phase 13 complete (all scaffolding skills created)
 
 Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
-- Average duration: 5.3min
-- Total execution time: 16min
+- Total plans completed: 4
+- Average duration: 5min
+- Total execution time: 20min
 
 **By Phase:**
 
@@ -59,7 +59,7 @@ Progress: [██████░░░░] 60%
 |-------|-------|-------|----------|
 | 11 - MCP Server Integration | 1 | 3min | 3min |
 | 12 - Security Gate Hook | 1 | 10min | 10min |
-| 13 - Scaffolding Skills | 1 | 3min | 3min |
+| 13 - Scaffolding Skills | 2 | 7min | 3.5min |
 
 ## Accumulated Context
 
@@ -80,6 +80,9 @@ v1.2 decisions:
 - (12-01) 12-file shared security registry in security_config.py (added .env and core/encryption.py)
 - (12-01) PreToolUse timeout 10s (lighter than PostToolUse 30s) for fast filename-only gate checks
 - (12-01) Bash rm/mv detection via regex matching against security file paths
+- (13-01) Skills use inline templates in SKILL.md rather than external template files for self-containment
+- (13-01) Pre-generation context reading steps (conftest.py, base.py, exemplar files) ensure output matches live codebase
+- (13-01) Post-generation pytest verification step included in both skills
 - (13-02) Inline templates reference exact ProviderSpec/ModelSpec/Settings patterns from live codebase
 - (13-02) 6-step modification order: enum, ProviderSpec, ModelSpec, Settings, .env.example, test file
 - (13-02) Test template includes 3 test classes: registration, config, client
@@ -101,6 +104,6 @@ Pre-existing test failures (out of scope):
 
 ## Session Continuity
 
-Last session: 2026-03-06T21:49:00Z
-Stopped at: Completed 13-02-PLAN.md
+Last session: 2026-03-06T21:51:00Z
+Stopped at: Completed 13-01-PLAN.md (Phase 13 complete)
 Resume file: None
