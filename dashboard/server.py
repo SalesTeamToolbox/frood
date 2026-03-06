@@ -3185,8 +3185,6 @@ def create_app(
 
         # -- App reverse proxy (for running dynamic apps) ----------------------
 
-        from starlette.responses import Response
-
         @app.api_route(
             "/apps/{slug}/{path:path}",
             methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
@@ -3207,7 +3205,7 @@ def create_app(
 
             return RedirectResponse(url=f"/apps/{slug}/")
 
-        async def _proxy_to_app(slug: str, path: str, request: Request) -> Response:
+        async def _proxy_to_app(slug: str, path: str, request: Request):
             """Internal: forward request to the app's local port."""
             found = app_manager.get_by_slug(slug)
             if not found:
