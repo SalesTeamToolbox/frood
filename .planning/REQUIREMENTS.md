@@ -15,9 +15,9 @@ Requirements for Claude Code Automation Enhancements milestone. Each maps to roa
 
 ### Hooks
 
-- [ ] **HOOK-01**: Edits to security-sensitive files (sandbox.py, command_filter.py, config.py, auth.py, .env) are blocked by a PreToolUse gate requiring explicit user confirmation
-- [ ] **HOOK-02**: Security gate hook outputs clear feedback identifying the sensitive file and why confirmation is needed
-- [ ] **HOOK-03**: Security gate integrates with existing PostToolUse security-monitor.py (complementary, not duplicative)
+- [x] **HOOK-01**: Edits to security-sensitive files (sandbox.py, command_filter.py, config.py, auth.py, .env) are blocked by a PreToolUse gate requiring explicit user confirmation
+- [x] **HOOK-02**: Security gate hook outputs clear feedback identifying the sensitive file and why confirmation is needed
+- [x] **HOOK-03**: Security gate integrates with existing PostToolUse security-monitor.py (complementary, not duplicative)
 
 ### Skills
 
@@ -59,9 +59,9 @@ Requirements for Claude Code Automation Enhancements milestone. Each maps to roa
 | MCP-01 | Phase 11 | Complete |
 | MCP-02 | Phase 11 | Complete |
 | MCP-03 | Phase 11 | Complete |
-| HOOK-01 | Phase 12 | Pending |
-| HOOK-02 | Phase 12 | Pending |
-| HOOK-03 | Phase 12 | Pending |
+| HOOK-01 | Phase 12 | Complete |
+| HOOK-02 | Phase 12 | Complete |
+| HOOK-03 | Phase 12 | Complete |
 | SKILL-01 | Phase 13 | Pending |
 | SKILL-02 | Phase 13 | Pending |
 | SKILL-03 | Phase 13 | Pending |
