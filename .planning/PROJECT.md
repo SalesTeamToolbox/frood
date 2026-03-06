@@ -2,11 +2,11 @@
 
 ## What This Is
 
-An AI agent platform that operates across 8 LLM providers with smart routing, provider-diverse fallback, and zero-budget operation. Agents run on free-tier LLMs (Cerebras, Groq, Codestral, Gemini, OpenRouter free) with CHEAP-tier failover (SambaNova, Together AI, Mistral La Plateforme) when free models are exhausted.
+An AI agent platform that operates across 9 LLM providers with tiered routing (L1 workhorse, L2 premium, free fallback), per-agent model configuration, and graceful degradation. StrongWall.ai (Kimi K2.5, unlimited) serves as L1 workhorse; Gemini and OpenRouter paid models as L2 premium; Cerebras, Groq, Codestral as free fallback tier.
 
 ## Core Value
 
-Agent42 must always be able to operate on free-tier LLMs, with enough model diversity and quality that no single provider outage or quota exhaustion stops the platform.
+Agent42 must always be able to run agents reliably, with tiered provider routing (L1 workhorse -> free fallback -> L2 premium) ensuring no single provider outage stops the platform.
 
 ## Requirements
 
@@ -36,15 +36,18 @@ Agent42 must always be able to operate on free-tier LLMs, with enough model dive
 
 ### Active
 
-## Current Milestone: v1.2 Claude Code Automation Enhancements
+## Current Milestone: v1.3 Agent LLM Control
 
-**Goal:** Implement recommended Claude Code automations — MCP servers, hooks, skills, and subagents — to improve development velocity, catch production bugs earlier, and codify repetitive workflows
+**Goal:** Restructure model routing around L1/L2 tiers with StrongWall.ai as primary workhorse, add per-agent routing configuration in the dashboard, and modernize the fallback chain
 
 **Target features:**
-- MCP server integration (context7 for library docs, GitHub for PR/issue management)
-- PreToolUse security gate hook (block edits to sensitive files before they happen)
-- Developer workflow skills (test-coverage, add-provider, add-tool, prod-check, pitfall)
-- Specialized subagents (test-coverage-auditor, dependency-health, migration-impact, deploy-verifier)
+- StrongWall.ai provider integration (Kimi K2.5, unlimited API, OpenAI-compatible)
+- L1 (workhorse) / L2 (premium) tier architecture in model routing
+- Per-agent routing override (primary, critic, fallback) in dashboard
+- Global default LLM settings in Settings page with per-agent overrides on Agents page
+- OpenRouter paid models as L2 option when balance present
+- Hybrid streaming: simulated streaming for chat, non-streaming for background tasks
+- Fallback chain: StrongWall -> Free tier (Cerebras/Groq) -> L2 premium (Gemini/OR paid)
 
 ### Out of Scope
 
@@ -75,7 +78,7 @@ Tech stack: Python 3.11+, FastAPI, AsyncOpenAI, aiofiles, pytest.
 ## Constraints
 
 - **API compatibility**: All providers use OpenAI Chat Completions compatible APIs
-- **No paid defaults**: Provider models default to FREE or CHEAP tier
+- **Tiered defaults**: L1 (StrongWall) when configured, free tier fallback, L2 premium opt-in
 - **Graceful degradation**: Missing API keys never crash Agent42
 - **Backward compatible**: Users without new API keys keep existing routing
 
@@ -99,5 +102,10 @@ Tech stack: Python 3.11+, FastAPI, AsyncOpenAI, aiofiles, pytest.
 | GitHub token via env var reference | ${GITHUB_PERSONAL_ACCESS_TOKEN} in .mcp.json, not embedded | ✓ Good — secrets stay out of repo |
 | Single .mcp.json config | All MCP servers in one file, npx for all runners | ✓ Good — simple, standard pattern |
 
+| StrongWall.ai as L1 workhorse | $16/mo unlimited Kimi K2.5 beats unreliable free OR models for coding | -- Pending |
+| L1/L2 tier architecture | Cleaner than free/cheap/paid mix; user-configurable per agent | -- Pending |
+| Gemini as default L2 | Reliable premium provider, already integrated | -- Pending |
+| Non-streaming accepted for L1 | StrongWall doesn't stream; simulate for chat, accept for background | -- Pending |
+
 ---
-*Last updated: 2026-03-06 after Phase 11*
+*Last updated: 2026-03-06 after v1.3 milestone start*
