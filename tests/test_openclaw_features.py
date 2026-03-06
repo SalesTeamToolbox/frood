@@ -640,7 +640,8 @@ class TestExtendedContextWindow:
         # Set Cerebras key (now the CODING primary) and Gemini as fallback
         with patch.dict(
             os.environ,
-            {"CEREBRAS_API_KEY": "fake-cerebras-key", "GEMINI_API_KEY": "test-key"},
+            {"CEREBRAS_API_KEY": "fake-cerebras-key", "GEMINI_API_KEY": "test-key",
+             "GEMINI_PRO_FOR_COMPLEX": "false"},
         ):
             router = ModelRouter()
             routing = router.get_routing(TaskType.CODING)

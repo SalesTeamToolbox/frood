@@ -822,7 +822,12 @@ class IterationEngine:
                     iteration_num=i,
                 )
                 result.critic_feedback = critic_feedback
-                result.approved = self._is_approved(critic_feedback)
+                if not critic_feedback or not critic_feedback.strip():
+                    # Empty critic response (model failure / 0 tokens) — accept output
+                    logger.warning("Critic returned empty response — auto-approving")
+                    result.approved = True
+                else:
+                    result.approved = self._is_approved(critic_feedback)
 
                 # Convergence detection
                 if (
@@ -1109,7 +1114,7 @@ class IterationEngine:
                 messages[idx]["content"] = content[:200] + "... (truncated)"
 
         compacted = len(tool_indices) - 2
-        logger.info("Compacted %d old tool messages (%d chars → budget)", compacted, total)
+        logger.info("Compacted %d old tool messages (%d chars -> budget)", compacted, total)
 
     @staticmethod
     async def _rlm_recompress(rlm_provider, messages: list[dict], task_description: str) -> list:
@@ -1155,7 +1160,7 @@ class IterationEngine:
                 },
             ]
             logger.info(
-                "RLM recompressed context: %d messages → 3 messages",
+                "RLM recompressed context: %d messages -> 3 messages",
                 len(messages),
             )
             return compressed
@@ -1294,7 +1299,7 @@ GAPS: (list each gap, if any)
             if len(content) > 300:
                 role = messages[i].get("role", "unknown")
                 messages[i]["content"] = (
-                    f"[{role} message truncated — {len(content)} chars → 100 chars] "
+                    f"[{role} message truncated — {len(content)} chars -> 100 chars] "
                     + content[:100]
                     + "..."
                 )

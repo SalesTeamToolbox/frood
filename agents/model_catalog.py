@@ -35,7 +35,7 @@ _REASONING_KEYWORDS = re.compile(r"reason|r1|think|o1|o3|o4", re.IGNORECASE)
 
 
 def _slug_from_model_id(model_id: str) -> str:
-    """Convert 'meta-llama/llama-4-maverick:free' → 'llama-4-maverick'."""
+    """Convert 'meta-llama/llama-4-maverick:free' -> 'llama-4-maverick'."""
     # Strip provider prefix and :free suffix
     name = model_id.rsplit("/", 1)[-1]
     name = name.split(":")[0]
@@ -223,7 +223,7 @@ class ModelCatalog:
             )
             registry.register_model(key, spec)
             new_keys.append(key)
-            logger.info("Auto-registered model: %s → %s", key, entry.model_id)
+            logger.info("Auto-registered model: %s -> %s", key, entry.model_id)
 
         if new_keys:
             logger.info("Registered %d new free model(s) from catalog", len(new_keys))
@@ -394,7 +394,7 @@ class ModelCatalog:
             registry.register_model(key, spec)
             new_keys.append(key)
             logger.info(
-                "Auto-registered paid model: %s → %s (tier=%s, $%.2f/M)",
+                "Auto-registered paid model: %s -> %s (tier=%s, $%.2f/M)",
                 key,
                 entry.model_id,
                 tier.value,

@@ -53,7 +53,7 @@ class ProjectMemoryStore:
             qdrant_store=qdrant_store,
             redis_backend=redis_backend,
         )
-        logger.info("Project memory initialized: %s → %s", project_id, project_dir)
+        logger.info("Project memory initialized: %s -> %s", project_id, project_dir)
 
     # -- Delegations to the per-project MemoryStore --
 

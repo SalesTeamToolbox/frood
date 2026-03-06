@@ -101,7 +101,7 @@ class PlanSpecification:
         wave contains tasks whose dependencies are all in earlier waves.
 
         Raises ``ValueError`` if a dependency cycle is detected.
-        Returns a dict mapping wave number → list of tasks in that wave.
+        Returns a dict mapping wave number -> list of tasks in that wave.
         """
         task_map: dict[str, PlanTask] = {t.id: t for t in self.tasks}
         in_degree: dict[str, int] = {t.id: 0 for t in self.tasks}

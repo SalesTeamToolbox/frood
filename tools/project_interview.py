@@ -586,7 +586,7 @@ class ProjectInterviewTool(Tool):
             f"\nSpec path: `{spec_path}`\n"
             f"Subtasks path: `{subtasks_path}`\n\n"
             f"The tasks are now in the queue and will be picked up by the coding agents. "
-            f"You can track progress in Mission Control → Projects."
+            f"You can track progress in Mission Control -> Projects."
         )
 
         return ToolResult(output="\n".join(lines), success=True)

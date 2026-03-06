@@ -15,6 +15,8 @@ class TestModelRouterDynamicRouting:
         # Set keys for both the FREE_ROUTING default (Cerebras) and Gemini fallback
         monkeypatch.setenv("CEREBRAS_API_KEY", "fake-cerebras-key")
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+        # Disable auto-upgrade so we test the raw FREE_ROUTING default
+        monkeypatch.setenv("GEMINI_PRO_FOR_COMPLEX", "false")
         router = ModelRouter()
         routing = router.get_routing(TaskType.CODING)
         assert routing["primary"] == FREE_ROUTING[TaskType.CODING]["primary"]
@@ -107,6 +109,7 @@ class TestModelRouterDynamicRouting:
         # Set key for CODING primary (Cerebras) and fallback (Gemini)
         monkeypatch.setenv("CEREBRAS_API_KEY", "fake-cerebras-key")
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+        monkeypatch.setenv("GEMINI_PRO_FOR_COMPLEX", "false")
         routing_file = tmp_path / "routing.json"
         routing_file.write_text("not json")
 
@@ -119,6 +122,7 @@ class TestModelRouterDynamicRouting:
         # Set key for CODING primary (Cerebras) and fallback (Gemini)
         monkeypatch.setenv("CEREBRAS_API_KEY", "fake-cerebras-key")
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+        monkeypatch.setenv("GEMINI_PRO_FOR_COMPLEX", "false")
         router = ModelRouter(routing_file=str(tmp_path / "nonexistent.json"))
         routing = router.get_routing(TaskType.CODING)
         assert routing["primary"] == FREE_ROUTING[TaskType.CODING]["primary"]

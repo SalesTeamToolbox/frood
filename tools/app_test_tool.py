@@ -8,9 +8,9 @@ navigating to them, taking screenshots, analyzing visuals, and
 checking for errors.
 
 Graceful degradation:
-- No Playwright installed → HTTP-only testing (health_check, check_logs)
-- No vision API key → screenshots saved but not analyzed
-- No app running → clear error messages
+- No Playwright installed -> HTTP-only testing (health_check, check_logs)
+- No vision API key -> screenshots saved but not analyzed
+- No app running -> clear error messages
 """
 
 import asyncio

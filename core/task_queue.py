@@ -373,13 +373,15 @@ class TaskQueue:
         await self._persist(task)
         return task
 
-    async def complete(self, task_id: str, result: str = ""):
+    async def complete(self, task_id: str, result: str = "", iterations: int = 0):
         """Mark a task as ready for review."""
         task = self._tasks.get(task_id)
         if not task:
             return
         task.status = TaskStatus.REVIEW
         task.result = result
+        if iterations:
+            task.iterations = iterations
         await self._notify(task)
         await self._persist(task)
 

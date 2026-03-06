@@ -175,6 +175,7 @@ MODELS: dict[str, ModelSpec] = {
     "or-free-auto": ModelSpec(
         "openrouter/free",
         ProviderType.OPENROUTER,
+        max_tokens=8192,
         display_name="OR Free Auto-Router",
         tier=ModelTier.FREE,
     ),
@@ -297,6 +298,7 @@ MODELS: dict[str, ModelSpec] = {
     "gemini-2-flash": ModelSpec(
         "gemini-2.5-flash",
         ProviderType.GEMINI,
+        max_tokens=8192,
         display_name="Gemini 2.5 Flash",
         tier=ModelTier.CHEAP,
         max_context_tokens=1000000,
@@ -380,6 +382,7 @@ MODELS: dict[str, ModelSpec] = {
     "gemini-2-pro": ModelSpec(
         "gemini-2.5-pro",
         ProviderType.GEMINI,
+        max_tokens=16384,
         display_name="Gemini 2.5 Pro",
         tier=ModelTier.PREMIUM,
         max_context_tokens=1000000,
@@ -473,8 +476,8 @@ class SpendingTracker:
         1. Catalog prices (from OR API sync) — keyed by model_id
         2. Built-in prices — keyed by model_id
         3. Free model detection — model_key starts with "or-free-" or
-           model_id ends with ":free" → $0
-        4. None → caller decides (conservative fallback)
+           model_id ends with ":free" -> $0
+        4. None -> caller decides (conservative fallback)
         """
         # 1. Catalog prices (populated by model_catalog.get_model_prices())
         if model_id and model_id in self._model_prices:
@@ -519,8 +522,8 @@ class SpendingTracker:
             prompt_price, completion_price = price
             estimated_cost = prompt_tokens * prompt_price + completion_tokens * completion_price
         else:
-            # Unknown model — conservative fallback ($5/$15 per M tokens)
-            estimated_cost = (prompt_tokens * 5.0 + completion_tokens * 15.0) / 1_000_000
+            # Unknown model — moderate fallback ($1/$3 per M tokens)
+            estimated_cost = (prompt_tokens * 1.0 + completion_tokens * 3.0) / 1_000_000
         self._daily_cost_usd += estimated_cost
 
     def check_limit(self, limit_usd: float) -> bool:

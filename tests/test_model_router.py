@@ -159,6 +159,7 @@ class TestGetRoutingWithPolicy:
                 "MODEL_ROUTING_POLICY": "free_only",
                 "CEREBRAS_API_KEY": "test-cerebras-key",
                 "GEMINI_API_KEY": "test-key",
+                "GEMINI_PRO_FOR_COMPLEX": "false",
             },
             clear=False,
         ):
@@ -677,6 +678,7 @@ class TestMultiProviderIntegration:
             "OPENROUTER_API_KEY": "test-or-key",
             "GEMINI_API_KEY": "test-gemini-key",
             "SAMBANOVA_API_KEY": "test-sambanova-key",
+            "GEMINI_PRO_FOR_COMPLEX": "false",
         }
 
         with (

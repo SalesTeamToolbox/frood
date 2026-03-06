@@ -415,7 +415,9 @@ class AppTool(Tool):
 
             # Use per-app venv to avoid "externally-managed-environment" errors
             try:
-                venv_python = await self._manager._ensure_app_venv(app_path, dict())
+                from core.app_manager import _sanitize_env
+
+                venv_python = await self._manager._ensure_app_venv(app_path, _sanitize_env())
             except RuntimeError as e:
                 return ToolResult(error=f"Failed to create app venv: {e}", success=False)
 
@@ -563,7 +565,7 @@ class AppTool(Tool):
             if app.git_enabled:
                 line += " [git"
                 if app.github_repo:
-                    line += f"→{app.github_repo}"
+                    line += f"->{app.github_repo}"
                 line += "]"
             if app.url:
                 line += f" — {app.url}"
