@@ -16,13 +16,15 @@ import asyncio
 import logging
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from core.approval_gate import ApprovalGate
+from core.error_codes import get_http_error_response
 from core.config import Settings, settings
 from core.device_auth import DeviceStore
 from core.task_queue import Task, TaskQueue, TaskStatus, TaskType
@@ -394,6 +396,25 @@ def create_app(
     # Security headers on all responses
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # Wire up TaskQueue -> WebSocket broadcasting for real-time updates
+    async def _broadcast_task_update(task: Task):
+        """Broadcast task status changes to all connected WebSocket clients."""
+        try:
+            await ws_manager.broadcast("task_update", {
+                "id": task.id,
+                "title": task.title,
+                "status": task.status.value if hasattr(task.status, "value") else str(task.status),
+                "task_type": task.task_type.value if hasattr(task.task_type, "value") else str(task.task_type),
+                "updated_at": task.updated_at,
+                "iterations": task.iterations,
+                "result_preview": task.result[:500] if task.result else "",
+                "error_preview": task.error[:500] if task.error else "",
+            })
+        except Exception as e:
+            logger.debug(f"WebSocket broadcast failed: {e}")
+
+    task_queue.on_update(_broadcast_task_update)
+
     # CORS: always enabled with secure defaults
     # If CORS_ALLOWED_ORIGINS is not configured, default to same-origin only
     # (empty list = no cross-origin requests allowed)
@@ -405,6 +426,15 @@ def create_app(
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
+
+    # -- Global exception handler for unified error responses ----------------
+
+    @app.exception_handler(HTTPException)
+    async def unified_error_handler(request: Request, exc: HTTPException):
+        """Convert HTTPException to structured {error, message, action} response."""
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        body = get_http_error_response(exc.status_code, detail)
+        return JSONResponse(status_code=exc.status_code, content=body)
 
     # Apply persisted tool/skill toggle state
     _toggle_state = _load_toggle_state()
@@ -614,7 +644,7 @@ def create_app(
     # -- Auth ------------------------------------------------------------------
 
     @app.post("/api/login")
-    async def login(req: LoginRequest, request: Request):
+    async def login(req: LoginRequest, request: Request, response: Response):
         # Fail-secure: reject all logins when no password is configured
         # (but allow hash-only auth when DASHBOARD_PASSWORD is empty)
         if (not settings.dashboard_password and not settings.dashboard_password_hash) or (
@@ -653,7 +683,29 @@ def create_app(
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
         logger.info(f"Successful login for '{req.username}' from {client_ip}")
-        return {"token": create_token(req.username)}
+        token = create_token(req.username)
+
+        # Set httpOnly cookie for XSS protection
+        response.set_cookie(
+            key="access_token",
+            value=token,
+            httponly=True,
+            secure=request.url.scheme == "https",
+            samesite="lax",
+            max_age=86400,  # 24 hours
+        )
+
+        return {
+            "status": "ok",
+            "token": token,  # Keep for non-browser clients
+            "message": "Login successful",
+        }
+
+    @app.post("/api/logout")
+    async def logout(response: Response):
+        """Logout endpoint that clears the auth cookie."""
+        response.delete_cookie(key="access_token")
+        return {"status": "ok", "message": "Logged out successfully"}
 
     @app.post("/api/settings/password")
     async def change_password(
