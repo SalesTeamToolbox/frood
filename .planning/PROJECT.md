@@ -28,7 +28,16 @@ Agent42 must always be able to operate on free-tier LLMs, with enough model dive
 
 ### Active
 
-(None — next milestone not yet planned)
+## Current Milestone: v1.1 Layout & Authentication Fixes
+
+**Goal:** Fix real-time UI updates, authentication problems, and error handling to improve user experience
+
+**Target features:**
+- Real-time chat updates without page refresh
+- Proper user feedback during processing
+- Authentication issue resolution
+- Improved error messaging
+- Loading indicators and status feedback
 
 ### Out of Scope
 
