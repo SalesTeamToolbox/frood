@@ -712,27 +712,26 @@ class TestStrongWallNonStreaming:
 class TestStrongWallHealth:
     """Tests for StrongWall provider health check and spending exemption."""
 
-    def test_health_checker_no_key_returns_none(self):
+    @pytest.mark.asyncio
+    async def test_health_checker_no_key_returns_none(self):
         """Health check is no-op when API key not set."""
         checker = ProviderHealthChecker()
-        import asyncio
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("STRONGWALL_API_KEY", None)
-            result = asyncio.get_event_loop().run_until_complete(
-                checker.check(ProviderType.STRONGWALL)
-            )
+            result = await checker.check(ProviderType.STRONGWALL)
         assert result is None
 
     @pytest.mark.asyncio
     async def test_health_checker_healthy(self):
         """Returns healthy when /v1/models responds quickly."""
         checker = ProviderHealthChecker()
-        with patch("providers.registry.httpx.AsyncClient") as mock_client:
-            mock_resp = MagicMock()
-            mock_resp.status_code = 200
-            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
-            mock_client.return_value.__aexit__ = AsyncMock()
-            mock_client.return_value.get = AsyncMock(return_value=mock_resp)
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_client_instance = AsyncMock()
+        mock_client_instance.get.return_value = mock_resp
+        with patch("providers.registry.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             with patch.dict(os.environ, {"STRONGWALL_API_KEY": "test-key"}):
                 result = await checker.check(ProviderType.STRONGWALL)
         assert result["status"] == "healthy"
@@ -744,10 +743,11 @@ class TestStrongWallHealth:
     async def test_health_checker_unhealthy_on_error(self):
         """Returns unhealthy when request fails."""
         checker = ProviderHealthChecker()
-        with patch("providers.registry.httpx.AsyncClient") as mock_client:
-            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
-            mock_client.return_value.__aexit__ = AsyncMock()
-            mock_client.return_value.get = AsyncMock(side_effect=Exception("Connection refused"))
+        mock_client_instance = AsyncMock()
+        mock_client_instance.get.side_effect = Exception("Connection refused")
+        with patch("providers.registry.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             with patch.dict(os.environ, {"STRONGWALL_API_KEY": "test-key"}):
                 result = await checker.check(ProviderType.STRONGWALL)
         assert result["status"] == "unhealthy"
@@ -757,12 +757,13 @@ class TestStrongWallHealth:
     async def test_health_checker_unhealthy_on_http_error(self):
         """Returns unhealthy when API returns HTTP error."""
         checker = ProviderHealthChecker()
-        with patch("providers.registry.httpx.AsyncClient") as mock_client:
-            mock_resp = MagicMock()
-            mock_resp.status_code = 401
-            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
-            mock_client.return_value.__aexit__ = AsyncMock()
-            mock_client.return_value.get = AsyncMock(return_value=mock_resp)
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_client_instance = AsyncMock()
+        mock_client_instance.get.return_value = mock_resp
+        with patch("providers.registry.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             with patch.dict(os.environ, {"STRONGWALL_API_KEY": "test-key"}):
                 result = await checker.check(ProviderType.STRONGWALL)
         assert result["status"] == "unhealthy"
