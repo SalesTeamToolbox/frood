@@ -244,7 +244,7 @@ BUILTIN_TEAMS: dict[str, dict] = {
     },
     "marketing-team": {
         "name": "marketing-team",
-        "description": "Marketing team: researcher → strategist → copywriter → editor pipeline",
+        "description": "Marketing team: researcher -> strategist -> copywriter -> editor pipeline",
         "workflow": "pipeline",
         "roles": [
             {
@@ -285,7 +285,7 @@ BUILTIN_TEAMS: dict[str, dict] = {
     },
     "content-team": {
         "name": "content-team",
-        "description": "Content team: writer → editor → SEO optimizer",
+        "description": "Content team: writer -> editor -> SEO optimizer",
         "workflow": "sequential",
         "roles": [
             {
@@ -317,7 +317,7 @@ BUILTIN_TEAMS: dict[str, dict] = {
     },
     "design-review": {
         "name": "design-review",
-        "description": "Design review team: designer → critic → brand reviewer",
+        "description": "Design review team: designer -> critic -> brand reviewer",
         "workflow": "sequential",
         "roles": [
             {
@@ -351,7 +351,7 @@ BUILTIN_TEAMS: dict[str, dict] = {
     },
     "strategy-team": {
         "name": "strategy-team",
-        "description": "Strategy team: parallel researchers → strategist → presenter",
+        "description": "Strategy team: parallel researchers -> strategist -> presenter",
         "workflow": "fan_out_fan_in",
         "roles": [
             {
@@ -394,7 +394,7 @@ BUILTIN_TEAMS: dict[str, dict] = {
     },
     "code-review-team": {
         "name": "code-review-team",
-        "description": "Code review team: developer → reviewer → tester (sequential)",
+        "description": "Code review team: developer -> reviewer -> tester (sequential)",
         "workflow": "sequential",
         "roles": [
             {
@@ -430,7 +430,7 @@ BUILTIN_TEAMS: dict[str, dict] = {
     },
     "dev-team": {
         "name": "dev-team",
-        "description": "Development team: architect → parallel backend + frontend devs → integrator",
+        "description": "Development team: architect -> parallel backend + frontend devs -> integrator",
         "workflow": "fan_out_fan_in",
         "roles": [
             {
@@ -476,7 +476,7 @@ BUILTIN_TEAMS: dict[str, dict] = {
     },
     "qa-team": {
         "name": "qa-team",
-        "description": "QA team: analyzer → test-writer → security-auditor (sequential)",
+        "description": "QA team: analyzer -> test-writer -> security-auditor (sequential)",
         "workflow": "sequential",
         "roles": [
             {
@@ -644,7 +644,7 @@ class TeamTool(Tool):
         return ToolResult(
             output=(
                 f"Team '{name}' composed with {len(roles)} roles: "
-                f"{' → '.join(role_names)}\n"
+                f"{' -> '.join(role_names)}\n"
                 f"Workflow: {workflow}\n"
                 f"Use action 'run' with name='{name}' and a task to execute."
             )
@@ -908,10 +908,26 @@ class TeamTool(Tool):
 
         return runs
 
-    def get_all_runs(self) -> list[dict]:
+    async def get_all_runs(self) -> list[dict]:
         """Get all runs (in-memory + persisted) as a list sorted by start time."""
         all_runs = {}
-        # In-memory runs take precedence
+        # Load persisted runs from disk first
+        persisted = await self.load_persisted_runs()
+        for run_id, run_data in persisted.items():
+            all_runs[run_id] = {
+                "run_id": run_data.get("run_id", run_id),
+                "team": run_data.get("team", ""),
+                "workflow": run_data.get("workflow", ""),
+                "task": run_data.get("task", ""),
+                "started_at": run_data.get("started_at", 0),
+                "completed_at": run_data.get("completed_at"),
+                "status": run_data.get("status", "unknown"),
+                "quality_score": run_data.get("quality_score", 0),
+                "project_id": run_data.get("project_id", ""),
+                "task_ids": run_data.get("task_ids", []),
+                "revisions": run_data.get("revisions", []),
+            }
+        # In-memory runs take precedence (overwrite persisted)
         for run_id, run_state in self._runs.items():
             all_runs[run_id] = {
                 "run_id": run_state.get("run_id", run_id),
@@ -928,9 +944,13 @@ class TeamTool(Tool):
             }
         return sorted(all_runs.values(), key=lambda r: r.get("started_at", 0), reverse=True)
 
-    def get_run_detail(self, run_id: str) -> dict | None:
+    async def get_run_detail(self, run_id: str) -> dict | None:
         """Get full detail for a single team run."""
         run_state = self._runs.get(run_id)
+        if not run_state:
+            # Try loading from persisted runs
+            persisted = await self.load_persisted_runs()
+            run_state = persisted.get(run_id)
         if not run_state:
             return None
 
@@ -1508,7 +1528,7 @@ class TeamTool(Tool):
             lines.append(
                 f"- **{name}**{builtin} — {team.get('description', '')}\n"
                 f"  Workflow: {team.get('workflow', 'sequential')}\n"
-                f"  Roles: {' → '.join(role_names)}"
+                f"  Roles: {' -> '.join(role_names)}"
             )
         return ToolResult(output="\n".join(lines))
 
@@ -1565,8 +1585,8 @@ class TeamTool(Tool):
             lines.append(f"**Execution:** Roles run in order: {' -> '.join(role_names)}")
 
         lines.append(
-            "\n**Manager Flow:** Plan → Team Execution → Review → "
-            "Revisions (if needed) → Final Synthesis"
+            "\n**Manager Flow:** Plan -> Team Execution -> Review -> "
+            "Revisions (if needed) -> Final Synthesis"
         )
 
         return ToolResult(output="\n".join(lines))

@@ -455,9 +455,9 @@ class TestSpendingTrackerPricing:
         from providers.registry import SpendingTracker
 
         tracker = SpendingTracker()
-        # No model_id provided — should use conservative estimate
+        # No model_id provided — should use moderate fallback estimate ($1/$3 per M)
         tracker.record_usage("key", 1000, 500)
-        expected = (1000 * 5.0 + 500 * 15.0) / 1_000_000
+        expected = (1000 * 1.0 + 500 * 3.0) / 1_000_000
         assert tracker.daily_spend_usd == pytest.approx(expected, abs=0.0001)
 
 

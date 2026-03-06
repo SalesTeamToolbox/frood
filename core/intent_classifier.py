@@ -324,8 +324,23 @@ class IntentClassifier:
         try:
             data = json.loads(text)
         except json.JSONDecodeError:
-            logger.warning(f"Failed to parse classifier response as JSON: {text[:200]}")
-            return self._keyword_classify(original_message)
+            # Try extracting JSON object from within surrounding text
+            import re
+
+            match = re.search(r"\{[^{}]*\}", text)
+            if match:
+                try:
+                    data = json.loads(match.group())
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Failed to parse classifier response as JSON: %s", text[:200]
+                    )
+                    return self._keyword_classify(original_message)
+            else:
+                logger.warning(
+                    "Failed to parse classifier response as JSON: %s", text[:200]
+                )
+                return self._keyword_classify(original_message)
 
         # Validate task_type
         task_type_str = data.get("task_type", "coding")

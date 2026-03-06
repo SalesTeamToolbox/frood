@@ -400,16 +400,7 @@ def create_app(
     async def _broadcast_task_update(task: Task):
         """Broadcast task status changes to all connected WebSocket clients."""
         try:
-            await ws_manager.broadcast("task_update", {
-                "id": task.id,
-                "title": task.title,
-                "status": task.status.value if hasattr(task.status, "value") else str(task.status),
-                "task_type": task.task_type.value if hasattr(task.task_type, "value") else str(task.task_type),
-                "updated_at": task.updated_at,
-                "iterations": task.iterations,
-                "result_preview": task.result[:500] if task.result else "",
-                "error_preview": task.error[:500] if task.error else "",
-            })
+            await ws_manager.broadcast("task_update", task.to_dict())
         except Exception as e:
             logger.debug(f"WebSocket broadcast failed: {e}")
 
@@ -1331,7 +1322,7 @@ def create_app(
         # Task type breakdown with success rates
         task_types = []
         for td in sorted(type_agg.values(), key=lambda t: t["total"], reverse=True):
-            done = td.get("done", 0)
+            done = td.get("done", 0) + td.get("review", 0)
             failed = td.get("failed", 0)
             completed = done + failed
             td["success_rate"] = round(done / completed, 3) if completed > 0 else 0.0
@@ -1397,12 +1388,15 @@ def create_app(
         # Total cost across all models
         total_cost = round(sum(m["estimated_cost_usd"] for m in llm_usage), 4)
 
-        # Done / failed for overall success rate
+        # Done + review / (done + review + failed) for overall success rate
+        # Tasks in "review" completed successfully and await human approval
         total_done = status_counts.get("done", 0)
+        total_review = status_counts.get("review", 0)
         total_failed = status_counts.get("failed", 0)
-        total_completed = total_done + total_failed
+        total_successful = total_done + total_review
+        total_completed = total_successful + total_failed
         overall_success_rate = (
-            round(total_done / total_completed, 3) if total_completed > 0 else 0.0
+            round(total_successful / total_completed, 3) if total_completed > 0 else 0.0
         )
 
         return {
@@ -2274,6 +2268,14 @@ def create_app(
             await chat_session_manager.add_message(session_id, user_msg)
             await ws_manager.broadcast("chat_message", user_msg)
 
+            # Auto-name session from first message if still untitled
+            if not session.title or session.title in ("New Chat", "New Session"):
+                _auto_title = text[:60].strip()
+                if len(text) > 60:
+                    _auto_title = _auto_title.rsplit(" ", 1)[0] + "..."
+                session = await chat_session_manager.update(session_id, title=_auto_title)
+                await ws_manager.broadcast("session_update", session.to_dict())
+
             # For ALL session types, route to active task if one exists
             _existing = task_queue.find_active_task(session_id=session_id)
             if _existing:
@@ -2410,6 +2412,19 @@ def create_app(
                     session_id,
                 )
 
+            # Resolve app path for code sessions so agent writes to app directory
+            _app_path = ""
+            if session.session_type == "code" and app_manager:
+                _app_id = getattr(session, "app_id", "")
+                if not _app_id and session.project_id and project_manager:
+                    _proj = await project_manager.get(session.project_id)
+                    if _proj:
+                        _app_id = _proj.app_id
+                if _app_id:
+                    _app_obj = app_manager.get(_app_id)
+                    if _app_obj and _app_obj.path:
+                        _app_path = _app_obj.path
+
             task = Task(
                 title=text[:120] + ("..." if len(text) > 120 else ""),
                 description=text,
@@ -2420,6 +2435,7 @@ def create_app(
                 origin_metadata={
                     "chat_msg_id": msg_id,
                     "chat_session_id": session_id,
+                    **({"app_path": _app_path} if _app_path else {}),
                 },
             )
             # Link to project if session has one
@@ -3283,7 +3299,7 @@ def create_app(
         team_tool = tool_registry.get("team")
         if not team_tool or not hasattr(team_tool, "get_all_runs"):
             return []
-        return team_tool.get_all_runs()
+        return await team_tool.get_all_runs()
 
     @app.get("/api/team-runs/{run_id}")
     async def get_team_run(run_id: str, _user: str = Depends(get_current_user)):
@@ -3293,7 +3309,7 @@ def create_app(
         team_tool = tool_registry.get("team")
         if not team_tool or not hasattr(team_tool, "get_run_detail"):
             raise HTTPException(status_code=404, detail="Team tool not available")
-        detail = team_tool.get_run_detail(run_id)
+        detail = await team_tool.get_run_detail(run_id)
         if not detail:
             raise HTTPException(status_code=404, detail="Team run not found")
 

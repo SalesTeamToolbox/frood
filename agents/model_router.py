@@ -10,7 +10,7 @@ Routing priority:
   2. Dynamic routing (from outcome tracking + research) — data-driven
   3. Trial model injection (small % of tasks) — evaluates new models
   4. Policy routing (balanced/performance) — upgrades when OR credits available
-  5. Hardcoded defaults: Gemini free → OR free models (fallback)
+  5. Hardcoded defaults: Gemini free -> OR free models (fallback)
 """
 
 import json
@@ -317,15 +317,14 @@ class ModelRouter:
                 except ValueError:
                     pass  # Unknown model — pass through
 
-        # 4b. Gemini Pro upgrade for complex task types — opt-in via
-        # GEMINI_PRO_FOR_COMPLEX=true. When enabled and GEMINI_API_KEY is set,
-        # upgrades complex task types from gemini-2-flash to gemini-2-pro.
-        if (
-            not is_admin_override
-            and task_type in _COMPLEX_TASK_TYPES
-            and routing.get("primary") == "gemini-2-flash"
-            and os.getenv("GEMINI_PRO_FOR_COMPLEX", "").lower() in ("true", "1", "yes")
-        ):
+        # 4b. Gemini Pro upgrade for complex task types — auto-enabled when
+        # GEMINI_API_KEY is set (paid account). Opt-out via GEMINI_PRO_FOR_COMPLEX=false.
+        gemini_pro_opt_out = os.getenv("GEMINI_PRO_FOR_COMPLEX", "").lower() in (
+            "false",
+            "0",
+            "no",
+        )
+        if not is_admin_override and task_type in _COMPLEX_TASK_TYPES and not gemini_pro_opt_out:
             gemini_prov = PROVIDERS.get(ProviderType.GEMINI)
             if gemini_prov and os.getenv(gemini_prov.api_key_env, ""):
                 # Only upgrade if gemini-2-pro is healthy
@@ -335,7 +334,7 @@ class ModelRouter:
                 if pro_healthy:
                     routing["primary"] = "gemini-2-pro"
                     logger.info(
-                        "Upgraded %s to gemini-2-pro (complex task with Gemini key)",
+                        "Upgraded %s to gemini-2-pro (complex task with paid Gemini key)",
                         task_type.value,
                     )
 
@@ -747,7 +746,7 @@ class ModelRouter:
 
         free_default = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING])
         logger.info(
-            "Policy routing (performance): %s → %s (score=%.2f)",
+            "Policy routing (performance): %s -> %s (score=%.2f)",
             task_type.value,
             best_key,
             best_score,
