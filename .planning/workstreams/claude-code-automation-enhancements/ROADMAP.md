@@ -4,7 +4,7 @@
 
 - ✅ **v1.0 Free LLM Provider Expansion** — Phases 1-6 (shipped 2026-03-02)
 - 🚧 **v1.1 Layout & Authentication Fixes** — Phases 7-10 (in progress)
-- 📋 **v1.2 Claude Code Automation Enhancements** — Phases 11-15 (planned)
+- 📋 **v1.2 Claude Code Automation Enhancements** — Phases 11-16 (planned)
 
 ## Phases
 
@@ -93,7 +93,9 @@ Plans:
   1. `/prod-check` runs systemd status, log tail, Qdrant health, Redis ping, dashboard HTTP check, and disk usage over SSH in one pass and reports results
   2. Pitfall skill auto-detects the next pitfall number and formats entries matching the existing table structure in CLAUDE.md
   3. Both skills can be invoked as slash commands within Claude Code sessions
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 14-01-PLAN.md — Create /prod-check and /add-pitfall skills for production health monitoring and pitfall table maintenance
 
 ### Phase 15: Specialized Subagents
 **Goal**: Developer can dispatch focused analysis agents for test coverage gaps, dependency staleness, migration risk, and deploy readiness
@@ -124,5 +126,18 @@ Plans:
 | 11. MCP Server Integration | 1/1 | Complete    | 2026-03-06 | -- |
 | 12. Security Gate Hook | 1/1 | Complete    | 2026-03-06 | -- |
 | 13. Scaffolding Skills | v1.2 | Complete    | 2026-03-06 | 2026-03-06 |
-| 14. Operational Skills | v1.2 | 0/? | Not started | -- |
+| 14. Operational Skills | v1.2 | 0/1 | Planned | -- |
 | 15. Specialized Subagents | v1.2 | 0/? | Not started | -- |
+| 16. jcodemunch Deep Integration | v1.2 | 0/? | Not started | -- |
+
+### Phase 16: jcodemunch Deep Integration
+**Goal**: Integrate jcodemunch MCP tools into context-loader hook, GSD agent prompts (mapper, planner, executor), and add mid-session drift detection — reducing token consumption and iteration count across all development workflows
+**Depends on**: Phase 11 (MCP Server Integration — jcodemunch already configured)
+**Requirements**: JCMUNCH-01 through JCMUNCH-05
+**Success Criteria** (what must be TRUE):
+  1. context-loader hook detects work type and pre-loads relevant symbol outlines via jcodemunch `search_symbols` — Claude starts tasks with API surface knowledge instead of blind exploration
+  2. `/gsd:map-codebase` uses jcodemunch `get_repo_outline` + `get_file_tree` with summaries instead of spawning 4 mapper agents doing sequential file reads
+  3. GSD planner agents receive `<codebase_context>` block with affected module interfaces extracted via `search_symbols` + `get_file_outline` before creating plans
+  4. GSD executor agents receive `<implementation_targets>` block with exact function signatures from `get_symbol` before modifying code
+  5. Mid-session drift detection uses `get_symbol(verify=true)` hash checking and triggers incremental re-index when source has diverged from index
+**Plans**: TBD
