@@ -30,6 +30,10 @@ Agent42 must always be able to operate on free-tier LLMs, with enough model dive
 - ✓ Loading indicators (spinner, progress bar, typing dots) with 200ms threshold — v1.1
 - ✓ Timeout warnings at 25s with user controls — v1.1
 
+- ✓ context7 MCP server for live library documentation queries — v1.2
+- ✓ GitHub MCP server for issue/PR/CI management from Claude Code — v1.2
+- ✓ Playwright MCP server for browser automation from Claude Code — v1.2
+
 ### Active
 
 ## Current Milestone: v1.2 Claude Code Automation Enhancements
@@ -92,6 +96,8 @@ Tech stack: Python 3.11+, FastAPI, AsyncOpenAI, aiofiles, pytest.
 | Unified error taxonomy | classify_error() mirrors iteration_engine heuristics for consistency | ✓ Good — single source of truth |
 | 200ms spinner threshold | Prevents flicker on fast API calls | ✓ Good — clean UX |
 | Safe DOM manipulation only | createElement/textContent, no innerHTML per security rules | ✓ Good — XSS prevention |
+| GitHub token via env var reference | ${GITHUB_PERSONAL_ACCESS_TOKEN} in .mcp.json, not embedded | ✓ Good — secrets stay out of repo |
+| Single .mcp.json config | All MCP servers in one file, npx for all runners | ✓ Good — simple, standard pattern |
 
 ---
-*Last updated: 2026-03-06 after Phase 9*
+*Last updated: 2026-03-06 after Phase 11*
