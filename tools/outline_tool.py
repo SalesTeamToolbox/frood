@@ -177,7 +177,7 @@ class OutlineTool(Tool):
             headings = [s["heading"] for s in sections]
             lines.append(
                 f"- **{doc_type}** ({len(sections)} sections)\n"
-                f"  {' → '.join(headings[:5])}{'...' if len(headings) > 5 else ''}"
+                f"  {' -> '.join(headings[:5])}{'...' if len(headings) > 5 else ''}"
             )
         return ToolResult(output="\n".join(lines))
 

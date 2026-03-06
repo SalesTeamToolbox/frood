@@ -391,8 +391,8 @@ class SSHTool(Tool):
             import asyncssh
 
             await asyncssh.scp(str(resolved), (conn_info.conn, remote_path))
-            logger.info(f"SSH upload: {local_path} → {host}:{remote_path}")
-            return ToolResult(output=f"Uploaded {local_path} → {host}:{remote_path}")
+            logger.info(f"SSH upload: {local_path} -> {host}:{remote_path}")
+            return ToolResult(output=f"Uploaded {local_path} -> {host}:{remote_path}")
         except Exception as e:
             logger.error(f"SSH upload failed: {e}")
             return ToolResult(error=f"Upload failed: {e}", success=False)
@@ -442,8 +442,8 @@ class SSHTool(Tool):
                         success=False,
                     )
 
-            logger.info(f"SSH download: {host}:{remote_path} → {local_path}")
-            return ToolResult(output=f"Downloaded {host}:{remote_path} → {local_path}")
+            logger.info(f"SSH download: {host}:{remote_path} -> {local_path}")
+            return ToolResult(output=f"Downloaded {host}:{remote_path} -> {local_path}")
         except Exception as e:
             logger.error(f"SSH download failed: {e}")
             return ToolResult(error=f"Download failed: {e}", success=False)

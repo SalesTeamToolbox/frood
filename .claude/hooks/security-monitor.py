@@ -4,6 +4,9 @@
 Triggered on PostToolUse for Write/Edit operations. Checks if changes
 affect security-critical files and scans for dangerous patterns.
 
+Security file definitions are imported from security_config.py (shared
+with the PreToolUse security-gate.py hook).
+
 Hook protocol:
 - Receives JSON on stdin with hook_event_name, tool_name, tool_input, tool_output
 - Output to stderr is shown to Claude as feedback
@@ -11,22 +14,13 @@ Hook protocol:
 """
 
 import json
+import os
 import re
 import sys
 
-# Security-critical files — changes here warrant extra scrutiny
-SECURITY_FILES = {
-    "core/sandbox.py": "Filesystem boundary enforcement",
-    "core/command_filter.py": "Shell command filtering",
-    "core/approval_gate.py": "Human-in-the-loop approval",
-    "dashboard/auth.py": "Authentication and authorization",
-    "core/rate_limiter.py": "Rate limiting",
-    "core/url_policy.py": "SSRF protection",
-    "tools/shell.py": "Shell command execution",
-    "core/config.py": "Security setting defaults",
-    "core/device_auth.py": "Device authentication",
-    ".env.example": "Credential patterns and defaults",
-}
+# Import shared security file registry
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from security_config import is_security_file
 
 # Dangerous patterns to check for in file content
 DANGEROUS_PATTERNS = [
@@ -93,14 +87,6 @@ DANGEROUS_PATTERNS = [
 ]
 
 
-def check_security_file(file_path):
-    """Check if the file is security-critical."""
-    for sec_path, description in SECURITY_FILES.items():
-        if file_path.endswith(sec_path) or sec_path in file_path:
-            return description
-    return None
-
-
 def scan_content(content, file_path=""):
     """Scan content for dangerous patterns."""
     warnings = []
@@ -144,8 +130,8 @@ def main():
     warnings = []
 
     # Check if this is a security-critical file
-    sec_desc = check_security_file(file_path)
-    if sec_desc:
+    is_match, _, sec_desc = is_security_file(file_path)
+    if is_match:
         warnings.append(f"SECURITY-CRITICAL FILE: {sec_desc}")
 
     # Scan the content for dangerous patterns

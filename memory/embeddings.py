@@ -395,7 +395,7 @@ class EmbeddingStore:
                 self._qdrant.clear_collection(QdrantStore.MEMORY)
                 payloads = [{"source": "memory", "section": c.get("section", "")} for c in chunks]
                 count = self._qdrant.upsert_vectors(QdrantStore.MEMORY, texts, vectors, payloads)
-                logger.info(f"Indexed {count} memory chunks → Qdrant")
+                logger.info(f"Indexed {count} memory chunks -> Qdrant")
                 return count
             except Exception as e:
                 logger.warning("Qdrant index_memory failed, falling back to JSON: %s", e)
@@ -416,7 +416,7 @@ class EmbeddingStore:
             )
 
         self._save()
-        logger.info(f"Indexed {len(chunks)} memory chunks → JSON")
+        logger.info(f"Indexed {len(chunks)} memory chunks -> JSON")
         return len(chunks)
 
     async def index_history_entry(self, event_type: str, summary: str, details: str = ""):

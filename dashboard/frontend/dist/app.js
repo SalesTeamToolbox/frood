@@ -148,18 +148,71 @@ setInterval(rotateTagline, 8000);
 // ---------------------------------------------------------------------------
 const API = "/api";
 
+// Cross-tab auth synchronization
+const _authChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("agent42_auth") : null;
+if (_authChannel) {
+  _authChannel.onmessage = (ev) => {
+    if (ev.data?.type === "logout") {
+      state.token = "";
+      localStorage.removeItem("agent42_token");
+      if (ws) ws.close();
+      render();
+    } else if (ev.data?.type === "login" && ev.data?.token) {
+      state.token = ev.data.token;
+      localStorage.setItem("agent42_token", ev.data.token);
+      connectWS();
+      loadAll().then(render);
+    }
+  };
+}
+
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json" };
   if (state.token) headers["Authorization"] = `Bearer ${state.token}`;
   const res = await fetch(`${API}${path}`, { ...opts, headers });
   if (res.status === 401) {
+    // Try to get specific error code from response
+    let errorCode = "";
+    let errorMessage = "Session expired. Please log in again.";
+    try {
+      const data = await res.json();
+      if (data.detail?.code) {
+        errorCode = data.detail.code;
+        errorMessage = data.detail.message || errorMessage;
+      } else if (data.error) {
+        errorCode = data.error;
+        errorMessage = data.message || errorMessage;
+      }
+    } catch {}
+
     state.token = "";
     localStorage.removeItem("agent42_token");
+
+    // Broadcast logout to other tabs
+    if (_authChannel) {
+      _authChannel.postMessage({ type: "logout" });
+    }
+
     render();
+
+    // Show specific error message
+    const errEl = document.getElementById("login-error");
+    if (errEl) errEl.textContent = errorMessage;
+
     return null;
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
+    // Handle structured error responses: {error, message, action}
+    if (data.error && data.message) {
+      if (typeof showError === "function") {
+        showError(data.error, data.message, data.action || "");
+      }
+      const err = new Error(data.message);
+      err.code = data.error;
+      err.action = data.action || "";
+      throw err;
+    }
     throw new Error(data.detail || `HTTP ${res.status}`);
   }
   return res.json();
@@ -426,7 +479,7 @@ function connectWS() {
 function handleWSMessage(msg) {
   if (msg.type === "task_update") {
     const idx = state.tasks.findIndex((t) => t.id === msg.data.id);
-    if (idx >= 0) state.tasks[idx] = msg.data;
+    if (idx >= 0) Object.assign(state.tasks[idx], msg.data);
     else state.tasks.unshift(msg.data);
     if (state.page === "tasks") renderMissionControl();
     if (state.page === "detail" && state.selectedTask?.id === msg.data.id) {
@@ -906,7 +959,8 @@ async function sendSessionMessage(sessionId, isCode) {
     // Don't reset sending state here — the WebSocket "chat_thinking" event
     // will set it to true when the agent starts and false when it finishes.
   } catch (e) {
-    toast("Failed to send: " + e.message, "error");
+    // Structured errors already shown by api(); only toast unstructured ones
+    if (!e.code) toast("Failed to send: " + e.message, "error");
     // Only reset on error so the typing indicator disappears
     if (isCode) state.codeSending = false;
     else state.chatSending = false;
@@ -1037,7 +1091,8 @@ async function sendChatMessage() {
     // Don't reset chatSending here — the WebSocket "chat_thinking" event
     // controls the typing indicator based on actual agent processing state.
   } catch (e) {
-    toast("Failed to send: " + e.message, "error");
+    // Structured errors already shown by api(); only toast unstructured ones
+    if (!e.code) toast("Failed to send: " + e.message, "error");
     state.chatSending = false;
     if (state.page === "chat") renderChat();
   }
@@ -1059,11 +1114,21 @@ async function doLogin(username, password) {
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
+      // Handle structured error responses from unified handler
+      if (data.error && data.message) {
+        throw new Error(data.message);
+      }
       throw new Error(data.detail || "Login failed");
     }
     const data = await res.json();
     state.token = data.token;
     localStorage.setItem("agent42_token", data.token);
+
+    // Broadcast login to other tabs
+    if (_authChannel) {
+      _authChannel.postMessage({ type: "login", token: data.token });
+    }
+
     connectWS();
     await loadAll();
     render();
@@ -1076,9 +1141,25 @@ async function doLogin(username, password) {
   }
 }
 
-function doLogout() {
+async function doLogout() {
+  // Call logout API to clear httpOnly cookie
+  try {
+    await fetch(`${API}/logout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (e) {
+    // Ignore errors - local logout still happens
+  }
+
   state.token = "";
   localStorage.removeItem("agent42_token");
+
+  // Broadcast logout to other tabs
+  if (_authChannel) {
+    _authChannel.postMessage({ type: "logout" });
+  }
+
   if (ws) ws.close();
   render();
 }
@@ -1086,6 +1167,12 @@ function doLogout() {
 async function doCreateTask(title, description, taskType, projectId, repoId, branch) {
   if (state._creatingTask) return;
   state._creatingTask = true;
+  const btn = document.querySelector(".modal .btn-primary, .modal button[type='submit']");
+  let loader = null;
+  if (btn && typeof LoadingIndicator !== "undefined") {
+    loader = new LoadingIndicator(btn);
+    loader.show();
+  }
   try {
     const body = { title, description, task_type: taskType };
     if (projectId) body.project_id = projectId;
@@ -1101,9 +1188,11 @@ async function doCreateTask(title, description, taskType, projectId, repoId, bra
     closeModal();
     toast("Task created. An agent has been dispatched. Don\u2019t Panic.", "success");
   } catch (err) {
-    toast(err.message, "error");
+    // Structured errors already shown by api(); only toast unstructured ones
+    if (!err.code) toast(err.message, "error");
   } finally {
     state._creatingTask = false;
+    if (loader) loader.hide();
   }
 }
 
@@ -1548,7 +1637,9 @@ function statusBadge(status) {
 }
 
 function timeSince(ts) {
+  if (!ts) return "-";
   const s = Math.floor(Date.now() / 1000 - ts);
+  if (s < 0) return "just now";
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
@@ -1789,8 +1880,8 @@ function renderDetail() {
           <div class="detail-item"><label>Type</label><div class="value"><span class="badge-type">${esc(t.task_type)}</span></div></div>
           <div class="detail-item"><label>Iterations</label><div class="value">${t.iterations || 0} / ${t.max_iterations || "?"}</div></div>
           ${t.token_usage?.total_tokens ? `<div class="detail-item"><label>Tokens</label><div class="value" style="font-family:var(--mono)">${formatNumber(t.token_usage.total_tokens)} <span style="color:var(--text-muted);font-size:0.8rem">(${formatNumber(t.token_usage.total_prompt_tokens)} in / ${formatNumber(t.token_usage.total_completion_tokens)} out)</span></div></div>` : ""}
-          <div class="detail-item"><label>Created</label><div class="value">${new Date(t.created_at * 1000).toLocaleString()}</div></div>
-          <div class="detail-item"><label>Updated</label><div class="value">${new Date(t.updated_at * 1000).toLocaleString()}</div></div>
+          <div class="detail-item"><label>Created</label><div class="value">${t.created_at ? new Date(t.created_at * 1000).toLocaleString() : "-"}</div></div>
+          <div class="detail-item"><label>Updated</label><div class="value">${t.updated_at ? new Date(t.updated_at * 1000).toLocaleString() : "-"}</div></div>
           ${t.origin_channel ? `<div class="detail-item"><label>Origin</label><div class="value">${esc(t.origin_channel)}</div></div>` : ""}
           ${t.worktree_path ? `<div class="detail-item"><label>Workspace</label><div class="value" style="font-family:var(--mono);font-size:0.8rem">${esc(t.worktree_path)}</div></div>` : ""}
           ${t.team_run_id ? `<div class="detail-item"><label>Team</label><div class="value"><a href="#" onclick="event.preventDefault();viewTeamRun('${esc(t.team_run_id)}')">${esc(t.team_name || "team")} / ${esc(t.role_name || "")}</a></div></div>` : ""}
@@ -2707,13 +2798,19 @@ function renderStatus() {
 function renderMarkdown(text) {
   if (!text) return "";
   let html = esc(text);
-  // Code blocks: ```lang\ncode\n```
+  // Protect code blocks and inline code from formatting — extract with placeholders
+  const codeBlocks = [];
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
     const id = "cb-" + Math.random().toString(36).slice(2, 8);
-    return `<div class="md-code-block"><div class="md-code-header"><span class="md-code-lang">${lang || "code"}</span><button class="md-code-copy" onclick="copyCodeBlock('${id}')">Copy</button></div><pre id="${id}"><code>${code.trim()}</code></pre></div>`;
+    const idx = codeBlocks.length;
+    codeBlocks.push(`<div class="md-code-block"><div class="md-code-header"><span class="md-code-lang">${lang || "code"}</span><button class="md-code-copy" onclick="copyCodeBlock('${id}')">Copy</button></div><pre id="${id}"><code>${code.trim()}</code></pre></div>`);
+    return `\x00CB${idx}\x00`;
   });
-  // Inline code: `code`
-  html = html.replace(/`([^`\n]+)`/g, '<code class="md-inline-code">$1</code>');
+  html = html.replace(/`([^`\n]+)`/g, (_, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(`<code class="md-inline-code">${code}</code>`);
+    return `\x00CB${idx}\x00`;
+  });
   // Bold: **text**
   html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   // Italic: *text*
@@ -2732,6 +2829,8 @@ function renderMarkdown(text) {
   html = html.replace(/\n\n/g, '</p><p class="md-p">');
   html = html.replace(/\n/g, "<br>");
   html = '<p class="md-p">' + html + "</p>";
+  // Restore code blocks
+  html = html.replace(/\x00CB(\d+)\x00/g, (_, idx) => codeBlocks[parseInt(idx)]);
   return html;
 }
 
@@ -3398,7 +3497,7 @@ function renderCodeChatHTML() {
     }
     const codeBlocks = extractCodeBlocks(m.content || "");
     const canvasButtons = codeBlocks.map((b, j) =>
-      `<button class="chat-canvas-btn" onclick="openCanvas(state.codeCurrentMessages[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
+      `<button class="chat-canvas-btn" onclick="openCodeCanvas(state.codeCurrentMessages[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
     ).join("");
     return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim)">${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}</div></div>`;
   }).join("");
@@ -3430,9 +3529,18 @@ function renderCodeChatHTML() {
     </div>`;
 }
 
+function openCodeCanvas(content, title, lang) {
+  state.codeCanvasOpen = true;
+  state.canvasContent = content;
+  state.canvasTitle = title || "Code";
+  state.canvasLang = lang || "";
+  renderCode();
+}
+
 function renderCodeCanvasPanel() {
   const panel = document.getElementById("code-canvas-panel");
   if (!panel || !state.canvasContent) return;
+  // Content is escaped via esc() — safe for display
   panel.innerHTML = `
     <div class="canvas-header">
       <span>${esc(state.canvasTitle || "Code")}</span>
@@ -3808,12 +3916,15 @@ function _renderReportsOverview(d) {
 
   // Connectivity summary
   const hs = conn.summary || {};
-  const connBadges = Object.entries(hs).map(([k, v]) =>
+  const connByStatus = hs.by_status || {};
+  const connBadges = Object.entries(connByStatus).map(([k, v]) =>
     `<span class="badge-status badge-${k === "ok" ? "done" : k === "unavailable" ? "failed" : "pending"}" style="margin-right:0.5rem">${esc(k)}: ${v}</span>`
   ).join("");
-  const connCard = Object.keys(hs).length > 0 ? `<div class="card reports-section">
+  const unhealthy = hs.unhealthy_models || [];
+  const unhealthyList = unhealthy.length > 0 ? `<div style="margin-top:0.75rem"><strong>Unhealthy Models:</strong><ul style="margin:0.25rem 0;padding-left:1.5rem">${unhealthy.map(m => `<li>${esc(m.key || m.model || "unknown")} — ${esc(m.status || "unavailable")}</li>`).join("")}</ul></div>` : "";
+  const connCard = Object.keys(connByStatus).length > 0 ? `<div class="card reports-section">
     <div class="card-header"><h3>Model Connectivity</h3></div>
-    <div class="card-body">${connBadges || '<span style="color:var(--text-muted)">No health data</span>'}</div>
+    <div class="card-body">${connBadges || '<span style="color:var(--text-muted)">No health data</span>'}${unhealthyList}</div>
   </div>` : "";
 
   return stats + `<div class="reports-grid">${modelsTable}${typesTable}</div>${connCard}`;

@@ -445,8 +445,15 @@ class Agent:
         needs_worktree = task.task_type in _CODE_TASK_TYPES
 
         try:
-            # Set up workspace — worktree for code tasks, output dir for others
-            if needs_worktree and self.worktree_manager:
+            # Set up workspace — app directory for chat sessions with apps,
+            # worktree for code tasks, output dir for others
+            app_path = task.origin_metadata.get("app_path", "")
+            if app_path and Path(app_path).is_dir():
+                # Use app directory directly so agent writes files into the app
+                worktree_path = Path(app_path)
+                needs_worktree = False
+                logger.info("Using app directory as workspace: %s", app_path)
+            elif needs_worktree and self.worktree_manager:
                 worktree_path = await self.worktree_manager.create(task.id)
             elif needs_worktree:
                 logger.warning("No repo configured — running code task without worktree")
@@ -517,7 +524,7 @@ class Agent:
                 )
                 if rlm_result is not None:
                     logger.info(
-                        "RLM pre-processed context for task %s: %dk→%dk chars",
+                        "RLM pre-processed context for task %s: %dk->%dk chars",
                         task.id,
                         len(task_context) // 1000,
                         len(rlm_result["response"]) // 1000,
@@ -585,7 +592,9 @@ class Agent:
                 output_path.write_text(review_md)
 
             # Transition task to review
-            await self.task_queue.complete(task.id, result=history.final_output)
+            await self.task_queue.complete(
+                task.id, result=history.final_output, iterations=history.total_iterations
+            )
 
             # Update project state for session recovery (GSD-inspired)
             if task.project_id and self.state_manager:

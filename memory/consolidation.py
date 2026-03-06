@@ -195,7 +195,7 @@ class ConsolidationPipeline:
             )
             logger.info(
                 f"Consolidation: stored summary for {channel_type}/{channel_id} "
-                f"({summary.message_count} messages → Qdrant)"
+                f"({summary.message_count} messages -> Qdrant)"
             )
         else:
             # Fallback: store in JSON embedding store
@@ -210,7 +210,7 @@ class ConsolidationPipeline:
             )
             logger.info(
                 f"Consolidation: stored summary for {channel_type}/{channel_id} "
-                f"({summary.message_count} messages → JSON embeddings)"
+                f"({summary.message_count} messages -> JSON embeddings)"
             )
 
         return summary

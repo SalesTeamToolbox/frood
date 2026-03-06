@@ -302,7 +302,7 @@ class TunnelTool(Tool):
         if self._expiry_task is None or self._expiry_task.done():
             self._expiry_task = asyncio.create_task(self._expiry_loop())
 
-        logger.info(f"Tunnel started: {tunnel.id} → {url} (port {port}, {actual_provider})")
+        logger.info(f"Tunnel started: {tunnel.id} -> {url} (port {port}, {actual_provider})")
         return ToolResult(
             output=f"Tunnel created!\n  ID: {tunnel.id}\n  URL: {url}\n  Port: {port}\n  Provider: {actual_provider}\n  TTL: {tunnel.ttl_minutes} minutes"
         )

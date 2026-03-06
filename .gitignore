@@ -75,6 +75,9 @@ script.js
 style.css
 solar_dashboard/
 
+# Playwright MCP artifacts (logs, screenshots)
+.playwright-mcp/
+
 # Agent output / scratch files
 analysis/
 api_docs/
