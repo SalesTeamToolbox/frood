@@ -5,11 +5,14 @@ Inspired by Nanobot's ProviderSpec pattern: adding a new provider is a 2-step
 process (register spec + add config field). No if-elif chains needed.
 """
 
+import asyncio
 import logging
 import os
+import time
 from dataclasses import dataclass
 from enum import Enum
 
+import httpx
 from openai import AsyncOpenAI
 
 from core.config import settings
@@ -437,6 +440,9 @@ MODELS: dict[str, ModelSpec] = {
 class SpendingTracker:
     """Tracks API spending to enforce daily limits."""
 
+    # Flat-rate providers are exempt from daily spending limits (already paid for)
+    _FLAT_RATE_PROVIDERS: set[ProviderType] = {ProviderType.STRONGWALL}
+
     # Known per-token pricing for models not covered by the OR catalog.
     # Source: https://ai.google.dev/gemini-api/docs/pricing (March 2026)
     # Format: model_id -> (prompt_per_token, completion_per_token)
@@ -488,6 +494,32 @@ class SpendingTracker:
     def update_model_prices(self, prices: dict[str, tuple[float, float]]) -> None:
         """Update per-model pricing from catalog data."""
         self._model_prices.update(prices)
+
+    def is_flat_rate(self, model_key: str) -> bool:
+        """Check if a model belongs to a flat-rate provider (exempt from spending limit)."""
+        spec = MODELS.get(model_key)
+        if not spec:
+            return False
+        return spec.provider in self._FLAT_RATE_PROVIDERS
+
+    def get_flat_rate_daily(self) -> dict:
+        """Return flat-rate cost info for reporting.
+
+        Returns dict with provider display name -> {monthly_usd, daily_usd, configured}.
+        """
+        result = {}
+        for pt in self._FLAT_RATE_PROVIDERS:
+            spec = PROVIDERS.get(pt)
+            if not spec:
+                continue
+            configured = bool(os.getenv(spec.api_key_env, ""))
+            monthly = settings.strongwall_monthly_cost if pt == ProviderType.STRONGWALL else 0.0
+            result[spec.display_name] = {
+                "monthly_usd": monthly,
+                "daily_usd": round(monthly / 30, 2),
+                "configured": configured,
+            }
+        return result
 
     def _get_price(self, model_key: str, model_id: str) -> tuple[float, float] | None:
         """Look up per-token pricing for a model.
@@ -562,6 +594,103 @@ class SpendingTracker:
 
 
 spending_tracker = SpendingTracker()
+
+
+class ProviderHealthChecker:
+    """Probes provider API endpoints to detect availability and degradation.
+
+    Unlike ModelCatalog.health_check() which sends completion requests to test
+    individual models, this checks provider-level reachability via /v1/models
+    (no tokens consumed).
+    """
+
+    # Thresholds per user decision in 16-CONTEXT.md
+    DEGRADED_THRESHOLD_S = 3.0  # >3s = degraded (queue congestion)
+    TIMEOUT_S = 5.0  # >5s = timeout, mark unhealthy
+    CHECK_INTERVAL_S = 60  # Poll every 60 seconds
+
+    def __init__(self):
+        self._status: dict[str, dict] = {}  # provider_type.value -> status dict
+        self._task: asyncio.Task | None = None
+
+    async def check(self, provider_type: ProviderType) -> dict | None:
+        """Probe a provider's /v1/models endpoint.
+
+        Returns status dict or None if provider not configured (no API key).
+        """
+        spec = PROVIDERS.get(provider_type)
+        if not spec:
+            return None
+        api_key = os.getenv(spec.api_key_env, "")
+        if not api_key:
+            return None
+
+        base_url = os.getenv(f"{provider_type.value.upper()}_BASE_URL", spec.base_url)
+        url = f"{base_url}/models"
+
+        try:
+            start = time.monotonic()
+            async with httpx.AsyncClient(timeout=self.TIMEOUT_S) as client:
+                resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+            latency = time.monotonic() - start
+
+            if resp.status_code >= 400:
+                status = "unhealthy"
+                error = f"HTTP {resp.status_code}"
+            elif latency >= self.DEGRADED_THRESHOLD_S:
+                status = "degraded"
+                error = f"Slow response ({latency:.1f}s)"
+            else:
+                status = "healthy"
+                error = None
+
+            result = {
+                "status": status,
+                "latency_ms": round(latency * 1000),
+                "last_checked": time.time(),
+                "error": error,
+            }
+        except Exception as e:
+            result = {
+                "status": "unhealthy",
+                "latency_ms": 0,
+                "last_checked": time.time(),
+                "error": str(e),
+            }
+
+        self._status[provider_type.value] = result
+        return result
+
+    def get_status(self, provider_type: ProviderType | None = None) -> dict:
+        """Get cached status for a provider or all providers."""
+        if provider_type:
+            return self._status.get(provider_type.value, {})
+        return dict(self._status)
+
+    async def start_polling(self, providers: list[ProviderType] | None = None):
+        """Start background polling loop. Call from app startup."""
+        if providers is None:
+            providers = [ProviderType.STRONGWALL]  # Default: only poll StrongWall
+        self._task = asyncio.create_task(self._poll_loop(providers))
+
+    async def _poll_loop(self, providers: list[ProviderType]):
+        """Background loop that checks providers every CHECK_INTERVAL_S seconds."""
+        while True:
+            for pt in providers:
+                try:
+                    await self.check(pt)
+                except Exception as e:
+                    logger.warning("Provider health check failed for %s: %s", pt.value, e)
+            await asyncio.sleep(self.CHECK_INTERVAL_S)
+
+    def stop(self):
+        """Cancel the background polling task."""
+        if self._task:
+            self._task.cancel()
+            self._task = None
+
+
+provider_health_checker = ProviderHealthChecker()
 
 
 class ProviderRegistry:
@@ -640,12 +769,15 @@ class ProviderRegistry:
         The usage_dict contains model_key, prompt_tokens, and completion_tokens
         when available, or None if the API did not return usage data.
         """
-        if not spending_tracker.check_limit(settings.max_daily_api_spend_usd):
-            raise SpendingLimitExceeded(
-                f"Daily API spending limit reached "
-                f"(${spending_tracker.daily_spend_usd:.2f} / "
-                f"${settings.max_daily_api_spend_usd:.2f})"
-            )
+        # Flat-rate providers (e.g. StrongWall) are exempt from spending limit
+        spec_for_limit = MODELS.get(model_key)
+        if not spec_for_limit or spec_for_limit.provider not in SpendingTracker._FLAT_RATE_PROVIDERS:
+            if not spending_tracker.check_limit(settings.max_daily_api_spend_usd):
+                raise SpendingLimitExceeded(
+                    f"Daily API spending limit reached "
+                    f"(${spending_tracker.daily_spend_usd:.2f} / "
+                    f"${settings.max_daily_api_spend_usd:.2f})"
+                )
 
         spec = self.get_model(model_key)
         client = self.get_client(spec.provider)
@@ -696,12 +828,15 @@ class ProviderRegistry:
 
         Returns the full response object so callers can inspect tool_calls.
         """
-        if not spending_tracker.check_limit(settings.max_daily_api_spend_usd):
-            raise SpendingLimitExceeded(
-                f"Daily API spending limit reached "
-                f"(${spending_tracker.daily_spend_usd:.2f} / "
-                f"${settings.max_daily_api_spend_usd:.2f})"
-            )
+        # Flat-rate providers (e.g. StrongWall) are exempt from spending limit
+        spec_for_limit = MODELS.get(model_key)
+        if not spec_for_limit or spec_for_limit.provider not in SpendingTracker._FLAT_RATE_PROVIDERS:
+            if not spending_tracker.check_limit(settings.max_daily_api_spend_usd):
+                raise SpendingLimitExceeded(
+                    f"Daily API spending limit reached "
+                    f"(${spending_tracker.daily_spend_usd:.2f} / "
+                    f"${settings.max_daily_api_spend_usd:.2f})"
+                )
 
         spec = self.get_model(model_key)
         client = self.get_client(spec.provider)
