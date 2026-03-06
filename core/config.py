@@ -52,6 +52,8 @@ class Settings:
     mistral_api_key: str = ""
     codestral_api_key: str = ""
     sambanova_api_key: str = ""
+    strongwall_api_key: str = ""
+    strongwall_monthly_cost: float = 16.0  # Flat monthly rate in USD
     together_api_key: str = ""
 
     # Dashboard auth
@@ -333,6 +335,8 @@ class Settings:
             mistral_api_key=os.getenv("MISTRAL_API_KEY", ""),
             codestral_api_key=os.getenv("CODESTRAL_API_KEY", ""),
             sambanova_api_key=os.getenv("SAMBANOVA_API_KEY", ""),
+            strongwall_api_key=os.getenv("STRONGWALL_API_KEY", ""),
+            strongwall_monthly_cost=float(os.getenv("STRONGWALL_MONTHLY_COST", "16.0")),
             together_api_key=os.getenv("TOGETHER_API_KEY", ""),
             # Dashboard
             dashboard_username=os.getenv("DASHBOARD_USERNAME", "admin"),
