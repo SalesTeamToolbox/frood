@@ -28,11 +28,11 @@ Restructure Agent42's model routing around L1 (workhorse) and L2 (premium) tiers
   2. Agent tasks dispatched to StrongWall receive complete, correctly parsed responses (including tool calls) without streaming-related errors
   3. StrongWall health check endpoint reports availability status and detects when the API is unreachable or returning errors
   4. Agent42 without STRONGWALL_API_KEY configured continues to operate with existing providers (graceful degradation)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 16-01: Provider registration and non-streaming response handling
-- [ ] 16-02: Health check and graceful degradation
+- [ ] 16-01-PLAN.md — Register StrongWall provider/model, enforce non-streaming for all requests
+- [ ] 16-02-PLAN.md — Provider health check polling, flat-rate cost tracking, dashboard integration
 
 ### Phase 17: Tier Routing Architecture
 **Goal**: Model routing operates on L1/L2 tier concepts with StrongWall as default L1, Gemini/OR-paid as L2, and existing free providers as fallback
