@@ -37,6 +37,7 @@ class ProviderType(str, Enum):
     MISTRAL = "mistral"
     MISTRAL_CODESTRAL = "mistral_codestral"
     SAMBANOVA = "sambanova"
+    STRONGWALL = "strongwall"
     TOGETHER = "together"
     CUSTOM = "custom"
 
@@ -154,6 +155,13 @@ PROVIDERS: dict[ProviderType, ProviderSpec] = {
         base_url="https://api.sambanova.ai/v1",
         api_key_env="SAMBANOVA_API_KEY",
         display_name="SambaNova",
+        supports_function_calling=True,
+    ),
+    ProviderType.STRONGWALL: ProviderSpec(
+        provider_type=ProviderType.STRONGWALL,
+        base_url="https://api.strongwall.ai/v1",
+        api_key_env="STRONGWALL_API_KEY",
+        display_name="StrongWall (Kimi K2.5)",
         supports_function_calling=True,
     ),
     ProviderType.TOGETHER: ProviderSpec(
@@ -364,6 +372,16 @@ MODELS: dict[str, ModelSpec] = {
         tier=ModelTier.CHEAP,
         max_context_tokens=131000,
     ),
+    # StrongWall (flat-rate $16/mo unlimited — OpenAI-compatible, no streaming)
+    "strongwall-kimi-k2.5": ModelSpec(
+        "kimi-k2.5",
+        ProviderType.STRONGWALL,
+        max_tokens=8192,
+        temperature=0.3,
+        display_name="Kimi K2.5 (StrongWall)",
+        tier=ModelTier.CHEAP,
+        max_context_tokens=131072,
+    ),
     # ═══════════════════════════════════════════════════════════════════════════
     # PREMIUM TIER — frontier models for final reviews, complex tasks, admin-selected
     # ═══════════════════════════════════════════════════════════════════════════
@@ -456,6 +474,8 @@ class SpendingTracker:
         # Keys include org/ prefix -- must match ModelSpec.model_id exactly
         "meta-llama/Llama-3.3-70B-Instruct-Turbo": (0.88e-6, 0.88e-6),  # $0.88/M in+out
         "deepseek-ai/DeepSeek-V3": (0.60e-6, 1.70e-6),                   # $0.60/M in, $1.70/M out
+        # StrongWall — flat-rate $16/mo unlimited (no per-token cost)
+        "kimi-k2.5": (0.0, 0.0),
     }
 
     def __init__(self):
