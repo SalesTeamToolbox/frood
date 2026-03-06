@@ -96,7 +96,7 @@ Phases execute in numeric order: 16 -> 17 -> 18 -> 19 -> 20
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 16. StrongWall Provider | 2/2 | Complete | 2026-03-06 |
+| 16. StrongWall Provider | 2/2 | Complete    | 2026-03-06 |
 | 17. Tier Routing Architecture | 0/2 | Not started | - |
 | 18. Agent Config Backend | 0/1 | Not started | - |
 | 19. Agent Config Dashboard | 0/2 | Not started | - |
