@@ -481,7 +481,8 @@ class Agent:
                 },
             )
 
-            # Get model routing for this task type (tier-aware)
+            # Get model routing for this task type (tier-aware, profile-aware)
+            _profile = task.profile or ""
             if task.tier == "L2":
                 routing = self.router.get_l2_routing(task.task_type)
                 if not routing:
@@ -489,11 +490,15 @@ class Agent:
                     logger.warning("L2 routing unavailable for %s — falling back to L1", task.id)
                     task.tier = "L1"
                     routing = self.router.get_routing(
-                        task.task_type, context_window=task.context_window
+                        task.task_type,
+                        context_window=task.context_window,
+                        profile_name=_profile,
                     )
             else:
                 routing = self.router.get_routing(
-                    task.task_type, context_window=task.context_window
+                    task.task_type,
+                    context_window=task.context_window,
+                    profile_name=_profile,
                 )
 
             # Build system prompt (with skill overrides, profile, and behaviour rules)

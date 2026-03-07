@@ -41,6 +41,15 @@ const state = {
   apiKeys: {},
   keyEdits: {},
   keySaving: false,
+  // LLM Routing
+  routingModels: { l1: [], fallback: [], l2: [] },
+  routingConfig: {},
+  routingEdits: {},
+  routingSaving: false,
+  // Per-agent routing (Agents page)
+  agentRoutingEdits: {},
+  agentRoutingSaving: false,
+  selectedProfileRouting: null,
   // Chat (multi-session)
   chatMessages: [],
   chatInput: "",
@@ -2225,6 +2234,19 @@ function renderAgents() {
     const skillChips = (p.preferred_skills || []).slice(0, 4).map((s) => `<span class="badge-type">${esc(s)}</span>`).join(" ");
     const extra = (p.preferred_skills || []).length > 4 ? `<span class="badge-type">+${p.preferred_skills.length - 4}</span>` : "";
 
+    // Model chip from routing config
+    const routingInfo = state.routingConfig && state.routingConfig.profiles ? state.routingConfig.profiles[p.name] : null;
+    const effectivePrimary = routingInfo && routingInfo.effective ? routingInfo.effective.primary : null;
+    const isModelOverridden = routingInfo && routingInfo.overrides && routingInfo.overrides.primary != null;
+    const modelChip = effectivePrimary
+      ? '<div class="agent-card-chips" style="margin-top:0.25rem">'
+        + '<span class="badge-type" style="font-size:0.65rem;'
+        + (isModelOverridden ? '' : 'color:var(--text-muted)') + '"'
+        + ' title="' + (isModelOverridden ? 'Overridden' : 'Inherited from default') + '">'
+        + esc(effectivePrimary) + (isModelOverridden ? '' : ' (inherited)')
+        + '</span></div>'
+      : '';
+
     return `
       <div class="agent-card ${isDefault ? 'agent-card-default' : ''}" onclick="loadProfileDetail('${esc(p.name)}')">
         <div class="agent-card-header">
@@ -2238,6 +2260,7 @@ function renderAgents() {
         <div class="agent-card-meta">
           <div class="agent-card-chips">${taskChips}</div>
           <div class="agent-card-chips">${skillChips}${extra}</div>
+          ${modelChip}
         </div>
       </div>
     `;
@@ -2296,6 +2319,49 @@ function renderAgentDetail(el) {
     ? `<div class="agent-detail-section"><h4>Persona Instructions</h4><div class="agent-persona-content">${esc(p.prompt_overlay)}</div></div>`
     : '';
 
+  // LLM Routing section (only for non-_default profiles)
+  let routingHtml = '';
+  if (p.name === "_default") {
+    routingHtml = '<div class="agent-detail-section">'
+      + '<h4>LLM Routing</h4>'
+      + '<p style="color:var(--text-muted);font-size:0.85rem">Global routing defaults are configured in '
+      + '<a href="#" onclick="event.preventDefault();state.page=\'settings\';state.settingsTab=\'routing\';render()">Settings &gt; LLM Routing</a>.</p>'
+      + '</div>';
+  } else {
+    const routing = state.selectedProfileRouting;
+    const agentOverrides = routing && routing.overrides ? routing.overrides : {};
+    const agentChain = routing && routing.resolution_chain ? routing.resolution_chain : [];
+    const agentIsOverridden = (field) => agentOverrides[field] !== undefined && agentOverrides[field] !== null;
+    const agentCurrentVal = (field) => {
+      if (state.agentRoutingEdits[field] !== undefined) return state.agentRoutingEdits[field];
+      if (agentIsOverridden(field)) return agentOverrides[field];
+      return "";
+    };
+    const hasAgentEdits = Object.keys(state.agentRoutingEdits).length > 0;
+    routingHtml = '<div class="agent-detail-section">'
+      + '<h4>LLM Routing</h4>'
+      + '<p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.75rem">'
+      + 'Override model routing for this agent. Unset fields inherit from global defaults.</p>'
+      + routingSelect("primary", "Primary", agentCurrentVal("primary"),
+          !agentIsOverridden("primary") && state.agentRoutingEdits["primary"] === undefined, "global default", "agent")
+      + routingSelect("critic", "Critic", agentCurrentVal("critic"),
+          !agentIsOverridden("critic") && state.agentRoutingEdits["critic"] === undefined, "global default", "agent")
+      + routingSelect("fallback", "Fallback", agentCurrentVal("fallback"),
+          !agentIsOverridden("fallback") && state.agentRoutingEdits["fallback"] === undefined, "global default", "agent")
+      + renderChainSummary(agentChain)
+      + '<div style="display:flex;gap:0.5rem;margin-top:0.75rem;align-items:center">'
+      + '<button class="btn btn-primary btn-sm" onclick="saveRouting(\'' + esc(p.name) + '\')"'
+      + (!hasAgentEdits || state.agentRoutingSaving ? ' disabled' : '') + '>'
+      + (state.agentRoutingSaving ? 'Saving...' : 'Save Routing')
+      + '</button>'
+      + '<button class="btn btn-outline btn-sm" onclick="resetRouting(\'' + esc(p.name) + '\')">'
+      + 'Reset to Inherited</button>'
+      + (hasAgentEdits ? '<span style="color:var(--warning);font-size:0.75rem;margin-left:0.5rem">Unsaved changes</span>' : '')
+      + '</div></div>';
+  }
+
+  // NOTE: innerHTML is the established pattern for this SPA (55+ handlers). All interpolated
+  // values are escaped via esc() for XSS protection.
   el.innerHTML = `
     <div class="agent-detail">
       <div class="agent-detail-topbar">
@@ -2322,6 +2388,7 @@ function renderAgentDetail(el) {
           <div class="agent-card-chips">${skillsHtml || '<span style="color:var(--text-muted)">None configured</span>'}</div>
         </div>
         ${personaHtml}
+        ${routingHtml}
         ${p.source_path ? `<div class="agent-detail-section"><h4>Source</h4><code style="font-size:0.8rem;color:var(--text-muted)">${esc(p.source_path)}</code></div>` : ''}
       </div>
     </div>
@@ -2330,8 +2397,13 @@ function renderAgentDetail(el) {
 
 async function loadProfileDetail(name) {
   try {
-    const profile = await api(`/profiles/${encodeURIComponent(name)}`);
+    const [profile, routing] = await Promise.all([
+      api(`/profiles/${encodeURIComponent(name)}`),
+      api(`/agent-routing/${encodeURIComponent(name)}`).catch(() => null),
+    ]);
     state.selectedProfile = profile;
+    state.selectedProfileRouting = routing;
+    state.agentRoutingEdits = {};
     state.agentsViewMode = "detail";
     render();
   } catch (err) { toast(err.message, "error"); }
@@ -4105,6 +4177,7 @@ function renderSettings() {
 
   const tabs = [
     { id: "providers", label: "LLM Providers" },
+    { id: "routing", label: "LLM Routing" },
     { id: "repos", label: "Repositories" },
     { id: "channels", label: "Channels" },
     { id: "security", label: "Security" },
@@ -4143,12 +4216,13 @@ function renderSettingsPanel() {
       <div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">
         <h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">How Model Routing Works</h4>
         <div class="help" style="line-height:1.7">
-          Agent42 selects models using a <strong>5-layer priority chain</strong>:<br>
+          Agent42 selects models using a <strong>6-layer priority chain</strong>:<br>
           <strong>1. Admin Override</strong> &mdash; Set <code>AGENT42_CODING_MODEL</code>, <code>AGENT42_CODING_CRITIC</code>, etc. in Orchestrator tab to force a specific model for any task type (e.g., <code>claude-opus-4-6</code> for final code review).<br>
+          <strong>1b. Profile Override</strong> &mdash; Per-agent model overrides or global defaults from the <a href="#" onclick="event.preventDefault();state.settingsTab='routing';renderSettingsPanel()">LLM Routing</a> tab.<br>
           <strong>2. Dynamic Routing</strong> &mdash; Agent42 tracks task outcomes and automatically promotes models that perform well.<br>
           <strong>3. Trial Injection</strong> &mdash; A small % of tasks test unproven models to discover better options.<br>
           <strong>4. Policy Routing</strong> &mdash; In <em>balanced</em> or <em>performance</em> mode, complex tasks upgrade to paid models when OpenRouter credits are available.<br>
-          <strong>5. Free Defaults</strong> &mdash; <strong>Gemini Flash</strong> (primary) + <strong>OpenRouter free models</strong> (critic/fallback).
+          <strong>5. Tier Defaults</strong> &mdash; <strong>L1</strong> (workhorse, e.g. StrongWall) &rarr; <strong>Fallback</strong> (free providers) &rarr; <strong>L2</strong> (premium, e.g. Gemini Pro). Configure in the <a href="#" onclick="event.preventDefault();state.settingsTab='routing';renderSettingsPanel()">LLM Routing</a> tab.
         </div>
       </div>
 
@@ -4156,15 +4230,16 @@ function renderSettingsPanel() {
         <h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">Fallback Chain</h4>
         <div class="help" style="line-height:1.7">
           When a model fails (rate-limited, unavailable, auth error), Agent42 automatically tries the next available provider:<br>
-          <strong>Gemini Flash</strong> (free tier: 1,500 req/day, 1M context) &rarr;
-          <strong>OpenRouter free models</strong> (diverse but rate-limited) &rarr;
-          <strong>OpenAI / Anthropic / DeepSeek</strong> (if keys configured).<br>
+          <strong>StrongWall</strong> (L1 workhorse, if configured) &rarr;
+          <strong>Cerebras / Groq</strong> (free fallback) &rarr;
+          <strong>Gemini / OpenRouter paid</strong> (L2 premium, if keys + credits available).<br>
           Rate-limited models (429) are skipped instantly &mdash; no wasted retries. Auth errors (401) skip the entire provider.
         </div>
       </div>
 
       <h4 style="margin:0 0 0.75rem;font-size:0.95rem">Primary Providers</h4>
       ${settingSecret("GEMINI_API_KEY", "Gemini API Key (Recommended)", "Default primary model. Generous free tier: 1,500 requests/day for Flash, 1M token context. Get one at aistudio.google.com.", true)}
+      ${settingSecret("STRONGWALL_API_KEY", "StrongWall API Key", "L1 workhorse provider. Kimi K2.5 with unlimited requests ($16/mo). Get access at strongwall.ai.", true)}
       ${settingSecret("OPENROUTER_API_KEY", "OpenRouter API Key", "200+ models via one key. Free models used as critic/fallback. Paid models activated when credits are available. Get one at openrouter.ai/keys.", true)}
 
       <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Premium Providers (Optional)</h4>
@@ -4206,6 +4281,7 @@ function renderSettingsPanel() {
         </div>
       ` : `<div class="help">${state.orStatusLoading ? "Loading..." : "Status not available. Configure an OpenRouter API key first."}</div>`}
     `,
+    routing: () => renderRoutingPanel(),
     repos: () => renderReposPanel(),
     channels: () => `
       <h3>Communication Channels</h3>
@@ -4509,6 +4585,210 @@ function updateEnvSaveBtn() {
 }
 
 // ---------------------------------------------------------------------------
+// LLM Routing helpers (shared between Settings and Agents pages)
+// ---------------------------------------------------------------------------
+async function loadRoutingModels() {
+  try {
+    state.routingModels = (await api("/available-models")) || { l1: [], fallback: [], l2: [] };
+  } catch { state.routingModels = { l1: [], fallback: [], l2: [] }; }
+}
+
+async function loadRoutingConfig() {
+  try {
+    state.routingConfig = (await api("/agent-routing")) || { profiles: {} };
+  } catch { state.routingConfig = { profiles: {} }; }
+}
+
+function routingSelect(field, label, currentValue, isInherited, inheritedFrom, scope) {
+  scope = scope || "default";
+  const models = state.routingModels;
+  const healthDot = (h) => h === "healthy" ? "&#9679;" // green dot via CSS color
+                         : h === "degraded" ? "&#9679;"
+                         : h === "unhealthy" ? "&#9679;" : "";
+  const healthColor = (h) => h === "healthy" ? "color:#22c55e"
+                            : h === "degraded" ? "color:#eab308"
+                            : h === "unhealthy" ? "color:#ef4444" : "";
+
+  const optionsHtml = (tier, tierLabel) => {
+    if (!models[tier] || models[tier].length === 0) return "";
+    return `<optgroup label="${esc(tierLabel)}">
+      ${models[tier].map(m =>
+        `<option value="${esc(m.key)}" ${currentValue === m.key ? "selected" : ""}>
+          ${m.health ? "\u25CF " : ""}${esc(m.display_name)} (${esc(m.provider)})
+        </option>`
+      ).join("")}
+    </optgroup>`;
+  };
+
+  const inheritLabel = isInherited
+    ? `<span style="color:var(--text-muted);font-size:0.75rem">inherited from ${esc(inheritedFrom || "system")}</span>`
+    : "";
+  const editFn = scope === "agent" ? "updateAgentRoutingEdit" : "updateRoutingEdit";
+  const clearFn = scope === "agent" ? "clearAgentRoutingField" : "clearRoutingField";
+  const resetBtn = !isInherited && currentValue
+    ? `<button class="btn btn-sm" onclick="${clearFn}('${esc(field)}')" title="Reset to inherited">&#10005;</button>`
+    : "";
+
+  return `
+    <div class="form-group">
+      <label>${esc(label)} ${inheritLabel}</label>
+      <div style="display:flex;gap:0.5rem;align-items:center">
+        <select style="flex:1;${isInherited ? 'color:var(--text-muted)' : ''}"
+                onchange="${editFn}('${esc(field)}', this.value)">
+          <option value="">Use default (Inherit)</option>
+          ${optionsHtml("l1", "L1 Models")}
+          ${optionsHtml("fallback", "Fallback Models")}
+          ${optionsHtml("l2", "L2 Premium Models")}
+        </select>
+        ${resetBtn}
+      </div>
+    </div>
+  `;
+}
+
+function renderChainSummary(chain) {
+  if (!chain || chain.length === 0) return "";
+  const badges = chain.map(entry => {
+    const sourceStyle = entry.source === "FALLBACK_ROUTING"
+      ? "background:var(--bg-hover);color:var(--text-muted)"
+      : entry.source && entry.source.startsWith("profile:")
+        ? "background:rgba(60,191,174,0.15);color:var(--a42-teal)"
+        : "background:rgba(232,168,56,0.12);color:var(--a42-gold)";
+    const sourceLabel = entry.source === "FALLBACK_ROUTING" ? "system"
+      : entry.source === "_default" ? "default" : "overridden";
+    return `<span style="display:inline-block;padding:0.15rem 0.5rem;border-radius:4px;font-size:0.75rem;${sourceStyle}">
+      ${esc(entry.field)}: ${esc(entry.value)} (${sourceLabel})
+    </span>`;
+  }).join(" &rarr; ");
+  return `<div style="margin-top:0.75rem;display:flex;flex-wrap:wrap;gap:0.3rem;align-items:center">
+    <strong style="font-size:0.8rem;color:var(--text-secondary)">Effective:</strong> ${badges}
+  </div>`;
+}
+
+function updateRoutingEdit(field, value) {
+  state.routingEdits[field] = value;
+  renderSettingsPanel();
+}
+
+function clearRoutingField(field) {
+  state.routingEdits[field] = "";
+  renderSettingsPanel();
+}
+
+function updateAgentRoutingEdit(field, value) {
+  state.agentRoutingEdits[field] = value;
+  render();
+}
+
+function clearAgentRoutingField(field) {
+  state.agentRoutingEdits[field] = "";
+  render();
+}
+
+async function saveRouting(profileName) {
+  const isDefault = profileName === "_default";
+  if (isDefault) { state.routingSaving = true; renderSettingsPanel(); }
+  else { state.agentRoutingSaving = true; render(); }
+  try {
+    const edits = isDefault ? state.routingEdits : state.agentRoutingEdits;
+    const body = {};
+    for (const [field, val] of Object.entries(edits)) {
+      if (val === undefined) continue;
+      body[field] = val === "" ? null : val;
+    }
+    if (Object.keys(body).length === 0) {
+      toast("No changes to save", "info");
+      if (isDefault) { state.routingSaving = false; renderSettingsPanel(); }
+      else { state.agentRoutingSaving = false; render(); }
+      return;
+    }
+    await api(`/agent-routing/${encodeURIComponent(profileName)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    if (isDefault) {
+      state.routingEdits = {};
+    } else {
+      state.agentRoutingEdits = {};
+      // Refresh per-agent routing data for detail view
+      try {
+        state.selectedProfileRouting = await api(`/agent-routing/${encodeURIComponent(profileName)}`);
+      } catch { /* ignore */ }
+    }
+    await loadRoutingConfig();
+    toast("Routing updated. Takes effect on next dispatch.", "success");
+  } catch (e) {
+    toast("Failed to save routing: " + e.message, "error");
+  }
+  if (isDefault) { state.routingSaving = false; renderSettingsPanel(); }
+  else { state.agentRoutingSaving = false; render(); }
+}
+
+async function resetRouting(profileName) {
+  const isDefault = profileName === "_default";
+  const label = isDefault ? "global routing defaults" : `routing for ${profileName}`;
+  if (!confirm(`Reset ${label}? This will clear all overrides.`)) return;
+  try {
+    await api(`/agent-routing/${encodeURIComponent(profileName)}`, { method: "DELETE" });
+    if (isDefault) {
+      state.routingEdits = {};
+    } else {
+      state.agentRoutingEdits = {};
+      state.selectedProfileRouting = null;
+      // Refresh per-agent routing data
+      try {
+        state.selectedProfileRouting = await api(`/agent-routing/${encodeURIComponent(profileName)}`);
+      } catch { /* no config after reset */ }
+    }
+    await loadRoutingConfig();
+    toast(`Routing reset. Inherits from ${isDefault ? "system defaults" : "global defaults"}.`, "success");
+  } catch (e) {
+    if (e.message && e.message.includes("404")) {
+      toast("No overrides to reset", "info");
+    } else {
+      toast("Failed to reset: " + e.message, "error");
+    }
+  }
+  if (isDefault) renderSettingsPanel();
+  else render();
+}
+
+function renderRoutingPanel() {
+  const defaultConfig = state.routingConfig && state.routingConfig.profiles ? state.routingConfig.profiles["_default"] : undefined;
+  const overrides = defaultConfig && defaultConfig.overrides ? defaultConfig.overrides : {};
+  const chain = defaultConfig && defaultConfig.resolution_chain ? defaultConfig.resolution_chain : [];
+
+  const isOverridden = (field) => overrides[field] !== undefined && overrides[field] !== null;
+  const currentVal = (field) => {
+    if (state.routingEdits[field] !== undefined) return state.routingEdits[field];
+    if (isOverridden(field)) return overrides[field];
+    return "";
+  };
+
+  const hasEdits = Object.keys(state.routingEdits).length > 0;
+  const unsavedWarning = hasEdits ? `<div class="help" style="color:var(--a42-gold);margin-bottom:0.5rem">Unsaved changes</div>` : "";
+
+  return `
+    <h3>LLM Routing</h3>
+    <p class="section-desc">Configure global model routing defaults. Per-agent overrides can be set on the Agents page.</p>
+    ${routingSelect("primary", "Primary (L1)", currentVal("primary"), !isOverridden("primary") && state.routingEdits["primary"] === undefined, "system")}
+    ${routingSelect("critic", "Critic", currentVal("critic"), !isOverridden("critic") && state.routingEdits["critic"] === undefined, "system")}
+    ${routingSelect("fallback", "Fallback", currentVal("fallback"), !isOverridden("fallback") && state.routingEdits["fallback"] === undefined, "system")}
+    ${renderChainSummary(chain)}
+    ${unsavedWarning}
+    <div class="form-group" style="margin-top:1.5rem">
+      <button class="btn btn-primary" onclick="saveRouting('_default')"
+              ${!hasEdits || state.routingSaving ? "disabled" : ""}>
+        ${state.routingSaving ? "Saving..." : "Save Routing Defaults"}
+      </button>
+      <button class="btn btn-outline" onclick="resetRouting('_default')" style="margin-left:0.5rem">
+        Reset Global Defaults
+      </button>
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
 // Main render
 // ---------------------------------------------------------------------------
 async function loadAll() {
@@ -4517,7 +4797,7 @@ async function loadAll() {
     loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(),
     loadChatMessages(), loadTokenStats(), loadChatSessions(), loadCodeSessions(),
     loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(), loadGithubAccounts(), loadOrStatus(),
-    loadReports(), loadProfiles(), loadPersona(),
+    loadReports(), loadProfiles(), loadPersona(), loadRoutingModels(), loadRoutingConfig(),
   ]);
 }
 

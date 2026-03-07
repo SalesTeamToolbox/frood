@@ -210,13 +210,17 @@ class DeviceStore:
 
 
 def _hash_key(raw_key: str) -> str:
-    """Hash an API key using HMAC-SHA256 (keyed by JWT_SECRET) or plain SHA-256 as fallback."""
-    jwt_secret = os.getenv("JWT_SECRET", "")
-    if jwt_secret:
-        return "hmac:" + hmac.new(
-            jwt_secret.encode(), raw_key.encode(), hashlib.sha256
-        ).hexdigest()
-    return hashlib.sha256(raw_key.encode()).hexdigest()
+    """Hash an API key using HMAC-SHA256, keyed by JWT_SECRET."""
+    jwt_secret = os.getenv("JWT_SECRET")
+    if not jwt_secret:
+        # This should not happen in a production environment.
+        # The secret is essential for secure, consistent hashing.
+        logger.critical("JWT_SECRET is not set! Cannot securely hash API keys.")
+        raise ValueError("JWT_SECRET is not configured.")
+
+    return "hmac:" + hmac.new(
+        jwt_secret.encode(), raw_key.encode(), hashlib.sha256
+    ).hexdigest()
 
 
 def _legacy_hash_key(raw_key: str) -> str:

@@ -16,7 +16,15 @@ import asyncio
 import logging
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,9 +32,9 @@ from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from core.approval_gate import ApprovalGate
-from core.error_codes import get_http_error_response
 from core.config import Settings, settings
 from core.device_auth import DeviceStore
+from core.error_codes import get_http_error_response
 from core.task_queue import Task, TaskQueue, TaskStatus, TaskType
 from dashboard.auth import (
     API_KEY_PREFIX,
@@ -222,6 +230,12 @@ class PersonaUpdateRequest(BaseModel):
     prompt: str
 
 
+class AgentRoutingRequest(BaseModel):
+    primary: str | None = None
+    critic: str | None = None
+    fallback: str | None = None
+
+
 # Settings that can be changed from the dashboard (non-secret, non-security).
 # Security-critical settings (sandbox, password, JWT) are deliberately excluded.
 _DASHBOARD_EDITABLE_SETTINGS = {
@@ -364,6 +378,32 @@ def _save_toggle_state(disabled_tools: list[str], disabled_skills: list[str]) ->
             indent=2,
         )
     )
+
+
+def _build_resolution_chain(store, profile: str) -> list[dict]:
+    """Show where each routing field is inherited from, for dashboard display.
+
+    Returns a list of dicts with keys: field, value, source.
+    Source is one of: "profile:{name}", "_default", "FALLBACK_ROUTING".
+    """
+    profile_ov = store.get_overrides(profile) if profile != "_default" else None
+    default_ov = store.get_overrides("_default")
+
+    chain = []
+    for field in ("primary", "critic", "fallback"):
+        if profile_ov and profile_ov.get(field):
+            chain.append(
+                {"field": field, "value": profile_ov[field], "source": f"profile:{profile}"}
+            )
+        elif default_ov and default_ov.get(field):
+            chain.append({"field": field, "value": default_ov[field], "source": "_default"})
+        else:
+            from agents.model_router import FALLBACK_ROUTING
+
+            fb = FALLBACK_ROUTING.get(TaskType.CODING, {})
+            val = fb.get(field) or fb.get("primary", "")
+            chain.append({"field": field, "value": val, "source": "FALLBACK_ROUTING"})
+    return chain
 
 
 def create_app(
@@ -1126,6 +1166,142 @@ def create_app(
         _update_env_file(env_path, {"AGENT_DEFAULT_PROFILE": name})
         os.environ["AGENT_DEFAULT_PROFILE"] = name
         return {"status": "ok", "default_profile": name}
+
+    # -- Agent Routing Config -------------------------------------------------
+
+    from agents.agent_routing_store import AgentRoutingStore
+
+    agent_routing_store = AgentRoutingStore()
+
+    @app.get("/api/agent-routing")
+    async def list_agent_routing(_user: str = Depends(get_current_user)):
+        """List all agent routing overrides with effective configs."""
+        store = agent_routing_store
+        all_overrides = store.list_all()
+
+        profiles = {}
+        # Include all profiles that have overrides
+        for name in all_overrides:
+            profiles[name] = {
+                "overrides": store.get_overrides(name),
+                "effective": store.get_effective(name, TaskType.CODING),
+            }
+
+        # Also include profiles from profile_loader that don't have overrides
+        if profile_loader:
+            for p in profile_loader.all_profiles():
+                if p.name not in profiles:
+                    profiles[p.name] = {
+                        "overrides": None,
+                        "effective": store.get_effective(p.name, TaskType.CODING),
+                    }
+
+        return {"profiles": profiles}
+
+    @app.get("/api/agent-routing/{profile}")
+    async def get_agent_routing(profile: str, _user: str = Depends(get_current_user)):
+        """Get routing config for a specific profile."""
+        store = agent_routing_store
+        overrides = store.get_overrides(profile)
+
+        return {
+            "profile": profile,
+            "overrides": overrides,
+            "effective": store.get_effective(profile, TaskType.CODING),
+            "resolution_chain": _build_resolution_chain(store, profile),
+        }
+
+    @app.put("/api/agent-routing/{profile}")
+    async def set_agent_routing(
+        profile: str, req: AgentRoutingRequest, _user: str = Depends(require_admin)
+    ):
+        """Set routing overrides for a profile."""
+        import os
+
+        from providers.registry import MODELS, PROVIDERS
+
+        # Validate model keys exist and providers have API keys
+        overrides = {}
+        for field in ("primary", "critic", "fallback"):
+            val = getattr(req, field)
+            if val is not None:
+                if val not in MODELS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Unknown model key: '{val}'. Use GET /api/available-models for valid keys.",
+                    )
+                spec = MODELS[val]
+                provider = PROVIDERS.get(spec.provider)
+                if provider and not os.getenv(provider.api_key_env, ""):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Provider '{spec.provider.value}' for model '{val}' has no API key configured.",
+                    )
+                overrides[field] = val
+
+        if not overrides:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one field (primary, critic, fallback) must be set.",
+            )
+
+        store = agent_routing_store
+        store.set_overrides(profile, overrides)
+
+        return {
+            "profile": profile,
+            "overrides": store.get_overrides(profile),
+            "effective": store.get_effective(profile, TaskType.CODING),
+        }
+
+    @app.delete("/api/agent-routing/{profile}")
+    async def delete_agent_routing(profile: str, _user: str = Depends(require_admin)):
+        """Reset a profile's routing overrides to defaults."""
+        store = agent_routing_store
+        if not store.delete_overrides(profile):
+            raise HTTPException(
+                status_code=404, detail=f"No overrides found for profile '{profile}'"
+            )
+        return {"status": "deleted", "profile": profile}
+
+    @app.get("/api/available-models")
+    async def list_available_models(_user: str = Depends(get_current_user)):
+        """List models available for routing config, grouped by tier.
+
+        Only includes models from providers with configured API keys (CONF-05).
+        """
+        import os
+
+        from providers.registry import MODELS, PROVIDERS, ModelTier, ProviderType
+
+        result = {"l1": [], "fallback": [], "l2": []}
+        for key, spec in MODELS.items():
+            provider = PROVIDERS.get(spec.provider)
+            api_key = os.getenv(provider.api_key_env, "") if provider else ""
+            if not api_key:
+                continue  # Skip models from unconfigured providers (CONF-05)
+
+            health = "unknown"
+            if model_catalog:
+                health = "healthy" if model_catalog.is_model_healthy(key) else "unhealthy"
+
+            entry = {
+                "key": key,
+                "display_name": spec.display_name or key,
+                "provider": spec.provider.value,
+                "tier": spec.tier.value,
+                "health": health,
+            }
+
+            # Tier classification per RESEARCH.md Section 4
+            if spec.provider == ProviderType.STRONGWALL:
+                result["l1"].append(entry)
+            elif spec.tier == ModelTier.FREE:
+                result["fallback"].append(entry)
+            else:  # CHEAP or PREMIUM
+                result["l2"].append(entry)
+
+        return result
 
     # -- Chat Persona ---------------------------------------------------------
 
