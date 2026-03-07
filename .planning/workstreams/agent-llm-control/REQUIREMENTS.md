@@ -25,7 +25,7 @@ Requirements for milestone v1.3. Each maps to roadmap phases.
 ### Agent Configuration
 
 - [x] **CONF-01**: Settings page has LLM Routing section with global L1/L2/critic/fallback defaults
-- [ ] **CONF-02**: Agents page shows per-agent routing override controls (primary, critic, fallback)
+- [x] **CONF-02**: Agents page shows per-agent routing override controls (primary, critic, fallback)
 - [ ] **CONF-03**: Per-agent overrides inherit global defaults, only store differences
 - [ ] **CONF-04**: Configuration persists across restarts (saved to config file)
 - [ ] **CONF-05**: Available provider/model options populated dynamically from configured API keys
@@ -75,7 +75,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TIER-04 | Phase 17 | Pending |
 | TIER-05 | Phase 17 | Pending |
 | CONF-01 | Phase 19 | Complete (19-01) |
-| CONF-02 | Phase 19 | Pending |
+| CONF-02 | Phase 19 | Complete |
 | CONF-03 | Phase 18 | Pending |
 | CONF-04 | Phase 18 | Pending |
 | CONF-05 | Phase 18 | Pending |

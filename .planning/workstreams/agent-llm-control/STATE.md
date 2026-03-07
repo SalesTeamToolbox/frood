@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in-progress
-last_updated: "2026-03-07T17:36:46Z"
+last_updated: "2026-03-07T17:50:42Z"
 ---
 
 # Project State
@@ -13,23 +13,23 @@ last_updated: "2026-03-07T17:36:46Z"
 See: .planning/PROJECT.md (updated 2026-03-06)
 
 **Core value:** Agent42 runs agents reliably with tiered provider routing (L1 workhorse -> free fallback -> L2 premium)
-**Current focus:** v1.3 Phase 19 in progress -- Agent Config Dashboard (Settings LLM Routing tab complete, Agents page routing next)
+**Current focus:** v1.3 Phase 19 complete -- Agent Config Dashboard (Settings + Agents routing UIs done), ready for Phase 20
 
 ## Current Position
 
-Phase: 19 of 20 (Agent Config Dashboard) -- IN PROGRESS
-Plan: 1 of 2 in current phase -- COMPLETE
-Status: 19-01 complete (Settings LLM Routing tab), ready for 19-02 (Agents page routing)
-Last activity: 2026-03-07 -- 19-01 complete (LLM Routing tab + shared helpers + Providers updates)
+Phase: 19 of 20 (Agent Config Dashboard) -- COMPLETE
+Plan: 2 of 2 in current phase -- COMPLETE
+Status: Phase 19 complete, ready for Phase 20 (Streaming Simulation)
+Last activity: 2026-03-07 -- 19-02 complete (Agents page per-agent routing + model chips)
 
-Progress: [██████░░░░] 60%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
-- Average duration: 11min
-- Total execution time: 66min
+- Total plans completed: 7
+- Average duration: 10.6min
+- Total execution time: 74min
 
 **By Phase:**
 
@@ -38,7 +38,7 @@ Progress: [██████░░░░] 60%
 | 16. StrongWall Provider | 2/2 | 15min | 7.5min |
 | 17. Tier Routing Architecture | 2/2 | 28min | 14min |
 | 18. Agent Config Backend | 1/1 | 18min | 18min |
-| 19. Agent Config Dashboard | 1/2 | 5min | 5min |
+| 19. Agent Config Dashboard | 2/2 | 13min | 6.5min |
 
 *Updated after each plan completion*
 
@@ -76,6 +76,10 @@ Progress: [██████░░░░] 60%
 - [19-01] STRONGWALL_API_KEY added to ADMIN_CONFIGURABLE_KEYS so settingSecret() renders as admin-editable
 - [19-01] Chain summary uses styled badges with source-aware coloring (teal/gold/muted)
 - [19-01] Empty string in routingEdits means "clear override" (send null to API), undefined means "no change"
+- [19-02] routingSelect() extended with scope parameter ('default' vs 'agent') to route changes to correct state object
+- [19-02] loadProfileDetail() fetches profile + routing data in parallel via Promise.all
+- [19-02] _default profile shows link to Settings > LLM Routing instead of inline routing controls
+- [19-02] Model chip on cards uses muted text + '(inherited)' for inherited, normal text for overridden
 
 ### Pending Todos
 
@@ -90,5 +94,5 @@ Progress: [██████░░░░] 60%
 ## Session Continuity
 
 Last session: 2026-03-07
-Stopped at: Completed 19-01-PLAN.md (Settings LLM Routing tab)
-Resume file: .planning/workstreams/agent-llm-control/phases/19-agent-config-dashboard/19-01-SUMMARY.md
+Stopped at: Completed 19-02-PLAN.md (Agents page per-agent routing)
+Resume file: .planning/workstreams/agent-llm-control/phases/19-agent-config-dashboard/19-02-SUMMARY.md

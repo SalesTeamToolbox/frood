@@ -14,7 +14,7 @@ Restructure Agent42's model routing around L1 (workhorse) and L2 (premium) tiers
 - [x] **Phase 16: StrongWall Provider** - Integrate StrongWall.ai as OpenAI-compatible provider with health check and non-streaming response handling
 - [x] **Phase 17: Tier Routing Architecture** - Restructure model_router.py around L1/L2 tiers with new fallback chain (completed 2026-03-07)
 - [x] **Phase 18: Agent Config Backend** - Per-agent routing config storage, API endpoints, and inheritance from global defaults (completed 2026-03-07)
-- [ ] **Phase 19: Agent Config Dashboard** - Settings page LLM Routing section and Agents page per-agent override UI
+- [x] **Phase 19: Agent Config Dashboard** - Settings page LLM Routing section and Agents page per-agent override UI (completed 2026-03-07)
 - [ ] **Phase 20: Streaming Simulation** - Simulated streaming for chat display from non-streaming providers
 
 ## Phase Details
@@ -75,7 +75,7 @@ Plans:
 
 Plans:
 - [x] 19-01-PLAN.md — Settings page LLM Routing tab with global defaults, shared routing helpers, Providers tab terminology updates, StrongWall API key field
-- [ ] 19-02-PLAN.md — Agents page per-agent routing controls in detail view, model chips on grid cards
+- [x] 19-02-PLAN.md — Agents page per-agent routing controls in detail view, model chips on grid cards
 
 ### Phase 20: Streaming Simulation
 **Goal**: Chat messages from non-streaming providers (StrongWall) display with progressive token reveal, matching the UX of streaming providers
@@ -99,9 +99,9 @@ Phases execute in numeric order: 16 -> 17 -> 18 -> 19 -> 20
 | 16. StrongWall Provider | 2/2 | Complete   | 2026-03-07 |
 | 17. Tier Routing Architecture | 2/2 | Complete    | 2026-03-07 |
 | 18. Agent Config Backend | 1/1 | Complete    | 2026-03-07 |
-| 19. Agent Config Dashboard | 1/2 | In progress | - |
+| 19. Agent Config Dashboard | 2/2 | Complete | 2026-03-07 |
 | 20. Streaming Simulation | 0/1 | Not started | - |
 
 ---
 *Roadmap created: 2026-03-06*
-*Last updated: 2026-03-07 (19-01 complete)*
+*Last updated: 2026-03-07 (19-02 complete)*
