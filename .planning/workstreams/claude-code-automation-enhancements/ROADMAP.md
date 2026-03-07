@@ -107,7 +107,9 @@ Plans:
   3. Migration impact agent traces all usages of a specified package or API and flags breaking incompatibilities with file:line references
   4. Deploy verifier agent checks imports resolve, env vars are set, method signatures match cross-module calls, and no required files are untracked in git
   5. All agents are defined as `.claude/agents/` markdown files and can be dispatched on demand
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 15-01-PLAN.md — Create test-coverage-auditor, dependency-health, migration-impact, and deploy-verifier agent definitions
 
 ## Progress
 
@@ -127,7 +129,7 @@ Plans:
 | 12. Security Gate Hook | 1/1 | Complete    | 2026-03-06 | -- |
 | 13. Scaffolding Skills | v1.2 | Complete    | 2026-03-06 | 2026-03-06 |
 | 14. Operational Skills | v1.2 | Complete    | 2026-03-06 | 2026-03-06 |
-| 15. Specialized Subagents | v1.2 | 0/? | Not started | -- |
+| 15. Specialized Subagents | v1.2 | 0/1 | Planned | -- |
 | 16. jcodemunch Deep Integration | v1.2 | 0/? | Not started | -- |
 
 ### Phase 16: jcodemunch Deep Integration
