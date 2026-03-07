@@ -130,7 +130,7 @@ Plans:
 | 13. Scaffolding Skills | v1.2 | Complete    | 2026-03-06 | 2026-03-06 |
 | 14. Operational Skills | v1.2 | Complete    | 2026-03-06 | 2026-03-06 |
 | 15. Specialized Subagents | v1.2 | Complete    | 2026-03-07 | 2026-03-06 |
-| 16. jcodemunch Deep Integration | v1.2 | 0/? | Not started | -- |
+| 16. jcodemunch Deep Integration | v1.2 | 0/2 | Not started | -- |
 
 ### Phase 16: jcodemunch Deep Integration
 **Goal**: Integrate jcodemunch MCP tools into context-loader hook, GSD agent prompts (mapper, planner, executor), and add mid-session drift detection — reducing token consumption and iteration count across all development workflows
@@ -142,4 +142,7 @@ Plans:
   3. GSD planner agents receive `<codebase_context>` block with affected module interfaces extracted via `search_symbols` + `get_file_outline` before creating plans
   4. GSD executor agents receive `<implementation_targets>` block with exact function signatures from `get_symbol` before modifying code
   5. Mid-session drift detection uses `get_symbol(verify=true)` hash checking and triggers incremental re-index when source has diverged from index
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 16-01-PLAN.md — Enhance context-loader hook with jcodemunch guidance and add mid-session drift detection to jcodemunch-reindex hook
+- [ ] 16-02-PLAN.md — Add jcodemunch pre-fetch steps to GSD map-codebase, plan-phase, and execute-plan workflows
