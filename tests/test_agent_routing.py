@@ -207,7 +207,6 @@ class TestModelRouterProfileIntegration:
 
     def _make_router_with_store(self, tmp_path, store_data=None):
         from agents.agent_routing_store import AgentRoutingStore
-
         from agents.model_router import ModelRouter
 
         store_path = tmp_path / "agent_routing.json"
@@ -220,8 +219,10 @@ class TestModelRouterProfileIntegration:
         router._agent_store = AgentRoutingStore(str(store_path))
         return router
 
-    def test_get_routing_with_profile_name(self, tmp_path):
+    def test_get_routing_with_profile_name(self, tmp_path, monkeypatch):
         """Profile override primary is returned."""
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        monkeypatch.setenv("GEMINI_PRO_FOR_COMPLEX", "false")
         router = self._make_router_with_store(
             tmp_path,
             {"coder": {"primary": "gemini-2-flash"}},
@@ -231,6 +232,7 @@ class TestModelRouterProfileIntegration:
 
     def test_admin_override_beats_profile(self, tmp_path, monkeypatch):
         """Env var override wins over profile."""
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         router = self._make_router_with_store(
             tmp_path,
             {"coder": {"primary": "gemini-2-flash"}},

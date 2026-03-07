@@ -243,6 +243,15 @@ class ModelRouter:
         # L2 authorization state (wired by Phase 18/19 dashboard UI)
         self._l2_authorized_task_types: set[str] = set()  # Global allowlist by task type
         self._l2_authorized_tasks: set[str] = set()  # Per-task ID authorization
+        # Per-agent routing overrides (Phase 18)
+        from agents.agent_routing_store import AgentRoutingStore
+
+        self._agent_store = AgentRoutingStore()
+
+    @property
+    def agent_routing_store(self):
+        """Expose the store for dashboard API access."""
+        return self._agent_store
 
     @staticmethod
     def _default_routing_file() -> str:
@@ -254,11 +263,14 @@ class ModelRouter:
         except Exception:
             return "data/dynamic_routing.json"
 
-    def get_routing(self, task_type: TaskType, context_window: str = "default") -> dict:
+    def get_routing(
+        self, task_type: TaskType, context_window: str = "default", profile_name: str = ""
+    ) -> dict:
         """Return the model routing config, applying the full resolution chain.
 
         Resolution chain:
         1. Admin override (AGENT42_CODING_MODEL etc.) -- always wins
+        1b. Per-profile override (agent_routing.json) -- profile + _default
         2. Dynamic routing (outcome-driven JSON file) -- data-driven
         3. L1 check: if L1 configured + healthy, use L1
         3b. FALLBACK_ROUTING (task-type-aware free tier) -- when L1 unavailable
@@ -272,31 +284,59 @@ class ModelRouter:
         # 1. Admin env var override — always wins; skip API key validation for explicit overrides
         override = self._check_admin_override(task_type)
         is_admin_override = override is not None
+        dynamic = None  # track whether dynamic routing was used (for step 4)
         if override:
             logger.info("Admin override for %s: %s", task_type.value, override)
             routing = override
         else:
-            # 2. Dynamic routing from outcome tracking + research
-            dynamic = self._check_dynamic_routing(task_type)
-            if dynamic:
-                logger.info(
-                    "Dynamic routing for %s: primary=%s (confidence=%.2f, n=%d)",
-                    task_type.value,
-                    dynamic.get("primary", "?"),
-                    dynamic.get("confidence", 0),
-                    dynamic.get("sample_size", 0),
-                )
-                routing = dynamic.copy()
-            else:
-                # 3. L1 check: if L1 configured + healthy, use L1
-                l1_routing = self._get_l1_routing(task_type)
-                if l1_routing:
-                    routing = l1_routing
+            # 1b. Per-profile override (agent_routing.json)
+            # Only enter profile path if there are actual overrides stored
+            if self._agent_store.has_config(profile_name):
+                profile_effective = self._agent_store.get_effective(profile_name, task_type)
+                if profile_effective.get("primary"):
+                    # Profile (or _default) has an explicit primary -- use it
+                    # Fill in max_iterations from FALLBACK_ROUTING since profiles don't store it
+                    fb = FALLBACK_ROUTING.get(task_type, FALLBACK_ROUTING[TaskType.CODING])
+                    routing = {
+                        "primary": profile_effective["primary"],
+                        "critic": profile_effective.get("critic"),
+                        "fallback": profile_effective.get("fallback"),
+                        "max_iterations": fb.get("max_iterations", 8),
+                    }
+                    logger.info(
+                        "Profile override for %s (profile=%s): primary=%s",
+                        task_type.value,
+                        profile_name,
+                        profile_effective["primary"],
+                    )
                 else:
-                    # 3b. FALLBACK_ROUTING (task-type-aware defaults)
-                    routing = FALLBACK_ROUTING.get(
-                        task_type, FALLBACK_ROUTING[TaskType.CODING]
-                    ).copy()
+                    # Profile/_default exists but has no primary -- fall through
+                    routing = None
+            else:
+                routing = None
+
+            if routing is None:
+                # 2. Dynamic routing from outcome tracking + research
+                dynamic = self._check_dynamic_routing(task_type)
+                if dynamic:
+                    logger.info(
+                        "Dynamic routing for %s: primary=%s (confidence=%.2f, n=%d)",
+                        task_type.value,
+                        dynamic.get("primary", "?"),
+                        dynamic.get("confidence", 0),
+                        dynamic.get("sample_size", 0),
+                    )
+                    routing = dynamic.copy()
+                else:
+                    # 3. L1 check: if L1 configured + healthy, use L1
+                    l1_routing = self._get_l1_routing(task_type)
+                    if l1_routing:
+                        routing = l1_routing
+                    else:
+                        # 3b. FALLBACK_ROUTING (task-type-aware defaults)
+                        routing = FALLBACK_ROUTING.get(
+                            task_type, FALLBACK_ROUTING[TaskType.CODING]
+                        ).copy()
 
         # 4. Policy routing — upgrade to paid models when credits are available
         if not is_admin_override and not dynamic:
