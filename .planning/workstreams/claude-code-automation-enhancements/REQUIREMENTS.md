@@ -29,10 +29,10 @@ Requirements for Claude Code Automation Enhancements milestone. Each maps to roa
 
 ### Subagents
 
-- [ ] **AGENT-01**: Test coverage auditor can analyze all untested modules and produce a prioritized list ranked by security risk, change frequency, and complexity
-- [ ] **AGENT-02**: Dependency health agent can verify OpenRouter model availability, check pip package versions against PyPI, and flag stale entries in MODELS dict and fallback lists
-- [ ] **AGENT-03**: Migration impact agent can trace all usages of a package or API change and flag breaking incompatibilities with file:line references
-- [ ] **AGENT-04**: Deploy verifier agent can run pre-deploy checks (import verification, env var validation, method signature matching, git status for untracked required files)
+- [x] **AGENT-01**: Test coverage auditor can analyze all untested modules and produce a prioritized list ranked by security risk, change frequency, and complexity
+- [x] **AGENT-02**: Dependency health agent can verify OpenRouter model availability, check pip package versions against PyPI, and flag stale entries in MODELS dict and fallback lists
+- [x] **AGENT-03**: Migration impact agent can trace all usages of a package or API change and flag breaking incompatibilities with file:line references
+- [x] **AGENT-04**: Deploy verifier agent can run pre-deploy checks (import verification, env var validation, method signature matching, git status for untracked required files)
 
 ## Future Requirements
 
@@ -67,10 +67,10 @@ Requirements for Claude Code Automation Enhancements milestone. Each maps to roa
 | SKILL-03 | Phase 13 | Complete |
 | SKILL-04 | Phase 14 | Complete |
 | SKILL-05 | Phase 14 | Complete |
-| AGENT-01 | Phase 15 | Pending |
-| AGENT-02 | Phase 15 | Pending |
-| AGENT-03 | Phase 15 | Pending |
-| AGENT-04 | Phase 15 | Pending |
+| AGENT-01 | Phase 15 | Complete |
+| AGENT-02 | Phase 15 | Complete |
+| AGENT-03 | Phase 15 | Complete |
+| AGENT-04 | Phase 15 | Complete |
 
 **Coverage:**
 - v1.2 requirements: 15 total
@@ -79,4 +79,4 @@ Requirements for Claude Code Automation Enhancements milestone. Each maps to roa
 
 ---
 *Requirements defined: 2026-03-05*
-*Last updated: 2026-03-06 after 14-01 plan execution*
+*Last updated: 2026-03-06 after 15-01 plan execution*

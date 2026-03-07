@@ -42,7 +42,7 @@ See [v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md) for full details.
 - [x] **Phase 12: Security Gate Hook** - Add PreToolUse hook that blocks edits to sensitive files without explicit confirmation (completed 2026-03-06)
 - [x] **Phase 13: Scaffolding Skills** - Create skills that generate test files, provider boilerplate, and tool boilerplate from project conventions (completed 2026-03-06)
 - [x] **Phase 14: Operational Skills** - Create skills for production health checks and pitfall table maintenance (completed 2026-03-06)
-- [ ] **Phase 15: Specialized Subagents** - Create subagent definitions for test coverage auditing, dependency health, migration impact, and deploy verification
+- [x] **Phase 15: Specialized Subagents** - Create subagent definitions for test coverage auditing, dependency health, migration impact, and deploy verification (completed 2026-03-06)
 
 ## Phase Details
 
@@ -109,7 +109,7 @@ Plans:
   5. All agents are defined as `.claude/agents/` markdown files and can be dispatched on demand
 **Plans**: 1 plan
 Plans:
-- [ ] 15-01-PLAN.md — Create test-coverage-auditor, dependency-health, migration-impact, and deploy-verifier agent definitions
+- [x] 15-01-PLAN.md — Create test-coverage-auditor, dependency-health, migration-impact, and deploy-verifier agent definitions
 
 ## Progress
 
@@ -129,7 +129,7 @@ Plans:
 | 12. Security Gate Hook | 1/1 | Complete    | 2026-03-06 | -- |
 | 13. Scaffolding Skills | v1.2 | Complete    | 2026-03-06 | 2026-03-06 |
 | 14. Operational Skills | v1.2 | Complete    | 2026-03-06 | 2026-03-06 |
-| 15. Specialized Subagents | v1.2 | 0/1 | Planned | -- |
+| 15. Specialized Subagents | v1.2 | 1/1 | Complete | 2026-03-06 |
 | 16. jcodemunch Deep Integration | v1.2 | 0/? | Not started | -- |
 
 ### Phase 16: jcodemunch Deep Integration
