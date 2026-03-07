@@ -46,6 +46,10 @@ const state = {
   routingConfig: {},
   routingEdits: {},
   routingSaving: false,
+  // Per-agent routing (Agents page)
+  agentRoutingEdits: {},
+  agentRoutingSaving: false,
+  selectedProfileRouting: null,
   // Chat (multi-session)
   chatMessages: [],
   chatInput: "",
@@ -2230,6 +2234,19 @@ function renderAgents() {
     const skillChips = (p.preferred_skills || []).slice(0, 4).map((s) => `<span class="badge-type">${esc(s)}</span>`).join(" ");
     const extra = (p.preferred_skills || []).length > 4 ? `<span class="badge-type">+${p.preferred_skills.length - 4}</span>` : "";
 
+    // Model chip from routing config
+    const routingInfo = state.routingConfig && state.routingConfig.profiles ? state.routingConfig.profiles[p.name] : null;
+    const effectivePrimary = routingInfo && routingInfo.effective ? routingInfo.effective.primary : null;
+    const isModelOverridden = routingInfo && routingInfo.overrides && routingInfo.overrides.primary != null;
+    const modelChip = effectivePrimary
+      ? '<div class="agent-card-chips" style="margin-top:0.25rem">'
+        + '<span class="badge-type" style="font-size:0.65rem;'
+        + (isModelOverridden ? '' : 'color:var(--text-muted)') + '"'
+        + ' title="' + (isModelOverridden ? 'Overridden' : 'Inherited from default') + '">'
+        + esc(effectivePrimary) + (isModelOverridden ? '' : ' (inherited)')
+        + '</span></div>'
+      : '';
+
     return `
       <div class="agent-card ${isDefault ? 'agent-card-default' : ''}" onclick="loadProfileDetail('${esc(p.name)}')">
         <div class="agent-card-header">
@@ -2243,6 +2260,7 @@ function renderAgents() {
         <div class="agent-card-meta">
           <div class="agent-card-chips">${taskChips}</div>
           <div class="agent-card-chips">${skillChips}${extra}</div>
+          ${modelChip}
         </div>
       </div>
     `;
@@ -2301,6 +2319,49 @@ function renderAgentDetail(el) {
     ? `<div class="agent-detail-section"><h4>Persona Instructions</h4><div class="agent-persona-content">${esc(p.prompt_overlay)}</div></div>`
     : '';
 
+  // LLM Routing section (only for non-_default profiles)
+  let routingHtml = '';
+  if (p.name === "_default") {
+    routingHtml = '<div class="agent-detail-section">'
+      + '<h4>LLM Routing</h4>'
+      + '<p style="color:var(--text-muted);font-size:0.85rem">Global routing defaults are configured in '
+      + '<a href="#" onclick="event.preventDefault();state.page=\'settings\';state.settingsTab=\'routing\';render()">Settings &gt; LLM Routing</a>.</p>'
+      + '</div>';
+  } else {
+    const routing = state.selectedProfileRouting;
+    const agentOverrides = routing && routing.overrides ? routing.overrides : {};
+    const agentChain = routing && routing.resolution_chain ? routing.resolution_chain : [];
+    const agentIsOverridden = (field) => agentOverrides[field] !== undefined && agentOverrides[field] !== null;
+    const agentCurrentVal = (field) => {
+      if (state.agentRoutingEdits[field] !== undefined) return state.agentRoutingEdits[field];
+      if (agentIsOverridden(field)) return agentOverrides[field];
+      return "";
+    };
+    const hasAgentEdits = Object.keys(state.agentRoutingEdits).length > 0;
+    routingHtml = '<div class="agent-detail-section">'
+      + '<h4>LLM Routing</h4>'
+      + '<p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.75rem">'
+      + 'Override model routing for this agent. Unset fields inherit from global defaults.</p>'
+      + routingSelect("primary", "Primary", agentCurrentVal("primary"),
+          !agentIsOverridden("primary") && state.agentRoutingEdits["primary"] === undefined, "global default", "agent")
+      + routingSelect("critic", "Critic", agentCurrentVal("critic"),
+          !agentIsOverridden("critic") && state.agentRoutingEdits["critic"] === undefined, "global default", "agent")
+      + routingSelect("fallback", "Fallback", agentCurrentVal("fallback"),
+          !agentIsOverridden("fallback") && state.agentRoutingEdits["fallback"] === undefined, "global default", "agent")
+      + renderChainSummary(agentChain)
+      + '<div style="display:flex;gap:0.5rem;margin-top:0.75rem;align-items:center">'
+      + '<button class="btn btn-primary btn-sm" onclick="saveRouting(\'' + esc(p.name) + '\')"'
+      + (!hasAgentEdits || state.agentRoutingSaving ? ' disabled' : '') + '>'
+      + (state.agentRoutingSaving ? 'Saving...' : 'Save Routing')
+      + '</button>'
+      + '<button class="btn btn-outline btn-sm" onclick="resetRouting(\'' + esc(p.name) + '\')">'
+      + 'Reset to Inherited</button>'
+      + (hasAgentEdits ? '<span style="color:var(--warning);font-size:0.75rem;margin-left:0.5rem">Unsaved changes</span>' : '')
+      + '</div></div>';
+  }
+
+  // NOTE: innerHTML is the established pattern for this SPA (55+ handlers). All interpolated
+  // values are escaped via esc() for XSS protection.
   el.innerHTML = `
     <div class="agent-detail">
       <div class="agent-detail-topbar">
@@ -2327,6 +2388,7 @@ function renderAgentDetail(el) {
           <div class="agent-card-chips">${skillsHtml || '<span style="color:var(--text-muted)">None configured</span>'}</div>
         </div>
         ${personaHtml}
+        ${routingHtml}
         ${p.source_path ? `<div class="agent-detail-section"><h4>Source</h4><code style="font-size:0.8rem;color:var(--text-muted)">${esc(p.source_path)}</code></div>` : ''}
       </div>
     </div>
@@ -2335,8 +2397,13 @@ function renderAgentDetail(el) {
 
 async function loadProfileDetail(name) {
   try {
-    const profile = await api(`/profiles/${encodeURIComponent(name)}`);
+    const [profile, routing] = await Promise.all([
+      api(`/profiles/${encodeURIComponent(name)}`),
+      api(`/agent-routing/${encodeURIComponent(name)}`).catch(() => null),
+    ]);
     state.selectedProfile = profile;
+    state.selectedProfileRouting = routing;
+    state.agentRoutingEdits = {};
     state.agentsViewMode = "detail";
     render();
   } catch (err) { toast(err.message, "error"); }
@@ -4532,7 +4599,8 @@ async function loadRoutingConfig() {
   } catch { state.routingConfig = { profiles: {} }; }
 }
 
-function routingSelect(field, label, currentValue, isInherited, inheritedFrom) {
+function routingSelect(field, label, currentValue, isInherited, inheritedFrom, scope) {
+  scope = scope || "default";
   const models = state.routingModels;
   const healthDot = (h) => h === "healthy" ? "&#9679;" // green dot via CSS color
                          : h === "degraded" ? "&#9679;"
@@ -4555,8 +4623,10 @@ function routingSelect(field, label, currentValue, isInherited, inheritedFrom) {
   const inheritLabel = isInherited
     ? `<span style="color:var(--text-muted);font-size:0.75rem">inherited from ${esc(inheritedFrom || "system")}</span>`
     : "";
+  const editFn = scope === "agent" ? "updateAgentRoutingEdit" : "updateRoutingEdit";
+  const clearFn = scope === "agent" ? "clearAgentRoutingField" : "clearRoutingField";
   const resetBtn = !isInherited && currentValue
-    ? `<button class="btn btn-sm" onclick="clearRoutingField('${esc(field)}')" title="Reset to inherited">&#10005;</button>`
+    ? `<button class="btn btn-sm" onclick="${clearFn}('${esc(field)}')" title="Reset to inherited">&#10005;</button>`
     : "";
 
   return `
@@ -4564,7 +4634,7 @@ function routingSelect(field, label, currentValue, isInherited, inheritedFrom) {
       <label>${esc(label)} ${inheritLabel}</label>
       <div style="display:flex;gap:0.5rem;align-items:center">
         <select style="flex:1;${isInherited ? 'color:var(--text-muted)' : ''}"
-                onchange="updateRoutingEdit('${esc(field)}', this.value)">
+                onchange="${editFn}('${esc(field)}', this.value)">
           <option value="">Use default (Inherit)</option>
           ${optionsHtml("l1", "L1 Models")}
           ${optionsHtml("fallback", "Fallback Models")}
@@ -4605,11 +4675,22 @@ function clearRoutingField(field) {
   renderSettingsPanel();
 }
 
+function updateAgentRoutingEdit(field, value) {
+  state.agentRoutingEdits[field] = value;
+  render();
+}
+
+function clearAgentRoutingField(field) {
+  state.agentRoutingEdits[field] = "";
+  render();
+}
+
 async function saveRouting(profileName) {
-  state.routingSaving = true;
-  renderSettingsPanel();
+  const isDefault = profileName === "_default";
+  if (isDefault) { state.routingSaving = true; renderSettingsPanel(); }
+  else { state.agentRoutingSaving = true; render(); }
   try {
-    const edits = state.routingEdits;
+    const edits = isDefault ? state.routingEdits : state.agentRoutingEdits;
     const body = {};
     for (const [field, val] of Object.entries(edits)) {
       if (val === undefined) continue;
@@ -4617,32 +4698,50 @@ async function saveRouting(profileName) {
     }
     if (Object.keys(body).length === 0) {
       toast("No changes to save", "info");
-      state.routingSaving = false;
-      renderSettingsPanel();
+      if (isDefault) { state.routingSaving = false; renderSettingsPanel(); }
+      else { state.agentRoutingSaving = false; render(); }
       return;
     }
     await api(`/agent-routing/${encodeURIComponent(profileName)}`, {
       method: "PUT",
       body: JSON.stringify(body),
     });
-    state.routingEdits = {};
+    if (isDefault) {
+      state.routingEdits = {};
+    } else {
+      state.agentRoutingEdits = {};
+      // Refresh per-agent routing data for detail view
+      try {
+        state.selectedProfileRouting = await api(`/agent-routing/${encodeURIComponent(profileName)}`);
+      } catch { /* ignore */ }
+    }
     await loadRoutingConfig();
     toast("Routing updated. Takes effect on next dispatch.", "success");
   } catch (e) {
     toast("Failed to save routing: " + e.message, "error");
   }
-  state.routingSaving = false;
-  renderSettingsPanel();
+  if (isDefault) { state.routingSaving = false; renderSettingsPanel(); }
+  else { state.agentRoutingSaving = false; render(); }
 }
 
 async function resetRouting(profileName) {
-  const label = profileName === "_default" ? "global routing defaults" : `routing for ${profileName}`;
+  const isDefault = profileName === "_default";
+  const label = isDefault ? "global routing defaults" : `routing for ${profileName}`;
   if (!confirm(`Reset ${label}? This will clear all overrides.`)) return;
   try {
     await api(`/agent-routing/${encodeURIComponent(profileName)}`, { method: "DELETE" });
-    state.routingEdits = {};
+    if (isDefault) {
+      state.routingEdits = {};
+    } else {
+      state.agentRoutingEdits = {};
+      state.selectedProfileRouting = null;
+      // Refresh per-agent routing data
+      try {
+        state.selectedProfileRouting = await api(`/agent-routing/${encodeURIComponent(profileName)}`);
+      } catch { /* no config after reset */ }
+    }
     await loadRoutingConfig();
-    toast(`Routing reset. Inherits from ${profileName === "_default" ? "system defaults" : "global defaults"}.`, "success");
+    toast(`Routing reset. Inherits from ${isDefault ? "system defaults" : "global defaults"}.`, "success");
   } catch (e) {
     if (e.message && e.message.includes("404")) {
       toast("No overrides to reset", "info");
@@ -4650,7 +4749,8 @@ async function resetRouting(profileName) {
       toast("Failed to reset: " + e.message, "error");
     }
   }
-  renderSettingsPanel();
+  if (isDefault) renderSettingsPanel();
+  else render();
 }
 
 function renderRoutingPanel() {
