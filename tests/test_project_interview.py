@@ -579,14 +579,14 @@ class TestProjectSetupRouting:
     """Tests for PROJECT_SETUP model routing."""
 
     def test_free_routing_has_project_setup(self):
-        # Import FREE_ROUTING dict directly to avoid the ProviderRegistry
+        # Import FALLBACK_ROUTING dict directly to avoid the ProviderRegistry
         # import chain which requires openai (not always installed in test env)
         try:
-            from agents.model_router import FREE_ROUTING
+            from agents.model_router import FALLBACK_ROUTING
             from core.task_queue import TaskType
 
-            assert TaskType.PROJECT_SETUP in FREE_ROUTING
-            routing = FREE_ROUTING[TaskType.PROJECT_SETUP]
+            assert TaskType.PROJECT_SETUP in FALLBACK_ROUTING
+            routing = FALLBACK_ROUTING[TaskType.PROJECT_SETUP]
             assert "primary" in routing
             assert "critic" in routing
             assert "max_iterations" in routing

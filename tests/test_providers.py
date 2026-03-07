@@ -1,7 +1,7 @@
 """Tests for Phase 5: Provider registry."""
 
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
@@ -10,15 +10,17 @@ from providers.registry import (
     PROVIDERS,
     ModelSpec,
     ModelTier,
+    ProviderHealthChecker,
     ProviderRegistry,
     ProviderSpec,
     ProviderType,
+    SpendingTracker,
 )
 
 
 class TestProviderRegistry:
     def test_all_providers_registered(self):
-        expected = {"openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm", "cerebras", "groq", "mistral", "mistral_codestral", "sambanova", "together"}
+        expected = {"openai", "anthropic", "deepseek", "gemini", "openrouter", "vllm", "cerebras", "groq", "mistral", "mistral_codestral", "sambanova", "strongwall", "together"}
         actual = {p.value for p in PROVIDERS.keys()}
         assert expected.issubset(actual)
 
@@ -537,3 +539,265 @@ class TestTogetherRegistration:
         with patch.dict(os.environ, {"TOGETHER_API_KEY": ""}, clear=False):
             with pytest.raises(ValueError, match="TOGETHER_API_KEY not set"):
                 registry.get_client(ProviderType.TOGETHER)
+
+
+class TestStrongWallRegistration:
+    """Phase 16: StrongWall provider registration tests."""
+
+    def test_strongwall_provider_spec(self):
+        """PROV-01: ProviderSpec is in PROVIDERS with correct base_url, api_key_env, display_name."""
+        spec = PROVIDERS[ProviderType.STRONGWALL]
+        assert spec.base_url == "https://api.strongwall.ai/v1"
+        assert spec.api_key_env == "STRONGWALL_API_KEY"
+        assert spec.display_name == "StrongWall (Kimi K2.5)"
+        assert spec.supports_function_calling is True
+
+    def test_strongwall_model_registered(self):
+        """PROV-01: strongwall-kimi-k2.5 in MODELS with correct provider, tier, display_name."""
+        spec = MODELS["strongwall-kimi-k2.5"]
+        assert spec.model_id == "kimi-k2.5"
+        assert spec.provider == ProviderType.STRONGWALL
+        assert spec.tier == ModelTier.CHEAP
+        assert spec.display_name == "Kimi K2.5 (StrongWall)"
+        assert spec.max_context_tokens == 131072
+
+    def test_strongwall_model_resolve(self):
+        """get_model() resolves strongwall-kimi-k2.5 with correct model_id."""
+        registry = ProviderRegistry()
+        spec = registry.get_model("strongwall-kimi-k2.5")
+        assert spec.model_id == "kimi-k2.5"
+        assert spec.provider == ProviderType.STRONGWALL
+
+    def test_strongwall_builtin_price_zero(self):
+        """Flat-rate provider has $0 per-token cost in _BUILTIN_PRICES."""
+        assert SpendingTracker._BUILTIN_PRICES["kimi-k2.5"] == (0.0, 0.0)
+
+    def test_strongwall_spending_tracker_zero_cost(self):
+        """SpendingTracker records $0 cost for StrongWall usage."""
+        tracker = SpendingTracker()
+        tracker.record_usage("strongwall-kimi-k2.5", 1000, 500, model_id="kimi-k2.5")
+        assert tracker.daily_spend_usd == 0.0
+
+    def test_strongwall_client_builds_with_key(self):
+        """Client builds when STRONGWALL_API_KEY is set."""
+        registry = ProviderRegistry()
+        with patch.dict(os.environ, {"STRONGWALL_API_KEY": "sw-test-key-1234"}):
+            client = registry.get_client(ProviderType.STRONGWALL)
+            assert client is not None
+            assert client.base_url == "https://api.strongwall.ai/v1/"
+
+    def test_strongwall_client_raises_without_key(self):
+        """Client raises ValueError when STRONGWALL_API_KEY is not set."""
+        registry = ProviderRegistry()
+        registry.invalidate_client(ProviderType.STRONGWALL)
+        with patch.dict(os.environ, {"STRONGWALL_API_KEY": ""}, clear=False):
+            with pytest.raises(ValueError, match="STRONGWALL_API_KEY not set"):
+                registry.get_client(ProviderType.STRONGWALL)
+
+
+class TestStrongWallNonStreaming:
+    """Phase 16: StrongWall non-streaming enforcement tests (STRONG-01 / PROV-02)."""
+
+    @pytest.mark.asyncio
+    async def test_complete_stream_false_for_strongwall(self):
+        """STRONG-01: complete() sets stream=False for StrongWall requests."""
+        registry = ProviderRegistry()
+        captured_kwargs = {}
+
+        async def mock_create(**kwargs):
+            captured_kwargs.update(kwargs)
+            mock_resp = MagicMock()
+            mock_resp.choices = [MagicMock()]
+            mock_resp.choices[0].message.content = "ok"
+            mock_resp.usage = None
+            return mock_resp
+
+        with patch.dict(os.environ, {"STRONGWALL_API_KEY": "sw-test-key"}):
+            client = registry.get_client(ProviderType.STRONGWALL)
+            with patch.object(client.chat.completions, "create", side_effect=mock_create):
+                await registry.complete(
+                    "strongwall-kimi-k2.5",
+                    messages=[{"role": "user", "content": "hi"}],
+                )
+        assert captured_kwargs.get("stream") is False, (
+            f"Expected stream=False for StrongWall complete(), got {captured_kwargs.get('stream')}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_complete_with_tools_stream_false_for_strongwall(self):
+        """STRONG-01: complete_with_tools() sets stream=False for StrongWall requests."""
+        registry = ProviderRegistry()
+        captured_kwargs = {}
+
+        async def mock_create(**kwargs):
+            captured_kwargs.update(kwargs)
+            mock_resp = MagicMock()
+            mock_resp.choices = [MagicMock()]
+            mock_resp.choices[0].message.content = "ok"
+            mock_resp.choices[0].message.tool_calls = None
+            mock_resp.usage = None
+            return mock_resp
+
+        tools = [{"type": "function", "function": {"name": "test_tool", "parameters": {}}}]
+        with patch.dict(os.environ, {"STRONGWALL_API_KEY": "sw-test-key"}):
+            client = registry.get_client(ProviderType.STRONGWALL)
+            with patch.object(client.chat.completions, "create", side_effect=mock_create):
+                await registry.complete_with_tools(
+                    "strongwall-kimi-k2.5",
+                    messages=[{"role": "user", "content": "hi"}],
+                    tools=tools,
+                )
+        assert captured_kwargs.get("stream") is False, (
+            f"Expected stream=False for StrongWall complete_with_tools(), got {captured_kwargs.get('stream')}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_strongwall_temperature_clamped(self):
+        """STRONG-01: Temperature > 1.0 is clamped for StrongWall."""
+        registry = ProviderRegistry()
+        captured_kwargs = {}
+
+        async def mock_create(**kwargs):
+            captured_kwargs.update(kwargs)
+            mock_resp = MagicMock()
+            mock_resp.choices = [MagicMock()]
+            mock_resp.choices[0].message.content = "ok"
+            mock_resp.usage = None
+            return mock_resp
+
+        with patch.dict(os.environ, {"STRONGWALL_API_KEY": "sw-test-key"}):
+            client = registry.get_client(ProviderType.STRONGWALL)
+            with patch.object(client.chat.completions, "create", side_effect=mock_create):
+                await registry.complete(
+                    "strongwall-kimi-k2.5",
+                    messages=[{"role": "user", "content": "hi"}],
+                    temperature=1.5,
+                )
+        assert captured_kwargs["temperature"] <= 1.0, (
+            f"Expected temp <= 1.0 for StrongWall, got {captured_kwargs['temperature']}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_strongwall_strict_removed_from_tools(self):
+        """STRONG-01: strict: true is set to false in tool definitions for StrongWall."""
+        registry = ProviderRegistry()
+        captured_kwargs = {}
+
+        async def mock_create(**kwargs):
+            captured_kwargs.update(kwargs)
+            mock_resp = MagicMock()
+            mock_resp.choices = [MagicMock()]
+            mock_resp.choices[0].message.content = "ok"
+            mock_resp.choices[0].message.tool_calls = None
+            mock_resp.usage = None
+            return mock_resp
+
+        tools = [{"type": "function", "function": {"name": "test_tool", "strict": True, "parameters": {}}}]
+        with patch.dict(os.environ, {"STRONGWALL_API_KEY": "sw-test-key"}):
+            client = registry.get_client(ProviderType.STRONGWALL)
+            with patch.object(client.chat.completions, "create", side_effect=mock_create):
+                await registry.complete_with_tools(
+                    "strongwall-kimi-k2.5",
+                    messages=[{"role": "user", "content": "hi"}],
+                    tools=tools,
+                )
+        sent_tools = captured_kwargs.get("tools", [])
+        for tool in sent_tools:
+            fn_strict = tool.get("function", {}).get("strict")
+            assert fn_strict is not True, (
+                f"strict should not be True for StrongWall tools, got {fn_strict}"
+            )
+
+
+class TestStrongWallHealth:
+    """Tests for StrongWall provider health check and spending exemption."""
+
+    @pytest.mark.asyncio
+    async def test_health_checker_no_key_returns_none(self):
+        """Health check is no-op when API key not set."""
+        checker = ProviderHealthChecker()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("STRONGWALL_API_KEY", None)
+            result = await checker.check(ProviderType.STRONGWALL)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_health_checker_healthy(self):
+        """Returns healthy when /v1/models responds quickly."""
+        checker = ProviderHealthChecker()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_client_instance = AsyncMock()
+        mock_client_instance.get.return_value = mock_resp
+        with patch("providers.registry.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            with patch.dict(os.environ, {"STRONGWALL_API_KEY": "test-key"}):
+                result = await checker.check(ProviderType.STRONGWALL)
+        assert result["status"] == "healthy"
+        assert result["error"] is None
+        assert "latency_ms" in result
+        assert "last_checked" in result
+
+    @pytest.mark.asyncio
+    async def test_health_checker_unhealthy_on_error(self):
+        """Returns unhealthy when request fails."""
+        checker = ProviderHealthChecker()
+        mock_client_instance = AsyncMock()
+        mock_client_instance.get.side_effect = Exception("Connection refused")
+        with patch("providers.registry.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            with patch.dict(os.environ, {"STRONGWALL_API_KEY": "test-key"}):
+                result = await checker.check(ProviderType.STRONGWALL)
+        assert result["status"] == "unhealthy"
+        assert "Connection refused" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_health_checker_unhealthy_on_http_error(self):
+        """Returns unhealthy when API returns HTTP error."""
+        checker = ProviderHealthChecker()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_client_instance = AsyncMock()
+        mock_client_instance.get.return_value = mock_resp
+        with patch("providers.registry.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            with patch.dict(os.environ, {"STRONGWALL_API_KEY": "test-key"}):
+                result = await checker.check(ProviderType.STRONGWALL)
+        assert result["status"] == "unhealthy"
+        assert "HTTP 401" in result["error"]
+
+    def test_spending_tracker_flat_rate_exempt(self):
+        """Flat-rate provider model identified correctly."""
+        tracker = SpendingTracker()
+        assert tracker.is_flat_rate("strongwall-kimi-k2.5") is True
+        assert tracker.is_flat_rate("gemini-2-flash") is False
+        assert tracker.is_flat_rate("nonexistent") is False
+
+    def test_flat_rate_daily_cost(self):
+        """Flat-rate daily cost calculated from monthly."""
+        tracker = SpendingTracker()
+        rates = tracker.get_flat_rate_daily()
+        sw = rates.get("StrongWall (Kimi K2.5)")
+        assert sw is not None
+        assert sw["monthly_usd"] == 16.0
+        assert sw["daily_usd"] == 0.53
+
+    def test_get_status_empty_initially(self):
+        """get_status returns empty dict before any checks."""
+        checker = ProviderHealthChecker()
+        assert checker.get_status() == {}
+        assert checker.get_status(ProviderType.STRONGWALL) == {}
+
+    def test_strongwall_graceful_degradation(self):
+        """Agent42 works without STRONGWALL_API_KEY — provider listed but unconfigured."""
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("STRONGWALL_API_KEY", None)
+            registry = ProviderRegistry()
+            providers = registry.available_providers()
+            sw = [p for p in providers if p["provider"] == "strongwall"]
+            assert len(sw) == 1
+            assert sw[0]["configured"] is False
+            # Should not raise — just listed as unconfigured

@@ -140,10 +140,12 @@ class TestL2Routing:
         for tt in TaskType:
             assert tt in L2_ROUTING, f"L2_ROUTING missing {tt.value}"
 
-    def test_l2_routing_has_no_critic(self):
-        """L2 is the final reviewer — no critic needed."""
+    def test_l2_routing_self_critiques(self):
+        """L2 self-critiques: premium model reviews its own output."""
         for tt, routing in L2_ROUTING.items():
-            assert routing["critic"] is None, f"L2 has critic for {tt.value}"
+            assert routing["critic"] == routing["primary"], (
+                f"L2 critic should self-critique for {tt.value}"
+            )
 
     def test_l2_routing_low_iterations(self):
         """L2 does review, not full execution — iterations should be low."""

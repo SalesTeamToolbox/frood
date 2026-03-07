@@ -52,6 +52,8 @@ class Settings:
     mistral_api_key: str = ""
     codestral_api_key: str = ""
     sambanova_api_key: str = ""
+    strongwall_api_key: str = ""
+    strongwall_monthly_cost: float = 16.0  # Flat monthly rate in USD
     together_api_key: str = ""
 
     # Dashboard auth
@@ -255,7 +257,7 @@ class Settings:
     conversational_model: str = ""  # Model for direct responses (empty = primary free model)
 
     # L1/L2 agent tier system
-    l1_default_model: str = ""  # Override L1 primary model (empty = use FREE_ROUTING)
+    l1_default_model: str = ""  # Override L1 primary model (empty = use FALLBACK_ROUTING)
     l1_critic_model: str = ""  # Override L1 critic model
     l2_enabled: bool = True  # Enable L2 premium tier (auto-disabled if no premium keys)
     l2_default_model: str = ""  # Override L2 model (empty = per-task-type premium defaults)
@@ -265,7 +267,7 @@ class Settings:
     l2_task_types: str = ""  # Comma-separated types eligible for L2 (empty = all)
 
     # Provider routing flags (Phase 6)
-    gemini_free_tier: bool = True  # When false, Gemini excluded from FREE_ROUTING and fallback
+    gemini_free_tier: bool = True  # When false, Gemini excluded from FALLBACK_ROUTING and fallback
     openrouter_free_only: bool = False  # When true, only OR :free suffix models are routed
 
     # RLM (Recursive Language Models — MIT CSAIL)
@@ -333,6 +335,8 @@ class Settings:
             mistral_api_key=os.getenv("MISTRAL_API_KEY", ""),
             codestral_api_key=os.getenv("CODESTRAL_API_KEY", ""),
             sambanova_api_key=os.getenv("SAMBANOVA_API_KEY", ""),
+            strongwall_api_key=os.getenv("STRONGWALL_API_KEY", ""),
+            strongwall_monthly_cost=float(os.getenv("STRONGWALL_MONTHLY_COST", "16.0")),
             together_api_key=os.getenv("TOGETHER_API_KEY", ""),
             # Dashboard
             dashboard_username=os.getenv("DASHBOARD_USERNAME", "admin"),

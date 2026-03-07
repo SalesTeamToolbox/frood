@@ -1388,6 +1388,9 @@ def create_app(
         # Total cost across all models
         total_cost = round(sum(m["estimated_cost_usd"] for m in llm_usage), 4)
 
+        # Flat-rate provider costs (separate from per-token)
+        flat_rates = spending_tracker.get_flat_rate_daily()
+
         # Done + review / (done + review + failed) for overall success rate
         # Tasks in "review" completed successfully and await human approval
         total_done = status_counts.get("done", 0)
@@ -1412,6 +1415,7 @@ def create_app(
                 "daily_spend_usd": spending_tracker.daily_spend_usd,
                 "total_estimated_usd": total_cost,
                 "by_model": llm_usage,  # same list, includes estimated_cost_usd
+                "flat_rate": flat_rates,  # flat-rate provider costs (e.g. StrongWall $16/mo)
             },
             "connectivity": connectivity,
             "model_performance": model_perf,
@@ -1723,14 +1727,16 @@ def create_app(
 
     @app.get("/api/models/health")
     async def get_model_health(_: AuthContext = Depends(require_admin)):
-        """Return model health check results and summary."""
-        if not model_catalog:
-            return {"error": "Model catalog not available", "summary": {}, "models": {}}
-        summary = model_catalog.get_health_summary()
-        return {
-            "summary": summary,
-            "models": model_catalog.health_status,
-        }
+        """Return model health check results, provider health, and summary."""
+        from providers.registry import provider_health_checker
+
+        result: dict = {"summary": {}, "models": {}, "providers": {}}
+        if model_catalog:
+            result["summary"] = model_catalog.get_health_summary()
+            result["models"] = model_catalog.health_status
+        # Add provider-level health (StrongWall endpoint probe)
+        result["providers"] = provider_health_checker.get_status()
+        return result
 
     @app.post("/api/models/health-check")
     async def trigger_health_check(_: AuthContext = Depends(require_admin)):

@@ -1,16 +1,18 @@
 """
 Model router — maps task types to the best model for the job.
 
-Free-first strategy: uses Gemini free tier as the base LLM (generous
-free quota), with OpenRouter free models as secondary and paid models
-as optional upgrades when the admin configures them.
+L1-first strategy: uses L1 workhorse (e.g. StrongWall Kimi K2.5) as the
+primary LLM when available, with free providers as fallback tier, and L2
+premium models as last resort for critical review.
 
-Routing priority:
-  1. Admin override (TASK_TYPE_MODEL env var) — always wins
+Resolution chain:
+  1. Admin override (AGENT42_CODING_MODEL etc.) — always wins
   2. Dynamic routing (from outcome tracking + research) — data-driven
-  3. Trial model injection (small % of tasks) — evaluates new models
+  3. L1 workhorse check (StrongWall or configured L1_MODEL) — primary tier
+  3b. FALLBACK_ROUTING defaults — task-type-aware free tier when L1 unavailable
   4. Policy routing (balanced/performance) — upgrades when OR credits available
-  5. Hardcoded defaults: Gemini free -> OR free models (fallback)
+  4b. Gemini Pro upgrade — complex tasks with paid Gemini key
+  5. Trial model injection (small % of tasks) — evaluates new models
 """
 
 import json
@@ -24,13 +26,13 @@ from providers.registry import PROVIDERS, ProviderRegistry, ProviderType
 logger = logging.getLogger("agent42.router")
 
 
-# -- Default routing: free models for everything ------------------------------
+# -- Fallback routing: task-type-aware fallback when L1 is unavailable --------
 # Uses Gemini free tier as the base (generous free quota: 1500 RPD for Flash,
 # 50 RPD for Pro). OpenRouter free models serve as critic / secondary to
 # distribute load across providers. The get_routing() validation automatically
 # falls back to OR free models if GEMINI_API_KEY is not set.
 
-FREE_ROUTING: dict[TaskType, dict] = {
+FALLBACK_ROUTING: dict[TaskType, dict] = {
     # -- Code-focused tasks: Cerebras primary (3000 tok/s), Codestral critic (code-aware) --
     TaskType.CODING: {
         "primary": "cerebras-gpt-oss-120b",  # Cerebras — 3000 tok/s, excellent for iteration
@@ -112,89 +114,93 @@ FREE_ROUTING: dict[TaskType, dict] = {
     },
 }
 
+# Backward-compatible alias for external consumers (tests, model_catalog, etc.)
+FREE_ROUTING = FALLBACK_ROUTING
+
 
 # -- L2 routing: premium models for senior review (suggested defaults) --------
 # These are the suggested premium models for L2 review tasks. Admins can
 # override per-task-type via AGENT42_L2_CODING_MODEL etc., or globally
 # via L2_DEFAULT_MODEL. L2 runs review-and-refine passes, not full execution,
-# so max_iterations are low. No critic needed — L2 IS the final reviewer.
+# so max_iterations are low. L2 self-critiques: premium model reviews its own
+# output with a dedicated reviewer system prompt.
 # If the premium model's API key is not set, get_l2_routing() returns None
 # and L2 escalation is disabled for that task type.
 
 L2_ROUTING: dict[TaskType, dict] = {
     TaskType.CODING: {
         "primary": "claude-sonnet",  # Strong at code review and refinement
-        "critic": None,
+        "critic": "claude-sonnet",  # Self-critique: same model, reviewer prompt
         "max_iterations": 3,
     },
     TaskType.DEBUGGING: {
         "primary": "claude-sonnet",  # Good at reasoning about subtle bugs
-        "critic": None,
+        "critic": "claude-sonnet",  # Self-critique
         "max_iterations": 3,
     },
     TaskType.RESEARCH: {
         "primary": "gpt-4o",  # Strong general reasoning
-        "critic": None,
+        "critic": "gpt-4o",  # Self-critique
         "max_iterations": 2,
     },
     TaskType.REFACTORING: {
         "primary": "claude-sonnet",  # Careful about preserving behavior
-        "critic": None,
+        "critic": "claude-sonnet",  # Self-critique
         "max_iterations": 3,
     },
     TaskType.DOCUMENTATION: {
         "primary": "gpt-4o",  # Clear technical writing
-        "critic": None,
+        "critic": "gpt-4o",  # Self-critique
         "max_iterations": 2,
     },
     TaskType.MARKETING: {
         "primary": "gpt-4o",  # Creative + persuasive
-        "critic": None,
+        "critic": "gpt-4o",  # Self-critique
         "max_iterations": 2,
     },
     TaskType.EMAIL: {
         "primary": "gpt-4o",  # Concise professional writing
-        "critic": None,
+        "critic": "gpt-4o",  # Self-critique
         "max_iterations": 2,
     },
     TaskType.DESIGN: {
         "primary": "gpt-4o",  # Visual reasoning
-        "critic": None,
+        "critic": "gpt-4o",  # Self-critique
         "max_iterations": 2,
     },
     TaskType.CONTENT: {
         "primary": "gpt-4o",  # Strong writing
-        "critic": None,
+        "critic": "gpt-4o",  # Self-critique
         "max_iterations": 2,
     },
     TaskType.STRATEGY: {
         "primary": "gpt-4o",  # Strategic analysis
-        "critic": None,
+        "critic": "gpt-4o",  # Self-critique
         "max_iterations": 2,
     },
     TaskType.DATA_ANALYSIS: {
         "primary": "gpt-4o",  # Data reasoning
-        "critic": None,
+        "critic": "gpt-4o",  # Self-critique
         "max_iterations": 2,
     },
     TaskType.PROJECT_MANAGEMENT: {
         "primary": "gpt-4o",  # Structured planning
-        "critic": None,
+        "critic": "gpt-4o",  # Self-critique
         "max_iterations": 2,
     },
     TaskType.APP_CREATE: {
         "primary": "claude-sonnet",  # Strong at code generation review
-        "critic": None,
+        "critic": "claude-sonnet",  # Self-critique
         "max_iterations": 3,
     },
     TaskType.APP_UPDATE: {
         "primary": "claude-sonnet",  # Careful with existing codebases
-        "critic": None,
+        "critic": "claude-sonnet",  # Self-critique
         "max_iterations": 3,
     },
     TaskType.PROJECT_SETUP: {
         "primary": "gpt-4o",  # Conversational + structured
-        "critic": None,
+        "critic": "gpt-4o",  # Self-critique
         "max_iterations": 2,
     },
 }
@@ -216,14 +222,15 @@ _VALID_POLICIES = frozenset({"free_only", "balanced", "performance"})
 
 
 class ModelRouter:
-    """Free-first model router with admin overrides and dynamic ranking.
+    """L1-first model router with admin overrides and dynamic ranking.
 
     Resolution order:
     1. Admin env var override: AGENT42_CODING_MODEL, AGENT42_CODING_CRITIC, etc.
     2. Dynamic routing: data-driven rankings from task outcomes + research
-    3. Trial injection: unproven models tested on a small % of tasks
+    3. L1 workhorse / FALLBACK_ROUTING (task-type fallback)
     4. Policy routing: balanced/performance — upgrades when OR credits available
-    5. Hardcoded FREE_ROUTING defaults (fallback)
+    4b. Gemini Pro upgrade (complex tasks with paid Gemini key)
+    5. Trial injection: unproven models tested on a small % of tasks
     """
 
     def __init__(self, evaluator=None, routing_file: str = "", catalog=None):
@@ -233,6 +240,9 @@ class ModelRouter:
         self._routing_file = routing_file or self._default_routing_file()
         self._dynamic_cache: dict | None = None
         self._dynamic_cache_mtime: float = 0.0
+        # L2 authorization state (wired by Phase 18/19 dashboard UI)
+        self._l2_authorized_task_types: set[str] = set()  # Global allowlist by task type
+        self._l2_authorized_tasks: set[str] = set()  # Per-task ID authorization
 
     @staticmethod
     def _default_routing_file() -> str:
@@ -246,6 +256,15 @@ class ModelRouter:
 
     def get_routing(self, task_type: TaskType, context_window: str = "default") -> dict:
         """Return the model routing config, applying the full resolution chain.
+
+        Resolution chain:
+        1. Admin override (AGENT42_CODING_MODEL etc.) -- always wins
+        2. Dynamic routing (outcome-driven JSON file) -- data-driven
+        3. L1 check: if L1 configured + healthy, use L1
+        3b. FALLBACK_ROUTING (task-type-aware free tier) -- when L1 unavailable
+        4. Policy routing (balanced/performance) -- upgrades when OR credits available
+        4b. Gemini Pro upgrade -- complex tasks with paid Gemini key
+        5. Trial injection -- unproven models on small % of tasks
 
         When context_window is "large" or "max", prefer models with larger
         context windows (e.g. Gemini Flash 1M) over the default task-type model.
@@ -269,8 +288,15 @@ class ModelRouter:
                 )
                 routing = dynamic.copy()
             else:
-                # 5. Hardcoded free defaults
-                routing = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING]).copy()
+                # 3. L1 check: if L1 configured + healthy, use L1
+                l1_routing = self._get_l1_routing(task_type)
+                if l1_routing:
+                    routing = l1_routing
+                else:
+                    # 3b. FALLBACK_ROUTING (task-type-aware defaults)
+                    routing = FALLBACK_ROUTING.get(
+                        task_type, FALLBACK_ROUTING[TaskType.CODING]
+                    ).copy()
 
         # 4. Policy routing — upgrade to paid models when credits are available
         if not is_admin_override and not dynamic:
@@ -301,9 +327,8 @@ class ModelRouter:
             elif _cfg.openrouter_free_only and primary_candidate:
                 try:
                     _spec = self.registry.get_model(primary_candidate)
-                    if (
-                        _spec.provider == ProviderType.OPENROUTER
-                        and not _spec.model_id.endswith(":free")
+                    if _spec.provider == ProviderType.OPENROUTER and not _spec.model_id.endswith(
+                        ":free"
                     ):
                         replacement = self._find_healthy_free_model(exclude={primary_candidate})
                         if replacement:
@@ -413,17 +438,26 @@ class ModelRouter:
                             routing["primary"] = cheap
                             logger.info(f"Fell back to CHEAP-tier model {cheap}")
                         else:
-                            # No free or CHEAP model found — use task-type default as last resort
-                            fallback = FREE_ROUTING.get(task_type)
-                            routing = (
-                                fallback.copy()
-                                if fallback
-                                else FREE_ROUTING[TaskType.CODING].copy()
-                            )
-                            logger.error(
-                                f"No available model found for {task_type.value}. "
-                                "Using fallback routing, but it may fail."
-                            )
+                            # Try L2 as last-resort before absolute fallback
+                            l2 = self.get_l2_routing(task_type)
+                            if l2:
+                                logger.warning(
+                                    "All L1/fallback models unavailable — using L2 last-resort"
+                                )
+                                routing = l2
+                                routing["primary"] = l2.get("primary", primary_model)
+                            else:
+                                # No free, CHEAP, or L2 — use task-type default as absolute last resort
+                                fallback = FALLBACK_ROUTING.get(task_type)
+                                routing = (
+                                    fallback.copy()
+                                    if fallback
+                                    else FALLBACK_ROUTING[TaskType.CODING].copy()
+                                )
+                                logger.error(
+                                    f"No available model found for {task_type.value}. "
+                                    "Using fallback routing, but it may fail."
+                                )
 
         # Critic model validation: if the critic is an OR free model and its
         # provider is unreliable (unhealthy / key missing), swap to a native
@@ -448,9 +482,7 @@ class ModelRouter:
                 gemini_prov = PROVIDERS.get(ProviderType.GEMINI)
                 if gemini_prov and os.getenv(gemini_prov.api_key_env, ""):
                     routing["critic"] = "gemini-2-flash"
-                    logger.info(
-                        "Critic %s unavailable — upgraded to gemini-2-flash", critic_model
-                    )
+                    logger.info("Critic %s unavailable — upgraded to gemini-2-flash", critic_model)
                 else:
                     # No reliable critic available — disable critic to avoid blocking
                     routing["critic"] = None
@@ -558,6 +590,119 @@ class ModelRouter:
                 return key
         return None
 
+    # -- L1 routing methods ---------------------------------------------------
+
+    def _resolve_l1_model(self) -> str:
+        """Resolve the L1 model key from environment or auto-detection.
+
+        Resolution order:
+        1. L1_MODEL env var (explicit override)
+        2. settings.l1_default_model (from L1_DEFAULT_MODEL in .env)
+        3. Auto-detect: strongwall-kimi-k2.5 when STRONGWALL_API_KEY is set
+        4. Empty string (L1 not configured)
+        """
+        # Use os.getenv for runtime correctness (KeyStore may inject after settings frozen)
+        l1_model = os.getenv("L1_MODEL", "")
+
+        if not l1_model:
+            try:
+                from core.config import settings
+
+                val = settings.l1_default_model
+                l1_model = val if isinstance(val, str) else ""
+            except Exception:
+                l1_model = ""
+
+        # Auto-detect: default to strongwall-kimi-k2.5 when StrongWall key is set
+        if not l1_model and os.getenv("STRONGWALL_API_KEY", ""):
+            l1_model = "strongwall-kimi-k2.5"
+
+        return l1_model
+
+    def _is_l1_available(self, l1_model: str) -> bool:
+        """Check if L1 model is configured and healthy.
+
+        Uses a two-tier check: provider-level health (ProviderHealthChecker
+        polls every 60s) and model-level health (ModelCatalog). Returns True
+        optimistically if checks are unavailable (e.g., catalog not loaded).
+        """
+        from providers.registry import MODELS, provider_health_checker
+
+        # 1. Check provider-level health (ProviderHealthChecker polls every 60s)
+        spec = MODELS.get(l1_model)
+        if spec:
+            prov_status = provider_health_checker.get_status(spec.provider)
+            if prov_status.get("status") == "unhealthy":
+                return False
+
+        # 2. Check model-level health (ModelCatalog -- optimistic by default)
+        if self._catalog and not self._catalog.is_model_healthy(l1_model):
+            return False
+
+        # 3. Check API key is set
+        if spec:
+            provider_spec = PROVIDERS.get(spec.provider)
+            if provider_spec and not os.getenv(provider_spec.api_key_env, ""):
+                return False
+
+        return True
+
+    def _get_l1_routing(self, task_type: TaskType) -> dict | None:
+        """Return L1 routing if L1 model is configured and healthy.
+
+        Returns None if L1 is not configured or unavailable, causing the
+        caller to fall through to FALLBACK_ROUTING.
+        """
+        l1_model = self._resolve_l1_model()
+        if not l1_model:
+            return None
+
+        if not self._is_l1_available(l1_model):
+            logger.info("L1 model %s unavailable, falling back to FALLBACK_ROUTING", l1_model)
+            return None
+
+        # Reuse max_iterations from FALLBACK_ROUTING (already tuned per task type)
+        fallback = FALLBACK_ROUTING.get(task_type, FALLBACK_ROUTING[TaskType.CODING])
+
+        return {
+            "primary": l1_model,
+            "critic": l1_model,  # L1 self-critique (same model, different prompt)
+            "max_iterations": fallback.get("max_iterations", 8),
+        }
+
+    # -- L2 authorization methods ----------------------------------------------
+
+    def authorize_l2(self, task_type: str | None = None, task_id: str | None = None) -> None:
+        """Authorize L2 escalation for a task type or specific task.
+
+        Phase 18/19 wires this to the dashboard UI. For now, callers
+        can use it programmatically (e.g., in tests or CLI).
+        """
+        if task_type:
+            self._l2_authorized_task_types.add(task_type)
+        if task_id:
+            self._l2_authorized_tasks.add(task_id)
+
+    def revoke_l2(self, task_type: str | None = None, task_id: str | None = None) -> None:
+        """Revoke L2 authorization for a task type or specific task."""
+        if task_type:
+            self._l2_authorized_task_types.discard(task_type)
+        if task_id:
+            self._l2_authorized_tasks.discard(task_id)
+
+    def is_l2_authorized(self, task_type: TaskType, task_id: str = "") -> bool:
+        """Check if L2 is authorized for this task type or task.
+
+        Returns True if either the task type is globally authorized or
+        the specific task ID has been authorized.
+        """
+        return (
+            task_type.value in self._l2_authorized_task_types
+            or task_id in self._l2_authorized_tasks
+        )
+
+    # -- L2 routing ------------------------------------------------------------
+
     def get_l2_routing(self, task_type: TaskType) -> dict | None:
         """Return L2 premium routing, or None if L2 is not configured/available.
 
@@ -628,7 +773,7 @@ class ModelRouter:
     def _check_policy_routing(self, task_type: TaskType) -> dict | None:
         """Apply policy-based routing when OR credits are available.
 
-        Returns a routing dict to use instead of FREE_ROUTING defaults,
+        Returns a routing dict to use instead of FALLBACK_ROUTING defaults,
         or None to keep the default.
         """
         try:
@@ -709,7 +854,7 @@ class ModelRouter:
         if best_score <= free_score + 0.1:
             return None  # Not significantly better — stay free
 
-        free_default = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING])
+        free_default = FALLBACK_ROUTING.get(task_type, FALLBACK_ROUTING[TaskType.CODING])
         logger.info(
             "Policy routing (balanced): upgrading %s to %s (score=%.2f vs free=%.2f)",
             task_type.value,
@@ -744,7 +889,7 @@ class ModelRouter:
         if not best_key:
             return None
 
-        free_default = FREE_ROUTING.get(task_type, FREE_ROUTING[TaskType.CODING])
+        free_default = FALLBACK_ROUTING.get(task_type, FALLBACK_ROUTING[TaskType.CODING])
         logger.info(
             "Policy routing (performance): %s -> %s (score=%.2f)",
             task_type.value,

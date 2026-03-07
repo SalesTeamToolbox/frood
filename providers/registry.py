@@ -5,11 +5,14 @@ Inspired by Nanobot's ProviderSpec pattern: adding a new provider is a 2-step
 process (register spec + add config field). No if-elif chains needed.
 """
 
+import asyncio
 import logging
 import os
+import time
 from dataclasses import dataclass
 from enum import Enum
 
+import httpx
 from openai import AsyncOpenAI
 
 from core.config import settings
@@ -37,6 +40,7 @@ class ProviderType(str, Enum):
     MISTRAL = "mistral"
     MISTRAL_CODESTRAL = "mistral_codestral"
     SAMBANOVA = "sambanova"
+    STRONGWALL = "strongwall"
     TOGETHER = "together"
     CUSTOM = "custom"
 
@@ -154,6 +158,13 @@ PROVIDERS: dict[ProviderType, ProviderSpec] = {
         base_url="https://api.sambanova.ai/v1",
         api_key_env="SAMBANOVA_API_KEY",
         display_name="SambaNova",
+        supports_function_calling=True,
+    ),
+    ProviderType.STRONGWALL: ProviderSpec(
+        provider_type=ProviderType.STRONGWALL,
+        base_url="https://api.strongwall.ai/v1",
+        api_key_env="STRONGWALL_API_KEY",
+        display_name="StrongWall (Kimi K2.5)",
         supports_function_calling=True,
     ),
     ProviderType.TOGETHER: ProviderSpec(
@@ -364,6 +375,16 @@ MODELS: dict[str, ModelSpec] = {
         tier=ModelTier.CHEAP,
         max_context_tokens=131000,
     ),
+    # StrongWall (flat-rate $16/mo unlimited — OpenAI-compatible, no streaming)
+    "strongwall-kimi-k2.5": ModelSpec(
+        "kimi-k2.5",
+        ProviderType.STRONGWALL,
+        max_tokens=8192,
+        temperature=0.3,
+        display_name="Kimi K2.5 (StrongWall)",
+        tier=ModelTier.CHEAP,
+        max_context_tokens=131072,
+    ),
     # ═══════════════════════════════════════════════════════════════════════════
     # PREMIUM TIER — frontier models for final reviews, complex tasks, admin-selected
     # ═══════════════════════════════════════════════════════════════════════════
@@ -419,6 +440,9 @@ MODELS: dict[str, ModelSpec] = {
 class SpendingTracker:
     """Tracks API spending to enforce daily limits."""
 
+    # Flat-rate providers are exempt from daily spending limits (already paid for)
+    _FLAT_RATE_PROVIDERS: set[ProviderType] = {ProviderType.STRONGWALL}
+
     # Known per-token pricing for models not covered by the OR catalog.
     # Source: https://ai.google.dev/gemini-api/docs/pricing (March 2026)
     # Format: model_id -> (prompt_per_token, completion_per_token)
@@ -456,6 +480,8 @@ class SpendingTracker:
         # Keys include org/ prefix -- must match ModelSpec.model_id exactly
         "meta-llama/Llama-3.3-70B-Instruct-Turbo": (0.88e-6, 0.88e-6),  # $0.88/M in+out
         "deepseek-ai/DeepSeek-V3": (0.60e-6, 1.70e-6),                   # $0.60/M in, $1.70/M out
+        # StrongWall — flat-rate $16/mo unlimited (no per-token cost)
+        "kimi-k2.5": (0.0, 0.0),
     }
 
     def __init__(self):
@@ -468,6 +494,32 @@ class SpendingTracker:
     def update_model_prices(self, prices: dict[str, tuple[float, float]]) -> None:
         """Update per-model pricing from catalog data."""
         self._model_prices.update(prices)
+
+    def is_flat_rate(self, model_key: str) -> bool:
+        """Check if a model belongs to a flat-rate provider (exempt from spending limit)."""
+        spec = MODELS.get(model_key)
+        if not spec:
+            return False
+        return spec.provider in self._FLAT_RATE_PROVIDERS
+
+    def get_flat_rate_daily(self) -> dict:
+        """Return flat-rate cost info for reporting.
+
+        Returns dict with provider display name -> {monthly_usd, daily_usd, configured}.
+        """
+        result = {}
+        for pt in self._FLAT_RATE_PROVIDERS:
+            spec = PROVIDERS.get(pt)
+            if not spec:
+                continue
+            configured = bool(os.getenv(spec.api_key_env, ""))
+            monthly = settings.strongwall_monthly_cost if pt == ProviderType.STRONGWALL else 0.0
+            result[spec.display_name] = {
+                "monthly_usd": monthly,
+                "daily_usd": round(monthly / 30, 2),
+                "configured": configured,
+            }
+        return result
 
     def _get_price(self, model_key: str, model_id: str) -> tuple[float, float] | None:
         """Look up per-token pricing for a model.
@@ -542,6 +594,103 @@ class SpendingTracker:
 
 
 spending_tracker = SpendingTracker()
+
+
+class ProviderHealthChecker:
+    """Probes provider API endpoints to detect availability and degradation.
+
+    Unlike ModelCatalog.health_check() which sends completion requests to test
+    individual models, this checks provider-level reachability via /v1/models
+    (no tokens consumed).
+    """
+
+    # Thresholds per user decision in 16-CONTEXT.md
+    DEGRADED_THRESHOLD_S = 3.0  # >3s = degraded (queue congestion)
+    TIMEOUT_S = 5.0  # >5s = timeout, mark unhealthy
+    CHECK_INTERVAL_S = 60  # Poll every 60 seconds
+
+    def __init__(self):
+        self._status: dict[str, dict] = {}  # provider_type.value -> status dict
+        self._task: asyncio.Task | None = None
+
+    async def check(self, provider_type: ProviderType) -> dict | None:
+        """Probe a provider's /v1/models endpoint.
+
+        Returns status dict or None if provider not configured (no API key).
+        """
+        spec = PROVIDERS.get(provider_type)
+        if not spec:
+            return None
+        api_key = os.getenv(spec.api_key_env, "")
+        if not api_key:
+            return None
+
+        base_url = os.getenv(f"{provider_type.value.upper()}_BASE_URL", spec.base_url)
+        url = f"{base_url}/models"
+
+        try:
+            start = time.monotonic()
+            async with httpx.AsyncClient(timeout=self.TIMEOUT_S) as client:
+                resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+            latency = time.monotonic() - start
+
+            if resp.status_code >= 400:
+                status = "unhealthy"
+                error = f"HTTP {resp.status_code}"
+            elif latency >= self.DEGRADED_THRESHOLD_S:
+                status = "degraded"
+                error = f"Slow response ({latency:.1f}s)"
+            else:
+                status = "healthy"
+                error = None
+
+            result = {
+                "status": status,
+                "latency_ms": round(latency * 1000),
+                "last_checked": time.time(),
+                "error": error,
+            }
+        except Exception as e:
+            result = {
+                "status": "unhealthy",
+                "latency_ms": 0,
+                "last_checked": time.time(),
+                "error": str(e),
+            }
+
+        self._status[provider_type.value] = result
+        return result
+
+    def get_status(self, provider_type: ProviderType | None = None) -> dict:
+        """Get cached status for a provider or all providers."""
+        if provider_type:
+            return self._status.get(provider_type.value, {})
+        return dict(self._status)
+
+    async def start_polling(self, providers: list[ProviderType] | None = None):
+        """Start background polling loop. Call from app startup."""
+        if providers is None:
+            providers = [ProviderType.STRONGWALL]  # Default: only poll StrongWall
+        self._task = asyncio.create_task(self._poll_loop(providers))
+
+    async def _poll_loop(self, providers: list[ProviderType]):
+        """Background loop that checks providers every CHECK_INTERVAL_S seconds."""
+        while True:
+            for pt in providers:
+                try:
+                    await self.check(pt)
+                except Exception as e:
+                    logger.warning("Provider health check failed for %s: %s", pt.value, e)
+            await asyncio.sleep(self.CHECK_INTERVAL_S)
+
+    def stop(self):
+        """Cancel the background polling task."""
+        if self._task:
+            self._task.cancel()
+            self._task = None
+
+
+provider_health_checker = ProviderHealthChecker()
 
 
 class ProviderRegistry:
@@ -620,26 +769,34 @@ class ProviderRegistry:
         The usage_dict contains model_key, prompt_tokens, and completion_tokens
         when available, or None if the API did not return usage data.
         """
-        if not spending_tracker.check_limit(settings.max_daily_api_spend_usd):
-            raise SpendingLimitExceeded(
-                f"Daily API spending limit reached "
-                f"(${spending_tracker.daily_spend_usd:.2f} / "
-                f"${settings.max_daily_api_spend_usd:.2f})"
-            )
+        # Flat-rate providers (e.g. StrongWall) are exempt from spending limit
+        spec_for_limit = MODELS.get(model_key)
+        if not spec_for_limit or spec_for_limit.provider not in SpendingTracker._FLAT_RATE_PROVIDERS:
+            if not spending_tracker.check_limit(settings.max_daily_api_spend_usd):
+                raise SpendingLimitExceeded(
+                    f"Daily API spending limit reached "
+                    f"(${spending_tracker.daily_spend_usd:.2f} / "
+                    f"${settings.max_daily_api_spend_usd:.2f})"
+                )
 
         spec = self.get_model(model_key)
         client = self.get_client(spec.provider)
 
         resolved_temp = temperature if temperature is not None else spec.temperature
-        # SAMB-03: SambaNova rejects temperature > 1.0
-        if spec.provider == ProviderType.SAMBANOVA:
+        # SAMB-03 / STRONG-01: SambaNova and StrongWall reject temperature > 1.0
+        if spec.provider in (ProviderType.SAMBANOVA, ProviderType.STRONGWALL):
             resolved_temp = min(resolved_temp, 1.0)
-        response = await client.chat.completions.create(
-            model=spec.model_id,
-            messages=messages,
-            temperature=resolved_temp,
-            max_tokens=max_tokens or spec.max_tokens,
-        )
+
+        kwargs = {
+            "model": spec.model_id,
+            "messages": messages,
+            "temperature": resolved_temp,
+            "max_tokens": max_tokens or spec.max_tokens,
+        }
+        # STRONG-01: StrongWall does not support streaming
+        if spec.provider == ProviderType.STRONGWALL:
+            kwargs["stream"] = False
+        response = await client.chat.completions.create(**kwargs)
 
         content = response.choices[0].message.content or ""
         usage = response.usage
@@ -671,19 +828,22 @@ class ProviderRegistry:
 
         Returns the full response object so callers can inspect tool_calls.
         """
-        if not spending_tracker.check_limit(settings.max_daily_api_spend_usd):
-            raise SpendingLimitExceeded(
-                f"Daily API spending limit reached "
-                f"(${spending_tracker.daily_spend_usd:.2f} / "
-                f"${settings.max_daily_api_spend_usd:.2f})"
-            )
+        # Flat-rate providers (e.g. StrongWall) are exempt from spending limit
+        spec_for_limit = MODELS.get(model_key)
+        if not spec_for_limit or spec_for_limit.provider not in SpendingTracker._FLAT_RATE_PROVIDERS:
+            if not spending_tracker.check_limit(settings.max_daily_api_spend_usd):
+                raise SpendingLimitExceeded(
+                    f"Daily API spending limit reached "
+                    f"(${spending_tracker.daily_spend_usd:.2f} / "
+                    f"${settings.max_daily_api_spend_usd:.2f})"
+                )
 
         spec = self.get_model(model_key)
         client = self.get_client(spec.provider)
 
         resolved_temp = temperature if temperature is not None else spec.temperature
-        # SAMB-03: SambaNova rejects temperature > 1.0
-        if spec.provider == ProviderType.SAMBANOVA:
+        # SAMB-03 / STRONG-01: SambaNova and StrongWall reject temperature > 1.0
+        if spec.provider in (ProviderType.SAMBANOVA, ProviderType.STRONGWALL):
             resolved_temp = min(resolved_temp, 1.0)
 
         kwargs = {
@@ -693,8 +853,8 @@ class ProviderRegistry:
             "max_tokens": max_tokens or spec.max_tokens,
         }
         if tools:
-            # SAMB-05: SambaNova does not support strict: true in tool definitions
-            if spec.provider == ProviderType.SAMBANOVA:
+            # SAMB-05 / STRONG-01: SambaNova and StrongWall do not support strict: true in tool definitions
+            if spec.provider in (ProviderType.SAMBANOVA, ProviderType.STRONGWALL):
                 import copy
                 tools = copy.deepcopy(tools)
                 for tool in tools:
@@ -705,6 +865,9 @@ class ProviderRegistry:
             # SAMB-04: SambaNova streaming tool calls have broken index field
             if spec.provider == ProviderType.SAMBANOVA:
                 kwargs["stream"] = False
+        # STRONG-01: StrongWall does not support streaming (all requests, not just tool calls)
+        if spec.provider == ProviderType.STRONGWALL:
+            kwargs["stream"] = False
 
         response = await client.chat.completions.create(**kwargs)
 

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from agents.model_router import (
     _COMPLEX_TASK_TYPES,
     _VALID_POLICIES,
-    FREE_ROUTING,
+    FALLBACK_ROUTING,
     ModelRouter,
 )
 from core.task_queue import TaskType
@@ -151,7 +151,7 @@ class TestPolicyRoutingPerformance:
 class TestGetRoutingWithPolicy:
     def test_free_only_uses_free_routing_defaults(self):
         router = ModelRouter()
-        # Provide API keys for both the FREE_ROUTING default (Cerebras) and a fallback
+        # Provide API keys for both the FALLBACK_ROUTING default (Cerebras) and a fallback
         # (Gemini) so get_routing() resolves without falling back to paid models.
         with patch.dict(
             os.environ,
@@ -165,8 +165,8 @@ class TestGetRoutingWithPolicy:
         ):
             with _patch_policy("free_only"):
                 routing = router.get_routing(TaskType.CODING)
-        # Should use FREE_ROUTING defaults — Cerebras primary for coding
-        default = FREE_ROUTING[TaskType.CODING]
+        # Should use FALLBACK_ROUTING defaults — Cerebras primary for coding
+        default = FALLBACK_ROUTING[TaskType.CODING]
         assert routing["primary"] == default["primary"]
 
     def test_admin_override_beats_policy(self):
@@ -198,41 +198,41 @@ class TestGetRoutingWithPolicy:
 # =============================================================================
 
 
-class TestFreeRoutingUpdates:
-    """ROUT-01/02/03: Verify FREE_ROUTING dict has the correct task-type entries."""
+class TestFallbackRoutingEntries:
+    """ROUT-01/02/03: Verify FALLBACK_ROUTING dict has the correct task-type entries."""
 
     def test_cerebras_primary_for_coding(self):
-        assert FREE_ROUTING[TaskType.CODING]["primary"] == "cerebras-gpt-oss-120b"
+        assert FALLBACK_ROUTING[TaskType.CODING]["primary"] == "cerebras-gpt-oss-120b"
 
     def test_cerebras_primary_for_debugging(self):
-        assert FREE_ROUTING[TaskType.DEBUGGING]["primary"] == "cerebras-gpt-oss-120b"
+        assert FALLBACK_ROUTING[TaskType.DEBUGGING]["primary"] == "cerebras-gpt-oss-120b"
 
     def test_cerebras_primary_for_app_create(self):
-        assert FREE_ROUTING[TaskType.APP_CREATE]["primary"] == "cerebras-gpt-oss-120b"
+        assert FALLBACK_ROUTING[TaskType.APP_CREATE]["primary"] == "cerebras-gpt-oss-120b"
 
     def test_codestral_critic_for_coding(self):
-        assert FREE_ROUTING[TaskType.CODING]["critic"] == "mistral-codestral"
+        assert FALLBACK_ROUTING[TaskType.CODING]["critic"] == "mistral-codestral"
 
     def test_codestral_critic_for_debugging(self):
-        assert FREE_ROUTING[TaskType.DEBUGGING]["critic"] == "mistral-codestral"
+        assert FALLBACK_ROUTING[TaskType.DEBUGGING]["critic"] == "mistral-codestral"
 
     def test_codestral_critic_for_refactoring(self):
-        assert FREE_ROUTING[TaskType.REFACTORING]["critic"] == "mistral-codestral"
+        assert FALLBACK_ROUTING[TaskType.REFACTORING]["critic"] == "mistral-codestral"
 
     def test_codestral_critic_for_app_create(self):
-        assert FREE_ROUTING[TaskType.APP_CREATE]["critic"] == "mistral-codestral"
+        assert FALLBACK_ROUTING[TaskType.APP_CREATE]["critic"] == "mistral-codestral"
 
     def test_groq_primary_for_research(self):
-        assert FREE_ROUTING[TaskType.RESEARCH]["primary"] == "groq-llama-70b"
+        assert FALLBACK_ROUTING[TaskType.RESEARCH]["primary"] == "groq-llama-70b"
 
     def test_groq_primary_for_content(self):
-        assert FREE_ROUTING[TaskType.CONTENT]["primary"] == "groq-llama-70b"
+        assert FALLBACK_ROUTING[TaskType.CONTENT]["primary"] == "groq-llama-70b"
 
     def test_groq_primary_for_strategy(self):
-        assert FREE_ROUTING[TaskType.STRATEGY]["primary"] == "groq-gpt-oss-120b"
+        assert FALLBACK_ROUTING[TaskType.STRATEGY]["primary"] == "groq-gpt-oss-120b"
 
     def test_other_types_keep_gemini(self):
-        assert FREE_ROUTING[TaskType.EMAIL]["primary"] == "gemini-2-flash"
+        assert FALLBACK_ROUTING[TaskType.EMAIL]["primary"] == "gemini-2-flash"
 
 
 class TestFallbackChainDiversity:
@@ -267,9 +267,11 @@ class TestFallbackChainDiversity:
     def test_fallback_skips_unhealthy_models(self):
         """Models marked unhealthy by catalog are skipped during fallback."""
         catalog = MagicMock()
+
         # Mark all models unhealthy except groq-llama-70b
         def is_healthy(key):
             return key == "groq-llama-70b"
+
         catalog.is_model_healthy.side_effect = is_healthy
 
         router = ModelRouter(catalog=catalog)
@@ -413,7 +415,8 @@ class TestGeminiFreeTierFlag:
 
         # Should not return any Gemini model
         if result:
-            from providers.registry import MODELS, ProviderType
+            from providers.registry import ProviderType
+
             try:
                 spec = router.registry.get_model(result)
                 assert spec.provider != ProviderType.GEMINI, (
@@ -431,7 +434,7 @@ class TestGeminiFreeTierFlag:
             openrouter_free_only=False,
         )
 
-        # EMAIL defaults to gemini-2-flash in FREE_ROUTING; with flag off, should use replacement
+        # EMAIL defaults to gemini-2-flash in FALLBACK_ROUTING; with flag off, should use replacement
         with (
             patch("core.config.settings", mock_settings),
             patch.dict(
@@ -522,7 +525,7 @@ class TestOpenrouterFreeOnlyFlag:
 
     def test_or_free_only_allows_free_suffix(self):
         """When openrouter_free_only=True, OR models WITH :free suffix are allowed."""
-        from providers.registry import MODELS, ProviderType
+        from providers.registry import ProviderType
 
         router = ModelRouter()
         mock_settings = MagicMock(
@@ -652,7 +655,7 @@ class TestMultiProviderIntegration:
             patch.dict(
                 os.environ,
                 {
-                    "CEREBRAS_API_KEY": "",   # No Cerebras key
+                    "CEREBRAS_API_KEY": "",  # No Cerebras key
                     "GROQ_API_KEY": "test-groq-key",  # Groq available as fallback
                     "GEMINI_API_KEY": "",
                     "CODESTRAL_API_KEY": "",
@@ -694,3 +697,143 @@ class TestMultiProviderIntegration:
         assert research_routing["primary"] == "groq-llama-70b"
         assert content_routing["primary"] == "groq-llama-70b"
         assert strategy_routing["primary"] == "groq-gpt-oss-120b"
+
+
+# =============================================================================
+# Phase 17 Plan 2: L1/L2 Tier Routing and Fallback Chain Tests
+# =============================================================================
+
+from agents.model_router import L2_ROUTING
+
+
+class TestL1Routing:
+    """TIER-01/02: Verify L1 model resolution and routing."""
+
+    def setup_method(self):
+        self.router = ModelRouter()
+
+    def test_l1_defaults_to_strongwall(self, monkeypatch):
+        """TIER-02: StrongWall is L1 when API key is set."""
+        monkeypatch.setenv("STRONGWALL_API_KEY", "test-key")
+        monkeypatch.delenv("L1_MODEL", raising=False)
+        monkeypatch.delenv("L1_DEFAULT_MODEL", raising=False)
+        assert self.router._resolve_l1_model() == "strongwall-kimi-k2.5"
+
+    def test_l1_explicit_model_override(self, monkeypatch):
+        """L1_MODEL env var takes priority over auto-detection."""
+        monkeypatch.setenv("L1_MODEL", "custom-model-v2")
+        monkeypatch.setenv("STRONGWALL_API_KEY", "test-key")
+        assert self.router._resolve_l1_model() == "custom-model-v2"
+
+    def test_l1_not_configured_returns_empty(self, monkeypatch):
+        """No L1 when neither L1_MODEL nor STRONGWALL_API_KEY set."""
+        monkeypatch.delenv("L1_MODEL", raising=False)
+        monkeypatch.delenv("L1_DEFAULT_MODEL", raising=False)
+        monkeypatch.delenv("STRONGWALL_API_KEY", raising=False)
+        assert self.router._resolve_l1_model() == ""
+
+    def test_l1_routing_has_self_critique(self, monkeypatch):
+        """L1 self-critique: critic == primary."""
+        monkeypatch.setenv("STRONGWALL_API_KEY", "test-key")
+        monkeypatch.delenv("L1_MODEL", raising=False)
+        monkeypatch.delenv("L1_DEFAULT_MODEL", raising=False)
+        # Mock health check to return healthy
+        monkeypatch.setattr(self.router, "_is_l1_available", lambda m: True)
+        routing = self.router._get_l1_routing(TaskType.CODING)
+        assert routing is not None
+        assert routing["critic"] == routing["primary"]
+        assert routing["primary"] == "strongwall-kimi-k2.5"
+
+    def test_l1_max_iterations_from_fallback(self, monkeypatch):
+        """L1 reuses max_iterations from FALLBACK_ROUTING per task type."""
+        monkeypatch.setenv("STRONGWALL_API_KEY", "test-key")
+        monkeypatch.delenv("L1_MODEL", raising=False)
+        monkeypatch.delenv("L1_DEFAULT_MODEL", raising=False)
+        monkeypatch.setattr(self.router, "_is_l1_available", lambda m: True)
+        routing = self.router._get_l1_routing(TaskType.APP_CREATE)
+        assert routing["max_iterations"] == FALLBACK_ROUTING[TaskType.APP_CREATE]["max_iterations"]
+
+    def test_l1_unavailable_returns_none(self, monkeypatch):
+        """L1 returns None when provider is unhealthy."""
+        monkeypatch.setenv("STRONGWALL_API_KEY", "test-key")
+        monkeypatch.delenv("L1_MODEL", raising=False)
+        monkeypatch.delenv("L1_DEFAULT_MODEL", raising=False)
+        monkeypatch.setattr(self.router, "_is_l1_available", lambda m: False)
+        assert self.router._get_l1_routing(TaskType.CODING) is None
+
+    def test_coding_uses_l1_not_or_free(self, monkeypatch):
+        """ROUTE-02: Critical tasks use L1 when configured, not OR free models."""
+        monkeypatch.setenv("STRONGWALL_API_KEY", "test-key")
+        monkeypatch.delenv("L1_MODEL", raising=False)
+        monkeypatch.delenv("L1_DEFAULT_MODEL", raising=False)
+        monkeypatch.setenv("GEMINI_PRO_FOR_COMPLEX", "false")
+        monkeypatch.setattr(self.router, "_is_l1_available", lambda m: True)
+        routing = self.router.get_routing(TaskType.CODING)
+        assert routing["primary"] == "strongwall-kimi-k2.5"
+
+
+class TestL2RoutingUpdates:
+    """TIER-03/04: Verify L2 routing with self-critique and OR paid availability."""
+
+    def test_l2_all_entries_have_self_critique(self):
+        """TIER-03: All L2_ROUTING entries have critic == primary (self-critique)."""
+        for task_type, routing in L2_ROUTING.items():
+            assert routing["critic"] == routing["primary"], (
+                f"L2_ROUTING[{task_type}] critic should equal primary for self-critique"
+            )
+
+    def test_l2_coding_uses_claude_sonnet(self):
+        """TIER-03: Coding L2 defaults to claude-sonnet."""
+        assert L2_ROUTING[TaskType.CODING]["primary"] == "claude-sonnet"
+
+    def test_l2_research_uses_gpt4o(self):
+        """TIER-03: Research L2 defaults to gpt-4o."""
+        assert L2_ROUTING[TaskType.RESEARCH]["primary"] == "gpt-4o"
+
+    def test_l2_max_iterations_are_low(self):
+        """L2 runs review-and-refine passes, so max_iterations should be low."""
+        for task_type, routing in L2_ROUTING.items():
+            assert routing["max_iterations"] <= 5, (
+                f"L2_ROUTING[{task_type}] max_iterations={routing['max_iterations']} is too high"
+            )
+
+
+class TestFallbackChain:
+    """TIER-05: Verify full fallback chain StrongWall -> Free -> L2."""
+
+    def setup_method(self):
+        self.router = ModelRouter()
+
+    def test_fallback_chain_l1_to_fallback(self, monkeypatch):
+        """When L1 is unavailable, get_routing falls to FALLBACK_ROUTING."""
+        monkeypatch.delenv("STRONGWALL_API_KEY", raising=False)
+        monkeypatch.delenv("L1_MODEL", raising=False)
+        monkeypatch.delenv("L1_DEFAULT_MODEL", raising=False)
+        monkeypatch.setenv("CEREBRAS_API_KEY", "test-key")
+        monkeypatch.setenv("GEMINI_PRO_FOR_COMPLEX", "false")
+        routing = self.router.get_routing(TaskType.CODING)
+        # Should use FALLBACK_ROUTING default (Cerebras for coding)
+        assert routing["primary"] == FALLBACK_ROUTING[TaskType.CODING]["primary"]
+
+    def test_backward_compat_no_strongwall(self, monkeypatch):
+        """ROUTE-03: Existing behavior preserved when no StrongWall key."""
+        monkeypatch.delenv("STRONGWALL_API_KEY", raising=False)
+        monkeypatch.delenv("L1_MODEL", raising=False)
+        monkeypatch.delenv("L1_DEFAULT_MODEL", raising=False)
+        monkeypatch.setenv("CEREBRAS_API_KEY", "test-key")
+        monkeypatch.setenv("CODESTRAL_API_KEY", "test-key")
+        monkeypatch.setenv("GEMINI_PRO_FOR_COMPLEX", "false")
+        routing = self.router.get_routing(TaskType.CODING)
+        expected = FALLBACK_ROUTING[TaskType.CODING]
+        assert routing["primary"] == expected["primary"]
+        assert routing["critic"] == expected["critic"]
+
+    def test_l1_configured_uses_l1(self, monkeypatch):
+        """When L1 is configured and healthy, get_routing returns L1."""
+        monkeypatch.setenv("STRONGWALL_API_KEY", "test-key")
+        monkeypatch.delenv("L1_MODEL", raising=False)
+        monkeypatch.delenv("L1_DEFAULT_MODEL", raising=False)
+        monkeypatch.setattr(self.router, "_is_l1_available", lambda m: True)
+        routing = self.router.get_routing(TaskType.CODING)
+        assert routing["primary"] == "strongwall-kimi-k2.5"
+        assert routing["critic"] == "strongwall-kimi-k2.5"

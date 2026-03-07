@@ -1384,6 +1384,11 @@ class Agent42:
         # Start heartbeat service
         await self.heartbeat.start()
 
+        # Start provider health check polling (StrongWall)
+        from providers.registry import provider_health_checker
+        await provider_health_checker.start_polling()
+        logger.info("  Provider health checker: polling StrongWall")
+
         tasks_to_run = [
             self._process_queue(),
             self.task_queue.watch_file(),
@@ -1535,6 +1540,9 @@ class Agent42:
         self.heartbeat.stop()
         self.cron_scheduler.stop()
         self.security_scanner.stop()
+        # Stop provider health check polling
+        from providers.registry import provider_health_checker
+        provider_health_checker.stop()
         await self.channel_manager.stop_all()
         await self.mcp_manager.disconnect_all()
         if self.app_manager:

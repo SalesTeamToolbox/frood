@@ -206,6 +206,114 @@ REFERENCE_FILES = {
     "async": ["pitfalls-archive.md"],
 }
 
+# Map work types to jcodemunch MCP tool call recommendations.
+# repo_id is NOT included here — it is injected by emit_jcodemunch_guidance().
+JCODEMUNCH_GUIDANCE = {
+    "tools": [
+        {
+            "tool": "search_symbols",
+            "params": {"query": "Tool", "kind": "class", "file_pattern": "tools/**/*.py"},
+            "purpose": "Understand existing tool API surface before making changes",
+        },
+        {
+            "tool": "get_file_outline",
+            "params": {"file_path": "tools/base.py"},
+            "purpose": "Review Tool/ToolExtension ABC interface",
+        },
+    ],
+    "security": [
+        {
+            "tool": "search_symbols",
+            "params": {"query": "sandbox", "file_pattern": "core/**/*.py"},
+            "purpose": "Map security-related symbols before editing",
+        },
+    ],
+    "providers": [
+        {
+            "tool": "get_file_outline",
+            "params": {"file_path": "providers/registry.py"},
+            "purpose": "Review ProviderSpec/ModelSpec patterns",
+        },
+    ],
+    "config": [
+        {
+            "tool": "get_file_outline",
+            "params": {"file_path": "core/config.py"},
+            "purpose": "Review Settings dataclass and from_env() pattern",
+        },
+    ],
+    "dashboard": [
+        {
+            "tool": "search_symbols",
+            "params": {"query": "endpoint", "file_pattern": "dashboard/**/*.py"},
+            "purpose": "Find dashboard API endpoints before modifying routes",
+        },
+    ],
+    "memory": [
+        {
+            "tool": "search_symbols",
+            "params": {"query": "memory", "file_pattern": "memory/**/*.py"},
+            "purpose": "Map memory subsystem symbols before editing",
+        },
+    ],
+    "skills": [
+        {
+            "tool": "get_file_outline",
+            "params": {"file_path": "skills/loader.py"},
+            "purpose": "Review SkillLoader interface and loading patterns",
+        },
+    ],
+    "testing": [
+        {
+            "tool": "search_symbols",
+            "params": {"query": "conftest", "file_pattern": "tests/**/*.py"},
+            "purpose": "Find shared fixtures and test utilities",
+        },
+    ],
+}
+
+
+def emit_jcodemunch_guidance(work_types, repo_id="local/agent42"):
+    """Generate jcodemunch MCP tool call recommendations for detected work types.
+
+    Collects guidance items for all detected work types, deduplicates by
+    (tool, key_param) tuple, and returns a list of formatted guidance strings.
+
+    Does NOT print — returns the strings for the caller to emit.
+
+    Args:
+        work_types: Set of detected work type strings.
+        repo_id: The jcodemunch repository identifier to inject into params.
+
+    Returns:
+        List of formatted guidance strings (one per recommended MCP call).
+    """
+    if not work_types:
+        return []
+
+    seen = set()
+    guidance_items = []
+
+    for wt in sorted(work_types):
+        for item in JCODEMUNCH_GUIDANCE.get(wt, []):
+            # Build dedup key from tool name + distinguishing param
+            params = item["params"]
+            key_param = params.get("file_path") or params.get("query", "")
+            dedup_key = (item["tool"], key_param)
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+
+            # Build parameter string with repo_id injected
+            all_params = {"repo": repo_id}
+            all_params.update(params)
+            param_lines = "\n".join(f"      {k}: {json.dumps(v)}" for k, v in all_params.items())
+            guidance_items.append(
+                f"{item['purpose']}:\n    mcp__jcodemunch__{item['tool']} with:\n{param_lines}"
+            )
+
+    return guidance_items
+
 
 def detect_work_types(prompt_text, tool_input=None):
     """Detect work types from prompt text and tool input."""
@@ -340,6 +448,15 @@ def main():
             print(f"[context-loader] Relevant patterns:\n{lessons}", file=sys.stderr)
         if references:
             print(f"[context-loader] Reference docs:\n{references}", file=sys.stderr)
+
+    # Emit jcodemunch MCP tool call guidance
+    guidance = emit_jcodemunch_guidance(work_types)
+    if guidance:
+        numbered = "\n".join(f"  {i + 1}. {g}" for i, g in enumerate(guidance))
+        print(
+            f"[context-loader] jcodemunch guidance -- run these before starting work:\n{numbered}",
+            file=sys.stderr,
+        )
 
     sys.exit(0)
 

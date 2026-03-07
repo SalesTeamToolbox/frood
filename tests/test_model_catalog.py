@@ -315,12 +315,12 @@ class TestValidatePrimaryModels:
             ),
         ]
 
-        # Monkey-patch FREE_ROUTING to include our fake model
-        from agents.model_router import FREE_ROUTING
+        # Monkey-patch FALLBACK_ROUTING to include our fake model
+        from agents.model_router import FALLBACK_ROUTING
         from core.task_queue import TaskType
 
-        original = FREE_ROUTING.get(TaskType.CODING)
-        FREE_ROUTING[TaskType.CODING] = {
+        original = FALLBACK_ROUTING.get(TaskType.CODING)
+        FALLBACK_ROUTING[TaskType.CODING] = {
             "primary": fake_key,
             "critic": None,
             "max_iterations": 8,
@@ -331,7 +331,7 @@ class TestValidatePrimaryModels:
             assert fake_key in result
             assert result[fake_key] is not None  # Should have found replacement
         finally:
-            FREE_ROUTING[TaskType.CODING] = original
+            FALLBACK_ROUTING[TaskType.CODING] = original
             MODELS.pop(fake_key, None)
 
 
@@ -549,8 +549,7 @@ class TestGroqSpendingTracker:
         from providers.registry import SpendingTracker
 
         tracker = SpendingTracker()
-        tracker.record_usage("groq-llama-70b", 50000, 25000,
-                             model_id="llama-3.3-70b-versatile")
+        tracker.record_usage("groq-llama-70b", 50000, 25000, model_id="llama-3.3-70b-versatile")
         assert tracker.daily_spend_usd == 0.0
 
     def test_groq_all_models_zero_cost(self):
@@ -573,8 +572,7 @@ class TestGroqSpendingTracker:
 
         tracker = SpendingTracker()
         for _ in range(50):
-            tracker.record_usage("groq-llama-70b", 8000, 2000,
-                                 model_id="llama-3.3-70b-versatile")
+            tracker.record_usage("groq-llama-70b", 8000, 2000, model_id="llama-3.3-70b-versatile")
         assert tracker.check_limit(1.0) is True
         assert tracker.daily_spend_usd == 0.0
 
@@ -583,8 +581,7 @@ class TestGroqSpendingTracker:
         from providers.registry import SpendingTracker
 
         tracker = SpendingTracker()
-        tracker.record_usage("groq-llama-8b", 1000, 500,
-                             model_id="llama-3.1-8b-instant")
+        tracker.record_usage("groq-llama-8b", 1000, 500, model_id="llama-3.1-8b-instant")
         assert tracker.daily_tokens == 1500
 
 
@@ -617,8 +614,7 @@ class TestMistralSpendingTracker:
         from providers.registry import SpendingTracker
 
         tracker = SpendingTracker()
-        tracker.record_usage("mistral-codestral", 50000, 25000,
-                             model_id="codestral-latest")
+        tracker.record_usage("mistral-codestral", 50000, 25000, model_id="codestral-latest")
         assert tracker.daily_spend_usd == 0.0
 
     def test_mistral_large_incurs_cost(self):
@@ -626,8 +622,7 @@ class TestMistralSpendingTracker:
         from providers.registry import SpendingTracker
 
         tracker = SpendingTracker()
-        tracker.record_usage("mistral-large", 10000, 5000,
-                             model_id="mistral-large-latest")
+        tracker.record_usage("mistral-large", 10000, 5000, model_id="mistral-large-latest")
         assert tracker.daily_spend_usd > 0.0
 
     def test_mistral_tokens_tracked(self):
@@ -635,10 +630,8 @@ class TestMistralSpendingTracker:
         from providers.registry import SpendingTracker
 
         tracker = SpendingTracker()
-        tracker.record_usage("mistral-codestral", 1000, 500,
-                             model_id="codestral-latest")
-        tracker.record_usage("mistral-small", 1000, 500,
-                             model_id="mistral-small-latest")
+        tracker.record_usage("mistral-codestral", 1000, 500, model_id="codestral-latest")
+        tracker.record_usage("mistral-small", 1000, 500, model_id="mistral-small-latest")
         assert tracker.daily_tokens == 3000
 
 
@@ -650,7 +643,9 @@ class TestSambanovaSpendingTracker:
         from providers.registry import SpendingTracker
 
         assert "Meta-Llama-3.3-70B-Instruct" in SpendingTracker._BUILTIN_PRICES
-        prompt_price, completion_price = SpendingTracker._BUILTIN_PRICES["Meta-Llama-3.3-70B-Instruct"]
+        prompt_price, completion_price = SpendingTracker._BUILTIN_PRICES[
+            "Meta-Llama-3.3-70B-Instruct"
+        ]
         assert prompt_price > 0.0
         assert completion_price > 0.0
 
@@ -668,8 +663,9 @@ class TestSambanovaSpendingTracker:
         from providers.registry import SpendingTracker
 
         tracker = SpendingTracker()
-        tracker.record_usage("sambanova-llama-70b", 10000, 5000,
-                             model_id="Meta-Llama-3.3-70B-Instruct")
+        tracker.record_usage(
+            "sambanova-llama-70b", 10000, 5000, model_id="Meta-Llama-3.3-70B-Instruct"
+        )
         assert tracker.daily_spend_usd > 0.0
 
     def test_sambanova_deepseek_incurs_cost(self):
@@ -677,8 +673,7 @@ class TestSambanovaSpendingTracker:
         from providers.registry import SpendingTracker
 
         tracker = SpendingTracker()
-        tracker.record_usage("sambanova-deepseek-v3", 10000, 5000,
-                             model_id="DeepSeek-V3-0324")
+        tracker.record_usage("sambanova-deepseek-v3", 10000, 5000, model_id="DeepSeek-V3-0324")
         assert tracker.daily_spend_usd > 0.0
 
     def test_sambanova_tokens_tracked(self):
@@ -686,8 +681,9 @@ class TestSambanovaSpendingTracker:
         from providers.registry import SpendingTracker
 
         tracker = SpendingTracker()
-        tracker.record_usage("sambanova-llama-70b", 1000, 500,
-                             model_id="Meta-Llama-3.3-70B-Instruct")
+        tracker.record_usage(
+            "sambanova-llama-70b", 1000, 500, model_id="Meta-Llama-3.3-70B-Instruct"
+        )
         assert tracker.daily_tokens == 1500
 
 
@@ -699,7 +695,9 @@ class TestTogetherSpendingTracker:
         from providers.registry import SpendingTracker
 
         assert "meta-llama/Llama-3.3-70B-Instruct-Turbo" in SpendingTracker._BUILTIN_PRICES
-        prompt_price, completion_price = SpendingTracker._BUILTIN_PRICES["meta-llama/Llama-3.3-70B-Instruct-Turbo"]
+        prompt_price, completion_price = SpendingTracker._BUILTIN_PRICES[
+            "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+        ]
         assert prompt_price > 0.0
         assert completion_price > 0.0
 
@@ -717,8 +715,9 @@ class TestTogetherSpendingTracker:
         from providers.registry import SpendingTracker
 
         tracker = SpendingTracker()
-        tracker.record_usage("together-llama-70b", 10000, 5000,
-                             model_id="meta-llama/Llama-3.3-70B-Instruct-Turbo")
+        tracker.record_usage(
+            "together-llama-70b", 10000, 5000, model_id="meta-llama/Llama-3.3-70B-Instruct-Turbo"
+        )
         assert tracker.daily_spend_usd > 0.0
 
     def test_together_deepseek_incurs_cost(self):
@@ -726,8 +725,9 @@ class TestTogetherSpendingTracker:
         from providers.registry import SpendingTracker
 
         tracker = SpendingTracker()
-        tracker.record_usage("together-deepseek-v3", 10000, 5000,
-                             model_id="deepseek-ai/DeepSeek-V3")
+        tracker.record_usage(
+            "together-deepseek-v3", 10000, 5000, model_id="deepseek-ai/DeepSeek-V3"
+        )
         assert tracker.daily_spend_usd > 0.0
 
     def test_together_not_free_model_detection(self):
@@ -966,7 +966,6 @@ class TestHealthCheckCheapTier:
     @pytest.mark.asyncio
     async def test_cheap_tier_included_in_health_check(self, tmp_path):
         """SambaNova and Together AI models are health-checked when their API keys are set."""
-        import os
 
         from providers.registry import MODELS, ProviderType
 
@@ -998,9 +997,7 @@ class TestHealthCheckCheapTier:
         sambanova_keys = {
             k for k, spec in MODELS.items() if spec.provider == ProviderType.SAMBANOVA
         }
-        together_keys = {
-            k for k, spec in MODELS.items() if spec.provider == ProviderType.TOGETHER
-        }
+        together_keys = {k for k, spec in MODELS.items() if spec.provider == ProviderType.TOGETHER}
 
         # At least one SambaNova and one Together AI model should have been checked
         assert len(sambanova_keys & checked_keys) > 0, (
@@ -1049,9 +1046,7 @@ class TestHealthCheckCheapTier:
         sambanova_keys = {
             k for k, spec in MODELS.items() if spec.provider == ProviderType.SAMBANOVA
         }
-        together_keys = {
-            k for k, spec in MODELS.items() if spec.provider == ProviderType.TOGETHER
-        }
+        together_keys = {k for k, spec in MODELS.items() if spec.provider == ProviderType.TOGETHER}
 
         assert len(sambanova_keys & checked_keys) == 0, (
             f"SambaNova models checked without API key: {sambanova_keys & checked_keys}"
