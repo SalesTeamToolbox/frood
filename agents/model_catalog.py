@@ -290,20 +290,20 @@ class ModelCatalog:
         return self._account_status
 
     def validate_primary_models(self, registry) -> dict[str, str | None]:
-        """Check whether FREE_ROUTING model IDs exist in the live catalog.
+        """Check whether FALLBACK_ROUTING model IDs exist in the live catalog.
 
         Returns ``{model_key: replacement_key_or_none}`` for models that are
         missing from the catalog.  Informational only — does NOT modify the
         registry.
         """
-        from agents.model_router import FREE_ROUTING
+        from agents.model_router import FALLBACK_ROUTING
 
         catalog_ids = {e.model_id for e in self._entries}
         if not catalog_ids:
             return {}
 
         results: dict[str, str | None] = {}
-        for _task_type, routing in FREE_ROUTING.items():
+        for _task_type, routing in FALLBACK_ROUTING.items():
             model_key = routing.get("primary", "")
             if not model_key:
                 continue

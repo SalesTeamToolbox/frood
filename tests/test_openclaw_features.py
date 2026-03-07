@@ -622,7 +622,7 @@ class TestCronStagger:
 # Extended Context Window Tests
 # ============================================================================
 
-from agents.model_router import FREE_ROUTING, ModelRouter
+from agents.model_router import FALLBACK_ROUTING, ModelRouter
 from providers.registry import ProviderRegistry
 
 
@@ -640,13 +640,16 @@ class TestExtendedContextWindow:
         # Set Cerebras key (now the CODING primary) and Gemini as fallback
         with patch.dict(
             os.environ,
-            {"CEREBRAS_API_KEY": "fake-cerebras-key", "GEMINI_API_KEY": "test-key",
-             "GEMINI_PRO_FOR_COMPLEX": "false"},
+            {
+                "CEREBRAS_API_KEY": "fake-cerebras-key",
+                "GEMINI_API_KEY": "test-key",
+                "GEMINI_PRO_FOR_COMPLEX": "false",
+            },
         ):
             router = ModelRouter()
             routing = router.get_routing(TaskType.CODING)
         # Default routing should use Cerebras as the coding primary (ROUT-01)
-        assert routing["primary"] == FREE_ROUTING[TaskType.CODING]["primary"]
+        assert routing["primary"] == FALLBACK_ROUTING[TaskType.CODING]["primary"]
 
     def test_get_routing_with_max_context_prefers_large_models(self):
         # Set Cerebras key (CODING primary), Gemini key (large-context fallback),
@@ -666,9 +669,7 @@ class TestExtendedContextWindow:
         # dict must have a primary.
         registry = ProviderRegistry()
         free_large_keys = {
-            m["key"]
-            for m in registry.models_by_min_context(500_000)
-            if m["tier"] == "free"
+            m["key"] for m in registry.models_by_min_context(500_000) if m["tier"] == "free"
         }
         if free_large_keys:
             # If free large-context models exist, one should have been selected
@@ -692,9 +693,7 @@ class TestExtendedContextWindow:
         # exists; if none do, the task-type default is used.
         registry = ProviderRegistry()
         free_large_keys = {
-            m["key"]
-            for m in registry.models_by_min_context(200_000)
-            if m["tier"] == "free"
+            m["key"] for m in registry.models_by_min_context(200_000) if m["tier"] == "free"
         }
         if free_large_keys:
             assert routing["primary"] in free_large_keys

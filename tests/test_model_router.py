@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from agents.model_router import (
     _COMPLEX_TASK_TYPES,
     _VALID_POLICIES,
-    FREE_ROUTING,
+    FALLBACK_ROUTING,
     ModelRouter,
 )
 from core.task_queue import TaskType
@@ -151,7 +151,7 @@ class TestPolicyRoutingPerformance:
 class TestGetRoutingWithPolicy:
     def test_free_only_uses_free_routing_defaults(self):
         router = ModelRouter()
-        # Provide API keys for both the FREE_ROUTING default (Cerebras) and a fallback
+        # Provide API keys for both the FALLBACK_ROUTING default (Cerebras) and a fallback
         # (Gemini) so get_routing() resolves without falling back to paid models.
         with patch.dict(
             os.environ,
@@ -165,8 +165,8 @@ class TestGetRoutingWithPolicy:
         ):
             with _patch_policy("free_only"):
                 routing = router.get_routing(TaskType.CODING)
-        # Should use FREE_ROUTING defaults — Cerebras primary for coding
-        default = FREE_ROUTING[TaskType.CODING]
+        # Should use FALLBACK_ROUTING defaults — Cerebras primary for coding
+        default = FALLBACK_ROUTING[TaskType.CODING]
         assert routing["primary"] == default["primary"]
 
     def test_admin_override_beats_policy(self):
@@ -198,41 +198,41 @@ class TestGetRoutingWithPolicy:
 # =============================================================================
 
 
-class TestFreeRoutingUpdates:
-    """ROUT-01/02/03: Verify FREE_ROUTING dict has the correct task-type entries."""
+class TestFallbackRoutingEntries:
+    """ROUT-01/02/03: Verify FALLBACK_ROUTING dict has the correct task-type entries."""
 
     def test_cerebras_primary_for_coding(self):
-        assert FREE_ROUTING[TaskType.CODING]["primary"] == "cerebras-gpt-oss-120b"
+        assert FALLBACK_ROUTING[TaskType.CODING]["primary"] == "cerebras-gpt-oss-120b"
 
     def test_cerebras_primary_for_debugging(self):
-        assert FREE_ROUTING[TaskType.DEBUGGING]["primary"] == "cerebras-gpt-oss-120b"
+        assert FALLBACK_ROUTING[TaskType.DEBUGGING]["primary"] == "cerebras-gpt-oss-120b"
 
     def test_cerebras_primary_for_app_create(self):
-        assert FREE_ROUTING[TaskType.APP_CREATE]["primary"] == "cerebras-gpt-oss-120b"
+        assert FALLBACK_ROUTING[TaskType.APP_CREATE]["primary"] == "cerebras-gpt-oss-120b"
 
     def test_codestral_critic_for_coding(self):
-        assert FREE_ROUTING[TaskType.CODING]["critic"] == "mistral-codestral"
+        assert FALLBACK_ROUTING[TaskType.CODING]["critic"] == "mistral-codestral"
 
     def test_codestral_critic_for_debugging(self):
-        assert FREE_ROUTING[TaskType.DEBUGGING]["critic"] == "mistral-codestral"
+        assert FALLBACK_ROUTING[TaskType.DEBUGGING]["critic"] == "mistral-codestral"
 
     def test_codestral_critic_for_refactoring(self):
-        assert FREE_ROUTING[TaskType.REFACTORING]["critic"] == "mistral-codestral"
+        assert FALLBACK_ROUTING[TaskType.REFACTORING]["critic"] == "mistral-codestral"
 
     def test_codestral_critic_for_app_create(self):
-        assert FREE_ROUTING[TaskType.APP_CREATE]["critic"] == "mistral-codestral"
+        assert FALLBACK_ROUTING[TaskType.APP_CREATE]["critic"] == "mistral-codestral"
 
     def test_groq_primary_for_research(self):
-        assert FREE_ROUTING[TaskType.RESEARCH]["primary"] == "groq-llama-70b"
+        assert FALLBACK_ROUTING[TaskType.RESEARCH]["primary"] == "groq-llama-70b"
 
     def test_groq_primary_for_content(self):
-        assert FREE_ROUTING[TaskType.CONTENT]["primary"] == "groq-llama-70b"
+        assert FALLBACK_ROUTING[TaskType.CONTENT]["primary"] == "groq-llama-70b"
 
     def test_groq_primary_for_strategy(self):
-        assert FREE_ROUTING[TaskType.STRATEGY]["primary"] == "groq-gpt-oss-120b"
+        assert FALLBACK_ROUTING[TaskType.STRATEGY]["primary"] == "groq-gpt-oss-120b"
 
     def test_other_types_keep_gemini(self):
-        assert FREE_ROUTING[TaskType.EMAIL]["primary"] == "gemini-2-flash"
+        assert FALLBACK_ROUTING[TaskType.EMAIL]["primary"] == "gemini-2-flash"
 
 
 class TestFallbackChainDiversity:
@@ -267,9 +267,11 @@ class TestFallbackChainDiversity:
     def test_fallback_skips_unhealthy_models(self):
         """Models marked unhealthy by catalog are skipped during fallback."""
         catalog = MagicMock()
+
         # Mark all models unhealthy except groq-llama-70b
         def is_healthy(key):
             return key == "groq-llama-70b"
+
         catalog.is_model_healthy.side_effect = is_healthy
 
         router = ModelRouter(catalog=catalog)
@@ -413,7 +415,8 @@ class TestGeminiFreeTierFlag:
 
         # Should not return any Gemini model
         if result:
-            from providers.registry import MODELS, ProviderType
+            from providers.registry import ProviderType
+
             try:
                 spec = router.registry.get_model(result)
                 assert spec.provider != ProviderType.GEMINI, (
@@ -431,7 +434,7 @@ class TestGeminiFreeTierFlag:
             openrouter_free_only=False,
         )
 
-        # EMAIL defaults to gemini-2-flash in FREE_ROUTING; with flag off, should use replacement
+        # EMAIL defaults to gemini-2-flash in FALLBACK_ROUTING; with flag off, should use replacement
         with (
             patch("core.config.settings", mock_settings),
             patch.dict(
@@ -522,7 +525,7 @@ class TestOpenrouterFreeOnlyFlag:
 
     def test_or_free_only_allows_free_suffix(self):
         """When openrouter_free_only=True, OR models WITH :free suffix are allowed."""
-        from providers.registry import MODELS, ProviderType
+        from providers.registry import ProviderType
 
         router = ModelRouter()
         mock_settings = MagicMock(
@@ -652,7 +655,7 @@ class TestMultiProviderIntegration:
             patch.dict(
                 os.environ,
                 {
-                    "CEREBRAS_API_KEY": "",   # No Cerebras key
+                    "CEREBRAS_API_KEY": "",  # No Cerebras key
                     "GROQ_API_KEY": "test-groq-key",  # Groq available as fallback
                     "GEMINI_API_KEY": "",
                     "CODESTRAL_API_KEY": "",

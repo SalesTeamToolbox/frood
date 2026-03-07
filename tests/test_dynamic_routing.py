@@ -3,7 +3,7 @@
 import json
 
 from agents.model_evaluator import ModelEvaluator
-from agents.model_router import FREE_ROUTING, ModelRouter
+from agents.model_router import FALLBACK_ROUTING, ModelRouter
 from core.task_queue import TaskType
 
 
@@ -11,15 +11,15 @@ class TestModelRouterDynamicRouting:
     """Tests for the dynamic routing layer in ModelRouter."""
 
     def test_hardcoded_fallback(self, monkeypatch):
-        """Without dynamic routing or admin override, should use FREE_ROUTING."""
-        # Set keys for both the FREE_ROUTING default (Cerebras) and Gemini fallback
+        """Without dynamic routing or admin override, should use FALLBACK_ROUTING."""
+        # Set keys for both the FALLBACK_ROUTING default (Cerebras) and Gemini fallback
         monkeypatch.setenv("CEREBRAS_API_KEY", "fake-cerebras-key")
         monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
-        # Disable auto-upgrade so we test the raw FREE_ROUTING default
+        # Disable auto-upgrade so we test the raw FALLBACK_ROUTING default
         monkeypatch.setenv("GEMINI_PRO_FOR_COMPLEX", "false")
         router = ModelRouter()
         routing = router.get_routing(TaskType.CODING)
-        assert routing["primary"] == FREE_ROUTING[TaskType.CODING]["primary"]
+        assert routing["primary"] == FALLBACK_ROUTING[TaskType.CODING]["primary"]
 
     def test_admin_override_takes_priority(self, monkeypatch):
         """Admin env vars should override everything."""
@@ -102,7 +102,7 @@ class TestModelRouterDynamicRouting:
         router = ModelRouter(routing_file=str(routing_file))
         # RESEARCH is not in the dynamic routing file
         routing = router.get_routing(TaskType.RESEARCH)
-        assert routing["primary"] == FREE_ROUTING[TaskType.RESEARCH]["primary"]
+        assert routing["primary"] == FALLBACK_ROUTING[TaskType.RESEARCH]["primary"]
 
     def test_dynamic_routing_invalid_file(self, tmp_path, monkeypatch):
         """Invalid JSON in routing file should fall back gracefully."""
@@ -115,7 +115,7 @@ class TestModelRouterDynamicRouting:
 
         router = ModelRouter(routing_file=str(routing_file))
         routing = router.get_routing(TaskType.CODING)
-        assert routing["primary"] == FREE_ROUTING[TaskType.CODING]["primary"]
+        assert routing["primary"] == FALLBACK_ROUTING[TaskType.CODING]["primary"]
 
     def test_dynamic_routing_no_file(self, tmp_path, monkeypatch):
         """Non-existent routing file should fall back to hardcoded."""
@@ -125,7 +125,7 @@ class TestModelRouterDynamicRouting:
         monkeypatch.setenv("GEMINI_PRO_FOR_COMPLEX", "false")
         router = ModelRouter(routing_file=str(tmp_path / "nonexistent.json"))
         routing = router.get_routing(TaskType.CODING)
-        assert routing["primary"] == FREE_ROUTING[TaskType.CODING]["primary"]
+        assert routing["primary"] == FALLBACK_ROUTING[TaskType.CODING]["primary"]
 
     def test_trial_injection(self, tmp_path):
         """Trial system should inject unproven models."""
@@ -174,4 +174,4 @@ class TestModelRouterDynamicRouting:
     def test_all_task_types_have_routing(self):
         """Every TaskType should have a hardcoded default routing."""
         for task_type in TaskType:
-            assert task_type in FREE_ROUTING, f"Missing routing for {task_type}"
+            assert task_type in FALLBACK_ROUTING, f"Missing routing for {task_type}"
