@@ -19,6 +19,7 @@ import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
+from jose.exceptions import ExpiredSignatureError, JOSEError
 
 from core.config import settings
 from core.device_auth import API_KEY_PREFIX, DeviceStore
@@ -128,12 +129,20 @@ def _validate_jwt(token: str) -> AuthContext:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[ALGORITHM])
         username = payload.get("sub")
         if username is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "missing_subject", "message": "Invalid token format"},
+            )
         return AuthContext(user=username, auth_type="jwt")
-    except JWTError:
+    except ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
+            detail={"code": "token_expired", "message": "Session expired. Please log in again."},
+        )
+    except JOSEError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "invalid_token", "message": "Invalid authentication. Please log in."},
         )
 
 

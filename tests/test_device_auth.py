@@ -113,6 +113,45 @@ class TestDeviceValidation:
         result = self.store.validate_api_key(raw_key)
         assert result is None
 
+    def test_legacy_sha256_hash_is_upgraded_on_validation(self):
+        """
+        Tests that a legacy SHA-256 hash is automatically upgraded to the new
+        HMAC-SHA256 hash upon successful validation, ensuring forward-compatibility.
+        """
+        # 1. Register a device to get a valid key
+        device, raw_key = self.store.register("Legacy Device", "tablet")
+        
+        # 2. Manually overwrite its hash with a legacy SHA-256 hash
+        from core.device_auth import _legacy_hash_key
+        legacy_hash = _legacy_hash_key(raw_key)
+        device.api_key_hash = legacy_hash
+        
+        # This requires reaching into the store's internal state to simulate
+        # a device that was created before the HMAC hashing was introduced.
+        self.store._devices[device.device_id] = device
+        self.store._hash_to_id = {legacy_hash: device.device_id}
+
+        # 3. Validate the key. This should trigger the upgrade logic.
+        validated_device = self.store.validate_api_key(raw_key)
+        assert validated_device is not None
+        assert validated_device.device_id == device.device_id
+
+        # 4. Verify the hash has been upgraded in the store
+        from core.device_auth import _hash_key
+        new_hmac_hash = _hash_key(raw_key)
+        upgraded_device = self.store.get(device.device_id)
+        
+        assert upgraded_device.api_key_hash == new_hmac_hash
+        assert legacy_hash != new_hmac_hash
+        assert self.store._hash_to_id.get(new_hmac_hash) == device.device_id
+        assert self.store._hash_to_id.get(legacy_hash) is None
+
+        # 5. Subsequent validation with the same key should still work
+        validated_again = self.store.validate_api_key(raw_key)
+        assert validated_again is not None
+        assert validated_again.device_id == device.device_id
+
+
 
 class TestDeviceRevocation:
     """Device API key revocation."""

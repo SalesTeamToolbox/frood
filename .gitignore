@@ -77,6 +77,10 @@ solar_dashboard/
 
 # Playwright MCP artifacts (logs, screenshots)
 .playwright-mcp/
+.playwright-cli/
+
+# UAT screenshots
+uat-*.png
 
 # Agent output / scratch files
 analysis/
@@ -96,3 +100,5 @@ MEMORY.md
 # Auto-resume ephemeral state
 .claude/handoff.json
 .claude/handoff-complete
+.claude/.jcodemunch-reindex-pending
+.claude/.jcodemunch-stats.json

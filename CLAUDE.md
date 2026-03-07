@@ -22,6 +22,30 @@ Ask yourself: *"Would this have saved me time if it was documented?"* If yes, ad
 
 ---
 
+## Codebase Navigation (jcodemunch)
+
+This project is indexed by jcodemunch MCP server (`local/agent42`, 197 files, 4700+ symbols).
+**Use jcodemunch tools before reading files** to understand structure and find the right code:
+
+| When you need to... | Use this tool |
+|----------------------|---------------|
+| Understand a module before editing | `get_file_outline` — shows all classes, functions, signatures |
+| Find where something is defined | `search_symbols` — search by name across the codebase |
+| Explore a directory's structure | `get_file_tree` with `path_prefix` (e.g., `tools/`, `core/`) |
+| Read a specific symbol's code | `get_symbol` — returns the full source of a function/class |
+| Find text patterns across files | `search_text` — grep-like search across indexed files |
+| Re-index after major changes | `index_folder` with `incremental: true` |
+
+**Workflow for feature development:**
+1. `get_file_tree` to orient — understand what exists in the relevant directory
+2. `search_symbols` to find related classes/functions across the codebase
+3. `get_file_outline` on files you plan to modify — understand the full API surface
+4. Only then `Read` the specific sections you need to change
+
+**Repo identifier:** `local/agent42` (use this as the `repo` parameter in all jcodemunch calls)
+
+---
+
 ## Automated Development Workflow
 
 This project uses automated hooks in the `.claude/` directory. These run automatically
@@ -408,6 +432,7 @@ class TestWorkspaceSandbox:
 | 113 | Init | `_register_tools()` called before `memory_store` initialized — AttributeError on startup | Move `_register_tools()` call to after MemoryStore initialization in `agent42.py` |
 | 114 | Deploy | `install-server.sh` used `--storage-path` CLI arg removed in Qdrant v1.14+; service crash-looped 37K+ times | Use `--config-path /etc/qdrant/config.yaml` + `WorkingDirectory=/var/lib/qdrant` in systemd unit; create config file with `storage.storage_path` |
 | 115 | Deploy | `.env` had `QDRANT_URL=http://qdrant:6333` (Docker hostname) on bare-metal server — Qdrant unreachable | Bare-metal deployments must use `http://localhost:6333`; Docker Compose uses `http://qdrant:6333` (service name resolves inside Docker network only) |
+| 116 | Server | `from starlette.responses import Response` at `create_app()` scope shadows `fastapi.Response` — causes `UnboundLocalError` on startup, crash-loops the service | Never import at `create_app` scope; use module-level FastAPI imports or import inside nested functions. FastAPI re-exports starlette's `Response` already. |
 
 ---
 
