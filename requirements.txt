@@ -37,6 +37,9 @@ pypdf>=3.0.0
 # Recursive Language Models (MIT CSAIL — long-context processing)
 rlms>=0.1.0
 
+# MCP (Model Context Protocol) server + client SDK
+mcp>=1.12.0
+
 # ── Optional memory backends (install as needed) ───────────────────────
 # Qdrant:    pip install qdrant-client         (vector DB for semantic search)
 # Redis:     pip install redis[hiredis]        (session cache + embedding cache)

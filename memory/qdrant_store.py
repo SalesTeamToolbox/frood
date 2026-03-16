@@ -284,9 +284,9 @@ class QdrantStore:
         query_filter = Filter(must=conditions) if conditions else None
 
         try:
-            results = self._client.search(
+            response = self._client.query_points(
                 collection_name=name,
-                query_vector=query_vector,
+                query=query_vector,
                 limit=top_k,
                 query_filter=query_filter,
             )
@@ -303,7 +303,7 @@ class QdrantStore:
                         if k not in ("text", "source", "section", "timestamp")
                     },
                 }
-                for hit in results
+                for hit in response.points
             ]
         except Exception as e:
             logger.error(f"Qdrant: search failed for '{name}': {e}")
@@ -354,6 +354,340 @@ class QdrantStore:
             return info.points_count or 0
         except Exception:
             return 0
+
+    # -- Lifecycle operations (Phase 3D) --
+
+    def update_payload(
+        self,
+        collection_suffix: str,
+        point_id: str,
+        updates: dict,
+    ) -> bool:
+        """Update payload fields on an existing point.
+
+        Used for lifecycle tracking: recall_count, last_recalled, confidence, status.
+        """
+        if not self._client:
+            return False
+
+        name = self._collection_name(collection_suffix)
+        try:
+            self._client.set_payload(
+                collection_name=name,
+                payload=updates,
+                points=[point_id],
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"Qdrant: payload update failed for '{name}': {e}")
+            return False
+
+    def record_recall(self, collection_suffix: str, point_ids: list[str]):
+        """Record that these points were recalled (returned in a search).
+
+        Increments recall_count, updates last_recalled timestamp,
+        and slightly boosts confidence.
+        """
+        if not self._client:
+            return
+
+        name = self._collection_name(collection_suffix)
+        now = time.time()
+
+        for pid in point_ids:
+            try:
+                # Retrieve current payload to increment recall_count
+                points = self._client.retrieve(
+                    collection_name=name,
+                    ids=[pid],
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                if not points:
+                    continue
+
+                payload = points[0].payload or {}
+                recall_count = payload.get("recall_count", 0) + 1
+                old_confidence = payload.get("confidence", 0.5)
+                # Boost confidence slightly on each recall (capped at 1.0)
+                new_confidence = min(1.0, old_confidence + 0.05)
+
+                self._client.set_payload(
+                    collection_name=name,
+                    payload={
+                        "recall_count": recall_count,
+                        "last_recalled": now,
+                        "confidence": round(new_confidence, 3),
+                    },
+                    points=[pid],
+                )
+            except Exception as e:
+                logger.debug(f"Qdrant: recall tracking failed for {pid}: {e}")
+
+    def set_status(
+        self,
+        collection_suffix: str,
+        point_id: str,
+        status: str,
+    ) -> bool:
+        """Set the status of a memory point ('active', 'forgotten')."""
+        return self.update_payload(collection_suffix, point_id, {"status": status})
+
+    def strengthen_point(
+        self,
+        collection_suffix: str,
+        point_id: str,
+        boost: float = 0.1,
+    ) -> bool:
+        """Explicitly strengthen a memory (user confirmed it was useful).
+
+        Boosts confidence by `boost` (capped at 1.0).
+        """
+        if not self._client:
+            return False
+
+        name = self._collection_name(collection_suffix)
+        try:
+            points = self._client.retrieve(
+                collection_name=name,
+                ids=[point_id],
+                with_payload=True,
+                with_vectors=False,
+            )
+            if not points:
+                return False
+
+            payload = points[0].payload or {}
+            old_confidence = payload.get("confidence", 0.5)
+            new_confidence = min(1.0, old_confidence + boost)
+
+            self._client.set_payload(
+                collection_name=name,
+                payload={
+                    "confidence": round(new_confidence, 3),
+                    "last_recalled": time.time(),
+                },
+                points=[point_id],
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"Qdrant: strengthen failed for {point_id}: {e}")
+            return False
+
+    def search_with_lifecycle(
+        self,
+        collection_suffix: str,
+        query_vector: list[float],
+        top_k: int = 5,
+        source_filter: str = "",
+        project_filter: str = "",
+        include_global: bool = True,
+        exclude_forgotten: bool = True,
+    ) -> list[dict]:
+        """Search with lifecycle-aware scoring.
+
+        Adjusts cosine similarity scores based on:
+        - confidence: higher confidence = higher score
+        - recall_count: frequently recalled = slight boost
+        - decay: memories not recalled in 30+ days get a penalty
+        - status: forgotten memories are excluded
+
+        Returns results with both raw and adjusted scores.
+        """
+        if not self._client:
+            return []
+
+        self._ensure_collection(collection_suffix)
+        name = self._collection_name(collection_suffix)
+
+        # Build filters
+        conditions = []
+        if source_filter:
+            conditions.append(FieldCondition(key="source", match=MatchValue(value=source_filter)))
+        if exclude_forgotten:
+            # Exclude points with status="forgotten"
+            # Note: points without a status field are treated as active
+            conditions.append(
+                FieldCondition(
+                    key="status",
+                    match=MatchValue(value="forgotten"),
+                )
+            )
+            # We want NOT forgotten, so we use must_not
+            forgotten_filter = Filter(
+                must_not=[
+                    FieldCondition(
+                        key="status",
+                        match=MatchValue(value="forgotten"),
+                    )
+                ]
+            )
+            # Merge with source filter
+            if source_filter:
+                forgotten_filter.must = [
+                    FieldCondition(key="source", match=MatchValue(value=source_filter))
+                ]
+        else:
+            forgotten_filter = None
+
+        # Project scoping
+        if project_filter and not include_global:
+            proj_condition = FieldCondition(key="project", match=MatchValue(value=project_filter))
+            if forgotten_filter:
+                forgotten_filter.must = forgotten_filter.must or []
+                forgotten_filter.must.append(proj_condition)
+            else:
+                forgotten_filter = Filter(must=[proj_condition])
+        elif project_filter and include_global:
+            # Include both project-specific and global memories
+            proj_condition = Filter(
+                should=[
+                    FieldCondition(key="project", match=MatchValue(value=project_filter)),
+                    FieldCondition(key="project", match=MatchValue(value="global")),
+                    FieldCondition(key="project", match=MatchValue(value="")),
+                ]
+            )
+            if forgotten_filter:
+                forgotten_filter.must = forgotten_filter.must or []
+                # We need to express OR for project — use a nested filter
+                # Qdrant Filter supports must + should at the same level
+                forgotten_filter.should = proj_condition.should
+            else:
+                forgotten_filter = proj_condition
+
+        query_filter = (
+            forgotten_filter
+            if forgotten_filter
+            else (Filter(must=conditions) if conditions else None)
+        )
+
+        try:
+            # Fetch more results than needed so we can re-rank
+            fetch_k = min(top_k * 3, 50)
+            response = self._client.query_points(
+                collection_name=name,
+                query=query_vector,
+                limit=fetch_k,
+                query_filter=query_filter,
+            )
+
+            now = time.time()
+            results = []
+            for hit in response.points:
+                payload = hit.payload or {}
+                raw_score = hit.score
+
+                # Lifecycle adjustments
+                confidence = payload.get("confidence", 0.5)
+                recall_count = payload.get("recall_count", 0)
+                last_recalled = payload.get("last_recalled", 0)
+
+                # Confidence weight: range [0.6, 1.1]
+                confidence_weight = 0.6 + 0.5 * confidence
+
+                # Recall boost: frequently recalled memories get a small boost
+                # max +20% for 10+ recalls
+                recall_boost = 1.0 + 0.02 * min(recall_count, 10)
+
+                # Decay penalty: memories not recalled in >30 days get penalized
+                # max -15% for very old, never-recalled memories
+                if last_recalled > 0:
+                    days_since_recall = (now - last_recalled) / 86400
+                else:
+                    # Never recalled — use creation timestamp
+                    created = payload.get("timestamp", now)
+                    days_since_recall = (now - created) / 86400
+
+                if days_since_recall > 30:
+                    decay = max(0.85, 1.0 - 0.005 * (days_since_recall - 30))
+                else:
+                    decay = 1.0
+
+                adjusted_score = raw_score * confidence_weight * recall_boost * decay
+
+                results.append(
+                    {
+                        "text": payload.get("text", ""),
+                        "source": payload.get("source", ""),
+                        "section": payload.get("section", ""),
+                        "project": payload.get("project", ""),
+                        "score": round(adjusted_score, 4),
+                        "raw_score": round(raw_score, 4),
+                        "confidence": confidence,
+                        "recall_count": recall_count,
+                        "point_id": hit.id,
+                        "metadata": {
+                            k: v
+                            for k, v in payload.items()
+                            if k
+                            not in (
+                                "text",
+                                "source",
+                                "section",
+                                "timestamp",
+                                "confidence",
+                                "recall_count",
+                                "last_recalled",
+                                "status",
+                                "project",
+                            )
+                        },
+                    }
+                )
+
+            # Re-sort by adjusted score
+            results.sort(key=lambda x: x["score"], reverse=True)
+            return results[:top_k]
+
+        except Exception as e:
+            logger.error(f"Qdrant: lifecycle search failed for '{name}': {e}")
+            return []
+
+    def find_by_text(
+        self,
+        collection_suffix: str,
+        query_vector: list[float],
+        text_substring: str,
+        top_k: int = 5,
+    ) -> list[dict]:
+        """Find points matching a text substring (for forget/correct operations).
+
+        Uses vector search + post-filter by text content.
+        """
+        if not self._client:
+            return []
+
+        self._ensure_collection(collection_suffix)
+        name = self._collection_name(collection_suffix)
+
+        try:
+            response = self._client.query_points(
+                collection_name=name,
+                query=query_vector,
+                limit=top_k * 3,  # Over-fetch for filtering
+            )
+
+            results = []
+            text_lower = text_substring.lower()
+            for hit in response.points:
+                payload = hit.payload or {}
+                hit_text = payload.get("text", "")
+                if text_lower in hit_text.lower():
+                    results.append(
+                        {
+                            "text": hit_text,
+                            "point_id": hit.id,
+                            "score": round(hit.score, 4),
+                            "collection": collection_suffix,
+                        }
+                    )
+                    if len(results) >= top_k:
+                        break
+
+            return results
+        except Exception as e:
+            logger.error(f"Qdrant: find_by_text failed: {e}")
+            return []
 
     def close(self):
         """Close the Qdrant client connection."""

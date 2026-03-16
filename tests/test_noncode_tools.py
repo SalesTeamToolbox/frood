@@ -2,45 +2,11 @@
 
 import pytest
 
-from core.task_queue import TaskType, infer_task_type
 from tools.content_analyzer import ContentAnalyzerTool
 from tools.data_tool import DataTool
 from tools.outline_tool import OutlineTool
 from tools.scoring_tool import BUILTIN_RUBRICS, ScoringTool
 from tools.template_tool import BUILTIN_TEMPLATES, TemplateTool
-
-# =============================================================================
-# Task Type Inference Tests
-# =============================================================================
-
-
-class TestTaskTypeInference:
-    """Test that new task types are correctly inferred from keywords."""
-
-    def test_design_keywords(self):
-        assert infer_task_type("Create a mockup for the login page") == TaskType.DESIGN
-        assert infer_task_type("Review the wireframe") == TaskType.DESIGN
-        assert infer_task_type("Design a new logo") == TaskType.DESIGN
-
-    def test_content_keywords(self):
-        assert infer_task_type("Write a narrative about our journey") == TaskType.CONTENT
-        assert infer_task_type("Create an article on productivity") == TaskType.CONTENT
-
-    def test_strategy_keywords(self):
-        assert infer_task_type("Do a SWOT analysis of our product") == TaskType.STRATEGY
-        assert infer_task_type("Develop a go-to-market strategy") == TaskType.STRATEGY
-
-    def test_data_analysis_keywords(self):
-        assert infer_task_type("Load the CSV and compute statistics") == TaskType.DATA_ANALYSIS
-        assert infer_task_type("Build a chart from the sales metrics") == TaskType.DATA_ANALYSIS
-
-    def test_project_management_keywords(self):
-        assert infer_task_type("Create a project plan for Q3") == TaskType.PROJECT_MANAGEMENT
-        assert infer_task_type("Set up the sprint roadmap") == TaskType.PROJECT_MANAGEMENT
-
-    def test_fallback_to_coding(self):
-        assert infer_task_type("implement the new feature") == TaskType.CODING
-
 
 # =============================================================================
 # Content Analyzer Tests

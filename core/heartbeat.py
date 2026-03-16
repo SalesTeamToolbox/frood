@@ -180,28 +180,29 @@ class HeartbeatService:
 
     def get_health(self, task_queue=None, tool_registry=None, skill_loader=None) -> SystemHealth:
         """Get a snapshot of overall system health."""
-        from core.capacity import compute_effective_capacity
+        import os
 
-        cap = compute_effective_capacity(self._configured_max_agents)
+        try:
+            load = os.getloadavg()
+        except (OSError, AttributeError):
+            load = (0.0, 0.0, 0.0)
+        cpu_cores = os.cpu_count() or 1
 
         health = SystemHealth(
             active_agents=len(self.active_agents),
             stalled_agents=len(self.stalled_agents),
             uptime_seconds=time.monotonic() - self._start_time,
-            # CPU metrics
-            cpu_load_1m=cap["cpu_load_1m"],
-            cpu_load_5m=cap["cpu_load_5m"],
-            cpu_load_15m=cap["cpu_load_15m"],
-            cpu_cores=cap["cpu_cores"],
-            load_per_core=cap["load_per_core"],
-            # System memory
-            memory_total_mb=cap["memory_total_mb"],
-            memory_available_mb=cap["memory_available_mb"],
-            # Dynamic capacity
-            effective_max_agents=cap["effective_max"],
-            configured_max_agents=cap["configured_max"],
-            capacity_auto_mode=cap.get("auto_mode", False),
-            capacity_reason=cap["reason"],
+            cpu_load_1m=load[0],
+            cpu_load_5m=load[1],
+            cpu_load_15m=load[2],
+            cpu_cores=cpu_cores,
+            load_per_core=round(load[0] / cpu_cores, 2),
+            memory_total_mb=0,
+            memory_available_mb=0,
+            effective_max_agents=self._configured_max_agents,
+            configured_max_agents=self._configured_max_agents,
+            capacity_auto_mode=False,
+            capacity_reason="MCP mode — Claude Code manages agents",
         )
 
         if task_queue:

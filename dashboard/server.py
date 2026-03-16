@@ -34,8 +34,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from core.approval_gate import ApprovalGate
 from core.config import Settings, settings
 from core.device_auth import DeviceStore
-from core.error_codes import get_http_error_response
-from core.task_queue import Task, TaskQueue, TaskStatus, TaskType
 from dashboard.auth import (
     API_KEY_PREFIX,
     AuthContext,
@@ -50,6 +48,58 @@ from dashboard.auth import (
 from dashboard.websocket_manager import WebSocketManager
 
 logger = logging.getLogger("agent42.server")
+
+# ---------------------------------------------------------------------------
+# Stubs for modules removed in the v2.0 MCP pivot
+# ---------------------------------------------------------------------------
+# These minimal stand-ins allow the server to start and return sensible
+# responses while the full v2.0 migration is completed.
+
+import enum as _enum
+
+
+class TaskStatus(_enum.Enum):
+    PENDING = "pending"
+    ASSIGNED = "assigned"
+    RUNNING = "running"
+    REVIEW = "review"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    BLOCKED = "blocked"
+    ARCHIVED = "archived"
+
+
+class TaskType(_enum.Enum):
+    CODING = "coding"
+    CONTENT = "content"
+    RESEARCH = "research"
+    EMAIL = "email"
+    MARKETING = "marketing"
+    DEBUG = "debug"
+    REVIEW = "review"
+    PLANNING = "planning"
+    PROJECT_SETUP = "project_setup"
+    APP_CREATE = "app_create"
+    APP_UPDATE = "app_update"
+
+
+def infer_task_type(text: str) -> TaskType:
+    """Keyword-based task type inference (stub)."""
+    lower = text.lower()
+    if any(k in lower for k in ("bug", "fix", "error", "debug")):
+        return TaskType.DEBUG
+    if any(k in lower for k in ("write", "blog", "article", "content")):
+        return TaskType.CONTENT
+    if any(k in lower for k in ("research", "find", "search", "look up")):
+        return TaskType.RESEARCH
+    return TaskType.CODING
+
+
+GENERAL_ASSISTANT_PROMPT = (
+    "You are Agent42, a helpful AI assistant. Answer questions accurately "
+    "and honestly. If you don't know something, say so."
+)
 
 
 async def _pip_install(packages: list[str]) -> tuple[list[str], list[str]]:
@@ -398,18 +448,14 @@ def _build_resolution_chain(store, profile: str) -> list[dict]:
         elif default_ov and default_ov.get(field):
             chain.append({"field": field, "value": default_ov[field], "source": "_default"})
         else:
-            from agents.model_router import FALLBACK_ROUTING
-
-            fb = FALLBACK_ROUTING.get(TaskType.CODING, {})
-            val = fb.get(field) or fb.get("primary", "")
-            chain.append({"field": field, "value": val, "source": "FALLBACK_ROUTING"})
+            chain.append({"field": field, "value": "", "source": "removed_in_v2"})
     return chain
 
 
 def create_app(
-    task_queue: TaskQueue,
-    ws_manager: WebSocketManager,
-    approval_gate: ApprovalGate,
+    task_queue=None,
+    ws_manager: WebSocketManager = None,
+    approval_gate: ApprovalGate | None = None,
     tool_registry=None,
     skill_loader=None,
     channel_manager=None,
@@ -437,14 +483,17 @@ def create_app(
     app.add_middleware(SecurityHeadersMiddleware)
 
     # Wire up TaskQueue -> WebSocket broadcasting for real-time updates
-    async def _broadcast_task_update(task: Task):
-        """Broadcast task status changes to all connected WebSocket clients."""
-        try:
-            await ws_manager.broadcast("task_update", task.to_dict())
-        except Exception as e:
-            logger.debug(f"WebSocket broadcast failed: {e}")
+    if task_queue is not None:
 
-    task_queue.on_update(_broadcast_task_update)
+        async def _broadcast_task_update(task):
+            """Broadcast task status changes to all connected WebSocket clients."""
+            try:
+                data = task.to_dict() if hasattr(task, "to_dict") else {"id": str(task)}
+                await ws_manager.broadcast("task_update", data)
+            except Exception as e:
+                logger.debug(f"WebSocket broadcast failed: {e}")
+
+        task_queue.on_update(_broadcast_task_update)
 
     # CORS: always enabled with secure defaults
     # If CORS_ALLOWED_ORIGINS is not configured, default to same-origin only
@@ -464,7 +513,7 @@ def create_app(
     async def unified_error_handler(request: Request, exc: HTTPException):
         """Convert HTTPException to structured {error, message, action} response."""
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-        body = get_http_error_response(exc.status_code, detail)
+        body = {"error": True, "message": detail, "status": exc.status_code}
         return JSONResponse(status_code=exc.status_code, content=body)
 
     # Apply persisted tool/skill toggle state
@@ -489,6 +538,14 @@ def create_app(
     @app.get("/api/health")
     async def health_detail(_user: str = Depends(get_current_user)):
         """Authenticated health check with detailed metrics."""
+        if task_queue is None:
+            return {
+                "status": "ok",
+                "tasks_total": 0,
+                "tasks_pending": 0,
+                "tasks_running": 0,
+                "websocket_connections": ws_manager.connection_count if ws_manager else 0,
+            }
         return {
             "status": "ok",
             "tasks_total": len(task_queue.all_tasks()),
@@ -498,7 +555,7 @@ def create_app(
             "tasks_running": sum(
                 1 for t in task_queue.all_tasks() if t.status == TaskStatus.RUNNING
             ),
-            "websocket_connections": ws_manager.connection_count,
+            "websocket_connections": ws_manager.connection_count if ws_manager else 0,
         }
 
     # -- Platform Status -------------------------------------------------------
@@ -514,9 +571,6 @@ def create_app(
             )
             return health.to_dict()
         # Fallback when heartbeat is not available
-        from core.capacity import compute_effective_capacity
-
-        cap = compute_effective_capacity(settings.max_concurrent_agents)
         tools_count = 0
         skills_count = 0
         if tool_registry:
@@ -535,15 +589,10 @@ def create_app(
             "memory_mb": 0,
             "tools_registered": tools_count,
             "skills_registered": skills_count,
-            **{
-                k: v
-                for k, v in cap.items()
-                if k not in ("configured_max", "auto_mode", "effective_max", "reason")
-            },
-            "effective_max_agents": cap["effective_max"],
-            "configured_max_agents": cap["configured_max"],
-            "capacity_auto_mode": cap.get("auto_mode", False),
-            "capacity_reason": cap["reason"],
+            "effective_max_agents": settings.max_concurrent_agents,
+            "configured_max_agents": settings.max_concurrent_agents,
+            "capacity_auto_mode": False,
+            "capacity_reason": "default",
         }
 
     # -- Setup Wizard ----------------------------------------------------------
@@ -631,30 +680,11 @@ def create_app(
                 },
             )
             await _pip_install(["qdrant-client", "redis[hiredis]"])
-            # Auto-queue a task to verify memory backend connectivity
-            setup_task = Task(
-                title="Verify enhanced memory (Qdrant + Redis)",
-                description=(
-                    "The setup wizard selected Qdrant + Redis for enhanced memory.\n\n"
-                    "If you used the production installer (deploy/install-server.sh),\n"
-                    "Redis and Qdrant are already running as system services.\n\n"
-                    "Verify connectivity:\n"
-                    "  - Qdrant: curl http://localhost:6333/healthz\n"
-                    "  - Redis:  redis-cli ping\n\n"
-                    "If running locally without the installer, start them manually:\n"
-                    "  sudo apt install redis-server\n"
-                    "  # See docs for Qdrant installation\n\n"
-                    "Restart Agent42 to pick up the new .env settings.\n\n"
-                    "The .env file has already been configured with:\n"
-                    "  QDRANT_URL=http://localhost:6333\n"
-                    "  QDRANT_ENABLED=true\n"
-                    "  REDIS_URL=redis://localhost:6379/0"
-                ),
-                task_type=TaskType.CODING,
-                priority=10,
+            # Task queue removed in v2.0 — setup verification is manual
+            logger.info(
+                "Qdrant + Redis selected during setup. Verify connectivity manually: "
+                "curl http://localhost:6333/healthz && redis-cli ping"
             )
-            await task_queue.add(setup_task)
-            setup_task_id = setup_task.id
 
         Settings.reload_from_env()
 
@@ -783,23 +813,27 @@ def create_app(
 
     # -- Tasks -----------------------------------------------------------------
 
+    def _require_task_queue():
+        if task_queue is None:
+            raise HTTPException(
+                status_code=410,
+                detail="Task queue removed in v2.0 MCP pivot. Use MCP tools instead.",
+            )
+
     @app.get("/api/tasks")
     async def list_tasks(_user: str = Depends(get_current_user)):
+        if task_queue is None:
+            return []
         return [t.to_dict() for t in task_queue.all_tasks()]
 
     @app.post("/api/tasks")
     async def create_task(req: TaskCreateRequest, auth: AuthContext = Depends(get_auth_context)):
-        task = Task(
+        _require_task_queue()
+        task = task_queue.create_task(
             title=req.title,
             description=req.description,
-            task_type=TaskType(req.task_type),
+            task_type=req.task_type,
             priority=req.priority,
-            context_window=req.context_window,
-            origin_device_id=auth.device_id,
-            project_id=req.project_id,
-            repo_id=req.repo_id,
-            branch=req.branch,
-            profile=req.profile,
         )
         await task_queue.add(task)
         _record_activity(event="task_created", title=task.title, task_id=task.id)
@@ -807,6 +841,7 @@ def create_app(
 
     @app.get("/api/tasks/{task_id}")
     async def get_task(task_id: str, _user: str = Depends(get_current_user)):
+        _require_task_queue()
         task = task_queue.get(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -814,78 +849,42 @@ def create_app(
 
     @app.post("/api/tasks/{task_id}/approve")
     async def approve_task(task_id: str, _user: str = Depends(get_current_user)):
+        _require_task_queue()
         await task_queue.approve(task_id)
         return {"status": "approved"}
 
     @app.post("/api/tasks/{task_id}/escalate")
     async def escalate_to_l2(task_id: str, _user: str = Depends(get_current_user)):
         """Escalate an L1-completed task to L2 premium review."""
-        task = task_queue.get(task_id)
-        if not task:
-            raise HTTPException(status_code=404, detail="Task not found")
-        if task.status not in (TaskStatus.REVIEW, TaskStatus.DONE):
-            raise HTTPException(
-                status_code=400,
-                detail="Only completed/review tasks can be escalated",
-            )
-        if task.tier == "L2":
-            raise HTTPException(status_code=400, detail="Task is already at L2 tier")
-
-        # Check L2 routing availability
-        from agents.model_router import ModelRouter
-
-        router = ModelRouter()
-        l2_routing = router.get_l2_routing(task.task_type)
-        if not l2_routing:
-            raise HTTPException(
-                status_code=400,
-                detail="L2 tier not available — premium API key not configured",
-            )
-
-        # Create L2 review task
-        from core.task_queue import Task as TaskModel
-
-        l2_task = TaskModel(
-            title=f"[L2 Review] {task.title}",
-            description=task.description,
-            task_type=task.task_type,
-            tier="L2",
-            l1_result=task.result or "",
-            escalated_from=task.id,
-            project_id=task.project_id,
-            origin_channel=task.origin_channel,
-            origin_channel_id=task.origin_channel_id,
-            origin_device_id=task.origin_device_id,
-            repo_id=task.repo_id,
-            branch=task.branch,
+        return JSONResponse(
+            status_code=410,
+            content={
+                "error": "Feature removed in v2.0 MCP pivot",
+                "status": "deprecated",
+                "detail": "L2 escalation is no longer available. Use MCP tools instead.",
+            },
         )
-        await task_queue.add(l2_task)
-        return {"task_id": l2_task.id, "status": "escalated"}
 
     @app.get("/api/l2/status")
     async def l2_status(_user: str = Depends(get_current_user)):
         """Check L2 tier availability for the dashboard UI."""
-        from agents.model_router import ModelRouter
-
-        router = ModelRouter()
-        available_types = []
-        for tt in TaskType:
-            if router.get_l2_routing(tt) is not None:
-                available_types.append(tt.value)
         return {
-            "l2_enabled": bool(available_types),
-            "available_task_types": available_types,
+            "l2_enabled": False,
+            "available_task_types": [],
+            "note": "L2 tier removed in v2.0 MCP pivot",
         }
 
     @app.post("/api/tasks/{task_id}/cancel")
     async def cancel_task(task_id: str, _user: str = Depends(get_current_user)):
         """Cancel a pending or running task."""
+        _require_task_queue()
         await task_queue.cancel(task_id)
         return {"status": "cancelled"}
 
     @app.post("/api/tasks/{task_id}/retry")
     async def retry_task(task_id: str, _user: str = Depends(get_current_user)):
         """Re-queue a failed task."""
+        _require_task_queue()
         task = task_queue.get(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -899,11 +898,14 @@ def create_app(
     @app.get("/api/tasks/board")
     async def get_board(_user: str = Depends(get_current_user)):
         """Get tasks grouped by status for Kanban board."""
+        if task_queue is None:
+            return {}
         return task_queue.board()
 
     @app.patch("/api/tasks/{task_id}/move")
     async def move_task(task_id: str, req: TaskMoveRequest, _user: str = Depends(get_current_user)):
         """Move task to a new status column (Kanban drag-and-drop)."""
+        _require_task_queue()
         task = task_queue.get(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -921,6 +923,7 @@ def create_app(
         broadcast ensures all connected clients (including open chat views)
         see the new comment in real time.
         """
+        _require_task_queue()
         task = task_queue.get(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -968,6 +971,7 @@ def create_app(
         task_id: str, req: TaskAssignRequest, _user: str = Depends(get_current_user)
     ):
         """Assign task to a specific agent."""
+        _require_task_queue()
         task = task_queue.get(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -982,6 +986,7 @@ def create_app(
         task_id: str, req: TaskPriorityRequest, _user: str = Depends(get_current_user)
     ):
         """Set task priority."""
+        _require_task_queue()
         task = task_queue.get(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -995,6 +1000,7 @@ def create_app(
         task_id: str, req: TaskBlockRequest, _user: str = Depends(get_current_user)
     ):
         """Mark task as blocked with reason."""
+        _require_task_queue()
         task = task_queue.get(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -1005,6 +1011,7 @@ def create_app(
     @app.patch("/api/tasks/{task_id}/unblock")
     async def unblock_task(task_id: str, _user: str = Depends(get_current_user)):
         """Remove blocked status from task."""
+        _require_task_queue()
         task = task_queue.get(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -1015,6 +1022,7 @@ def create_app(
     @app.post("/api/tasks/{task_id}/archive")
     async def archive_task(task_id: str, _user: str = Depends(get_current_user)):
         """Archive a completed task."""
+        _require_task_queue()
         task = task_queue.get(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -1035,6 +1043,7 @@ def create_app(
         The message is queued and consumed at the start of the next iteration,
         allowing real-time course correction without stopping the agent.
         """
+        _require_task_queue()
         task = task_queue.get(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -1169,9 +1178,30 @@ def create_app(
 
     # -- Agent Routing Config -------------------------------------------------
 
-    from agents.agent_routing_store import AgentRoutingStore
+    # AgentRoutingStore removed in v2.0 — use a minimal stub
+    try:
+        from agents.agent_routing_store import AgentRoutingStore
 
-    agent_routing_store = AgentRoutingStore()
+        agent_routing_store = AgentRoutingStore()
+    except ImportError:
+
+        class _StubRoutingStore:
+            def get_overrides(self, profile):
+                return None
+
+            def list_all(self):
+                return {}
+
+            def get_effective(self, profile, task_type):
+                return {}
+
+            def set_overrides(self, profile, overrides):
+                pass
+
+            def delete_overrides(self, profile):
+                return False
+
+        agent_routing_store = _StubRoutingStore()
 
     @app.get("/api/agent-routing")
     async def list_agent_routing(_user: str = Depends(get_current_user)):
@@ -1216,43 +1246,14 @@ def create_app(
         profile: str, req: AgentRoutingRequest, _user: str = Depends(require_admin)
     ):
         """Set routing overrides for a profile."""
-        import os
-
-        from providers.registry import MODELS, PROVIDERS
-
-        # Validate model keys exist and providers have API keys
-        overrides = {}
-        for field in ("primary", "critic", "fallback"):
-            val = getattr(req, field)
-            if val is not None:
-                if val not in MODELS:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Unknown model key: '{val}'. Use GET /api/available-models for valid keys.",
-                    )
-                spec = MODELS[val]
-                provider = PROVIDERS.get(spec.provider)
-                if provider and not os.getenv(provider.api_key_env, ""):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Provider '{spec.provider.value}' for model '{val}' has no API key configured.",
-                    )
-                overrides[field] = val
-
-        if not overrides:
-            raise HTTPException(
-                status_code=400,
-                detail="At least one field (primary, critic, fallback) must be set.",
-            )
-
-        store = agent_routing_store
-        store.set_overrides(profile, overrides)
-
-        return {
-            "profile": profile,
-            "overrides": store.get_overrides(profile),
-            "effective": store.get_effective(profile, TaskType.CODING),
-        }
+        return JSONResponse(
+            status_code=410,
+            content={
+                "error": "Feature removed in v2.0 MCP pivot",
+                "status": "deprecated",
+                "detail": "Model routing is no longer managed here. Use MCP tools instead.",
+            },
+        )
 
     @app.delete("/api/agent-routing/{profile}")
     async def delete_agent_routing(profile: str, _user: str = Depends(require_admin)):
@@ -1266,50 +1267,19 @@ def create_app(
 
     @app.get("/api/available-models")
     async def list_available_models(_user: str = Depends(get_current_user)):
-        """List models available for routing config, grouped by tier.
-
-        Only includes models from providers with configured API keys (CONF-05).
-        """
-        import os
-
-        from providers.registry import MODELS, PROVIDERS, ModelTier, ProviderType
-
-        result = {"l1": [], "fallback": [], "l2": []}
-        for key, spec in MODELS.items():
-            provider = PROVIDERS.get(spec.provider)
-            api_key = os.getenv(provider.api_key_env, "") if provider else ""
-            if not api_key:
-                continue  # Skip models from unconfigured providers (CONF-05)
-
-            health = "unknown"
-            if model_catalog:
-                health = "healthy" if model_catalog.is_model_healthy(key) else "unhealthy"
-
-            entry = {
-                "key": key,
-                "display_name": spec.display_name or key,
-                "provider": spec.provider.value,
-                "tier": spec.tier.value,
-                "health": health,
-            }
-
-            # Tier classification per RESEARCH.md Section 4
-            if spec.provider == ProviderType.STRONGWALL:
-                result["l1"].append(entry)
-            elif spec.tier == ModelTier.FREE:
-                result["fallback"].append(entry)
-            else:  # CHEAP or PREMIUM
-                result["l2"].append(entry)
-
-        return result
+        """List models available for routing config, grouped by tier."""
+        return {
+            "l1": [],
+            "fallback": [],
+            "l2": [],
+            "note": "Provider registry removed in v2.0 MCP pivot",
+        }
 
     # -- Chat Persona ---------------------------------------------------------
 
     @app.get("/api/persona")
     async def get_persona(_user: str = Depends(get_current_user)):
         """Get the current chat persona prompt (custom and default)."""
-        from agents.agent import GENERAL_ASSISTANT_PROMPT
-
         return {
             "custom_prompt": _load_persona(),
             "default_prompt": GENERAL_ASSISTANT_PROMPT,
@@ -1353,34 +1323,39 @@ def create_app(
     @app.get("/api/stats/tokens")
     async def get_token_stats(_user: str = Depends(get_current_user)):
         """Get aggregate token usage across all tasks."""
-        from providers.registry import spending_tracker
-
         total_tokens = 0
         total_prompt = 0
         total_completion = 0
         by_model: dict = {}
 
-        for task in task_queue.all_tasks():
-            usage = task.token_usage
-            if not usage or not isinstance(usage, dict):
-                continue
-            total_tokens += usage.get("total_tokens", 0)
-            total_prompt += usage.get("total_prompt_tokens", 0)
-            total_completion += usage.get("total_completion_tokens", 0)
-            for model_key, model_data in usage.get("by_model", {}).items():
-                if model_key not in by_model:
-                    by_model[model_key] = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
-                by_model[model_key]["prompt_tokens"] += model_data.get("prompt_tokens", 0)
-                by_model[model_key]["completion_tokens"] += model_data.get("completion_tokens", 0)
-                by_model[model_key]["calls"] += model_data.get("calls", 0)
+        if task_queue is not None:
+            for task in task_queue.all_tasks():
+                usage = task.token_usage
+                if not usage or not isinstance(usage, dict):
+                    continue
+                total_tokens += usage.get("total_tokens", 0)
+                total_prompt += usage.get("total_prompt_tokens", 0)
+                total_completion += usage.get("total_completion_tokens", 0)
+                for model_key, model_data in usage.get("by_model", {}).items():
+                    if model_key not in by_model:
+                        by_model[model_key] = {
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "calls": 0,
+                        }
+                    by_model[model_key]["prompt_tokens"] += model_data.get("prompt_tokens", 0)
+                    by_model[model_key]["completion_tokens"] += model_data.get(
+                        "completion_tokens", 0
+                    )
+                    by_model[model_key]["calls"] += model_data.get("calls", 0)
 
         return {
             "total_tokens": total_tokens,
             "total_prompt_tokens": total_prompt,
             "total_completion_tokens": total_completion,
             "by_model": by_model,
-            "daily_spend_usd": spending_tracker.daily_spend_usd,
-            "daily_tokens": spending_tracker.daily_tokens,
+            "daily_spend_usd": 0.0,
+            "daily_tokens": 0,
         }
 
     # -- Reports (admin analytics) -------------------------------------------
@@ -1416,9 +1391,18 @@ def create_app(
             }
 
     async def _build_reports():
-        from providers.registry import spending_tracker
+        # spending_tracker removed in v2.0 — use a minimal stub
+        class _StubTracker:
+            daily_spend_usd = 0.0
+            daily_tokens = 0
+            _model_prices = {}
 
-        all_tasks = task_queue.all_tasks()
+            def get_flat_rate_daily(self):
+                return {}
+
+        spending_tracker = _StubTracker()
+
+        all_tasks = task_queue.all_tasks() if task_queue is not None else []
 
         # -- LLM usage (per-model token breakdown) --
         model_agg: dict[str, dict] = {}
@@ -1638,6 +1622,7 @@ def create_app(
         task_id: str, req: ReviewFeedback, _user: str = Depends(get_current_user)
     ):
         """Submit human reviewer feedback — the agent learns from this."""
+        _require_task_queue()
         task = task_queue.get(task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
@@ -1729,12 +1714,10 @@ def create_app(
 
     @app.get("/api/providers")
     async def list_providers(_user: str = Depends(get_current_user)):
-        from providers.registry import ProviderRegistry
-
-        registry = ProviderRegistry()
         return {
-            "providers": registry.available_providers(),
-            "models": registry.available_models(),
+            "providers": [],
+            "models": [],
+            "note": "Provider registry removed in v2.0 MCP pivot",
         }
 
     # -- Tools (Phase 4) ------------------------------------------------------
@@ -1892,26 +1875,26 @@ def create_app(
         """Return OpenRouter account status and routing policy info."""
         import os
 
-        from providers.registry import MODELS
-
         policy = os.getenv("MODEL_ROUTING_POLICY", "balanced")
-        account = model_catalog.openrouter_account_status if model_catalog else None
-        if account is None and model_catalog and os.getenv("OPENROUTER_API_KEY"):
-            account = await model_catalog.check_account(api_key=os.getenv("OPENROUTER_API_KEY", ""))
-        paid_count = len([k for k in MODELS if k.startswith("or-paid-")]) if model_catalog else 0
-        return {"policy": policy, "account": account, "paid_models_registered": paid_count}
+        account = None
+        if model_catalog:
+            account = getattr(model_catalog, "openrouter_account_status", None)
+            if account is None and os.getenv("OPENROUTER_API_KEY"):
+                try:
+                    account = await model_catalog.check_account(
+                        api_key=os.getenv("OPENROUTER_API_KEY", "")
+                    )
+                except Exception:
+                    pass
+        return {"policy": policy, "account": account, "paid_models_registered": 0}
 
     @app.get("/api/models/health")
     async def get_model_health(_: AuthContext = Depends(require_admin)):
         """Return model health check results, provider health, and summary."""
-        from providers.registry import provider_health_checker
-
         result: dict = {"summary": {}, "models": {}, "providers": {}}
         if model_catalog:
             result["summary"] = model_catalog.get_health_summary()
             result["models"] = model_catalog.health_status
-        # Add provider-level health (StrongWall endpoint probe)
-        result["providers"] = provider_health_checker.get_status()
         return result
 
     @app.post("/api/models/health-check")
@@ -1928,13 +1911,7 @@ def create_app(
     @app.get("/api/settings/rlm-status")
     async def get_rlm_status(_: AuthContext = Depends(require_admin)):
         """Return RLM (Recursive Language Model) status and configuration."""
-        try:
-            from providers.rlm_provider import RLMProvider
-
-            provider = RLMProvider()
-            return provider.get_status()
-        except Exception as e:
-            return {"enabled": False, "error": str(e)}
+        return {"enabled": False, "note": "RLM provider removed in v2.0 MCP pivot"}
 
     @app.get("/api/settings/storage")
     async def get_storage_status(_admin: AuthContext = Depends(require_admin)):
@@ -2118,9 +2095,13 @@ def create_app(
         await ws_manager.broadcast("chat_message", user_msg)
 
         # Route to active task if one exists for dashboard chat
-        _existing = task_queue.find_active_task(
-            origin_channel="dashboard_chat",
-            origin_channel_id="chat",
+        _existing = (
+            task_queue.find_active_task(
+                origin_channel="dashboard_chat",
+                origin_channel_id="chat",
+            )
+            if task_queue is not None
+            else None
         )
         if _existing:
             await task_queue.route_message_to_task(
@@ -2143,63 +2124,9 @@ def create_app(
             classification = await intent_classifier.classify(text, conversation_history=history)
             task_type = classification.task_type
         else:
-            from core.task_queue import infer_task_type
-
             task_type = infer_task_type(text)
 
-        # Conversational mode: respond directly without creating a task
-        if classification and classification.is_conversational and settings.conversational_enabled:
-            try:
-                from agents.agent import GENERAL_ASSISTANT_PROMPT
-                from agents.model_router import ModelRouter
-
-                _conv_router = ModelRouter()
-                _conv_model = settings.conversational_model
-                if not _conv_model:
-                    _conv_routing = _conv_router.get_routing(TaskType.EMAIL)
-                    _conv_model = _conv_routing["primary"]
-
-                _custom = _load_persona()
-                _conv_system = _custom or GENERAL_ASSISTANT_PROMPT
-
-                # Load memory context for conversational awareness
-                from memory.store import build_conversational_memory_context
-
-                _mem_context = await build_conversational_memory_context(memory_store, text)
-                if _mem_context and _mem_context.strip():
-                    _conv_system += "\n\n" + _mem_context
-
-                _conv_messages = [{"role": "system", "content": _conv_system}]
-                for h in history[-10:]:
-                    _conv_messages.append(h)
-                _conv_messages.append({"role": "user", "content": text})
-
-                _conv_text, _ = await asyncio.wait_for(
-                    _conv_router.complete(_conv_model, _conv_messages),
-                    timeout=30.0,
-                )
-                if _conv_text:
-                    _reply_msg = {
-                        "id": _uuid.uuid4().hex[:12],
-                        "role": "assistant",
-                        "content": _conv_text,
-                        "timestamp": _time.time(),
-                        "sender": "Agent42",
-                    }
-                    _chat_messages.append(_reply_msg)
-                    await ws_manager.broadcast("chat_message", _reply_msg)
-
-                    # Persist to chat session if available
-                    if req.session_id and chat_session_manager:
-                        await chat_session_manager.add_message(req.session_id, user_msg)
-                        await chat_session_manager.add_message(req.session_id, _reply_msg)
-
-                    return {"status": "ok", "message": user_msg, "reply": _reply_msg}
-            except Exception as _conv_err:
-                logger.warning(
-                    "Dashboard conversational response failed, falling back to task: %s",
-                    _conv_err,
-                )
+        # Conversational mode removed in v2.0 MCP pivot (ModelRouter deleted)
 
         # No active task — create new one.
         # Include recent conversation context so the agent is aware of prior
@@ -2233,17 +2160,18 @@ def create_app(
                 f"The team's Manager will coordinate the roles automatically."
             )
 
-        task = Task(
+        if task_queue is None:
+            return {
+                "status": "error",
+                "message": user_msg,
+                "error": "Task queue not available (removed in v2.0 MCP pivot)",
+            }
+
+        task = task_queue.create_task(
             title=text[:120] + ("..." if len(text) > 120 else ""),
             description=task_description,
-            task_type=task_type,
+            task_type=task_type.value if hasattr(task_type, "value") else str(task_type),
             priority=1,
-            origin_channel="dashboard_chat",
-            origin_channel_id="chat",
-            origin_metadata={
-                "chat_msg_id": msg_id,
-                **({"chat_session_id": req.session_id} if req.session_id else {}),
-            },
         )
 
         # Smart project creation: only create a project when the classifier
@@ -2459,7 +2387,11 @@ def create_app(
                 await ws_manager.broadcast("session_update", session.to_dict())
 
             # For ALL session types, route to active task if one exists
-            _existing = task_queue.find_active_task(session_id=session_id)
+            _existing = (
+                task_queue.find_active_task(session_id=session_id)
+                if task_queue is not None
+                else None
+            )
             if _existing:
                 await task_queue.route_message_to_task(
                     _existing,
@@ -2475,8 +2407,6 @@ def create_app(
                 }
 
             # Classify intent — use LLM classifier when available
-            from core.task_queue import TaskType, infer_task_type
-
             classification = None
             _sess_history = []
             try:
@@ -2497,62 +2427,7 @@ def create_app(
             else:
                 task_type = infer_task_type(text)
 
-            # Conversational mode: respond directly without creating a task
-            if (
-                classification
-                and classification.is_conversational
-                and settings.conversational_enabled
-            ):
-                try:
-                    from agents.agent import GENERAL_ASSISTANT_PROMPT
-                    from agents.model_router import ModelRouter
-
-                    _sess_router = ModelRouter()
-                    _sess_model = settings.conversational_model
-                    if not _sess_model:
-                        _sess_routing = _sess_router.get_routing(TaskType.EMAIL)
-                        _sess_model = _sess_routing["primary"]
-
-                    _custom = _load_persona()
-                    _sess_system = _custom or GENERAL_ASSISTANT_PROMPT
-
-                    # Load memory context for conversational awareness
-                    from memory.store import build_conversational_memory_context
-
-                    _sess_mem = await build_conversational_memory_context(memory_store, text)
-                    if _sess_mem and _sess_mem.strip():
-                        _sess_system += "\n\n" + _sess_mem
-
-                    _sess_messages = [{"role": "system", "content": _sess_system}]
-                    for h in _sess_history[-10:]:
-                        _sess_messages.append(h)
-                    _sess_messages.append({"role": "user", "content": text})
-
-                    _sess_text, _ = await asyncio.wait_for(
-                        _sess_router.complete(_sess_model, _sess_messages),
-                        timeout=30.0,
-                    )
-                    if _sess_text:
-                        _sess_reply = {
-                            "id": _uuid.uuid4().hex[:12],
-                            "role": "assistant",
-                            "content": _sess_text,
-                            "timestamp": _time.time(),
-                            "sender": "Agent42",
-                            "session_id": session_id,
-                        }
-                        await chat_session_manager.add_message(session_id, _sess_reply)
-                        await ws_manager.broadcast("chat_message", _sess_reply)
-                        return {
-                            "status": "ok",
-                            "message": user_msg,
-                            "reply": _sess_reply,
-                        }
-                except Exception as _sess_conv_err:
-                    logger.warning(
-                        "Session conversational response failed, falling back to task: %s",
-                        _sess_conv_err,
-                    )
+            # Conversational mode removed in v2.0 MCP pivot (ModelRouter deleted)
 
             # Detect explicit "create a project" intent from the code page and route
             # it through the project interview flow (PROJECT_SETUP task type).
@@ -2607,18 +2482,18 @@ def create_app(
                     if _app_obj and _app_obj.path:
                         _app_path = _app_obj.path
 
-            task = Task(
+            if task_queue is None:
+                return {
+                    "status": "error",
+                    "message": user_msg,
+                    "error": "Task queue not available (removed in v2.0 MCP pivot)",
+                }
+
+            task = task_queue.create_task(
                 title=text[:120] + ("..." if len(text) > 120 else ""),
                 description=text,
-                task_type=task_type,
+                task_type=task_type.value if hasattr(task_type, "value") else str(task_type),
                 priority=1,
-                origin_channel="dashboard_chat",
-                origin_channel_id="chat",
-                origin_metadata={
-                    "chat_msg_id": msg_id,
-                    "chat_session_id": session_id,
-                    **({"app_path": _app_path} if _app_path else {}),
-                },
             )
             # Link to project if session has one
             if session.project_id:
@@ -2887,15 +2762,16 @@ def create_app(
             if not project:
                 raise HTTPException(status_code=404, detail="Project not found")
 
-            task = Task(
+            _require_task_queue()
+            _tt = req.task_type.upper()
+            _tt_val = _tt.lower() if _tt in TaskType.__members__ else "coding"
+            task = task_queue.create_task(
                 title=req.title,
                 description=req.description,
-                task_type=TaskType[req.task_type.upper()]
-                if req.task_type.upper() in TaskType.__members__
-                else TaskType.CODING,
+                task_type=_tt_val,
                 priority=req.priority,
-                project_id=project_id,
             )
+            task.project_id = project_id
             await task_queue.add(task)
             await ws_manager.broadcast("task_update", task.to_dict())
             _record_activity(event="task_created", title=task.title, task_id=task.id)
@@ -3228,7 +3104,8 @@ def create_app(
                 git_enabled=req.git_enabled,
             )
             # Create a build task for the app
-            task = Task(
+            _require_task_queue()
+            task = task_queue.create_task(
                 title=f"Build App: {req.name}",
                 description=(
                     f"Build a complete web application:\n\n"
@@ -3241,7 +3118,7 @@ def create_app(
                     f"Write all source files to the app path. "
                     f"When done, mark the app as ready and start it."
                 ),
-                task_type=TaskType.APP_CREATE,
+                task_type="app_create",
                 priority=1,
             )
             await task_queue.add(task)
@@ -3317,7 +3194,8 @@ def create_app(
             if not found:
                 raise HTTPException(status_code=404, detail="App not found")
 
-            task = Task(
+            _require_task_queue()
+            task = task_queue.create_task(
                 title=f"Update App: {found.name}",
                 description=(
                     f"Update the existing application:\n\n"
@@ -3328,7 +3206,7 @@ def create_app(
                     f"Read the existing app files first. Make targeted changes. "
                     f"Restart the app when done."
                 ),
-                task_type=TaskType.APP_UPDATE,
+                task_type="app_update",
                 priority=1,
             )
             await task_queue.add(task)
