@@ -91,11 +91,15 @@ class Agent42:
         self.ws_manager = WebSocketManager()
         self.heartbeat = HeartbeatService()
         self.cron_scheduler = CronScheduler()
-        self.device_store = DeviceStore()
+        self.device_store = DeviceStore(data_dir / "devices.json")
         init_device_store(self.device_store)
         self.repo_manager = RepositoryManager(data_dir / "repos")
         self.session_manager = SessionManager(str(data_dir / "sessions"))
-        self.skill_loader = SkillLoader()
+        skill_dirs = [
+            Path(__file__).parent / "skills" / "builtin",
+            Path(__file__).parent / "skills" / "workspace",
+        ]
+        self.skill_loader = SkillLoader([d for d in skill_dirs if d.exists()])
 
         # ── Tool registry (for dashboard visibility) ─────────────────────
         self.tool_registry = ToolRegistry(rate_limiter=ToolRateLimiter())
@@ -125,8 +129,7 @@ class Agent42:
 
         # ── Security scanner ─────────────────────────────────────────────
         self.security_scanner = ScheduledSecurityScanner(
-            workspace=str(workspace),
-            interval=settings.security_scan_interval,
+            workspace_path=str(workspace),
         )
 
         # ── Custom tools (plugins) ───────────────────────────────────────
