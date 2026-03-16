@@ -1707,3 +1707,60 @@ body.towel-day .dont-panic-watermark {
   font-size: 0.78rem;
   white-space: nowrap;
 }
+
+/* ── IDE Layout ──────────────────────────────────────────────────────── */
+.ide-layout { display: flex !important; height: 100% !important; overflow: hidden !important; }
+.ide-layout-parent { overflow: hidden !important; height: calc(100vh - 48px) !important; padding: 0 !important; }
+.ide-sidebar { width: 260px; min-width: 200px; background: var(--bg-secondary);
+  border-right: 1px solid var(--border); display: flex; flex-direction: column;
+  overflow: hidden; }
+.ide-sidebar-header { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); }
+.ide-sidebar-header button { background: none; border: none; color: var(--text-secondary);
+  cursor: pointer; font-size: 0.85rem; padding: 0.15rem 0.4rem; border-radius: 3px; }
+.ide-sidebar-header button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.ide-file-tree { flex: 1; overflow-y: auto; padding: 0.25rem 0; font-size: 0.82rem; }
+.ide-tree-item { display: flex; align-items: center; padding: 0.2rem 0.5rem;
+  cursor: pointer; color: var(--text-secondary); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.ide-tree-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.ide-tree-item.active { background: var(--primary-dim); color: var(--primary); }
+.ide-tree-item .icon { width: 16px; margin-right: 4px; text-align: center; font-size: 0.75rem; }
+.ide-tree-dir { font-weight: 500; }
+.ide-tree-file { }
+.ide-tree-indent { display: inline-block; width: 16px; }
+.ide-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.ide-tabs { display: flex; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+  overflow-x: auto; min-height: 35px; }
+.ide-tab { padding: 0.4rem 0.75rem; font-size: 0.8rem; cursor: pointer;
+  border-right: 1px solid var(--border); display: flex; align-items: center;
+  gap: 0.5rem; color: var(--text-secondary); white-space: nowrap; }
+.ide-tab:hover { background: var(--bg-hover); }
+.ide-tab.active { background: var(--bg-primary); color: var(--text-primary);
+  border-bottom: 2px solid var(--primary); }
+.ide-tab .close { font-size: 0.7rem; opacity: 0.5; padding: 0 2px; }
+.ide-tab .close:hover { opacity: 1; color: var(--danger); }
+.ide-tab .modified { color: var(--warning); font-size: 0.6rem; }
+.ide-editor-container { flex: 1; overflow: hidden; }
+.ide-statusbar { display: flex; justify-content: space-between; padding: 0.2rem 0.75rem;
+  background: var(--primary); color: #fff; font-size: 0.72rem; }
+.ide-statusbar-right { display: flex; gap: 1rem; }
+.ide-search-bar { padding: 0.5rem; border-bottom: 1px solid var(--border); }
+.ide-search-bar input { width: 100%; padding: 0.35rem 0.5rem; background: var(--bg-primary);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary);
+  font-size: 0.8rem; }
+.ide-search-results { max-height: 200px; overflow-y: auto; padding: 0.25rem; font-size: 0.78rem; }
+.ide-search-result { padding: 0.2rem 0.5rem; cursor: pointer; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-dim, rgba(255,255,255,0.05)); }
+.ide-search-result:hover { background: var(--bg-hover); }
+.ide-search-result .file { color: var(--primary); }
+.ide-search-result .line-num { color: var(--warning); margin: 0 0.3rem; }
+.ide-welcome { display: flex; flex-direction: column; align-items: center;
+  justify-content: center; height: 100%; color: var(--text-secondary); }
+.ide-welcome h2 { margin-bottom: 0.5rem; color: var(--text-primary); }
+.ide-welcome p { max-width: 400px; text-align: center; line-height: 1.5; }
+.ide-node-select { display: flex; gap: 0.5rem; align-items: center; }
+.ide-node-select select { background: var(--bg-primary); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.2rem 0.4rem;
+  font-size: 0.75rem; }
