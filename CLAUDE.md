@@ -246,9 +246,6 @@ task_types: [coding, debugging]
 Instructions for the agent when this skill is active...
 ```
 
-**Providers:** Add `ProviderSpec` to `PROVIDERS` dict and `ModelSpec` entries to `MODELS`
-dict in `providers/registry.py`.
-
 ### Graceful Degradation
 
 Redis, Qdrant, channels, and MCP servers are all optional. Code **must** handle their
@@ -266,26 +263,16 @@ else:
 from memory.redis_session import RedisSessionStore
 ```
 
-### Dynamic Model Routing (5-Layer)
+### MCP Architecture (v2.0)
 
-Model selection in `model_router.py` uses a 5-layer resolution chain:
+Claude Code provides the intelligence layer (LLM, orchestration). Agent42 provides
+the tooling layer via MCP:
 
-1. **Admin override** — `AGENT42_{TYPE}_MODEL` env vars (highest priority)
-2. **Dynamic routing** — `data/dynamic_routing.json` written by `ModelEvaluator` based on outcome data
-3. **Trial injection** — Unproven models randomly assigned (`MODEL_TRIAL_PERCENTAGE`, default 10%)
-4. **Policy routing** — `balanced`/`performance` mode upgrades to paid models when OR credits available
-5. **Hardcoded defaults** — `FREE_ROUTING` dict: Gemini Flash primary, OR free models as critic/fallback
-
-**Default model strategy:** Gemini 2.5 Flash is the base LLM (generous free tier: 500 RPM).
-OpenRouter free models serve as critic / secondary to distribute across providers.
-`get_routing()` auto-falls back to OR free models if `GEMINI_API_KEY` is not set.
-Admin can set `AGENT42_CODING_MODEL=claude-opus-4-6` (etc.) for premium models on specific tasks.
-
-**Never hardcode premium models as defaults.** The dynamic system self-improves:
-- `ModelCatalog` syncs free models from OpenRouter API (default every 24h)
-- `ModelEvaluator` tracks success rate, iteration efficiency, and critic scores per model
-- `ModelResearcher` fetches benchmark scores from LMSys Arena, HuggingFace, Artificial Analysis
-- Composite score: `0.4*success_rate + 0.3*iteration_efficiency + 0.2*critic_avg + 0.1*research_score`
+- **MCP Server** (`mcp_server.py`) — 36+ tools exposed via stdio transport
+- **Memory** — ONNX embeddings + Qdrant for semantic search (~25 MB RAM)
+- **Associative Recall** — Hook auto-surfaces relevant memories on every prompt
+- **Context Assembler** — `agent42_context` tool pulls from memory, docs, git, skills
+- **Dashboard** — FastAPI web UI for monitoring and configuration
 
 ### Security Layers (Defense in Depth)
 

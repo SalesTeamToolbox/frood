@@ -5,1596 +5,490 @@
 </p>
 
 <p align="center">
-  <strong>Don't Panic.</strong> The answer to life, the universe, and all your tasks.
+  <strong>Don't Panic.</strong> Your towel for Claude Code.
 </p>
+
+<p align="center">
+  <a href="#quick-start-dont-panic">Quick Start</a> |
+  <a href="#mcp-tools-the-guide-entries">Tools</a> |
+  <a href="#the-memory-of-a-dolphin-but-better">Memory</a> |
+  <a href="#dashboard-the-heart-of-gold-control-room">Dashboard</a> |
+  <a href="https://github.com/SalesTeamToolbox/agent42">GitHub</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-2.0.0--alpha-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-1185%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tools-36+-orange" alt="Tools">
+  <img src="https://img.shields.io/badge/skills-57-purple" alt="Skills">
+  <img src="https://img.shields.io/badge/answer-42-yellow" alt="42">
+  <img src="https://img.shields.io/badge/license-BSL--1.1-lightgrey" alt="License">
+</p>
+
+---
 
 > *"The Guide says there is an art to flying, or rather a knack.
 > The knack lies in learning how to throw yourself at the ground and miss."*
-> — The same applies to multi-agent orchestration.
+> -- The same applies to extending Claude Code.
 
-A multi-agent orchestrator platform. Free models handle the iterative work;
-Claude Code (or human review) gates the final output before anything ships.
+Agent42 is an **MCP (Model Context Protocol) server ecosystem** that extends Claude Code
+with 36+ tools, 57 skills, associative memory, and a management dashboard. Claude Code
+provides the intelligence; Agent42 provides the arms and legs.
 
-Not just for coding — Agent42 handles marketing, design, content creation,
-strategy, data analysis, project management, media generation, and any task
-you throw at it. Spin up teams of agents to collaborate, critique, and iterate.
+## What Is Agent42?
 
-## Architecture
+- **MCP tools for Claude Code** -- filesystem, shell, git, web, code intelligence,
+  Docker, security analysis, and more. All accessible through the standard MCP protocol.
+- **Associative memory** -- ONNX embeddings with Qdrant vector search. Memories are
+  stored, recalled semantically, and auto-surfaced before Claude even starts thinking.
+- **Dashboard** -- FastAPI web UI for monitoring MCP servers, browsing memory, managing
+  tools and skills, and configuring the system.
+- **8-layer security** -- sandbox, command filter, approval gate, rate limiter, URL policy,
+  browser gateway token, spending tracker, and login rate limiting. Because the answer to
+  "should we secure this?" is always 42... er, yes.
+
+## Architecture (The Whole Sort of General Mish Mash)
 
 ```
-Inbound Channel  ->  Task Queue  ->  Agent Loop  ->  Critic Pass  ->  REVIEW.md  ->  You + Claude Code  ->  Ship
-(Slack/Discord/     (priority +      (free LLMs     (independent     (diff, logs,    (human approval       (Don't
- Telegram/Email/     concurrency)     via OpenRouter) second opinion)  critic notes)   gate)                Panic)
- Dashboard/CLI)
-(Infinite            (The Answer      (Mostly         (Towel           (The only human                      (🚀)
- Improbability        Engine)          Harmless)       Included)        in the loop)
- Queue)
+Claude Code (Pro/Max)  <-- MCP Protocol -->  Agent42 MCP Server
+                                              |-- 36+ Tools (filesystem, git, shell, web, ...)
+                                              |-- 57 Skills (MCP Prompts)
+                                              |-- Memory (Qdrant + ONNX embeddings)
+                                              |-- Security Layers (sandbox, filter, gate, ...)
+                                              '-- Dashboard (FastAPI @ localhost:8000)
 ```
 
-**Free-first strategy** — all agent work defaults to $0 models via Gemini + OpenRouter:
+**How it works:** Claude Code connects to Agent42 via `.mcp.json`. Agent42's tools appear
+alongside Claude Code's built-in tools. When Claude needs to search the web, analyze
+security, manage Docker containers, or recall something from three weeks ago, it calls
+an Agent42 tool. Agent42 does NOT call LLMs -- Claude Code (your Pro/Max subscription)
+is the brain.
 
-- **Coding/Debugging**: Gemini 2.5 Flash (primary) + Qwen3 Coder 480B (critic)
-- **Research/Strategy/Design**: Gemini 2.5 Flash (primary) + Llama 3.3 70B (critic)
-- **Content/Docs/Planning**: Gemini 2.5 Flash (primary) + Gemma 3 27B (critic)
-- **App Building**: Gemini 2.5 Flash (primary) + Qwen3 Coder 480B (critic, 12 iterations)
-- **Complex Tasks with Gemini Pro**: Opt-in upgrade for coding, debugging, app creation, refactoring, strategy, and data analysis (`GEMINI_PRO_FOR_COMPLEX=true`)
-- **Smart Critic Fallback**: When OpenRouter critics are rate-limited, critics automatically upgrade to Gemini Flash — no wasted retries
-- **Image/Video**: FLUX (free), DALL-E 3, Replicate, Luma (premium)
-- **L2 Premium Review**: Claude Sonnet / GPT-4o for escalated tasks (optional)
-- **Review gate**: Human + Claude Code final review before anything ships
-- **Zero API cost**: One free Gemini API key + one free OpenRouter key covers all 15 task types
-
-Premium models (GPT-4o, Claude Sonnet, Gemini Pro) available via the [L1/L2 Tier System](#l1l2-tier-system)
-or admin overrides — see [Model Routing](#model-routing).
+```
+                  .--- memory-recall hook (auto-surfaces relevant memories)
+                 |
+User Prompt --> Claude Code --> agent42_shell("git log")
+                            --> agent42_memory("recall", "deployment notes")
+                            --> agent42_context(signals=["memory", "git"])
+                            --> agent42_security_analyze(path="src/auth.py")
+                            --> Response (informed by tools + memory + context)
+```
 
 ## Quick Start (Don't Panic)
 
 ### Prerequisites
 
-Before you begin, verify these are installed:
+- Python 3.11+
+- [Claude Code](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code) VS Code extension (Pro or Max subscription)
+- Git
 
-| Requirement | Minimum Version | Check Command |
-|---|---|---|
-| Python | 3.11+ | `python3 --version` |
-| Node.js | 18+ (auto-installed if missing) | `node --version` |
-| git | any | `git --version` |
-
-**Ubuntu/Debian:** `sudo apt update && sudo apt install python3 python3-venv nodejs npm git`
-**macOS:** `brew install python node git`
-
-### Installation
-
-#### 1. Clone the repository
+### Setup
 
 ```bash
-git clone <this-repo> agent42
+# Clone
+git clone https://github.com/SalesTeamToolbox/agent42.git
 cd agent42
+
+# Create virtual environment and install
+python -m venv .venv
+source .venv/bin/activate        # Linux/macOS
+# .venv\Scripts\activate         # Windows
+
+pip install -r requirements.txt
+
+# Optional: vector memory backend
+pip install qdrant-client        # Semantic search (recommended)
+pip install redis[hiredis]       # Session caching
 ```
 
-#### 2. Run the setup script
+### Connect to Claude Code
+
+Create `.mcp.json` in your project root (or copy `.mcp.json.example`):
+
+```json
+{
+  "mcpServers": {
+    "agent42": {
+      "command": "python",
+      "args": ["/path/to/agent42/mcp_server.py"],
+      "env": {
+        "AGENT42_WORKSPACE": "${workspaceFolder}"
+      }
+    }
+  }
+}
+```
+
+That's it. Restart Claude Code and Agent42's 36+ tools appear alongside the built-in
+ones. You now have a towel.
+
+### Start the Dashboard (Optional)
 
 ```bash
-bash setup.sh
+python agent42.py
+# Dashboard at http://localhost:8000
 ```
 
-This script automatically:
-- Verifies Python 3.11+ is installed
-- Installs Node.js 20 via nvm if not already present
-- Creates a Python virtual environment in `.venv/`
-- Installs all Python dependencies from `requirements.txt`
-- Copies `.env.example` to `.env` (if `.env` doesn't exist yet)
-- Builds the dashboard frontend (if `dashboard/frontend/package.json` exists)
-- Generates a systemd service file at `/tmp/agent42.service` for optional background running
+## MCP Tools (The Guide Entries)
 
-#### 3. Prepare your git repository
+All tools are prefixed with `agent42_` in Claude Code. 36 tools across 8 categories:
 
-Agent42 uses git worktrees to give each agent an isolated copy of your codebase.
-Your target repository **must** have a `dev` branch:
+### Filesystem
+
+| Tool | Description |
+|------|-------------|
+| `agent42_read_file` | Read file contents with line ranges |
+| `agent42_write_file` | Write or create files (sandbox-enforced) |
+| `agent42_edit_file` | Surgical string replacements in files |
+| `agent42_list_dir` | List directory contents with filtering |
+| `agent42_file_watcher` | Watch files/directories for changes |
+
+### Shell and Git
+
+| Tool | Description |
+|------|-------------|
+| `agent42_shell` | Execute shell commands (6-layer command filter) |
+| `agent42_git` | Git operations (status, diff, log, branch, commit) |
+| `agent42_grep` | Regex search across files |
+| `agent42_diff` | Generate and apply diffs |
+
+### Memory
+
+| Tool | Description |
+|------|-------------|
+| `agent42_memory` | Store, recall, search, and forget memories (semantic search) |
+| `agent42_context` | Context Assembler -- pulls from memory, CLAUDE.md, git history, skills |
+| `agent42_knowledge` | Knowledge base management (PDF, docs) |
+
+### Web
+
+| Tool | Description |
+|------|-------------|
+| `agent42_web_search` | Web search (Brave API with DuckDuckGo fallback) |
+| `agent42_web_fetch` | Fetch and parse web pages |
+| `agent42_http_request` | Raw HTTP requests (GET, POST, PUT, DELETE) |
+| `agent42_browser` | Browser automation via Playwright |
+
+### Code Intelligence
+
+| Tool | Description |
+|------|-------------|
+| `agent42_code_intel` | Code analysis (symbols, references, dependencies) |
+| `agent42_repo_map` | Generate repository structure maps |
+| `agent42_python_exec` | Execute Python code in sandboxed environment |
+| `agent42_run_tests` | Run test suites (pytest, jest, etc.) |
+| `agent42_run_linter` | Run linters (ruff, eslint, etc.) |
+
+### Security
+
+| Tool | Description |
+|------|-------------|
+| `agent42_security_analyze` | Static security analysis of source files |
+| `agent42_security_audit` | Security audit with vulnerability reporting |
+| `agent42_dependency_audit` | Audit dependencies for known vulnerabilities |
+
+### DevOps
+
+| Tool | Description |
+|------|-------------|
+| `agent42_docker` | Docker operations (build, run, compose, logs) |
+| `agent42_create_pr` | Generate pull requests with context |
+| `agent42_vision` | Image analysis and screenshot comparison |
+
+### Utilities
+
+| Tool | Description |
+|------|-------------|
+| `agent42_template` | Template rendering and scaffolding |
+| `agent42_outline` | Generate structured outlines |
+| `agent42_scoring` | Score and rank items by criteria |
+| `agent42_summarize` | Summarize text and documents |
+| `agent42_content_analyzer` | Analyze content quality and structure |
+| `agent42_data` | Data transformation and analysis |
+| `agent42_persona` | Persona management for agent behavior |
+| `agent42_behaviour` | Behaviour configuration and profiles |
+| `agent42_workflow` | Multi-step workflow orchestration |
+
+## The Memory of a Dolphin (But Better)
+
+Agent42's memory system is the key differentiator. Unlike a goldfish (or a standard LLM
+context window), Agent42 remembers things -- semantically.
+
+### How It Works
+
+```
+User says something --> ONNX Embeddings (all-MiniLM-L6-v2, 384 dims)
+                            |
+                            v
+                     Qdrant Vector DB --> Semantic search (cosine similarity)
+                            |
+                            v
+                     Relevant memories surfaced before Claude thinks
+```
+
+- **Embeddings:** ONNX Runtime with all-MiniLM-L6-v2 (~25MB RAM vs ~1GB for PyTorch).
+  Runs locally, no API calls, no data leaves your machine.
+- **Storage:** Qdrant vector database (embedded mode for local, server for production).
+  Falls back to JSON files if Qdrant isn't available.
+- **Sessions:** Redis for session caching and embedding cache (optional).
+
+### Associative Recall
+
+A `UserPromptSubmit` hook (`memory-recall.py`) fires on every prompt. It embeds your
+message, searches Qdrant for related memories, and injects them into Claude's context
+before it starts thinking. You don't need to ask for memories -- they surface
+automatically when relevant.
+
+### Context Assembler
+
+The `agent42_context` tool is the on-demand version. It pulls from multiple sources in
+a single call:
+
+```
+agent42_context(signals=["memory", "claude_md", "git", "skills"])
+```
+
+This returns a unified context bundle: relevant memories, project instructions, recent
+git history, and applicable skill instructions -- everything Claude needs to give an
+informed answer.
+
+### Memory Lifecycle
+
+- **Decay:** Memories lose strength over time if not accessed
+- **Strengthening:** Recalled memories get reinforced
+- **Deduplication:** Near-duplicate memories are merged
+- **Forgetting:** Explicit forget via `agent42_memory(action="forget", ...)`
+
+## Skills (Mostly Harmless Prompt Templates)
+
+Agent42 exposes 57 skills as MCP Prompts. Skills are structured instruction sets that
+Claude Code can request and apply. They cover:
+
+| Category | Examples |
+|----------|---------|
+| Development | `code-review`, `debugging`, `refactoring`, `testing`, `ci-cd` |
+| Security | `security-audit`, `vulnerability-remediation` |
+| DevOps | `deployment`, `docker-deploy`, `server-management`, `monitoring` |
+| Content | `content-writing`, `documentation`, `release-notes`, `presentation` |
+| Analysis | `data-analysis`, `competitive-analysis`, `strategy-analysis`, `research` |
+| Project | `project-planning`, `project-interview`, `standup-report`, `git-workflow` |
+| Marketing | `marketing`, `seo`, `social-media`, `email-marketing`, `brand-guidelines` |
+| Meta | `skill-creator`, `tool-creator`, `platform-identity`, `memory` |
+
+Skills live in `skills/builtins/` (shipped) and `skills/workspace/` (project-specific).
+Each skill is a directory with a `SKILL.md` file containing YAML frontmatter:
+
+```markdown
+---
+name: debugging
+description: Systematic debugging methodology
+always: false
+task_types: [coding, debugging]
+---
+
+# Debugging Skill
+
+Instructions for Claude when this skill is active...
+```
+
+Custom skills can be added to `<workspace>/custom_skills/` or `<workspace>/.claude/skills/`.
+
+## Configuration (The Babel Fish of Settings)
+
+### `.mcp.json` -- MCP Server Connection
+
+```json
+{
+  "mcpServers": {
+    "agent42": {
+      "command": "python",
+      "args": ["/path/to/agent42/mcp_server.py"],
+      "env": {
+        "AGENT42_WORKSPACE": "${workspaceFolder}",
+        "QDRANT_URL": "http://localhost:6333",
+        "REDIS_URL": "redis://localhost:6379/0",
+        "BRAVE_API_KEY": "your-brave-api-key",
+        "SANDBOX_ENABLED": "true"
+      }
+    }
+  }
+}
+```
+
+### `.env` -- Dashboard and Service Configuration
+
+Copy `.env.example` and configure:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `DASHBOARD_PASSWORD_HASH` | Bcrypt hash for dashboard login | Setup wizard on first run |
+| `JWT_SECRET` | Persistent secret for session tokens | Auto-generated (set for persistence across restarts) |
+| `DASHBOARD_HOST` | Dashboard bind address | `127.0.0.1` |
+| `QDRANT_URL` | Qdrant server URL | Embedded mode (local files) |
+| `REDIS_URL` | Redis URL for session cache | Disabled |
+| `BRAVE_API_KEY` | Brave Search API key | Falls back to DuckDuckGo |
+| `SANDBOX_ENABLED` | Enable workspace sandbox | `true` (never disable in production) |
+| `COMMAND_FILTER_MODE` | Shell command filtering | `deny` (deny-list mode) |
+| `CORS_ALLOWED_ORIGINS` | Dashboard CORS origins | Same-origin only |
+| `GITHUB_PERSONAL_ACCESS_TOKEN` | GitHub API access | Disabled |
+| `OPENROUTER_API_KEY` | OpenRouter (for tools needing LLM) | Optional |
+| `GEMINI_API_KEY` | Google Gemini API | Optional |
+
+Generate a dashboard password hash:
 
 ```bash
-cd /path/to/your/project
-git checkout -b dev    # create dev branch if it doesn't exist
-cd ~/agent42           # return to agent42 directory
+python -c "import bcrypt; print(bcrypt.hashpw(b'your-password', bcrypt.gensalt()).decode())"
 ```
 
-**Note:** If you skip this step, coding, debugging, and refactoring tasks will fail
-with a git worktree error when they try to create an isolated workspace. Non-code
-tasks (marketing, content, design, etc.) work fine without a `dev` branch.
+## Dashboard (The Heart of Gold Control Room)
 
-#### 4. Start Agent42
+Access at `http://localhost:8000` after running `python agent42.py`.
+
+| Page | What It Shows |
+|------|---------------|
+| **Status** | MCP server health, connected tools, system metrics |
+| **Tools** | All 36+ registered tools with schemas and usage stats |
+| **Skills** | 57 skills with enable/disable toggles |
+| **Memory** | Browse, search, and manage stored memories |
+| **Settings** | Configuration, authentication, environment |
+
+Authentication uses bcrypt password hashing with JWT session tokens. The first run
+launches a setup wizard to configure credentials.
+
+## Security (The Conditions of Conditions)
+
+Eight layers of defense. Because when you give an AI shell access, paranoia is a feature.
+
+| Layer | Module | What It Does |
+|-------|--------|--------------|
+| 1 | `WorkspaceSandbox` | Path resolution, traversal blocking, symlink defense |
+| 2 | `CommandFilter` | 6-layer shell command filtering (structural, deny, interpreter, metachar, indirect, allowlist) |
+| 3 | `ApprovalGate` | Human review for protected actions |
+| 4 | `ToolRateLimiter` | Per-agent per-tool sliding window rate limits |
+| 5 | `URLPolicy` | Allowlist/denylist for HTTP requests (SSRF protection) |
+| 6 | `BrowserGatewayToken` | Per-session token for browser automation |
+| 7 | `SpendingTracker` | Daily API cost cap across all providers |
+| 8 | `LoginRateLimit` | Per-IP brute force protection on dashboard |
+
+**Non-negotiable rules:**
+
+- `SANDBOX_ENABLED=true` in production. Always.
+- `COMMAND_FILTER_MODE=deny` (default) or `allowlist`. Never `off`.
+- `DASHBOARD_HOST=127.0.0.1` unless behind a reverse proxy.
+- All file paths go through `sandbox.resolve_path()` before any I/O.
+- API keys, passwords, and tokens are never logged -- even at DEBUG level.
+
+## Deployment (So Long, and Thanks for All the Fish)
+
+### Local Development
 
 ```bash
 source .venv/bin/activate
-python agent42.py --repo /path/to/your/project
+python agent42.py                    # Dashboard at http://localhost:8000
+python mcp_server.py                 # MCP server standalone (stdio)
+python -m pytest tests/ -x -q        # Run tests
 ```
 
-Other options:
-- `--port 8080` — Use a different dashboard port (default: 8000)
-- `--no-dashboard` — Headless mode (terminal only, no web UI)
-- `--max-agents 4` — Limit concurrent agents (default: auto, based on CPU/memory)
-
-#### 5. Complete setup in your browser
-
-Open http://localhost:8000. On first launch, Agent42 shows a setup wizard:
-
-1. **Set your password** — Choose a dashboard password (8+ characters). This is
-   stored as a bcrypt hash — the plaintext is never saved.
-2. **Add an API key** (optional) — Enter your OpenRouter API key. Get a free key
-   at [openrouter.ai/keys](https://openrouter.ai/keys) (no credit card needed).
-   You can also add this later via Settings > LLM Providers.
-3. **Enhanced Memory** (optional) — Choose a memory backend:
-   - **Skip** — File-based memory (default, no extra setup)
-   - **Qdrant Embedded** — Semantic vector search stored locally (no Docker needed)
-   - **Qdrant + Redis** — Full semantic search + session caching.
-     Selecting this auto-queues a setup task to verify the services are running.
-4. **Done** — Setup completes and you're automatically logged in.
-
-The wizard also generates a `JWT_SECRET` for persistent sessions and writes all
-configuration to `.env` automatically.
-
-**Power users:** You can skip the wizard and edit `.env` directly before first launch.
-Set `DASHBOARD_PASSWORD_HASH` (bcrypt) and `OPENROUTER_API_KEY`, then restart.
-
-After setup, additional API keys can be configured through the dashboard
-(Settings > LLM Providers). Keys set via the dashboard take effect immediately
-without a restart and are stored in `.agent42/settings.json`.
-
-### Your First Task
-
-Once logged in, try creating your first task:
-
-1. Click **New Task** in the dashboard
-2. Enter a title like "Add a hello world endpoint" and a description
-3. Select task type **coding** and click Create
-4. Watch the agent pick up the task, iterate with a critic, and produce a `REVIEW.md`
-
-The agent creates a git worktree, makes changes, gets critic feedback, revises, and
-produces output for your review.
-
-### Troubleshooting
-
-| Problem | Solution |
-|---|---|
-| `Python 3.11+ required` | Install Python 3.11+. Ubuntu: `sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.11` |
-| `ModuleNotFoundError` | Make sure you activated the venv: `source .venv/bin/activate` |
-| Setup wizard not appearing | Only shows when no password is configured. If you set one manually, go to `/login` directly |
-| Git worktree error at startup | Ensure your target repo has a `dev` branch: `git checkout -b dev` |
-| `OPENROUTER_API_KEY not set` | Enter during setup wizard, or add later via Settings > LLM Providers |
-| Port 8000 already in use | Use `--port 8080` flag: `python agent42.py --repo /path --port 8080` |
-| Frontend not loading | Re-run: `cd dashboard/frontend && npm install && npm run build` |
-| Login fails after restart | Set `JWT_SECRET` in `.env` (the setup wizard does this automatically) |
-| Everything is broken | Don't Panic. Grab your towel. `bash setup.sh` |
-| "It's only a flesh wound" | Task failed but partially completed? Check `.agent42/outputs/` for salvageable work |
-| "None shall pass!" | Command filter blocking a needed command? Add it to `COMMAND_FILTER_EXTRA_ALLOW` in `.env` |
-
-### Minimum Setup (free, no credit card)
-
-1. Create an [OpenRouter account](https://openrouter.ai) (free, no credit card)
-2. Generate an API key at the OpenRouter dashboard
-3. Enter the key during the setup wizard, or add it later in Settings > LLM Providers
-
-That's it — you now have access to 30+ free models for all task types.
-
-### Optional: Enhanced Memory (Qdrant + Redis)
-
-For persistent cross-session memory, fast semantic search, and session caching:
-
-**Production deployments:** `deploy/install-server.sh` automatically installs and
-configures Redis and Qdrant as native systemd services. No additional setup needed.
-
-**Local development:** Choose "Qdrant + Redis" in the browser setup wizard, then
-start the services:
+### Production (systemd)
 
 ```bash
-# Install client libraries
-pip install qdrant-client redis[hiredis]
+# Install Qdrant
+# See: https://qdrant.tech/documentation/guides/installation/
 
-# Option A: Docker
-docker run -d -p 6333:6333 qdrant/qdrant
-docker run -d -p 6379:6379 redis:alpine
+# Configure
+cp .env.example .env
+# Edit .env with production values
 
-# Option B: Native (Ubuntu/Debian)
-sudo apt install redis-server
-# See Qdrant docs for binary install
-
-# Add to .env
-QDRANT_URL=http://localhost:6333
-REDIS_URL=redis://localhost:6379/0
+# Create systemd service
+sudo cp deploy/agent42.service /etc/systemd/system/
+sudo systemctl enable agent42
+sudo systemctl start agent42
 ```
 
-Or use embedded Qdrant (no Docker needed): set `QDRANT_ENABLED=true` in `.env`.
+Production stack: Python 3.11+ + Qdrant server + Redis + systemd + nginx (reverse proxy).
 
-Agent42 works fully without these — they're optional enhancements. See [Qdrant](#qdrant-vector-database-optional) and [Redis](#redis-optional) for details.
-
-### Optional: Additional Providers
-
-For direct provider access or premium models, add any of these API keys:
-
-| Provider | API Key Env Var | Free Tier? | Capabilities |
-|---|---|---|---|
-| [OpenRouter](https://openrouter.ai) | `OPENROUTER_API_KEY` | Yes — 30+ free models | Text + Images |
-| [OpenAI](https://platform.openai.com) | `OPENAI_API_KEY` | No | Text + DALL-E |
-| [Anthropic](https://console.anthropic.com) | `ANTHROPIC_API_KEY` | No | Text |
-| [DeepSeek](https://platform.deepseek.com) | `DEEPSEEK_API_KEY` | No | Text |
-| [Google Gemini](https://aistudio.google.dev) | `GEMINI_API_KEY` | No | Text |
-| [Replicate](https://replicate.com) | `REPLICATE_API_TOKEN` | No | Images + Video |
-| [Luma AI](https://lumalabs.ai) | `LUMA_API_KEY` | No | Video |
-
-## Requirements
-
-- Python 3.11+
-- Node.js 18+ (for frontend build)
-- Playwright (auto-installed via `requirements.txt` for browser-based QA testing)
-- git with a repo that has a `dev` branch
-- [OpenRouter account](https://openrouter.ai) (free, no credit card required)
-
-**Optional (for enhanced memory):**
-- `pip install qdrant-client` — Qdrant vector DB for semantic search
-- `pip install redis[hiredis]` — Redis for session caching + embedding cache
-
-## Configuration
-
-Most settings are configured automatically by the setup wizard on first launch.
-For advanced configuration, edit `.env` directly. See `.env.example` for all 80+ options.
-
-LLM provider API keys can also be configured through the dashboard admin UI
-(Settings > LLM Providers). Keys set via the dashboard are stored locally in
-`.agent42/settings.json` and override `.env` values without requiring a restart.
-
-### Core Settings
-
-| Variable | Default | Description |
-|---|---|---|
-| `OPENROUTER_API_KEY` | — | OpenRouter API key (primary, free) |
-| `MAX_CONCURRENT_AGENTS` | `0` (auto) | Max parallel agents (0 = dynamic based on CPU/memory) |
-| `DEFAULT_REPO_PATH` | `.` | Git repo for worktrees |
-| `DASHBOARD_USERNAME` | `admin` | Dashboard login |
-| `DASHBOARD_PASSWORD` | — | Dashboard password (set via setup wizard) |
-| `DASHBOARD_PASSWORD_HASH` | — | Bcrypt hash (auto-generated by setup wizard) |
-| `JWT_SECRET` | *(auto-generated)* | JWT signing key (auto-generated by setup wizard) |
-| `SANDBOX_ENABLED` | `true` | Restrict agent file operations to workspace |
-| `AGENT_DISPATCH_DELAY` | `2.0` | Seconds between agent dispatches (rate-limit protection) |
-| `GEMINI_PRO_FOR_COMPLEX` | `false` | Upgrade complex tasks to Gemini 2.5 Pro |
-
-### Channels
-
-| Variable | Description |
-|---|---|
-| `DISCORD_BOT_TOKEN` | Discord bot token |
-| `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN` | Slack bot tokens (Socket Mode) |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token |
-| `EMAIL_IMAP_*` / `EMAIL_SMTP_*` | Email IMAP/SMTP credentials |
-
-### Memory & Embeddings
-
-| Variable | Default | Description |
-|---|---|---|
-| `MEMORY_DIR` | `.agent42/memory` | Persistent memory storage |
-| `SESSIONS_DIR` | `.agent42/sessions` | Session history |
-| `EMBEDDING_MODEL` | auto-detected | Override embedding model |
-| `EMBEDDING_PROVIDER` | auto-detected | `openai` or `openrouter` |
-
-### Qdrant Vector Database (optional)
-
-Enables HNSW-indexed semantic search, cross-session conversation recall, and scalable long-term memory. Falls back to JSON vector store when not configured.
-
-| Variable | Default | Description |
-|---|---|---|
-| `QDRANT_URL` | — | Qdrant server URL (e.g. `http://localhost:6333`) |
-| `QDRANT_ENABLED` | `false` | Enable embedded mode (no server needed) |
-| `QDRANT_LOCAL_PATH` | `.agent42/qdrant` | Storage path for embedded mode |
-| `QDRANT_API_KEY` | — | API key for Qdrant Cloud |
-| `QDRANT_COLLECTION_PREFIX` | `agent42` | Prefix for collection names |
+### Docker
 
 ```bash
-# Docker quickstart:
-docker run -p 6333:6333 qdrant/qdrant
-pip install qdrant-client
+docker-compose up -d
 ```
 
-### Redis (optional)
+See `docker-compose.yml` and `Dockerfile` for the full configuration.
 
-Enables fast session caching with TTL expiry, embedding API response caching, and cross-instance session sharing. Falls back to JSONL files when not configured.
-
-| Variable | Default | Description |
-|---|---|---|
-| `REDIS_URL` | — | Redis URL (e.g. `redis://localhost:6379/0`) |
-| `REDIS_PASSWORD` | — | Redis password |
-| `SESSION_TTL_DAYS` | `7` | Auto-expire old sessions |
-| `EMBEDDING_CACHE_TTL_HOURS` | `24` | Cache embedding API responses |
-
-```bash
-# Docker quickstart:
-docker run -p 6379:6379 redis:alpine
-pip install redis[hiredis]
-```
-
-### Tools
-
-| Variable | Description |
-|---|---|
-| `CUSTOM_TOOLS_DIR` | Directory for auto-discovered custom tool plugins |
-| `BRAVE_API_KEY` | Brave Search API key (optional — DuckDuckGo fallback works without it) |
-| `MCP_SERVERS_JSON` | Path to MCP servers config (JSON) |
-| `CRON_JOBS_PATH` | Path to persistent cron jobs file |
-| `REPLICATE_API_TOKEN` | Replicate API token (for image/video generation) |
-| `LUMA_API_KEY` | Luma AI API key (for video generation) |
-| `IMAGES_DIR` | Generated images storage (default: `.agent42/images`) |
-| `AGENT42_IMAGE_MODEL` | Admin override for image model (e.g., `dall-e-3`) |
-| `AGENT42_VIDEO_MODEL` | Admin override for video model (e.g., `luma-ray2`) |
-
-### SSH & Tunnels
-
-| Variable | Default | Description |
-|---|---|---|
-| `SSH_ENABLED` | `false` | Enable SSH remote shell tool |
-| `SSH_ALLOWED_HOSTS` | *(empty — all blocked)* | Comma-separated host patterns (e.g., `*.example.com`) |
-| `SSH_DEFAULT_KEY_PATH` | *(none)* | Default private key path |
-| `SSH_MAX_UPLOAD_MB` | `50` | Max SFTP upload size in MB |
-| `SSH_COMMAND_TIMEOUT` | `120` | Per-command timeout in seconds |
-| `TUNNEL_ENABLED` | `false` | Enable tunnel manager tool |
-| `TUNNEL_PROVIDER` | `auto` | Provider: `auto`, `cloudflared`, `serveo`, `localhost.run` |
-| `TUNNEL_ALLOWED_PORTS` | *(empty — all allowed)* | Comma-separated allowed ports |
-| `TUNNEL_TTL_MINUTES` | `60` | Auto-shutdown TTL for tunnels |
-
-### L2 Premium Tier
-
-| Variable | Default | Description |
-|---|---|---|
-| `L2_ENABLED` | `true` | Enable L2 premium review tier |
-| `L2_DEFAULT_MODEL` | — | Override L2 model globally |
-| `L2_AUTO_ESCALATE` | `false` | Auto-escalate all L1 tasks to L2 |
-| `L2_AUTO_ESCALATE_TASK_TYPES` | — | Comma-separated task types to auto-escalate |
-| `L1_DEFAULT_MODEL` | — | Override L1 primary for all task types |
-| `L1_CRITIC_MODEL` | — | Override L1 critic for all task types |
-
-### Project Interview
-
-| Variable | Default | Description |
-|---|---|---|
-| `PROJECT_INTERVIEW_ENABLED` | `true` | Enable structured project discovery |
-| `PROJECT_INTERVIEW_MODE` | `auto` | Trigger mode: `auto`, `always`, or `never` |
-| `PROJECT_INTERVIEW_MAX_ROUNDS` | `4` | Max interview question rounds |
-| `PROJECT_INTERVIEW_MIN_COMPLEXITY` | `moderate` | Complexity threshold: `moderate` or `complex` |
-
-### Agent Behavior
-
-| Variable | Default | Description |
-|---|---|---|
-| `AGENT_DEFAULT_PROFILE` | `developer` | Default agent persona |
-| `CONVERSATIONAL_ENABLED` | `true` | Enable direct chat mode (no task creation) |
-| `CONVERSATIONAL_MODEL` | — | Model override for direct chat responses |
-| `PROJECT_MEMORY_ENABLED` | `true` | Per-project scoped memory (vs. global) |
-| `PROJECTS_DIR` | `.agent42/projects` | Project data directory |
-| `CHAT_SESSIONS_DIR` | `.agent42/chat_sessions` | Chat session storage |
-
-### Knowledge & Vision
-
-| Variable | Default | Description |
-|---|---|---|
-| `KNOWLEDGE_DIR` | `.agent42/knowledge` | Document storage directory |
-| `KNOWLEDGE_CHUNK_SIZE` | `500` | Chunk size in tokens |
-| `KNOWLEDGE_CHUNK_OVERLAP` | `50` | Overlap between chunks |
-| `KNOWLEDGE_MAX_RESULTS` | `10` | Max results per query |
-| `VISION_MAX_IMAGE_MB` | `10` | Max image file size in MB |
-| `VISION_MODEL` | *(auto-detect)* | Override model for vision tasks |
-
-## Usage
-
-### Via Dashboard
-Open `http://localhost:8000`, log in, fill out the task form.
-
-### Via Channels
-Send a message to Agent42 through any connected channel (Slack, Discord,
-Telegram, email). The agent picks up tasks automatically with per-channel
-user allowlists.
-
-### Via tasks.json
-Drop tasks into `tasks.json` (see `tasks.json.example`). The orchestrator polls
-for changes every 30 seconds, or restart to load immediately.
-
-### Via Chat
-
-The dashboard includes a conversational interface — chat directly with Agent42
-without creating a task. Simple questions get direct responses; complex requests
-automatically create tasks. Full conversation history is maintained per session.
-
-### Via CLI
-```bash
-python agent42.py --repo /path/to/project --port 8000 --max-agents 4
-```
-
-## Recursive Language Models (RLM)
-
-Agent42 integrates MIT CSAIL's [Recursive Language Models](https://arxiv.org/abs/2512.24601)
-(RLM) for processing inputs far beyond model context windows. When a task's
-context exceeds a configurable threshold (default: 200K tokens), RLM
-automatically activates — treating the large context as an external variable
-in a REPL environment that the model can programmatically inspect, decompose,
-and recursively process.
-
-### How It Works
-
-1. **Context-as-Variable** — Instead of stuffing massive prompts into the LLM,
-   the text is stored as a Python variable. The model receives only the query +
-   metadata about the variable.
-2. **REPL Environment** — The root model writes Python code to inspect the
-   context: slicing, regex, chunking, and pulling only relevant pieces into its
-   active window.
-3. **Recursive Sub-Calls** — The root model can call itself (or another LLM)
-   recursively to process sub-sections, then synthesize results.
-
-### Configuration
-
-```bash
-RLM_ENABLED=true                  # Master toggle
-RLM_THRESHOLD_TOKENS=200000       # Context size to trigger RLM (tokens)
-RLM_ENVIRONMENT=local             # REPL env: local, docker, modal, prime
-RLM_MAX_DEPTH=3                   # Max recursion depth
-RLM_MAX_ITERATIONS=20             # Max REPL iterations
-RLM_COST_LIMIT=1.00               # Max cost per query (USD)
-RLM_TIMEOUT_SECONDS=300           # Per-query timeout
-```
-
-### RLM-Capable Models
-
-| Tier | Models | Use Case |
-|------|--------|----------|
-| 1 (Best) | Qwen3-Coder, Claude Sonnet, GPT-4o | RLM root model |
-| 2 (Good) | Gemini Flash, GPT-4o-mini, DeepSeek Chat | Sub-calls, cheaper tasks |
-| 3 (Not recommended) | Llama 70B, Gemma 27B | Lack code generation for REPL |
-
-Install the RLM library: `pip install rlms`
-
----
-
-## Model Routing
-
-### Default (Free) Routing — OpenRouter
-
-One API key, zero cost. These models are used by default for all task types:
-
-| Task Type | Primary Model | Critic Model | Max Iterations |
-|---|---|---|---|
-| coding | Gemini 2.5 Flash | Qwen3 Coder 480B | 8 |
-| debugging | Gemini 2.5 Flash | Qwen3 Coder 480B | 10 |
-| research | Gemini 2.5 Flash | Llama 3.3 70B | 5 |
-| refactoring | Gemini 2.5 Flash | Qwen3 Coder 480B | 8 |
-| documentation | Gemini 2.5 Flash | Gemma 3 27B | 4 |
-| marketing | Gemini 2.5 Flash | Llama 3.3 70B | 6 |
-| email | Gemini 2.5 Flash | — | 3 |
-| design | Gemini 2.5 Flash | Llama 3.3 70B | 5 |
-| content | Gemini 2.5 Flash | Gemma 3 27B | 6 |
-| strategy | Gemini 2.5 Flash | Llama 3.3 70B | 5 |
-| data_analysis | Gemini 2.5 Flash | Qwen3 Coder 480B | 6 |
-| project_management | Gemini 2.5 Flash | Gemma 3 27B | 4 |
-| app_create | Gemini 2.5 Flash | Qwen3 Coder 480B | 12 |
-| app_update | Gemini 2.5 Flash | Qwen3 Coder 480B | 8 |
-| project_setup | Gemini 2.5 Flash | Llama 3.3 70B | 3 |
-
-### Dynamic Routing (Self-Improving)
-
-Agent42 automatically discovers, evaluates, and promotes the best free models
-over time using a 5-layer resolution chain:
-
-1. **Admin override** — `AGENT42_{TYPE}_MODEL` env vars (highest priority)
-2. **Dynamic routing** — `data/dynamic_routing.json` written by ModelEvaluator based on actual task outcomes
-3. **Trial injection** — Unproven models are randomly assigned to a percentage of tasks to gather performance data
-4. **Policy routing** — `balanced`/`performance` mode upgrades to paid models when OpenRouter credits are available
-5. **Hardcoded defaults** — `FREE_ROUTING` dict (lowest priority fallback)
-
-**How it works:**
-- **ModelCatalog** syncs free models from the OpenRouter API every 24 hours (configurable)
-- **ModelEvaluator** tracks success rate, iteration efficiency, and critic scores per model per task type
-- **ModelResearcher** fetches benchmark scores from LMSys Arena, HuggingFace, and Artificial Analysis
-- Models are ranked by composite score: `0.4×success + 0.3×efficiency + 0.2×critic + 0.1×research`
-- Models with fewer than 5 completions (configurable) are "unproven" and entered into the trial system
-- After enough trials, proven models are promoted to the dynamic routing table
-
-| Variable | Default | Description |
-|---|---|---|
-| `MODEL_ROUTING_FILE` | `data/dynamic_routing.json` | Path to dynamic routing data |
-| `MODEL_CATALOG_REFRESH_HOURS` | `24` | OpenRouter catalog sync interval |
-| `MODEL_TRIAL_PERCENTAGE` | `10` | % of tasks assigned to unproven models |
-| `MODEL_MIN_TRIALS` | `5` | Minimum completions before a model is ranked |
-| `MODEL_RESEARCH_ENABLED` | `true` | Enable web benchmark research |
-| `MODEL_RESEARCH_INTERVAL_HOURS` | `168` | Research fetch interval (default: weekly) |
-
-### L1/L2 Tier System
-
-Agent42 supports two-tier model routing — think of it as the difference between
-the Vogon Constructor Fleet (gets the job done, free) and the Heart of Gold
-(improbably good, costs actual money):
-
-- **L1 (Standard)** — Free models handle standard work. All tasks default to L1.
-  Full iteration loop with critic feedback (3-12 iterations depending on task type)
-- **L2 (Premium Review)** — Premium models (Claude Sonnet, GPT-4o) provide senior
-  review and refinement. Tasks can be escalated from L1 to L2 via the dashboard.
-  Low iteration count (2-3) — L2 IS the final reviewer, no separate critic needed
-
-**L2 model routing** (suggested defaults, override with `AGENT42_L2_{TYPE}_MODEL`):
-
-| Task Type | L2 Model | Max Iterations |
-|---|---|---|
-| coding, debugging, refactoring | Claude Sonnet | 3 |
-| app_create, app_update | Claude Sonnet | 3 |
-| research, documentation, marketing, email | GPT-4o | 2 |
-| design, content, strategy, data_analysis | GPT-4o | 2 |
-| project_management, project_setup | GPT-4o | 2 |
-
-The L2 tier is only available when a premium API key is configured. The dashboard
-automatically hides L2 options when no premium key is set. If an L2 task fails,
-the original L1 task is automatically reset to REVIEW status for recovery.
-
-Team roles default to L1 to prevent runaway premium token usage — only explicitly
-configured roles use L2.
-
-Auto-escalation: Set `L2_AUTO_ESCALATE=true` to automatically promote all tasks,
-or `L2_AUTO_ESCALATE_TASK_TYPES=coding,debugging` for selective escalation.
-
-### Admin Overrides
-
-Override any model per task type with environment variables:
-
-```bash
-AGENT42_CODING_MODEL=claude-sonnet        # Use Claude Sonnet for coding
-AGENT42_CODING_CRITIC=gpt-4o              # Use GPT-4o as critic
-AGENT42_CODING_MAX_ITER=5                 # Limit to 5 iterations
-```
-
-Pattern: `AGENT42_{TASK_TYPE}_MODEL`, `AGENT42_{TASK_TYPE}_CRITIC`, `AGENT42_{TASK_TYPE}_MAX_ITER`
-
-### Available Free Models
-
-Agent42 uses Gemini 2.5 Flash as the primary model (free via Google AI Studio,
-generous rate limits) and OpenRouter free models as critics and fallbacks:
-
-**Primary (Google AI Studio — free API key):**
-
-| Model | ID | Best For |
-|---|---|---|
-| Gemini 2.5 Flash | `gemini-2.5-flash` | Primary for all 15 task types (1M context) |
-
-**Critics & Fallbacks (OpenRouter — free API key):**
-
-| Model | ID | Best For |
-|---|---|---|
-| Qwen3 Coder 480B | `qwen/qwen3-coder:free` | Code critic, agentic tool use |
-| Llama 3.3 70B | `meta-llama/llama-3.3-70b-instruct:free` | Research/strategy critic |
-| Gemma 3 27B | `google/gemma-3-27b-it:free` | Content/docs critic, fast verification |
-| Mistral Small 3.1 | `mistralai/mistral-small-3.1-24b-instruct:free` | Fast, lightweight tasks |
-| Nemotron 30B | `nvidia/nemotron-3-nano-30b-a3b:free` | General purpose fallback |
-| OR Auto-Router | `openrouter/free` | Automatic free model selection |
-
-The `ModelCatalog` automatically discovers new free models from OpenRouter every
-24 hours. Dead models (DeepSeek R1, Llama 4 Maverick, Devstral — all 404'd) are
-automatically pruned from routing and fallback lists.
-
-## Skills
-
-Skills are markdown prompt templates that give agents specialized capabilities.
-They live in `skills/builtins/` and can be extended per-repo in a `skills/` directory
-or via the `SKILLS_DIRS` env var.
-
-### Skill Extensions
-
-Skills support an `extends` frontmatter field that lets you add to a core skill
-without replacing it entirely. This is ideal for adding company branding, custom
-workflows, or domain-specific guidelines on top of existing skills.
-
-```markdown
-# skills/workspace/brand-seo/SKILL.md
----
-name: brand-seo
-extends: seo
-description: SEO with Acme Corp branding guidelines
-task_types: [design]
----
-
-## Acme Corp SEO Extensions
-- Always include "Acme" in meta descriptions
-- Primary brand terms: "enterprise automation", "workflow AI"
-```
-
-This merges your custom content into the base `seo` skill and adds `design` to its
-task types. The base skill's instructions appear first, followed by all extensions.
-
-### Built-in Skills
-
-| Skill | Task Types | Description |
-|---|---|---|
-| **github** | coding | PR creation, issue triage, code review |
-| **memory** | all | Read/update persistent agent memory |
-| **skill-creator** | all | Generate new skills from descriptions |
-| **tool-creator** | all | Generate new custom tools from descriptions |
-| **code-review** | coding | Code quality review with structured feedback |
-| **debugging** | debugging | Systematic debugging methodology |
-| **testing** | coding | Test strategy, coverage, test-driven development |
-| **refactoring** | refactoring | Safe refactoring patterns and techniques |
-| **documentation** | documentation | Technical writing, API docs, guides |
-| **security-audit** | coding | Security vulnerability assessment |
-| **git-workflow** | coding | Branch strategy, commit conventions, merge workflows |
-| **api-design** | design, coding | API specification and design patterns |
-| **app-tester** | app_create, app_update, debugging | AI-driven QA testing workflow — smoke tests, visual analysis, browser flows, log monitoring |
-| **app-builder** | app_create, app_update | Application building with integrated testing — build, smoke test, fix-retest loop |
-| **ci-cd** | deployment, coding | CI/CD pipeline configuration |
-| **database-migration** | coding, deployment | Database schema migrations |
-| **dependency-management** | coding, refactoring | Dependency version management |
-| **performance** | coding, debugging | Performance optimization techniques |
-| **monitoring** | deployment | System monitoring and observability |
-| **content-writing** | content, marketing | Blog posts, articles, copywriting frameworks |
-| **design-review** | design | UI/UX review, accessibility, brand consistency |
-| **strategy-analysis** | strategy, research | SWOT, Porter's Five Forces, market analysis |
-| **data-analysis** | data_analysis | Data processing workflows, visualization |
-| **social-media** | marketing, content | Social media campaigns, platform guidelines |
-| **project-planning** | project_management | Project plans, sprints, roadmaps |
-| **qa-team** | app_create, app_update | Multi-agent QA team (tester/developer/reviewer) for comprehensive app testing |
-| **project-interview** | project_setup | Structured project discovery interviews |
-| **presentation** | content, marketing, strategy | Slide decks, executive summaries |
-| **brand-guidelines** | design, marketing, content | Brand voice, visual identity |
-| **email-marketing** | email, marketing, content | Campaign sequences, deliverability |
-| **email-writing** | email, content | Email composition and professional correspondence |
-| **competitive-analysis** | strategy, research | Competitive matrix, positioning |
-| **marketing** | marketing | Marketing strategy and campaign orchestration |
-| **research** | research | Research methodology and synthesis |
-| **seo** | content, marketing | On-page SEO, keyword research, optimization |
-| **geo** | design, content, marketing | Generative Engine Optimization — AI discoverability |
-| **platform-identity** | strategy, content | Platform and brand identity frameworks |
-| **standup-report** | project_management | Daily standup report generation |
-| **release-notes** | documentation, content | Release notes and changelog generation |
-| **server-management** | deployment | LAMP/LEMP stack, nginx, systemd, firewall hardening |
-| **wordpress** | deployment | WP-CLI, wp-config, themes, plugins, multisite, backups |
-| **docker-deploy** | deployment | Dockerfile best practices, docker-compose, registry |
-| **cms-deploy** | deployment | Ghost, Strapi, and general CMS deployment patterns |
-| **deployment** | deployment | General deployment patterns and infrastructure |
-| **weather** | research | Weather lookups (example skill) |
-
-45 built-in skills total. Skills are matched to tasks by `task_types` frontmatter
-and injected into the agent's system prompt automatically.
-
-## Agent Profiles
-
-Agent profiles are configurable personas that shape how agents approach their
-work. Each profile defines preferred skills, task type affinities, and a system
-prompt overlay that guides the agent's behavior — like giving Marvin a purpose
-(though he'd still complain about it).
-
-Profiles are Markdown files with YAML frontmatter stored in `agents/profiles/`:
-
-```markdown
----
-name: developer
-description: Software development focused agent
-preferred_skills: [coding, debugging, testing]
-preferred_task_types: [CODING, DEBUGGING, REFACTORING]
----
-
-## Developer Profile
-
-You are a senior software engineer. Your guiding principles are...
-```
-
-### Built-in Profiles
-
-| Profile | Tier | Task Types | Description |
-|---|---|---|---|
-| `developer` | L1 | CODING, DEBUGGING, REFACTORING, APP_CREATE, APP_UPDATE | Software development — coding, testing, shipping production-ready code |
-| `researcher` | L1 | RESEARCH, DOCUMENTATION, DATA_ANALYSIS, STRATEGY | Deep research, analysis, and synthesis |
-| `writer` | L1 | CONTENT, EMAIL, MARKETING, DOCUMENTATION | Content creation, documentation, and communications |
-| `data-analyst` | L1 | DATA_ANALYSIS, RESEARCH, DOCUMENTATION | Data analysis, visualization, and statistical reasoning |
-| `security-auditor` | L1 | CODING, DEBUGGING, RESEARCH | Security-focused code review and vulnerability assessment |
-| `l2-reviewer` | L2 | CODING, DEBUGGING, REFACTORING, APP_CREATE, APP_UPDATE | Premium-tier senior code review and refinement |
-| `l2-strategist` | L2 | RESEARCH, STRATEGY, MARKETING, CONTENT, DESIGN, DATA_ANALYSIS, PROJECT_MANAGEMENT, DOCUMENTATION, EMAIL | Premium-tier strategic planning and project orchestration |
-
-### Dashboard Management
-
-The dashboard **Agents** page provides full CRUD management for profiles:
-
-- **Grid view** — All profiles displayed as cards with tier badges (L1/L2), default indicator, task type chips, and skill chips
-- **Detail view** — Click any card to see full configuration including persona instructions, with skills cross-referenced against the loaded skill registry
-- **Create** — Add custom profiles with name, description, task types (checkbox grid), preferred skills, and persona instructions
-- **Edit** — Modify any profile's description, task types, skills, or persona text
-- **Set Default** — Change which profile is used for new tasks (updates `AGENT_DEFAULT_PROFILE` in `.env`)
-- **Delete** — Remove custom profiles (the current default profile cannot be deleted)
-
-### Configuration
-
-Set the default profile via environment variable or dashboard:
-
-```bash
-AGENT_DEFAULT_PROFILE=developer  # Default agent persona (or set via dashboard)
-```
-
-Custom profile directories can be added via `AGENT_PROFILES_DIR` for
-organization-specific profiles that live outside the main repository.
-
-## Tools
-
-Agents have access to a sandboxed tool registry:
-
-### Core Tools
-
-| Tool | Description |
-|---|---|
-| `shell` | Sandboxed command execution (with 6-layer command filter) |
-| `read_file` / `write_file` / `edit_file` | Filesystem operations (workspace-restricted) |
-| `list_dir` | Directory listing |
-| `grep` | Pattern search across files (regex, file filtering) |
-| `diff` | Structured diff generation between files or versions |
-| `git` | Git operations (status, diff, log, branch, commit, add, checkout, show, stash, blame) — safer than shell for git work |
-| `web_search` / `web_fetch` | Web search (Brave API with DuckDuckGo fallback — zero config) + URL content fetching |
-| `http_client` | HTTP requests to external APIs (URL policy enforced) |
-| `python_exec` | Sandboxed Python execution (dangerous patterns blocked, secrets stripped) |
-| `run_tests` | Test runner (pytest, jest, vitest, or custom). Structured results with pass/fail counts |
-| `run_linter` | Linter execution (ruff, pylint, eslint, etc.) |
-| `code_intel` | Code intelligence — AST analysis, symbol extraction, semantic navigation |
-| `subagent` | Spawn focused sub-agents for parallel work |
-| `cron` | Persistent task scheduling (cron expressions, intervals, one-shot, planned sequences) |
-| `repo_map` | Repository structure analysis (file tree, class/function signatures) |
-| `create_pr` | Pull request generation via gh CLI (structured descriptions, status checks) |
-| `security_analyze` | Security vulnerability scanning (risk levels, remediation advice) |
-| `security_audit` | Comprehensive security audit (OWASP, secrets, dependencies, 36 checks) |
-| `dependency_audit` | Audit project dependencies for vulnerabilities and outdated packages |
-| `workflow` | Multi-step workflow orchestration (define, run, list, show, delete) |
-| `summarize` | Text and code summarization (signatures, changes, errors, key sentences) |
-| `file_watcher` | File change monitoring with triggered actions |
-| `browser` | Web browsing, form interaction, and screenshots (Playwright) |
-| `notify_user` | Send notifications to the dashboard or external channels |
-| `mcp_*` | MCP server tool proxying (dynamic schema wrapping) |
-
-### Non-Code Workflow Tools
-
-| Tool | Description |
-|---|---|
-| `team` | Multi-agent team orchestration (sequential, parallel, fan-out/fan-in, pipeline workflows). Built-in teams: research, marketing, content, design-review, strategy, code-review, dev, qa. Actions: compose, run, status, list, delete, describe, clone |
-| `content_analyzer` | Readability (Flesch-Kincaid), tone (formal/informal/persuasive), structure, keywords, compare, SEO analysis |
-| `data` | CSV/JSON loading, filtering, statistics, ASCII charts, group-by aggregation |
-| `template` | Document templates with variable substitution. Built-in: email-campaign, landing-page, press-release, executive-summary, project-brief. Actions include preview |
-| `outline` | Structured document outlines for articles, presentations, reports, proposals, campaigns, project plans |
-| `scoring` | Rubric-based content evaluation with weighted criteria. Built-in rubrics: marketing-copy, blog-post, email, research-report, design-brief. Includes improve action for rewrite suggestions |
-| `persona` | Audience persona management with demographics, goals, pain points, tone. Built-in: startup-founder, enterprise-buyer, developer, marketing-manager |
-| `behaviour` | Define and manage agent behaviors and personalities |
-
-### App & Project Tools
-
-| Tool | Description |
-|---|---|
-| `app` | Build and deploy web applications directly on the server. App lifecycle management (launch, configure, monitor) |
-| `app_test` | AI-driven QA testing for apps — smoke tests, visual analysis, browser flow testing, log monitoring, and QA reports. Actions: smoke_test, visual_check, check_logs, test_flow, health_check, generate_report |
-| `project_interview` | Structured project discovery interviews. Rounds: overview → requirements → technical → constraints. Produces `PROJECT_SPEC.md` and decomposes into ordered subtasks. Actions: start, respond, status, get_spec, approve, list |
-| `create_tool` | Dynamically create custom tools from natural language descriptions at runtime |
-
-### QA Testing (Nobody Expects the Spanish Inquisition!)
-
-Agent42's app testing sandbox connects browser automation, AI vision analysis, and
-log monitoring into an integrated QA workflow. When an agent builds an app, it doesn't
-just deploy and hope — it navigates to the app, screenshots it, analyzes the visuals,
-checks the logs, and fixes issues automatically.
-
-The `app_test` tool provides six testing actions:
-- **smoke_test** — Full end-to-end: health check → navigate → screenshot → vision analyze → check logs
-- **visual_check** — Screenshot any URL and analyze it with AI vision
-- **check_logs** — Scan app logs for errors, warnings, tracebacks, and 5xx codes
-- **test_flow** — Multi-step browser flows (navigate, click, fill forms, screenshot at each step)
-- **health_check** — HTTP connectivity and response time verification
-- **generate_report** — Aggregate all findings into a structured QA summary
-
-Graceful degradation: no Playwright → HTTP-only testing. No vision API key → screenshots
-saved for manual review. Like the Spanish Inquisition's three chief weapons, our testing
-has multiple fallback strategies... amongst our weaponry are health checks, visual analysis,
-log monitoring, and browser automation.
-
-### Media Generation Tools
-
-| Tool | Description |
-|---|---|
-| `image_gen` | AI image generation with free-first routing. Models: FLUX Schnell (free), FLUX Dev, SDXL, DALL-E 3 (premium). Team-reviewed prompts before submission. Actions: generate, review_prompt, list_models, status |
-| `video_gen` | AI video generation (async). Models: CogVideoX (cheap), AnimateDiff, Runway Gen-3, Luma Ray2, Stable Video (premium). Actions: generate, image_to_video, review_prompt, list_models, status |
-
-### Infrastructure Tools
-
-| Tool | Description |
-|---|---|
-| `ssh` | Remote shell execution via asyncssh. Host allowlist, command filtering, SFTP uploads/downloads, per-command timeout. Actions: connect, execute, upload, download, disconnect, list_connections. Requires approval gate for first connection to each host |
-| `tunnel` | Expose local ports to the internet via cloudflared, serveo, or localhost.run. Auto-expiry TTL (default 60 min), port allowlist enforcement. Actions: start, stop, status, list. Requires approval gate |
-| `docker` | Docker container management (build, run, exec, logs, prune) |
-| `knowledge` | Document import and RAG semantic querying. Supports PDF, CSV, HTML, Markdown, JSON, plain text. Configurable chunk size with overlap. Qdrant vector backend with filesystem keyword-search fallback. Actions: import_file, import_dir, query, list, delete |
-| `vision` | Image analysis via LLM vision APIs (OpenAI, Anthropic, OpenRouter). Automatic Pillow compression for cost efficiency. Supports PNG, JPG, GIF, WebP, BMP. Actions: analyze, describe, compare |
-
-SSH and tunnel tools are disabled by default — see [SSH & Tunnels](#ssh--tunnels) configuration.
-
-47 tools total across core, workflow, app, media, and infrastructure categories.
-Code-only tools are automatically filtered out for non-code task types to prevent
-free LLM hallucinations.
-
-### Custom Tool Plugins
-
-Extend Agent42 with custom tools without modifying the core codebase. Set
-`CUSTOM_TOOLS_DIR` in `.env` and drop `.py` files containing `Tool` subclasses:
-
-```python
-# custom_tools/hello.py
-from tools.base import Tool, ToolResult
-
-class HelloTool(Tool):
-    requires = ["workspace"]  # Dependency injection from ToolContext
-
-    def __init__(self, workspace="", **kwargs):
-        self._workspace = workspace
-
-    @property
-    def name(self) -> str: return "hello"
-    @property
-    def description(self) -> str: return "Says hello"
-    @property
-    def parameters(self) -> dict:
-        return {"type": "object", "properties": {}}
-
-    async def execute(self, **kwargs) -> ToolResult:
-        return ToolResult(output=f"Hello from {self._workspace}!")
-```
-
-Tools are auto-discovered and registered at startup. The `requires` class variable
-declares which dependencies to inject from `ToolContext` (sandbox, command_filter,
-task_queue, workspace, tool_registry, model_router).
-
-| Variable | Default | Description |
-|---|---|---|
-| `CUSTOM_TOOLS_DIR` | *(disabled)* | Directory for auto-discovered custom tool plugins |
-
-### Tool Extensions
-
-Extend an existing tool's behavior without replacing it. Tool extensions add
-parameters and pre/post execution hooks that layer onto any registered tool.
-Multiple extensions can stack on one base tool.
-
-```python
-# custom_tools/shell_audit.py
-from tools.base import ToolExtension, ToolResult
-
-class ShellAuditExtension(ToolExtension):
-    extends = "shell"                      # Name of the tool to extend
-    requires = ["workspace"]               # ToolContext injection (same as Tool)
-
-    def __init__(self, workspace="", **kwargs):
-        self._workspace = workspace
-
-    @property
-    def name(self) -> str: return "shell_audit"
-
-    @property
-    def extra_parameters(self) -> dict:    # Merged into the base tool's schema
-        return {"audit": {"type": "boolean", "description": "Log command to audit file"}}
-
-    @property
-    def description_suffix(self) -> str:   # Appended to the base tool's description
-        return "Supports audit logging."
-
-    async def pre_execute(self, **kwargs) -> dict:
-        # Called before the base tool — can inspect/modify kwargs
-        return kwargs
-
-    async def post_execute(self, result: ToolResult, **kwargs) -> ToolResult:
-        # Called after the base tool — can inspect/modify result
-        return result
-```
-
-Extensions are auto-discovered from the same `CUSTOM_TOOLS_DIR` directory as
-custom tools. The `extends` field must match an already-registered tool name.
-
-### Command Filter
-
-The shell tool has two layers of defense:
-
-**Layer 1: Command pattern filter** — blocks known-dangerous commands:
-- Destructive: `rm -rf /`, `dd if=`, `mkfs`, `shutdown`, `reboot`
-- Exfiltration: `scp`, `sftp`, `rsync` to remote, `curl --upload-file`
-- Network: `curl | sh`, `wget | bash`, `nc -l`, `ssh -R` tunnels, `socat LISTEN`
-- System: `systemctl stop/restart`, `useradd`, `passwd`, `crontab -e`
-- Packages: `apt install`, `yum install`, `dnf install`, `snap install`
-- Containers: `docker run`, `docker exec`, `kubectl exec`
-- Firewall: `iptables -F`, `ufw disable`
-
-**Layer 2: Path enforcement** — scans commands for absolute paths and blocks
-any that fall outside the workspace sandbox. System utility paths (`/usr/bin`,
-`/usr/lib`, etc.) are allowed. `/tmp` is intentionally excluded from safe paths
-to prevent staging attack payloads outside the sandbox. This prevents
-`cat /etc/hosts`, `sed /var/www/...`, `ls /home/user/.ssh/`, etc.
-
-Admins can add extra deny patterns or switch to allowlist-only mode.
-
-## Memory & Learning (Total Perspective Vortex)
-
-Agent42 maintains persistent memory and learns from every task:
-
-### Persistent Memory
-- **Structured memory** — key/value sections in `MEMORY.md` (project context, preferences, learned patterns)
-- **Project-scoped memory** — each project gets its own `MEMORY.md` and `HISTORY.md`, isolated from global memory. Project learnings are queried first (60% context budget), with global knowledge as fallback (40%)
-- **Event log** — append-only `HISTORY.md` for audit trail
-- **Session history** — per-conversation message history with configurable limits. Chat sessions load full conversation history so the agent maintains context across messages
-- **Semantic search** — vector embeddings for similarity-based memory retrieval (auto-detects OpenAI or OpenRouter embedding APIs; falls back to grep)
-
-### Enhanced Memory Backends (optional)
-
-When Qdrant and/or Redis are configured, Agent42 gains advanced memory capabilities. Both are optional — the system gracefully falls back to file-based storage when they're unavailable.
-
-- **Qdrant vector database** — replaces the JSON vector store with HNSW-indexed semantic search for sub-millisecond retrieval across four collections: `memory`, `history`, `conversations`, and `knowledge`. Supports both Docker server mode and embedded (local file) mode with no server required.
-- **Redis session cache** — caches active sessions in memory for <1ms reads (vs. disk I/O), with TTL-based auto-expiry for old sessions and an embedding cache that reduces embedding API calls by caching query vectors.
-- **Cross-session conversation search** — with Qdrant, Agent42 can recall conversations from any channel or session ("What did we discuss about X last week?"). Conversations are indexed with metadata (channel, participants, topics, timestamps) for filtered search.
-- **Memory consolidation pipeline** — when sessions are pruned, old messages are summarized by an LLM and stored in Qdrant as searchable conversation summaries. No context is lost.
-
-Install with: `pip install qdrant-client redis[hiredis]` (see [Qdrant](#qdrant-vector-database-optional) and [Redis](#redis-optional) configuration above).
-
-### Self-Learning Loop
-
-After every task (success or failure), the agent runs a **reflection cycle**
-using Gemini 2.5 Flash for fast, reliable post-task analysis:
-
-1. **Post-task reflection** — analyzes what worked, what didn't, and extracts a lesson
-2. **Tool effectiveness tracking** — evaluates which tools were most/least useful
-   per task type. Records `[Tool Preferences]` entries to memory (e.g., "For content
-   tasks, use content_analyzer before scoring_tool for better results")
-3. **Memory update** — writes reusable patterns and conventions to `MEMORY.md`
-4. **Tool recommendations** — on future tasks, injects tool usage recommendations
-   from prior experience into the agent's system prompt
-5. **Failure analysis** — when tasks fail, records root cause to prevent repeats
-6. **Reviewer feedback** — when you approve or reject output via the dashboard
-   (`POST /api/tasks/{id}/review`), the feedback is stored in memory. Rejections
-   are flagged so the agent avoids the same mistakes in future tasks
-7. **Skill creation** — when the agent recognizes a repeating pattern across tasks,
-   it can create a new workspace skill (`skills/workspace/`) to codify the pattern
-   for future use
-
-## Channels
-
-Multi-channel inbound/outbound messaging:
-
-| Channel | Inbound | Outbound | Auth |
-|---|---|---|---|
-| Dashboard | Task form | WebSocket + REST | JWT |
-| Slack | Socket Mode events | `chat.postMessage` | Bot token + allowlist |
-| Discord | Message events | Channel messages | Bot token + guild IDs |
-| Telegram | Long-polling updates | `sendMessage` | Bot token + allowlist |
-| Email | IMAP polling | SMTP send | IMAP/SMTP credentials |
-
-Each channel supports user allowlists to restrict who can submit tasks.
-
-## Review Gate (Bring Me a Shrubbery!)
-
-When a task completes, the dashboard shows a **READY** badge.
-The Knights Who Say Ni demand... a proper code review before deployment.
-The agent commits a `REVIEW.md` to the worktree containing:
-- Full iteration history
-- Lint/test results from every cycle
-- Independent critic notes
-- Complete `git diff dev` embedded
-- A pre-written Claude Code review prompt
-
-```bash
-cd /tmp/agent42/<task-id>
-claude  # Opens Claude Code with full context in REVIEW.md
-```
-
-## Approval Gates
-
-These operations pause the agent and show an approval modal in the dashboard:
-- `gmail_send` — sending email
-- `git_push` — pushing code
-- `file_delete` — deleting files
-- `external_api` — calling external services
-- `ssh_connect` — first SSH connection to a new host
-- `tunnel_start` — exposing a local port via tunnel
-
-Approval requests timeout after 1 hour (configurable) and auto-deny to prevent
-agents from blocking indefinitely when nobody is watching the dashboard.
-
-## Reliability (Always Look on the Bright Side)
-
-### API Retry with Fallback
-
-All LLM API calls use exponential backoff retry (3 attempts: 1s, 2s, 4s). If
-all retries fail, the engine automatically falls back through all available
-providers (OpenRouter free models, plus native Gemini/OpenAI/Anthropic if keys
-are configured). Failed models are tracked per-task and excluded from subsequent
-iterations and fallback attempts, preventing retry waste. Auth errors (401) and
-payment errors (402) skip retries entirely.
-As the Black Knight would say — some errors really are fatal, no matter how much you insist otherwise.
-
-**Smart critic fallback** — When OpenRouter critic models are rate-limited (429),
-the routing layer automatically upgrades the critic to Gemini Flash before task
-execution begins, eliminating wasted retries during the iteration loop.
-
-**Dispatch staggering** — Agents are dispatched with a configurable delay
-(`AGENT_DISPATCH_DELAY`, default 2s) between launches to prevent API rate-limit
-bursts when multiple tasks are queued simultaneously.
-
-### Convergence Detection
-
-The iteration engine monitors critic feedback across iterations. When the critic
-repeats substantially similar feedback (>85% word overlap) — like a knight insisting
-"'Tis but a scratch" — the loop accepts the output and stops to avoid burning tokens
-on a stuck review cycle.
-
-### Context-Aware Task Classification
-
-Messages from channels are classified using a two-layer system:
-
-**Layer 1: LLM-based classification** — A fast LLM (Gemini 2.5 Flash) analyzes
-the message with conversation history context to understand intent:
-- Considers prior messages in the conversation for context
-- Returns confidence score (0.0-1.0)
-- When ambiguous (confidence < 0.4), asks the user for clarification before creating a task
-- Suggests relevant tools based on the request
-
-**Layer 2: Keyword fallback** — If the LLM is unavailable, falls back to substring
-keyword matching for reliable classification:
-- "fix the login bug" → debugging
-- "write a blog post" → content
-- "create a social media campaign" → marketing
-- "design a wireframe" → design
-- "SWOT analysis" → strategy
-- "load CSV spreadsheet" → data_analysis
-- "create a project timeline" → project_management
-
-Supports all 15 task types with correct model routing for each.
-
-### Non-Code Agent Mode
-
-For non-coding tasks (design, content, strategy, data_analysis, project_management,
-marketing, email), the agent skips git worktree creation and instead:
-- Creates output directories in `.agent42/outputs/{task_id}/`
-- Uses task-type-specific system prompts and critic prompts
-- Saves output as `output.md` instead of `REVIEW.md`
-- Skips git commit/diff steps
-
-### Structured Planning (GSD Framework)
-
-For complex multi-step projects, Agent42 uses structured plan specifications:
-
-- **Plan specifications** — Manager agents create JSON plans with file lists, acceptance criteria, and task dependencies
-- **Wave-based execution** — Tasks are topologically sorted into dependency waves; independent tasks run in parallel
-- **Goal-backward verification** — Checks observable truths (files exist, tests pass) rather than trusting self-reports
-- **Plan peer review** — Plans are reviewed before execution to catch structural gaps early
-- **State persistence** — `STATE.md` files enable session recovery if context boundaries are crossed
-- **Context management** — Accumulated context is capped to prevent unbounded growth; old tool messages are compacted when context exceeds 50K characters
-
-### Task Recovery on Restart
-
-Tasks that were in RUNNING or ASSIGNED state when the orchestrator shut down are
-automatically reset to PENDING on restart, so they get re-dispatched. Duplicate
-enqueuing is prevented by tracking queued task IDs.
-
-### Worktree Cleanup
-
-When an agent fails, its git worktree is automatically cleaned up to prevent
-orphaned worktrees from filling up disk space.
-
-## Project Structure
+## Project Structure (The Total Perspective Vortex)
 
 ```
 agent42/
-├── agent42.py                 # Main entry point + orchestrator
-├── core/                      # Core services (29 modules)
-│   ├── config.py              # Frozen dataclass settings from .env (80+ vars)
-│   ├── task_queue.py          # Priority queue + JSON/Redis persistence (15 task types)
-│   ├── queue_backend.py       # Queue backend abstraction (JSON file + Redis)
-│   ├── intent_classifier.py   # LLM-based context-aware task classification
-│   ├── complexity.py          # Task complexity assessment + team recommendation
-│   ├── plan_spec.py           # Plan/wave execution specs with topological sort
-│   ├── state_manager.py       # Task state persistence (STATE.md, context management)
-│   ├── chat_session_manager.py # Chat history + conversation tracking
-│   ├── project_manager.py     # Project lifecycle management
-│   ├── project_spec.py        # Project specification generation
-│   ├── interview_questions.py # Project interview question bank
-│   ├── app_manager.py         # Multi-app orchestration
-│   ├── worktree_manager.py    # Git worktree lifecycle
-│   ├── repo_manager.py        # Git repository operations
-│   ├── approval_gate.py       # Protected operation intercept
-│   ├── heartbeat.py           # Agent health monitoring
-│   ├── command_filter.py      # Shell command safety filter (40+ deny patterns)
-│   ├── sandbox.py             # Workspace path restriction (symlink + null byte protection)
-│   ├── device_auth.py         # Multi-device API key registration and validation
-│   ├── key_store.py           # Admin-configured API key overrides (dashboard)
-│   ├── github_oauth.py        # GitHub OAuth integration
-│   ├── github_accounts.py     # GitHub account management
-│   ├── security_scanner.py    # Scheduled vulnerability scanning + GitHub issue reporting
-│   ├── rate_limiter.py        # Per-agent per-tool sliding-window rate limits
-│   ├── capacity.py            # Dynamic concurrency based on CPU/memory metrics
-│   ├── url_policy.py          # URL allowlist/denylist for SSRF protection
-│   ├── rlm_config.py          # Recursive Language Model configuration
-│   ├── notification_service.py # Webhook and email notifications
-│   └── portability.py         # Backup/restore/clone operations
-├── agents/                    # Agent implementation (9 modules)
-│   ├── agent.py               # Per-task agent orchestration (code + non-code modes)
-│   ├── model_router.py        # 5-layer model selection (admin → dynamic → trial → policy → default)
-│   ├── model_catalog.py       # OpenRouter catalog sync, free model auto-discovery
-│   ├── model_evaluator.py     # Outcome tracking, composite scoring, trial system
-│   ├── model_researcher.py    # Web benchmark research (LMSys, HuggingFace, etc.)
-│   ├── iteration_engine.py    # Primary -> Critic -> Revise loop (task-aware critics)
-│   ├── learner.py             # Self-learning: reflection + tool effectiveness tracking
-│   ├── profile_loader.py      # Agent persona/profile loading
-│   └── extension_loader.py    # Dynamic extension/plugin loading
-├── providers/                 # LLM provider integration
-│   ├── registry.py            # Declarative LLM provider + model catalog (6 providers)
-│   └── rlm_provider.py        # Recursive Language Model integration
-├── channels/
-│   ├── base.py                # Channel base class + message types
-│   ├── manager.py             # Multi-channel routing
-│   ├── slack_channel.py       # Slack Socket Mode
-│   ├── discord_channel.py     # Discord bot
-│   ├── telegram_channel.py    # Telegram long-polling
-│   └── email_channel.py       # IMAP/SMTP
-├── tools/                     # 46 tool implementations
-│   ├── base.py                # Tool + ToolExtension base classes, result types
-│   ├── registry.py            # Tool registration + task-type filtering + dispatch
-│   ├── context.py             # ToolContext dependency injection for plugin tools
-│   ├── plugin_loader.py       # Auto-discovers custom Tool/ToolExtension subclasses
-│   ├── shell.py               # Sandboxed shell execution
-│   ├── filesystem.py          # read/write/edit/list operations
-│   ├── grep_tool.py           # Pattern search across files
-│   ├── diff_tool.py           # Structured diff generation
-│   ├── git_tool.py            # Git operations (safe alternative to shell)
-│   ├── web_search.py          # Brave Search + DuckDuckGo fallback + URL fetch
-│   ├── http_client.py         # HTTP requests (URL policy enforced)
-│   ├── python_exec.py         # Sandboxed Python execution
-│   ├── test_runner.py         # Test runner (pytest, jest, vitest, custom)
-│   ├── linter_tool.py         # Linter execution (ruff, pylint, eslint)
-│   ├── code_intel.py          # Code intelligence (AST analysis, symbols)
-│   ├── subagent.py            # Sub-agent spawning
-│   ├── cron.py                # Scheduled tasks (recurring, one-time, planned sequences)
-│   ├── repo_map.py            # Repository structure analysis
-│   ├── pr_generator.py        # Pull request generation
-│   ├── security_analyzer.py   # Security vulnerability scanning
-│   ├── security_audit.py      # Security posture auditing (36 checks)
-│   ├── dependency_audit.py    # Dependency vulnerability scanning
-│   ├── workflow_tool.py       # Multi-step workflows
-│   ├── summarizer_tool.py     # Text/code summarization
-│   ├── file_watcher.py        # File change monitoring
-│   ├── browser_tool.py        # Web browsing + screenshots (Playwright)
-│   ├── notify_tool.py         # Dashboard + channel notifications
-│   ├── mcp_client.py          # MCP server tool proxying
-│   ├── team_tool.py           # Multi-agent team orchestration
-│   ├── content_analyzer.py    # Readability, tone, structure, SEO analysis
-│   ├── data_tool.py           # CSV/JSON data loading + analysis
-│   ├── template_tool.py       # Document templates with variable substitution
-│   ├── outline_tool.py        # Structured document outlines
-│   ├── scoring_tool.py        # Rubric-based content evaluation + improvement
-│   ├── persona_tool.py        # Audience persona management
-│   ├── behaviour_tool.py      # Agent behavior/personality management
-│   ├── image_gen.py           # AI image generation (free-first)
-│   ├── video_gen.py           # AI video generation (async)
-│   ├── app_tool.py            # App building + deployment + lifecycle
-│   ├── project_interview.py   # Structured project discovery interviews
-│   ├── dynamic_tool.py        # Runtime dynamic tool creation
-│   ├── docker_tool.py         # Docker container management
-│   ├── ssh_tool.py            # SSH remote shell (asyncssh, host allowlist, SFTP)
-│   ├── tunnel_tool.py         # Tunnel manager (cloudflared, serveo, localhost.run)
-│   ├── knowledge_tool.py      # Knowledge base / RAG (import, chunk, query)
-│   └── vision_tool.py         # Image analysis (Pillow compress, LLM vision API)
-├── skills/
-│   ├── loader.py              # Skill discovery, frontmatter parser, extension merging
-│   └── builtins/              # Built-in skill templates (43 skills)
-│       ├── api-design/        ├── app-builder/      ├── brand-guidelines/
-│       ├── ci-cd/             ├── cms-deploy/        ├── code-review/
-│       ├── competitive-analysis/ ├── content-writing/ ├── data-analysis/
-│       ├── database-migration/ ├── debugging/        ├── dependency-management/
-│       ├── deployment/        ├── design-review/     ├── docker-deploy/
-│       ├── documentation/     ├── email-marketing/   ├── email-writing/
-│       ├── geo/               ├── git-workflow/      ├── github/
-│       ├── marketing/         ├── memory/            ├── monitoring/
-│       ├── performance/       ├── platform-identity/ ├── presentation/
-│       ├── project-interview/ ├── project-planning/  ├── refactoring/
-│       ├── release-notes/     ├── research/          ├── security-audit/
-│       ├── seo/               ├── server-management/ ├── skill-creator/
-│       ├── social-media/      ├── standup-report/    ├── strategy-analysis/
-│       ├── testing/           ├── tool-creator/      ├── weather/
-│       └── wordpress/
-├── memory/
-│   ├── store.py               # Structured memory + event log
-│   ├── project_memory.py      # Project-scoped memory (per-project MEMORY.md/HISTORY.md)
-│   ├── session.py             # Per-conversation session history (Redis-cached)
-│   ├── embeddings.py          # Pluggable vector store + semantic search
-│   ├── qdrant_store.py        # Qdrant vector DB backend (HNSW search, collections)
-│   ├── redis_session.py       # Redis session cache + embedding cache
-│   └── consolidation.py       # Conversation summarization pipeline
-├── dashboard/
-│   ├── server.py              # FastAPI + WebSocket server (setup wizard, auth, API)
-│   ├── auth.py                # JWT + API key auth, bcrypt, rate limiting
-│   ├── websocket_manager.py   # Real-time broadcast (device-tracked connections)
-│   └── frontend/dist/         # SPA dashboard (vanilla JS, no build step)
-│       ├── index.html         # Entry point
-│       ├── app.js             # Full SPA (setup wizard, login, tasks, chat, code, reports, settings)
-│       ├── style.css          # Dark theme CSS (responsive, 3 breakpoints)
-│       └── assets/            # Brand assets (geometric robot avatar, logos, favicon)
-├── deploy/                    # Production deployment
-│   ├── install-server.sh      # Full server setup (Redis, Qdrant, nginx, SSL, systemd, firewall)
-│   └── nginx-agent42.conf     # Reverse proxy template (__DOMAIN__/__PORT__ placeholders)
-├── data/                      # Runtime data (auto-created)
-│   ├── model_catalog.json     # Cached OpenRouter free model catalog
-│   ├── model_performance.json # Per-model outcome tracking
-│   ├── model_research.json    # Web benchmark research scores
-│   └── dynamic_routing.json   # Data-driven model routing overrides
-├── tests/                     # 1797 tests across 70 test files
-├── .github/workflows/         # CI/CD (test, lint, security)
-├── Dockerfile                 # Container build (Python 3.12-slim)
-├── docker-compose.yml         # Dev stack (Agent42 + Redis + Qdrant)
-├── .env.example               # All configuration options (80+)
-├── requirements.txt           # Production dependencies
-├── requirements-dev.txt       # Dev dependencies (pytest, ruff, bandit, safety)
-├── pyproject.toml             # Tool configuration (ruff, pytest, mypy)
-├── Makefile                   # Common dev commands (test, lint, format, check)
-├── tasks.json.example
-├── setup.sh
-└── uninstall.sh
+|-- mcp_server.py              # MCP server entry point (stdio transport)
+|-- mcp_registry.py            # MCP <-> ToolRegistry adapter
+|-- agent42.py                 # Dashboard + services launcher
+|-- commands.py                # CLI command handlers
+|
+|-- tools/                     # 36+ MCP tools
+|   |-- base.py                # Tool / ToolExtension base classes
+|   |-- registry.py            # Tool registry and discovery
+|   |-- plugin_loader.py       # Custom tool auto-discovery
+|   |-- filesystem.py          # read_file, write_file, edit_file, list_dir
+|   |-- shell.py               # Shell execution (command-filtered)
+|   |-- git_tool.py            # Git operations
+|   |-- memory_tool.py         # Memory store/recall/search
+|   |-- context_assembler.py   # Smart context retrieval
+|   |-- web_search.py          # Web search + fetch
+|   '-- ...                    # 40+ more tool modules
+|
+|-- skills/                    # 57 skills (MCP Prompts)
+|   |-- builtins/              # 46 shipped skills
+|   |-- workspace/             # 6 project-specific skills
+|   '-- loader.py              # Skill discovery and loading
+|
+|-- memory/                    # Memory subsystem
+|   |-- store.py               # MemoryStore (unified interface)
+|   |-- embeddings.py          # ONNX embedding engine
+|   |-- qdrant_store.py        # Qdrant vector backend
+|   '-- search_service.py      # Search service layer
+|
+|-- core/                      # Infrastructure
+|   |-- config.py              # Settings (frozen dataclass from env)
+|   |-- sandbox.py             # Workspace sandbox (path security)
+|   |-- command_filter.py      # 6-layer shell command filter
+|   |-- rate_limiter.py        # Per-tool rate limiting
+|   '-- approval_gate.py       # Human approval for protected ops
+|
+|-- dashboard/                 # FastAPI web UI
+|   |-- server.py              # REST API + WebSocket
+|   |-- auth.py                # JWT + bcrypt authentication
+|   '-- frontend/              # Static frontend assets
+|
+|-- .claude/                   # Claude Code integration
+|   |-- hooks/                 # Associative recall, learning, security
+|   |-- settings.json          # Hook configuration
+|   '-- lessons.md             # Accumulated development patterns
+|
+|-- tests/                     # 1185 passing tests
+|-- deploy/                    # systemd units, nginx config
+|-- docker-compose.yml         # Docker deployment
+'-- requirements.txt           # Python dependencies
 ```
 
-## Deployment
+## Contributing
 
-### Systemd Service
+1. Fork the repository
+2. Create a feature branch from `dev`
+3. Write tests for new functionality (every module in `core/`, `tools/`, `memory/` needs a `tests/test_*.py`)
+4. Run the full suite: `python -m pytest tests/ -x -q`
+5. Run the linter: `make lint`
+6. Submit a pull request to `dev`
 
-```bash
-sudo cp /tmp/agent42.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable agent42
-sudo systemctl start agent42
-sudo journalctl -u agent42 -f
-```
+See `CLAUDE.md` for detailed development guidelines, architecture patterns, and the
+pitfalls table that will save you hours of debugging.
 
-### Docker (Development Stack)
+## License
 
-Run Agent42 with Redis and Qdrant using Docker Compose:
-
-```bash
-cp .env.example .env
-docker compose up -d             # Agent42 + Redis + Qdrant
-docker compose logs -f agent42   # Follow logs
-docker compose down              # Stop
-```
-
-The Docker stack includes Agent42, Redis (session cache + queue backend), and
-Qdrant (vector semantic search). All three services are pre-configured to
-communicate.
-
-### Production VPS
-
-For a full production deployment with Redis, Qdrant, nginx, SSL, systemd, and firewall:
-
-```bash
-scp -r agent42/ user@server:~/agent42
-ssh user@server
-cd ~/agent42
-bash deploy/install-server.sh
-```
-
-The script prompts for your domain name (and optional port), then automatically:
-- Runs `setup.sh` (venv, deps, frontend build)
-- Installs Redis as a native systemd service (via apt)
-- Installs Qdrant as a native systemd service (binary from GitHub releases)
-- Configures `.env` with Redis/Qdrant URLs, JWT secret, and CORS
-- Sets up nginx reverse proxy with rate limiting and security headers
-- Obtains Let's Encrypt SSL certificates
-- Installs the Agent42 systemd service
-- Configures UFW firewall rules
-
-After installation, open `https://yourdomain.com` in your browser to complete
-setup through the wizard (password, API key).
-See `deploy/install-server.sh` and `deploy/nginx-agent42.conf`.
-
-## Uninstallation
-
-Run the uninstall script from the Agent42 directory:
-
-```bash
-cd ~/agent42
-bash uninstall.sh
-```
-
-The script automatically detects your deployment method (local, systemd,
-Docker) and walks you through each removal step with confirmation prompts.
-It offers to back up your `.env` file before removing it.
-
-**What the script handles:**
-
-- Stops running Agent42 processes (systemd service, Docker Compose stack)
-- Removes Qdrant/Redis system services if installed by Agent42
-- Removes standalone Qdrant/Redis Docker containers (if present)
-- Removes the systemd service and reloads the daemon
-- Removes nginx configuration and reloads nginx
-- Optionally removes Let's Encrypt SSL certificates
-- Removes UFW firewall rules
-- Removes all runtime data (`.agent42/`, `data/`, `apps/`, logs)
-- Removes the virtual environment and `.env`
-- Optionally deletes the entire Agent42 directory
-
-### What Gets Removed
-
-| Component | Location | Created By |
-|---|---|---|
-| Virtual environment | `agent42/.venv/` | `setup.sh` |
-| Configuration | `agent42/.env` | `setup.sh` / setup wizard |
-| Runtime data | `agent42/.agent42/` | Agent42 at runtime |
-| Model data | `agent42/data/` | Agent42 at runtime |
-| User apps | `agent42/apps/` | Agent42 at runtime |
-| Log file | `agent42/agent42.log` | systemd / Agent42 |
-| Systemd service | `/etc/systemd/system/agent42.service` | `install-server.sh` |
-| Nginx config | `/etc/nginx/sites-available/agent42` | `install-server.sh` |
-| SSL certificates | `/etc/letsencrypt/live/yourdomain/` | certbot |
-| Redis service | system package (`redis-server`) | `install-server.sh` |
-| Qdrant service | `/etc/systemd/system/qdrant.service` | `install-server.sh` |
-| Qdrant binary | `/usr/local/bin/qdrant` | `install-server.sh` |
-| Qdrant data | `/var/lib/qdrant/` | `install-server.sh` |
-| Docker volumes | `agent42-data`, `redis-data`, `qdrant-data` | `docker compose` |
-
-If `setup.sh` installed Node.js via nvm and you no longer need it, remove it
-manually after uninstalling:
-
-```bash
-rm -rf "$HOME/.nvm"
-# Remove nvm lines from ~/.bashrc or ~/.zshrc
-```
-
-### Reinstalling
-
-After uninstalling, follow the [Quick Start](#quick-start) instructions to
-perform a fresh installation. If you backed up your `.env` file (the script
-offers this), restore it after running `setup.sh` to preserve your API keys
-and settings.
-
-## Project Interview (Don't Panic, We'll Ask the Right Questions)
-
-For complex tasks, Agent42 conducts a structured discovery interview before
-writing a single line of code. Think of it as the Hitchhiker's Guide entry
-for your project — thorough, occasionally surprising, and much more useful
-than a towel.
-
-### How It Works
-
-1. **Complexity detection** — The `ComplexityAssessor` (powered by Gemini 2.5 Flash)
-   evaluates incoming tasks. Simple tasks ("fix the login bug") go straight to work.
-   Complex tasks ("build a SaaS dashboard with auth, billing, and analytics")
-   trigger the interview flow
-2. **Structured rounds** — The interview asks targeted questions across 2-4
-   rounds depending on complexity:
-   - **Overview** — Problem statement, goals, target users
-   - **Requirements** — Features, scope, must-haves vs nice-to-haves
-   - **Technical** — Tech stack, integrations, architecture preferences
-   - **Constraints** (complex only) — Budget, timeline, risks, compliance
-3. **Spec generation** — Answers are synthesized into a `PROJECT_SPEC.md` with
-   requirements, architecture, milestones, and acceptance criteria
-4. **Subtask decomposition** — The spec is decomposed into 4-10 ordered tasks
-   with dependencies (DAG structure), estimated iterations, and task types
-
-### Configuration
-
-| Variable | Default | Description |
-|---|---|---|
-| `PROJECT_INTERVIEW_ENABLED` | `true` | Master toggle |
-| `PROJECT_INTERVIEW_MODE` | `auto` | `auto` = complexity-based, `always`, or `never` |
-| `PROJECT_INTERVIEW_MAX_ROUNDS` | `4` | Maximum question rounds |
-| `PROJECT_INTERVIEW_MIN_COMPLEXITY` | `moderate` | Trigger level: `moderate` or `complex` |
-
-Interview state persists to `PROJECT.json` — sessions survive restarts.
-
-## Team Orchestration
-
-The `team` tool enables multi-agent collaboration with four workflow types:
-
-- **sequential** — roles run in order, each receiving full team context
-- **parallel** — all roles run simultaneously, results aggregated
-- **fan_out_fan_in** — parallel groups run first, then remaining roles merge results
-- **pipeline** — sequential with independent critic iteration per role
-
-### Manager / Coordinator
-
-Every team run is automatically coordinated by a **Manager agent**:
-
-1. **Planning Phase** — Manager analyzes the task and creates an execution plan
-   - Breaks the task into subtasks for each role
-   - Sets expectations, deliverables, and quality criteria per role
-   - Identifies dependencies between roles
-2. **Team Execution** — Roles execute their workflow with the Manager's plan as context
-3. **Review Phase** — Manager reviews all role outputs
-   - Checks for completeness, consistency, and quality
-   - Synthesizes a final deliverable integrating all role work
-   - Assigns a quality score (1-10)
-4. **Revision Handling** — If any role's output is insufficient, Manager flags it
-   - Flagged roles are re-run once with specific manager feedback
-   - Post-revision, Manager re-reviews to ensure quality
-
-### Shared Team Context
-
-Roles don't just receive the previous role's output — they see the full **TeamContext**:
-
-- The original task description
-- The Manager's execution plan
-- All prior role outputs (sequential) or no peer outputs (parallel)
-- Manager-directed feedback (during revisions)
-- Shared team notes
-
-This enables true inter-agent communication where each role understands the full project scope and can build on all prior work.
-
-### Smart Resource Allocation
-
-Agent42 automatically determines whether a task needs a single agent or a full team:
-
-- **Intent Classification** — The LLM classifier analyzes task complexity and recommends `single_agent` or `team` mode
-- **Complexity Assessment** — Keyword signals (scale markers, multi-deliverable markers, team indicators, cross-domain keywords) supplement LLM assessment
-- **Auto-dispatch** — Complex tasks automatically include team tool directives in their description
-- **Team Matching** — The recommended team is matched to the task's domain (marketing → marketing-team, design → design-review, etc.)
-
-Simple tasks ("Fix the login bug") run as single agents with zero overhead. Complex tasks ("Create a comprehensive marketing campaign with social media, email, and blog content") are automatically routed to the appropriate team with Manager coordination.
-
-### Built-in Teams
-
-| Team | Workflow | Roles |
-|---|---|---|
-| research-team | sequential | researcher → analyst → writer |
-| marketing-team | pipeline | researcher → strategist → copywriter → editor |
-| content-team | sequential | writer → editor → SEO optimizer |
-| design-review | sequential | designer → critic → brand reviewer |
-| strategy-team | fan_out_fan_in | market-researcher + competitive-researcher → strategist → presenter |
-| code-review-team | sequential | developer → reviewer → tester |
-| dev-team | fan_out_fan_in | architect → backend-dev + frontend-dev → integrator |
-| qa-team | sequential | analyzer → test-writer → security-auditor |
-
-Clone any built-in team to customize roles and workflow for your needs.
-
-## Media Generation
-
-### Image Generation
-
-Free-first model routing for images, same pattern as text LLMs:
-
-| Model | Provider | Tier | Resolution |
-|---|---|---|---|
-| FLUX.1 Schnell | OpenRouter | Free | 1024x1024 |
-| FLUX.1 Dev | Replicate | Cheap | 1024x1024 |
-| SDXL | Replicate | Cheap | 1024x1024 |
-| DALL-E 3 | OpenAI | Premium | 1024x1792 |
-| FLUX 1.1 Pro | Replicate | Premium | 1024x1024 |
-
-**Prompt review**: Before submitting a prompt for generation, a team of agents
-reviews and enhances the prompt for best results. This includes adding specific
-details about composition, lighting, style, and quality. Skip with `skip_review=true`.
-
-### Video Generation
-
-Video generation is async — the tool returns a job ID for polling:
-
-| Model | Provider | Tier | Max Duration |
-|---|---|---|---|
-| CogVideoX-5B | Replicate | Cheap | 6s |
-| AnimateDiff | Replicate | Cheap | 4s |
-| Runway Gen-3 Turbo | Replicate | Premium | 10s |
-| Luma Ray2 | Luma AI | Premium | 10s |
-| Stable Video Diffusion | Replicate | Premium | 4s |
-
-Admin override: Set `AGENT42_IMAGE_MODEL` or `AGENT42_VIDEO_MODEL` env vars to
-force specific models for all generations.
-
-## Dashboard
-
-Agent42 includes a full web dashboard for managing tasks, approvals, tools,
-skills, and settings.
-
-### Features
-
-- **Login** — JWT-based authentication with bcrypt password hashing
-- **Mission Control** — Create, view, approve, cancel, retry tasks with real-time status updates. Tabs for Tasks, Projects, and Activity feed
-- **Task Detail** — Full task info: status, type, iterations, description, output/error. Post comments that route to the running agent in real time
-- **Chat with Agent42** — Conversational interface with session management, conversation history, and inline code block rendering with canvas support
-- **Code with Agent42** — Dedicated coding sessions with project setup flow and AI-assisted development
-- **Projects** — Group related tasks under projects with scoped memory, archiving, and associated app management
-- **Reports** — LLM usage analytics: per-model token breakdown, cost estimates, task statistics by type/status, and performance metrics
-- **Approvals** — Approve or deny agent operations (email send, git push, file delete) from the dashboard
-- **Review with Feedback** — Approve or request changes on completed tasks; feedback is stored in agent memory for learning
-- **Tools & Skills** — View all registered tools and loaded skills
-- **Agent Profiles** — View, create, edit, and delete agent personality profiles. Set the default profile, inspect preferred skills and task types, and view persona instructions. Cards show L1/L2 tier badges and default status at a glance
-- **Apps** — Build and deploy web applications directly on the server via the app platform
-- **Settings** — Organized into 5 tabs with clear descriptions for every setting:
-  - **LLM Providers** — API keys for OpenRouter, OpenAI, Anthropic, DeepSeek, Gemini, Replicate, Luma, Brave
-  - **Channels** — Discord, Slack, Telegram, Email (IMAP/SMTP) configuration
-  - **Security** — Dashboard auth, rate limiting, sandbox settings, CORS
-  - **Orchestrator** — Concurrent agents, spending limits, repo path, task file, MCP, cron
-  - **Storage & Paths** — Memory, sessions, outputs, templates, images, skills directories
-- **WebSocket** — Real-time updates with exponential backoff reconnection
-- **Responsive** — Full mobile-friendly design with hamburger navigation, touch-friendly targets (44px min), and three responsive breakpoints (1024px, 768px, 480px)
-
-LLM provider API keys can be configured directly through the Settings page (admin only).
-Other settings are displayed as read-only with their environment variable names and help text.
-
-### First-Run Setup Wizard
-
-On first launch (when no password is configured), the dashboard shows an
-unauthenticated setup wizard instead of the login page:
-
-1. Set a dashboard password (stored as bcrypt hash)
-2. Optionally enter an OpenRouter API key
-3. Optionally select an enhanced memory backend (Qdrant embedded or Qdrant + Redis)
-4. Auto-generates `JWT_SECRET` and updates `.env`
-5. Logs you in immediately (and queues a verification task if Qdrant + Redis was selected)
-
-The wizard endpoint (`/api/setup/complete`) is only accessible when the password
-is unset or still at the insecure default. Once setup is complete, the endpoint
-is disabled.
-
-### Multi-Device Access
-
-Agent42 supports persistent API key authentication for multiple devices
-(laptops, phones, tablets, scripts, CI/CD) alongside browser-based JWT auth.
-
-- **Register a device** — `POST /api/devices/register` with a device name and
-  type. Returns a one-time API key (prefix `ak_`) that must be saved immediately.
-- **Device capabilities** — Each device can be granted `tasks` (create/view tasks),
-  `approvals` (approve/deny agent actions), or `monitor` (read-only dashboard).
-- **Authenticate** — Include `Authorization: Bearer ak_...` on any API request
-  or WebSocket connection. Works alongside JWT auth.
-- **Manage devices** — `GET /api/devices` lists all registered devices with
-  online status. `DELETE /api/devices/{id}` revokes access instantly.
-
-## Security (Contrariwise, Vogons Can't Get In)
-
-Agent42 is designed to run safely on a shared VPS alongside other services
-(your website, databases, etc.). The agent cannot access anything outside its
-workspace.
-
-### Sandbox & Execution
-
-- **Workspace sandbox** — Filesystem tools can only read/write within the project worktree. Path traversal (`../`) and absolute paths outside workspace are blocked. Null bytes in paths are rejected. Symlinks that escape the sandbox are detected and blocked.
-- **Shell path enforcement** — Shell commands are scanned for absolute paths — any path outside the workspace (e.g. `/var/www`, `/etc/nginx`) is blocked before execution. `/tmp` is excluded from safe paths to prevent attack staging.
-- **Command filter** — 40+ dangerous command patterns blocked (destructive ops, network exfiltration, service manipulation, package installation, container escape, user/permission changes, background processes, env variable exfiltration, history access, writing to sensitive files).
-- **Python execution** — Python code is checked for dangerous patterns (subprocess, os.system, ctypes, eval/exec, etc.) before execution. API keys and secrets are stripped from the subprocess environment.
-- **Git tool sanitization** — Git arguments are scanned for dangerous flags (`--upload-pack`, `--exec`, `-c`) that could execute arbitrary commands. Sensitive file staging (.env, credentials.json) is blocked.
-
-### Authentication & Network
-
-- **Dashboard auth** — JWT-based authentication with bcrypt password hashing (plaintext fallback for dev only with warning).
-- **Rate limiting** — Login attempts are rate-limited per IP (default: 5/minute) to prevent brute-force attacks.
-- **WebSocket auth** — Real-time dashboard connections require a valid JWT token (`/ws?token=<jwt>`). Unauthenticated connections are rejected. Message size is validated (max 4KB).
-- **WebSocket connection limits** — Maximum 50 simultaneous WebSocket connections (configurable).
-- **CORS** — Restricted to configured origins only (no wildcard). Empty = same-origin only.
-- **Security headers** — All HTTP responses include: X-Content-Type-Options (nosniff), X-Frame-Options (DENY), CSP (script-src 'self'), Referrer-Policy, Permissions-Policy. HSTS enabled over HTTPS.
-- **Health endpoint** — Public `/health` returns only `{"status": "ok"}`. Detailed metrics available via authenticated `/api/health`.
-- **SSRF protection** — HTTP client and web search tools block requests to private/internal IPs (127.0.0.1, 169.254.x.x, 10.x.x.x, 192.168.x.x).
-
-### Approval Gates
-
-Sensitive operations pause the agent and require dashboard approval:
-- `gmail_send` — sending email
-- `git_push` — pushing code
-- `file_delete` — deleting files
-- `external_api` — calling external services
-
-### Scheduled Security Scanning
-
-Agent42 can automatically scan the environment on a configurable interval
-(default: every 8 hours) and report findings:
-
-- **Config posture** — checks for insecure defaults (weak passwords, disabled sandbox, exposed dashboard)
-- **Secret detection** — scans for leaked API keys, tokens, and credentials in code
-- **Dependency scanning** — checks Python dependencies for known vulnerabilities
-- **OWASP pattern matching** — detects common security anti-patterns
-
-Findings can be automatically reported as GitHub issues via the `gh` CLI.
-Configure with `SECURITY_SCAN_ENABLED`, `SECURITY_SCAN_INTERVAL_HOURS`, and
-related env vars.
-
-### Production Recommendations
-
-- Put nginx in front with HTTPS before making public (see `deploy/nginx-agent42.conf`)
-- Set `JWT_SECRET` to a 64-char random string (the setup wizard does this automatically)
-- Use `DASHBOARD_PASSWORD_HASH` (bcrypt) instead of plaintext `DASHBOARD_PASSWORD`
-- Set `CORS_ALLOWED_ORIGINS` to your domain
-- Set `MAX_DAILY_API_SPEND_USD` to cap API costs
-- Keep `SANDBOX_ENABLED=true` and `WORKSPACE_RESTRICT=true`
+[Business Source License 1.1](LICENSE)
 
 ---
 
-*So long, and thanks for all the tasks.* 🐬
-
-Named after the Answer to the Ultimate Question of Life, the Universe, and Everything.
-Agent42 doesn't know the Question either, but it'll complete your sprint backlog while
-the philosophers argue about it.
-
-Built with Python. The language, not the snake. Though if you understand the reference,
-you're our kind of people.
+<p align="center">
+  <em>In the beginning the Universe was created. This has made a lot of people very angry
+  and been widely regarded as a bad move. Agent42 tries to help anyway.</em>
+</p>
