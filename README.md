@@ -12,15 +12,16 @@
   <a href="#quick-start-dont-panic">Quick Start</a> |
   <a href="#mcp-tools-the-guide-entries">Tools</a> |
   <a href="#the-memory-of-a-dolphin-but-better">Memory</a> |
-  <a href="#dashboard-the-heart-of-gold-control-room">Dashboard</a> |
+  <a href="#multi-node-the-infinite-improbability-drive">Multi-Node</a> |
+  <a href="#powering-claude-code-the-babel-fish-of-providers">Providers</a> |
   <a href="https://github.com/SalesTeamToolbox/agent42">GitHub</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.0.0--alpha-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-1185%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/tools-36+-orange" alt="Tools">
   <img src="https://img.shields.io/badge/skills-57-purple" alt="Skills">
+  <img src="https://img.shields.io/badge/nodes-local%20%2B%20remote-teal" alt="Multi-Node">
   <img src="https://img.shields.io/badge/answer-42-yellow" alt="42">
   <img src="https://img.shields.io/badge/license-BSL--1.1-lightgrey" alt="License">
 </p>
@@ -32,8 +33,11 @@
 > -- The same applies to extending Claude Code.
 
 Agent42 is an **MCP (Model Context Protocol) server ecosystem** that extends Claude Code
-with 36+ tools, 57 skills, associative memory, and a management dashboard. Claude Code
-provides the intelligence; Agent42 provides the arms and legs.
+with 36+ tools, 57 skills, associative memory, multi-node management, and a dashboard.
+Claude Code provides the intelligence; Agent42 provides the arms and legs.
+
+**Agent42 requires zero API keys.** It does not call LLMs. All AI reasoning comes from
+your Claude Code subscription (or API key). Agent42 is purely the tooling and memory layer.
 
 ## What Is Agent42?
 
@@ -41,6 +45,8 @@ provides the intelligence; Agent42 provides the arms and legs.
   Docker, security analysis, and more. All accessible through the standard MCP protocol.
 - **Associative memory** -- ONNX embeddings with Qdrant vector search. Memories are
   stored, recalled semantically, and auto-surfaced before Claude even starts thinking.
+- **Multi-node** -- Run Agent42 on your laptop AND your VPS. Control both environments
+  from a single Claude Code session in VS Code. Deploy code, run commands, sync memory.
 - **Dashboard** -- FastAPI web UI for monitoring MCP servers, browsing memory, managing
   tools and skills, and configuring the system.
 - **8-layer security** -- sandbox, command filter, approval gate, rate limiter, URL policy,
@@ -50,19 +56,24 @@ provides the intelligence; Agent42 provides the arms and legs.
 ## Architecture (The Whole Sort of General Mish Mash)
 
 ```
-Claude Code (Pro/Max)  <-- MCP Protocol -->  Agent42 MCP Server
-                                              |-- 36+ Tools (filesystem, git, shell, web, ...)
-                                              |-- 57 Skills (MCP Prompts)
-                                              |-- Memory (Qdrant + ONNX embeddings)
-                                              |-- Security Layers (sandbox, filter, gate, ...)
-                                              '-- Dashboard (FastAPI @ localhost:8000)
+                          VS Code + Claude Code
+                                  |
+                           MCP Protocol
+                    __________|__________
+                   |                     |
+          Local Agent42 Node      Remote Agent42 Node
+          (your laptop)           (your VPS via SSH)
+          |-- 36+ Tools           |-- 36+ Tools
+          |-- 57 Skills           |-- Memory
+          |-- Memory (Qdrant)     |-- Shell access
+          |-- Dashboard           |-- Deployments
+          '-- Security            '-- Services
 ```
 
 **How it works:** Claude Code connects to Agent42 via `.mcp.json`. Agent42's tools appear
 alongside Claude Code's built-in tools. When Claude needs to search the web, analyze
 security, manage Docker containers, or recall something from three weeks ago, it calls
-an Agent42 tool. Agent42 does NOT call LLMs -- Claude Code (your Pro/Max subscription)
-is the brain.
+an Agent42 tool. Agent42 does NOT call LLMs -- Claude Code is the brain.
 
 ```
                   .--- memory-recall hook (auto-surfaces relevant memories)
@@ -70,7 +81,7 @@ is the brain.
 User Prompt --> Claude Code --> agent42_shell("git log")
                             --> agent42_memory("recall", "deployment notes")
                             --> agent42_context(signals=["memory", "git"])
-                            --> agent42_security_analyze(path="src/auth.py")
+                            --> agent42_remote_shell("systemctl status myapp")
                             --> Response (informed by tools + memory + context)
 ```
 
@@ -79,7 +90,8 @@ User Prompt --> Claude Code --> agent42_shell("git log")
 ### Prerequisites
 
 - Python 3.11+
-- [Claude Code](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code) VS Code extension (Pro or Max subscription)
+- [Claude Code](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)
+  VS Code extension or CLI
 - Git
 
 ### Setup
@@ -156,9 +168,10 @@ All tools are prefixed with `agent42_` in Claude Code. 36 tools across 8 categor
 
 | Tool | Description |
 |------|-------------|
-| `agent42_memory` | Store, recall, search, and forget memories (semantic search) |
+| `agent42_memory` | Store, recall, search, forget, correct, and strengthen memories |
 | `agent42_context` | Context Assembler -- pulls from memory, CLAUDE.md, git history, skills |
 | `agent42_knowledge` | Knowledge base management (PDF, docs) |
+| `agent42_node_sync` | Sync memory and config between local and remote nodes |
 
 ### Web
 
@@ -217,7 +230,7 @@ context window), Agent42 remembers things -- semantically.
 ### How It Works
 
 ```
-User says something --> ONNX Embeddings (all-MiniLM-L6-v2, 384 dims)
+User says something --> ONNX Embeddings (all-MiniLM-L6-v2, 384 dims, ~25MB RAM)
                             |
                             v
                      Qdrant Vector DB --> Semantic search (cosine similarity)
@@ -226,7 +239,7 @@ User says something --> ONNX Embeddings (all-MiniLM-L6-v2, 384 dims)
                      Relevant memories surfaced before Claude thinks
 ```
 
-- **Embeddings:** ONNX Runtime with all-MiniLM-L6-v2 (~25MB RAM vs ~1GB for PyTorch).
+- **Embeddings:** ONNX Runtime with all-MiniLM-L6-v2 (~25MB RAM). Not PyTorch (~1GB).
   Runs locally, no API calls, no data leaves your machine.
 - **Storage:** Qdrant vector database (embedded mode for local, server for production).
   Falls back to JSON files if Qdrant isn't available.
@@ -238,6 +251,11 @@ A `UserPromptSubmit` hook (`memory-recall.py`) fires on every prompt. It embeds 
 message, searches Qdrant for related memories, and injects them into Claude's context
 before it starts thinking. You don't need to ask for memories -- they surface
 automatically when relevant.
+
+This means if you're working on authentication and you previously discovered that
+"bcrypt hashes break when copied between machines," that memory automatically appears
+in Claude's context without you asking. Like how your brain works -- relevant memories
+triggered by context, not by explicit recall.
 
 ### Context Assembler
 
@@ -255,9 +273,62 @@ informed answer.
 ### Memory Lifecycle
 
 - **Decay:** Memories lose strength over time if not accessed
-- **Strengthening:** Recalled memories get reinforced
-- **Deduplication:** Near-duplicate memories are merged
-- **Forgetting:** Explicit forget via `agent42_memory(action="forget", ...)`
+- **Strengthening:** Recalled memories get reinforced (`agent42_memory(action="strengthen")`)
+- **Deduplication:** Near-duplicate memories are merged automatically (cosine > 0.90)
+- **Correction:** Update outdated memories (`agent42_memory(action="correct")`)
+- **Forgetting:** Explicit forget (`agent42_memory(action="forget")`)
+
+## Multi-Node (The Infinite Improbability Drive)
+
+Agent42 can run on multiple machines simultaneously. Control your laptop AND your VPS
+from a single VS Code window.
+
+### Setup
+
+Add both nodes to `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "agent42": {
+      "command": "python",
+      "args": ["/path/to/agent42/mcp_server.py"],
+      "env": {
+        "AGENT42_WORKSPACE": "${workspaceFolder}"
+      }
+    },
+    "agent42-remote": {
+      "command": "ssh",
+      "args": ["your-server", "cd ~/agent42 && .venv/bin/python mcp_server.py"],
+      "env": {}
+    }
+  }
+}
+```
+
+### How It Works
+
+- **Local node** runs as a stdio MCP server -- Claude Code launches it directly
+- **Remote node** runs over SSH -- Claude Code spawns an SSH connection that pipes
+  stdio to the remote MCP server. No ports to open, no HTTP endpoints to expose.
+- Both nodes appear as separate tool sets: `agent42_shell` (local) and
+  `agent42_remote_shell` (remote)
+- Memory sync via `agent42_node_sync` replicates knowledge between nodes
+
+### What You Can Do
+
+```
+You: "Deploy the latest build to production"
+
+Claude Code:
+  1. agent42_shell("git log --oneline -5")           # Check local commits
+  2. agent42_remote_shell("cd ~/myapp && git pull")    # Pull on VPS
+  3. agent42_remote_shell("systemctl restart myapp")   # Restart service
+  4. agent42_remote_shell("curl -s localhost:8080/health") # Verify
+  5. agent42_memory(store, "Deployed commit abc123")   # Remember it
+```
+
+All from VS Code. No terminal switching. No SSH windows.
 
 ## Skills (Mostly Harmless Prompt Templates)
 
@@ -293,6 +364,123 @@ Instructions for Claude when this skill is active...
 
 Custom skills can be added to `<workspace>/custom_skills/` or `<workspace>/.claude/skills/`.
 
+## Powering Claude Code (The Babel Fish of Providers)
+
+Agent42 itself requires **no API keys** -- it's purely tools and memory. But Claude Code
+(the brain) needs an AI provider. You have several options:
+
+### Claude Code Subscription (Recommended)
+
+The simplest setup. Log in with your Anthropic account.
+
+| Plan | Cost | Best For |
+|------|------|----------|
+| **Pro** | $20/mo | Light usage, individual developers |
+| **Max** | $100-200/mo | Heavy daily use, extended thinking, power users |
+
+No API keys to manage. No token costs to worry about. Just log in and go.
+
+### Anthropic API Key (Pay-Per-Token)
+
+Set `ANTHROPIC_API_KEY` in your environment. Pay only for what you use.
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+Best for automation, CI/CD pipelines, or precise cost control. Claude Code CLI and
+VS Code extension both support this natively.
+
+### Cloud Providers
+
+Use Claude through your existing cloud infrastructure:
+
+- **Amazon Bedrock** -- `ANTHROPIC_MODEL=bedrock` with AWS credentials
+- **Google Vertex AI** -- `ANTHROPIC_MODEL=vertex` with GCP credentials
+
+Best for enterprises with existing cloud contracts, data residency requirements,
+or compliance needs.
+
+### Alternative Providers
+
+These services provide API access to various AI models and can be used with
+Claude Code via `ANTHROPIC_BASE_URL`:
+
+| Provider | What It Offers | Pricing |
+|----------|---------------|---------|
+| [**OpenRouter**](https://openrouter.ai) | API gateway to 200+ models (Claude, GPT-4, Gemini, Llama, open-source). Single API key for all providers. | Pay-per-token with markup |
+| [**Synthetic**](https://synthetic.new) | Privacy-focused platform running open-source models (GLM-4.7, Kimi K2, Qwen 3) in private datacenters. Never trains on your data or stores prompts. OpenAI-compatible API. | $30/mo subscription or pay-per-use |
+| [**Strongwall.ai**](https://strongwall.ai) | Privacy-first AI platform with architectural data protection. No data retention, no behavioral profiling, no training on conversations. | Contact for pricing |
+
+**To use an alternative provider with Claude Code:**
+
+```bash
+export ANTHROPIC_API_KEY=""  # Must be empty string
+export ANTHROPIC_BASE_URL="https://openrouter.ai/api/v1"
+export OPENROUTER_API_KEY="sk-or-..."
+```
+
+### Comparison
+
+| | Subscription | API Key | Cloud (Bedrock/Vertex) | OpenRouter/Alt |
+|---|---|---|---|---|
+| **Setup** | Login once | Set env var | Cloud credentials | Set base URL + key |
+| **Cost model** | Flat monthly | Per token | Per token | Per token + markup |
+| **Best for** | Daily use | Automation | Enterprise | Multi-model access |
+| **Model choice** | Claude only | Claude only | Claude only | Claude + many others |
+| **Data privacy** | Anthropic TOS | Anthropic TOS | Your cloud TOS | Third-party TOS |
+| **Rate limits** | Generous (Max) | Standard | Cloud quotas | Varies |
+
+**Bottom line:** For most Agent42 users, a Claude Code subscription is the simplest
+and most cost-effective option. Alternative providers make sense for privacy requirements
+(Strongwall, Synthetic), multi-model experimentation (OpenRouter), or enterprise
+compliance (Bedrock, Vertex).
+
+### Hybrid Automation (The Best of Both Worlds)
+
+For the most powerful setup, use **both** a Claude Code subscription and an API provider:
+
+- **Interactive work** (human in the loop) -- Claude Code Subscription (Pro/Max).
+  You're in VS Code, making decisions, reviewing code, using Opus-class reasoning.
+- **Automated work** (overnight, unattended) -- API provider like
+  [Synthetic](https://synthetic.new) ($30/mo) or [OpenRouter](https://openrouter.ai).
+  Cowork tasks iterate autonomously using the API.
+
+```
+  YOU (daytime)                        COWORK (overnight)
+  ┌──────────────────────┐             ┌──────────────────────┐
+  │ Claude Code (Max)    │             │ Synthetic API ($30)  │
+  │ Interactive, Opus    │  ──────►    │ Automated, GLM/Qwen  │
+  │ Heavy reasoning      │  you sleep  │ Iterate until done   │
+  │ Final review         │  ◄──────    │ Store progress in    │
+  └──────────────────────┘  you wake   │ Agent42 memory       │
+                                       └──────────────────────┘
+```
+
+Agent42's memory bridges the gap -- memories stored during automated work are
+available when you return. The brain changes but the memory persists.
+
+**Why this works with TOS:**
+- Claude Code subscription is used interactively (as designed)
+- API providers are used programmatically (as designed)
+- Each provider is used for exactly what it's built for
+
+**Cowork automation script:**
+
+```bash
+# Run on VPS overnight -- uses Synthetic API, not CC subscription
+export ANTHROPIC_API_KEY=""
+export ANTHROPIC_BASE_URL="https://api.synthetic.new/openai/v1"
+export SYNTHETIC_API_KEY="sk-syn-..."
+
+# Agent42 tools (memory, shell, git, tests) work regardless of provider
+claude -p "Implement the auth routes. Run tests. Iterate until passing." \
+  --mcp-config ~/.mcp.json
+```
+
+When you open VS Code the next morning, the memory-recall hook surfaces what was
+built overnight. You review with Opus-class reasoning, powered by your subscription.
+
 ## Configuration (The Babel Fish of Settings)
 
 ### `.mcp.json` -- MCP Server Connection
@@ -322,7 +510,7 @@ Copy `.env.example` and configure:
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `DASHBOARD_PASSWORD_HASH` | Bcrypt hash for dashboard login | Setup wizard on first run |
-| `JWT_SECRET` | Persistent secret for session tokens | Auto-generated (set for persistence across restarts) |
+| `JWT_SECRET` | Persistent secret for session tokens | Auto-generated (set for persistence) |
 | `DASHBOARD_HOST` | Dashboard bind address | `127.0.0.1` |
 | `QDRANT_URL` | Qdrant server URL | Embedded mode (local files) |
 | `REDIS_URL` | Redis URL for session cache | Disabled |
@@ -331,8 +519,6 @@ Copy `.env.example` and configure:
 | `COMMAND_FILTER_MODE` | Shell command filtering | `deny` (deny-list mode) |
 | `CORS_ALLOWED_ORIGINS` | Dashboard CORS origins | Same-origin only |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | GitHub API access | Disabled |
-| `OPENROUTER_API_KEY` | OpenRouter (for tools needing LLM) | Optional |
-| `GEMINI_API_KEY` | Google Gemini API | Optional |
 
 Generate a dashboard password hash:
 
@@ -431,10 +617,11 @@ agent42/
 |   |-- filesystem.py          # read_file, write_file, edit_file, list_dir
 |   |-- shell.py               # Shell execution (command-filtered)
 |   |-- git_tool.py            # Git operations
-|   |-- memory_tool.py         # Memory store/recall/search
+|   |-- memory_tool.py         # Memory store/recall/search/forget/correct
 |   |-- context_assembler.py   # Smart context retrieval
+|   |-- node_sync.py           # Multi-node memory sync
 |   |-- web_search.py          # Web search + fetch
-|   '-- ...                    # 40+ more tool modules
+|   '-- ...                    # 25+ more tool modules
 |
 |-- skills/                    # 57 skills (MCP Prompts)
 |   |-- builtins/              # 46 shipped skills
@@ -443,7 +630,7 @@ agent42/
 |
 |-- memory/                    # Memory subsystem
 |   |-- store.py               # MemoryStore (unified interface)
-|   |-- embeddings.py          # ONNX embedding engine
+|   |-- embeddings.py          # ONNX embedding engine (25MB, local)
 |   |-- qdrant_store.py        # Qdrant vector backend
 |   '-- search_service.py      # Search service layer
 |
@@ -461,10 +648,14 @@ agent42/
 |
 |-- .claude/                   # Claude Code integration
 |   |-- hooks/                 # Associative recall, learning, security
+|   |   |-- memory-recall.py   # Auto-surfaces relevant memories per prompt
+|   |   |-- memory-learn.py    # Captures learnings at session end
+|   |   |-- context-loader.py  # Loads relevant reference docs
+|   |   '-- security-gate.py   # Flags security-sensitive changes
 |   |-- settings.json          # Hook configuration
 |   '-- lessons.md             # Accumulated development patterns
 |
-|-- tests/                     # 1185 passing tests
+|-- tests/                     # Test suite
 |-- deploy/                    # systemd units, nginx config
 |-- docker-compose.yml         # Docker deployment
 '-- requirements.txt           # Python dependencies

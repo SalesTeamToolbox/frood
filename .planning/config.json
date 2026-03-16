@@ -1,6 +1,5 @@
 {
   "mode": "yolo",
-  "depth": "standard",
   "parallelization": true,
   "commit_docs": true,
   "model_profile": "balanced",
@@ -9,7 +8,11 @@
     "plan_check": true,
     "verifier": true,
     "auto_advance": true,
-    "nyquist_validation": true
+    "nyquist_validation": true,
+    "_auto_chain_active": false
+  },
+  "git": {
+    "branching_strategy": "none"
   },
   "gates": {
     "confirm_project": true,
@@ -24,5 +27,6 @@
   "safety": {
     "always_confirm_destructive": true,
     "always_confirm_external_services": true
-  }
+  },
+  "granularity": "standard"
 }
