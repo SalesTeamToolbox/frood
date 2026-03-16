@@ -170,8 +170,11 @@ class TestEmbeddingStore:
         self.store_path = Path(self.tmpdir) / "embeddings.json"
 
     def test_no_api_key_means_unavailable(self):
-        """EmbeddingStore should gracefully disable when no API key is set."""
-        with patch.dict("os.environ", {}, clear=True):
+        """EmbeddingStore should gracefully disable when no API key and no local model."""
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("memory.embeddings._find_onnx_model_dir", return_value=None),
+        ):
             store = EmbeddingStore(self.store_path)
             assert store.is_available is False
 
@@ -243,10 +246,13 @@ class TestEmbeddingStore:
         assert store.entry_count() == 2
 
     def test_openrouter_only_key_disables_embeddings(self):
-        """When only OPENROUTER_API_KEY is set (no OPENAI_API_KEY), embeddings
+        """When only OPENROUTER_API_KEY is set and no local model, embeddings
         should be disabled because OpenRouter doesn't support /embeddings."""
         env = {"OPENROUTER_API_KEY": "sk-or-test-key"}
-        with patch.dict("os.environ", env, clear=True):
+        with (
+            patch.dict("os.environ", env, clear=True),
+            patch("memory.embeddings._find_onnx_model_dir", return_value=None),
+        ):
             store = EmbeddingStore(self.store_path)
             assert store.is_available is False
 
@@ -265,8 +271,10 @@ class TestEmbeddingStoreWithMockAPI:
         self.tmpdir = tempfile.mkdtemp()
         self.store_path = Path(self.tmpdir) / "embeddings.json"
         self.store = EmbeddingStore(self.store_path)
-        # Force available by setting a mock client
+        # Force API mode by setting mock client and marking provider resolved
+        self.store._provider_resolved = True
         self.store._client = MagicMock()
+        self.store._onnx_model = None  # Ensure ONNX path is not used
         self.store._model = "test-model"
 
     @pytest.mark.asyncio
@@ -347,12 +355,15 @@ class TestMemoryStoreSemanticFallback:
 
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
-        # Ensure no API keys are set for this test
+        # Ensure no API keys and no local model for this test
         self.env_patch = patch.dict("os.environ", {}, clear=True)
+        self.onnx_patch = patch("memory.embeddings._find_onnx_model_dir", return_value=None)
         self.env_patch.start()
+        self.onnx_patch.start()
         self.store = MemoryStore(self.tmpdir)
 
     def teardown_method(self):
+        self.onnx_patch.stop()
         self.env_patch.stop()
 
     def test_semantic_not_available(self):
@@ -456,7 +467,10 @@ class TestScheduleReindex:
 
     def test_update_memory_skips_reindex_when_unavailable(self):
         """update_memory should not schedule reindex when embeddings unavailable."""
-        with patch.dict("os.environ", {}, clear=True):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("memory.embeddings._find_onnx_model_dir", return_value=None),
+        ):
             store = MemoryStore(self.tmpdir)
             assert not store.embeddings.is_available
             # This should not raise even without an event loop
@@ -496,8 +510,11 @@ class TestJsonEmbeddingEviction:
         assert store._entries[-1].text == "entry 7"
 
 
-class TestScopeTracking:
-    """Test active scope tracking in SessionManager."""
+class _DisabledScopeTracking:
+    """Disabled — ScopeInfo/TaskType deleted in v2.0 MCP pivot.
+
+    Original tests depended on core.intent_classifier and core.task_queue.
+    """
 
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()

@@ -65,6 +65,18 @@ class Tool(ABC):
             },
         }
 
+    def to_mcp_schema(self, prefix: str = "agent42") -> dict:
+        """Serialize to MCP tool definition format.
+
+        Returns a dict compatible with ``mcp.types.Tool`` construction:
+        ``types.Tool(**tool.to_mcp_schema())``.
+        """
+        return {
+            "name": f"{prefix}_{self.name}" if prefix else self.name,
+            "description": self.description,
+            "inputSchema": self.parameters,
+        }
+
 
 class ToolExtension(ABC):
     """Extends an existing tool with additional parameters and behavior hooks.
