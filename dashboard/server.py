@@ -1275,10 +1275,14 @@ def create_app(
 
     @app.get("/api/approvals")
     async def list_approvals(_user: str = Depends(get_current_user)):
+        if approval_gate is None:
+            return []
         return approval_gate.pending_requests()
 
     @app.post("/api/approvals")
     async def handle_approval(req: ApprovalAction, _user: str = Depends(get_current_user)):
+        if approval_gate is None:
+            raise HTTPException(501, "Approval gate not configured")
         if req.approved:
             approval_gate.approve(req.task_id, req.action, user=_user)
         else:
