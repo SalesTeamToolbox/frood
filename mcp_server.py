@@ -248,6 +248,12 @@ def _build_registry() -> ToolRegistry:
         else None
     )
 
+    # ── Node Sync (Phase 9 — memory sync between nodes) ────────────────
+    NodeSyncTool = _safe_import("tools.node_sync", "NodeSyncTool")
+    _register(
+        NodeSyncTool(memory_store=memory_store, workspace=workspace_str) if NodeSyncTool else None
+    )
+
     # ── Skipped tools (require LLM layer or agent orchestration) ──────────
     # SubagentTool    — Claude Code handles sub-agents
     # TeamTool        — Claude Code handles orchestration
