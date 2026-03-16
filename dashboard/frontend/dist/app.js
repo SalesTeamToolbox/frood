@@ -1356,6 +1356,9 @@ async function doHandleApproval(taskId, action, approved) {
 // ---------------------------------------------------------------------------
 function navigate(page, data) {
   state.page = page;
+  // Remove IDE layout class when leaving code page
+  var pc = document.getElementById("page-content");
+  if (pc) pc.classList.remove("ide-layout-parent");
   if (data) {
     if (page === "detail") state.selectedTask = data;
     if (page === "settings" && data.tab) state.settingsTab = data.tab;
@@ -3351,249 +3354,320 @@ function showCreateProjectModal() {
 }
 
 // ---------------------------------------------------------------------------
-// Code Page
+// IDE (Monaco Editor)
 // ---------------------------------------------------------------------------
+let _monacoEditor = null;
+let _monacoReady = false;
+const _ideTabs = [];
+let _ideActiveTab = -1;
+let _ideTreeCache = {};
+let _ideExpandedDirs = new Set([""]);
+
 function renderCode() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "code") return;
-
-  const sessions = state.codeSessions;
-  const hasSession = !!state.codeCurrentSessionId;
-  const currentSession = sessions.find(s => s.id === state.codeCurrentSessionId);
-
-  // Session sidebar
-  const sessionList = sessions.map(s => {
-    const isActive = s.id === state.codeCurrentSessionId;
-    const unread = s._unread ? `<span class="session-unread">${s._unread}</span>` : "";
-    const title = s.title || "New Code";
-    return `
-      <div class="session-item ${isActive ? 'active' : ''}" onclick="switchCodeSession('${s.id}')">
-        <span class="session-title">${esc(title)}</span>
-        ${unread}
-        <button class="session-delete" onclick="event.stopPropagation();deleteChatSession('${s.id}','code')" title="Delete">&times;</button>
-      </div>`;
-  }).join("");
-
-  // Code setup flow or chat
-  let mainContent = "";
-  if (!hasSession) {
-    mainContent = `
-      <div class="code-welcome">
-        <div class="chat-welcome-icon" style="background:var(--success-dim);border-color:var(--success)"><img src="/assets/agent42-avatar.svg" alt="Agent42" width="64" height="64"></div>
-        <h2 style="margin-bottom:0.5rem">Code with Agent42</h2>
-        <p style="color:var(--text-secondary);margin-bottom:1.5rem">Start a new coding session to build projects with AI assistance.</p>
-        <button class="btn btn-primary" onclick="createChatSession('code')">+ New Coding Session</button>
-      </div>`;
-  } else if (state.codeSetupStep === 1 || state.codeSetupStep === 2) {
-    mainContent = renderCodeSetupHTML(state.codeCurrentSessionId);
-  } else {
-    mainContent = renderCodeChatHTML();
-  }
+  el.classList.add("ide-layout-parent");
 
   el.innerHTML = `
-    <div class="code-layout">
-      <div class="session-sidebar">
-        <button class="btn btn-primary btn-sm session-new-btn" onclick="createChatSession('code')">+ New Session</button>
-        <div class="session-list">${sessionList}</div>
-      </div>
-      <div class="code-main">
-        ${mainContent}
-      </div>
-    </div>
-  `;
-
-  if (hasSession && state.codeSetupStep >= 3) {
-    scrollChatToBottom("code-messages");
-    if (state.codeCanvasOpen) renderCodeCanvasPanel();
-  }
-}
-
-function renderCodeSetupHTML(sessionId) {
-  if (state.codeSetupStep === 1) {
-    return `
-      <div class="code-setup">
-        <h3>Project Setup</h3>
-        <p style="color:var(--text-secondary);margin-bottom:1.5rem">Where will this project run?</p>
-        <div class="setup-cards">
-          <label class="setup-card">
-            <input type="radio" name="code-mode" value="local" checked>
-            <div class="setup-card-content">
-              <div class="setup-card-icon">&#128187;</div>
-              <div class="setup-card-title">Local App</div>
-              <div class="setup-card-desc">Build and run on this server using Agent42's app platform</div>
-            </div>
-          </label>
-          <label class="setup-card">
-            <input type="radio" name="code-mode" value="remote">
-            <div class="setup-card-content">
-              <div class="setup-card-icon">&#9729;&#65039;</div>
-              <div class="setup-card-title">Remote Server</div>
-              <div class="setup-card-desc">Deploy to a remote server via SSH connection</div>
-            </div>
-          </label>
-          <label class="setup-card">
-            <input type="radio" name="code-mode" value="github">
-            <div class="setup-card-content">
-              <div class="setup-card-icon">&#128025;</div>
-              <div class="setup-card-title">GitHub Repository</div>
-              <div class="setup-card-desc">Connect to a GitHub repo — create new or clone existing</div>
-            </div>
-          </label>
+    <div class="ide-layout">
+      <div class="ide-sidebar">
+        <div class="ide-sidebar-header">
+          <span>EXPLORER</span>
+          <div>
+            <button onclick="ideRefreshTree()" title="Refresh">&#8635;</button>
+            <button onclick="ideToggleSearch()" title="Search">&#128269;</button>
+          </div>
         </div>
-        <button class="btn btn-primary" style="margin-top:1.5rem" onclick="state.codeSetupStep=2;renderCode()">Continue</button>
-      </div>`;
-  }
-
-  const mode = document.querySelector('input[name="code-mode"]:checked')?.value || "local";
-  if (state.codeSetupStep === 2) {
-    const localFields = `
-      <div class="form-group">
-        <label>App Name</label>
-        <input type="text" id="code-app-name" placeholder="my-awesome-app">
-      </div>
-      <div class="form-group">
-        <label>Runtime</label>
-        <select id="code-runtime">
-          <option value="python">Python (Flask/FastAPI)</option>
-          <option value="node">Node.js (Express/Next.js)</option>
-          <option value="static">Static (HTML/CSS/JS)</option>
-        </select>
-      </div>`;
-
-    const remoteFields = `
-      <div class="form-group">
-        <label>SSH Host</label>
-        <input type="text" id="code-ssh-host" placeholder="user@hostname">
-        <div class="help">Must be in SSH_ALLOWED_HOSTS</div>
-      </div>
-      <div class="form-group">
-        <label><input type="checkbox" id="code-deploy-now"> Deploy immediately after setup</label>
-      </div>`;
-
-    const connectedRepoOptions = state.repos.filter(r => r.status === "active").map(r =>
-      `<option value="${esc(r.id)}">${esc(r.name)}${r.github_repo ? " (" + esc(r.github_repo) + ")" : ""}</option>`
-    ).join("");
-
-    const githubFields = `
-      ${connectedRepoOptions ? `
-      <div class="form-group">
-        <label>Use a connected repository</label>
-        <select id="code-repo-id">
-          <option value="">-- Select a repo from Settings --</option>
-          ${connectedRepoOptions}
-        </select>
-        <div class="help">Repos connected in Settings are ready to code on and submit PRs</div>
-      </div>
-      <div style="text-align:center;color:var(--text-muted);margin:0.75rem 0;font-size:0.85rem">— or create / clone —</div>
-      ` : ""}
-      <div class="form-group">
-        <label>Create new repository</label>
-        <input type="text" id="code-gh-repo" placeholder="my-project">
-        <div class="help">${state.githubConnected ? "A new repo will be created under your GitHub account" : '<a href="#" onclick="navigate(\'settings\');return false">Connect GitHub in Settings</a> to enable repo creation'}</div>
-      </div>
-      <div class="form-group">
-        <label>Or clone by URL</label>
-        <input type="text" id="code-gh-clone-url" placeholder="https://github.com/user/repo.git">
-      </div>
-      <div class="form-group">
-        <label><input type="checkbox" id="code-gh-private" checked> Private repository</label>
-      </div>
-      <div class="form-group">
-        <label>Runtime</label>
-        <select id="code-runtime">
-          <option value="python">Python (Flask/FastAPI)</option>
-          <option value="node">Node.js (Express/Next.js)</option>
-          <option value="static">Static (HTML/CSS/JS)</option>
-        </select>
-      </div>`;
-
-    const titles = { local: "Local App Setup", remote: "Remote Server Setup", github: "GitHub Repository Setup" };
-
-    return `
-      <div class="code-setup">
-        <h3>${titles[mode] || "Project Setup"}</h3>
-        ${mode === "local" ? localFields : mode === "github" ? githubFields : remoteFields}
-        ${mode !== "github" ? `
-        <div class="form-group">
-          <label>GitHub Repository (optional)</label>
-          <input type="text" id="code-gh-repo" placeholder="my-project">
-          <div class="help">${state.githubConnected ? "Connected to GitHub" : "Connect GitHub in Settings to enable"}</div>
-        </div>` : ""}
-        <div style="display:flex;gap:0.5rem;margin-top:1.5rem">
-          <button class="btn btn-outline" onclick="state.codeSetupStep=1;renderCode()">Back</button>
-          <button class="btn btn-primary" onclick="submitCodeSetup('${sessionId}')">Start Coding</button>
+        <div id="ide-search-panel" class="ide-search-bar" style="display:none">
+          <input type="text" id="ide-search-input" placeholder="Search files..."
+                 onkeydown="if(event.key==='Enter')ideDoSearch(this.value)">
+          <div id="ide-search-results" class="ide-search-results"></div>
         </div>
-      </div>`;
-  }
-  return "";
-}
-
-function renderCodeChatHTML() {
-  const messages = state.codeCurrentMessages;
-  const session = state.codeSessions.find(s => s.id === state.codeCurrentSessionId);
-
-  const msgs = messages.map((m, i) => {
-    const isUser = m.role === "user";
-    const sender = m.sender || (isUser ? "You" : "Agent42");
-    const time = m.timestamp ? formatChatTime(m.timestamp) : "";
-    const content = isUser ? esc(m.content).replace(/\n/g, "<br>") : renderMarkdown(m.content);
-
-    if (isUser) {
-      return `<div class="chat-msg chat-msg-user"><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-user">${content}</div></div><div class="chat-avatar chat-avatar-user">U</div></div>`;
-    }
-    const codeBlocks = extractCodeBlocks(m.content || "");
-    const canvasButtons = codeBlocks.map((b, j) =>
-      `<button class="chat-canvas-btn" onclick="openCodeCanvas(state.codeCurrentMessages[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
-    ).join("");
-    return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim)">${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}</div></div>`;
-  }).join("");
-
-  messages.forEach(m => { if (m.role !== "user") m.__codeBlocks = extractCodeBlocks(m.content || ""); });
-
-  const typingHtml = state.codeSending ? `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim)">${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
-
-  const deployLabel = { local: "Local", remote: "Remote", github: "GitHub" }[session?.deployment_target] || session?.deployment_target || "";
-  const sessionInfo = session?.deployment_target ? `<div class="code-session-info"><span>${deployLabel}</span>${session.github_repo ? ` <span>&#8226; ${esc(session.github_repo)}</span>` : ""}</div>` : "";
-
-  return `
-    <div class="code-chat-area ${state.codeCanvasOpen ? 'canvas-active' : ''}">
-      <div class="code-chat-panel">
-        ${sessionInfo}
-        <div class="chat-messages" id="code-messages">${msgs}${typingHtml}</div>
-        <div class="chat-composer">
-          <div class="chat-composer-inner">
-            <textarea id="code-chat-input" class="chat-textarea code-textarea" rows="1" placeholder="Describe what you want to build..."
-                      oninput="autoGrowTextarea(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendSessionMessage('${state.codeCurrentSessionId}',true)}"
-                      ${state.codeSending ? "disabled" : ""}></textarea>
-            <button class="chat-send-btn" onclick="sendSessionMessage('${state.codeCurrentSessionId}',true)" ${state.codeSending ? "disabled" : ""}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
-            </button>
+        <div id="ide-file-tree" class="ide-file-tree"></div>
+      </div>
+      <div class="ide-main">
+        <div id="ide-tabs" class="ide-tabs"></div>
+        <div id="ide-editor-container" class="ide-editor-container"></div>
+        <div id="ide-welcome" class="ide-welcome" style="display:flex">
+          <h2>Agent42 IDE</h2>
+          <p>Select a file from the explorer to start editing.<br>Changes are saved with Ctrl+S.</p>
+        </div>
+        <div id="ide-statusbar" class="ide-statusbar">
+          <span id="ide-status-left">Ready</span>
+          <div class="ide-statusbar-right">
+            <span id="ide-status-lang">-</span>
+            <span id="ide-status-pos">Ln 1, Col 1</span>
           </div>
         </div>
       </div>
-      <div id="code-canvas-panel" class="canvas-panel ${state.codeCanvasOpen ? 'open' : ''}"></div>
-    </div>`;
-}
-
-function openCodeCanvas(content, title, lang) {
-  state.codeCanvasOpen = true;
-  state.canvasContent = content;
-  state.canvasTitle = title || "Code";
-  state.canvasLang = lang || "";
-  renderCode();
-}
-
-function renderCodeCanvasPanel() {
-  const panel = document.getElementById("code-canvas-panel");
-  if (!panel || !state.canvasContent) return;
-  // Content is escaped via esc() — safe for display
-  panel.innerHTML = `
-    <div class="canvas-header">
-      <span>${esc(state.canvasTitle || "Code")}</span>
-      <button class="canvas-close" onclick="state.codeCanvasOpen=false;renderCode()">&times;</button>
     </div>
-    <pre class="canvas-code"><code>${esc(state.canvasContent)}</code></pre>
   `;
+
+  ideLoadTree("");
+  ideInitMonaco();
+}
+
+function ideInitMonaco() {
+  if (_monacoReady) return;
+  const container = document.getElementById("ide-editor-container");
+  if (!container) return;
+  // Dynamically load Monaco loader if not present
+  if (typeof require === "undefined" || !require.config) {
+    if (!document.getElementById("monaco-loader-script")) {
+      var script = document.createElement("script");
+      script.id = "monaco-loader-script";
+      script.src = "/vs/loader.js";
+      script.onload = function() {
+        require.config({ paths: { vs: "/vs" } });
+        setTimeout(ideInitMonaco, 100);
+      };
+      document.head.appendChild(script);
+    }
+    setTimeout(ideInitMonaco, 300);
+    return;
+  }
+  require(["vs/editor/editor.main"], function () {
+    monaco.editor.defineTheme("agent42-dark", {
+      base: "vs-dark",
+      inherit: true,
+      rules: [],
+      colors: {
+        "editor.background": "#0f172a",
+        "editor.foreground": "#e2e8f0",
+        "editorLineNumber.foreground": "#475569",
+        "editorCursor.foreground": "#38bdf8",
+        "editor.selectionBackground": "#334155",
+        "editor.lineHighlightBackground": "#1e293b",
+      },
+    });
+    _monacoEditor = monaco.editor.create(container, {
+      value: "",
+      language: "plaintext",
+      theme: "agent42-dark",
+      fontSize: 14,
+      fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
+      minimap: { enabled: true },
+      automaticLayout: true,
+      scrollBeyondLastLine: false,
+      wordWrap: "on",
+      tabSize: 4,
+      renderWhitespace: "selection",
+      bracketPairColorization: { enabled: true },
+    });
+    _monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {
+      ideSaveCurrentFile();
+    });
+    _monacoEditor.onDidChangeCursorPosition(function (e) {
+      const pos = document.getElementById("ide-status-pos");
+      if (pos) pos.textContent = "Ln " + e.position.lineNumber + ", Col " + e.position.column;
+    });
+    _monacoEditor.onDidChangeModelContent(function () {
+      if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab]) {
+        _ideTabs[_ideActiveTab].modified = true;
+        ideRenderTabs();
+      }
+    });
+    container.style.display = "none";
+    _monacoReady = true;
+  });
+}
+
+async function ideLoadTree(path) {
+  try {
+    const res = await fetch("/api/ide/tree?path=" + encodeURIComponent(path), {
+      headers: { Authorization: "Bearer " + state.token },
+    });
+    const data = await res.json();
+    _ideTreeCache[path] = data.entries;
+    ideRenderTree();
+  } catch (e) {
+    console.error("Tree load error:", e);
+  }
+}
+
+function ideRenderTree() {
+  const el = document.getElementById("ide-file-tree");
+  if (!el) return;
+  el.innerHTML = ideRenderTreeLevel("", 0);
+}
+
+function ideRenderTreeLevel(dirPath, depth) {
+  const entries = _ideTreeCache[dirPath];
+  if (!entries) return "";
+  const indent = '<span class="ide-tree-indent"></span>'.repeat(depth);
+  return entries.map(function(e) {
+    if (e.type === "dir") {
+      const expanded = _ideExpandedDirs.has(e.path);
+      const icon = expanded ? "&#9660;" : "&#9654;";
+      const children = expanded ? ideRenderTreeLevel(e.path, depth + 1) : "";
+      return '<div class="ide-tree-item ide-tree-dir" onclick="ideToggleDir(\'' + e.path.replace(/'/g, "\\'") + '\')">' + indent + '<span class="icon">' + icon + '</span>' + esc(e.name) + '</div>' + children;
+    }
+    var activeClass = _ideActiveTab >= 0 && _ideTabs[_ideActiveTab] && _ideTabs[_ideActiveTab].path === e.path ? "active" : "";
+    var fileIcon = ideFileIcon(e.name);
+    return '<div class="ide-tree-item ide-tree-file ' + activeClass + '" onclick="ideOpenFile(\'' + e.path.replace(/'/g, "\\'") + '\')">' + indent + '<span class="icon">' + fileIcon + '</span>' + esc(e.name) + '</div>';
+  }).join("");
+}
+
+function ideFileIcon(name) {
+  var ext = name.split(".").pop();
+  if (ext) ext = ext.toLowerCase();
+  var icons = { py: "&#128013;", js: "&#9998;", ts: "&#9998;", json: "{ }", md: "&#128196;",
+    html: "&#127760;", css: "&#127912;", sh: "&#9881;", yaml: "&#9881;", yml: "&#9881;",
+    toml: "&#9881;", txt: "&#128196;", sql: "&#128451;" };
+  return icons[ext] || "&#128196;";
+}
+
+async function ideToggleDir(path) {
+  if (_ideExpandedDirs.has(path)) {
+    _ideExpandedDirs.delete(path);
+  } else {
+    _ideExpandedDirs.add(path);
+    if (!_ideTreeCache[path]) await ideLoadTree(path);
+  }
+  ideRenderTree();
+}
+
+async function ideOpenFile(path) {
+  var existing = -1;
+  for (var i = 0; i < _ideTabs.length; i++) {
+    if (_ideTabs[i].path === path) { existing = i; break; }
+  }
+  if (existing >= 0) {
+    _ideActiveTab = existing;
+    ideActivateTab();
+    return;
+  }
+  try {
+    var statusEl = document.getElementById("ide-status-left");
+    if (statusEl) statusEl.textContent = "Loading " + path + "...";
+    var res = await fetch("/api/ide/file?path=" + encodeURIComponent(path), {
+      headers: { Authorization: "Bearer " + state.token },
+    });
+    if (!res.ok) { toast("Failed to load file", "error"); return; }
+    var data = await res.json();
+    var uri = monaco.Uri.parse("file:///" + path);
+    var model = monaco.editor.getModel(uri);
+    if (model) model.dispose();
+    model = monaco.editor.createModel(data.content, data.language, uri);
+    _ideTabs.push({ path: path, modified: false, model: model, language: data.language, originalContent: data.content });
+    _ideActiveTab = _ideTabs.length - 1;
+    ideActivateTab();
+    if (statusEl) statusEl.textContent = path;
+  } catch (e) {
+    toast("Error loading file: " + e.message, "error");
+  }
+}
+
+function ideActivateTab() {
+  if (_ideActiveTab < 0 || !_ideTabs[_ideActiveTab]) return;
+  var tab = _ideTabs[_ideActiveTab];
+  if (_monacoEditor) {
+    _monacoEditor.setModel(tab.model);
+    var container = document.getElementById("ide-editor-container");
+    var welcome = document.getElementById("ide-welcome");
+    if (container) container.style.display = "block";
+    if (welcome) welcome.style.display = "none";
+  }
+  var langEl = document.getElementById("ide-status-lang");
+  if (langEl) langEl.textContent = tab.language || "plaintext";
+  var statusEl = document.getElementById("ide-status-left");
+  if (statusEl) statusEl.textContent = tab.path + (tab.modified ? " (modified)" : "");
+  ideRenderTabs();
+  ideRenderTree();
+}
+
+function ideRenderTabs() {
+  var el = document.getElementById("ide-tabs");
+  if (!el) return;
+  el.innerHTML = _ideTabs.map(function(t, i) {
+    var active = i === _ideActiveTab ? "active" : "";
+    var mod = t.modified ? '<span class="modified">&#9679;</span>' : "";
+    var name = t.path.split("/").pop();
+    return '<div class="ide-tab ' + active + '" onclick="_ideActiveTab=' + i + ';ideActivateTab()">' +
+      mod + esc(name) +
+      '<span class="close" onclick="event.stopPropagation();ideCloseTab(' + i + ')">&times;</span>' +
+    '</div>';
+  }).join("");
+}
+
+function ideCloseTab(index) {
+  var tab = _ideTabs[index];
+  if (tab.modified && !confirm("Discard unsaved changes to " + tab.path + "?")) return;
+  if (tab.model) tab.model.dispose();
+  _ideTabs.splice(index, 1);
+  if (_ideActiveTab >= _ideTabs.length) _ideActiveTab = _ideTabs.length - 1;
+  if (_ideTabs.length === 0) {
+    _ideActiveTab = -1;
+    if (_monacoEditor) _monacoEditor.setModel(null);
+    var container = document.getElementById("ide-editor-container");
+    var welcome = document.getElementById("ide-welcome");
+    if (container) container.style.display = "none";
+    if (welcome) welcome.style.display = "flex";
+  } else {
+    ideActivateTab();
+  }
+  ideRenderTabs();
+}
+
+async function ideSaveCurrentFile() {
+  if (_ideActiveTab < 0) return;
+  var tab = _ideTabs[_ideActiveTab];
+  var content = tab.model.getValue();
+  var statusEl = document.getElementById("ide-status-left");
+  try {
+    if (statusEl) statusEl.textContent = "Saving " + tab.path + "...";
+    var res = await fetch("/api/ide/file", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
+      body: JSON.stringify({ path: tab.path, content: content }),
+    });
+    if (!res.ok) { toast("Save failed", "error"); return; }
+    tab.modified = false;
+    tab.originalContent = content;
+    ideRenderTabs();
+    if (statusEl) statusEl.textContent = tab.path + " — saved";
+    toast("Saved " + tab.path, "success");
+  } catch (e) {
+    toast("Save error: " + e.message, "error");
+  }
+}
+
+function ideRefreshTree() {
+  _ideTreeCache = {};
+  _ideExpandedDirs = new Set([""]);
+  ideLoadTree("");
+}
+
+function ideToggleSearch() {
+  var panel = document.getElementById("ide-search-panel");
+  if (panel) {
+    panel.style.display = panel.style.display === "none" ? "block" : "none";
+    if (panel.style.display === "block") {
+      var input = document.getElementById("ide-search-input");
+      if (input) input.focus();
+    }
+  }
+}
+
+async function ideDoSearch(query) {
+  if (!query.trim()) return;
+  var resultsEl = document.getElementById("ide-search-results");
+  if (!resultsEl) return;
+  resultsEl.textContent = "Searching...";
+  try {
+    var res = await fetch("/api/ide/search?q=" + encodeURIComponent(query), {
+      headers: { Authorization: "Bearer " + state.token },
+    });
+    var data = await res.json();
+    if (data.results.length === 0) { resultsEl.textContent = "No results"; return; }
+    resultsEl.innerHTML = data.results.map(function(r) {
+      return '<div class="ide-search-result" onclick="ideOpenFile(\'' + r.file.replace(/'/g, "\\'") + '\')">' +
+        '<span class="file">' + esc(r.file) + '</span><span class="line-num">:' + r.line + '</span> ' +
+        esc(r.text) + '</div>';
+    }).join("");
+  } catch (e) {
+    resultsEl.textContent = "Search error: " + e.message;
+  }
 }
 
 // ---------------------------------------------------------------------------

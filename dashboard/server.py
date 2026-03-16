@@ -153,8 +153,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline'; "
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "font-src 'self' https://cdn.jsdelivr.net; "
+            "worker-src 'self' blob:; "
             "img-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'"
         )
         response.headers["Permissions-Policy"] = (
@@ -1270,6 +1273,150 @@ def create_app(
             "webhook_events": settings.get_webhook_events(),
             "email_recipients": settings.get_notification_email_recipients(),
         }
+
+    # -- IDE (Web IDE file operations) -----------------------------------------
+
+    import os as _os
+
+    workspace = Path(_os.environ.get("AGENT42_WORKSPACE", str(Path.cwd())))
+
+    @app.get("/api/ide/tree")
+    async def ide_tree(path: str = "", _user: str = Depends(get_current_user)):
+        """List directory tree for the IDE file explorer."""
+        target = (workspace / path).resolve()
+        if not str(target).startswith(str(workspace.resolve())):
+            raise HTTPException(403, "Path outside workspace")
+        if not target.exists():
+            raise HTTPException(404, f"Path not found: {path}")
+        if not target.is_dir():
+            raise HTTPException(400, "Not a directory")
+
+        entries = []
+        try:
+            for item in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+                name = item.name
+                if name.startswith(".") and name not in (".claude", ".env.example"):
+                    continue
+                if name in ("__pycache__", "node_modules", ".venv", ".git"):
+                    continue
+                entries.append(
+                    {
+                        "name": name,
+                        "path": str(item.relative_to(workspace)).replace("\\", "/"),
+                        "type": "dir" if item.is_dir() else "file",
+                        "size": item.stat().st_size if item.is_file() else 0,
+                    }
+                )
+        except PermissionError:
+            raise HTTPException(403, "Permission denied")
+        return {"path": path, "entries": entries}
+
+    @app.get("/api/ide/file")
+    async def ide_read_file(path: str, _user: str = Depends(get_current_user)):
+        """Read file contents for the IDE editor."""
+        target = (workspace / path).resolve()
+        if not str(target).startswith(str(workspace.resolve())):
+            raise HTTPException(403, "Path outside workspace")
+        if not target.exists():
+            raise HTTPException(404, f"File not found: {path}")
+        if not target.is_file():
+            raise HTTPException(400, "Not a file")
+        if target.stat().st_size > 2_000_000:
+            raise HTTPException(413, "File too large (> 2MB)")
+
+        try:
+            content = target.read_text(encoding="utf-8", errors="replace")
+        except Exception as e:
+            raise HTTPException(500, f"Read error: {e}")
+
+        # Determine language from extension
+        ext_map = {
+            ".py": "python",
+            ".js": "javascript",
+            ".ts": "typescript",
+            ".jsx": "javascript",
+            ".tsx": "typescript",
+            ".json": "json",
+            ".yaml": "yaml",
+            ".yml": "yaml",
+            ".md": "markdown",
+            ".html": "html",
+            ".css": "css",
+            ".sh": "shell",
+            ".bash": "shell",
+            ".toml": "toml",
+            ".cfg": "ini",
+            ".ini": "ini",
+            ".sql": "sql",
+            ".xml": "xml",
+            ".dockerfile": "dockerfile",
+            ".rs": "rust",
+            ".go": "go",
+        }
+        ext = target.suffix.lower()
+        language = ext_map.get(ext, "plaintext")
+        if target.name == "Dockerfile":
+            language = "dockerfile"
+        elif target.name == "Makefile":
+            language = "makefile"
+
+        return {"path": path, "content": content, "language": language}
+
+    class IDEWriteRequest(BaseModel):
+        path: str
+        content: str
+
+    @app.post("/api/ide/file")
+    async def ide_write_file(req: IDEWriteRequest, _user: str = Depends(get_current_user)):
+        """Write file contents from the IDE editor."""
+        target = (workspace / req.path).resolve()
+        if not str(target).startswith(str(workspace.resolve())):
+            raise HTTPException(403, "Path outside workspace")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            target.write_text(req.content, encoding="utf-8")
+        except Exception as e:
+            raise HTTPException(500, f"Write error: {e}")
+        return {"status": "ok", "path": req.path, "size": len(req.content)}
+
+    @app.get("/api/ide/search")
+    async def ide_search(q: str, path: str = "", _user: str = Depends(get_current_user)):
+        """Search file contents in workspace."""
+        import re
+
+        target = (workspace / path).resolve()
+        if not str(target).startswith(str(workspace.resolve())):
+            raise HTTPException(403, "Path outside workspace")
+
+        results = []
+        skip_dirs = {".git", "__pycache__", "node_modules", ".venv", ".agent42"}
+        try:
+            pattern = re.compile(q, re.IGNORECASE)
+        except re.error:
+            raise HTTPException(400, f"Invalid search pattern: {q}")
+
+        for root, dirs, files in _os.walk(target):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            for fname in files:
+                fpath = Path(root) / fname
+                if fpath.stat().st_size > 500_000:
+                    continue
+                try:
+                    text = fpath.read_text(encoding="utf-8", errors="ignore")
+                    for i, line in enumerate(text.splitlines(), 1):
+                        if pattern.search(line):
+                            results.append(
+                                {
+                                    "file": str(fpath.relative_to(workspace)).replace("\\", "/"),
+                                    "line": i,
+                                    "text": line.strip()[:200],
+                                }
+                            )
+                            if len(results) >= 100:
+                                return {"query": q, "results": results, "truncated": True}
+                except (PermissionError, UnicodeDecodeError):
+                    continue
+        return {"query": q, "results": results, "truncated": False}
 
     # -- Approvals -------------------------------------------------------------
 
