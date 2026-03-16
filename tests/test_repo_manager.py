@@ -237,50 +237,5 @@ class TestGitHubIntegration:
 
 
 # ---------------------------------------------------------------------------
-# Task repo_id / branch backward compatibility
+# TestTaskRepoFields removed — core.task_queue was deleted in v2.0 MCP pivot.
 # ---------------------------------------------------------------------------
-
-
-class TestTaskRepoFields:
-    def test_task_with_repo_fields(self):
-        from core.task_queue import Task
-
-        task = Task(
-            title="Fix bug",
-            description="Fix the login bug",
-            repo_id="abc123",
-            branch="dev",
-        )
-        d = task.to_dict()
-        assert d["repo_id"] == "abc123"
-        assert d["branch"] == "dev"
-
-        restored = Task.from_dict(d)
-        assert restored.repo_id == "abc123"
-        assert restored.branch == "dev"
-
-    def test_task_without_repo_fields(self):
-        from core.task_queue import Task
-
-        task = Task(title="Research", description="Research something")
-        assert task.repo_id == ""
-        assert task.branch == ""
-
-        d = task.to_dict()
-        restored = Task.from_dict(d)
-        assert restored.repo_id == ""
-        assert restored.branch == ""
-
-    def test_old_task_dict_without_repo_fields(self):
-        """Backward compatibility: old task dicts without repo_id/branch."""
-        from core.task_queue import Task
-
-        old_dict = {
-            "title": "Old task",
-            "description": "No repo info",
-            "task_type": "coding",
-            "status": "pending",
-        }
-        task = Task.from_dict(old_dict)
-        assert task.repo_id == ""
-        assert task.branch == ""

@@ -1,9 +1,13 @@
 """
 Semantic memory — vector embeddings for meaning-based search.
 
-Uses any OpenAI-compatible embedding API (OpenAI or OpenRouter) with a
-pluggable vector store backend:
+Embedding providers (resolution order):
+1. Local ONNX (onnxruntime + tokenizers) — runs entirely on-device, no API key,
+   ~23 MB RAM instead of ~1 GB for PyTorch. Uses all-MiniLM-L6-v2 (384 dims).
+2. OpenAI API — text-embedding-3-small (1536 dims). Requires OPENAI_API_KEY.
+3. Disabled — falls back to grep-based search.
 
+Vector store backends:
 1. Qdrant backend (preferred) — HNSW-indexed search, payload filtering,
    persistence, and scalability. Supports server or embedded mode.
 2. JSON backend (fallback) — Pure-Python cosine similarity with JSON
@@ -11,8 +15,6 @@ pluggable vector store backend:
 
 Embedding cache via Redis (optional) — avoids redundant API calls for
 repeated queries.
-
-Gracefully degrades to grep-based search when no embedding API is configured.
 """
 
 import json
@@ -23,11 +25,21 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from openai import AsyncOpenAI
-
 logger = logging.getLogger("agent42.memory.embeddings")
 
-# Embedding models available on common providers
+# ── Local ONNX embedding support ──────────────────────────────────────────
+LOCAL_MODEL_NAME = "all-MiniLM-L6-v2"
+LOCAL_VECTOR_DIM = 384
+
+try:
+    import onnxruntime  # noqa: F401
+    from tokenizers import Tokenizer  # noqa: F401
+
+    LOCAL_EMBEDDINGS_AVAILABLE = True
+except ImportError:
+    LOCAL_EMBEDDINGS_AVAILABLE = False
+
+# Embedding models available on API providers
 EMBEDDING_MODELS = {
     "openai": "text-embedding-3-small",  # OpenAI — cheap, 1536 dims
     "openrouter": "openai/text-embedding-3-small",  # Via OpenRouter
@@ -58,6 +70,80 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
+def _find_onnx_model_dir() -> Path | None:
+    """Locate the ONNX model directory.
+
+    Checks:
+    1. .agent42/models/all-MiniLM-L6-v2/ (project-local)
+    2. ~/.agent42/models/all-MiniLM-L6-v2/ (global)
+    """
+    candidates = [
+        Path(os.environ.get("AGENT42_WORKSPACE", ".")) / ".agent42" / "models" / LOCAL_MODEL_NAME,
+    ]
+    try:
+        candidates.append(Path.home() / ".agent42" / "models" / LOCAL_MODEL_NAME)
+    except RuntimeError:
+        pass  # HOME not set (e.g. in tests with clear=True)
+    for p in candidates:
+        tokenizer_path = p / "tokenizer.json"
+        model_path = p / "onnx" / "model.onnx"
+        if tokenizer_path.exists() and model_path.exists():
+            return p
+    return None
+
+
+class _OnnxEmbedder:
+    """Lightweight ONNX-based text embedder (~23 MB RAM vs ~1 GB for PyTorch)."""
+
+    def __init__(self, model_dir: Path):
+        import numpy as np
+        import onnxruntime as ort
+        from tokenizers import Tokenizer
+
+        self._np = np
+        self._tokenizer = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
+        self._tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
+        self._tokenizer.enable_truncation(max_length=256)
+        self._session = ort.InferenceSession(
+            str(model_dir / "onnx" / "model.onnx"),
+            providers=["CPUExecutionProvider"],
+        )
+        self.dim = 384  # all-MiniLM-L6-v2
+
+    def encode(self, text: str) -> list[float]:
+        """Encode a single text to a normalized embedding vector."""
+        return self.encode_batch([text])[0]
+
+    def encode_batch(self, texts: list[str]) -> list[list[float]]:
+        """Encode multiple texts to normalized embedding vectors."""
+        np = self._np
+        encoded = self._tokenizer.encode_batch(texts)
+
+        input_ids = np.array([e.ids for e in encoded], dtype=np.int64)
+        attention_mask = np.array([e.attention_mask for e in encoded], dtype=np.int64)
+        token_type_ids = np.zeros_like(input_ids)
+
+        outputs = self._session.run(
+            None,
+            {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "token_type_ids": token_type_ids,
+            },
+        )
+
+        # Mean pooling + L2 normalize
+        token_embeddings = outputs[0]
+        mask_expanded = attention_mask[:, :, np.newaxis].astype(np.float32)
+        summed = np.sum(token_embeddings * mask_expanded, axis=1)
+        counts = np.clip(mask_expanded.sum(axis=1), 1e-9, None)
+        embeddings = summed / counts
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        embeddings = embeddings / norms
+
+        return embeddings.tolist()
+
+
 class EmbeddingStore:
     """Pluggable vector store for semantic memory search.
 
@@ -66,8 +152,8 @@ class EmbeddingStore:
 
     Resolution order for embedding API:
     1. EMBEDDING_MODEL + EMBEDDING_PROVIDER env vars (explicit config)
-    2. OpenAI (if OPENAI_API_KEY is set)
-    3. OpenRouter (if OPENROUTER_API_KEY is set)
+    2. Local ONNX model (no API key, no network, ~23 MB RAM)
+    3. OpenAI (if OPENAI_API_KEY is set)
     4. Disabled — falls back to grep search
     """
 
@@ -75,43 +161,69 @@ class EmbeddingStore:
         self.store_path = Path(store_path)
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
         self._entries: list[EmbeddingEntry] = []
-        self._client: AsyncOpenAI | None = None
+        self._client = None  # AsyncOpenAI — lazy import
+        self._onnx_model: _OnnxEmbedder | None = None
         self._model: str = ""
+        self._vector_dim: int = 0
         self._loaded = False
-        self._qdrant = qdrant_store  # QdrantStore instance (optional)
-        self._redis = redis_backend  # RedisSessionBackend instance (optional)
-        self._resolve_provider()
+        self._qdrant = qdrant_store
+        self._redis = redis_backend
+        self._provider_resolved = False  # Lazy — don't load model until needed
 
     def _resolve_provider(self):
-        """Find the best available embedding API."""
+        """Find the best available embedding provider.
+
+        Resolution order:
+        1. Explicit EMBEDDING_MODEL + EMBEDDING_PROVIDER env vars
+        2. Local ONNX model (no API key needed, lightweight)
+        3. OpenAI API (if OPENAI_API_KEY is set)
+        4. Disabled — falls back to grep search
+        """
         # Explicit override
         explicit_model = os.getenv("EMBEDDING_MODEL")
         explicit_provider = os.getenv("EMBEDDING_PROVIDER", "").lower()
 
-        if explicit_model:
-            self._model = explicit_model
+        if explicit_model and explicit_provider != "local":
             base_url, api_key = self._provider_config(explicit_provider)
             if api_key:
+                from openai import AsyncOpenAI
+
                 self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+                self._model = explicit_model
+                self._vector_dim = 1536
                 logger.info(
                     f"Embeddings: using {explicit_model} via {explicit_provider or 'openai'}"
                 )
                 return
 
-        # Auto-detect: try providers in order of preference.
-        # OpenRouter is excluded — its free tier does not support the
-        # /embeddings endpoint (returns 401 "User not found").
-        for provider, model in [
-            ("openai", EMBEDDING_MODELS["openai"]),
-        ]:
+        # Auto-detect: prefer local ONNX (no API key, no network, low memory)
+        if LOCAL_EMBEDDINGS_AVAILABLE:
+            model_dir = _find_onnx_model_dir()
+            if model_dir:
+                try:
+                    self._onnx_model = _OnnxEmbedder(model_dir)
+                    self._model = LOCAL_MODEL_NAME
+                    self._vector_dim = self._onnx_model.dim
+                    logger.info(
+                        f"Embeddings: ONNX model {LOCAL_MODEL_NAME} ({self._vector_dim} dims, ~23 MB)"
+                    )
+                    return
+                except Exception as e:
+                    logger.warning(f"Embeddings: ONNX model failed to load: {e}")
+
+        # Fallback: try API providers
+        for provider, model in [("openai", EMBEDDING_MODELS["openai"])]:
             base_url, api_key = self._provider_config(provider)
             if api_key:
+                from openai import AsyncOpenAI
+
                 self._model = model
+                self._vector_dim = 1536
                 self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
                 logger.info(f"Embeddings: auto-detected {provider}, using {model}")
                 return
 
-        logger.info("Embeddings: no API configured — semantic search disabled, using grep fallback")
+        logger.info("Embeddings: no provider available — semantic search disabled")
 
     @staticmethod
     def _provider_config(provider: str) -> tuple[str, str]:
@@ -122,10 +234,23 @@ class EmbeddingStore:
         }
         return configs.get(provider, ("https://api.openai.com/v1", ""))
 
+    def _ensure_provider(self):
+        """Lazy-load the embedding provider on first use (avoids OOM at startup)."""
+        if not self._provider_resolved:
+            self._provider_resolved = True
+            self._resolve_provider()
+
     @property
     def is_available(self) -> bool:
-        """Whether semantic search is available."""
-        return self._client is not None
+        """Whether semantic search is available (local model or API)."""
+        self._ensure_provider()
+        return self._onnx_model is not None or self._client is not None
+
+    @property
+    def vector_dim(self) -> int:
+        """Dimension of the embedding vectors produced by the current provider."""
+        self._ensure_provider()
+        return self._vector_dim
 
     def _load(self):
         """Load entries from disk."""
@@ -148,7 +273,6 @@ class EmbeddingStore:
     def _save(self):
         """Persist entries to disk. Evicts oldest entries if over limit."""
         if len(self._entries) > self.MAX_JSON_ENTRIES:
-            # Keep newest entries, sorted by timestamp
             self._entries.sort(key=lambda e: e.timestamp)
             self._entries = self._entries[-self.MAX_JSON_ENTRIES :]
             logger.info(f"JSON embedding store evicted to {self.MAX_JSON_ENTRIES} entries")
@@ -166,12 +290,19 @@ class EmbeddingStore:
     async def embed_text(self, text: str) -> list[float]:
         """Get the embedding vector for a text string.
 
-        Checks Redis cache first, falls back to API call, then caches result.
+        Uses local ONNX model if available, otherwise falls back to API.
+        Checks Redis cache first for API calls.
         """
-        if not self._client:
-            raise RuntimeError("No embedding API configured")
+        if not self.is_available:
+            raise RuntimeError("No embedding provider configured")
 
-        # Check Redis cache
+        # Local ONNX model — fast, no network, no cache needed
+        if self._onnx_model is not None:
+            import asyncio
+
+            return await asyncio.to_thread(self._onnx_model.encode, text)
+
+        # API path — check Redis cache first
         if self._redis and self._redis.is_available:
             cached = self._redis.get_cached_embedding(text)
             if cached is not None:
@@ -190,19 +321,25 @@ class EmbeddingStore:
         return vector
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Batch-embed multiple texts with Redis cache support.
+        """Batch-embed multiple texts.
 
-        Checks Redis cache for each text first, only sends uncached texts
-        to the API. Caches new results on return.
+        Uses local ONNX model for batch encoding if available,
+        otherwise falls back to API with Redis cache support.
         """
-        if not self._client:
-            raise RuntimeError("No embedding API configured")
+        if not self.is_available:
+            raise RuntimeError("No embedding provider configured")
 
+        # Local ONNX model — batch encode is very efficient
+        if self._onnx_model is not None:
+            import asyncio
+
+            return await asyncio.to_thread(self._onnx_model.encode_batch, texts)
+
+        # API path — with Redis cache
         use_cache = self._redis and self._redis.is_available
         vectors: list[list[float] | None] = [None] * len(texts)
         uncached_indices: list[int] = []
 
-        # Check cache for each text
         if use_cache:
             for i, text in enumerate(texts):
                 cached = self._redis.get_cached_embedding(text)
@@ -213,7 +350,6 @@ class EmbeddingStore:
         else:
             uncached_indices = list(range(len(texts)))
 
-        # Batch-embed uncached texts
         if uncached_indices:
             uncached_texts = [texts[i] for i in uncached_indices]
             api_vectors: list[list[float]] = []
@@ -225,7 +361,6 @@ class EmbeddingStore:
                 )
                 api_vectors.extend([d.embedding for d in response.data])
 
-            # Fill in results and cache
             for idx, vec in zip(uncached_indices, api_vectors):
                 vectors[idx] = vec
                 if use_cache:
@@ -278,16 +413,7 @@ class EmbeddingStore:
 
         When Qdrant is available, uses HNSW-indexed search with payload
         filtering. Falls back to JSON linear scan if Qdrant is unavailable
-        **or if the Qdrant search fails at runtime** (e.g. server went down
-        after init).
-
-        Args:
-            query: Search query text
-            top_k: Number of results
-            source_filter: Filter by source field
-            collection: Qdrant collection suffix (default: searches memory+history)
-
-        Returns list of {text, source, section, score, metadata}.
+        **or if the Qdrant search fails at runtime**.
         """
         # Prefer Qdrant when available
         if self._qdrant and self._qdrant.is_available:
@@ -296,10 +422,8 @@ class EmbeddingStore:
                 return self._search_qdrant(query_vector, top_k, source_filter, collection)
             except Exception as e:
                 logger.warning("Qdrant search failed, falling through to JSON fallback: %s", e)
-                # Fall through to JSON scan below
 
-        # Fallback: JSON linear scan — check entries before calling the
-        # embedding API to avoid unnecessary API calls on empty stores.
+        # Fallback: JSON linear scan
         self._load()
         if not self._entries:
             return []
@@ -324,7 +448,6 @@ class EmbeddingStore:
                 source_filter=source_filter,
             )
 
-        # Search across memory and history collections
         memory_results = self._qdrant.search(
             QdrantStore.MEMORY,
             query_vector,
@@ -338,7 +461,6 @@ class EmbeddingStore:
             source_filter=source_filter,
         )
 
-        # Merge and re-sort by score
         combined = memory_results + history_results
         combined.sort(key=lambda x: x["score"], reverse=True)
         return combined[:top_k]
@@ -375,11 +497,7 @@ class EmbeddingStore:
         ]
 
     async def index_memory(self, memory_text: str):
-        """Index the contents of MEMORY.md for semantic search.
-
-        Splits by sections and indexes each section as a chunk.
-        Writes to Qdrant when available, falls back to JSON on failure.
-        """
+        """Index the contents of MEMORY.md for semantic search."""
         chunks = self._split_into_chunks(memory_text, source="memory")
         if not chunks:
             return 0
@@ -387,7 +505,6 @@ class EmbeddingStore:
         texts = [c["text"] for c in chunks]
         vectors = await self.embed_texts(texts)
 
-        # Store in Qdrant if available
         if self._qdrant and self._qdrant.is_available:
             try:
                 from memory.qdrant_store import QdrantStore
@@ -420,15 +537,11 @@ class EmbeddingStore:
         return len(chunks)
 
     async def index_history_entry(self, event_type: str, summary: str, details: str = ""):
-        """Index a single history event for semantic search.
-
-        Writes to Qdrant when available, falls back to JSON on failure.
-        """
+        """Index a single history event for semantic search."""
         text = f"{event_type}: {summary}"
         if details:
             text += f"\n{details}"
 
-        # Store in Qdrant if available
         if self._qdrant and self._qdrant.is_available:
             try:
                 from memory.qdrant_store import QdrantStore
@@ -444,7 +557,6 @@ class EmbeddingStore:
             except Exception as e:
                 logger.warning("Qdrant index_history failed, falling back to JSON: %s", e)
 
-        # Fallback: JSON store
         await self.add_entry(text, source="history", section=event_type)
 
     async def search_conversations(
@@ -454,10 +566,7 @@ class EmbeddingStore:
         channel_filter: str = "",
         time_after: float = 0.0,
     ) -> list[dict]:
-        """Search across conversation summaries and messages.
-
-        Requires Qdrant — returns empty list if unavailable.
-        """
+        """Search across conversation summaries. Requires Qdrant."""
         if not self._qdrant or not self._qdrant.is_available:
             return []
 
@@ -478,47 +587,30 @@ class EmbeddingStore:
 
         for line in text.split("\n"):
             if line.startswith("## "):
-                # Flush previous section
                 if current_lines:
                     content = "\n".join(current_lines).strip()
                     if len(content) >= min_chunk_len:
                         chunks.append(
-                            {
-                                "text": content,
-                                "section": current_section,
-                                "source": source,
-                            }
+                            {"text": content, "section": current_section, "source": source}
                         )
                 current_section = line.lstrip("#").strip()
                 current_lines = [line]
             elif line.startswith("# "):
-                # Top-level heading — start fresh
                 if current_lines:
                     content = "\n".join(current_lines).strip()
                     if len(content) >= min_chunk_len:
                         chunks.append(
-                            {
-                                "text": content,
-                                "section": current_section,
-                                "source": source,
-                            }
+                            {"text": content, "section": current_section, "source": source}
                         )
                 current_section = line.lstrip("#").strip()
                 current_lines = [line]
             else:
                 current_lines.append(line)
 
-        # Flush last section
         if current_lines:
             content = "\n".join(current_lines).strip()
             if len(content) >= min_chunk_len:
-                chunks.append(
-                    {
-                        "text": content,
-                        "section": current_section,
-                        "source": source,
-                    }
-                )
+                chunks.append({"text": content, "section": current_section, "source": source})
 
         return chunks
 

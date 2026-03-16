@@ -1,5 +1,14 @@
 {
   "mcpServers": {
+    "agent42": {
+      "command": "c:\\Users\\rickw\\projects\\agent42\\.venv\\Scripts\\python.exe",
+      "args": ["c:\\Users\\rickw\\projects\\agent42\\mcp_server.py"],
+      "env": {
+        "AGENT42_WORKSPACE": "c:\\Users\\rickw\\projects\\agent42",
+        "REDIS_URL": "redis://localhost:6379/0",
+        "QDRANT_URL": "http://localhost:6333"
+      }
+    },
     "jcodemunch": {
       "command": "uvx",
       "args": ["jcodemunch-mcp"],

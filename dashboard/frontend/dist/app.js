@@ -2319,46 +2319,11 @@ function renderAgentDetail(el) {
     ? `<div class="agent-detail-section"><h4>Persona Instructions</h4><div class="agent-persona-content">${esc(p.prompt_overlay)}</div></div>`
     : '';
 
-  // LLM Routing section (only for non-_default profiles)
-  let routingHtml = '';
-  if (p.name === "_default") {
-    routingHtml = '<div class="agent-detail-section">'
-      + '<h4>LLM Routing</h4>'
-      + '<p style="color:var(--text-muted);font-size:0.85rem">Global routing defaults are configured in '
-      + '<a href="#" onclick="event.preventDefault();state.page=\'settings\';state.settingsTab=\'routing\';render()">Settings &gt; LLM Routing</a>.</p>'
-      + '</div>';
-  } else {
-    const routing = state.selectedProfileRouting;
-    const agentOverrides = routing && routing.overrides ? routing.overrides : {};
-    const agentChain = routing && routing.resolution_chain ? routing.resolution_chain : [];
-    const agentIsOverridden = (field) => agentOverrides[field] !== undefined && agentOverrides[field] !== null;
-    const agentCurrentVal = (field) => {
-      if (state.agentRoutingEdits[field] !== undefined) return state.agentRoutingEdits[field];
-      if (agentIsOverridden(field)) return agentOverrides[field];
-      return "";
-    };
-    const hasAgentEdits = Object.keys(state.agentRoutingEdits).length > 0;
-    routingHtml = '<div class="agent-detail-section">'
-      + '<h4>LLM Routing</h4>'
-      + '<p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.75rem">'
-      + 'Override model routing for this agent. Unset fields inherit from global defaults.</p>'
-      + routingSelect("primary", "Primary", agentCurrentVal("primary"),
-          !agentIsOverridden("primary") && state.agentRoutingEdits["primary"] === undefined, "global default", "agent")
-      + routingSelect("critic", "Critic", agentCurrentVal("critic"),
-          !agentIsOverridden("critic") && state.agentRoutingEdits["critic"] === undefined, "global default", "agent")
-      + routingSelect("fallback", "Fallback", agentCurrentVal("fallback"),
-          !agentIsOverridden("fallback") && state.agentRoutingEdits["fallback"] === undefined, "global default", "agent")
-      + renderChainSummary(agentChain)
-      + '<div style="display:flex;gap:0.5rem;margin-top:0.75rem;align-items:center">'
-      + '<button class="btn btn-primary btn-sm" onclick="saveRouting(\'' + esc(p.name) + '\')"'
-      + (!hasAgentEdits || state.agentRoutingSaving ? ' disabled' : '') + '>'
-      + (state.agentRoutingSaving ? 'Saving...' : 'Save Routing')
-      + '</button>'
-      + '<button class="btn btn-outline btn-sm" onclick="resetRouting(\'' + esc(p.name) + '\')">'
-      + 'Reset to Inherited</button>'
-      + (hasAgentEdits ? '<span style="color:var(--warning);font-size:0.75rem;margin-left:0.5rem">Unsaved changes</span>' : '')
-      + '</div></div>';
-  }
+  // Integration section (v2.0 — model routing handled by Claude Code)
+  const routingHtml = '<div class="agent-detail-section">'
+    + '<h4>Integration</h4>'
+    + '<p class="text-muted" style="font-size:0.85rem">Model routing is managed by Claude Code. Agent profiles define system prompts and tool/skill access.</p>'
+    + '</div>';
 
   // NOTE: innerHTML is the established pattern for this SPA (55+ handlers). All interpolated
   // values are escaped via esc() for XSS protection.
@@ -2791,6 +2756,15 @@ function renderStatus() {
       <div class="capacity-detail">
         <div class="capacity-title">Dynamic Agent Capacity ${s.capacity_auto_mode ? "(auto-scaled from hardware)" : `(configured max: ${cfgMax})`}</div>
         <div class="capacity-reason">${esc(s.capacity_reason || "Calculating...")}</div>
+      </div>
+    </div>
+
+    <div class="card status-section" style="margin-bottom:1.5rem">
+      <div class="card-header"><h3>MCP Servers</h3></div>
+      <div class="card-body">
+        <p style="color:var(--text-muted);margin-bottom:0.75rem">Agent42 MCP server provides tools to Claude Code via stdio transport.</p>
+        <div class="status-metric-row"><span class="metric-label">Local Node</span><span class="badge badge-success" style="font-size:0.8rem">Connected</span></div>
+        <div class="status-metric-row"><span class="metric-label">Remote Node</span><span class="badge badge-muted" style="font-size:0.8rem;opacity:0.6">Not configured</span></div>
       </div>
     </div>
 
@@ -3883,7 +3857,7 @@ function renderReports() {
   const tab = state.reportsTab;
   const tabs = [
     { id: "overview", label: "Overview" },
-    { id: "llm", label: "LLM Usage" },
+    { id: "health", label: "System Health" },
     { id: "tasks", label: "Tasks & Projects" },
   ];
 
@@ -3908,7 +3882,7 @@ function renderReports() {
 
   let body = "";
   if (tab === "overview") body = _renderReportsOverview(d);
-  else if (tab === "llm") body = _renderReportsLLM(d);
+  else if (tab === "health") body = _renderReportsHealth(d);
   else if (tab === "tasks") body = _renderReportsTasks(d);
 
   bodyEl.innerHTML = body;
@@ -3940,29 +3914,21 @@ function _renderReportsOverview(d) {
     <div class="stat-card"><div class="stat-label">Total Tokens</div><div class="stat-value" style="font-family:var(--mono)">${formatNumber(tu.total_tokens)}</div></div>
     <div class="stat-card"><div class="stat-label">Est. Total Cost</div><div class="stat-value" style="font-family:var(--mono)">$${(costs.total_estimated_usd || 0).toFixed(4)}</div></div>
     <div class="stat-card"><div class="stat-label">Daily Spend</div><div class="stat-value" style="font-family:var(--mono)">$${(tu.daily_spend_usd || 0).toFixed(4)}</div></div>
-    <div class="stat-card"><div class="stat-label">Models Used</div><div class="stat-value text-info">${llm.length}</div></div>
+    <div class="stat-card"><div class="stat-label">MCP Tools</div><div class="stat-value text-info">${tools.enabled || tools.total || 0}</div></div>
     <div class="stat-card"><div class="stat-label">Projects</div><div class="stat-value">${projects.length}</div></div>
     <div class="stat-card"><div class="stat-label">Tools</div><div class="stat-value">${tools.enabled || 0}/${tools.total || 0}</div></div>
   </div>`;
 
-  // Top models table (top 10)
-  const maxTok = llm.length > 0 ? llm[0].total_tokens : 1;
-  const modelRows = llm.slice(0, 10).map(m => {
-    const pct = maxTok > 0 ? (m.total_tokens / maxTok * 100) : 0;
-    return `<tr>
-      <td style="font-weight:600;font-family:var(--mono);font-size:0.85rem">${esc(m.model_key)}</td>
-      <td style="text-align:right">${formatNumber(m.calls)}</td>
-      <td>${_reportsBar(pct, formatNumber(m.total_tokens), "")}</td>
-      <td style="text-align:right;font-family:var(--mono)">$${m.estimated_cost_usd.toFixed(4)}</td>
-    </tr>`;
-  }).join("");
-  const modelsTable = llm.length > 0 ? `<div class="card reports-section">
-    <div class="card-header"><h3>Top Models by Token Usage</h3></div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Model</th><th style="text-align:right">Calls</th><th>Tokens</th><th style="text-align:right">Est. Cost</th></tr></thead>
-      <tbody>${modelRows}</tbody>
-    </table></div>
-  </div>` : "";
+  // MCP integration summary card
+  const mcpCard = `<div class="card reports-section">
+    <div class="card-header"><h3>MCP Integration</h3></div>
+    <div class="card-body">
+      <div class="status-metric-row"><span class="metric-label">Transport</span><span class="metric-value">stdio</span></div>
+      <div class="status-metric-row"><span class="metric-label">Tools Available</span><span class="metric-value">${tools.enabled || tools.total || 0}</span></div>
+      <div class="status-metric-row"><span class="metric-label">Skills Loaded</span><span class="metric-value">${(skills.skills || []).length || skills.total || 0}</span></div>
+      <p style="color:var(--text-muted);font-size:0.85rem;margin-top:0.75rem">Model routing is handled by Claude Code. Token usage below reflects auxiliary API calls (embeddings, media, search).</p>
+    </div>
+  </div>`;
 
   // Task type breakdown
   const maxType = byType.length > 0 ? Math.max(...byType.map(t => t.total)) : 1;
@@ -3986,96 +3952,48 @@ function _renderReportsOverview(d) {
     </table></div>
   </div>` : "";
 
-  // Connectivity summary
-  const hs = conn.summary || {};
-  const connByStatus = hs.by_status || {};
-  const connBadges = Object.entries(connByStatus).map(([k, v]) =>
-    `<span class="badge-status badge-${k === "ok" ? "done" : k === "unavailable" ? "failed" : "pending"}" style="margin-right:0.5rem">${esc(k)}: ${v}</span>`
-  ).join("");
-  const unhealthy = hs.unhealthy_models || [];
-  const unhealthyList = unhealthy.length > 0 ? `<div style="margin-top:0.75rem"><strong>Unhealthy Models:</strong><ul style="margin:0.25rem 0;padding-left:1.5rem">${unhealthy.map(m => `<li>${esc(m.key || m.model || "unknown")} — ${esc(m.status || "unavailable")}</li>`).join("")}</ul></div>` : "";
-  const connCard = Object.keys(connByStatus).length > 0 ? `<div class="card reports-section">
-    <div class="card-header"><h3>Model Connectivity</h3></div>
-    <div class="card-body">${connBadges || '<span style="color:var(--text-muted)">No health data</span>'}${unhealthyList}</div>
-  </div>` : "";
-
-  return stats + `<div class="reports-grid">${modelsTable}${typesTable}</div>${connCard}`;
+  return stats + `<div class="reports-grid">${mcpCard}${typesTable}</div>`;
 }
 
-function _renderReportsLLM(d) {
-  const llm = d.llm_usage || [];
-  const perf = d.model_performance || [];
-  const conn = d.connectivity || {};
-  const models = conn.models || {};
+function _renderReportsHealth(d) {
+  const tu = d.token_usage || {};
+  const tools = d.tools || {};
+  const skills = d.skills || {};
+  const toolList = tools.top_tools || [];
+  const skillList = skills.skills || [];
 
-  // Full model usage table
-  const maxTok = llm.length > 0 ? llm[0].total_tokens : 1;
-  const usageRows = llm.map(m => {
-    const pct = maxTok > 0 ? (m.total_tokens / maxTok * 100) : 0;
-    return `<tr>
-      <td style="font-weight:600;font-family:var(--mono);font-size:0.85rem">${esc(m.model_key)}</td>
-      <td style="text-align:right">${formatNumber(m.calls)}</td>
-      <td style="text-align:right;font-family:var(--mono)">${formatNumber(m.prompt_tokens)}</td>
-      <td style="text-align:right;font-family:var(--mono)">${formatNumber(m.completion_tokens)}</td>
-      <td>${_reportsBar(pct, formatNumber(m.total_tokens), "")}</td>
-      <td style="text-align:right;font-family:var(--mono)">$${m.estimated_cost_usd.toFixed(4)}</td>
-    </tr>`;
-  }).join("");
-  const usageTable = `<div class="card reports-section">
-    <div class="card-header"><h3>Model Token Usage</h3></div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Model</th><th style="text-align:right">Calls</th><th style="text-align:right">Prompt</th><th style="text-align:right">Completion</th><th>Total</th><th style="text-align:right">Est. Cost</th></tr></thead>
-      <tbody>${usageRows || '<tr><td colspan="6"><div style="padding:1rem;color:var(--text-muted)">No usage data</div></td></tr>'}</tbody>
-    </table></div>
+  // Memory / storage stats
+  const memCard = `<div class="card reports-section">
+    <div class="card-header"><h3>System Health</h3></div>
+    <div class="card-body">
+      <p style="color:var(--text-muted);margin-bottom:1rem">Agent42 operates as an MCP server. Model routing is handled by Claude Code.</p>
+      <div class="status-metric-row"><span class="metric-label">MCP Transport</span><span class="metric-value text-success">stdio</span></div>
+      <div class="status-metric-row"><span class="metric-label">Tools Registered</span><span class="metric-value">${tools.total || 0}</span></div>
+      <div class="status-metric-row"><span class="metric-label">Tools Enabled</span><span class="metric-value text-success">${tools.enabled || 0}</span></div>
+      <div class="status-metric-row"><span class="metric-label">Skills Loaded</span><span class="metric-value">${(skillList || []).length || skills.total || 0}</span></div>
+      <div class="status-metric-row"><span class="metric-label">Total Tokens Tracked</span><span class="metric-value" style="font-family:var(--mono)">${formatNumber(tu.total_tokens)}</span></div>
+      <div class="status-metric-row"><span class="metric-label">Daily Spend</span><span class="metric-value" style="font-family:var(--mono)">$${(tu.daily_spend_usd || 0).toFixed(4)}</span></div>
+    </div>
   </div>`;
 
-  // Model performance table
-  const perfRows = perf.map(m => {
-    const scorePct = (m.composite_score || 0) * 100;
-    const srPct = (m.success_rate || 0) * 100;
-    const srCls = srPct >= 80 ? "bar-success" : srPct >= 50 ? "bar-warning" : "bar-danger";
+  // Tool usage table
+  const maxTool = toolList.length > 0 ? Math.max(...toolList.map(t => t.calls || 0)) : 1;
+  const toolRows = toolList.slice(0, 20).map(t => {
+    const pct = maxTool > 0 ? ((t.calls || 0) / maxTool * 100) : 0;
     return `<tr>
-      <td style="font-weight:600;font-family:var(--mono);font-size:0.85rem">${esc(m.model_key)}</td>
-      <td>${esc(m.task_type)}</td>
-      <td style="text-align:right">${m.total_tasks}</td>
-      <td>${_reportsBar(srPct, srPct.toFixed(0) + "%", srCls)}</td>
-      <td style="text-align:right;font-family:var(--mono)">${(m.iteration_efficiency || 0).toFixed(2)}</td>
-      <td style="text-align:right;font-family:var(--mono)">${(m.critic_avg || 0).toFixed(2)}</td>
-      <td>${_reportsBar(scorePct, scorePct.toFixed(0) + "%", "bar-info")}</td>
+      <td style="font-weight:600;font-family:var(--mono);font-size:0.85rem">${esc(t.name || t.tool || "")}</td>
+      <td>${_reportsBar(pct, formatNumber(t.calls || 0), "bar-info")}</td>
     </tr>`;
   }).join("");
-  const perfTable = perf.length > 0 ? `<div class="card reports-section">
-    <div class="card-header"><h3>Model Performance (Evaluator)</h3></div>
+  const toolTable = toolList.length > 0 ? `<div class="card reports-section">
+    <div class="card-header"><h3>Tool Usage</h3></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Model</th><th>Task Type</th><th style="text-align:right">Tasks</th><th>Success Rate</th><th style="text-align:right">Iter. Eff.</th><th style="text-align:right">Critic Avg</th><th>Composite</th></tr></thead>
-      <tbody>${perfRows}</tbody>
+      <thead><tr><th>Tool</th><th>Invocations</th></tr></thead>
+      <tbody>${toolRows}</tbody>
     </table></div>
   </div>` : "";
 
-  // Connectivity / health table
-  const healthEntries = Object.entries(models);
-  const healthRows = healthEntries.map(([mk, info]) => {
-    const st = info.status || "unknown";
-    const dot = `<span class="health-dot h-${st}"></span>`;
-    const lat = info.latency_ms != null ? info.latency_ms.toFixed(0) + "ms" : "--";
-    const checked = info.last_checked ? new Date(info.last_checked * 1000).toLocaleString() : "--";
-    return `<tr>
-      <td style="font-family:var(--mono);font-size:0.85rem">${esc(mk)}</td>
-      <td>${dot}${esc(st)}</td>
-      <td style="text-align:right;font-family:var(--mono)">${lat}</td>
-      <td style="font-size:0.82rem;color:var(--text-muted)">${esc(checked)}</td>
-      <td style="font-size:0.82rem;color:var(--danger)">${esc(info.error || "")}</td>
-    </tr>`;
-  }).join("");
-  const healthTable = healthEntries.length > 0 ? `<div class="card reports-section">
-    <div class="card-header"><h3>Model Connectivity</h3></div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Model</th><th>Status</th><th style="text-align:right">Latency</th><th>Last Checked</th><th>Error</th></tr></thead>
-      <tbody>${healthRows}</tbody>
-    </table></div>
-  </div>` : "";
-
-  return usageTable + perfTable + healthTable;
+  return memCard + toolTable;
 }
 
 function _renderReportsTasks(d) {
@@ -4176,8 +4094,7 @@ function renderSettings() {
   if (!el || state.page !== "settings") return;
 
   const tabs = [
-    { id: "providers", label: "LLM Providers" },
-    { id: "routing", label: "LLM Routing" },
+    { id: "providers", label: "API Keys" },
     { id: "repos", label: "Repositories" },
     { id: "channels", label: "Channels" },
     { id: "security", label: "Security" },
@@ -4214,26 +4131,18 @@ function renderSettingsPanel() {
       <p class="section-desc">Configure API keys for language model providers. Agent42 intelligently routes tasks to the best available model based on your configured keys.</p>
 
       <div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">
-        <h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">How Model Routing Works</h4>
+        <h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">Model Routing (v2.0)</h4>
         <div class="help" style="line-height:1.7">
-          Agent42 selects models using a <strong>6-layer priority chain</strong>:<br>
-          <strong>1. Admin Override</strong> &mdash; Set <code>AGENT42_CODING_MODEL</code>, <code>AGENT42_CODING_CRITIC</code>, etc. in Orchestrator tab to force a specific model for any task type (e.g., <code>claude-opus-4-6</code> for final code review).<br>
-          <strong>1b. Profile Override</strong> &mdash; Per-agent model overrides or global defaults from the <a href="#" onclick="event.preventDefault();state.settingsTab='routing';renderSettingsPanel()">LLM Routing</a> tab.<br>
-          <strong>2. Dynamic Routing</strong> &mdash; Agent42 tracks task outcomes and automatically promotes models that perform well.<br>
-          <strong>3. Trial Injection</strong> &mdash; A small % of tasks test unproven models to discover better options.<br>
-          <strong>4. Policy Routing</strong> &mdash; In <em>balanced</em> or <em>performance</em> mode, complex tasks upgrade to paid models when OpenRouter credits are available.<br>
-          <strong>5. Tier Defaults</strong> &mdash; <strong>L1</strong> (workhorse, e.g. StrongWall) &rarr; <strong>Fallback</strong> (free providers) &rarr; <strong>L2</strong> (premium, e.g. Gemini Pro). Configure in the <a href="#" onclick="event.preventDefault();state.settingsTab='routing';renderSettingsPanel()">LLM Routing</a> tab.
+          Model routing is now handled by <strong>Claude Code</strong>. Agent42 operates as an MCP server, providing tools and context to Claude Code sessions.<br><br>
+          API keys configured here are used for <strong>media generation</strong> (Replicate, Luma), <strong>web search</strong> (Brave), and <strong>embeddings</strong> (Gemini, OpenAI). LLM model selection is managed in your Claude Code configuration.
         </div>
       </div>
 
       <div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">
-        <h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">Fallback Chain</h4>
+        <h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">MCP Integration</h4>
         <div class="help" style="line-height:1.7">
-          When a model fails (rate-limited, unavailable, auth error), Agent42 automatically tries the next available provider:<br>
-          <strong>StrongWall</strong> (L1 workhorse, if configured) &rarr;
-          <strong>Cerebras / Groq</strong> (free fallback) &rarr;
-          <strong>Gemini / OpenRouter paid</strong> (L2 premium, if keys + credits available).<br>
-          Rate-limited models (429) are skipped instantly &mdash; no wasted retries. Auth errors (401) skip the entire provider.
+          Agent42 runs as an MCP server that Claude Code connects to via stdio transport. Tools, memory, and workspace operations are exposed as MCP tools.<br>
+          API keys below are still used for auxiliary services (image/video generation, search, embeddings).
         </div>
       </div>
 
@@ -4281,7 +4190,7 @@ function renderSettingsPanel() {
         </div>
       ` : `<div class="help">${state.orStatusLoading ? "Loading..." : "Status not available. Configure an OpenRouter API key first."}</div>`}
     `,
-    routing: () => renderRoutingPanel(),
+    routing: () => `<h3>LLM Routing</h3><p class="section-desc">Model routing is now handled by Claude Code. Configure models in your Claude Code settings.</p>`,
     repos: () => renderReposPanel(),
     channels: () => `
       <h3>Communication Channels</h3>

@@ -100,8 +100,11 @@ class MemoryStore:
             loop = asyncio.get_running_loop()
             loop.create_task(_reindex())
         except RuntimeError:
-            # No running event loop — skip reindex
-            logger.debug("No event loop available for memory reindex")
+            # No running event loop — run synchronously
+            try:
+                asyncio.run(_reindex())
+            except Exception as e:
+                logger.debug(f"Sync reindex failed (non-critical): {e}")
 
     def append_to_section(self, section: str, content: str):
         """Append content under a specific section heading."""
@@ -202,11 +205,22 @@ class MemoryStore:
         """Whether semantic search is available (embedding API configured)."""
         return self.embeddings.is_available
 
-    async def semantic_search(self, query: str, top_k: int = 5, source: str = "") -> list[dict]:
+    async def semantic_search(
+        self,
+        query: str,
+        top_k: int = 5,
+        source: str = "",
+        project: str = "",
+        lifecycle_aware: bool = True,
+    ) -> list[dict]:
         """Search memory and history using semantic similarity.
 
+        When lifecycle_aware=True and Qdrant is available, uses lifecycle-adjusted
+        scoring (confidence, recall_count, decay). Also records that returned
+        memories were recalled (for strengthening).
+
         Falls back to grep-based search if no embedding API is configured.
-        Returns list of {text, source, section, score}.
+        Returns list of {text, source, section, score, ...}.
         """
         if not self.embeddings.is_available:
             # Graceful fallback to grep
@@ -215,7 +229,109 @@ class MemoryStore:
                 {"text": line, "source": "history", "section": "", "score": 0.0}
                 for line in grep_results[:top_k]
             ]
+
+        # Use lifecycle-aware search when Qdrant is available
+        if lifecycle_aware and self._qdrant and self._qdrant.is_available:
+            try:
+                query_vector = await self.embeddings.embed_text(query)
+                from memory.qdrant_store import QdrantStore
+
+                # Search across memory and history with lifecycle scoring
+                memory_results = self._qdrant.search_with_lifecycle(
+                    QdrantStore.MEMORY,
+                    query_vector,
+                    top_k=top_k,
+                    source_filter=source,
+                    project_filter=project,
+                )
+                history_results = self._qdrant.search_with_lifecycle(
+                    QdrantStore.HISTORY,
+                    query_vector,
+                    top_k=top_k,
+                    source_filter=source,
+                    project_filter=project,
+                )
+
+                # Merge and re-sort by adjusted score
+                combined = memory_results + history_results
+                combined.sort(key=lambda x: x["score"], reverse=True)
+                results = combined[:top_k]
+
+                # Record recalls (fire-and-forget)
+                self._record_recalls(results)
+
+                return results
+            except Exception as e:
+                logger.warning("Lifecycle search failed, falling back: %s", e)
+
+        # Standard (non-lifecycle) search
         return await self.embeddings.search(query, top_k=top_k, source_filter=source)
+
+    def _record_recalls(self, results: list[dict]):
+        """Record that these memories were recalled (updates Qdrant metadata)."""
+        if not self._qdrant or not self._qdrant.is_available:
+            return
+
+        from memory.qdrant_store import QdrantStore
+
+        for r in results:
+            point_id = r.get("point_id")
+            source = r.get("source", "")
+            if not point_id:
+                continue
+
+            collection = QdrantStore.MEMORY if source == "memory" else QdrantStore.HISTORY
+            try:
+                self._qdrant.record_recall(collection, [point_id])
+            except Exception:
+                pass  # Non-critical
+
+    async def strengthen_memory(self, query: str, boost: float = 0.1) -> int:
+        """Strengthen memories matching the query (user confirmed useful).
+
+        Returns number of memories strengthened.
+        """
+        if not self._qdrant or not self._qdrant.is_available or not self.embeddings.is_available:
+            return 0
+
+        from memory.qdrant_store import QdrantStore
+
+        query_vector = await self.embeddings.embed_text(query)
+        count = 0
+
+        for collection in [QdrantStore.MEMORY, QdrantStore.HISTORY]:
+            results = self._qdrant.search_with_lifecycle(collection, query_vector, top_k=3)
+            for r in results:
+                point_id = r.get("point_id")
+                if point_id and r.get("score", 0) > 0.7:
+                    if self._qdrant.strengthen_point(collection, point_id, boost):
+                        count += 1
+
+        return count
+
+    async def forget_semantic(self, query: str) -> int:
+        """Mark memories matching the query as forgotten in Qdrant.
+
+        Forgotten memories are excluded from future searches but not deleted.
+        Returns number of memories forgotten.
+        """
+        if not self._qdrant or not self._qdrant.is_available or not self.embeddings.is_available:
+            return 0
+
+        from memory.qdrant_store import QdrantStore
+
+        query_vector = await self.embeddings.embed_text(query)
+        count = 0
+
+        for collection in [QdrantStore.MEMORY, QdrantStore.HISTORY]:
+            results = self._qdrant.find_by_text(collection, query_vector, query, top_k=5)
+            for r in results:
+                point_id = r.get("point_id")
+                if point_id:
+                    if self._qdrant.set_status(collection, point_id, "forgotten"):
+                        count += 1
+
+        return count
 
     async def reindex_memory(self):
         """Re-index MEMORY.md for semantic search.

@@ -90,7 +90,7 @@ class TestQdrantStoreWithMock:
         assert self.mock_client.upsert.called
 
     def test_search_returns_formatted_results(self):
-        # Mock search response
+        # Mock query_points response (QdrantStore.search uses query_points)
         mock_hit = MagicMock()
         mock_hit.payload = {
             "text": "Python is great",
@@ -99,7 +99,9 @@ class TestQdrantStoreWithMock:
             "timestamp": 1234567890.0,
         }
         mock_hit.score = 0.95
-        self.mock_client.search.return_value = [mock_hit]
+        mock_response = MagicMock()
+        mock_response.points = [mock_hit]
+        self.mock_client.query_points.return_value = mock_response
 
         results = self.store.search("memory", [0.1] * 1536, top_k=5)
         assert len(results) == 1
@@ -415,6 +417,8 @@ class TestEmbeddingStoreWithBackends:
         mock_redis.get_cached_embedding.return_value = None  # Cache miss
 
         store = EmbeddingStore(self.store_path, redis_backend=mock_redis)
+        store._provider_resolved = True  # Prevent auto-detection of ONNX model
+        store._onnx_model = None  # Force API path
         store._client = MagicMock()
         store._model = "test-model"
 
@@ -437,6 +441,8 @@ class TestEmbeddingStoreWithBackends:
         mock_redis.get_cached_embedding.return_value = [0.4, 0.5, 0.6]
 
         store = EmbeddingStore(self.store_path, redis_backend=mock_redis)
+        store._provider_resolved = True  # Prevent auto-detection of ONNX model
+        store._onnx_model = None  # Force API path
         store._client = MagicMock()
         store._model = "test-model"
 
@@ -462,6 +468,8 @@ class TestEmbeddingStoreWithBackends:
         ]
 
         store = EmbeddingStore(self.store_path, qdrant_store=mock_qdrant)
+        store._provider_resolved = True  # Prevent auto-detection of ONNX model
+        store._onnx_model = None  # Force API path
         store._client = MagicMock()
         store._model = "test-model"
 
@@ -481,6 +489,8 @@ class TestEmbeddingStoreWithBackends:
         from memory.embeddings import EmbeddingEntry
 
         store = EmbeddingStore(self.store_path)
+        store._provider_resolved = True  # Prevent auto-detection of ONNX model
+        store._onnx_model = None  # Force API path
         store._client = MagicMock()
         store._model = "test-model"
         store._entries = [
@@ -550,6 +560,8 @@ class TestBatchEmbedWithCache:
             Path(tempfile.mkdtemp()) / "embeddings.json",
             redis_backend=mock_redis,
         )
+        store._provider_resolved = True  # Prevent auto-detection of ONNX model
+        store._onnx_model = None  # Force API path
         store._client = MagicMock()
         store._model = "test-model"
 
@@ -582,6 +594,8 @@ class TestBatchEmbedWithCache:
             Path(tempfile.mkdtemp()) / "embeddings.json",
             redis_backend=mock_redis,
         )
+        store._provider_resolved = True  # Prevent auto-detection of ONNX model
+        store._onnx_model = None  # Force API path
         store._client = MagicMock()
         store._model = "test-model"
         store._client.embeddings = MagicMock()

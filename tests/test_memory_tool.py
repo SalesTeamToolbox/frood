@@ -130,7 +130,8 @@ class TestMemoryToolSearch:
         result = await self.tool.execute(action="search", content="Python")
         assert result.success
         assert "Python" in result.output
-        assert "[memory]" in result.output
+        # May show as [memory] (semantic) or [keyword] (no Qdrant)
+        assert "[memory" in result.output or "[keyword]" in result.output
 
     @pytest.mark.asyncio
     async def test_search_history(self):

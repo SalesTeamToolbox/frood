@@ -1,14 +1,19 @@
 """
 MCP (Model Context Protocol) client — connects to external MCP servers.
 
-Supports both stdio (local process) and HTTP (remote endpoint) transports.
+Uses the official ``mcp`` Python SDK for protocol handling.
+Supports stdio (local process) transport.  SSE/HTTP planned for Phase 7.
+
 Tools from MCP servers are auto-discovered and registered with namespaced names.
 """
 
-import asyncio
-import json
 import logging
 import os
+import shutil
+from contextlib import AsyncExitStack
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 from tools.base import Tool, ToolResult
 
@@ -16,71 +21,7 @@ logger = logging.getLogger("agent42.tools.mcp")
 
 
 class MCPConnection:
-    """Manages a connection to a single MCP server."""
-
-    def __init__(self, name: str, config: dict):
-        self.name = name
-        self.config = config
-        self.transport = config.get("transport", "stdio")
-        self._proc: asyncio.subprocess.Process | None = None
-        self._request_id = 0
-        self._pending: dict[int, asyncio.Future] = {}
-        self._reader_task: asyncio.Task | None = None
-
-    async def connect(self):
-        """Establish connection to the MCP server."""
-        if self.transport == "stdio":
-            await self._connect_stdio()
-        else:
-            logger.warning(f"MCP HTTP transport not yet implemented for {self.name}")
-            return
-
-        # Initialize the server
-        await self._send_request(
-            "initialize",
-            {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "agent42", "version": "0.1.0"},
-            },
-        )
-        await self._send_notification("notifications/initialized", {})
-        logger.info(f"MCP server connected: {self.name}")
-
-    async def disconnect(self):
-        """Close the connection."""
-        if self._reader_task:
-            self._reader_task.cancel()
-        if self._proc:
-            self._proc.terminate()
-            await self._proc.wait()
-        logger.info(f"MCP server disconnected: {self.name}")
-
-    async def list_tools(self) -> list[dict]:
-        """Discover available tools from the server."""
-        try:
-            result = await self._send_request("tools/list", {})
-            return result.get("tools", [])
-        except Exception as e:
-            logger.error(f"Failed to list tools from {self.name}: {e}")
-            return []
-
-    async def call_tool(self, tool_name: str, arguments: dict) -> str:
-        """Call a tool on the MCP server."""
-        result = await self._send_request(
-            "tools/call",
-            {
-                "name": tool_name,
-                "arguments": arguments,
-            },
-        )
-        # Extract text from content blocks
-        content = result.get("content", [])
-        texts = []
-        for block in content:
-            if block.get("type") == "text":
-                texts.append(block.get("text", ""))
-        return "\n".join(texts) if texts else json.dumps(result)
+    """Manages a connection to a single MCP server via the MCP SDK."""
 
     # Commands that are allowed for MCP stdio servers
     _ALLOWED_MCP_COMMANDS = {
@@ -95,6 +36,95 @@ class MCPConnection:
         "bun",
     }
 
+    # Env keys that cannot be overridden by MCP server configs
+    _BLOCKED_ENV_KEYS = {"PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH"}
+
+    def __init__(self, name: str, config: dict):
+        self.name = name
+        self.config = config
+        self._exit_stack: AsyncExitStack | None = None
+        self._session: ClientSession | None = None
+
+    async def connect(self):
+        """Establish connection to the MCP server using the SDK."""
+        command = self.config.get("command", "")
+        args = self.config.get("args", [])
+        env_overrides = self.config.get("env", {})
+
+        # Validate command against allowlist
+        resolved_command = self._validate_command(command)
+
+        # Sanitize env overrides
+        sanitized_env = {}
+        for key, value in env_overrides.items():
+            if key.upper() in self._BLOCKED_ENV_KEYS:
+                logger.warning(f"MCP server {self.name}: blocked env override '{key}'")
+            else:
+                sanitized_env[key] = value
+
+        env = dict(os.environ)
+        env.update(sanitized_env)
+
+        server_params = StdioServerParameters(
+            command=resolved_command,
+            args=args,
+            env=env,
+        )
+
+        # Use AsyncExitStack to manage SDK context managers with explicit lifecycle
+        self._exit_stack = AsyncExitStack()
+        await self._exit_stack.__aenter__()
+
+        read_stream, write_stream = await self._exit_stack.enter_async_context(
+            stdio_client(server_params)
+        )
+        self._session = await self._exit_stack.enter_async_context(
+            ClientSession(read_stream, write_stream)
+        )
+        await self._session.initialize()
+
+        logger.info(f"MCP server connected: {self.name}")
+
+    async def disconnect(self):
+        """Close the connection."""
+        if self._exit_stack:
+            await self._exit_stack.__aexit__(None, None, None)
+            self._exit_stack = None
+            self._session = None
+        logger.info(f"MCP server disconnected: {self.name}")
+
+    async def list_tools(self) -> list[dict]:
+        """Discover available tools from the server."""
+        if not self._session:
+            return []
+        try:
+            result = await self._session.list_tools()
+            return [
+                {
+                    "name": t.name,
+                    "description": t.description or "",
+                    "inputSchema": t.inputSchema if hasattr(t, "inputSchema") else {},
+                }
+                for t in result.tools
+            ]
+        except Exception as e:
+            logger.error(f"Failed to list tools from {self.name}: {e}")
+            return []
+
+    async def call_tool(self, tool_name: str, arguments: dict) -> str:
+        """Call a tool on the MCP server."""
+        if not self._session:
+            raise RuntimeError(f"MCP server {self.name} not connected")
+
+        result = await self._session.call_tool(tool_name, arguments=arguments)
+
+        # Extract text from content blocks
+        texts = []
+        for block in result.content:
+            if hasattr(block, "text"):
+                texts.append(block.text)
+        return "\n".join(texts) if texts else str(result)
+
     @classmethod
     def _validate_command(cls, command: str) -> str:
         """Validate the MCP server command against an allowlist.
@@ -102,8 +132,6 @@ class MCPConnection:
         Only known MCP server runners are allowed to prevent arbitrary
         code execution via malicious mcp_servers.json configs.
         """
-        import shutil
-
         if not command:
             raise ValueError("MCP server command cannot be empty")
 
@@ -122,100 +150,6 @@ class MCPConnection:
             raise FileNotFoundError(f"MCP command not found: {command}")
 
         return resolved
-
-    async def _connect_stdio(self):
-        """Connect via stdio (local process)."""
-        command = self.config.get("command", "")
-        args = self.config.get("args", [])
-        env_overrides = self.config.get("env", {})
-
-        # Validate command against allowlist
-        resolved_command = self._validate_command(command)
-
-        # Sanitize env overrides: don't allow overriding PATH or LD_PRELOAD
-        _BLOCKED_ENV_KEYS = {"PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH"}
-        for key in list(env_overrides.keys()):
-            if key.upper() in _BLOCKED_ENV_KEYS:
-                logger.warning(f"MCP server {self.name}: blocked env override '{key}'")
-                del env_overrides[key]
-
-        env = os.environ.copy()
-        env.update(env_overrides)
-
-        self._proc = await asyncio.create_subprocess_exec(
-            resolved_command,
-            *args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        self._reader_task = asyncio.create_task(self._read_loop())
-
-    async def _read_loop(self):
-        """Read JSON-RPC messages from the server."""
-        _buffer = ""
-        while self._proc and self._proc.stdout:
-            try:
-                line = await self._proc.stdout.readline()
-                if not line:
-                    break
-
-                text = line.decode("utf-8").strip()
-                if not text:
-                    continue
-
-                try:
-                    msg = json.loads(text)
-                except json.JSONDecodeError:
-                    continue
-
-                msg_id = msg.get("id")
-                if msg_id is not None and msg_id in self._pending:
-                    future = self._pending.pop(msg_id)
-                    if "error" in msg:
-                        future.set_exception(RuntimeError(msg["error"].get("message", "MCP error")))
-                    else:
-                        future.set_result(msg.get("result", {}))
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"MCP read error ({self.name}): {e}")
-
-    async def _send_request(self, method: str, params: dict) -> dict:
-        """Send a JSON-RPC request and wait for response."""
-        self._request_id += 1
-        msg_id = self._request_id
-
-        message = {
-            "jsonrpc": "2.0",
-            "id": msg_id,
-            "method": method,
-            "params": params,
-        }
-
-        future: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._pending[msg_id] = future
-
-        if self._proc and self._proc.stdin:
-            data = json.dumps(message) + "\n"
-            self._proc.stdin.write(data.encode("utf-8"))
-            await self._proc.stdin.drain()
-
-        return await asyncio.wait_for(future, timeout=30.0)
-
-    async def _send_notification(self, method: str, params: dict):
-        """Send a JSON-RPC notification (no response expected)."""
-        message = {
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-        }
-        if self._proc and self._proc.stdin:
-            data = json.dumps(message) + "\n"
-            self._proc.stdin.write(data.encode("utf-8"))
-            await self._proc.stdin.drain()
 
 
 class MCPToolProxy(Tool):
@@ -270,7 +204,6 @@ class MCPManager:
 
         except Exception as e:
             logger.error(f"Failed to connect MCP server {name}: {e}")
-            # Clean up orphaned process on connection failure
             try:
                 await conn.disconnect()
             except Exception:

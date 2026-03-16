@@ -7,10 +7,12 @@ system, but previously there was no corresponding tool — the agent would claim
 "stored in MEMORY.md" without actually writing anything.
 
 Operations:
-  store   — persist a fact, preference, or learning to MEMORY.md
-  recall  — read the current memory (optionally search by query)
-  log     — append an event to HISTORY.md
-  search  — search memory and history for a keyword/phrase
+  store    — persist a fact, preference, or learning to MEMORY.md
+  recall   — read the current memory (optionally search by query)
+  log      — append an event to HISTORY.md
+  search   — search memory and history for a keyword/phrase
+  forget   — remove a specific section or entry from MEMORY.md
+  correct  — update/replace content in a memory section
 """
 
 import logging
@@ -18,6 +20,46 @@ import logging
 from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("agent42.tools.memory")
+
+# Semantic similarity thresholds for deduplication
+DEDUP_THRESHOLD = 0.90  # >= this = near-duplicate, skip or merge
+DEDUP_SEARCH_THRESHOLD = 0.85  # >= this in results = collapse duplicates
+
+
+def _deduplicate_results(
+    results: list[str], threshold: float = DEDUP_SEARCH_THRESHOLD
+) -> list[str]:
+    """Remove near-duplicate entries from search results by text similarity.
+
+    Uses simple token overlap (Jaccard) since we don't want to call the
+    embedding model just to deduplicate a handful of result strings.
+    """
+    if len(results) <= 1:
+        return results
+
+    def _jaccard(a: str, b: str) -> float:
+        sa = set(a.lower().split())
+        sb = set(b.lower().split())
+        if not sa or not sb:
+            return 0.0
+        return len(sa & sb) / len(sa | sb)
+
+    # Extract the text portion (after the [tag] prefix) for comparison
+    def _text_of(entry: str) -> str:
+        idx = entry.find("] ")
+        return entry[idx + 2 :] if idx >= 0 else entry
+
+    kept: list[str] = []
+    for entry in results:
+        text = _text_of(entry)
+        is_dup = False
+        for existing in kept:
+            if _jaccard(text, _text_of(existing)) >= threshold:
+                is_dup = True
+                break
+        if not is_dup:
+            kept.append(entry)
+    return kept
 
 
 class MemoryTool(Tool):
@@ -42,11 +84,14 @@ class MemoryTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Read and write persistent memory. "
+            "Read and write persistent memory with lifecycle management. "
             "Use 'store' to save facts, preferences, or learnings to MEMORY.md. "
             "Use 'recall' to retrieve the current memory contents. "
             "Use 'log' to record an event in the chronological HISTORY.md. "
-            "Use 'search' to find specific past information by keyword or phrase."
+            "Use 'search' to find specific past information by keyword or phrase. "
+            "Use 'forget' to remove a section from MEMORY.md and mark as forgotten in Qdrant. "
+            "Use 'correct' to replace content in a specific memory section. "
+            "Use 'strengthen' to confirm a recalled memory was useful (boosts confidence)."
         )
 
     @property
@@ -56,12 +101,23 @@ class MemoryTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["store", "recall", "log", "search"],
+                    "enum": [
+                        "store",
+                        "recall",
+                        "log",
+                        "search",
+                        "forget",
+                        "correct",
+                        "strengthen",
+                    ],
                     "description": (
                         "store: save information to MEMORY.md under a section; "
                         "recall: read current memory contents; "
                         "log: append an event to HISTORY.md; "
-                        "search: search memory and history by keyword"
+                        "search: search memory and history by keyword; "
+                        "forget: remove a section from MEMORY.md and mark forgotten in Qdrant; "
+                        "correct: replace content in a memory section; "
+                        "strengthen: confirm a recalled memory was useful (boosts confidence)"
                     ),
                 },
                 "section": {
@@ -86,6 +142,14 @@ class MemoryTool(Tool):
                         "'task_completed', 'decision', 'error'). Defaults to 'note'."
                     ),
                 },
+                "project": {
+                    "type": "string",
+                    "description": (
+                        "Project scope for the memory. Use 'global' for cross-project "
+                        "memories, or a project name for project-specific ones. "
+                        "Defaults to 'global'."
+                    ),
+                },
             },
             "required": ["action"],
         }
@@ -96,6 +160,7 @@ class MemoryTool(Tool):
         section: str = "",
         content: str = "",
         event_type: str = "note",
+        project: str = "global",
         **kwargs,
     ) -> ToolResult:
         if not self._store:
@@ -106,20 +171,28 @@ class MemoryTool(Tool):
             )
 
         if action == "store":
-            return self._handle_store(section, content)
+            return await self._handle_store(section, content, project)
         elif action == "recall":
             return self._handle_recall()
         elif action == "log":
             return self._handle_log(event_type, content)
         elif action == "search":
-            return self._handle_search(content)
+            return await self._handle_search(content, project)
+        elif action == "forget":
+            return await self._handle_forget(section, content)
+        elif action == "correct":
+            return await self._handle_correct(section, content)
+        elif action == "strengthen":
+            return await self._handle_strengthen(content)
         else:
             return ToolResult(
-                output=f"Unknown action: {action}. Use store, recall, log, or search.",
+                output=f"Unknown action: {action}. Use store, recall, log, search, forget, correct, or strengthen.",
                 success=False,
             )
 
-    def _handle_store(self, section: str, content: str) -> ToolResult:
+    async def _handle_store(
+        self, section: str, content: str, project: str = "global"
+    ) -> ToolResult:
         if not content or not content.strip():
             return ToolResult(
                 output="No content provided. Specify what to remember.",
@@ -129,8 +202,70 @@ class MemoryTool(Tool):
         content = content.strip()
 
         try:
+            # Write-time dedup: check if a near-duplicate already exists
+            if self._store.semantic_available:
+                try:
+                    existing = await self._store.semantic_search(content, top_k=1)
+                    if existing:
+                        top = existing[0]
+                        score = top.get("score", 0)
+                        if score >= DEDUP_THRESHOLD:
+                            existing_text = top.get("text", top.get("summary", ""))
+                            logger.info(
+                                "Duplicate memory detected (score=%.2f), skipping: %s",
+                                score,
+                                content[:80],
+                            )
+                            return ToolResult(
+                                output=(
+                                    f"Memory already exists (similarity {score:.0%}): "
+                                    f"{existing_text[:200]}"
+                                )
+                            )
+                except Exception as e:
+                    logger.debug("Dedup check failed, storing anyway: %s", e)
+
+            # 1. Write to MEMORY.md (flat file, always works)
             self._store.append_to_section(section, content)
-            logger.info("Memory stored: [%s] %s", section, content[:80])
+
+            # 2. Index in Qdrant for semantic search (if available)
+            semantic_indexed = False
+            if self._store.semantic_available:
+                try:
+                    # Include lifecycle metadata for new memories
+
+                    metadata = {
+                        "confidence": 0.5,
+                        "recall_count": 0,
+                        "last_recalled": 0,
+                        "status": "active",
+                        "project": project,
+                    }
+                    await self._store.log_event_semantic(
+                        event_type="memory",
+                        summary=f"[{section}] {content}",
+                        details=content,
+                    )
+                    # Update the just-stored point with lifecycle metadata
+                    if self._store._qdrant and self._store._qdrant.is_available:
+                        from memory.qdrant_store import QdrantStore
+
+                        query_vector = await self._store.embeddings.embed_text(
+                            f"[{section}] {content}"
+                        )
+                        hits = self._store._qdrant.find_by_text(
+                            QdrantStore.HISTORY, query_vector, content[:50], top_k=1
+                        )
+                        if hits:
+                            self._store._qdrant.update_payload(
+                                QdrantStore.HISTORY, hits[0]["point_id"], metadata
+                            )
+                    semantic_indexed = True
+                except Exception as e:
+                    logger.warning("Semantic indexing failed (stored in flat file): %s", e)
+
+            mode = "semantic + file" if semantic_indexed else "file only"
+            logger.info("Memory stored (%s): [%s] %s", mode, section, content[:80])
             return ToolResult(output=f"Stored in memory under '{section}': {content}")
         except Exception as e:
             logger.error("Failed to store memory: %s", e)
@@ -175,7 +310,157 @@ class MemoryTool(Tool):
                 success=False,
             )
 
-    def _handle_search(self, query: str) -> ToolResult:
+    async def _handle_forget(self, section: str, content: str = "") -> ToolResult:
+        if not section and not content:
+            return ToolResult(
+                output="Provide a section name or content to forget.",
+                success=False,
+            )
+
+        forgotten_qdrant = 0
+        section = (section or "").strip()
+        content = (content or "").strip()
+
+        try:
+            # 1. Remove from flat file (by section)
+            if section:
+                memory = self._store.read_memory()
+                lines = memory.split("\n")
+                new_lines = []
+                skip = False
+
+                for line in lines:
+                    if line.startswith("## "):
+                        heading = line[3:].strip()
+                        if heading.lower() == section.lower():
+                            skip = True
+                            continue
+                        else:
+                            skip = False
+                    if not skip:
+                        new_lines.append(line)
+
+                new_content = "\n".join(new_lines).strip() + "\n"
+                self._store.update_memory(new_content)
+
+            # 2. Mark as forgotten in Qdrant (by content or section name)
+            search_term = content or section
+            if search_term:
+                forgotten_qdrant = await self._store.forget_semantic(search_term)
+
+            self._store._schedule_reindex()
+            parts = []
+            if section:
+                parts.append(f"Removed section '{section}' from MEMORY.md")
+            if forgotten_qdrant:
+                parts.append(f"Marked {forgotten_qdrant} entries as forgotten in Qdrant")
+            result = ". ".join(parts) or "Nothing to forget."
+
+            logger.info(
+                "Memory forgotten: section=%s content=%s qdrant=%d",
+                section,
+                content[:50],
+                forgotten_qdrant,
+            )
+            return ToolResult(output=result)
+        except Exception as e:
+            logger.error("Failed to forget memory: %s", e)
+            return ToolResult(
+                output=f"Failed to forget: {e}",
+                error=str(e),
+                success=False,
+            )
+
+    async def _handle_correct(self, section: str, content: str) -> ToolResult:
+        if not section or not section.strip():
+            return ToolResult(
+                output="No section specified. Provide the section name to correct.",
+                success=False,
+            )
+        if not content or not content.strip():
+            return ToolResult(
+                output="No content provided. Provide the corrected information.",
+                success=False,
+            )
+        section = section.strip()
+        content = content.strip()
+
+        try:
+            # 1. Update flat file
+            memory = self._store.read_memory()
+            lines = memory.split("\n")
+            new_lines = []
+            replaced = False
+            skip = False
+
+            for line in lines:
+                if line.startswith("## "):
+                    heading = line[3:].strip()
+                    if heading.lower() == section.lower():
+                        new_lines.append(f"## {section}")
+                        new_lines.append(content)
+                        new_lines.append("")
+                        skip = True
+                        replaced = True
+                        continue
+                    else:
+                        skip = False
+                if not skip:
+                    new_lines.append(line)
+
+            if not replaced:
+                new_lines.append(f"\n## {section}")
+                new_lines.append(content)
+                new_lines.append("")
+
+            new_content = "\n".join(new_lines).strip() + "\n"
+            self._store.update_memory(new_content)
+
+            # 2. Forget old entries in Qdrant and re-index
+            await self._store.forget_semantic(section)
+            self._store._schedule_reindex()
+
+            logger.info("Memory corrected: [%s] %s", section, content[:80])
+            action = "Corrected" if replaced else "Created"
+            return ToolResult(output=f"{action} memory section '{section}': {content}")
+        except Exception as e:
+            logger.error("Failed to correct memory: %s", e)
+            return ToolResult(
+                output=f"Failed to correct memory: {e}",
+                error=str(e),
+                success=False,
+            )
+
+    async def _handle_strengthen(self, content: str) -> ToolResult:
+        """Strengthen memories matching the content (user confirms they were useful)."""
+        if not content or not content.strip():
+            return ToolResult(
+                output="No content provided. Describe the memory to strengthen.",
+                success=False,
+            )
+        content = content.strip()
+
+        try:
+            count = await self._store.strengthen_memory(content)
+            if count > 0:
+                logger.info("Strengthened %d memories matching: %s", count, content[:80])
+                return ToolResult(
+                    output=f"Strengthened {count} memory(s) matching '{content[:100]}'. "
+                    f"Their confidence has been boosted."
+                )
+            else:
+                return ToolResult(
+                    output=f"No matching memories found to strengthen for '{content[:100]}'."
+                )
+        except Exception as e:
+            logger.error("Failed to strengthen memory: %s", e)
+            return ToolResult(
+                output=f"Failed to strengthen: {e}",
+                error=str(e),
+                success=False,
+            )
+
+    async def _handle_search(self, query: str, project: str = "") -> ToolResult:
         if not query or not query.strip():
             return ToolResult(
                 output="No search query provided.",
@@ -184,19 +469,43 @@ class MemoryTool(Tool):
         query = query.strip()
 
         try:
-            # Search both memory content and history
             results = []
 
-            # Grep-search memory
+            # 1. Semantic search via Qdrant (finds by meaning, not keywords)
+            # Uses lifecycle-aware scoring when available
+            if self._store.semantic_available:
+                semantic_hits = await self._store.semantic_search(query, top_k=5, project=project)
+                for hit in semantic_hits:
+                    score = hit.get("score", 0)
+                    text = hit.get("text", hit.get("summary", ""))
+                    source = hit.get("source", "memory")
+                    confidence = hit.get("confidence", "")
+                    recall_count = hit.get("recall_count", "")
+                    # Show lifecycle info if available
+                    meta = f"score={score:.2f}"
+                    if confidence:
+                        meta += f" conf={confidence:.2f}"
+                    if recall_count:
+                        meta += f" recalls={recall_count}"
+                    if text:
+                        results.append(f"[{source} {meta}] {text.strip()}")
+
+            # 2. Keyword fallback — search memory text
             memory = self._store.read_memory()
             for line in memory.splitlines():
-                if query.lower() in line.lower():
-                    results.append(f"[memory] {line.strip()}")
+                line_stripped = line.strip()
+                if line_stripped and query.lower() in line_stripped.lower():
+                    entry = f"[keyword] {line_stripped}"
+                    if entry not in results:
+                        results.append(entry)
 
-            # Grep-search history
+            # 3. History keyword search
             history_matches = self._store.search_history(query)
             for match in history_matches[:10]:
                 results.append(f"[history] {match.strip()}")
+
+            # Deduplicate near-identical results
+            results = _deduplicate_results(results)
 
             if not results:
                 return ToolResult(output=f"No results found for '{query}' in memory or history.")
