@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "agent42": {
+      "command": "python",
+      "args": ["c:/Users/rickw/projects/agent42/mcp_server.py"],
+      "env": {
+        "AGENT42_WORKSPACE": "${workspaceFolder}"
+      }
+    }
+  }
+}

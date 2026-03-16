@@ -12,7 +12,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/security-gate.py",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/security-gate.py",
             "timeout": 10
           }
         ]
@@ -23,8 +23,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/context-loader.py",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/context-loader.py",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/memory-recall.py",
+            "timeout": 10
           }
         ]
       }
@@ -35,12 +40,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/security-monitor.py",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/security-monitor.py",
             "timeout": 30
           },
           {
             "type": "command",
-            "command": "python .claude/hooks/format-on-write.py",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/format-on-write.py",
             "timeout": 30
           }
         ]
@@ -49,12 +54,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/jcodemunch-token-tracker.py",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/jcodemunch-token-tracker.py",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "python .claude/hooks/jcodemunch-reindex.py",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/jcodemunch-reindex.py",
             "timeout": 10
           }
         ]
@@ -65,22 +70,27 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/session-handoff.py",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/session-handoff.py",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "python .claude/hooks/test-validator.py",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/test-validator.py",
             "timeout": 45
           },
           {
             "type": "command",
-            "command": "python .claude/hooks/learning-engine.py",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/learning-engine.py",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "python .claude/hooks/jcodemunch-reindex.py",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/memory-learn.py",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/jcodemunch-reindex.py",
             "timeout": 15
           }
         ]

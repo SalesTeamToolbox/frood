@@ -10,6 +10,7 @@ Security layers:
 
 import asyncio
 import logging
+import os
 import re
 
 from core.command_filter import CommandFilter, CommandFilterError
@@ -151,12 +152,54 @@ class ShellTool(Tool):
             return ToolResult(error=str(e), success=False)
 
         try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                cwd=str(self._sandbox.allowed_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+            import shutil
+            import sys
+
+            cwd = str(self._sandbox.allowed_dir)
+            bash = shutil.which("bash")
+            # Fallback: check common Git Bash locations on Windows
+            if sys.platform == "win32" and not bash:
+                for candidate in [
+                    r"C:\Program Files\Git\usr\bin\bash.exe",
+                    r"C:\Program Files\Git\bin\bash.exe",
+                    r"C:\Program Files (x86)\Git\usr\bin\bash.exe",
+                ]:
+                    if os.path.isfile(candidate):
+                        bash = candidate
+                        break
+            if sys.platform == "win32" and bash:
+                # Use Git Bash on Windows so Unix commands (ls, grep) work
+                # --norc --noprofile prevents slow profile loading and hangs
+                # Build a minimal env with Git Bash utilities on PATH
+                git_root = os.path.dirname(os.path.dirname(os.path.dirname(bash)))
+                env = os.environ.copy()
+                git_paths = os.pathsep.join(
+                    [
+                        os.path.join(git_root, "usr", "bin"),
+                        os.path.join(git_root, "bin"),
+                        os.path.join(git_root, "mingw64", "bin"),
+                    ]
+                )
+                env["PATH"] = git_paths + os.pathsep + env.get("PATH", "")
+                proc = await asyncio.create_subprocess_exec(
+                    bash,
+                    "--norc",
+                    "--noprofile",
+                    "-c",
+                    command,
+                    cwd=cwd,
+                    env=env,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            else:
+                proc = await asyncio.create_subprocess_shell(
+                    command,
+                    cwd=cwd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
 
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self._timeout)
 

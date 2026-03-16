@@ -1,30 +1,24 @@
 """
-agent42.py - The answer to life, the universe, and all your tasks.
+agent42.py — The answer to life, the universe, and all your tasks.
 
-Multi-agent orchestrator platform. Free models handle the iterative work;
-premium APIs or human review gate the final output.
-
-Now with:
-- Channel gateway (Discord, Slack, Telegram, Email) — Phase 2
-- Skills framework (SKILL.md dynamic loading) — Phase 3
-- Tool ecosystem (MCP, web search, cron, subagents) — Phase 4
-- 8 LLM providers with 20+ models — Phase 5
-- Persistent memory system — Phase 6
+v2.0 MCP Architecture:
+- Claude Code provides the intelligence layer (LLM, orchestration, context)
+- Agent42 provides the tooling layer (MCP tools, memory, dashboard)
+- MCP server is started by Claude Code via .mcp.json (stdio transport)
+- This file starts the dashboard and optional services
 
 Usage:
-    python agent42.py                     # Start with defaults
+    python agent42.py                     # Start dashboard (http://localhost:8000)
     python agent42.py --port 8080         # Custom dashboard port
-    python agent42.py --repo /path/to     # Specify repo path
-    python agent42.py --no-dashboard      # Headless mode (terminal only)
-    python agent42.py --max-agents 2      # Limit concurrent agents
-
-Dashboard: http://localhost:8000 (default)
+    python agent42.py --no-dashboard      # Headless mode (services only)
+    python agent42.py backup -o ./        # Create backup archive
+    python agent42.py restore backup.tar  # Restore from backup
+    python agent42.py clone -o ./         # Create clone package
 """
 
 import argparse
 import asyncio
 import atexit
-import json
 import logging
 import os
 import signal
@@ -36,1642 +30,209 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
-from agents.agent import Agent
-from agents.extension_loader import ExtensionLoader
-from agents.learner import Learner
-from agents.model_router import ModelRouter
-from agents.profile_loader import ProfileLoader
-from channels.base import InboundMessage, OutboundMessage
-from channels.manager import ChannelManager
-from core.app_manager import AppManager
-from core.approval_gate import ApprovalGate
-from core.capacity import compute_effective_capacity
-from core.chat_session_manager import ChatSessionManager
-from core.command_filter import DEFAULT_ALLOWLIST, CommandFilter
+from commands import BackupCommandHandler, CloneCommandHandler, RestoreCommandHandler
 from core.config import settings
 from core.device_auth import DeviceStore
-from core.github_accounts import GitHubAccountStore
 from core.heartbeat import HeartbeatService
-from core.intent_classifier import IntentClassifier, PendingClarification, ScopeInfo
-from core.key_store import KeyStore
 from core.project_manager import ProjectManager
-from core.rate_limiter import ToolLimit, ToolRateLimiter
+from core.rate_limiter import ToolRateLimiter
 from core.repo_manager import RepositoryManager
-from core.sandbox import WorkspaceSandbox
 from core.security_scanner import ScheduledSecurityScanner
-from core.task_queue import Task, TaskQueue, TaskStatus, TaskType, infer_task_type
-from core.worktree_manager import WorktreeManager
 from dashboard.auth import init_device_store
 from dashboard.server import create_app
 from dashboard.websocket_manager import WebSocketManager
-from memory.consolidation import ConsolidationPipeline
 from memory.qdrant_store import QdrantConfig, QdrantStore
 from memory.redis_session import RedisConfig, RedisSessionBackend
 from memory.session import SessionManager
 from memory.store import MemoryStore
 from skills.loader import SkillLoader
-from tools.app_test_tool import AppTestTool
-from tools.app_tool import AppTool
-from tools.behaviour_tool import BehaviourTool
-from tools.browser_tool import BrowserTool
-from tools.code_intel import CodeIntelTool
-from tools.content_analyzer import ContentAnalyzerTool
-from tools.context import ToolContext
-from tools.cron import CronScheduler, CronTool
-from tools.data_tool import DataTool
-from tools.dependency_audit import DependencyAuditTool
-from tools.diff_tool import DiffTool
-from tools.docker_tool import DockerTool
-from tools.file_watcher import FileWatcherTool
-from tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
-from tools.git_tool import GitTool
-from tools.grep_tool import GrepTool
-from tools.http_client import HttpClientTool
-from tools.image_gen import ImageGenTool
-from tools.knowledge_tool import KnowledgeTool
-from tools.linter_tool import LinterTool
-from tools.mcp_client import MCPManager
-from tools.memory_tool import MemoryTool
-from tools.notify_tool import NotifyUserTool
-from tools.outline_tool import OutlineTool
-from tools.persona_tool import PersonaTool
+from tools.cron import CronScheduler
 from tools.plugin_loader import PluginLoader
-from tools.pr_generator import PRGeneratorTool
-from tools.python_exec import PythonExecTool
 from tools.registry import ToolRegistry
-from tools.repo_map import RepoMapTool
-from tools.scoring_tool import ScoringTool
-from tools.security_analyzer import SecurityAnalyzerTool
-from tools.shell import ShellTool
-from tools.ssh_tool import SSHTool
-from tools.subagent import SubagentTool
-from tools.summarizer_tool import SummarizerTool
-from tools.team_tool import TeamTool
-from tools.template_tool import TemplateTool
-from tools.test_runner import TestRunnerTool
-from tools.tunnel_tool import TunnelTool
-from tools.video_gen import VideoGenTool
-from tools.vision_tool import VisionTool
-from tools.web_search import WebFetchTool, WebSearchTool
-from tools.workflow_tool import WorkflowTool
 
-# -- Logging -------------------------------------------------------------------
+# ── Logging ──────────────────────────────────────────────────────────────
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-
 _log_handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
 try:
     _log_handlers.append(logging.FileHandler("agent42.log"))
 except PermissionError:
-    print(
-        "WARNING: Cannot write to agent42.log (permission denied) — logging to stdout only.",
-        file=sys.stderr,
-    )
+    print("WARNING: Cannot write to agent42.log — logging to stdout only.", file=sys.stderr)
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, handlers=_log_handlers)
 logger = logging.getLogger("agent42")
 
-# Ensure exit is always logged even if the finally block or signal handling is bypassed
 atexit.register(lambda: print("Agent42 process exiting (atexit)", flush=True))
-
-# -- Custom persona loader ----------------------------------------------------
-_PERSONA_FILE = Path(__file__).parent / "data" / "agent42_persona.json"
-
-
-def _load_custom_persona() -> str:
-    """Load the custom chat persona prompt from disk.
-
-    Returns the saved prompt string, or "" if no custom persona is set.
-    """
-    if _PERSONA_FILE.exists():
-        try:
-            data = json.loads(_PERSONA_FILE.read_text())
-            return data.get("prompt", "")
-        except Exception:
-            pass
-    return ""
 
 
 class Agent42:
-    """Core orchestrator — manages tasks, agents, channels, tools, and dashboard."""
+    """Agent42 v2.0 — Dashboard + services launcher.
+
+    In the MCP architecture, Claude Code handles LLM orchestration.
+    Agent42 provides:
+    - Dashboard web UI (FastAPI + WebSocket)
+    - Memory backend (Qdrant + Redis)
+    - Cron scheduler
+    - Security scanning
+    - Skill/tool registry (shared with MCP server)
+    """
 
     def __init__(
         self,
-        repo_path: str | None = None,
         dashboard_port: int = 8000,
         headless: bool = False,
-        max_agents: int | None = None,
     ):
-        # Data directory: always the agent42 install dir (for memory, sessions, etc.)
-        self.data_dir = Path(__file__).parent.resolve()
-        # Repo path: optional, can be configured later via dashboard
-        self.repo_path = Path(repo_path).resolve() if repo_path else self.data_dir
-        self.has_repo = repo_path is not None and (Path(repo_path).resolve() / ".git").exists()
         self.dashboard_port = dashboard_port
         self.headless = headless
-        self.max_agents = max_agents or settings.max_concurrent_agents
 
-        # Core infrastructure — optional Redis-backed queue
-        queue_backend = None
-        if settings.redis_url:
-            from core.queue_backend import RedisQueueBackend
+        # ── Core infrastructure ──────────────────────────────────────────
+        workspace = Path(settings.default_repo_path or ".").resolve()
+        data_dir = Path(__file__).parent / ".agent42"
 
-            queue_backend = RedisQueueBackend(
-                redis_url=settings.redis_url,
-                redis_password=settings.redis_password,
-                fallback_json_path=settings.tasks_json_path,
-            )
-        self.task_queue = TaskQueue(
-            tasks_json_path=settings.tasks_json_path,
-            backend=queue_backend,
-        )
         self.ws_manager = WebSocketManager()
-        self.worktree_manager = WorktreeManager(str(self.repo_path)) if self.has_repo else None
+        self.heartbeat = HeartbeatService()
+        self.cron_scheduler = CronScheduler()
+        self.device_store = DeviceStore()
+        init_device_store(self.device_store)
+        self.repo_manager = RepositoryManager(data_dir / "repos")
+        self.session_manager = SessionManager(str(data_dir / "sessions"))
+        self.skill_loader = SkillLoader()
 
-        # Multi-repository manager
-        self.repo_manager = RepositoryManager(
-            repos_json_path=settings.repos_json_path,
-            clone_dir=settings.repos_clone_dir,
-            github_token=settings.github_token,
-        )
+        # ── Tool registry (for dashboard visibility) ─────────────────────
+        self.tool_registry = ToolRegistry(rate_limiter=ToolRateLimiter())
 
-        self._active_count = 0
-        self._active_lock = asyncio.Lock()
-        # Per-task intervention queues for mid-task user feedback (Agent Zero-inspired)
-        self._intervention_queues: dict[str, asyncio.Queue] = {}
-        self.approval_gate = ApprovalGate(
-            self.task_queue,
-            log_path=settings.approval_log_path,
-        )
-        self._shutdown_event = asyncio.Event()
-        self._uvicorn_server: uvicorn.Server | None = None
+        # ── Memory backend ───────────────────────────────────────────────
+        memory_dir = data_dir / "memory"
+        memory_dir.mkdir(parents=True, exist_ok=True)
 
-        # Phase 1: Security
-        self.sandbox = WorkspaceSandbox(self.repo_path, enabled=settings.sandbox_enabled)
-
-        # Command filter: strict allowlist mode or default deny-list
-        allowlist = None
-        if settings.command_filter_mode == "allowlist":
-            if settings.command_filter_allowlist:
-                allowlist = [
-                    p.strip() for p in settings.command_filter_allowlist.split(",") if p.strip()
-                ]
-            else:
-                allowlist = list(DEFAULT_ALLOWLIST)
-        self.command_filter = CommandFilter(allowlist=allowlist)
-
-        # Phase 2: Channels
-        self.channel_manager = ChannelManager()
-
-        # Phase 3: Skills
-        skill_dirs = [
-            Path(__file__).parent / "skills" / "builtins",
-            self.repo_path / "skills",
-        ]
-        for extra in settings.get_skills_dirs():
-            skill_dirs.append(Path(extra))
-        self.skill_loader = SkillLoader(skill_dirs)
-        self.skill_loader.load_all()
-
-        # Agent profiles (Agent Zero-inspired) — configurable agent personas
-        profile_dirs = []
-        if settings.agent_profiles_dir:
-            p = Path(settings.agent_profiles_dir)
-            if not p.is_absolute():
-                p = self.data_dir / p
-            profile_dirs.append(p)
-        self.profile_loader = ProfileLoader(extra_dirs=profile_dirs if profile_dirs else None)
-        self.profile_loader.load_all()
-
-        # Agent execution extensions (Agent Zero-inspired) — lifecycle hook plugins
-        ext_dir = None
-        if settings.extensions_dir:
-            ext_dir = Path(settings.extensions_dir)
-            if not ext_dir.is_absolute():
-                ext_dir = self.data_dir / ext_dir
-        self.extension_loader = ExtensionLoader(extensions_dir=ext_dir)
-
-        # Phase 4: Tools (with optional rate limiting)
-        rate_limiter = None
-        if settings.tool_rate_limiting_enabled:
-            rate_limiter = ToolRateLimiter()
-            if settings.tool_rate_limit_overrides:
-                try:
-                    overrides_raw = json.loads(settings.tool_rate_limit_overrides)
-                    overrides = {name: ToolLimit(**spec) for name, spec in overrides_raw.items()}
-                    rate_limiter.update_limits(overrides)
-                except (json.JSONDecodeError, TypeError) as e:
-                    logger.warning(f"Invalid TOOL_RATE_LIMIT_OVERRIDES: {e}")
-        self.tool_registry = ToolRegistry(rate_limiter=rate_limiter)
-        self.mcp_manager = MCPManager()
-        self.cron_scheduler = CronScheduler(settings.cron_jobs_path)
-
-        # Apps platform
-        self.app_manager = (
-            AppManager(
-                apps_dir=settings.apps_dir,
-                port_range_start=settings.apps_port_range_start,
-                port_range_end=settings.apps_port_range_end,
-                max_running=settings.apps_max_running,
-                auto_restart=settings.apps_auto_restart,
-                dashboard_port=dashboard_port,
-                git_enabled_default=settings.apps_git_enabled_default,
-                github_token=settings.apps_github_token,
-                default_mode=settings.apps_default_mode,
-                require_auth_default=settings.apps_require_auth_default,
-            )
-            if settings.apps_enabled
-            else None
-        )
-
-        # Chat sessions and projects
-        self.chat_session_manager = ChatSessionManager(self.data_dir / settings.chat_sessions_dir)
-        self.project_manager = ProjectManager(
-            self.data_dir / settings.projects_dir,
-            self.task_queue,
-        )
-
-        # Project state manager for session recovery (GSD-inspired)
-        from core.state_manager import StateManager
-
-        self.state_manager = StateManager(self.data_dir / settings.projects_dir)
-
-        # Phase 4b: Custom tool plugins (auto-discovery from CUSTOM_TOOLS_DIR)
-        if settings.custom_tools_dir:
-            tool_context = ToolContext(
-                sandbox=self.sandbox,
-                command_filter=self.command_filter,
-                task_queue=self.task_queue,
-                workspace=str(self.repo_path),
-                tool_registry=self.tool_registry,
-            )
-            custom_dir = Path(settings.custom_tools_dir)
-            if not custom_dir.is_absolute():
-                custom_dir = self.data_dir / custom_dir
-            self._custom_tools = PluginLoader.load_all(custom_dir, tool_context, self.tool_registry)
+        qdrant_store = None
+        qdrant_url = os.environ.get("QDRANT_URL", "")
+        if qdrant_url:
+            qdrant_store = QdrantStore(QdrantConfig(url=qdrant_url, vector_dim=384))
         else:
-            self._custom_tools = []
+            qdrant_path = str(data_dir / "qdrant")
+            qdrant_store = QdrantStore(QdrantConfig(local_path=qdrant_path, vector_dim=384))
 
-        # Phase 6: Memory (with optional Qdrant + Redis backends)
-        self._qdrant_store = None
-        self._redis_backend = None
-
-        if settings.qdrant_enabled:
-            self._qdrant_store = QdrantStore(
-                QdrantConfig(
-                    url=settings.qdrant_url,
-                    api_key=settings.qdrant_api_key,
-                    collection_prefix=settings.qdrant_collection_prefix,
-                    local_path=settings.qdrant_local_path,
-                )
-            )
-
+        redis_backend = None
         if settings.redis_url:
-            self._redis_backend = RedisSessionBackend(
-                RedisConfig(
-                    url=settings.redis_url,
-                    password=settings.redis_password,
-                    session_ttl_days=settings.session_ttl_days,
-                    embedding_cache_ttl_hours=settings.embedding_cache_ttl_hours,
-                )
-            )
+            redis_backend = RedisSessionBackend(RedisConfig(url=settings.redis_url))
 
         self.memory_store = MemoryStore(
-            self.data_dir / settings.memory_dir,
-            qdrant_store=self._qdrant_store,
-            redis_backend=self._redis_backend,
+            memory_dir, qdrant_store=qdrant_store, redis_backend=redis_backend
         )
 
-        # Register tools now that memory_store is available
-        self._register_tools()
+        # ── Project manager ──────────────────────────────────────────────
+        self.project_manager = ProjectManager(data_dir / "projects", task_queue=None)
 
-        consolidation = ConsolidationPipeline(
-            model_router=ModelRouter(),
-            embedding_store=self.memory_store.embeddings,
-            qdrant_store=self._qdrant_store,
-        )
-
-        self.session_manager = SessionManager(
-            self.data_dir / settings.sessions_dir,
-            redis_backend=self._redis_backend,
-            consolidation_pipeline=consolidation,
-        )
-
-        # Phase 10: Device gateway authentication
-        self.device_store = DeviceStore(self.data_dir / settings.devices_file)
-        init_device_store(self.device_store)
-
-        # Admin-configured API keys (override .env values)
-        self.key_store = KeyStore(self.data_dir / ".agent42" / "settings.json")
-        self.key_store.inject_into_environ()
-
-        # Multi-account GitHub credential store
-        self.github_account_store = GitHubAccountStore(
-            self.data_dir / ".agent42" / "github_accounts.json"
-        )
-
-        # Dynamic model routing components (must be before Learner for injection)
-        from agents.model_catalog import ModelCatalog
-        from agents.model_evaluator import ModelEvaluator
-        from agents.model_researcher import ModelResearcher
-
-        data_dir = self.data_dir / "data"
-        data_dir.mkdir(parents=True, exist_ok=True)
-
-        self.model_catalog = ModelCatalog(
-            cache_path=data_dir / "model_catalog.json",
-            refresh_hours=settings.model_catalog_refresh_hours,
-            balance_check_hours=settings.openrouter_balance_check_hours,
-        )
-        self.model_evaluator = ModelEvaluator(
-            performance_path=data_dir / "model_performance.json",
-            routing_path=self.data_dir / settings.model_routing_file,
-            research_path=data_dir / "model_research.json",
-            trial_percentage=settings.model_trial_percentage,
-            min_trials=settings.model_min_trials,
-        )
-        self.model_researcher = (
-            ModelResearcher(
-                research_path=data_dir / "model_research.json",
-                interval_hours=settings.model_research_interval_hours,
-            )
-            if settings.model_research_enabled
-            else None
-        )
-
-        # Self-learning (with model evaluator for outcome tracking)
-        self.workspace_skills_dir = self.data_dir / "skills" / "workspace"
-        self.learner = Learner(
-            router=ModelRouter(evaluator=self.model_evaluator, catalog=self.model_catalog),
-            memory_store=self.memory_store,
-            skills_dir=self.workspace_skills_dir,
-            model_evaluator=self.model_evaluator,
-        )
-
-        # Phase 7: Heartbeat monitoring
-        self.heartbeat = HeartbeatService(
-            on_stall=self._on_agent_stall,
-            on_heartbeat=self._on_heartbeat,
-            configured_max_agents=self.max_agents,
-            task_queue=self.task_queue,
-            tool_registry=self.tool_registry,
-            skill_loader=self.skill_loader,
-        )
-
-        # Scheduled security scanning
+        # ── Security scanner ─────────────────────────────────────────────
         self.security_scanner = ScheduledSecurityScanner(
-            workspace_path=str(self.repo_path) if self.has_repo else str(self.data_dir),
-            interval_seconds=settings.get_security_scan_interval_seconds(),
-            min_severity=settings.security_scan_min_severity,
-            github_issues_enabled=settings.security_scan_github_issues,
-            memory_store=self.memory_store,
+            workspace=str(workspace),
+            interval=settings.security_scan_interval,
         )
 
-        # Phase 9: Context-aware intent classification
-        self.intent_classifier = IntentClassifier(router=ModelRouter())
-        self._pending_clarifications: dict[str, PendingClarification] = {}
-        self._pending_scope_clarifications: dict[str, dict] = {}
-
-        # Wire up callbacks
-        self.task_queue.on_update(self._on_task_update)
-
-    def _register_tools(self):
-        """Register all built-in tools."""
-        workspace = str(self.repo_path)
-
-        # Core tools
-        self.tool_registry.register(ShellTool(self.sandbox, self.command_filter))
-        self.tool_registry.register(ReadFileTool(self.sandbox))
-        self.tool_registry.register(WriteFileTool(self.sandbox))
-        self.tool_registry.register(EditFileTool(self.sandbox))
-        self.tool_registry.register(ListDirTool(self.sandbox))
-        self.tool_registry.register(WebSearchTool())
-        self.tool_registry.register(WebFetchTool())
-        self.tool_registry.register(CronTool(self.cron_scheduler))
-        self.tool_registry.register(SubagentTool(self.task_queue))
-
-        # Agent Zero-inspired tools
-        self.tool_registry.register(BehaviourTool(memory_dir=self.data_dir / settings.memory_dir))
-        self.tool_registry.register(MemoryTool(memory_store=self.memory_store))
-        self.tool_registry.register(NotifyUserTool(ws_manager=self.ws_manager))
-        self.tool_registry.register(MemoryTool(memory_store=self.memory_store))
-
-        # Development tools
-        self.tool_registry.register(GitTool(workspace))
-        self.tool_registry.register(GrepTool(workspace))
-        self.tool_registry.register(DiffTool(workspace))
-        self.tool_registry.register(TestRunnerTool(workspace))
-        self.tool_registry.register(LinterTool(workspace))
-        self.tool_registry.register(HttpClientTool())
-
-        # Advanced tools (from competitive analysis)
-        self.tool_registry.register(BrowserTool(workspace))
-        self.tool_registry.register(CodeIntelTool(workspace))
-        self.tool_registry.register(DependencyAuditTool(workspace))
-        self.tool_registry.register(DockerTool(workspace))
-        self.tool_registry.register(PythonExecTool(workspace))
-        self.tool_registry.register(RepoMapTool(workspace))
-        self.tool_registry.register(PRGeneratorTool(workspace))
-        self.tool_registry.register(SecurityAnalyzerTool(workspace))
-        self.tool_registry.register(WorkflowTool(workspace, self.tool_registry))
-        self.tool_registry.register(SummarizerTool(workspace))
-        self.tool_registry.register(FileWatcherTool(workspace))
-
-        # General-purpose tools (non-coding workflows)
-        self.tool_registry.register(TeamTool(self.task_queue))
-        self.tool_registry.register(ContentAnalyzerTool())
-        self.tool_registry.register(DataTool())
-        self.tool_registry.register(TemplateTool())
-        self.tool_registry.register(OutlineTool())
-        self.tool_registry.register(ScoringTool())
-        self.tool_registry.register(PersonaTool())
-
-        # Media generation tools (Phase 9)
-        router = ModelRouter()
-        self.tool_registry.register(ImageGenTool(router=router))
-        self.tool_registry.register(VideoGenTool(router=router))
-
-        # SSH remote shell (disabled by default — requires SSH_ENABLED=true)
-        if settings.ssh_enabled:
-            self.tool_registry.register(
-                SSHTool(self.sandbox, self.command_filter, self.approval_gate)
-            )
-
-        # Tunnel manager (disabled by default — requires TUNNEL_ENABLED=true)
-        if settings.tunnel_enabled:
-            self.tool_registry.register(TunnelTool(self.approval_gate))
-
-        # Knowledge base / RAG
-        embedding_store = getattr(self, "embedding_store", None)
-        self.tool_registry.register(KnowledgeTool(self.sandbox, embedding_store))
-
-        # Vision / image analysis
-        self.tool_registry.register(VisionTool(self.sandbox))
-
-        # Apps platform (enabled by default)
-        if self.app_manager:
-            self.tool_registry.register(AppTool(self.app_manager))
-            self.tool_registry.register(AppTestTool(self.app_manager, self.sandbox))
-
-        # Project interview tool (for structured project discovery)
-        if settings.project_interview_enabled:
-            from tools.project_interview import ProjectInterviewTool
-
-            self.tool_registry.register(
-                ProjectInterviewTool(
-                    workspace_path=workspace,
-                    router=router,
-                    outputs_dir=settings.outputs_dir,
-                    task_queue=self.task_queue,
-                )
-            )
-
-    async def _setup_channels(self):
-        """Configure and register enabled channels based on settings."""
-        # Discord
-        if settings.discord_bot_token:
-            from channels.discord_channel import DiscordChannel
-
-            self.channel_manager.register(
-                DiscordChannel(
-                    {
-                        "bot_token": settings.discord_bot_token,
-                        "guild_ids": settings.get_discord_guild_ids(),
-                    }
-                )
-            )
-            logger.info("Discord channel configured")
-
-        # Slack
-        if settings.slack_bot_token and settings.slack_app_token:
-            from channels.slack_channel import SlackChannel
-
-            self.channel_manager.register(
-                SlackChannel(
-                    {
-                        "bot_token": settings.slack_bot_token,
-                        "app_token": settings.slack_app_token,
-                    }
-                )
-            )
-            logger.info("Slack channel configured")
-
-        # Telegram
-        if settings.telegram_bot_token:
-            from channels.telegram_channel import TelegramChannel
-
-            self.channel_manager.register(
-                TelegramChannel(
-                    {
-                        "bot_token": settings.telegram_bot_token,
-                    }
-                )
-            )
-            logger.info("Telegram channel configured")
-
-        # Email
-        if settings.email_imap_host:
-            from channels.email_channel import EmailChannel
-
-            self.channel_manager.register(
-                EmailChannel(
-                    {
-                        "imap_host": settings.email_imap_host,
-                        "imap_port": settings.email_imap_port,
-                        "imap_user": settings.email_imap_user,
-                        "imap_password": settings.email_imap_password,
-                        "smtp_host": settings.email_smtp_host,
-                        "smtp_port": settings.email_smtp_port,
-                        "smtp_user": settings.email_smtp_user,
-                        "smtp_password": settings.email_smtp_password,
-                    }
-                )
-            )
-            logger.info("Email channel configured")
-
-        # Set up message handler
-        self.channel_manager.on_message(self._handle_channel_message)
-
-    async def _setup_mcp(self):
-        """Connect to configured MCP servers and register their tools."""
-        mcp_servers = settings.get_mcp_servers()
-        for name, config in mcp_servers.items():
-            tools = await self.mcp_manager.connect_server(name, config)
-            for tool in tools:
-                self.tool_registry.register(tool)
-
-    async def _handle_channel_message(self, message: InboundMessage) -> OutboundMessage | None:
-        """Handle incoming messages from channels with context-aware classification.
-
-        Uses LLM-based intent classification with conversation history.
-        If the intent is ambiguous, sends a clarification question back to the
-        channel instead of creating a task immediately.
-
-        When scope detection is enabled and an active scope exists, detects
-        whether the new message continues the current scope or represents a
-        topic change that warrants a new branch/task.
-        """
-        logger.info(f"[{message.channel_type}] {message.sender_name}: {message.content[:100]}")
-
-        # Store in session history
-        from memory.session import SessionMessage
-
-        await self.session_manager.add_message(
-            message.channel_type,
-            message.channel_id,
-            SessionMessage(
-                role="user",
-                content=message.content,
-                channel_type=message.channel_type,
-                sender_id=message.sender_id,
-                sender_name=message.sender_name,
-            ),
-        )
-
-        # Check if this is a response to a pending clarification
-        clarification_key = f"{message.channel_type}:{message.channel_id}:{message.sender_id}"
-        pending = self._pending_clarifications.get(clarification_key)
-        if pending:
-            # User responded to clarification — use their answer + original message
-            del self._pending_clarifications[clarification_key]
-            combined = f"{pending.original_message}\n\nUser clarification: {message.content}"
-            return await self._create_task_from_message(combined, message, force_type=None)
-
-        # Check if this is a response to a pending scope clarification
-        scope_clarification_key = (
-            f"scope:{message.channel_type}:{message.channel_id}:{message.sender_id}"
-        )
-        pending_scope = self._pending_scope_clarifications.get(scope_clarification_key)
-        if pending_scope:
-            del self._pending_scope_clarifications[scope_clarification_key]
-            user_answer = message.content.strip().lower()
-            if user_answer in ("yes", "y", "new", "new topic", "different"):
-                # User confirmed scope change — create new scope and task
-                return await self._handle_scope_change(
-                    pending_scope["original_message"],
-                    message,
-                    pending_scope["classification"],
-                    pending_scope["scope_analysis"],
-                )
-            else:
-                # User says it's the same scope — continue with existing scope
-                return await self._create_task_from_message(
-                    pending_scope["original_message"],
-                    message,
-                    force_type=pending_scope["classification"].task_type,
-                    classification=pending_scope["classification"],
-                    parent_task_id=pending_scope["active_scope"].task_id,
-                )
-
-        # Get conversation history for context-aware classification
-        history = self.session_manager.get_history(
-            message.channel_type, message.channel_id, max_messages=10
-        )
-        history_dicts = [{"role": m.role, "content": m.content} for m in history] if history else []
-
-        # Classify intent with LLM + context
-        classification = await self.intent_classifier.classify(
-            message.content, conversation_history=history_dicts
-        )
-
-        logger.info(
-            f"Intent classification: {classification.task_type.value} "
-            f"(confidence={classification.confidence:.2f}, "
-            f"llm={classification.used_llm}, "
-            f"conversational={classification.is_conversational}, "
-            f"clarify={classification.needs_clarification})"
-        )
-
-        # Conversational mode: respond directly without creating a task
-        if classification.is_conversational and settings.conversational_enabled:
-            try:
-                response = await self._direct_response(message, history_dicts)
-                if response:
-                    return response
-            except Exception as e:
-                logger.warning(f"Direct response failed, falling back to task: {e}")
-                # Fall through to task creation
-
-        # If ambiguous, ask for clarification
-        if classification.needs_clarification and classification.clarification_question:
-            self._pending_clarifications[clarification_key] = PendingClarification(
-                original_message=message.content,
-                channel_type=message.channel_type,
-                channel_id=message.channel_id,
-                sender_id=message.sender_id,
-                sender_name=message.sender_name,
-                clarification_question=classification.clarification_question,
-                partial_result=classification,
-                metadata=message.metadata,
-            )
-
-            return OutboundMessage(
-                channel_type=message.channel_type,
-                channel_id=message.channel_id,
-                content=classification.clarification_question,
-                metadata=message.metadata,
-            )
-
-        # Scope change detection: check if this message is a new topic
-        if settings.scope_detection_enabled:
-            active_scope = self.session_manager.get_active_scope(
-                message.channel_type, message.channel_id
-            )
-
-            if active_scope and self._should_check_scope(
-                active_scope, message.channel_type, message.channel_id
-            ):
-                scope_analysis = await self.intent_classifier.detect_scope_change(
-                    message.content,
-                    active_scope,
-                    conversation_history=history_dicts,
-                    confidence_threshold=settings.scope_detection_confidence_threshold,
-                )
-
-                logger.info(
-                    f"Scope analysis: continuation={scope_analysis.is_continuation}, "
-                    f"confidence={scope_analysis.confidence:.2f}, "
-                    f"uncertain={scope_analysis.uncertain}"
-                )
-
-                if scope_analysis.uncertain:
-                    # Not sure — ask the user
-                    self._pending_scope_clarifications[scope_clarification_key] = {
-                        "original_message": message.content,
-                        "classification": classification,
-                        "scope_analysis": scope_analysis,
-                        "active_scope": active_scope,
-                    }
-                    return OutboundMessage(
-                        channel_type=message.channel_type,
-                        channel_id=message.channel_id,
-                        content=(
-                            f"I noticed this might be a different topic from what we've "
-                            f"been working on ({active_scope.summary}). Should I create "
-                            f"a new branch/task for this, or is this related to the "
-                            f"current work? (yes = new topic / no = same topic)"
-                        ),
-                        metadata=message.metadata,
-                    )
-
-                if not scope_analysis.is_continuation:
-                    # Scope change detected — new branch/task
-                    return await self._handle_scope_change(
-                        message.content,
-                        message,
-                        classification,
-                        scope_analysis,
-                    )
-
-                # Continuation — route to active task instead of creating a new one
-                active_scope.message_count += 1
-                await self.session_manager.set_active_scope(
-                    message.channel_type, message.channel_id, active_scope
-                )
-                _existing = self.task_queue.find_active_task(
-                    origin_channel=message.channel_type,
-                    origin_channel_id=message.channel_id,
-                )
-                if _existing:
-                    await self.task_queue.route_message_to_task(
-                        _existing,
-                        message.content,
-                        message.sender_name,
-                        self._intervention_queues,
-                    )
-                    return OutboundMessage(
-                        channel_type=message.channel_type,
-                        channel_id=message.channel_id,
-                        content=f"Message added to active task {_existing.id}.",
-                        metadata=message.metadata,
-                    )
-                # Fallback: no active task found despite scope — create child task
-                return await self._create_task_from_message(
-                    message.content,
-                    message,
-                    force_type=classification.task_type,
-                    classification=classification,
-                    parent_task_id=active_scope.task_id,
-                )
-
-        # No active scope or scope detection disabled — check for active task first
-        _existing = self.task_queue.find_active_task(
-            origin_channel=message.channel_type,
-            origin_channel_id=message.channel_id,
-        )
-        if _existing:
-            await self.task_queue.route_message_to_task(
-                _existing,
-                message.content,
-                message.sender_name,
-                self._intervention_queues,
-            )
-            return OutboundMessage(
-                channel_type=message.channel_type,
-                channel_id=message.channel_id,
-                content=f"Message added to active task {_existing.id}.",
-                metadata=message.metadata,
-            )
-
-        # No active task — create new task and set scope
-        return await self._create_task_from_message(
-            message.content,
-            message,
-            force_type=classification.task_type,
-            classification=classification,
-        )
-
-    def _should_check_scope(
-        self,
-        active_scope: ScopeInfo,
-        channel_type: str,
-        channel_id: str,
-    ) -> bool:
-        """Determine if scope checking is warranted.
-
-        Returns False (and auto-clears the scope) when the active scope's
-        task has already completed, failed, or been archived.
-        """
-        task = self.task_queue.get(active_scope.task_id)
-        if task and task.status in (TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.ARCHIVED):
-            self.session_manager.clear_active_scope(channel_type, channel_id)
-            logger.info(
-                f"Auto-cleared stale scope {active_scope.scope_id} "
-                f"(task {active_scope.task_id} is {task.status.value})"
-            )
-            return False
-        return True
-
-    async def _handle_scope_change(
-        self,
-        description: str,
-        message: InboundMessage,
-        classification,
-        scope_analysis,
-    ) -> OutboundMessage:
-        """Handle a detected scope change by creating a new task and updating scope.
-
-        Notifies the user that a scope change was detected and a new branch
-        will be created for the new work.
-        """
-        old_scope = self.session_manager.get_active_scope(message.channel_type, message.channel_id)
-        old_summary = old_scope.summary if old_scope else "previous work"
-
-        # Create new task (no parent link — this is a fresh scope)
-        result = await self._create_task_from_message(
-            description,
-            message,
-            force_type=classification.task_type,
-            classification=classification,
-        )
-
-        # Prepend scope change notice to the standard task-created message
-        scope_notice = (
-            f'Scope change detected — switching from "{old_summary}" to a new topic. '
-            f"A new branch will be created for this work.\n\n"
-        )
-        return OutboundMessage(
-            channel_type=result.channel_type,
-            channel_id=result.channel_id,
-            content=scope_notice + result.content,
-            metadata=result.metadata,
-        )
-
-    async def _direct_response(
-        self,
-        message: InboundMessage,
-        history_dicts: list[dict],
-    ) -> OutboundMessage | None:
-        """Respond directly to conversational messages without creating a task.
-
-        Uses the general assistant prompt with a fast free model for simple
-        messages like greetings, quick questions, and status checks.
-        Falls back to None on failure so the caller can create a task instead.
-        """
-        from agents.agent import GENERAL_ASSISTANT_PROMPT
-
-        router = ModelRouter()
-        model = settings.conversational_model
-        if not model:
-            routing = router.get_routing(TaskType.EMAIL)
-            model = routing["primary"]
-
-        _custom = _load_custom_persona()
-        system_content = _custom or GENERAL_ASSISTANT_PROMPT
-
-        # Load persistent memory context so conversational responses
-        # can reference past interactions stored in MEMORY.md / HISTORY.md
-        from memory.store import build_conversational_memory_context
-
-        memory_context = await build_conversational_memory_context(
-            self.memory_store, message.content
-        )
-        if memory_context and memory_context.strip():
-            system_content += "\n\n" + memory_context
-
-        messages = [{"role": "system", "content": system_content}]
-        # Add recent conversation history for context
-        for h in history_dicts[-10:]:
-            messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
-        messages.append({"role": "user", "content": message.content})
-
-        text, _ = await asyncio.wait_for(
-            router.complete(model, messages),
-            timeout=30.0,
-        )
-
-        if not text:
-            return None
-
-        # Store assistant response in session history
-        from memory.session import SessionMessage
-
-        await self.session_manager.add_message(
-            message.channel_type,
-            message.channel_id,
-            SessionMessage(
-                role="assistant",
-                content=text,
-                channel_type=message.channel_type,
-            ),
-        )
-
-        logger.info("Direct conversational response (%d chars) via %s", len(text), model)
-
-        return OutboundMessage(
-            channel_type=message.channel_type,
-            channel_id=message.channel_id,
-            content=text,
-            metadata=message.metadata,
-        )
-
-    async def _create_task_from_message(
-        self,
-        description: str,
-        message: InboundMessage,
-        force_type: TaskType | None = None,
-        classification=None,
-        parent_task_id: str = "",
-    ) -> OutboundMessage:
-        """Create a task from a channel message with the given (or inferred) type.
-
-        If the classification recommends a team, injects a resource allocation
-        directive into the task description so the executing agent knows to use
-        the team tool.
-
-        When ``parent_task_id`` is provided the new task is linked to the
-        parent (scope continuation).  When omitted (new root task), the
-        active scope for the session is established automatically.
-        """
-        task_type = force_type or infer_task_type(description)
-
-        # Smart resource allocation: inject team directive for complex tasks
-        task_description = description
-        team_name = ""
-        if (
-            classification
-            and classification.recommended_mode == "team"
-            and classification.recommended_team
-        ):
-            team_name = classification.recommended_team
-            task_description = (
-                f"{description}\n\n"
-                f"---\n"
-                f"RESOURCE ALLOCATION: This task has been assessed as requiring "
-                f"team collaboration.\n"
-                f"Use the 'team' tool with action='run', name='{team_name}', "
-                f"and the task description above to execute with the {team_name}.\n"
-                f"The team's Manager will coordinate the roles automatically."
-            )
-
-        task = Task(
-            title=f"[{message.channel_type}] {description[:60]}",
-            description=task_description,
-            task_type=task_type,
-            origin_channel=message.channel_type,
-            origin_channel_id=message.channel_id,
-            origin_metadata=message.metadata,
-            parent_task_id=parent_task_id,
-        )
-        await self.task_queue.add(task)
-
-        # Set active scope for new root tasks (no parent = new scope)
-        if not parent_task_id and settings.scope_detection_enabled:
-            scope = ScopeInfo(
-                scope_id=task.id,
-                summary=description[:100],
-                task_type=task_type,
-                task_id=task.id,
-            )
-            await self.session_manager.set_active_scope(
-                message.channel_type, message.channel_id, scope
-            )
-            logger.info(f"Active scope set: {task.id} — {description[:60]}")
-
-        # Log to memory (semantic indexing for cross-session search)
-        await self.memory_store.log_event_semantic(
-            "channel_message",
-            f"From {message.sender_name} via {message.channel_type}",
-            description[:500],
-        )
-
-        mode_str = f"team: {team_name}" if team_name else "single agent"
-        return OutboundMessage(
-            channel_type=message.channel_type,
-            channel_id=message.channel_id,
-            content=(
-                f"Task created: {task.id} (type: {task_type.value}, "
-                f"mode: {mode_str}) — I'm working on it."
-            ),
-            metadata=message.metadata,
-        )
-
-    async def _on_task_update(self, task):
-        """Broadcast task state changes to all dashboard clients.
-
-        Also routes results back to the originating channel when a task
-        completes or fails. Supports session-scoped chat and project stats.
-        """
-        await self.ws_manager.broadcast("task_update", task.to_dict())
-
-        # Record to activity feed for the dashboard sidebar
-        record = getattr(self.ws_manager, "record_activity", None)
-        if record:
-            status = task.status.value if hasattr(task.status, "value") else str(task.status)
-            record(
-                event=f"task_{status}",
-                title=getattr(task, "title", ""),
-                task_id=getattr(task, "id", ""),
-            )
-
-        # Dashboard chat: broadcast thinking/done state so the frontend can
-        # show a typing indicator while the agent is processing.
-        if task.origin_channel == "dashboard_chat":
-            session_id = task.origin_metadata.get("chat_session_id", "")
-            if task.status == TaskStatus.RUNNING:
-                await self.ws_manager.broadcast(
-                    "chat_thinking",
-                    {"session_id": session_id, "task_id": task.id, "thinking": True},
-                )
-            elif task.status in (
-                TaskStatus.REVIEW,
-                TaskStatus.DONE,
-                TaskStatus.FAILED,
-            ):
-                await self.ws_manager.broadcast(
-                    "chat_thinking",
-                    {"session_id": session_id, "task_id": task.id, "thinking": False},
-                )
-
-        # Project stats update: refresh and broadcast when task has a project
-        if task.project_id and self.project_manager:
-            project = await self.project_manager.get(task.project_id)
-            if project:
-                d = project.to_dict()
-                d["stats"] = self.project_manager.project_stats(task.project_id)
-                await self.ws_manager.broadcast("project_update", d)
-
-        # Dashboard chat: broadcast agent response back as a chat message
-        if task.origin_channel == "dashboard_chat" and task.status in (
-            TaskStatus.REVIEW,
-            TaskStatus.DONE,
-        ):
-            import time as _time
-            import uuid as _uuid
-
-            session_id = task.origin_metadata.get("chat_session_id", "")
-            content = task.result or "(completed with no output)"
-            chat_msg = {
-                "id": _uuid.uuid4().hex[:12],
-                "role": "assistant",
-                "content": content,
-                "timestamp": _time.time(),
-                "sender": "Agent42",
-                "task_id": task.id,
-                "session_id": session_id,
-            }
-            # Persist to session if we have a session manager and session_id
-            if session_id and self.chat_session_manager:
-                await self.chat_session_manager.add_message(session_id, chat_msg)
-            else:
-                self.ws_manager.chat_messages.append(chat_msg)
-            await self.ws_manager.broadcast("chat_message", chat_msg)
-            return  # Don't also send via channel manager
-
-        if task.origin_channel == "dashboard_chat" and task.status == TaskStatus.FAILED:
-            import time as _time
-            import uuid as _uuid
-
-            session_id = task.origin_metadata.get("chat_session_id", "")
-            chat_msg = {
-                "id": _uuid.uuid4().hex[:12],
-                "role": "assistant",
-                "content": f"Sorry, I encountered an error: {task.error}",
-                "timestamp": _time.time(),
-                "sender": "Agent42",
-                "task_id": task.id,
-                "session_id": session_id,
-            }
-            if session_id and self.chat_session_manager:
-                await self.chat_session_manager.add_message(session_id, chat_msg)
-            else:
-                self.ws_manager.chat_messages.append(chat_msg)
-            await self.ws_manager.broadcast("chat_message", chat_msg)
-            return
-
-        # L2 auto-escalation: when an L1 task completes, optionally escalate to L2
-        if (
-            task.tier == "L1"
-            and task.status in (TaskStatus.REVIEW, TaskStatus.DONE)
-            and settings.l2_auto_escalate
-        ):
-            # Check if this task type should be auto-escalated
-            should_escalate = True
-            if settings.l2_auto_escalate_task_types:
-                eligible = {
-                    t.strip() for t in settings.l2_auto_escalate_task_types.split(",") if t.strip()
-                }
-                should_escalate = task.task_type.value in eligible
-
-            if should_escalate:
-                _escalation_router = ModelRouter()
-                l2_routing = _escalation_router.get_l2_routing(task.task_type)
-                if l2_routing:
-                    l2_task = Task(
-                        title=f"[L2 Review] {task.title}",
-                        description=task.description,
-                        task_type=task.task_type,
-                        tier="L2",
-                        l1_result=task.result or "",
-                        escalated_from=task.id,
-                        project_id=task.project_id,
-                        origin_channel=task.origin_channel,
-                        origin_channel_id=task.origin_channel_id,
-                        origin_metadata=task.origin_metadata,
-                        origin_device_id=task.origin_device_id,
-                        repo_id=task.repo_id,
-                        branch=task.branch,
-                    )
-                    await self.task_queue.add(l2_task)
-                    logger.info(
-                        "Auto-escalated L1 task %s to L2 task %s",
-                        task.id,
-                        l2_task.id,
-                    )
-                    return  # Don't send results yet — wait for L2
-
-        # L2 failure recovery: if an L2 task fails, restore the L1 source to REVIEW
-        if task.tier == "L2" and task.status == TaskStatus.FAILED and task.escalated_from:
-            source_task = self.task_queue.get(task.escalated_from)
-            if source_task and source_task.status != TaskStatus.REVIEW:
-                source_task.status = TaskStatus.REVIEW
-                source_task.updated_at = __import__("time").time()
-                await self.task_queue.save()
-                logger.warning(
-                    "L2 task %s failed — restored L1 task %s to REVIEW",
-                    task.id,
-                    task.escalated_from,
-                )
-
-        # Route results back to originating channel
-        if task.origin_channel and task.status in (TaskStatus.REVIEW, TaskStatus.DONE):
-            content = f"Task **{task.title}** completed.\n\n"
-            if task.result:
-                # Truncate long results for chat
-                result_preview = task.result[:1500]
-                if len(task.result) > 1500:
-                    result_preview += "\n... (truncated — see dashboard for full output)"
-                content += result_preview
-
-            outbound = OutboundMessage(
-                channel_type=task.origin_channel,
-                channel_id=task.origin_channel_id,
-                content=content,
-                metadata=task.origin_metadata,
-            )
-            await self.channel_manager.send(outbound)
-
-        elif task.origin_channel and task.status == TaskStatus.FAILED:
-            outbound = OutboundMessage(
-                channel_type=task.origin_channel,
-                channel_id=task.origin_channel_id,
-                content=f"Task **{task.title}** failed: {task.error}",
-                metadata=task.origin_metadata,
-            )
-            await self.channel_manager.send(outbound)
-
-    async def emit(self, event_type: str, data: dict):
-        """Push events from agents to the dashboard via WebSocket."""
-        await self.ws_manager.broadcast(event_type, data)
-
-        # Feed iteration events into the heartbeat service
-        if event_type == "iteration" and "task_id" in data:
-            self.heartbeat.beat(
-                data["task_id"],
-                iteration=data.get("iteration", 0),
-                message=data.get("preview", "")[:100],
-            )
-
-    async def _on_agent_stall(self, task_id: str):
-        """Handle a stalled agent by broadcasting a warning."""
-        logger.warning(f"Agent stalled: {task_id}")
-        await self.ws_manager.broadcast("agent_stall", {"task_id": task_id})
-
-    async def _on_heartbeat(self, health):
-        """Broadcast system health to dashboard."""
-        await self.ws_manager.broadcast("system_health", health.to_dict())
-
-    async def _run_agent(self, task):
-        """Execute a single agent with dynamic concurrency limiting.
-
-        Uses real-time CPU and memory metrics to determine whether a new
-        agent can be dispatched.  Running agents are never killed — the
-        gate only prevents new dispatches when the system is under load.
-        """
-        self.heartbeat.register_agent(task.id)
+        # ── Custom tools (plugins) ───────────────────────────────────────
+        self._custom_tools: list[str] = []
         try:
-            # Wait until capacity allows a new agent
-            while True:
-                cap = compute_effective_capacity(self.max_agents)
-                async with self._active_lock:
-                    if self._active_count < cap["effective_max"]:
-                        self._active_count += 1
-                        break
-                logger.debug(
-                    f"Capacity full ({self._active_count}/{cap['effective_max']}), "
-                    f"waiting to dispatch task {task.id}"
-                )
-                await asyncio.sleep(10)
+            plugin_loader = PluginLoader(self.tool_registry)
+            loaded = plugin_loader.discover_and_load()
+            self._custom_tools = [t.name for t in loaded]
+        except Exception as e:
+            logger.warning(f"Plugin loading failed: {e}")
 
-            # Create per-task intervention queue for mid-task user feedback
-            intervention_queue: asyncio.Queue = asyncio.Queue()
-            self._intervention_queues[task.id] = intervention_queue
-
-            # Drain messages buffered while the task was PENDING
-            if task.pending_messages:
-                n = len(task.pending_messages)
-                for pm in task.pending_messages:
-                    await intervention_queue.put(pm["content"])
-                task.pending_messages.clear()
-                logger.info("Drained %d pending messages for task %s", n, task.id)
-
-            try:
-                # Select worktree manager: task-specific repo or default
-                wt_manager = self.worktree_manager
-                if task.repo_id and self.repo_manager:
-                    try:
-                        wt_manager = self.repo_manager.get_worktree_manager(task.repo_id)
-                    except ValueError as e:
-                        logger.warning(
-                            "Task %s repo_id %s not found, using default: %s",
-                            task.id,
-                            task.repo_id,
-                            e,
-                        )
-
-                # Resolve project-scoped memory if the task belongs to a project
-                project_memory = None
-                if task.project_id and self.project_manager and settings.project_memory_enabled:
-                    project_memory = self.project_manager.get_project_memory(
-                        task.project_id,
-                        global_store=self.memory_store,
-                        qdrant_store=self._qdrant_store,
-                        redis_backend=self._redis_backend,
-                    )
-
-                agent = Agent(
-                    task=task,
-                    task_queue=self.task_queue,
-                    worktree_manager=wt_manager,
-                    approval_gate=self.approval_gate,
-                    emit=self.emit,
-                    skill_loader=self.skill_loader,
-                    memory_store=self.memory_store,
-                    project_memory=project_memory,
-                    workspace_skills_dir=self.workspace_skills_dir,
-                    tool_registry=self.tool_registry,
-                    profile_loader=self.profile_loader,
-                    extension_loader=self.extension_loader,
-                    intervention_queue=intervention_queue,
-                    state_manager=self.state_manager,
-                    chat_session_manager=self.chat_session_manager,
-                )
-                await agent.run()
-                self.heartbeat.mark_complete(task.id)
-            finally:
-                async with self._active_lock:
-                    self._active_count -= 1
-                # Remove intervention queue once the agent is done
-                self._intervention_queues.pop(task.id, None)
-        except Exception:
-            self.heartbeat.mark_failed(task.id)
-            raise
-
-    async def _process_queue(self):
-        """Pull tasks from the queue and dispatch agents.
-
-        Respects concurrency limit and staggers dispatches to prevent
-        API rate-limit bursts when many tasks are queued simultaneously.
-        """
-        dispatch_delay = settings.agent_dispatch_delay
-        logger.info(
-            f"Queue processor started (max concurrent: {self.max_agents}, "
-            f"dispatch delay: {dispatch_delay}s)"
-        )
-        running_tasks: set[asyncio.Task] = set()
-
-        while not self._shutdown_event.is_set():
-            try:
-                task = await asyncio.wait_for(self.task_queue.next(), timeout=5.0)
-                t = asyncio.create_task(self._run_agent(task))
-                running_tasks.add(t)
-                t.add_done_callback(running_tasks.discard)
-                logger.info(f"Dispatched task {task.id} ({len(running_tasks)} active)")
-                # Stagger dispatches to prevent API rate-limit bursts
-                if dispatch_delay > 0:
-                    await asyncio.sleep(dispatch_delay)
-            except TimeoutError:
-                continue
-            except Exception as e:
-                logger.error(f"Queue processor error: {e}", exc_info=True)
-                await asyncio.sleep(1)
+        logger.info("Agent42 v2.0 initialized (MCP architecture)")
 
     async def start(self):
-        """Start the orchestrator: dashboard, channels, queue processor, cron, MCP."""
-        self._validate_env()
-
-        dashboard_host = settings.dashboard_host
-
-        logger.info(f"Agent42 starting — repo: {self.repo_path}")
-        logger.info(f"  Max concurrent agents: {self.max_agents}")
-        logger.info(f"  Sandbox: {'enabled' if settings.sandbox_enabled else 'disabled'}")
+        """Start the dashboard and background services."""
+        logger.info("Agent42 starting...")
         logger.info(f"  Skills loaded: {len(self.skill_loader.all_skills())}")
         logger.info(f"  Tools registered: {len(self.tool_registry.list_tools())}")
         if self._custom_tools:
             logger.info(f"  Custom tools: {', '.join(self._custom_tools)}")
-        active_devices = [d for d in self.device_store.list_devices() if not d.is_revoked]
-        logger.info(f"  Registered devices: {len(active_devices)}")
-        if not self.headless:
-            logger.info(f"  Dashboard: http://{dashboard_host}:{self.dashboard_port}")
 
         # Auth warnings
         for warning in settings.validate_dashboard_auth():
             logger.warning(warning)
 
-        # Load tasks and initialize subsystems
-        await self.task_queue.load_from_file()
+        # Load persisted data
         await self.repo_manager.load()
-        if self.repo_manager.list_repos():
-            logger.info(f"  Repos loaded: {len(self.repo_manager.list_repos())}")
-        if self.app_manager:
-            await self.app_manager.load()
-            logger.info(f"  Apps loaded: {len(self.app_manager.list_apps())}")
-            await self.app_manager.start_monitor(
-                interval=float(settings.apps_monitor_interval),
-            )
-        await self.chat_session_manager.load()
         await self.project_manager.load()
-        logger.info(
-            "  Chat sessions: %d, Projects: %d",
-            len(self.chat_session_manager.list_sessions(include_archived=True)),
-            len(self.project_manager.list_projects(include_archived=True)),
-        )
-        await self._setup_channels()
-        await self._setup_mcp()
 
-        # Set up cron task callback
-        self.cron_scheduler.on_trigger(self._cron_create_task)
-
-        # Start heartbeat service
+        # Start heartbeat
         await self.heartbeat.start()
 
-        # Start provider health check polling (StrongWall)
-        from providers.registry import provider_health_checker
-        await provider_health_checker.start_polling()
-        logger.info("  Provider health checker: polling StrongWall")
-
         tasks_to_run = [
-            self._process_queue(),
-            self.task_queue.watch_file(),
             self.cron_scheduler.start(),
-            self._model_catalog_refresh_loop(),
         ]
-
-        if self.model_researcher:
-            tasks_to_run.append(self._model_research_loop())
 
         # Scheduled security scanning
         if settings.security_scan_enabled:
             tasks_to_run.append(self.security_scanner.start())
             logger.info(f"  Security scanning: enabled (every {settings.security_scan_interval})")
 
-        # Start channel listeners
-        if self.channel_manager._channels:
-            tasks_to_run.append(self.channel_manager.start_all())
-            logger.info(f"  Channels: {', '.join(self.channel_manager._channels.keys())}")
-
         if not self.headless:
             app = create_app(
-                self.task_queue,
-                self.ws_manager,
-                self.approval_gate,
+                ws_manager=self.ws_manager,
                 tool_registry=self.tool_registry,
                 skill_loader=self.skill_loader,
-                channel_manager=self.channel_manager,
-                learner=self.learner,
                 device_store=self.device_store,
                 heartbeat=self.heartbeat,
-                key_store=self.key_store,
-                app_manager=self.app_manager,
-                chat_session_manager=self.chat_session_manager,
-                project_manager=self.project_manager,
                 repo_manager=self.repo_manager,
-                profile_loader=self.profile_loader,
-                intervention_queues=self._intervention_queues,
-                github_account_store=self.github_account_store,
-                model_catalog=self.model_catalog,
-                model_evaluator=self.model_evaluator,
-                intent_classifier=self.intent_classifier,
+                project_manager=self.project_manager,
                 memory_store=self.memory_store,
             )
             config = uvicorn.Config(
                 app,
-                host=dashboard_host,
+                host=settings.dashboard_host,
                 port=self.dashboard_port,
                 log_level="warning",
             )
             server = uvicorn.Server(config)
-            self._uvicorn_server = server
+            logger.info(f"  Dashboard: http://{settings.dashboard_host}:{self.dashboard_port}")
             tasks_to_run.append(server.serve())
 
+        logger.info("Agent42 ready — MCP tools available via Claude Code")
         await asyncio.gather(*tasks_to_run)
-
-    async def _model_catalog_refresh_loop(self):
-        """Periodically refresh the OpenRouter model catalog and run health checks."""
-        from providers.registry import ProviderRegistry, spending_tracker
-
-        first_run = True
-        while not self._shutdown_event.is_set():
-            try:
-                api_key = os.getenv("OPENROUTER_API_KEY", "")
-                if self.model_catalog.needs_refresh():
-                    await self.model_catalog.refresh(api_key=api_key)
-                    registry = ProviderRegistry()
-                    new_models = self.model_catalog.register_new_models(registry)
-                    if new_models:
-                        logger.info("Discovered %d new free model(s)", len(new_models))
-
-                    # Update spending tracker with actual model prices
-                    spending_tracker.update_model_prices(self.model_catalog.get_model_prices())
-
-                    # Validate primary models against live catalog
-                    stale = self.model_catalog.validate_primary_models(registry)
-                    stale_warnings = {k: v for k, v in stale.items() if v}
-                    if stale_warnings:
-                        logger.warning(
-                            "Stale model(s) with suggested replacements: %s",
-                            stale_warnings,
-                        )
-
-                    # Register paid models if policy allows
-                    policy = os.getenv("MODEL_ROUTING_POLICY", "balanced")
-                    if policy != "free_only" and api_key:
-                        account = await self.model_catalog.check_account(api_key=api_key)
-                        if not account.get("is_free_tier", True):
-                            paid = self.model_catalog.register_paid_models(registry)
-                            if paid:
-                                logger.info("Registered %d paid model(s)", len(paid))
-
-                    # Rerank after catalog refresh
-                    self.model_evaluator.rerank_all()
-
-                # Run health check on startup and periodically (every 6h)
-                if first_run or self.model_catalog.needs_health_check():
-                    logger.info("Running model health check...")
-                    await self.model_catalog.health_check(api_key=api_key)
-                    summary = self.model_catalog.get_health_summary()
-                    if summary.get("unhealthy_models"):
-                        for m in summary["unhealthy_models"]:
-                            logger.warning(
-                                "Unhealthy model: %s — %s (%s)",
-                                m["key"],
-                                m["status"],
-                                m.get("error", ""),
-                            )
-                    first_run = False
-            except Exception as e:
-                logger.warning("Model catalog refresh failed (non-critical): %s", e)
-
-            await asyncio.sleep(self.model_catalog.refresh_interval_seconds)
-
-    async def _model_research_loop(self):
-        """Periodically research model benchmarks from authoritative sources."""
-        while not self._shutdown_event.is_set():
-            try:
-                if self.model_researcher and self.model_researcher.needs_research():
-                    await self.model_researcher.research(router=ModelRouter())
-                    # Rerank after new research data
-                    self.model_evaluator.rerank_all()
-            except Exception as e:
-                logger.warning("Model research failed (non-critical): %s", e)
-
-            interval = (
-                self.model_researcher.interval_seconds
-                if self.model_researcher
-                else 604800  # 1 week
-            )
-            await asyncio.sleep(interval)
-
-    async def _cron_create_task(self, title: str, description: str, task_type: str):
-        """Callback for cron scheduler to create tasks."""
-        try:
-            tt = TaskType(task_type)
-        except ValueError:
-            tt = TaskType.CODING
-        task = Task(title=title, description=description, task_type=tt)
-        await self.task_queue.add(task)
-        logger.info(f"Cron created task: {task.id} — {title}")
 
     async def shutdown(self):
         """Graceful shutdown."""
         logger.info("Agent42 shutting down...")
-        self._shutdown_event.set()
-        if self._uvicorn_server:
-            self._uvicorn_server.should_exit = True
-        self.heartbeat.stop()
+        await self.heartbeat.stop()
         self.cron_scheduler.stop()
-        self.security_scanner.stop()
-        # Stop provider health check polling
-        from providers.registry import provider_health_checker
-        provider_health_checker.stop()
-        await self.channel_manager.stop_all()
-        await self.mcp_manager.disconnect_all()
-        if self.app_manager:
-            await self.app_manager.shutdown()
-
-    def _validate_env(self):
-        """Validate required configuration before starting."""
-        if not self.has_repo:
-            logger.info(
-                "No git repository configured. Connect repos via the dashboard Settings page."
-            )
-        elif not self.repo_path.exists():
-            logger.warning(f"Configured repo path does not exist: {self.repo_path}")
-        elif not (self.repo_path / ".git").exists():
-            logger.warning(f"{self.repo_path} is not a git repository.")
-
-        # Warn about unconfigured providers
-        from providers.registry import ProviderRegistry
-
-        registry = ProviderRegistry()
-        for p in registry.available_providers():
-            if not p["configured"]:
-                logger.debug(f"Provider not configured: {p['display_name']}")
-
-        # Security configuration warnings
-        if not settings.tool_rate_limiting_enabled:
-            logger.warning(
-                "SECURITY: Tool rate limiting is disabled (TOOL_RATE_LIMITING_ENABLED=false)"
-            )
-        if settings.max_daily_api_spend_usd == 0.0:
-            logger.warning("No daily API spend limit set (MAX_DAILY_API_SPEND_USD=0)")
-        if settings.dashboard_username == "admin" and settings.dashboard_host != "127.0.0.1":
-            logger.warning(
-                "SECURITY: Default 'admin' username on exposed host (%s). "
-                "Set DASHBOARD_USERNAME to a custom value.",
-                settings.dashboard_host,
-            )
-
-
-from commands import (
-    BackupCommandHandler,
-    RestoreCommandHandler,
-    CloneCommandHandler,
-    CommandHandler,
-)
+        logger.info("Agent42 stopped")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Agent42 — The answer to all your tasks")
     subparsers = parser.add_subparsers(dest="command")
 
-    # Server args (also on the root parser for backward compatibility)
+    # Server args
+    parser.add_argument("--port", type=int, default=8000, help="Dashboard port (default: 8000)")
     parser.add_argument(
-        "--repo",
-        default=settings.default_repo_path or "",
-        help="Path to the git repository (optional — configure via dashboard)",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=8000,
-        help="Dashboard port (default: 8000)",
-    )
-    parser.add_argument(
-        "--no-dashboard",
-        action="store_true",
-        help="Run headless without the web dashboard",
-    )
-    parser.add_argument(
-        "--max-agents",
-        type=int,
-        default=None,
-        help=f"Max concurrent agents (default: {settings.max_concurrent_agents})",
+        "--no-dashboard", action="store_true", help="Run headless without the web dashboard"
     )
 
     # Backup subcommand
-    backup_parser = subparsers.add_parser(
-        "backup", help="Create a full backup archive of Agent42 data"
-    )
+    backup_parser = subparsers.add_parser("backup", help="Create a full backup archive")
+    backup_parser.add_argument("-o", "--output", default=".", help="Output directory")
     backup_parser.add_argument(
-        "-o",
-        "--output",
-        default=".",
-        help="Output directory for the archive (default: current directory)",
-    )
-    backup_parser.add_argument(
-        "--include-worktrees",
-        action="store_true",
-        help="Include git worktrees in the backup (can be large)",
+        "--include-worktrees", action="store_true", help="Include git worktrees"
     )
 
     # Restore subcommand
-    restore_parser = subparsers.add_parser(
-        "restore", help="Restore Agent42 data from a backup archive"
-    )
-    restore_parser.add_argument(
-        "archive",
-        help="Path to the backup archive (.tar.gz)",
-    )
-    restore_parser.add_argument(
-        "--target",
-        default=".",
-        help="Target directory to restore into (default: current directory)",
-    )
-    restore_parser.add_argument(
-        "--skip-secrets",
-        action="store_true",
-        help="Skip restoring .env and settings.json",
-    )
+    restore_parser = subparsers.add_parser("restore", help="Restore from backup archive")
+    restore_parser.add_argument("archive", help="Path to the backup archive (.tar.gz)")
+    restore_parser.add_argument("--target", default=".", help="Target directory")
+    restore_parser.add_argument("--skip-secrets", action="store_true", help="Skip .env/settings")
 
     # Clone subcommand
-    clone_parser = subparsers.add_parser(
-        "clone", help="Create a clone package for deploying to a new node"
-    )
+    clone_parser = subparsers.add_parser("clone", help="Create a clone package for new node")
+    clone_parser.add_argument("-o", "--output", default=".", help="Output directory")
     clone_parser.add_argument(
-        "-o",
-        "--output",
-        default=".",
-        help="Output directory for the archive (default: current directory)",
-    )
-    clone_parser.add_argument(
-        "--include-skills",
-        action="store_true",
-        help="Include user-installed skills from skills/workspace/",
+        "--include-skills", action="store_true", help="Include user-installed skills"
     )
 
     args = parser.parse_args()
 
-    command_handlers: dict[str, CommandHandler] = {
+    command_handlers = {
         "backup": BackupCommandHandler(),
         "restore": RestoreCommandHandler(),
         "clone": CloneCommandHandler(),
@@ -1681,27 +242,26 @@ def main():
     if handler:
         handler.run(args)
     else:
-        # Default: start the orchestrator (existing behavior)
-        print("Agent42 initializing...", flush=True)
+        # Default: start dashboard + services
+        print("Agent42 v2.0 initializing (MCP architecture)...", flush=True)
         try:
-            orchestrator = Agent42(
-                repo_path=args.repo or None,
+            agent42 = Agent42(
                 dashboard_port=args.port,
                 headless=args.no_dashboard,
-                max_agents=args.max_agents,
             )
         except Exception as exc:
             logger.critical("Agent42 failed to initialize: %s", exc, exc_info=True)
             sys.exit(1)
 
         loop = asyncio.new_event_loop()
-
         if sys.platform != "win32":
             for sig in (signal.SIGINT, signal.SIGTERM):
-                loop.add_signal_handler(sig, lambda: loop.create_task(orchestrator.shutdown()))
+                loop.add_signal_handler(sig, lambda: loop.create_task(agent42.shutdown()))
 
         try:
-            loop.run_until_complete(orchestrator.start())
+            loop.run_until_complete(agent42.start())
+        except KeyboardInterrupt:
+            loop.run_until_complete(agent42.shutdown())
         except Exception as exc:
             logger.critical("Agent42 crashed: %s", exc, exc_info=True)
             sys.exit(1)
