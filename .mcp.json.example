@@ -2,10 +2,24 @@
   "mcpServers": {
     "agent42": {
       "command": "python",
-      "args": ["c:/Users/rickw/projects/agent42/mcp_server.py"],
+      "args": ["/path/to/agent42/mcp_server.py"],
       "env": {
-        "AGENT42_WORKSPACE": "${workspaceFolder}"
+        "AGENT42_WORKSPACE": "${workspaceFolder}",
+        "QDRANT_URL": "http://localhost:6333",
+        "REDIS_URL": "redis://localhost:6379/0"
       }
+    },
+    "_comment_remote_ssh": "Remote node via SSH stdio (simplest — uses SSH config):",
+    "agent42-remote": {
+      "command": "ssh",
+      "args": ["agent42-prod", "cd ~/agent42 && .venv/bin/python mcp_server.py"],
+      "env": {}
+    },
+    "_comment_remote_sse": "Remote node via SSE (requires mcp_server.py --transport sse on VPS):",
+    "agent42-remote-sse": {
+      "type": "sse",
+      "url": "http://localhost:8100/sse",
+      "_note": "Use SSH tunnel: ssh -L 8100:localhost:8100 agent42-prod"
     }
   }
 }

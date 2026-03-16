@@ -441,6 +441,58 @@ async def run_stdio():
         )
 
 
+async def run_sse(port: int = 8100):
+    """Run the MCP server with SSE transport (for remote access).
+
+    Starts an HTTP server that Claude Code (or any MCP client) can connect
+    to via Server-Sent Events. Use this on the VPS to expose Agent42 tools
+    over the network.
+
+    Usage:
+        python mcp_server.py --transport sse --port 8100
+    """
+    import uvicorn
+    from mcp.server.sse import SseServerTransport
+    from starlette.applications import Starlette
+    from starlette.routing import Mount, Route
+
+    server, _adapter = _create_server()
+    sse = SseServerTransport("/messages/")
+
+    async def handle_sse(request):
+        async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
+            await server.run(
+                streams[0],
+                streams[1],
+                InitializationOptions(
+                    server_name=SERVER_NAME,
+                    server_version=SERVER_VERSION,
+                    capabilities=server.get_capabilities(
+                        notification_options=NotificationOptions(),
+                        experimental_capabilities={},
+                    ),
+                ),
+            )
+
+    async def handle_messages(request):
+        await sse.handle_post_message(request.scope, request.receive, request._send)
+
+    app = Starlette(
+        routes=[
+            Route("/sse", endpoint=handle_sse),
+            Mount("/messages/", app=sse.handle_post_message),
+        ],
+    )
+
+    host = os.environ.get("MCP_SSE_HOST", "127.0.0.1")
+    logger.info(f"MCP SSE server starting on {host}:{port}")
+    logger.info(f"  Connect URL: http://{host}:{port}/sse")
+
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    uvi_server = uvicorn.Server(config)
+    await uvi_server.serve()
+
+
 def main():
     """Entry point — parse transport argument and start server."""
     logging.basicConfig(
@@ -455,11 +507,17 @@ def main():
         if idx + 1 < len(sys.argv):
             transport = sys.argv[idx + 1]
 
+    # Parse optional --port for SSE transport
+    port = 8100
+    if "--port" in sys.argv:
+        idx = sys.argv.index("--port")
+        if idx + 1 < len(sys.argv):
+            port = int(sys.argv[idx + 1])
+
     if transport == "stdio":
         asyncio.run(run_stdio())
     elif transport == "sse":
-        logger.error("SSE transport is planned for Phase 7 (remote node)")
-        sys.exit(1)
+        asyncio.run(run_sse(port=port))
     else:
         logger.error(f"Unknown transport: {transport}")
         sys.exit(1)
