@@ -160,8 +160,32 @@ class QdrantStore:
                 logger.info(f"Qdrant: created collection '{name}'")
 
             self._initialized_collections.add(suffix)
+
+            # Create payload indexes for task metadata (MEMORY and HISTORY only)
+            # create_payload_index() is idempotent — safe on existing collections
+            if suffix in (self.MEMORY, self.HISTORY):
+                self._ensure_task_indexes(name)
+
         except Exception as e:
             logger.error(f"Qdrant: failed to ensure collection '{name}': {e}")
+
+    def _ensure_task_indexes(self, collection_name: str):
+        """Create payload indexes for task_type and task_id (idempotent)."""
+        from qdrant_client.models import PayloadSchemaType
+
+        try:
+            self._client.create_payload_index(
+                collection_name=collection_name,
+                field_name="task_type",
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
+            self._client.create_payload_index(
+                collection_name=collection_name,
+                field_name="task_id",
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
+        except Exception as e:
+            logger.warning("Qdrant: task payload index creation failed (non-critical): %s", e)
 
     def _make_point_id(self, text: str, source: str = "") -> str:
         """Generate a deterministic UUID point ID from text content.
