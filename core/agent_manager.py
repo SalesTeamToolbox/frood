@@ -17,6 +17,55 @@ from pathlib import Path
 
 logger = logging.getLogger("agent42.agent_manager")
 
+# ── Model mapping per provider ────────────────────────────────────────────
+# Each agent task type maps to the best model per provider.
+# This enables concurrent agent teams — each agent uses a different model,
+# avoiding rate limit conflicts on any single model.
+
+PROVIDER_MODELS = {
+    "anthropic": {
+        "fast": "claude-haiku-4-5-20251001",
+        "general": "claude-sonnet-4-6-20260217",
+        "reasoning": "claude-opus-4-6-20260205",
+        "coding": "claude-sonnet-4-6-20260217",
+        "content": "claude-sonnet-4-6-20260217",
+    },
+    "synthetic": {
+        "fast": "hf:zai-org/GLM-4.7-Flash",
+        "general": "hf:zai-org/GLM-4.7",
+        "reasoning": "hf:moonshotai/Kimi-K2-Thinking",
+        "coding": "hf:Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "content": "hf:Qwen/Qwen3.5-397B-A17B",
+        "research": "hf:moonshotai/Kimi-K2.5",
+        "monitoring": "hf:zai-org/GLM-4.7-Flash",
+        "marketing": "hf:MiniMaxAI/MiniMax-M2.5",
+        "analysis": "hf:deepseek-ai/DeepSeek-R1-0528",
+        "lightweight": "hf:meta-llama/Llama-3.3-70B-Instruct",
+    },
+    "openrouter": {
+        "fast": "google/gemini-2.0-flash-001",
+        "general": "anthropic/claude-sonnet-4-6",
+        "reasoning": "anthropic/claude-opus-4-6",
+        "coding": "anthropic/claude-sonnet-4-6",
+        "content": "anthropic/claude-sonnet-4-6",
+    },
+}
+
+
+def resolve_model(provider: str, task_category: str) -> str:
+    """Resolve the best model for a provider + task category.
+
+    Returns the model ID string. Falls back to 'general' if the
+    task category isn't mapped for the given provider.
+    """
+    models = PROVIDER_MODELS.get(provider, PROVIDER_MODELS.get("anthropic", {}))
+    return models.get(task_category, models.get("general", "claude-sonnet-4-6"))
+
+
+# ── Agent Templates ──────────────────────────────────────────────────────
+# Templates use task categories instead of hardcoded model names.
+# The actual model is resolved at creation time based on the chosen provider.
+
 AGENT_TEMPLATES = {
     "support": {
         "name": "Support Agent",
@@ -24,7 +73,7 @@ AGENT_TEMPLATES = {
         "tools": ["web_fetch", "http_request", "memory", "template", "knowledge", "web_search"],
         "skills": ["support", "communication", "troubleshooting"],
         "schedule": "always",
-        "model": "claude-sonnet-4-6",
+        "_task_category": "general",
         "max_iterations": 10,
     },
     "marketing": {
@@ -33,7 +82,7 @@ AGENT_TEMPLATES = {
         "tools": ["web_search", "web_fetch", "content_analyzer", "template", "memory", "data"],
         "skills": ["marketing", "seo", "social-media", "content-writing", "email-marketing"],
         "schedule": "0 9 * * *",
-        "model": "claude-sonnet-4-6",
+        "_task_category": "marketing",
         "max_iterations": 15,
     },
     "devops": {
@@ -42,7 +91,7 @@ AGENT_TEMPLATES = {
         "tools": ["shell", "docker", "http_request", "git", "memory", "grep"],
         "skills": ["deployment", "server-management", "monitoring", "ci-cd"],
         "schedule": "*/5 * * * *",
-        "model": "claude-haiku-4-5",
+        "_task_category": "fast",
         "max_iterations": 5,
     },
     "content": {
@@ -51,7 +100,7 @@ AGENT_TEMPLATES = {
         "tools": ["web_search", "web_fetch", "template", "content_analyzer", "memory", "outline"],
         "skills": ["content-writing", "documentation", "release-notes", "presentation"],
         "schedule": "manual",
-        "model": "claude-sonnet-4-6",
+        "_task_category": "content",
         "max_iterations": 20,
     },
     "research": {
@@ -60,7 +109,7 @@ AGENT_TEMPLATES = {
         "tools": ["web_search", "web_fetch", "data", "memory", "summarize", "content_analyzer"],
         "skills": ["research", "data-analysis", "competitive-analysis", "strategy-analysis"],
         "schedule": "manual",
-        "model": "claude-opus-4-6",
+        "_task_category": "reasoning",
         "max_iterations": 25,
     },
     "code-review": {
@@ -69,7 +118,7 @@ AGENT_TEMPLATES = {
         "tools": ["read_file", "grep", "code_intel", "security_analyze", "git", "memory"],
         "skills": ["code-review", "security-audit", "refactoring", "testing"],
         "schedule": "manual",
-        "model": "claude-sonnet-4-6",
+        "_task_category": "coding",
         "max_iterations": 10,
     },
 }
@@ -120,6 +169,11 @@ class AgentConfig:
     def from_template(cls, template_key: str, **overrides) -> "AgentConfig":
         tmpl = AGENT_TEMPLATES.get(template_key, {})
         config = {**tmpl, "template": template_key, **overrides}
+        # Resolve model from task category + provider
+        task_cat = config.pop("_task_category", "general")
+        if "model" not in overrides:
+            provider = config.get("provider", "anthropic")
+            config["model"] = resolve_model(provider, task_cat)
         return cls.from_dict(config)
 
 
@@ -204,3 +258,11 @@ class AgentManager:
     @staticmethod
     def get_templates() -> dict:
         return AGENT_TEMPLATES
+
+    @staticmethod
+    def get_provider_models() -> dict:
+        return PROVIDER_MODELS
+
+    @staticmethod
+    def resolve_model_for(provider: str, task_category: str) -> str:
+        return resolve_model(provider, task_category)

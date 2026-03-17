@@ -422,7 +422,7 @@ Claude Code via `ANTHROPIC_BASE_URL`:
 | Provider | What It Offers | Pricing |
 |----------|---------------|---------|
 | [**OpenRouter**](https://openrouter.ai) | API gateway to 200+ models (Claude, GPT-4, Gemini, Llama, open-source). Single API key for all providers. | Pay-per-token with markup |
-| [**Synthetic**](https://synthetic.new) | Privacy-focused platform running open-source models (GLM-4.7, Kimi K2, Qwen 3) in private datacenters. Never trains on your data or stores prompts. OpenAI-compatible API. | $30/mo subscription or pay-per-use |
+| [**Synthetic**](https://synthetic.new/?referral=Oc15m9cIhEFmXF9) | Privacy-focused platform running open-source models (GLM-4.7, Kimi K2, Qwen 3) in private datacenters. Never trains on your data or stores prompts. OpenAI-compatible API. | $30/mo subscription or pay-per-use |
 | [**Strongwall.ai**](https://strongwall.ai) | Privacy-first AI platform with architectural data protection. No data retention, no behavioral profiling, no training on conversations. | Contact for pricing |
 
 **To use an alternative provider with Claude Code:**
