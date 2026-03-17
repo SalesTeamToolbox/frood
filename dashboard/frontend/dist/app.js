@@ -3208,7 +3208,7 @@ function renderCode() {
 
   // Hide normal page content, show persistent IDE container
   pageContent.style.display = "none";
-  persistent.style.display = "";
+  persistent.style.display = "block";
 
   // If IDE is already built, just show it — don't rebuild
   if (persistent.querySelector("#ide-layout")) {
@@ -5553,7 +5553,7 @@ function render() {
           </div>
         </div>
         <div class="content" id="page-content"></div>
-        <div class="content ide-layout-parent" id="ide-persistent" style="display:none"></div>
+        <div class="content ide-layout-parent" id="ide-persistent" style="display:none;overflow:hidden;height:calc(100vh - 48px);padding:0;flex:none;width:100%"></div>
       </div>
     </div>
   `;
