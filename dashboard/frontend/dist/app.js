@@ -3367,6 +3367,9 @@ function renderCode() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "code") return;
   el.classList.add("ide-layout-parent");
+  el.style.overflow = "hidden";
+  el.style.height = "calc(100vh - 48px)";
+  el.style.padding = "0";
 
   el.innerHTML = `
     <div class="ide-layout">
@@ -3699,12 +3702,23 @@ function termLoadXterm(cb) {
   link.rel = "stylesheet";
   link.href = "/xterm/xterm.css";
   document.head.appendChild(link);
+  // Save and disable AMD define to prevent conflict with Monaco
+  var savedDefine = window.define;
+  var savedRequire = window.require;
+  window.define = undefined;
+  window.require = undefined;
   var script = document.createElement("script");
   script.src = "/xterm/xterm.js";
   script.onload = function() {
     var script2 = document.createElement("script");
     script2.src = "/xterm/addon-fit.js";
-    script2.onload = function() { _xtermLoaded = true; cb(); };
+    script2.onload = function() {
+      // Restore AMD
+      window.define = savedDefine;
+      window.require = savedRequire;
+      _xtermLoaded = true;
+      cb();
+    };
     document.head.appendChild(script2);
   };
   document.head.appendChild(script);
