@@ -135,6 +135,16 @@ Each task was committed atomically:
 - `instructor` dependency already installed — ready for structured LLM extraction
 - Config fields (`learning_min_evidence`, `learning_quarantine_confidence`) already wired to environment variables
 
+## Self-Check: PASSED
+
+- `memory/effectiveness.py` — FOUND
+- `tests/test_effectiveness.py` — FOUND
+- `21-01-SUMMARY.md` — FOUND
+- commit `7deeebc` (RED tests) — FOUND
+- commit `8ea9ba3` (GREEN implementation) — FOUND
+- commit `1544f18` (wiring + endpoints) — FOUND
+- commit `e97d620` (metadata) — FOUND
+
 ---
 *Phase: 21-effectiveness-tracking-and-learning-extraction*
 *Completed: 2026-03-17*
