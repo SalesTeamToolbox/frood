@@ -1774,6 +1774,10 @@ body.towel-day .dont-panic-watermark {
   justify-content: center; height: 100%; color: var(--text-secondary); }
 .ide-welcome h2 { margin-bottom: 0.5rem; color: var(--text-primary); }
 .ide-welcome p { max-width: 400px; text-align: center; line-height: 1.5; }
+.ide-tab-new-cc { background: none; border: none; border-right: 1px solid var(--border);
+  color: #6b7280; cursor: pointer; padding: 0.4rem 0.6rem; display: flex;
+  align-items: center; gap: 1px; flex-shrink: 0; }
+.ide-tab-new-cc:hover { background: var(--bg-hover); color: var(--text-primary); }
 .ide-cc-launch-btn { margin-top: 1.25rem; padding: 0.6rem 1.25rem; background: #f97316;
   color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
   display: flex; align-items: center; font-weight: 500; }
