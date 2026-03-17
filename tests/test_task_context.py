@@ -405,3 +405,212 @@ class TestBackwardCompat:
         texts = [r["text"] for r in results]
         assert "old entry" in texts
         assert "new entry" in texts
+
+
+# ---------------------------------------------------------------------------
+# Plan 02: RETR-01 and RETR-02
+# ---------------------------------------------------------------------------
+
+
+class TestFilteredSearch:
+    """RETR-01: search() and search_with_lifecycle() accept task_type_filter."""
+
+    def test_search_with_task_type_filter(self):
+        """QdrantStore.search builds FieldCondition for task_type when filter provided."""
+        from memory.qdrant_store import QdrantConfig, QdrantStore
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        config = QdrantConfig(url="http://localhost:6333")
+        store = QdrantStore.__new__(QdrantStore)
+        store.config = config
+        store._client = mock_client
+        store._initialized_collections = {QdrantStore.MEMORY}
+
+        store.search(QdrantStore.MEMORY, [0.1] * 384, task_type_filter="coding")
+
+        # Verify query_filter includes task_type condition
+        call_kwargs = mock_client.query_points.call_args[1]
+        query_filter = call_kwargs.get("query_filter")
+        assert query_filter is not None
+        # Filter.must should contain a FieldCondition with key="task_type"
+        field_keys = [c.key for c in query_filter.must]
+        assert "task_type" in field_keys
+
+    def test_search_without_task_type_filter(self):
+        """QdrantStore.search does NOT add task_type filter when filter is empty."""
+        from memory.qdrant_store import QdrantConfig, QdrantStore
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        config = QdrantConfig(url="http://localhost:6333")
+        store = QdrantStore.__new__(QdrantStore)
+        store.config = config
+        store._client = mock_client
+        store._initialized_collections = {QdrantStore.MEMORY}
+
+        store.search(QdrantStore.MEMORY, [0.1] * 384)
+
+        call_kwargs = mock_client.query_points.call_args[1]
+        query_filter = call_kwargs.get("query_filter")
+        # No filter at all when no filters provided
+        assert query_filter is None
+
+    def test_search_with_task_id_filter(self):
+        """QdrantStore.search builds FieldCondition for task_id when filter provided."""
+        from memory.qdrant_store import QdrantConfig, QdrantStore
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        config = QdrantConfig(url="http://localhost:6333")
+        store = QdrantStore.__new__(QdrantStore)
+        store.config = config
+        store._client = mock_client
+        store._initialized_collections = {QdrantStore.MEMORY}
+
+        store.search(QdrantStore.MEMORY, [0.1] * 384, task_id_filter="abc-123")
+
+        call_kwargs = mock_client.query_points.call_args[1]
+        query_filter = call_kwargs.get("query_filter")
+        assert query_filter is not None
+        field_keys = [c.key for c in query_filter.must]
+        assert "task_id" in field_keys
+
+
+class TestFilteredSearchLifecycle:
+    """RETR-01: search_with_lifecycle() accepts task_type_filter."""
+
+    def test_lifecycle_search_with_task_type_filter(self):
+        """search_with_lifecycle with task_type_filter adds condition to filter."""
+        from memory.qdrant_store import QdrantConfig, QdrantStore
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        config = QdrantConfig(url="http://localhost:6333")
+        store = QdrantStore.__new__(QdrantStore)
+        store.config = config
+        store._client = mock_client
+        store._initialized_collections = {QdrantStore.MEMORY}
+
+        store.search_with_lifecycle(QdrantStore.MEMORY, [0.1] * 384, task_type_filter="coding")
+
+        call_kwargs = mock_client.query_points.call_args[1]
+        query_filter = call_kwargs.get("query_filter")
+        assert query_filter is not None
+        # task_type condition should be in must list
+        all_must = query_filter.must or []
+        task_type_conditions = [c for c in all_must if hasattr(c, "key") and c.key == "task_type"]
+        assert len(task_type_conditions) >= 1
+
+    def test_lifecycle_search_without_task_type_filter(self):
+        """search_with_lifecycle without task_type_filter has no task_type condition."""
+        from memory.qdrant_store import QdrantConfig, QdrantStore
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.points = []
+        mock_client.query_points.return_value = mock_response
+
+        config = QdrantConfig(url="http://localhost:6333")
+        store = QdrantStore.__new__(QdrantStore)
+        store.config = config
+        store._client = mock_client
+        store._initialized_collections = {QdrantStore.MEMORY}
+
+        store.search_with_lifecycle(QdrantStore.MEMORY, [0.1] * 384)
+
+        call_kwargs = mock_client.query_points.call_args[1]
+        query_filter = call_kwargs.get("query_filter")
+        # Should have forgotten filter but no task_type
+        if query_filter and query_filter.must:
+            task_type_conditions = [
+                c for c in query_filter.must if hasattr(c, "key") and c.key == "task_type"
+            ]
+            assert len(task_type_conditions) == 0
+
+
+class TestEmbeddingStoreFilterPassthrough:
+    """RETR-01: EmbeddingStore.search passes task_type_filter to Qdrant."""
+
+    @pytest.mark.asyncio
+    async def test_search_passes_task_type_filter(self):
+        from memory.embeddings import EmbeddingStore
+
+        store = EmbeddingStore.__new__(EmbeddingStore)
+        mock_qdrant = MagicMock()
+        mock_qdrant.is_available = True
+        store._qdrant = mock_qdrant
+        store._provider_resolved = True
+        store._onnx_model = None
+        store._client = None
+
+        with patch.object(store, "embed_text", new_callable=AsyncMock, return_value=[0.1] * 384):
+            with patch.object(store, "_search_qdrant", return_value=[]) as mock_search:
+                await store.search("test query", task_type_filter="debugging")
+
+        mock_search.assert_called_once()
+        call_kwargs = mock_search.call_args
+        # _search_qdrant is called with positional args or kwargs
+        # Check that task_type_filter was passed
+        assert "debugging" in str(call_kwargs)
+
+
+class TestBuildContextSemantic:
+    """RETR-02: build_context_semantic passes task_type to filtered search."""
+
+    @pytest.mark.asyncio
+    async def test_passes_task_type_to_search(self):
+        from memory.store import MemoryStore
+
+        store = MemoryStore.__new__(MemoryStore)
+        store.memory_path = MagicMock()
+        store.memory_path.read_text.return_value = "# Memory\nSome content"
+
+        mock_embeddings = MagicMock()
+        mock_embeddings.is_available = True
+        mock_embeddings.search = AsyncMock(return_value=[])
+        mock_embeddings.search_conversations = AsyncMock(return_value=[])
+        store.embeddings = mock_embeddings
+        store._qdrant = None
+
+        await store.build_context_semantic("test query", task_type="coding")
+
+        mock_embeddings.search.assert_called_once()
+        call_kwargs = mock_embeddings.search.call_args
+        # Verify task_type_filter="coding" was passed
+        assert call_kwargs[1].get("task_type_filter") == "coding" or "coding" in str(call_kwargs)
+
+    @pytest.mark.asyncio
+    async def test_empty_task_type_passes_empty_string(self):
+        from memory.store import MemoryStore
+
+        store = MemoryStore.__new__(MemoryStore)
+        store.memory_path = MagicMock()
+        store.memory_path.read_text.return_value = "# Memory"
+
+        mock_embeddings = MagicMock()
+        mock_embeddings.is_available = True
+        mock_embeddings.search = AsyncMock(return_value=[])
+        mock_embeddings.search_conversations = AsyncMock(return_value=[])
+        store.embeddings = mock_embeddings
+        store._qdrant = None
+
+        await store.build_context_semantic("test query")
+
+        mock_embeddings.search.assert_called_once()
+        call_kwargs = mock_embeddings.search.call_args
+        # task_type_filter should be "" (empty) or not present
+        ttf = call_kwargs[1].get("task_type_filter", "")
+        assert ttf == ""
