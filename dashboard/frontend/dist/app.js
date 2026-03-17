@@ -3327,9 +3327,51 @@ function renderCode() {
 }
 
 function ideInitMonaco() {
-  if (_monacoReady) return;
   const container = document.getElementById("ide-editor-container");
   if (!container) return;
+
+  // If Monaco was previously created but DOM was destroyed (SPA re-render),
+  // re-create the editor in the new container
+  if (_monacoReady && _monacoEditor) {
+    if (!container.querySelector(".monaco-editor")) {
+      _monacoEditor.dispose();
+      _monacoEditor = monaco.editor.create(container, {
+        value: "",
+        language: "plaintext",
+        theme: "agent42-dark",
+        fontSize: 14,
+        fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
+        minimap: { enabled: true },
+        automaticLayout: true,
+        scrollBeyondLastLine: false,
+        wordWrap: "on",
+        tabSize: 4,
+        renderWhitespace: "selection",
+        bracketPairColorization: { enabled: true },
+      });
+      _monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {
+        ideSaveCurrentFile();
+      });
+      _monacoEditor.onDidChangeCursorPosition(function (e) {
+        const pos = document.getElementById("ide-status-pos");
+        if (pos) pos.textContent = "Ln " + e.position.lineNumber + ", Col " + e.position.column;
+      });
+      _monacoEditor.onDidChangeModelContent(function () {
+        if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab]) {
+          _ideTabs[_ideActiveTab].modified = true;
+          ideRenderTabs();
+        }
+      });
+      container.style.display = "none";
+      // Re-activate current tab if one was open
+      if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab]) {
+        ideActivateTab();
+      }
+    }
+    return;
+  }
+
+  if (_monacoReady) return;
   // Dynamically load Monaco loader if not present
   if (typeof require === "undefined" || !require.config) {
     if (!document.getElementById("monaco-loader-script")) {
