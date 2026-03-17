@@ -665,6 +665,29 @@ docker-compose up -d
 
 See `docker-compose.yml` and `Dockerfile` for the full configuration.
 
+## Claude Code Hooks (The Sub-Etha Sense-O-Matic)
+
+Agent42 ships 11 hooks in `.claude/hooks/` that run automatically during Claude Code
+sessions. They form the nervous system -- memory recall, security enforcement, code
+formatting, and session continuity happen without you lifting a finger.
+
+| Hook | Trigger | What It Does |
+|------|---------|--------------|
+| `context-loader.py` | UserPromptSubmit | Loads relevant lessons and reference docs based on work type |
+| `memory-recall.py` | UserPromptSubmit | Surfaces relevant memories from Qdrant before Claude thinks |
+| `security-gate.py` | PreToolUse | Blocks edits to security-sensitive files (requires approval) |
+| `security-monitor.py` | PostToolUse (Write/Edit) | Flags security-sensitive changes for review |
+| `format-on-write.py` | PostToolUse (Write/Edit) | Auto-formats Python files with ruff on every write |
+| `jcodemunch-reindex.py` | Stop + PostToolUse | Re-indexes codebase after structural file changes |
+| `jcodemunch-token-tracker.py` | PostToolUse | Tracks token savings from jcodemunch vs full file reads |
+| `session-handoff.py` | Stop | Captures session state for auto-resume continuity |
+| `test-validator.py` | Stop | Validates tests pass, checks test coverage for new modules |
+| `learning-engine.py` | Stop | Records development patterns and vocabulary |
+| `memory-learn.py` | Stop | Captures new learnings into memory system for future recall |
+
+Note: `security_config.py` in the hooks directory is a shared config module used by
+both `security-gate.py` and `security-monitor.py` -- not a hook itself.
+
 ## Project Structure (The Total Perspective Vortex)
 
 ```
@@ -711,11 +734,18 @@ agent42/
 |   '-- frontend/              # Static frontend assets
 |
 |-- .claude/                   # Claude Code integration
-|   |-- hooks/                 # Associative recall, learning, security
+|   |-- hooks/                 # 11 hooks: memory, security, formatting, learning
 |   |   |-- memory-recall.py   # Auto-surfaces relevant memories per prompt
 |   |   |-- memory-learn.py    # Captures learnings at session end
 |   |   |-- context-loader.py  # Loads relevant reference docs
-|   |   '-- security-gate.py   # Flags security-sensitive changes
+|   |   |-- security-gate.py   # PreToolUse: blocks edits to security files
+|   |   |-- security-monitor.py # PostToolUse: flags security-sensitive changes
+|   |   |-- format-on-write.py # Auto-formats Python files on write
+|   |   |-- session-handoff.py # Captures session state for continuity
+|   |   |-- learning-engine.py # Records development patterns
+|   |   |-- test-validator.py  # Validates tests pass on stop
+|   |   |-- jcodemunch-reindex.py      # Re-indexes after structural changes
+|   |   '-- jcodemunch-token-tracker.py # Tracks token savings
 |   |-- settings.json          # Hook configuration
 |   '-- lessons.md             # Accumulated development patterns
 |
