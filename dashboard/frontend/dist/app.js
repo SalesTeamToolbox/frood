@@ -3404,6 +3404,8 @@ function renderCode() {
             <div class="ide-terminal-header-right">
               <button onclick="termNew('local')" title="New local terminal">+ Local</button>
               <button onclick="termNew('remote')" title="New remote terminal">+ Remote</button>
+              <button onclick="termNewClaude('local')" title="Claude Code (local)" style="color:#38bdf8">+ Claude</button>
+              <button onclick="termNewClaude('remote')" title="Claude Code (remote)" style="color:#34d399">+ Claude Remote</button>
               <button onclick="termToggle()" title="Close terminal panel">&times;</button>
             </div>
           </div>
@@ -3797,6 +3799,47 @@ function termNew(node) {
     term.onData(function(data) { if (ws.readyState === 1) ws.send(data); });
 
     var session = { term: term, ws: ws, el: termDiv, node: node || "local", label: (node || "local") + " " + (_termSessions.length + 1) };
+    _termSessions.push(session);
+    _termActiveIdx = _termSessions.length - 1;
+    termRenderTabs();
+  });
+}
+
+function termNewClaude(node) {
+  termLoadXterm(function() {
+    var container = document.getElementById("ide-terminal-container");
+    if (!container) return;
+    for (var i = 0; i < _termSessions.length; i++) {
+      if (_termSessions[i].el) _termSessions[i].el.style.display = "none";
+    }
+    var termDiv = document.createElement("div");
+    termDiv.style.height = "100%";
+    container.appendChild(termDiv);
+    var term = new Terminal({
+      theme: { background: "#0f172a", foreground: "#e2e8f0", cursor: "#38bdf8",
+               selectionBackground: "#334155" },
+      fontSize: 13,
+      fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
+      cursorBlink: true,
+    });
+    term.open(termDiv);
+    try {
+      var fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      fitAddon.fit();
+      window.addEventListener("resize", function() { try { fitAddon.fit(); } catch(e) {} });
+    } catch(e) {}
+
+    var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" + encodeURIComponent(state.token) + "&node=" + encodeURIComponent(node || "local") + "&cmd=claude";
+    var ws = new WebSocket(wsUrl);
+    ws.onopen = function() { term.write("\r\n\x1b[36m🤖 Claude Code (" + (node || "local") + ") — using your CC subscription\x1b[0m\r\n\r\n"); };
+    ws.onmessage = function(e) { term.write(e.data); };
+    ws.onerror = function() { term.write("\r\n\x1b[31mConnection error\x1b[0m\r\n"); };
+    ws.onclose = function() { term.write("\r\n\x1b[33mClaude session ended\x1b[0m\r\n"); };
+    term.onData(function(data) { if (ws.readyState === 1) ws.send(data); });
+
+    var session = { term: term, ws: ws, el: termDiv, node: node || "local", label: "Claude (" + (node || "local") + ")" };
     _termSessions.push(session);
     _termActiveIdx = _termSessions.length - 1;
     termRenderTabs();

@@ -1449,14 +1449,47 @@ def create_app(
             return
 
         node = websocket.query_params.get("node", "local")
+        cmd = websocket.query_params.get("cmd", "shell")
         shell = _shutil.which("bash") or _shutil.which("sh") or _shutil.which("cmd")
         if not shell:
             await websocket.send_text("\r\nNo shell found\r\n")
             await websocket.close()
             return
 
+        # Find Claude Code CLI
+        claude_bin = _shutil.which("claude")
+
         try:
-            if node == "remote":
+            if cmd == "claude" and node == "remote":
+                # Claude Code on remote via SSH
+                ssh_host = _os.environ.get("AGENT42_REMOTE_HOST", "agent42-prod")
+                proc = await _asyncio.create_subprocess_exec(
+                    "ssh",
+                    "-tt",
+                    ssh_host,
+                    "claude",
+                    stdin=_asyncio.subprocess.PIPE,
+                    stdout=_asyncio.subprocess.PIPE,
+                    stderr=_asyncio.subprocess.STDOUT,
+                )
+            elif cmd == "claude":
+                # Claude Code locally (uses CC subscription)
+                if not claude_bin:
+                    await websocket.send_text(
+                        "\r\nClaude Code CLI not found.\r\n"
+                        "Install: npm install -g @anthropic-ai/claude-code\r\n"
+                        "Or log in: claude login\r\n"
+                    )
+                    await websocket.close()
+                    return
+                proc = await _asyncio.create_subprocess_exec(
+                    claude_bin,
+                    stdin=_asyncio.subprocess.PIPE,
+                    stdout=_asyncio.subprocess.PIPE,
+                    stderr=_asyncio.subprocess.STDOUT,
+                    cwd=str(workspace),
+                )
+            elif node == "remote":
                 ssh_host = _os.environ.get("AGENT42_REMOTE_HOST", "agent42-prod")
                 proc = await _asyncio.create_subprocess_exec(
                     "ssh",
