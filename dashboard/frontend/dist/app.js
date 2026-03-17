@@ -4127,21 +4127,17 @@ function ideShowPanel(panel, evt) {
   var btn = evt && evt.currentTarget ? evt.currentTarget : document.querySelectorAll(".ide-activity-btn")[panel === "search" ? 1 : 0];
   var sidebar = document.getElementById("ide-sidebar-panel");
 
-  // Toggle: clicking the active panel hides sidebar + activity bar (VS Code Ctrl+B behavior)
+  // Toggle: clicking the active panel hides sidebar only (activity bar stays)
   if (panel === _ideActivePanel && _ideSidebarVisible) {
     _ideSidebarVisible = false;
     if (sidebar) sidebar.style.display = "none";
-    var actBar = document.querySelector(".ide-activity-bar");
-    if (actBar) actBar.style.display = "none";
     if (btn) btn.classList.remove("active");
     return;
   }
 
-  // Show sidebar + activity bar and switch panel
+  // Show sidebar and switch panel (activity bar always visible)
   _ideSidebarVisible = true;
   _ideActivePanel = panel;
-  var actBar2 = document.querySelector(".ide-activity-bar");
-  if (actBar2) actBar2.style.display = "";
   var btns = document.querySelectorAll(".ide-activity-btn");
   btns.forEach(function(b) { b.classList.remove("active"); });
   if (btn) btn.classList.add("active");
@@ -4165,27 +4161,25 @@ function ideShowPanel(panel, evt) {
 
 // Toggle explorer panel (Ctrl+B, same as VS Code)
 function ideToggleExplorer() {
+  var sidebar = document.getElementById("ide-sidebar-panel");
   if (_ideSidebarVisible) {
-    // Hide both activity bar and sidebar
+    // Hide sidebar only — activity bar stays visible for re-toggle
     _ideSidebarVisible = false;
-    var sidebar = document.getElementById("ide-sidebar-panel");
-    var actBar = document.querySelector(".ide-activity-bar");
     if (sidebar) sidebar.style.display = "none";
-    if (actBar) actBar.style.display = "none";
     var btns = document.querySelectorAll(".ide-activity-btn");
     btns.forEach(function(b) { b.classList.remove("active"); });
   } else {
-    // Show both
+    // Show sidebar
     _ideSidebarVisible = true;
-    var sidebar = document.getElementById("ide-sidebar-panel");
-    var actBar = document.querySelector(".ide-activity-bar");
     if (sidebar) sidebar.style.display = "";
-    if (actBar) actBar.style.display = "";
     var idx = _ideActivePanel === "search" ? 1 : 0;
     var btns = document.querySelectorAll(".ide-activity-btn");
     if (btns[idx]) btns[idx].classList.add("active");
   }
-  setTimeout(function() { if (typeof termFitAll === "function") termFitAll(); }, 100);
+  setTimeout(function() {
+    if (typeof termFitAll === "function") termFitAll();
+    if (_monacoEditor) _monacoEditor.layout();
+  }, 100);
 }
 
 // Collapse/expand main Agent42 sidebar when in IDE mode
