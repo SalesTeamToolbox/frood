@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/tools-36+-orange" alt="Tools">
   <img src="https://img.shields.io/badge/skills-57-purple" alt="Skills">
   <img src="https://img.shields.io/badge/nodes-local%20%2B%20remote-teal" alt="Multi-Node">
