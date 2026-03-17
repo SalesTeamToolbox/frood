@@ -1462,7 +1462,13 @@ def create_app(
         try:
             if cmd == "claude" and node == "remote":
                 # Claude Code on remote via SSH
-                ssh_host = _os.environ.get("AGENT42_REMOTE_HOST", "agent42-prod")
+                ssh_host = _os.environ.get("AGENT42_REMOTE_HOST", "")
+                if not ssh_host:
+                    await websocket.send_text(
+                        "\r\n\x1b[31mNo remote node configured (AGENT42_REMOTE_HOST not set)\x1b[0m\r\n"
+                    )
+                    await websocket.close()
+                    return
                 proc = await _asyncio.create_subprocess_exec(
                     "ssh",
                     "-tt",
@@ -1490,7 +1496,13 @@ def create_app(
                     cwd=str(workspace),
                 )
             elif node == "remote":
-                ssh_host = _os.environ.get("AGENT42_REMOTE_HOST", "agent42-prod")
+                ssh_host = _os.environ.get("AGENT42_REMOTE_HOST", "")
+                if not ssh_host:
+                    await websocket.send_text(
+                        "\r\n\x1b[31mNo remote node configured (AGENT42_REMOTE_HOST not set)\x1b[0m\r\n"
+                    )
+                    await websocket.close()
+                    return
                 proc = await _asyncio.create_subprocess_exec(
                     "ssh",
                     "-tt",
@@ -1524,9 +1536,24 @@ def create_app(
 
         read_task = _asyncio.create_task(read_output())
 
+        import json as _json
+
         try:
             while True:
                 msg = await websocket.receive_text()
+                # Check for JSON resize message before forwarding to stdin
+                try:
+                    parsed = _json.loads(msg)
+                    if isinstance(parsed, dict) and parsed.get("type") == "resize":
+                        cols = int(parsed.get("cols", 80))
+                        rows = int(parsed.get("rows", 24))
+                        # Best-effort: send ANSI resize escape to process stdin
+                        if proc.stdin and not proc.stdin.is_closing():
+                            proc.stdin.write(f"\x1b[8;{rows};{cols}t".encode())
+                            await proc.stdin.drain()
+                        continue  # Do not forward resize message as terminal input
+                except (_json.JSONDecodeError, ValueError, TypeError):
+                    pass  # Not JSON — fall through to normal input
                 if proc.stdin and not proc.stdin.is_closing():
                     proc.stdin.write(msg.encode("utf-8"))
                     await proc.stdin.drain()
@@ -1536,6 +1563,14 @@ def create_app(
             read_task.cancel()
             if proc.returncode is None:
                 proc.terminate()
+
+    # -- Remote Node Status ----------------------------------------------------
+
+    @app.get("/api/remote/status")
+    async def remote_status(_user: str = Depends(get_current_user)):
+        """Check if a remote node is configured."""
+        host = _os.environ.get("AGENT42_REMOTE_HOST", "")
+        return {"available": bool(host), "host": host if host else None}
 
     # -- IDE Chat (AI-powered code assistant) ----------------------------------
 
