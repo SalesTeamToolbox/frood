@@ -49,6 +49,19 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 - Hybrid streaming: simulated streaming for chat, non-streaming for background tasks
 - Fallback chain: StrongWall -> Free tier (Cerebras/Groq) -> L2 premium (Gemini/OR paid)
 
+## Current Milestone: v1.4 Per-Project/Task Memories
+
+**Goal:** Add task-level memory scoping, tool/skill effectiveness tracking, automated post-task learning extraction, and proactive recommendations to make Agent42 learn from experience
+
+**Target features:**
+- Task-level metadata on memory entries (task_id, task_type fields in Qdrant payloads)
+- Tool/skill effectiveness tracking (success/failure, duration, task type correlation)
+- Automated post-task learning extraction (hook-based, no user action needed)
+- Task-type-aware memory retrieval ("show me learnings from past Flask builds")
+- MCP tool usage pattern tracking (which tools Claude Code calls, outcomes)
+- Proactive context injection (auto-surface relevant learnings when new tasks start)
+- Recommendations engine (suggest tools/skills based on historical effectiveness)
+
 ### Out of Scope
 
 - Cloudflare Workers AI — too-low limits for agentic workloads
