@@ -1504,6 +1504,184 @@ def create_app(
             if proc.returncode is None:
                 proc.terminate()
 
+    # -- IDE Chat (AI-powered code assistant) ----------------------------------
+
+    import httpx as _httpx
+
+    class ChatRequest(BaseModel):
+        message: str
+        history: list = []
+        provider_url: str = ""
+        api_key: str = ""
+        model: str = ""
+        file_context: str = ""
+
+    @app.post("/api/ide/chat")
+    async def ide_chat(req: ChatRequest, _user: str = Depends(get_current_user)):
+        """Send a message to the AI provider and get a response.
+
+        Uses Anthropic Messages API format. Compatible with:
+        - Anthropic API (default)
+        - Synthetic.new (Anthropic-compatible)
+        - Any Anthropic-compatible provider
+        """
+
+        # Resolve provider settings
+        api_key = req.api_key or _os.environ.get("ANTHROPIC_API_KEY", "")
+        provider_url = req.provider_url or _os.environ.get(
+            "ANTHROPIC_BASE_URL", "https://api.anthropic.com"
+        )
+        model = req.model or _os.environ.get("CHAT_MODEL", "claude-sonnet-4-5-20250514")
+
+        if not api_key:
+            raise HTTPException(
+                400, "No API key configured. Set ANTHROPIC_API_KEY in Settings or provide api_key."
+            )
+
+        # Build messages
+        messages = []
+        for h in req.history[-20:]:  # Last 20 messages for context
+            messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+        messages.append({"role": "user", "content": req.message})
+
+        # Build system prompt with Agent42 context
+        system_parts = [
+            "You are an AI coding assistant integrated into Agent42 IDE.",
+            "You have access to the user's workspace files and can help with coding, debugging, and project management.",
+        ]
+        if req.file_context:
+            system_parts.append(f"\nCurrently open file:\n```\n{req.file_context[:3000]}\n```")
+
+        # Load relevant memories if memory_store is available
+        if memory_store:
+            try:
+                recall = memory_store.search(req.message, limit=3)
+                if recall:
+                    system_parts.append("\nRelevant memories from past work:")
+                    for r in recall[:3]:
+                        system_parts.append(f"- {r.get('content', r.get('text', ''))[:200]}")
+            except Exception:
+                pass
+
+        system_prompt = "\n".join(system_parts)
+
+        # Build tool definitions for the AI
+        tools = []
+        if tool_registry:
+            for t in tool_registry.list_tools()[:15]:  # Limit to 15 most useful tools
+                tool_def = {
+                    "name": t["name"],
+                    "description": t.get("description", "")[:200],
+                    "input_schema": t.get("parameters", {"type": "object", "properties": {}}),
+                }
+                tools.append(tool_def)
+
+        # Call AI provider
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        body = {
+            "model": model,
+            "max_tokens": 4096,
+            "system": system_prompt,
+            "messages": messages,
+        }
+        if tools:
+            body["tools"] = tools
+
+        try:
+            async with _httpx.AsyncClient(timeout=120.0) as client:
+                url = provider_url.rstrip("/") + "/v1/messages"
+                resp = await client.post(url, headers=headers, json=body)
+
+                if resp.status_code != 200:
+                    error_text = resp.text[:500]
+                    raise HTTPException(resp.status_code, f"AI provider error: {error_text}")
+
+                data = resp.json()
+
+                # Extract text response
+                response_text = ""
+                tool_calls = []
+                for block in data.get("content", []):
+                    if block.get("type") == "text":
+                        response_text += block.get("text", "")
+                    elif block.get("type") == "tool_use":
+                        tool_calls.append(
+                            {
+                                "id": block.get("id"),
+                                "name": block.get("name"),
+                                "input": block.get("input", {}),
+                            }
+                        )
+
+                # Execute tool calls if any
+                tool_results = []
+                for tc in tool_calls:
+                    try:
+                        tool = tool_registry.get(tc["name"]) if tool_registry else None
+                        if tool:
+                            result = await tool.execute(**tc["input"])
+                            tool_results.append(
+                                {
+                                    "tool_call_id": tc["id"],
+                                    "name": tc["name"],
+                                    "result": result.output
+                                    if hasattr(result, "output")
+                                    else str(result),
+                                }
+                            )
+                        else:
+                            tool_results.append(
+                                {
+                                    "tool_call_id": tc["id"],
+                                    "name": tc["name"],
+                                    "result": f"Tool '{tc['name']}' not found",
+                                }
+                            )
+                    except Exception as e:
+                        tool_results.append(
+                            {
+                                "tool_call_id": tc["id"],
+                                "name": tc["name"],
+                                "result": f"Error: {e}",
+                            }
+                        )
+
+                return {
+                    "response": response_text,
+                    "tool_calls": tool_calls,
+                    "tool_results": tool_results,
+                    "model": data.get("model", model),
+                    "usage": data.get("usage", {}),
+                }
+
+        except _httpx.TimeoutException:
+            raise HTTPException(504, "AI provider timed out")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"Chat error: {e}")
+
+    @app.get("/api/ide/chat/config")
+    async def ide_chat_config(_user: str = Depends(get_current_user)):
+        """Return current chat provider configuration (no secrets)."""
+        has_key = bool(_os.environ.get("ANTHROPIC_API_KEY", ""))
+        provider_url = _os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+        model = _os.environ.get("CHAT_MODEL", "claude-sonnet-4-5-20250514")
+        return {
+            "has_api_key": has_key,
+            "provider_url": provider_url,
+            "model": model,
+            "providers": [
+                {"name": "Anthropic", "url": "https://api.anthropic.com"},
+                {"name": "Synthetic", "url": "https://api.synthetic.new/v1"},
+                {"name": "OpenRouter", "url": "https://openrouter.ai/api/v1"},
+            ],
+        }
+
     # -- Approvals -------------------------------------------------------------
 
     @app.get("/api/approvals")

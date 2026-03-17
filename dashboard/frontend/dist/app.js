@@ -3413,8 +3413,31 @@ function renderCode() {
           <span id="ide-status-left">Ready</span>
           <div class="ide-statusbar-right">
             <button onclick="termToggle()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.72rem">Terminal</button>
+            <button onclick="ideChatToggle()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.72rem">Chat</button>
             <span id="ide-status-lang">-</span>
             <span id="ide-status-pos">Ln 1, Col 1</span>
+          </div>
+        </div>
+      </div>
+      <div id="ide-chat-panel" class="ide-chat-panel" style="display:none">
+        <div class="ide-chat-header">
+          <span>AI CHAT</span>
+          <div style="display:flex;gap:0.3rem;align-items:center">
+            <select id="ide-chat-model" title="Model">
+              <option value="claude-sonnet-4-5-20250514">Sonnet 4.5</option>
+              <option value="claude-opus-4-6-20260205">Opus 4.6</option>
+              <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+            </select>
+            <button onclick="ideChatClear()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer" title="Clear chat">&#128465;</button>
+            <button onclick="ideChatToggle()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer">&times;</button>
+          </div>
+        </div>
+        <div id="ide-chat-messages" class="ide-chat-messages"></div>
+        <div class="ide-chat-input-area">
+          <textarea id="ide-chat-input" placeholder="Ask about your code..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();ideChatSend()}"></textarea>
+          <div class="ide-chat-send">
+            <span class="model-info" id="ide-chat-status">Ready</span>
+            <button id="ide-chat-send-btn" onclick="ideChatSend()">Send</button>
           </div>
         </div>
       </div>
@@ -3807,6 +3830,123 @@ function termRenderTabs() {
     var active = i === _termActiveIdx ? "active" : "";
     return '<span class="ide-terminal-tab ' + active + '" onclick="termSwitch(' + i + ')">' + esc(s.label) + ' <span class="close" onclick="event.stopPropagation();termClose(' + i + ')">&times;</span></span>';
   }).join("");
+}
+
+// ---------------------------------------------------------------------------
+// IDE Chat (AI assistant)
+// ---------------------------------------------------------------------------
+var _ideChatHistory = [];
+var _ideChatSending = false;
+
+function ideChatToggle() {
+  var panel = document.getElementById("ide-chat-panel");
+  if (!panel) return;
+  panel.style.display = panel.style.display === "none" ? "flex" : "none";
+}
+
+function ideChatClear() {
+  _ideChatHistory = [];
+  var el = document.getElementById("ide-chat-messages");
+  if (el) el.innerHTML = "";
+}
+
+function ideChatAddMsg(role, content) {
+  var el = document.getElementById("ide-chat-messages");
+  if (!el) return;
+  var cls = role === "user" ? "ide-chat-msg-user" : "ide-chat-msg-ai";
+  var div = document.createElement("div");
+  div.className = "ide-chat-msg " + cls;
+  var bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.textContent = content;
+  div.appendChild(bubble);
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+function ideChatAddToolMsg(name, result) {
+  var el = document.getElementById("ide-chat-messages");
+  if (!el) return;
+  var div = document.createElement("div");
+  div.className = "ide-chat-msg-tool";
+  div.textContent = "Tool: " + name + " → " + (result || "").substring(0, 200);
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function ideChatSend() {
+  if (_ideChatSending) return;
+  var input = document.getElementById("ide-chat-input");
+  var msg = input ? input.value.trim() : "";
+  if (!msg) return;
+  input.value = "";
+
+  // Get current file context
+  var fileContext = "";
+  if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab] && _ideTabs[_ideActiveTab].model) {
+    var content = _ideTabs[_ideActiveTab].model.getValue();
+    fileContext = "[" + _ideTabs[_ideActiveTab].path + "]\n" + content.substring(0, 3000);
+  }
+
+  // Add user message to UI
+  ideChatAddMsg("user", msg);
+  _ideChatHistory.push({ role: "user", content: msg });
+
+  // Show typing
+  _ideChatSending = true;
+  var statusEl = document.getElementById("ide-chat-status");
+  var sendBtn = document.getElementById("ide-chat-send-btn");
+  if (statusEl) statusEl.textContent = "Thinking...";
+  if (sendBtn) sendBtn.disabled = true;
+
+  var model = document.getElementById("ide-chat-model");
+  var modelValue = model ? model.value : "";
+
+  try {
+    var res = await fetch("/api/ide/chat", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: msg,
+        history: _ideChatHistory.slice(-18),
+        model: modelValue,
+        file_context: fileContext,
+      }),
+    });
+
+    if (!res.ok) {
+      var errData = await res.json().catch(function() { return {}; });
+      var errMsg = errData.detail || "Error " + res.status;
+      ideChatAddMsg("assistant", "Error: " + errMsg);
+      return;
+    }
+
+    var data = await res.json();
+
+    // Show tool calls
+    if (data.tool_results && data.tool_results.length > 0) {
+      for (var i = 0; i < data.tool_results.length; i++) {
+        ideChatAddToolMsg(data.tool_results[i].name, data.tool_results[i].result);
+      }
+    }
+
+    // Show AI response
+    if (data.response) {
+      ideChatAddMsg("assistant", data.response);
+      _ideChatHistory.push({ role: "assistant", content: data.response });
+    }
+
+    if (statusEl) {
+      var tokens = data.usage ? (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0) : 0;
+      statusEl.textContent = data.model + (tokens ? " (" + tokens + " tokens)" : "");
+    }
+  } catch (e) {
+    ideChatAddMsg("assistant", "Connection error: " + e.message);
+  } finally {
+    _ideChatSending = false;
+    if (sendBtn) sendBtn.disabled = false;
+    if (statusEl && statusEl.textContent === "Thinking...") statusEl.textContent = "Ready";
+  }
 }
 
 // ---------------------------------------------------------------------------
