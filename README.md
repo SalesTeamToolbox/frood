@@ -18,9 +18,9 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.0.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tools-36+-orange" alt="Tools">
-  <img src="https://img.shields.io/badge/skills-57-purple" alt="Skills">
+  <img src="https://img.shields.io/badge/version-3.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tools-28+-orange" alt="Tools">
+  <img src="https://img.shields.io/badge/skills-53-purple" alt="Skills">
   <img src="https://img.shields.io/badge/nodes-local%20%2B%20remote-teal" alt="Multi-Node">
   <img src="https://img.shields.io/badge/answer-42-yellow" alt="42">
   <img src="https://img.shields.io/badge/license-BSL--1.1-lightgrey" alt="License">
@@ -35,7 +35,7 @@
 Agent42 is an **autonomous agent platform** with a web IDE, MCP tools, associative
 memory, and custom AI agent management. Use it as:
 
-- **An MCP server** for Claude Code in VS Code (36+ tools, 57 skills)
+- **An MCP server** for Claude Code in VS Code (28+ MCP tools, 53 skills)
 - **A web IDE** with Monaco editor, terminal, and AI chat (accessible from any browser)
 - **An agent management platform** that runs custom AI agents 24/7 on your VPS
 
@@ -47,8 +47,8 @@ Claude Code subscription, Anthropic API key, or alternative providers like
 
 - **Web IDE** -- Monaco editor (same engine as VS Code), xterm.js terminal, integrated
   AI chat. Edit code, run commands, and talk to Claude -- all in your browser.
-- **MCP tools for Claude Code** -- 36+ tools: filesystem, shell, git, web, code
-  intelligence, Docker, security analysis, and more. Standard MCP protocol.
+- **MCP tools for Claude Code** -- 28+ MCP tools: git, memory, code intelligence,
+  Docker, security analysis, content, and more. Standard MCP protocol.
 - **Custom AI agents** -- Create agents with specific tools, skills, and schedules.
   6 built-in templates (Support, Marketing, DevOps, Content, Research, Code Review).
   Each agent picks its own AI provider and model.
@@ -71,8 +71,8 @@ Claude Code subscription, Anthropic API key, or alternative providers like
                          │         │           │
                     ┌────┴─────────┴───────────┴─────┐
                     │       Agent42 Platform          │
-                    │  36+ Tools | 57 Skills | Memory │
-                    │  73 API Routes | 8-Layer Security│
+                    │ 28+ MCP Tools | 53 Skills | Memory│
+                    │ 200+ API Routes | 8-Layer Security│
                     ├──────────────┬──────────────────┤
                     │ Local Node   │ Remote Node (VPS)│
                     │ (laptop)     │ (SSH transport)  │
@@ -144,7 +144,7 @@ Create `.mcp.json` in your project root (or copy `.mcp.json.example`):
 }
 ```
 
-That's it. Restart Claude Code and Agent42's 36+ tools appear alongside the built-in
+That's it. Restart Claude Code and Agent42's 28+ MCP tools appear alongside the built-in
 ones. You now have a towel.
 
 ### Start the Dashboard (Optional)
@@ -156,28 +156,11 @@ python agent42.py
 
 ## MCP Tools (The Guide Entries)
 
-All tools are prefixed with `agent42_` in Claude Code. 36 tools across 8 categories:
+All MCP tools are prefixed with `agent42_` in Claude Code. 28 tools registered in the
+MCP server across 7 categories. Claude Code also provides its own native tools for
+filesystem, shell, grep, and web operations -- Agent42 doesn't duplicate those.
 
-### Filesystem
-
-| Tool | Description |
-|------|-------------|
-| `agent42_read_file` | Read file contents with line ranges |
-| `agent42_write_file` | Write or create files (sandbox-enforced) |
-| `agent42_edit_file` | Surgical string replacements in files |
-| `agent42_list_dir` | List directory contents with filtering |
-| `agent42_file_watcher` | Watch files/directories for changes |
-
-### Shell and Git
-
-| Tool | Description |
-|------|-------------|
-| `agent42_shell` | Execute shell commands (6-layer command filter) |
-| `agent42_git` | Git operations (status, diff, log, branch, commit) |
-| `agent42_grep` | Regex search across files |
-| `agent42_diff` | Generate and apply diffs |
-
-### Memory
+### Memory and Context
 
 | Tool | Description |
 |------|-------------|
@@ -185,15 +168,7 @@ All tools are prefixed with `agent42_` in Claude Code. 36 tools across 8 categor
 | `agent42_context` | Context Assembler -- pulls from memory, CLAUDE.md, git history, skills |
 | `agent42_knowledge` | Knowledge base management (PDF, docs) |
 | `agent42_node_sync` | Sync memory and config between local and remote nodes |
-
-### Web
-
-| Tool | Description |
-|------|-------------|
-| `agent42_web_search` | Web search (Brave API with DuckDuckGo fallback) |
-| `agent42_web_fetch` | Fetch and parse web pages |
-| `agent42_http_request` | Raw HTTP requests (GET, POST, PUT, DELETE) |
-| `agent42_browser` | Browser automation via Playwright |
+| `agent42_behaviour` | Behaviour configuration and profiles |
 
 ### Code Intelligence
 
@@ -204,6 +179,14 @@ All tools are prefixed with `agent42_` in Claude Code. 36 tools across 8 categor
 | `agent42_python_exec` | Execute Python code in sandboxed environment |
 | `agent42_run_tests` | Run test suites (pytest, jest, etc.) |
 | `agent42_run_linter` | Run linters (ruff, eslint, etc.) |
+
+### Git and Diff
+
+| Tool | Description |
+|------|-------------|
+| `agent42_git` | Git operations (status, diff, log, branch, commit) |
+| `agent42_diff` | Generate and apply diffs |
+| `agent42_create_pr` | Generate pull requests with context |
 
 ### Security
 
@@ -218,22 +201,45 @@ All tools are prefixed with `agent42_` in Claude Code. 36 tools across 8 categor
 | Tool | Description |
 |------|-------------|
 | `agent42_docker` | Docker operations (build, run, compose, logs) |
-| `agent42_create_pr` | Generate pull requests with context |
+| `agent42_browser` | Browser automation via Playwright |
+| `agent42_file_watcher` | Watch files/directories for changes |
 | `agent42_vision` | Image analysis and screenshot comparison |
 
-### Utilities
+### Content and Data
 
 | Tool | Description |
 |------|-------------|
+| `agent42_content_analyzer` | Analyze content quality and structure |
+| `agent42_data` | Data transformation and analysis |
 | `agent42_template` | Template rendering and scaffolding |
 | `agent42_outline` | Generate structured outlines |
 | `agent42_scoring` | Score and rank items by criteria |
 | `agent42_summarize` | Summarize text and documents |
-| `agent42_content_analyzer` | Analyze content quality and structure |
-| `agent42_data` | Data transformation and analysis |
-| `agent42_persona` | Persona management for agent behavior |
-| `agent42_behaviour` | Behaviour configuration and profiles |
+
+### Orchestration
+
+| Tool | Description |
+|------|-------------|
 | `agent42_workflow` | Multi-step workflow orchestration |
+| `agent42_persona` | Persona management for agent behavior |
+
+### Claude Code Native Tools (Not Registered)
+
+These capabilities are provided natively by Claude Code itself, so Agent42 does not
+register them in the MCP server (they'd be redundant):
+
+- **Filesystem:** read, write, edit, list directory (CC's Read, Write, Edit, LS)
+- **Shell:** command execution (CC's Bash tool applies its own safety layer)
+- **Search:** regex search across files (CC's Grep tool)
+- **Web:** web search, page fetch, HTTP requests (CC's WebSearch, WebFetch)
+
+### Dashboard-Only Tools (Not in MCP)
+
+These tools are only available when running the full Agent42 dashboard (`python agent42.py`),
+not through the MCP server:
+
+`subagent`, `team`, `notify`, `image_gen`, `video_gen`, `project_interview`, `dynamic`,
+`cron`, `ssh`, `tunnel`, `app`, `app_test`, `mcp_tool_proxy`
 
 ## The Memory of a Dolphin (But Better)
 
@@ -345,8 +351,8 @@ All from VS Code. No terminal switching. No SSH windows.
 
 ## Skills (Mostly Harmless Prompt Templates)
 
-Agent42 exposes 57 skills as MCP Prompts. Skills are structured instruction sets that
-Claude Code can request and apply. They cover:
+Agent42 exposes 53 skills as MCP Prompts (47 builtin + 6 workspace). Skills are
+structured instruction sets that Claude Code can request and apply. They cover:
 
 | Category | Examples |
 |----------|---------|
@@ -563,7 +569,7 @@ Terminal buttons:
 | **Mission Control** | Project overview, task kanban board |
 | **Status** | MCP server health, node status, system metrics |
 | **Code** | Web IDE with Monaco editor, terminal, AI chat |
-| **Tools** | All 36+ registered tools with schemas |
+| **Tools** | All 28+ registered MCP tools with schemas |
 | **Skills** | 53 skills with descriptions and task types |
 | **Agents** | Custom agent management (create, start/stop, templates) |
 | **Settings** | API keys, provider config, security settings |
@@ -668,7 +674,7 @@ agent42/
 |-- agent42.py                 # Dashboard + services launcher
 |-- commands.py                # CLI command handlers
 |
-|-- tools/                     # 36+ MCP tools
+|-- tools/                     # 28+ MCP tools
 |   |-- base.py                # Tool / ToolExtension base classes
 |   |-- registry.py            # Tool registry and discovery
 |   |-- plugin_loader.py       # Custom tool auto-discovery
@@ -681,8 +687,8 @@ agent42/
 |   |-- web_search.py          # Web search + fetch
 |   '-- ...                    # 25+ more tool modules
 |
-|-- skills/                    # 57 skills (MCP Prompts)
-|   |-- builtins/              # 46 shipped skills
+|-- skills/                    # 53 skills (MCP Prompts)
+|   |-- builtins/              # 47 shipped skills
 |   |-- workspace/             # 6 project-specific skills
 |   '-- loader.py              # Skill discovery and loading
 |
