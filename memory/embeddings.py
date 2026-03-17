@@ -417,7 +417,12 @@ class EmbeddingStore:
         return len(items)
 
     async def search(
-        self, query: str, top_k: int = 5, source_filter: str = "", collection: str = ""
+        self,
+        query: str,
+        top_k: int = 5,
+        source_filter: str = "",
+        collection: str = "",
+        task_type_filter: str = "",
     ) -> list[dict]:
         """Semantic search: find the most relevant entries for a query.
 
@@ -429,7 +434,9 @@ class EmbeddingStore:
         if self._qdrant and self._qdrant.is_available:
             try:
                 query_vector = await self.embed_text(query)
-                return self._search_qdrant(query_vector, top_k, source_filter, collection)
+                return self._search_qdrant(
+                    query_vector, top_k, source_filter, collection, task_type_filter
+                )
             except Exception as e:
                 logger.warning("Qdrant search failed, falling through to JSON fallback: %s", e)
 
@@ -446,6 +453,7 @@ class EmbeddingStore:
         top_k: int,
         source_filter: str,
         collection: str,
+        task_type_filter: str = "",
     ) -> list[dict]:
         """Search via Qdrant backend. Raises on failure so caller can fall back."""
         from memory.qdrant_store import QdrantStore
@@ -456,6 +464,7 @@ class EmbeddingStore:
                 query_vector,
                 top_k=top_k,
                 source_filter=source_filter,
+                task_type_filter=task_type_filter,
             )
 
         memory_results = self._qdrant.search(
@@ -463,12 +472,14 @@ class EmbeddingStore:
             query_vector,
             top_k=top_k,
             source_filter=source_filter,
+            task_type_filter=task_type_filter,
         )
         history_results = self._qdrant.search(
             QdrantStore.HISTORY,
             query_vector,
             top_k=top_k,
             source_filter=source_filter,
+            task_type_filter=task_type_filter,
         )
 
         combined = memory_results + history_results

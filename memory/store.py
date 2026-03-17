@@ -212,6 +212,7 @@ class MemoryStore:
         source: str = "",
         project: str = "",
         lifecycle_aware: bool = True,
+        task_type: str = "",
     ) -> list[dict]:
         """Search memory and history using semantic similarity.
 
@@ -243,6 +244,7 @@ class MemoryStore:
                     top_k=top_k,
                     source_filter=source,
                     project_filter=project,
+                    task_type_filter=task_type,
                 )
                 history_results = self._qdrant.search_with_lifecycle(
                     QdrantStore.HISTORY,
@@ -250,6 +252,7 @@ class MemoryStore:
                     top_k=top_k,
                     source_filter=source,
                     project_filter=project,
+                    task_type_filter=task_type,
                 )
 
                 # Merge and re-sort by adjusted score
@@ -265,7 +268,9 @@ class MemoryStore:
                 logger.warning("Lifecycle search failed, falling back: %s", e)
 
         # Standard (non-lifecycle) search
-        return await self.embeddings.search(query, top_k=top_k, source_filter=source)
+        return await self.embeddings.search(
+            query, top_k=top_k, source_filter=source, task_type_filter=task_type
+        )
 
     def _record_recalls(self, results: list[dict]):
         """Record that these memories were recalled (updates Qdrant metadata)."""
@@ -378,7 +383,7 @@ class MemoryStore:
         return "\n".join(parts)
 
     async def build_context_semantic(
-        self, query: str, top_k: int = 5, max_memory_lines: int = 50
+        self, query: str, top_k: int = 5, max_memory_lines: int = 50, task_type: str = ""
     ) -> str:
         """Build context augmented with semantically relevant memory.
 
@@ -406,7 +411,7 @@ class MemoryStore:
         # Gracefully degrade to non-semantic context if the embedding API
         # fails at runtime (e.g. invalid key, provider outage).
         try:
-            results = await self.embeddings.search(query, top_k=top_k)
+            results = await self.embeddings.search(query, top_k=top_k, task_type_filter=task_type)
         except Exception as e:
             logger.warning("Semantic search failed, falling back to basic context: %s", e)
             return self.build_context(max_memory_lines=max_memory_lines)

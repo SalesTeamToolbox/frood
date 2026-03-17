@@ -274,6 +274,8 @@ class QdrantStore:
         source_filter: str = "",
         channel_filter: str = "",
         time_after: float = 0.0,
+        task_type_filter: str = "",
+        task_id_filter: str = "",
     ) -> list[dict]:
         """Semantic search in a collection.
 
@@ -284,6 +286,8 @@ class QdrantStore:
             source_filter: Filter by source field
             channel_filter: Filter by channel_type field
             time_after: Only return results after this timestamp
+            task_type_filter: Filter by task_type field (e.g. "coding")
+            task_id_filter: Filter by task_id field (UUID string)
 
         Returns:
             List of {text, source, section, score, metadata} dicts.
@@ -304,6 +308,12 @@ class QdrantStore:
             )
         if time_after > 0:
             conditions.append(FieldCondition(key="timestamp", range=Range(gte=time_after)))
+        if task_type_filter:
+            conditions.append(
+                FieldCondition(key="task_type", match=MatchValue(value=task_type_filter))
+            )
+        if task_id_filter:
+            conditions.append(FieldCondition(key="task_id", match=MatchValue(value=task_id_filter)))
 
         query_filter = Filter(must=conditions) if conditions else None
 
@@ -507,6 +517,8 @@ class QdrantStore:
         project_filter: str = "",
         include_global: bool = True,
         exclude_forgotten: bool = True,
+        task_type_filter: str = "",
+        task_id_filter: str = "",
     ) -> list[dict]:
         """Search with lifecycle-aware scoring.
 
@@ -578,6 +590,24 @@ class QdrantStore:
                 forgotten_filter.should = proj_condition.should
             else:
                 forgotten_filter = proj_condition
+
+        # Task-type and task-id filtering (append to whatever filter was built)
+        task_conditions = []
+        if task_type_filter:
+            task_conditions.append(
+                FieldCondition(key="task_type", match=MatchValue(value=task_type_filter))
+            )
+        if task_id_filter:
+            task_conditions.append(
+                FieldCondition(key="task_id", match=MatchValue(value=task_id_filter))
+            )
+
+        if task_conditions:
+            if forgotten_filter:
+                forgotten_filter.must = (forgotten_filter.must or []) + task_conditions
+            else:
+                # Also add to conditions list for the fallback path
+                conditions.extend(task_conditions)
 
         query_filter = (
             forgotten_filter
