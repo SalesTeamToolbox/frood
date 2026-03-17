@@ -3204,76 +3204,57 @@ function renderCode() {
   el.style.padding = "0";
 
   el.innerHTML = `
-    <div class="ide-layout" style="display:flex;height:100%;overflow:hidden">
-      <div class="ide-sidebar" style="width:240px;min-width:180px;flex-shrink:0;overflow-y:auto;background:#1e293b;border-right:1px solid #334155;display:flex;flex-direction:column">
-        <div class="ide-sidebar-header">
-          <span>EXPLORER</span>
-          <div>
-            <button onclick="ideRefreshTree()" title="Refresh">&#8635;</button>
-            <button onclick="ideToggleSearch()" title="Search">&#128269;</button>
-          </div>
-        </div>
-        <div id="ide-search-panel" class="ide-search-bar" style="display:none">
-          <input type="text" id="ide-search-input" placeholder="Search files..."
-                 onkeydown="if(event.key==='Enter')ideDoSearch(this.value)">
-          <div id="ide-search-results" class="ide-search-results"></div>
-        </div>
-        <div id="ide-file-tree" class="ide-file-tree"></div>
-      </div>
-      <div class="ide-main" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
-        <div id="ide-tabs" class="ide-tabs"></div>
-        <div id="ide-editor-container" class="ide-editor-container"></div>
-        <div id="ide-welcome" class="ide-welcome" style="display:flex">
-          <h2>Agent42 IDE</h2>
-          <p>Select a file from the explorer to start editing.<br>Changes are saved with Ctrl+S.</p>
-        </div>
-        <div id="ide-terminal-wrapper" class="ide-terminal-wrapper" style="display:none">
-          <div class="ide-terminal-header">
-            <div class="ide-terminal-header-left">
-              <span>TERMINAL</span>
-              <div id="ide-terminal-tabs" class="ide-terminal-tabs"></div>
-            </div>
-            <div class="ide-terminal-header-right">
-              <button onclick="termNew('local')" title="New local terminal">+ Local</button>
-              <button onclick="termNew('remote')" title="New remote terminal">+ Remote</button>
-              <button onclick="termNewClaude('local')" title="Claude Code (local)" style="color:#38bdf8">+ Claude</button>
-              <button onclick="termNewClaude('remote')" title="Claude Code (remote)" style="color:#34d399">+ Claude Remote</button>
-              <button onclick="termToggle()" title="Close terminal panel">&times;</button>
+    <div id="ide-layout" style="display:flex;flex-direction:column;height:100%;overflow:hidden">
+      <div class="ide-top-row" style="display:flex;flex:1;overflow:hidden;min-height:0">
+        <div class="ide-sidebar" style="width:240px;min-width:180px;flex-shrink:0;overflow-y:auto;background:#1e293b;border-right:1px solid #334155;display:flex;flex-direction:column">
+          <div class="ide-sidebar-header">
+            <span>EXPLORER</span>
+            <div>
+              <button onclick="ideRefreshTree()" title="Refresh">&#8635;</button>
+              <button onclick="ideToggleSearch()" title="Search">&#128269;</button>
             </div>
           </div>
-          <div id="ide-terminal-container" class="ide-terminal-container"></div>
+          <div id="ide-search-panel" class="ide-search-bar" style="display:none">
+            <input type="text" id="ide-search-input" placeholder="Search files..."
+                   onkeydown="if(event.key==='Enter')ideDoSearch(this.value)">
+            <div id="ide-search-results" class="ide-search-results"></div>
+          </div>
+          <div id="ide-file-tree" class="ide-file-tree"></div>
         </div>
-        <div id="ide-statusbar" class="ide-statusbar">
-          <span id="ide-status-left">Ready</span>
-          <div class="ide-statusbar-right">
-            <button onclick="termToggle()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.72rem">Terminal</button>
-            <button onclick="ideChatToggle()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.72rem">Chat</button>
-            <span id="ide-status-lang">-</span>
-            <span id="ide-status-pos">Ln 1, Col 1</span>
+        <div class="ide-main" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+          <div id="ide-tabs" class="ide-tabs"></div>
+          <div id="ide-editor-container" class="ide-editor-container" style="flex:1;overflow:hidden"></div>
+          <div id="ide-welcome" class="ide-welcome" style="display:flex">
+            <h2>Agent42 IDE</h2>
+            <p>Select a file from the explorer to start editing.<br>Changes are saved with Ctrl+S.</p>
           </div>
         </div>
       </div>
-      <div id="ide-chat-panel" class="ide-chat-panel" style="display:none;width:350px;min-width:280px;flex-shrink:0;flex-direction:column;border-left:1px solid #334155;background:#1e293b">
-        <div class="ide-chat-header">
-          <span>AI CHAT</span>
-          <div style="display:flex;gap:0.3rem;align-items:center">
-            <select id="ide-chat-model" title="Model">
-              <option value="claude-sonnet-4-6-20260217">Sonnet 4.6</option>
-              <option value="claude-opus-4-6-20260205">Opus 4.6</option>
-              <option value="claude-sonnet-4-5-20250514">Sonnet 4.5</option>
-              <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-            </select>
-            <button onclick="ideChatClear()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer" title="Clear chat">&#128465;</button>
-            <button onclick="ideChatToggle()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer">&times;</button>
+      <div id="ide-drag-handle" class="ide-drag-handle"></div>
+      <div id="ide-terminal-wrapper" class="ide-terminal-wrapper" style="display:flex">
+        <div class="ide-terminal-header">
+          <div id="ide-terminal-tabs" class="ide-terminal-tabs"></div>
+          <div style="display:flex;gap:0.4rem;align-items:center;position:relative">
+            <button class="ide-term-btn" onclick="termDropdownToggle()" title="New terminal">+</button>
+            <div id="ide-term-dropdown" class="ide-term-dropdown" style="display:none">
+              <div class="dropdown-group-label">Local</div>
+              <div class="dropdown-item" onclick="termNew('local');termDropdownDismiss()">Terminal</div>
+              <div class="dropdown-item" onclick="termNewClaude('local');termDropdownDismiss()">Claude Code</div>
+              <div class="dropdown-group-label">Remote</div>
+              <div class="dropdown-item remote-item" onclick="termNew('remote');termDropdownDismiss()">Terminal</div>
+              <div class="dropdown-item remote-item" onclick="termNewClaude('remote');termDropdownDismiss()">Claude Code</div>
+            </div>
+            <button class="ide-term-btn" onclick="termToggle()" title="Close">&times;</button>
           </div>
         </div>
-        <div id="ide-chat-messages" class="ide-chat-messages"></div>
-        <div class="ide-chat-input-area">
-          <textarea id="ide-chat-input" placeholder="Ask about your code..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();ideChatSend()}"></textarea>
-          <div class="ide-chat-send">
-            <span class="model-info" id="ide-chat-status">Ready</span>
-            <button id="ide-chat-send-btn" onclick="ideChatSend()">Send</button>
-          </div>
+        <div id="ide-terminal-container" style="flex:1;overflow:hidden"></div>
+      </div>
+      <div id="ide-statusbar" class="ide-statusbar">
+        <span id="ide-status-left">Ready</span>
+        <div class="ide-statusbar-right">
+          <button onclick="termToggle()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.72rem">&#96; Terminal</button>
+          <span id="ide-status-lang">-</span>
+          <span id="ide-status-pos">Ln 1, Col 1</span>
         </div>
       </div>
     </div>
@@ -3281,6 +3262,31 @@ function renderCode() {
 
   ideLoadTree("");
   ideInitMonaco();
+  initDragHandle();
+
+  // Open default local terminal on first load
+  if (_termSessions.length === 0) {
+    _termVisible = true;
+    termNew("local");
+  }
+
+  // Single shared resize listener (guard against duplicate on page revisit)
+  if (!window._ideResizeListenerAttached) {
+    window._ideResizeListenerAttached = true;
+    window.addEventListener("resize", termFitAll);
+  }
+
+  // Ctrl+backtick keyboard shortcut (guard against duplicate on page revisit)
+  if (!window._ideKeyListenerAttached) {
+    window._ideKeyListenerAttached = true;
+    document.addEventListener("keydown", function(e) {
+      if (state.page !== "code") return;
+      if (e.key === "`" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        termToggle();
+      }
+    });
+  }
 }
 
 function ideInitMonaco() {
@@ -3585,17 +3591,30 @@ function termLoadXterm(cb) {
 function termToggle() {
   _termVisible = !_termVisible;
   var wrapper = document.getElementById("ide-terminal-wrapper");
+  var handle = document.getElementById("ide-drag-handle");
   if (!wrapper) return;
   if (_termVisible) {
     wrapper.style.display = "flex";
+    if (handle) handle.style.display = "block";
     if (_termSessions.length === 0) termNew("local");
+    else termFitAll();
   } else {
     wrapper.style.display = "none";
+    if (handle) handle.style.display = "none";
   }
 }
 
 function termNew(node) {
   termLoadXterm(function() {
+    // Show terminal panel if hidden
+    if (!_termVisible) {
+      _termVisible = true;
+      var wrapperEl = document.getElementById("ide-terminal-wrapper");
+      var handleEl = document.getElementById("ide-drag-handle");
+      if (wrapperEl) wrapperEl.style.display = "flex";
+      if (handleEl) handleEl.style.display = "block";
+    }
+
     var container = document.getElementById("ide-terminal-container");
     if (!container) return;
     // Hide all existing terminals
@@ -3613,32 +3632,51 @@ function termNew(node) {
       cursorBlink: true,
     });
     term.open(termDiv);
+
+    var fitAddon = null;
     try {
-      var fitAddon = new FitAddon.FitAddon();
+      fitAddon = new FitAddon.FitAddon();
       term.loadAddon(fitAddon);
       fitAddon.fit();
-      window.addEventListener("resize", function() { try { fitAddon.fit(); } catch(e) {} });
     } catch(e) {}
 
-    // Connect WebSocket
+    // Build WebSocket URL
     var protocol = location.protocol === "https:" ? "wss:" : "ws:";
     var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" + encodeURIComponent(state.token) + "&node=" + encodeURIComponent(node || "local");
-    var ws = new WebSocket(wsUrl);
-    ws.onopen = function() { term.write("\r\n\x1b[32mConnected to " + (node || "local") + " terminal\x1b[0m\r\n\r\n"); };
-    ws.onmessage = function(e) { term.write(e.data); };
-    ws.onerror = function() { term.write("\r\n\x1b[31mConnection error\x1b[0m\r\n"); };
-    ws.onclose = function() { term.write("\r\n\x1b[33mDisconnected\x1b[0m\r\n"); };
-    term.onData(function(data) { if (ws.readyState === 1) ws.send(data); });
 
-    var session = { term: term, ws: ws, el: termDiv, node: node || "local", label: (node || "local") + " " + (_termSessions.length + 1) };
+    // Build label: "bash (remote)" for remote, "bash N" for local
+    var localCount = _termSessions.filter(function(s) { return s.node !== "remote" && s.label.indexOf("bash") === 0; }).length;
+    var label = (node === "remote") ? "bash (remote)" : "bash " + (localCount + 1);
+
+    var session = {
+      term: term,
+      ws: null,
+      el: termDiv,
+      node: node || "local",
+      label: label,
+      fitAddon: fitAddon,
+      reconnecting: false,
+      retryCount: 0,
+      wsUrl: wsUrl
+    };
     _termSessions.push(session);
     _termActiveIdx = _termSessions.length - 1;
+    termConnectWs(session, wsUrl, 0);
     termRenderTabs();
   });
 }
 
 function termNewClaude(node) {
   termLoadXterm(function() {
+    // Show terminal panel if hidden
+    if (!_termVisible) {
+      _termVisible = true;
+      var wrapperEl = document.getElementById("ide-terminal-wrapper");
+      var handleEl = document.getElementById("ide-drag-handle");
+      if (wrapperEl) wrapperEl.style.display = "flex";
+      if (handleEl) handleEl.style.display = "block";
+    }
+
     var container = document.getElementById("ide-terminal-container");
     if (!container) return;
     for (var i = 0; i < _termSessions.length; i++) {
@@ -3655,25 +3693,33 @@ function termNewClaude(node) {
       cursorBlink: true,
     });
     term.open(termDiv);
+
+    var fitAddon = null;
     try {
-      var fitAddon = new FitAddon.FitAddon();
+      fitAddon = new FitAddon.FitAddon();
       term.loadAddon(fitAddon);
       fitAddon.fit();
-      window.addEventListener("resize", function() { try { fitAddon.fit(); } catch(e) {} });
     } catch(e) {}
 
     var protocol = location.protocol === "https:" ? "wss:" : "ws:";
     var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" + encodeURIComponent(state.token) + "&node=" + encodeURIComponent(node || "local") + "&cmd=claude";
-    var ws = new WebSocket(wsUrl);
-    ws.onopen = function() { term.write("\r\n\x1b[36m🤖 Claude Code (" + (node || "local") + ") — using your CC subscription\x1b[0m\r\n\r\n"); };
-    ws.onmessage = function(e) { term.write(e.data); };
-    ws.onerror = function() { term.write("\r\n\x1b[31mConnection error\x1b[0m\r\n"); };
-    ws.onclose = function() { term.write("\r\n\x1b[33mClaude session ended\x1b[0m\r\n"); };
-    term.onData(function(data) { if (ws.readyState === 1) ws.send(data); });
 
-    var session = { term: term, ws: ws, el: termDiv, node: node || "local", label: "Claude (" + (node || "local") + ")" };
+    var label = (node === "remote") ? "Claude (remote)" : "Claude (local)";
+
+    var session = {
+      term: term,
+      ws: null,
+      el: termDiv,
+      node: node || "local",
+      label: label,
+      fitAddon: fitAddon,
+      reconnecting: false,
+      retryCount: 0,
+      wsUrl: wsUrl
+    };
     _termSessions.push(session);
     _termActiveIdx = _termSessions.length - 1;
+    termConnectWs(session, wsUrl, 0);
     termRenderTabs();
   });
 }
@@ -3703,126 +3749,151 @@ function termRenderTabs() {
   var el = document.getElementById("ide-terminal-tabs");
   if (!el) return;
   el.innerHTML = _termSessions.map(function(s, i) {
-    var active = i === _termActiveIdx ? "active" : "";
-    return '<span class="ide-terminal-tab ' + active + '" onclick="termSwitch(' + i + ')">' + esc(s.label) + ' <span class="close" onclick="event.stopPropagation();termClose(' + i + ')">&times;</span></span>';
+    var active = i === _termActiveIdx ? " active" : "";
+    var dotColor = s.reconnecting ? "#f59e0b" : (s.node === "remote" ? "#34d399" : "#38bdf8");
+    return '<span class="ide-terminal-tab' + active + '" onclick="termSwitch(' + i + ')">'
+      + '<span style="color:' + dotColor + ';margin-right:4px">&#9679;</span>'
+      + esc(s.label)
+      + ' <span class="close" onclick="event.stopPropagation();termClose(' + i + ')">&times;</span>'
+      + '</span>';
   }).join("");
 }
 
 // ---------------------------------------------------------------------------
-// IDE Chat (AI assistant)
+// Terminal WebSocket connector with auto-reconnect
 // ---------------------------------------------------------------------------
-var _ideChatHistory = [];
-var _ideChatSending = false;
+function termConnectWs(session, wsUrl, retryCount) {
+  retryCount = retryCount || 0;
+  var ws = new WebSocket(wsUrl);
+  session.ws = ws;
+  session.reconnecting = retryCount > 0;
+  termRenderTabs();
 
-function ideChatToggle() {
-  var panel = document.getElementById("ide-chat-panel");
-  if (!panel) return;
-  panel.style.display = panel.style.display === "none" ? "flex" : "none";
-}
-
-function ideChatClear() {
-  _ideChatHistory = [];
-  var el = document.getElementById("ide-chat-messages");
-  if (el) el.innerHTML = "";
-}
-
-function ideChatAddMsg(role, content) {
-  var el = document.getElementById("ide-chat-messages");
-  if (!el) return;
-  var cls = role === "user" ? "ide-chat-msg-user" : "ide-chat-msg-ai";
-  var div = document.createElement("div");
-  div.className = "ide-chat-msg " + cls;
-  var bubble = document.createElement("div");
-  bubble.className = "bubble";
-  bubble.textContent = content;
-  div.appendChild(bubble);
-  el.appendChild(div);
-  el.scrollTop = el.scrollHeight;
-}
-
-function ideChatAddToolMsg(name, result) {
-  var el = document.getElementById("ide-chat-messages");
-  if (!el) return;
-  var div = document.createElement("div");
-  div.className = "ide-chat-msg-tool";
-  div.textContent = "Tool: " + name + " → " + (result || "").substring(0, 200);
-  el.appendChild(div);
-  el.scrollTop = el.scrollHeight;
-}
-
-async function ideChatSend() {
-  if (_ideChatSending) return;
-  var input = document.getElementById("ide-chat-input");
-  var msg = input ? input.value.trim() : "";
-  if (!msg) return;
-  input.value = "";
-
-  // Get current file context
-  var fileContext = "";
-  if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab] && _ideTabs[_ideActiveTab].model) {
-    var content = _ideTabs[_ideActiveTab].model.getValue();
-    fileContext = "[" + _ideTabs[_ideActiveTab].path + "]\n" + content.substring(0, 3000);
-  }
-
-  // Add user message to UI
-  ideChatAddMsg("user", msg);
-  _ideChatHistory.push({ role: "user", content: msg });
-
-  // Show typing
-  _ideChatSending = true;
-  var statusEl = document.getElementById("ide-chat-status");
-  var sendBtn = document.getElementById("ide-chat-send-btn");
-  if (statusEl) statusEl.textContent = "Thinking...";
-  if (sendBtn) sendBtn.disabled = true;
-
-  var model = document.getElementById("ide-chat-model");
-  var modelValue = model ? model.value : "";
-
-  try {
-    var res = await fetch("/api/ide/chat", {
-      method: "POST",
-      headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: msg,
-        history: _ideChatHistory.slice(-18),
-        model: modelValue,
-        file_context: fileContext,
-      }),
-    });
-
-    if (!res.ok) {
-      var errData = await res.json().catch(function() { return {}; });
-      var errMsg = errData.detail || "Error " + res.status;
-      ideChatAddMsg("assistant", "Error: " + errMsg);
+  ws.onopen = function() {
+    session.reconnecting = false;
+    session.retryCount = 0;
+    termRenderTabs();
+    if (retryCount > 0) {
+      session.term.write("\r\n\x1b[32mReconnected\x1b[0m\r\n");
+    }
+  };
+  ws.onmessage = function(e) { session.term.write(e.data); };
+  ws.onclose = function() {
+    if (retryCount >= 3) {
+      session.term.write("\r\n\x1b[31mDisconnected (max retries reached)\x1b[0m\r\n");
+      session.reconnecting = false;
+      termRenderTabs();
       return;
     }
-
-    var data = await res.json();
-
-    // Show tool calls
-    if (data.tool_results && data.tool_results.length > 0) {
-      for (var i = 0; i < data.tool_results.length; i++) {
-        ideChatAddToolMsg(data.tool_results[i].name, data.tool_results[i].result);
+    var delay = Math.pow(2, retryCount) * 1000; // 1000, 2000, 4000 ms
+    session.term.write("\r\n\x1b[33mDisconnected \u2014 reconnecting in " + (delay / 1000) + "s...\x1b[0m\r\n");
+    session.reconnecting = true;
+    termRenderTabs();
+    setTimeout(function() {
+      if (_termSessions.indexOf(session) !== -1) {
+        termConnectWs(session, wsUrl, retryCount + 1);
       }
-    }
+    }, delay);
+  };
+  session.term.onData(function(data) {
+    if (ws.readyState === 1) ws.send(data);
+  });
+}
 
-    // Show AI response
-    if (data.response) {
-      ideChatAddMsg("assistant", data.response);
-      _ideChatHistory.push({ role: "assistant", content: data.response });
-    }
+function termFitAll() {
+  _termSessions.forEach(function(s) {
+    if (!s.fitAddon) return;
+    try {
+      s.fitAddon.fit();
+      if (s.ws && s.ws.readyState === 1 && s.term) {
+        s.ws.send(JSON.stringify({ type: "resize", cols: s.term.cols, rows: s.term.rows }));
+      }
+    } catch(e) {}
+  });
+}
 
-    if (statusEl) {
-      var tokens = data.usage ? (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0) : 0;
-      statusEl.textContent = data.model + (tokens ? " (" + tokens + " tokens)" : "");
-    }
-  } catch (e) {
-    ideChatAddMsg("assistant", "Connection error: " + e.message);
-  } finally {
-    _ideChatSending = false;
-    if (sendBtn) sendBtn.disabled = false;
-    if (statusEl && statusEl.textContent === "Thinking...") statusEl.textContent = "Ready";
+// ---------------------------------------------------------------------------
+// Terminal dropdown helpers
+// ---------------------------------------------------------------------------
+var _remoteAvailCache = null;
+var _remoteAvailCacheAt = 0;
+
+function termDropdownToggle() {
+  var menu = document.getElementById("ide-term-dropdown");
+  if (!menu) return;
+  var visible = menu.style.display !== "none";
+  menu.style.display = visible ? "none" : "block";
+  if (!visible) {
+    checkRemoteAvailable(function(available) {
+      var remoteItems = menu.querySelectorAll(".remote-item");
+      remoteItems.forEach(function(el) {
+        el.style.opacity = available ? "1" : "0.4";
+        el.style.pointerEvents = available ? "auto" : "none";
+        el.title = available ? "" : "No remote node configured";
+      });
+    });
+    setTimeout(function() {
+      document.addEventListener("click", termDropdownDismiss, { once: true });
+    }, 0);
   }
+}
+
+function termDropdownDismiss() {
+  var menu = document.getElementById("ide-term-dropdown");
+  if (menu) menu.style.display = "none";
+}
+
+function checkRemoteAvailable(cb) {
+  var now = Date.now();
+  if (_remoteAvailCache !== null && now - _remoteAvailCacheAt < 30000) {
+    cb(_remoteAvailCache);
+    return;
+  }
+  apiFetch("/api/remote/status")
+    .then(function(d) {
+      _remoteAvailCache = !!(d && d.available);
+      _remoteAvailCacheAt = Date.now();
+      cb(_remoteAvailCache);
+    })
+    .catch(function() { cb(false); });
+}
+
+// ---------------------------------------------------------------------------
+// Drag handle for terminal panel resize
+// ---------------------------------------------------------------------------
+var _isDragging = false;
+var _dragStartY = 0;
+var _dragStartHeight = 0;
+
+function initDragHandle() {
+  var handle = document.getElementById("ide-drag-handle");
+  if (!handle) return;
+  handle.addEventListener("mousedown", function(e) {
+    _isDragging = true;
+    _dragStartY = e.clientY;
+    var wrapper = document.getElementById("ide-terminal-wrapper");
+    _dragStartHeight = wrapper ? wrapper.getBoundingClientRect().height : 200;
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", function(e) {
+    if (!_isDragging) return;
+    var delta = _dragStartY - e.clientY;
+    var newHeight = Math.max(80, Math.min(_dragStartHeight + delta, window.innerHeight * 0.8));
+    var wrapper = document.getElementById("ide-terminal-wrapper");
+    if (wrapper) {
+      wrapper.style.height = newHeight + "px";
+      wrapper.style.flex = "none";
+    }
+    termFitAll();
+  });
+  document.addEventListener("mouseup", function() {
+    if (!_isDragging) return;
+    _isDragging = false;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  });
 }
 
 // ---------------------------------------------------------------------------
