@@ -89,6 +89,10 @@ Progress: [████████░░] 80%
 - [19-02] _default profile shows link to Settings > LLM Routing instead of inline routing controls
 - [19-02] Model chip on cards uses muted text + '(inherited)' for inherited, normal text for overridden
 
+### Roadmap Evolution
+
+- Phase 19.1 inserted after Phase 19: UI Redesign — Redesign the Agent42 dashboard UI for a modern, polished look and feel (INSERTED)
+
 ### Pending Todos
 
 - v1.2 phases 13-15 running in parallel workstream (claude-code-automation-enhancements)
