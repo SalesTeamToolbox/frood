@@ -32,48 +32,61 @@
 > The knack lies in learning how to throw yourself at the ground and miss."*
 > -- The same applies to extending Claude Code.
 
-Agent42 is an **MCP (Model Context Protocol) server ecosystem** that extends Claude Code
-with 36+ tools, 57 skills, associative memory, multi-node management, and a dashboard.
-Claude Code provides the intelligence; Agent42 provides the arms and legs.
+Agent42 is an **autonomous agent platform** with a web IDE, MCP tools, associative
+memory, and custom AI agent management. Use it as:
 
-**Agent42 requires zero API keys.** It does not call LLMs. All AI reasoning comes from
-your Claude Code subscription (or API key). Agent42 is purely the tooling and memory layer.
+- **An MCP server** for Claude Code in VS Code (36+ tools, 57 skills)
+- **A web IDE** with Monaco editor, terminal, and AI chat (accessible from any browser)
+- **An agent management platform** that runs custom AI agents 24/7 on your VPS
+
+**Agent42 requires zero API keys for its tools.** All AI reasoning comes from your
+Claude Code subscription, Anthropic API key, or alternative providers like
+[Synthetic.new](https://synthetic.new) and [OpenRouter](https://openrouter.ai).
 
 ## What Is Agent42?
 
-- **MCP tools for Claude Code** -- filesystem, shell, git, web, code intelligence,
-  Docker, security analysis, and more. All accessible through the standard MCP protocol.
+- **Web IDE** -- Monaco editor (same engine as VS Code), xterm.js terminal, integrated
+  AI chat. Edit code, run commands, and talk to Claude -- all in your browser.
+- **MCP tools for Claude Code** -- 36+ tools: filesystem, shell, git, web, code
+  intelligence, Docker, security analysis, and more. Standard MCP protocol.
+- **Custom AI agents** -- Create agents with specific tools, skills, and schedules.
+  6 built-in templates (Support, Marketing, DevOps, Content, Research, Code Review).
+  Each agent picks its own AI provider and model.
 - **Associative memory** -- ONNX embeddings with Qdrant vector search. Memories are
   stored, recalled semantically, and auto-surfaced before Claude even starts thinking.
 - **Multi-node** -- Run Agent42 on your laptop AND your VPS. Control both environments
-  from a single Claude Code session in VS Code. Deploy code, run commands, sync memory.
-- **Dashboard** -- FastAPI web UI for monitoring MCP servers, browsing memory, managing
-  tools and skills, and configuring the system.
+  from a single session. Deploy code, run commands, sync memory.
 - **8-layer security** -- sandbox, command filter, approval gate, rate limiter, URL policy,
-  browser gateway token, spending tracker, and login rate limiting. Because the answer to
-  "should we secure this?" is always 42... er, yes.
+  browser gateway token, spending tracker, and login rate limiting.
 
 ## Architecture (The Whole Sort of General Mish Mash)
 
 ```
-                          VS Code + Claude Code
-                                  |
-                           MCP Protocol
-                    __________|__________
-                   |                     |
-          Local Agent42 Node      Remote Agent42 Node
-          (your laptop)           (your VPS via SSH)
-          |-- 36+ Tools           |-- 36+ Tools
-          |-- 57 Skills           |-- Memory
-          |-- Memory (Qdrant)     |-- Shell access
-          |-- Dashboard           |-- Deployments
-          '-- Security            '-- Services
+                    ┌─────────────────────────────────┐
+                    │    How You Interact with Agent42 │
+                    ├─────────┬───────────┬───────────┤
+                    │ VS Code │ Web IDE   │ Agents    │
+                    │ + CC    │ (browser) │ (24/7)    │
+                    └────┬────┴─────┬─────┴─────┬─────┘
+                         │         │           │
+                    ┌────┴─────────┴───────────┴─────┐
+                    │       Agent42 Platform          │
+                    │  36+ Tools | 57 Skills | Memory │
+                    │  73 API Routes | 8-Layer Security│
+                    ├──────────────┬──────────────────┤
+                    │ Local Node   │ Remote Node (VPS)│
+                    │ (laptop)     │ (SSH transport)  │
+                    └──────────────┴──────────────────┘
 ```
 
-**How it works:** Claude Code connects to Agent42 via `.mcp.json`. Agent42's tools appear
-alongside Claude Code's built-in tools. When Claude needs to search the web, analyze
-security, manage Docker containers, or recall something from three weeks ago, it calls
-an Agent42 tool. Agent42 does NOT call LLMs -- Claude Code is the brain.
+**Three ways to use Agent42:**
+
+1. **VS Code + Claude Code** -- MCP tools appear alongside built-in tools.
+   Claude calls `agent42_shell`, `agent42_memory`, etc. as needed.
+2. **Web IDE** -- Open `http://localhost:8000`, navigate to Code. Monaco editor,
+   terminal, and AI chat. Run Claude Code directly in the browser terminal.
+3. **Custom agents** -- Create agents on the Agents page. They run autonomously
+   on your VPS using Synthetic or OpenRouter for overnight work.
 
 ```
                   .--- memory-recall hook (auto-surfaces relevant memories)
@@ -526,20 +539,65 @@ Generate a dashboard password hash:
 python -c "import bcrypt; print(bcrypt.hashpw(b'your-password', bcrypt.gensalt()).decode())"
 ```
 
-## Dashboard (The Heart of Gold Control Room)
+## Web IDE (The Heart of Gold Control Room)
 
 Access at `http://localhost:8000` after running `python agent42.py`.
 
+The IDE page provides a full development environment in your browser:
+
+- **File Explorer** -- Navigate your project tree, click to open files
+- **Monaco Editor** -- Same engine as VS Code. Syntax highlighting, multi-tab, Ctrl+S save
+- **Terminal** -- xterm.js with local and remote shells, plus Claude Code integration
+- **AI Chat** -- Right sidebar with model selection. Uses your CC subscription or API key
+
+Terminal buttons:
+- `+ Local` -- Open a local shell
+- `+ Remote` -- SSH to your VPS
+- `+ Claude` -- Run Claude Code (uses your CC subscription)
+- `+ Claude Remote` -- Run Claude Code on your VPS
+
+### Dashboard Pages
+
 | Page | What It Shows |
 |------|---------------|
-| **Status** | MCP server health, connected tools, system metrics |
-| **Tools** | All 36+ registered tools with schemas and usage stats |
-| **Skills** | 57 skills with enable/disable toggles |
-| **Memory** | Browse, search, and manage stored memories |
-| **Settings** | Configuration, authentication, environment |
+| **Mission Control** | Project overview, task kanban board |
+| **Status** | MCP server health, node status, system metrics |
+| **Code** | Web IDE with Monaco editor, terminal, AI chat |
+| **Tools** | All 36+ registered tools with schemas |
+| **Skills** | 53 skills with descriptions and task types |
+| **Agents** | Custom agent management (create, start/stop, templates) |
+| **Settings** | API keys, provider config, security settings |
 
-Authentication uses bcrypt password hashing with JWT session tokens. The first run
-launches a setup wizard to configure credentials.
+Authentication uses bcrypt password hashing with JWT session tokens.
+
+## Custom Agents (The Babel Fish of Automation)
+
+Create AI agents that run autonomously with specific tools, skills, and schedules.
+
+### Built-in Templates
+
+| Template | Tools | Schedule | Use Case |
+|----------|-------|----------|----------|
+| **Support** | web, memory, template, knowledge | Always on | Customer support |
+| **Marketing** | web_search, content, template, data | Daily 9am | Content and campaigns |
+| **DevOps** | shell, docker, git, http | Every 5 min | Monitoring and deployment |
+| **Content** | web_search, template, content, outline | Manual | Articles and docs |
+| **Research** | web_search, data, memory, summarize | Manual | Investigation and reports |
+| **Code Review** | read_file, grep, code_intel, security | Manual | PR reviews and audits |
+
+### Creating an Agent
+
+From the dashboard Agents page, click **"+ Create Agent"** or **"Templates"**:
+
+1. Choose a name and description
+2. Select which tools the agent can use
+3. Pick skills that inform its behavior
+4. Choose a provider (CC subscription, Synthetic, OpenRouter)
+5. Select a model (Sonnet 4.6, Opus 4.6, Haiku 4.5)
+6. Set a schedule (manual, always-on, or cron expression)
+
+Each agent gets its own memory scope and iteration limits. Agents on the VPS run
+autonomously using your chosen API provider.
 
 ## Security (The Conditions of Conditions)
 
