@@ -1363,6 +1363,12 @@ function navigate(page, data) {
     if (page === "detail") state.selectedTask = data;
     if (page === "settings" && data.tab) state.settingsTab = data.tab;
   }
+  // Preserve IDE container across render() — detach before innerHTML nuke, re-attach after
+  var ideEl = document.getElementById("ide-persistent");
+  if (ideEl && ideEl.children.length > 0) {
+    ideEl.remove();
+    window._ideDetached = ideEl;
+  }
   render();
   // Update active nav
   document.querySelectorAll(".sidebar-nav a").forEach((a) => {
@@ -5569,6 +5575,19 @@ function render() {
     detail: renderDetail,
     projectDetail: renderProjectDetail,
   };
+  // Re-attach preserved IDE container after innerHTML rebuild
+  if (window._ideDetached) {
+    var newPlaceholder = document.getElementById("ide-persistent");
+    if (newPlaceholder) {
+      newPlaceholder.replaceWith(window._ideDetached);
+    } else {
+      // Append to .main if placeholder wasn't created
+      var mainEl = document.querySelector(".main");
+      if (mainEl) mainEl.appendChild(window._ideDetached);
+    }
+    window._ideDetached = null;
+  }
+
   // When NOT on Code page, ensure page-content is visible and IDE is hidden
   if (state.page !== "code") {
     var _pc = document.getElementById("page-content");
