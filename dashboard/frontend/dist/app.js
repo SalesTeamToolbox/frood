@@ -3204,10 +3204,20 @@ function renderCode() {
   el.style.flex = "none";
   el.style.padding = "0";
 
+  // NOTE: innerHTML is used here with static template literals only (no user input).
+  // All dynamic content is inserted via textContent/DOM methods after this point.
   el.innerHTML = `
     <div id="ide-layout" style="display:flex;flex-direction:column;height:100%;overflow:hidden">
       <div class="ide-top-row" style="display:flex;flex:1;overflow:hidden;min-height:0">
-        <div class="ide-sidebar" style="width:240px;min-width:180px;flex-shrink:0;overflow-y:auto;background:#1e293b;border-right:1px solid #334155;display:flex;flex-direction:column">
+        <div class="ide-activity-bar">
+          <button class="ide-activity-btn active" onclick="ideShowPanel('explorer',event)" title="Explorer">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+          </button>
+          <button class="ide-activity-btn" onclick="ideShowPanel('search',event)" title="Search">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          </button>
+        </div>
+        <div id="ide-sidebar-panel" class="ide-sidebar">
           <div class="ide-sidebar-header">
             <span>EXPLORER</span>
             <div>
@@ -3233,29 +3243,50 @@ function renderCode() {
       </div>
       <div id="ide-drag-handle" class="ide-drag-handle"></div>
       <div id="ide-terminal-wrapper" class="ide-terminal-wrapper" style="display:flex">
-        <div class="ide-terminal-header">
-          <div id="ide-terminal-tabs" class="ide-terminal-tabs"></div>
-          <div style="display:flex;gap:0.4rem;align-items:center;position:relative">
-            <button class="ide-term-btn" onclick="termDropdownToggle()" title="New terminal">+</button>
-            <div id="ide-term-dropdown" class="ide-term-dropdown" style="display:none">
-              <div class="dropdown-group-label">Local</div>
-              <div class="dropdown-item" onclick="termNew('local');termDropdownDismiss()">Terminal</div>
-              <div class="dropdown-item" onclick="termNewClaude('local');termDropdownDismiss()">Claude Code</div>
-              <div class="dropdown-group-label">Remote</div>
-              <div class="dropdown-item remote-item" onclick="termNew('remote');termDropdownDismiss()">Terminal</div>
-              <div class="dropdown-item remote-item" onclick="termNewClaude('remote');termDropdownDismiss()">Claude Code</div>
+        <div class="ide-panel-tabs">
+          <button class="ide-panel-tab" onclick="idePanelTab('problems')">PROBLEMS</button>
+          <button class="ide-panel-tab" onclick="idePanelTab('output')">OUTPUT</button>
+          <button class="ide-panel-tab active" onclick="idePanelTab('terminal')">TERMINAL</button>
+          <div class="ide-panel-actions">
+            <div id="ide-terminal-tabs" class="ide-terminal-tabs"></div>
+            <div style="display:flex;gap:0.2rem;align-items:center;position:relative">
+              <button class="ide-term-btn" onclick="termDropdownToggle()" title="New terminal">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+              <button class="ide-term-btn" onclick="termSplit()" title="Split terminal">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18"/></svg>
+              </button>
+              <button class="ide-term-btn" onclick="termKillActive()" title="Kill terminal">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              </button>
+              <button class="ide-term-btn" onclick="termMaximize()" title="Maximize panel">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>
+              </button>
+              <button class="ide-term-btn" onclick="termToggle()" title="Close panel">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+              <div id="ide-term-dropdown" class="ide-term-dropdown" style="display:none">
+                <div class="dropdown-group-label">Local</div>
+                <div class="dropdown-item" onclick="termNew('local');termDropdownDismiss()">Terminal</div>
+                <div class="dropdown-item" onclick="termNewClaude('local');termDropdownDismiss()">Claude Code</div>
+                <div class="dropdown-group-label">Remote</div>
+                <div class="dropdown-item remote-item" onclick="termNew('remote');termDropdownDismiss()">Terminal</div>
+                <div class="dropdown-item remote-item" onclick="termNewClaude('remote');termDropdownDismiss()">Claude Code</div>
+              </div>
             </div>
-            <button class="ide-term-btn" onclick="termToggle()" title="Close">&times;</button>
           </div>
         </div>
         <div id="ide-terminal-container" style="flex:1;overflow:hidden"></div>
       </div>
       <div id="ide-statusbar" class="ide-statusbar">
-        <span id="ide-status-left">Ready</span>
+        <div class="ide-statusbar-left">
+          <span class="ide-status-branch" id="ide-status-branch">main</span>
+          <span id="ide-status-left">Ready</span>
+        </div>
         <div class="ide-statusbar-right">
-          <button onclick="termToggle()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.72rem">&#96; Terminal</button>
-          <span id="ide-status-lang">-</span>
           <span id="ide-status-pos">Ln 1, Col 1</span>
+          <span id="ide-status-encoding">UTF-8</span>
+          <span id="ide-status-lang">Plain Text</span>
         </div>
       </div>
     </div>
@@ -3818,6 +3849,131 @@ function termFitAll() {
 // ---------------------------------------------------------------------------
 var _remoteAvailCache = null;
 var _remoteAvailCacheAt = 0;
+
+// --- VS Code-style panel/activity bar helpers ---
+var _ideSidebarVisible = true;
+var _ideActivePanel = "explorer";
+
+function ideShowPanel(panel, evt) {
+  evt = evt || window.event;
+  var btn = evt && evt.currentTarget ? evt.currentTarget : document.querySelectorAll(".ide-activity-btn")[panel === "search" ? 1 : 0];
+  var sidebar = document.getElementById("ide-sidebar-panel");
+
+  // Toggle: clicking the active panel hides the sidebar (VS Code behavior)
+  if (panel === _ideActivePanel && _ideSidebarVisible) {
+    _ideSidebarVisible = false;
+    if (sidebar) sidebar.style.display = "none";
+    if (btn) btn.classList.remove("active");
+    return;
+  }
+
+  // Show sidebar and switch panel
+  _ideSidebarVisible = true;
+  _ideActivePanel = panel;
+  var btns = document.querySelectorAll(".ide-activity-btn");
+  btns.forEach(function(b) { b.classList.remove("active"); });
+  if (btn) btn.classList.add("active");
+  if (sidebar) sidebar.style.display = "";
+
+  var searchPanel = document.getElementById("ide-search-panel");
+  var fileTree = document.getElementById("ide-file-tree");
+  var header = document.querySelector(".ide-sidebar-header span");
+  if (panel === "search") {
+    if (searchPanel) searchPanel.style.display = "block";
+    if (fileTree) fileTree.style.display = "none";
+    if (header) header.textContent = "SEARCH";
+    var inp = document.getElementById("ide-search-input");
+    if (inp) inp.focus();
+  } else {
+    if (searchPanel) searchPanel.style.display = "none";
+    if (fileTree) fileTree.style.display = "";
+    if (header) header.textContent = "EXPLORER";
+  }
+}
+
+// Collapse/expand main Agent42 sidebar when in IDE mode
+var _ideMainSidebarCollapsed = false;
+function ideToggleMainSidebar() {
+  _ideMainSidebarCollapsed = !_ideMainSidebarCollapsed;
+  var sidebar = document.querySelector(".sidebar");
+  var main = document.querySelector(".main");
+  var miniBar = document.getElementById("ide-mini-sidebar");
+
+  if (_ideMainSidebarCollapsed) {
+    if (sidebar) sidebar.style.display = "none";
+    if (main) main.style.marginLeft = "48px";
+    // Create mini icon sidebar if not exists
+    if (!miniBar) {
+      miniBar = document.createElement("div");
+      miniBar.id = "ide-mini-sidebar";
+      miniBar.className = "ide-mini-sidebar";
+      // NOTE: innerHTML used with static content only — no user input
+      miniBar.innerHTML = [
+        {icon:'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4', page:'tasks', title:'Mission Control'},
+        {icon:'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', page:'status', title:'Status'},
+        {icon:'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z', page:'chat', title:'Chat'},
+        {icon:'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4', page:'code', title:'Code'},
+        {icon:'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z', page:'settings', title:'Settings'}
+      ].map(function(item) {
+        var active = item.page === 'code' ? ' active' : '';
+        return '<button class="ide-mini-btn' + active + '" onclick="navigate(\'' + item.page + '\');if(\'' + item.page + '\'!==\'code\')ideToggleMainSidebar()" title="' + item.title + '">'
+          + '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="' + item.icon + '"/></svg>'
+          + '</button>';
+      }).join('');
+      document.body.appendChild(miniBar);
+    }
+    miniBar.style.display = "flex";
+  } else {
+    if (sidebar) sidebar.style.display = "";
+    if (main) main.style.marginLeft = "";
+    if (miniBar) miniBar.style.display = "none";
+  }
+  // Re-fit terminals after layout change
+  setTimeout(function() { if (typeof termFitAll === "function") termFitAll(); }, 100);
+}
+
+function idePanelTab(tab) {
+  var btns = document.querySelectorAll(".ide-panel-tab");
+  btns.forEach(function(b) { b.classList.remove("active"); });
+  event.currentTarget.classList.add("active");
+  // Only terminal tab is functional for now
+  var termContainer = document.getElementById("ide-terminal-container");
+  if (termContainer) termContainer.style.display = tab === "terminal" ? "" : "none";
+  var termTabs = document.getElementById("ide-terminal-tabs");
+  if (termTabs) termTabs.style.display = tab === "terminal" ? "" : "none";
+}
+
+function termSplit() {
+  // Split = just open another terminal of the same type
+  termNew("local");
+}
+
+function termKillActive() {
+  if (_termSessions.length === 0) return;
+  var idx = _termActiveIdx;
+  var session = _termSessions[idx];
+  if (session.ws && session.ws.readyState <= 1) session.ws.close();
+  if (session.el) session.el.remove();
+  _termSessions.splice(idx, 1);
+  if (_termSessions.length > 0) {
+    _termActiveIdx = Math.min(idx, _termSessions.length - 1);
+    termSwitch(_termActiveIdx);
+  } else {
+    _termActiveIdx = 0;
+  }
+  termRenderTabs();
+}
+
+var _termMaximized = false;
+function termMaximize() {
+  var topRow = document.querySelector(".ide-top-row");
+  var handle = document.getElementById("ide-drag-handle");
+  if (!topRow) return;
+  _termMaximized = !_termMaximized;
+  topRow.style.display = _termMaximized ? "none" : "";
+  if (handle) handle.style.display = _termMaximized ? "none" : "";
+  termFitAll();
+}
 
 function termDropdownToggle() {
   var menu = document.getElementById("ide-term-dropdown");
@@ -5076,6 +5232,7 @@ function render() {
           <button class="hamburger-btn" onclick="toggleMobileSidebar()" aria-label="Open menu">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
+          ${state.page === "code" ? '<button class="ide-sidebar-toggle" onclick="ideToggleMainSidebar()" title="Toggle sidebar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>' : ''}
           <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", agents: "Agent Profiles", apps: "Apps", reports: "Reports", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? `
