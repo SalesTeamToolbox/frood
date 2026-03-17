@@ -3201,6 +3201,7 @@ function renderCode() {
   el.classList.add("ide-layout-parent");
   el.style.overflow = "hidden";
   el.style.height = "calc(100vh - 48px)";
+  el.style.flex = "none";
   el.style.padding = "0";
 
   el.innerHTML = `
