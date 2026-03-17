@@ -67,32 +67,32 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TMETA-01 | Pending | Pending |
-| TMETA-02 | Pending | Pending |
-| TMETA-03 | Pending | Pending |
-| TMETA-04 | Pending | Pending |
-| EFFT-01 | Pending | Pending |
-| EFFT-02 | Pending | Pending |
-| EFFT-03 | Pending | Pending |
-| EFFT-04 | Pending | Pending |
-| EFFT-05 | Pending | Pending |
-| LEARN-01 | Pending | Pending |
-| LEARN-02 | Pending | Pending |
-| LEARN-03 | Pending | Pending |
-| LEARN-04 | Pending | Pending |
-| LEARN-05 | Pending | Pending |
-| RETR-01 | Pending | Pending |
-| RETR-02 | Pending | Pending |
-| RETR-03 | Pending | Pending |
-| RETR-04 | Pending | Pending |
-| RETR-05 | Pending | Pending |
-| RETR-06 | Pending | Pending |
+| TMETA-01 | Phase 20 | Pending |
+| TMETA-02 | Phase 20 | Pending |
+| TMETA-03 | Phase 20 | Pending |
+| TMETA-04 | Phase 20 | Pending |
+| RETR-01 | Phase 20 | Pending |
+| RETR-02 | Phase 20 | Pending |
+| EFFT-01 | Phase 21 | Pending |
+| EFFT-02 | Phase 21 | Pending |
+| EFFT-03 | Phase 21 | Pending |
+| EFFT-04 | Phase 21 | Pending |
+| EFFT-05 | Phase 21 | Pending |
+| LEARN-01 | Phase 21 | Pending |
+| LEARN-02 | Phase 21 | Pending |
+| LEARN-03 | Phase 21 | Pending |
+| LEARN-04 | Phase 21 | Pending |
+| LEARN-05 | Phase 21 | Pending |
+| RETR-03 | Phase 22 | Pending |
+| RETR-04 | Phase 22 | Pending |
+| RETR-05 | Phase 23 | Pending |
+| RETR-06 | Phase 23 | Pending |
 
 **Coverage:**
 - v1.4 requirements: 20 total
-- Mapped to phases: 0
-- Unmapped: 20
+- Mapped to phases: 20
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-17*
-*Last updated: 2026-03-17 after initial definition*
+*Last updated: 2026-03-17 after roadmap creation*
