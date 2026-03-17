@@ -3196,13 +3196,31 @@ let _ideTreeCache = {};
 let _ideExpandedDirs = new Set([""]);
 
 function renderCode() {
-  const el = document.getElementById("page-content");
-  if (!el || state.page !== "code") return;
-  el.classList.add("ide-layout-parent");
-  el.style.overflow = "hidden";
-  el.style.height = "calc(100vh - 48px)";
-  el.style.flex = "none";
-  el.style.padding = "0";
+  var pageContent = document.getElementById("page-content");
+  var persistent = document.getElementById("ide-persistent");
+  if (!pageContent || !persistent || state.page !== "code") return;
+
+  // Hide normal page content, show persistent IDE container
+  pageContent.style.display = "none";
+  persistent.style.display = "";
+
+  // If IDE is already built, just show it — don't rebuild
+  if (persistent.querySelector("#ide-layout")) {
+    // Re-fit terminals after returning
+    setTimeout(function() {
+      if (typeof termFitAll === "function") termFitAll();
+      if (_monacoEditor) _monacoEditor.layout();
+      // Re-fit CC terminals
+      for (var i = 0; i < _ideTabs.length; i++) {
+        if (_ideTabs[i].type === "claude" && _ideTabs[i].fitAddon && _ideTabs[i].el && _ideTabs[i].el.offsetHeight > 0) {
+          try { _ideTabs[i].fitAddon.fit(); } catch(e) {}
+        }
+      }
+    }, 50);
+    return;
+  }
+
+  var el = persistent;
 
   // NOTE: innerHTML is used here with static template literals only (no user input).
   // All dynamic content is inserted via textContent/DOM methods after this point.
@@ -3302,7 +3320,6 @@ function renderCode() {
   ideLoadTree("");
   ideInitMonaco();
   initDragHandle();
-  ideReattachCCTabs();
 
   // Open default local terminal on first load
   if (_termSessions.length === 0) {
@@ -5530,6 +5547,7 @@ function render() {
           </div>
         </div>
         <div class="content" id="page-content"></div>
+        <div class="content ide-layout-parent" id="ide-persistent" style="display:none"></div>
       </div>
     </div>
   `;
@@ -5551,6 +5569,14 @@ function render() {
     detail: renderDetail,
     projectDetail: renderProjectDetail,
   };
+  // When NOT on Code page, ensure page-content is visible and IDE is hidden
+  if (state.page !== "code") {
+    var _pc = document.getElementById("page-content");
+    var _ip = document.getElementById("ide-persistent");
+    if (_pc) _pc.style.display = "";
+    if (_ip) _ip.style.display = "none";
+  }
+
   (renderers[state.page] || renderTasks)();
 
   // Re-apply sidebar collapsed state after render (persists across navigation)
