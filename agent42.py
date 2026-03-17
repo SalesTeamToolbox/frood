@@ -131,6 +131,10 @@ class Agent42:
             memory_dir, qdrant_store=qdrant_store, redis_backend=redis_backend
         )
 
+        # ── Effectiveness tracking ────────────────────────────
+        self.effectiveness_store = EffectivenessStore(data_dir / "effectiveness.db")
+        self.tool_registry._effectiveness_store = self.effectiveness_store
+
         # ── Project manager ──────────────────────────────────────────────
         self.project_manager = ProjectManager(data_dir / "projects", task_queue=None)
 
@@ -188,6 +192,7 @@ class Agent42:
                 repo_manager=self.repo_manager,
                 project_manager=self.project_manager,
                 memory_store=self.memory_store,
+                effectiveness_store=self.effectiveness_store,
             )
             config = uvicorn.Config(
                 app,

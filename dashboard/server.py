@@ -469,6 +469,7 @@ def create_app(
     profile_loader=None,
     github_account_store=None,
     memory_store=None,
+    effectiveness_store=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -1773,6 +1774,38 @@ def create_app(
         api_key: str = ""
         model: str = ""
         file_context: str = ""
+
+
+    # -- Effectiveness Tracking API (EFFT-03: MCP tool tracking) ---------------
+
+    @app.post("/api/effectiveness/record")
+    async def record_effectiveness(request: Request):
+        """Record a tool invocation from an external hook (MCP tool tracking).
+
+        Accepts JSON: {tool_name, task_type, task_id, success, duration_ms}
+        Used by PostToolUse hooks to track MCP tools that bypass ToolRegistry.
+        """
+        try:
+            data = await request.json()
+            if effectiveness_store:
+                await effectiveness_store.record(
+                    tool_name=data.get("tool_name", "unknown"),
+                    task_type=data.get("task_type", "general"),
+                    task_id=data.get("task_id", ""),
+                    success=bool(data.get("success", True)),
+                    duration_ms=float(data.get("duration_ms", 0)),
+                )
+            return {"status": "ok"}
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
+
+    @app.get("/api/effectiveness/stats")
+    async def effectiveness_stats(tool_name: str = "", task_type: str = ""):
+        """Return aggregated effectiveness statistics."""
+        if not effectiveness_store:
+            return {"stats": []}
+        stats = await effectiveness_store.get_aggregated_stats(tool_name, task_type)
+        return {"stats": stats}
 
     @app.post("/api/ide/chat")
     async def ide_chat(req: ChatRequest, _user: str = Depends(get_current_user)):
