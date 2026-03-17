@@ -108,24 +108,15 @@ def _build_registry() -> ToolRegistry:
                 name = getattr(tool_or_none, "name", "unknown")
                 logger.warning(f"Failed to register {name}: {e}")
 
-    # ── Phase 1: Filesystem & Shell ───────────────────────────────────────
-    ReadFileTool = _safe_import("tools.filesystem", "ReadFileTool")
-    WriteFileTool = _safe_import("tools.filesystem", "WriteFileTool")
-    EditFileTool = _safe_import("tools.filesystem", "EditFileTool")
-    ListDirTool = _safe_import("tools.filesystem", "ListDirTool")
-    ShellTool = _safe_import("tools.shell", "ShellTool")
-
-    _register(ReadFileTool(sandbox) if ReadFileTool else None)
-    _register(WriteFileTool(sandbox) if WriteFileTool else None)
-    _register(EditFileTool(sandbox) if EditFileTool else None)
-    _register(ListDirTool(sandbox) if ListDirTool else None)
-    _register(ShellTool(sandbox, command_filter) if ShellTool else None)
+    # ── Redundant tools NOT registered (Claude Code provides natively):
+    # ReadFileTool, WriteFileTool, EditFileTool, ListDirTool → CC Read/Write/Edit/Glob
+    # ShellTool → CC Bash tool
+    # WebSearchTool, WebFetchTool → CC WebSearch/WebFetch
+    # GrepTool → CC Grep tool
+    # HttpClientTool → CC Bash + curl
 
     # ── Group A: No dependencies ──────────────────────────────────────────
     for mod, cls in [
-        ("tools.web_search", "WebSearchTool"),
-        ("tools.web_search", "WebFetchTool"),
-        ("tools.http_client", "HttpClientTool"),
         ("tools.content_analyzer", "ContentAnalyzerTool"),
         ("tools.data_tool", "DataTool"),
         ("tools.template_tool", "TemplateTool"),
@@ -140,7 +131,6 @@ def _build_registry() -> ToolRegistry:
     # ── Group B: workspace_path only ──────────────────────────────────────
     for mod, cls in [
         ("tools.git_tool", "GitTool"),
-        ("tools.grep_tool", "GrepTool"),
         ("tools.diff_tool", "DiffTool"),
         ("tools.test_runner", "TestRunnerTool"),
         ("tools.linter_tool", "LinterTool"),
