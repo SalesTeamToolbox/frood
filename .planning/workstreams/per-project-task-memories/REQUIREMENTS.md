@@ -16,11 +16,11 @@ Requirements for task-aware memory. Each maps to roadmap phases.
 
 ### Effectiveness Tracking
 
-- [ ] **EFFT-01**: EffectivenessStore (SQLite) records tool_name, task_type, success, duration_ms, task_id per invocation
-- [ ] **EFFT-02**: Tool outcome recording is async-buffered (no latency on tool execution hot path)
-- [ ] **EFFT-03**: MCP tool usage tracked via PostToolUse hook or MCPRegistryAdapter wrapper
-- [ ] **EFFT-04**: Effectiveness aggregation query returns success_rate, avg_duration by tool+task_type pair
-- [ ] **EFFT-05**: Graceful degradation — agent continues without crashing if SQLite is unavailable
+- [x] **EFFT-01**: EffectivenessStore (SQLite) records tool_name, task_type, success, duration_ms, task_id per invocation
+- [x] **EFFT-02**: Tool outcome recording is async-buffered (no latency on tool execution hot path)
+- [x] **EFFT-03**: MCP tool usage tracked via PostToolUse hook or MCPRegistryAdapter wrapper
+- [x] **EFFT-04**: Effectiveness aggregation query returns success_rate, avg_duration by tool+task_type pair
+- [x] **EFFT-05**: Graceful degradation — agent continues without crashing if SQLite is unavailable
 
 ### Learning Extraction
 
@@ -73,11 +73,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TMETA-04 | Phase 20 | Pending |
 | RETR-01 | Phase 20 | Complete |
 | RETR-02 | Phase 20 | Complete |
-| EFFT-01 | Phase 21 | Pending |
-| EFFT-02 | Phase 21 | Pending |
-| EFFT-03 | Phase 21 | Pending |
-| EFFT-04 | Phase 21 | Pending |
-| EFFT-05 | Phase 21 | Pending |
+| EFFT-01 | Phase 21 | Complete (21-01) |
+| EFFT-02 | Phase 21 | Complete (21-01) |
+| EFFT-03 | Phase 21 | Complete (21-01) |
+| EFFT-04 | Phase 21 | Complete (21-01) |
+| EFFT-05 | Phase 21 | Complete (21-01) |
 | LEARN-01 | Phase 21 | Pending |
 | LEARN-02 | Phase 21 | Pending |
 | LEARN-03 | Phase 21 | Pending |

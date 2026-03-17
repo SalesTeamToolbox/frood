@@ -41,7 +41,7 @@
   4. The new HISTORY.md entry is also indexed in Qdrant with the correct task_id and task_type payload fields
   5. A brand-new learning entry is not surfaced to the agent until at least 3 independent observations support it (confidence capped at 0.6 until threshold met)
   6. If the SQLite database file is missing or unwritable, tool execution continues normally — no exception propagates to the agent
-**Plans**: TBD
+**Plans**: 1 of 2 (21-01-PLAN.md complete — EFFT-01 through EFFT-05 done; 21-02 learning extraction pending)
 
 ### Phase 22: Proactive Context Injection
 **Goal**: When a user starts a new task, relevant past learnings are automatically injected into context before the agent responds
@@ -71,7 +71,7 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 20. Task Metadata Foundation | 2/2 | Complete    | 2026-03-17 |
-| 21. Effectiveness Tracking and Learning Extraction | 0/? | Not started | - |
+| 21. Effectiveness Tracking and Learning Extraction | 1/2 | In progress | - |
 | 22. Proactive Context Injection | 0/? | Not started | - |
 | 23. Recommendations Engine | 0/? | Not started | - |
 
