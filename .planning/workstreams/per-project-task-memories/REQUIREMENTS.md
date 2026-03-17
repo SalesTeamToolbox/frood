@@ -32,8 +32,8 @@ Requirements for task-aware memory. Each maps to roadmap phases.
 
 ### Retrieval & Injection
 
-- [ ] **RETR-01**: `search_with_lifecycle()` accepts optional `task_type_filter` parameter
-- [ ] **RETR-02**: `build_context_semantic()` passes task_type through to filtered search
+- [x] **RETR-01**: `search_with_lifecycle()` accepts optional `task_type_filter` parameter
+- [x] **RETR-02**: `build_context_semantic()` passes task_type through to filtered search
 - [ ] **RETR-03**: Proactive context injection on UserPromptSubmit injects top-3 past learnings by inferred task_type
 - [ ] **RETR-04**: Injection score threshold (>0.80) prevents irrelevant context injection
 - [ ] **RETR-05**: Recommendations engine suggests top-3 tools/skills by success_rate for given task_type
@@ -71,8 +71,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TMETA-02 | Phase 20 | Pending |
 | TMETA-03 | Phase 20 | Pending |
 | TMETA-04 | Phase 20 | Pending |
-| RETR-01 | Phase 20 | Pending |
-| RETR-02 | Phase 20 | Pending |
+| RETR-01 | Phase 20 | Complete |
+| RETR-02 | Phase 20 | Complete |
 | EFFT-01 | Phase 21 | Pending |
 | EFFT-02 | Phase 21 | Pending |
 | EFFT-03 | Phase 21 | Pending |

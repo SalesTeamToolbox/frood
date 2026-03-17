@@ -15,24 +15,24 @@ See: .planning/PROJECT.md (updated 2026-03-17)
 ## Current Position
 
 Phase: 20 of 23 (Task Metadata Foundation)
-Plan: 1 of 1 in current phase (plan 01 complete)
+Plan: 2 of 2 in current phase (plans 01 and 02 complete)
 Status: Phase 20 complete — ready for Phase 21
-Last activity: 2026-03-17 — Plan 20-01 executed: TaskType enum + task lifecycle protocol + payload injection
+Last activity: 2026-03-17 — Plan 20-02 executed: task_type_filter added to full Qdrant search chain + RETR tests
 
-Progress: [##░░░░░░░░] 25%
+Progress: [###░░░░░░░] 50%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 5 min
-- Total execution time: ~0.1 hours
+- Total plans completed: 2
+- Average duration: 7 min
+- Total execution time: ~0.2 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 20. Task Metadata Foundation | 1 | 5 min | 5 min |
+| 20. Task Metadata Foundation | 2 | 14 min | 7 min |
 | 21. Tracking and Learning | 0 | — | — |
 | 22. Proactive Injection | 0 | — | — |
 | 23. Recommendations Engine | 0 | — | — |
@@ -49,6 +49,9 @@ Progress: [##░░░░░░░░] 25%
 - Task fields conditionally injected (only when non-None) — outside task context, payload has no task_id/task_type keys at all
 - Payload indexes scoped to MEMORY and HISTORY only — CONVERSATIONS and KNOWLEDGE not needed for task filtering
 - Lazy import of get_task_context inside methods to prevent circular imports (memory -> core direction only)
+- task_type is plain string at all MemoryStore/EmbeddingStore interface boundaries (not TaskType enum) — avoids coupling memory/ to core/
+- search_with_lifecycle task conditions must append to forgotten_filter.must after full filter assembly (not conditions list)
+- Full filter chain: MemoryStore(task_type) -> EmbeddingStore(task_type_filter) -> QdrantStore(task_type_filter) -> FieldCondition(key='task_type')
 
 ### Key Architecture Constraints (from research)
 
@@ -69,5 +72,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-17
-Stopped at: Completed 20-task-metadata-foundation/20-01-PLAN.md
-Resume file: .planning/workstreams/per-project-task-memories/phases/20-task-metadata-foundation/20-01-SUMMARY.md
+Stopped at: Completed 20-task-metadata-foundation/20-02-PLAN.md
+Resume file: .planning/workstreams/per-project-task-memories/phases/20-task-metadata-foundation/20-02-SUMMARY.md
