@@ -3576,7 +3576,11 @@ function ideRenderTabs() {
       mod + icon + esc(name) +
       '<span class="close" onclick="event.stopPropagation();ideCloseTab(' + i + ')">&times;</span>' +
     '</div>';
-  }).join("");
+  }).join("") +
+  '<button class="ide-tab-new-cc" onclick="ideOpenClaude(\'local\')" title="New Claude Code instance">' +
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg>' +
+    '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="margin-left:2px"><path d="M12 5v14M5 12h14"/></svg>' +
+  '</button>';
 }
 
 function ideCloseTab(index) {
