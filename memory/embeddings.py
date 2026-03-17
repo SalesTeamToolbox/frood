@@ -372,15 +372,25 @@ class EmbeddingStore:
         self, text: str, source: str = "", section: str = "", metadata: dict | None = None
     ):
         """Embed and store a single text entry."""
+        from core.task_context import get_task_context
+
         self._load()
         vector = await self.embed_text(text)
+
+        effective_metadata = dict(metadata or {})
+        task_id, task_type = get_task_context()
+        if task_id is not None:
+            effective_metadata["task_id"] = task_id
+        if task_type is not None:
+            effective_metadata["task_type"] = task_type
+
         entry = EmbeddingEntry(
             text=text,
             vector=vector,
             source=source,
             section=section,
             timestamp=time.time(),
-            metadata=metadata or {},
+            metadata=effective_metadata,
         )
         self._entries.append(entry)
         self._save()
@@ -507,10 +517,21 @@ class EmbeddingStore:
 
         if self._qdrant and self._qdrant.is_available:
             try:
+                from core.task_context import get_task_context
                 from memory.qdrant_store import QdrantStore
 
                 self._qdrant.clear_collection(QdrantStore.MEMORY)
                 payloads = [{"source": "memory", "section": c.get("section", "")} for c in chunks]
+
+                # Inject task context if available
+                task_id, task_type = get_task_context()
+                if task_id is not None or task_type is not None:
+                    for payload in payloads:
+                        if task_id is not None:
+                            payload["task_id"] = task_id
+                        if task_type is not None:
+                            payload["task_type"] = task_type
+
                 count = self._qdrant.upsert_vectors(QdrantStore.MEMORY, texts, vectors, payloads)
                 logger.info(f"Indexed {count} memory chunks -> Qdrant")
                 return count
@@ -544,14 +565,24 @@ class EmbeddingStore:
 
         if self._qdrant and self._qdrant.is_available:
             try:
+                from core.task_context import get_task_context
                 from memory.qdrant_store import QdrantStore
 
                 vector = await self.embed_text(text)
+                payload = {"source": "history", "section": event_type}
+
+                # Inject task context if available
+                task_id, task_type = get_task_context()
+                if task_id is not None:
+                    payload["task_id"] = task_id
+                if task_type is not None:
+                    payload["task_type"] = task_type
+
                 self._qdrant.upsert_single(
                     QdrantStore.HISTORY,
                     text,
                     vector,
-                    {"source": "history", "section": event_type},
+                    payload,
                 )
                 return
             except Exception as e:
