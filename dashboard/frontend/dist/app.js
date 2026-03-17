@@ -1356,6 +1356,9 @@ async function doHandleApproval(taskId, action, approved) {
 // ---------------------------------------------------------------------------
 function navigate(page, data) {
   state.page = page;
+  // Remove IDE layout class when leaving code page
+  var pc = document.getElementById("page-content");
+  if (pc) pc.classList.remove("ide-layout-parent");
   if (data) {
     if (page === "detail") state.selectedTask = data;
     if (page === "settings" && data.tab) state.settingsTab = data.tab;
@@ -2211,376 +2214,208 @@ async function showAppLogs(appId, name) {
 // Agents page
 // ---------------------------------------------------------------------------
 function renderAgents() {
-  const el = document.getElementById("page-content");
+  var el = document.getElementById("page-content");
   if (!el || state.page !== "agents") return;
 
-  if (state.agentsViewMode === "detail" && state.selectedProfile) {
-    renderAgentDetail(el);
-    return;
-  }
+  // Fetch agents from API
+  fetch("/api/agents", { headers: { Authorization: "Bearer " + state.token } })
+    .then(function(r) { return r.json(); })
+    .then(function(agents) { _renderAgentCards(el, agents); })
+    .catch(function() { _renderAgentCards(el, []); });
+}
 
-  // Stats
-  const total = state.profiles.length;
-  const l1Count = state.profiles.filter((p) => !p.name.startsWith("l2-")).length;
-  const l2Count = state.profiles.filter((p) => p.name.startsWith("l2-")).length;
-  const taskTypes = new Set();
-  state.profiles.forEach((p) => (p.preferred_task_types || []).forEach((t) => taskTypes.add(t)));
-
-  const cards = state.profiles.map((p) => {
-    const isDefault = p.name === state.defaultProfile;
-    const tier = p.name.startsWith("l2-") ? "L2" : "L1";
-    const tierClass = tier === "L2" ? "badge-l2" : "badge-l1";
-    const taskChips = (p.preferred_task_types || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ");
-    const skillChips = (p.preferred_skills || []).slice(0, 4).map((s) => `<span class="badge-type">${esc(s)}</span>`).join(" ");
-    const extra = (p.preferred_skills || []).length > 4 ? `<span class="badge-type">+${p.preferred_skills.length - 4}</span>` : "";
-
-    // Model chip from routing config
-    const routingInfo = state.routingConfig && state.routingConfig.profiles ? state.routingConfig.profiles[p.name] : null;
-    const effectivePrimary = routingInfo && routingInfo.effective ? routingInfo.effective.primary : null;
-    const isModelOverridden = routingInfo && routingInfo.overrides && routingInfo.overrides.primary != null;
-    const modelChip = effectivePrimary
-      ? '<div class="agent-card-chips" style="margin-top:0.25rem">'
-        + '<span class="badge-type" style="font-size:0.65rem;'
-        + (isModelOverridden ? '' : 'color:var(--text-muted)') + '"'
-        + ' title="' + (isModelOverridden ? 'Overridden' : 'Inherited from default') + '">'
-        + esc(effectivePrimary) + (isModelOverridden ? '' : ' (inherited)')
-        + '</span></div>'
-      : '';
-
-    return `
-      <div class="agent-card ${isDefault ? 'agent-card-default' : ''}" onclick="loadProfileDetail('${esc(p.name)}')">
-        <div class="agent-card-header">
-          <div class="agent-card-title">
-            <h4>${esc(p.name)}</h4>
-            <span class="badge-tier ${tierClass}">${tier}</span>
-            ${isDefault ? '<span class="badge-tier badge-default">default</span>' : ''}
-          </div>
-        </div>
-        <p class="agent-card-desc">${esc(p.description) || '<span style="color:var(--text-muted)">No description</span>'}</p>
-        <div class="agent-card-meta">
-          <div class="agent-card-chips">${taskChips}</div>
-          <div class="agent-card-chips">${skillChips}${extra}</div>
-          ${modelChip}
-        </div>
-      </div>
-    `;
+function _renderAgentCards(el, agents) {
+  var statusColors = { active: "#34d399", running: "#38bdf8", paused: "#facc15", stopped: "#64748b", error: "#f87171" };
+  var cards = agents.map(function(a) {
+    var color = statusColors[a.status] || "#64748b";
+    var tools = (a.tools || []).slice(0, 4).map(function(t) { return '<span class="badge-type">' + esc(t) + '</span>'; }).join(" ");
+    var extra = (a.tools || []).length > 4 ? '<span class="badge-type">+' + ((a.tools || []).length - 4) + '</span>' : '';
+    var skills = (a.skills || []).slice(0, 3).map(function(s) { return '<span class="badge-type" style="background:var(--primary-dim);color:var(--primary)">' + esc(s) + '</span>'; }).join(" ");
+    return '<div class="agent-card" onclick="agentShowDetail(\'' + a.id + '\')">' +
+      '<div class="agent-card-header">' +
+        '<div class="agent-card-title"><h4>' + esc(a.name) + '</h4>' +
+        '<span class="badge-tier" style="background:' + color + ';color:#000">' + esc(a.status) + '</span></div>' +
+      '</div>' +
+      '<p class="agent-card-desc">' + esc(a.description || "No description") + '</p>' +
+      '<div class="agent-card-meta">' +
+        '<div style="font-size:0.72rem;color:var(--text-secondary)">Model: ' + esc(a.model || "default") + ' | Schedule: ' + esc(a.schedule || "manual") + '</div>' +
+        '<div class="agent-card-chips" style="margin-top:0.3rem">' + tools + extra + '</div>' +
+        '<div class="agent-card-chips" style="margin-top:0.2rem">' + skills + '</div>' +
+        '<div style="font-size:0.68rem;color:var(--text-muted);margin-top:0.3rem">Runs: ' + (a.total_runs || 0) + ' | Tokens: ' + (a.total_tokens || 0) + '</div>' +
+      '</div></div>';
   }).join("");
 
-  // NOTE: All interpolated values use esc() for XSS protection — this follows
-  // the existing innerHTML pattern used throughout this file (55+ inline handlers).
-  const isCustomPersona = !!state.personaCustom;
-  const activePersona = state.personaCustom || state.personaDefault || "";
-  const personaCard = `
-    <div class="persona-card">
-      <div class="persona-card-header">
-        <div style="display:flex;align-items:center;gap:0.75rem">
-          <h4 style="margin:0;font-size:1rem;font-weight:600">Chat Persona</h4>
-          <span class="badge-tier ${isCustomPersona ? 'badge-l2' : 'badge-l1'}">${isCustomPersona ? 'Custom' : 'Default'}</span>
-        </div>
-        <div style="display:flex;gap:0.5rem">
-          ${isCustomPersona ? '<button class="btn btn-outline btn-sm" onclick="resetPersona()">Reset to Default</button>' : ''}
-          <button class="btn btn-primary btn-sm" onclick="showEditPersonaModal()">Edit</button>
-        </div>
-      </div>
-      <div class="persona-preview">${esc(activePersona)}</div>
-    </div>
-  `;
-
-  el.innerHTML = `
-    ${personaCard}
-    <div class="stats-row">
-      <div class="stat-card"><div class="stat-label">Total Profiles</div><div class="stat-value">${total}</div></div>
-      <div class="stat-card"><div class="stat-label">L1 Agents</div><div class="stat-value text-info">${l1Count}</div></div>
-      <div class="stat-card"><div class="stat-label">L2 Agents</div><div class="stat-value text-warning">${l2Count}</div></div>
-      <div class="stat-card"><div class="stat-label">Task Types</div><div class="stat-value">${taskTypes.size}</div></div>
-    </div>
-    ${state.profiles.length ? `<div class="agents-grid">${cards}</div>` : '<div class="empty-state" style="padding:3rem;text-align:center"><p style="font-size:1.1rem;margin-bottom:1rem">No agent profiles found</p><p style="color:var(--text-muted)">Create your first agent profile to get started.</p><button class="btn btn-primary" style="margin-top:1rem" onclick="showCreateProfileModal()">+ Create Profile</button></div>'}
-  `;
+  el.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
+      '<h2 style="margin:0">Agents</h2>' +
+      '<div style="display:flex;gap:0.5rem">' +
+        '<button class="btn btn-primary" onclick="agentShowCreate()">+ Create Agent</button>' +
+        '<button class="btn btn-outline" onclick="agentShowTemplates()">Templates</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="stats-row">' +
+      '<div class="stat-card"><div class="stat-label">Total Agents</div><div class="stat-value">' + agents.length + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Active</div><div class="stat-value text-success">' + agents.filter(function(a) { return a.status === "active" || a.status === "running"; }).length + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Paused</div><div class="stat-value text-warning">' + agents.filter(function(a) { return a.status === "paused"; }).length + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Total Runs</div><div class="stat-value">' + agents.reduce(function(s, a) { return s + (a.total_runs || 0); }, 0) + '</div></div>' +
+    '</div>' +
+    (cards ? '<div class="agents-grid">' + cards + '</div>' :
+      '<div class="empty-state" style="padding:3rem;text-align:center">' +
+        '<p style="font-size:1.1rem;margin-bottom:1rem">No agents yet</p>' +
+        '<p style="color:var(--text-muted)">Create your first autonomous agent or start from a template.</p>' +
+        '<div style="display:flex;gap:0.5rem;justify-content:center;margin-top:1rem">' +
+          '<button class="btn btn-primary" onclick="agentShowCreate()">+ Create Agent</button>' +
+          '<button class="btn btn-outline" onclick="agentShowTemplates()">Use Template</button>' +
+        '</div>' +
+      '</div>');
 }
 
-function renderAgentDetail(el) {
-  const p = state.selectedProfile;
-  if (!p) return;
-
-  const tier = p.name.startsWith("l2-") ? "L2" : "L1";
-  const tierClass = tier === "L2" ? "badge-l2" : "badge-l1";
-  const isDefault = p.name === state.defaultProfile;
-
-  const taskChips = (p.preferred_task_types || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ");
-
-  // Cross-reference skills with loaded skills state
-  const skillsHtml = (p.preferred_skills || []).map((s) => {
-    const loaded = state.skills.find((sk) => sk.name === s);
-    const indicator = loaded ? (loaded.enabled !== false ? '&#9989;' : '&#10060;') : '&#10067;';
-    return `<span class="badge-type">${indicator} ${esc(s)}</span>`;
-  }).join(" ");
-
-  const personaHtml = p.prompt_overlay
-    ? `<div class="agent-detail-section"><h4>Persona Instructions</h4><div class="agent-persona-content">${esc(p.prompt_overlay)}</div></div>`
-    : '';
-
-  // Integration section (v2.0 — model routing handled by Claude Code)
-  const routingHtml = '<div class="agent-detail-section">'
-    + '<h4>Integration</h4>'
-    + '<p class="text-muted" style="font-size:0.85rem">Model routing is managed by Claude Code. Agent profiles define system prompts and tool/skill access.</p>'
-    + '</div>';
-
-  // NOTE: innerHTML is the established pattern for this SPA (55+ handlers). All interpolated
-  // values are escaped via esc() for XSS protection.
-  el.innerHTML = `
-    <div class="agent-detail">
-      <div class="agent-detail-topbar">
-        <button class="btn btn-outline btn-sm" onclick="state.agentsViewMode='grid';state.selectedProfile=null;render()">&#8592; Back to Profiles</button>
-        <div class="agent-detail-actions">
-          ${!isDefault ? `<button class="btn btn-outline btn-sm" onclick="setDefaultProfile('${esc(p.name)}')">Set as Default</button>` : '<span class="badge-tier badge-default">Current Default</span>'}
-          <button class="btn btn-outline btn-sm" onclick="showEditProfileModal('${esc(p.name)}')">Edit</button>
-          ${!isDefault ? `<button class="btn btn-outline btn-sm btn-danger-text" onclick="deleteProfile('${esc(p.name)}')">Delete</button>` : ''}
-        </div>
-      </div>
-      <div class="agent-detail-card">
-        <div class="agent-detail-header">
-          <h3>${esc(p.name)}</h3>
-          <span class="badge-tier ${tierClass}">${tier}</span>
-          ${isDefault ? '<span class="badge-tier badge-default">default</span>' : ''}
-        </div>
-        <p style="color:var(--text-secondary);margin-bottom:1.5rem">${esc(p.description)}</p>
-        <div class="agent-detail-section">
-          <h4>Task Types</h4>
-          <div class="agent-card-chips">${taskChips || '<span style="color:var(--text-muted)">None configured</span>'}</div>
-        </div>
-        <div class="agent-detail-section">
-          <h4>Preferred Skills</h4>
-          <div class="agent-card-chips">${skillsHtml || '<span style="color:var(--text-muted)">None configured</span>'}</div>
-        </div>
-        ${personaHtml}
-        ${routingHtml}
-        ${p.source_path ? `<div class="agent-detail-section"><h4>Source</h4><code style="font-size:0.8rem;color:var(--text-muted)">${esc(p.source_path)}</code></div>` : ''}
-      </div>
-    </div>
-  `;
+function agentShowCreate() {
+  var el = document.getElementById("page-content");
+  if (!el) return;
+  el.innerHTML =
+    '<div style="max-width:600px;margin:0 auto">' +
+      '<h2>Create Agent</h2>' +
+      '<div class="form-group"><label>Name</label><input type="text" id="agent-name" placeholder="My Agent"></div>' +
+      '<div class="form-group"><label>Description</label><textarea id="agent-desc" rows="2" placeholder="What does this agent do?"></textarea></div>' +
+      '<div class="form-group"><label>Provider</label>' +
+        '<select id="agent-provider"><option value="anthropic">Anthropic (CC Subscription)</option><option value="synthetic">Synthetic.new</option><option value="openrouter">OpenRouter</option></select></div>' +
+      '<div class="form-group"><label>Model</label>' +
+        '<select id="agent-model"><option value="claude-sonnet-4-6">Sonnet 4.6</option><option value="claude-opus-4-6">Opus 4.6</option><option value="claude-haiku-4-5">Haiku 4.5</option></select></div>' +
+      '<div class="form-group"><label>Schedule</label>' +
+        '<select id="agent-schedule"><option value="manual">Manual</option><option value="always">Always On</option><option value="0 9 * * *">Daily 9am</option><option value="*/5 * * * *">Every 5 min</option></select></div>' +
+      '<div class="form-group"><label>Tools (comma-separated)</label><input type="text" id="agent-tools" placeholder="shell, memory, web_search, git"></div>' +
+      '<div class="form-group"><label>Skills (comma-separated)</label><input type="text" id="agent-skills" placeholder="code-review, debugging, testing"></div>' +
+      '<div class="form-group"><label>Max Iterations</label><input type="number" id="agent-iterations" value="10" min="1" max="100"></div>' +
+      '<div style="display:flex;gap:0.5rem;margin-top:1.5rem">' +
+        '<button class="btn btn-outline" onclick="renderAgents()">Cancel</button>' +
+        '<button class="btn btn-primary" onclick="agentDoCreate()">Create Agent</button>' +
+      '</div>' +
+    '</div>';
 }
 
-async function loadProfileDetail(name) {
+async function agentDoCreate() {
+  var data = {
+    name: document.getElementById("agent-name").value.trim(),
+    description: document.getElementById("agent-desc").value.trim(),
+    provider: document.getElementById("agent-provider").value,
+    model: document.getElementById("agent-model").value,
+    schedule: document.getElementById("agent-schedule").value,
+    tools: document.getElementById("agent-tools").value.split(",").map(function(s) { return s.trim(); }).filter(Boolean),
+    skills: document.getElementById("agent-skills").value.split(",").map(function(s) { return s.trim(); }).filter(Boolean),
+    max_iterations: parseInt(document.getElementById("agent-iterations").value) || 10,
+  };
+  if (!data.name) { toast("Agent name is required", "error"); return; }
   try {
-    const [profile, routing] = await Promise.all([
-      api(`/profiles/${encodeURIComponent(name)}`),
-      api(`/agent-routing/${encodeURIComponent(name)}`).catch(() => null),
-    ]);
-    state.selectedProfile = profile;
-    state.selectedProfileRouting = routing;
-    state.agentRoutingEdits = {};
-    state.agentsViewMode = "detail";
-    render();
-  } catch (err) { toast(err.message, "error"); }
-}
-
-function showCreateProfileModal() {
-  const taskTypes = [
-    "CODING","DEBUGGING","REFACTORING","RESEARCH","DOCUMENTATION",
-    "MARKETING","EMAIL","DESIGN","CONTENT","STRATEGY","DATA_ANALYSIS","PROJECT_MANAGEMENT",
-    "APP_CREATE","APP_UPDATE"
-  ];
-  const checkboxes = taskTypes.map((t) => `<label class="checkbox-label"><input type="checkbox" value="${t}" class="cp-task-type"> ${t}</label>`).join("");
-  showModal(`
-    <div class="modal" style="max-width:560px">
-      <div class="modal-header"><h3>Create Profile</h3>
-        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label for="cp-name">Name</label>
-          <input type="text" id="cp-name" placeholder="my-custom-agent" pattern="[a-z0-9][a-z0-9-]*">
-          <div class="help">Lowercase letters, numbers, and hyphens only.</div>
-        </div>
-        <div class="form-group">
-          <label for="cp-desc">Description</label>
-          <input type="text" id="cp-desc" placeholder="A brief description of this agent profile">
-        </div>
-        <div class="form-group">
-          <label>Task Types</label>
-          <div class="checkbox-grid">${checkboxes}</div>
-        </div>
-        <div class="form-group">
-          <label for="cp-skills">Preferred Skills</label>
-          <input type="text" id="cp-skills" placeholder="coding, debugging, testing">
-          <div class="help">Comma-separated skill names.</div>
-        </div>
-        <div class="form-group">
-          <label for="cp-persona">Persona Instructions</label>
-          <textarea id="cp-persona" rows="6" placeholder="System prompt overlay for this agent profile..."></textarea>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="createProfile()">Create</button>
-      </div>
-    </div>
-  `);
-  document.getElementById("cp-name")?.focus();
-}
-
-function showEditPersonaModal() {
-  const active = state.personaCustom || state.personaDefault || "";
-  const defaultRef = state.personaDefault || "";
-  showModal(`
-    <div class="modal" style="max-width:640px">
-      <div class="modal-header"><h3>Edit Chat Persona</h3>
-        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label for="persona-prompt">System Prompt</label>
-          <textarea id="persona-prompt" rows="12" style="font-family:var(--font-mono);font-size:0.85rem">${esc(active)}</textarea>
-        </div>
-        <details class="persona-reference">
-          <summary style="cursor:pointer;font-size:0.85rem;color:var(--text-muted)">View default prompt</summary>
-          <pre style="white-space:pre-wrap;font-size:0.8rem;margin-top:0.5rem;padding:0.75rem;background:var(--bg-surface);border-radius:var(--radius-sm);max-height:200px;overflow-y:auto">${esc(defaultRef)}</pre>
-        </details>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
-        ${state.personaCustom ? '<button class="btn btn-outline" onclick="resetPersona()">Reset to Default</button>' : ''}
-        <button class="btn btn-primary" onclick="savePersona()">Save</button>
-      </div>
-    </div>
-  `);
-  document.getElementById("persona-prompt")?.focus();
-}
-
-async function savePersona() {
-  const prompt = document.getElementById("persona-prompt")?.value || "";
-  try {
-    await api("/persona", { method: "PUT", body: JSON.stringify({ prompt }) });
-    await loadPersona();
-    closeModal();
-    render();
-    toast("Chat persona updated.", "success");
-  } catch (err) { toast(err.message, "error"); }
-}
-
-async function resetPersona() {
-  try {
-    await api("/persona", { method: "PUT", body: JSON.stringify({ prompt: "" }) });
-    await loadPersona();
-    closeModal();
-    render();
-    toast("Chat persona reset to default.", "success");
-  } catch (err) { toast(err.message, "error"); }
-}
-
-function showEditProfileModal(name) {
-  const p = state.selectedProfile;
-  if (!p) return;
-  const taskTypes = [
-    "CODING","DEBUGGING","REFACTORING","RESEARCH","DOCUMENTATION",
-    "MARKETING","EMAIL","DESIGN","CONTENT","STRATEGY","DATA_ANALYSIS","PROJECT_MANAGEMENT",
-    "APP_CREATE","APP_UPDATE"
-  ];
-  const activeTypes = new Set(p.preferred_task_types || []);
-  const checkboxes = taskTypes.map((t) => `<label class="checkbox-label"><input type="checkbox" value="${t}" class="ep-task-type" ${activeTypes.has(t) ? 'checked' : ''}> ${t}</label>`).join("");
-  showModal(`
-    <div class="modal" style="max-width:560px">
-      <div class="modal-header"><h3>Edit Profile: ${esc(name)}</h3>
-        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label>Name</label>
-          <input type="text" value="${esc(name)}" disabled style="opacity:0.6">
-        </div>
-        <div class="form-group">
-          <label for="ep-desc">Description</label>
-          <input type="text" id="ep-desc" value="${esc(p.description || '')}">
-        </div>
-        <div class="form-group">
-          <label>Task Types</label>
-          <div class="checkbox-grid">${checkboxes}</div>
-        </div>
-        <div class="form-group">
-          <label for="ep-skills">Preferred Skills</label>
-          <input type="text" id="ep-skills" value="${esc((p.preferred_skills || []).join(', '))}">
-          <div class="help">Comma-separated skill names.</div>
-        </div>
-        <div class="form-group">
-          <label for="ep-persona">Persona Instructions</label>
-          <textarea id="ep-persona" rows="6">${esc(p.prompt_overlay || '')}</textarea>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="updateProfile('${esc(name)}')">Save</button>
-      </div>
-    </div>
-  `);
-}
-
-async function createProfile() {
-  const name = document.getElementById("cp-name")?.value?.trim();
-  const description = document.getElementById("cp-desc")?.value?.trim() || "";
-  const skillsRaw = document.getElementById("cp-skills")?.value?.trim() || "";
-  const persona = document.getElementById("cp-persona")?.value?.trim() || "";
-  const taskTypes = Array.from(document.querySelectorAll(".cp-task-type:checked")).map((cb) => cb.value);
-  const skills = skillsRaw ? skillsRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
-
-  if (!name) { toast("Profile name is required", "error"); return; }
-
-  try {
-    await api("/profiles", {
+    var res = await fetch("/api/agents", {
       method: "POST",
-      body: JSON.stringify({ name, description, preferred_skills: skills, preferred_task_types: taskTypes, prompt_overlay: persona }),
+      headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
+      body: JSON.stringify(data),
     });
-    closeModal();
-    toast("Profile created", "success");
-    await loadProfiles();
-    render();
-  } catch (err) { toast(err.message, "error"); }
+    if (res.ok) { toast("Agent created: " + data.name, "success"); renderAgents(); }
+    else { toast("Failed to create agent", "error"); }
+  } catch (e) { toast("Error: " + e.message, "error"); }
 }
 
-async function updateProfile(name) {
-  const description = document.getElementById("ep-desc")?.value?.trim();
-  const skillsRaw = document.getElementById("ep-skills")?.value?.trim() || "";
-  const persona = document.getElementById("ep-persona")?.value?.trim() || "";
-  const taskTypes = Array.from(document.querySelectorAll(".ep-task-type:checked")).map((cb) => cb.value);
-  const skills = skillsRaw ? skillsRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
-
-  try {
-    const updated = await api(`/profiles/${encodeURIComponent(name)}`, {
-      method: "PUT",
-      body: JSON.stringify({ description, preferred_skills: skills, preferred_task_types: taskTypes, prompt_overlay: persona }),
+function agentShowTemplates() {
+  fetch("/api/agents/templates", { headers: { Authorization: "Bearer " + state.token } })
+    .then(function(r) { return r.json(); })
+    .then(function(templates) {
+      var el = document.getElementById("page-content");
+      if (!el) return;
+      var cards = Object.keys(templates).map(function(key) {
+        var t = templates[key];
+        var tools = (t.tools || []).map(function(x) { return '<span class="badge-type">' + esc(x) + '</span>'; }).join(" ");
+        return '<div class="agent-card" style="cursor:pointer" onclick="agentCreateFromTemplate(\'' + key + '\')">' +
+          '<div class="agent-card-header"><div class="agent-card-title"><h4>' + esc(t.name) + '</h4></div></div>' +
+          '<p class="agent-card-desc">' + esc(t.description) + '</p>' +
+          '<div class="agent-card-meta"><div class="agent-card-chips">' + tools + '</div>' +
+          '<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.3rem">Model: ' + esc(t.model || "default") + ' | Schedule: ' + esc(t.schedule || "manual") + '</div></div></div>';
+      }).join("");
+      el.innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
+          '<h2>Agent Templates</h2>' +
+          '<button class="btn btn-outline" onclick="renderAgents()">Back</button>' +
+        '</div>' +
+        '<p style="color:var(--text-secondary);margin-bottom:1rem">Click a template to create an agent from it.</p>' +
+        '<div class="agents-grid">' + cards + '</div>';
     });
-    closeModal();
-    toast("Profile updated", "success");
-    state.selectedProfile = updated;
-    await loadProfiles();
-    render();
-  } catch (err) { toast(err.message, "error"); }
 }
 
-async function deleteProfile(name) {
-  if (!confirm(`Delete profile "${name}"? This cannot be undone.`)) return;
+async function agentCreateFromTemplate(key) {
   try {
-    await api(`/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
-    toast("Profile deleted", "success");
-    state.agentsViewMode = "grid";
-    state.selectedProfile = null;
-    await loadProfiles();
-    render();
-  } catch (err) { toast(err.message, "error"); }
+    var res = await fetch("/api/agents", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
+      body: JSON.stringify({ template: key }),
+    });
+    if (res.ok) {
+      var agent = await res.json();
+      toast("Created agent: " + agent.name, "success");
+      renderAgents();
+    } else { toast("Failed to create agent", "error"); }
+  } catch (e) { toast("Error: " + e.message, "error"); }
 }
 
-async function setDefaultProfile(name) {
+async function agentShowDetail(id) {
   try {
-    await api(`/profiles/default/${encodeURIComponent(name)}`, { method: "PUT" });
-    toast(`Default profile set to "${name}"`, "success");
-    state.defaultProfile = name;
-    await loadProfiles();
-    // Reload detail if viewing
-    if (state.agentsViewMode === "detail" && state.selectedProfile) {
-      await loadProfileDetail(name);
-    } else {
-      render();
-    }
-  } catch (err) { toast(err.message, "error"); }
+    var res = await fetch("/api/agents/" + id, { headers: { Authorization: "Bearer " + state.token } });
+    var agent = await res.json();
+    var el = document.getElementById("page-content");
+    if (!el) return;
+    var statusColors = { active: "#34d399", running: "#38bdf8", paused: "#facc15", stopped: "#64748b", error: "#f87171" };
+    var color = statusColors[agent.status] || "#64748b";
+    var tools = (agent.tools || []).map(function(t) { return '<span class="badge-type">' + esc(t) + '</span>'; }).join(" ");
+    var skills = (agent.skills || []).map(function(s) { return '<span class="badge-type" style="background:var(--primary-dim);color:var(--primary)">' + esc(s) + '</span>'; }).join(" ");
+    var lastRun = agent.last_run_at ? new Date(agent.last_run_at * 1000).toLocaleString() : "Never";
+    el.innerHTML =
+      '<div style="max-width:700px">' +
+        '<button class="btn btn-outline btn-sm" onclick="renderAgents()" style="margin-bottom:1rem">&larr; Back</button>' +
+        '<div class="agent-detail-card" style="background:var(--bg-secondary);padding:1.5rem;border-radius:12px;border:1px solid var(--border)">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
+            '<div><h3 style="margin:0">' + esc(agent.name) + '</h3>' +
+            '<span class="badge-tier" style="background:' + color + ';color:#000;margin-top:0.25rem;display:inline-block">' + esc(agent.status) + '</span></div>' +
+            '<div style="display:flex;gap:0.5rem">' +
+              (agent.status === "stopped" ? '<button class="btn btn-primary btn-sm" onclick="agentStart(\'' + agent.id + '\')">Start</button>' : '') +
+              (agent.status === "active" ? '<button class="btn btn-outline btn-sm" onclick="agentStop(\'' + agent.id + '\')">Stop</button>' : '') +
+              '<button class="btn btn-outline btn-sm btn-danger-text" onclick="agentDelete(\'' + agent.id + '\')">Delete</button>' +
+            '</div>' +
+          '</div>' +
+          '<p style="color:var(--text-secondary)">' + esc(agent.description || "No description") + '</p>' +
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">' +
+            '<div><strong>Provider:</strong> ' + esc(agent.provider) + '</div>' +
+            '<div><strong>Model:</strong> ' + esc(agent.model) + '</div>' +
+            '<div><strong>Schedule:</strong> ' + esc(agent.schedule) + '</div>' +
+            '<div><strong>Max Iterations:</strong> ' + agent.max_iterations + '</div>' +
+            '<div><strong>Total Runs:</strong> ' + (agent.total_runs || 0) + '</div>' +
+            '<div><strong>Total Tokens:</strong> ' + (agent.total_tokens || 0) + '</div>' +
+            '<div><strong>Last Run:</strong> ' + lastRun + '</div>' +
+            '<div><strong>Memory Scope:</strong> ' + esc(agent.memory_scope) + '</div>' +
+          '</div>' +
+          '<div style="margin-top:1rem"><strong>Tools:</strong><div style="margin-top:0.3rem">' + (tools || "None") + '</div></div>' +
+          '<div style="margin-top:0.75rem"><strong>Skills:</strong><div style="margin-top:0.3rem">' + (skills || "None") + '</div></div>' +
+        '</div>' +
+      '</div>';
+  } catch (e) { toast("Error loading agent", "error"); }
+}
+
+async function agentStart(id) {
+  await fetch("/api/agents/" + id + "/start", { method: "POST", headers: { Authorization: "Bearer " + state.token } });
+  toast("Agent started", "success");
+  agentShowDetail(id);
+}
+
+async function agentStop(id) {
+  await fetch("/api/agents/" + id + "/stop", { method: "POST", headers: { Authorization: "Bearer " + state.token } });
+  toast("Agent stopped", "success");
+  agentShowDetail(id);
+}
+
+async function agentDelete(id) {
+  if (!confirm("Delete this agent?")) return;
+  await fetch("/api/agents/" + id, { method: "DELETE", headers: { Authorization: "Bearer " + state.token } });
+  toast("Agent deleted", "success");
+  renderAgents();
 }
 
 // ---------------------------------------------------------------------------
@@ -3351,249 +3186,643 @@ function showCreateProjectModal() {
 }
 
 // ---------------------------------------------------------------------------
-// Code Page
+// IDE (Monaco Editor)
 // ---------------------------------------------------------------------------
+let _monacoEditor = null;
+let _monacoReady = false;
+const _ideTabs = [];
+let _ideActiveTab = -1;
+let _ideTreeCache = {};
+let _ideExpandedDirs = new Set([""]);
+
 function renderCode() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "code") return;
-
-  const sessions = state.codeSessions;
-  const hasSession = !!state.codeCurrentSessionId;
-  const currentSession = sessions.find(s => s.id === state.codeCurrentSessionId);
-
-  // Session sidebar
-  const sessionList = sessions.map(s => {
-    const isActive = s.id === state.codeCurrentSessionId;
-    const unread = s._unread ? `<span class="session-unread">${s._unread}</span>` : "";
-    const title = s.title || "New Code";
-    return `
-      <div class="session-item ${isActive ? 'active' : ''}" onclick="switchCodeSession('${s.id}')">
-        <span class="session-title">${esc(title)}</span>
-        ${unread}
-        <button class="session-delete" onclick="event.stopPropagation();deleteChatSession('${s.id}','code')" title="Delete">&times;</button>
-      </div>`;
-  }).join("");
-
-  // Code setup flow or chat
-  let mainContent = "";
-  if (!hasSession) {
-    mainContent = `
-      <div class="code-welcome">
-        <div class="chat-welcome-icon" style="background:var(--success-dim);border-color:var(--success)"><img src="/assets/agent42-avatar.svg" alt="Agent42" width="64" height="64"></div>
-        <h2 style="margin-bottom:0.5rem">Code with Agent42</h2>
-        <p style="color:var(--text-secondary);margin-bottom:1.5rem">Start a new coding session to build projects with AI assistance.</p>
-        <button class="btn btn-primary" onclick="createChatSession('code')">+ New Coding Session</button>
-      </div>`;
-  } else if (state.codeSetupStep === 1 || state.codeSetupStep === 2) {
-    mainContent = renderCodeSetupHTML(state.codeCurrentSessionId);
-  } else {
-    mainContent = renderCodeChatHTML();
-  }
+  el.classList.add("ide-layout-parent");
+  el.style.overflow = "hidden";
+  el.style.height = "calc(100vh - 48px)";
+  el.style.padding = "0";
 
   el.innerHTML = `
-    <div class="code-layout">
-      <div class="session-sidebar">
-        <button class="btn btn-primary btn-sm session-new-btn" onclick="createChatSession('code')">+ New Session</button>
-        <div class="session-list">${sessionList}</div>
-      </div>
-      <div class="code-main">
-        ${mainContent}
-      </div>
-    </div>
-  `;
-
-  if (hasSession && state.codeSetupStep >= 3) {
-    scrollChatToBottom("code-messages");
-    if (state.codeCanvasOpen) renderCodeCanvasPanel();
-  }
-}
-
-function renderCodeSetupHTML(sessionId) {
-  if (state.codeSetupStep === 1) {
-    return `
-      <div class="code-setup">
-        <h3>Project Setup</h3>
-        <p style="color:var(--text-secondary);margin-bottom:1.5rem">Where will this project run?</p>
-        <div class="setup-cards">
-          <label class="setup-card">
-            <input type="radio" name="code-mode" value="local" checked>
-            <div class="setup-card-content">
-              <div class="setup-card-icon">&#128187;</div>
-              <div class="setup-card-title">Local App</div>
-              <div class="setup-card-desc">Build and run on this server using Agent42's app platform</div>
-            </div>
-          </label>
-          <label class="setup-card">
-            <input type="radio" name="code-mode" value="remote">
-            <div class="setup-card-content">
-              <div class="setup-card-icon">&#9729;&#65039;</div>
-              <div class="setup-card-title">Remote Server</div>
-              <div class="setup-card-desc">Deploy to a remote server via SSH connection</div>
-            </div>
-          </label>
-          <label class="setup-card">
-            <input type="radio" name="code-mode" value="github">
-            <div class="setup-card-content">
-              <div class="setup-card-icon">&#128025;</div>
-              <div class="setup-card-title">GitHub Repository</div>
-              <div class="setup-card-desc">Connect to a GitHub repo — create new or clone existing</div>
-            </div>
-          </label>
+    <div class="ide-layout" style="display:flex;height:100%;overflow:hidden">
+      <div class="ide-sidebar" style="width:240px;min-width:180px;flex-shrink:0;overflow-y:auto;background:#1e293b;border-right:1px solid #334155;display:flex;flex-direction:column">
+        <div class="ide-sidebar-header">
+          <span>EXPLORER</span>
+          <div>
+            <button onclick="ideRefreshTree()" title="Refresh">&#8635;</button>
+            <button onclick="ideToggleSearch()" title="Search">&#128269;</button>
+          </div>
         </div>
-        <button class="btn btn-primary" style="margin-top:1.5rem" onclick="state.codeSetupStep=2;renderCode()">Continue</button>
-      </div>`;
-  }
-
-  const mode = document.querySelector('input[name="code-mode"]:checked')?.value || "local";
-  if (state.codeSetupStep === 2) {
-    const localFields = `
-      <div class="form-group">
-        <label>App Name</label>
-        <input type="text" id="code-app-name" placeholder="my-awesome-app">
-      </div>
-      <div class="form-group">
-        <label>Runtime</label>
-        <select id="code-runtime">
-          <option value="python">Python (Flask/FastAPI)</option>
-          <option value="node">Node.js (Express/Next.js)</option>
-          <option value="static">Static (HTML/CSS/JS)</option>
-        </select>
-      </div>`;
-
-    const remoteFields = `
-      <div class="form-group">
-        <label>SSH Host</label>
-        <input type="text" id="code-ssh-host" placeholder="user@hostname">
-        <div class="help">Must be in SSH_ALLOWED_HOSTS</div>
-      </div>
-      <div class="form-group">
-        <label><input type="checkbox" id="code-deploy-now"> Deploy immediately after setup</label>
-      </div>`;
-
-    const connectedRepoOptions = state.repos.filter(r => r.status === "active").map(r =>
-      `<option value="${esc(r.id)}">${esc(r.name)}${r.github_repo ? " (" + esc(r.github_repo) + ")" : ""}</option>`
-    ).join("");
-
-    const githubFields = `
-      ${connectedRepoOptions ? `
-      <div class="form-group">
-        <label>Use a connected repository</label>
-        <select id="code-repo-id">
-          <option value="">-- Select a repo from Settings --</option>
-          ${connectedRepoOptions}
-        </select>
-        <div class="help">Repos connected in Settings are ready to code on and submit PRs</div>
-      </div>
-      <div style="text-align:center;color:var(--text-muted);margin:0.75rem 0;font-size:0.85rem">— or create / clone —</div>
-      ` : ""}
-      <div class="form-group">
-        <label>Create new repository</label>
-        <input type="text" id="code-gh-repo" placeholder="my-project">
-        <div class="help">${state.githubConnected ? "A new repo will be created under your GitHub account" : '<a href="#" onclick="navigate(\'settings\');return false">Connect GitHub in Settings</a> to enable repo creation'}</div>
-      </div>
-      <div class="form-group">
-        <label>Or clone by URL</label>
-        <input type="text" id="code-gh-clone-url" placeholder="https://github.com/user/repo.git">
-      </div>
-      <div class="form-group">
-        <label><input type="checkbox" id="code-gh-private" checked> Private repository</label>
-      </div>
-      <div class="form-group">
-        <label>Runtime</label>
-        <select id="code-runtime">
-          <option value="python">Python (Flask/FastAPI)</option>
-          <option value="node">Node.js (Express/Next.js)</option>
-          <option value="static">Static (HTML/CSS/JS)</option>
-        </select>
-      </div>`;
-
-    const titles = { local: "Local App Setup", remote: "Remote Server Setup", github: "GitHub Repository Setup" };
-
-    return `
-      <div class="code-setup">
-        <h3>${titles[mode] || "Project Setup"}</h3>
-        ${mode === "local" ? localFields : mode === "github" ? githubFields : remoteFields}
-        ${mode !== "github" ? `
-        <div class="form-group">
-          <label>GitHub Repository (optional)</label>
-          <input type="text" id="code-gh-repo" placeholder="my-project">
-          <div class="help">${state.githubConnected ? "Connected to GitHub" : "Connect GitHub in Settings to enable"}</div>
-        </div>` : ""}
-        <div style="display:flex;gap:0.5rem;margin-top:1.5rem">
-          <button class="btn btn-outline" onclick="state.codeSetupStep=1;renderCode()">Back</button>
-          <button class="btn btn-primary" onclick="submitCodeSetup('${sessionId}')">Start Coding</button>
+        <div id="ide-search-panel" class="ide-search-bar" style="display:none">
+          <input type="text" id="ide-search-input" placeholder="Search files..."
+                 onkeydown="if(event.key==='Enter')ideDoSearch(this.value)">
+          <div id="ide-search-results" class="ide-search-results"></div>
         </div>
-      </div>`;
-  }
-  return "";
-}
-
-function renderCodeChatHTML() {
-  const messages = state.codeCurrentMessages;
-  const session = state.codeSessions.find(s => s.id === state.codeCurrentSessionId);
-
-  const msgs = messages.map((m, i) => {
-    const isUser = m.role === "user";
-    const sender = m.sender || (isUser ? "You" : "Agent42");
-    const time = m.timestamp ? formatChatTime(m.timestamp) : "";
-    const content = isUser ? esc(m.content).replace(/\n/g, "<br>") : renderMarkdown(m.content);
-
-    if (isUser) {
-      return `<div class="chat-msg chat-msg-user"><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-user">${content}</div></div><div class="chat-avatar chat-avatar-user">U</div></div>`;
-    }
-    const codeBlocks = extractCodeBlocks(m.content || "");
-    const canvasButtons = codeBlocks.map((b, j) =>
-      `<button class="chat-canvas-btn" onclick="openCodeCanvas(state.codeCurrentMessages[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
-    ).join("");
-    return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim)">${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}</div></div>`;
-  }).join("");
-
-  messages.forEach(m => { if (m.role !== "user") m.__codeBlocks = extractCodeBlocks(m.content || ""); });
-
-  const typingHtml = state.codeSending ? `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-avatar chat-avatar-agent" style="background:var(--success-dim)">${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
-
-  const deployLabel = { local: "Local", remote: "Remote", github: "GitHub" }[session?.deployment_target] || session?.deployment_target || "";
-  const sessionInfo = session?.deployment_target ? `<div class="code-session-info"><span>${deployLabel}</span>${session.github_repo ? ` <span>&#8226; ${esc(session.github_repo)}</span>` : ""}</div>` : "";
-
-  return `
-    <div class="code-chat-area ${state.codeCanvasOpen ? 'canvas-active' : ''}">
-      <div class="code-chat-panel">
-        ${sessionInfo}
-        <div class="chat-messages" id="code-messages">${msgs}${typingHtml}</div>
-        <div class="chat-composer">
-          <div class="chat-composer-inner">
-            <textarea id="code-chat-input" class="chat-textarea code-textarea" rows="1" placeholder="Describe what you want to build..."
-                      oninput="autoGrowTextarea(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendSessionMessage('${state.codeCurrentSessionId}',true)}"
-                      ${state.codeSending ? "disabled" : ""}></textarea>
-            <button class="chat-send-btn" onclick="sendSessionMessage('${state.codeCurrentSessionId}',true)" ${state.codeSending ? "disabled" : ""}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
-            </button>
+        <div id="ide-file-tree" class="ide-file-tree"></div>
+      </div>
+      <div class="ide-main" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+        <div id="ide-tabs" class="ide-tabs"></div>
+        <div id="ide-editor-container" class="ide-editor-container"></div>
+        <div id="ide-welcome" class="ide-welcome" style="display:flex">
+          <h2>Agent42 IDE</h2>
+          <p>Select a file from the explorer to start editing.<br>Changes are saved with Ctrl+S.</p>
+        </div>
+        <div id="ide-terminal-wrapper" class="ide-terminal-wrapper" style="display:none">
+          <div class="ide-terminal-header">
+            <div class="ide-terminal-header-left">
+              <span>TERMINAL</span>
+              <div id="ide-terminal-tabs" class="ide-terminal-tabs"></div>
+            </div>
+            <div class="ide-terminal-header-right">
+              <button onclick="termNew('local')" title="New local terminal">+ Local</button>
+              <button onclick="termNew('remote')" title="New remote terminal">+ Remote</button>
+              <button onclick="termNewClaude('local')" title="Claude Code (local)" style="color:#38bdf8">+ Claude</button>
+              <button onclick="termNewClaude('remote')" title="Claude Code (remote)" style="color:#34d399">+ Claude Remote</button>
+              <button onclick="termToggle()" title="Close terminal panel">&times;</button>
+            </div>
+          </div>
+          <div id="ide-terminal-container" class="ide-terminal-container"></div>
+        </div>
+        <div id="ide-statusbar" class="ide-statusbar">
+          <span id="ide-status-left">Ready</span>
+          <div class="ide-statusbar-right">
+            <button onclick="termToggle()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.72rem">Terminal</button>
+            <button onclick="ideChatToggle()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.72rem">Chat</button>
+            <span id="ide-status-lang">-</span>
+            <span id="ide-status-pos">Ln 1, Col 1</span>
           </div>
         </div>
       </div>
-      <div id="code-canvas-panel" class="canvas-panel ${state.codeCanvasOpen ? 'open' : ''}"></div>
-    </div>`;
-}
-
-function openCodeCanvas(content, title, lang) {
-  state.codeCanvasOpen = true;
-  state.canvasContent = content;
-  state.canvasTitle = title || "Code";
-  state.canvasLang = lang || "";
-  renderCode();
-}
-
-function renderCodeCanvasPanel() {
-  const panel = document.getElementById("code-canvas-panel");
-  if (!panel || !state.canvasContent) return;
-  // Content is escaped via esc() — safe for display
-  panel.innerHTML = `
-    <div class="canvas-header">
-      <span>${esc(state.canvasTitle || "Code")}</span>
-      <button class="canvas-close" onclick="state.codeCanvasOpen=false;renderCode()">&times;</button>
+      <div id="ide-chat-panel" class="ide-chat-panel" style="display:none;width:350px;min-width:280px;flex-shrink:0;flex-direction:column;border-left:1px solid #334155;background:#1e293b">
+        <div class="ide-chat-header">
+          <span>AI CHAT</span>
+          <div style="display:flex;gap:0.3rem;align-items:center">
+            <select id="ide-chat-model" title="Model">
+              <option value="claude-sonnet-4-6-20260217">Sonnet 4.6</option>
+              <option value="claude-opus-4-6-20260205">Opus 4.6</option>
+              <option value="claude-sonnet-4-5-20250514">Sonnet 4.5</option>
+              <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+            </select>
+            <button onclick="ideChatClear()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer" title="Clear chat">&#128465;</button>
+            <button onclick="ideChatToggle()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer">&times;</button>
+          </div>
+        </div>
+        <div id="ide-chat-messages" class="ide-chat-messages"></div>
+        <div class="ide-chat-input-area">
+          <textarea id="ide-chat-input" placeholder="Ask about your code..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();ideChatSend()}"></textarea>
+          <div class="ide-chat-send">
+            <span class="model-info" id="ide-chat-status">Ready</span>
+            <button id="ide-chat-send-btn" onclick="ideChatSend()">Send</button>
+          </div>
+        </div>
+      </div>
     </div>
-    <pre class="canvas-code"><code>${esc(state.canvasContent)}</code></pre>
   `;
+
+  ideLoadTree("");
+  ideInitMonaco();
+}
+
+function ideInitMonaco() {
+  if (_monacoReady) return;
+  const container = document.getElementById("ide-editor-container");
+  if (!container) return;
+  // Dynamically load Monaco loader if not present
+  if (typeof require === "undefined" || !require.config) {
+    if (!document.getElementById("monaco-loader-script")) {
+      var script = document.createElement("script");
+      script.id = "monaco-loader-script";
+      script.src = "/vs/loader.js";
+      script.onload = function() {
+        require.config({ paths: { vs: "/vs" } });
+        setTimeout(ideInitMonaco, 100);
+      };
+      document.head.appendChild(script);
+    }
+    setTimeout(ideInitMonaco, 300);
+    return;
+  }
+  require(["vs/editor/editor.main"], function () {
+    monaco.editor.defineTheme("agent42-dark", {
+      base: "vs-dark",
+      inherit: true,
+      rules: [],
+      colors: {
+        "editor.background": "#0f172a",
+        "editor.foreground": "#e2e8f0",
+        "editorLineNumber.foreground": "#475569",
+        "editorCursor.foreground": "#38bdf8",
+        "editor.selectionBackground": "#334155",
+        "editor.lineHighlightBackground": "#1e293b",
+      },
+    });
+    _monacoEditor = monaco.editor.create(container, {
+      value: "",
+      language: "plaintext",
+      theme: "agent42-dark",
+      fontSize: 14,
+      fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
+      minimap: { enabled: true },
+      automaticLayout: true,
+      scrollBeyondLastLine: false,
+      wordWrap: "on",
+      tabSize: 4,
+      renderWhitespace: "selection",
+      bracketPairColorization: { enabled: true },
+    });
+    _monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {
+      ideSaveCurrentFile();
+    });
+    _monacoEditor.onDidChangeCursorPosition(function (e) {
+      const pos = document.getElementById("ide-status-pos");
+      if (pos) pos.textContent = "Ln " + e.position.lineNumber + ", Col " + e.position.column;
+    });
+    _monacoEditor.onDidChangeModelContent(function () {
+      if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab]) {
+        _ideTabs[_ideActiveTab].modified = true;
+        ideRenderTabs();
+      }
+    });
+    container.style.display = "none";
+    _monacoReady = true;
+  });
+}
+
+async function ideLoadTree(path) {
+  try {
+    const res = await fetch("/api/ide/tree?path=" + encodeURIComponent(path), {
+      headers: { Authorization: "Bearer " + state.token },
+    });
+    const data = await res.json();
+    _ideTreeCache[path] = data.entries;
+    ideRenderTree();
+  } catch (e) {
+    console.error("Tree load error:", e);
+  }
+}
+
+function ideRenderTree() {
+  const el = document.getElementById("ide-file-tree");
+  if (!el) return;
+  el.innerHTML = ideRenderTreeLevel("", 0);
+}
+
+function ideRenderTreeLevel(dirPath, depth) {
+  const entries = _ideTreeCache[dirPath];
+  if (!entries) return "";
+  const indent = '<span class="ide-tree-indent"></span>'.repeat(depth);
+  return entries.map(function(e) {
+    if (e.type === "dir") {
+      const expanded = _ideExpandedDirs.has(e.path);
+      const icon = expanded ? "&#9660;" : "&#9654;";
+      const children = expanded ? ideRenderTreeLevel(e.path, depth + 1) : "";
+      return '<div class="ide-tree-item ide-tree-dir" onclick="ideToggleDir(\'' + e.path.replace(/'/g, "\\'") + '\')">' + indent + '<span class="icon">' + icon + '</span>' + esc(e.name) + '</div>' + children;
+    }
+    var activeClass = _ideActiveTab >= 0 && _ideTabs[_ideActiveTab] && _ideTabs[_ideActiveTab].path === e.path ? "active" : "";
+    var fileIcon = ideFileIcon(e.name);
+    return '<div class="ide-tree-item ide-tree-file ' + activeClass + '" onclick="ideOpenFile(\'' + e.path.replace(/'/g, "\\'") + '\')">' + indent + '<span class="icon">' + fileIcon + '</span>' + esc(e.name) + '</div>';
+  }).join("");
+}
+
+function ideFileIcon(name) {
+  var ext = name.split(".").pop();
+  if (ext) ext = ext.toLowerCase();
+  var icons = { py: "&#128013;", js: "&#9998;", ts: "&#9998;", json: "{ }", md: "&#128196;",
+    html: "&#127760;", css: "&#127912;", sh: "&#9881;", yaml: "&#9881;", yml: "&#9881;",
+    toml: "&#9881;", txt: "&#128196;", sql: "&#128451;" };
+  return icons[ext] || "&#128196;";
+}
+
+async function ideToggleDir(path) {
+  if (_ideExpandedDirs.has(path)) {
+    _ideExpandedDirs.delete(path);
+  } else {
+    _ideExpandedDirs.add(path);
+    if (!_ideTreeCache[path]) await ideLoadTree(path);
+  }
+  ideRenderTree();
+}
+
+async function ideOpenFile(path) {
+  var existing = -1;
+  for (var i = 0; i < _ideTabs.length; i++) {
+    if (_ideTabs[i].path === path) { existing = i; break; }
+  }
+  if (existing >= 0) {
+    _ideActiveTab = existing;
+    ideActivateTab();
+    return;
+  }
+  try {
+    var statusEl = document.getElementById("ide-status-left");
+    if (statusEl) statusEl.textContent = "Loading " + path + "...";
+    var res = await fetch("/api/ide/file?path=" + encodeURIComponent(path), {
+      headers: { Authorization: "Bearer " + state.token },
+    });
+    if (!res.ok) { toast("Failed to load file", "error"); return; }
+    var data = await res.json();
+    var uri = monaco.Uri.parse("file:///" + path);
+    var model = monaco.editor.getModel(uri);
+    if (model) model.dispose();
+    model = monaco.editor.createModel(data.content, data.language, uri);
+    _ideTabs.push({ path: path, modified: false, model: model, language: data.language, originalContent: data.content });
+    _ideActiveTab = _ideTabs.length - 1;
+    ideActivateTab();
+    if (statusEl) statusEl.textContent = path;
+  } catch (e) {
+    toast("Error loading file: " + e.message, "error");
+  }
+}
+
+function ideActivateTab() {
+  if (_ideActiveTab < 0 || !_ideTabs[_ideActiveTab]) return;
+  var tab = _ideTabs[_ideActiveTab];
+  if (_monacoEditor) {
+    _monacoEditor.setModel(tab.model);
+    var container = document.getElementById("ide-editor-container");
+    var welcome = document.getElementById("ide-welcome");
+    if (container) container.style.display = "block";
+    if (welcome) welcome.style.display = "none";
+  }
+  var langEl = document.getElementById("ide-status-lang");
+  if (langEl) langEl.textContent = tab.language || "plaintext";
+  var statusEl = document.getElementById("ide-status-left");
+  if (statusEl) statusEl.textContent = tab.path + (tab.modified ? " (modified)" : "");
+  ideRenderTabs();
+  ideRenderTree();
+}
+
+function ideRenderTabs() {
+  var el = document.getElementById("ide-tabs");
+  if (!el) return;
+  el.innerHTML = _ideTabs.map(function(t, i) {
+    var active = i === _ideActiveTab ? "active" : "";
+    var mod = t.modified ? '<span class="modified">&#9679;</span>' : "";
+    var name = t.path.split("/").pop();
+    return '<div class="ide-tab ' + active + '" onclick="_ideActiveTab=' + i + ';ideActivateTab()">' +
+      mod + esc(name) +
+      '<span class="close" onclick="event.stopPropagation();ideCloseTab(' + i + ')">&times;</span>' +
+    '</div>';
+  }).join("");
+}
+
+function ideCloseTab(index) {
+  var tab = _ideTabs[index];
+  if (tab.modified && !confirm("Discard unsaved changes to " + tab.path + "?")) return;
+  if (tab.model) tab.model.dispose();
+  _ideTabs.splice(index, 1);
+  if (_ideActiveTab >= _ideTabs.length) _ideActiveTab = _ideTabs.length - 1;
+  if (_ideTabs.length === 0) {
+    _ideActiveTab = -1;
+    if (_monacoEditor) _monacoEditor.setModel(null);
+    var container = document.getElementById("ide-editor-container");
+    var welcome = document.getElementById("ide-welcome");
+    if (container) container.style.display = "none";
+    if (welcome) welcome.style.display = "flex";
+  } else {
+    ideActivateTab();
+  }
+  ideRenderTabs();
+}
+
+async function ideSaveCurrentFile() {
+  if (_ideActiveTab < 0) return;
+  var tab = _ideTabs[_ideActiveTab];
+  var content = tab.model.getValue();
+  var statusEl = document.getElementById("ide-status-left");
+  try {
+    if (statusEl) statusEl.textContent = "Saving " + tab.path + "...";
+    var res = await fetch("/api/ide/file", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
+      body: JSON.stringify({ path: tab.path, content: content }),
+    });
+    if (!res.ok) { toast("Save failed", "error"); return; }
+    tab.modified = false;
+    tab.originalContent = content;
+    ideRenderTabs();
+    if (statusEl) statusEl.textContent = tab.path + " — saved";
+    toast("Saved " + tab.path, "success");
+  } catch (e) {
+    toast("Save error: " + e.message, "error");
+  }
+}
+
+function ideRefreshTree() {
+  _ideTreeCache = {};
+  _ideExpandedDirs = new Set([""]);
+  ideLoadTree("");
+}
+
+function ideToggleSearch() {
+  var panel = document.getElementById("ide-search-panel");
+  if (panel) {
+    panel.style.display = panel.style.display === "none" ? "block" : "none";
+    if (panel.style.display === "block") {
+      var input = document.getElementById("ide-search-input");
+      if (input) input.focus();
+    }
+  }
+}
+
+async function ideDoSearch(query) {
+  if (!query.trim()) return;
+  var resultsEl = document.getElementById("ide-search-results");
+  if (!resultsEl) return;
+  resultsEl.textContent = "Searching...";
+  try {
+    var res = await fetch("/api/ide/search?q=" + encodeURIComponent(query), {
+      headers: { Authorization: "Bearer " + state.token },
+    });
+    var data = await res.json();
+    if (data.results.length === 0) { resultsEl.textContent = "No results"; return; }
+    resultsEl.innerHTML = data.results.map(function(r) {
+      return '<div class="ide-search-result" onclick="ideOpenFile(\'' + r.file.replace(/'/g, "\\'") + '\')">' +
+        '<span class="file">' + esc(r.file) + '</span><span class="line-num">:' + r.line + '</span> ' +
+        esc(r.text) + '</div>';
+    }).join("");
+  } catch (e) {
+    resultsEl.textContent = "Search error: " + e.message;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Terminal (xterm.js)
+// ---------------------------------------------------------------------------
+var _termSessions = [];
+var _termActiveIdx = -1;
+var _termVisible = false;
+var _xtermLoaded = false;
+
+function termLoadXterm(cb) {
+  if (_xtermLoaded) { cb(); return; }
+  var link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = "/xterm/xterm.css";
+  document.head.appendChild(link);
+  // Save and disable AMD define to prevent conflict with Monaco
+  var savedDefine = window.define;
+  var savedRequire = window.require;
+  window.define = undefined;
+  window.require = undefined;
+  var script = document.createElement("script");
+  script.src = "/xterm/xterm.js";
+  script.onload = function() {
+    var script2 = document.createElement("script");
+    script2.src = "/xterm/addon-fit.js";
+    script2.onload = function() {
+      // Restore AMD
+      window.define = savedDefine;
+      window.require = savedRequire;
+      _xtermLoaded = true;
+      cb();
+    };
+    document.head.appendChild(script2);
+  };
+  document.head.appendChild(script);
+}
+
+function termToggle() {
+  _termVisible = !_termVisible;
+  var wrapper = document.getElementById("ide-terminal-wrapper");
+  if (!wrapper) return;
+  if (_termVisible) {
+    wrapper.style.display = "flex";
+    if (_termSessions.length === 0) termNew("local");
+  } else {
+    wrapper.style.display = "none";
+  }
+}
+
+function termNew(node) {
+  termLoadXterm(function() {
+    var container = document.getElementById("ide-terminal-container");
+    if (!container) return;
+    // Hide all existing terminals
+    for (var i = 0; i < _termSessions.length; i++) {
+      if (_termSessions[i].el) _termSessions[i].el.style.display = "none";
+    }
+    var termDiv = document.createElement("div");
+    termDiv.style.height = "100%";
+    container.appendChild(termDiv);
+    var term = new Terminal({
+      theme: { background: "#0f172a", foreground: "#e2e8f0", cursor: "#38bdf8",
+               selectionBackground: "#334155" },
+      fontSize: 13,
+      fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
+      cursorBlink: true,
+    });
+    term.open(termDiv);
+    try {
+      var fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      fitAddon.fit();
+      window.addEventListener("resize", function() { try { fitAddon.fit(); } catch(e) {} });
+    } catch(e) {}
+
+    // Connect WebSocket
+    var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" + encodeURIComponent(state.token) + "&node=" + encodeURIComponent(node || "local");
+    var ws = new WebSocket(wsUrl);
+    ws.onopen = function() { term.write("\r\n\x1b[32mConnected to " + (node || "local") + " terminal\x1b[0m\r\n\r\n"); };
+    ws.onmessage = function(e) { term.write(e.data); };
+    ws.onerror = function() { term.write("\r\n\x1b[31mConnection error\x1b[0m\r\n"); };
+    ws.onclose = function() { term.write("\r\n\x1b[33mDisconnected\x1b[0m\r\n"); };
+    term.onData(function(data) { if (ws.readyState === 1) ws.send(data); });
+
+    var session = { term: term, ws: ws, el: termDiv, node: node || "local", label: (node || "local") + " " + (_termSessions.length + 1) };
+    _termSessions.push(session);
+    _termActiveIdx = _termSessions.length - 1;
+    termRenderTabs();
+  });
+}
+
+function termNewClaude(node) {
+  termLoadXterm(function() {
+    var container = document.getElementById("ide-terminal-container");
+    if (!container) return;
+    for (var i = 0; i < _termSessions.length; i++) {
+      if (_termSessions[i].el) _termSessions[i].el.style.display = "none";
+    }
+    var termDiv = document.createElement("div");
+    termDiv.style.height = "100%";
+    container.appendChild(termDiv);
+    var term = new Terminal({
+      theme: { background: "#0f172a", foreground: "#e2e8f0", cursor: "#38bdf8",
+               selectionBackground: "#334155" },
+      fontSize: 13,
+      fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
+      cursorBlink: true,
+    });
+    term.open(termDiv);
+    try {
+      var fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      fitAddon.fit();
+      window.addEventListener("resize", function() { try { fitAddon.fit(); } catch(e) {} });
+    } catch(e) {}
+
+    var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" + encodeURIComponent(state.token) + "&node=" + encodeURIComponent(node || "local") + "&cmd=claude";
+    var ws = new WebSocket(wsUrl);
+    ws.onopen = function() { term.write("\r\n\x1b[36m🤖 Claude Code (" + (node || "local") + ") — using your CC subscription\x1b[0m\r\n\r\n"); };
+    ws.onmessage = function(e) { term.write(e.data); };
+    ws.onerror = function() { term.write("\r\n\x1b[31mConnection error\x1b[0m\r\n"); };
+    ws.onclose = function() { term.write("\r\n\x1b[33mClaude session ended\x1b[0m\r\n"); };
+    term.onData(function(data) { if (ws.readyState === 1) ws.send(data); });
+
+    var session = { term: term, ws: ws, el: termDiv, node: node || "local", label: "Claude (" + (node || "local") + ")" };
+    _termSessions.push(session);
+    _termActiveIdx = _termSessions.length - 1;
+    termRenderTabs();
+  });
+}
+
+function termSwitch(idx) {
+  if (idx < 0 || idx >= _termSessions.length) return;
+  for (var i = 0; i < _termSessions.length; i++) {
+    if (_termSessions[i].el) _termSessions[i].el.style.display = i === idx ? "block" : "none";
+  }
+  _termActiveIdx = idx;
+  termRenderTabs();
+}
+
+function termClose(idx) {
+  var s = _termSessions[idx];
+  if (s.ws) s.ws.close();
+  if (s.term) s.term.dispose();
+  if (s.el) s.el.remove();
+  _termSessions.splice(idx, 1);
+  if (_termActiveIdx >= _termSessions.length) _termActiveIdx = _termSessions.length - 1;
+  if (_termSessions.length === 0) { _termVisible = false; var w = document.getElementById("ide-terminal-wrapper"); if (w) w.style.display = "none"; }
+  else termSwitch(_termActiveIdx);
+  termRenderTabs();
+}
+
+function termRenderTabs() {
+  var el = document.getElementById("ide-terminal-tabs");
+  if (!el) return;
+  el.innerHTML = _termSessions.map(function(s, i) {
+    var active = i === _termActiveIdx ? "active" : "";
+    return '<span class="ide-terminal-tab ' + active + '" onclick="termSwitch(' + i + ')">' + esc(s.label) + ' <span class="close" onclick="event.stopPropagation();termClose(' + i + ')">&times;</span></span>';
+  }).join("");
+}
+
+// ---------------------------------------------------------------------------
+// IDE Chat (AI assistant)
+// ---------------------------------------------------------------------------
+var _ideChatHistory = [];
+var _ideChatSending = false;
+
+function ideChatToggle() {
+  var panel = document.getElementById("ide-chat-panel");
+  if (!panel) return;
+  panel.style.display = panel.style.display === "none" ? "flex" : "none";
+}
+
+function ideChatClear() {
+  _ideChatHistory = [];
+  var el = document.getElementById("ide-chat-messages");
+  if (el) el.innerHTML = "";
+}
+
+function ideChatAddMsg(role, content) {
+  var el = document.getElementById("ide-chat-messages");
+  if (!el) return;
+  var cls = role === "user" ? "ide-chat-msg-user" : "ide-chat-msg-ai";
+  var div = document.createElement("div");
+  div.className = "ide-chat-msg " + cls;
+  var bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.textContent = content;
+  div.appendChild(bubble);
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+function ideChatAddToolMsg(name, result) {
+  var el = document.getElementById("ide-chat-messages");
+  if (!el) return;
+  var div = document.createElement("div");
+  div.className = "ide-chat-msg-tool";
+  div.textContent = "Tool: " + name + " → " + (result || "").substring(0, 200);
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function ideChatSend() {
+  if (_ideChatSending) return;
+  var input = document.getElementById("ide-chat-input");
+  var msg = input ? input.value.trim() : "";
+  if (!msg) return;
+  input.value = "";
+
+  // Get current file context
+  var fileContext = "";
+  if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab] && _ideTabs[_ideActiveTab].model) {
+    var content = _ideTabs[_ideActiveTab].model.getValue();
+    fileContext = "[" + _ideTabs[_ideActiveTab].path + "]\n" + content.substring(0, 3000);
+  }
+
+  // Add user message to UI
+  ideChatAddMsg("user", msg);
+  _ideChatHistory.push({ role: "user", content: msg });
+
+  // Show typing
+  _ideChatSending = true;
+  var statusEl = document.getElementById("ide-chat-status");
+  var sendBtn = document.getElementById("ide-chat-send-btn");
+  if (statusEl) statusEl.textContent = "Thinking...";
+  if (sendBtn) sendBtn.disabled = true;
+
+  var model = document.getElementById("ide-chat-model");
+  var modelValue = model ? model.value : "";
+
+  try {
+    var res = await fetch("/api/ide/chat", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: msg,
+        history: _ideChatHistory.slice(-18),
+        model: modelValue,
+        file_context: fileContext,
+      }),
+    });
+
+    if (!res.ok) {
+      var errData = await res.json().catch(function() { return {}; });
+      var errMsg = errData.detail || "Error " + res.status;
+      ideChatAddMsg("assistant", "Error: " + errMsg);
+      return;
+    }
+
+    var data = await res.json();
+
+    // Show tool calls
+    if (data.tool_results && data.tool_results.length > 0) {
+      for (var i = 0; i < data.tool_results.length; i++) {
+        ideChatAddToolMsg(data.tool_results[i].name, data.tool_results[i].result);
+      }
+    }
+
+    // Show AI response
+    if (data.response) {
+      ideChatAddMsg("assistant", data.response);
+      _ideChatHistory.push({ role: "assistant", content: data.response });
+    }
+
+    if (statusEl) {
+      var tokens = data.usage ? (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0) : 0;
+      statusEl.textContent = data.model + (tokens ? " (" + tokens + " tokens)" : "");
+    }
+  } catch (e) {
+    ideChatAddMsg("assistant", "Connection error: " + e.message);
+  } finally {
+    _ideChatSending = false;
+    if (sendBtn) sendBtn.disabled = false;
+    if (statusEl && statusEl.textContent === "Thinking...") statusEl.textContent = "Ready";
+  }
 }
 
 // ---------------------------------------------------------------------------

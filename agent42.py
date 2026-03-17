@@ -96,13 +96,20 @@ class Agent42:
         self.repo_manager = RepositoryManager(data_dir / "repos")
         self.session_manager = SessionManager(str(data_dir / "sessions"))
         skill_dirs = [
-            Path(__file__).parent / "skills" / "builtin",
+            Path(__file__).parent / "skills" / "builtins",
             Path(__file__).parent / "skills" / "workspace",
         ]
         self.skill_loader = SkillLoader([d for d in skill_dirs if d.exists()])
+        self.skill_loader.load_all()
 
-        # ── Tool registry (for dashboard visibility) ─────────────────────
-        self.tool_registry = ToolRegistry(rate_limiter=ToolRateLimiter())
+        # ── Tool registry (shared with MCP server for dashboard visibility)
+        try:
+            from mcp_server import _build_registry
+
+            self.tool_registry = _build_registry()
+        except Exception as e:
+            logger.warning(f"MCP registry build failed, using empty: {e}")
+            self.tool_registry = ToolRegistry(rate_limiter=ToolRateLimiter())
 
         # ── Memory backend ───────────────────────────────────────────────
         memory_dir = data_dir / "memory"
