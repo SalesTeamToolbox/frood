@@ -270,6 +270,50 @@ def try_semantic_search(memory_dir, prompt, agent42_root):
         return []
 
 
+def try_agent42_api_search(prompt):
+    """Fallback: query Agent42's memory via its HTTP API.
+
+    The Agent42 server exposes a memory search endpoint that queries Qdrant
+    directly. This works when the dedicated search service isn't running but
+    the Agent42 dashboard server is.
+    """
+    import urllib.error
+    import urllib.request
+
+    api_url = os.environ.get("AGENT42_API_URL", "http://127.0.0.1:8000")
+
+    try:
+        # Try the MCP-exposed memory search via the API
+        data = json.dumps({"action": "search", "content": prompt}).encode()
+
+        req = urllib.request.Request(
+            f"{api_url}/api/memory/search",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            result = json.loads(resp.read())
+
+        memories = []
+        for r in result.get("results", []):
+            score = r.get("score", r.get("relevance", 0.5))
+            text = r.get("text", r.get("content", "")).strip()[:250]
+            source = r.get("source", "qdrant")
+            if text:
+                memories.append(
+                    {
+                        "text": f"[{source}] {text}",
+                        "score": float(score),
+                        "source": "agent42-api",
+                    }
+                )
+        return memories
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, Exception):
+        return []
+
+
 def deduplicate(memories):
     """Remove near-duplicate memories by text prefix."""
     seen = set()
@@ -331,7 +375,10 @@ def main():
     memories = []
 
     # Layer 1: Semantic search (best quality, requires embedding API + Qdrant)
+    # Try dedicated search service first, then fall back to Agent42 API
     semantic_results = try_semantic_search(memory_dir, prompt, agent42_root)
+    if not semantic_results:
+        semantic_results = try_agent42_api_search(prompt)
     memories.extend(semantic_results)
 
     # Layer 2: MEMORY.md keyword search

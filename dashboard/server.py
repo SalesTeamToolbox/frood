@@ -1707,6 +1707,61 @@ def create_app(
         host = _os.environ.get("AGENT42_REMOTE_HOST", "")
         return {"available": bool(host), "host": host if host else None}
 
+    # -- Memory Search API (used by hooks + frontend) -------------------------
+
+    @app.post("/api/memory/search")
+    async def memory_search(request: Request):
+        """Search Agent42's memory system (Qdrant + MEMORY.md).
+
+        Used by the memory-recall hook as a fallback when the dedicated
+        search service isn't running. No auth required for local hook access.
+        """
+        try:
+            body = await request.json()
+            query = body.get("content", body.get("query", ""))
+            if not query:
+                return {"results": []}
+
+            results = []
+
+            # Try Qdrant semantic search if memory_store is available
+            if memory_store:
+                try:
+                    hits = await memory_store.semantic_search(query, top_k=5)
+                    for hit in hits:
+                        results.append(
+                            {
+                                "text": hit.get("text", hit.get("content", "")),
+                                "score": hit.get("score", 0.5),
+                                "source": hit.get("source", "qdrant"),
+                            }
+                        )
+                except Exception:
+                    pass
+
+            # Fallback: keyword search on MEMORY.md
+            if not results:
+                mem_path = workspace / "memory" / "MEMORY.md"
+                if not mem_path.exists():
+                    mem_path = workspace / ".agent42" / "MEMORY.md"
+                if mem_path.exists():
+                    content = mem_path.read_text(encoding="utf-8", errors="replace")
+                    keywords = [w.lower() for w in query.split() if len(w) > 3]
+                    for section in content.split("\n## "):
+                        matches = sum(1 for k in keywords if k in section.lower())
+                        if matches >= 2:
+                            results.append(
+                                {
+                                    "text": section[:250].strip(),
+                                    "score": min(matches * 0.2, 1.0),
+                                    "source": "memory-md",
+                                }
+                            )
+
+            return {"results": results[:5]}
+        except Exception as e:
+            return {"results": [], "error": str(e)}
+
     # -- IDE Chat (AI-powered code assistant) ----------------------------------
 
     import httpx as _httpx

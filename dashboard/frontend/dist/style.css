@@ -1710,7 +1710,7 @@ body.towel-day .dont-panic-watermark {
 
 /* ── IDE Layout ──────────────────────────────────────────────────────── */
 .ide-layout { display: flex !important; height: 100% !important; overflow: hidden !important; }
-.ide-layout-parent { overflow: hidden !important; height: calc(100vh - 48px) !important; padding: 0 !important; flex: none !important; }
+.ide-layout-parent { overflow: hidden !important; height: calc(100vh - 48px) !important; padding: 0 !important; flex: none !important; width: 100% !important; }
 /* ── Activity Bar (VS Code icon rail) ────────────────────────────────── */
 .ide-activity-bar { width: 48px; min-width: 48px; background: #181a20; display: flex;
   flex-direction: column; align-items: center; padding-top: 0.25rem;
