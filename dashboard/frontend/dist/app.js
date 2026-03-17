@@ -3302,6 +3302,7 @@ function renderCode() {
   ideLoadTree("");
   ideInitMonaco();
   initDragHandle();
+  ideReattachCCTabs();
 
   // Open default local terminal on first load
   if (_termSessions.length === 0) {
@@ -4014,6 +4015,85 @@ function termFitAll() {
 // ---------------------------------------------------------------------------
 var _remoteAvailCache = null;
 var _remoteAvailCacheAt = 0;
+
+// --- Re-attach Claude Code tabs after SPA navigation ---
+function ideReattachCCTabs() {
+  var ccContainer = document.getElementById("ide-cc-container");
+  if (!ccContainer) return;
+  var hasCCTabs = false;
+  for (var i = 0; i < _ideTabs.length; i++) {
+    var tab = _ideTabs[i];
+    if (tab.type !== "claude") continue;
+    hasCCTabs = true;
+    // Old DOM was destroyed — re-create xterm in new container
+    termLoadXterm(function(tabRef, idx) {
+      return function() {
+        var termDiv = document.createElement("div");
+        termDiv.className = "ide-cc-term";
+        termDiv.style.height = "100%";
+        termDiv.style.display = (idx === _ideActiveTab) ? "block" : "none";
+        ccContainer.appendChild(termDiv);
+
+        var term = new Terminal({
+          theme: { background: "#1a1a2e", foreground: "#e2e8f0", cursor: "#f97316",
+                   selectionBackground: "#334155" },
+          fontSize: 14,
+          fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
+          cursorBlink: true,
+        });
+        term.open(termDiv);
+
+        var fitAddon = null;
+        try {
+          fitAddon = new FitAddon.FitAddon();
+          term.loadAddon(fitAddon);
+          fitAddon.fit();
+        } catch(e) {}
+
+        // Close old WS if still open
+        if (tabRef.ws && tabRef.ws.readyState <= 1) tabRef.ws.close();
+
+        // Update tab references
+        tabRef.el = termDiv;
+        tabRef.term = term;
+        tabRef.fitAddon = fitAddon;
+
+        // Reconnect WS
+        var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+        var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" +
+          encodeURIComponent(state.token) + "&node=" + encodeURIComponent(tabRef.node || "local") + "&cmd=claude";
+
+        var ws = new WebSocket(wsUrl);
+        tabRef.ws = ws;
+        ws.onopen = function() {
+          term.write("\x1b[38;5;208m" + tabRef.path + " reconnected\x1b[0m\r\n\r\n");
+          if (fitAddon) {
+            fitAddon.fit();
+            ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+          }
+        };
+        ws.onmessage = function(ev) { term.write(ev.data); };
+        ws.onclose = function() { term.write("\r\n\x1b[90m[session ended]\x1b[0m\r\n"); };
+        ws.onerror = function() { term.write("\r\n\x1b[31m[connection error]\x1b[0m\r\n"); };
+        term.onData(function(data) {
+          if (ws.readyState === 1) ws.send(data);
+        });
+        term.onResize(function(size) {
+          if (ws.readyState === 1) ws.send(JSON.stringify({ type: "resize", cols: size.cols, rows: size.rows }));
+        });
+
+        // If this is the active tab, show it
+        if (idx === _ideActiveTab) {
+          ideActivateTab();
+        }
+      };
+    }(tab, i));
+  }
+  // Re-render tabs to show CC tabs
+  if (hasCCTabs) {
+    setTimeout(function() { ideRenderTabs(); }, 500);
+  }
+}
 
 // --- VS Code-style panel/activity bar helpers ---
 var _ideSidebarVisible = true;
