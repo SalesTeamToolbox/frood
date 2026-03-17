@@ -1757,6 +1757,11 @@ def create_app(
     async def list_agent_templates(_user: str = Depends(get_current_user)):
         return AGENT_TEMPLATES
 
+    @app.get("/api/agents/models")
+    async def list_provider_models(_user: str = Depends(get_current_user)):
+        """Return available models per provider for agent configuration."""
+        return PROVIDER_MODELS
+
     @app.post("/api/agents")
     async def create_agent(req: AgentCreateRequest, _user: str = Depends(get_current_user)):
         data = req.model_dump(exclude_none=True)
