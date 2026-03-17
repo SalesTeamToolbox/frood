@@ -15,6 +15,7 @@ Restructure Agent42's model routing around L1 (workhorse) and L2 (premium) tiers
 - [x] **Phase 17: Tier Routing Architecture** - Restructure model_router.py around L1/L2 tiers with new fallback chain (completed 2026-03-07)
 - [x] **Phase 18: Agent Config Backend** - Per-agent routing config storage, API endpoints, and inheritance from global defaults (completed 2026-03-07)
 - [x] **Phase 19: Agent Config Dashboard** - Settings page LLM Routing section and Agents page per-agent override UI (completed 2026-03-07)
+- [ ] **Phase 19.1: UI Redesign** - Redesign the coding/IDE page to mirror VS Code's CC/terminal integration — fix layout, local/remote clarity, broken connections (INSERTED)
 - [ ] **Phase 20: Streaming Simulation** - Simulated streaming for chat display from non-streaming providers
 
 ## Phase Details
@@ -77,6 +78,25 @@ Plans:
 - [x] 19-01-PLAN.md — Settings page LLM Routing tab with global defaults, shared routing helpers, Providers tab terminology updates, StrongWall API key field
 - [x] 19-02-PLAN.md — Agents page per-agent routing controls in detail view, model chips on grid cards
 
+### Phase 19.1: UI Redesign (INSERTED)
+
+**Goal:** Redesign the coding/IDE page to mirror VS Code's CC/terminal integration — fix layout (no scroll-to-find), clear local/remote separation, fix broken connections, proper panel layout (editor top, terminal/CC bottom)
+**Requirements**: None (inserted phase, no formal requirement IDs)
+**Depends on:** Phase 19
+**Success Criteria** (what must be TRUE):
+  1. IDE page loads with VS Code-style layout: editor top, draggable terminal bottom, status bar at very bottom
+  2. Terminal panel visible by default with a local terminal session on page load
+  3. Single "+" dropdown with grouped Local/Remote options replaces four separate buttons
+  4. Remote options grayed out when AGENT42_REMOTE_HOST not configured (no more defaulting to agent42-prod)
+  5. Color-coded tabs: blue for local, green for remote, amber for reconnecting
+  6. Auto-reconnect with exponential backoff on WebSocket disconnect
+  7. AI Chat side panel completely removed from HTML, JS, and CSS
+**Plans:** 2 plans
+
+Plans:
+- [ ] 19.1-01-PLAN.md — Backend fixes: remote terminal guard, /api/remote/status endpoint, resize message parsing, Wave 0 tests
+- [ ] 19.1-02-PLAN.md — Frontend rewrite: VS Code layout, drag handle, "+" dropdown, color tabs, auto-reconnect, Ctrl+backtick, chat removal, CSS updates
+
 ### Phase 20: Streaming Simulation
 **Goal**: Chat messages from non-streaming providers (StrongWall) display with progressive token reveal, matching the UX of streaming providers
 **Depends on**: Phase 16, Phase 19
@@ -92,7 +112,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 16 -> 17 -> 18 -> 19 -> 20
+Phases execute in numeric order: 16 -> 17 -> 18 -> 19 -> 19.1 -> 20
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -100,6 +120,7 @@ Phases execute in numeric order: 16 -> 17 -> 18 -> 19 -> 20
 | 17. Tier Routing Architecture | 2/2 | Complete    | 2026-03-07 |
 | 18. Agent Config Backend | 1/1 | Complete    | 2026-03-07 |
 | 19. Agent Config Dashboard | 2/2 | Complete    | 2026-03-07 |
+| 19.1 UI Redesign | 0/2 | Planned | - |
 | 20. Streaming Simulation | 0/1 | Not started | - |
 
 ---
