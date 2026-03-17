@@ -2214,376 +2214,208 @@ async function showAppLogs(appId, name) {
 // Agents page
 // ---------------------------------------------------------------------------
 function renderAgents() {
-  const el = document.getElementById("page-content");
+  var el = document.getElementById("page-content");
   if (!el || state.page !== "agents") return;
 
-  if (state.agentsViewMode === "detail" && state.selectedProfile) {
-    renderAgentDetail(el);
-    return;
-  }
+  // Fetch agents from API
+  fetch("/api/agents", { headers: { Authorization: "Bearer " + state.token } })
+    .then(function(r) { return r.json(); })
+    .then(function(agents) { _renderAgentCards(el, agents); })
+    .catch(function() { _renderAgentCards(el, []); });
+}
 
-  // Stats
-  const total = state.profiles.length;
-  const l1Count = state.profiles.filter((p) => !p.name.startsWith("l2-")).length;
-  const l2Count = state.profiles.filter((p) => p.name.startsWith("l2-")).length;
-  const taskTypes = new Set();
-  state.profiles.forEach((p) => (p.preferred_task_types || []).forEach((t) => taskTypes.add(t)));
-
-  const cards = state.profiles.map((p) => {
-    const isDefault = p.name === state.defaultProfile;
-    const tier = p.name.startsWith("l2-") ? "L2" : "L1";
-    const tierClass = tier === "L2" ? "badge-l2" : "badge-l1";
-    const taskChips = (p.preferred_task_types || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ");
-    const skillChips = (p.preferred_skills || []).slice(0, 4).map((s) => `<span class="badge-type">${esc(s)}</span>`).join(" ");
-    const extra = (p.preferred_skills || []).length > 4 ? `<span class="badge-type">+${p.preferred_skills.length - 4}</span>` : "";
-
-    // Model chip from routing config
-    const routingInfo = state.routingConfig && state.routingConfig.profiles ? state.routingConfig.profiles[p.name] : null;
-    const effectivePrimary = routingInfo && routingInfo.effective ? routingInfo.effective.primary : null;
-    const isModelOverridden = routingInfo && routingInfo.overrides && routingInfo.overrides.primary != null;
-    const modelChip = effectivePrimary
-      ? '<div class="agent-card-chips" style="margin-top:0.25rem">'
-        + '<span class="badge-type" style="font-size:0.65rem;'
-        + (isModelOverridden ? '' : 'color:var(--text-muted)') + '"'
-        + ' title="' + (isModelOverridden ? 'Overridden' : 'Inherited from default') + '">'
-        + esc(effectivePrimary) + (isModelOverridden ? '' : ' (inherited)')
-        + '</span></div>'
-      : '';
-
-    return `
-      <div class="agent-card ${isDefault ? 'agent-card-default' : ''}" onclick="loadProfileDetail('${esc(p.name)}')">
-        <div class="agent-card-header">
-          <div class="agent-card-title">
-            <h4>${esc(p.name)}</h4>
-            <span class="badge-tier ${tierClass}">${tier}</span>
-            ${isDefault ? '<span class="badge-tier badge-default">default</span>' : ''}
-          </div>
-        </div>
-        <p class="agent-card-desc">${esc(p.description) || '<span style="color:var(--text-muted)">No description</span>'}</p>
-        <div class="agent-card-meta">
-          <div class="agent-card-chips">${taskChips}</div>
-          <div class="agent-card-chips">${skillChips}${extra}</div>
-          ${modelChip}
-        </div>
-      </div>
-    `;
+function _renderAgentCards(el, agents) {
+  var statusColors = { active: "#34d399", running: "#38bdf8", paused: "#facc15", stopped: "#64748b", error: "#f87171" };
+  var cards = agents.map(function(a) {
+    var color = statusColors[a.status] || "#64748b";
+    var tools = (a.tools || []).slice(0, 4).map(function(t) { return '<span class="badge-type">' + esc(t) + '</span>'; }).join(" ");
+    var extra = (a.tools || []).length > 4 ? '<span class="badge-type">+' + ((a.tools || []).length - 4) + '</span>' : '';
+    var skills = (a.skills || []).slice(0, 3).map(function(s) { return '<span class="badge-type" style="background:var(--primary-dim);color:var(--primary)">' + esc(s) + '</span>'; }).join(" ");
+    return '<div class="agent-card" onclick="agentShowDetail(\'' + a.id + '\')">' +
+      '<div class="agent-card-header">' +
+        '<div class="agent-card-title"><h4>' + esc(a.name) + '</h4>' +
+        '<span class="badge-tier" style="background:' + color + ';color:#000">' + esc(a.status) + '</span></div>' +
+      '</div>' +
+      '<p class="agent-card-desc">' + esc(a.description || "No description") + '</p>' +
+      '<div class="agent-card-meta">' +
+        '<div style="font-size:0.72rem;color:var(--text-secondary)">Model: ' + esc(a.model || "default") + ' | Schedule: ' + esc(a.schedule || "manual") + '</div>' +
+        '<div class="agent-card-chips" style="margin-top:0.3rem">' + tools + extra + '</div>' +
+        '<div class="agent-card-chips" style="margin-top:0.2rem">' + skills + '</div>' +
+        '<div style="font-size:0.68rem;color:var(--text-muted);margin-top:0.3rem">Runs: ' + (a.total_runs || 0) + ' | Tokens: ' + (a.total_tokens || 0) + '</div>' +
+      '</div></div>';
   }).join("");
 
-  // NOTE: All interpolated values use esc() for XSS protection — this follows
-  // the existing innerHTML pattern used throughout this file (55+ inline handlers).
-  const isCustomPersona = !!state.personaCustom;
-  const activePersona = state.personaCustom || state.personaDefault || "";
-  const personaCard = `
-    <div class="persona-card">
-      <div class="persona-card-header">
-        <div style="display:flex;align-items:center;gap:0.75rem">
-          <h4 style="margin:0;font-size:1rem;font-weight:600">Chat Persona</h4>
-          <span class="badge-tier ${isCustomPersona ? 'badge-l2' : 'badge-l1'}">${isCustomPersona ? 'Custom' : 'Default'}</span>
-        </div>
-        <div style="display:flex;gap:0.5rem">
-          ${isCustomPersona ? '<button class="btn btn-outline btn-sm" onclick="resetPersona()">Reset to Default</button>' : ''}
-          <button class="btn btn-primary btn-sm" onclick="showEditPersonaModal()">Edit</button>
-        </div>
-      </div>
-      <div class="persona-preview">${esc(activePersona)}</div>
-    </div>
-  `;
-
-  el.innerHTML = `
-    ${personaCard}
-    <div class="stats-row">
-      <div class="stat-card"><div class="stat-label">Total Profiles</div><div class="stat-value">${total}</div></div>
-      <div class="stat-card"><div class="stat-label">L1 Agents</div><div class="stat-value text-info">${l1Count}</div></div>
-      <div class="stat-card"><div class="stat-label">L2 Agents</div><div class="stat-value text-warning">${l2Count}</div></div>
-      <div class="stat-card"><div class="stat-label">Task Types</div><div class="stat-value">${taskTypes.size}</div></div>
-    </div>
-    ${state.profiles.length ? `<div class="agents-grid">${cards}</div>` : '<div class="empty-state" style="padding:3rem;text-align:center"><p style="font-size:1.1rem;margin-bottom:1rem">No agent profiles found</p><p style="color:var(--text-muted)">Create your first agent profile to get started.</p><button class="btn btn-primary" style="margin-top:1rem" onclick="showCreateProfileModal()">+ Create Profile</button></div>'}
-  `;
+  el.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
+      '<h2 style="margin:0">Agents</h2>' +
+      '<div style="display:flex;gap:0.5rem">' +
+        '<button class="btn btn-primary" onclick="agentShowCreate()">+ Create Agent</button>' +
+        '<button class="btn btn-outline" onclick="agentShowTemplates()">Templates</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="stats-row">' +
+      '<div class="stat-card"><div class="stat-label">Total Agents</div><div class="stat-value">' + agents.length + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Active</div><div class="stat-value text-success">' + agents.filter(function(a) { return a.status === "active" || a.status === "running"; }).length + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Paused</div><div class="stat-value text-warning">' + agents.filter(function(a) { return a.status === "paused"; }).length + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Total Runs</div><div class="stat-value">' + agents.reduce(function(s, a) { return s + (a.total_runs || 0); }, 0) + '</div></div>' +
+    '</div>' +
+    (cards ? '<div class="agents-grid">' + cards + '</div>' :
+      '<div class="empty-state" style="padding:3rem;text-align:center">' +
+        '<p style="font-size:1.1rem;margin-bottom:1rem">No agents yet</p>' +
+        '<p style="color:var(--text-muted)">Create your first autonomous agent or start from a template.</p>' +
+        '<div style="display:flex;gap:0.5rem;justify-content:center;margin-top:1rem">' +
+          '<button class="btn btn-primary" onclick="agentShowCreate()">+ Create Agent</button>' +
+          '<button class="btn btn-outline" onclick="agentShowTemplates()">Use Template</button>' +
+        '</div>' +
+      '</div>');
 }
 
-function renderAgentDetail(el) {
-  const p = state.selectedProfile;
-  if (!p) return;
-
-  const tier = p.name.startsWith("l2-") ? "L2" : "L1";
-  const tierClass = tier === "L2" ? "badge-l2" : "badge-l1";
-  const isDefault = p.name === state.defaultProfile;
-
-  const taskChips = (p.preferred_task_types || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ");
-
-  // Cross-reference skills with loaded skills state
-  const skillsHtml = (p.preferred_skills || []).map((s) => {
-    const loaded = state.skills.find((sk) => sk.name === s);
-    const indicator = loaded ? (loaded.enabled !== false ? '&#9989;' : '&#10060;') : '&#10067;';
-    return `<span class="badge-type">${indicator} ${esc(s)}</span>`;
-  }).join(" ");
-
-  const personaHtml = p.prompt_overlay
-    ? `<div class="agent-detail-section"><h4>Persona Instructions</h4><div class="agent-persona-content">${esc(p.prompt_overlay)}</div></div>`
-    : '';
-
-  // Integration section (v2.0 — model routing handled by Claude Code)
-  const routingHtml = '<div class="agent-detail-section">'
-    + '<h4>Integration</h4>'
-    + '<p class="text-muted" style="font-size:0.85rem">Model routing is managed by Claude Code. Agent profiles define system prompts and tool/skill access.</p>'
-    + '</div>';
-
-  // NOTE: innerHTML is the established pattern for this SPA (55+ handlers). All interpolated
-  // values are escaped via esc() for XSS protection.
-  el.innerHTML = `
-    <div class="agent-detail">
-      <div class="agent-detail-topbar">
-        <button class="btn btn-outline btn-sm" onclick="state.agentsViewMode='grid';state.selectedProfile=null;render()">&#8592; Back to Profiles</button>
-        <div class="agent-detail-actions">
-          ${!isDefault ? `<button class="btn btn-outline btn-sm" onclick="setDefaultProfile('${esc(p.name)}')">Set as Default</button>` : '<span class="badge-tier badge-default">Current Default</span>'}
-          <button class="btn btn-outline btn-sm" onclick="showEditProfileModal('${esc(p.name)}')">Edit</button>
-          ${!isDefault ? `<button class="btn btn-outline btn-sm btn-danger-text" onclick="deleteProfile('${esc(p.name)}')">Delete</button>` : ''}
-        </div>
-      </div>
-      <div class="agent-detail-card">
-        <div class="agent-detail-header">
-          <h3>${esc(p.name)}</h3>
-          <span class="badge-tier ${tierClass}">${tier}</span>
-          ${isDefault ? '<span class="badge-tier badge-default">default</span>' : ''}
-        </div>
-        <p style="color:var(--text-secondary);margin-bottom:1.5rem">${esc(p.description)}</p>
-        <div class="agent-detail-section">
-          <h4>Task Types</h4>
-          <div class="agent-card-chips">${taskChips || '<span style="color:var(--text-muted)">None configured</span>'}</div>
-        </div>
-        <div class="agent-detail-section">
-          <h4>Preferred Skills</h4>
-          <div class="agent-card-chips">${skillsHtml || '<span style="color:var(--text-muted)">None configured</span>'}</div>
-        </div>
-        ${personaHtml}
-        ${routingHtml}
-        ${p.source_path ? `<div class="agent-detail-section"><h4>Source</h4><code style="font-size:0.8rem;color:var(--text-muted)">${esc(p.source_path)}</code></div>` : ''}
-      </div>
-    </div>
-  `;
+function agentShowCreate() {
+  var el = document.getElementById("page-content");
+  if (!el) return;
+  el.innerHTML =
+    '<div style="max-width:600px;margin:0 auto">' +
+      '<h2>Create Agent</h2>' +
+      '<div class="form-group"><label>Name</label><input type="text" id="agent-name" placeholder="My Agent"></div>' +
+      '<div class="form-group"><label>Description</label><textarea id="agent-desc" rows="2" placeholder="What does this agent do?"></textarea></div>' +
+      '<div class="form-group"><label>Provider</label>' +
+        '<select id="agent-provider"><option value="anthropic">Anthropic (CC Subscription)</option><option value="synthetic">Synthetic.new</option><option value="openrouter">OpenRouter</option></select></div>' +
+      '<div class="form-group"><label>Model</label>' +
+        '<select id="agent-model"><option value="claude-sonnet-4-6">Sonnet 4.6</option><option value="claude-opus-4-6">Opus 4.6</option><option value="claude-haiku-4-5">Haiku 4.5</option></select></div>' +
+      '<div class="form-group"><label>Schedule</label>' +
+        '<select id="agent-schedule"><option value="manual">Manual</option><option value="always">Always On</option><option value="0 9 * * *">Daily 9am</option><option value="*/5 * * * *">Every 5 min</option></select></div>' +
+      '<div class="form-group"><label>Tools (comma-separated)</label><input type="text" id="agent-tools" placeholder="shell, memory, web_search, git"></div>' +
+      '<div class="form-group"><label>Skills (comma-separated)</label><input type="text" id="agent-skills" placeholder="code-review, debugging, testing"></div>' +
+      '<div class="form-group"><label>Max Iterations</label><input type="number" id="agent-iterations" value="10" min="1" max="100"></div>' +
+      '<div style="display:flex;gap:0.5rem;margin-top:1.5rem">' +
+        '<button class="btn btn-outline" onclick="renderAgents()">Cancel</button>' +
+        '<button class="btn btn-primary" onclick="agentDoCreate()">Create Agent</button>' +
+      '</div>' +
+    '</div>';
 }
 
-async function loadProfileDetail(name) {
+async function agentDoCreate() {
+  var data = {
+    name: document.getElementById("agent-name").value.trim(),
+    description: document.getElementById("agent-desc").value.trim(),
+    provider: document.getElementById("agent-provider").value,
+    model: document.getElementById("agent-model").value,
+    schedule: document.getElementById("agent-schedule").value,
+    tools: document.getElementById("agent-tools").value.split(",").map(function(s) { return s.trim(); }).filter(Boolean),
+    skills: document.getElementById("agent-skills").value.split(",").map(function(s) { return s.trim(); }).filter(Boolean),
+    max_iterations: parseInt(document.getElementById("agent-iterations").value) || 10,
+  };
+  if (!data.name) { toast("Agent name is required", "error"); return; }
   try {
-    const [profile, routing] = await Promise.all([
-      api(`/profiles/${encodeURIComponent(name)}`),
-      api(`/agent-routing/${encodeURIComponent(name)}`).catch(() => null),
-    ]);
-    state.selectedProfile = profile;
-    state.selectedProfileRouting = routing;
-    state.agentRoutingEdits = {};
-    state.agentsViewMode = "detail";
-    render();
-  } catch (err) { toast(err.message, "error"); }
-}
-
-function showCreateProfileModal() {
-  const taskTypes = [
-    "CODING","DEBUGGING","REFACTORING","RESEARCH","DOCUMENTATION",
-    "MARKETING","EMAIL","DESIGN","CONTENT","STRATEGY","DATA_ANALYSIS","PROJECT_MANAGEMENT",
-    "APP_CREATE","APP_UPDATE"
-  ];
-  const checkboxes = taskTypes.map((t) => `<label class="checkbox-label"><input type="checkbox" value="${t}" class="cp-task-type"> ${t}</label>`).join("");
-  showModal(`
-    <div class="modal" style="max-width:560px">
-      <div class="modal-header"><h3>Create Profile</h3>
-        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label for="cp-name">Name</label>
-          <input type="text" id="cp-name" placeholder="my-custom-agent" pattern="[a-z0-9][a-z0-9-]*">
-          <div class="help">Lowercase letters, numbers, and hyphens only.</div>
-        </div>
-        <div class="form-group">
-          <label for="cp-desc">Description</label>
-          <input type="text" id="cp-desc" placeholder="A brief description of this agent profile">
-        </div>
-        <div class="form-group">
-          <label>Task Types</label>
-          <div class="checkbox-grid">${checkboxes}</div>
-        </div>
-        <div class="form-group">
-          <label for="cp-skills">Preferred Skills</label>
-          <input type="text" id="cp-skills" placeholder="coding, debugging, testing">
-          <div class="help">Comma-separated skill names.</div>
-        </div>
-        <div class="form-group">
-          <label for="cp-persona">Persona Instructions</label>
-          <textarea id="cp-persona" rows="6" placeholder="System prompt overlay for this agent profile..."></textarea>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="createProfile()">Create</button>
-      </div>
-    </div>
-  `);
-  document.getElementById("cp-name")?.focus();
-}
-
-function showEditPersonaModal() {
-  const active = state.personaCustom || state.personaDefault || "";
-  const defaultRef = state.personaDefault || "";
-  showModal(`
-    <div class="modal" style="max-width:640px">
-      <div class="modal-header"><h3>Edit Chat Persona</h3>
-        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label for="persona-prompt">System Prompt</label>
-          <textarea id="persona-prompt" rows="12" style="font-family:var(--font-mono);font-size:0.85rem">${esc(active)}</textarea>
-        </div>
-        <details class="persona-reference">
-          <summary style="cursor:pointer;font-size:0.85rem;color:var(--text-muted)">View default prompt</summary>
-          <pre style="white-space:pre-wrap;font-size:0.8rem;margin-top:0.5rem;padding:0.75rem;background:var(--bg-surface);border-radius:var(--radius-sm);max-height:200px;overflow-y:auto">${esc(defaultRef)}</pre>
-        </details>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
-        ${state.personaCustom ? '<button class="btn btn-outline" onclick="resetPersona()">Reset to Default</button>' : ''}
-        <button class="btn btn-primary" onclick="savePersona()">Save</button>
-      </div>
-    </div>
-  `);
-  document.getElementById("persona-prompt")?.focus();
-}
-
-async function savePersona() {
-  const prompt = document.getElementById("persona-prompt")?.value || "";
-  try {
-    await api("/persona", { method: "PUT", body: JSON.stringify({ prompt }) });
-    await loadPersona();
-    closeModal();
-    render();
-    toast("Chat persona updated.", "success");
-  } catch (err) { toast(err.message, "error"); }
-}
-
-async function resetPersona() {
-  try {
-    await api("/persona", { method: "PUT", body: JSON.stringify({ prompt: "" }) });
-    await loadPersona();
-    closeModal();
-    render();
-    toast("Chat persona reset to default.", "success");
-  } catch (err) { toast(err.message, "error"); }
-}
-
-function showEditProfileModal(name) {
-  const p = state.selectedProfile;
-  if (!p) return;
-  const taskTypes = [
-    "CODING","DEBUGGING","REFACTORING","RESEARCH","DOCUMENTATION",
-    "MARKETING","EMAIL","DESIGN","CONTENT","STRATEGY","DATA_ANALYSIS","PROJECT_MANAGEMENT",
-    "APP_CREATE","APP_UPDATE"
-  ];
-  const activeTypes = new Set(p.preferred_task_types || []);
-  const checkboxes = taskTypes.map((t) => `<label class="checkbox-label"><input type="checkbox" value="${t}" class="ep-task-type" ${activeTypes.has(t) ? 'checked' : ''}> ${t}</label>`).join("");
-  showModal(`
-    <div class="modal" style="max-width:560px">
-      <div class="modal-header"><h3>Edit Profile: ${esc(name)}</h3>
-        <button class="btn btn-icon btn-outline" onclick="closeModal()">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label>Name</label>
-          <input type="text" value="${esc(name)}" disabled style="opacity:0.6">
-        </div>
-        <div class="form-group">
-          <label for="ep-desc">Description</label>
-          <input type="text" id="ep-desc" value="${esc(p.description || '')}">
-        </div>
-        <div class="form-group">
-          <label>Task Types</label>
-          <div class="checkbox-grid">${checkboxes}</div>
-        </div>
-        <div class="form-group">
-          <label for="ep-skills">Preferred Skills</label>
-          <input type="text" id="ep-skills" value="${esc((p.preferred_skills || []).join(', '))}">
-          <div class="help">Comma-separated skill names.</div>
-        </div>
-        <div class="form-group">
-          <label for="ep-persona">Persona Instructions</label>
-          <textarea id="ep-persona" rows="6">${esc(p.prompt_overlay || '')}</textarea>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="updateProfile('${esc(name)}')">Save</button>
-      </div>
-    </div>
-  `);
-}
-
-async function createProfile() {
-  const name = document.getElementById("cp-name")?.value?.trim();
-  const description = document.getElementById("cp-desc")?.value?.trim() || "";
-  const skillsRaw = document.getElementById("cp-skills")?.value?.trim() || "";
-  const persona = document.getElementById("cp-persona")?.value?.trim() || "";
-  const taskTypes = Array.from(document.querySelectorAll(".cp-task-type:checked")).map((cb) => cb.value);
-  const skills = skillsRaw ? skillsRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
-
-  if (!name) { toast("Profile name is required", "error"); return; }
-
-  try {
-    await api("/profiles", {
+    var res = await fetch("/api/agents", {
       method: "POST",
-      body: JSON.stringify({ name, description, preferred_skills: skills, preferred_task_types: taskTypes, prompt_overlay: persona }),
+      headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
+      body: JSON.stringify(data),
     });
-    closeModal();
-    toast("Profile created", "success");
-    await loadProfiles();
-    render();
-  } catch (err) { toast(err.message, "error"); }
+    if (res.ok) { toast("Agent created: " + data.name, "success"); renderAgents(); }
+    else { toast("Failed to create agent", "error"); }
+  } catch (e) { toast("Error: " + e.message, "error"); }
 }
 
-async function updateProfile(name) {
-  const description = document.getElementById("ep-desc")?.value?.trim();
-  const skillsRaw = document.getElementById("ep-skills")?.value?.trim() || "";
-  const persona = document.getElementById("ep-persona")?.value?.trim() || "";
-  const taskTypes = Array.from(document.querySelectorAll(".ep-task-type:checked")).map((cb) => cb.value);
-  const skills = skillsRaw ? skillsRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
-
-  try {
-    const updated = await api(`/profiles/${encodeURIComponent(name)}`, {
-      method: "PUT",
-      body: JSON.stringify({ description, preferred_skills: skills, preferred_task_types: taskTypes, prompt_overlay: persona }),
+function agentShowTemplates() {
+  fetch("/api/agents/templates", { headers: { Authorization: "Bearer " + state.token } })
+    .then(function(r) { return r.json(); })
+    .then(function(templates) {
+      var el = document.getElementById("page-content");
+      if (!el) return;
+      var cards = Object.keys(templates).map(function(key) {
+        var t = templates[key];
+        var tools = (t.tools || []).map(function(x) { return '<span class="badge-type">' + esc(x) + '</span>'; }).join(" ");
+        return '<div class="agent-card" style="cursor:pointer" onclick="agentCreateFromTemplate(\'' + key + '\')">' +
+          '<div class="agent-card-header"><div class="agent-card-title"><h4>' + esc(t.name) + '</h4></div></div>' +
+          '<p class="agent-card-desc">' + esc(t.description) + '</p>' +
+          '<div class="agent-card-meta"><div class="agent-card-chips">' + tools + '</div>' +
+          '<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.3rem">Model: ' + esc(t.model || "default") + ' | Schedule: ' + esc(t.schedule || "manual") + '</div></div></div>';
+      }).join("");
+      el.innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
+          '<h2>Agent Templates</h2>' +
+          '<button class="btn btn-outline" onclick="renderAgents()">Back</button>' +
+        '</div>' +
+        '<p style="color:var(--text-secondary);margin-bottom:1rem">Click a template to create an agent from it.</p>' +
+        '<div class="agents-grid">' + cards + '</div>';
     });
-    closeModal();
-    toast("Profile updated", "success");
-    state.selectedProfile = updated;
-    await loadProfiles();
-    render();
-  } catch (err) { toast(err.message, "error"); }
 }
 
-async function deleteProfile(name) {
-  if (!confirm(`Delete profile "${name}"? This cannot be undone.`)) return;
+async function agentCreateFromTemplate(key) {
   try {
-    await api(`/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
-    toast("Profile deleted", "success");
-    state.agentsViewMode = "grid";
-    state.selectedProfile = null;
-    await loadProfiles();
-    render();
-  } catch (err) { toast(err.message, "error"); }
+    var res = await fetch("/api/agents", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
+      body: JSON.stringify({ template: key }),
+    });
+    if (res.ok) {
+      var agent = await res.json();
+      toast("Created agent: " + agent.name, "success");
+      renderAgents();
+    } else { toast("Failed to create agent", "error"); }
+  } catch (e) { toast("Error: " + e.message, "error"); }
 }
 
-async function setDefaultProfile(name) {
+async function agentShowDetail(id) {
   try {
-    await api(`/profiles/default/${encodeURIComponent(name)}`, { method: "PUT" });
-    toast(`Default profile set to "${name}"`, "success");
-    state.defaultProfile = name;
-    await loadProfiles();
-    // Reload detail if viewing
-    if (state.agentsViewMode === "detail" && state.selectedProfile) {
-      await loadProfileDetail(name);
-    } else {
-      render();
-    }
-  } catch (err) { toast(err.message, "error"); }
+    var res = await fetch("/api/agents/" + id, { headers: { Authorization: "Bearer " + state.token } });
+    var agent = await res.json();
+    var el = document.getElementById("page-content");
+    if (!el) return;
+    var statusColors = { active: "#34d399", running: "#38bdf8", paused: "#facc15", stopped: "#64748b", error: "#f87171" };
+    var color = statusColors[agent.status] || "#64748b";
+    var tools = (agent.tools || []).map(function(t) { return '<span class="badge-type">' + esc(t) + '</span>'; }).join(" ");
+    var skills = (agent.skills || []).map(function(s) { return '<span class="badge-type" style="background:var(--primary-dim);color:var(--primary)">' + esc(s) + '</span>'; }).join(" ");
+    var lastRun = agent.last_run_at ? new Date(agent.last_run_at * 1000).toLocaleString() : "Never";
+    el.innerHTML =
+      '<div style="max-width:700px">' +
+        '<button class="btn btn-outline btn-sm" onclick="renderAgents()" style="margin-bottom:1rem">&larr; Back</button>' +
+        '<div class="agent-detail-card" style="background:var(--bg-secondary);padding:1.5rem;border-radius:12px;border:1px solid var(--border)">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
+            '<div><h3 style="margin:0">' + esc(agent.name) + '</h3>' +
+            '<span class="badge-tier" style="background:' + color + ';color:#000;margin-top:0.25rem;display:inline-block">' + esc(agent.status) + '</span></div>' +
+            '<div style="display:flex;gap:0.5rem">' +
+              (agent.status === "stopped" ? '<button class="btn btn-primary btn-sm" onclick="agentStart(\'' + agent.id + '\')">Start</button>' : '') +
+              (agent.status === "active" ? '<button class="btn btn-outline btn-sm" onclick="agentStop(\'' + agent.id + '\')">Stop</button>' : '') +
+              '<button class="btn btn-outline btn-sm btn-danger-text" onclick="agentDelete(\'' + agent.id + '\')">Delete</button>' +
+            '</div>' +
+          '</div>' +
+          '<p style="color:var(--text-secondary)">' + esc(agent.description || "No description") + '</p>' +
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">' +
+            '<div><strong>Provider:</strong> ' + esc(agent.provider) + '</div>' +
+            '<div><strong>Model:</strong> ' + esc(agent.model) + '</div>' +
+            '<div><strong>Schedule:</strong> ' + esc(agent.schedule) + '</div>' +
+            '<div><strong>Max Iterations:</strong> ' + agent.max_iterations + '</div>' +
+            '<div><strong>Total Runs:</strong> ' + (agent.total_runs || 0) + '</div>' +
+            '<div><strong>Total Tokens:</strong> ' + (agent.total_tokens || 0) + '</div>' +
+            '<div><strong>Last Run:</strong> ' + lastRun + '</div>' +
+            '<div><strong>Memory Scope:</strong> ' + esc(agent.memory_scope) + '</div>' +
+          '</div>' +
+          '<div style="margin-top:1rem"><strong>Tools:</strong><div style="margin-top:0.3rem">' + (tools || "None") + '</div></div>' +
+          '<div style="margin-top:0.75rem"><strong>Skills:</strong><div style="margin-top:0.3rem">' + (skills || "None") + '</div></div>' +
+        '</div>' +
+      '</div>';
+  } catch (e) { toast("Error loading agent", "error"); }
+}
+
+async function agentStart(id) {
+  await fetch("/api/agents/" + id + "/start", { method: "POST", headers: { Authorization: "Bearer " + state.token } });
+  toast("Agent started", "success");
+  agentShowDetail(id);
+}
+
+async function agentStop(id) {
+  await fetch("/api/agents/" + id + "/stop", { method: "POST", headers: { Authorization: "Bearer " + state.token } });
+  toast("Agent stopped", "success");
+  agentShowDetail(id);
+}
+
+async function agentDelete(id) {
+  if (!confirm("Delete this agent?")) return;
+  await fetch("/api/agents/" + id, { method: "DELETE", headers: { Authorization: "Bearer " + state.token } });
+  toast("Agent deleted", "success");
+  renderAgents();
 }
 
 // ---------------------------------------------------------------------------

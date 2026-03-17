@@ -1715,6 +1715,91 @@ def create_app(
             ],
         }
 
+    # -- Agents (Custom AI Agent Management) -----------------------------------
+
+    from core.agent_manager import AGENT_TEMPLATES, AgentManager
+
+    _agent_manager = AgentManager(workspace / ".agent42" / "agents")
+
+    class AgentCreateRequest(BaseModel):
+        name: str = ""
+        description: str = ""
+        template: str = ""
+        tools: list = []
+        skills: list = []
+        provider: str = "anthropic"
+        provider_url: str = ""
+        model: str = "claude-sonnet-4-6"
+        schedule: str = "manual"
+        memory_scope: str = "global"
+        max_iterations: int = 10
+        approval_required: bool = False
+
+    class AgentUpdateRequest(BaseModel):
+        name: str | None = None
+        description: str | None = None
+        tools: list | None = None
+        skills: list | None = None
+        provider: str | None = None
+        provider_url: str | None = None
+        model: str | None = None
+        schedule: str | None = None
+        memory_scope: str | None = None
+        max_iterations: int | None = None
+        approval_required: bool | None = None
+        status: str | None = None
+
+    @app.get("/api/agents")
+    async def list_agents(_user: str = Depends(get_current_user)):
+        return [a.to_dict() for a in _agent_manager.list_all()]
+
+    @app.get("/api/agents/templates")
+    async def list_agent_templates(_user: str = Depends(get_current_user)):
+        return AGENT_TEMPLATES
+
+    @app.post("/api/agents")
+    async def create_agent(req: AgentCreateRequest, _user: str = Depends(get_current_user)):
+        data = req.model_dump(exclude_none=True)
+        agent = _agent_manager.create(**data)
+        return agent.to_dict()
+
+    @app.get("/api/agents/{agent_id}")
+    async def get_agent(agent_id: str, _user: str = Depends(get_current_user)):
+        agent = _agent_manager.get(agent_id)
+        if not agent:
+            raise HTTPException(404, f"Agent not found: {agent_id}")
+        return agent.to_dict()
+
+    @app.patch("/api/agents/{agent_id}")
+    async def update_agent(
+        agent_id: str, req: AgentUpdateRequest, _user: str = Depends(get_current_user)
+    ):
+        data = {k: v for k, v in req.model_dump().items() if v is not None}
+        agent = _agent_manager.update(agent_id, **data)
+        if not agent:
+            raise HTTPException(404, f"Agent not found: {agent_id}")
+        return agent.to_dict()
+
+    @app.delete("/api/agents/{agent_id}")
+    async def delete_agent(agent_id: str, _user: str = Depends(get_current_user)):
+        if not _agent_manager.delete(agent_id):
+            raise HTTPException(404, f"Agent not found: {agent_id}")
+        return {"status": "deleted"}
+
+    @app.post("/api/agents/{agent_id}/start")
+    async def start_agent(agent_id: str, _user: str = Depends(get_current_user)):
+        agent = _agent_manager.set_status(agent_id, "active")
+        if not agent:
+            raise HTTPException(404, f"Agent not found: {agent_id}")
+        return agent.to_dict()
+
+    @app.post("/api/agents/{agent_id}/stop")
+    async def stop_agent(agent_id: str, _user: str = Depends(get_current_user)):
+        agent = _agent_manager.set_status(agent_id, "stopped")
+        if not agent:
+            raise HTTPException(404, f"Agent not found: {agent_id}")
+        return agent.to_dict()
+
     # -- Approvals -------------------------------------------------------------
 
     @app.get("/api/approvals")
