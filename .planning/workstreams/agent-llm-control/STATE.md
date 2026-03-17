@@ -21,23 +21,23 @@ last_updated: "2026-03-07T17:50:42Z"
 See: .planning/PROJECT.md (updated 2026-03-06)
 
 **Core value:** Agent42 runs agents reliably with tiered provider routing (L1 workhorse -> free fallback -> L2 premium)
-**Current focus:** Phase 19.1 UI Redesign in progress — backend fixes done (Plan 01), frontend rewrite next (Plan 02)
+**Current focus:** Phase 19.1 UI Redesign COMPLETE — both plans done, ready for human verification and Phase 20
 
 ## Current Position
 
-Phase: 19.1 of 20 (UI Redesign) -- IN PROGRESS
-Plan: 1 of 2 in current phase -- COMPLETE (Plan 02 next)
-Status: Phase 19.1 Plan 01 complete, ready for Plan 02 (Frontend Rewrite)
-Last activity: 2026-03-17 -- 19.1-01 complete (Backend fixes + Wave 0 tests)
+Phase: 19.1 of 20 (UI Redesign) -- COMPLETE
+Plan: 2 of 2 in current phase -- COMPLETE
+Status: Phase 19.1 complete — IDE layout rewritten, human browser verification needed before Phase 20
+Last activity: 2026-03-17 -- 19.1-02 complete (Frontend Rewrite: VS Code-style IDE layout)
 
-Progress: [████████░░] 80%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
-- Average duration: 10.6min
-- Total execution time: 74min
+- Total plans completed: 8
+- Average duration: 10.4min
+- Total execution time: 83min
 
 **By Phase:**
 
@@ -47,7 +47,7 @@ Progress: [████████░░] 80%
 | 17. Tier Routing Architecture | 2/2 | 28min | 14min |
 | 18. Agent Config Backend | 1/1 | 18min | 18min |
 | 19. Agent Config Dashboard | 2/2 | 13min | 6.5min |
-| 19.1. UI Redesign | 1/2 | 12min | 12min |
+| 19.1. UI Redesign | 2/2 | 21min | 10.5min |
 
 *Updated after each plan completion*
 
@@ -92,6 +92,11 @@ Progress: [████████░░] 80%
 - [19.1-01] Use empty string default for AGENT42_REMOTE_HOST (not 'agent42-prod') — fail closed rather than silently connecting to wrong host
 - [19.1-01] Add /api/remote/status endpoint to enable frontend feature detection before attempting WebSocket connections
 - [19.1-01] Mark test_ide_html.py tests as xfail until Plan 02 ships — Wave 0 tests define target state not current state
+- [19.1-02] Terminal visible by default on Code page load — renderCode() opens first local terminal if sessions empty
+- [19.1-02] Terminal wrapper is sibling of ide-top-row (not nested in ide-main) — enables full-width drag handle
+- [19.1-02] fitAddon stored on session object (was closure-local) — enables drag-handle resize for all tabs
+- [19.1-02] Single shared termFitAll with window guard — no per-session window listener accumulation
+- [19.1-02] Remove xfail markers from test_ide_html.py — all 6 tests now regular passing tests
 
 ### Roadmap Evolution
 
@@ -110,5 +115,5 @@ Progress: [████████░░] 80%
 ## Session Continuity
 
 Last session: 2026-03-17
-Stopped at: Completed 19.1-01-PLAN.md (Backend fixes + Wave 0 tests)
-Resume file: .planning/workstreams/agent-llm-control/phases/19.1-ui-redesign/19.1-01-SUMMARY.md
+Stopped at: Completed 19.1-02-PLAN.md (Frontend Rewrite: VS Code-style IDE layout)
+Resume file: .planning/workstreams/agent-llm-control/phases/19.1-ui-redesign/19.1-02-SUMMARY.md
