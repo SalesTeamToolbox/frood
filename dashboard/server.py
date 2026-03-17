@@ -1418,6 +1418,92 @@ def create_app(
                     continue
         return {"query": q, "results": results, "truncated": False}
 
+    # -- Terminal WebSocket ----------------------------------------------------
+
+    import asyncio as _asyncio
+    import shutil as _shutil
+
+    _terminal_sessions: dict[str, dict] = {}
+
+    def _get_user_from_token(token: str) -> str:
+        """Validate JWT token and return username."""
+        from jose import jwt as _jwt
+
+        payload = _jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+        return payload.get("sub", "")
+
+    @app.websocket("/ws/terminal")
+    async def terminal_ws(websocket: WebSocket):
+        """WebSocket endpoint for interactive terminal sessions."""
+        await websocket.accept()
+
+        # Authenticate via query param
+        token = websocket.query_params.get("token", "")
+        if not token:
+            await websocket.close(code=4001, reason="Missing token")
+            return
+        try:
+            _get_user_from_token(token)
+        except Exception:
+            await websocket.close(code=4001, reason="Invalid token")
+            return
+
+        node = websocket.query_params.get("node", "local")
+        shell = _shutil.which("bash") or _shutil.which("sh") or _shutil.which("cmd")
+        if not shell:
+            await websocket.send_text("\r\nNo shell found\r\n")
+            await websocket.close()
+            return
+
+        try:
+            if node == "remote":
+                ssh_host = _os.environ.get("AGENT42_REMOTE_HOST", "agent42-prod")
+                proc = await _asyncio.create_subprocess_exec(
+                    "ssh",
+                    "-tt",
+                    ssh_host,
+                    stdin=_asyncio.subprocess.PIPE,
+                    stdout=_asyncio.subprocess.PIPE,
+                    stderr=_asyncio.subprocess.STDOUT,
+                )
+            else:
+                proc = await _asyncio.create_subprocess_exec(
+                    shell,
+                    stdin=_asyncio.subprocess.PIPE,
+                    stdout=_asyncio.subprocess.PIPE,
+                    stderr=_asyncio.subprocess.STDOUT,
+                    cwd=str(workspace),
+                )
+        except Exception as e:
+            await websocket.send_text(f"\r\nFailed to start shell: {e}\r\n")
+            await websocket.close()
+            return
+
+        async def read_output():
+            try:
+                while True:
+                    data = await proc.stdout.read(4096)
+                    if not data:
+                        break
+                    await websocket.send_text(data.decode("utf-8", errors="replace"))
+            except Exception:
+                pass
+
+        read_task = _asyncio.create_task(read_output())
+
+        try:
+            while True:
+                msg = await websocket.receive_text()
+                if proc.stdin and not proc.stdin.is_closing():
+                    proc.stdin.write(msg.encode("utf-8"))
+                    await proc.stdin.drain()
+        except Exception:
+            pass
+        finally:
+            read_task.cancel()
+            if proc.returncode is None:
+                proc.terminate()
+
     # -- Approvals -------------------------------------------------------------
 
     @app.get("/api/approvals")
