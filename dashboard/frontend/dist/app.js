@@ -3317,6 +3317,11 @@ function renderCode() {
         e.preventDefault();
         termToggle();
       }
+      // Ctrl+B: toggle explorer (same as VS Code)
+      if (e.key === "b" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        ideToggleExplorer();
+      }
     });
   }
 }
@@ -3859,17 +3864,21 @@ function ideShowPanel(panel, evt) {
   var btn = evt && evt.currentTarget ? evt.currentTarget : document.querySelectorAll(".ide-activity-btn")[panel === "search" ? 1 : 0];
   var sidebar = document.getElementById("ide-sidebar-panel");
 
-  // Toggle: clicking the active panel hides the sidebar (VS Code behavior)
+  // Toggle: clicking the active panel hides sidebar + activity bar (VS Code Ctrl+B behavior)
   if (panel === _ideActivePanel && _ideSidebarVisible) {
     _ideSidebarVisible = false;
     if (sidebar) sidebar.style.display = "none";
+    var actBar = document.querySelector(".ide-activity-bar");
+    if (actBar) actBar.style.display = "none";
     if (btn) btn.classList.remove("active");
     return;
   }
 
-  // Show sidebar and switch panel
+  // Show sidebar + activity bar and switch panel
   _ideSidebarVisible = true;
   _ideActivePanel = panel;
+  var actBar2 = document.querySelector(".ide-activity-bar");
+  if (actBar2) actBar2.style.display = "";
   var btns = document.querySelectorAll(".ide-activity-btn");
   btns.forEach(function(b) { b.classList.remove("active"); });
   if (btn) btn.classList.add("active");
@@ -3889,6 +3898,31 @@ function ideShowPanel(panel, evt) {
     if (fileTree) fileTree.style.display = "";
     if (header) header.textContent = "EXPLORER";
   }
+}
+
+// Toggle explorer panel (Ctrl+B, same as VS Code)
+function ideToggleExplorer() {
+  if (_ideSidebarVisible) {
+    // Hide both activity bar and sidebar
+    _ideSidebarVisible = false;
+    var sidebar = document.getElementById("ide-sidebar-panel");
+    var actBar = document.querySelector(".ide-activity-bar");
+    if (sidebar) sidebar.style.display = "none";
+    if (actBar) actBar.style.display = "none";
+    var btns = document.querySelectorAll(".ide-activity-btn");
+    btns.forEach(function(b) { b.classList.remove("active"); });
+  } else {
+    // Show both
+    _ideSidebarVisible = true;
+    var sidebar = document.getElementById("ide-sidebar-panel");
+    var actBar = document.querySelector(".ide-activity-bar");
+    if (sidebar) sidebar.style.display = "";
+    if (actBar) actBar.style.display = "";
+    var idx = _ideActivePanel === "search" ? 1 : 0;
+    var btns = document.querySelectorAll(".ide-activity-btn");
+    if (btns[idx]) btns[idx].classList.add("active");
+  }
+  setTimeout(function() { if (typeof termFitAll === "function") termFitAll(); }, 100);
 }
 
 // Collapse/expand main Agent42 sidebar when in IDE mode

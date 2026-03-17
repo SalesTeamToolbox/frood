@@ -1277,6 +1277,7 @@ def create_app(
     # -- IDE (Web IDE file operations) -----------------------------------------
 
     import os as _os
+    import sys as _sys
 
     workspace = Path(_os.environ.get("AGENT42_WORKSPACE", str(Path.cwd())))
 
@@ -1434,10 +1435,16 @@ def create_app(
 
     @app.websocket("/ws/terminal")
     async def terminal_ws(websocket: WebSocket):
-        """WebSocket endpoint for interactive terminal sessions."""
+        """WebSocket endpoint for interactive terminal sessions.
+
+        Uses PTY (winpty on Windows, pty on Unix) for local shells so they
+        behave interactively (prompt, colors, job control).  Falls back to
+        subprocess PIPE for SSH remote sessions.
+        """
+        # Security: all subprocess commands use fixed binaries resolved via
+        # shutil.which — no user-supplied strings are interpolated into commands.
         await websocket.accept()
 
-        # Authenticate via query param
         token = websocket.query_params.get("token", "")
         if not token:
             await websocket.close(code=4001, reason="Missing token")
@@ -1456,113 +1463,241 @@ def create_app(
             await websocket.close()
             return
 
-        # Find Claude Code CLI
         claude_bin = _shutil.which("claude")
-
-        try:
-            if cmd == "claude" and node == "remote":
-                # Claude Code on remote via SSH
-                ssh_host = _os.environ.get("AGENT42_REMOTE_HOST", "")
-                if not ssh_host:
-                    await websocket.send_text(
-                        "\r\n\x1b[31mNo remote node configured (AGENT42_REMOTE_HOST not set)\x1b[0m\r\n"
-                    )
-                    await websocket.close()
-                    return
-                proc = await _asyncio.create_subprocess_exec(
-                    "ssh",
-                    "-tt",
-                    ssh_host,
-                    "claude",
-                    stdin=_asyncio.subprocess.PIPE,
-                    stdout=_asyncio.subprocess.PIPE,
-                    stderr=_asyncio.subprocess.STDOUT,
-                )
-            elif cmd == "claude":
-                # Claude Code locally (uses CC subscription)
-                if not claude_bin:
-                    await websocket.send_text(
-                        "\r\nClaude Code CLI not found.\r\n"
-                        "Install: npm install -g @anthropic-ai/claude-code\r\n"
-                        "Or log in: claude login\r\n"
-                    )
-                    await websocket.close()
-                    return
-                proc = await _asyncio.create_subprocess_exec(
-                    claude_bin,
-                    stdin=_asyncio.subprocess.PIPE,
-                    stdout=_asyncio.subprocess.PIPE,
-                    stderr=_asyncio.subprocess.STDOUT,
-                    cwd=str(workspace),
-                )
-            elif node == "remote":
-                ssh_host = _os.environ.get("AGENT42_REMOTE_HOST", "")
-                if not ssh_host:
-                    await websocket.send_text(
-                        "\r\n\x1b[31mNo remote node configured (AGENT42_REMOTE_HOST not set)\x1b[0m\r\n"
-                    )
-                    await websocket.close()
-                    return
-                proc = await _asyncio.create_subprocess_exec(
-                    "ssh",
-                    "-tt",
-                    ssh_host,
-                    stdin=_asyncio.subprocess.PIPE,
-                    stdout=_asyncio.subprocess.PIPE,
-                    stderr=_asyncio.subprocess.STDOUT,
-                )
-            else:
-                proc = await _asyncio.create_subprocess_exec(
-                    shell,
-                    stdin=_asyncio.subprocess.PIPE,
-                    stdout=_asyncio.subprocess.PIPE,
-                    stderr=_asyncio.subprocess.STDOUT,
-                    cwd=str(workspace),
-                )
-        except Exception as e:
-            await websocket.send_text(f"\r\nFailed to start shell: {e}\r\n")
-            await websocket.close()
-            return
-
-        async def read_output():
-            try:
-                while True:
-                    data = await proc.stdout.read(4096)
-                    if not data:
-                        break
-                    await websocket.send_text(data.decode("utf-8", errors="replace"))
-            except Exception:
-                pass
-
-        read_task = _asyncio.create_task(read_output())
-
         import json as _json
 
-        try:
-            while True:
-                msg = await websocket.receive_text()
-                # Check for JSON resize message before forwarding to stdin
+        # --- Remote sessions use subprocess (SSH needs PIPE, not local PTY) ---
+        if node == "remote":
+            ssh_host = _os.environ.get("AGENT42_REMOTE_HOST", "")
+            if not ssh_host:
+                await websocket.send_text(
+                    "\r\n\x1b[31mNo remote node configured (AGENT42_REMOTE_HOST not set)\x1b[0m\r\n"
+                )
+                await websocket.close()
+                return
+            ssh_args = ["ssh", "-tt", ssh_host]
+            if cmd == "claude":
+                ssh_args.append("claude")
+            try:
+                proc = await _asyncio.create_subprocess_exec(
+                    *ssh_args,
+                    stdin=_asyncio.subprocess.PIPE,
+                    stdout=_asyncio.subprocess.PIPE,
+                    stderr=_asyncio.subprocess.STDOUT,
+                )
+            except Exception as e:
+                await websocket.send_text(f"\r\nFailed to start SSH: {e}\r\n")
+                await websocket.close()
+                return
+
+            async def _read_remote():
                 try:
-                    parsed = _json.loads(msg)
-                    if isinstance(parsed, dict) and parsed.get("type") == "resize":
-                        cols = int(parsed.get("cols", 80))
-                        rows = int(parsed.get("rows", 24))
-                        # Best-effort: send ANSI resize escape to process stdin
-                        if proc.stdin and not proc.stdin.is_closing():
-                            proc.stdin.write(f"\x1b[8;{rows};{cols}t".encode())
-                            await proc.stdin.drain()
-                        continue  # Do not forward resize message as terminal input
-                except (_json.JSONDecodeError, ValueError, TypeError):
-                    pass  # Not JSON — fall through to normal input
-                if proc.stdin and not proc.stdin.is_closing():
-                    proc.stdin.write(msg.encode("utf-8"))
-                    await proc.stdin.drain()
-        except Exception:
-            pass
-        finally:
-            read_task.cancel()
-            if proc.returncode is None:
-                proc.terminate()
+                    while True:
+                        data = await proc.stdout.read(4096)
+                        if not data:
+                            break
+                        await websocket.send_text(data.decode("utf-8", errors="replace"))
+                except Exception:
+                    pass
+
+            read_task = _asyncio.create_task(_read_remote())
+            try:
+                while True:
+                    msg = await websocket.receive_text()
+                    try:
+                        parsed = _json.loads(msg)
+                        if isinstance(parsed, dict) and parsed.get("type") == "resize":
+                            continue
+                    except (_json.JSONDecodeError, ValueError, TypeError):
+                        pass
+                    if proc.stdin and not proc.stdin.is_closing():
+                        proc.stdin.write(msg.encode("utf-8"))
+                        await proc.stdin.drain()
+            except Exception:
+                pass
+            finally:
+                read_task.cancel()
+                if proc.returncode is None:
+                    proc.terminate()
+            return
+
+        # --- Local sessions: determine command ---
+        if cmd == "claude":
+            if not claude_bin:
+                await websocket.send_text(
+                    "\r\nClaude Code CLI not found.\r\n"
+                    "Install: npm install -g @anthropic-ai/claude-code\r\n"
+                )
+                await websocket.close()
+                return
+            pty_cmd = claude_bin
+        else:
+            pty_cmd = shell
+
+        # --- Try PTY for interactive local shell ---
+        pty_process = None
+        use_pty = False
+        try:
+            if _sys.platform == "win32":
+                from winpty import PtyProcess
+
+                pty_process = PtyProcess.spawn(pty_cmd, cwd=str(workspace))
+                use_pty = True
+            else:
+                import pty as _pty_mod
+                import subprocess as _subprocess_pty
+
+                master_fd, slave_fd = _pty_mod.openpty()
+                proc = _subprocess_pty.Popen(
+                    [pty_cmd],
+                    stdin=slave_fd,
+                    stdout=slave_fd,
+                    stderr=slave_fd,
+                    cwd=str(workspace),
+                    preexec_fn=_os.setsid,
+                )
+                _os.close(slave_fd)
+                use_pty = True
+        except Exception as e:
+            logger.warning(f"PTY unavailable, falling back to PIPE: {e}")
+            use_pty = False
+
+        if use_pty and _sys.platform == "win32" and pty_process:
+            loop = _asyncio.get_event_loop()
+
+            async def _read_pty_win():
+                try:
+                    while pty_process.isalive():
+                        try:
+                            data = await loop.run_in_executor(None, lambda: pty_process.read(4096))
+                            if data:
+                                await websocket.send_text(data)
+                        except EOFError:
+                            break
+                        except Exception:
+                            break
+                except Exception:
+                    pass
+
+            read_task = _asyncio.create_task(_read_pty_win())
+            try:
+                while True:
+                    msg = await websocket.receive_text()
+                    try:
+                        parsed = _json.loads(msg)
+                        if isinstance(parsed, dict) and parsed.get("type") == "resize":
+                            cols = int(parsed.get("cols", 80))
+                            rows = int(parsed.get("rows", 24))
+                            try:
+                                pty_process.setwinsize(rows, cols)
+                            except Exception:
+                                pass
+                            continue
+                    except (_json.JSONDecodeError, ValueError, TypeError):
+                        pass
+                    try:
+                        pty_process.write(msg)
+                    except Exception:
+                        break
+            except Exception:
+                pass
+            finally:
+                read_task.cancel()
+                if pty_process.isalive():
+                    pty_process.terminate()
+
+        elif use_pty and _sys.platform != "win32":
+            import select as _select
+
+            loop = _asyncio.get_event_loop()
+
+            def _read_master():
+                if _select.select([master_fd], [], [], 0.1)[0]:
+                    return _os.read(master_fd, 4096)
+                return b""
+
+            async def _read_pty_unix():
+                try:
+                    while proc.poll() is None:
+                        data = await loop.run_in_executor(None, _read_master)
+                        if data:
+                            await websocket.send_text(data.decode("utf-8", errors="replace"))
+                        else:
+                            await _asyncio.sleep(0.05)
+                except Exception:
+                    pass
+
+            read_task = _asyncio.create_task(_read_pty_unix())
+            try:
+                while True:
+                    msg = await websocket.receive_text()
+                    try:
+                        parsed = _json.loads(msg)
+                        if isinstance(parsed, dict) and parsed.get("type") == "resize":
+                            import fcntl
+                            import struct
+                            import termios
+
+                            cols = int(parsed.get("cols", 80))
+                            rows = int(parsed.get("rows", 24))
+                            winsize = struct.pack("HHHH", rows, cols, 0, 0)
+                            fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+                            continue
+                    except (_json.JSONDecodeError, ValueError, TypeError):
+                        pass
+                    _os.write(master_fd, msg.encode("utf-8"))
+            except Exception:
+                pass
+            finally:
+                read_task.cancel()
+                _os.close(master_fd)
+                if proc.poll() is None:
+                    proc.terminate()
+
+        else:
+            # Fallback: subprocess PIPE (no interactive prompt)
+            try:
+                proc = await _asyncio.create_subprocess_exec(
+                    pty_cmd,
+                    stdin=_asyncio.subprocess.PIPE,
+                    stdout=_asyncio.subprocess.PIPE,
+                    stderr=_asyncio.subprocess.STDOUT,
+                    cwd=str(workspace),
+                )
+            except Exception as e:
+                await websocket.send_text(f"\r\nFailed to start shell: {e}\r\n")
+                await websocket.close()
+                return
+
+            async def _read_fallback():
+                try:
+                    while True:
+                        data = await proc.stdout.read(4096)
+                        if not data:
+                            break
+                        await websocket.send_text(data.decode("utf-8", errors="replace"))
+                except Exception:
+                    pass
+
+            read_task = _asyncio.create_task(_read_fallback())
+            try:
+                while True:
+                    msg = await websocket.receive_text()
+                    try:
+                        parsed = _json.loads(msg)
+                        if isinstance(parsed, dict) and parsed.get("type") == "resize":
+                            continue
+                    except (_json.JSONDecodeError, ValueError, TypeError):
+                        pass
+                    if proc.stdin and not proc.stdin.is_closing():
+                        proc.stdin.write(msg.encode("utf-8"))
+                        await proc.stdin.drain()
+            except Exception:
+                pass
+            finally:
+                read_task.cancel()
+                if proc.returncode is None:
+                    proc.terminate()
 
     # -- Remote Node Status ----------------------------------------------------
 

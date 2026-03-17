@@ -44,6 +44,9 @@ mcp>=1.12.0
 # Qdrant:    pip install qdrant-client         (vector DB for semantic search)
 # Redis:     pip install redis[hiredis]        (session cache + embedding cache)
 
+# Terminal PTY (interactive shell in web IDE)
+pywinpty>=2.0.0; sys_platform == "win32"
+
 # ── Optional channel dependencies (install as needed) ──────────────────
 # Discord:   pip install discord.py
 # Slack:     pip install slack-sdk aiohttp
