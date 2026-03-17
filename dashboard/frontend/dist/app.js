@@ -4095,7 +4095,7 @@ function ideToggleMainSidebar() {
 
   if (_ideMainSidebarCollapsed) {
     if (sidebar) sidebar.style.display = "none";
-    if (main) main.style.marginLeft = "48px";
+    if (main) { main.style.marginLeft = "48px"; main.style.width = "calc(100% - 48px)"; }
     // Create mini icon sidebar if not exists
     if (!miniBar) {
       miniBar = document.createElement("div");
@@ -4131,7 +4131,7 @@ function ideToggleMainSidebar() {
     miniBar.style.display = "flex";
   } else {
     if (sidebar) sidebar.style.display = "";
-    if (main) main.style.marginLeft = "";
+    if (main) { main.style.marginLeft = ""; main.style.width = ""; }
     if (miniBar) miniBar.style.display = "none";
   }
   // Re-fit terminals after layout change
@@ -5478,7 +5478,7 @@ function render() {
     var sidebar = document.querySelector(".sidebar");
     var main = document.querySelector(".main");
     if (sidebar) sidebar.style.display = "none";
-    if (main) main.style.marginLeft = "48px";
+    if (main) { main.style.marginLeft = "48px"; main.style.width = "calc(100% - 48px)"; }
     var miniBar = document.getElementById("ide-mini-sidebar");
     if (miniBar) {
       miniBar.style.display = "flex";
