@@ -3235,9 +3235,14 @@ function renderCode() {
         <div class="ide-main" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
           <div id="ide-tabs" class="ide-tabs"></div>
           <div id="ide-editor-container" class="ide-editor-container" style="flex:1;overflow:hidden"></div>
+          <div id="ide-cc-container" class="ide-cc-container" style="display:none;flex:1;overflow:hidden;background:#1a1a2e"></div>
           <div id="ide-welcome" class="ide-welcome" style="display:flex">
             <h2>Agent42 IDE</h2>
             <p>Select a file from the explorer to start editing.<br>Changes are saved with Ctrl+S.</p>
+            <button class="ide-cc-launch-btn" onclick="ideOpenClaude('local')">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:middle"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+              Open Claude Code
+            </button>
           </div>
         </div>
       </div>
@@ -3268,10 +3273,12 @@ function renderCode() {
               <div id="ide-term-dropdown" class="ide-term-dropdown" style="display:none">
                 <div class="dropdown-group-label">Local</div>
                 <div class="dropdown-item" onclick="termNew('local');termDropdownDismiss()">Terminal</div>
-                <div class="dropdown-item" onclick="termNewClaude('local');termDropdownDismiss()">Claude Code</div>
+                <div class="dropdown-item" onclick="termNewClaude('local');termDropdownDismiss()">Claude Code (panel)</div>
+                <div class="dropdown-item" onclick="ideOpenClaude('local');termDropdownDismiss()">Claude Code (tab)</div>
                 <div class="dropdown-group-label">Remote</div>
                 <div class="dropdown-item remote-item" onclick="termNew('remote');termDropdownDismiss()">Terminal</div>
-                <div class="dropdown-item remote-item" onclick="termNewClaude('remote');termDropdownDismiss()">Claude Code</div>
+                <div class="dropdown-item remote-item" onclick="termNewClaude('remote');termDropdownDismiss()">Claude Code (panel)</div>
+                <div class="dropdown-item remote-item" onclick="ideOpenClaude('remote');termDropdownDismiss()">Claude Code (tab)</div>
               </div>
             </div>
           </div>
@@ -3522,17 +3529,37 @@ async function ideOpenFile(path) {
 function ideActivateTab() {
   if (_ideActiveTab < 0 || !_ideTabs[_ideActiveTab]) return;
   var tab = _ideTabs[_ideActiveTab];
-  if (_monacoEditor) {
-    _monacoEditor.setModel(tab.model);
-    var container = document.getElementById("ide-editor-container");
-    var welcome = document.getElementById("ide-welcome");
-    if (container) container.style.display = "block";
+  var container = document.getElementById("ide-editor-container");
+  var welcome = document.getElementById("ide-welcome");
+  var ccContainer = document.getElementById("ide-cc-container");
+
+  if (tab.type === "claude") {
+    // Claude Code tab: hide Monaco, show CC terminal
+    if (_monacoEditor) _monacoEditor.setModel(null);
+    if (container) container.style.display = "none";
     if (welcome) welcome.style.display = "none";
+    if (ccContainer) {
+      ccContainer.style.display = "block";
+      // Show the right CC terminal
+      var ccDivs = ccContainer.querySelectorAll(".ide-cc-term");
+      ccDivs.forEach(function(d) { d.style.display = "none"; });
+      if (tab.el) tab.el.style.display = "block";
+      if (tab.fitAddon) { try { tab.fitAddon.fit(); } catch(e) {} }
+    }
+  } else {
+    // File tab: show Monaco, hide CC terminal
+    if (_monacoEditor) {
+      _monacoEditor.setModel(tab.model);
+      if (container) container.style.display = "block";
+    }
+    if (welcome) welcome.style.display = "none";
+    if (ccContainer) ccContainer.style.display = "none";
   }
+
   var langEl = document.getElementById("ide-status-lang");
-  if (langEl) langEl.textContent = tab.language || "plaintext";
+  if (langEl) langEl.textContent = tab.type === "claude" ? "Claude Code" : (tab.language || "plaintext");
   var statusEl = document.getElementById("ide-status-left");
-  if (statusEl) statusEl.textContent = tab.path + (tab.modified ? " (modified)" : "");
+  if (statusEl) statusEl.textContent = tab.type === "claude" ? tab.path : tab.path + (tab.modified ? " (modified)" : "");
   ideRenderTabs();
   ideRenderTree();
 }
@@ -3543,9 +3570,10 @@ function ideRenderTabs() {
   el.innerHTML = _ideTabs.map(function(t, i) {
     var active = i === _ideActiveTab ? "active" : "";
     var mod = t.modified ? '<span class="modified">&#9679;</span>' : "";
-    var name = t.path.split("/").pop();
+    var name = t.type === "claude" ? t.path : t.path.split("/").pop();
+    var icon = t.type === "claude" ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" style="margin-right:4px;vertical-align:middle"><path d="M4 17l6-6-6-6M12 19h8"/></svg>' : "";
     return '<div class="ide-tab ' + active + '" onclick="_ideActiveTab=' + i + ';ideActivateTab()">' +
-      mod + esc(name) +
+      mod + icon + esc(name) +
       '<span class="close" onclick="event.stopPropagation();ideCloseTab(' + i + ')">&times;</span>' +
     '</div>';
   }).join("");
@@ -3553,8 +3581,14 @@ function ideRenderTabs() {
 
 function ideCloseTab(index) {
   var tab = _ideTabs[index];
-  if (tab.modified && !confirm("Discard unsaved changes to " + tab.path + "?")) return;
-  if (tab.model) tab.model.dispose();
+  if (tab.type === "claude") {
+    // Close Claude Code session
+    if (tab.ws && tab.ws.readyState <= 1) tab.ws.close();
+    if (tab.el) tab.el.remove();
+  } else {
+    if (tab.modified && !confirm("Discard unsaved changes to " + tab.path + "?")) return;
+    if (tab.model) tab.model.dispose();
+  }
   _ideTabs.splice(index, 1);
   if (_ideActiveTab >= _ideTabs.length) _ideActiveTab = _ideTabs.length - 1;
   if (_ideTabs.length === 0) {
@@ -3562,12 +3596,92 @@ function ideCloseTab(index) {
     if (_monacoEditor) _monacoEditor.setModel(null);
     var container = document.getElementById("ide-editor-container");
     var welcome = document.getElementById("ide-welcome");
+    var ccContainer = document.getElementById("ide-cc-container");
     if (container) container.style.display = "none";
+    if (ccContainer) ccContainer.style.display = "none";
     if (welcome) welcome.style.display = "flex";
   } else {
     ideActivateTab();
   }
   ideRenderTabs();
+}
+
+// --- Claude Code as editor tab ---
+var _ccTabCounter = 0;
+function ideOpenClaude(node) {
+  node = node || "local";
+  _ccTabCounter++;
+  var label = "Claude Code" + (_ccTabCounter > 1 ? " " + _ccTabCounter : "");
+  var ccContainer = document.getElementById("ide-cc-container");
+  if (!ccContainer) return;
+
+  termLoadXterm(function() {
+    var termDiv = document.createElement("div");
+    termDiv.className = "ide-cc-term";
+    termDiv.style.height = "100%";
+    ccContainer.appendChild(termDiv);
+
+    var term = new Terminal({
+      theme: { background: "#1a1a2e", foreground: "#e2e8f0", cursor: "#f97316",
+               selectionBackground: "#334155" },
+      fontSize: 14,
+      fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
+      cursorBlink: true,
+    });
+    term.open(termDiv);
+
+    var fitAddon = null;
+    try {
+      fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      fitAddon.fit();
+    } catch(e) {}
+
+    var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" +
+      encodeURIComponent(state.token) + "&node=" + encodeURIComponent(node) + "&cmd=claude";
+
+    var tab = {
+      type: "claude",
+      path: label,
+      el: termDiv,
+      term: term,
+      ws: null,
+      fitAddon: fitAddon,
+      node: node
+    };
+    _ideTabs.push(tab);
+    _ideActiveTab = _ideTabs.length - 1;
+
+    // Connect WS
+    var ws = new WebSocket(wsUrl);
+    tab.ws = ws;
+    ws.onopen = function() {
+      term.write("\x1b[38;5;208m" + label + " connected\x1b[0m\r\n\r\n");
+      if (fitAddon) {
+        fitAddon.fit();
+        ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      }
+    };
+    ws.onmessage = function(ev) { term.write(ev.data); };
+    ws.onclose = function() { term.write("\r\n\x1b[90m[session ended]\x1b[0m\r\n"); };
+    ws.onerror = function() { term.write("\r\n\x1b[31m[connection error]\x1b[0m\r\n"); };
+    term.onData(function(data) {
+      if (ws.readyState === 1) ws.send(data);
+    });
+    term.onResize(function(size) {
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: "resize", cols: size.cols, rows: size.rows }));
+    });
+
+    ideActivateTab();
+
+    // Fit on window resize
+    window.addEventListener("resize", function() {
+      if (fitAddon && tab.el && tab.el.offsetHeight > 0) {
+        try { fitAddon.fit(); } catch(e) {}
+      }
+    });
+  });
 }
 
 async function ideSaveCurrentFile() {
