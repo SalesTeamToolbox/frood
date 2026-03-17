@@ -1717,9 +1717,11 @@ def create_app(
 
     # -- Agents (Custom AI Agent Management) -----------------------------------
 
-    from core.agent_manager import AGENT_TEMPLATES, AgentManager
+    from core.agent_manager import AGENT_TEMPLATES, PROVIDER_MODELS, AgentManager
+    from core.agent_runtime import AgentRuntime
 
     _agent_manager = AgentManager(workspace / ".agent42" / "agents")
+    _agent_runtime = AgentRuntime(workspace)
 
     class AgentCreateRequest(BaseModel):
         name: str = ""
@@ -1793,17 +1795,44 @@ def create_app(
 
     @app.post("/api/agents/{agent_id}/start")
     async def start_agent(agent_id: str, _user: str = Depends(get_current_user)):
-        agent = _agent_manager.set_status(agent_id, "active")
+        agent = _agent_manager.get(agent_id)
         if not agent:
             raise HTTPException(404, f"Agent not found: {agent_id}")
-        return agent.to_dict()
+        # Launch the agent process
+        result = await _agent_runtime.start_agent(agent.to_dict())
+        if not result:
+            raise HTTPException(500, "Failed to start agent — is Claude Code CLI installed?")
+        _agent_manager.set_status(agent_id, "active")
+        _agent_manager.record_run(agent_id)
+        return {**agent.to_dict(), "pid": result.pid, "status": "active"}
 
     @app.post("/api/agents/{agent_id}/stop")
     async def stop_agent(agent_id: str, _user: str = Depends(get_current_user)):
-        agent = _agent_manager.set_status(agent_id, "stopped")
+        agent = _agent_manager.get(agent_id)
         if not agent:
             raise HTTPException(404, f"Agent not found: {agent_id}")
+        await _agent_runtime.stop_agent(agent_id)
+        _agent_manager.set_status(agent_id, "stopped")
         return agent.to_dict()
+
+    @app.get("/api/agents/{agent_id}/status")
+    async def agent_runtime_status(agent_id: str, _user: str = Depends(get_current_user)):
+        """Get real-time status of a running agent process."""
+        status = _agent_runtime.get_status(agent_id)
+        if not status:
+            return {"agent_id": agent_id, "status": "not_running"}
+        return status
+
+    @app.get("/api/agents/{agent_id}/log")
+    async def agent_log(agent_id: str, _user: str = Depends(get_current_user)):
+        """Get the full log output of an agent run."""
+        log = _agent_runtime.get_log(agent_id)
+        return {"agent_id": agent_id, "log": log}
+
+    @app.get("/api/agents/running")
+    async def list_running_agents(_user: str = Depends(get_current_user)):
+        """List all currently running agent processes."""
+        return _agent_runtime.list_running()
 
     # -- Approvals -------------------------------------------------------------
 
