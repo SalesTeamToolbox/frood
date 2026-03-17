@@ -3372,8 +3372,8 @@ function renderCode() {
   el.style.padding = "0";
 
   el.innerHTML = `
-    <div class="ide-layout">
-      <div class="ide-sidebar">
+    <div class="ide-layout" style="display:flex;height:100%;overflow:hidden">
+      <div class="ide-sidebar" style="width:240px;min-width:180px;flex-shrink:0;overflow-y:auto;background:#1e293b;border-right:1px solid #334155;display:flex;flex-direction:column">
         <div class="ide-sidebar-header">
           <span>EXPLORER</span>
           <div>
@@ -3388,7 +3388,7 @@ function renderCode() {
         </div>
         <div id="ide-file-tree" class="ide-file-tree"></div>
       </div>
-      <div class="ide-main">
+      <div class="ide-main" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
         <div id="ide-tabs" class="ide-tabs"></div>
         <div id="ide-editor-container" class="ide-editor-container"></div>
         <div id="ide-welcome" class="ide-welcome" style="display:flex">
@@ -3419,13 +3419,14 @@ function renderCode() {
           </div>
         </div>
       </div>
-      <div id="ide-chat-panel" class="ide-chat-panel" style="display:none">
+      <div id="ide-chat-panel" class="ide-chat-panel" style="display:none;width:350px;min-width:280px;flex-shrink:0;flex-direction:column;border-left:1px solid #334155;background:#1e293b">
         <div class="ide-chat-header">
           <span>AI CHAT</span>
           <div style="display:flex;gap:0.3rem;align-items:center">
             <select id="ide-chat-model" title="Model">
-              <option value="claude-sonnet-4-5-20250514">Sonnet 4.5</option>
+              <option value="claude-sonnet-4-6-20260217">Sonnet 4.6</option>
               <option value="claude-opus-4-6-20260205">Opus 4.6</option>
+              <option value="claude-sonnet-4-5-20250514">Sonnet 4.5</option>
               <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
             </select>
             <button onclick="ideChatClear()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer" title="Clear chat">&#128465;</button>
