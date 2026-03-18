@@ -10,7 +10,7 @@
 ## Phases
 
 - [x] **Phase 20: Task Metadata Foundation** - Establish task_id/task_type payload schema and type-aware retrieval
-- [ ] **Phase 21: Effectiveness Tracking and Learning Extraction** - Async tool tracking, SQLite store, and post-task learning pipeline
+- [x] **Phase 21: Effectiveness Tracking and Learning Extraction** - Async tool tracking, SQLite store, and post-task learning pipeline
 - [ ] **Phase 22: Proactive Context Injection** - Inject past learnings into new tasks at UserPromptSubmit
 - [ ] **Phase 23: Recommendations Engine** - Surface tool/skill recommendations from aggregated effectiveness data
 
@@ -41,7 +41,7 @@
   4. The new HISTORY.md entry is also indexed in Qdrant with the correct task_id and task_type payload fields
   5. A brand-new learning entry is not surfaced to the agent until at least 3 independent observations support it (confidence capped at 0.6 until threshold met)
   6. If the SQLite database file is missing or unwritable, tool execution continues normally — no exception propagates to the agent
-**Plans**: 1 of 2 (21-01-PLAN.md complete — EFFT-01 through EFFT-05 done; 21-02 learning extraction pending)
+**Plans**: 2 of 2 complete (21-01: EFFT-01 through EFFT-05; 21-02: LEARN-01 through LEARN-05)
 
 ### Phase 22: Proactive Context Injection
 **Goal**: When a user starts a new task, relevant past learnings are automatically injected into context before the agent responds
@@ -71,7 +71,7 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 20. Task Metadata Foundation | 2/2 | Complete    | 2026-03-17 |
-| 21. Effectiveness Tracking and Learning Extraction | 1/2 | In progress | - |
+| 21. Effectiveness Tracking and Learning Extraction | 2/2 | Complete    | 2026-03-17 |
 | 22. Proactive Context Injection | 0/? | Not started | - |
 | 23. Recommendations Engine | 0/? | Not started | - |
 

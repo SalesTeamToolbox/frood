@@ -18,11 +18,11 @@ See: .planning/PROJECT.md (updated 2026-03-17)
 ## Current Position
 
 Phase: 21 of 23 (Effectiveness Tracking and Learning Extraction)
-Plan: 1 of 2 in current phase (plan 01 complete — plan 02 pending)
-Status: Phase 21 plan 01 complete — ready for plan 02 (learning extraction pipeline)
-Last activity: 2026-03-17 - Completed 21-01: EffectivenessStore with async SQLite tracking
+Plan: 2 of 2 in current phase (both plans complete — phase 21 done)
+Status: Phase 21 complete — ready for phase 22 (proactive injection)
+Last activity: 2026-03-17 - Completed 21-02: Learning extraction pipeline (Stop hook + quarantine)
 
-Progress: [####░░░░░░] 60%
+Progress: [#####░░░░░] 75%
 
 ## Performance Metrics
 
@@ -36,7 +36,7 @@ Progress: [####░░░░░░] 60%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 20. Task Metadata Foundation | 2 | 14 min | 7 min |
-| 21. Tracking and Learning | 1 | 19 min | 19 min |
+| 21. Tracking and Learning | 2 | 47 min | 24 min |
 | 22. Proactive Injection | 0 | — | — |
 | 23. Recommendations Engine | 0 | — | — |
 
@@ -59,6 +59,10 @@ Progress: [####░░░░░░] 60%
 - EffectivenessStore.record() wraps all operations in try/except Exception — the tracking subsystem must never raise to caller
 - Rate limiter record() fires only on result.success=True — failures should not consume rate limit budget
 - instructor>=1.3.0 added in Plan 01 (needed by Plan 02) to consolidate dependency installs in one PR
+- Quarantine fields applied via update_payload after log_event_semantic — separates memory layer from learning-extraction semantics
+- instructor.Mode.JSON used for broad model compatibility — Gemini Flash via OpenRouter may not support function calling mode
+- Task context bridge file at .agent42/current-task.json — written by begin_task, removed by end_task, read by Stop hook subprocess
+- _maybe_promote_quarantined defined as inner function within create_app to access memory_store closure
 
 ### Key Architecture Constraints (from research)
 
@@ -86,5 +90,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-17
-Stopped at: Completed 21-01 (EffectivenessStore + ToolRegistry wiring)
-Resume file: .planning/workstreams/per-project-task-memories/phases/21-effectiveness-tracking-and-learning-extraction/21-01-SUMMARY.md
+Stopped at: Completed 21-02 (Learning extraction pipeline — Stop hook + quarantine)
+Resume file: .planning/workstreams/per-project-task-memories/phases/21-effectiveness-tracking-and-learning-extraction/21-02-SUMMARY.md
