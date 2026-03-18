@@ -3565,10 +3565,11 @@ function ideActivateTab() {
     if (ccContainer) {
       ccContainer.style.display = "block";
       // Show the right CC terminal
-      var ccDivs = ccContainer.querySelectorAll(".ide-cc-term");
+      var ccDivs = ccContainer.querySelectorAll(".ide-cc-term, .ide-cc-chat");
       ccDivs.forEach(function(d) { d.style.display = "none"; });
-      if (tab.el) tab.el.style.display = "block";
-      if (tab.fitAddon) { try { tab.fitAddon.fit(); } catch(e) {} }
+      if (tab.el) tab.el.style.display = tab.chatPanel ? "flex" : "block";
+      // Only call fitAddon for xterm-based tabs (chatPanel tabs have no fitAddon -- Pitfall 5)
+      if (!tab.chatPanel && tab.fitAddon) { try { tab.fitAddon.fit(); } catch(e) {} }
     }
   } else {
     // File tab: show Monaco, hide CC terminal
@@ -3632,6 +3633,93 @@ function ideCloseTab(index) {
     ideActivateTab();
   }
   ideRenderTabs();
+}
+
+// -- CC Chat markdown renderer (marked.js + DOMPurify + highlight.js) -----------
+
+var _ccMarkdownReady = false;
+
+function _initCCMarkdown() {
+  if (typeof marked === "undefined" || typeof hljs === "undefined"
+      || typeof markedHighlight === "undefined" || typeof DOMPurify === "undefined") {
+    return false;
+  }
+  // CDN UMD pattern: markedHighlight global is a namespace; actual function is .markedHighlight
+  var mhFn = markedHighlight.markedHighlight;
+  marked.use(mhFn({
+    emptyLangClass: "hljs",
+    langPrefix: "hljs language-",
+    highlight: function(code, lang) {
+      var language = hljs.getLanguage(lang) ? lang : "plaintext";
+      return hljs.highlight(code, { language: language }).value;
+    }
+  }));
+  marked.use({ gfm: true, breaks: false });
+  return true;
+}
+
+function ccRenderMarkdown(text) {
+  if (!_ccMarkdownReady) _ccMarkdownReady = _initCCMarkdown();
+  if (!_ccMarkdownReady || !text) return "<p>" + esc(text || "") + "</p>";
+  var rawHtml = marked.parse(text);
+  // CHAT-05 locked decision: ALL marked output MUST be sanitized via DOMPurify (STATE.md)
+  return DOMPurify.sanitize(rawHtml, {
+    ALLOWED_TAGS: ["p","br","strong","em","b","i","h1","h2","h3","h4","h5","h6",
+                   "ul","ol","li","blockquote","pre","code","a","table","thead",
+                   "tbody","tr","th","td","hr","span","div","details","summary"],
+    ALLOWED_ATTR: ["href","class","id","target","rel","open"],
+  });
+}
+
+function ccAppendUserBubble(tab, text) {
+  var container = tab.el.querySelector(".cc-chat-messages");
+  if (!container) return;
+  var now = new Date();
+  var time = now.getHours() + ":" + String(now.getMinutes()).padStart(2, "0");
+  var wrapper = document.createElement("div");
+  wrapper.className = "chat-msg chat-msg-user";
+  var content = document.createElement("div");
+  content.className = "chat-msg-content";
+  var header = document.createElement("div");
+  header.className = "chat-msg-header";
+  var senderEl = document.createElement("span");
+  senderEl.className = "chat-msg-sender";
+  senderEl.textContent = "You";
+  var timeEl = document.createElement("span");
+  timeEl.className = "chat-msg-time";
+  timeEl.textContent = time;
+  header.appendChild(senderEl);
+  header.appendChild(timeEl);
+  var body = document.createElement("div");
+  body.className = "chat-msg-body chat-msg-body-user";
+  body.textContent = text;  // textContent only -- no HTML in user messages
+  content.appendChild(header);
+  content.appendChild(body);
+  var avatar = document.createElement("div");
+  avatar.className = "chat-avatar chat-avatar-user";
+  avatar.textContent = "U";
+  wrapper.appendChild(content);
+  wrapper.appendChild(avatar);
+  container.appendChild(wrapper);
+  if (tab.autoScroll) {
+    requestAnimationFrame(function() { container.scrollTop = container.scrollHeight; });
+  }
+}
+
+function ccAppendThinkingBlock(tab, text) {
+  var container = tab.el.querySelector(".cc-chat-messages");
+  if (!container) return;
+  var block = document.createElement("details");
+  block.className = "cc-thinking-block";
+  var summary = document.createElement("summary");
+  summary.className = "cc-thinking-summary";
+  summary.textContent = "Thinking...";
+  block.appendChild(summary);
+  var content = document.createElement("div");
+  content.className = "cc-thinking-content";
+  content.textContent = text;  // textContent only -- thinking is unformatted
+  block.appendChild(content);
+  container.appendChild(block);
 }
 
 // --- Claude Code as editor tab ---
@@ -4047,6 +4135,12 @@ function ideReattachCCTabs() {
   for (var i = 0; i < _ideTabs.length; i++) {
     var tab = _ideTabs[i];
     if (tab.type !== "claude") continue;
+    if (tab.chatPanel) {
+      // Chat panel tabs persist their DOM -- no xterm re-creation needed
+      if (tab.el && !tab.el.isConnected) ccContainer.appendChild(tab.el);
+      hasCCTabs = true;
+      continue;
+    }
     hasCCTabs = true;
     // Old DOM was destroyed — re-create xterm in new container
     termLoadXterm(function(tabRef, idx) {
