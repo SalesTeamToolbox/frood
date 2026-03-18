@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-last_updated: "2026-03-18T22:15:05.741Z"
+status: in_progress
+last_updated: "2026-03-18T23:45:00Z"
 progress:
   total_phases: 1
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
 ---
 
 # Project State: Intelligent Memory Bridge
@@ -24,29 +24,27 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 ## Current Position
 
 Phase: 1 of 4 (Auto-Sync Hook)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-03-18 — Roadmap created, phases derived from 14 requirements
+Plan: 1 of 2 complete in current phase (01-01 done, 01-02 next)
+Status: In progress
+Last activity: 2026-03-18 — Completed 01-01: PostToolUse hook + worker implementation
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 10%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0
-- Average duration: -
-- Total execution time: 0 hours
+- Total plans completed: 1
+- Average duration: 7 min
+- Total execution time: 0.12 hours
 
 **By Phase:**
 
 | Phase   | Plans | Total | Avg/Plan |
 |---------|-------|-------|----------|
-| -       | -     | -     | -        |
+| 01-auto-sync-hook | 1/2 | 7 min | 7 min |
 
 *Updated after each plan completion*
-| Phase 05-streaming-pty-bridge-and-cc-initialization-optimization P02 | 18 | 2 tasks | 1 files |
-| Phase 05-streaming-pty-bridge P03 | 6 | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -54,11 +52,9 @@ Progress: [░░░░░░░░░░] 0%
 
 - [Workstream design]: PostToolUse hook chosen for SYNC (not PreToolUse) — sync fires after CC write succeeds, so Qdrant failure never blocks CC's Write tool (supports SYNC-04)
 - [Workstream design]: No LLM calls in hooks — extraction uses heuristic pattern matching; avoids per-session API cost and latency
-- [Phase 05-streaming-pty-bridge-and-cc-initialization-optimization]: cc_ prefix on all cc_chat_ws PTY variables to avoid collision with terminal WS PTY variables in same create_app() closure
-- [Phase 05-streaming-pty-bridge-and-cc-initialization-optimization]: PTY-with-PIPE-fallback: try PTY spawn, except Exception -> use_cc_pty=False, then PIPE path; PIPE fallback is identical to pre-PTY implementation (PTY-04 preserved)
-- [Phase 05-streaming-pty-bridge-and-cc-initialization-optimization]: hook_response subtype suppressed from frontend relay (too verbose for UI); hook_started emits Loading {name}... progress status
-- [Phase 05]: Warm pool keyed by username (one per user not per tab); atomic pop prevents double-claim
-- [Phase 05]: ?warm=true opt-in triggers _cc_spawn_warm() background task at WS open; warm session_id injected via --resume
+- [01-01]: Hook entry point is stdlib-only — zero Agent42 imports keeps startup under 5ms (PostToolUse fires on every CC Write/Edit)
+- [01-01]: Worker bypasses upsert_single/upsert_vectors and calls _client.upsert() directly with file-path-only UUID5 point ID — existing methods hash content into ID, breaking SYNC-03 dedup
+- [01-01]: Path detection uses Path.parts inspection for .claude/projects/*/memory/*.md sequence — works cross-platform without regex
 
 ### Pending Todos
 
@@ -70,6 +66,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-18
-Stopped at: Roadmap created, ready to plan Phase 1
+Last session: 2026-03-18T23:45:00Z
+Stopped at: Completed 01-01-PLAN.md — hook + worker implemented, 21 tests passing
 Resume file: None

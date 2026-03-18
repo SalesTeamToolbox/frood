@@ -28,7 +28,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Memories written from user, feedback, project, and reference file types are all present in Qdrant
   3. Writing the same content twice results in exactly one Qdrant entry (no duplicates)
   4. When Qdrant is unreachable, Claude Code's Write tool completes normally with no error shown to Claude
-**Plans**: TBD
+**Plans**: 2 (01-01 complete, 01-02 next)
 
 ### Phase 2: Intelligent Learning
 **Goal**: At session end, the Stop hook extracts structured, categorized learnings from the conversation and stores them in Qdrant with enough context to be useful on future recall
@@ -68,7 +68,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Auto-Sync Hook | 0/TBD | Not started | - |
+| 1. Auto-Sync Hook | 1/2 | In progress | - |
 | 2. Intelligent Learning | 0/TBD | Not started | - |
 | 3. CLAUDE.md Integration | 0/TBD | Not started | - |
 | 4. Memory Quality | 0/TBD | Not started | - |
