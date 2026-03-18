@@ -44,26 +44,26 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SYNC-01 | — | Pending |
-| SYNC-02 | — | Pending |
-| SYNC-03 | — | Pending |
-| SYNC-04 | — | Pending |
-| LEARN-01 | — | Pending |
-| LEARN-02 | — | Pending |
-| LEARN-03 | — | Pending |
-| LEARN-04 | — | Pending |
-| LEARN-05 | — | Pending |
-| INTEG-01 | — | Pending |
-| INTEG-02 | — | Pending |
-| INTEG-03 | — | Pending |
-| QUAL-01 | — | Pending |
-| QUAL-02 | — | Pending |
+| SYNC-01 | Phase 1 | Pending |
+| SYNC-02 | Phase 1 | Pending |
+| SYNC-03 | Phase 1 | Pending |
+| SYNC-04 | Phase 1 | Pending |
+| LEARN-01 | Phase 2 | Pending |
+| LEARN-02 | Phase 2 | Pending |
+| LEARN-03 | Phase 2 | Pending |
+| LEARN-04 | Phase 2 | Pending |
+| LEARN-05 | Phase 2 | Pending |
+| INTEG-01 | Phase 3 | Pending |
+| INTEG-02 | Phase 3 | Pending |
+| INTEG-03 | Phase 3 | Pending |
+| QUAL-01 | Phase 4 | Pending |
+| QUAL-02 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 14 total
-- Mapped to phases: 0
-- Unmapped: 14 ⚠️
+- Mapped to phases: 14
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-18*
-*Last updated: 2026-03-18 after initial definition*
+*Last updated: 2026-03-18 after roadmap created*
