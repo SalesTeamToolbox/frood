@@ -3990,6 +3990,109 @@ function ccSetupScrollBehavior(tab) {
   }, 100);
 }
 
+// -- CC Chat Input Controls --------------------------------------------------
+
+var CC_INPUT_MAX_HEIGHT = 200; // px (INPUT-03)
+
+var CC_SLASH_COMMANDS = [
+  { cmd: "/help",    desc: "Show available commands" },
+  { cmd: "/clear",   desc: "Clear current chat display" },
+  { cmd: "/compact", desc: "Compact conversation context" },
+];
+
+function ccSend(tabIdx) {
+  var tab = ccGetTab(tabIdx);
+  var input = document.getElementById("cc-input-" + tabIdx);
+  if (!tab || !input || tab.sending) return;
+  var text = input.value.trim();
+  if (!text) return;
+
+  // /clear handled locally without sending to CC backend
+  if (text === "/clear") {
+    var msgs = tab.el.querySelector(".cc-chat-messages");
+    if (msgs) { while (msgs.firstChild) msgs.removeChild(msgs.firstChild); }
+    input.value = "";
+    ccInputResize(input);
+    return;
+  }
+
+  ccAppendUserBubble(tab, text);  // CHAT-01: immediate user bubble before send
+  if (tab.ws && tab.ws.readyState === 1) {
+    tab.ws.send(JSON.stringify({ message: text }));
+    ccSetSendingState(tab, true);
+  }
+  input.value = "";
+  ccInputResize(input);
+  var dropdown = document.getElementById("cc-slash-" + tabIdx);
+  if (dropdown) dropdown.style.display = "none";
+}
+
+function ccStop(tabIdx) {
+  var tab = ccGetTab(tabIdx);
+  if (!tab || !tab.ws || tab.ws.readyState !== 1) return;
+  // Backend handles {"type":"stop"} via asyncio.wait() concurrent receive (Plan 02-02)
+  tab.ws.send(JSON.stringify({ type: "stop" }));
+  // Backend emits turn_complete after proc.terminate() -- ccSetSendingState called there
+}
+
+function ccHandleKeydown(event, tabIdx) {
+  // INPUT-01: Enter sends; Shift+Enter inserts newline natively
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    ccSend(tabIdx);
+  }
+}
+
+function ccInputResize(textarea) {
+  // INPUT-03: scrollHeight auto-resize pattern (CSS-Tricks standard)
+  textarea.style.height = "auto";
+  textarea.style.height = Math.min(textarea.scrollHeight, CC_INPUT_MAX_HEIGHT) + "px";
+}
+
+function ccUpdateSlashDropdown(tab) {
+  // INPUT-04: show filtered slash command dropdown when input starts with "/"
+  if (!tab) return;
+  var input = document.getElementById("cc-input-" + tab.tabIdx);
+  var dropdown = document.getElementById("cc-slash-" + tab.tabIdx);
+  if (!input || !dropdown) return;
+
+  var val = input.value;
+  if (!val.startsWith("/") || val.includes(" ")) {
+    dropdown.style.display = "none";
+    return;
+  }
+
+  var filter = val.toLowerCase();
+  var matches = CC_SLASH_COMMANDS.filter(function(c) {
+    return c.cmd.startsWith(filter);
+  });
+
+  if (matches.length === 0) { dropdown.style.display = "none"; return; }
+
+  // Rebuild dropdown with safe DOM methods (textContent only, no innerHTML with user data)
+  while (dropdown.firstChild) dropdown.removeChild(dropdown.firstChild);
+  matches.forEach(function(c) {
+    var item = document.createElement("div");
+    item.className = "cc-slash-item";
+    item.dataset.cmd = c.cmd;
+    var cmdSpan = document.createElement("span");
+    cmdSpan.className = "cc-slash-cmd";
+    cmdSpan.textContent = c.cmd;
+    var descSpan = document.createElement("span");
+    descSpan.className = "cc-slash-desc";
+    descSpan.textContent = c.desc;
+    item.appendChild(cmdSpan);
+    item.appendChild(descSpan);
+    item.addEventListener("click", function() {
+      if (input) { input.value = c.cmd + " "; ccInputResize(input); }
+      dropdown.style.display = "none";
+      if (input) input.focus();
+    });
+    dropdown.appendChild(item);
+  });
+  dropdown.style.display = "block";
+}
+
 function ideOpenClaude(node) {
   node = node || "local";
   _ccTabCounter++;
