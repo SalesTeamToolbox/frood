@@ -1717,6 +1717,7 @@ def create_app(
         """
         etype = event.get("type")
         envelopes = []
+        logger.info(f"CC event: type={etype}, subtype={event.get('subtype', '-')}")
         if etype == "system" and event.get("subtype") == "init":
             # Emit status so user sees CC initialized during the long startup
             envelopes.append({"type": "status", "data": {"message": "Claude Code initialized"}})
@@ -1920,6 +1921,7 @@ def create_app(
 
                 async def _read_stdout():
                     try:
+                        logger.info("CC _read_stdout: starting async for loop")
                         async for raw_line in proc.stdout:
                             line = raw_line.decode("utf-8", errors="replace").strip()
                             if not line:
@@ -1928,13 +1930,19 @@ def create_app(
                                 event = _json.loads(line)
                             except _json.JSONDecodeError:
                                 continue
-                            for envelope in _parse_cc_event(event, tool_id_map, session_state):
+                            envelopes = _parse_cc_event(event, tool_id_map, session_state)
+                            logger.info(
+                                f"CC event type={event.get('type')}, envelopes={len(envelopes)}"
+                            )
+                            for envelope in envelopes:
                                 try:
                                     await websocket.send_json(envelope)
-                                except Exception:
+                                except Exception as ws_err:
+                                    logger.error(f"CC WS send failed: {ws_err}")
                                     return
-                    except Exception:
-                        pass
+                        logger.info("CC _read_stdout: async for loop finished")
+                    except Exception as read_err:
+                        logger.error(f"CC _read_stdout error: {read_err}")
 
                 read_task = _asyncio.create_task(_read_stdout())
 
