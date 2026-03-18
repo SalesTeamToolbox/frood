@@ -9,10 +9,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Backend Bridge
 
-- [ ] **BRIDGE-01**: Server exposes `/ws/cc-chat` WebSocket endpoint that spawns `claude -p --output-format stream-json` and relays structured NDJSON events to the frontend
-- [ ] **BRIDGE-02**: Backend translates CC stream-json events (system, stream_event, result) into a normalized message format (text_delta, tool_start, tool_complete, turn_complete, etc.)
-- [ ] **BRIDGE-03**: Session registry tracks active CC processes by session ID, allowing multi-session management
-- [ ] **BRIDGE-04**: Multi-turn conversations work via `--resume <session_id>` — process re-spawned per turn with session continuity
+- [x] **BRIDGE-01**: Server exposes `/ws/cc-chat` WebSocket endpoint that spawns `claude -p --output-format stream-json` and relays structured NDJSON events to the frontend
+- [x] **BRIDGE-02**: Backend translates CC stream-json events (system, stream_event, result) into a normalized message format (text_delta, tool_start, tool_complete, turn_complete, etc.)
+- [x] **BRIDGE-03**: Session registry tracks active CC processes by session ID, allowing multi-session management
+- [x] **BRIDGE-04**: Multi-turn conversations work via `--resume <session_id>` — process re-spawned per turn with session continuity
 - [ ] **BRIDGE-05**: Fallback path uses existing `/api/ide/chat` (Anthropic API via httpx) when `claude` CLI is not available
 - [ ] **BRIDGE-06**: Server detects CC subscription status via `claude auth status` and reports availability to frontend
 

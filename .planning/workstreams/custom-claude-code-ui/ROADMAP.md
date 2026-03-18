@@ -86,7 +86,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Backend WS Bridge | 0/? | Not started | - |
+| 1. Backend WS Bridge | 2/3 | In progress | - |
 | 2. Core Chat UI | 0/? | Not started | - |
 | 3. Tool Use + Sessions | 0/? | Not started | - |
 | 4. Layout + Diff Viewer | 0/? | Not started | - |

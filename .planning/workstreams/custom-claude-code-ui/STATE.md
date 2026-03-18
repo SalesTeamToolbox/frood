@@ -15,24 +15,24 @@ See: .planning/PROJECT.md (updated 2026-03-17)
 ## Current Position
 
 Phase: 1 of 4 (Backend WS Bridge)
-Plan: 1 of 3 in current phase (01-01 complete)
+Plan: 2 of 3 in current phase (01-01, 01-02 complete)
 Status: In progress
-Last activity: 2026-03-17 — Plan 01-01 complete (Wave 0 test scaffold)
+Last activity: 2026-03-18 — Plan 01-02 complete (/ws/cc-chat endpoint + helpers)
 
-Progress: [█░░░░░░░░░] 10%
+Progress: [██░░░░░░░░] 20%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 12 min
-- Total execution time: 12 min
+- Total plans completed: 2
+- Average duration: 12.5 min
+- Total execution time: 25 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01-backend-ws-bridge | 1/3 | 12 min | 12 min |
+| 01-backend-ws-bridge | 2/3 | 25 min | 12.5 min |
 
 *Updated after each plan completion*
 
@@ -48,19 +48,21 @@ Progress: [█░░░░░░░░░] 10%
 - LAYOUT-04 (Monaco diff editor) grouped with layout modes in Phase 4 — all UI arrangement work
 - xfail(raises=ImportError, strict=False) pattern for tests importing symbols not yet implemented
 - Wave 0 source inspection tests left as RED AssertionError — correct TDD state; Plan 02 GREEN flips them
+- _parse_cc_event, _save_session, _load_session are closure-scoped inside create_app() — not importable as module attributes; xfail tests for direct import remain xfail by design
+- claude auth status result cached 60s to avoid Node.js cold-start latency per connection
+- subprocess args always a Python list; user_message passed as positional arg (no shell=True)
 
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
-- Phase 1 research flag: verify exact NDJSON event schema for `--verbose --include-partial-messages` combined flags against a live CC session before locking the parser
 - Phase 3 research flag: verify CC PermissionRequest event payload structure against current CC version before implementing permission UI
-- fixture note: cc_stream_sample.ndjson tool_result content block field path is inferred from SDK docs — must verify against live CC session before Plan 02 finalizes tool_complete parser
+- Open: tool_complete.output field path with --verbose not verified from live session; current implementation emits empty string (safe for Phase 2, may need update in Phase 3)
 
 ## Session Continuity
 
-Last session: 2026-03-17
-Stopped at: Plan 01-01 complete — Wave 0 scaffold done. Ready for Plan 01-02 (implementation).
+Last session: 2026-03-18
+Stopped at: Plan 01-02 complete — /ws/cc-chat implemented. Ready for Plan 01-03 (verification/integration tests).
 Resume file: None
