@@ -491,6 +491,20 @@ def main():
         stream=sys.stderr,  # MCP uses stdout for protocol; logs go to stderr
     )
 
+    # Health check mode — verify imports and config, then exit
+    if "--health" in sys.argv:
+        try:
+            from core.config import Settings
+
+            settings = Settings.from_env()
+            # Verify critical imports work
+
+            print("healthy", file=sys.stderr)
+            sys.exit(0)
+        except Exception as e:
+            print(f"unhealthy: {e}", file=sys.stderr)
+            sys.exit(1)
+
     transport = "stdio"
     if "--transport" in sys.argv:
         idx = sys.argv.index("--transport")
