@@ -1713,6 +1713,195 @@ def create_app(
 
     _ANSI_ESCAPE = _re_cc.compile(r"\x1b\[[0-9;]*[mGKHF]")
 
+    # PTY-03: Pre-warmed CC session pool (one warm process per user)
+    import time as _time_cc
+
+    _cc_warm_pool: dict = {}
+    # Each entry: {
+    #   "cc_session_id": str | None,  # From result event of sentinel run
+    #   "ready": bool,                # True after sentinel run completes
+    #   "spawned_at": float,          # time.monotonic()
+    #   "last_used": float,           # time.monotonic() -- for idle timeout
+    # }
+    # Idle timeout: 300 seconds (5 * 60 = 300)
+    _CC_WARM_IDLE_TIMEOUT = 300
+
+    async def _cc_spawn_warm(user: str, workspace_path) -> None:
+        """Spawn a CC process with sentinel '.' message to pre-initialize MCP servers.
+
+        On success, stores {cc_session_id, ready: True, spawned_at, last_used} in
+        _cc_warm_pool[user]. The warm process exits after the sentinel run; the
+        resulting session_id is used with --resume for the user's first real message.
+        """
+        claude_bin = _shutil.which("claude")
+        if not claude_bin:
+            logger.warning("CC warm spawn skipped: claude binary not found")
+            return
+
+        warm_args = [
+            claude_bin,
+            "-p",
+            ".",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+        ]
+        warm_session_id = None
+        now = _time_cc.monotonic()
+
+        try:
+            if _sys.platform == "win32":
+                try:
+                    from winpty import PtyProcess as _WarmPtyProcess
+
+                    warm_pty = _WarmPtyProcess.spawn(
+                        warm_args,
+                        cwd=str(workspace_path),
+                        dimensions=(24, 220),
+                    )
+                    loop = _asyncio.get_event_loop()
+                    while warm_pty.isalive():
+                        try:
+                            raw_line = await loop.run_in_executor(None, warm_pty.readline)
+                            line = _ANSI_ESCAPE.sub("", raw_line).strip()
+                            if not line:
+                                continue
+                            try:
+                                ev = _json.loads(line)
+                            except _json.JSONDecodeError:
+                                continue
+                            if ev.get("type") == "result":
+                                warm_session_id = ev.get("session_id")
+                                break
+                        except EOFError:
+                            break
+                        except Exception as e:
+                            logger.warning(f"CC warm spawn (win PTY) read error: {e}")
+                            break
+                    if warm_pty.isalive():
+                        warm_pty.terminate()
+                except Exception as win_err:
+                    logger.warning(f"CC warm spawn (win PTY) failed: {win_err}")
+                    warm_session_id = None
+            else:
+                try:
+                    import pty as _warm_pty_mod
+                    import select as _warm_select
+                    import subprocess as _warm_subprocess
+
+                    w_master_fd, w_slave_fd = _warm_pty_mod.openpty()
+                    warm_proc = _warm_subprocess.Popen(
+                        warm_args,
+                        stdin=w_slave_fd,
+                        stdout=w_slave_fd,
+                        stderr=w_slave_fd,
+                        cwd=str(workspace_path),
+                        preexec_fn=_os.setsid,
+                    )
+                    _os.close(w_slave_fd)
+                    loop = _asyncio.get_event_loop()
+                    w_line_buf = ""
+
+                    def _warm_read_chunk():
+                        if _warm_select.select([w_master_fd], [], [], 0.1)[0]:
+                            try:
+                                return _os.read(w_master_fd, 4096).decode("utf-8", errors="replace")
+                            except OSError:
+                                return None
+                        return ""
+
+                    while warm_proc.poll() is None:
+                        chunk = await loop.run_in_executor(None, _warm_read_chunk)
+                        if chunk is None:
+                            break
+                        if not chunk:
+                            await _asyncio.sleep(0.05)
+                            continue
+                        w_line_buf += chunk
+                        found_result = False
+                        while "\n" in w_line_buf:
+                            raw_line, w_line_buf = w_line_buf.split("\n", 1)
+                            line = _ANSI_ESCAPE.sub("", raw_line).strip()
+                            if not line:
+                                continue
+                            try:
+                                ev = _json.loads(line)
+                            except _json.JSONDecodeError:
+                                continue
+                            if ev.get("type") == "result":
+                                warm_session_id = ev.get("session_id")
+                                found_result = True
+                                break
+                        if found_result:
+                            break
+                    try:
+                        _os.close(w_master_fd)
+                    except OSError:
+                        pass
+                    if warm_proc.poll() is None:
+                        warm_proc.terminate()
+                except Exception as unix_err:
+                    logger.warning(f"CC warm spawn (unix PTY) failed: {unix_err}")
+                    warm_session_id = None
+
+            if warm_session_id is None:
+                # PIPE fallback for warm spawn
+                try:
+                    warm_proc_pipe = await _asyncio.create_subprocess_exec(
+                        *warm_args,
+                        stdout=_asyncio.subprocess.PIPE,
+                        stderr=_asyncio.subprocess.PIPE,
+                        cwd=str(workspace_path),
+                    )
+                    async for raw_line in warm_proc_pipe.stdout:
+                        line = raw_line.decode("utf-8", errors="replace").strip()
+                        if not line:
+                            continue
+                        try:
+                            ev = _json.loads(line)
+                        except _json.JSONDecodeError:
+                            continue
+                        if ev.get("type") == "result":
+                            warm_session_id = ev.get("session_id")
+                            break
+                    if warm_proc_pipe.returncode is None:
+                        warm_proc_pipe.terminate()
+                except Exception as pipe_err:
+                    logger.warning(f"CC warm spawn (PIPE fallback) failed: {pipe_err}")
+
+        except Exception as outer_err:
+            logger.warning(f"CC warm spawn failed: {outer_err}")
+            return
+
+        if warm_session_id:
+            _cc_warm_pool[user] = {
+                "cc_session_id": warm_session_id,
+                "ready": True,
+                "spawned_at": now,
+                "last_used": now,
+            }
+            logger.info(f"CC warm session {warm_session_id} ready for {user}")
+        else:
+            logger.warning(f"CC warm spawn completed but no session_id obtained for {user}")
+
+    async def _cc_prewarm_idle_task():
+        """Background task: remove warm pool entries older than 5 minutes (300s)."""
+        while True:
+            await _asyncio.sleep(60)  # Check every 60 seconds
+            now = _time_cc.monotonic()
+            expired = [
+                user
+                for user, entry in _cc_warm_pool.items()
+                if now - entry["last_used"] > _CC_WARM_IDLE_TIMEOUT
+            ]
+            for user in expired:
+                del _cc_warm_pool[user]
+                logger.info(f"CC warm session expired for {user}")
+
+    @app.on_event("startup")
+    async def _start_warm_pool_cleanup():
+        _asyncio.create_task(_cc_prewarm_idle_task())
+
     def _parse_cc_event(event: dict, tool_id_map: dict, session_state: dict) -> list:
         """Translate one CC NDJSON event into WS envelope dicts.
 
