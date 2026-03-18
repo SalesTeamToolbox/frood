@@ -3287,6 +3287,18 @@ def create_app(
         """Return RLM (Recursive Language Model) status and configuration."""
         return {"enabled": False, "note": "RLM provider removed in v2.0 MCP pivot"}
 
+    def _load_cc_sync_status() -> dict:
+        """Load CC memory sync status from .agent42/cc-sync-status.json."""
+        try:
+            import json as _json
+
+            status_path = Path(settings.workspace or ".") / ".agent42" / "cc-sync-status.json"
+            if status_path.exists():
+                return _json.loads(status_path.read_text())
+        except Exception:
+            pass
+        return {"last_sync": None, "total_synced": 0, "last_error": None}
+
     @app.get("/api/settings/storage")
     async def get_storage_status(_admin: AuthContext = Depends(require_admin)):
         """Return the active storage backend configuration and live connectivity status."""
@@ -3366,6 +3378,7 @@ def create_app(
         else:
             effective_mode = "file"
 
+        cc_status = _load_cc_sync_status()
         return {
             "mode": effective_mode,
             "configured_mode": mode,
@@ -3379,6 +3392,11 @@ def create_app(
                 "enabled": bool(redis_url),
                 "url": redis_url or None,
                 "status": redis_status,
+            },
+            "cc_sync": {
+                "last_sync": cc_status.get("last_sync"),
+                "total_synced": cc_status.get("total_synced", 0),
+                "last_error": cc_status.get("last_error"),
             },
         }
 
