@@ -63,7 +63,7 @@ Plans:
 
 Plans:
 
-- [ ] 02-01-PLAN.md — Wave 0 test scaffold (tests/test_cc_chat_ui.py — 16 tests)
+- [x] 02-01-PLAN.md — Wave 0 test scaffold (tests/test_cc_chat_ui.py — 20 tests)
 - [ ] 02-02-PLAN.md — Backend stop handler (server.py asyncio.wait() concurrent receive)
 - [ ] 02-03-PLAN.md — CDN deps (index.html) + CC chat CSS classes (style.css)
 - [ ] 02-04-PLAN.md — Core chat JS: ideOpenCCChat, streaming bubble lifecycle, ccRenderMarkdown
@@ -101,6 +101,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Backend WS Bridge | 3/3 | Complete | 2026-03-18 |
-| 2. Core Chat UI | 0/5 | Not started | - |
+| 2. Core Chat UI | 1/5 | In progress | - |
 | 3. Tool Use + Sessions | 0/? | Not started | - |
 | 4. Layout + Diff Viewer | 0/? | Not started | - |

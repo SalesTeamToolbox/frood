@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-18T05:54:52.896Z"
+last_updated: "2026-03-18T17:03:32Z"
 ---
 
 # Project State
@@ -13,29 +13,30 @@ last_updated: "2026-03-18T05:54:52.896Z"
 See: .planning/PROJECT.md (updated 2026-03-17)
 
 **Core value:** Agent42 must provide a rich, VS Code-quality Claude Code chat experience in its web IDE
-**Current focus:** Phase 1 — Backend WS Bridge
+**Current focus:** Phase 2 — Core Chat UI
 
 ## Current Position
 
-Phase: 2 of 4 (Frontend Chat UI — next)
-Plan: 3 of 3 in Phase 1 complete — Phase 1 DONE
-Status: Phase 1 complete, ready for Phase 2
-Last activity: 2026-03-18 — Plan 01-03 complete (session REST + auth-status verified; all 6 BRIDGE test classes green)
+Phase: 2 of 4 (Frontend Chat UI — in progress)
+Plan: 1 of 5 in Phase 2 complete
+Status: Phase 2 in progress — Plan 02-01 (Wave 0 test scaffold) complete
+Last activity: 2026-03-18 — Plan 02-01 complete (Wave 0 test scaffold: 20 tests across 5 classes, all RED as expected)
 
-Progress: [███░░░░░░░] 30%
+Progress: [████░░░░░░] 40%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
-- Average duration: 9.7 min
-- Total execution time: 29 min
+- Total plans completed: 4
+- Average duration: 8.5 min
+- Total execution time: 33 min
 
 **By Phase:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 01-backend-ws-bridge | 3/3 DONE | 29 min | 9.7 min |
+| Phase                | Plans    | Total  | Avg/Plan |
+|----------------------|----------|--------|----------|
+| 01-backend-ws-bridge | 3/3 DONE | 29 min | 9.7 min  |
+| 02-core-chat-ui      | 1/5      | 4 min  | 4 min    |
 
 *Updated after each plan completion*
 
@@ -56,6 +57,7 @@ Progress: [███░░░░░░░] 30%
 - subprocess args always a Python list; user_message passed as positional arg (no shell=True)
 - Auth status check uses exit code only (not JSON parsing) — insulated from claude CLI schema changes
 - Session listing uses per-file try/except — corrupt files do not break GET /api/cc/sessions
+- Wave 0 scaffold uses source-text inspection (Path.read_text) — identical to test_ide_html.py; 20 tests across 5 classes; TestCCChatStop uses inspect.getsource(dashboard.server) for backend pattern checks
 
 ### Pending Todos
 
@@ -70,5 +72,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-18
-Stopped at: Plan 01-03 complete — Phase 1 (Backend WS Bridge) fully done. All 3 plans complete. Ready for Phase 2 (Frontend Chat UI).
+Stopped at: Plan 02-01 complete — Wave 0 test scaffold done. 20 tests RED. Ready for Plan 02-02 (CDN deps + index.html).
 Resume file: None
