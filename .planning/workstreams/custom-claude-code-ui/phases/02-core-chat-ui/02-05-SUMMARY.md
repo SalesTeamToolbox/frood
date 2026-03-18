@@ -106,6 +106,13 @@ None - no external service configuration required.
 - Phase 3 (Session Persistence) can begin: sessionStorage + --resume flag for CC sessions.
 - Phase 3 research flag still open: verify CC PermissionRequest event payload structure against current CC version before implementing permission UI.
 
+## Self-Check: PASSED
+
+- FOUND: `.planning/workstreams/custom-claude-code-ui/phases/02-core-chat-ui/02-05-SUMMARY.md`
+- FOUND: `dashboard/frontend/dist/app.js` (with all 5 functions defined)
+- FOUND: commit `9e84092` (feat(02-05))
+- FOUND: commit `44b1626` (docs(02-05))
+
 ---
 *Phase: 02-core-chat-ui*
 *Completed: 2026-03-18*
