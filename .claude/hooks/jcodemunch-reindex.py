@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# hook_event: PostToolUse
+# hook_event: Stop
+# hook_timeout: 10
 """Auto-reindex jcodemunch when structural file changes or drift are detected.
 
 Handles two event types:

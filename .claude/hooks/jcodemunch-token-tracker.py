@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# hook_event: PostToolUse
+# hook_timeout: 10
 """Track token savings from jcodemunch usage vs full file reads.
 
 Triggered on PostToolUse for all tool calls. Filters to jcodemunch MCP
@@ -35,7 +37,7 @@ def get_file_size(project_dir, rel_path):
     """Get file size in characters. Returns 0 if file not found."""
     full_path = os.path.join(project_dir, rel_path.replace("/", os.sep))
     try:
-        with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+        with open(full_path, encoding="utf-8", errors="replace") as f:
             return len(f.read())
     except (OSError, UnicodeDecodeError):
         return 0
@@ -49,7 +51,7 @@ def estimate_tokens(char_count):
 def load_stats(stats_path):
     """Load existing session stats or create new ones."""
     try:
-        with open(stats_path, "r") as f:
+        with open(stats_path) as f:
             stats = json.load(f)
             # Reset if older than 6 hours (new session)
             if time.time() - stats.get("session_start", 0) > 21600:
@@ -166,9 +168,7 @@ def main():
     project_dir = normalize_path(project_dir)
 
     # Calculate savings
-    tokens_used, tokens_avoided = estimate_savings(
-        tool_name, tool_input, tool_output, project_dir
-    )
+    tokens_used, tokens_avoided = estimate_savings(tool_name, tool_input, tool_output, project_dir)
     tokens_saved = max(0, tokens_avoided - tokens_used)
 
     # Load and update stats

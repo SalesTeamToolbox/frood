@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# hook_event: PostToolUse
+# hook_matcher: Write|Edit
+# hook_timeout: 30
 """Security monitor hook — flags security-sensitive changes for review.
 
 Triggered on PostToolUse for Write/Edit operations. Checks if changes

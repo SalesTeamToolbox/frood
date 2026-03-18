@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# hook_event: Stop
+# hook_timeout: 15
 """Session handoff hook — captures session state for auto-resume continuity.
 
 Triggered on Stop event. Extracts what happened during the session (files
@@ -74,7 +76,7 @@ def extract_session_data(event, project_dir):
             file_path = normalize_path(file_path)
             # Normalize to relative path
             if project_dir and file_path.startswith(project_dir):
-                file_path = file_path[len(project_dir):].lstrip("/\\")
+                file_path = file_path[len(project_dir) :].lstrip("/\\")
 
             if tool_name in ("Write", "Edit", "NotebookEdit"):
                 files_modified.add(file_path)
@@ -144,7 +146,12 @@ def detect_gsd_state(project_dir):
     for phase_dir in sorted(glob.glob(phase_pattern)):
         if os.path.isdir(phase_dir):
             phase_name = os.path.basename(phase_dir)
-            phase_info = {"name": phase_name, "has_plan": False, "has_state": False, "status": "unknown"}
+            phase_info = {
+                "name": phase_name,
+                "has_plan": False,
+                "has_state": False,
+                "status": "unknown",
+            }
 
             if os.path.exists(os.path.join(phase_dir, "PLAN.md")):
                 phase_info["has_plan"] = True
@@ -157,9 +164,15 @@ def detect_gsd_state(project_dir):
                 try:
                     with open(state_path) as f:
                         content = f.read(500)
-                        if "status: completed" in content.lower() or "## completed" in content.lower():
+                        if (
+                            "status: completed" in content.lower()
+                            or "## completed" in content.lower()
+                        ):
                             phase_info["status"] = "completed"
-                        elif "status: in_progress" in content.lower() or "## in progress" in content.lower():
+                        elif (
+                            "status: in_progress" in content.lower()
+                            or "## in progress" in content.lower()
+                        ):
                             phase_info["status"] = "in_progress"
                 except OSError:
                     pass
@@ -188,10 +201,7 @@ def detect_completion(session_data, gsd_state):
     """Heuristic to detect if work appears complete."""
     # If GSD exists and all phases are completed/verified
     if gsd_state and gsd_state.get("phases"):
-        all_done = all(
-            p["status"] in ("completed", "verified")
-            for p in gsd_state["phases"]
-        )
+        all_done = all(p["status"] in ("completed", "verified") for p in gsd_state["phases"])
         if all_done:
             return True
 
@@ -262,8 +272,7 @@ def main():
     n_files = len(session_data["files_modified"])
     status = handoff["status"]
     print(
-        f"[session-handoff] Session #{session_num}: {n_files} files modified, "
-        f"status={status}",
+        f"[session-handoff] Session #{session_num}: {n_files} files modified, status={status}",
         file=sys.stderr,
     )
 
