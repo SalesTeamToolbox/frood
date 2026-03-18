@@ -9,9 +9,16 @@ ContextVar automatically copies to asyncio child tasks.
 """
 
 import contextvars
+import json
+import os
 import uuid
+from pathlib import Path
 
 from core.task_types import TaskType
+
+# Cross-process bridge: Stop hooks (separate Python processes) read this file
+# to discover the current task_id and task_type.
+_TASK_FILE_DIR = os.environ.get("AGENT42_DATA_DIR", ".agent42")
 
 _task_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("task_id", default=None)
 _task_type_var: contextvars.ContextVar[TaskType | None] = contextvars.ContextVar(
@@ -37,6 +44,30 @@ class TaskContext:
         self.task_type = task_type
 
 
+def _write_task_file(task_id: str, task_type: str) -> None:
+    """Write current task info to a file for cross-process access (Stop hooks)."""
+    try:
+        task_dir = Path(_TASK_FILE_DIR)
+        task_dir.mkdir(parents=True, exist_ok=True)
+        task_file = task_dir / "current-task.json"
+        task_file.write_text(
+            json.dumps({"task_id": task_id, "task_type": task_type}),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass  # Non-critical — hook will generate its own task_id
+
+
+def _remove_task_file() -> None:
+    """Remove the current task file after task ends."""
+    try:
+        task_file = Path(_TASK_FILE_DIR) / "current-task.json"
+        if task_file.exists():
+            task_file.unlink()
+    except Exception:
+        pass  # Non-critical
+
+
 def begin_task(task_type: TaskType) -> TaskContext:
     """Start a task context. All memory writes inherit task_id and task_type.
 
@@ -49,6 +80,8 @@ def begin_task(task_type: TaskType) -> TaskContext:
     task_id = str(uuid.uuid4())
     id_token = _task_id_var.set(task_id)
     type_token = _task_type_var.set(task_type)
+    # Write cross-process bridge file for Stop hook
+    _write_task_file(task_id, task_type.value)
     return TaskContext(id_token, type_token, task_id, task_type)
 
 
@@ -56,6 +89,7 @@ def end_task(ctx: TaskContext) -> None:
     """End a task context. Clears task_id and task_type from the ContextVar."""
     _task_id_var.reset(ctx._id_token)
     _task_type_var.reset(ctx._type_token)
+    _remove_task_file()
 
 
 def get_task_context() -> tuple[str | None, str | None]:

@@ -1775,7 +1775,6 @@ def create_app(
         model: str = ""
         file_context: str = ""
 
-
     # -- Effectiveness Tracking API (EFFT-03: MCP tool tracking) ---------------
 
     @app.post("/api/effectiveness/record")
@@ -1806,6 +1805,159 @@ def create_app(
             return {"stats": []}
         stats = await effectiveness_store.get_aggregated_stats(tool_name, task_type)
         return {"stats": stats}
+
+    async def _maybe_promote_quarantined(ms, task_type: str, outcome: str, summary: str):
+        """Increment observation_count on matching quarantined learnings.
+
+        Promotes entries to full confidence when they reach LEARNING_MIN_EVIDENCE.
+        Fire-and-forget — never blocks the response.
+        """
+        import os as _os_local
+
+        try:
+            if not ms or not ms.embeddings._qdrant:
+                return
+            qdrant = ms.embeddings._qdrant
+            if not qdrant.is_available:
+                return
+
+            from memory.qdrant_store import QdrantStore
+
+            threshold = int(_os_local.environ.get("LEARNING_MIN_EVIDENCE", "3"))
+
+            query_vector = await ms.embeddings.embed_text(summary)
+            results = qdrant.search_with_lifecycle(
+                QdrantStore.HISTORY,
+                query_vector,
+                top_k=5,
+                task_type_filter=task_type,
+            )
+
+            for r in results:
+                payload = r.get("payload", {})
+                if not payload.get("quarantined"):
+                    continue
+                if payload.get("outcome") != outcome:
+                    continue
+                if r.get("score", 0) < 0.70:
+                    continue
+
+                point_id = r.get("point_id")
+                if not point_id:
+                    continue
+
+                new_count = payload.get("observation_count", 1) + 1
+                updates = {"observation_count": new_count}
+                if new_count >= threshold:
+                    updates["confidence"] = 1.0
+                    updates["quarantined"] = False
+                    logger.info(
+                        "Promoted quarantined learning (point %s) after %d observations",
+                        point_id,
+                        new_count,
+                    )
+                qdrant.update_payload(QdrantStore.HISTORY, point_id, updates)
+
+        except Exception as e:
+            logger.warning("Quarantine promotion check failed (non-critical): %s", e)
+
+    @app.post("/api/effectiveness/learn")
+    async def record_learning(request: Request):
+        """Persist a learning entry from the Stop hook extraction pipeline.
+
+        Accepts JSON: {task_type, task_id, outcome, summary, tools_used, files_modified, key_insight}
+        Writes to HISTORY.md and indexes in Qdrant with quarantine fields.
+        No authentication required — called by local Stop hooks only.
+        """
+        import asyncio as _asyncio
+        import os as _os_local
+
+        try:
+            data = await request.json()
+            task_type = data.get("task_type", "general")
+            task_id = data.get("task_id", "")
+            outcome = data.get("outcome", "unknown")
+            summary = data.get("summary", "")
+            key_insight = data.get("key_insight", "")
+            tools_used = data.get("tools_used", [])
+            files_modified = data.get("files_modified", [])
+
+            if not summary:
+                return {"status": "skipped", "reason": "empty summary"}
+
+            # Format: [task_type][task_id][outcome]
+            event_type = f"[{task_type}][{task_id}][{outcome}]"
+            details = ""
+            if tools_used:
+                details += f"Tools used: {', '.join(tools_used)}.\n"
+            if files_modified:
+                details += f"Files modified: {', '.join(files_modified)}.\n"
+            if key_insight:
+                details += f"Key insight: {key_insight}"
+
+            # Set task context so index_history_entry picks up task_id/task_type
+            from core.task_context import _task_id_var, begin_task, end_task
+            from core.task_types import TaskType
+
+            # Map string to TaskType enum (fallback to GENERAL)
+            try:
+                tt_enum = TaskType(task_type)
+            except ValueError:
+                tt_enum = TaskType.GENERAL
+
+            ctx = begin_task(tt_enum)
+            # Override the auto-generated task_id with the one from the hook
+            _task_id_var.set(task_id if task_id else ctx.task_id)
+
+            try:
+                if memory_store:
+                    await memory_store.log_event_semantic(event_type, summary, details)
+
+                    # Add quarantine fields to the Qdrant entry
+                    if (
+                        memory_store.embeddings._qdrant
+                        and memory_store.embeddings._qdrant.is_available
+                    ):
+                        from memory.qdrant_store import QdrantStore
+
+                        # Find the most recently upserted point and add quarantine fields
+                        query_vector = await memory_store.embeddings.embed_text(
+                            f"{event_type}: {summary}\n{details}"
+                        )
+                        results = memory_store.embeddings._qdrant.search_with_lifecycle(
+                            QdrantStore.HISTORY,
+                            query_vector,
+                            top_k=1,
+                            task_type_filter=task_type,
+                        )
+                        if results:
+                            point_id = results[0].get("point_id")
+                            if point_id:
+                                quarantine_conf = float(
+                                    _os_local.environ.get("LEARNING_QUARANTINE_CONFIDENCE", "0.6")
+                                )
+                                memory_store.embeddings._qdrant.update_payload(
+                                    QdrantStore.HISTORY,
+                                    point_id,
+                                    {
+                                        "observation_count": 1,
+                                        "confidence": quarantine_conf,
+                                        "quarantined": True,
+                                        "outcome": outcome,
+                                    },
+                                )
+            finally:
+                end_task(ctx)
+
+            # Fire-and-forget: check for quarantine promotions
+            _asyncio.create_task(
+                _maybe_promote_quarantined(memory_store, task_type, outcome, summary)
+            )
+
+            return {"status": "ok", "event_type": event_type}
+        except Exception as e:
+            logger.error("Learning record failed: %s", e)
+            return {"status": "error", "detail": str(e)}
 
     @app.post("/api/ide/chat")
     async def ide_chat(req: ChatRequest, _user: str = Depends(get_current_user)):
