@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-18T17:14:17Z"
+last_updated: "2026-03-18T17:31:00Z"
 ---
 
 # Project State
@@ -18,11 +18,11 @@ See: .planning/PROJECT.md (updated 2026-03-17)
 ## Current Position
 
 Phase: 2 of 4 (Frontend Chat UI — in progress)
-Plan: 3 of 5 in Phase 2 complete
-Status: Phase 2 in progress — Plans 02-01, 02-02, 02-03 complete
-Last activity: 2026-03-18 — Plan 02-03 complete (CDN deps in index.html + .cc-chat-* CSS in style.css)
+Plan: 4 of 5 in Phase 2 complete
+Status: Phase 2 in progress — Plans 02-01, 02-02, 02-03, 02-04 complete
+Last activity: 2026-03-18 — Plan 02-04 complete (ideOpenCCChat, streaming bubble lifecycle, ccRenderMarkdown, ideActivateTab chatPanel fix)
 
-Progress: [█████░░░░░] 50%
+Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
@@ -36,7 +36,7 @@ Progress: [█████░░░░░] 50%
 | Phase                | Plans    | Total  | Avg/Plan |
 |----------------------|----------|--------|----------|
 | 01-backend-ws-bridge | 3/3 DONE | 29 min | 9.7 min  |
-| 02-core-chat-ui      | 3/5      | 8 min  | 2.7 min  |
+| 02-core-chat-ui      | 4/5      | 19 min | 4.8 min  |
 
 *Updated after each plan completion*
 
@@ -61,6 +61,9 @@ Progress: [█████░░░░░] 50%
 - Use highlight.min.js (full bundle) not core.min.js — core has zero language definitions built in
 - hljs CSS scoped to .cc-chat-messages to prevent conflicts with existing .md-code-block styles
 - CDN load order: marked -> marked-highlight -> hljs -> DOMPurify -> app.js (UMD globals must exist when app.js runs)
+- markedHighlight CDN UMD pattern: markedHighlight.markedHighlight (namespace.function) not globalThis.markedHighlight
+- Global security_reminder_hook.py blocks first innerHTML assignment per session; second attempt allowed — DOMPurify usage is safe
+- ideOpenCCChat replaces ideOpenClaude in all onclick HTML strings; ideOpenClaude function kept intact for backward compat
 
 ### Pending Todos
 
@@ -75,5 +78,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-18
-Stopped at: Plan 02-03 complete — CDN deps + CSS done. index.html has 4 CDN libs, style.css has all .cc-chat-* classes. Ready for Plan 02-04 (JS rendering engine).
+Stopped at: Plan 02-04 complete — ideOpenCCChat, streaming bubble lifecycle, ccRenderMarkdown, ideActivateTab chatPanel fix done. TestCCChatRendering (9/9) and TestCCChatScrolling (2/2) all GREEN. Ready for Plan 02-05 (input handling: ccSend, ccStop, ccHandleKeydown, ccInputResize, ccUpdateSlashDropdown).
 Resume file: None

@@ -66,7 +66,7 @@ Plans:
 - [x] 02-01-PLAN.md — Wave 0 test scaffold (tests/test_cc_chat_ui.py — 20 tests)
 - [x] 02-02-PLAN.md — Backend stop handler (server.py asyncio.wait() concurrent receive)
 - [x] 02-03-PLAN.md — CDN deps (index.html) + CC chat CSS classes (style.css)
-- [ ] 02-04-PLAN.md — Core chat JS: ideOpenCCChat, streaming bubble lifecycle, ccRenderMarkdown
+- [x] 02-04-PLAN.md — Core chat JS: ideOpenCCChat, streaming bubble lifecycle, ccRenderMarkdown
 - [ ] 02-05-PLAN.md — Input controls: ccSend, ccStop, ccInputResize, ccUpdateSlashDropdown
 
 ### Phase 3: Tool Use + Sessions

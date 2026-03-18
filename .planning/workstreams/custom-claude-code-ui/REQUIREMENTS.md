@@ -18,15 +18,15 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Chat Rendering
 
-- [ ] **CHAT-01**: User messages display in styled bubbles with avatar and timestamp
-- [ ] **CHAT-02**: Assistant messages display in styled bubbles with streaming text cursor during generation
-- [ ] **CHAT-03**: Completed messages render markdown (headers, lists, bold, italic, links) via marked.js
-- [ ] **CHAT-04**: Code blocks render with syntax highlighting via highlight.js
-- [ ] **CHAT-05**: All AI-generated HTML is sanitized via DOMPurify before DOM insertion
-- [ ] **CHAT-06**: Streaming uses append-only DOM (no re-render of previous messages) with 50ms batched updates
+- [x] **CHAT-01**: User messages display in styled bubbles with avatar and timestamp
+- [x] **CHAT-02**: Assistant messages display in styled bubbles with streaming text cursor during generation
+- [x] **CHAT-03**: Completed messages render markdown (headers, lists, bold, italic, links) via marked.js
+- [x] **CHAT-04**: Code blocks render with syntax highlighting via highlight.js
+- [x] **CHAT-05**: All AI-generated HTML is sanitized via DOMPurify before DOM insertion
+- [x] **CHAT-06**: Streaming uses append-only DOM (no re-render of previous messages) with 50ms batched updates
 - [ ] **CHAT-07**: Auto-scroll pins to bottom during streaming, releases when user scrolls up
 - [ ] **CHAT-08**: Stop button cancels active generation (kills CC process)
-- [ ] **CHAT-09**: Thinking/reasoning blocks display in collapsible sections with distinct styling
+- [x] **CHAT-09**: Thinking/reasoning blocks display in collapsible sections with distinct styling
 
 ### Tool Use Display
 
@@ -97,15 +97,15 @@ Deferred to future release. Tracked but not in current roadmap.
 | BRIDGE-04 | Phase 1 | Complete |
 | BRIDGE-05 | Phase 1 | Complete |
 | BRIDGE-06 | Phase 1 | Complete |
-| CHAT-01 | Phase 2 | Pending |
-| CHAT-02 | Phase 2 | Pending |
-| CHAT-03 | Phase 2 | Pending |
-| CHAT-04 | Phase 2 | Pending |
-| CHAT-05 | Phase 2 | Pending |
-| CHAT-06 | Phase 2 | Pending |
+| CHAT-01 | Phase 2 | Complete |
+| CHAT-02 | Phase 2 | Complete |
+| CHAT-03 | Phase 2 | Complete |
+| CHAT-04 | Phase 2 | Complete |
+| CHAT-05 | Phase 2 | Complete |
+| CHAT-06 | Phase 2 | Complete |
 | CHAT-07 | Phase 2 | Pending |
 | CHAT-08 | Phase 2 | Pending |
-| CHAT-09 | Phase 2 | Pending |
+| CHAT-09 | Phase 2 | Complete |
 | INPUT-01 | Phase 2 | Pending |
 | INPUT-02 | Phase 2 | Pending |
 | INPUT-03 | Phase 2 | Pending |
