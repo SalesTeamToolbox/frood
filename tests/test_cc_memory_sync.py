@@ -227,8 +227,9 @@ class TestSyncWorker:
 
         # Check that upsert was called and payload contained source=claude_code
         assert mock_client.upsert.called
-        call_kwargs = mock_client.upsert.call_args
-        points = call_kwargs[1].get("points") or call_kwargs[0][1] if call_kwargs[0] else []
+        ca = mock_client.upsert.call_args
+        # upsert is called with keyword args: collection_name=..., points=[...]
+        points = ca.kwargs.get("points") or (ca.args[1] if len(ca.args) > 1 else [])
         assert len(points) > 0
         payload = points[0].payload
         assert payload.get("source") == "claude_code"
