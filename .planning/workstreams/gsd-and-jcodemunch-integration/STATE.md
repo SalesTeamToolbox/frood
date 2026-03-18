@@ -1,38 +1,59 @@
----
-workstream: gsd-and-jcodemunch-integration
-created: 2026-03-17
----
-
 # Project State
-
-## Current Position
-
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-03-17 — Milestone v3.0 GSD & jcodemunch Integration started
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-03-17)
 
-**Core value:** Agent42 must always be able to run agents reliably
-**Current focus:** v3.0 GSD & jcodemunch Integration — unified platform with setup automation, memory sync, deep tool integration, enterprise foundations
+**Core value:** Agent42 must always be able to run agents reliably, with tiered provider routing ensuring no single provider outage stops the platform.
 
-## Progress
+**Current focus:** Phase 1: Setup Foundation — one-command Linux/VPS setup with MCP, hooks, jcodemunch index, health validation
 
-**Phases Complete:** 0
-**Current Plan:** N/A
+## Current Position
+
+Phase: 1 of 4 (Setup Foundation)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-03-17 — Roadmap created, 4 phases, 13/13 requirements mapped
+
+Progress: [░░░░░░░░░░] 0%
+
+## Performance Metrics
+
+**Velocity:**
+
+- Total plans completed: 0
+- Average duration: —
+- Total execution time: —
+
+**By Phase:**
+
+| Phase                  | Plans | Total | Avg/Plan |
+|------------------------|-------|-------|----------|
+| 1. Setup Foundation    | 0/TBD | -     | -        |
+| 2. Windows + CLAUDE.md | 0/TBD | -     | -        |
+| 3. Memory Sync         | 0/TBD | -     | -        |
+| 4. Context Engine      | 0/TBD | -     | -        |
+
+Updated after each plan completion.
 
 ## Accumulated Context
 
-- Agent42 already has deep jcodemunch integration (hooks, token tracking, reindex, GSD workflow pre-fetch)
-- Memory system is multi-layer (Qdrant + ONNX + flat files + MemoryTool with 7 actions)
-- GSD fork includes autonomous mode, workstreams, Nyquist validation, cowork daemon
-- Cross-platform basics exist (local MCP, remote SSH MCP, NodeSyncTool rsync)
-- Gaps: unified setup, bi-directional sync, deep tool-level integration, enterprise RBAC
+### Decisions
+
+- [Roadmap]: Phase 3 depends on Phase 1, not Phase 2 — memory sync needs working setup but not Windows/CLAUDE.md support
+- [Roadmap]: Phase 2 and Phase 3 share the same dependency (Phase 1 only); execute Phase 2 before Phase 3 for delivery continuity
+- [Roadmap]: Phase 4 depends on Phase 3 — context engine needs stable per-project namespaces before wiring effectiveness ranking
+
+### Pending Todos
+
+None yet.
+
+### Blockers/Concerns
+
+None yet.
 
 ## Session Continuity
 
-**Stopped At:** N/A
-**Resume File:** None
+Last session: 2026-03-17
+Stopped at: Roadmap created — ready to plan Phase 1
+Resume file: None
