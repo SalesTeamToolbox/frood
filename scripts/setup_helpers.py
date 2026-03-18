@@ -169,6 +169,7 @@ def generate_mcp_config(project_dir: str, ssh_alias: str | None = None) -> None:
         if name not in servers:
             servers[name] = entry
 
+    os.makedirs(project_dir, exist_ok=True)
     with open(mcp_path, "w") as f:
         json.dump(config, f, indent=2)
         f.write("\n")
