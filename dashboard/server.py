@@ -1718,9 +1718,27 @@ def create_app(
         etype = event.get("type")
         envelopes = []
         logger.info(f"CC event: type={etype}, subtype={event.get('subtype', '-')}")
-        if etype == "system" and event.get("subtype") == "init":
-            # Emit status so user sees CC initialized during the long startup
-            envelopes.append({"type": "status", "data": {"message": "Claude Code initialized"}})
+        if etype == "system":
+            subtype = event.get("subtype", "")
+            if subtype == "init":
+                # PTY-02: Relay per-MCP-server connection status
+                mcp_servers = event.get("mcp_servers", [])
+                for srv in mcp_servers:
+                    srv_name = (srv.get("name", "") if isinstance(srv, dict) else str(srv)).strip()
+                    if srv_name:
+                        envelopes.append(
+                            {"type": "status", "data": {"message": f"Connected to {srv_name}"}}
+                        )
+                # Always emit ready message after init, even if mcp_servers is empty
+                envelopes.append({"type": "status", "data": {"message": "Claude Code ready"}})
+            elif subtype == "hook_started":
+                # PTY-02: Show hook loading progress
+                hook_name = event.get("hook_name") or event.get("name") or ""
+                if hook_name:
+                    envelopes.append(
+                        {"type": "status", "data": {"message": f"Loading {hook_name}..."}}
+                    )
+            # hook_response: suppress (too verbose for UI)
         elif etype == "stream_event":
             raw = event.get("event", {})
             raw_type = raw.get("type", "")
