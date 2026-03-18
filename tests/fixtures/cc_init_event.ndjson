@@ -1,0 +1,5 @@
+{"type": "system", "subtype": "hook_started", "hook_name": "context-loader"}
+{"type": "system", "subtype": "hook_response", "hook_name": "context-loader", "output": "loaded 3 lessons"}
+{"type": "system", "subtype": "init", "mcp_servers": [{"name": "jcodemunch", "status": "connected"}, {"name": "agent42-remote", "status": "connected"}], "tools": []}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hello"}}}
+{"type": "result", "session_id": "test-session-001", "usage": {"input_tokens": 100, "output_tokens": 50}, "cost_usd": 0.001}
