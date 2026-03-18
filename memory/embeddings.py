@@ -372,15 +372,25 @@ class EmbeddingStore:
         self, text: str, source: str = "", section: str = "", metadata: dict | None = None
     ):
         """Embed and store a single text entry."""
+        from core.task_context import get_task_context
+
         self._load()
         vector = await self.embed_text(text)
+
+        effective_metadata = dict(metadata or {})
+        task_id, task_type = get_task_context()
+        if task_id is not None:
+            effective_metadata["task_id"] = task_id
+        if task_type is not None:
+            effective_metadata["task_type"] = task_type
+
         entry = EmbeddingEntry(
             text=text,
             vector=vector,
             source=source,
             section=section,
             timestamp=time.time(),
-            metadata=metadata or {},
+            metadata=effective_metadata,
         )
         self._entries.append(entry)
         self._save()
@@ -407,7 +417,12 @@ class EmbeddingStore:
         return len(items)
 
     async def search(
-        self, query: str, top_k: int = 5, source_filter: str = "", collection: str = ""
+        self,
+        query: str,
+        top_k: int = 5,
+        source_filter: str = "",
+        collection: str = "",
+        task_type_filter: str = "",
     ) -> list[dict]:
         """Semantic search: find the most relevant entries for a query.
 
@@ -419,7 +434,9 @@ class EmbeddingStore:
         if self._qdrant and self._qdrant.is_available:
             try:
                 query_vector = await self.embed_text(query)
-                return self._search_qdrant(query_vector, top_k, source_filter, collection)
+                return self._search_qdrant(
+                    query_vector, top_k, source_filter, collection, task_type_filter
+                )
             except Exception as e:
                 logger.warning("Qdrant search failed, falling through to JSON fallback: %s", e)
 
@@ -436,6 +453,7 @@ class EmbeddingStore:
         top_k: int,
         source_filter: str,
         collection: str,
+        task_type_filter: str = "",
     ) -> list[dict]:
         """Search via Qdrant backend. Raises on failure so caller can fall back."""
         from memory.qdrant_store import QdrantStore
@@ -446,6 +464,7 @@ class EmbeddingStore:
                 query_vector,
                 top_k=top_k,
                 source_filter=source_filter,
+                task_type_filter=task_type_filter,
             )
 
         memory_results = self._qdrant.search(
@@ -453,12 +472,14 @@ class EmbeddingStore:
             query_vector,
             top_k=top_k,
             source_filter=source_filter,
+            task_type_filter=task_type_filter,
         )
         history_results = self._qdrant.search(
             QdrantStore.HISTORY,
             query_vector,
             top_k=top_k,
             source_filter=source_filter,
+            task_type_filter=task_type_filter,
         )
 
         combined = memory_results + history_results
@@ -507,10 +528,21 @@ class EmbeddingStore:
 
         if self._qdrant and self._qdrant.is_available:
             try:
+                from core.task_context import get_task_context
                 from memory.qdrant_store import QdrantStore
 
                 self._qdrant.clear_collection(QdrantStore.MEMORY)
                 payloads = [{"source": "memory", "section": c.get("section", "")} for c in chunks]
+
+                # Inject task context if available
+                task_id, task_type = get_task_context()
+                if task_id is not None or task_type is not None:
+                    for payload in payloads:
+                        if task_id is not None:
+                            payload["task_id"] = task_id
+                        if task_type is not None:
+                            payload["task_type"] = task_type
+
                 count = self._qdrant.upsert_vectors(QdrantStore.MEMORY, texts, vectors, payloads)
                 logger.info(f"Indexed {count} memory chunks -> Qdrant")
                 return count
@@ -544,14 +576,24 @@ class EmbeddingStore:
 
         if self._qdrant and self._qdrant.is_available:
             try:
+                from core.task_context import get_task_context
                 from memory.qdrant_store import QdrantStore
 
                 vector = await self.embed_text(text)
+                payload = {"source": "history", "section": event_type}
+
+                # Inject task context if available
+                task_id, task_type = get_task_context()
+                if task_id is not None:
+                    payload["task_id"] = task_id
+                if task_type is not None:
+                    payload["task_type"] = task_type
+
                 self._qdrant.upsert_single(
                     QdrantStore.HISTORY,
                     text,
                     vector,
-                    {"source": "history", "section": event_type},
+                    payload,
                 )
                 return
             except Exception as e:

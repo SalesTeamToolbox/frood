@@ -5,7 +5,9 @@ Handles tool discovery, registration, execution, and schema generation.
 Optionally enforces per-tool rate limiting via ToolRateLimiter.
 """
 
+import asyncio
 import logging
+import time
 
 from tools.base import Tool, ToolResult
 
@@ -48,9 +50,10 @@ _CODE_TASK_TYPES = {
 class ToolRegistry:
     """Manages all available tools for agent execution."""
 
-    def __init__(self, rate_limiter=None):
+    def __init__(self, rate_limiter=None, effectiveness_store=None):
         self._tools: dict[str, Tool] = {}
         self._rate_limiter = rate_limiter
+        self._effectiveness_store = effectiveness_store
         self._disabled: set[str] = set()
 
     def register(self, tool: Tool):
@@ -107,15 +110,35 @@ class ToolRegistry:
                 logger.warning(f"Rate limited: {reason}")
                 return ToolResult(error=reason, success=False)
 
+        start_ns = time.perf_counter_ns()
         try:
             result = await tool.execute(**kwargs)
         except Exception as e:
             logger.error(f"Tool {tool_name} failed: {e}", exc_info=True)
-            return ToolResult(error=str(e), success=False)
+            result = ToolResult(error=str(e), success=False)
+
+        duration_ms = (time.perf_counter_ns() - start_ns) / 1_000_000
 
         # Record successful call for rate limiting
-        if self._rate_limiter:
+        if self._rate_limiter and result.success:
             self._rate_limiter.record(tool_name, agent_id)
+
+        # Fire-and-forget effectiveness tracking (EFFT-02: never blocks tool return)
+        if self._effectiveness_store:
+            try:
+                from core.task_context import get_task_context
+                task_id, task_type = get_task_context()
+                asyncio.create_task(
+                    self._effectiveness_store.record(
+                        tool_name=tool_name,
+                        task_type=task_type or "general",
+                        task_id=task_id or "",
+                        success=result.success,
+                        duration_ms=duration_ms,
+                    )
+                )
+            except Exception:
+                pass  # Never block tool execution for tracking
 
         return result
 

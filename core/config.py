@@ -270,6 +270,10 @@ class Settings:
     gemini_free_tier: bool = True  # When false, Gemini excluded from FALLBACK_ROUTING and fallback
     openrouter_free_only: bool = False  # When true, only OR :free suffix models are routed
 
+
+    # Learning extraction (Phase 21)
+    learning_min_evidence: int = 3
+    learning_quarantine_confidence: float = 0.6
     # RLM (Recursive Language Models — MIT CSAIL)
     rlm_enabled: bool = True
     rlm_threshold_tokens: int = 200_000
@@ -484,6 +488,9 @@ class Settings:
             l2_auto_escalate=os.getenv("L2_AUTO_ESCALATE", "false").lower() in ("true", "1", "yes"),
             l2_auto_escalate_task_types=os.getenv("L2_AUTO_ESCALATE_TASK_TYPES", ""),
             l2_task_types=os.getenv("L2_TASK_TYPES", ""),
+            # Learning extraction
+            learning_min_evidence=int(os.getenv("LEARNING_MIN_EVIDENCE", "3")),
+            learning_quarantine_confidence=float(os.getenv("LEARNING_QUARANTINE_CONFIDENCE", "0.6")),
             # RLM (Recursive Language Models)
             rlm_enabled=os.getenv("RLM_ENABLED", "true").lower() in ("true", "1", "yes"),
             rlm_threshold_tokens=int(os.getenv("RLM_THRESHOLD_TOKENS", "200000")),

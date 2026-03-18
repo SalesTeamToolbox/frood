@@ -469,6 +469,7 @@ def create_app(
     profile_loader=None,
     github_account_store=None,
     memory_store=None,
+    effectiveness_store=None,
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -1277,6 +1278,7 @@ def create_app(
     # -- IDE (Web IDE file operations) -----------------------------------------
 
     import os as _os
+    import sys as _sys
 
     workspace = Path(_os.environ.get("AGENT42_WORKSPACE", str(Path.cwd())))
 
@@ -1434,10 +1436,16 @@ def create_app(
 
     @app.websocket("/ws/terminal")
     async def terminal_ws(websocket: WebSocket):
-        """WebSocket endpoint for interactive terminal sessions."""
+        """WebSocket endpoint for interactive terminal sessions.
+
+        Uses PTY (winpty on Windows, pty on Unix) for local shells so they
+        behave interactively (prompt, colors, job control).  Falls back to
+        subprocess PIPE for SSH remote sessions.
+        """
+        # Security: all subprocess commands use fixed binaries resolved via
+        # shutil.which — no user-supplied strings are interpolated into commands.
         await websocket.accept()
 
-        # Authenticate via query param
         token = websocket.query_params.get("token", "")
         if not token:
             await websocket.close(code=4001, reason="Missing token")
@@ -1456,86 +1464,664 @@ def create_app(
             await websocket.close()
             return
 
-        # Find Claude Code CLI
         claude_bin = _shutil.which("claude")
+        import json as _json
 
-        try:
-            if cmd == "claude" and node == "remote":
-                # Claude Code on remote via SSH
-                ssh_host = _os.environ.get("AGENT42_REMOTE_HOST", "agent42-prod")
+        # --- Remote sessions use subprocess (SSH needs PIPE, not local PTY) ---
+        if node == "remote":
+            ssh_host = _os.environ.get("AGENT42_REMOTE_HOST", "")
+            if not ssh_host:
+                await websocket.send_text(
+                    "\r\n\x1b[31mNo remote node configured (AGENT42_REMOTE_HOST not set)\x1b[0m\r\n"
+                )
+                await websocket.close()
+                return
+            ssh_args = ["ssh", "-tt", ssh_host]
+            if cmd == "claude":
+                ssh_args.append("claude")
+            try:
                 proc = await _asyncio.create_subprocess_exec(
-                    "ssh",
-                    "-tt",
-                    ssh_host,
-                    "claude",
+                    *ssh_args,
                     stdin=_asyncio.subprocess.PIPE,
                     stdout=_asyncio.subprocess.PIPE,
                     stderr=_asyncio.subprocess.STDOUT,
                 )
-            elif cmd == "claude":
-                # Claude Code locally (uses CC subscription)
-                if not claude_bin:
-                    await websocket.send_text(
-                        "\r\nClaude Code CLI not found.\r\n"
-                        "Install: npm install -g @anthropic-ai/claude-code\r\n"
-                        "Or log in: claude login\r\n"
-                    )
-                    await websocket.close()
-                    return
-                proc = await _asyncio.create_subprocess_exec(
-                    claude_bin,
-                    stdin=_asyncio.subprocess.PIPE,
-                    stdout=_asyncio.subprocess.PIPE,
-                    stderr=_asyncio.subprocess.STDOUT,
-                    cwd=str(workspace),
-                )
-            elif node == "remote":
-                ssh_host = _os.environ.get("AGENT42_REMOTE_HOST", "agent42-prod")
-                proc = await _asyncio.create_subprocess_exec(
-                    "ssh",
-                    "-tt",
-                    ssh_host,
-                    stdin=_asyncio.subprocess.PIPE,
-                    stdout=_asyncio.subprocess.PIPE,
-                    stderr=_asyncio.subprocess.STDOUT,
-                )
-            else:
-                proc = await _asyncio.create_subprocess_exec(
-                    shell,
-                    stdin=_asyncio.subprocess.PIPE,
-                    stdout=_asyncio.subprocess.PIPE,
-                    stderr=_asyncio.subprocess.STDOUT,
-                    cwd=str(workspace),
-                )
-        except Exception as e:
-            await websocket.send_text(f"\r\nFailed to start shell: {e}\r\n")
-            await websocket.close()
-            return
+            except Exception as e:
+                await websocket.send_text(f"\r\nFailed to start SSH: {e}\r\n")
+                await websocket.close()
+                return
 
-        async def read_output():
+            async def _read_remote():
+                try:
+                    while True:
+                        data = await proc.stdout.read(4096)
+                        if not data:
+                            break
+                        await websocket.send_text(data.decode("utf-8", errors="replace"))
+                except Exception:
+                    pass
+
+            read_task = _asyncio.create_task(_read_remote())
             try:
                 while True:
-                    data = await proc.stdout.read(4096)
-                    if not data:
-                        break
-                    await websocket.send_text(data.decode("utf-8", errors="replace"))
+                    msg = await websocket.receive_text()
+                    try:
+                        parsed = _json.loads(msg)
+                        if isinstance(parsed, dict) and parsed.get("type") == "resize":
+                            continue
+                    except (_json.JSONDecodeError, ValueError, TypeError):
+                        pass
+                    if proc.stdin and not proc.stdin.is_closing():
+                        proc.stdin.write(msg.encode("utf-8"))
+                        await proc.stdin.drain()
             except Exception:
                 pass
+            finally:
+                read_task.cancel()
+                if proc.returncode is None:
+                    proc.terminate()
+            return
 
-        read_task = _asyncio.create_task(read_output())
+        # --- Local sessions: determine command ---
+        if cmd == "claude":
+            if not claude_bin:
+                await websocket.send_text(
+                    "\r\nClaude Code CLI not found.\r\n"
+                    "Install: npm install -g @anthropic-ai/claude-code\r\n"
+                )
+                await websocket.close()
+                return
+            pty_cmd = claude_bin
+        else:
+            pty_cmd = shell
+
+        # --- Try PTY for interactive local shell ---
+        pty_process = None
+        use_pty = False
+        try:
+            if _sys.platform == "win32":
+                from winpty import PtyProcess
+
+                pty_process = PtyProcess.spawn(pty_cmd, cwd=str(workspace))
+                use_pty = True
+            else:
+                import pty as _pty_mod
+                import subprocess as _subprocess_pty
+
+                master_fd, slave_fd = _pty_mod.openpty()
+                proc = _subprocess_pty.Popen(
+                    [pty_cmd],
+                    stdin=slave_fd,
+                    stdout=slave_fd,
+                    stderr=slave_fd,
+                    cwd=str(workspace),
+                    preexec_fn=_os.setsid,
+                )
+                _os.close(slave_fd)
+                use_pty = True
+        except Exception as e:
+            logger.warning(f"PTY unavailable, falling back to PIPE: {e}")
+            use_pty = False
+
+        if use_pty and _sys.platform == "win32" and pty_process:
+            loop = _asyncio.get_event_loop()
+
+            async def _read_pty_win():
+                try:
+                    while pty_process.isalive():
+                        try:
+                            data = await loop.run_in_executor(None, lambda: pty_process.read(4096))
+                            if data:
+                                await websocket.send_text(data)
+                        except EOFError:
+                            break
+                        except Exception:
+                            break
+                except Exception:
+                    pass
+
+            read_task = _asyncio.create_task(_read_pty_win())
+            try:
+                while True:
+                    msg = await websocket.receive_text()
+                    try:
+                        parsed = _json.loads(msg)
+                        if isinstance(parsed, dict) and parsed.get("type") == "resize":
+                            cols = int(parsed.get("cols", 80))
+                            rows = int(parsed.get("rows", 24))
+                            try:
+                                pty_process.setwinsize(rows, cols)
+                            except Exception:
+                                pass
+                            continue
+                    except (_json.JSONDecodeError, ValueError, TypeError):
+                        pass
+                    try:
+                        pty_process.write(msg)
+                    except Exception:
+                        break
+            except Exception:
+                pass
+            finally:
+                read_task.cancel()
+                if pty_process.isalive():
+                    pty_process.terminate()
+
+        elif use_pty and _sys.platform != "win32":
+            import select as _select
+
+            loop = _asyncio.get_event_loop()
+
+            def _read_master():
+                if _select.select([master_fd], [], [], 0.1)[0]:
+                    return _os.read(master_fd, 4096)
+                return b""
+
+            async def _read_pty_unix():
+                try:
+                    while proc.poll() is None:
+                        data = await loop.run_in_executor(None, _read_master)
+                        if data:
+                            await websocket.send_text(data.decode("utf-8", errors="replace"))
+                        else:
+                            await _asyncio.sleep(0.05)
+                except Exception:
+                    pass
+
+            read_task = _asyncio.create_task(_read_pty_unix())
+            try:
+                while True:
+                    msg = await websocket.receive_text()
+                    try:
+                        parsed = _json.loads(msg)
+                        if isinstance(parsed, dict) and parsed.get("type") == "resize":
+                            import fcntl
+                            import struct
+                            import termios
+
+                            cols = int(parsed.get("cols", 80))
+                            rows = int(parsed.get("rows", 24))
+                            winsize = struct.pack("HHHH", rows, cols, 0, 0)
+                            fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+                            continue
+                    except (_json.JSONDecodeError, ValueError, TypeError):
+                        pass
+                    _os.write(master_fd, msg.encode("utf-8"))
+            except Exception:
+                pass
+            finally:
+                read_task.cancel()
+                _os.close(master_fd)
+                if proc.poll() is None:
+                    proc.terminate()
+
+        else:
+            # Fallback: subprocess PIPE (no interactive prompt)
+            try:
+                proc = await _asyncio.create_subprocess_exec(
+                    pty_cmd,
+                    stdin=_asyncio.subprocess.PIPE,
+                    stdout=_asyncio.subprocess.PIPE,
+                    stderr=_asyncio.subprocess.STDOUT,
+                    cwd=str(workspace),
+                )
+            except Exception as e:
+                await websocket.send_text(f"\r\nFailed to start shell: {e}\r\n")
+                await websocket.close()
+                return
+
+            async def _read_fallback():
+                try:
+                    while True:
+                        data = await proc.stdout.read(4096)
+                        if not data:
+                            break
+                        await websocket.send_text(data.decode("utf-8", errors="replace"))
+                except Exception:
+                    pass
+
+            read_task = _asyncio.create_task(_read_fallback())
+            try:
+                while True:
+                    msg = await websocket.receive_text()
+                    try:
+                        parsed = _json.loads(msg)
+                        if isinstance(parsed, dict) and parsed.get("type") == "resize":
+                            continue
+                    except (_json.JSONDecodeError, ValueError, TypeError):
+                        pass
+                    if proc.stdin and not proc.stdin.is_closing():
+                        proc.stdin.write(msg.encode("utf-8"))
+                        await proc.stdin.drain()
+            except Exception:
+                pass
+            finally:
+                read_task.cancel()
+                if proc.returncode is None:
+                    proc.terminate()
+
+    # -- Claude Code Chat WebSocket Bridge -------------------------------------
+
+    from pathlib import Path as _pathlib_Path
+
+    import aiofiles as _aiofiles
+
+    _CC_SESSIONS_DIR = workspace / ".agent42" / "cc-sessions"
+    _CC_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _parse_cc_event(event: dict, tool_id_map: dict, session_state: dict) -> list:
+        """Translate one CC NDJSON event into WS envelope dicts.
+
+        Returns [] for events with no WS output (system/init, message_start, etc.).
+        Mutates tool_id_map and session_state["cc_session_id"] on result event.
+        """
+        etype = event.get("type")
+        envelopes = []
+        if etype == "stream_event":
+            raw = event.get("event", {})
+            raw_type = raw.get("type", "")
+            index = raw.get("index")
+            if raw_type == "content_block_start":
+                cb = raw.get("content_block", {})
+                if cb.get("type") == "tool_use":
+                    tool_id_map[index] = {"id": cb["id"], "name": cb["name"]}
+                    envelopes.append(
+                        {
+                            "type": "tool_start",
+                            "data": {"id": cb["id"], "name": cb["name"], "input": {}},
+                        }
+                    )
+            elif raw_type == "content_block_delta":
+                delta = raw.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    envelopes.append(
+                        {
+                            "type": "text_delta",
+                            "data": {"text": delta.get("text", "")},
+                        }
+                    )
+                elif delta.get("type") == "input_json_delta":
+                    t = tool_id_map.get(index, {})
+                    envelopes.append(
+                        {
+                            "type": "tool_delta",
+                            "data": {"id": t.get("id"), "partial": delta.get("partial_json", "")},
+                        }
+                    )
+            elif raw_type == "content_block_stop":
+                if index in tool_id_map:
+                    t = tool_id_map.pop(index)
+                    envelopes.append(
+                        {
+                            "type": "tool_complete",
+                            "data": {
+                                "id": t.get("id"),
+                                "name": t.get("name"),
+                                "output": "",
+                                "is_error": False,
+                            },
+                        }
+                    )
+        elif etype == "result":
+            cc_sid = event.get("session_id")
+            session_state["cc_session_id"] = cc_sid
+            usage = event.get("usage", {})
+            envelopes.append(
+                {
+                    "type": "turn_complete",
+                    "data": {
+                        "session_id": cc_sid,
+                        "cost_usd": event.get("cost_usd"),
+                        "input_tokens": usage.get("input_tokens", 0),
+                        "output_tokens": usage.get("output_tokens", 0),
+                    },
+                }
+            )
+        return envelopes
+
+    async def _save_session(ws_session_id: str, data: dict, sessions_dir=None) -> None:
+        """Write session data to .agent42/cc-sessions/{ws_session_id}.json."""
+        d = _pathlib_Path(sessions_dir) if sessions_dir is not None else _CC_SESSIONS_DIR
+        async with _aiofiles.open(d / f"{ws_session_id}.json", "w") as fh:
+            await fh.write(_json.dumps(data, indent=2))
+
+    async def _load_session(ws_session_id: str, sessions_dir=None) -> dict:
+        """Read session data; returns {} if file missing or corrupt."""
+        d = _pathlib_Path(sessions_dir) if sessions_dir is not None else _CC_SESSIONS_DIR
+        path = d / f"{ws_session_id}.json"
+        if not path.exists():
+            return {}
+        try:
+            async with _aiofiles.open(path) as fh:
+                return _json.loads(await fh.read())
+        except Exception:
+            return {}
+
+    @app.websocket("/ws/cc-chat")
+    async def cc_chat_ws(websocket: WebSocket):
+        """CC Chat WebSocket: per-turn spawn, NDJSON relay, multi-turn via --resume.
+
+        Security: subprocess args is a Python list (no shell interpolation). user_message
+        is a single positional CC argument passed directly.
+        """
+        import datetime as _datetime
+        import uuid as _uuid
+
+        await websocket.accept()
+        token = websocket.query_params.get("token", "")
+        if not token:
+            await websocket.close(code=4001, reason="Missing token")
+            return
+        try:
+            _get_user_from_token(token)
+        except Exception:
+            await websocket.close(code=4001, reason="Invalid token")
+            return
+
+        ws_session_id = websocket.query_params.get("session_id") or str(_uuid.uuid4())
+        session_data = await _load_session(ws_session_id)
+        session_state: dict = {"cc_session_id": session_data.get("cc_session_id")}
+        session_title: str = session_data.get("title", "")
+        created_at: str = session_data.get("created_at", _datetime.datetime.utcnow().isoformat())
 
         try:
             while True:
-                msg = await websocket.receive_text()
-                if proc.stdin and not proc.stdin.is_closing():
-                    proc.stdin.write(msg.encode("utf-8"))
-                    await proc.stdin.drain()
+                raw_msg = await websocket.receive_text()
+                try:
+                    msg_data = _json.loads(raw_msg)
+                    user_message = msg_data.get("message", raw_msg)
+                except (_json.JSONDecodeError, AttributeError):
+                    user_message = raw_msg
+
+                if not user_message.strip():
+                    continue
+                if not session_title:
+                    session_title = user_message[:80]
+
+                claude_bin = _shutil.which("claude")
+                if not claude_bin:
+                    # BRIDGE-05: CLI not installed -- notify and emit fallback response
+                    await websocket.send_json(
+                        {
+                            "type": "status",
+                            "data": {
+                                "message": "CC subscription not available \u2014 using API mode"
+                            },
+                        }
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "text_delta",
+                            "data": {
+                                "text": "Claude Code CLI not installed. Run: npm install -g @anthropic-ai/claude-code"
+                            },
+                        }
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "turn_complete",
+                            "data": {
+                                "session_id": session_state.get("cc_session_id"),
+                                "cost_usd": None,
+                                "input_tokens": 0,
+                                "output_tokens": 0,
+                            },
+                        }
+                    )
+                    continue
+
+                # Build subprocess args as a Python list (prevents shell injection)
+                args = [
+                    claude_bin,
+                    "-p",
+                    user_message,
+                    "--output-format",
+                    "stream-json",
+                    "--verbose",
+                    "--include-partial-messages",
+                ]
+                cc_session_id = session_state.get("cc_session_id")
+                if cc_session_id:
+                    args += ["--resume", cc_session_id]
+
+                try:
+                    proc = await _asyncio.create_subprocess_exec(
+                        *args,
+                        stdout=_asyncio.subprocess.PIPE,
+                        stderr=_asyncio.subprocess.PIPE,
+                        cwd=str(workspace),
+                    )
+                except Exception as spawn_err:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "data": {
+                                "message": f"Failed to start CC: {spawn_err}",
+                                "code": "spawn_failed",
+                            },
+                        }
+                    )
+                    continue
+
+                tool_id_map: dict = {}
+
+                async def _read_stdout():
+                    try:
+                        async for raw_line in proc.stdout:
+                            line = raw_line.decode("utf-8", errors="replace").strip()
+                            if not line:
+                                continue
+                            try:
+                                event = _json.loads(line)
+                            except _json.JSONDecodeError:
+                                continue
+                            for envelope in _parse_cc_event(event, tool_id_map, session_state):
+                                try:
+                                    await websocket.send_json(envelope)
+                                except Exception:
+                                    return
+                    except Exception:
+                        pass
+
+                read_task = _asyncio.create_task(_read_stdout())
+
+                async def _receive_msg():
+                    return await websocket.receive_text()
+
+                receive_task = _asyncio.create_task(_receive_msg())
+                try:
+                    while True:
+                        done, _pending = await _asyncio.wait(
+                            {read_task, receive_task}, return_when=_asyncio.FIRST_COMPLETED
+                        )
+                        if receive_task in done:
+                            # Client disconnect raises WebSocketDisconnect in receive_task —
+                            # check exception first to avoid infinite spin loop (code-review #1)
+                            if receive_task.exception() is not None:
+                                read_task.cancel()
+                                if proc.returncode is None:
+                                    proc.terminate()
+                                receive_task = None
+                                break
+                            try:
+                                inner = _json.loads(receive_task.result())
+                            except Exception:
+                                inner = {}
+                            if inner.get("type") == "stop":
+                                read_task.cancel()
+                                if proc.returncode is None:
+                                    proc.terminate()
+                                await websocket.send_json(
+                                    {
+                                        "type": "turn_complete",
+                                        "data": {
+                                            "session_id": session_state.get("cc_session_id"),
+                                            "cost_usd": None,
+                                            "input_tokens": 0,
+                                            "output_tokens": 0,
+                                        },
+                                    }
+                                )
+                                receive_task = None
+                                break
+                            # Not a stop — re-arm receive and check if read_task also completed
+                            receive_task = _asyncio.create_task(_receive_msg())
+                            if read_task in done:
+                                break
+                        else:
+                            # read_task completed (subprocess exited) — turn done
+                            for t in _pending:
+                                t.cancel()
+                            break
+                finally:
+                    if receive_task and not receive_task.done():
+                        receive_task.cancel()
+                    read_task.cancel()
+                    if proc.returncode is None:
+                        proc.terminate()
+
+                await _save_session(
+                    ws_session_id,
+                    {
+                        "ws_session_id": ws_session_id,
+                        "cc_session_id": session_state.get("cc_session_id"),
+                        "created_at": created_at,
+                        "last_active_at": _datetime.datetime.utcnow().isoformat(),
+                        "title": session_title,
+                    },
+                )
+
         except Exception:
             pass
-        finally:
-            read_task.cancel()
-            if proc.returncode is None:
-                proc.terminate()
+
+    # -- CC Session REST API ---------------------------------------------------
+
+    @app.get("/api/cc/sessions")
+    async def cc_sessions(_user: str = Depends(get_current_user)):
+        """List all CC chat sessions, sorted by last modified time."""
+        sessions = []
+        cc_dir = workspace / ".agent42" / "cc-sessions"
+        if cc_dir.exists():
+            for f in sorted(cc_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+                try:
+                    async with _aiofiles.open(f) as fh:
+                        data = _json.loads(await fh.read())
+                    sessions.append(data)
+                except Exception:
+                    pass
+        return {"sessions": sessions}
+
+    @app.delete("/api/cc/sessions/{session_id}")
+    async def cc_delete_session(session_id: str, _user: str = Depends(get_current_user)):
+        """Delete a CC chat session file."""
+        path = workspace / ".agent42" / "cc-sessions" / f"{session_id}.json"
+        if path.exists():
+            path.unlink()
+        return {"status": "ok"}
+
+    # -- CC Auth Status --------------------------------------------------------
+
+    _cc_auth_cache: dict = {"result": None, "expires": 0.0}
+
+    @app.get("/api/cc/auth-status")
+    async def cc_auth_status(_user: str = Depends(get_current_user)):
+        """Check CC subscription status via 'claude auth status' exit code."""
+        import time as _time
+
+        now = _time.monotonic()
+        cached = _cc_auth_cache
+        if cached["expires"] > now and cached["result"] is not None:
+            available, message = cached["result"]
+            return {"available": available, "message": message}
+
+        claude_bin = _shutil.which("claude")
+        if not claude_bin:
+            result = (False, "claude CLI not installed")
+        else:
+            try:
+                proc = await _asyncio.create_subprocess_exec(
+                    claude_bin,
+                    "auth",
+                    "status",
+                    stdout=_asyncio.subprocess.PIPE,
+                    stderr=_asyncio.subprocess.PIPE,
+                )
+                await _asyncio.wait_for(proc.wait(), timeout=10.0)
+                available = proc.returncode == 0
+                message = "CC subscription active" if available else "CC not authenticated"
+                result = (available, message)
+            except TimeoutError:
+                result = (False, "claude auth status timed out")
+            except Exception as e:
+                result = (False, f"auth check failed: {e}")
+
+        _cc_auth_cache["result"] = result
+        _cc_auth_cache["expires"] = now + 60.0
+        available, message = result
+        return {"available": available, "message": message}
+
+    # -- Remote Node Status ----------------------------------------------------
+
+    @app.get("/api/remote/status")
+    async def remote_status(_user: str = Depends(get_current_user)):
+        """Check if a remote node is configured."""
+        host = _os.environ.get("AGENT42_REMOTE_HOST", "")
+        return {"available": bool(host), "host": host if host else None}
+
+    # -- Memory Search API (used by hooks + frontend) -------------------------
+
+    @app.post("/api/memory/search")
+    async def memory_search(request: Request):
+        """Search Agent42's memory system (Qdrant + MEMORY.md).
+
+        Used by the memory-recall hook as a fallback when the dedicated
+        search service isn't running. No auth required for local hook access.
+        """
+        try:
+            body = await request.json()
+            query = body.get("content", body.get("query", ""))
+            if not query:
+                return {"results": []}
+
+            results = []
+
+            # Try Qdrant semantic search if memory_store is available
+            if memory_store:
+                try:
+                    hits = await memory_store.semantic_search(query, top_k=5)
+                    for hit in hits:
+                        results.append(
+                            {
+                                "text": hit.get("text", hit.get("content", "")),
+                                "score": hit.get("score", 0.5),
+                                "source": hit.get("source", "qdrant"),
+                            }
+                        )
+                except Exception:
+                    pass
+
+            # Fallback: keyword search on MEMORY.md
+            if not results:
+                mem_path = workspace / "memory" / "MEMORY.md"
+                if not mem_path.exists():
+                    mem_path = workspace / ".agent42" / "MEMORY.md"
+                if mem_path.exists():
+                    content = mem_path.read_text(encoding="utf-8", errors="replace")
+                    keywords = [w.lower() for w in query.split() if len(w) > 3]
+                    for section in content.split("\n## "):
+                        matches = sum(1 for k in keywords if k in section.lower())
+                        if matches >= 2:
+                            results.append(
+                                {
+                                    "text": section[:250].strip(),
+                                    "score": min(matches * 0.2, 1.0),
+                                    "source": "memory-md",
+                                }
+                            )
+
+            return {"results": results[:5]}
+        except Exception as e:
+            return {"results": [], "error": str(e)}
 
     # -- IDE Chat (AI-powered code assistant) ----------------------------------
 
@@ -1548,6 +2134,190 @@ def create_app(
         api_key: str = ""
         model: str = ""
         file_context: str = ""
+
+    # -- Effectiveness Tracking API (EFFT-03: MCP tool tracking) ---------------
+
+    @app.post("/api/effectiveness/record")
+    async def record_effectiveness(request: Request):
+        """Record a tool invocation from an external hook (MCP tool tracking).
+
+        Accepts JSON: {tool_name, task_type, task_id, success, duration_ms}
+        Used by PostToolUse hooks to track MCP tools that bypass ToolRegistry.
+        """
+        try:
+            data = await request.json()
+            if effectiveness_store:
+                await effectiveness_store.record(
+                    tool_name=data.get("tool_name", "unknown"),
+                    task_type=data.get("task_type", "general"),
+                    task_id=data.get("task_id", ""),
+                    success=bool(data.get("success", True)),
+                    duration_ms=float(data.get("duration_ms", 0)),
+                )
+            return {"status": "ok"}
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
+
+    @app.get("/api/effectiveness/stats")
+    async def effectiveness_stats(tool_name: str = "", task_type: str = ""):
+        """Return aggregated effectiveness statistics."""
+        if not effectiveness_store:
+            return {"stats": []}
+        stats = await effectiveness_store.get_aggregated_stats(tool_name, task_type)
+        return {"stats": stats}
+
+    async def _maybe_promote_quarantined(ms, task_type: str, outcome: str, summary: str):
+        """Increment observation_count on matching quarantined learnings.
+
+        Promotes entries to full confidence when they reach LEARNING_MIN_EVIDENCE.
+        Fire-and-forget — never blocks the response.
+        """
+        import os as _os_local
+
+        try:
+            if not ms or not ms.embeddings._qdrant:
+                return
+            qdrant = ms.embeddings._qdrant
+            if not qdrant.is_available:
+                return
+
+            from memory.qdrant_store import QdrantStore
+
+            threshold = int(_os_local.environ.get("LEARNING_MIN_EVIDENCE", "3"))
+
+            query_vector = await ms.embeddings.embed_text(summary)
+            results = qdrant.search_with_lifecycle(
+                QdrantStore.HISTORY,
+                query_vector,
+                top_k=5,
+                task_type_filter=task_type,
+            )
+
+            for r in results:
+                payload = r.get("payload", {})
+                if not payload.get("quarantined"):
+                    continue
+                if payload.get("outcome") != outcome:
+                    continue
+                if r.get("score", 0) < 0.70:
+                    continue
+
+                point_id = r.get("point_id")
+                if not point_id:
+                    continue
+
+                new_count = payload.get("observation_count", 1) + 1
+                updates = {"observation_count": new_count}
+                if new_count >= threshold:
+                    updates["confidence"] = 1.0
+                    updates["quarantined"] = False
+                    logger.info(
+                        "Promoted quarantined learning (point %s) after %d observations",
+                        point_id,
+                        new_count,
+                    )
+                qdrant.update_payload(QdrantStore.HISTORY, point_id, updates)
+
+        except Exception as e:
+            logger.warning("Quarantine promotion check failed (non-critical): %s", e)
+
+    @app.post("/api/effectiveness/learn")
+    async def record_learning(request: Request):
+        """Persist a learning entry from the Stop hook extraction pipeline.
+
+        Accepts JSON: {task_type, task_id, outcome, summary, tools_used, files_modified, key_insight}
+        Writes to HISTORY.md and indexes in Qdrant with quarantine fields.
+        No authentication required — called by local Stop hooks only.
+        """
+        import asyncio as _asyncio
+        import os as _os_local
+
+        try:
+            data = await request.json()
+            task_type = data.get("task_type", "general")
+            task_id = data.get("task_id", "")
+            outcome = data.get("outcome", "unknown")
+            summary = data.get("summary", "")
+            key_insight = data.get("key_insight", "")
+            tools_used = data.get("tools_used", [])
+            files_modified = data.get("files_modified", [])
+
+            if not summary:
+                return {"status": "skipped", "reason": "empty summary"}
+
+            # Format: [task_type][task_id][outcome]
+            event_type = f"[{task_type}][{task_id}][{outcome}]"
+            details = ""
+            if tools_used:
+                details += f"Tools used: {', '.join(tools_used)}.\n"
+            if files_modified:
+                details += f"Files modified: {', '.join(files_modified)}.\n"
+            if key_insight:
+                details += f"Key insight: {key_insight}"
+
+            # Set task context so index_history_entry picks up task_id/task_type
+            from core.task_context import _task_id_var, begin_task, end_task
+            from core.task_types import TaskType
+
+            # Map string to TaskType enum (fallback to GENERAL)
+            try:
+                tt_enum = TaskType(task_type)
+            except ValueError:
+                tt_enum = TaskType.GENERAL
+
+            ctx = begin_task(tt_enum)
+            # Override the auto-generated task_id with the one from the hook
+            _task_id_var.set(task_id if task_id else ctx.task_id)
+
+            try:
+                if memory_store:
+                    await memory_store.log_event_semantic(event_type, summary, details)
+
+                    # Add quarantine fields to the Qdrant entry
+                    if (
+                        memory_store.embeddings._qdrant
+                        and memory_store.embeddings._qdrant.is_available
+                    ):
+                        from memory.qdrant_store import QdrantStore
+
+                        # Find the most recently upserted point and add quarantine fields
+                        query_vector = await memory_store.embeddings.embed_text(
+                            f"{event_type}: {summary}\n{details}"
+                        )
+                        results = memory_store.embeddings._qdrant.search_with_lifecycle(
+                            QdrantStore.HISTORY,
+                            query_vector,
+                            top_k=1,
+                            task_type_filter=task_type,
+                        )
+                        if results:
+                            point_id = results[0].get("point_id")
+                            if point_id:
+                                quarantine_conf = float(
+                                    _os_local.environ.get("LEARNING_QUARANTINE_CONFIDENCE", "0.6")
+                                )
+                                memory_store.embeddings._qdrant.update_payload(
+                                    QdrantStore.HISTORY,
+                                    point_id,
+                                    {
+                                        "observation_count": 1,
+                                        "confidence": quarantine_conf,
+                                        "quarantined": True,
+                                        "outcome": outcome,
+                                    },
+                                )
+            finally:
+                end_task(ctx)
+
+            # Fire-and-forget: check for quarantine promotions
+            _asyncio.create_task(
+                _maybe_promote_quarantined(memory_store, task_type, outcome, summary)
+            )
+
+            return {"status": "ok", "event_type": event_type}
+        except Exception as e:
+            logger.error("Learning record failed: %s", e)
+            return {"status": "error", "detail": str(e)}
 
     @app.post("/api/ide/chat")
     async def ide_chat(req: ChatRequest, _user: str = Depends(get_current_user)):

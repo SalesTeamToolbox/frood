@@ -19,6 +19,12 @@ python-dotenv>=1.0.0
 # Async file I/O
 aiofiles>=23.0.0
 
+# Async SQLite (effectiveness tracking)
+aiosqlite>=0.20.0
+
+# Structured LLM extraction (learning pipeline)
+instructor>=1.3.0
+
 # HTTP client (Phase 4: web search, web fetch)
 httpx>=0.27.0
 
@@ -43,6 +49,9 @@ mcp>=1.12.0
 # ── Optional memory backends (install as needed) ───────────────────────
 # Qdrant:    pip install qdrant-client         (vector DB for semantic search)
 # Redis:     pip install redis[hiredis]        (session cache + embedding cache)
+
+# Terminal PTY (interactive shell in web IDE)
+pywinpty>=2.0.0; sys_platform == "win32"
 
 # ── Optional channel dependencies (install as needed) ──────────────────
 # Discord:   pip install discord.py

@@ -13,6 +13,8 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 info()    { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
@@ -94,6 +96,40 @@ else
     $QUIET || warn "No frontend found at dashboard/frontend — skipping frontend build"
 fi
 
+# ── SSH alias for remote node ─────────────────────────────────────────────────
+SSH_ALIAS=""
+if ! $QUIET; then
+    echo ""
+    read -rp "  SSH alias for remote node (leave blank to skip): " SSH_ALIAS
+fi
+
+# ── MCP configuration ────────────────────────────────────────────────────────
+info "Configuring MCP servers..."
+if [ -n "$SSH_ALIAS" ]; then
+    python3 scripts/setup_helpers.py mcp-config "$PROJECT_DIR" "$SSH_ALIAS"
+else
+    python3 scripts/setup_helpers.py mcp-config "$PROJECT_DIR"
+fi
+info "MCP configuration complete"
+
+# ── Hook registration ────────────────────────────────────────────────────────
+info "Registering Claude Code hooks..."
+python3 scripts/setup_helpers.py register-hooks "$PROJECT_DIR"
+info "Hooks registered"
+
+# ── jcodemunch indexing ───────────────────────────────────────────────────────
+info "Indexing project with jcodemunch..."
+if ! python3 scripts/jcodemunch_index.py "$PROJECT_DIR" --timeout=120; then
+    warn "jcodemunch indexing failed — run manually: uvx jcodemunch-mcp"
+fi
+
+# ── Health report ─────────────────────────────────────────────────────────────
+if ! $QUIET; then
+    echo ""
+    info "Running health checks..."
+    python3 scripts/setup_helpers.py health "$PROJECT_DIR"
+fi
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 if ! $QUIET; then
     echo ""
@@ -101,6 +137,8 @@ if ! $QUIET; then
     echo ""
     echo "  1. Start Agent42:  source .venv/bin/activate && python agent42.py"
     echo "  2. Open http://localhost:8000 to complete setup in your browser"
+    echo "  3. MCP config:     .mcp.json (configured for Claude Code)"
+    echo "  4. Hooks:          .claude/settings.json (auto-registered)"
     echo ""
     warn "Your git repo needs a 'dev' branch for coding/debugging/refactoring tasks."
     info "  git checkout -b dev  (if you don't have one)"

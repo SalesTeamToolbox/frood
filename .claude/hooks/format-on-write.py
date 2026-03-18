@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# hook_event: PostToolUse
+# hook_matcher: Write|Edit
+# hook_timeout: 30
 """Format-on-write hook — auto-formats Python files after every Write/Edit.
 
 Triggered on PostToolUse for Write/Edit operations on .py files.

@@ -1363,6 +1363,12 @@ function navigate(page, data) {
     if (page === "detail") state.selectedTask = data;
     if (page === "settings" && data.tab) state.settingsTab = data.tab;
   }
+  // Preserve IDE container across render() — detach before innerHTML nuke, re-attach after
+  var ideEl = document.getElementById("ide-persistent");
+  if (ideEl && ideEl.children.length > 0) {
+    ideEl.remove();
+    window._ideDetached = ideEl;
+  }
   render();
   // Update active nav
   document.querySelectorAll(".sidebar-nav a").forEach((a) => {
@@ -3196,84 +3202,122 @@ let _ideTreeCache = {};
 let _ideExpandedDirs = new Set([""]);
 
 function renderCode() {
-  const el = document.getElementById("page-content");
-  if (!el || state.page !== "code") return;
-  el.classList.add("ide-layout-parent");
-  el.style.overflow = "hidden";
-  el.style.height = "calc(100vh - 48px)";
-  el.style.padding = "0";
+  var pageContent = document.getElementById("page-content");
+  var persistent = document.getElementById("ide-persistent");
+  if (!pageContent || !persistent || state.page !== "code") return;
 
+  // Hide normal page content, show persistent IDE container
+  pageContent.style.display = "none";
+  persistent.style.display = "block";
+
+  // If IDE is already built, just show it — don't rebuild
+  if (persistent.querySelector("#ide-layout")) {
+    // Re-fit terminals after returning
+    setTimeout(function() {
+      if (typeof termFitAll === "function") termFitAll();
+      if (_monacoEditor) _monacoEditor.layout();
+      // Re-fit CC terminals
+      for (var i = 0; i < _ideTabs.length; i++) {
+        if (_ideTabs[i].type === "claude" && _ideTabs[i].fitAddon && _ideTabs[i].el && _ideTabs[i].el.offsetHeight > 0) {
+          try { _ideTabs[i].fitAddon.fit(); } catch(e) {}
+        }
+      }
+    }, 50);
+    return;
+  }
+
+  var el = persistent;
+
+  // NOTE: innerHTML is used here with static template literals only (no user input).
+  // All dynamic content is inserted via textContent/DOM methods after this point.
   el.innerHTML = `
-    <div class="ide-layout" style="display:flex;height:100%;overflow:hidden">
-      <div class="ide-sidebar" style="width:240px;min-width:180px;flex-shrink:0;overflow-y:auto;background:#1e293b;border-right:1px solid #334155;display:flex;flex-direction:column">
-        <div class="ide-sidebar-header">
-          <span>EXPLORER</span>
-          <div>
-            <button onclick="ideRefreshTree()" title="Refresh">&#8635;</button>
-            <button onclick="ideToggleSearch()" title="Search">&#128269;</button>
+    <div id="ide-layout" style="display:flex;flex-direction:column;height:100%;overflow:hidden">
+      <div class="ide-top-row" style="display:flex;flex:1;overflow:hidden;min-height:0">
+        <div class="ide-activity-bar">
+          <button class="ide-activity-btn active" onclick="ideShowPanel('explorer',event)" title="Explorer">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+          </button>
+          <button class="ide-activity-btn" onclick="ideShowPanel('search',event)" title="Search">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          </button>
+        </div>
+        <div id="ide-sidebar-panel" class="ide-sidebar">
+          <div class="ide-sidebar-header">
+            <span>EXPLORER</span>
+            <div>
+              <button onclick="ideRefreshTree()" title="Refresh">&#8635;</button>
+              <button onclick="ideToggleSearch()" title="Search">&#128269;</button>
+            </div>
+          </div>
+          <div id="ide-search-panel" class="ide-search-bar" style="display:none">
+            <input type="text" id="ide-search-input" placeholder="Search files..."
+                   onkeydown="if(event.key==='Enter')ideDoSearch(this.value)">
+            <div id="ide-search-results" class="ide-search-results"></div>
+          </div>
+          <div id="ide-file-tree" class="ide-file-tree"></div>
+        </div>
+        <div class="ide-main" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+          <div id="ide-tabs" class="ide-tabs"></div>
+          <div id="ide-editor-container" class="ide-editor-container" style="flex:1;overflow:hidden"></div>
+          <div id="ide-cc-container" class="ide-cc-container" style="display:none;flex:1;overflow:hidden;background:#1a1a2e"></div>
+          <div id="ide-welcome" class="ide-welcome" style="display:flex">
+            <h2>Agent42 IDE</h2>
+            <p>Select a file from the explorer to start editing.<br>Changes are saved with Ctrl+S.</p>
+            <button class="ide-cc-launch-btn" onclick="ideOpenCCChat('local')">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:middle"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+              Open Claude Code
+            </button>
           </div>
         </div>
-        <div id="ide-search-panel" class="ide-search-bar" style="display:none">
-          <input type="text" id="ide-search-input" placeholder="Search files..."
-                 onkeydown="if(event.key==='Enter')ideDoSearch(this.value)">
-          <div id="ide-search-results" class="ide-search-results"></div>
-        </div>
-        <div id="ide-file-tree" class="ide-file-tree"></div>
       </div>
-      <div class="ide-main" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
-        <div id="ide-tabs" class="ide-tabs"></div>
-        <div id="ide-editor-container" class="ide-editor-container"></div>
-        <div id="ide-welcome" class="ide-welcome" style="display:flex">
-          <h2>Agent42 IDE</h2>
-          <p>Select a file from the explorer to start editing.<br>Changes are saved with Ctrl+S.</p>
-        </div>
-        <div id="ide-terminal-wrapper" class="ide-terminal-wrapper" style="display:none">
-          <div class="ide-terminal-header">
-            <div class="ide-terminal-header-left">
-              <span>TERMINAL</span>
-              <div id="ide-terminal-tabs" class="ide-terminal-tabs"></div>
-            </div>
-            <div class="ide-terminal-header-right">
-              <button onclick="termNew('local')" title="New local terminal">+ Local</button>
-              <button onclick="termNew('remote')" title="New remote terminal">+ Remote</button>
-              <button onclick="termNewClaude('local')" title="Claude Code (local)" style="color:#38bdf8">+ Claude</button>
-              <button onclick="termNewClaude('remote')" title="Claude Code (remote)" style="color:#34d399">+ Claude Remote</button>
-              <button onclick="termToggle()" title="Close terminal panel">&times;</button>
+      <div id="ide-drag-handle" class="ide-drag-handle"></div>
+      <div id="ide-terminal-wrapper" class="ide-terminal-wrapper" style="display:flex">
+        <div class="ide-panel-tabs">
+          <button class="ide-panel-tab" onclick="idePanelTab('problems')">PROBLEMS</button>
+          <button class="ide-panel-tab" onclick="idePanelTab('output')">OUTPUT</button>
+          <button class="ide-panel-tab active" onclick="idePanelTab('terminal')">TERMINAL</button>
+          <div class="ide-panel-actions">
+            <div id="ide-terminal-tabs" class="ide-terminal-tabs"></div>
+            <div style="display:flex;gap:0.2rem;align-items:center;position:relative">
+              <button class="ide-term-btn" onclick="termDropdownToggle()" title="New terminal">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+              <button class="ide-term-btn" onclick="termSplit()" title="Split terminal">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18"/></svg>
+              </button>
+              <button class="ide-term-btn" onclick="termKillActive()" title="Kill terminal">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              </button>
+              <button class="ide-term-btn" onclick="termMaximize()" title="Maximize panel">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>
+              </button>
+              <button class="ide-term-btn" onclick="termToggle()" title="Close panel">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+              <div id="ide-term-dropdown" class="ide-term-dropdown" style="display:none">
+                <div class="dropdown-group-label">Local</div>
+                <div class="dropdown-item" onclick="termNew('local');termDropdownDismiss()">Terminal</div>
+                <div class="dropdown-item" onclick="termNewClaude('local');termDropdownDismiss()">Claude Code (panel)</div>
+                <div class="dropdown-item" onclick="ideOpenCCChat('local');termDropdownDismiss()">Claude Code (tab)</div>
+                <div class="dropdown-group-label">Remote</div>
+                <div class="dropdown-item remote-item" onclick="termNew('remote');termDropdownDismiss()">Terminal</div>
+                <div class="dropdown-item remote-item" onclick="termNewClaude('remote');termDropdownDismiss()">Claude Code (panel)</div>
+                <div class="dropdown-item remote-item" onclick="ideOpenCCChat('remote');termDropdownDismiss()">Claude Code (tab)</div>
+              </div>
             </div>
           </div>
-          <div id="ide-terminal-container" class="ide-terminal-container"></div>
         </div>
-        <div id="ide-statusbar" class="ide-statusbar">
+        <div id="ide-terminal-container" style="flex:1;overflow:hidden"></div>
+      </div>
+      <div id="ide-statusbar" class="ide-statusbar">
+        <div class="ide-statusbar-left">
+          <span class="ide-status-branch" id="ide-status-branch">main</span>
           <span id="ide-status-left">Ready</span>
-          <div class="ide-statusbar-right">
-            <button onclick="termToggle()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.72rem">Terminal</button>
-            <button onclick="ideChatToggle()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:0.72rem">Chat</button>
-            <span id="ide-status-lang">-</span>
-            <span id="ide-status-pos">Ln 1, Col 1</span>
-          </div>
         </div>
-      </div>
-      <div id="ide-chat-panel" class="ide-chat-panel" style="display:none;width:350px;min-width:280px;flex-shrink:0;flex-direction:column;border-left:1px solid #334155;background:#1e293b">
-        <div class="ide-chat-header">
-          <span>AI CHAT</span>
-          <div style="display:flex;gap:0.3rem;align-items:center">
-            <select id="ide-chat-model" title="Model">
-              <option value="claude-sonnet-4-6-20260217">Sonnet 4.6</option>
-              <option value="claude-opus-4-6-20260205">Opus 4.6</option>
-              <option value="claude-sonnet-4-5-20250514">Sonnet 4.5</option>
-              <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-            </select>
-            <button onclick="ideChatClear()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer" title="Clear chat">&#128465;</button>
-            <button onclick="ideChatToggle()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer">&times;</button>
-          </div>
-        </div>
-        <div id="ide-chat-messages" class="ide-chat-messages"></div>
-        <div class="ide-chat-input-area">
-          <textarea id="ide-chat-input" placeholder="Ask about your code..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();ideChatSend()}"></textarea>
-          <div class="ide-chat-send">
-            <span class="model-info" id="ide-chat-status">Ready</span>
-            <button id="ide-chat-send-btn" onclick="ideChatSend()">Send</button>
-          </div>
+        <div class="ide-statusbar-right">
+          <span id="ide-status-pos">Ln 1, Col 1</span>
+          <span id="ide-status-encoding">UTF-8</span>
+          <span id="ide-status-lang">Plain Text</span>
         </div>
       </div>
     </div>
@@ -3281,12 +3325,84 @@ function renderCode() {
 
   ideLoadTree("");
   ideInitMonaco();
+  initDragHandle();
+
+  // Open default local terminal on first load
+  if (_termSessions.length === 0) {
+    _termVisible = true;
+    termNew("local");
+  }
+
+  // Single shared resize listener (guard against duplicate on page revisit)
+  if (!window._ideResizeListenerAttached) {
+    window._ideResizeListenerAttached = true;
+    window.addEventListener("resize", termFitAll);
+  }
+
+  // Ctrl+backtick keyboard shortcut (guard against duplicate on page revisit)
+  if (!window._ideKeyListenerAttached) {
+    window._ideKeyListenerAttached = true;
+    document.addEventListener("keydown", function(e) {
+      if (state.page !== "code") return;
+      if (e.key === "`" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        termToggle();
+      }
+      // Ctrl+B: toggle explorer (same as VS Code)
+      if (e.key === "b" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        ideToggleExplorer();
+      }
+    });
+  }
 }
 
 function ideInitMonaco() {
-  if (_monacoReady) return;
   const container = document.getElementById("ide-editor-container");
   if (!container) return;
+
+  // If Monaco was previously created but DOM was destroyed (SPA re-render),
+  // re-create the editor in the new container
+  if (_monacoReady && _monacoEditor) {
+    if (!container.querySelector(".monaco-editor")) {
+      _monacoEditor.dispose();
+      _monacoEditor = monaco.editor.create(container, {
+        value: "",
+        language: "plaintext",
+        theme: "agent42-dark",
+        fontSize: 14,
+        fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
+        minimap: { enabled: true },
+        automaticLayout: true,
+        scrollBeyondLastLine: false,
+        wordWrap: "on",
+        tabSize: 4,
+        renderWhitespace: "selection",
+        bracketPairColorization: { enabled: true },
+      });
+      _monacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {
+        ideSaveCurrentFile();
+      });
+      _monacoEditor.onDidChangeCursorPosition(function (e) {
+        const pos = document.getElementById("ide-status-pos");
+        if (pos) pos.textContent = "Ln " + e.position.lineNumber + ", Col " + e.position.column;
+      });
+      _monacoEditor.onDidChangeModelContent(function () {
+        if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab]) {
+          _ideTabs[_ideActiveTab].modified = true;
+          ideRenderTabs();
+        }
+      });
+      container.style.display = "none";
+      // Re-activate current tab if one was open
+      if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab]) {
+        ideActivateTab();
+      }
+    }
+    return;
+  }
+
+  if (_monacoReady) return;
   // Dynamically load Monaco loader if not present
   if (typeof require === "undefined" || !require.config) {
     if (!document.getElementById("monaco-loader-script")) {
@@ -3437,17 +3553,38 @@ async function ideOpenFile(path) {
 function ideActivateTab() {
   if (_ideActiveTab < 0 || !_ideTabs[_ideActiveTab]) return;
   var tab = _ideTabs[_ideActiveTab];
-  if (_monacoEditor) {
-    _monacoEditor.setModel(tab.model);
-    var container = document.getElementById("ide-editor-container");
-    var welcome = document.getElementById("ide-welcome");
-    if (container) container.style.display = "block";
+  var container = document.getElementById("ide-editor-container");
+  var welcome = document.getElementById("ide-welcome");
+  var ccContainer = document.getElementById("ide-cc-container");
+
+  if (tab.type === "claude") {
+    // Claude Code tab: hide Monaco, show CC terminal
+    if (_monacoEditor) _monacoEditor.setModel(null);
+    if (container) container.style.display = "none";
     if (welcome) welcome.style.display = "none";
+    if (ccContainer) {
+      ccContainer.style.display = "block";
+      // Show the right CC terminal
+      var ccDivs = ccContainer.querySelectorAll(".ide-cc-term, .ide-cc-chat");
+      ccDivs.forEach(function(d) { d.style.display = "none"; });
+      if (tab.el) tab.el.style.display = tab.chatPanel ? "flex" : "block";
+      // Only call fitAddon for xterm-based tabs (chatPanel tabs have no fitAddon -- Pitfall 5)
+      if (!tab.chatPanel && tab.fitAddon) { try { tab.fitAddon.fit(); } catch(e) {} }
+    }
+  } else {
+    // File tab: show Monaco, hide CC terminal
+    if (_monacoEditor) {
+      _monacoEditor.setModel(tab.model);
+      if (container) container.style.display = "block";
+    }
+    if (welcome) welcome.style.display = "none";
+    if (ccContainer) ccContainer.style.display = "none";
   }
+
   var langEl = document.getElementById("ide-status-lang");
-  if (langEl) langEl.textContent = tab.language || "plaintext";
+  if (langEl) langEl.textContent = tab.type === "claude" ? "Claude Code" : (tab.language || "plaintext");
   var statusEl = document.getElementById("ide-status-left");
-  if (statusEl) statusEl.textContent = tab.path + (tab.modified ? " (modified)" : "");
+  if (statusEl) statusEl.textContent = tab.type === "claude" ? tab.path : tab.path + (tab.modified ? " (modified)" : "");
   ideRenderTabs();
   ideRenderTree();
 }
@@ -3458,18 +3595,32 @@ function ideRenderTabs() {
   el.innerHTML = _ideTabs.map(function(t, i) {
     var active = i === _ideActiveTab ? "active" : "";
     var mod = t.modified ? '<span class="modified">&#9679;</span>' : "";
-    var name = t.path.split("/").pop();
+    var name = t.type === "claude" ? t.path : t.path.split("/").pop();
+    var icon = t.type === "claude" ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" style="margin-right:4px;vertical-align:middle"><path d="M4 17l6-6-6-6M12 19h8"/></svg>' : "";
     return '<div class="ide-tab ' + active + '" onclick="_ideActiveTab=' + i + ';ideActivateTab()">' +
-      mod + esc(name) +
+      mod + icon + esc(name) +
       '<span class="close" onclick="event.stopPropagation();ideCloseTab(' + i + ')">&times;</span>' +
     '</div>';
-  }).join("");
+  }).join("") +
+  '<button class="ide-tab-new-cc" onclick="ideOpenCCChat(\'local\')" title="New Claude Code instance">' +
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg>' +
+    '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="margin-left:2px"><path d="M12 5v14M5 12h14"/></svg>' +
+  '</button>';
 }
 
 function ideCloseTab(index) {
   var tab = _ideTabs[index];
-  if (tab.modified && !confirm("Discard unsaved changes to " + tab.path + "?")) return;
-  if (tab.model) tab.model.dispose();
+  if (tab.type === "claude") {
+    // Close Claude Code session — clear timer synchronously before DOM removal
+    clearInterval(tab.streamTimer);
+    tab.streamTimer = null;
+    tab.streamMsgEl = null;
+    if (tab.ws && tab.ws.readyState <= 1) tab.ws.close();
+    if (tab.el) tab.el.remove();
+  } else {
+    if (tab.modified && !confirm("Discard unsaved changes to " + tab.path + "?")) return;
+    if (tab.model) tab.model.dispose();
+  }
   _ideTabs.splice(index, 1);
   if (_ideActiveTab >= _ideTabs.length) _ideActiveTab = _ideTabs.length - 1;
   if (_ideTabs.length === 0) {
@@ -3477,12 +3628,562 @@ function ideCloseTab(index) {
     if (_monacoEditor) _monacoEditor.setModel(null);
     var container = document.getElementById("ide-editor-container");
     var welcome = document.getElementById("ide-welcome");
+    var ccContainer = document.getElementById("ide-cc-container");
     if (container) container.style.display = "none";
+    if (ccContainer) ccContainer.style.display = "none";
     if (welcome) welcome.style.display = "flex";
   } else {
     ideActivateTab();
   }
   ideRenderTabs();
+}
+
+// -- CC Chat markdown renderer (marked.js + DOMPurify + highlight.js) -----------
+
+var _ccMarkdownReady = false;
+
+function _initCCMarkdown() {
+  if (typeof marked === "undefined" || typeof hljs === "undefined"
+      || typeof markedHighlight === "undefined" || typeof DOMPurify === "undefined") {
+    return false;
+  }
+  // CDN UMD pattern: markedHighlight global is a namespace; actual function is .markedHighlight
+  var mhFn = markedHighlight.markedHighlight;
+  marked.use(mhFn({
+    emptyLangClass: "hljs",
+    langPrefix: "hljs language-",
+    highlight: function(code, lang) {
+      var language = hljs.getLanguage(lang) ? lang : "plaintext";
+      return hljs.highlight(code, { language: language }).value;
+    }
+  }));
+  marked.use({ gfm: true, breaks: false });
+  // Enforce rel="noopener noreferrer" on target="_blank" links to prevent tab-napping
+  DOMPurify.addHook("afterSanitizeAttributes", function(node) {
+    if (node.tagName === "A" && node.getAttribute("target") === "_blank") {
+      node.setAttribute("rel", "noopener noreferrer");
+    }
+  });
+  return true;
+}
+
+function ccRenderMarkdown(text) {
+  if (!_ccMarkdownReady) _ccMarkdownReady = _initCCMarkdown();
+  if (!_ccMarkdownReady || !text) return "<p>" + esc(text || "") + "</p>";
+  var rawHtml = marked.parse(text);
+  // CHAT-05 locked decision: ALL marked output MUST be sanitized via DOMPurify (STATE.md)
+  return DOMPurify.sanitize(rawHtml, {
+    ALLOWED_TAGS: ["p","br","strong","em","b","i","h1","h2","h3","h4","h5","h6",
+                   "ul","ol","li","blockquote","pre","code","a","table","thead",
+                   "tbody","tr","th","td","hr","span","div","details","summary"],
+    ALLOWED_ATTR: ["href","class","id","target","rel","open"],
+  });
+}
+
+function ccAppendUserBubble(tab, text) {
+  var container = tab.el.querySelector(".cc-chat-messages");
+  if (!container) return;
+  var now = new Date();
+  var time = now.getHours() + ":" + String(now.getMinutes()).padStart(2, "0");
+  var wrapper = document.createElement("div");
+  wrapper.className = "chat-msg chat-msg-user";
+  var content = document.createElement("div");
+  content.className = "chat-msg-content";
+  var header = document.createElement("div");
+  header.className = "chat-msg-header";
+  var senderEl = document.createElement("span");
+  senderEl.className = "chat-msg-sender";
+  senderEl.textContent = "You";
+  var timeEl = document.createElement("span");
+  timeEl.className = "chat-msg-time";
+  timeEl.textContent = time;
+  header.appendChild(senderEl);
+  header.appendChild(timeEl);
+  var body = document.createElement("div");
+  body.className = "chat-msg-body chat-msg-body-user";
+  body.textContent = text;  // textContent only -- no HTML in user messages
+  content.appendChild(header);
+  content.appendChild(body);
+  var avatar = document.createElement("div");
+  avatar.className = "chat-avatar chat-avatar-user";
+  avatar.textContent = "U";
+  wrapper.appendChild(content);
+  wrapper.appendChild(avatar);
+  container.appendChild(wrapper);
+  if (tab.autoScroll) {
+    requestAnimationFrame(function() { container.scrollTop = container.scrollHeight; });
+  }
+}
+
+function ccAppendThinkingBlock(tab, text) {
+  var container = tab.el.querySelector(".cc-chat-messages");
+  if (!container) return;
+  var block = document.createElement("details");
+  block.className = "cc-thinking-block";
+  var summary = document.createElement("summary");
+  summary.className = "cc-thinking-summary";
+  summary.textContent = "Thinking...";
+  block.appendChild(summary);
+  var content = document.createElement("div");
+  content.className = "cc-thinking-content";
+  content.textContent = text;  // textContent only -- thinking is unformatted
+  block.appendChild(content);
+  container.appendChild(block);
+}
+
+// --- Claude Code as editor tab ---
+var _ccTabCounter = 0;
+
+function ideOpenCCChat(node) {
+  node = node || "local";
+  _ccTabCounter++;
+  var tabIdx = _ccTabCounter;
+  var label = "Claude Code" + (tabIdx > 1 ? " " + tabIdx : "");
+  var ccContainer = document.getElementById("ide-cc-container");
+  if (!ccContainer) return;
+
+  // Session ID for /ws/cc-chat query param (crypto.randomUUID with fallback)
+  var sessionId = (typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+  // Build chat panel DOM using safe DOM methods
+  var chatDiv = document.createElement("div");
+  chatDiv.className = "ide-cc-chat";
+  chatDiv.id = "cc-chat-" + tabIdx;
+
+  var header = document.createElement("div");
+  header.className = "cc-chat-header";
+  var headerLabel = document.createElement("span");
+  headerLabel.textContent = "Claude Code";
+  header.appendChild(headerLabel);
+  chatDiv.appendChild(header);
+
+  var messagesDiv = document.createElement("div");
+  messagesDiv.className = "cc-chat-messages";
+  messagesDiv.id = "cc-msgs-" + tabIdx;
+  chatDiv.appendChild(messagesDiv);
+
+  var scrollAnchor = document.createElement("div");
+  scrollAnchor.className = "cc-chat-scroll-anchor";
+  scrollAnchor.id = "cc-scroll-anchor-" + tabIdx;
+  scrollAnchor.style.display = "none";
+  var scrollBtn = document.createElement("button");
+  scrollBtn.className = "cc-scroll-btn";
+  scrollBtn.textContent = "\u2193 scroll to bottom";
+  scrollBtn.setAttribute("onclick", "ccScrollToBottom(" + tabIdx + ")");
+  scrollAnchor.appendChild(scrollBtn);
+  chatDiv.appendChild(scrollAnchor);
+
+  var composer = document.createElement("div");
+  composer.className = "cc-chat-composer";
+
+  var slashDropdown = document.createElement("div");
+  slashDropdown.className = "cc-slash-dropdown";
+  slashDropdown.id = "cc-slash-" + tabIdx;
+  slashDropdown.style.display = "none";
+  composer.appendChild(slashDropdown);
+
+  var textarea = document.createElement("textarea");
+  textarea.className = "cc-chat-input";
+  textarea.id = "cc-input-" + tabIdx;
+  textarea.rows = 1;
+  textarea.placeholder = "Message Claude Code... (Enter to send, Shift+Enter for newline)";
+  textarea.setAttribute("oninput", "ccInputResize(this);ccUpdateSlashDropdown(ccGetTab(" + tabIdx + "))");
+  textarea.setAttribute("onkeydown", "ccHandleKeydown(event," + tabIdx + ")");
+  composer.appendChild(textarea);
+
+  var sendBtn = document.createElement("button");
+  sendBtn.className = "cc-send-btn";
+  sendBtn.id = "cc-send-" + tabIdx;
+  sendBtn.textContent = "Send";
+  sendBtn.setAttribute("onclick", "ccSend(" + tabIdx + ")");
+  composer.appendChild(sendBtn);
+
+  var stopBtn = document.createElement("button");
+  stopBtn.className = "cc-stop-btn";
+  stopBtn.id = "cc-stop-" + tabIdx;
+  stopBtn.textContent = "Stop";
+  stopBtn.style.display = "none";
+  stopBtn.setAttribute("onclick", "ccStop(" + tabIdx + ")");
+  composer.appendChild(stopBtn);
+
+  chatDiv.appendChild(composer);
+  ccContainer.appendChild(chatDiv);
+
+  var tab = {
+    type: "claude",
+    path: label,
+    chatPanel: true,
+    el: chatDiv,
+    ws: null,
+    node: node,
+    tabIdx: tabIdx,
+    sending: false,
+    autoScroll: true,
+    streamBuffer: "",
+    streamMsgEl: null,
+    streamTimer: null,
+    ccSessionId: sessionId,
+    _scrollListenerAttached: false,
+  };
+  _ideTabs.push(tab);
+  _ideActiveTab = _ideTabs.length - 1;
+
+  ccSetupScrollBehavior(tab);
+
+  var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  var wsUrl = protocol + "//" + location.host + "/ws/cc-chat?token="
+    + encodeURIComponent(state.token) + "&session_id=" + encodeURIComponent(sessionId);
+
+  // Guard against duplicate WS (Pitfall 6)
+  if (tab.ws && tab.ws.readyState <= 1) { ideActivateTab(); return; }
+
+  var ws = new WebSocket(wsUrl);
+  tab.ws = ws;
+
+  ws.onopen = function() {
+    var notice = document.createElement("div");
+    notice.style.cssText = "color:var(--text-muted);font-size:0.8rem;padding:0.5rem 0;text-align:center";
+    notice.textContent = "Claude Code connected";
+    messagesDiv.appendChild(notice);
+  };
+
+  ws.onmessage = function(ev) {
+    var data;
+    try { data = JSON.parse(ev.data); } catch(e) { return; }
+    var msgType = data.type;
+    var msgData = data.data || {};
+
+    if (msgType === "text_delta") {
+      var deltaText = (msgData.text || "");
+      if (!tab.streamMsgEl) {
+        // First text_delta: create streaming bubble (CHAT-02)
+        var now = new Date();
+        var time = now.getHours() + ":" + String(now.getMinutes()).padStart(2, "0");
+        var msgWrapper = document.createElement("div");
+        msgWrapper.className = "chat-msg chat-msg-agent";
+        var avatarEl = document.createElement("div");
+        avatarEl.className = "chat-avatar chat-avatar-agent";
+        avatarEl.textContent = "CC";
+        msgWrapper.appendChild(avatarEl);
+        var msgContent = document.createElement("div");
+        msgContent.className = "chat-msg-content";
+        var msgHeader = document.createElement("div");
+        msgHeader.className = "chat-msg-header";
+        var senderSpan = document.createElement("span");
+        senderSpan.className = "chat-msg-sender";
+        senderSpan.textContent = "Claude Code";
+        var timeSpan = document.createElement("span");
+        timeSpan.className = "chat-msg-time";
+        timeSpan.textContent = time;
+        msgHeader.appendChild(senderSpan);
+        msgHeader.appendChild(timeSpan);
+        msgContent.appendChild(msgHeader);
+        var bodyEl = document.createElement("div");
+        bodyEl.className = "chat-msg-body chat-msg-body-agent cc-streaming-body";
+        bodyEl.id = "cc-stream-body-" + tabIdx;
+        msgContent.appendChild(bodyEl);
+        msgWrapper.appendChild(msgContent);
+        messagesDiv.appendChild(msgWrapper);
+        tab.streamMsgEl = bodyEl;
+        // 50ms batched flush timer (CHAT-06 append-only DOM)
+        tab.streamTimer = setInterval(function() {
+          if (tab.streamMsgEl) tab.streamMsgEl.textContent = tab.streamBuffer;
+          if (tab.autoScroll) requestAnimationFrame(function() {
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+          });
+        }, 50);
+      }
+      tab.streamBuffer += deltaText;
+
+    } else if (msgType === "turn_complete") {
+      clearInterval(tab.streamTimer);
+      tab.streamTimer = null;
+      // Guard: tool-only turns emit turn_complete with no preceding text_delta (Pitfall 4)
+      var finalEl = tab.streamMsgEl;
+      var finalBuf = tab.streamBuffer;
+      // Null FIRST so any queued interval tick's guard (if tab.streamMsgEl) fires safely
+      tab.streamMsgEl = null;
+      tab.streamBuffer = "";
+      if (finalEl && finalBuf) {
+        // Safe: ccRenderMarkdown always returns DOMPurify.sanitize() output (CHAT-05)
+        finalEl.innerHTML = ccRenderMarkdown(finalBuf);
+        finalEl.classList.remove("cc-streaming-body");
+      }
+      ccSetSendingState(tab, false);
+      if (tab.autoScroll) requestAnimationFrame(function() {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      });
+
+    } else if (msgType === "thinking_complete") {
+      ccAppendThinkingBlock(tab, msgData.text || "");
+
+    } else if (msgType === "error") {
+      clearInterval(tab.streamTimer);
+      tab.streamTimer = null;
+      tab.streamBuffer = "";
+      tab.streamMsgEl = null;
+      ccSetSendingState(tab, false);
+      var errDiv = document.createElement("div");
+      errDiv.style.cssText = "color:var(--danger,#ef4444);padding:0.5rem;font-size:0.85rem";
+      errDiv.textContent = "Error: " + (msgData.message || "Unknown error");
+      messagesDiv.appendChild(errDiv);
+
+    } else if (msgType === "status") {
+      var statusDiv = document.createElement("div");
+      statusDiv.style.cssText = "color:var(--text-muted);font-size:0.78rem;padding:0.25rem 0;text-align:center;font-style:italic";
+      statusDiv.textContent = msgData.message || "";
+      messagesDiv.appendChild(statusDiv);
+    }
+  };
+
+  ws.onclose = function() {
+    clearInterval(tab.streamTimer);
+    tab.streamTimer = null;
+    if (tab.streamMsgEl && tab.streamBuffer) {
+      // Safe: ccRenderMarkdown always returns DOMPurify.sanitize() output
+      tab.streamMsgEl.innerHTML = ccRenderMarkdown(tab.streamBuffer);
+      tab.streamMsgEl.classList.remove("cc-streaming-body");
+      tab.streamBuffer = "";
+      tab.streamMsgEl = null;
+    }
+    ccSetSendingState(tab, false);
+  };
+
+  ws.onerror = function() {
+    var errDiv = document.createElement("div");
+    errDiv.style.cssText = "color:var(--danger,#ef4444);padding:0.5rem;font-size:0.85rem";
+    errDiv.textContent = "WebSocket connection error";
+    messagesDiv.appendChild(errDiv);
+  };
+
+  ideActivateTab();
+}
+
+function ccGetTab(tabIdx) {
+  for (var i = 0; i < _ideTabs.length; i++) {
+    if (_ideTabs[i].tabIdx === tabIdx) return _ideTabs[i];
+  }
+  return null;
+}
+
+function ccSetSendingState(tab, sending) {
+  tab.sending = sending;
+  var sendBtn = document.getElementById("cc-send-" + tab.tabIdx);
+  var stopBtn2 = document.getElementById("cc-stop-" + tab.tabIdx);
+  if (sendBtn) sendBtn.style.display = sending ? "none" : "inline-block";
+  if (stopBtn2) stopBtn2.style.display = sending ? "inline-block" : "none";
+}
+
+function ccScrollToBottom(tabIdx) {
+  var tab = ccGetTab(tabIdx);
+  if (!tab) return;
+  var msgs = document.getElementById("cc-msgs-" + tabIdx);
+  if (msgs) requestAnimationFrame(function() { msgs.scrollTop = msgs.scrollHeight; });
+  tab.autoScroll = true;
+  var anchor = document.getElementById("cc-scroll-anchor-" + tabIdx);
+  if (anchor) anchor.style.display = "none";
+}
+
+function ccSetupScrollBehavior(tab) {
+  if (tab._scrollListenerAttached) return;
+  tab._scrollListenerAttached = true;
+  var tabIdx = tab.tabIdx;
+  setTimeout(function() {
+    var msgs = document.getElementById("cc-msgs-" + tabIdx);
+    var anchor = document.getElementById("cc-scroll-anchor-" + tabIdx);
+    if (!msgs) return;
+    msgs.addEventListener("scroll", function() {
+      var atBottom = msgs.scrollTop + msgs.clientHeight >= msgs.scrollHeight - 40;
+      tab.autoScroll = atBottom;
+      if (anchor) anchor.style.display = atBottom ? "none" : "block";
+    });
+  }, 100);
+}
+
+// -- CC Chat Input Controls --------------------------------------------------
+
+var CC_INPUT_MAX_HEIGHT = 200; // px (INPUT-03)
+
+var CC_SLASH_COMMANDS = [
+  { cmd: "/help",    desc: "Show available commands" },
+  { cmd: "/clear",   desc: "Clear current chat display" },
+  { cmd: "/compact", desc: "Compact conversation context" },
+];
+
+function ccSend(tabIdx) {
+  var tab = ccGetTab(tabIdx);
+  var input = document.getElementById("cc-input-" + tabIdx);
+  if (!tab || !input || tab.sending) return;
+  var text = input.value.trim();
+  if (!text) return;
+
+  // /clear handled locally without sending to CC backend
+  if (text === "/clear") {
+    var msgs = tab.el.querySelector(".cc-chat-messages");
+    if (msgs) { while (msgs.firstChild) msgs.removeChild(msgs.firstChild); }
+    input.value = "";
+    ccInputResize(input);
+    return;
+  }
+
+  if (!tab.ws || tab.ws.readyState !== 1) {
+    var errDiv = document.createElement("div");
+    errDiv.style.cssText = "color:var(--danger,#ef4444);padding:0.5rem;font-size:0.85rem";
+    errDiv.textContent = "Not connected. Please wait or reload.";
+    tab.el.querySelector(".cc-chat-messages").appendChild(errDiv);
+    return;
+  }
+  ccAppendUserBubble(tab, text);  // CHAT-01: immediate user bubble before send
+  tab.ws.send(JSON.stringify({ message: text }));
+  ccSetSendingState(tab, true);
+  input.value = "";
+  ccInputResize(input);
+  var dropdown = document.getElementById("cc-slash-" + tabIdx);
+  if (dropdown) dropdown.style.display = "none";
+}
+
+function ccStop(tabIdx) {
+  var tab = ccGetTab(tabIdx);
+  if (!tab || !tab.ws || tab.ws.readyState !== 1) return;
+  // Backend handles {"type":"stop"} via asyncio.wait() concurrent receive (Plan 02-02)
+  tab.ws.send(JSON.stringify({ type: "stop" }));
+  // Backend emits turn_complete after proc.terminate() -- ccSetSendingState called there
+}
+
+function ccHandleKeydown(event, tabIdx) {
+  // INPUT-01: Enter sends; Shift+Enter inserts newline natively
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    ccSend(tabIdx);
+  }
+}
+
+function ccInputResize(textarea) {
+  // INPUT-03: scrollHeight auto-resize pattern (CSS-Tricks standard)
+  textarea.style.height = "auto";
+  textarea.style.height = Math.min(textarea.scrollHeight, CC_INPUT_MAX_HEIGHT) + "px";
+}
+
+function ccUpdateSlashDropdown(tab) {
+  // INPUT-04: show filtered slash command dropdown when input starts with "/"
+  if (!tab) return;
+  var input = document.getElementById("cc-input-" + tab.tabIdx);
+  var dropdown = document.getElementById("cc-slash-" + tab.tabIdx);
+  if (!input || !dropdown) return;
+
+  var val = input.value;
+  if (!val.startsWith("/") || val.includes(" ")) {
+    dropdown.style.display = "none";
+    return;
+  }
+
+  var filter = val.toLowerCase();
+  var matches = CC_SLASH_COMMANDS.filter(function(c) {
+    return c.cmd.startsWith(filter);
+  });
+
+  if (matches.length === 0) { dropdown.style.display = "none"; return; }
+
+  // Rebuild dropdown with safe DOM methods (textContent only, no innerHTML with user data)
+  while (dropdown.firstChild) dropdown.removeChild(dropdown.firstChild);
+  matches.forEach(function(c) {
+    var item = document.createElement("div");
+    item.className = "cc-slash-item";
+    item.dataset.cmd = c.cmd;
+    var cmdSpan = document.createElement("span");
+    cmdSpan.className = "cc-slash-cmd";
+    cmdSpan.textContent = c.cmd;
+    var descSpan = document.createElement("span");
+    descSpan.className = "cc-slash-desc";
+    descSpan.textContent = c.desc;
+    item.appendChild(cmdSpan);
+    item.appendChild(descSpan);
+    item.addEventListener("click", function() {
+      if (input) { input.value = c.cmd + " "; ccInputResize(input); }
+      dropdown.style.display = "none";
+      if (input) input.focus();
+    });
+    dropdown.appendChild(item);
+  });
+  dropdown.style.display = "block";
+}
+
+function ideOpenClaude(node) {
+  node = node || "local";
+  _ccTabCounter++;
+  var label = "Claude Code" + (_ccTabCounter > 1 ? " " + _ccTabCounter : "");
+  var ccContainer = document.getElementById("ide-cc-container");
+  if (!ccContainer) return;
+
+  termLoadXterm(function() {
+    var termDiv = document.createElement("div");
+    termDiv.className = "ide-cc-term";
+    termDiv.style.height = "100%";
+    ccContainer.appendChild(termDiv);
+
+    var term = new Terminal({
+      theme: { background: "#1a1a2e", foreground: "#e2e8f0", cursor: "#f97316",
+               selectionBackground: "#334155" },
+      fontSize: 14,
+      fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
+      cursorBlink: true,
+    });
+    term.open(termDiv);
+
+    var fitAddon = null;
+    try {
+      fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      fitAddon.fit();
+    } catch(e) {}
+
+    var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" +
+      encodeURIComponent(state.token) + "&node=" + encodeURIComponent(node) + "&cmd=claude";
+
+    var tab = {
+      type: "claude",
+      path: label,
+      el: termDiv,
+      term: term,
+      ws: null,
+      fitAddon: fitAddon,
+      node: node
+    };
+    _ideTabs.push(tab);
+    _ideActiveTab = _ideTabs.length - 1;
+
+    // Connect WS
+    var ws = new WebSocket(wsUrl);
+    tab.ws = ws;
+    ws.onopen = function() {
+      term.write("\x1b[38;5;208m" + label + " connected\x1b[0m\r\n\r\n");
+      if (fitAddon) {
+        fitAddon.fit();
+        ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+      }
+    };
+    ws.onmessage = function(ev) { term.write(ev.data); };
+    ws.onclose = function() { term.write("\r\n\x1b[90m[session ended]\x1b[0m\r\n"); };
+    ws.onerror = function() { term.write("\r\n\x1b[31m[connection error]\x1b[0m\r\n"); };
+    term.onData(function(data) {
+      if (ws.readyState === 1) ws.send(data);
+    });
+    term.onResize(function(size) {
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: "resize", cols: size.cols, rows: size.rows }));
+    });
+
+    ideActivateTab();
+
+    // Fit on window resize
+    window.addEventListener("resize", function() {
+      if (fitAddon && tab.el && tab.el.offsetHeight > 0) {
+        try { fitAddon.fit(); } catch(e) {}
+      }
+    });
+  });
 }
 
 async function ideSaveCurrentFile() {
@@ -3585,17 +4286,30 @@ function termLoadXterm(cb) {
 function termToggle() {
   _termVisible = !_termVisible;
   var wrapper = document.getElementById("ide-terminal-wrapper");
+  var handle = document.getElementById("ide-drag-handle");
   if (!wrapper) return;
   if (_termVisible) {
     wrapper.style.display = "flex";
+    if (handle) handle.style.display = "block";
     if (_termSessions.length === 0) termNew("local");
+    else termFitAll();
   } else {
     wrapper.style.display = "none";
+    if (handle) handle.style.display = "none";
   }
 }
 
 function termNew(node) {
   termLoadXterm(function() {
+    // Show terminal panel if hidden
+    if (!_termVisible) {
+      _termVisible = true;
+      var wrapperEl = document.getElementById("ide-terminal-wrapper");
+      var handleEl = document.getElementById("ide-drag-handle");
+      if (wrapperEl) wrapperEl.style.display = "flex";
+      if (handleEl) handleEl.style.display = "block";
+    }
+
     var container = document.getElementById("ide-terminal-container");
     if (!container) return;
     // Hide all existing terminals
@@ -3613,32 +4327,51 @@ function termNew(node) {
       cursorBlink: true,
     });
     term.open(termDiv);
+
+    var fitAddon = null;
     try {
-      var fitAddon = new FitAddon.FitAddon();
+      fitAddon = new FitAddon.FitAddon();
       term.loadAddon(fitAddon);
       fitAddon.fit();
-      window.addEventListener("resize", function() { try { fitAddon.fit(); } catch(e) {} });
     } catch(e) {}
 
-    // Connect WebSocket
+    // Build WebSocket URL
     var protocol = location.protocol === "https:" ? "wss:" : "ws:";
     var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" + encodeURIComponent(state.token) + "&node=" + encodeURIComponent(node || "local");
-    var ws = new WebSocket(wsUrl);
-    ws.onopen = function() { term.write("\r\n\x1b[32mConnected to " + (node || "local") + " terminal\x1b[0m\r\n\r\n"); };
-    ws.onmessage = function(e) { term.write(e.data); };
-    ws.onerror = function() { term.write("\r\n\x1b[31mConnection error\x1b[0m\r\n"); };
-    ws.onclose = function() { term.write("\r\n\x1b[33mDisconnected\x1b[0m\r\n"); };
-    term.onData(function(data) { if (ws.readyState === 1) ws.send(data); });
 
-    var session = { term: term, ws: ws, el: termDiv, node: node || "local", label: (node || "local") + " " + (_termSessions.length + 1) };
+    // Build label: "bash (remote)" for remote, "bash N" for local
+    var localCount = _termSessions.filter(function(s) { return s.node !== "remote" && s.label.indexOf("bash") === 0; }).length;
+    var label = (node === "remote") ? "bash (remote)" : "bash " + (localCount + 1);
+
+    var session = {
+      term: term,
+      ws: null,
+      el: termDiv,
+      node: node || "local",
+      label: label,
+      fitAddon: fitAddon,
+      reconnecting: false,
+      retryCount: 0,
+      wsUrl: wsUrl
+    };
     _termSessions.push(session);
     _termActiveIdx = _termSessions.length - 1;
+    termConnectWs(session, wsUrl, 0);
     termRenderTabs();
   });
 }
 
 function termNewClaude(node) {
   termLoadXterm(function() {
+    // Show terminal panel if hidden
+    if (!_termVisible) {
+      _termVisible = true;
+      var wrapperEl = document.getElementById("ide-terminal-wrapper");
+      var handleEl = document.getElementById("ide-drag-handle");
+      if (wrapperEl) wrapperEl.style.display = "flex";
+      if (handleEl) handleEl.style.display = "block";
+    }
+
     var container = document.getElementById("ide-terminal-container");
     if (!container) return;
     for (var i = 0; i < _termSessions.length; i++) {
@@ -3655,25 +4388,33 @@ function termNewClaude(node) {
       cursorBlink: true,
     });
     term.open(termDiv);
+
+    var fitAddon = null;
     try {
-      var fitAddon = new FitAddon.FitAddon();
+      fitAddon = new FitAddon.FitAddon();
       term.loadAddon(fitAddon);
       fitAddon.fit();
-      window.addEventListener("resize", function() { try { fitAddon.fit(); } catch(e) {} });
     } catch(e) {}
 
     var protocol = location.protocol === "https:" ? "wss:" : "ws:";
     var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" + encodeURIComponent(state.token) + "&node=" + encodeURIComponent(node || "local") + "&cmd=claude";
-    var ws = new WebSocket(wsUrl);
-    ws.onopen = function() { term.write("\r\n\x1b[36m🤖 Claude Code (" + (node || "local") + ") — using your CC subscription\x1b[0m\r\n\r\n"); };
-    ws.onmessage = function(e) { term.write(e.data); };
-    ws.onerror = function() { term.write("\r\n\x1b[31mConnection error\x1b[0m\r\n"); };
-    ws.onclose = function() { term.write("\r\n\x1b[33mClaude session ended\x1b[0m\r\n"); };
-    term.onData(function(data) { if (ws.readyState === 1) ws.send(data); });
 
-    var session = { term: term, ws: ws, el: termDiv, node: node || "local", label: "Claude (" + (node || "local") + ")" };
+    var label = (node === "remote") ? "Claude (remote)" : "Claude (local)";
+
+    var session = {
+      term: term,
+      ws: null,
+      el: termDiv,
+      node: node || "local",
+      label: label,
+      fitAddon: fitAddon,
+      reconnecting: false,
+      retryCount: 0,
+      wsUrl: wsUrl
+    };
     _termSessions.push(session);
     _termActiveIdx = _termSessions.length - 1;
+    termConnectWs(session, wsUrl, 0);
     termRenderTabs();
   });
 }
@@ -3703,126 +4444,396 @@ function termRenderTabs() {
   var el = document.getElementById("ide-terminal-tabs");
   if (!el) return;
   el.innerHTML = _termSessions.map(function(s, i) {
-    var active = i === _termActiveIdx ? "active" : "";
-    return '<span class="ide-terminal-tab ' + active + '" onclick="termSwitch(' + i + ')">' + esc(s.label) + ' <span class="close" onclick="event.stopPropagation();termClose(' + i + ')">&times;</span></span>';
+    var active = i === _termActiveIdx ? " active" : "";
+    var dotColor = s.reconnecting ? "#f59e0b" : (s.node === "remote" ? "#34d399" : "#38bdf8");
+    return '<span class="ide-terminal-tab' + active + '" onclick="termSwitch(' + i + ')">'
+      + '<span style="color:' + dotColor + ';margin-right:4px">&#9679;</span>'
+      + esc(s.label)
+      + ' <span class="close" onclick="event.stopPropagation();termClose(' + i + ')">&times;</span>'
+      + '</span>';
   }).join("");
 }
 
 // ---------------------------------------------------------------------------
-// IDE Chat (AI assistant)
+// Terminal WebSocket connector with auto-reconnect
 // ---------------------------------------------------------------------------
-var _ideChatHistory = [];
-var _ideChatSending = false;
+function termConnectWs(session, wsUrl, retryCount) {
+  retryCount = retryCount || 0;
+  var ws = new WebSocket(wsUrl);
+  session.ws = ws;
+  session.reconnecting = retryCount > 0;
+  termRenderTabs();
 
-function ideChatToggle() {
-  var panel = document.getElementById("ide-chat-panel");
-  if (!panel) return;
-  panel.style.display = panel.style.display === "none" ? "flex" : "none";
-}
-
-function ideChatClear() {
-  _ideChatHistory = [];
-  var el = document.getElementById("ide-chat-messages");
-  if (el) el.innerHTML = "";
-}
-
-function ideChatAddMsg(role, content) {
-  var el = document.getElementById("ide-chat-messages");
-  if (!el) return;
-  var cls = role === "user" ? "ide-chat-msg-user" : "ide-chat-msg-ai";
-  var div = document.createElement("div");
-  div.className = "ide-chat-msg " + cls;
-  var bubble = document.createElement("div");
-  bubble.className = "bubble";
-  bubble.textContent = content;
-  div.appendChild(bubble);
-  el.appendChild(div);
-  el.scrollTop = el.scrollHeight;
-}
-
-function ideChatAddToolMsg(name, result) {
-  var el = document.getElementById("ide-chat-messages");
-  if (!el) return;
-  var div = document.createElement("div");
-  div.className = "ide-chat-msg-tool";
-  div.textContent = "Tool: " + name + " → " + (result || "").substring(0, 200);
-  el.appendChild(div);
-  el.scrollTop = el.scrollHeight;
-}
-
-async function ideChatSend() {
-  if (_ideChatSending) return;
-  var input = document.getElementById("ide-chat-input");
-  var msg = input ? input.value.trim() : "";
-  if (!msg) return;
-  input.value = "";
-
-  // Get current file context
-  var fileContext = "";
-  if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab] && _ideTabs[_ideActiveTab].model) {
-    var content = _ideTabs[_ideActiveTab].model.getValue();
-    fileContext = "[" + _ideTabs[_ideActiveTab].path + "]\n" + content.substring(0, 3000);
-  }
-
-  // Add user message to UI
-  ideChatAddMsg("user", msg);
-  _ideChatHistory.push({ role: "user", content: msg });
-
-  // Show typing
-  _ideChatSending = true;
-  var statusEl = document.getElementById("ide-chat-status");
-  var sendBtn = document.getElementById("ide-chat-send-btn");
-  if (statusEl) statusEl.textContent = "Thinking...";
-  if (sendBtn) sendBtn.disabled = true;
-
-  var model = document.getElementById("ide-chat-model");
-  var modelValue = model ? model.value : "";
-
-  try {
-    var res = await fetch("/api/ide/chat", {
-      method: "POST",
-      headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: msg,
-        history: _ideChatHistory.slice(-18),
-        model: modelValue,
-        file_context: fileContext,
-      }),
-    });
-
-    if (!res.ok) {
-      var errData = await res.json().catch(function() { return {}; });
-      var errMsg = errData.detail || "Error " + res.status;
-      ideChatAddMsg("assistant", "Error: " + errMsg);
+  ws.onopen = function() {
+    session.reconnecting = false;
+    session.retryCount = 0;
+    termRenderTabs();
+    if (retryCount > 0) {
+      session.term.write("\r\n\x1b[32mReconnected\x1b[0m\r\n");
+    }
+  };
+  ws.onmessage = function(e) { session.term.write(e.data); };
+  ws.onclose = function() {
+    if (retryCount >= 3) {
+      session.term.write("\r\n\x1b[31mDisconnected (max retries reached)\x1b[0m\r\n");
+      session.reconnecting = false;
+      termRenderTabs();
       return;
     }
-
-    var data = await res.json();
-
-    // Show tool calls
-    if (data.tool_results && data.tool_results.length > 0) {
-      for (var i = 0; i < data.tool_results.length; i++) {
-        ideChatAddToolMsg(data.tool_results[i].name, data.tool_results[i].result);
+    var delay = Math.pow(2, retryCount) * 1000; // 1000, 2000, 4000 ms
+    session.term.write("\r\n\x1b[33mDisconnected \u2014 reconnecting in " + (delay / 1000) + "s...\x1b[0m\r\n");
+    session.reconnecting = true;
+    termRenderTabs();
+    setTimeout(function() {
+      if (_termSessions.indexOf(session) !== -1) {
+        termConnectWs(session, wsUrl, retryCount + 1);
       }
-    }
+    }, delay);
+  };
+  session.term.onData(function(data) {
+    if (ws.readyState === 1) ws.send(data);
+  });
+}
 
-    // Show AI response
-    if (data.response) {
-      ideChatAddMsg("assistant", data.response);
-      _ideChatHistory.push({ role: "assistant", content: data.response });
-    }
+function termFitAll() {
+  _termSessions.forEach(function(s) {
+    if (!s.fitAddon) return;
+    try {
+      s.fitAddon.fit();
+      if (s.ws && s.ws.readyState === 1 && s.term) {
+        s.ws.send(JSON.stringify({ type: "resize", cols: s.term.cols, rows: s.term.rows }));
+      }
+    } catch(e) {}
+  });
+}
 
-    if (statusEl) {
-      var tokens = data.usage ? (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0) : 0;
-      statusEl.textContent = data.model + (tokens ? " (" + tokens + " tokens)" : "");
+// ---------------------------------------------------------------------------
+// Terminal dropdown helpers
+// ---------------------------------------------------------------------------
+var _remoteAvailCache = null;
+var _remoteAvailCacheAt = 0;
+
+// --- Re-attach Claude Code tabs after SPA navigation ---
+function ideReattachCCTabs() {
+  var ccContainer = document.getElementById("ide-cc-container");
+  if (!ccContainer) return;
+  var hasCCTabs = false;
+  for (var i = 0; i < _ideTabs.length; i++) {
+    var tab = _ideTabs[i];
+    if (tab.type !== "claude") continue;
+    if (tab.chatPanel) {
+      // Chat panel tabs persist their DOM -- no xterm re-creation needed
+      if (tab.el && !tab.el.isConnected) ccContainer.appendChild(tab.el);
+      hasCCTabs = true;
+      continue;
     }
-  } catch (e) {
-    ideChatAddMsg("assistant", "Connection error: " + e.message);
-  } finally {
-    _ideChatSending = false;
-    if (sendBtn) sendBtn.disabled = false;
-    if (statusEl && statusEl.textContent === "Thinking...") statusEl.textContent = "Ready";
+    hasCCTabs = true;
+    // Old DOM was destroyed — re-create xterm in new container
+    termLoadXterm(function(tabRef, idx) {
+      return function() {
+        var termDiv = document.createElement("div");
+        termDiv.className = "ide-cc-term";
+        termDiv.style.height = "100%";
+        termDiv.style.display = (idx === _ideActiveTab) ? "block" : "none";
+        ccContainer.appendChild(termDiv);
+
+        var term = new Terminal({
+          theme: { background: "#1a1a2e", foreground: "#e2e8f0", cursor: "#f97316",
+                   selectionBackground: "#334155" },
+          fontSize: 14,
+          fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
+          cursorBlink: true,
+        });
+        term.open(termDiv);
+
+        var fitAddon = null;
+        try {
+          fitAddon = new FitAddon.FitAddon();
+          term.loadAddon(fitAddon);
+          fitAddon.fit();
+        } catch(e) {}
+
+        // Close old WS if still open
+        if (tabRef.ws && tabRef.ws.readyState <= 1) tabRef.ws.close();
+
+        // Update tab references
+        tabRef.el = termDiv;
+        tabRef.term = term;
+        tabRef.fitAddon = fitAddon;
+
+        // Reconnect WS
+        var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+        var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" +
+          encodeURIComponent(state.token) + "&node=" + encodeURIComponent(tabRef.node || "local") + "&cmd=claude";
+
+        var ws = new WebSocket(wsUrl);
+        tabRef.ws = ws;
+        ws.onopen = function() {
+          term.write("\x1b[38;5;208m" + tabRef.path + " reconnected\x1b[0m\r\n\r\n");
+          if (fitAddon) {
+            fitAddon.fit();
+            ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+          }
+        };
+        ws.onmessage = function(ev) { term.write(ev.data); };
+        ws.onclose = function() { term.write("\r\n\x1b[90m[session ended]\x1b[0m\r\n"); };
+        ws.onerror = function() { term.write("\r\n\x1b[31m[connection error]\x1b[0m\r\n"); };
+        term.onData(function(data) {
+          if (ws.readyState === 1) ws.send(data);
+        });
+        term.onResize(function(size) {
+          if (ws.readyState === 1) ws.send(JSON.stringify({ type: "resize", cols: size.cols, rows: size.rows }));
+        });
+
+        // If this is the active tab, show it
+        if (idx === _ideActiveTab) {
+          ideActivateTab();
+        }
+      };
+    }(tab, i));
   }
+  // Re-render tabs to show CC tabs
+  if (hasCCTabs) {
+    setTimeout(function() { ideRenderTabs(); }, 500);
+  }
+}
+
+// --- VS Code-style panel/activity bar helpers ---
+var _ideSidebarVisible = true;
+var _ideActivePanel = "explorer";
+
+function ideShowPanel(panel, evt) {
+  evt = evt || window.event;
+  var btn = evt && evt.currentTarget ? evt.currentTarget : document.querySelectorAll(".ide-activity-btn")[panel === "search" ? 1 : 0];
+  var sidebar = document.getElementById("ide-sidebar-panel");
+
+  // Toggle: clicking the active panel hides sidebar only (activity bar stays)
+  if (panel === _ideActivePanel && _ideSidebarVisible) {
+    _ideSidebarVisible = false;
+    if (sidebar) sidebar.style.display = "none";
+    if (btn) btn.classList.remove("active");
+    return;
+  }
+
+  // Show sidebar and switch panel (activity bar always visible)
+  _ideSidebarVisible = true;
+  _ideActivePanel = panel;
+  var btns = document.querySelectorAll(".ide-activity-btn");
+  btns.forEach(function(b) { b.classList.remove("active"); });
+  if (btn) btn.classList.add("active");
+  if (sidebar) sidebar.style.display = "";
+
+  var searchPanel = document.getElementById("ide-search-panel");
+  var fileTree = document.getElementById("ide-file-tree");
+  var header = document.querySelector(".ide-sidebar-header span");
+  if (panel === "search") {
+    if (searchPanel) searchPanel.style.display = "block";
+    if (fileTree) fileTree.style.display = "none";
+    if (header) header.textContent = "SEARCH";
+    var inp = document.getElementById("ide-search-input");
+    if (inp) inp.focus();
+  } else {
+    if (searchPanel) searchPanel.style.display = "none";
+    if (fileTree) fileTree.style.display = "";
+    if (header) header.textContent = "EXPLORER";
+  }
+}
+
+// Toggle explorer panel (Ctrl+B, same as VS Code)
+function ideToggleExplorer() {
+  var sidebar = document.getElementById("ide-sidebar-panel");
+  if (_ideSidebarVisible) {
+    // Hide sidebar only — activity bar stays visible for re-toggle
+    _ideSidebarVisible = false;
+    if (sidebar) sidebar.style.display = "none";
+    var btns = document.querySelectorAll(".ide-activity-btn");
+    btns.forEach(function(b) { b.classList.remove("active"); });
+  } else {
+    // Show sidebar
+    _ideSidebarVisible = true;
+    if (sidebar) sidebar.style.display = "";
+    var idx = _ideActivePanel === "search" ? 1 : 0;
+    var btns = document.querySelectorAll(".ide-activity-btn");
+    if (btns[idx]) btns[idx].classList.add("active");
+  }
+  setTimeout(function() {
+    if (typeof termFitAll === "function") termFitAll();
+    if (_monacoEditor) _monacoEditor.layout();
+  }, 100);
+}
+
+// Collapse/expand main Agent42 sidebar when in IDE mode
+var _ideMainSidebarCollapsed = false;
+function ideToggleMainSidebar() {
+  _ideMainSidebarCollapsed = !_ideMainSidebarCollapsed;
+  var sidebar = document.querySelector(".sidebar");
+  var main = document.querySelector(".main");
+  var miniBar = document.getElementById("ide-mini-sidebar");
+
+  if (_ideMainSidebarCollapsed) {
+    if (sidebar) sidebar.style.display = "none";
+    if (main) { main.style.marginLeft = "48px"; main.style.width = "calc(100% - 48px)"; }
+    // Create mini icon sidebar if not exists
+    if (!miniBar) {
+      miniBar = document.createElement("div");
+      miniBar.id = "ide-mini-sidebar";
+      miniBar.className = "ide-mini-sidebar";
+      // NOTE: innerHTML used with static content only — no user input
+      miniBar.innerHTML = [
+        {icon:'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4', page:'tasks', title:'Mission Control'},
+        {icon:'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', page:'status', title:'Status'},
+        {icon:'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z', page:'approvals', title:'Approvals'},
+        {icon:'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z', page:'chat', title:'Chat'},
+        {icon:'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4', page:'code', title:'Code'},
+        {icon:'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z', page:'tools', title:'Tools'},
+        {icon:'M13 10V3L4 14h7v7l9-11h-7z', page:'skills', title:'Skills'},
+        {icon:'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z', page:'agents', title:'Agents'},
+        {icon:'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z', page:'teams', title:'Teams'},
+        {icon:'M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7M4 7l4-4h8l4 4M4 7h16M9 11v4M15 11v4', page:'apps', title:'Apps'},
+        {icon:'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', page:'reports', title:'Reports'},
+        {icon:'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z', page:'settings', title:'Settings'}
+      ].map(function(item) {
+        var active = item.page === state.page ? ' active' : '';
+        return '<button class="ide-mini-btn' + active + '" onclick="navigate(\'' + item.page + '\')" title="' + item.title + '">'
+          + '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="' + item.icon + '"/></svg>'
+          + '</button>';
+      }).join('');
+      document.body.appendChild(miniBar);
+    } else {
+      // Update active state
+      var btns = miniBar.querySelectorAll('.ide-mini-btn');
+      var pages = ['tasks','status','approvals','chat','code','tools','skills','agents','teams','apps','reports','settings'];
+      btns.forEach(function(b, i) { b.classList.toggle('active', pages[i] === state.page); });
+    }
+    miniBar.style.display = "flex";
+  } else {
+    if (sidebar) sidebar.style.display = "";
+    if (main) { main.style.marginLeft = ""; main.style.width = ""; }
+    if (miniBar) miniBar.style.display = "none";
+  }
+  // Re-fit terminals after layout change
+  setTimeout(function() { if (typeof termFitAll === "function") termFitAll(); }, 100);
+}
+
+function idePanelTab(tab) {
+  var btns = document.querySelectorAll(".ide-panel-tab");
+  btns.forEach(function(b) { b.classList.remove("active"); });
+  event.currentTarget.classList.add("active");
+  // Only terminal tab is functional for now
+  var termContainer = document.getElementById("ide-terminal-container");
+  if (termContainer) termContainer.style.display = tab === "terminal" ? "" : "none";
+  var termTabs = document.getElementById("ide-terminal-tabs");
+  if (termTabs) termTabs.style.display = tab === "terminal" ? "" : "none";
+}
+
+function termSplit() {
+  // Split = just open another terminal of the same type
+  termNew("local");
+}
+
+function termKillActive() {
+  if (_termSessions.length === 0) return;
+  var idx = _termActiveIdx;
+  var session = _termSessions[idx];
+  if (session.ws && session.ws.readyState <= 1) session.ws.close();
+  if (session.el) session.el.remove();
+  _termSessions.splice(idx, 1);
+  if (_termSessions.length > 0) {
+    _termActiveIdx = Math.min(idx, _termSessions.length - 1);
+    termSwitch(_termActiveIdx);
+  } else {
+    _termActiveIdx = 0;
+  }
+  termRenderTabs();
+}
+
+var _termMaximized = false;
+function termMaximize() {
+  var topRow = document.querySelector(".ide-top-row");
+  var handle = document.getElementById("ide-drag-handle");
+  if (!topRow) return;
+  _termMaximized = !_termMaximized;
+  topRow.style.display = _termMaximized ? "none" : "";
+  if (handle) handle.style.display = _termMaximized ? "none" : "";
+  termFitAll();
+}
+
+function termDropdownToggle() {
+  var menu = document.getElementById("ide-term-dropdown");
+  if (!menu) return;
+  var visible = menu.style.display !== "none";
+  menu.style.display = visible ? "none" : "block";
+  if (!visible) {
+    checkRemoteAvailable(function(available) {
+      var remoteItems = menu.querySelectorAll(".remote-item");
+      remoteItems.forEach(function(el) {
+        el.style.opacity = available ? "1" : "0.4";
+        el.style.pointerEvents = available ? "auto" : "none";
+        el.title = available ? "" : "No remote node configured";
+      });
+    });
+    setTimeout(function() {
+      document.addEventListener("click", termDropdownDismiss, { once: true });
+    }, 0);
+  }
+}
+
+function termDropdownDismiss() {
+  var menu = document.getElementById("ide-term-dropdown");
+  if (menu) menu.style.display = "none";
+}
+
+function checkRemoteAvailable(cb) {
+  var now = Date.now();
+  if (_remoteAvailCache !== null && now - _remoteAvailCacheAt < 30000) {
+    cb(_remoteAvailCache);
+    return;
+  }
+  apiFetch("/api/remote/status")
+    .then(function(d) {
+      _remoteAvailCache = !!(d && d.available);
+      _remoteAvailCacheAt = Date.now();
+      cb(_remoteAvailCache);
+    })
+    .catch(function() { cb(false); });
+}
+
+// ---------------------------------------------------------------------------
+// Drag handle for terminal panel resize
+// ---------------------------------------------------------------------------
+var _isDragging = false;
+var _dragStartY = 0;
+var _dragStartHeight = 0;
+
+function initDragHandle() {
+  var handle = document.getElementById("ide-drag-handle");
+  if (!handle) return;
+  handle.addEventListener("mousedown", function(e) {
+    _isDragging = true;
+    _dragStartY = e.clientY;
+    var wrapper = document.getElementById("ide-terminal-wrapper");
+    _dragStartHeight = wrapper ? wrapper.getBoundingClientRect().height : 200;
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", function(e) {
+    if (!_isDragging) return;
+    var delta = _dragStartY - e.clientY;
+    var newHeight = Math.max(80, Math.min(_dragStartHeight + delta, window.innerHeight * 0.8));
+    var wrapper = document.getElementById("ide-terminal-wrapper");
+    if (wrapper) {
+      wrapper.style.height = newHeight + "px";
+      wrapper.style.flex = "none";
+    }
+    termFitAll();
+  });
+  document.addEventListener("mouseup", function() {
+    if (!_isDragging) return;
+    _isDragging = false;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -5004,6 +6015,7 @@ function render() {
           <button class="hamburger-btn" onclick="toggleMobileSidebar()" aria-label="Open menu">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
+          <button class="ide-sidebar-toggle" onclick="ideToggleMainSidebar()" title="Toggle sidebar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>
           <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", agents: "Agent Profiles", apps: "Apps", reports: "Reports", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? `
@@ -5015,6 +6027,7 @@ function render() {
           </div>
         </div>
         <div class="content" id="page-content"></div>
+        <div class="content ide-layout-parent" id="ide-persistent" style="display:none;overflow:hidden;height:calc(100vh - 48px);padding:0;flex:none;width:100%"></div>
       </div>
     </div>
   `;
@@ -5036,7 +6049,43 @@ function render() {
     detail: renderDetail,
     projectDetail: renderProjectDetail,
   };
+  // Re-attach preserved IDE container after innerHTML rebuild
+  if (window._ideDetached) {
+    var newPlaceholder = document.getElementById("ide-persistent");
+    if (newPlaceholder) {
+      newPlaceholder.replaceWith(window._ideDetached);
+    } else {
+      // Append to .main if placeholder wasn't created
+      var mainEl = document.querySelector(".main");
+      if (mainEl) mainEl.appendChild(window._ideDetached);
+    }
+    window._ideDetached = null;
+  }
+
+  // When NOT on Code page, ensure page-content is visible and IDE is hidden
+  if (state.page !== "code") {
+    var _pc = document.getElementById("page-content");
+    var _ip = document.getElementById("ide-persistent");
+    if (_pc) _pc.style.display = "";
+    if (_ip) _ip.style.display = "none";
+  }
+
   (renderers[state.page] || renderTasks)();
+
+  // Re-apply sidebar collapsed state after render (persists across navigation)
+  if (_ideMainSidebarCollapsed) {
+    var sidebar = document.querySelector(".sidebar");
+    var main = document.querySelector(".main");
+    if (sidebar) sidebar.style.display = "none";
+    if (main) { main.style.marginLeft = "48px"; main.style.width = "calc(100% - 48px)"; }
+    var miniBar = document.getElementById("ide-mini-sidebar");
+    if (miniBar) {
+      miniBar.style.display = "flex";
+      var btns = miniBar.querySelectorAll('.ide-mini-btn');
+      var pages = ['tasks','status','approvals','chat','code','tools','skills','agents','teams','apps','reports','settings'];
+      btns.forEach(function(b, i) { b.classList.toggle('active', pages[i] === state.page); });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

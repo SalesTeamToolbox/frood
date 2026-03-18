@@ -41,6 +41,7 @@ from core.security_scanner import ScheduledSecurityScanner
 from dashboard.auth import init_device_store
 from dashboard.server import create_app
 from dashboard.websocket_manager import WebSocketManager
+from memory.effectiveness import EffectivenessStore
 from memory.qdrant_store import QdrantConfig, QdrantStore
 from memory.redis_session import RedisConfig, RedisSessionBackend
 from memory.session import SessionManager
@@ -131,6 +132,10 @@ class Agent42:
             memory_dir, qdrant_store=qdrant_store, redis_backend=redis_backend
         )
 
+        # ── Effectiveness tracking ────────────────────────────
+        self.effectiveness_store = EffectivenessStore(data_dir / "effectiveness.db")
+        self.tool_registry._effectiveness_store = self.effectiveness_store
+
         # ── Project manager ──────────────────────────────────────────────
         self.project_manager = ProjectManager(data_dir / "projects", task_queue=None)
 
@@ -188,6 +193,7 @@ class Agent42:
                 repo_manager=self.repo_manager,
                 project_manager=self.project_manager,
                 memory_store=self.memory_store,
+                effectiveness_store=self.effectiveness_store,
             )
             config = uvicorn.Config(
                 app,
