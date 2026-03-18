@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# hook_event: UserPromptSubmit
+# hook_timeout: 30
 """Context loader hook — detects work type and loads relevant context.
 
 Triggered on UserPromptSubmit. Analyzes the prompt to detect what area of

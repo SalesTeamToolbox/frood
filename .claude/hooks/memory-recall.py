@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# hook_event: UserPromptSubmit
+# hook_timeout: 10
 """Associative memory recall hook — surfaces relevant memories automatically.
 
 Triggered on UserPromptSubmit. Searches Agent42's memory for content relevant

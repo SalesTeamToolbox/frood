@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# hook_event: PreToolUse
+# hook_matcher: Write|Edit|Bash
+# hook_timeout: 10
 """PreToolUse security gate -- blocks edits to security-sensitive files.
 
 This hook runs BEFORE Write, Edit, and Bash operations.  If the target
@@ -66,8 +69,7 @@ def main():
         is_match, matched_path, description = is_security_file(file_path)
         if is_match:
             print(
-                f"[security-gate] BLOCKED: {file_path} ({description}) "
-                f"-- approve to continue",
+                f"[security-gate] BLOCKED: {file_path} ({description}) -- approve to continue",
                 file=sys.stderr,
             )
             sys.exit(2)

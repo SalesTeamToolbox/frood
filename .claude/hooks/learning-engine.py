@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# hook_event: Stop
+# hook_timeout: 15
 """Learning engine hook — records development patterns from sessions.
 
 Triggered on Stop event. Analyzes the session to extract:

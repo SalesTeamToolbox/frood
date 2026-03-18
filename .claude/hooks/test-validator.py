@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# hook_event: Stop
+# hook_timeout: 45
 """Smart test validator hook — runs targeted tests on changed files only.
 
 Triggered on Stop event. Instead of running the full 1797-test suite every time,
@@ -53,7 +55,7 @@ def normalize_path(path, project_dir):
     path = os.path.normpath(path)
     project_dir = os.path.normpath(project_dir)
     if path.startswith(project_dir):
-        path = path[len(project_dir):].lstrip(os.sep)
+        path = path[len(project_dir) :].lstrip(os.sep)
     return path.replace("\\", "/")
 
 
@@ -278,7 +280,7 @@ def main():
         missing = check_test_coverage_for_new_files(created, project_dir)
         if missing:
             print(
-                f"\n[test-validator] New module(s) without test coverage:",
+                "\n[test-validator] New module(s) without test coverage:",
                 file=sys.stderr,
             )
             for m in missing:

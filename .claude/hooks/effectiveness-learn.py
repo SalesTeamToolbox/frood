@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# hook_event: Stop
+# hook_timeout: 30
 """Effectiveness learning hook — extracts structured learnings from sessions.
 
 Triggered on Stop. Uses instructor + Pydantic to extract structured learnings

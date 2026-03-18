@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# hook_event: Stop
+# hook_timeout: 15
 """Associative memory learning hook — captures learnings from each session.
 
 Triggered on Stop. Analyzes what happened in the conversation and stores
