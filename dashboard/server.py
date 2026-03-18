@@ -2038,7 +2038,7 @@ def create_app(
             await websocket.close(code=4001, reason="Missing token")
             return
         try:
-            _get_user_from_token(token)
+            _cc_user = _get_user_from_token(token)
         except Exception:
             await websocket.close(code=4001, reason="Invalid token")
             return
@@ -2048,6 +2048,11 @@ def create_app(
         session_state: dict = {"cc_session_id": session_data.get("cc_session_id")}
         session_title: str = session_data.get("title", "")
         created_at: str = session_data.get("created_at", _datetime.datetime.utcnow().isoformat())
+
+        # PTY-03: Check for ?warm=true and spawn warm process in background
+        warm_requested = websocket.query_params.get("warm", "").lower() in ("true", "1", "yes")
+        if warm_requested and _cc_user not in _cc_warm_pool:
+            _asyncio.create_task(_cc_spawn_warm(_cc_user, workspace))
 
         try:
             while True:
@@ -2094,6 +2099,21 @@ def create_app(
                         }
                     )
                     continue
+
+                # PTY-03: Check warm pool for pre-initialized session (first message only)
+                warm_entry = _cc_warm_pool.pop(_cc_user, None)
+                if warm_entry and warm_entry.get("ready") and warm_entry.get("cc_session_id"):
+                    if not session_state.get("cc_session_id"):
+                        session_state["cc_session_id"] = warm_entry["cc_session_id"]
+                        logger.info(
+                            f"CC using warm session {warm_entry['cc_session_id']} for {_cc_user}"
+                        )
+                        await websocket.send_json(
+                            {
+                                "type": "status",
+                                "data": {"message": "Using pre-warmed session"},
+                            }
+                        )
 
                 # Build subprocess args as a Python list (prevents shell injection)
                 args = [
