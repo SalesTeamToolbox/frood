@@ -151,7 +151,7 @@ class TestAuthIntegration:
 
     def test_protected_endpoint_requires_auth(self, client):
         """Protected endpoints should require authentication."""
-        res = client.get("/api/tasks")
+        res = client.get("/api/status")
 
         assert res.status_code == 401
 

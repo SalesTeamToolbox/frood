@@ -252,12 +252,12 @@ class TestMCPServerCreation:
         _server, adapter = _create_server()
         tools = adapter.list_tools()
         names = {t.name for t in tools}
-        # Phase 1 core tools must be present
-        assert "agent42_read_file" in names
-        assert "agent42_write_file" in names
-        assert "agent42_shell" in names
-        # Phase 2+ added many more tools
-        assert len(tools) >= 3
+        # Core tools must be present
+        assert "agent42_context" in names
+        assert "agent42_memory" in names
+        assert "agent42_git" in names
+        # 25+ tools registered
+        assert len(tools) >= 25
 
     def test_resolve_workspace_defaults_to_cwd(self):
 

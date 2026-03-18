@@ -1,12 +1,16 @@
 """Tests for multi-device gateway authentication."""
 
 import json
+import os
 import tempfile
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# _hash_key requires JWT_SECRET for HMAC — set before importing
+os.environ.setdefault("JWT_SECRET", "test-secret-for-device-auth")
 
 from core.device_auth import API_KEY_PREFIX, DeviceStore, _hash_key
 
@@ -120,12 +124,13 @@ class TestDeviceValidation:
         """
         # 1. Register a device to get a valid key
         device, raw_key = self.store.register("Legacy Device", "tablet")
-        
+
         # 2. Manually overwrite its hash with a legacy SHA-256 hash
         from core.device_auth import _legacy_hash_key
+
         legacy_hash = _legacy_hash_key(raw_key)
         device.api_key_hash = legacy_hash
-        
+
         # This requires reaching into the store's internal state to simulate
         # a device that was created before the HMAC hashing was introduced.
         self.store._devices[device.device_id] = device
@@ -138,9 +143,10 @@ class TestDeviceValidation:
 
         # 4. Verify the hash has been upgraded in the store
         from core.device_auth import _hash_key
+
         new_hmac_hash = _hash_key(raw_key)
         upgraded_device = self.store.get(device.device_id)
-        
+
         assert upgraded_device.api_key_hash == new_hmac_hash
         assert legacy_hash != new_hmac_hash
         assert self.store._hash_to_id.get(new_hmac_hash) == device.device_id
@@ -150,7 +156,6 @@ class TestDeviceValidation:
         validated_again = self.store.validate_api_key(raw_key)
         assert validated_again is not None
         assert validated_again.device_id == device.device_id
-
 
 
 class TestDeviceRevocation:
@@ -259,7 +264,9 @@ class TestDevicePersistence:
 
         # The device should exist in _devices but not be discoverable via its API key hash
         assert store2.get(device_id) is not None
-        assert store2.get(device_id).name == "Malformed Device" # The malformed entry overwrites the valid one
+        assert (
+            store2.get(device_id).name == "Malformed Device"
+        )  # The malformed entry overwrites the valid one
 
         # Attempt to validate the original raw_key, which should now fail
         # because the device with the valid hash was effectively removed from _hash_to_id
@@ -390,13 +397,18 @@ class TestDualAuth:
 # ---------------------------------------------------------------------------
 
 try:
+    from dashboard.websocket_manager import WebSocketManager
+
+    HAS_WEBSOCKET_MANAGER = True
+except ImportError:
+    HAS_WEBSOCKET_MANAGER = False
+
+try:
     from fastapi.testclient import TestClient
 
     from core.approval_gate import ApprovalGate
-    from core.task_queue import TaskQueue
     from dashboard.auth import create_token, init_device_store
     from dashboard.server import create_app
-    from dashboard.websocket_manager import WebSocketManager
 
     HAS_TESTCLIENT = True
 except ImportError:
@@ -409,9 +421,8 @@ class TestDeviceEndpoints:
 
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
-        self.tq = TaskQueue()
         self.ws = WebSocketManager()
-        self.ag = ApprovalGate(self.tq)
+        self.ag = ApprovalGate(task_queue=MagicMock())
         self.ds = DeviceStore(Path(self.tmpdir) / "devices.jsonl")
         init_device_store(self.ds)
 
@@ -425,7 +436,7 @@ class TestDeviceEndpoints:
             mock_settings.login_rate_limit = 100
             mock_settings.get_cors_origins.return_value = []
 
-            app = create_app(self.tq, self.ws, self.ag, device_store=self.ds)
+            app = create_app(self.ws, self.ag, device_store=self.ds)
             return app
 
     def _get_admin_token(self):
@@ -539,7 +550,7 @@ class TestDeviceEndpoints:
 
         # Verify the revoked key can't be used for auth
         resp3 = client.get(
-            "/api/tasks",
+            "/api/status",
             headers={"Authorization": f"Bearer {device_key}"},
         )
         assert resp3.status_code == 401
@@ -579,32 +590,10 @@ class TestDeviceEndpoints:
 
         # Use device key to list tasks
         resp2 = client.get(
-            "/api/tasks",
+            "/api/status",
             headers={"Authorization": f"Bearer {device_key}"},
         )
         assert resp2.status_code == 200
-
-    def test_device_creates_task_with_device_id(self):
-        """Task created by device should have origin_device_id set."""
-        app = self._make_app()
-        client = TestClient(app)
-        token = self._get_admin_token()
-
-        resp = client.post(
-            "/api/devices/register",
-            json={"name": "Watch", "device_type": "watch"},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        device_id = resp.json()["device_id"]
-        device_key = resp.json()["api_key"]
-
-        resp2 = client.post(
-            "/api/tasks",
-            json={"title": "Fix bug", "description": "Fix the login bug"},
-            headers={"Authorization": f"Bearer {device_key}"},
-        )
-        assert resp2.status_code == 200
-        assert resp2.json()["origin_device_id"] == device_id
 
     def test_no_auth_rejected(self):
         app = self._make_app()
@@ -618,6 +607,7 @@ class TestDeviceEndpoints:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not HAS_WEBSOCKET_MANAGER, reason="websocket_manager not available")
 class TestWebSocketDeviceTracking:
     """WebSocketManager device identity tracking."""
 
@@ -633,59 +623,6 @@ class TestWebSocketDeviceTracking:
         ws = WebSocketManager()
         mock_ws = MagicMock()
         ws.disconnect(mock_ws)  # Should not raise
-
-
-# ---------------------------------------------------------------------------
-# Task model — origin_device_id field
-# ---------------------------------------------------------------------------
-
-
-class TestTaskDeviceField:
-    """Task dataclass includes origin_device_id."""
-
-    def test_task_default_device_id_empty(self):
-        from core.task_queue import Task
-
-        task = Task(title="Test", description="Test task")
-        assert task.origin_device_id == ""
-
-    def test_task_with_device_id(self):
-        from core.task_queue import Task
-
-        task = Task(title="Test", description="Test task", origin_device_id="abc123def456")
-        assert task.origin_device_id == "abc123def456"
-
-    def test_task_to_dict_includes_device_id(self):
-        from core.task_queue import Task
-
-        task = Task(title="Test", description="Test", origin_device_id="dev1")
-        d = task.to_dict()
-        assert d["origin_device_id"] == "dev1"
-
-    def test_task_from_dict_with_device_id(self):
-        from core.task_queue import Task
-
-        data = {
-            "title": "Test",
-            "description": "Test",
-            "origin_device_id": "dev2",
-            "status": "pending",
-            "task_type": "coding",
-        }
-        task = Task.from_dict(data)
-        assert task.origin_device_id == "dev2"
-
-    def test_task_from_dict_without_device_id(self):
-        from core.task_queue import Task
-
-        data = {
-            "title": "Test",
-            "description": "Test",
-            "status": "pending",
-            "task_type": "coding",
-        }
-        task = Task.from_dict(data)
-        assert task.origin_device_id == ""
 
 
 # ---------------------------------------------------------------------------
