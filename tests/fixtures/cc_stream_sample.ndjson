@@ -1,0 +1,21 @@
+# FIXTURE NOTE: tool_result content block structure (line 12) is inferred from SDK docs.
+# Verify against live CC session with --verbose before finalizing _parse_cc_event tool_complete branch.
+# See .planning/workstreams/custom-claude-code-ui/phases/01-backend-ws-bridge/01-RESEARCH.md Open Question 1
+{"type": "system", "subtype": "init", "session_id": "sess_fixture_01", "cwd": "/workspace", "tools": []}
+{"type": "stream_event", "event": {"type": "message_start", "message": {"id": "msg_1", "type": "message", "role": "assistant", "content": [], "model": "claude-opus-4-5", "stop_reason": null, "usage": {"input_tokens": 10, "output_tokens": 0}}}}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "I will read the file."}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "tu_abc123", "name": "read_file", "input": {}}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{\"path\":"}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "\"/README.md\"}"}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 1}}
+{"type": "stream_event", "event": {"type": "message_delta", "delta": {"stop_reason": "tool_use", "stop_sequence": null}, "usage": {"output_tokens": 30}}}
+{"type": "stream_event", "event": {"type": "message_stop"}}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "tool_result", "tool_use_id": "tu_abc123", "content": "# Agent42\nThis is the README."}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "The README says Agent42 is a platform."}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 1}}
+{"type": "stream_event", "event": {"type": "message_stop"}}
+{"type": "result", "subtype": "success", "is_error": false, "session_id": "sess_fixture_01", "cost_usd": 0.0042, "usage": {"input_tokens": 150, "output_tokens": 45}, "total_cost": 0.0042}
