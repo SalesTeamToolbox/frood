@@ -1935,6 +1935,14 @@ def create_app(
                             {read_task, receive_task}, return_when=_asyncio.FIRST_COMPLETED
                         )
                         if receive_task in done:
+                            # Client disconnect raises WebSocketDisconnect in receive_task —
+                            # check exception first to avoid infinite spin loop (code-review #1)
+                            if receive_task.exception() is not None:
+                                read_task.cancel()
+                                if proc.returncode is None:
+                                    proc.terminate()
+                                receive_task = None
+                                break
                             try:
                                 inner = _json.loads(receive_task.result())
                             except Exception:

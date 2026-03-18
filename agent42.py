@@ -41,6 +41,7 @@ from core.security_scanner import ScheduledSecurityScanner
 from dashboard.auth import init_device_store
 from dashboard.server import create_app
 from dashboard.websocket_manager import WebSocketManager
+from memory.effectiveness import EffectivenessStore
 from memory.qdrant_store import QdrantConfig, QdrantStore
 from memory.redis_session import RedisConfig, RedisSessionBackend
 from memory.session import SessionManager

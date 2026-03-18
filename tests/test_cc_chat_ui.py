@@ -30,7 +30,7 @@ class TestCCChatDeps:
         )
         assert "highlight.js@11.11.1" in self.html, (
             "index.html must include highlight.js CDN script: "
-            "https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/highlight.min.js"
+            "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"
         )
         assert "marked-highlight@2.2.3" in self.html, (
             "index.html must include marked-highlight CDN script: "

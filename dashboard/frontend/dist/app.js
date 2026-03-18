@@ -3611,7 +3611,10 @@ function ideRenderTabs() {
 function ideCloseTab(index) {
   var tab = _ideTabs[index];
   if (tab.type === "claude") {
-    // Close Claude Code session
+    // Close Claude Code session — clear timer synchronously before DOM removal
+    clearInterval(tab.streamTimer);
+    tab.streamTimer = null;
+    tab.streamMsgEl = null;
     if (tab.ws && tab.ws.readyState <= 1) tab.ws.close();
     if (tab.el) tab.el.remove();
   } else {
@@ -3655,6 +3658,12 @@ function _initCCMarkdown() {
     }
   }));
   marked.use({ gfm: true, breaks: false });
+  // Enforce rel="noopener noreferrer" on target="_blank" links to prevent tab-napping
+  DOMPurify.addHook("afterSanitizeAttributes", function(node) {
+    if (node.tagName === "A" && node.getAttribute("target") === "_blank") {
+      node.setAttribute("rel", "noopener noreferrer");
+    }
+  });
   return true;
 }
 
@@ -3892,13 +3901,16 @@ function ideOpenCCChat(node) {
       clearInterval(tab.streamTimer);
       tab.streamTimer = null;
       // Guard: tool-only turns emit turn_complete with no preceding text_delta (Pitfall 4)
-      if (tab.streamMsgEl && tab.streamBuffer) {
-        // Safe: ccRenderMarkdown always returns DOMPurify.sanitize() output (CHAT-05)
-        tab.streamMsgEl.innerHTML = ccRenderMarkdown(tab.streamBuffer);
-        tab.streamMsgEl.classList.remove("cc-streaming-body");
-      }
-      tab.streamBuffer = "";
+      var finalEl = tab.streamMsgEl;
+      var finalBuf = tab.streamBuffer;
+      // Null FIRST so any queued interval tick's guard (if tab.streamMsgEl) fires safely
       tab.streamMsgEl = null;
+      tab.streamBuffer = "";
+      if (finalEl && finalBuf) {
+        // Safe: ccRenderMarkdown always returns DOMPurify.sanitize() output (CHAT-05)
+        finalEl.innerHTML = ccRenderMarkdown(finalBuf);
+        finalEl.classList.remove("cc-streaming-body");
+      }
       ccSetSendingState(tab, false);
       if (tab.autoScroll) requestAnimationFrame(function() {
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -4016,11 +4028,16 @@ function ccSend(tabIdx) {
     return;
   }
 
-  ccAppendUserBubble(tab, text);  // CHAT-01: immediate user bubble before send
-  if (tab.ws && tab.ws.readyState === 1) {
-    tab.ws.send(JSON.stringify({ message: text }));
-    ccSetSendingState(tab, true);
+  if (!tab.ws || tab.ws.readyState !== 1) {
+    var errDiv = document.createElement("div");
+    errDiv.style.cssText = "color:var(--danger,#ef4444);padding:0.5rem;font-size:0.85rem";
+    errDiv.textContent = "Not connected. Please wait or reload.";
+    tab.el.querySelector(".cc-chat-messages").appendChild(errDiv);
+    return;
   }
+  ccAppendUserBubble(tab, text);  // CHAT-01: immediate user bubble before send
+  tab.ws.send(JSON.stringify({ message: text }));
+  ccSetSendingState(tab, true);
   input.value = "";
   ccInputResize(input);
   var dropdown = document.getElementById("cc-slash-" + tabIdx);

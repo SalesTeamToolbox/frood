@@ -20,10 +20,19 @@
     var require = { paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } };
   </script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
+  <script>
+    // Save AMD define before loading UMD libraries — Monaco's RequireJS
+    // swallows anonymous define() calls, preventing window globals from being set.
+    var _amdDefine = window.define; window.define = undefined;
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/marked@17.0.4/lib/marked.umd.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked-highlight@2.2.3/lib/index.umd.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.3.3/dist/purify.min.js"></script>
+  <script>
+    // Restore AMD define for Monaco
+    window.define = _amdDefine;
+  </script>
   <script src="/app.js"></script>
 </body>
 </html>
