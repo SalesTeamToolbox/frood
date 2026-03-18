@@ -1717,7 +1717,10 @@ def create_app(
         """
         etype = event.get("type")
         envelopes = []
-        if etype == "stream_event":
+        if etype == "system" and event.get("subtype") == "init":
+            # Emit status so user sees CC initialized during the long startup
+            envelopes.append({"type": "status", "data": {"message": "Claude Code initialized"}})
+        elif etype == "stream_event":
             raw = event.get("event", {})
             raw_type = raw.get("type", "")
             index = raw.get("index")
@@ -1762,6 +1765,16 @@ def create_app(
                             },
                         }
                     )
+        elif etype == "assistant":
+            # Fallback for pipe-buffered stdout: stream_event deltas are block-buffered
+            # by Node.js and may not arrive individually. The "assistant" event carries
+            # the full response text — emit as text_delta so the chat UI renders it.
+            msg = event.get("message", {})
+            for block in msg.get("content", []):
+                if block.get("type") == "text":
+                    text = block.get("text", "")
+                    if text:
+                        envelopes.append({"type": "text_delta", "data": {"text": text}})
         elif etype == "result":
             cc_sid = event.get("session_id")
             session_state["cc_session_id"] = cc_sid
@@ -1771,7 +1784,7 @@ def create_app(
                     "type": "turn_complete",
                     "data": {
                         "session_id": cc_sid,
-                        "cost_usd": event.get("cost_usd"),
+                        "cost_usd": event.get("cost_usd", event.get("total_cost_usd")),
                         "input_tokens": usage.get("input_tokens", 0),
                         "output_tokens": usage.get("output_tokens", 0),
                     },
