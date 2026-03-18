@@ -1700,6 +1700,319 @@ def create_app(
                 if proc.returncode is None:
                     proc.terminate()
 
+    # -- Claude Code Chat WebSocket Bridge -------------------------------------
+
+    from pathlib import Path as _pathlib_Path
+
+    import aiofiles as _aiofiles
+
+    _CC_SESSIONS_DIR = workspace / ".agent42" / "cc-sessions"
+    _CC_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _parse_cc_event(event: dict, tool_id_map: dict, session_state: dict) -> list:
+        """Translate one CC NDJSON event into WS envelope dicts.
+
+        Returns [] for events with no WS output (system/init, message_start, etc.).
+        Mutates tool_id_map and session_state["cc_session_id"] on result event.
+        """
+        etype = event.get("type")
+        envelopes = []
+        if etype == "stream_event":
+            raw = event.get("event", {})
+            raw_type = raw.get("type", "")
+            index = raw.get("index")
+            if raw_type == "content_block_start":
+                cb = raw.get("content_block", {})
+                if cb.get("type") == "tool_use":
+                    tool_id_map[index] = {"id": cb["id"], "name": cb["name"]}
+                    envelopes.append(
+                        {
+                            "type": "tool_start",
+                            "data": {"id": cb["id"], "name": cb["name"], "input": {}},
+                        }
+                    )
+            elif raw_type == "content_block_delta":
+                delta = raw.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    envelopes.append(
+                        {
+                            "type": "text_delta",
+                            "data": {"text": delta.get("text", "")},
+                        }
+                    )
+                elif delta.get("type") == "input_json_delta":
+                    t = tool_id_map.get(index, {})
+                    envelopes.append(
+                        {
+                            "type": "tool_delta",
+                            "data": {"id": t.get("id"), "partial": delta.get("partial_json", "")},
+                        }
+                    )
+            elif raw_type == "content_block_stop":
+                if index in tool_id_map:
+                    t = tool_id_map.pop(index)
+                    envelopes.append(
+                        {
+                            "type": "tool_complete",
+                            "data": {
+                                "id": t.get("id"),
+                                "name": t.get("name"),
+                                "output": "",
+                                "is_error": False,
+                            },
+                        }
+                    )
+        elif etype == "result":
+            cc_sid = event.get("session_id")
+            session_state["cc_session_id"] = cc_sid
+            usage = event.get("usage", {})
+            envelopes.append(
+                {
+                    "type": "turn_complete",
+                    "data": {
+                        "session_id": cc_sid,
+                        "cost_usd": event.get("cost_usd"),
+                        "input_tokens": usage.get("input_tokens", 0),
+                        "output_tokens": usage.get("output_tokens", 0),
+                    },
+                }
+            )
+        return envelopes
+
+    async def _save_session(ws_session_id: str, data: dict, sessions_dir=None) -> None:
+        """Write session data to .agent42/cc-sessions/{ws_session_id}.json."""
+        d = _pathlib_Path(sessions_dir) if sessions_dir is not None else _CC_SESSIONS_DIR
+        async with _aiofiles.open(d / f"{ws_session_id}.json", "w") as fh:
+            await fh.write(_json.dumps(data, indent=2))
+
+    async def _load_session(ws_session_id: str, sessions_dir=None) -> dict:
+        """Read session data; returns {} if file missing or corrupt."""
+        d = _pathlib_Path(sessions_dir) if sessions_dir is not None else _CC_SESSIONS_DIR
+        path = d / f"{ws_session_id}.json"
+        if not path.exists():
+            return {}
+        try:
+            async with _aiofiles.open(path) as fh:
+                return _json.loads(await fh.read())
+        except Exception:
+            return {}
+
+    @app.websocket("/ws/cc-chat")
+    async def cc_chat_ws(websocket: WebSocket):
+        """CC Chat WebSocket: per-turn spawn, NDJSON relay, multi-turn via --resume.
+
+        Security: subprocess args is a Python list (no shell interpolation). user_message
+        is a single positional CC argument passed directly.
+        """
+        import datetime as _datetime
+        import uuid as _uuid
+
+        await websocket.accept()
+        token = websocket.query_params.get("token", "")
+        if not token:
+            await websocket.close(code=4001, reason="Missing token")
+            return
+        try:
+            _get_user_from_token(token)
+        except Exception:
+            await websocket.close(code=4001, reason="Invalid token")
+            return
+
+        ws_session_id = websocket.query_params.get("session_id") or str(_uuid.uuid4())
+        session_data = await _load_session(ws_session_id)
+        session_state: dict = {"cc_session_id": session_data.get("cc_session_id")}
+        session_title: str = session_data.get("title", "")
+        created_at: str = session_data.get("created_at", _datetime.datetime.utcnow().isoformat())
+
+        try:
+            while True:
+                raw_msg = await websocket.receive_text()
+                try:
+                    msg_data = _json.loads(raw_msg)
+                    user_message = msg_data.get("message", raw_msg)
+                except (_json.JSONDecodeError, AttributeError):
+                    user_message = raw_msg
+
+                if not user_message.strip():
+                    continue
+                if not session_title:
+                    session_title = user_message[:80]
+
+                claude_bin = _shutil.which("claude")
+                if not claude_bin:
+                    # BRIDGE-05: CLI not installed -- notify and emit fallback response
+                    await websocket.send_json(
+                        {
+                            "type": "status",
+                            "data": {
+                                "message": "CC subscription not available \u2014 using API mode"
+                            },
+                        }
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "text_delta",
+                            "data": {
+                                "text": "Claude Code CLI not installed. Run: npm install -g @anthropic-ai/claude-code"
+                            },
+                        }
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "turn_complete",
+                            "data": {
+                                "session_id": session_state.get("cc_session_id"),
+                                "cost_usd": None,
+                                "input_tokens": 0,
+                                "output_tokens": 0,
+                            },
+                        }
+                    )
+                    continue
+
+                # Build subprocess args as a Python list (prevents shell injection)
+                args = [
+                    claude_bin,
+                    "-p",
+                    user_message,
+                    "--output-format",
+                    "stream-json",
+                    "--verbose",
+                    "--include-partial-messages",
+                ]
+                cc_session_id = session_state.get("cc_session_id")
+                if cc_session_id:
+                    args += ["--resume", cc_session_id]
+
+                try:
+                    proc = await _asyncio.create_subprocess_exec(
+                        *args,
+                        stdout=_asyncio.subprocess.PIPE,
+                        stderr=_asyncio.subprocess.PIPE,
+                        cwd=str(workspace),
+                    )
+                except Exception as spawn_err:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "data": {
+                                "message": f"Failed to start CC: {spawn_err}",
+                                "code": "spawn_failed",
+                            },
+                        }
+                    )
+                    continue
+
+                tool_id_map: dict = {}
+
+                async def _read_stdout():
+                    try:
+                        async for raw_line in proc.stdout:
+                            line = raw_line.decode("utf-8", errors="replace").strip()
+                            if not line:
+                                continue
+                            try:
+                                event = _json.loads(line)
+                            except _json.JSONDecodeError:
+                                continue
+                            for envelope in _parse_cc_event(event, tool_id_map, session_state):
+                                try:
+                                    await websocket.send_json(envelope)
+                                except Exception:
+                                    return
+                    except Exception:
+                        pass
+
+                read_task = _asyncio.create_task(_read_stdout())
+                try:
+                    await read_task
+                except Exception:
+                    pass
+                finally:
+                    read_task.cancel()
+                    if proc.returncode is None:
+                        proc.terminate()
+
+                await _save_session(
+                    ws_session_id,
+                    {
+                        "ws_session_id": ws_session_id,
+                        "cc_session_id": session_state.get("cc_session_id"),
+                        "created_at": created_at,
+                        "last_active_at": _datetime.datetime.utcnow().isoformat(),
+                        "title": session_title,
+                    },
+                )
+
+        except Exception:
+            pass
+
+    # -- CC Session REST API ---------------------------------------------------
+
+    @app.get("/api/cc/sessions")
+    async def cc_sessions(_user: str = Depends(get_current_user)):
+        """List all CC chat sessions, sorted by last modified time."""
+        sessions = []
+        cc_dir = workspace / ".agent42" / "cc-sessions"
+        if cc_dir.exists():
+            for f in sorted(cc_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+                try:
+                    async with _aiofiles.open(f) as fh:
+                        data = _json.loads(await fh.read())
+                    sessions.append(data)
+                except Exception:
+                    pass
+        return {"sessions": sessions}
+
+    @app.delete("/api/cc/sessions/{session_id}")
+    async def cc_delete_session(session_id: str, _user: str = Depends(get_current_user)):
+        """Delete a CC chat session file."""
+        path = workspace / ".agent42" / "cc-sessions" / f"{session_id}.json"
+        if path.exists():
+            path.unlink()
+        return {"status": "ok"}
+
+    # -- CC Auth Status --------------------------------------------------------
+
+    _cc_auth_cache: dict = {"result": None, "expires": 0.0}
+
+    @app.get("/api/cc/auth-status")
+    async def cc_auth_status(_user: str = Depends(get_current_user)):
+        """Check CC subscription status via 'claude auth status' exit code."""
+        import time as _time
+
+        now = _time.monotonic()
+        cached = _cc_auth_cache
+        if cached["expires"] > now and cached["result"] is not None:
+            available, message = cached["result"]
+            return {"available": available, "message": message}
+
+        claude_bin = _shutil.which("claude")
+        if not claude_bin:
+            result = (False, "claude CLI not installed")
+        else:
+            try:
+                proc = await _asyncio.create_subprocess_exec(
+                    claude_bin,
+                    "auth",
+                    "status",
+                    stdout=_asyncio.subprocess.PIPE,
+                    stderr=_asyncio.subprocess.PIPE,
+                )
+                await _asyncio.wait_for(proc.wait(), timeout=10.0)
+                available = proc.returncode == 0
+                message = "CC subscription active" if available else "CC not authenticated"
+                result = (available, message)
+            except TimeoutError:
+                result = (False, "claude auth status timed out")
+            except Exception as e:
+                result = (False, f"auth check failed: {e}")
+
+        _cc_auth_cache["result"] = result
+        _cc_auth_cache["expires"] = now + 60.0
+        available, message = result
+        return {"available": available, "message": message}
+
     # -- Remote Node Status ----------------------------------------------------
 
     @app.get("/api/remote/status")
