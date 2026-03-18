@@ -49,7 +49,35 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 - Hybrid streaming: simulated streaming for chat, non-streaming for background tasks
 - Fallback chain: StrongWall -> Free tier (Cerebras/Groq) -> L2 premium (Gemini/OR paid)
 
-## Current Milestone: v1.4 Per-Project/Task Memories
+## Current Milestone: v2.0 Custom Claude Code UI
+
+**Goal:** Build a VS Code Claude Code extension-style chat interface inside the Agent42 IDE, replacing the raw xterm terminal with a rich, web-native experience.
+
+**Connection model:** Smart hybrid — interactive chat uses CC subscription (free via `claude` CLI), autonomous agent tasks use Agent42's tiered routing (Gemini L1 → free fallback → L2 premium). StrongWall.ai deprecated (causes disconnects).
+
+**Target features:**
+- Chat message bubbles (user/assistant, avatars, timestamps, copy buttons)
+- Markdown rendering (headers, lists, syntax-highlighted code blocks, links)
+- Tool use cards (file reads, writes, commands — expandable/collapsible with status)
+- Rich input box (multi-line, paragraph breaks, Shift+Enter, slash commands)
+- Diff viewer (side-by-side/inline code changes, accept/reject buttons)
+- Session history (browse/resume past conversations via Agent42 memory)
+- Multi-agent view (multiple CC instances in tabs or side-by-side panels)
+- Flexible layout (CC as editor tab OR dedicated side panel, user chooses)
+
+## Current Milestone: v3.0 GSD & jcodemunch Integration
+
+**Goal:** Unify Agent42's developer tooling into a zero-friction platform — one-command setup that configures Claude Code, MCP, hooks, and jcodemunch; conflict-resistant memory sync across nodes; and a unified context engine that merges code intelligence with semantic memory and GSD workflow state.
+
+**Target features:**
+- One-command setup (Linux + Windows) — generates .mcp.json, registers hooks, indexes repo with jcodemunch, validates health
+- CLAUDE.md template generation with Agent42 conventions baked in
+- Conflict-resistant memory sync: UUID+timestamp entries, entry-union merge (replaces mtime-wins)
+- ContextAssemblerTool + jcodemunch path — code symbol search merged into unified context
+- Per-project memory namespace wired into MemoryTool (ProjectMemoryStore already exists, needs wiring)
+- GSD workstream state surfaced in context engine
+
+## Deferred: v2.1 Per-Project/Task Memories
 
 **Goal:** Add task-level memory scoping, tool/skill effectiveness tracking, automated post-task learning extraction, and proactive recommendations to make Agent42 learn from experience
 
@@ -121,4 +149,4 @@ Tech stack: Python 3.11+, FastAPI, AsyncOpenAI, aiofiles, pytest.
 | Non-streaming accepted for L1 | StrongWall doesn't stream; simulate for chat, accept for background | -- Pending |
 
 ---
-*Last updated: 2026-03-06 after v1.3 milestone start*
+*Last updated: 2026-03-17 after v3.0 GSD & jcodemunch Integration milestone start*
