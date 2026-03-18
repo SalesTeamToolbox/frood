@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-18T19:36:16.978Z"
+last_updated: "2026-03-18T22:23:00.000Z"
 ---
 
 # Project State
@@ -18,18 +18,18 @@ See: .planning/PROJECT.md (updated 2026-03-17)
 ## Current Position
 
 Phase: 5 of 5 (Streaming PTY Bridge — IN PROGRESS)
-Plan: 1 of 3 in Phase 5 complete
-Status: Phase 5 Plan 1 DONE — Wave 0 test scaffold complete (13 tests: 12 xfail RED, 1 pass)
-Last activity: 2026-03-18 — Plan 05-01 complete (test_cc_pty.py Wave 0 scaffold, cc_init_event.ndjson fixture)
+Plan: 2 of 3 in Phase 5 complete
+Status: Phase 5 Plan 2 DONE - PTY bridge + keepalive + expanded _parse_cc_event (10/13 tests pass)
+Last activity: 2026-03-18 — Plan 05-02 complete (PTY subprocess, _parse_cc_event expansion, keepalive)
 
-Progress: [█████████░] 90%
+Progress: [█████████░] 93%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
-- Average duration: 6.1 min
-- Total execution time: 45 min
+- Total plans completed: 8
+- Average duration: 7.9 min
+- Total execution time: 63 min
 
 **By Phase:**
 
@@ -37,7 +37,7 @@ Progress: [█████████░] 90%
 |----------------------|----------|--------|----------|
 | 01-backend-ws-bridge | 3/3 DONE | 29 min | 9.7 min  |
 | 02-core-chat-ui      | 5/5 DONE | 27 min | 5.4 min  |
-| 05-streaming-pty     | 1/3 DONE | 15 min | 15 min   |
+| 05-streaming-pty     | 2/3 DONE | 33 min | 16.5 min |
 
 *Updated after each plan completion*
 
@@ -70,6 +70,9 @@ Progress: [█████████░] 90%
 - Slash command dropdown uses only safe DOM APIs (createElement, textContent) — no innerHTML with user input to prevent XSS
 - ccSend handles /clear locally (clears DOM) without sending to CC backend — avoids unnecessary WS traffic
 - ccStop leaves sending state true — backend turn_complete event resets it via ccSetSendingState (correct lifecycle)
+- `cc_` prefix on all `cc_chat_ws` PTY variables to avoid collision with terminal WS PTY variables in same `create_app()` closure
+- PTY-with-PIPE-fallback: try PTY spawn, except Exception -> `use_cc_pty=False`, then PIPE path; PIPE fallback identical to pre-PTY implementation (PTY-04 preserved)
+- `hook_response` subtype suppressed from frontend relay (too verbose for UI); `hook_started` emits "Loading {name}..." progress status
 
 ### Roadmap Evolution
 
@@ -88,5 +91,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-18
-Stopped at: Plan 05-01 complete — Phase 5 Wave 0 test scaffold done. test_cc_pty.py (13 tests: 12 xfail RED, 1 pass) and cc_init_event.ndjson fixture created. Ready for Plan 05-02 (PTY implementation).
+Stopped at: Plan 05-02 complete - PTY subprocess + keepalive + expanded _parse_cc_event. 10/13 test_cc_pty.py tests pass (9 xpass + 1 pass). Only TestPreWarmPool 3 tests remain xfail. Ready for Plan 05-03 (pre-warm pool).
 Resume file: None
