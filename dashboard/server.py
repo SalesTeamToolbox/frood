@@ -1924,11 +1924,50 @@ def create_app(
                         pass
 
                 read_task = _asyncio.create_task(_read_stdout())
+
+                async def _receive_msg():
+                    return await websocket.receive_text()
+
+                receive_task = _asyncio.create_task(_receive_msg())
                 try:
-                    await read_task
-                except Exception:
-                    pass
+                    while True:
+                        done, _pending = await _asyncio.wait(
+                            {read_task, receive_task}, return_when=_asyncio.FIRST_COMPLETED
+                        )
+                        if receive_task in done:
+                            try:
+                                inner = _json.loads(receive_task.result())
+                            except Exception:
+                                inner = {}
+                            if inner.get("type") == "stop":
+                                read_task.cancel()
+                                if proc.returncode is None:
+                                    proc.terminate()
+                                await websocket.send_json(
+                                    {
+                                        "type": "turn_complete",
+                                        "data": {
+                                            "session_id": session_state.get("cc_session_id"),
+                                            "cost_usd": None,
+                                            "input_tokens": 0,
+                                            "output_tokens": 0,
+                                        },
+                                    }
+                                )
+                                receive_task = None
+                                break
+                            # Not a stop — re-arm receive and check if read_task also completed
+                            receive_task = _asyncio.create_task(_receive_msg())
+                            if read_task in done:
+                                break
+                        else:
+                            # read_task completed (subprocess exited) — turn done
+                            for t in _pending:
+                                t.cancel()
+                            break
                 finally:
+                    if receive_task and not receive_task.done():
+                        receive_task.cancel()
                     read_task.cancel()
                     if proc.returncode is None:
                         proc.terminate()
