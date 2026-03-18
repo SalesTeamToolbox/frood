@@ -13,16 +13,16 @@ last_updated: "2026-03-18T19:36:16.978Z"
 See: .planning/PROJECT.md (updated 2026-03-17)
 
 **Core value:** Agent42 must provide a rich, VS Code-quality Claude Code chat experience in its web IDE
-**Current focus:** Phase 2 — Core Chat UI
+**Current focus:** Phase 5 — Streaming PTY Bridge
 
 ## Current Position
 
-Phase: 2 of 4 (Frontend Chat UI — COMPLETE)
-Plan: 5 of 5 in Phase 2 complete
-Status: Phase 2 DONE — All plans complete (02-01 through 02-05)
-Last activity: 2026-03-18 — Plan 02-05 complete (ccSend, ccStop, ccHandleKeydown, ccInputResize, ccUpdateSlashDropdown, CC_SLASH_COMMANDS — all 20 tests GREEN)
+Phase: 5 of 5 (Streaming PTY Bridge — IN PROGRESS)
+Plan: 1 of 3 in Phase 5 complete
+Status: Phase 5 Plan 1 DONE — Wave 0 test scaffold complete (13 tests: 12 xfail RED, 1 pass)
+Last activity: 2026-03-18 — Plan 05-01 complete (test_cc_pty.py Wave 0 scaffold, cc_init_event.ndjson fixture)
 
-Progress: [████████░░] 70%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -37,6 +37,7 @@ Progress: [████████░░] 70%
 |----------------------|----------|--------|----------|
 | 01-backend-ws-bridge | 3/3 DONE | 29 min | 9.7 min  |
 | 02-core-chat-ui      | 5/5 DONE | 27 min | 5.4 min  |
+| 05-streaming-pty     | 1/3 DONE | 15 min | 15 min   |
 
 *Updated after each plan completion*
 
@@ -58,6 +59,8 @@ Progress: [████████░░] 70%
 - Auth status check uses exit code only (not JSON parsing) — insulated from claude CLI schema changes
 - Session listing uses per-file try/except — corrupt files do not break GET /api/cc/sessions
 - Wave 0 scaffold uses source-text inspection (Path.read_text) — identical to test_ide_html.py; 20 tests across 5 classes; TestCCChatStop uses inspect.getsource(dashboard.server) for backend pattern checks
+- Phase 5 Wave 0: xfail(raises=AssertionError, strict=False) for unimplemented PTY features; test_pipe_fallback_preserved not xfail because PIPE already exists in cc_chat_ws
+- _extract_function_source helper: indent-based regex finds closure-scoped function bodies for isolated ns unit testing
 - Use highlight.min.js (full bundle) not core.min.js — core has zero language definitions built in
 - hljs CSS scoped to .cc-chat-messages to prevent conflicts with existing .md-code-block styles
 - CDN load order: marked -> marked-highlight -> hljs -> DOMPurify -> app.js (UMD globals must exist when app.js runs)
@@ -85,5 +88,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-18
-Stopped at: Plan 02-05 complete — Phase 2 Core Chat UI DONE. ccSend, ccStop, ccHandleKeydown, ccInputResize, ccUpdateSlashDropdown, CC_SLASH_COMMANDS added. All 20 test_cc_chat_ui.py tests GREEN. Ready for Phase 3 (session persistence).
+Stopped at: Plan 05-01 complete — Phase 5 Wave 0 test scaffold done. test_cc_pty.py (13 tests: 12 xfail RED, 1 pass) and cc_init_event.ndjson fixture created. Ready for Plan 05-02 (PTY implementation).
 Resume file: None

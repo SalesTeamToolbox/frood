@@ -10,7 +10,7 @@ created: 2026-03-17
 **Plans:** 3 plans
 
 Plans:
-- [ ] 05-01-PLAN.md — Wave 0 test scaffold (test_cc_pty.py + cc_init_event.ndjson fixture)
+- [x] 05-01-PLAN.md — Wave 0 test scaffold (test_cc_pty.py + cc_init_event.ndjson fixture)
 - [ ] 05-02-PLAN.md — PTY subprocess + init progress + keepalive (server.py)
 - [ ] 05-03-PLAN.md — Pre-warmed CC session pool (server.py)
 
@@ -120,7 +120,7 @@ Plans:
 
 Plans:
 
-- [ ] 05-01-PLAN.md — Wave 0 test scaffold (test_cc_pty.py + cc_init_event.ndjson fixture)
+- [x] 05-01-PLAN.md — Wave 0 test scaffold (test_cc_pty.py + cc_init_event.ndjson fixture)
 - [ ] 05-02-PLAN.md — PTY subprocess + init progress + keepalive (server.py)
 - [ ] 05-03-PLAN.md — Pre-warmed CC session pool (server.py)
 
