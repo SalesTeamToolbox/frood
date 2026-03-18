@@ -1709,6 +1709,10 @@ def create_app(
     _CC_SESSIONS_DIR = workspace / ".agent42" / "cc-sessions"
     _CC_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
+    import re as _re_cc
+
+    _ANSI_ESCAPE = _re_cc.compile(r"\x1b\[[0-9;]*[mGKHF]")
+
     def _parse_cc_event(event: dict, tool_id_map: dict, session_state: dict) -> list:
         """Translate one CC NDJSON event into WS envelope dicts.
 
@@ -1916,52 +1920,205 @@ def create_app(
                 if cc_session_id:
                     args += ["--resume", cc_session_id]
 
+                # --- PTY spawn (PTY-01) with PIPE fallback (PTY-04) ---
+                use_cc_pty = False
+                cc_pty_process = None  # winpty PtyProcess
+                cc_proc = None  # asyncio subprocess (PIPE fallback) or Popen (Unix PTY)
+                cc_master_fd = None  # Unix PTY master fd
+
                 try:
-                    proc = await _asyncio.create_subprocess_exec(
-                        *args,
-                        stdout=_asyncio.subprocess.PIPE,
-                        stderr=_asyncio.subprocess.PIPE,
-                        cwd=str(workspace),
-                    )
-                except Exception as spawn_err:
-                    await websocket.send_json(
-                        {
-                            "type": "error",
-                            "data": {
-                                "message": f"Failed to start CC: {spawn_err}",
-                                "code": "spawn_failed",
-                            },
-                        }
-                    )
-                    continue
+                    if _sys.platform == "win32":
+                        from winpty import PtyProcess as _CCPtyProcess
+
+                        cc_pty_process = _CCPtyProcess.spawn(
+                            args,
+                            cwd=str(workspace),
+                            dimensions=(24, 220),
+                        )
+                        use_cc_pty = True
+                    else:
+                        import pty as _cc_pty_mod
+                        import subprocess as _cc_subprocess_pty
+
+                        cc_master_fd, _cc_slave_fd = _cc_pty_mod.openpty()
+                        cc_proc = _cc_subprocess_pty.Popen(
+                            args,
+                            stdin=_cc_slave_fd,
+                            stdout=_cc_slave_fd,
+                            stderr=_cc_slave_fd,
+                            cwd=str(workspace),
+                            preexec_fn=_os.setsid,
+                        )
+                        _os.close(_cc_slave_fd)
+                        use_cc_pty = True
+                except Exception as pty_err:
+                    logger.warning(f"CC PTY unavailable, falling back to PIPE: {pty_err}")
+                    use_cc_pty = False
+
+                if not use_cc_pty:
+                    try:
+                        cc_proc = await _asyncio.create_subprocess_exec(
+                            *args,
+                            stdout=_asyncio.subprocess.PIPE,
+                            stderr=_asyncio.subprocess.PIPE,
+                            cwd=str(workspace),
+                        )
+                    except Exception as spawn_err:
+                        await websocket.send_json(
+                            {
+                                "type": "error",
+                                "data": {
+                                    "message": f"Failed to start CC: {spawn_err}",
+                                    "code": "spawn_failed",
+                                },
+                            }
+                        )
+                        continue
 
                 tool_id_map: dict = {}
 
-                async def _read_stdout():
-                    try:
-                        logger.info("CC _read_stdout: starting async for loop")
-                        async for raw_line in proc.stdout:
-                            line = raw_line.decode("utf-8", errors="replace").strip()
-                            if not line:
-                                continue
-                            try:
-                                event = _json.loads(line)
-                            except _json.JSONDecodeError:
-                                continue
-                            envelopes = _parse_cc_event(event, tool_id_map, session_state)
-                            logger.info(
-                                f"CC event type={event.get('type')}, envelopes={len(envelopes)}"
-                            )
-                            for envelope in envelopes:
-                                try:
-                                    await websocket.send_json(envelope)
-                                except Exception as ws_err:
-                                    logger.error(f"CC WS send failed: {ws_err}")
-                                    return
-                        logger.info("CC _read_stdout: async for loop finished")
-                    except Exception as read_err:
-                        logger.error(f"CC _read_stdout error: {read_err}")
+                def _terminate_cc():
+                    """Terminate CC subprocess regardless of PTY mode."""
+                    if use_cc_pty and cc_pty_process and _sys.platform == "win32":
+                        if cc_pty_process.isalive():
+                            cc_pty_process.terminate()
+                    elif cc_proc is not None:
+                        if hasattr(cc_proc, "returncode"):
+                            # asyncio.subprocess
+                            if cc_proc.returncode is None:
+                                cc_proc.terminate()
+                        elif hasattr(cc_proc, "poll"):
+                            # subprocess.Popen
+                            if cc_proc.poll() is None:
+                                cc_proc.terminate()
 
+                loop = _asyncio.get_event_loop()
+
+                if use_cc_pty and _sys.platform == "win32":
+                    # Windows PTY: readline via run_in_executor, ANSI stripped (PTY-01)
+                    async def _read_stdout():
+                        try:
+                            while cc_pty_process.isalive():
+                                try:
+                                    raw_line = await loop.run_in_executor(
+                                        None, cc_pty_process.readline
+                                    )
+                                    line = _ANSI_ESCAPE.sub("", raw_line).strip()
+                                    if not line:
+                                        continue
+                                    try:
+                                        event = _json.loads(line)
+                                    except _json.JSONDecodeError:
+                                        continue
+                                    envelopes = _parse_cc_event(event, tool_id_map, session_state)
+                                    logger.info(
+                                        f"CC PTY event type={event.get('type')}, "
+                                        f"envelopes={len(envelopes)}"
+                                    )
+                                    for envelope in envelopes:
+                                        try:
+                                            await websocket.send_json(envelope)
+                                        except Exception as ws_err:
+                                            logger.error(f"CC WS send failed: {ws_err}")
+                                            return
+                                except EOFError:
+                                    break
+                                except Exception as inner_err:
+                                    logger.error(f"CC PTY readline error: {inner_err}")
+                                    break
+                        except Exception as outer_err:
+                            logger.error(f"CC _read_stdout (win PTY) error: {outer_err}")
+
+                elif use_cc_pty:
+                    # Unix PTY: select + os.read with line accumulation buffer (PTY-01)
+                    import select as _cc_select
+
+                    _cc_line_buf = ""
+
+                    def _read_cc_chunk():
+                        if _cc_select.select([cc_master_fd], [], [], 0.1)[0]:
+                            try:
+                                return _os.read(cc_master_fd, 4096).decode(
+                                    "utf-8", errors="replace"
+                                )
+                            except OSError:
+                                return None
+                        return ""
+
+                    async def _read_stdout():
+                        nonlocal _cc_line_buf
+                        try:
+                            while cc_proc.poll() is None:
+                                chunk = await loop.run_in_executor(None, _read_cc_chunk)
+                                if chunk is None:
+                                    break
+                                if not chunk:
+                                    await _asyncio.sleep(0.05)
+                                    continue
+                                _cc_line_buf += chunk
+                                while "\n" in _cc_line_buf:
+                                    raw_line, _cc_line_buf = _cc_line_buf.split("\n", 1)
+                                    line = _ANSI_ESCAPE.sub("", raw_line).strip()
+                                    if not line:
+                                        continue
+                                    try:
+                                        event = _json.loads(line)
+                                    except _json.JSONDecodeError:
+                                        continue
+                                    envelopes = _parse_cc_event(event, tool_id_map, session_state)
+                                    logger.info(
+                                        f"CC PTY event type={event.get('type')}, "
+                                        f"envelopes={len(envelopes)}"
+                                    )
+                                    for envelope in envelopes:
+                                        try:
+                                            await websocket.send_json(envelope)
+                                        except Exception as ws_err:
+                                            logger.error(f"CC WS send failed: {ws_err}")
+                                            return
+                        except Exception as outer_err:
+                            logger.error(f"CC _read_stdout (unix PTY) error: {outer_err}")
+
+                else:
+                    # PIPE fallback (PTY-04): identical to pre-PTY implementation
+                    async def _read_stdout():
+                        try:
+                            logger.info("CC _read_stdout (PIPE): starting async for loop")
+                            async for raw_line in cc_proc.stdout:
+                                line = raw_line.decode("utf-8", errors="replace").strip()
+                                if not line:
+                                    continue
+                                try:
+                                    event = _json.loads(line)
+                                except _json.JSONDecodeError:
+                                    continue
+                                envelopes = _parse_cc_event(event, tool_id_map, session_state)
+                                logger.info(
+                                    f"CC event type={event.get('type')}, envelopes={len(envelopes)}"
+                                )
+                                for envelope in envelopes:
+                                    try:
+                                        await websocket.send_json(envelope)
+                                    except Exception as ws_err:
+                                        logger.error(f"CC WS send failed: {ws_err}")
+                                        return
+                            logger.info("CC _read_stdout (PIPE): async for loop finished")
+                        except Exception as read_err:
+                            logger.error(f"CC _read_stdout (PIPE) error: {read_err}")
+
+                # PTY-05: keepalive task sends {"type": "keepalive"} every 15 seconds
+                async def _send_keepalive():
+                    try:
+                        while True:
+                            await _asyncio.sleep(15)
+                            try:
+                                await websocket.send_json({"type": "keepalive"})
+                            except Exception:
+                                break
+                    except Exception:
+                        pass
+
+                keepalive_task = _asyncio.create_task(_send_keepalive())
                 read_task = _asyncio.create_task(_read_stdout())
 
                 async def _receive_msg():
@@ -1978,8 +2135,7 @@ def create_app(
                             # check exception first to avoid infinite spin loop (code-review #1)
                             if receive_task.exception() is not None:
                                 read_task.cancel()
-                                if proc.returncode is None:
-                                    proc.terminate()
+                                _terminate_cc()
                                 receive_task = None
                                 break
                             try:
@@ -1988,8 +2144,7 @@ def create_app(
                                 inner = {}
                             if inner.get("type") == "stop":
                                 read_task.cancel()
-                                if proc.returncode is None:
-                                    proc.terminate()
+                                _terminate_cc()
                                 await websocket.send_json(
                                     {
                                         "type": "turn_complete",
@@ -2016,8 +2171,13 @@ def create_app(
                     if receive_task and not receive_task.done():
                         receive_task.cancel()
                     read_task.cancel()
-                    if proc.returncode is None:
-                        proc.terminate()
+                    keepalive_task.cancel()
+                    _terminate_cc()
+                    if cc_master_fd is not None:
+                        try:
+                            _os.close(cc_master_fd)
+                        except OSError:
+                            pass
 
                 await _save_session(
                     ws_session_id,
