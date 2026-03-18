@@ -3263,7 +3263,7 @@ function renderCode() {
           <div id="ide-welcome" class="ide-welcome" style="display:flex">
             <h2>Agent42 IDE</h2>
             <p>Select a file from the explorer to start editing.<br>Changes are saved with Ctrl+S.</p>
-            <button class="ide-cc-launch-btn" onclick="ideOpenClaude('local')">
+            <button class="ide-cc-launch-btn" onclick="ideOpenCCChat('local')">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:middle"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
               Open Claude Code
             </button>
@@ -3298,11 +3298,11 @@ function renderCode() {
                 <div class="dropdown-group-label">Local</div>
                 <div class="dropdown-item" onclick="termNew('local');termDropdownDismiss()">Terminal</div>
                 <div class="dropdown-item" onclick="termNewClaude('local');termDropdownDismiss()">Claude Code (panel)</div>
-                <div class="dropdown-item" onclick="ideOpenClaude('local');termDropdownDismiss()">Claude Code (tab)</div>
+                <div class="dropdown-item" onclick="ideOpenCCChat('local');termDropdownDismiss()">Claude Code (tab)</div>
                 <div class="dropdown-group-label">Remote</div>
                 <div class="dropdown-item remote-item" onclick="termNew('remote');termDropdownDismiss()">Terminal</div>
                 <div class="dropdown-item remote-item" onclick="termNewClaude('remote');termDropdownDismiss()">Claude Code (panel)</div>
-                <div class="dropdown-item remote-item" onclick="ideOpenClaude('remote');termDropdownDismiss()">Claude Code (tab)</div>
+                <div class="dropdown-item remote-item" onclick="ideOpenCCChat('remote');termDropdownDismiss()">Claude Code (tab)</div>
               </div>
             </div>
           </div>
@@ -3602,7 +3602,7 @@ function ideRenderTabs() {
       '<span class="close" onclick="event.stopPropagation();ideCloseTab(' + i + ')">&times;</span>' +
     '</div>';
   }).join("") +
-  '<button class="ide-tab-new-cc" onclick="ideOpenClaude(\'local\')" title="New Claude Code instance">' +
+  '<button class="ide-tab-new-cc" onclick="ideOpenCCChat(\'local\')" title="New Claude Code instance">' +
     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg>' +
     '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="margin-left:2px"><path d="M12 5v14M5 12h14"/></svg>' +
   '</button>';
@@ -3724,6 +3724,272 @@ function ccAppendThinkingBlock(tab, text) {
 
 // --- Claude Code as editor tab ---
 var _ccTabCounter = 0;
+
+function ideOpenCCChat(node) {
+  node = node || "local";
+  _ccTabCounter++;
+  var tabIdx = _ccTabCounter;
+  var label = "Claude Code" + (tabIdx > 1 ? " " + tabIdx : "");
+  var ccContainer = document.getElementById("ide-cc-container");
+  if (!ccContainer) return;
+
+  // Session ID for /ws/cc-chat query param (crypto.randomUUID with fallback)
+  var sessionId = (typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+  // Build chat panel DOM using safe DOM methods
+  var chatDiv = document.createElement("div");
+  chatDiv.className = "ide-cc-chat";
+  chatDiv.id = "cc-chat-" + tabIdx;
+
+  var header = document.createElement("div");
+  header.className = "cc-chat-header";
+  var headerLabel = document.createElement("span");
+  headerLabel.textContent = "Claude Code";
+  header.appendChild(headerLabel);
+  chatDiv.appendChild(header);
+
+  var messagesDiv = document.createElement("div");
+  messagesDiv.className = "cc-chat-messages";
+  messagesDiv.id = "cc-msgs-" + tabIdx;
+  chatDiv.appendChild(messagesDiv);
+
+  var scrollAnchor = document.createElement("div");
+  scrollAnchor.className = "cc-chat-scroll-anchor";
+  scrollAnchor.id = "cc-scroll-anchor-" + tabIdx;
+  scrollAnchor.style.display = "none";
+  var scrollBtn = document.createElement("button");
+  scrollBtn.className = "cc-scroll-btn";
+  scrollBtn.textContent = "\u2193 scroll to bottom";
+  scrollBtn.setAttribute("onclick", "ccScrollToBottom(" + tabIdx + ")");
+  scrollAnchor.appendChild(scrollBtn);
+  chatDiv.appendChild(scrollAnchor);
+
+  var composer = document.createElement("div");
+  composer.className = "cc-chat-composer";
+
+  var slashDropdown = document.createElement("div");
+  slashDropdown.className = "cc-slash-dropdown";
+  slashDropdown.id = "cc-slash-" + tabIdx;
+  slashDropdown.style.display = "none";
+  composer.appendChild(slashDropdown);
+
+  var textarea = document.createElement("textarea");
+  textarea.className = "cc-chat-input";
+  textarea.id = "cc-input-" + tabIdx;
+  textarea.rows = 1;
+  textarea.placeholder = "Message Claude Code... (Enter to send, Shift+Enter for newline)";
+  textarea.setAttribute("oninput", "ccInputResize(this);ccUpdateSlashDropdown(ccGetTab(" + tabIdx + "))");
+  textarea.setAttribute("onkeydown", "ccHandleKeydown(event," + tabIdx + ")");
+  composer.appendChild(textarea);
+
+  var sendBtn = document.createElement("button");
+  sendBtn.className = "cc-send-btn";
+  sendBtn.id = "cc-send-" + tabIdx;
+  sendBtn.textContent = "Send";
+  sendBtn.setAttribute("onclick", "ccSend(" + tabIdx + ")");
+  composer.appendChild(sendBtn);
+
+  var stopBtn = document.createElement("button");
+  stopBtn.className = "cc-stop-btn";
+  stopBtn.id = "cc-stop-" + tabIdx;
+  stopBtn.textContent = "Stop";
+  stopBtn.style.display = "none";
+  stopBtn.setAttribute("onclick", "ccStop(" + tabIdx + ")");
+  composer.appendChild(stopBtn);
+
+  chatDiv.appendChild(composer);
+  ccContainer.appendChild(chatDiv);
+
+  var tab = {
+    type: "claude",
+    path: label,
+    chatPanel: true,
+    el: chatDiv,
+    ws: null,
+    node: node,
+    tabIdx: tabIdx,
+    sending: false,
+    autoScroll: true,
+    streamBuffer: "",
+    streamMsgEl: null,
+    streamTimer: null,
+    ccSessionId: sessionId,
+    _scrollListenerAttached: false,
+  };
+  _ideTabs.push(tab);
+  _ideActiveTab = _ideTabs.length - 1;
+
+  ccSetupScrollBehavior(tab);
+
+  var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  var wsUrl = protocol + "//" + location.host + "/ws/cc-chat?token="
+    + encodeURIComponent(state.token) + "&session_id=" + encodeURIComponent(sessionId);
+
+  // Guard against duplicate WS (Pitfall 6)
+  if (tab.ws && tab.ws.readyState <= 1) { ideActivateTab(); return; }
+
+  var ws = new WebSocket(wsUrl);
+  tab.ws = ws;
+
+  ws.onopen = function() {
+    var notice = document.createElement("div");
+    notice.style.cssText = "color:var(--text-muted);font-size:0.8rem;padding:0.5rem 0;text-align:center";
+    notice.textContent = "Claude Code connected";
+    messagesDiv.appendChild(notice);
+  };
+
+  ws.onmessage = function(ev) {
+    var data;
+    try { data = JSON.parse(ev.data); } catch(e) { return; }
+    var msgType = data.type;
+    var msgData = data.data || {};
+
+    if (msgType === "text_delta") {
+      var deltaText = (msgData.text || "");
+      if (!tab.streamMsgEl) {
+        // First text_delta: create streaming bubble (CHAT-02)
+        var now = new Date();
+        var time = now.getHours() + ":" + String(now.getMinutes()).padStart(2, "0");
+        var msgWrapper = document.createElement("div");
+        msgWrapper.className = "chat-msg chat-msg-agent";
+        var avatarEl = document.createElement("div");
+        avatarEl.className = "chat-avatar chat-avatar-agent";
+        avatarEl.textContent = "CC";
+        msgWrapper.appendChild(avatarEl);
+        var msgContent = document.createElement("div");
+        msgContent.className = "chat-msg-content";
+        var msgHeader = document.createElement("div");
+        msgHeader.className = "chat-msg-header";
+        var senderSpan = document.createElement("span");
+        senderSpan.className = "chat-msg-sender";
+        senderSpan.textContent = "Claude Code";
+        var timeSpan = document.createElement("span");
+        timeSpan.className = "chat-msg-time";
+        timeSpan.textContent = time;
+        msgHeader.appendChild(senderSpan);
+        msgHeader.appendChild(timeSpan);
+        msgContent.appendChild(msgHeader);
+        var bodyEl = document.createElement("div");
+        bodyEl.className = "chat-msg-body chat-msg-body-agent cc-streaming-body";
+        bodyEl.id = "cc-stream-body-" + tabIdx;
+        msgContent.appendChild(bodyEl);
+        msgWrapper.appendChild(msgContent);
+        messagesDiv.appendChild(msgWrapper);
+        tab.streamMsgEl = bodyEl;
+        // 50ms batched flush timer (CHAT-06 append-only DOM)
+        tab.streamTimer = setInterval(function() {
+          if (tab.streamMsgEl) tab.streamMsgEl.textContent = tab.streamBuffer;
+          if (tab.autoScroll) requestAnimationFrame(function() {
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+          });
+        }, 50);
+      }
+      tab.streamBuffer += deltaText;
+
+    } else if (msgType === "turn_complete") {
+      clearInterval(tab.streamTimer);
+      tab.streamTimer = null;
+      // Guard: tool-only turns emit turn_complete with no preceding text_delta (Pitfall 4)
+      if (tab.streamMsgEl && tab.streamBuffer) {
+        // Safe: ccRenderMarkdown always returns DOMPurify.sanitize() output (CHAT-05)
+        tab.streamMsgEl.innerHTML = ccRenderMarkdown(tab.streamBuffer);
+        tab.streamMsgEl.classList.remove("cc-streaming-body");
+      }
+      tab.streamBuffer = "";
+      tab.streamMsgEl = null;
+      ccSetSendingState(tab, false);
+      if (tab.autoScroll) requestAnimationFrame(function() {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      });
+
+    } else if (msgType === "thinking_complete") {
+      ccAppendThinkingBlock(tab, msgData.text || "");
+
+    } else if (msgType === "error") {
+      clearInterval(tab.streamTimer);
+      tab.streamTimer = null;
+      tab.streamBuffer = "";
+      tab.streamMsgEl = null;
+      ccSetSendingState(tab, false);
+      var errDiv = document.createElement("div");
+      errDiv.style.cssText = "color:var(--danger,#ef4444);padding:0.5rem;font-size:0.85rem";
+      errDiv.textContent = "Error: " + (msgData.message || "Unknown error");
+      messagesDiv.appendChild(errDiv);
+
+    } else if (msgType === "status") {
+      var statusDiv = document.createElement("div");
+      statusDiv.style.cssText = "color:var(--text-muted);font-size:0.78rem;padding:0.25rem 0;text-align:center;font-style:italic";
+      statusDiv.textContent = msgData.message || "";
+      messagesDiv.appendChild(statusDiv);
+    }
+  };
+
+  ws.onclose = function() {
+    clearInterval(tab.streamTimer);
+    tab.streamTimer = null;
+    if (tab.streamMsgEl && tab.streamBuffer) {
+      // Safe: ccRenderMarkdown always returns DOMPurify.sanitize() output
+      tab.streamMsgEl.innerHTML = ccRenderMarkdown(tab.streamBuffer);
+      tab.streamMsgEl.classList.remove("cc-streaming-body");
+      tab.streamBuffer = "";
+      tab.streamMsgEl = null;
+    }
+    ccSetSendingState(tab, false);
+  };
+
+  ws.onerror = function() {
+    var errDiv = document.createElement("div");
+    errDiv.style.cssText = "color:var(--danger,#ef4444);padding:0.5rem;font-size:0.85rem";
+    errDiv.textContent = "WebSocket connection error";
+    messagesDiv.appendChild(errDiv);
+  };
+
+  ideActivateTab();
+}
+
+function ccGetTab(tabIdx) {
+  for (var i = 0; i < _ideTabs.length; i++) {
+    if (_ideTabs[i].tabIdx === tabIdx) return _ideTabs[i];
+  }
+  return null;
+}
+
+function ccSetSendingState(tab, sending) {
+  tab.sending = sending;
+  var sendBtn = document.getElementById("cc-send-" + tab.tabIdx);
+  var stopBtn2 = document.getElementById("cc-stop-" + tab.tabIdx);
+  if (sendBtn) sendBtn.style.display = sending ? "none" : "inline-block";
+  if (stopBtn2) stopBtn2.style.display = sending ? "inline-block" : "none";
+}
+
+function ccScrollToBottom(tabIdx) {
+  var tab = ccGetTab(tabIdx);
+  if (!tab) return;
+  var msgs = document.getElementById("cc-msgs-" + tabIdx);
+  if (msgs) requestAnimationFrame(function() { msgs.scrollTop = msgs.scrollHeight; });
+  tab.autoScroll = true;
+  var anchor = document.getElementById("cc-scroll-anchor-" + tabIdx);
+  if (anchor) anchor.style.display = "none";
+}
+
+function ccSetupScrollBehavior(tab) {
+  if (tab._scrollListenerAttached) return;
+  tab._scrollListenerAttached = true;
+  var tabIdx = tab.tabIdx;
+  setTimeout(function() {
+    var msgs = document.getElementById("cc-msgs-" + tabIdx);
+    var anchor = document.getElementById("cc-scroll-anchor-" + tabIdx);
+    if (!msgs) return;
+    msgs.addEventListener("scroll", function() {
+      var atBottom = msgs.scrollTop + msgs.clientHeight >= msgs.scrollHeight - 40;
+      tab.autoScroll = atBottom;
+      if (anchor) anchor.style.display = atBottom ? "none" : "block";
+    });
+  }, 100);
+}
+
 function ideOpenClaude(node) {
   node = node || "local";
   _ccTabCounter++;
