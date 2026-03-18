@@ -49,11 +49,11 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SETUP-01 | Phase 1 | Pending |
-| SETUP-02 | Phase 1 | Pending |
-| SETUP-03 | Phase 1 | Pending |
-| SETUP-04 | Phase 1 | Pending |
-| SETUP-05 | Phase 1 | Pending |
+| SETUP-01 | Phase 1 | Helpers done (01-02), setup.sh integration pending (01-03) |
+| SETUP-02 | Phase 1 | Helpers done (01-02), setup.sh integration pending (01-03) |
+| SETUP-03 | Phase 1 | Pending (01-03) |
+| SETUP-04 | Phase 1 | Helpers done (01-02), setup.sh integration pending (01-03) |
+| SETUP-05 | Phase 1 | Helpers done (01-02), setup.sh integration pending (01-03) |
 | SETUP-06 | Phase 2 | Pending |
 | SETUP-07 | Phase 2 | Pending |
 | MEM-01 | Phase 3 | Pending |
@@ -70,4 +70,4 @@
 
 ---
 *Requirements defined: 2026-03-17*
-*Last updated: 2026-03-17 — roadmap created, phase mappings confirmed*
+*Last updated: 2026-03-18 — Plan 01-02 complete: setup_helpers.py + mcp_server.py --health implemented*

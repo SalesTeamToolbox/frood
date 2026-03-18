@@ -30,7 +30,7 @@ This milestone unifies Agent42's developer tooling into a zero-friction platform
 **Plans**: 3 plans
 
 - [x] 01-01-PLAN.md — Hook frontmatter + test scaffolding (Wave 1)
-- [ ] 01-02-PLAN.md — Python setup helpers + MCP health flag (Wave 1)
+- [x] 01-02-PLAN.md — Python setup helpers + MCP health flag (Wave 1)
 - [ ] 01-03-PLAN.md — jcodemunch indexer + setup.sh integration + tests (Wave 2)
 
 ### Phase 2: Windows + CLAUDE.md
@@ -72,7 +72,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Setup Foundation | 1/3 | In progress | - |
+| 1. Setup Foundation | 2/3 | In progress | - |
 | 2. Windows + CLAUDE.md | 0/TBD | Not started | - |
 | 3. Memory Sync | 0/TBD | Not started | - |
 | 4. Context Engine | 0/TBD | Not started | - |
