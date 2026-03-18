@@ -90,6 +90,11 @@
           },
           {
             "type": "command",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/effectiveness-learn.py",
+            "timeout": 30
+          },
+          {
+            "type": "command",
             "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/jcodemunch-reindex.py",
             "timeout": 15
           }
