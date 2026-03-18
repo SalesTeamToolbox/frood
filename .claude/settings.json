@@ -47,6 +47,11 @@
             "type": "command",
             "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/format-on-write.py",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/cc-memory-sync.py",
+            "timeout": 5
           }
         ]
       },
