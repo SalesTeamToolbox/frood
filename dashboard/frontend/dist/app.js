@@ -3948,6 +3948,105 @@ function ccSetToolOutput(toolId, content, contentType) {
   }
 }
 
+// -- CC Permission Request UI (TOOL-06) --------------------------------------
+
+function ccCreatePermissionCard(tab, permId, toolInput) {
+  var container = tab.el.querySelector(".cc-chat-messages");
+  if (!container) return;
+
+  // Auto-approve in trust mode
+  if (tab.trustMode && tab.ws && tab.ws.readyState === 1) {
+    tab.ws.send(JSON.stringify({ type: "permission_response", id: permId, approved: true }));
+    // Show brief auto-approved notice
+    var notice = document.createElement("div");
+    notice.className = "cc-perm-auto-approved";
+    notice.textContent = "\u2705 Auto-approved (trust mode)";
+    container.appendChild(notice);
+    return;
+  }
+
+  var card = document.createElement("div");
+  card.className = "cc-perm-card";
+  card.id = "cc-perm-" + permId;
+
+  var label = document.createElement("div");
+  label.className = "cc-perm-label";
+  label.textContent = "\uD83D\uDD12 Permission Required";
+  card.appendChild(label);
+
+  var desc = document.createElement("div");
+  desc.className = "cc-perm-desc";
+  // toolInput may contain tool_name and description from CC
+  var toolName = (toolInput && toolInput.tool_name) || "a tool";
+  var target = (toolInput && (toolInput.file_path || toolInput.command || toolInput.description)) || "";
+  desc.textContent = "Claude Code wants to use " + toolName + (target ? ": " + target : "");
+  card.appendChild(desc);
+
+  var actions = document.createElement("div");
+  actions.className = "cc-perm-actions";
+
+  var approveBtn = document.createElement("button");
+  approveBtn.className = "cc-perm-approve";
+  approveBtn.textContent = "Approve";
+  approveBtn.setAttribute("data-perm-id", permId);
+  approveBtn.addEventListener("click", function() {
+    ccResolvePermission(tab, permId, true);
+  });
+  actions.appendChild(approveBtn);
+
+  var rejectBtn = document.createElement("button");
+  rejectBtn.className = "cc-perm-reject";
+  rejectBtn.textContent = "Reject";
+  rejectBtn.setAttribute("data-perm-id", permId);
+  rejectBtn.addEventListener("click", function() {
+    ccResolvePermission(tab, permId, false);
+  });
+  actions.appendChild(rejectBtn);
+
+  card.appendChild(actions);
+  container.appendChild(card);
+
+  if (tab.autoScroll) {
+    requestAnimationFrame(function() { container.scrollTop = container.scrollHeight; });
+  }
+}
+
+function ccResolvePermission(tab, permId, approved) {
+  if (!tab.ws || tab.ws.readyState !== 1) return;
+  tab.ws.send(JSON.stringify({ type: "permission_response", id: permId, approved: approved }));
+
+  // Update card UI to show resolved state
+  var card = document.getElementById("cc-perm-" + permId);
+  if (card) {
+    card.classList.add(approved ? "cc-perm-approved" : "cc-perm-rejected");
+    var actions = card.querySelector(".cc-perm-actions");
+    if (actions) actions.style.display = "none";
+    var result = document.createElement("div");
+    result.className = "cc-perm-result";
+    result.textContent = approved ? "\u2705 Approved" : "\u274C Rejected";
+    card.appendChild(result);
+  }
+}
+
+function ccToggleTrustMode(tabIdx) {
+  var tab = ccGetTab(tabIdx);
+  if (!tab) return;
+  tab.trustMode = !tab.trustMode;
+  if (tab.ws && tab.ws.readyState === 1) {
+    tab.ws.send(JSON.stringify({ type: "trust_mode", enabled: tab.trustMode }));
+  }
+  var indicator = document.getElementById("cc-trust-indicator-" + tabIdx);
+  if (indicator) {
+    indicator.textContent = tab.trustMode ? "\uD83D\uDD13 Trust mode ON" : "";
+    indicator.style.display = tab.trustMode ? "inline-block" : "none";
+  }
+  var toggle = document.getElementById("cc-trust-toggle-" + tabIdx);
+  if (toggle) {
+    toggle.textContent = tab.trustMode ? "Disable Trust" : "Trust Mode";
+    toggle.classList.toggle("cc-trust-active", tab.trustMode);
+  }
+}
+
 // -- CC WS Message Handler Factory (shared by ideOpenCCChat + ccResumeSession) --
 
 function ccMakeWsHandler(tab, msgs) {
@@ -3977,7 +4076,10 @@ function ccMakeWsHandler(tab, msgs) {
     } else if (msgType === "tool_output") {
       ccSetToolOutput(msgData.id, msgData.content, msgData.content_type);
 
-    // NOTE: permission_request case added by Plan 03-04 Task 1 here
+    } else if (msgType === "permission_request") {
+      // Backend emits permission_request at content_block_stop with fully parsed input
+      // (no need to look up tab.toolCards — backend buffers input_json_delta internally)
+      ccCreatePermissionCard(tab, msgData.id, msgData.input || {});
 
     } else if (msgType === "text_delta") {
       var deltaText = (msgData.text || "");
@@ -4084,6 +4186,20 @@ function ideOpenCCChat(node) {
   var headerLabel = document.createElement("span");
   headerLabel.textContent = "Claude Code";
   header.appendChild(headerLabel);
+
+  var trustToggle = document.createElement("button");
+  trustToggle.className = "cc-trust-toggle";
+  trustToggle.id = "cc-trust-toggle-" + tabIdx;
+  trustToggle.textContent = "Trust Mode";
+  trustToggle.setAttribute("onclick", "ccToggleTrustMode(" + tabIdx + ")");
+  header.appendChild(trustToggle);
+
+  var trustIndicator = document.createElement("span");
+  trustIndicator.className = "cc-trust-indicator";
+  trustIndicator.id = "cc-trust-indicator-" + tabIdx;
+  trustIndicator.style.display = "none";
+  header.appendChild(trustIndicator);
+
   chatDiv.appendChild(header);
 
   var messagesDiv = document.createElement("div");
@@ -4154,6 +4270,7 @@ function ideOpenCCChat(node) {
     ccSessionId: sessionId,
     _scrollListenerAttached: false,
     toolCards: {},  // Map of tool_id to {el, inputBuf, name, status}
+    trustMode: false,
   };
   _ideTabs.push(tab);
   _ideActiveTab = _ideTabs.length - 1;
