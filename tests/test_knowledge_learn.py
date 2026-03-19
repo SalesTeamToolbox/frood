@@ -785,3 +785,95 @@ class TestHookRegistration:
         assert learn_hook is not None, "knowledge-learn.py hook not found in Stop"
         assert "timeout" in learn_hook, "knowledge-learn.py hook has no timeout set"
         assert learn_hook["timeout"] > 0
+
+
+# ===========================================================================
+# TestKnowledgeIndexes — KNOWLEDGE collection payload indexes
+# ===========================================================================
+
+
+class TestKnowledgeIndexes:
+    """Tests for KNOWLEDGE collection payload index creation in QdrantStore."""
+
+    def test_ensure_knowledge_indexes_method_exists(self):
+        """QdrantStore has _ensure_knowledge_indexes method."""
+        from memory.qdrant_store import QdrantStore
+
+        assert hasattr(QdrantStore, "_ensure_knowledge_indexes"), (
+            "QdrantStore missing _ensure_knowledge_indexes method"
+        )
+
+    def test_ensure_knowledge_indexes_creates_learning_type_index(self):
+        """_ensure_knowledge_indexes creates learning_type KEYWORD index."""
+        from unittest.mock import MagicMock
+
+        from memory.qdrant_store import QdrantConfig, QdrantStore
+
+        config = QdrantConfig(vector_dim=384)
+        store = QdrantStore(config)
+        mock_client = MagicMock()
+        store._client = mock_client
+
+        # PayloadSchemaType is imported locally inside the method — no need to patch it
+        store._ensure_knowledge_indexes("agent42_knowledge")
+
+        # Verify create_payload_index was called for both fields
+        calls = mock_client.create_payload_index.call_args_list
+        field_names = [c.kwargs.get("field_name") for c in calls]
+        assert "learning_type" in field_names, f"learning_type index not created. Calls: {calls}"
+        assert "category" in field_names, f"category index not created. Calls: {calls}"
+
+    def test_ensure_collection_triggers_knowledge_indexes(self):
+        """_ensure_collection calls _ensure_knowledge_indexes for KNOWLEDGE suffix."""
+        from unittest.mock import MagicMock, patch
+
+        from memory.qdrant_store import QdrantConfig, QdrantStore
+
+        config = QdrantConfig(vector_dim=384)
+        store = QdrantStore(config)
+
+        mock_client = MagicMock()
+        mock_client.get_collections.return_value.collections = []
+        store._client = mock_client
+
+        with patch.object(store, "_ensure_knowledge_indexes") as mock_ki:
+            store._ensure_collection(QdrantStore.KNOWLEDGE)
+
+        (
+            mock_ki.assert_called_once(),
+            "Expected _ensure_knowledge_indexes to be called for KNOWLEDGE",
+        )
+
+    def test_ensure_collection_skips_knowledge_indexes_for_memory(self):
+        """_ensure_collection does NOT call _ensure_knowledge_indexes for MEMORY suffix."""
+        from unittest.mock import MagicMock, patch
+
+        from memory.qdrant_store import QdrantConfig, QdrantStore
+
+        config = QdrantConfig(vector_dim=384)
+        store = QdrantStore(config)
+
+        mock_client = MagicMock()
+        mock_client.get_collections.return_value.collections = []
+        store._client = mock_client
+
+        with patch.object(store, "_ensure_knowledge_indexes") as mock_ki:
+            store._ensure_collection(QdrantStore.MEMORY)
+
+        mock_ki.assert_not_called(), "Expected _ensure_knowledge_indexes NOT called for MEMORY"
+
+    def test_knowledge_indexes_silent_on_failure(self):
+        """_ensure_knowledge_indexes swallows exceptions (non-critical)."""
+        from unittest.mock import MagicMock
+
+        from memory.qdrant_store import QdrantConfig, QdrantStore
+
+        config = QdrantConfig(vector_dim=384)
+        store = QdrantStore(config)
+
+        mock_client = MagicMock()
+        mock_client.create_payload_index.side_effect = Exception("Qdrant error")
+        store._client = mock_client
+
+        # Must NOT raise
+        store._ensure_knowledge_indexes("agent42_knowledge")
