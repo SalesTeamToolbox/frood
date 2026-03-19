@@ -26,18 +26,18 @@ See: .planning/PROJECT.md (updated 2026-03-17)
 ## Current Position
 
 Phase: 3 of 5 (Tool Use and Sessions — IN PROGRESS)
-Plan: 3 of 5 in Phase 3 complete
-Status: Plan 03-03 DONE - Tool card rendering: ccCreateToolCard, ccFinalizeToolCard, ccSetToolOutput, ccMakeWsHandler factory + CSS.
-Last activity: 2026-03-19 — Plan 03-03 complete (tool cards JS + CSS, all TestToolCards and TestToolCardCSS XPASS)
+Plan: 4 of 5 in Phase 3 complete
+Status: Plan 03-04 DONE - Permission request UI: ccCreatePermissionCard, ccResolvePermission, ccToggleTrustMode, permission_request WS handler, trust mode toggle + CSS.
+Last activity: 2026-03-19 — Plan 03-04 complete (permission cards JS + CSS, all TestPermissionRequest XPASS)
 
-Progress: [████______] 40%
+Progress: [████▌_____] 48%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11
+- Total plans completed: 12
 - Average duration: 7.5 min
-- Total execution time: 82 min
+- Total execution time: 90 min
 
 **By Phase:**
 
@@ -46,7 +46,7 @@ Progress: [████______] 40%
 | 01-backend-ws-bridge | 3/3 DONE | 29 min | 9.7 min  |
 | 02-core-chat-ui      | 5/5 DONE | 27 min | 5.4 min  |
 | 05-streaming-pty     | 3/3 DONE | 39 min | 13.0 min |
-| 03-tool-use-sessions | 3/5      | 31 min | 10.3 min |
+| 03-tool-use-sessions | 4/5      | 39 min | 9.75 min |
 
 *Updated after each plan completion*
 
@@ -93,6 +93,9 @@ Progress: [████______] 40%
 - Partial JSON from tool_delta accumulated in inputBuf string; only parsed after tool_complete (avoids Pitfall 2: SyntaxError on partial JSON)
 - tool_output enriches finalized card via data-tool-id selector, decoupled from tool_complete timing
 - ccToolType helper centralizes file/bash/generic detection; toolCards map reset on turn_complete to clear stale references
+- Trust mode is per-tab (tab.trustMode) not global — isolates trust scope to individual CC sessions
+- Auto-approve in trust mode sends permission_response immediately + brief notice; no full card rendered
+- permission_request WS case needs no tab.toolCards lookup — backend pre-parses input before emitting
 
 ### Roadmap Evolution
 
@@ -111,5 +114,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-19
-Stopped at: Plan 03-03 complete - tool card rendering (ccCreateToolCard, ccFinalizeToolCard, ccSetToolOutput, ccMakeWsHandler) + CSS. All TestToolCards and TestToolCardCSS XPASS. Ready for Plan 03-04.
+Stopped at: Plan 03-04 complete - permission request UI (ccCreatePermissionCard, ccResolvePermission, ccToggleTrustMode, permission_request WS handler) + CSS. All TestPermissionRequest XPASS. Ready for Plan 03-05.
 Resume file: None

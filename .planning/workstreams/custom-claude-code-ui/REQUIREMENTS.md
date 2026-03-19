@@ -35,7 +35,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **TOOL-03**: Tool cards show output/result when expanded after completion
 - [ ] **TOOL-04**: File read/write tools show file path prominently with syntax-highlighted content preview
 - [ ] **TOOL-05**: Command execution tools show the command and its output
-- [ ] **TOOL-06**: Permission requests display inline with approve/reject buttons
+- [x] **TOOL-06**: Permission requests display inline with approve/reject buttons
 
 ### Rich Input
 
@@ -123,7 +123,7 @@ Deferred to future release. Tracked but not in current roadmap.
 | TOOL-03 | Phase 3 | Pending |
 | TOOL-04 | Phase 3 | Pending |
 | TOOL-05 | Phase 3 | Pending |
-| TOOL-06 | Phase 3 | Pending |
+| TOOL-06 | Phase 3 | Complete |
 | SESS-01 | Phase 3 | Pending |
 | SESS-02 | Phase 3 | Pending |
 | SESS-03 | Phase 3 | Pending |

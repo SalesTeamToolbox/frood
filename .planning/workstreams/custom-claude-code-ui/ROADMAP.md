@@ -99,8 +99,8 @@ Plans:
 
 - [x] 03-01-PLAN.md — Wave 0 test scaffold (test_cc_tool_use.py + cc_tool_result_sample.ndjson fixture)
 - [x] 03-02-PLAN.md — Backend: _parse_cc_event tool_result/permission + session metadata extension
-- [ ] 03-03-PLAN.md — Frontend: tool card rendering (create/delta/complete/output) + CSS
-- [ ] 03-04-PLAN.md — Frontend: permission request UI + trust mode + CSS
+- [x] 03-03-PLAN.md — Frontend: tool card rendering (create/delta/complete/output) + CSS
+- [x] 03-04-PLAN.md — Frontend: permission request UI + trust mode + CSS
 - [ ] 03-05-PLAN.md — Frontend: session persistence, tab strip, sidebar, token bar + CSS
 
 ### Phase 4: Layout + Diff Viewer
