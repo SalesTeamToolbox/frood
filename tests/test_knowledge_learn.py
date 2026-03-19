@@ -231,14 +231,14 @@ class TestExtraction:
             "confidence": 0.9,
         }
 
-        with (
-            patch.object(self.worker, "QdrantStore", type(mock_store)),
-            patch("qdrant_client.models.PointStruct", MagicMock),
-        ):
+        # Do NOT patch QdrantStore — the worker uses QdrantStore.KNOWLEDGE as a
+        # string constant ("knowledge"); mock_store is passed directly as the store.
+        with patch("qdrant_client.models.PointStruct", MagicMock):
             result = self.worker.dedup_or_store(mock_store, mock_embedder, learning, session_id)
 
-        # Should call upsert on the client (no similar existing entry)
-        assert mock_store._client.upsert.called or result in ("stored", "boosted")
+        # Should store (no similar existing entry in mock_store)
+        assert result == "stored"
+        assert mock_store._client.upsert.called
 
     def test_feedback_extracted(self):
         """LEARN-02: mock API response with learning_type='feedback' — stored with that type."""
