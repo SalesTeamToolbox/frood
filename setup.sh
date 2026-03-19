@@ -117,6 +117,11 @@ info "Registering Claude Code hooks..."
 python3 scripts/setup_helpers.py register-hooks "$PROJECT_DIR"
 info "Hooks registered"
 
+# ── CLAUDE.md memory section ─────────────────────────────────────────────────
+info "Generating CLAUDE.md memory section..."
+python3 scripts/setup_helpers.py claude-md "$PROJECT_DIR"
+info "CLAUDE.md memory section updated"
+
 # ── jcodemunch indexing ───────────────────────────────────────────────────────
 info "Indexing project with jcodemunch..."
 if ! python3 scripts/jcodemunch_index.py "$PROJECT_DIR" --timeout=120; then
