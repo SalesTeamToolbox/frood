@@ -2817,6 +2817,152 @@ def create_app(
             logger.error("Learning record failed: %s", e)
             return {"status": "error", "detail": str(e)}
 
+    @app.post("/api/knowledge/learn")
+    async def extract_knowledge(request: Request):
+        """Extract structured learnings from session context via LLM.
+
+        Called by knowledge-learn-worker.py (Stop hook background worker).
+        No authentication required — local hook access only.
+
+        Accepts: {session_summary, tools_used, files_modified, messages_context}
+        Returns: {status, learnings: [{learning_type, category, title, content, confidence}]}
+        """
+        import asyncio as _asyncio_local
+
+        try:
+            data = await request.json()
+            session_summary = data.get("session_summary", "")
+            tools_used = data.get("tools_used", [])
+            files_modified = data.get("files_modified", [])
+            messages_context = data.get("messages_context", [])
+
+            if not session_summary:
+                return {"status": "skipped", "reason": "empty summary", "learnings": []}
+
+            # Pydantic models defined inside the endpoint to avoid module-level import issues
+            from typing import Literal
+
+            from pydantic import BaseModel, Field
+
+            class ExtractedLearning(BaseModel):
+                learning_type: Literal[
+                    "decision", "feedback", "pattern", "correction", "trivial"
+                ] = Field(
+                    description=(
+                        "decision=architectural choice, feedback=user correction, "
+                        "pattern=recurring approach, correction=error fix, trivial=skip"
+                    )
+                )
+                category: str = Field(
+                    description=(
+                        "Category tag. Prefer one of: security, feature, refactor, deploy. "
+                        "Suggest new if truly different."
+                    )
+                )
+                title: str = Field(description="One-line summary of the learning (max 80 chars)")
+                content: str = Field(
+                    description="The durable learning — specific enough to be useful next session"
+                )
+                confidence: float = Field(
+                    ge=0.5,
+                    le=1.0,
+                    description=(
+                        "How clearly expressed: 0.9 for definitive decisions, "
+                        "0.5 for vague patterns"
+                    ),
+                )
+
+            class ExtractionResult(BaseModel):
+                learnings: list[ExtractedLearning] = Field(
+                    description="List of 0-5 learnings. Empty list if session was trivial."
+                )
+
+            # Build context from last 20 messages
+            msg_text = ""
+            for msg in messages_context[-20:]:
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    msg_text += f"[{role}]: {content[:500]}\n"
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            msg_text += f"[{role}]: {block.get('text', '')[:500]}\n"
+
+            prompt = f"""Analyze this development session and extract structured learnings.
+
+Tools used: {", ".join(tools_used)}
+Files modified: {", ".join(files_modified)}
+
+Session summary:
+{session_summary[:2000]}
+
+Recent conversation context:
+{msg_text[:4000]}
+
+Extract 0-5 learnings. For each:
+- learning_type: decision (architectural choice made), feedback (user correction), pattern (recurring approach), correction (error fix), trivial (not worth storing)
+- category: security, feature, refactor, deploy, or suggest a new category
+- title: one-line summary (max 80 chars)
+- content: the durable learning — what should be remembered for future sessions
+- confidence: 0.5 (vague) to 1.0 (definitive)
+
+If the session was trivial or purely mechanical, return an empty list.
+Focus on learnings that would help in future similar sessions."""
+
+            def _sync_extract(prompt_text):
+                try:
+                    import instructor
+                    from openai import OpenAI
+                except ImportError:
+                    return {"learnings": []}
+
+                import os as _os
+
+                # Use Agent42's own provider routing
+                api_key = _os.environ.get("OPENROUTER_API_KEY", "") or _os.environ.get(
+                    "GEMINI_API_KEY", ""
+                )
+                if not api_key:
+                    api_key = _os.environ.get("OPENAI_API_KEY", "")
+                    base_url = None
+                else:
+                    base_url = "https://openrouter.ai/api/v1"
+
+                if not api_key:
+                    return {"learnings": []}
+
+                client_kwargs = {"api_key": api_key}
+                if base_url:
+                    client_kwargs["base_url"] = base_url
+
+                client = instructor.from_openai(OpenAI(**client_kwargs), mode=instructor.Mode.JSON)
+                result = client.chat.completions.create(
+                    model=("google/gemini-2.0-flash-001" if base_url else "gpt-4o-mini"),
+                    response_model=ExtractionResult,
+                    max_retries=2,
+                    messages=[{"role": "user", "content": prompt_text}],
+                )
+                return result.model_dump()
+
+            try:
+                extraction = await _asyncio_local.to_thread(_sync_extract, prompt)
+            except Exception as e:
+                logger.warning("Knowledge extraction failed: %s", e)
+                return {"status": "error", "detail": str(e), "learnings": []}
+
+            # Filter out trivial learnings before returning
+            learnings = [
+                lrn
+                for lrn in extraction.get("learnings", [])
+                if lrn.get("learning_type") != "trivial"
+            ]
+            return {"status": "ok", "learnings": learnings}
+
+        except Exception as e:
+            logger.warning("Knowledge extraction endpoint failed: %s", e)
+            return {"status": "error", "detail": str(e), "learnings": []}
+
     @app.post("/api/ide/chat")
     async def ide_chat(req: ChatRequest, _user: str = Depends(get_current_user)):
         """Send a message to the AI provider and get a response.
