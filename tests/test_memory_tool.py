@@ -190,3 +190,24 @@ class TestMemoryToolSchema:
         assert "section" in props
         assert "content" in props
         assert "event_type" in props
+
+
+class TestMemoryToolConsolidate:
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.store = MemoryStore(self.tmpdir)
+        self.tool = MemoryTool(memory_store=self.store)
+
+    @pytest.mark.asyncio
+    async def test_consolidate_no_qdrant(self):
+        """Consolidate fails gracefully when Qdrant unavailable."""
+        result = await self.tool.execute(action="consolidate")
+        assert not result.success
+        assert "Qdrant" in result.output
+
+    @pytest.mark.asyncio
+    async def test_consolidate_action_in_schema(self):
+        """The consolidate action is listed in the tool schema."""
+        schema = self.tool.parameters
+        actions = schema["properties"]["action"]["enum"]
+        assert "consolidate" in actions

@@ -110,6 +110,7 @@ class MemoryTool(Tool):
                         "correct",
                         "strengthen",
                         "reindex_cc",
+                        "consolidate",
                     ],
                     "description": (
                         "store: save information to MEMORY.md under a section; "
@@ -119,7 +120,8 @@ class MemoryTool(Tool):
                         "forget: remove a section from MEMORY.md and mark forgotten in Qdrant; "
                         "correct: replace content in a memory section; "
                         "strengthen: confirm a recalled memory was useful (boosts confidence); "
-                        "reindex_cc: scan all Claude Code memory files and sync missing ones to Qdrant"
+                        "reindex_cc: scan all Claude Code memory files and sync missing ones to Qdrant; "
+                        "consolidate: run dedup consolidation on Qdrant memory (removes duplicates, flags near-matches)"
                     ),
                 },
                 "section": {
@@ -188,9 +190,11 @@ class MemoryTool(Tool):
             return await self._handle_strengthen(content)
         elif action == "reindex_cc":
             return await self._handle_reindex_cc()
+        elif action == "consolidate":
+            return await self._handle_consolidate()
         else:
             return ToolResult(
-                output=f"Unknown action: {action}. Use store, recall, log, search, forget, correct, strengthen, or reindex_cc.",
+                output=f"Unknown action: {action}. Use store, recall, log, search, forget, correct, strengthen, reindex_cc, or consolidate.",
                 success=False,
             )
 
@@ -279,6 +283,36 @@ class MemoryTool(Tool):
 
             mode = "semantic + file" if semantic_indexed else "file only"
             logger.info("Memory stored (%s): [%s] %s", mode, section, content[:80])
+
+            # Check if consolidation should trigger (fire-and-forget background task)
+            if semantic_indexed:
+                try:
+                    from memory.consolidation_worker import (
+                        increment_entries_since,
+                        should_trigger_consolidation,
+                    )
+
+                    increment_entries_since()
+                    if should_trigger_consolidation():
+                        import asyncio
+                        from memory.consolidation_worker import run_consolidation
+
+                        async def _bg_consolidate():
+                            try:
+                                await asyncio.to_thread(
+                                    run_consolidation, self._store._qdrant
+                                )
+                            except Exception as _bg_err:
+                                logger.warning("Background consolidation failed: %s", _bg_err)
+
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(_bg_consolidate())
+                        except RuntimeError:
+                            pass
+                except Exception:
+                    pass  # Consolidation check is non-critical
+
             return ToolResult(output=f"Stored in memory under '{section}': {content}")
         except Exception as e:
             logger.error("Failed to store memory: %s", e)
@@ -644,3 +678,49 @@ class MemoryTool(Tool):
             result_parts.append(f"Errors: {errors}")
 
         return ToolResult(output="\n".join(result_parts))
+
+    async def _handle_consolidate(self) -> ToolResult:
+        """Trigger an on-demand memory consolidation pass (QUAL-01).
+
+        Scans the Qdrant memory and knowledge collections for near-duplicate
+        vectors (cosine similarity >= CONSOLIDATION_AUTO_THRESHOLD) and removes
+        the lower-confidence duplicate.  Near-duplicates in the
+        [CONSOLIDATION_FLAG_THRESHOLD, auto) range are counted but not deleted.
+        """
+        if not self._store or not self._store._qdrant or not self._store._qdrant.is_available:
+            return ToolResult(
+                output="Qdrant is not available. Consolidation requires Qdrant.",
+                success=False,
+            )
+        try:
+            import asyncio
+
+            from memory.consolidation_worker import run_consolidation
+
+            result = await asyncio.to_thread(run_consolidation, self._store._qdrant)
+            if result.get("error"):
+                return ToolResult(
+                    output=f"Consolidation failed: {result['error']}",
+                    success=False,
+                )
+
+            # Log the consolidation event to Qdrant history (non-critical)
+            if self._store.semantic_available and result["removed"] > 0:
+                try:
+                    await self._store.log_event_semantic(
+                        "consolidation",
+                        f"Removed {result['removed']} duplicates from {', '.join(result.get('collections', []))}",
+                    )
+                except Exception:
+                    pass
+
+            return ToolResult(
+                output=(
+                    f"Consolidation complete: scanned {result['scanned']} entries, "
+                    f"removed {result['removed']} duplicate(s), "
+                    f"flagged {result['flagged']} near-duplicate(s)."
+                )
+            )
+        except Exception as e:
+            logger.error("Consolidation failed: %s", e)
+            return ToolResult(output=f"Consolidation failed: {e}", success=False)
