@@ -21,23 +21,23 @@ last_updated: "2026-03-18T22:13:17.000Z"
 See: .planning/PROJECT.md (updated 2026-03-17)
 
 **Core value:** Agent42 must provide a rich, VS Code-quality Claude Code chat experience in its web IDE
-**Current focus:** Phase 5 — COMPLETE
+**Current focus:** Phase 3 — Tool Use and Sessions (Wave 0 scaffold complete)
 
 ## Current Position
 
-Phase: 5 of 5 (Streaming PTY Bridge — COMPLETE)
-Plan: 3 of 3 in Phase 5 complete
-Status: Phase 5 DONE - All 13 test_cc_pty.py tests GREEN. Pre-warm pool with 5-min idle timeout.
-Last activity: 2026-03-18 — Plan 05-03 complete (pre-warm pool, idle cleanup, ?warm=true integration)
+Phase: 3 of 5 (Tool Use and Sessions — IN PROGRESS)
+Plan: 1 of 5 in Phase 3 complete
+Status: Plan 03-01 DONE - Wave 0 test scaffold with 28 tests (26 xfail, 2 GREEN).
+Last activity: 2026-03-19 — Plan 03-01 complete (test scaffold for TOOL-01..06, SESS-01..06)
 
-Progress: [██████████] 100%
+Progress: [██________] 20%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9
-- Average duration: 7.6 min
-- Total execution time: 69 min
+- Total plans completed: 10
+- Average duration: 7.3 min
+- Total execution time: 73 min
 
 **By Phase:**
 
@@ -46,6 +46,7 @@ Progress: [██████████] 100%
 | 01-backend-ws-bridge | 3/3 DONE | 29 min | 9.7 min  |
 | 02-core-chat-ui      | 5/5 DONE | 27 min | 5.4 min  |
 | 05-streaming-pty     | 3/3 DONE | 39 min | 13.0 min |
+| 03-tool-use-sessions | 1/5      | 4 min  | 4.0 min  |
 
 *Updated after each plan completion*
 
@@ -83,6 +84,8 @@ Progress: [██████████] 100%
 - `hook_response` subtype suppressed from frontend relay (too verbose for UI); `hook_started` emits "Loading {name}..." progress status
 - Warm pool keyed by username (one per user not per tab); atomic pop prevents double-claim
 - ?warm=true opt-in triggers _cc_spawn_warm() background task at WS open; warm session_id injected via --resume
+- Phase 3 Wave 0: 28 tests across 10 classes; xfail(strict=False) for all unimplemented features; TestParseToolResultFixture passes GREEN (fixture validation)
+- Phase 3 NDJSON fixture: cc_tool_result_sample.ndjson with Read + Bash tool_result content blocks for _parse_cc_event unit testing
 
 ### Roadmap Evolution
 
@@ -100,6 +103,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-18
-Stopped at: Plan 05-03 complete - pre-warm pool with `_cc_spawn_warm()`, `_cc_prewarm_idle_task()`, ?warm=true integration. All 13 test_cc_pty.py GREEN. Phase 5 COMPLETE.
+Last session: 2026-03-19
+Stopped at: Plan 03-01 complete - Wave 0 test scaffold with 28 tests (26 xfail, 2 GREEN) covering TOOL-01..06, SESS-01..06. Ready for Plan 03-02.
 Resume file: None
