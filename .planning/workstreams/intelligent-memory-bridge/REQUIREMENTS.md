@@ -22,9 +22,9 @@
 
 ### CLAUDE.md Integration
 
-- [ ] **INTEG-01**: CLAUDE.md instructs Claude to use `agent42_memory search` before answering from memory
-- [ ] **INTEG-02**: CLAUDE.md instructs Claude to use `agent42_memory store` alongside its built-in memory writes
-- [ ] **INTEG-03**: Setup.sh generates CLAUDE.md memory section automatically when Agent42 is installed
+- [x] **INTEG-01**: CLAUDE.md instructs Claude to use `agent42_memory search` before answering from memory
+- [x] **INTEG-02**: CLAUDE.md instructs Claude to use `agent42_memory store` alongside its built-in memory writes
+- [x] **INTEG-03**: Setup.sh generates CLAUDE.md memory section automatically when Agent42 is installed
 
 ### Memory Quality
 
@@ -53,9 +53,9 @@
 | LEARN-03 | Phase 2 | Pending |
 | LEARN-04 | Phase 2 | Pending |
 | LEARN-05 | Phase 2 | Pending |
-| INTEG-01 | Phase 3 | Pending |
-| INTEG-02 | Phase 3 | Pending |
-| INTEG-03 | Phase 3 | Pending |
+| INTEG-01 | Phase 3 | Complete |
+| INTEG-02 | Phase 3 | Complete |
+| INTEG-03 | Phase 3 | Complete |
 | QUAL-01 | Phase 4 | Pending |
 | QUAL-02 | Phase 4 | Pending |
 
@@ -66,4 +66,4 @@
 
 ---
 *Requirements defined: 2026-03-18*
-*Last updated: 2026-03-18 after roadmap created*
+*Last updated: 2026-03-19 after Phase 3 Plan 01 complete (INTEG-01, INTEG-02, INTEG-03)*

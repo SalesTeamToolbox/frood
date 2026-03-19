@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Auto-Sync Hook** - Intercept CC memory writes and sync to Qdrant automatically
 - [x] **Phase 2: Intelligent Learning** - Extract structured learnings from conversation context at session end (completed 2026-03-19)
-- [ ] **Phase 3: CLAUDE.md Integration** - Steer Claude to use Agent42 memory via instructions and setup automation
+- [x] **Phase 3: CLAUDE.md Integration** - Steer Claude to use Agent42 memory via instructions and setup automation (completed 2026-03-19)
 - [ ] **Phase 4: Memory Quality** - Keep Qdrant store clean with dedup, consolidation, and confidence scoring
 
 ## Phase Details
@@ -50,9 +50,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. CLAUDE.md contains instructions that direct Claude to call `agent42_memory search` before answering from its own flat-file memory
   2. CLAUDE.md contains instructions that direct Claude to call `agent42_memory store` alongside its built-in memory write operations
   3. Running setup.sh on a fresh Agent42 installation produces a CLAUDE.md that contains both memory instructions without any manual editing
-**Plans**: 1 plan
+**Plans**: 1/1 complete
+
 Plans:
-- [ ] 03-01-PLAN.md -- Memory instructions template, setup_helpers function, setup.sh wiring
+
+- [x] 03-01-PLAN.md -- Memory instructions template, setup_helpers function, setup.sh wiring (complete)
 
 ### Phase 4: Memory Quality
 **Goal**: The Agent42 Qdrant memory store remains accurate and navigable over time — duplicates are removed, related entries are merged, and search results are ranked by proven relevance
@@ -72,5 +74,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 |-------|----------------|--------|-----------|
 | 1. Auto-Sync Hook | 2/2 | Complete | 2026-03-18 |
 | 2. Intelligent Learning | 2/2 | Complete | 2026-03-19 |
-| 3. CLAUDE.md Integration | 0/1 | Planning complete | - |
+| 3. CLAUDE.md Integration | 1/1 | Complete | 2026-03-19 |
 | 4. Memory Quality | 0/TBD | Not started | - |
