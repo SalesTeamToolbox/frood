@@ -4134,7 +4134,11 @@ function ccMakeWsHandler(tab, msgs) {
         finalEl.insertAdjacentHTML("afterbegin", DOMPurify.sanitize(rendered));
         finalEl.classList.remove("cc-streaming-body");
       }
-      // NOTE: token accumulation added by Plan 03-05 Task 1 here
+      // SESS-06: accumulate token usage
+      tab.totalInputTokens += (msgData.input_tokens || 0);
+      tab.totalOutputTokens += (msgData.output_tokens || 0);
+      tab.totalCostUsd += (msgData.cost_usd || 0);
+      ccUpdateTokenBar(tab);
       ccSetSendingState(tab, false);
       if (tab.autoScroll && msgs) requestAnimationFrame(function() {
         msgs.scrollTop = msgs.scrollHeight;
@@ -4163,6 +4167,41 @@ function ccMakeWsHandler(tab, msgs) {
   };
 }
 
+// -- CC Session Management (SESS-01 through SESS-06) --------------------------
+
+function ccGetStoredSessionId() {
+  try { return sessionStorage.getItem("cc_active_session") || ""; } catch(e) { return ""; }
+}
+
+function ccStoreSessionId(sessionId) {
+  try { sessionStorage.setItem("cc_active_session", sessionId); } catch(e) {}
+}
+
+function ccRelativeTime(isoString) {
+  if (!isoString) return "";
+  var now = Date.now();
+  var then = new Date(isoString).getTime();
+  var diff = Math.floor((now - then) / 1000);
+  if (diff < 60) return "just now";
+  if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+  if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+  if (diff < 172800) return "yesterday";
+  return Math.floor(diff / 86400) + "d ago";
+}
+
+function ccFormatTokens(n) {
+  if (typeof n !== "number" || isNaN(n)) return "0";
+  return n >= 1000 ? (n / 1000).toFixed(1) + "K" : String(n);
+}
+
+function ccUpdateTokenBar(tab) {
+  var bar = document.getElementById("cc-token-bar-" + tab.tabIdx);
+  if (!bar) return;
+  bar.textContent = "In: " + ccFormatTokens(tab.totalInputTokens)
+    + "  Out: " + ccFormatTokens(tab.totalOutputTokens)
+    + "  Cost: $" + (tab.totalCostUsd || 0).toFixed(4);
+}
+
 function ideOpenCCChat(node) {
   node = node || "local";
   _ccTabCounter++;
@@ -4171,10 +4210,19 @@ function ideOpenCCChat(node) {
   var ccContainer = document.getElementById("ide-cc-container");
   if (!ccContainer) return;
 
-  // Session ID for /ws/cc-chat query param (crypto.randomUUID with fallback)
-  var sessionId = (typeof crypto !== "undefined" && crypto.randomUUID)
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  // SESS-01/02: restore session from sessionStorage on page refresh
+  var storedSession = ccGetStoredSessionId();
+  var sessionResumed = false;
+  var sessionId;
+  if (storedSession && _ccTabCounter === 1) {
+    sessionId = storedSession;
+    sessionResumed = true;
+  } else {
+    sessionId = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+  ccStoreSessionId(sessionId);
 
   // Build chat panel DOM using safe DOM methods
   var chatDiv = document.createElement("div");
@@ -4186,6 +4234,13 @@ function ideOpenCCChat(node) {
   var headerLabel = document.createElement("span");
   headerLabel.textContent = "Claude Code";
   header.appendChild(headerLabel);
+
+  var historyBtn = document.createElement("button");
+  historyBtn.className = "cc-history-btn";
+  historyBtn.textContent = "\uD83D\uDCCB";
+  historyBtn.title = "Session History";
+  historyBtn.setAttribute("onclick", "ccToggleSessionSidebar(" + tabIdx + ")");
+  header.appendChild(historyBtn);
 
   var trustToggle = document.createElement("button");
   trustToggle.className = "cc-trust-toggle";
@@ -4201,6 +4256,43 @@ function ideOpenCCChat(node) {
   header.appendChild(trustIndicator);
 
   chatDiv.appendChild(header);
+
+  // SESS-03: session tab strip
+  var tabStrip = document.createElement("div");
+  tabStrip.className = "cc-tab-strip";
+  tabStrip.id = "cc-tab-strip-" + tabIdx;
+  var sessionTab = document.createElement("div");
+  sessionTab.className = "cc-session-tab cc-session-tab-active";
+  sessionTab.textContent = label;
+  tabStrip.appendChild(sessionTab);
+  var tabAddBtn = document.createElement("button");
+  tabAddBtn.className = "cc-tab-add";
+  tabAddBtn.textContent = "+";
+  tabAddBtn.title = "New session";
+  tabAddBtn.setAttribute("onclick", "ideOpenCCChat('local')");
+  tabStrip.appendChild(tabAddBtn);
+  chatDiv.appendChild(tabStrip);
+
+  // SESS-06: token usage bar
+  var tokenBar = document.createElement("div");
+  tokenBar.className = "cc-token-bar";
+  tokenBar.id = "cc-token-bar-" + tabIdx;
+  tokenBar.textContent = "In: 0  Out: 0  Cost: $0.0000";
+  chatDiv.appendChild(tokenBar);
+
+  // SESS-04/05: session history sidebar (hidden by default)
+  var sessionSidebar = document.createElement("div");
+  sessionSidebar.className = "cc-session-sidebar";
+  sessionSidebar.id = "cc-session-sidebar-" + tabIdx;
+  sessionSidebar.style.display = "none";
+  var sidebarHeader = document.createElement("div");
+  sidebarHeader.className = "cc-session-sidebar-header";
+  sidebarHeader.textContent = "Session History";
+  sessionSidebar.appendChild(sidebarHeader);
+  var sessionList = document.createElement("div");
+  sessionList.className = "cc-session-list";
+  sessionSidebar.appendChild(sessionList);
+  chatDiv.appendChild(sessionSidebar);
 
   var messagesDiv = document.createElement("div");
   messagesDiv.className = "cc-chat-messages";
@@ -4271,6 +4363,9 @@ function ideOpenCCChat(node) {
     _scrollListenerAttached: false,
     toolCards: {},  // Map of tool_id to {el, inputBuf, name, status}
     trustMode: false,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCostUsd: 0,
   };
   _ideTabs.push(tab);
   _ideActiveTab = _ideTabs.length - 1;
@@ -4292,6 +4387,12 @@ function ideOpenCCChat(node) {
     notice.style.cssText = "color:var(--text-muted);font-size:0.8rem;padding:0.5rem 0;text-align:center";
     notice.textContent = "Claude Code connected";
     messagesDiv.appendChild(notice);
+    if (sessionResumed) {
+      var resumeNotice = document.createElement("div");
+      resumeNotice.style.cssText = "color:var(--success,#22c55e);font-size:0.8rem;padding:0.5rem 0;text-align:center";
+      resumeNotice.textContent = "Session resumed \u2014 context preserved";
+      messagesDiv.appendChild(resumeNotice);
+    }
   };
 
   ws.onmessage = ccMakeWsHandler(tab, messagesDiv);
