@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-03-17)
 
 ## Current Position
 
-Phase: 3 of 5 (Tool Use and Sessions — IN PROGRESS)
-Plan: 4 of 5 in Phase 3 complete
-Status: Plan 03-04 DONE - Permission request UI: ccCreatePermissionCard, ccResolvePermission, ccToggleTrustMode, permission_request WS handler, trust mode toggle + CSS.
-Last activity: 2026-03-19 — Plan 03-04 complete (permission cards JS + CSS, all TestPermissionRequest XPASS)
+Phase: 3 of 5 (Tool Use and Sessions — COMPLETE)
+Plan: 5 of 5 in Phase 3 complete
+Status: Plan 03-05 DONE - Session management: sessionStorage persistence, tab strip, session sidebar, ccResumeSession (reuses ccMakeWsHandler), token bar. All SESS-01 through SESS-06 complete.
+Last activity: 2026-03-19 — Plan 03-05 complete (session persistence, tab strip, sidebar, token bar — all TestSessionPersistence, TestMultiSessionTabs, TestSessionSidebar, TestTokenBar XPASS)
 
-Progress: [████▌_____] 48%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -46,7 +46,7 @@ Progress: [████▌_____] 48%
 | 01-backend-ws-bridge | 3/3 DONE | 29 min | 9.7 min  |
 | 02-core-chat-ui      | 5/5 DONE | 27 min | 5.4 min  |
 | 05-streaming-pty     | 3/3 DONE | 39 min | 13.0 min |
-| 03-tool-use-sessions | 4/5      | 39 min | 9.75 min |
+| 03-tool-use-sessions | 5/5 DONE | 49 min | 9.8 min  |
 
 *Updated after each plan completion*
 
@@ -96,6 +96,10 @@ Progress: [████▌_____] 48%
 - Trust mode is per-tab (tab.trustMode) not global — isolates trust scope to individual CC sessions
 - Auto-approve in trust mode sends permission_response immediately + brief notice; no full card rendered
 - permission_request WS case needs no tab.toolCards lookup — backend pre-parses input before emitting
+- sessionStorage keyed as cc_active_session; first tab only restores (tabCounter===1) to avoid cross-tab conflicts
+- ccResumeSession reuses ccMakeWsHandler factory — no handler duplication, consistent with Plan 03-03 architecture
+- Session sidebar hidden by default; ccToggleSessionSidebar lazy-loads sessions on first open
+- Token accumulation is client-side only per session; resets on ccResumeSession
 
 ### Roadmap Evolution
 
@@ -114,5 +118,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-19
-Stopped at: Plan 03-04 complete - permission request UI (ccCreatePermissionCard, ccResolvePermission, ccToggleTrustMode, permission_request WS handler) + CSS. All TestPermissionRequest XPASS. Ready for Plan 03-05.
+Stopped at: Plan 03-05 complete - session management (sessionStorage persistence, tab strip, session sidebar, ccResumeSession using ccMakeWsHandler, token bar). All SESS-01 through SESS-06 XPASS. Phase 3 complete.
 Resume file: None

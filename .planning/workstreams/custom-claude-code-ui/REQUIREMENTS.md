@@ -46,12 +46,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Session Management
 
-- [ ] **SESS-01**: Each CC conversation has a unique session ID tied to the CC process session
-- [ ] **SESS-02**: Session ID persists in sessionStorage so page navigation doesn't lose context
-- [ ] **SESS-03**: User can open multiple CC sessions as separate tabs
-- [ ] **SESS-04**: Session history sidebar lists past conversations with timestamps and preview
-- [ ] **SESS-05**: User can resume a past session from the history list
-- [ ] **SESS-06**: Token usage display shows context window utilization per session
+- [x] **SESS-01**: Each CC conversation has a unique session ID tied to the CC process session
+- [x] **SESS-02**: Session ID persists in sessionStorage so page navigation doesn't lose context
+- [x] **SESS-03**: User can open multiple CC sessions as separate tabs
+- [x] **SESS-04**: Session history sidebar lists past conversations with timestamps and preview
+- [x] **SESS-05**: User can resume a past session from the history list
+- [x] **SESS-06**: Token usage display shows context window utilization per session
 
 ### Layout
 
@@ -124,12 +124,12 @@ Deferred to future release. Tracked but not in current roadmap.
 | TOOL-04 | Phase 3 | Pending |
 | TOOL-05 | Phase 3 | Pending |
 | TOOL-06 | Phase 3 | Complete |
-| SESS-01 | Phase 3 | Pending |
-| SESS-02 | Phase 3 | Pending |
-| SESS-03 | Phase 3 | Pending |
-| SESS-04 | Phase 3 | Pending |
-| SESS-05 | Phase 3 | Pending |
-| SESS-06 | Phase 3 | Pending |
+| SESS-01 | Phase 3 | Complete |
+| SESS-02 | Phase 3 | Complete |
+| SESS-03 | Phase 3 | Complete |
+| SESS-04 | Phase 3 | Complete |
+| SESS-05 | Phase 3 | Complete |
+| SESS-06 | Phase 3 | Complete |
 | LAYOUT-01 | Phase 4 | Pending |
 | LAYOUT-02 | Phase 4 | Pending |
 | LAYOUT-03 | Phase 4 | Pending |

@@ -38,7 +38,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Backend WS Bridge** - WebSocket endpoint that spawns CC subprocess and relays typed events to the frontend
 - [x] **Phase 2: Core Chat UI** - Streaming chat panel with markdown rendering, sanitization, input box, and scroll-pin
-- [ ] **Phase 3: Tool Use + Sessions** - Tool use cards, permission UI, session persistence, and multi-session tabs
+- [x] **Phase 3: Tool Use + Sessions** - Tool use cards, permission UI, session persistence, and multi-session tabs
 - [ ] **Phase 4: Layout + Diff Viewer** - Tab/panel layout modes, user toggle, and Monaco diff editor integration
 - [ ] **Phase 5: Streaming PTY Bridge** - PTY subprocess for real-time streaming, init progress, pre-warm pool
 
@@ -101,7 +101,7 @@ Plans:
 - [x] 03-02-PLAN.md — Backend: _parse_cc_event tool_result/permission + session metadata extension
 - [x] 03-03-PLAN.md — Frontend: tool card rendering (create/delta/complete/output) + CSS
 - [x] 03-04-PLAN.md — Frontend: permission request UI + trust mode + CSS
-- [ ] 03-05-PLAN.md — Frontend: session persistence, tab strip, sidebar, token bar + CSS
+- [x] 03-05-PLAN.md — Frontend: session persistence, tab strip, sidebar, token bar + CSS
 
 ### Phase 4: Layout + Diff Viewer
 **Goal**: Users can position the CC chat interface as an editor tab or a resizable side panel, and can view code diffs in a Monaco-powered diff editor
