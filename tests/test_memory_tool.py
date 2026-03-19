@@ -211,3 +211,89 @@ class TestMemoryToolConsolidate:
         schema = self.tool.parameters
         actions = schema["properties"]["action"]["enum"]
         assert "consolidate" in actions
+
+
+class TestMemoryToolSearchScoring:
+    """Tests for QUAL-02: search results include confidence scores and recall counts."""
+
+    def setup_method(self):
+        from unittest.mock import AsyncMock, patch  # noqa: F401
+
+        self.tmpdir = tempfile.mkdtemp()
+        self.store = MemoryStore(self.tmpdir)
+        self.tool = MemoryTool(memory_store=self.store)
+
+    @pytest.mark.asyncio
+    async def test_search_shows_relevance_label(self):
+        """Search output uses 'relevance=' for lifecycle-adjusted results."""
+        from unittest.mock import AsyncMock, patch
+
+        mock_hits = [
+            {
+                "text": "User prefers dark mode",
+                "source": "memory",
+                "score": 0.85,
+                "confidence": 0.7,
+                "recall_count": 3,
+            }
+        ]
+        with patch.object(self.store, "semantic_available", True):
+            with patch.object(
+                self.store, "semantic_search", new_callable=AsyncMock, return_value=mock_hits
+            ):
+                result = await self.tool.execute(action="search", content="dark mode")
+        assert "relevance=0.85" in result.output
+
+    @pytest.mark.asyncio
+    async def test_search_shows_confidence_when_present(self):
+        """Confidence is shown even at default value (0.5)."""
+        from unittest.mock import AsyncMock, patch
+
+        mock_hits = [
+            {
+                "text": "Some memory",
+                "source": "memory",
+                "score": 0.75,
+                "confidence": 0.5,
+                "recall_count": 0,
+            }
+        ]
+        with patch.object(self.store, "semantic_available", True):
+            with patch.object(
+                self.store, "semantic_search", new_callable=AsyncMock, return_value=mock_hits
+            ):
+                result = await self.tool.execute(action="search", content="test")
+        assert "conf=0.50" in result.output
+
+    @pytest.mark.asyncio
+    async def test_search_shows_recall_count_zero(self):
+        """recall_count=0 is shown (not hidden because it's falsy)."""
+        from unittest.mock import AsyncMock, patch
+
+        mock_hits = [
+            {
+                "text": "New memory entry",
+                "source": "memory",
+                "score": 0.90,
+                "confidence": 0.5,
+                "recall_count": 0,
+            }
+        ]
+        with patch.object(self.store, "semantic_available", True):
+            with patch.object(
+                self.store, "semantic_search", new_callable=AsyncMock, return_value=mock_hits
+            ):
+                result = await self.tool.execute(action="search", content="new")
+        assert "recalls=0" in result.output
+
+    @pytest.mark.asyncio
+    async def test_search_hides_lifecycle_for_keyword(self):
+        """Keyword-only results don't show conf/recalls."""
+        self.store.append_to_section("Facts", "Python is great")
+        result = await self.tool.execute(action="search", content="Python")
+        assert result.success
+        # Keyword results have [keyword] prefix, no conf/recalls
+        for line in result.output.splitlines():
+            if "[keyword]" in line:
+                assert "conf=" not in line
+                assert "recalls=" not in line
