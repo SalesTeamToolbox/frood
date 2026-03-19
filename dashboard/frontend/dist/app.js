@@ -3734,6 +3734,333 @@ function ccAppendThinkingBlock(tab, text) {
 // --- Claude Code as editor tab ---
 var _ccTabCounter = 0;
 
+// -- CC Tool Card Rendering (TOOL-01 through TOOL-05) -------------------------
+
+var _CC_FILE_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "MultiEdit"];
+var _CC_BASH_TOOLS = ["Bash", "bash"];
+
+function ccToolType(name) {
+  if (_CC_FILE_TOOLS.indexOf(name) >= 0) return "file";
+  if (_CC_BASH_TOOLS.indexOf(name) >= 0) return "bash";
+  return "generic";
+}
+
+function ccCreateToolCard(tab, toolId, toolName) {
+  var container = tab.el.querySelector(".cc-chat-messages");
+  if (!container) return null;
+
+  // If streaming text bubble in progress, finalize it first
+  if (tab.streamMsgEl && tab.streamBuffer) {
+    // Render accumulated text via DOMPurify-sanitized markdown
+    tab.streamMsgEl.textContent = tab.streamBuffer;
+    tab.streamMsgEl.classList.remove("cc-streaming-body");
+    tab.streamMsgEl = null;
+    tab.streamBuffer = "";
+  }
+
+  var card = document.createElement("div");
+  card.className = "cc-tool-card cc-tool-running";
+  card.setAttribute("data-tool-id", toolId);
+
+  var header = document.createElement("div");
+  header.className = "cc-tool-header";
+  header.setAttribute("onclick", "ccToggleToolCard(this)");
+
+  var statusIcon = document.createElement("span");
+  statusIcon.className = "cc-tool-status-icon";
+  statusIcon.textContent = "\u23F3";
+  header.appendChild(statusIcon);
+
+  var nameSpan = document.createElement("span");
+  nameSpan.className = "cc-tool-name";
+  nameSpan.textContent = toolName;
+  header.appendChild(nameSpan);
+
+  var targetSpan = document.createElement("span");
+  targetSpan.className = "cc-tool-target";
+  targetSpan.textContent = "";
+  header.appendChild(targetSpan);
+
+  var chevron = document.createElement("span");
+  chevron.className = "cc-tool-chevron";
+  chevron.textContent = "\u25B6";
+  header.appendChild(chevron);
+
+  card.appendChild(header);
+
+  var body = document.createElement("div");
+  body.className = "cc-tool-body";
+  body.style.display = "none";
+  card.appendChild(body);
+
+  container.appendChild(card);
+
+  if (tab.autoScroll) {
+    requestAnimationFrame(function() { container.scrollTop = container.scrollHeight; });
+  }
+
+  return card;
+}
+
+function ccToggleToolCard(headerEl) {
+  var card = headerEl.parentElement;
+  if (!card) return;
+  var body = card.querySelector(".cc-tool-body");
+  if (!body) return;
+  var chevron = card.querySelector(".cc-tool-chevron");
+  if (body.style.display === "none") {
+    body.style.display = "block";
+    if (chevron) chevron.textContent = "\u25BC";
+  } else {
+    body.style.display = "none";
+    if (chevron) chevron.textContent = "\u25B6";
+  }
+}
+
+function ccFinalizeToolCard(cardEl, toolName, parsedInput, isError) {
+  if (!cardEl) return;
+  var ttype = ccToolType(toolName);
+
+  cardEl.classList.remove("cc-tool-running");
+  cardEl.classList.add(isError ? "cc-tool-error" : "cc-tool-complete");
+
+  var icon = cardEl.querySelector(".cc-tool-status-icon");
+  if (icon) icon.textContent = isError ? "\u274C" : "\u2705";
+
+  var targetSpan = cardEl.querySelector(".cc-tool-target");
+  if (targetSpan) {
+    if (ttype === "file") {
+      targetSpan.textContent = parsedInput.file_path || parsedInput.path || parsedInput.pattern || "";
+    } else if (ttype === "bash") {
+      var cmd = parsedInput.command || "";
+      targetSpan.textContent = cmd.length > 60 ? cmd.substring(0, 57) + "..." : cmd;
+    }
+  }
+
+  var body = cardEl.querySelector(".cc-tool-body");
+  if (!body) return;
+
+  var inputSection = document.createElement("div");
+  inputSection.className = "cc-tool-input";
+  var inputLabel = document.createElement("div");
+  inputLabel.className = "cc-tool-section-label";
+  inputLabel.textContent = "Input";
+  inputSection.appendChild(inputLabel);
+
+  if (ttype === "bash") {
+    var cmdPre = document.createElement("pre");
+    cmdPre.className = "cc-tool-bash";
+    var cmdCode = document.createElement("code");
+    cmdCode.textContent = parsedInput.command || JSON.stringify(parsedInput, null, 2);
+    cmdPre.appendChild(cmdCode);
+    inputSection.appendChild(cmdPre);
+  } else if (ttype === "file") {
+    var pathDiv = document.createElement("div");
+    pathDiv.className = "cc-tool-file-path";
+    pathDiv.textContent = parsedInput.file_path || parsedInput.path || parsedInput.pattern || "";
+    inputSection.appendChild(pathDiv);
+    var otherKeys = Object.keys(parsedInput).filter(function(k) {
+      return k !== "file_path" && k !== "path";
+    });
+    if (otherKeys.length > 0) {
+      var paramPre = document.createElement("pre");
+      paramPre.className = "cc-tool-params";
+      var filtered = {};
+      otherKeys.forEach(function(k) { filtered[k] = parsedInput[k]; });
+      paramPre.textContent = JSON.stringify(filtered, null, 2);
+      inputSection.appendChild(paramPre);
+    }
+  } else {
+    var paramPre2 = document.createElement("pre");
+    paramPre2.className = "cc-tool-params";
+    paramPre2.textContent = JSON.stringify(parsedInput, null, 2);
+    inputSection.appendChild(paramPre2);
+  }
+
+  body.appendChild(inputSection);
+
+  var outputSection = document.createElement("div");
+  outputSection.className = "cc-tool-output";
+  outputSection.setAttribute("data-tool-id", cardEl.getAttribute("data-tool-id"));
+  body.appendChild(outputSection);
+}
+
+function ccSetToolOutput(toolId, content, contentType) {
+  var outputEl = document.querySelector('.cc-tool-output[data-tool-id="' + toolId + '"]');
+  if (!outputEl) return;
+
+  var outputLabel = document.createElement("div");
+  outputLabel.className = "cc-tool-section-label";
+  outputLabel.textContent = "Output";
+  outputEl.appendChild(outputLabel);
+
+  var card = outputEl.closest(".cc-tool-card");
+  var toolName = "";
+  if (card) {
+    var nameEl = card.querySelector(".cc-tool-name");
+    if (nameEl) toolName = nameEl.textContent;
+  }
+  var ttype = ccToolType(toolName);
+
+  var pre = document.createElement("pre");
+  pre.className = ttype === "bash" ? "cc-tool-bash cc-tool-output-content" : "cc-tool-output-content";
+
+  var maxLines = ttype === "bash" ? 20 : 30;
+  var lines = (content || "").split("\n");
+  var truncated = lines.length > maxLines;
+  var displayContent = truncated ? lines.slice(0, maxLines).join("\n") : content;
+
+  if (ttype === "file" && contentType === "text") {
+    // Syntax highlight via hljs, then sanitize via DOMPurify (CHAT-05 pattern)
+    try {
+      var highlighted = hljs.highlightAuto(displayContent);
+      var sanitized = DOMPurify.sanitize(highlighted.value);
+      pre.insertAdjacentHTML("afterbegin", sanitized);
+    } catch(e) {
+      pre.textContent = displayContent;
+    }
+  } else {
+    pre.textContent = displayContent;
+  }
+
+  outputEl.appendChild(pre);
+
+  if (truncated) {
+    var showMore = document.createElement("button");
+    showMore.className = "cc-tool-show-more";
+    showMore.textContent = "Show " + (lines.length - maxLines) + " more lines";
+    showMore.addEventListener("click", function() {
+      if (ttype === "file") {
+        try {
+          var fullH = hljs.highlightAuto(content);
+          var fullSanitized = DOMPurify.sanitize(fullH.value);
+          pre.textContent = "";
+          pre.insertAdjacentHTML("afterbegin", fullSanitized);
+        } catch(e2) {
+          pre.textContent = content;
+        }
+      } else {
+        pre.textContent = content;
+      }
+      showMore.style.display = "none";
+    });
+    outputEl.appendChild(showMore);
+  }
+}
+
+// -- CC WS Message Handler Factory (shared by ideOpenCCChat + ccResumeSession) --
+
+function ccMakeWsHandler(tab, msgs) {
+  return function(ev) {
+    var data;
+    try { data = JSON.parse(ev.data); } catch(e) { return; }
+    var msgType = data.type;
+    var msgData = data.data || {};
+
+    if (msgType === "tool_start") {
+      var card = ccCreateToolCard(tab, msgData.id, msgData.name);
+      tab.toolCards[msgData.id] = { el: card, inputBuf: "", name: msgData.name, status: "running" };
+
+    } else if (msgType === "tool_delta") {
+      var tc = tab.toolCards[msgData.id];
+      if (tc) { tc.inputBuf += (msgData.partial || ""); }
+
+    } else if (msgType === "tool_complete") {
+      var tc2 = tab.toolCards[msgData.id];
+      if (tc2) {
+        var parsed = {};
+        try { parsed = JSON.parse(tc2.inputBuf); } catch(e) {}
+        ccFinalizeToolCard(tc2.el, tc2.name || msgData.name, parsed, msgData.is_error);
+        tc2.status = msgData.is_error ? "error" : "complete";
+      }
+
+    } else if (msgType === "tool_output") {
+      ccSetToolOutput(msgData.id, msgData.content, msgData.content_type);
+
+    // NOTE: permission_request case added by Plan 03-04 Task 1 here
+
+    } else if (msgType === "text_delta") {
+      var deltaText = (msgData.text || "");
+      if (!tab.streamMsgEl) {
+        var now2 = new Date();
+        var time2 = now2.getHours() + ":" + String(now2.getMinutes()).padStart(2, "0");
+        var msgWrapper = document.createElement("div");
+        msgWrapper.className = "chat-msg chat-msg-agent";
+        var avatarEl = document.createElement("div");
+        avatarEl.className = "chat-avatar chat-avatar-agent";
+        avatarEl.textContent = "CC";
+        msgWrapper.appendChild(avatarEl);
+        var msgContent = document.createElement("div");
+        msgContent.className = "chat-msg-content";
+        var msgHeader = document.createElement("div");
+        msgHeader.className = "chat-msg-header";
+        var senderSpan = document.createElement("span");
+        senderSpan.className = "chat-msg-sender";
+        senderSpan.textContent = "Claude Code";
+        var timeSpan = document.createElement("span");
+        timeSpan.className = "chat-msg-time";
+        timeSpan.textContent = time2;
+        msgHeader.appendChild(senderSpan);
+        msgHeader.appendChild(timeSpan);
+        msgContent.appendChild(msgHeader);
+        var bodyEl = document.createElement("div");
+        bodyEl.className = "chat-msg-body chat-msg-body-agent cc-streaming-body";
+        msgContent.appendChild(bodyEl);
+        msgWrapper.appendChild(msgContent);
+        if (msgs) msgs.appendChild(msgWrapper);
+        tab.streamMsgEl = bodyEl;
+        tab.streamTimer = setInterval(function() {
+          if (tab.streamMsgEl) tab.streamMsgEl.textContent = tab.streamBuffer;
+          if (tab.autoScroll && msgs) requestAnimationFrame(function() {
+            msgs.scrollTop = msgs.scrollHeight;
+          });
+        }, 50);
+      }
+      tab.streamBuffer += deltaText;
+
+    } else if (msgType === "turn_complete") {
+      clearInterval(tab.streamTimer);
+      tab.streamTimer = null;
+      var finalEl = tab.streamMsgEl;
+      var finalBuf = tab.streamBuffer;
+      tab.streamMsgEl = null;
+      tab.streamBuffer = "";
+      tab.toolCards = {};
+      if (finalEl && finalBuf) {
+        var rendered = ccRenderMarkdown(finalBuf);
+        finalEl.textContent = "";
+        finalEl.insertAdjacentHTML("afterbegin", DOMPurify.sanitize(rendered));
+        finalEl.classList.remove("cc-streaming-body");
+      }
+      // NOTE: token accumulation added by Plan 03-05 Task 1 here
+      ccSetSendingState(tab, false);
+      if (tab.autoScroll && msgs) requestAnimationFrame(function() {
+        msgs.scrollTop = msgs.scrollHeight;
+      });
+
+    } else if (msgType === "thinking_complete") {
+      ccAppendThinkingBlock(tab, msgData.text || "");
+
+    } else if (msgType === "error") {
+      clearInterval(tab.streamTimer);
+      tab.streamTimer = null;
+      tab.streamBuffer = "";
+      tab.streamMsgEl = null;
+      ccSetSendingState(tab, false);
+      var errDiv = document.createElement("div");
+      errDiv.style.cssText = "color:var(--danger,#ef4444);padding:0.5rem;font-size:0.85rem";
+      errDiv.textContent = "Error: " + (msgData.message || "Unknown error");
+      if (msgs) msgs.appendChild(errDiv);
+
+    } else if (msgType === "status") {
+      var statusDiv = document.createElement("div");
+      statusDiv.style.cssText = "color:var(--text-muted);font-size:0.78rem;padding:0.25rem 0;text-align:center;font-style:italic";
+      statusDiv.textContent = msgData.message || "";
+      if (msgs) msgs.appendChild(statusDiv);
+    }
+  };
+}
+
 function ideOpenCCChat(node) {
   node = node || "local";
   _ccTabCounter++;
@@ -3826,6 +4153,7 @@ function ideOpenCCChat(node) {
     streamTimer: null,
     ccSessionId: sessionId,
     _scrollListenerAttached: false,
+    toolCards: {},  // Map of tool_id to {el, inputBuf, name, status}
   };
   _ideTabs.push(tab);
   _ideActiveTab = _ideTabs.length - 1;
@@ -3849,94 +4177,7 @@ function ideOpenCCChat(node) {
     messagesDiv.appendChild(notice);
   };
 
-  ws.onmessage = function(ev) {
-    var data;
-    try { data = JSON.parse(ev.data); } catch(e) { return; }
-    var msgType = data.type;
-    var msgData = data.data || {};
-
-    if (msgType === "text_delta") {
-      var deltaText = (msgData.text || "");
-      if (!tab.streamMsgEl) {
-        // First text_delta: create streaming bubble (CHAT-02)
-        var now = new Date();
-        var time = now.getHours() + ":" + String(now.getMinutes()).padStart(2, "0");
-        var msgWrapper = document.createElement("div");
-        msgWrapper.className = "chat-msg chat-msg-agent";
-        var avatarEl = document.createElement("div");
-        avatarEl.className = "chat-avatar chat-avatar-agent";
-        avatarEl.textContent = "CC";
-        msgWrapper.appendChild(avatarEl);
-        var msgContent = document.createElement("div");
-        msgContent.className = "chat-msg-content";
-        var msgHeader = document.createElement("div");
-        msgHeader.className = "chat-msg-header";
-        var senderSpan = document.createElement("span");
-        senderSpan.className = "chat-msg-sender";
-        senderSpan.textContent = "Claude Code";
-        var timeSpan = document.createElement("span");
-        timeSpan.className = "chat-msg-time";
-        timeSpan.textContent = time;
-        msgHeader.appendChild(senderSpan);
-        msgHeader.appendChild(timeSpan);
-        msgContent.appendChild(msgHeader);
-        var bodyEl = document.createElement("div");
-        bodyEl.className = "chat-msg-body chat-msg-body-agent cc-streaming-body";
-        bodyEl.id = "cc-stream-body-" + tabIdx;
-        msgContent.appendChild(bodyEl);
-        msgWrapper.appendChild(msgContent);
-        messagesDiv.appendChild(msgWrapper);
-        tab.streamMsgEl = bodyEl;
-        // 50ms batched flush timer (CHAT-06 append-only DOM)
-        tab.streamTimer = setInterval(function() {
-          if (tab.streamMsgEl) tab.streamMsgEl.textContent = tab.streamBuffer;
-          if (tab.autoScroll) requestAnimationFrame(function() {
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-          });
-        }, 50);
-      }
-      tab.streamBuffer += deltaText;
-
-    } else if (msgType === "turn_complete") {
-      clearInterval(tab.streamTimer);
-      tab.streamTimer = null;
-      // Guard: tool-only turns emit turn_complete with no preceding text_delta (Pitfall 4)
-      var finalEl = tab.streamMsgEl;
-      var finalBuf = tab.streamBuffer;
-      // Null FIRST so any queued interval tick's guard (if tab.streamMsgEl) fires safely
-      tab.streamMsgEl = null;
-      tab.streamBuffer = "";
-      if (finalEl && finalBuf) {
-        // Safe: ccRenderMarkdown always returns DOMPurify.sanitize() output (CHAT-05)
-        finalEl.innerHTML = ccRenderMarkdown(finalBuf);
-        finalEl.classList.remove("cc-streaming-body");
-      }
-      ccSetSendingState(tab, false);
-      if (tab.autoScroll) requestAnimationFrame(function() {
-        messagesDiv.scrollTop = messagesDiv.scrollHeight;
-      });
-
-    } else if (msgType === "thinking_complete") {
-      ccAppendThinkingBlock(tab, msgData.text || "");
-
-    } else if (msgType === "error") {
-      clearInterval(tab.streamTimer);
-      tab.streamTimer = null;
-      tab.streamBuffer = "";
-      tab.streamMsgEl = null;
-      ccSetSendingState(tab, false);
-      var errDiv = document.createElement("div");
-      errDiv.style.cssText = "color:var(--danger,#ef4444);padding:0.5rem;font-size:0.85rem";
-      errDiv.textContent = "Error: " + (msgData.message || "Unknown error");
-      messagesDiv.appendChild(errDiv);
-
-    } else if (msgType === "status") {
-      var statusDiv = document.createElement("div");
-      statusDiv.style.cssText = "color:var(--text-muted);font-size:0.78rem;padding:0.25rem 0;text-align:center;font-style:italic";
-      statusDiv.textContent = msgData.message || "";
-      messagesDiv.appendChild(statusDiv);
-    }
-  };
+  ws.onmessage = ccMakeWsHandler(tab, messagesDiv);
 
   ws.onclose = function() {
     clearInterval(tab.streamTimer);
