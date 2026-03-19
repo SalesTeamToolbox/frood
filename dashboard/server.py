@@ -1902,6 +1902,9 @@ def create_app(
     async def _start_warm_pool_cleanup():
         _asyncio.create_task(_cc_prewarm_idle_task())
 
+    # Constant: MCP tool name CC uses when requesting user permission
+    _CC_PERMISSION_TOOL = "mcp__agent42__cc_permission"
+
     def _parse_cc_event(event: dict, tool_id_map: dict, session_state: dict) -> list:
         """Translate one CC NDJSON event into WS envelope dicts.
 
@@ -1939,11 +1942,33 @@ def create_app(
             if raw_type == "content_block_start":
                 cb = raw.get("content_block", {})
                 if cb.get("type") == "tool_use":
-                    tool_id_map[index] = {"id": cb["id"], "name": cb["name"]}
+                    tool_name = cb.get("name", "")
+                    tool_id = cb.get("id", "")
+                    is_perm = tool_name == _CC_PERMISSION_TOOL
+                    tool_id_map[index] = {
+                        "id": tool_id,
+                        "name": tool_name,
+                        "input_buf": "",
+                        "is_permission": is_perm,
+                    }
+                    if not is_perm:
+                        envelopes.append(
+                            {
+                                "type": "tool_start",
+                                "data": {"id": tool_id, "name": tool_name, "input": {}},
+                            }
+                        )
+                    # Permission tool: no envelope yet — wait for input_json_delta + content_block_stop
+                elif cb.get("type") == "tool_result":
+                    # TOOL-03: Relay tool output to frontend so tool cards can show result content
                     envelopes.append(
                         {
-                            "type": "tool_start",
-                            "data": {"id": cb["id"], "name": cb["name"], "input": {}},
+                            "type": "tool_output",
+                            "data": {
+                                "id": cb.get("tool_use_id", ""),
+                                "content": cb.get("content", ""),
+                                "content_type": "text",
+                            },
                         }
                     )
             elif raw_type == "content_block_delta":
@@ -1956,27 +1981,56 @@ def create_app(
                         }
                     )
                 elif delta.get("type") == "input_json_delta":
-                    t = tool_id_map.get(index, {})
-                    envelopes.append(
-                        {
-                            "type": "tool_delta",
-                            "data": {"id": t.get("id"), "partial": delta.get("partial_json", "")},
-                        }
-                    )
+                    partial = delta.get("partial_json", "")
+                    if index in tool_id_map:
+                        tool_id_map[index]["input_buf"] = (
+                            tool_id_map[index].get("input_buf", "") + partial
+                        )
+                        if not tool_id_map[index].get("is_permission"):
+                            envelopes.append(
+                                {
+                                    "type": "tool_delta",
+                                    "data": {
+                                        "id": tool_id_map[index]["id"],
+                                        "partial": partial,
+                                    },
+                                }
+                            )
+                    # Permission tool deltas: silently buffered, not forwarded to frontend
             elif raw_type == "content_block_stop":
                 if index in tool_id_map:
                     t = tool_id_map.pop(index)
-                    envelopes.append(
-                        {
-                            "type": "tool_complete",
-                            "data": {
-                                "id": t.get("id"),
-                                "name": t.get("name"),
-                                "output": "",
-                                "is_error": False,
-                            },
-                        }
-                    )
+                    if t.get("is_permission"):
+                        # Parse accumulated input — now has the full tool input JSON
+                        perm_input = {}
+                        try:
+                            import json as _json_mod
+
+                            perm_input = _json_mod.loads(t.get("input_buf", "{}") or "{}")
+                        except Exception:
+                            pass
+                        envelopes.append(
+                            {
+                                "type": "permission_request",
+                                "data": {
+                                    "id": t["id"],
+                                    "name": t["name"],
+                                    "input": perm_input,
+                                },
+                            }
+                        )
+                    else:
+                        envelopes.append(
+                            {
+                                "type": "tool_complete",
+                                "data": {
+                                    "id": t.get("id"),
+                                    "name": t.get("name"),
+                                    "output": "",
+                                    "is_error": False,
+                                },
+                            }
+                        )
         elif etype == "assistant":
             # Fallback for pipe-buffered stdout: stream_event deltas are block-buffered
             # by Node.js and may not arrive individually. The "assistant" event carries
