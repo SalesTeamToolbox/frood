@@ -1899,3 +1899,137 @@ body.towel-day .dont-panic-watermark {
   cursor: pointer; border-radius: 4px; }
 .ide-mini-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.08); }
 .ide-mini-btn.active { color: var(--text-primary); }
+
+/* -- CC Tool Cards (Phase 3: TOOL-01 through TOOL-05) -- */
+.cc-tool-card {
+  margin: 0.5rem 0;
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 0.85rem;
+}
+
+.cc-tool-card.cc-tool-running {
+  border-left: 3px solid var(--warning, #f59e0b);
+}
+
+.cc-tool-card.cc-tool-complete {
+  border-left: 3px solid var(--success, #22c55e);
+}
+
+.cc-tool-card.cc-tool-error {
+  border-left: 3px solid var(--danger, #ef4444);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.cc-tool-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  background: var(--bg-tertiary, #1a1a2e);
+  user-select: none;
+}
+
+.cc-tool-header:hover {
+  background: var(--bg-hover, #252540);
+}
+
+.cc-tool-status-icon {
+  flex-shrink: 0;
+  font-size: 0.9rem;
+}
+
+.cc-tool-name {
+  font-weight: 600;
+  color: var(--accent, #60a5fa);
+}
+
+.cc-tool-target {
+  color: var(--text-muted, #888);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.cc-tool-chevron {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: var(--text-muted, #888);
+  transition: transform 0.15s ease;
+}
+
+.cc-tool-body {
+  padding: 0.75rem;
+  border-top: 1px solid var(--border-color, #333);
+  background: var(--bg-secondary, #0d0d1a);
+}
+
+.cc-tool-section-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.cc-tool-section-label:first-child {
+  margin-top: 0;
+}
+
+.cc-tool-input pre,
+.cc-tool-output pre {
+  margin: 0;
+  padding: 0.5rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.cc-tool-params {
+  background: var(--bg-tertiary, #1a1a2e);
+  color: var(--text-secondary, #ccc);
+}
+
+.cc-tool-bash {
+  background: #0a0a0a;
+  color: #d4d4d4;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+}
+
+.cc-tool-file-path {
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  color: var(--accent, #60a5fa);
+  font-size: 0.85rem;
+  padding: 0.25rem 0;
+  word-break: break-all;
+}
+
+.cc-tool-output-content {
+  background: var(--bg-tertiary, #1a1a2e);
+  color: var(--text-primary, #e5e5e5);
+}
+
+.cc-tool-show-more {
+  display: inline-block;
+  margin-top: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  background: transparent;
+  color: var(--accent, #60a5fa);
+  border: 1px solid var(--accent, #60a5fa);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.cc-tool-show-more:hover {
+  background: var(--accent, #60a5fa);
+  color: #fff;
+}
