@@ -71,6 +71,85 @@ _STATIC_SERVERS = {
 
 
 # ---------------------------------------------------------------------------
+# CLAUDE.md memory section template
+# ---------------------------------------------------------------------------
+
+_CLAUDE_MD_BEGIN = "<!-- BEGIN AGENT42 MEMORY -->"
+_CLAUDE_MD_END = "<!-- END AGENT42 MEMORY -->"
+
+CLAUDE_MD_TEMPLATE = """\
+<!-- BEGIN AGENT42 MEMORY -->
+## Agent42 Memory
+
+Agent42 provides a persistent, semantically-searchable memory layer via the `agent42_memory`
+MCP tool. These instructions configure Claude Code to use Agent42 as its primary memory system.
+
+### When to search memory
+
+ALWAYS call `agent42_memory` with action `search` before answering any question that
+could draw on past project decisions, user preferences, debugging history, or architectural
+choices. Do not rely solely on your context window or built-in memory files.
+
+```
+agent42_memory(action="search", content="<your query>")
+```
+
+### When to store
+
+After learning something important -- a user preference, a project decision, a fix for
+a recurring bug -- call `agent42_memory` with action `store` IN ADDITION to any
+built-in memory write. This ensures the information is searchable by semantic meaning,
+not just file name.
+
+```
+agent42_memory(action="store", section="<Category>", content="<what to remember>")
+```
+
+### When to log
+
+After completing a significant task or resolving a non-obvious problem, call
+`agent42_memory` with action `log` to record the event in the project timeline.
+
+```
+agent42_memory(action="log", event_type="task_completed", content="<summary>")
+```
+<!-- END AGENT42 MEMORY -->
+"""
+
+
+def generate_claude_md_section(project_dir: str) -> None:
+    """Append or replace the Agent42 memory section in CLAUDE.md.
+
+    If CLAUDE.md does not exist, creates it with a minimal header and the
+    managed section. If it exists, finds the marker pair and replaces
+    everything between them. If markers are not found, appends the section.
+
+    Args:
+        project_dir: Absolute path to the project root.
+    """
+    claude_md_path = os.path.join(project_dir, "CLAUDE.md")
+
+    if os.path.isfile(claude_md_path):
+        with open(claude_md_path, encoding="utf-8") as f:
+            original = f.read()
+    else:
+        original = "# CLAUDE.md\n\n"
+
+    if _CLAUDE_MD_BEGIN in original and _CLAUDE_MD_END in original:
+        before = original[: original.index(_CLAUDE_MD_BEGIN)]
+        after = original[original.index(_CLAUDE_MD_END) + len(_CLAUDE_MD_END) :]
+        # Strip at most one leading newline from after to avoid accumulating blank lines
+        if after.startswith("\n"):
+            after = after[1:]
+        new_content = before + CLAUDE_MD_TEMPLATE + after
+    else:
+        new_content = original.rstrip("\n") + "\n\n" + CLAUDE_MD_TEMPLATE
+
+    with open(claude_md_path, "w", encoding="utf-8") as f:
+        f.write(new_content)
+
+
+# ---------------------------------------------------------------------------
 # read_hook_metadata
 # ---------------------------------------------------------------------------
 
@@ -556,6 +635,15 @@ if __name__ == "__main__":
         healthy_count = sum(1 for r in results if r["healthy"])
         sys.exit(0 if healthy_count >= 3 else 1)
 
+    elif cmd == "claude-md":
+        if len(sys.argv) < 3:
+            print(f"Usage: {sys.argv[0]} claude-md <project_dir>")
+            sys.exit(1)
+        project_dir = sys.argv[2]
+        generate_claude_md_section(project_dir)
+
     else:
-        print(f"Usage: {sys.argv[0]} {{mcp-config|register-hooks|health}} <project_dir> [options]")
+        print(
+            f"Usage: {sys.argv[0]} {{mcp-config|register-hooks|health|claude-md}} <project_dir> [options]"
+        )
         sys.exit(1)
