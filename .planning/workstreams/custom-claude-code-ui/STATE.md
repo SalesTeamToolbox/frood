@@ -26,18 +26,18 @@ See: .planning/PROJECT.md (updated 2026-03-17)
 ## Current Position
 
 Phase: 3 of 5 (Tool Use and Sessions — IN PROGRESS)
-Plan: 2 of 5 in Phase 3 complete
-Status: Plan 03-02 DONE - Backend expanded: tool_output, permission_request, permission WS handlers, session metadata fields.
-Last activity: 2026-03-19 — Plan 03-02 complete (_parse_cc_event expansion + session metadata)
+Plan: 3 of 5 in Phase 3 complete
+Status: Plan 03-03 DONE - Tool card rendering: ccCreateToolCard, ccFinalizeToolCard, ccSetToolOutput, ccMakeWsHandler factory + CSS.
+Last activity: 2026-03-19 — Plan 03-03 complete (tool cards JS + CSS, all TestToolCards and TestToolCardCSS XPASS)
 
-Progress: [███_______] 30%
+Progress: [████______] 40%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
-- Average duration: 7.3 min
-- Total execution time: 73 min
+- Total plans completed: 11
+- Average duration: 7.5 min
+- Total execution time: 82 min
 
 **By Phase:**
 
@@ -46,7 +46,7 @@ Progress: [███_______] 30%
 | 01-backend-ws-bridge | 3/3 DONE | 29 min | 9.7 min  |
 | 02-core-chat-ui      | 5/5 DONE | 27 min | 5.4 min  |
 | 05-streaming-pty     | 3/3 DONE | 39 min | 13.0 min |
-| 03-tool-use-sessions | 2/5      | 22 min | 11.0 min |
+| 03-tool-use-sessions | 3/5      | 31 min | 10.3 min |
 
 *Updated after each plan completion*
 
@@ -89,6 +89,10 @@ Progress: [███_______] 30%
 - permission_request emitted at content_block_stop (not content_block_start) so input is fully parsed before frontend receives it
 - input_buf accumulated for ALL tools in tool_id_map (not just permission tool) to support future tool_complete input enrichment
 - last_assistant_text capped at 200 chars (ring buffer) to bound memory growth across long sessions; first 60 chars saved as preview_text in session JSON
+- ccMakeWsHandler factory extracts all WS dispatch logic from ideOpenCCChat for reuse by ccResumeSession (Plan 03-05)
+- Partial JSON from tool_delta accumulated in inputBuf string; only parsed after tool_complete (avoids Pitfall 2: SyntaxError on partial JSON)
+- tool_output enriches finalized card via data-tool-id selector, decoupled from tool_complete timing
+- ccToolType helper centralizes file/bash/generic detection; toolCards map reset on turn_complete to clear stale references
 
 ### Roadmap Evolution
 
@@ -107,5 +111,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-19
-Stopped at: Plan 03-02 complete - backend expansion with tool_output, permission_request, permission WS handlers, preview_text/message_count session metadata. Ready for Plan 03-03.
+Stopped at: Plan 03-03 complete - tool card rendering (ccCreateToolCard, ccFinalizeToolCard, ccSetToolOutput, ccMakeWsHandler) + CSS. All TestToolCards and TestToolCardCSS XPASS. Ready for Plan 03-04.
 Resume file: None
