@@ -3535,6 +3535,25 @@ Focus on learnings that would help in future similar sessions."""
             pass
         return {"last_sync": None, "total_synced": 0, "last_error": None}
 
+    def _load_consolidation_status() -> dict:
+        """Load memory consolidation status from .agent42/consolidation-status.json."""
+        try:
+            import json as _json
+
+            status_path = Path(settings.workspace or ".") / ".agent42" / "consolidation-status.json"
+            if status_path.exists():
+                return _json.loads(status_path.read_text())
+        except Exception:
+            pass
+        return {
+            "last_run": None,
+            "entries_since": 0,
+            "last_scanned": 0,
+            "last_removed": 0,
+            "last_flagged": 0,
+            "last_error": None,
+        }
+
     @app.get("/api/settings/storage")
     async def get_storage_status(_admin: AuthContext = Depends(require_admin)):
         """Return the active storage backend configuration and live connectivity status."""
@@ -3615,6 +3634,7 @@ Focus on learnings that would help in future similar sessions."""
             effective_mode = "file"
 
         cc_status = _load_cc_sync_status()
+        consolidation_status = _load_consolidation_status()
         return {
             "mode": effective_mode,
             "configured_mode": mode,
@@ -3633,6 +3653,14 @@ Focus on learnings that would help in future similar sessions."""
                 "last_sync": cc_status.get("last_sync"),
                 "total_synced": cc_status.get("total_synced", 0),
                 "last_error": cc_status.get("last_error"),
+            },
+            "consolidation": {
+                "last_run": consolidation_status.get("last_run"),
+                "entries_since": consolidation_status.get("entries_since", 0),
+                "last_scanned": consolidation_status.get("last_scanned", 0),
+                "last_removed": consolidation_status.get("last_removed", 0),
+                "last_flagged": consolidation_status.get("last_flagged", 0),
+                "last_error": consolidation_status.get("last_error"),
             },
         }
 
@@ -3668,6 +3696,28 @@ Focus on learnings that would help in future similar sessions."""
             "installed": installed,
             "errors": errors,
         }
+
+    @app.post("/api/consolidate/trigger")
+    async def trigger_consolidation(_admin: AuthContext = Depends(require_admin)):
+        """Manually trigger memory dedup consolidation.
+
+        Requires admin auth. Runs synchronously and returns stats.
+        """
+        try:
+            # Check if Qdrant is available via the app's memory store
+            memory_store = getattr(app.state, "memory_store", None)
+            qdrant = getattr(memory_store, "_qdrant", None) if memory_store else None
+
+            if not qdrant or not qdrant.is_available:
+                return {"success": False, "error": "Qdrant is not available"}
+
+            from memory.consolidation_worker import run_consolidation
+
+            result = await asyncio.to_thread(run_consolidation, qdrant)
+            return {"success": True, **result}
+        except Exception as e:
+            logger.error("Manual consolidation trigger failed: %s", e)
+            return {"success": False, "error": str(e)}
 
     # -- Channels (Phase 2) ---------------------------------------------------
 
