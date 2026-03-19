@@ -295,13 +295,12 @@ class MemoryTool(Tool):
                     increment_entries_since()
                     if should_trigger_consolidation():
                         import asyncio
+
                         from memory.consolidation_worker import run_consolidation
 
                         async def _bg_consolidate():
                             try:
-                                await asyncio.to_thread(
-                                    run_consolidation, self._store._qdrant
-                                )
+                                await asyncio.to_thread(run_consolidation, self._store._qdrant)
                             except Exception as _bg_err:
                                 logger.warning("Background consolidation failed: %s", _bg_err)
 
@@ -530,14 +529,15 @@ class MemoryTool(Tool):
                     score = hit.get("score", 0)
                     text = hit.get("text", hit.get("summary", ""))
                     source = hit.get("source", "memory")
-                    confidence = hit.get("confidence", "")
-                    recall_count = hit.get("recall_count", "")
-                    # Show lifecycle info if available
-                    meta = f"score={score:.2f}"
-                    if confidence:
-                        meta += f" conf={confidence:.2f}"
-                    if recall_count:
-                        meta += f" recalls={recall_count}"
+                    confidence = hit.get("confidence")
+                    recall_count = hit.get("recall_count")
+                    # Build metadata string — always show lifecycle fields when present
+                    meta_parts = [f"relevance={score:.2f}"]
+                    if confidence is not None:
+                        meta_parts.append(f"conf={confidence:.2f}")
+                    if recall_count is not None:
+                        meta_parts.append(f"recalls={recall_count}")
+                    meta = " ".join(meta_parts)
                     if text:
                         results.append(f"[{source} {meta}] {text.strip()}")
 
