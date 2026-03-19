@@ -2102,6 +2102,11 @@ def create_app(
         session_state: dict = {"cc_session_id": session_data.get("cc_session_id")}
         session_title: str = session_data.get("title", "")
         created_at: str = session_data.get("created_at", _datetime.datetime.utcnow().isoformat())
+        session_state["permission_events"] = {}  # tool_id -> asyncio.Event
+        session_state["permission_results"] = {}  # tool_id -> bool
+        session_state["trust_mode"] = False
+        session_state["message_count"] = session_data.get("message_count", 0)
+        session_state["last_assistant_text"] = ""
 
         # PTY-03: Check for ?warm=true and spawn warm process in background
         warm_requested = websocket.query_params.get("warm", "").lower() in ("true", "1", "yes")
@@ -2121,6 +2126,7 @@ def create_app(
                     continue
                 if not session_title:
                     session_title = user_message[:80]
+                session_state["message_count"] = session_state.get("message_count", 0) + 1
 
                 claude_bin = _shutil.which("claude")
                 if not claude_bin:
@@ -2179,6 +2185,7 @@ def create_app(
                     "--verbose",
                     "--include-partial-messages",
                 ]
+                args += ["--permission-prompt-tool-name", _CC_PERMISSION_TOOL]
                 cc_session_id = session_state.get("cc_session_id")
                 if cc_session_id:
                     args += ["--resume", cc_session_id]
@@ -2278,6 +2285,12 @@ def create_app(
                                         f"CC PTY event type={event.get('type')}, "
                                         f"envelopes={len(envelopes)}"
                                     )
+                                    for env in envelopes:
+                                        if env.get("type") == "text_delta":
+                                            session_state["last_assistant_text"] = (
+                                                session_state.get("last_assistant_text", "")
+                                                + env["data"].get("text", "")
+                                            )[-200:]
                                     for envelope in envelopes:
                                         try:
                                             await websocket.send_json(envelope)
@@ -2333,6 +2346,12 @@ def create_app(
                                         f"CC PTY event type={event.get('type')}, "
                                         f"envelopes={len(envelopes)}"
                                     )
+                                    for env in envelopes:
+                                        if env.get("type") == "text_delta":
+                                            session_state["last_assistant_text"] = (
+                                                session_state.get("last_assistant_text", "")
+                                                + env["data"].get("text", "")
+                                            )[-200:]
                                     for envelope in envelopes:
                                         try:
                                             await websocket.send_json(envelope)
@@ -2359,6 +2378,12 @@ def create_app(
                                 logger.info(
                                     f"CC event type={event.get('type')}, envelopes={len(envelopes)}"
                                 )
+                                for env in envelopes:
+                                    if env.get("type") == "text_delta":
+                                        session_state["last_assistant_text"] = (
+                                            session_state.get("last_assistant_text", "")
+                                            + env["data"].get("text", "")
+                                        )[-200:]
                                 for envelope in envelopes:
                                     try:
                                         await websocket.send_json(envelope)
@@ -2421,6 +2446,15 @@ def create_app(
                                 )
                                 receive_task = None
                                 break
+                            elif inner.get("type") == "permission_response":
+                                perm_id = inner.get("id", "")
+                                approved = inner.get("approved", False)
+                                session_state["permission_results"][perm_id] = approved
+                                evt = session_state["permission_events"].get(perm_id)
+                                if evt:
+                                    evt.set()
+                            elif inner.get("type") == "trust_mode":
+                                session_state["trust_mode"] = inner.get("enabled", False)
                             # Not a stop — re-arm receive and check if read_task also completed
                             receive_task = _asyncio.create_task(_receive_msg())
                             if read_task in done:
@@ -2450,6 +2484,8 @@ def create_app(
                         "created_at": created_at,
                         "last_active_at": _datetime.datetime.utcnow().isoformat(),
                         "title": session_title,
+                        "preview_text": session_state.get("last_assistant_text", "")[:60],
+                        "message_count": session_state.get("message_count", 0),
                     },
                 )
 
