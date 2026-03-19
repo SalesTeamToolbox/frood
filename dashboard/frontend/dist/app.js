@@ -4202,6 +4202,160 @@ function ccUpdateTokenBar(tab) {
     + "  Cost: $" + (tab.totalCostUsd || 0).toFixed(4);
 }
 
+function ccLoadSessionSidebar(tab) {
+  var sidebar = document.getElementById("cc-session-sidebar-" + tab.tabIdx);
+  if (!sidebar) return;
+  var listEl = sidebar.querySelector(".cc-session-list");
+  if (!listEl) return;
+
+  fetch("/api/cc/sessions", {
+    headers: { "Authorization": "Bearer " + (state.token || "") }
+  })
+  .then(function(resp) { return resp.json(); })
+  .then(function(data) {
+    var sessions = (data.sessions || []).sort(function(a, b) {
+      return (b.last_active_at || "").localeCompare(a.last_active_at || "");
+    });
+
+    while (listEl.firstChild) listEl.removeChild(listEl.firstChild);
+
+    var now = new Date();
+    var todayStr = now.toISOString().slice(0, 10);
+    var yesterday = new Date(now.getTime() - 86400000);
+    var yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+    var groups = { "Today": [], "Yesterday": [], "Older": [] };
+    sessions.forEach(function(s) {
+      var dateStr = (s.last_active_at || "").slice(0, 10);
+      if (dateStr === todayStr) groups["Today"].push(s);
+      else if (dateStr === yesterdayStr) groups["Yesterday"].push(s);
+      else groups["Older"].push(s);
+    });
+
+    ["Today", "Yesterday", "Older"].forEach(function(groupName) {
+      var items = groups[groupName];
+      if (items.length === 0) return;
+
+      var groupLabel = document.createElement("div");
+      groupLabel.className = "cc-session-group-label";
+      groupLabel.textContent = groupName;
+      listEl.appendChild(groupLabel);
+
+      items.forEach(function(s) {
+        var entry = document.createElement("div");
+        entry.className = "cc-session-entry";
+        entry.setAttribute("data-session-id", s.ws_session_id || "");
+
+        var title = document.createElement("div");
+        title.className = "cc-session-title";
+        title.textContent = (s.title || "Untitled").substring(0, 30);
+        entry.appendChild(title);
+
+        var meta = document.createElement("div");
+        meta.className = "cc-session-meta";
+        meta.textContent = ccRelativeTime(s.last_active_at)
+          + (s.message_count ? " \u00B7 " + s.message_count + " msgs" : "");
+        entry.appendChild(meta);
+
+        if (s.preview_text) {
+          var preview = document.createElement("div");
+          preview.className = "cc-session-preview";
+          preview.textContent = s.preview_text.substring(0, 60);
+          entry.appendChild(preview);
+        }
+
+        entry.addEventListener("click", function() {
+          ccResumeSession(tab, s.ws_session_id, s.title || "Untitled");
+        });
+
+        listEl.appendChild(entry);
+      });
+    });
+
+    if (sessions.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "cc-session-empty";
+      empty.textContent = "No past sessions";
+      listEl.appendChild(empty);
+    }
+  })
+  .catch(function(err) {
+    console.error("Failed to load CC sessions:", err);
+  });
+}
+
+function ccResumeSession(tab, wsSessionId, title) {
+  if (!wsSessionId) return;
+
+  if (tab.ws && tab.ws.readyState <= 1) {
+    tab.ws.close();
+  }
+
+  tab.ccSessionId = wsSessionId;
+  ccStoreSessionId(wsSessionId);
+
+  var msgs = tab.el.querySelector(".cc-chat-messages");
+  if (msgs) { while (msgs.firstChild) msgs.removeChild(msgs.firstChild); }
+
+  var notice = document.createElement("div");
+  notice.style.cssText = "color:var(--success,#22c55e);font-size:0.8rem;padding:0.5rem 0;text-align:center";
+  notice.textContent = "Session resumed: " + title;
+  if (msgs) msgs.appendChild(notice);
+
+  tab.totalInputTokens = 0;
+  tab.totalOutputTokens = 0;
+  tab.totalCostUsd = 0;
+  ccUpdateTokenBar(tab);
+
+  var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  var wsUrl = protocol + "//" + location.host + "/ws/cc-chat?token="
+    + encodeURIComponent(state.token) + "&session_id=" + encodeURIComponent(wsSessionId);
+  var ws = new WebSocket(wsUrl);
+  tab.ws = ws;
+
+  // Reuse the shared WS handler factory (defined in Plan 03-03)
+  // This prevents handler duplication -- any changes to ccMakeWsHandler
+  // automatically apply to both ideOpenCCChat and ccResumeSession
+  ws.onmessage = ccMakeWsHandler(tab, msgs);
+
+  ws.onopen = function() {
+    var connNotice = document.createElement("div");
+    connNotice.style.cssText = "color:var(--text-muted);font-size:0.8rem;padding:0.5rem 0;text-align:center";
+    connNotice.textContent = "Claude Code reconnected";
+    if (msgs) msgs.appendChild(connNotice);
+  };
+
+  ws.onclose = function() {
+    clearInterval(tab.streamTimer);
+    tab.streamTimer = null;
+    if (tab.streamMsgEl && tab.streamBuffer) {
+      tab.streamMsgEl.textContent = tab.streamBuffer;
+      tab.streamMsgEl.classList.remove("cc-streaming-body");
+      tab.streamBuffer = "";
+      tab.streamMsgEl = null;
+    }
+    ccSetSendingState(tab, false);
+  };
+
+  ws.onerror = function() {
+    var errDiv = document.createElement("div");
+    errDiv.style.cssText = "color:var(--danger,#ef4444);padding:0.5rem;font-size:0.85rem";
+    errDiv.textContent = "WebSocket connection error";
+    if (msgs) msgs.appendChild(errDiv);
+  };
+}
+
+function ccToggleSessionSidebar(tabIdx) {
+  var sidebar = document.getElementById("cc-session-sidebar-" + tabIdx);
+  if (!sidebar) return;
+  var visible = sidebar.style.display !== "none";
+  sidebar.style.display = visible ? "none" : "block";
+  if (!visible) {
+    var tab = ccGetTab(tabIdx);
+    if (tab) ccLoadSessionSidebar(tab);
+  }
+}
+
 function ideOpenCCChat(node) {
   node = node || "local";
   _ccTabCounter++;
