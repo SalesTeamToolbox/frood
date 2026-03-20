@@ -499,6 +499,9 @@ def create_app(
         body = {"error": True, "message": detail, "status": exc.status_code}
         return JSONResponse(status_code=exc.status_code, content=body)
 
+    # Shared imports used by multiple handlers within create_app scope
+    import json as _json
+
     # Apply persisted tool/skill toggle state
     _toggle_state = _load_toggle_state()
     if tool_registry:
@@ -2185,7 +2188,8 @@ def create_app(
                     "--verbose",
                     "--include-partial-messages",
                 ]
-                args += ["--permission-prompt-tool-name", _CC_PERMISSION_TOOL]
+                # Note: --permission-prompt-tool-name removed — not supported in CC CLI v2.x.
+                # Permission prompts are handled via the standard stream-json events.
                 cc_session_id = session_state.get("cc_session_id")
                 if cc_session_id:
                     args += ["--resume", cc_session_id]
@@ -2198,14 +2202,9 @@ def create_app(
 
                 try:
                     if _sys.platform == "win32":
-                        from winpty import PtyProcess as _CCPtyProcess
-
-                        cc_pty_process = _CCPtyProcess.spawn(
-                            args,
-                            cwd=str(workspace),
-                            dimensions=(24, 220),
-                        )
-                        use_cc_pty = True
+                        # Skip winpty on Windows — PIPE mode is more reliable for
+                        # NDJSON relay (winpty readline can hang on slow startup).
+                        pass
                     else:
                         import pty as _cc_pty_mod
                         import subprocess as _cc_subprocess_pty
@@ -2227,12 +2226,18 @@ def create_app(
 
                 if not use_cc_pty:
                     try:
+                        logger.info(
+                            "CC PIPE: spawning subprocess with %d args, cwd=%s",
+                            len(args),
+                            workspace,
+                        )
                         cc_proc = await _asyncio.create_subprocess_exec(
                             *args,
                             stdout=_asyncio.subprocess.PIPE,
                             stderr=_asyncio.subprocess.PIPE,
                             cwd=str(workspace),
                         )
+                        logger.info("CC PIPE: process spawned, pid=%s", cc_proc.pid)
                     except Exception as spawn_err:
                         await websocket.send_json(
                             {
@@ -2362,11 +2367,14 @@ def create_app(
                             logger.error(f"CC _read_stdout (unix PTY) error: {outer_err}")
 
                 else:
-                    # PIPE fallback (PTY-04): identical to pre-PTY implementation
+                    # PIPE fallback (PTY-04): readline loop (more reliable on Windows)
                     async def _read_stdout():
                         try:
-                            logger.info("CC _read_stdout (PIPE): starting async for loop")
-                            async for raw_line in cc_proc.stdout:
+                            logger.info("CC _read_stdout (PIPE): starting readline loop")
+                            while True:
+                                raw_line = await cc_proc.stdout.readline()
+                                if not raw_line:
+                                    break
                                 line = raw_line.decode("utf-8", errors="replace").strip()
                                 if not line:
                                     continue
@@ -2390,7 +2398,7 @@ def create_app(
                                     except Exception as ws_err:
                                         logger.error(f"CC WS send failed: {ws_err}")
                                         return
-                            logger.info("CC _read_stdout (PIPE): async for loop finished")
+                            logger.info("CC _read_stdout (PIPE): readline loop finished")
                         except Exception as read_err:
                             logger.error(f"CC _read_stdout (PIPE) error: {read_err}")
 
@@ -2489,8 +2497,10 @@ def create_app(
                     },
                 )
 
-        except Exception:
+        except WebSocketDisconnect:
             pass
+        except Exception as _cc_outer_err:
+            logger.error("CC chat WS error: %s", _cc_outer_err, exc_info=True)
 
     # -- CC Session REST API ---------------------------------------------------
 
@@ -2632,6 +2642,263 @@ def create_app(
         api_key: str = ""
         model: str = ""
         file_context: str = ""
+
+    # -- Chat Session Management -----------------------------------------------
+
+    import json as _chat_json
+    import time as _chat_time
+    import uuid as _chat_uuid
+
+    import aiofiles as _chat_aiofiles
+
+    _CHAT_SESSIONS_DIR = Path(_os.environ.get("AGENT42_DATA_DIR", ".agent42")) / "chat-sessions"
+    _CHAT_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+    async def _chat_load_sessions(session_type: str = "") -> list[dict]:
+        """Load all chat sessions, optionally filtered by type."""
+        sessions = []
+        if not _CHAT_SESSIONS_DIR.exists():
+            return sessions
+        for f in _CHAT_SESSIONS_DIR.iterdir():
+            if f.suffix == ".json" and not f.stem.endswith("_messages"):
+                try:
+                    async with _chat_aiofiles.open(f) as fh:
+                        s = _chat_json.loads(await fh.read())
+                        if session_type and s.get("session_type") != session_type:
+                            continue
+                        sessions.append(s)
+                except Exception:
+                    continue
+        sessions.sort(key=lambda s: s.get("updated_at", 0), reverse=True)
+        return sessions
+
+    async def _chat_load_session(session_id: str) -> dict | None:
+        path = _CHAT_SESSIONS_DIR / f"{session_id}.json"
+        if not path.exists():
+            return None
+        try:
+            async with _chat_aiofiles.open(path) as fh:
+                return _chat_json.loads(await fh.read())
+        except Exception:
+            return None
+
+    async def _chat_save_session(session: dict):
+        path = _CHAT_SESSIONS_DIR / f"{session['id']}.json"
+        async with _chat_aiofiles.open(path, "w") as fh:
+            await fh.write(_chat_json.dumps(session, indent=2))
+
+    async def _chat_load_messages(session_id: str) -> list[dict]:
+        path = _CHAT_SESSIONS_DIR / f"{session_id}_messages.json"
+        if not path.exists():
+            return []
+        try:
+            async with _chat_aiofiles.open(path) as fh:
+                return _chat_json.loads(await fh.read())
+        except Exception:
+            return []
+
+    async def _chat_save_messages(session_id: str, messages: list[dict]):
+        path = _CHAT_SESSIONS_DIR / f"{session_id}_messages.json"
+        async with _chat_aiofiles.open(path, "w") as fh:
+            await fh.write(_chat_json.dumps(messages, indent=2))
+
+    @app.get("/api/chat/messages")
+    async def chat_messages_legacy(_user: str = Depends(get_current_user)):
+        """Get messages for legacy (no-session) chat mode."""
+        return await _chat_load_messages("_legacy")
+
+    @app.get("/api/chat/sessions")
+    async def chat_sessions_list(type: str = "", _user: str = Depends(get_current_user)):
+        """List chat sessions, optionally filtered by type (chat/code)."""
+        return await _chat_load_sessions(type)
+
+    class CreateSessionRequest(BaseModel):
+        title: str = ""
+        session_type: str = "chat"
+
+    @app.post("/api/chat/sessions")
+    async def chat_session_create(
+        req: CreateSessionRequest, _user: str = Depends(get_current_user)
+    ):
+        """Create a new chat/code session."""
+        now = _chat_time.time()
+        session = {
+            "id": str(_chat_uuid.uuid4()),
+            "title": req.title or "New conversation",
+            "session_type": req.session_type,
+            "created_at": now,
+            "updated_at": now,
+            "message_count": 0,
+            "deployment_target": None,
+        }
+        await _chat_save_session(session)
+        return session
+
+    @app.get("/api/chat/sessions/{session_id}/messages")
+    async def chat_session_messages(session_id: str, _user: str = Depends(get_current_user)):
+        """Get all messages for a specific session."""
+        return await _chat_load_messages(session_id)
+
+    class SendMessageRequest(BaseModel):
+        message: str
+
+    @app.post("/api/chat/sessions/{session_id}/send")
+    async def chat_session_send(
+        session_id: str, req: SendMessageRequest, _user: str = Depends(get_current_user)
+    ):
+        """Send a message in a session and get AI response."""
+        session = await _chat_load_session(session_id)
+        if not session:
+            raise HTTPException(404, "Session not found")
+
+        messages = await _chat_load_messages(session_id)
+        now = _chat_time.time()
+
+        # Save user message
+        user_msg = {
+            "id": str(_chat_uuid.uuid4()),
+            "role": "user",
+            "content": req.message,
+            "timestamp": now,
+            "sender": "You",
+            "session_id": session_id,
+        }
+        messages.append(user_msg)
+
+        # Broadcast user message + thinking indicator via WS
+        if ws_manager:
+            await ws_manager.broadcast("chat_message", user_msg)
+            await ws_manager.broadcast(
+                "chat_thinking", {"session_id": session_id, "thinking": True}
+            )
+
+        # Update session title from first message
+        if session.get("message_count", 0) == 0:
+            session["title"] = req.message[:80]
+
+        # Build AI conversation history
+        ai_messages = []
+        for m in messages[-20:]:
+            ai_messages.append({"role": m["role"], "content": m["content"]})
+
+        # Get AI response
+        api_key = _os.environ.get("ANTHROPIC_API_KEY", "")
+        provider_url = _os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+        model = _os.environ.get("CHAT_MODEL", "claude-sonnet-4-5-20250514")
+
+        response_text = ""
+        if not api_key:
+            response_text = (
+                "No API key configured. Set `ANTHROPIC_API_KEY` in your `.env` file "
+                "or configure it in Dashboard Settings to enable AI chat."
+            )
+        else:
+            # Build system prompt
+            system_parts = [
+                "You are Agent42, an AI assistant. Be helpful, concise, and accurate.",
+                "You can help with coding, debugging, project management, and general questions.",
+            ]
+            persona = _load_persona() if callable(_load_persona) else ""
+            if persona:
+                system_parts.insert(0, persona)
+
+            headers = {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+            body = {
+                "model": model,
+                "max_tokens": 4096,
+                "system": "\n".join(system_parts),
+                "messages": ai_messages,
+            }
+            try:
+                async with _httpx.AsyncClient(timeout=120.0) as client:
+                    url = provider_url.rstrip("/") + "/v1/messages"
+                    resp = await client.post(url, headers=headers, json=body)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        for block in data.get("content", []):
+                            if block.get("type") == "text":
+                                response_text += block.get("text", "")
+                    else:
+                        response_text = f"AI provider error ({resp.status_code}): {resp.text[:200]}"
+            except _httpx.TimeoutException:
+                response_text = "AI provider timed out. Please try again."
+            except Exception as e:
+                response_text = f"Chat error: {e}"
+
+        # Save assistant message
+        assistant_msg = {
+            "id": str(_chat_uuid.uuid4()),
+            "role": "assistant",
+            "content": response_text,
+            "timestamp": _chat_time.time(),
+            "sender": "Agent42",
+            "session_id": session_id,
+        }
+        messages.append(assistant_msg)
+
+        # Update session metadata
+        session["message_count"] = len([m for m in messages if m["role"] == "user"])
+        session["updated_at"] = _chat_time.time()
+        session["preview"] = response_text[:60]
+
+        await _chat_save_messages(session_id, messages)
+        await _chat_save_session(session)
+
+        # Broadcast response + stop thinking via WS
+        if ws_manager:
+            await ws_manager.broadcast("chat_message", assistant_msg)
+            await ws_manager.broadcast(
+                "chat_thinking", {"session_id": session_id, "thinking": False}
+            )
+
+        return {"status": "ok"}
+
+    @app.delete("/api/chat/sessions/{session_id}")
+    async def chat_session_delete(session_id: str, _user: str = Depends(get_current_user)):
+        """Delete a chat session and its messages."""
+        session_path = _CHAT_SESSIONS_DIR / f"{session_id}.json"
+        messages_path = _CHAT_SESSIONS_DIR / f"{session_id}_messages.json"
+        if session_path.exists():
+            session_path.unlink()
+        if messages_path.exists():
+            messages_path.unlink()
+        return {"status": "ok"}
+
+    class SetupRequest(BaseModel):
+        mode: str = "local"
+        runtime: str = "python"
+        app_name: str = ""
+        ssh_host: str = ""
+        github_repo_name: str = ""
+        github_clone_url: str = ""
+        github_private: bool = True
+        repo_id: str = ""
+
+    @app.post("/api/chat/sessions/{session_id}/setup")
+    async def chat_session_setup(
+        session_id: str, req: SetupRequest, _user: str = Depends(get_current_user)
+    ):
+        """Configure deployment target for a code session."""
+        session = await _chat_load_session(session_id)
+        if not session:
+            raise HTTPException(404, "Session not found")
+        session["deployment_target"] = {
+            "mode": req.mode,
+            "runtime": req.runtime,
+            "app_name": req.app_name,
+            "ssh_host": req.ssh_host,
+            "github_repo_name": req.github_repo_name,
+            "github_clone_url": req.github_clone_url,
+            "github_private": req.github_private,
+            "repo_id": req.repo_id,
+        }
+        session["updated_at"] = _chat_time.time()
+        await _chat_save_session(session)
+        return session
 
     # -- Effectiveness Tracking API (EFFT-03: MCP tool tracking) ---------------
 
