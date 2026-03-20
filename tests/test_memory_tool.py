@@ -237,7 +237,9 @@ class TestMemoryToolSearchScoring:
                 "recall_count": 3,
             }
         ]
-        with patch.object(self.store, "semantic_available", True):
+        with patch.object(
+            type(self.store), "semantic_available", new_callable=lambda: property(lambda s: True)
+        ):
             with patch.object(
                 self.store, "semantic_search", new_callable=AsyncMock, return_value=mock_hits
             ):
@@ -258,7 +260,9 @@ class TestMemoryToolSearchScoring:
                 "recall_count": 0,
             }
         ]
-        with patch.object(self.store, "semantic_available", True):
+        with patch.object(
+            type(self.store), "semantic_available", new_callable=lambda: property(lambda s: True)
+        ):
             with patch.object(
                 self.store, "semantic_search", new_callable=AsyncMock, return_value=mock_hits
             ):
@@ -279,7 +283,9 @@ class TestMemoryToolSearchScoring:
                 "recall_count": 0,
             }
         ]
-        with patch.object(self.store, "semantic_available", True):
+        with patch.object(
+            type(self.store), "semantic_available", new_callable=lambda: property(lambda s: True)
+        ):
             with patch.object(
                 self.store, "semantic_search", new_callable=AsyncMock, return_value=mock_hits
             ):
