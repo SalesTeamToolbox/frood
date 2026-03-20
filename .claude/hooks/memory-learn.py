@@ -24,48 +24,116 @@ from pathlib import Path
 
 
 def extract_session_summary(event):
-    """Extract a meaningful summary from the stop event."""
+    """Extract a meaningful summary from the stop event.
+
+    Claude Code Stop events provide: hook_event_name, project_dir, stop_reason,
+    and optionally transcript_summary. They do NOT include tool_results or
+    messages (those were from the old Agent42 standalone pipeline).
+
+    Strategy:
+    1. Use transcript_summary if CC provides it (best quality)
+    2. Use tool_results/messages if present (Agent42 standalone mode)
+    3. Fall back to recent git changes (always available)
+    """
     parts = []
 
-    # Track tools used and files modified
-    tool_results = event.get("tool_results", [])
-    if isinstance(tool_results, list):
-        tools_used = set()
-        files_modified = set()
-        for tr in tool_results:
-            if not isinstance(tr, dict):
-                continue
-            tool_name = tr.get("tool_name", "")
-            if tool_name:
-                tools_used.add(tool_name)
-            tool_input = tr.get("tool_input", {})
-            if isinstance(tool_input, dict):
-                fp = tool_input.get("file_path", "") or tool_input.get("path", "")
-                if fp and tool_name in (
-                    "Write",
-                    "Edit",
-                    "agent42_write_file",
-                    "agent42_edit_file",
-                ):
-                    files_modified.add(os.path.basename(fp))
+    # ── Strategy 1: CC transcript summary (highest quality) ───────────
+    transcript = event.get("transcript_summary", "")
+    if isinstance(transcript, str) and len(transcript.strip()) > 10:
+        parts.append(f"Summary: {transcript.strip()[:300]}")
 
-        if tools_used:
-            parts.append(f"Tools: {', '.join(sorted(tools_used)[:10])}")
-        if files_modified:
-            parts.append(f"Modified: {', '.join(sorted(files_modified)[:10])}")
+    # ── Strategy 2: Agent42 standalone event fields (legacy) ──────────
+    if not parts:
+        tool_results = event.get("tool_results", [])
+        if isinstance(tool_results, list) and tool_results:
+            tools_used = set()
+            files_modified = set()
+            for tr in tool_results:
+                if not isinstance(tr, dict):
+                    continue
+                tool_name = tr.get("tool_name", "")
+                if tool_name:
+                    tools_used.add(tool_name)
+                tool_input = tr.get("tool_input", {})
+                if isinstance(tool_input, dict):
+                    fp = tool_input.get("file_path", "") or tool_input.get("path", "")
+                    if fp and tool_name in (
+                        "Write",
+                        "Edit",
+                        "agent42_write_file",
+                        "agent42_edit_file",
+                    ):
+                        files_modified.add(os.path.basename(fp))
 
-    # Extract last assistant message as summary
-    messages = event.get("messages", [])
-    if isinstance(messages, list):
-        for msg in reversed(messages):
-            if msg.get("role") == "assistant":
-                content = msg.get("content", "")
-                if isinstance(content, str) and len(content) > 20:
-                    first_line = content.split("\n")[0][:200]
-                    parts.append(f"Summary: {first_line}")
-                    break
+            if tools_used:
+                parts.append(f"Tools: {', '.join(sorted(tools_used)[:10])}")
+            if files_modified:
+                parts.append(f"Modified: {', '.join(sorted(files_modified)[:10])}")
+
+        messages = event.get("messages", [])
+        if isinstance(messages, list) and messages:
+            for msg in reversed(messages):
+                if msg.get("role") == "assistant":
+                    content = msg.get("content", "")
+                    if isinstance(content, str) and len(content) > 20:
+                        first_line = content.split("\n")[0][:200]
+                        parts.append(f"Summary: {first_line}")
+                        break
+
+    # ── Strategy 3: Git changes fallback (always works) ───────────────
+    if not parts:
+        parts = _git_summary(event.get("project_dir", "."))
+
+    # ── Include stop reason as metadata ───────────────────────────────
+    stop_reason = event.get("stop_reason", "")
+    if stop_reason and stop_reason != "end_turn":
+        parts.append(f"stop_reason={stop_reason}")
 
     return " | ".join(parts) if parts else ""
+
+
+def _git_summary(project_dir):
+    """Build a session summary from recent git activity."""
+    import subprocess
+
+    parts = []
+    try:
+        # Get files changed since last commit (unstaged + staged)
+        result = subprocess.run(
+            ["git", "diff", "--stat", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=project_dir,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # Last line of --stat is the summary line
+            lines = result.stdout.strip().split("\n")
+            stat_line = lines[-1].strip() if lines else ""
+            changed_files = [l.split("|")[0].strip() for l in lines[:-1] if "|" in l]
+            if changed_files:
+                parts.append(f"Modified: {', '.join(changed_files[:8])}")
+            if stat_line:
+                parts.append(f"Changes: {stat_line}")
+    except Exception:
+        pass
+
+    if not parts:
+        try:
+            # Fall back to most recent commit message
+            result = subprocess.run(
+                ["git", "log", "-1", "--oneline"],
+                capture_output=True,
+                text=True,
+                cwd=project_dir,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                parts.append(f"Last commit: {result.stdout.strip()[:150]}")
+        except Exception:
+            pass
+
+    return parts
 
 
 def main():

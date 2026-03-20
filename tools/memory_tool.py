@@ -109,6 +109,8 @@ class MemoryTool(Tool):
                         "forget",
                         "correct",
                         "strengthen",
+                        "reindex_cc",
+                        "consolidate",
                     ],
                     "description": (
                         "store: save information to MEMORY.md under a section; "
@@ -117,7 +119,9 @@ class MemoryTool(Tool):
                         "search: search memory and history by keyword; "
                         "forget: remove a section from MEMORY.md and mark forgotten in Qdrant; "
                         "correct: replace content in a memory section; "
-                        "strengthen: confirm a recalled memory was useful (boosts confidence)"
+                        "strengthen: confirm a recalled memory was useful (boosts confidence); "
+                        "reindex_cc: scan all Claude Code memory files and sync missing ones to Qdrant; "
+                        "consolidate: run dedup consolidation on Qdrant memory (removes duplicates, flags near-matches)"
                     ),
                 },
                 "section": {
@@ -175,7 +179,7 @@ class MemoryTool(Tool):
         elif action == "recall":
             return self._handle_recall()
         elif action == "log":
-            return self._handle_log(event_type, content)
+            return await self._handle_log(event_type, content)
         elif action == "search":
             return await self._handle_search(content, project)
         elif action == "forget":
@@ -184,9 +188,13 @@ class MemoryTool(Tool):
             return await self._handle_correct(section, content)
         elif action == "strengthen":
             return await self._handle_strengthen(content)
+        elif action == "reindex_cc":
+            return await self._handle_reindex_cc()
+        elif action == "consolidate":
+            return await self._handle_consolidate()
         else:
             return ToolResult(
-                output=f"Unknown action: {action}. Use store, recall, log, search, forget, correct, or strengthen.",
+                output=f"Unknown action: {action}. Use store, recall, log, search, forget, correct, strengthen, reindex_cc, or consolidate.",
                 success=False,
             )
 
@@ -264,8 +272,46 @@ class MemoryTool(Tool):
                 except Exception as e:
                     logger.warning("Semantic indexing failed (stored in flat file): %s", e)
 
+            # 3. Reindex MEMORY.md into Qdrant memory collection
+            # (_schedule_reindex is fire-and-forget and may not complete
+            #  before MCP response is sent — do an explicit await here)
+            if self._store.semantic_available:
+                try:
+                    await self._store.reindex_memory()
+                except Exception as e:
+                    logger.warning("Memory reindex failed (non-critical): %s", e)
+
             mode = "semantic + file" if semantic_indexed else "file only"
             logger.info("Memory stored (%s): [%s] %s", mode, section, content[:80])
+
+            # Check if consolidation should trigger (fire-and-forget background task)
+            if semantic_indexed:
+                try:
+                    from memory.consolidation_worker import (
+                        increment_entries_since,
+                        should_trigger_consolidation,
+                    )
+
+                    increment_entries_since()
+                    if should_trigger_consolidation():
+                        import asyncio
+
+                        from memory.consolidation_worker import run_consolidation
+
+                        async def _bg_consolidate():
+                            try:
+                                await asyncio.to_thread(run_consolidation, self._store._qdrant)
+                            except Exception as _bg_err:
+                                logger.warning("Background consolidation failed: %s", _bg_err)
+
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(_bg_consolidate())
+                        except RuntimeError:
+                            pass
+                except Exception:
+                    pass  # Consolidation check is non-critical
+
             return ToolResult(output=f"Stored in memory under '{section}': {content}")
         except Exception as e:
             logger.error("Failed to store memory: %s", e)
@@ -289,7 +335,7 @@ class MemoryTool(Tool):
                 success=False,
             )
 
-    def _handle_log(self, event_type: str, content: str) -> ToolResult:
+    async def _handle_log(self, event_type: str, content: str) -> ToolResult:
         if not content or not content.strip():
             return ToolResult(
                 output="No content provided. Specify the event summary.",
@@ -299,7 +345,11 @@ class MemoryTool(Tool):
         content = content.strip()
 
         try:
-            self._store.log_event(event_type, content)
+            # Use semantic indexing so history entries get vectorized in Qdrant
+            if self._store.semantic_available:
+                await self._store.log_event_semantic(event_type, content)
+            else:
+                self._store.log_event(event_type, content)
             logger.info("History logged: [%s] %s", event_type, content[:80])
             return ToolResult(output=f"Event logged to history: [{event_type}] {content}")
         except Exception as e:
@@ -479,14 +529,15 @@ class MemoryTool(Tool):
                     score = hit.get("score", 0)
                     text = hit.get("text", hit.get("summary", ""))
                     source = hit.get("source", "memory")
-                    confidence = hit.get("confidence", "")
-                    recall_count = hit.get("recall_count", "")
-                    # Show lifecycle info if available
-                    meta = f"score={score:.2f}"
-                    if confidence:
-                        meta += f" conf={confidence:.2f}"
-                    if recall_count:
-                        meta += f" recalls={recall_count}"
+                    confidence = hit.get("confidence")
+                    recall_count = hit.get("recall_count")
+                    # Build metadata string — always show lifecycle fields when present
+                    meta_parts = [f"relevance={score:.2f}"]
+                    if confidence is not None:
+                        meta_parts.append(f"conf={confidence:.2f}")
+                    if recall_count is not None:
+                        meta_parts.append(f"recalls={recall_count}")
+                    meta = " ".join(meta_parts)
                     if text:
                         results.append(f"[{source} {meta}] {text.strip()}")
 
@@ -521,3 +572,155 @@ class MemoryTool(Tool):
                 error=str(e),
                 success=False,
             )
+
+    async def _handle_reindex_cc(self) -> ToolResult:
+        """Scan all CC memory files for all projects and sync missing ones to Qdrant."""
+        import time
+        import uuid
+        from pathlib import Path
+
+        from memory.embeddings import _find_onnx_model_dir, _OnnxEmbedder
+
+        # Check prerequisites
+        if not self._store or not self._store.semantic_available:
+            return ToolResult(
+                output="Qdrant is not available. Cannot reindex.",
+                success=False,
+            )
+
+        model_dir = _find_onnx_model_dir()
+        if not model_dir:
+            return ToolResult(
+                output="ONNX model not found. Cannot generate embeddings for reindex.",
+                success=False,
+            )
+
+        try:
+            embedder = _OnnxEmbedder(model_dir)
+        except Exception as e:
+            return ToolResult(
+                output=f"Failed to load ONNX model: {e}",
+                success=False,
+            )
+
+        # Scan all CC memory files
+        cc_base = Path.home() / ".claude" / "projects"
+        if not cc_base.exists():
+            return ToolResult(
+                output="No Claude Code projects directory found at ~/.claude/projects/"
+            )
+
+        memory_files = list(cc_base.glob("*/memory/*.md"))
+        if not memory_files:
+            return ToolResult(output="No Claude Code memory files found.")
+
+        # UUID5 namespace (must match worker's make_point_id)
+        namespace = uuid.UUID("a42a42a4-2a42-4a42-a42a-42a42a42a42a")
+        qdrant = self._store._qdrant
+        synced = 0
+        skipped = 0
+        errors = 0
+
+        for mf in memory_files:
+            try:
+                content = mf.read_text(encoding="utf-8")
+                if not content.strip():
+                    skipped += 1
+                    continue
+
+                # Check if already in Qdrant (by deterministic point ID)
+                point_id = str(uuid.uuid5(namespace, f"claude_code:{mf}"))
+
+                # Try to retrieve the point — if it exists, skip
+                try:
+                    from qdrant_client.models import PointStruct
+
+                    existing = qdrant._client.retrieve(
+                        collection_name=f"{qdrant.config.collection_prefix}_memory",
+                        ids=[point_id],
+                    )
+                    if existing:
+                        skipped += 1
+                        continue
+                except Exception:
+                    pass  # Collection may not exist yet — proceed with upsert
+
+                # Embed and upsert
+                vector = embedder.encode(content[:2000])
+                payload = {
+                    "source": "claude_code",
+                    "file_path": str(mf),
+                    "section": mf.stem,
+                }
+                full_payload = {"text": content, "timestamp": time.time(), **payload}
+                try:
+                    from qdrant_client.models import PointStruct
+                except ImportError:
+                    return ToolResult(
+                        output="qdrant-client not installed. Cannot reindex.",
+                        success=False,
+                    )
+                point = PointStruct(id=point_id, vector=vector, payload=full_payload)
+                qdrant._ensure_collection("memory")
+                col_name = f"{qdrant.config.collection_prefix}_memory"
+                qdrant._client.upsert(collection_name=col_name, points=[point])
+                synced += 1
+            except Exception as e:
+                logger.warning("reindex_cc: failed to sync %s: %s", mf, e)
+                errors += 1
+
+        result_parts = [
+            f"Scanned {len(memory_files)} CC memory file(s).",
+            f"Newly synced: {synced}",
+            f"Already synced: {skipped}",
+        ]
+        if errors:
+            result_parts.append(f"Errors: {errors}")
+
+        return ToolResult(output="\n".join(result_parts))
+
+    async def _handle_consolidate(self) -> ToolResult:
+        """Trigger an on-demand memory consolidation pass (QUAL-01).
+
+        Scans the Qdrant memory and knowledge collections for near-duplicate
+        vectors (cosine similarity >= CONSOLIDATION_AUTO_THRESHOLD) and removes
+        the lower-confidence duplicate.  Near-duplicates in the
+        [CONSOLIDATION_FLAG_THRESHOLD, auto) range are counted but not deleted.
+        """
+        if not self._store or not self._store._qdrant or not self._store._qdrant.is_available:
+            return ToolResult(
+                output="Qdrant is not available. Consolidation requires Qdrant.",
+                success=False,
+            )
+        try:
+            import asyncio
+
+            from memory.consolidation_worker import run_consolidation
+
+            result = await asyncio.to_thread(run_consolidation, self._store._qdrant)
+            if result.get("error"):
+                return ToolResult(
+                    output=f"Consolidation failed: {result['error']}",
+                    success=False,
+                )
+
+            # Log the consolidation event to Qdrant history (non-critical)
+            if self._store.semantic_available and result["removed"] > 0:
+                try:
+                    await self._store.log_event_semantic(
+                        "consolidation",
+                        f"Removed {result['removed']} duplicates from {', '.join(result.get('collections', []))}",
+                    )
+                except Exception:
+                    pass
+
+            return ToolResult(
+                output=(
+                    f"Consolidation complete: scanned {result['scanned']} entries, "
+                    f"removed {result['removed']} duplicate(s), "
+                    f"flagged {result['flagged']} near-duplicate(s)."
+                )
+            )
+        except Exception as e:
+            logger.error("Consolidation failed: %s", e)
+            return ToolResult(output=f"Consolidation failed: {e}", success=False)

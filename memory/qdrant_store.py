@@ -165,6 +165,8 @@ class QdrantStore:
             # create_payload_index() is idempotent — safe on existing collections
             if suffix in (self.MEMORY, self.HISTORY):
                 self._ensure_task_indexes(name)
+            if suffix == self.KNOWLEDGE:
+                self._ensure_knowledge_indexes(name)
 
         except Exception as e:
             logger.error(f"Qdrant: failed to ensure collection '{name}': {e}")
@@ -186,6 +188,24 @@ class QdrantStore:
             )
         except Exception as e:
             logger.warning("Qdrant: task payload index creation failed (non-critical): %s", e)
+
+    def _ensure_knowledge_indexes(self, collection_name: str):
+        """Create payload indexes for learning_type and category on KNOWLEDGE collection (idempotent)."""
+        from qdrant_client.models import PayloadSchemaType
+
+        try:
+            self._client.create_payload_index(
+                collection_name=collection_name,
+                field_name="learning_type",
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
+            self._client.create_payload_index(
+                collection_name=collection_name,
+                field_name="category",
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
+        except Exception as e:
+            logger.warning("Qdrant: knowledge payload index creation failed (non-critical): %s", e)
 
     def _make_point_id(self, text: str, source: str = "") -> str:
         """Generate a deterministic UUID point ID from text content.

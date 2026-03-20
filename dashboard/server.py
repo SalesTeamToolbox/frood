@@ -1709,6 +1709,202 @@ def create_app(
     _CC_SESSIONS_DIR = workspace / ".agent42" / "cc-sessions"
     _CC_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
+    import re as _re_cc
+
+    _ANSI_ESCAPE = _re_cc.compile(r"\x1b\[[0-9;]*[mGKHF]")
+
+    # PTY-03: Pre-warmed CC session pool (one warm process per user)
+    import time as _time_cc
+
+    _cc_warm_pool: dict = {}
+    # Each entry: {
+    #   "cc_session_id": str | None,  # From result event of sentinel run
+    #   "ready": bool,                # True after sentinel run completes
+    #   "spawned_at": float,          # time.monotonic()
+    #   "last_used": float,           # time.monotonic() -- for idle timeout
+    # }
+    # Idle timeout: 300 seconds (5 * 60 = 300)
+    _CC_WARM_IDLE_TIMEOUT = 300
+
+    async def _cc_spawn_warm(user: str, workspace_path) -> None:
+        """Spawn a CC process with sentinel '.' message to pre-initialize MCP servers.
+
+        On success, stores {cc_session_id, ready: True, spawned_at, last_used} in
+        _cc_warm_pool[user]. The warm process exits after the sentinel run; the
+        resulting session_id is used with --resume for the user's first real message.
+        """
+        claude_bin = _shutil.which("claude")
+        if not claude_bin:
+            logger.warning("CC warm spawn skipped: claude binary not found")
+            return
+
+        warm_args = [
+            claude_bin,
+            "-p",
+            ".",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+        ]
+        warm_session_id = None
+        now = _time_cc.monotonic()
+
+        try:
+            if _sys.platform == "win32":
+                try:
+                    from winpty import PtyProcess as _WarmPtyProcess
+
+                    warm_pty = _WarmPtyProcess.spawn(
+                        warm_args,
+                        cwd=str(workspace_path),
+                        dimensions=(24, 220),
+                    )
+                    loop = _asyncio.get_event_loop()
+                    while warm_pty.isalive():
+                        try:
+                            raw_line = await loop.run_in_executor(None, warm_pty.readline)
+                            line = _ANSI_ESCAPE.sub("", raw_line).strip()
+                            if not line:
+                                continue
+                            try:
+                                ev = _json.loads(line)
+                            except _json.JSONDecodeError:
+                                continue
+                            if ev.get("type") == "result":
+                                warm_session_id = ev.get("session_id")
+                                break
+                        except EOFError:
+                            break
+                        except Exception as e:
+                            logger.warning(f"CC warm spawn (win PTY) read error: {e}")
+                            break
+                    if warm_pty.isalive():
+                        warm_pty.terminate()
+                except Exception as win_err:
+                    logger.warning(f"CC warm spawn (win PTY) failed: {win_err}")
+                    warm_session_id = None
+            else:
+                try:
+                    import pty as _warm_pty_mod
+                    import select as _warm_select
+                    import subprocess as _warm_subprocess
+
+                    w_master_fd, w_slave_fd = _warm_pty_mod.openpty()
+                    warm_proc = _warm_subprocess.Popen(
+                        warm_args,
+                        stdin=w_slave_fd,
+                        stdout=w_slave_fd,
+                        stderr=w_slave_fd,
+                        cwd=str(workspace_path),
+                        preexec_fn=_os.setsid,
+                    )
+                    _os.close(w_slave_fd)
+                    loop = _asyncio.get_event_loop()
+                    w_line_buf = ""
+
+                    def _warm_read_chunk():
+                        if _warm_select.select([w_master_fd], [], [], 0.1)[0]:
+                            try:
+                                return _os.read(w_master_fd, 4096).decode("utf-8", errors="replace")
+                            except OSError:
+                                return None
+                        return ""
+
+                    while warm_proc.poll() is None:
+                        chunk = await loop.run_in_executor(None, _warm_read_chunk)
+                        if chunk is None:
+                            break
+                        if not chunk:
+                            await _asyncio.sleep(0.05)
+                            continue
+                        w_line_buf += chunk
+                        found_result = False
+                        while "\n" in w_line_buf:
+                            raw_line, w_line_buf = w_line_buf.split("\n", 1)
+                            line = _ANSI_ESCAPE.sub("", raw_line).strip()
+                            if not line:
+                                continue
+                            try:
+                                ev = _json.loads(line)
+                            except _json.JSONDecodeError:
+                                continue
+                            if ev.get("type") == "result":
+                                warm_session_id = ev.get("session_id")
+                                found_result = True
+                                break
+                        if found_result:
+                            break
+                    try:
+                        _os.close(w_master_fd)
+                    except OSError:
+                        pass
+                    if warm_proc.poll() is None:
+                        warm_proc.terminate()
+                except Exception as unix_err:
+                    logger.warning(f"CC warm spawn (unix PTY) failed: {unix_err}")
+                    warm_session_id = None
+
+            if warm_session_id is None:
+                # PIPE fallback for warm spawn
+                try:
+                    warm_proc_pipe = await _asyncio.create_subprocess_exec(
+                        *warm_args,
+                        stdout=_asyncio.subprocess.PIPE,
+                        stderr=_asyncio.subprocess.PIPE,
+                        cwd=str(workspace_path),
+                    )
+                    async for raw_line in warm_proc_pipe.stdout:
+                        line = raw_line.decode("utf-8", errors="replace").strip()
+                        if not line:
+                            continue
+                        try:
+                            ev = _json.loads(line)
+                        except _json.JSONDecodeError:
+                            continue
+                        if ev.get("type") == "result":
+                            warm_session_id = ev.get("session_id")
+                            break
+                    if warm_proc_pipe.returncode is None:
+                        warm_proc_pipe.terminate()
+                except Exception as pipe_err:
+                    logger.warning(f"CC warm spawn (PIPE fallback) failed: {pipe_err}")
+
+        except Exception as outer_err:
+            logger.warning(f"CC warm spawn failed: {outer_err}")
+            return
+
+        if warm_session_id:
+            _cc_warm_pool[user] = {
+                "cc_session_id": warm_session_id,
+                "ready": True,
+                "spawned_at": now,
+                "last_used": now,
+            }
+            logger.info(f"CC warm session {warm_session_id} ready for {user}")
+        else:
+            logger.warning(f"CC warm spawn completed but no session_id obtained for {user}")
+
+    async def _cc_prewarm_idle_task():
+        """Background task: remove warm pool entries older than 5 minutes (300s)."""
+        while True:
+            await _asyncio.sleep(60)  # Check every 60 seconds
+            now = _time_cc.monotonic()
+            expired = [
+                user
+                for user, entry in _cc_warm_pool.items()
+                if now - entry["last_used"] > _CC_WARM_IDLE_TIMEOUT
+            ]
+            for user in expired:
+                del _cc_warm_pool[user]
+                logger.info(f"CC warm session expired for {user}")
+
+    @app.on_event("startup")
+    async def _start_warm_pool_cleanup():
+        _asyncio.create_task(_cc_prewarm_idle_task())
+
+    # Constant: MCP tool name CC uses when requesting user permission
+    _CC_PERMISSION_TOOL = "mcp__agent42__cc_permission"
+
     def _parse_cc_event(event: dict, tool_id_map: dict, session_state: dict) -> list:
         """Translate one CC NDJSON event into WS envelope dicts.
 
@@ -1718,9 +1914,27 @@ def create_app(
         etype = event.get("type")
         envelopes = []
         logger.info(f"CC event: type={etype}, subtype={event.get('subtype', '-')}")
-        if etype == "system" and event.get("subtype") == "init":
-            # Emit status so user sees CC initialized during the long startup
-            envelopes.append({"type": "status", "data": {"message": "Claude Code initialized"}})
+        if etype == "system":
+            subtype = event.get("subtype", "")
+            if subtype == "init":
+                # PTY-02: Relay per-MCP-server connection status
+                mcp_servers = event.get("mcp_servers", [])
+                for srv in mcp_servers:
+                    srv_name = (srv.get("name", "") if isinstance(srv, dict) else str(srv)).strip()
+                    if srv_name:
+                        envelopes.append(
+                            {"type": "status", "data": {"message": f"Connected to {srv_name}"}}
+                        )
+                # Always emit ready message after init, even if mcp_servers is empty
+                envelopes.append({"type": "status", "data": {"message": "Claude Code ready"}})
+            elif subtype == "hook_started":
+                # PTY-02: Show hook loading progress
+                hook_name = event.get("hook_name") or event.get("name") or ""
+                if hook_name:
+                    envelopes.append(
+                        {"type": "status", "data": {"message": f"Loading {hook_name}..."}}
+                    )
+            # hook_response: suppress (too verbose for UI)
         elif etype == "stream_event":
             raw = event.get("event", {})
             raw_type = raw.get("type", "")
@@ -1728,11 +1942,33 @@ def create_app(
             if raw_type == "content_block_start":
                 cb = raw.get("content_block", {})
                 if cb.get("type") == "tool_use":
-                    tool_id_map[index] = {"id": cb["id"], "name": cb["name"]}
+                    tool_name = cb.get("name", "")
+                    tool_id = cb.get("id", "")
+                    is_perm = tool_name == _CC_PERMISSION_TOOL
+                    tool_id_map[index] = {
+                        "id": tool_id,
+                        "name": tool_name,
+                        "input_buf": "",
+                        "is_permission": is_perm,
+                    }
+                    if not is_perm:
+                        envelopes.append(
+                            {
+                                "type": "tool_start",
+                                "data": {"id": tool_id, "name": tool_name, "input": {}},
+                            }
+                        )
+                    # Permission tool: no envelope yet — wait for input_json_delta + content_block_stop
+                elif cb.get("type") == "tool_result":
+                    # TOOL-03: Relay tool output to frontend so tool cards can show result content
                     envelopes.append(
                         {
-                            "type": "tool_start",
-                            "data": {"id": cb["id"], "name": cb["name"], "input": {}},
+                            "type": "tool_output",
+                            "data": {
+                                "id": cb.get("tool_use_id", ""),
+                                "content": cb.get("content", ""),
+                                "content_type": "text",
+                            },
                         }
                     )
             elif raw_type == "content_block_delta":
@@ -1745,27 +1981,56 @@ def create_app(
                         }
                     )
                 elif delta.get("type") == "input_json_delta":
-                    t = tool_id_map.get(index, {})
-                    envelopes.append(
-                        {
-                            "type": "tool_delta",
-                            "data": {"id": t.get("id"), "partial": delta.get("partial_json", "")},
-                        }
-                    )
+                    partial = delta.get("partial_json", "")
+                    if index in tool_id_map:
+                        tool_id_map[index]["input_buf"] = (
+                            tool_id_map[index].get("input_buf", "") + partial
+                        )
+                        if not tool_id_map[index].get("is_permission"):
+                            envelopes.append(
+                                {
+                                    "type": "tool_delta",
+                                    "data": {
+                                        "id": tool_id_map[index]["id"],
+                                        "partial": partial,
+                                    },
+                                }
+                            )
+                    # Permission tool deltas: silently buffered, not forwarded to frontend
             elif raw_type == "content_block_stop":
                 if index in tool_id_map:
                     t = tool_id_map.pop(index)
-                    envelopes.append(
-                        {
-                            "type": "tool_complete",
-                            "data": {
-                                "id": t.get("id"),
-                                "name": t.get("name"),
-                                "output": "",
-                                "is_error": False,
-                            },
-                        }
-                    )
+                    if t.get("is_permission"):
+                        # Parse accumulated input — now has the full tool input JSON
+                        perm_input = {}
+                        try:
+                            import json as _json_mod
+
+                            perm_input = _json_mod.loads(t.get("input_buf", "{}") or "{}")
+                        except Exception:
+                            pass
+                        envelopes.append(
+                            {
+                                "type": "permission_request",
+                                "data": {
+                                    "id": t["id"],
+                                    "name": t["name"],
+                                    "input": perm_input,
+                                },
+                            }
+                        )
+                    else:
+                        envelopes.append(
+                            {
+                                "type": "tool_complete",
+                                "data": {
+                                    "id": t.get("id"),
+                                    "name": t.get("name"),
+                                    "output": "",
+                                    "is_error": False,
+                                },
+                            }
+                        )
         elif etype == "assistant":
             # Fallback for pipe-buffered stdout: stream_event deltas are block-buffered
             # by Node.js and may not arrive individually. The "assistant" event carries
@@ -1827,7 +2092,7 @@ def create_app(
             await websocket.close(code=4001, reason="Missing token")
             return
         try:
-            _get_user_from_token(token)
+            _cc_user = _get_user_from_token(token)
         except Exception:
             await websocket.close(code=4001, reason="Invalid token")
             return
@@ -1837,6 +2102,16 @@ def create_app(
         session_state: dict = {"cc_session_id": session_data.get("cc_session_id")}
         session_title: str = session_data.get("title", "")
         created_at: str = session_data.get("created_at", _datetime.datetime.utcnow().isoformat())
+        session_state["permission_events"] = {}  # tool_id -> asyncio.Event
+        session_state["permission_results"] = {}  # tool_id -> bool
+        session_state["trust_mode"] = False
+        session_state["message_count"] = session_data.get("message_count", 0)
+        session_state["last_assistant_text"] = ""
+
+        # PTY-03: Check for ?warm=true and spawn warm process in background
+        warm_requested = websocket.query_params.get("warm", "").lower() in ("true", "1", "yes")
+        if warm_requested and _cc_user not in _cc_warm_pool:
+            _asyncio.create_task(_cc_spawn_warm(_cc_user, workspace))
 
         try:
             while True:
@@ -1851,6 +2126,7 @@ def create_app(
                     continue
                 if not session_title:
                     session_title = user_message[:80]
+                session_state["message_count"] = session_state.get("message_count", 0) + 1
 
                 claude_bin = _shutil.which("claude")
                 if not claude_bin:
@@ -1884,6 +2160,21 @@ def create_app(
                     )
                     continue
 
+                # PTY-03: Check warm pool for pre-initialized session (first message only)
+                warm_entry = _cc_warm_pool.pop(_cc_user, None)
+                if warm_entry and warm_entry.get("ready") and warm_entry.get("cc_session_id"):
+                    if not session_state.get("cc_session_id"):
+                        session_state["cc_session_id"] = warm_entry["cc_session_id"]
+                        logger.info(
+                            f"CC using warm session {warm_entry['cc_session_id']} for {_cc_user}"
+                        )
+                        await websocket.send_json(
+                            {
+                                "type": "status",
+                                "data": {"message": "Using pre-warmed session"},
+                            }
+                        )
+
                 # Build subprocess args as a Python list (prevents shell injection)
                 args = [
                     claude_bin,
@@ -1894,56 +2185,228 @@ def create_app(
                     "--verbose",
                     "--include-partial-messages",
                 ]
+                args += ["--permission-prompt-tool-name", _CC_PERMISSION_TOOL]
                 cc_session_id = session_state.get("cc_session_id")
                 if cc_session_id:
                     args += ["--resume", cc_session_id]
 
+                # --- PTY spawn (PTY-01) with PIPE fallback (PTY-04) ---
+                use_cc_pty = False
+                cc_pty_process = None  # winpty PtyProcess
+                cc_proc = None  # asyncio subprocess (PIPE fallback) or Popen (Unix PTY)
+                cc_master_fd = None  # Unix PTY master fd
+
                 try:
-                    proc = await _asyncio.create_subprocess_exec(
-                        *args,
-                        stdout=_asyncio.subprocess.PIPE,
-                        stderr=_asyncio.subprocess.PIPE,
-                        cwd=str(workspace),
-                    )
-                except Exception as spawn_err:
-                    await websocket.send_json(
-                        {
-                            "type": "error",
-                            "data": {
-                                "message": f"Failed to start CC: {spawn_err}",
-                                "code": "spawn_failed",
-                            },
-                        }
-                    )
-                    continue
+                    if _sys.platform == "win32":
+                        from winpty import PtyProcess as _CCPtyProcess
+
+                        cc_pty_process = _CCPtyProcess.spawn(
+                            args,
+                            cwd=str(workspace),
+                            dimensions=(24, 220),
+                        )
+                        use_cc_pty = True
+                    else:
+                        import pty as _cc_pty_mod
+                        import subprocess as _cc_subprocess_pty
+
+                        cc_master_fd, _cc_slave_fd = _cc_pty_mod.openpty()
+                        cc_proc = _cc_subprocess_pty.Popen(
+                            args,
+                            stdin=_cc_slave_fd,
+                            stdout=_cc_slave_fd,
+                            stderr=_cc_slave_fd,
+                            cwd=str(workspace),
+                            preexec_fn=_os.setsid,
+                        )
+                        _os.close(_cc_slave_fd)
+                        use_cc_pty = True
+                except Exception as pty_err:
+                    logger.warning(f"CC PTY unavailable, falling back to PIPE: {pty_err}")
+                    use_cc_pty = False
+
+                if not use_cc_pty:
+                    try:
+                        cc_proc = await _asyncio.create_subprocess_exec(
+                            *args,
+                            stdout=_asyncio.subprocess.PIPE,
+                            stderr=_asyncio.subprocess.PIPE,
+                            cwd=str(workspace),
+                        )
+                    except Exception as spawn_err:
+                        await websocket.send_json(
+                            {
+                                "type": "error",
+                                "data": {
+                                    "message": f"Failed to start CC: {spawn_err}",
+                                    "code": "spawn_failed",
+                                },
+                            }
+                        )
+                        continue
 
                 tool_id_map: dict = {}
 
-                async def _read_stdout():
-                    try:
-                        logger.info("CC _read_stdout: starting async for loop")
-                        async for raw_line in proc.stdout:
-                            line = raw_line.decode("utf-8", errors="replace").strip()
-                            if not line:
-                                continue
-                            try:
-                                event = _json.loads(line)
-                            except _json.JSONDecodeError:
-                                continue
-                            envelopes = _parse_cc_event(event, tool_id_map, session_state)
-                            logger.info(
-                                f"CC event type={event.get('type')}, envelopes={len(envelopes)}"
-                            )
-                            for envelope in envelopes:
-                                try:
-                                    await websocket.send_json(envelope)
-                                except Exception as ws_err:
-                                    logger.error(f"CC WS send failed: {ws_err}")
-                                    return
-                        logger.info("CC _read_stdout: async for loop finished")
-                    except Exception as read_err:
-                        logger.error(f"CC _read_stdout error: {read_err}")
+                def _terminate_cc():
+                    """Terminate CC subprocess regardless of PTY mode."""
+                    if use_cc_pty and cc_pty_process and _sys.platform == "win32":
+                        if cc_pty_process.isalive():
+                            cc_pty_process.terminate()
+                    elif cc_proc is not None:
+                        if hasattr(cc_proc, "returncode"):
+                            # asyncio.subprocess
+                            if cc_proc.returncode is None:
+                                cc_proc.terminate()
+                        elif hasattr(cc_proc, "poll"):
+                            # subprocess.Popen
+                            if cc_proc.poll() is None:
+                                cc_proc.terminate()
 
+                loop = _asyncio.get_event_loop()
+
+                if use_cc_pty and _sys.platform == "win32":
+                    # Windows PTY: readline via run_in_executor, ANSI stripped (PTY-01)
+                    async def _read_stdout():
+                        try:
+                            while cc_pty_process.isalive():
+                                try:
+                                    raw_line = await loop.run_in_executor(
+                                        None, cc_pty_process.readline
+                                    )
+                                    line = _ANSI_ESCAPE.sub("", raw_line).strip()
+                                    if not line:
+                                        continue
+                                    try:
+                                        event = _json.loads(line)
+                                    except _json.JSONDecodeError:
+                                        continue
+                                    envelopes = _parse_cc_event(event, tool_id_map, session_state)
+                                    logger.info(
+                                        f"CC PTY event type={event.get('type')}, "
+                                        f"envelopes={len(envelopes)}"
+                                    )
+                                    for env in envelopes:
+                                        if env.get("type") == "text_delta":
+                                            session_state["last_assistant_text"] = (
+                                                session_state.get("last_assistant_text", "")
+                                                + env["data"].get("text", "")
+                                            )[-200:]
+                                    for envelope in envelopes:
+                                        try:
+                                            await websocket.send_json(envelope)
+                                        except Exception as ws_err:
+                                            logger.error(f"CC WS send failed: {ws_err}")
+                                            return
+                                except EOFError:
+                                    break
+                                except Exception as inner_err:
+                                    logger.error(f"CC PTY readline error: {inner_err}")
+                                    break
+                        except Exception as outer_err:
+                            logger.error(f"CC _read_stdout (win PTY) error: {outer_err}")
+
+                elif use_cc_pty:
+                    # Unix PTY: select + os.read with line accumulation buffer (PTY-01)
+                    import select as _cc_select
+
+                    _cc_line_buf = ""
+
+                    def _read_cc_chunk():
+                        if _cc_select.select([cc_master_fd], [], [], 0.1)[0]:
+                            try:
+                                return _os.read(cc_master_fd, 4096).decode(
+                                    "utf-8", errors="replace"
+                                )
+                            except OSError:
+                                return None
+                        return ""
+
+                    async def _read_stdout():
+                        nonlocal _cc_line_buf
+                        try:
+                            while cc_proc.poll() is None:
+                                chunk = await loop.run_in_executor(None, _read_cc_chunk)
+                                if chunk is None:
+                                    break
+                                if not chunk:
+                                    await _asyncio.sleep(0.05)
+                                    continue
+                                _cc_line_buf += chunk
+                                while "\n" in _cc_line_buf:
+                                    raw_line, _cc_line_buf = _cc_line_buf.split("\n", 1)
+                                    line = _ANSI_ESCAPE.sub("", raw_line).strip()
+                                    if not line:
+                                        continue
+                                    try:
+                                        event = _json.loads(line)
+                                    except _json.JSONDecodeError:
+                                        continue
+                                    envelopes = _parse_cc_event(event, tool_id_map, session_state)
+                                    logger.info(
+                                        f"CC PTY event type={event.get('type')}, "
+                                        f"envelopes={len(envelopes)}"
+                                    )
+                                    for env in envelopes:
+                                        if env.get("type") == "text_delta":
+                                            session_state["last_assistant_text"] = (
+                                                session_state.get("last_assistant_text", "")
+                                                + env["data"].get("text", "")
+                                            )[-200:]
+                                    for envelope in envelopes:
+                                        try:
+                                            await websocket.send_json(envelope)
+                                        except Exception as ws_err:
+                                            logger.error(f"CC WS send failed: {ws_err}")
+                                            return
+                        except Exception as outer_err:
+                            logger.error(f"CC _read_stdout (unix PTY) error: {outer_err}")
+
+                else:
+                    # PIPE fallback (PTY-04): identical to pre-PTY implementation
+                    async def _read_stdout():
+                        try:
+                            logger.info("CC _read_stdout (PIPE): starting async for loop")
+                            async for raw_line in cc_proc.stdout:
+                                line = raw_line.decode("utf-8", errors="replace").strip()
+                                if not line:
+                                    continue
+                                try:
+                                    event = _json.loads(line)
+                                except _json.JSONDecodeError:
+                                    continue
+                                envelopes = _parse_cc_event(event, tool_id_map, session_state)
+                                logger.info(
+                                    f"CC event type={event.get('type')}, envelopes={len(envelopes)}"
+                                )
+                                for env in envelopes:
+                                    if env.get("type") == "text_delta":
+                                        session_state["last_assistant_text"] = (
+                                            session_state.get("last_assistant_text", "")
+                                            + env["data"].get("text", "")
+                                        )[-200:]
+                                for envelope in envelopes:
+                                    try:
+                                        await websocket.send_json(envelope)
+                                    except Exception as ws_err:
+                                        logger.error(f"CC WS send failed: {ws_err}")
+                                        return
+                            logger.info("CC _read_stdout (PIPE): async for loop finished")
+                        except Exception as read_err:
+                            logger.error(f"CC _read_stdout (PIPE) error: {read_err}")
+
+                # PTY-05: keepalive task sends {"type": "keepalive"} every 15 seconds
+                async def _send_keepalive():
+                    try:
+                        while True:
+                            await _asyncio.sleep(15)
+                            try:
+                                await websocket.send_json({"type": "keepalive"})
+                            except Exception:
+                                break
+                    except Exception:
+                        pass
+
+                keepalive_task = _asyncio.create_task(_send_keepalive())
                 read_task = _asyncio.create_task(_read_stdout())
 
                 async def _receive_msg():
@@ -1960,8 +2423,7 @@ def create_app(
                             # check exception first to avoid infinite spin loop (code-review #1)
                             if receive_task.exception() is not None:
                                 read_task.cancel()
-                                if proc.returncode is None:
-                                    proc.terminate()
+                                _terminate_cc()
                                 receive_task = None
                                 break
                             try:
@@ -1970,8 +2432,7 @@ def create_app(
                                 inner = {}
                             if inner.get("type") == "stop":
                                 read_task.cancel()
-                                if proc.returncode is None:
-                                    proc.terminate()
+                                _terminate_cc()
                                 await websocket.send_json(
                                     {
                                         "type": "turn_complete",
@@ -1985,6 +2446,15 @@ def create_app(
                                 )
                                 receive_task = None
                                 break
+                            elif inner.get("type") == "permission_response":
+                                perm_id = inner.get("id", "")
+                                approved = inner.get("approved", False)
+                                session_state["permission_results"][perm_id] = approved
+                                evt = session_state["permission_events"].get(perm_id)
+                                if evt:
+                                    evt.set()
+                            elif inner.get("type") == "trust_mode":
+                                session_state["trust_mode"] = inner.get("enabled", False)
                             # Not a stop — re-arm receive and check if read_task also completed
                             receive_task = _asyncio.create_task(_receive_msg())
                             if read_task in done:
@@ -1998,8 +2468,13 @@ def create_app(
                     if receive_task and not receive_task.done():
                         receive_task.cancel()
                     read_task.cancel()
-                    if proc.returncode is None:
-                        proc.terminate()
+                    keepalive_task.cancel()
+                    _terminate_cc()
+                    if cc_master_fd is not None:
+                        try:
+                            _os.close(cc_master_fd)
+                        except OSError:
+                            pass
 
                 await _save_session(
                     ws_session_id,
@@ -2009,6 +2484,8 @@ def create_app(
                         "created_at": created_at,
                         "last_active_at": _datetime.datetime.utcnow().isoformat(),
                         "title": session_title,
+                        "preview_text": session_state.get("last_assistant_text", "")[:60],
+                        "message_count": session_state.get("message_count", 0),
                     },
                 )
 
@@ -2339,6 +2816,152 @@ def create_app(
         except Exception as e:
             logger.error("Learning record failed: %s", e)
             return {"status": "error", "detail": str(e)}
+
+    @app.post("/api/knowledge/learn")
+    async def extract_knowledge(request: Request):
+        """Extract structured learnings from session context via LLM.
+
+        Called by knowledge-learn-worker.py (Stop hook background worker).
+        No authentication required — local hook access only.
+
+        Accepts: {session_summary, tools_used, files_modified, messages_context}
+        Returns: {status, learnings: [{learning_type, category, title, content, confidence}]}
+        """
+        import asyncio as _asyncio_local
+
+        try:
+            data = await request.json()
+            session_summary = data.get("session_summary", "")
+            tools_used = data.get("tools_used", [])
+            files_modified = data.get("files_modified", [])
+            messages_context = data.get("messages_context", [])
+
+            if not session_summary:
+                return {"status": "skipped", "reason": "empty summary", "learnings": []}
+
+            # Pydantic models defined inside the endpoint to avoid module-level import issues
+            from typing import Literal
+
+            from pydantic import BaseModel, Field
+
+            class ExtractedLearning(BaseModel):
+                learning_type: Literal[
+                    "decision", "feedback", "pattern", "correction", "trivial"
+                ] = Field(
+                    description=(
+                        "decision=architectural choice, feedback=user correction, "
+                        "pattern=recurring approach, correction=error fix, trivial=skip"
+                    )
+                )
+                category: str = Field(
+                    description=(
+                        "Category tag. Prefer one of: security, feature, refactor, deploy. "
+                        "Suggest new if truly different."
+                    )
+                )
+                title: str = Field(description="One-line summary of the learning (max 80 chars)")
+                content: str = Field(
+                    description="The durable learning — specific enough to be useful next session"
+                )
+                confidence: float = Field(
+                    ge=0.5,
+                    le=1.0,
+                    description=(
+                        "How clearly expressed: 0.9 for definitive decisions, "
+                        "0.5 for vague patterns"
+                    ),
+                )
+
+            class ExtractionResult(BaseModel):
+                learnings: list[ExtractedLearning] = Field(
+                    description="List of 0-5 learnings. Empty list if session was trivial."
+                )
+
+            # Build context from last 20 messages
+            msg_text = ""
+            for msg in messages_context[-20:]:
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    msg_text += f"[{role}]: {content[:500]}\n"
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            msg_text += f"[{role}]: {block.get('text', '')[:500]}\n"
+
+            prompt = f"""Analyze this development session and extract structured learnings.
+
+Tools used: {", ".join(tools_used)}
+Files modified: {", ".join(files_modified)}
+
+Session summary:
+{session_summary[:2000]}
+
+Recent conversation context:
+{msg_text[:4000]}
+
+Extract 0-5 learnings. For each:
+- learning_type: decision (architectural choice made), feedback (user correction), pattern (recurring approach), correction (error fix), trivial (not worth storing)
+- category: security, feature, refactor, deploy, or suggest a new category
+- title: one-line summary (max 80 chars)
+- content: the durable learning — what should be remembered for future sessions
+- confidence: 0.5 (vague) to 1.0 (definitive)
+
+If the session was trivial or purely mechanical, return an empty list.
+Focus on learnings that would help in future similar sessions."""
+
+            def _sync_extract(prompt_text):
+                try:
+                    import instructor
+                    from openai import OpenAI
+                except ImportError:
+                    return {"learnings": []}
+
+                import os as _os
+
+                # Use Agent42's own provider routing
+                api_key = _os.environ.get("OPENROUTER_API_KEY", "") or _os.environ.get(
+                    "GEMINI_API_KEY", ""
+                )
+                if not api_key:
+                    api_key = _os.environ.get("OPENAI_API_KEY", "")
+                    base_url = None
+                else:
+                    base_url = "https://openrouter.ai/api/v1"
+
+                if not api_key:
+                    return {"learnings": []}
+
+                client_kwargs = {"api_key": api_key}
+                if base_url:
+                    client_kwargs["base_url"] = base_url
+
+                client = instructor.from_openai(OpenAI(**client_kwargs), mode=instructor.Mode.JSON)
+                result = client.chat.completions.create(
+                    model=("google/gemini-2.0-flash-001" if base_url else "gpt-4o-mini"),
+                    response_model=ExtractionResult,
+                    max_retries=2,
+                    messages=[{"role": "user", "content": prompt_text}],
+                )
+                return result.model_dump()
+
+            try:
+                extraction = await _asyncio_local.to_thread(_sync_extract, prompt)
+            except Exception as e:
+                logger.warning("Knowledge extraction failed: %s", e)
+                return {"status": "error", "detail": str(e), "learnings": []}
+
+            # Filter out trivial learnings before returning
+            learnings = [
+                lrn
+                for lrn in extraction.get("learnings", [])
+                if lrn.get("learning_type") != "trivial"
+            ]
+            return {"status": "ok", "learnings": learnings}
+
+        except Exception as e:
+            logger.warning("Knowledge extraction endpoint failed: %s", e)
+            return {"status": "error", "detail": str(e), "learnings": []}
 
     @app.post("/api/ide/chat")
     async def ide_chat(req: ChatRequest, _user: str = Depends(get_current_user)):
@@ -2900,6 +3523,37 @@ def create_app(
         """Return RLM (Recursive Language Model) status and configuration."""
         return {"enabled": False, "note": "RLM provider removed in v2.0 MCP pivot"}
 
+    def _load_cc_sync_status() -> dict:
+        """Load CC memory sync status from .agent42/cc-sync-status.json."""
+        try:
+            import json as _json
+
+            status_path = Path(settings.workspace or ".") / ".agent42" / "cc-sync-status.json"
+            if status_path.exists():
+                return _json.loads(status_path.read_text())
+        except Exception:
+            pass
+        return {"last_sync": None, "total_synced": 0, "last_error": None}
+
+    def _load_consolidation_status() -> dict:
+        """Load memory consolidation status from .agent42/consolidation-status.json."""
+        try:
+            import json as _json
+
+            status_path = Path(settings.workspace or ".") / ".agent42" / "consolidation-status.json"
+            if status_path.exists():
+                return _json.loads(status_path.read_text())
+        except Exception:
+            pass
+        return {
+            "last_run": None,
+            "entries_since": 0,
+            "last_scanned": 0,
+            "last_removed": 0,
+            "last_flagged": 0,
+            "last_error": None,
+        }
+
     @app.get("/api/settings/storage")
     async def get_storage_status(_admin: AuthContext = Depends(require_admin)):
         """Return the active storage backend configuration and live connectivity status."""
@@ -2979,6 +3633,8 @@ def create_app(
         else:
             effective_mode = "file"
 
+        cc_status = _load_cc_sync_status()
+        consolidation_status = _load_consolidation_status()
         return {
             "mode": effective_mode,
             "configured_mode": mode,
@@ -2992,6 +3648,19 @@ def create_app(
                 "enabled": bool(redis_url),
                 "url": redis_url or None,
                 "status": redis_status,
+            },
+            "cc_sync": {
+                "last_sync": cc_status.get("last_sync"),
+                "total_synced": cc_status.get("total_synced", 0),
+                "last_error": cc_status.get("last_error"),
+            },
+            "consolidation": {
+                "last_run": consolidation_status.get("last_run"),
+                "entries_since": consolidation_status.get("entries_since", 0),
+                "last_scanned": consolidation_status.get("last_scanned", 0),
+                "last_removed": consolidation_status.get("last_removed", 0),
+                "last_flagged": consolidation_status.get("last_flagged", 0),
+                "last_error": consolidation_status.get("last_error"),
             },
         }
 
@@ -3027,6 +3696,28 @@ def create_app(
             "installed": installed,
             "errors": errors,
         }
+
+    @app.post("/api/consolidate/trigger")
+    async def trigger_consolidation(_admin: AuthContext = Depends(require_admin)):
+        """Manually trigger memory dedup consolidation.
+
+        Requires admin auth. Runs synchronously and returns stats.
+        """
+        try:
+            # Check if Qdrant is available via the app's memory store
+            memory_store = getattr(app.state, "memory_store", None)
+            qdrant = getattr(memory_store, "_qdrant", None) if memory_store else None
+
+            if not qdrant or not qdrant.is_available:
+                return {"success": False, "error": "Qdrant is not available"}
+
+            from memory.consolidation_worker import run_consolidation
+
+            result = await asyncio.to_thread(run_consolidation, qdrant)
+            return {"success": True, **result}
+        except Exception as e:
+            logger.error("Manual consolidation trigger failed: %s", e)
+            return {"success": False, "error": str(e)}
 
     # -- Channels (Phase 2) ---------------------------------------------------
 
