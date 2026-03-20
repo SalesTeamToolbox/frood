@@ -493,17 +493,114 @@ def main():
 
     # Health check mode — verify imports and config, then exit
     if "--health" in sys.argv:
+        import json
+        import urllib.error
+        import urllib.request
+
+        results = {"status": "healthy", "checks": {}, "memory_pipeline": {}}
+
+        # -- Core health (existing) --
         try:
             from core.config import Settings
 
             settings = Settings.from_env()
-            # Verify critical imports work
-
-            print("healthy", file=sys.stderr)
-            sys.exit(0)
+            results["checks"]["config"] = "ok"
         except Exception as e:
-            print(f"unhealthy: {e}", file=sys.stderr)
+            results["status"] = "unhealthy"
+            results["checks"]["config"] = f"FAIL: {e}"
+            print(json.dumps(results, indent=2), file=sys.stderr)
             sys.exit(1)
+
+        # -- Memory Pipeline: Qdrant connectivity --
+        qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+        try:
+            req = urllib.request.Request(f"{qdrant_url}/collections", method="GET")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read())
+            collections = [c["name"] for c in data.get("result", {}).get("collections", [])]
+            has_memory = "agent42_memory" in collections
+            results["memory_pipeline"]["qdrant"] = (
+                f"ok ({len(collections)} collections, memory={'yes' if has_memory else 'no'})"
+            )
+        except Exception as e:
+            results["memory_pipeline"]["qdrant"] = f"unavailable: {str(e)[:80]}"
+
+        # -- Memory Pipeline: Search service --
+        search_url = os.environ.get("AGENT42_SEARCH_URL", "http://127.0.0.1:6380")
+        try:
+            req = urllib.request.Request(f"{search_url}/health", method="GET")
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                resp.read()
+            results["memory_pipeline"]["search_service"] = "ok"
+        except Exception:
+            results["memory_pipeline"]["search_service"] = "unavailable"
+
+        # -- Memory Pipeline: MEMORY.md --
+        project_dir = os.environ.get("AGENT42_WORKSPACE", os.getcwd())
+        memory_md = os.path.join(project_dir, ".agent42", "memory", "MEMORY.md")
+        if os.path.exists(memory_md):
+            size = os.path.getsize(memory_md)
+            results["memory_pipeline"]["memory_md"] = f"ok ({size} bytes)"
+        else:
+            results["memory_pipeline"]["memory_md"] = "missing"
+
+        # -- Memory Pipeline: HISTORY.md --
+        history_md = os.path.join(project_dir, ".agent42", "memory", "HISTORY.md")
+        if os.path.exists(history_md):
+            size = os.path.getsize(history_md)
+            try:
+                with open(history_md, encoding="utf-8") as f:
+                    content = f.read()
+                entry_count = content.count("\n---\n")
+                results["memory_pipeline"]["history_md"] = (
+                    f"ok ({size} bytes, ~{entry_count} entries)"
+                )
+            except Exception:
+                results["memory_pipeline"]["history_md"] = f"ok ({size} bytes)"
+        else:
+            results["memory_pipeline"]["history_md"] = "missing"
+
+        # -- Memory Pipeline: Hook registration --
+        settings_json = os.path.join(project_dir, ".claude", "settings.json")
+        hooks_registered = {"recall": False, "learn": False}
+        if os.path.exists(settings_json):
+            try:
+                with open(settings_json, encoding="utf-8") as f:
+                    sdata = json.load(f)
+                hooks = sdata.get("hooks", {})
+                for hook_list in hooks.get("UserPromptSubmit", []):
+                    for h in hook_list.get("hooks", []):
+                        if "memory-recall" in h.get("command", ""):
+                            hooks_registered["recall"] = True
+                for hook_list in hooks.get("Stop", []):
+                    for h in hook_list.get("hooks", []):
+                        if "memory-learn" in h.get("command", ""):
+                            hooks_registered["learn"] = True
+            except Exception:
+                pass
+        results["memory_pipeline"]["hooks"] = (
+            f"recall={'registered' if hooks_registered['recall'] else 'MISSING'}, "
+            f"learn={'registered' if hooks_registered['learn'] else 'MISSING'}"
+        )
+
+        # -- Memory Pipeline: 24h stats (from dashboard API) --
+        api_url = os.environ.get("AGENT42_API_URL", "http://127.0.0.1:8000")
+        try:
+            req = urllib.request.Request(f"{api_url}/api/memory/stats", method="GET")
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                stats = json.loads(resp.read())
+            results["memory_pipeline"]["24h_stats"] = {
+                "recall_queries": stats.get("recall_count", 0),
+                "learn_captures": stats.get("learn_count", 0),
+                "avg_latency_ms": stats.get("avg_latency_ms", 0),
+                "errors": stats.get("error_count", 0),
+            }
+        except Exception:
+            results["memory_pipeline"]["24h_stats"] = "unavailable (dashboard not running)"
+
+        # -- Output --
+        print(json.dumps(results, indent=2), file=sys.stderr)
+        sys.exit(0 if results["status"] == "healthy" else 1)
 
     transport = "stdio"
     if "--transport" in sys.argv:

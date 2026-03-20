@@ -30,8 +30,8 @@ from pathlib import Path
 HIGH_RELEVANCE = 0.85  # Always inject
 MEDIUM_RELEVANCE = 0.70  # Inject if domain matches
 MIN_KEYWORD_MATCHES = 2  # Minimum keyword hits for text search
-MAX_MEMORIES = 5  # Max memories to inject
-MAX_OUTPUT_CHARS = 3000  # Rough output cap (~750 tokens)
+MAX_MEMORIES = 3  # Max memories to inject
+MAX_OUTPUT_CHARS = 2000  # Rough output cap (~500 tokens)
 MIN_PROMPT_LEN = 15  # Skip very short prompts
 
 # Common words to skip during keyword extraction
@@ -496,10 +496,6 @@ def main():
     memories = memories[:MAX_MEMORIES]
 
     if not memories:
-        print(
-            f"[agent42-memory] Recall: searched ({len(keywords)} keywords) — no matches",
-            file=sys.stderr,
-        )
         sys.exit(0)
 
     source_label = f" via {search_source}" if search_source else ""
