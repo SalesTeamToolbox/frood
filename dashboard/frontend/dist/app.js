@@ -3566,6 +3566,27 @@ function ideActivateTab() {
   var ccContainer = document.getElementById("ide-cc-container");
 
   if (tab.type === "claude") {
+    // Panel mode: CC session is already in the right panel — switch which tab is visible
+    if (_ccPanelMode && tab.inPanel) {
+      if (_monacoEditor) _monacoEditor.setModel(null);
+      if (container) container.style.display = "none";
+      if (welcome) welcome.style.display = "none";
+      if (ccContainer) ccContainer.style.display = "none";
+      // In the CC panel, hide all CC sessions then show the requested one
+      var panel = document.getElementById("ide-cc-panel");
+      if (panel) {
+        var panelDivs = panel.querySelectorAll(".ide-cc-term, .ide-cc-chat");
+        panelDivs.forEach(function(d) { d.style.display = "none"; });
+      }
+      if (tab.el) tab.el.style.display = tab.chatPanel ? "flex" : "block";
+      var langEl2 = document.getElementById("ide-status-lang");
+      if (langEl2) langEl2.textContent = "Claude Code";
+      var statusEl2 = document.getElementById("ide-status-left");
+      if (statusEl2) statusEl2.textContent = tab.path;
+      ideRenderTabs();
+      ideRenderTree();
+      return;
+    }
     // Claude Code tab: hide Monaco, show CC terminal
     if (_monacoEditor) _monacoEditor.setModel(null);
     if (container) container.style.display = "none";
@@ -3601,6 +3622,8 @@ function ideRenderTabs() {
   var el = document.getElementById("ide-tabs");
   if (!el) return;
   el.innerHTML = _ideTabs.map(function(t, i) {
+    // Hide CC tabs from the tab bar when they are displayed in the panel
+    if (t.type === "claude" && t.inPanel) return "";
     var active = i === _ideActiveTab ? "active" : "";
     var mod = t.modified ? '<span class="modified">&#9679;</span>' : "";
     var name = t.type === "claude" ? t.path : t.path.split("/").pop();
@@ -5500,25 +5523,104 @@ function initPanelDragHandle() {
 }
 
 function ideToggleCCPanel() {
-  // Stub: full implementation in Plan 04-03
-  // For now, just toggle panel visibility to enable Wave 1 test verification
+  // Three-state toggle (Plan 04-03 full implementation):
+  // 1. Panel open → close and move sessions back to tabs
+  // 2. CC tabs exist → open panel and move sessions into it
+  // 3. No CC open → open panel and start a new session
+  var ccTabs = _ideTabs.filter(function(t) { return t.type === "claude"; });
+  if (_ccPanelMode) {
+    ideMoveSessionsToTab();
+    ideCloseCCPanel();
+  } else if (ccTabs.length > 0) {
+    ideOpenCCPanel();
+    ideMoveSessionsToPanel();
+  } else {
+    ideOpenCCPanel();
+    ideOpenCCChat("local");
+    setTimeout(ideMoveSessionsToPanel, 50);
+  }
+}
+
+function ideOpenCCPanel() {
   var panel = document.getElementById("ide-cc-panel");
   var handle = document.getElementById("ide-panel-drag-handle");
   if (!panel) return;
-  if (panel.style.display === "none") {
-    var savedWidth = 400;
-    try { savedWidth = parseInt(localStorage.getItem("cc_panel_width")) || 400; } catch(e) {}
-    panel.style.display = "flex";
-    panel.style.width = savedWidth + "px";
-    panel.style.flex = "none";
-    if (handle) handle.style.display = "";
-    _ccPanelMode = true;
-  } else {
-    panel.style.display = "none";
-    if (handle) handle.style.display = "none";
-    _ccPanelMode = false;
+  var savedWidth = 400;
+  try { savedWidth = parseInt(localStorage.getItem("cc_panel_width")) || 400; } catch(e) {}
+  panel.style.display = "flex";
+  panel.style.flexDirection = "column";
+  panel.style.width = savedWidth + "px";
+  panel.style.flex = "none";
+  if (handle) handle.style.display = "";
+  _ccPanelMode = true;
+  setTimeout(function() { if (_monacoEditor) _monacoEditor.layout(); }, 50);
+}
+
+function ideCloseCCPanel() {
+  var panel = document.getElementById("ide-cc-panel");
+  var handle = document.getElementById("ide-panel-drag-handle");
+  if (!panel) return;
+  try { localStorage.setItem("cc_panel_width", Math.round(panel.getBoundingClientRect().width)); } catch(e) {}
+  panel.style.display = "none";
+  if (handle) handle.style.display = "none";
+  _ccPanelMode = false;
+  setTimeout(function() { if (_monacoEditor) _monacoEditor.layout(); }, 50);
+}
+
+function ideMoveSessionsToPanel() {
+  var panel = document.getElementById("ide-cc-panel");
+  var ccContainer = document.getElementById("ide-cc-container");
+  if (!panel) return;
+  // Move each CC tab's DOM element into the panel (appendChild moves, does not clone)
+  _ideTabs.forEach(function(tab) {
+    if (tab.type === "claude" && tab.el) {
+      panel.appendChild(tab.el);
+      tab.el.style.display = tab.chatPanel ? "flex" : "block";
+      tab.inPanel = true;
+    }
+  });
+  // Hide the CC container (no longer houses CC sessions)
+  if (ccContainer) ccContainer.style.display = "none";
+  // Show the first active CC tab in the panel
+  var ccTabs = _ideTabs.filter(function(t) { return t.type === "claude"; });
+  if (ccTabs.length > 0) {
+    var activeCC = ccTabs[0];
+    ccTabs.forEach(function(t) { if (t.el) t.el.style.display = "none"; });
+    if (activeCC.el) activeCC.el.style.display = activeCC.chatPanel ? "flex" : "block";
   }
-  if (_monacoEditor) _monacoEditor.layout();
+  // Activate the first non-CC tab (show editor), or welcome if none
+  var fileTabs = _ideTabs.filter(function(t) { return t.type !== "claude"; });
+  if (fileTabs.length > 0) {
+    _ideActiveTab = _ideTabs.indexOf(fileTabs[0]);
+    ideActivateTab();
+  } else {
+    _ideActiveTab = -1;
+    if (_monacoEditor) _monacoEditor.setModel(null);
+    var container = document.getElementById("ide-editor-container");
+    var welcome = document.getElementById("ide-welcome");
+    if (container) container.style.display = "none";
+    if (welcome) welcome.style.display = "flex";
+  }
+  ideRenderTabs();
+}
+
+function ideMoveSessionsToTab() {
+  var ccContainer = document.getElementById("ide-cc-container");
+  if (!ccContainer) return;
+  // Move CC tab DOM elements back into the CC container
+  _ideTabs.forEach(function(tab) {
+    if (tab.type === "claude" && tab.el) {
+      ccContainer.appendChild(tab.el);
+      tab.inPanel = false;
+    }
+  });
+  // Activate the first CC tab
+  var ccTabs = _ideTabs.filter(function(t) { return t.type === "claude"; });
+  if (ccTabs.length > 0) {
+    _ideActiveTab = _ideTabs.indexOf(ccTabs[0]);
+    ideActivateTab();
+  }
+  ideRenderTabs();
 }
 
 // ---------------------------------------------------------------------------
