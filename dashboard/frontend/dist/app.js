@@ -3240,6 +3240,9 @@ function renderCode() {
           <button class="ide-activity-btn" onclick="ideShowPanel('search',event)" title="Search">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
           </button>
+          <button class="ide-activity-btn" onclick="ideToggleCCPanel()" title="Claude Code Panel">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+          </button>
         </div>
         <div id="ide-sidebar-panel" class="ide-sidebar">
           <div class="ide-sidebar-header">
@@ -3256,18 +3259,22 @@ function renderCode() {
           </div>
           <div id="ide-file-tree" class="ide-file-tree"></div>
         </div>
-        <div class="ide-main" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
-          <div id="ide-tabs" class="ide-tabs"></div>
-          <div id="ide-editor-container" class="ide-editor-container" style="flex:1;overflow:hidden"></div>
-          <div id="ide-cc-container" class="ide-cc-container" style="display:none;flex:1;overflow:hidden;background:#1a1a2e"></div>
-          <div id="ide-welcome" class="ide-welcome" style="display:flex">
-            <h2>Agent42 IDE</h2>
-            <p>Select a file from the explorer to start editing.<br>Changes are saved with Ctrl+S.</p>
-            <button class="ide-cc-launch-btn" onclick="ideOpenCCChat('local')">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:middle"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
-              Open Claude Code
-            </button>
+        <div class="ide-main" style="flex:1;display:flex;flex-direction:row;overflow:hidden">
+          <div class="ide-main-editor-area" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
+            <div id="ide-tabs" class="ide-tabs"></div>
+            <div id="ide-editor-container" class="ide-editor-container" style="flex:1;overflow:hidden"></div>
+            <div id="ide-cc-container" class="ide-cc-container" style="display:none;flex:1;overflow:hidden;background:#1a1a2e"></div>
+            <div id="ide-welcome" class="ide-welcome" style="display:flex">
+              <h2>Agent42 IDE</h2>
+              <p>Select a file from the explorer to start editing.<br>Changes are saved with Ctrl+S.</p>
+              <button class="ide-cc-launch-btn" onclick="ideOpenCCChat('local')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:middle"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+                Open Claude Code
+              </button>
+            </div>
           </div>
+          <div id="ide-panel-drag-handle" class="ide-panel-drag-handle" style="display:none"></div>
+          <div id="ide-cc-panel" class="ide-cc-panel" style="display:none"></div>
         </div>
       </div>
       <div id="ide-drag-handle" class="ide-drag-handle"></div>
@@ -3326,6 +3333,7 @@ function renderCode() {
   ideLoadTree("");
   ideInitMonaco();
   initDragHandle();
+  initPanelDragHandle();
 
   // Open default local terminal on first load
   if (_termSessions.length === 0) {
@@ -5447,6 +5455,70 @@ function initDragHandle() {
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
   });
+}
+
+// ---------------------------------------------------------------------------
+// CC Panel drag handle for horizontal resize (LAYOUT-02)
+// ---------------------------------------------------------------------------
+var _ccPanelMode = false;
+var _isPanelDragging = false;
+var _panelDragStartX = 0;
+var _panelDragStartWidth = 0;
+
+function initPanelDragHandle() {
+  var handle = document.getElementById("ide-panel-drag-handle");
+  if (!handle) return;
+  handle.addEventListener("mousedown", function(e) {
+    _isPanelDragging = true;
+    _panelDragStartX = e.clientX;
+    var panel = document.getElementById("ide-cc-panel");
+    _panelDragStartWidth = panel ? panel.getBoundingClientRect().width : 400;
+    document.body.style.cursor = "ew-resize";
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", function(e) {
+    if (!_isPanelDragging) return;
+    var delta = _panelDragStartX - e.clientX;
+    var editorArea = document.querySelector(".ide-main-editor-area");
+    var maxWidth = editorArea ? editorArea.getBoundingClientRect().width * 0.6 : 600;
+    var newWidth = Math.max(250, Math.min(_panelDragStartWidth + delta, maxWidth));
+    var panel = document.getElementById("ide-cc-panel");
+    if (panel) { panel.style.width = newWidth + "px"; panel.style.flex = "none"; }
+    if (_monacoEditor) _monacoEditor.layout();
+  });
+  document.addEventListener("mouseup", function() {
+    if (!_isPanelDragging) return;
+    _isPanelDragging = false;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    var panel = document.getElementById("ide-cc-panel");
+    if (panel) {
+      try { localStorage.setItem("cc_panel_width", Math.round(panel.getBoundingClientRect().width)); } catch(e) {}
+    }
+  });
+}
+
+function ideToggleCCPanel() {
+  // Stub: full implementation in Plan 04-03
+  // For now, just toggle panel visibility to enable Wave 1 test verification
+  var panel = document.getElementById("ide-cc-panel");
+  var handle = document.getElementById("ide-panel-drag-handle");
+  if (!panel) return;
+  if (panel.style.display === "none") {
+    var savedWidth = 400;
+    try { savedWidth = parseInt(localStorage.getItem("cc_panel_width")) || 400; } catch(e) {}
+    panel.style.display = "flex";
+    panel.style.width = savedWidth + "px";
+    panel.style.flex = "none";
+    if (handle) handle.style.display = "";
+    _ccPanelMode = true;
+  } else {
+    panel.style.display = "none";
+    if (handle) handle.style.display = "none";
+    _ccPanelMode = false;
+  }
+  if (_monacoEditor) _monacoEditor.layout();
 }
 
 // ---------------------------------------------------------------------------
