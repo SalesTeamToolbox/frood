@@ -10,7 +10,7 @@ created: 2026-03-17
 **Plans:** 3 plans
 
 Plans:
-- [ ] 05-01-PLAN.md — Wave 0 test scaffold (test_cc_pty.py + cc_init_event.ndjson fixture)
+- [x] 05-01-PLAN.md — Wave 0 test scaffold (test_cc_pty.py + cc_init_event.ndjson fixture)
 - [ ] 05-02-PLAN.md — PTY subprocess + init progress + keepalive (server.py)
 - [ ] 05-03-PLAN.md — Pre-warmed CC session pool (server.py)
 
@@ -38,8 +38,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Backend WS Bridge** - WebSocket endpoint that spawns CC subprocess and relays typed events to the frontend
 - [x] **Phase 2: Core Chat UI** - Streaming chat panel with markdown rendering, sanitization, input box, and scroll-pin
-- [ ] **Phase 3: Tool Use + Sessions** - Tool use cards, permission UI, session persistence, and multi-session tabs
-- [ ] **Phase 4: Layout + Diff Viewer** - Tab/panel layout modes, user toggle, and Monaco diff editor integration
+- [x] **Phase 3: Tool Use + Sessions** - Tool use cards, permission UI, session persistence, and multi-session tabs
+- [x] **Phase 4: Layout + Diff Viewer** - Tab/panel layout modes, user toggle, and Monaco diff editor integration
 - [ ] **Phase 5: Streaming PTY Bridge** - PTY subprocess for real-time streaming, init progress, pre-warm pool
 
 ## Phase Details
@@ -93,7 +93,15 @@ Plans:
   4. The session ID persists across page navigation so refreshing the page does not lose conversation context; the user can open additional CC sessions as separate tabs
   5. The session history sidebar lists past conversations with timestamps and preview text; clicking a session resumes that conversation
   6. Token usage for the current session is visible in the UI
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+
+- [x] 03-01-PLAN.md — Wave 0 test scaffold (test_cc_tool_use.py + cc_tool_result_sample.ndjson fixture)
+- [x] 03-02-PLAN.md — Backend: _parse_cc_event tool_result/permission + session metadata extension
+- [x] 03-03-PLAN.md — Frontend: tool card rendering (create/delta/complete/output) + CSS
+- [x] 03-04-PLAN.md — Frontend: permission request UI + trust mode + CSS
+- [x] 03-05-PLAN.md — Frontend: session persistence, tab strip, sidebar, token bar + CSS
 
 ### Phase 4: Layout + Diff Viewer
 **Goal**: Users can position the CC chat interface as an editor tab or a resizable side panel, and can view code diffs in a Monaco-powered diff editor
@@ -104,7 +112,14 @@ Plans:
   2. The user can switch the CC interface to a dedicated resizable right-side panel without losing conversation state
   3. The user can toggle back and forth between tab and panel modes
   4. Code diffs proposed by CC display in Monaco's built-in diff editor with side-by-side comparison
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+
+- [x] 04-01-PLAN.md — Wave 0 test scaffold (tests/test_cc_layout.py — 12 tests)
+- [x] 04-02-PLAN.md — HTML template restructure + panel container + drag handle + CSS (LAYOUT-01, LAYOUT-02)
+- [x] 04-03-PLAN.md — Tab-to-panel mode switching with session transfer (LAYOUT-03)
+- [x] 04-04-PLAN.md — Monaco diff editor tab + View Diff tool card buttons (LAYOUT-04)
 
 ### Phase 5: Streaming PTY Bridge & CC Initialization Optimization
 **Goal**: CC chat responses stream in real-time via PTY (not block-buffered PIPE), with initialization progress visible and optional pre-warming to eliminate cold start delay
@@ -120,9 +135,9 @@ Plans:
 
 Plans:
 
-- [ ] 05-01-PLAN.md — Wave 0 test scaffold (test_cc_pty.py + cc_init_event.ndjson fixture)
-- [ ] 05-02-PLAN.md — PTY subprocess + init progress + keepalive (server.py)
-- [ ] 05-03-PLAN.md — Pre-warmed CC session pool (server.py)
+- [x] 05-01-PLAN.md — Wave 0 test scaffold (test_cc_pty.py + cc_init_event.ndjson fixture)
+- [x] 05-02-PLAN.md — PTY subprocess + init progress + keepalive (server.py)
+- [x] 05-03-PLAN.md — Pre-warmed CC session pool (server.py)
 
 ## Progress
 
@@ -133,6 +148,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 (Phase 5 can run after Phase 2
 |-------|----------------|--------|-----------|
 | 1. Backend WS Bridge | 3/3 | Complete | 2026-03-18 |
 | 2. Core Chat UI | 5/5 | Complete | 2026-03-18 |
-| 3. Tool Use + Sessions | 0/? | Not started | - |
-| 4. Layout + Diff Viewer | 0/? | Not started | - |
-| 5. Streaming PTY Bridge | 0/3 | Planning complete | - |
+| 3. Tool Use + Sessions | 5/5 | Complete | 2026-03-19 |
+| 4. Layout + Diff Viewer | 4/4 | Complete | 2026-03-20 |
+| 5. Streaming PTY Bridge | 3/3 | Complete | 2026-03-18 |

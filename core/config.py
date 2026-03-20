@@ -271,6 +271,11 @@ class Settings:
     openrouter_free_only: bool = False  # When true, only OR :free suffix models are routed
 
 
+    # Memory consolidation (QUAL-01)
+    consolidation_auto_threshold: float = 0.95
+    consolidation_flag_threshold: float = 0.85
+    consolidation_trigger_count: int = 100
+
     # Learning extraction (Phase 21)
     learning_min_evidence: int = 3
     learning_quarantine_confidence: float = 0.6
@@ -548,6 +553,10 @@ class Settings:
             apps_require_auth_default=os.getenv("APPS_REQUIRE_AUTH_DEFAULT", "false").lower()
             in ("true", "1", "yes"),
             apps_monitor_interval=int(os.getenv("APPS_MONITOR_INTERVAL", "15")),
+            # Memory consolidation (QUAL-01)
+            consolidation_auto_threshold=float(os.getenv("CONSOLIDATION_AUTO_THRESHOLD", "0.95")),
+            consolidation_flag_threshold=float(os.getenv("CONSOLIDATION_FLAG_THRESHOLD", "0.85")),
+            consolidation_trigger_count=int(os.getenv("CONSOLIDATION_TRIGGER_COUNT", "100")),
         )
 
     def get_discord_guild_ids(self) -> list[int]:

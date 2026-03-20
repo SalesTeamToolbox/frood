@@ -1,0 +1,18 @@
+# Fixture for Phase 3 tool_result parsing — Read and Bash tool sequences.
+{"type": "system", "subtype": "init", "session_id": "sess_tool_01", "cwd": "/workspace", "tools": [], "mcp_servers": []}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "I will read main.py and list the directory."}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "tu_read_001", "name": "Read", "input": {}}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{\"file_path\":"}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "\"/src/main.py\"}"}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 1}}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "tool_result", "tool_use_id": "tu_read_001", "content": "def main():\n    print('hello')"}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 2, "content_block": {"type": "tool_use", "id": "tu_bash_001", "name": "Bash", "input": {}}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "{\"command\":"}}}
+{"type": "stream_event", "event": {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "\"ls -la\"}"}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 2}}
+{"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "tool_result", "tool_use_id": "tu_bash_001", "content": "total 42\ndrwxr-xr-x 2 user user 4096 main.py"}}}
+{"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}}
+{"type": "result", "subtype": "success", "is_error": false, "session_id": "sess_tool_01", "cost_usd": 0.0035, "usage": {"input_tokens": 200, "output_tokens": 60}, "total_cost": 0.0035}

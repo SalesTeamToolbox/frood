@@ -77,6 +77,17 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 - Per-project memory namespace wired into MemoryTool (ProjectMemoryStore already exists, needs wiring)
 - GSD workstream state surfaced in context engine
 
+## Current Milestone: v1.0 Intelligent Memory Bridge
+
+**Goal:** Bridge Claude Code's flat-file memory with Agent42's Qdrant-backed semantic memory so that when Agent42 is installed, its enhanced memory becomes the primary system automatically — no user intervention needed.
+
+**Target features:**
+- PostToolUse hook that auto-syncs Claude Code memory writes to Agent42 Qdrant
+- Enhanced Stop hook with intelligent learning extraction (patterns, decisions, feedback, project context)
+- CLAUDE.md instructions that make Claude prefer Agent42 memory for reads and writes
+- Memory dedup across both systems (Claude Code flat files + Agent42 Qdrant)
+- Bidirectional awareness: Claude Code auto-memory still works, but everything flows to Qdrant
+
 ## Deferred: v2.1 Per-Project/Task Memories
 
 **Goal:** Add task-level memory scoping, tool/skill effectiveness tracking, automated post-task learning extraction, and proactive recommendations to make Agent42 learn from experience

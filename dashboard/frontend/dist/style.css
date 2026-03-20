@@ -1872,6 +1872,15 @@ body.towel-day .dont-panic-watermark {
 .ide-drag-handle::after { content: ""; position: absolute; top: -2px; bottom: -2px;
   left: 0; right: 0; }
 .ide-drag-handle:hover { background: #007acc; }
+/* ── CC Panel layout (LAYOUT-02) ─────────────────────────────────────── */
+.ide-main-editor-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.ide-cc-panel { display: none; flex-direction: column; overflow: hidden; background: #1a1a2e;
+  border-left: 1px solid var(--border); min-width: 250px; }
+.ide-panel-drag-handle { width: 3px; background: transparent; cursor: ew-resize;
+  position: relative; flex-shrink: 0; z-index: 10; }
+.ide-panel-drag-handle::after { content: ""; position: absolute; left: -2px; right: -2px;
+  top: 0; bottom: 0; }
+.ide-panel-drag-handle:hover { background: #007acc; }
 /* ── Terminal Dropdown ────────────────────────────────────────────────── */
 .ide-term-dropdown { position: absolute; bottom: calc(100% + 4px); right: 0;
   background: #1e293b; border: 1px solid #334155; border-radius: 6px;
@@ -1899,3 +1908,405 @@ body.towel-day .dont-panic-watermark {
   cursor: pointer; border-radius: 4px; }
 .ide-mini-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.08); }
 .ide-mini-btn.active { color: var(--text-primary); }
+
+/* -- CC Tool Cards (Phase 3: TOOL-01 through TOOL-05) -- */
+.cc-tool-card {
+  margin: 0.5rem 0;
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 0.85rem;
+}
+
+.cc-tool-card.cc-tool-running {
+  border-left: 3px solid var(--warning, #f59e0b);
+}
+
+.cc-tool-card.cc-tool-complete {
+  border-left: 3px solid var(--success, #22c55e);
+}
+
+.cc-tool-card.cc-tool-error {
+  border-left: 3px solid var(--danger, #ef4444);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.cc-tool-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  background: var(--bg-tertiary, #1a1a2e);
+  user-select: none;
+}
+
+.cc-tool-header:hover {
+  background: var(--bg-hover, #252540);
+}
+
+.cc-tool-status-icon {
+  flex-shrink: 0;
+  font-size: 0.9rem;
+}
+
+.cc-tool-name {
+  font-weight: 600;
+  color: var(--accent, #60a5fa);
+}
+
+.cc-tool-target {
+  color: var(--text-muted, #888);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.cc-tool-chevron {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: var(--text-muted, #888);
+  transition: transform 0.15s ease;
+}
+
+.cc-tool-body {
+  padding: 0.75rem;
+  border-top: 1px solid var(--border-color, #333);
+  background: var(--bg-secondary, #0d0d1a);
+}
+
+.cc-tool-section-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.cc-tool-section-label:first-child {
+  margin-top: 0;
+}
+
+.cc-tool-input pre,
+.cc-tool-output pre {
+  margin: 0;
+  padding: 0.5rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.cc-tool-params {
+  background: var(--bg-tertiary, #1a1a2e);
+  color: var(--text-secondary, #ccc);
+}
+
+.cc-tool-bash {
+  background: #0a0a0a;
+  color: #d4d4d4;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+}
+
+.cc-tool-file-path {
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  color: var(--accent, #60a5fa);
+  font-size: 0.85rem;
+  padding: 0.25rem 0;
+  word-break: break-all;
+}
+
+.cc-tool-output-content {
+  background: var(--bg-tertiary, #1a1a2e);
+  color: var(--text-primary, #e5e5e5);
+}
+
+.cc-tool-show-more {
+  display: inline-block;
+  margin-top: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  background: transparent;
+  color: var(--accent, #60a5fa);
+  border: 1px solid var(--accent, #60a5fa);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.cc-tool-show-more:hover {
+  background: var(--accent, #60a5fa);
+  color: #fff;
+}
+
+/* -- Phase 4: Tool card action buttons (LAYOUT-04) -- */
+.cc-tool-actions { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid rgba(255,255,255,0.06); }
+.cc-tool-action-btn { padding: 4px 12px; font-size: 0.78rem; border-radius: 4px;
+  border: 1px solid var(--accent, #f97316); color: var(--accent, #f97316);
+  background: transparent; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.cc-tool-action-btn:hover { background: var(--accent, #f97316); color: #fff; }
+.cc-tool-diff-btn { font-weight: 600; }
+
+/* -- CC Permission Cards (Phase 3: TOOL-06) -- */
+.cc-perm-card {
+  margin: 0.5rem 0;
+  padding: 0.75rem;
+  border: 2px solid var(--warning, #f59e0b);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08);
+  animation: cc-perm-pulse 2s ease-in-out infinite;
+}
+
+.cc-perm-card.cc-perm-approved {
+  border-color: var(--success, #22c55e);
+  background: rgba(34, 197, 94, 0.05);
+  animation: none;
+}
+
+.cc-perm-card.cc-perm-rejected {
+  border-color: var(--danger, #ef4444);
+  background: rgba(239, 68, 68, 0.05);
+  animation: none;
+}
+
+@keyframes cc-perm-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.2); }
+  50% { box-shadow: 0 0 8px 2px rgba(245, 158, 11, 0.15); }
+}
+
+.cc-perm-label {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--warning, #f59e0b);
+  margin-bottom: 0.35rem;
+}
+
+.cc-perm-desc {
+  font-size: 0.82rem;
+  color: var(--text-secondary, #ccc);
+  margin-bottom: 0.5rem;
+}
+
+.cc-perm-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.cc-perm-approve {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  background: var(--success, #22c55e);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.cc-perm-approve:hover {
+  opacity: 0.85;
+}
+
+.cc-perm-reject {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  background: transparent;
+  color: var(--danger, #ef4444);
+  border: 1px solid var(--danger, #ef4444);
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.cc-perm-reject:hover {
+  background: var(--danger, #ef4444);
+  color: #fff;
+}
+
+.cc-perm-result {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding-top: 0.25rem;
+}
+
+.cc-perm-auto-approved {
+  font-size: 0.78rem;
+  color: var(--text-muted, #888);
+  padding: 0.15rem 0;
+  font-style: italic;
+}
+
+/* Trust mode toggle (in chat header) */
+.cc-trust-toggle {
+  margin-left: auto;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+  background: transparent;
+  color: var(--text-muted, #888);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.cc-trust-toggle:hover {
+  color: var(--text-primary, #e5e5e5);
+  border-color: var(--text-muted, #888);
+}
+
+.cc-trust-toggle.cc-trust-active {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning, #f59e0b);
+  border-color: var(--warning, #f59e0b);
+}
+
+.cc-trust-indicator {
+  font-size: 0.72rem;
+  color: var(--warning, #f59e0b);
+  margin-left: 0.5rem;
+}
+
+/* -- CC Session Tab Strip (Phase 3: SESS-03) -- */
+.cc-tab-strip {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-bottom: 1px solid var(--border-color, #333);
+  background: var(--bg-tertiary, #1a1a2e);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.cc-session-tab {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.78rem;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+}
+
+.cc-session-tab:hover {
+  color: var(--text-primary, #e5e5e5);
+}
+
+.cc-session-tab.cc-session-tab-active {
+  color: var(--accent, #60a5fa);
+  border-bottom-color: var(--accent, #60a5fa);
+}
+
+.cc-tab-add {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  background: transparent;
+  color: var(--text-muted, #888);
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cc-tab-add:hover {
+  color: var(--accent, #60a5fa);
+}
+
+/* -- CC Token Usage Bar (Phase 3: SESS-06) -- */
+.cc-token-bar {
+  padding: 0.2rem 0.75rem;
+  font-size: 0.7rem;
+  color: var(--text-muted, #888);
+  background: var(--bg-secondary, #0d0d1a);
+  border-bottom: 1px solid var(--border-color, #333);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  letter-spacing: 0.02em;
+}
+
+/* -- CC Session Sidebar (Phase 3: SESS-04, SESS-05) -- */
+.cc-session-sidebar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 260px;
+  height: 100%;
+  background: var(--bg-primary, #0a0a1a);
+  border-left: 1px solid var(--border-color, #333);
+  overflow-y: auto;
+  z-index: 10;
+}
+
+.cc-session-sidebar-header {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-primary, #e5e5e5);
+  border-bottom: 1px solid var(--border-color, #333);
+}
+
+.cc-session-group-label {
+  padding: 0.4rem 0.75rem 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cc-session-entry {
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-color, #222);
+}
+
+.cc-session-entry:hover {
+  background: var(--bg-hover, #252540);
+}
+
+.cc-session-title {
+  font-size: 0.82rem;
+  color: var(--text-primary, #e5e5e5);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cc-session-meta {
+  font-size: 0.7rem;
+  color: var(--text-muted, #888);
+  margin-top: 0.15rem;
+}
+
+.cc-session-preview {
+  font-size: 0.72rem;
+  color: var(--text-muted, #666);
+  margin-top: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cc-session-empty {
+  padding: 1rem 0.75rem;
+  font-size: 0.78rem;
+  color: var(--text-muted, #666);
+  text-align: center;
+  font-style: italic;
+}
+
+.cc-history-btn {
+  margin-left: 0.5rem;
+  padding: 0.15rem 0.35rem;
+  font-size: 0.8rem;
+  background: transparent;
+  border: 1px solid var(--border-color, #333);
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-muted, #888);
+}
+
+.cc-history-btn:hover {
+  color: var(--text-primary, #e5e5e5);
+  border-color: var(--text-muted, #888);
+}

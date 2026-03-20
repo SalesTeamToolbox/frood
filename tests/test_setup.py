@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scripts.jcodemunch_index import index_project
 from scripts.setup_helpers import (
     check_health,
+    generate_claude_md_section,
     generate_mcp_config,
     print_health_report,
     read_hook_metadata,
@@ -648,6 +649,78 @@ class TestHealthReport:
         captured = capsys.readouterr()
         assert "services healthy" in captured.out
         assert "3/5" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# TestClaudeMdGeneration
+# ---------------------------------------------------------------------------
+
+
+class TestClaudeMdGeneration:
+    """INTEG-01 through INTEG-03: CLAUDE.md memory section generation."""
+
+    def test_creates_claude_md_when_absent(self, tmp_path):
+        """Creates CLAUDE.md with markers and agent42_memory when no file exists."""
+        generate_claude_md_section(str(tmp_path))
+        claude_md = tmp_path / "CLAUDE.md"
+        assert claude_md.exists()
+        content = claude_md.read_text()
+        assert "<!-- BEGIN AGENT42 MEMORY -->" in content
+        assert "<!-- END AGENT42 MEMORY -->" in content
+        assert "agent42_memory" in content
+
+    def test_appends_to_existing_claude_md(self, tmp_path):
+        """Appends managed section to existing CLAUDE.md, preserving user content."""
+        (tmp_path / "CLAUDE.md").write_text("# My Project\n\nExisting content.\n")
+        generate_claude_md_section(str(tmp_path))
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "My Project" in content
+        assert "Existing content." in content
+        assert "agent42_memory" in content
+
+    def test_idempotent_on_rerun(self, tmp_path):
+        """Calling generate_claude_md_section twice produces identical file content."""
+        generate_claude_md_section(str(tmp_path))
+        first = (tmp_path / "CLAUDE.md").read_text()
+        generate_claude_md_section(str(tmp_path))
+        second = (tmp_path / "CLAUDE.md").read_text()
+        assert first == second
+
+    def test_replaces_managed_section_on_rerun(self, tmp_path):
+        """Old content between markers is replaced; new template content is present."""
+        (tmp_path / "CLAUDE.md").write_text(
+            "# Project\n\n<!-- BEGIN AGENT42 MEMORY -->\nOLD CONTENT\n<!-- END AGENT42 MEMORY -->\n"
+        )
+        generate_claude_md_section(str(tmp_path))
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "OLD CONTENT" not in content
+        assert "agent42_memory" in content
+
+    def test_preserves_content_outside_markers(self, tmp_path):
+        """Content before and after markers is preserved; only inside is replaced."""
+        (tmp_path / "CLAUDE.md").write_text(
+            "# My Project\n\nBefore section.\n\n"
+            "<!-- BEGIN AGENT42 MEMORY -->\nOLD\n<!-- END AGENT42 MEMORY -->\n\n"
+            "After section.\n"
+        )
+        generate_claude_md_section(str(tmp_path))
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "Before section." in content
+        assert "After section." in content
+        assert "OLD" not in content
+
+    def test_template_contains_search_instruction(self, tmp_path):
+        """Generated CLAUDE.md contains action=\"search\" — verifies INTEG-01."""
+        generate_claude_md_section(str(tmp_path))
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert 'action="search"' in content
+
+    def test_template_contains_store_and_log(self, tmp_path):
+        """Generated CLAUDE.md contains action=\"store\" and action=\"log\" — verifies INTEG-02."""
+        generate_claude_md_section(str(tmp_path))
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert 'action="store"' in content
+        assert 'action="log"' in content
 
 
 # ---------------------------------------------------------------------------
