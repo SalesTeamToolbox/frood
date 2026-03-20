@@ -136,6 +136,81 @@ def _git_summary(project_dir):
     return parts
 
 
+def is_trivial_session(event):
+    """Detect trivial sessions that should not be stored.
+
+    Skip if ANY of these conditions are true:
+    - stop_reason is 'interrupted'
+    - No files modified AND fewer than 3 tool calls
+    - Session duration < 30 seconds (if timestamps available)
+    """
+    stop_reason = event.get("stop_reason", "")
+    if stop_reason == "interrupted":
+        return True
+
+    tool_results = event.get("tool_results", [])
+    tool_count = len(tool_results) if isinstance(tool_results, list) else 0
+
+    # Check files modified from tool_results
+    files_modified = set()
+    if isinstance(tool_results, list):
+        for tr in tool_results:
+            if not isinstance(tr, dict):
+                continue
+            tool_name = tr.get("tool_name", "")
+            tool_input = tr.get("tool_input", {})
+            if isinstance(tool_input, dict):
+                fp = tool_input.get("file_path", "") or tool_input.get("path", "")
+                if fp and tool_name in ("Write", "Edit", "agent42_write_file", "agent42_edit_file"):
+                    files_modified.add(fp)
+
+    if not files_modified and tool_count < 3:
+        return True
+
+    # Session duration check (if start_time in event)
+    start_time = event.get("session_start_time", 0)
+    if start_time and (time.time() - start_time) < 30:
+        return True
+
+    return False
+
+
+def check_dedup(history_path, summary):
+    """Check if summary is a duplicate of recent HISTORY.md entries.
+
+    Compares keywords of new summary against last 10 entries.
+    Returns True if > 80% keyword overlap found (skip this entry).
+    """
+    if not history_path.exists():
+        return False
+
+    try:
+        content = history_path.read_text(encoding="utf-8")
+    except Exception:
+        return False
+
+    # Parse last 10 entries
+    entries = content.split("\n---\n")
+    recent = [e.strip() for e in entries[-10:] if e.strip()]
+    if not recent:
+        return False
+
+    # Extract keywords from new summary
+    new_words = set(re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", summary.lower()))
+    if not new_words:
+        return False
+
+    for entry in recent:
+        entry_words = set(re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", entry.lower()))
+        if not entry_words:
+            continue
+        overlap = len(new_words & entry_words) / max(len(new_words), 1)
+        if overlap > 0.80:
+            return True
+
+    return False
+
+
 def main():
     try:
         event = json.loads(sys.stdin.read())
@@ -148,12 +223,20 @@ def main():
     if not summary:
         sys.exit(0)
 
+    # Skip trivial sessions
+    if is_trivial_session(event):
+        sys.exit(0)
+
     # ── Append to HISTORY.md ─────────────────────────────────────────────
     memory_dir = Path(project_dir) / ".agent42" / "memory"
     memory_dir.mkdir(parents=True, exist_ok=True)
 
     history_path = memory_dir / "HISTORY.md"
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Skip duplicates
+    if check_dedup(history_path, summary):
+        sys.exit(0)
 
     entry = f"\n---\n[{timestamp}] {summary}\n"
 
