@@ -110,6 +110,17 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd C:/Users/user/projects/agent42 && python .claude/hooks/credential-sync.py",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }
