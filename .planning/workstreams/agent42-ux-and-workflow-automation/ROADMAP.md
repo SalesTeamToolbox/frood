@@ -34,7 +34,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] 01-01-PLAN.md — Fix recall hook limits and learn hook filtering (MEM-01, MEM-02)
 - [x] 01-02-PLAN.md — Server-side logging and --health memory diagnostics (MEM-04)
-- [ ] 01-03-PLAN.md — End-to-end pipeline tests (MEM-03)
+- [x] 01-03-PLAN.md — End-to-end pipeline tests (MEM-03)
 
 ### Phase 2: GSD Auto-Activation
 **Goal**: GSD methodology activates automatically for multi-step coding and planning tasks — users get structured workflow without manual invocation

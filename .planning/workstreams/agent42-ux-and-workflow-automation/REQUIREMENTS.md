@@ -16,7 +16,7 @@
 
 - [x] **MEM-01**: Memory recall hook outputs relevant memories to stderr so they appear in VS Code Claude Code chat stream
 - [x] **MEM-02**: Memory learn hook outputs learning confirmations to stderr so they appear in VS Code chat stream
-- [ ] **MEM-03**: End-to-end memory pipeline works: prompt triggers recall, stop triggers learn, both show visible feedback
+- [x] **MEM-03**: End-to-end memory pipeline works: prompt triggers recall, stop triggers learn, both show visible feedback
 - [x] **MEM-04**: Memory operations are logged in Agent42 server logs for debugging
 
 ### GSD Auto-Activation
@@ -58,7 +58,7 @@
 |-------------|-------|--------|
 | MEM-01 | Phase 1 | Complete |
 | MEM-02 | Phase 1 | Complete |
-| MEM-03 | Phase 1 | Pending |
+| MEM-03 | Phase 1 | Complete |
 | MEM-04 | Phase 1 | Complete |
 | GSD-01 | Phase 2 | Pending |
 | GSD-02 | Phase 2 | Pending |
