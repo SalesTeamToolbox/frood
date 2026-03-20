@@ -460,7 +460,52 @@ def main():
             file=sys.stderr,
         )
 
+    # Memory storage reminder — nudge Claude to persist important findings
+    _emit_memory_nudge(prompt)
+
     sys.exit(0)
+
+
+def _emit_memory_nudge(prompt):
+    """Remind Claude to store important discoveries via agent42_memory.
+
+    Triggers on prompts that suggest knowledge-producing work (debugging,
+    investigating, deploying, fixing, configuring). Skips trivial prompts
+    and slash commands.
+    """
+    if not prompt or len(prompt.strip()) < 20:
+        return
+    if prompt.strip().startswith("/"):
+        return
+
+    text = prompt.lower()
+    # Detect prompts likely to produce store-worthy knowledge
+    knowledge_signals = [
+        "fix",
+        "debug",
+        "deploy",
+        "config",
+        "setup",
+        "investigate",
+        "why",
+        "how does",
+        "figure out",
+        "diagnose",
+        "resolve",
+        "integrate",
+        "migrate",
+        "upgrade",
+        "refactor",
+    ]
+    if not any(signal in text for signal in knowledge_signals):
+        return
+
+    print(
+        "[context-loader] Memory reminder: If you discover something non-obvious "
+        "during this task (a fix, a gotcha, a config detail), store it using the "
+        "agent42_memory MCP tool with action=store so it's available in future sessions.",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":

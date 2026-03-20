@@ -316,6 +316,77 @@ def try_agent42_api_search(prompt):
         return []
 
 
+def try_qdrant_direct_search(keywords):
+    """Query Qdrant REST API directly with keyword matching on payloads.
+
+    When both the search service and dashboard are down, we can still query
+    Qdrant's REST API directly. Since we don't have embeddings, we scroll
+    through all points and do keyword matching on payload text. This works
+    well when the collection is small (< 1000 points).
+    """
+    import urllib.error
+    import urllib.request
+
+    qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+    collections = ["agent42_memory", "agent42_history"]
+    memories = []
+
+    for collection in collections:
+        try:
+            # Scroll all points (fast for small collections)
+            data = json.dumps(
+                {
+                    "limit": 100,
+                    "with_payload": True,
+                    "with_vector": False,
+                }
+            ).encode()
+
+            req = urllib.request.Request(
+                f"{qdrant_url}/collections/{collection}/points/scroll",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                result = json.loads(resp.read())
+
+            points = result.get("result", {}).get("points", [])
+            source = collection.replace("agent42_", "")
+
+            for point in points:
+                payload = point.get("payload", {})
+                text = payload.get("text", payload.get("content", ""))
+                section = payload.get("section", "")
+                if not text:
+                    continue
+
+                # Score by keyword match density
+                text_lower = text.lower()
+                matches = sum(1 for kw in keywords if kw in text_lower)
+                if matches < MIN_KEYWORD_MATCHES:
+                    continue
+
+                score = min(matches / max(len(keywords), 1), 1.0) * 0.75
+                label = f"[{section}]" if section else f"[{source}]"
+                display = text[:250].strip()
+                if len(text) > 250:
+                    display += "..."
+
+                memories.append(
+                    {
+                        "text": f"{label} {display}",
+                        "score": score,
+                        "source": "qdrant-direct",
+                    }
+                )
+        except (urllib.error.URLError, OSError, json.JSONDecodeError, Exception):
+            continue
+
+    return memories
+
+
 def deduplicate(memories):
     """Remove near-duplicate memories by text prefix."""
     seen = set()
@@ -382,6 +453,11 @@ def main():
     if not semantic_results:
         semantic_results = try_agent42_api_search(prompt)
     memories.extend(semantic_results)
+
+    # Layer 1.5: Qdrant direct scroll + keyword match (when search service is down)
+    if not semantic_results:
+        qdrant_results = try_qdrant_direct_search(keywords)
+        memories.extend(qdrant_results)
 
     # Layer 2: MEMORY.md keyword search
     memory_file = memory_dir / "MEMORY.md"
