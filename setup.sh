@@ -2,22 +2,59 @@
 # setup.sh — Agent42 setup script
 # Run once after cloning: bash setup.sh
 # Use --quiet when called from install-server.sh (suppresses banners/prompts)
+#
+# Subcommands:
+#   bash setup.sh              Full local setup (default)
+#   bash setup.sh sync-auth    Sync CC credentials to remote VPS
+#   bash setup.sh --quiet      Quiet mode (for install-server.sh)
 
 set -e
 
-QUIET=false
-[ "$1" = "--quiet" ] && QUIET=true
-
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
 info()    { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+
+# ── Subcommand: sync-auth ──────────────────────────────────────────────────
+if [ "$1" = "sync-auth" ]; then
+    SSH_ALIAS="${2:-agent42-prod}"
+    LOCAL_CREDS="$HOME/.claude/.credentials.json"
+
+    if [ ! -f "$LOCAL_CREDS" ]; then
+        error "No local CC credentials found at $LOCAL_CREDS. Run 'claude auth login' first."
+    fi
+
+    info "Checking remote CC auth status on $SSH_ALIAS..."
+    REMOTE_STATUS=$(ssh -o ConnectTimeout=5 "$SSH_ALIAS" "claude auth status 2>&1" 2>/dev/null | grep -o '"loggedIn": *[a-z]*' | head -1 || echo "unknown")
+
+    info "Syncing CC credentials to $SSH_ALIAS..."
+    ssh "$SSH_ALIAS" "mkdir -p ~/.claude" 2>/dev/null
+    scp -q "$LOCAL_CREDS" "$SSH_ALIAS:~/.claude/.credentials.json"
+
+    # Verify
+    NEW_STATUS=$(ssh -o ConnectTimeout=5 "$SSH_ALIAS" "claude auth status 2>&1" 2>/dev/null | grep -o '"loggedIn": *[a-z]*' | head -1 || echo "unknown")
+    if echo "$NEW_STATUS" | grep -q "true"; then
+        info "CC credentials synced successfully!"
+        ssh "$SSH_ALIAS" "claude auth status 2>&1" 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(f'  Auth: {d.get(\"authMethod\",\"?\")} | Subscription: {d.get(\"subscriptionType\",\"?\")}')
+except: pass
+" 2>/dev/null || true
+    else
+        warn "Credentials copied but auth status unclear. Run 'claude auth status' on VPS to verify."
+    fi
+    exit 0
+fi
+
+QUIET=false
+[ "$1" = "--quiet" ] && QUIET=true
 
 if ! $QUIET; then
     echo ""
