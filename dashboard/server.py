@@ -2231,11 +2231,16 @@ def create_app(
                             len(args),
                             workspace,
                         )
+                        # Use home dir as cwd to avoid loading project-level
+                        # .claude/ configs with platform-specific paths (e.g. Windows
+                        # MCP paths on a Linux VPS). The workspace is still accessible
+                        # to CC via --add-dir if needed.
+                        _cc_cwd = str(Path.home()) if _sys.platform != "win32" else str(workspace)
                         cc_proc = await _asyncio.create_subprocess_exec(
                             *args,
                             stdout=_asyncio.subprocess.PIPE,
                             stderr=_asyncio.subprocess.PIPE,
-                            cwd=str(workspace),
+                            cwd=_cc_cwd,
                         )
                         logger.info("CC PIPE: process spawned, pid=%s", cc_proc.pid)
                     except Exception as spawn_err:
