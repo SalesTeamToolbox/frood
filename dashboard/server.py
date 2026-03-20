@@ -2868,7 +2868,7 @@ def create_app(
             messages_path.unlink()
         return {"status": "ok"}
 
-    class SetupRequest(BaseModel):
+    class ChatSetupRequest(BaseModel):
         mode: str = "local"
         runtime: str = "python"
         app_name: str = ""
@@ -2880,7 +2880,7 @@ def create_app(
 
     @app.post("/api/chat/sessions/{session_id}/setup")
     async def chat_session_setup(
-        session_id: str, req: SetupRequest, _user: str = Depends(get_current_user)
+        session_id: str, req: ChatSetupRequest, _user: str = Depends(get_current_user)
     ):
         """Configure deployment target for a code session."""
         session = await _chat_load_session(session_id)
