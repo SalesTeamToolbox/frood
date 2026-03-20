@@ -49,6 +49,17 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 - Hybrid streaming: simulated streaming for chat, non-streaming for background tasks
 - Fallback chain: StrongWall -> Free tier (Cerebras/Groq) -> L2 premium (Gemini/OR paid)
 
+## Current Milestone: v1.0 Agent42 UX & Workflow Automation
+
+**Goal:** Make Agent42 feel like a native app, fix the memory pipeline visibility, and make GSD the default methodology when Agent42 is installed — so coding tasks automatically use structured planning and execution.
+
+**Target features:**
+- PWA manifest + desktop shortcut for app-like browser experience (no address bar)
+- Memory hook pipeline debug — fix recall/learn hooks not showing updates in VS Code chat stream
+- GSD auto-activation: always-on skill + CLAUDE.md integration + context-loader enhancement
+- When Agent42 is installed, GSD becomes the default process for multi-step coding tasks
+- CC credential sync to VPS (setup.sh sync-auth + SessionStart hook) — SHIPPED
+
 ## Current Milestone: v2.0 Custom Claude Code UI
 
 **Goal:** Build a VS Code Claude Code extension-style chat interface inside the Agent42 IDE, replacing the raw xterm terminal with a rich, web-native experience.
