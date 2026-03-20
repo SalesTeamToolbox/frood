@@ -501,6 +501,19 @@ def create_app(
 
     # Shared imports used by multiple handlers within create_app scope
     import json as _json
+    import time as _time_mem
+
+    # Memory pipeline logger — records metadata only (no payload content)
+    _memory_logger = logging.getLogger("memory.recall")
+
+    # In-memory 24h stats counters — consumed by /api/memory/stats and --health
+    _memory_stats = {
+        "recall_count": 0,
+        "learn_count": 0,
+        "error_count": 0,
+        "total_latency_ms": 0.0,
+        "last_reset": _time_mem.time(),
+    }
 
     # Apply persisted tool/skill toggle state
     _toggle_state = _load_toggle_state()
@@ -2590,13 +2603,25 @@ def create_app(
         Used by the memory-recall hook as a fallback when the dedicated
         search service isn't running. No auth required for local hook access.
         """
+        # Reset 24h stats window if a full day has passed
+        if _time_mem.time() - _memory_stats["last_reset"] > 86400:
+            _memory_stats["recall_count"] = 0
+            _memory_stats["learn_count"] = 0
+            _memory_stats["error_count"] = 0
+            _memory_stats["total_latency_ms"] = 0.0
+            _memory_stats["last_reset"] = _time_mem.time()
+
+        _start = _time_mem.monotonic()
+        keyword_count = 0
         try:
             body = await request.json()
             query = body.get("content", body.get("query", ""))
             if not query:
                 return {"results": []}
 
+            keyword_count = len(query.split())
             results = []
+            search_method = "none"
 
             # Try Qdrant semantic search if memory_store is available
             if memory_store:
@@ -2610,6 +2635,8 @@ def create_app(
                                 "source": hit.get("source", "qdrant"),
                             }
                         )
+                    if results:
+                        search_method = "semantic"
                 except Exception:
                     pass
 
@@ -2631,10 +2658,43 @@ def create_app(
                                     "source": "memory-md",
                                 }
                             )
+                    if results:
+                        search_method = "keyword"
+
+            _elapsed = (_time_mem.monotonic() - _start) * 1000
+            _memory_logger.info(
+                "recall query: keywords=%d results=%d method=%s latency_ms=%.1f",
+                keyword_count,
+                len(results),
+                search_method,
+                _elapsed,
+            )
+            _memory_stats["recall_count"] += 1
+            _memory_stats["total_latency_ms"] += _elapsed
 
             return {"results": results[:5]}
         except Exception as e:
+            _elapsed = (_time_mem.monotonic() - _start) * 1000
+            _memory_logger.warning(
+                "recall query failed: keywords=%d error=%s latency_ms=%.1f",
+                keyword_count,
+                str(e)[:100],
+                _elapsed,
+            )
+            _memory_stats["error_count"] += 1
             return {"results": [], "error": str(e)}
+
+    @app.get("/api/memory/stats")
+    async def memory_stats():
+        """Return 24h memory pipeline activity counters."""
+        avg_latency = _memory_stats["total_latency_ms"] / max(_memory_stats["recall_count"], 1)
+        return {
+            "recall_count": _memory_stats["recall_count"],
+            "learn_count": _memory_stats["learn_count"],
+            "error_count": _memory_stats["error_count"],
+            "avg_latency_ms": round(avg_latency, 1),
+            "period_start": _memory_stats["last_reset"],
+        }
 
     # -- IDE Chat (AI-powered code assistant) ----------------------------------
 
