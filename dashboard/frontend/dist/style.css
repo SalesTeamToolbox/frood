@@ -2043,6 +2043,14 @@ body.towel-day .dont-panic-watermark {
   color: #fff;
 }
 
+/* -- Phase 4: Tool card action buttons (LAYOUT-04) -- */
+.cc-tool-actions { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid rgba(255,255,255,0.06); }
+.cc-tool-action-btn { padding: 4px 12px; font-size: 0.78rem; border-radius: 4px;
+  border: 1px solid var(--accent, #f97316); color: var(--accent, #f97316);
+  background: transparent; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.cc-tool-action-btn:hover { background: var(--accent, #f97316); color: #fff; }
+.cc-tool-diff-btn { font-weight: 600; }
+
 /* -- CC Permission Cards (Phase 3: TOOL-06) -- */
 .cc-perm-card {
   margin: 0.5rem 0;

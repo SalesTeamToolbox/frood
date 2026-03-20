@@ -3201,6 +3201,20 @@ let _ideActiveTab = -1;
 let _ideTreeCache = {};
 let _ideExpandedDirs = new Set([""]);
 
+function ideDetectLanguage(filename) {
+  if (!filename) return "plaintext";
+  var ext = filename.split(".").pop().toLowerCase();
+  var map = {
+    py: "python", js: "javascript", ts: "typescript", tsx: "typescript",
+    jsx: "javascript", css: "css", html: "html", json: "json",
+    md: "markdown", yaml: "yaml", yml: "yaml", xml: "xml",
+    sh: "shell", bash: "shell", rs: "rust", go: "go", java: "java",
+    rb: "ruby", php: "php", sql: "sql", toml: "ini", cfg: "ini",
+    txt: "plaintext"
+  };
+  return map[ext] || "plaintext";
+}
+
 function renderCode() {
   var pageContent = document.getElementById("page-content");
   var persistent = document.getElementById("ide-persistent");
@@ -3600,6 +3614,19 @@ function ideActivateTab() {
       // Only call fitAddon for xterm-based tabs (chatPanel tabs have no fitAddon -- Pitfall 5)
       if (!tab.chatPanel && tab.fitAddon) { try { tab.fitAddon.fit(); } catch(e) {} }
     }
+  } else if (tab.type === "diff") {
+    // Diff tab: hide Monaco file editor and CC containers, show diff container
+    if (_monacoEditor) _monacoEditor.setModel(null);
+    if (container) container.style.display = "none";
+    if (welcome) welcome.style.display = "none";
+    if (ccContainer) ccContainer.style.display = "none";
+    // Hide all other diff containers
+    var allDiffEls = document.querySelectorAll(".ide-diff-container");
+    allDiffEls.forEach(function(d) { d.style.display = "none"; });
+    if (tab.el) {
+      tab.el.style.display = "block";
+      tab.diffEditor.layout();
+    }
   } else {
     // File tab: show Monaco, hide CC terminal
     if (_monacoEditor) {
@@ -3648,6 +3675,11 @@ function ideCloseTab(index) {
     tab.streamMsgEl = null;
     if (tab.ws && tab.ws.readyState <= 1) tab.ws.close();
     if (tab.el) tab.el.remove();
+  } else if (tab.type === "diff") {
+    if (tab.diffEditor) tab.diffEditor.dispose();
+    if (tab.diffOriginalModel) tab.diffOriginalModel.dispose();
+    if (tab.diffModifiedModel) tab.diffModifiedModel.dispose();
+    if (tab.el) tab.el.remove();
   } else {
     if (tab.modified && !confirm("Discard unsaved changes to " + tab.path + "?")) return;
     if (tab.model) tab.model.dispose();
@@ -3667,6 +3699,86 @@ function ideCloseTab(index) {
     ideActivateTab();
   }
   ideRenderTabs();
+}
+
+// -- Monaco Diff Editor (LAYOUT-04) -------------------------------------------
+
+function ideOpenDiffTab(filename, originalContent, modifiedContent, language) {
+  language = language || ideDetectLanguage(filename) || "plaintext";
+
+  // Create container div inside .ide-main-editor-area
+  var editorArea = document.querySelector(".ide-main-editor-area");
+  if (!editorArea) {
+    var editorContainer = document.getElementById("ide-editor-container");
+    if (editorContainer) editorArea = editorContainer.parentNode;
+  }
+  var diffContainer = document.createElement("div");
+  diffContainer.className = "ide-diff-container";
+  diffContainer.style.cssText = "flex:1;overflow:hidden;display:none";
+  if (editorArea) editorArea.appendChild(diffContainer);
+
+  var origModel = monaco.editor.createModel(originalContent || "", language);
+  var modModel = monaco.editor.createModel(modifiedContent || "", language);
+
+  var diffEditor = monaco.editor.createDiffEditor(diffContainer, {
+    automaticLayout: true,
+    renderSideBySide: true,
+    originalEditable: false,
+    enableSplitViewResizing: true,
+    theme: "agent42-dark"
+  });
+  diffEditor.setModel({ original: origModel, modified: modModel });
+  // Ensure both panes are read-only (Pitfall 3 from research)
+  diffEditor.getOriginalEditor().updateOptions({ readOnly: true });
+  diffEditor.getModifiedEditor().updateOptions({ readOnly: true });
+
+  var shortName = filename.split("/").pop();
+  var tab = {
+    type: "diff",
+    path: shortName + " \u2194 Changes",
+    chatPanel: false,
+    diffEditor: diffEditor,
+    diffOriginalModel: origModel,
+    diffModifiedModel: modModel,
+    el: diffContainer,
+    modified: false,
+  };
+  _ideTabs.push(tab);
+  _ideActiveTab = _ideTabs.length - 1;
+  ideActivateTab();
+  ideRenderTabs();
+}
+
+function ccOpenDiffFromToolCard(filePath, toolId) {
+  if (!filePath) return;
+
+  // Get modified content from the tool card output
+  var outputEl = document.querySelector('.cc-tool-output[data-tool-id="' + toolId + '"]');
+  var modifiedContent = "";
+  if (outputEl) {
+    var pre = outputEl.querySelector("pre");
+    if (pre) modifiedContent = pre.textContent || "";
+  }
+
+  // Fetch original file content from server
+  var url = "/api/ide/file?path=" + encodeURIComponent(filePath);
+  fetch(url, { headers: { Authorization: "Bearer " + state.token } }).then(function(resp) {
+    if (!resp.ok) return Promise.resolve("");
+    return resp.text();
+  }).then(function(originalContent) {
+    // Parse response — the endpoint returns JSON with a content field
+    var origText = originalContent || "";
+    try {
+      var parsed = JSON.parse(origText);
+      if (parsed.content !== undefined) origText = parsed.content;
+    } catch(e) {
+      // Response was plain text, use as-is
+    }
+    ideOpenDiffTab(filePath, origText, modifiedContent);
+  }).catch(function() {
+    // New file (original doesn't exist) — show empty original pane
+    ideOpenDiffTab(filePath, "", modifiedContent);
+  });
 }
 
 // -- CC Chat markdown renderer (marked.js + DOMPurify + highlight.js) -----------
@@ -3769,6 +3881,11 @@ var _ccTabCounter = 0;
 
 var _CC_FILE_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "MultiEdit"];
 var _CC_BASH_TOOLS = ["Bash", "bash"];
+var _CC_WRITE_TOOLS = ["Write", "Edit", "MultiEdit"];
+
+function ccIsWriteTool(name) {
+  return _CC_WRITE_TOOLS.indexOf(name) >= 0;
+}
 
 function ccToolType(name) {
   if (_CC_FILE_TOOLS.indexOf(name) >= 0) return "file";
@@ -3909,6 +4026,35 @@ function ccFinalizeToolCard(cardEl, toolName, parsedInput, isError) {
   }
 
   body.appendChild(inputSection);
+
+  // Action buttons for Write/Edit tool cards (LAYOUT-04)
+  if (ccIsWriteTool(toolName) && !isError) {
+    var actionsDiv = document.createElement("div");
+    actionsDiv.className = "cc-tool-actions";
+
+    var filePath = parsedInput.file_path || parsedInput.path || "";
+    var cardToolId = cardEl.getAttribute("data-tool-id");
+
+    var viewDiffBtn = document.createElement("button");
+    viewDiffBtn.className = "cc-tool-action-btn cc-tool-diff-btn";
+    viewDiffBtn.textContent = "View Diff";
+    viewDiffBtn.setAttribute("data-filepath", filePath);
+    viewDiffBtn.setAttribute("data-tool-id", cardToolId);
+    viewDiffBtn.addEventListener("click", function() {
+      ccOpenDiffFromToolCard(this.getAttribute("data-filepath"), this.getAttribute("data-tool-id"));
+    });
+    actionsDiv.appendChild(viewDiffBtn);
+
+    var openFileBtn = document.createElement("button");
+    openFileBtn.className = "cc-tool-action-btn";
+    openFileBtn.textContent = "Open File";
+    openFileBtn.addEventListener("click", function() {
+      ideOpenFile(filePath);
+    });
+    actionsDiv.appendChild(openFileBtn);
+
+    body.appendChild(actionsDiv);
+  }
 
   var outputSection = document.createElement("div");
   outputSection.className = "cc-tool-output";
