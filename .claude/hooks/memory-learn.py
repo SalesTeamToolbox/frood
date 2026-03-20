@@ -161,10 +161,11 @@ def main():
         with open(history_path, "a", encoding="utf-8") as f:
             f.write(entry)
     except Exception as e:
-        print(f"[memory-learn] Failed to write history: {e}", file=sys.stderr)
+        print(f"[agent42-memory] Learn: failed to write history — {e}", file=sys.stderr)
         sys.exit(0)
 
     # ── Index via search service HTTP API (avoids loading model in hook) ──
+    indexed = False
     search_url = os.environ.get("AGENT42_SEARCH_URL", "http://127.0.0.1:6380")
     try:
         import urllib.request
@@ -178,11 +179,12 @@ def main():
         )
         with urllib.request.urlopen(req, timeout=3) as resp:
             resp.read()
-        print("[memory-learn] Indexed session in semantic store", file=sys.stderr)
+        indexed = True
     except Exception:
         pass  # Search service not running — file-based history still works
 
-    print(f"[memory-learn] Captured: {summary[:100]}", file=sys.stderr)
+    store_label = "HISTORY.md + Qdrant" if indexed else "HISTORY.md"
+    print(f"[agent42-memory] Learn: captured to {store_label} — {summary[:120]}", file=sys.stderr)
     sys.exit(0)
 
 
