@@ -1872,6 +1872,15 @@ body.towel-day .dont-panic-watermark {
 .ide-drag-handle::after { content: ""; position: absolute; top: -2px; bottom: -2px;
   left: 0; right: 0; }
 .ide-drag-handle:hover { background: #007acc; }
+/* ── CC Panel layout (LAYOUT-02) ─────────────────────────────────────── */
+.ide-main-editor-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.ide-cc-panel { display: none; flex-direction: column; overflow: hidden; background: #1a1a2e;
+  border-left: 1px solid var(--border); min-width: 250px; }
+.ide-panel-drag-handle { width: 3px; background: transparent; cursor: ew-resize;
+  position: relative; flex-shrink: 0; z-index: 10; }
+.ide-panel-drag-handle::after { content: ""; position: absolute; left: -2px; right: -2px;
+  top: 0; bottom: 0; }
+.ide-panel-drag-handle:hover { background: #007acc; }
 /* ── Terminal Dropdown ────────────────────────────────────────────────── */
 .ide-term-dropdown { position: absolute; bottom: calc(100% + 4px); right: 0;
   background: #1e293b; border: 1px solid #334155; border-radius: 6px;
