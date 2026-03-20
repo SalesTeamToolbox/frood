@@ -90,6 +90,8 @@ def main():
     if not worker.exists():
         sys.exit(0)
 
+    filename = Path(file_path).name
+
     # Spawn detached subprocess so CC Write tool is never blocked
     creation_flags = 0
     if sys.platform == "win32":
@@ -104,8 +106,11 @@ def main():
             close_fds=(sys.platform != "win32"),
             creationflags=creation_flags,
         )
+        print(
+            f"[agent42-memory] Sync: embedding {filename} to Qdrant (background)", file=sys.stderr
+        )
     except Exception:
-        pass  # SYNC-04: never block CC on any error
+        print(f"[agent42-memory] Sync: failed to spawn worker for {filename}", file=sys.stderr)
 
     sys.exit(0)
 

@@ -446,17 +446,24 @@ def main():
         sys.exit(0)
 
     memories = []
+    search_source = None  # Track which layer provided results
 
     # Layer 1: Semantic search (best quality, requires embedding API + Qdrant)
     # Try dedicated search service first, then fall back to Agent42 API
     semantic_results = try_semantic_search(memory_dir, prompt, agent42_root)
-    if not semantic_results:
+    if semantic_results:
+        search_source = "semantic"
+    else:
         semantic_results = try_agent42_api_search(prompt)
+        if semantic_results:
+            search_source = "agent42-api"
     memories.extend(semantic_results)
 
     # Layer 1.5: Qdrant direct scroll + keyword match (when search service is down)
     if not semantic_results:
         qdrant_results = try_qdrant_direct_search(keywords)
+        if qdrant_results:
+            search_source = "qdrant"
         memories.extend(qdrant_results)
 
     # Layer 2: MEMORY.md keyword search
@@ -464,7 +471,10 @@ def main():
     if memory_file.exists():
         try:
             content = memory_file.read_text(encoding="utf-8")
-            memories.extend(search_memory_sections(content, keywords))
+            file_results = search_memory_sections(content, keywords)
+            if file_results and not search_source:
+                search_source = "keyword"
+            memories.extend(file_results)
         except Exception:
             pass
 
@@ -473,7 +483,10 @@ def main():
     if history_file.exists():
         try:
             content = history_file.read_text(encoding="utf-8")
-            memories.extend(search_history_entries(content, keywords))
+            file_results = search_history_entries(content, keywords)
+            if file_results and not search_source:
+                search_source = "history"
+            memories.extend(file_results)
         except Exception:
             pass
 
@@ -483,9 +496,14 @@ def main():
     memories = memories[:MAX_MEMORIES]
 
     if not memories:
+        print(
+            f"[agent42-memory] Recall: searched ({len(keywords)} keywords) — no matches",
+            file=sys.stderr,
+        )
         sys.exit(0)
 
-    lines = ["[agent42-memory] Relevant memories from past work:"]
+    source_label = f" via {search_source}" if search_source else ""
+    lines = [f"[agent42-memory] Recall: {len(memories)} memories surfaced{source_label}"]
     for m in memories:
         score = m.get("score", 0)
         text = m.get("text", "").strip()
