@@ -6936,6 +6936,12 @@ function render() {
           <a href="#" data-page="reports" class="${state.page === "reports" ? "active" : ""}" onclick="event.preventDefault();navigate('reports');closeMobileSidebar()">&#128202; Reports</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings');closeMobileSidebar()">&#9881; Settings</a>
         </nav>
+        ${state.status && state.status.gsd_workstream ? `
+        <div class="gsd-indicator">
+          <div class="gsd-workstream">&#9654; ${state.status.gsd_workstream}</div>
+          <div class="gsd-phase">${state.status.gsd_phase ? "Phase " + state.status.gsd_phase : ""}</div>
+        </div>
+        ` : ""}
         <div class="sidebar-footer">
           <span id="ws-dot" class="ws-dot ${state.wsConnected ? "connected" : "disconnected"}"></span>
           <span id="ws-label">${state.wsConnected ? "Connected to the Guide" : "Disconnected"}</span>
