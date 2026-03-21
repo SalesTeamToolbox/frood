@@ -2329,3 +2329,72 @@ body.towel-day .dont-panic-watermark {
   color: var(--text-primary, #e5e5e5);
   border-color: var(--text-muted, #888);
 }
+
+/* UX-01: Init progress chip */
+.cc-init-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.8rem;
+  margin: 0.5rem auto;
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border, #333);
+  border-radius: 1rem;
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+  width: fit-content;
+}
+.cc-init-spinner {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  border: 2px solid var(--text-muted, #888);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: ccInitSpin 0.8s linear infinite;
+}
+@keyframes ccInitSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* UX-02: Typing indicator (three pulsing dots) */
+.cc-typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.6rem 1rem;
+  margin: 0.25rem 0;
+}
+.cc-typing-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  background: var(--text-muted, #888);
+  border-radius: 50%;
+  animation: ccTypingPulse 1.4s ease-in-out infinite;
+}
+.cc-typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.cc-typing-dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes ccTypingPulse {
+  0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); }
+  30% { opacity: 1; transform: scale(1); }
+}
+
+/* MEM-01/MEM-02: Memory activity chips */
+.cc-memory-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  margin: 0.15rem 0;
+  font-size: 0.72rem;
+  color: var(--text-muted, #888);
+  border-left: 2px solid var(--primary, #6366f1);
+  opacity: 1;
+  transition: opacity 0.5s ease;
+}
+.cc-memory-chip.cc-memory-fade {
+  opacity: 0;
+}
+.cc-memory-chip-icon {
+  font-size: 0.8rem;
+}

@@ -154,8 +154,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — Fix duplicate answers bug + suppress init connection noise (backend dedup guard + init_progress event type + frontend init chip)
-- [ ] 06-02-PLAN.md — Typing indicator (CSS animated dots) + memory activity chips (backend hook_response parsing + frontend memory_loaded/memory_saved rendering)
+- [x] 06-01-PLAN.md — Fix duplicate answers bug + suppress init connection noise (backend dedup guard + init_progress event type + frontend init chip)
+- [x] 06-02-PLAN.md — Typing indicator (CSS animated dots) + memory activity chips (backend hook_response parsing + frontend memory_loaded/memory_saved rendering)
 
 ## Progress
 
@@ -169,4 +169,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 (Phase 5 can run after Phase 2
 | 3. Tool Use + Sessions | 5/5 | Complete | 2026-03-19 |
 | 4. Layout + Diff Viewer | 4/4 | Complete | 2026-03-20 |
 | 5. Streaming PTY Bridge | 3/3 | Complete | 2026-03-18 |
-| 6. Chat UX Polish & Memory Visibility | 0/2 | Not started | -- |
+| 6. Chat UX Polish & Memory Visibility | 2/2 | Complete | 2026-03-21 |

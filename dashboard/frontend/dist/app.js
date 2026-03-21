@@ -4281,6 +4281,12 @@ function ccMakeWsHandler(tab, msgs) {
 
     } else if (msgType === "text_delta") {
       var deltaText = (msgData.text || "");
+      // UX-01: Dismiss init chip on first real response token
+      var initChip = msgs ? msgs.querySelector(".cc-init-chip") : null;
+      if (initChip) initChip.remove();
+      // UX-02: Remove typing indicator when real content arrives
+      var typingInd = msgs ? msgs.querySelector(".cc-typing-indicator") : null;
+      if (typingInd) typingInd.remove();
       if (!tab.streamMsgEl) {
         var now2 = new Date();
         var time2 = now2.getHours() + ":" + String(now2.getMinutes()).padStart(2, "0");
@@ -4319,6 +4325,9 @@ function ccMakeWsHandler(tab, msgs) {
       tab.streamBuffer += deltaText;
 
     } else if (msgType === "turn_complete") {
+      // UX-02 fallback: remove typing indicator if still present (e.g., tool-only turns)
+      var typingInd2 = msgs ? msgs.querySelector(".cc-typing-indicator") : null;
+      if (typingInd2) typingInd2.remove();
       clearInterval(tab.streamTimer);
       tab.streamTimer = null;
       var finalEl = tab.streamMsgEl;
@@ -4327,6 +4336,15 @@ function ccMakeWsHandler(tab, msgs) {
       tab.streamBuffer = "";
       tab.toolCards = {};
       if (finalEl && finalBuf) {
+        // UX-03: Belt-and-suspenders dedup — if content matches last turn, discard
+        var contentHash = finalBuf.length + ":" + finalBuf.slice(0, 100) + finalBuf.slice(-100);
+        if (contentHash === tab._lastTurnHash) {
+          var dupWrapper = finalEl.closest(".chat-msg");
+          if (dupWrapper) dupWrapper.remove();
+          ccSetSendingState(tab, false);
+          return;
+        }
+        tab._lastTurnHash = contentHash;
         var rendered = ccRenderMarkdown(finalBuf);
         finalEl.textContent = "";
         finalEl.insertAdjacentHTML("afterbegin", DOMPurify.sanitize(rendered));
@@ -4346,6 +4364,9 @@ function ccMakeWsHandler(tab, msgs) {
       ccAppendThinkingBlock(tab, msgData.text || "");
 
     } else if (msgType === "error") {
+      // UX-02 fallback: remove typing indicator on error
+      var typingInd3 = msgs ? msgs.querySelector(".cc-typing-indicator") : null;
+      if (typingInd3) typingInd3.remove();
       clearInterval(tab.streamTimer);
       tab.streamTimer = null;
       tab.streamBuffer = "";
@@ -4361,6 +4382,59 @@ function ccMakeWsHandler(tab, msgs) {
       statusDiv.style.cssText = "color:var(--text-muted);font-size:0.78rem;padding:0.25rem 0;text-align:center;font-style:italic";
       statusDiv.textContent = msgData.message || "";
       if (msgs) msgs.appendChild(statusDiv);
+
+    } else if (msgType === "init_progress") {
+      // UX-01: Collapse all init noise into a single dismissible chip
+      var existingChip = msgs ? msgs.querySelector(".cc-init-chip") : null;
+      if (!existingChip) {
+        var chip = document.createElement("div");
+        chip.className = "cc-init-chip";
+        var spinner = document.createElement("span");
+        spinner.className = "cc-init-spinner";
+        chip.appendChild(spinner);
+        var chipText = document.createElement("span");
+        chipText.className = "cc-init-chip-text";
+        chipText.textContent = msgData.message || "Initializing...";
+        chip.appendChild(chipText);
+        if (msgs) msgs.appendChild(chip);
+      } else {
+        var textEl = existingChip.querySelector(".cc-init-chip-text");
+        if (textEl) textEl.textContent = msgData.message || "Initializing...";
+      }
+
+    } else if (msgType === "memory_loaded") {
+      // MEM-01: Subtle inline status showing how many memories were loaded
+      var memChip = document.createElement("div");
+      memChip.className = "cc-memory-chip";
+      var memIcon = document.createElement("span");
+      memIcon.className = "cc-memory-chip-icon";
+      memIcon.textContent = "\u21BA";
+      memChip.appendChild(memIcon);
+      var memText = document.createElement("span");
+      memText.textContent = msgData.message || ("Loaded " + (msgData.count || 0) + " memories");
+      memChip.appendChild(memText);
+      if (msgs) msgs.appendChild(memChip);
+      setTimeout(function() {
+        memChip.classList.add("cc-memory-fade");
+        setTimeout(function() { if (memChip.parentNode) memChip.remove(); }, 600);
+      }, 5000);
+
+    } else if (msgType === "memory_saved") {
+      // MEM-02: Checkmark indicator confirming memory was saved
+      var saveChip = document.createElement("div");
+      saveChip.className = "cc-memory-chip";
+      var saveIcon = document.createElement("span");
+      saveIcon.className = "cc-memory-chip-icon";
+      saveIcon.textContent = "\u2713";
+      saveChip.appendChild(saveIcon);
+      var saveText = document.createElement("span");
+      saveText.textContent = msgData.message || "Memory saved";
+      saveChip.appendChild(saveText);
+      if (msgs) msgs.appendChild(saveChip);
+      setTimeout(function() {
+        saveChip.classList.add("cc-memory-fade");
+        setTimeout(function() { if (saveChip.parentNode) saveChip.remove(); }, 600);
+      }, 5000);
     }
   };
 }
@@ -4718,6 +4792,7 @@ function ideOpenCCChat(node) {
     totalInputTokens: 0,
     totalOutputTokens: 0,
     totalCostUsd: 0,
+    _lastTurnHash: "",  // UX-03: dedup guard for duplicate turn content
   };
   _ideTabs.push(tab);
   _ideActiveTab = _ideTabs.length - 1;
@@ -4847,6 +4922,19 @@ function ccSend(tabIdx) {
     return;
   }
   ccAppendUserBubble(tab, text);  // CHAT-01: immediate user bubble before send
+  // UX-02: Show typing indicator immediately after user bubble
+  var msgsForTyping = tab.el.querySelector(".cc-chat-messages");
+  var typingEl = document.createElement("div");
+  typingEl.className = "cc-typing-indicator";
+  typingEl.id = "cc-typing-" + tabIdx;
+  var dot1 = document.createElement("span"); dot1.className = "cc-typing-dot";
+  var dot2 = document.createElement("span"); dot2.className = "cc-typing-dot";
+  var dot3 = document.createElement("span"); dot3.className = "cc-typing-dot";
+  typingEl.appendChild(dot1); typingEl.appendChild(dot2); typingEl.appendChild(dot3);
+  if (msgsForTyping) msgsForTyping.appendChild(typingEl);
+  if (tab.autoScroll && msgsForTyping) {
+    requestAnimationFrame(function() { msgsForTyping.scrollTop = msgsForTyping.scrollHeight; });
+  }
   tab.ws.send(JSON.stringify({ message: text }));
   ccSetSendingState(tab, true);
   input.value = "";

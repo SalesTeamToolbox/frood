@@ -62,14 +62,14 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Chat UX Polish
 
-- [ ] **UX-01**: MCP/hook "Connecting to X..." init messages are suppressed from the chat message list — replaced by a single compact "Initializing Claude Code..." status chip that auto-dismisses when the first real response arrives
-- [ ] **UX-02**: Animated typing indicator (three pulsing dots) appears within 200ms of user sending a message and disappears when the first `text_delta` token is received
-- [ ] **UX-03**: Each LLM turn produces exactly one assistant message bubble — duplicate detection prevents repeated answers under any reconnect or retry condition
+- [x] **UX-01**: MCP/hook "Connecting to X..." init messages are suppressed from the chat message list — replaced by a single compact "Initializing Claude Code..." status chip that auto-dismisses when the first real response arrives
+- [x] **UX-02**: Animated typing indicator (three pulsing dots) appears within 200ms of user sending a message and disappears when the first `text_delta` token is received
+- [x] **UX-03**: Each LLM turn produces exactly one assistant message bubble — duplicate detection prevents repeated answers under any reconnect or retry condition
 
 ### Memory Visibility
 
-- [ ] **MEM-01**: When the context assembler loads memories for a turn, a subtle inline status line "↺ Loaded N memories" appears below the user message (not a full bubble, dismissed after 5s)
-- [ ] **MEM-02**: When the Stop hook saves a memory, a "✓ Memory saved" indicator appears in the chat — visible confirmation that the memory pipeline is active
+- [x] **MEM-01**: When the context assembler loads memories for a turn, a subtle inline status line "↺ Loaded N memories" appears below the user message (not a full bubble, dismissed after 5s)
+- [x] **MEM-02**: When the Stop hook saves a memory, a "✓ Memory saved" indicator appears in the chat — visible confirmation that the memory pipeline is active
 
 ## v2 Requirements
 
