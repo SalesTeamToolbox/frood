@@ -31,6 +31,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
 from commands import BackupCommandHandler, CloneCommandHandler, RestoreCommandHandler
+from core.app_manager import AppManager
 from core.config import settings
 from core.device_auth import DeviceStore
 from core.heartbeat import HeartbeatService
@@ -184,6 +185,10 @@ class Agent42:
             logger.info(f"  Security scanning: enabled (every {settings.security_scan_interval})")
 
         if not self.headless:
+            app_manager = AppManager(
+                apps_dir=str(settings.apps_dir) if hasattr(settings, "apps_dir") else "apps",
+                dashboard_port=self.dashboard_port,
+            )
             app = create_app(
                 ws_manager=self.ws_manager,
                 tool_registry=self.tool_registry,
@@ -194,6 +199,7 @@ class Agent42:
                 project_manager=self.project_manager,
                 memory_store=self.memory_store,
                 effectiveness_store=self.effectiveness_store,
+                app_manager=app_manager,
             )
             config = uvicorn.Config(
                 app,

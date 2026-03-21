@@ -4294,7 +4294,13 @@ function ccMakeWsHandler(tab, msgs) {
         msgWrapper.className = "chat-msg chat-msg-agent";
         var avatarEl = document.createElement("div");
         avatarEl.className = "chat-avatar chat-avatar-agent";
-        avatarEl.textContent = "CC";
+        var avatarImg = document.createElement("img");
+        avatarImg.src = "/assets/agent42-avatar.svg";
+        avatarImg.alt = "42";
+        avatarImg.width = 20;
+        avatarImg.height = 20;
+        avatarImg.style.borderRadius = "50%";
+        avatarEl.appendChild(avatarImg);
         msgWrapper.appendChild(avatarEl);
         var msgContent = document.createElement("div");
         msgContent.className = "chat-msg-content";
@@ -4302,7 +4308,7 @@ function ccMakeWsHandler(tab, msgs) {
         msgHeader.className = "chat-msg-header";
         var senderSpan = document.createElement("span");
         senderSpan.className = "chat-msg-sender";
-        senderSpan.textContent = "Claude Code";
+        senderSpan.textContent = "Agent42";
         var timeSpan = document.createElement("span");
         timeSpan.className = "chat-msg-time";
         timeSpan.textContent = time2;
