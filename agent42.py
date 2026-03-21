@@ -147,12 +147,16 @@ class Agent42:
 
         # ── Custom tools (plugins) ───────────────────────────────────────
         self._custom_tools: list[str] = []
-        try:
-            plugin_loader = PluginLoader(self.tool_registry)
-            loaded = plugin_loader.discover_and_load()
-            self._custom_tools = [t.name for t in loaded]
-        except Exception as e:
-            logger.warning(f"Plugin loading failed: {e}")
+        custom_tools_dir = Path(settings.custom_tools_dir) if settings.custom_tools_dir else None
+        if custom_tools_dir and custom_tools_dir.is_dir():
+            try:
+                from tools.context import ToolContext
+
+                ctx = ToolContext(workspace=str(workspace), tool_registry=self.tool_registry)
+                loaded_names = PluginLoader.load_all(custom_tools_dir, ctx, self.tool_registry)
+                self._custom_tools = loaded_names
+            except Exception as e:
+                logger.warning(f"Plugin loading failed: {e}")
 
         logger.info("Agent42 v2.0 initialized (MCP architecture)")
 
