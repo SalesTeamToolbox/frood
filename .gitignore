@@ -74,6 +74,11 @@ test_app_task.py
 index.html
 script.js
 style.css
+
+# Allow MeatheadGear frontend (these are real app files, not scratch)
+!apps/meatheadgear/frontend/index.html
+!apps/meatheadgear/frontend/style.css
+!apps/meatheadgear/frontend/app.js
 solar_dashboard/
 
 # Playwright MCP artifacts (logs, screenshots)
