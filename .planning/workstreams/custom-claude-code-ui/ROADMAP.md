@@ -41,6 +41,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Tool Use + Sessions** - Tool use cards, permission UI, session persistence, and multi-session tabs
 - [x] **Phase 4: Layout + Diff Viewer** - Tab/panel layout modes, user toggle, and Monaco diff editor integration
 - [ ] **Phase 5: Streaming PTY Bridge** - PTY subprocess for real-time streaming, init progress, pre-warm pool
+- [ ] **Phase 6: Chat UX Polish & Memory Visibility** - Hide init noise, add working indicator, fix duplicate answers, show memory activity
 
 ## Phase Details
 
@@ -139,6 +140,23 @@ Plans:
 - [x] 05-02-PLAN.md — PTY subprocess + init progress + keepalive (server.py)
 - [x] 05-03-PLAN.md — Pre-warmed CC session pool (server.py)
 
+### Phase 6: Chat UX Polish & Memory Visibility
+**Goal**: Chat feels polished and trustworthy — no init noise, clear working state, no duplicates, and visible proof that memory is active
+**Depends on**: Phase 2 (chat rendering), Phase 1 (backend WS events)
+**Requirements**: UX-01, UX-02, UX-03, MEM-01, MEM-02
+**Success Criteria** (what must be TRUE):
+  1. MCP/hook "Connecting to X..." init messages do NOT appear as chat messages — collapsed into a single compact "Initializing Claude Code..." status chip that disappears on first real response
+  2. After user sends a message, animated typing dots appear within 200ms and remain until the first text_delta token arrives
+  3. Each LLM turn produces exactly one assistant message bubble — no duplicate answers under any reconnect or retry condition
+  4. When the context assembler loads memories, a subtle "↺ Loaded N memories" status line appears below the user message (not a full bubble)
+  5. When a memory is written (Stop hook learns something), a "✓ Memory saved" indicator appears in the chat — visible confirmation memory is active
+
+**Plans**: TBD (2-3 plans)
+
+Plans:
+- [ ] 06-01-PLAN.md — Fix duplicate answers bug + hide init connection noise (backend filter + frontend dedup guard)
+- [ ] 06-02-PLAN.md — Working indicator (typing dots) + memory activity chips (read/write events via WS)
+
 ## Progress
 
 **Execution Order:**
@@ -151,3 +169,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 (Phase 5 can run after Phase 2
 | 3. Tool Use + Sessions | 5/5 | Complete | 2026-03-19 |
 | 4. Layout + Diff Viewer | 4/4 | Complete | 2026-03-20 |
 | 5. Streaming PTY Bridge | 3/3 | Complete | 2026-03-18 |
+| 6. Chat UX Polish & Memory Visibility | 0/2 | Not started | — |

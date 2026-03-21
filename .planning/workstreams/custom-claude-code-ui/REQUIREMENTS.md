@@ -60,6 +60,17 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **LAYOUT-03**: User can switch between tab and panel modes
 - [ ] **LAYOUT-04**: Diff viewer uses Monaco's built-in diff editor for proposed code changes
 
+### Chat UX Polish
+
+- [ ] **UX-01**: MCP/hook "Connecting to X..." init messages are suppressed from the chat message list — replaced by a single compact "Initializing Claude Code..." status chip that auto-dismisses when the first real response arrives
+- [ ] **UX-02**: Animated typing indicator (three pulsing dots) appears within 200ms of user sending a message and disappears when the first `text_delta` token is received
+- [ ] **UX-03**: Each LLM turn produces exactly one assistant message bubble — duplicate detection prevents repeated answers under any reconnect or retry condition
+
+### Memory Visibility
+
+- [ ] **MEM-01**: When the context assembler loads memories for a turn, a subtle inline status line "↺ Loaded N memories" appears below the user message (not a full bubble, dismissed after 5s)
+- [ ] **MEM-02**: When the Stop hook saves a memory, a "✓ Memory saved" indicator appears in the chat — visible confirmation that the memory pipeline is active
+
 ## v2 Requirements
 
 Deferred to future release. Tracked but not in current roadmap.
@@ -140,10 +151,16 @@ Deferred to future release. Tracked but not in current roadmap.
 | PTY-04 | Phase 5 | Pending |
 | PTY-05 | Phase 5 | Pending |
 
+| UX-01 | Phase 6 | Pending |
+| UX-02 | Phase 6 | Pending |
+| UX-03 | Phase 6 | Pending |
+| MEM-01 | Phase 6 | Pending |
+| MEM-02 | Phase 6 | Pending |
+
 **Coverage:**
 
-- v1 requirements: 40 total
-- Mapped to phases: 40
+- v1 requirements: 45 total
+- Mapped to phases: 45
 - Unmapped: 0
 
 ---
