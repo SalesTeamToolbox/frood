@@ -2087,21 +2087,57 @@ def create_app(
                             ask_input = _json_mod2.loads(t.get("input_buf", "{}") or "{}")
                         except Exception:
                             pass
-                        question_text = (
+                        raw_question = (
                             ask_input.get("question")
                             or ask_input.get("prompt")
                             or ask_input.get("text")
-                            or str(ask_input)
+                            or ""
                         )
-                        envelopes.append(
-                            {
-                                "type": "ask_question",
-                                "data": {
-                                    "id": t["id"],
-                                    "question": question_text,
-                                },
-                            }
-                        )
+                        # Try to parse structured {questions:[...]} payload (GSD discuss-phase).
+                        # The question param may be valid JSON or Python-repr dict (single quotes,
+                        # capitalised booleans). Convert Python-repr to JSON before parsing.
+                        import json as _json_aq
+                        import re as _re_aq
+
+                        def _py_repr_to_json_aq(s):
+                            s = _re_aq.sub(r"\bTrue\b", "true", s)
+                            s = _re_aq.sub(r"\bFalse\b", "false", s)
+                            s = _re_aq.sub(r"\bNone\b", "null", s)
+                            s = _re_aq.sub(r"'([^']*)'", r'"\1"', s)
+                            return s
+
+                        structured = None
+                        for _s in (raw_question, _py_repr_to_json_aq(raw_question)):
+                            try:
+                                _obj = _json_aq.loads(_s)
+                                if isinstance(_obj, dict) and "questions" in _obj:
+                                    structured = _obj
+                                    break
+                            except Exception:
+                                pass
+
+                        if structured is not None:
+                            envelopes.append(
+                                {
+                                    "type": "ask_question",
+                                    "data": {
+                                        "id": t["id"],
+                                        "format": "structured",
+                                        "questions": structured.get("questions", []),
+                                    },
+                                }
+                            )
+                        else:
+                            envelopes.append(
+                                {
+                                    "type": "ask_question",
+                                    "data": {
+                                        "id": t["id"],
+                                        "format": "text",
+                                        "question": raw_question,
+                                    },
+                                }
+                            )
                     else:
                         envelopes.append(
                             {
