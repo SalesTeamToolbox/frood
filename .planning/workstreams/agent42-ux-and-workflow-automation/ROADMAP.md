@@ -75,7 +75,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Success Criteria** (what must be TRUE):
   1. The dashboard status bar displays the name of the currently active GSD workstream and phase number when a workstream is in progress
   2. When the user advances to a new phase in GSD, the status bar updates within one WebSocket heartbeat cycle without a page refresh
-**Plans**: TBD
+**Plans:** 1 plan
+
+**Plan list:**
+
+- [ ] 04-01-PLAN.md — SystemHealth GSD fields + sidebar indicator (DASH-01, DASH-02)
 
 ## Progress
 
@@ -87,7 +91,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Memory Pipeline | 3/3 | Complete |  |
 | 2. GSD Auto-Activation | 2/2 | Complete    | 2026-03-21 |
 | 3. Desktop App Experience | 2/2 | Complete   | 2026-03-21 |
-| 4. Dashboard GSD Integration | 0/? | Not started | - |
+| 4. Dashboard GSD Integration | 0/1 | Not started | - |
 
 ---
 *Roadmap created: 2026-03-20*
