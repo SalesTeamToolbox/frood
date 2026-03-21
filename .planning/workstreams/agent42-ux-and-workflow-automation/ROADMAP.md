@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 1: Memory Pipeline** - Fix recall and learn hooks so memory operations are visible in VS Code chat stream
 - [x] **Phase 2: GSD Auto-Activation** - Make GSD the default methodology for multi-step coding tasks when Agent42 is installed (completed 2026-03-21)
 - [x] **Phase 3: Desktop App Experience** - PWA manifest and desktop shortcut so Agent42 opens as a chromeless app (completed 2026-03-21)
-- [ ] **Phase 4: Dashboard GSD Integration** - Status bar shows active workstream and current phase via WebSocket
+- [x] **Phase 4: Dashboard GSD Integration** - Status bar shows active workstream and current phase via WebSocket (completed 2026-03-21)
 
 ## Phase Details
 
@@ -79,7 +79,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Plan list:**
 
-- [ ] 04-01-PLAN.md — SystemHealth GSD fields + sidebar indicator (DASH-01, DASH-02)
+- [x] 04-01-PLAN.md — SystemHealth GSD fields + sidebar indicator (DASH-01, DASH-02)
 
 ## Progress
 
@@ -91,7 +91,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Memory Pipeline | 3/3 | Complete |  |
 | 2. GSD Auto-Activation | 2/2 | Complete    | 2026-03-21 |
 | 3. Desktop App Experience | 2/2 | Complete   | 2026-03-21 |
-| 4. Dashboard GSD Integration | 0/1 | Not started | - |
+| 4. Dashboard GSD Integration | 1/1 | Complete | 2026-03-21 |
 
 ---
 *Roadmap created: 2026-03-20*
