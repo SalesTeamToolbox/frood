@@ -189,6 +189,7 @@ class Agent42:
                 apps_dir=str(settings.apps_dir) if hasattr(settings, "apps_dir") else "apps",
                 dashboard_port=self.dashboard_port,
             )
+            await app_manager.load()
             app = create_app(
                 ws_manager=self.ws_manager,
                 tool_registry=self.tool_registry,
