@@ -7,10 +7,10 @@
 
 ### Authentication
 
-- [ ] **AUTH-01**: Customer can sign up with email and password
-- [ ] **AUTH-02**: Customer can log in and receive a JWT session token
-- [ ] **AUTH-03**: Customer session persists across browser refresh
-- [ ] **AUTH-04**: Customer can reset password via email link (Resend)
+- [x] **AUTH-01**: Customer can sign up with email and password
+- [x] **AUTH-02**: Customer can log in and receive a JWT session token
+- [x] **AUTH-03**: Customer session persists across browser refresh
+- [x] **AUTH-04**: Customer can reset password via email link (Resend)
 
 ### Catalog
 

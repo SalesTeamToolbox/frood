@@ -20,11 +20,11 @@ Build a fully autonomous AI-run gym apparel e-commerce platform as an Agent42 ap
 **Goal**: Working storefront — customers can browse gym wear products with real Printful catalog data
 **Depends on**: Nothing (first phase)
 **Requirements**: AUTH-01–04, CAT-01–04
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 
 Plans:
 - [x] 01-01-PLAN.md — App skeleton: FastAPI, config, database, models, Agent42 registration
-- [ ] 01-02-PLAN.md — Authentication: register, login, JWT sessions, password reset
+- [x] 01-02-PLAN.md — Authentication: register, login, JWT sessions, password reset
 - [x] 01-03-PLAN.md — Printful catalog sync: API client, pricing engine, product endpoints
 - [ ] 01-04-PLAN.md — Frontend: product grid, product detail, auth modal, brand styling
 
@@ -104,7 +104,7 @@ Plans:
 
 | Phase | Plans | Status | Completed |
 |-------|-------|--------|-----------|
-| 1. Store Foundation | 2/4 | In Progress|  |
+| 1. Store Foundation | 3/4 | In Progress|  |
 | 2. Design Studio | TBD | Not started | — |
 | 3. Checkout & Fulfillment | TBD | Not started | — |
 | 4. Agent Infrastructure | 2/2 | Complete   | 2026-03-21 |
