@@ -83,6 +83,24 @@ class TestSkillLoader:
         assert len(result) == 1
         assert result[0].name == "always-skill"
 
+    def test_gsd_auto_activate_skill_always_loads(self, tmp_path):
+        """GSD auto-activate skill loads for any task type via always: true."""
+        _write_skill(
+            tmp_path,
+            "gsd-auto-activate",
+            "---\nname: gsd-auto-activate\ndescription: Instructs Claude to use GSD methodology for multi-step tasks\nalways: true\n---\n\n# GSD Auto-Activation\n\nUse `/gsd:new-project` for full workstreams.",
+        )
+        loader = SkillLoader([tmp_path])
+        loader.load_all()
+        # Should load for any arbitrary task type
+        result = loader.get_for_task_type("completely_unknown_type")
+        assert len(result) == 1
+        assert result[0].name == "gsd-auto-activate"
+        # Instructions should contain GSD command reference
+        assert "/gsd:new-project" in result[0].instructions
+        # always-on skills don't have task_types set
+        assert result[0].task_types is None or result[0].task_types == []
+
     def test_multiple_directories(self, tmp_path):
         dir1 = tmp_path / "dir1"
         dir2 = tmp_path / "dir2"
