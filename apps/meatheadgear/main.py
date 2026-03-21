@@ -12,6 +12,8 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 # Ensure the app directory is on the path when run from repo root
@@ -23,6 +25,8 @@ from routers.catalog import router as catalog_router
 from services.catalog import start_background_sync, sync_catalog
 
 from config import settings
+
+FRONTEND_DIR = Path(__file__).parent / "frontend"
 
 
 @asynccontextmanager
@@ -42,14 +46,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Register routers
+# CORS — allows frontend dev server and same-origin production
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8001", "http://127.0.0.1:8001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Register API routers first — FastAPI matches in order, static catch-all must be last
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(catalog_router, prefix="/api/catalog", tags=["catalog"])
-
-# Serve frontend assets
-_frontend_dir = Path(__file__).parent / "frontend"
-if _frontend_dir.exists():
-    app.mount("/static", StaticFiles(directory=str(_frontend_dir)), name="static")
 
 
 @app.get("/api/health")
@@ -60,8 +68,13 @@ async def health():
 
 @app.get("/")
 async def root():
-    """Root redirect — frontend served from /static."""
-    return {"status": "ok", "app": "meatheadgear"}
+    """Serve the storefront SPA entry point."""
+    return FileResponse(FRONTEND_DIR / "index.html")
+
+
+# Static files mount — AFTER all API routes (catch-all must be last)
+if FRONTEND_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 
 if __name__ == "__main__":
