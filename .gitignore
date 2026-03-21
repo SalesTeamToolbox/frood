@@ -108,3 +108,15 @@ MEMORY.md
 .claude/handoff-complete
 .claude/.jcodemunch-reindex-pending
 .claude/.jcodemunch-stats.json
+
+# Local MCP config (machine-specific)
+.mcp.local.json
+
+# Local review/analysis artifacts
+.claude/security-review.md
+
+# App-level Claude Code state (ephemeral)
+apps/*/.claude/
+
+# Screenshots in repo root
+*.png
