@@ -83,6 +83,10 @@ class SystemHealth:
     capacity_auto_mode: bool = False
     capacity_reason: str = ""
 
+    # GSD workstream state
+    gsd_workstream: str | None = None
+    gsd_phase: str | None = None
+
     def to_dict(self) -> dict:
         return {
             "active_agents": self.active_agents,
@@ -107,6 +111,8 @@ class SystemHealth:
             "configured_max_agents": self.configured_max_agents,
             "capacity_auto_mode": self.capacity_auto_mode,
             "capacity_reason": self.capacity_reason,
+            "gsd_workstream": self.gsd_workstream,
+            "gsd_phase": self.gsd_phase,
         }
 
 
@@ -178,7 +184,9 @@ class HeartbeatService:
     def stalled_agents(self) -> list[AgentHeartbeat]:
         return [hb for hb in self._agents.values() if hb.status == "running" and hb.is_stalled]
 
-    def get_health(self, task_queue=None, tool_registry=None, skill_loader=None) -> SystemHealth:
+    def get_health(
+        self, task_queue=None, tool_registry=None, skill_loader=None, project_root=None
+    ) -> SystemHealth:
         """Get a snapshot of overall system health."""
         import os
 
@@ -264,6 +272,39 @@ class HeartbeatService:
                     health.memory_mb = usage.ru_maxrss / 1024  # KB on Linux
         except (ImportError, AttributeError, OSError):
             pass
+
+        # Read GSD workstream state (per D-07, D-08, D-09)
+        try:
+            import re
+
+            root = project_root or os.getcwd()
+            aw_path = os.path.join(root, ".planning", "active-workstream")
+            if os.path.isfile(aw_path):
+                with open(aw_path) as f:
+                    ws_name = f.read().strip()
+                if ws_name:
+                    # Truncate long workstream names (per D-04)
+                    display_name = ws_name
+                    # Strip common prefixes like "agent42-"
+                    for prefix in ("agent42-", "a42-"):
+                        if display_name.startswith(prefix):
+                            display_name = display_name[len(prefix) :]
+                            break
+                    # Truncate and add ellipsis if still too long
+                    if len(display_name) > 20:
+                        display_name = display_name[:17] + "..."
+                    health.gsd_workstream = display_name
+
+                    # Read phase number from STATE.md
+                    state_path = os.path.join(root, ".planning", "workstreams", ws_name, "STATE.md")
+                    if os.path.isfile(state_path):
+                        with open(state_path) as f:
+                            state_content = f.read()
+                        phase_match = re.search(r"^Phase:\s*(\d+)", state_content, re.MULTILINE)
+                        if phase_match:
+                            health.gsd_phase = phase_match.group(1)
+        except Exception:
+            pass  # Silently omit on any error — don't crash heartbeat
 
         return health
 

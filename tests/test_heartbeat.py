@@ -144,3 +144,72 @@ class TestHeartbeatService:
     def test_stop_without_start(self):
         # Should not raise
         self.service.stop()
+
+
+class TestGsdStateReading:
+    """Tests for GSD workstream state reading in heartbeat."""
+
+    def test_system_health_gsd_fields_default_none(self):
+        health = SystemHealth()
+        assert health.gsd_workstream is None
+        assert health.gsd_phase is None
+
+    def test_system_health_to_dict_includes_gsd_fields(self):
+        health = SystemHealth()
+        d = health.to_dict()
+        assert "gsd_workstream" in d
+        assert "gsd_phase" in d
+        assert d["gsd_workstream"] is None
+        assert d["gsd_phase"] is None
+
+    def test_system_health_to_dict_with_gsd_values(self):
+        health = SystemHealth(gsd_workstream="ux-automation", gsd_phase="4")
+        d = health.to_dict()
+        assert d["gsd_workstream"] == "ux-automation"
+        assert d["gsd_phase"] == "4"
+
+    def test_get_health_reads_active_workstream(self, tmp_path):
+        ws_file = tmp_path / ".planning" / "active-workstream"
+        ws_file.parent.mkdir(parents=True)
+        ws_file.write_text("my-workstream\n")
+        state_dir = tmp_path / ".planning" / "workstreams" / "my-workstream"
+        state_dir.mkdir(parents=True)
+        (state_dir / "STATE.md").write_text("## Current Position\n\nPhase: 3\nPlan: 01\n")
+        service = HeartbeatService(interval=1)
+        health = service.get_health(project_root=str(tmp_path))
+        assert health.gsd_workstream is not None
+        assert health.gsd_phase == "3"
+
+    def test_get_health_no_active_workstream_file(self, tmp_path):
+        service = HeartbeatService(interval=1)
+        health = service.get_health(project_root=str(tmp_path))
+        assert health.gsd_workstream is None
+        assert health.gsd_phase is None
+
+    def test_get_health_empty_active_workstream(self, tmp_path):
+        ws_file = tmp_path / ".planning" / "active-workstream"
+        ws_file.parent.mkdir(parents=True)
+        ws_file.write_text("")
+        service = HeartbeatService(interval=1)
+        health = service.get_health(project_root=str(tmp_path))
+        assert health.gsd_workstream is None
+        assert health.gsd_phase is None
+
+    def test_get_health_missing_state_md(self, tmp_path):
+        ws_file = tmp_path / ".planning" / "active-workstream"
+        ws_file.parent.mkdir(parents=True)
+        ws_file.write_text("my-workstream\n")
+        # No STATE.md created
+        service = HeartbeatService(interval=1)
+        health = service.get_health(project_root=str(tmp_path))
+        assert health.gsd_workstream is not None
+        assert health.gsd_phase is None
+
+    def test_get_health_truncates_long_workstream_name(self, tmp_path):
+        long_name = "agent42-ux-and-workflow-automation"
+        ws_file = tmp_path / ".planning" / "active-workstream"
+        ws_file.parent.mkdir(parents=True)
+        ws_file.write_text(long_name + "\n")
+        service = HeartbeatService(interval=1)
+        health = service.get_health(project_root=str(tmp_path))
+        assert len(health.gsd_workstream) <= 20
