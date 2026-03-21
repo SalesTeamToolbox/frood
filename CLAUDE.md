@@ -377,6 +377,39 @@ class TestWorkspaceSandbox:
 
 ---
 
+## Development Methodology
+
+Agent42 uses **GSD (Get Shit Done)** as the default methodology for multi-step work.
+The always-on `gsd-auto-activate` skill handles detection automatically.
+
+### When to Use GSD
+
+Use GSD for any task involving multiple files, phases, or coordinated steps:
+- New features, tools, skills, or providers
+- Refactors touching 3+ files
+- Architecture changes or migrations
+- Any task where you'd naturally say "first I need to... then..."
+
+### When to Skip GSD
+
+Skip GSD for trivial tasks (Claude handles these directly):
+- Quick questions ("what does X do?")
+- Single-file typo/style fixes
+- Configuration lookups
+- Debugging a specific known error
+
+### Key GSD Commands
+
+| Command | When to Use |
+|---------|-------------|
+| `/gsd:new-project` | Initialize a new multi-phase workstream |
+| `/gsd:quick` | Ad-hoc task with GSD tracking but no full phase plan |
+| `/gsd:plan-phase` | Plan a specific phase when already in a workstream |
+| `/gsd:execute-phase` | Execute a planned phase |
+| `/gsd:next` | Advance to the next task in the current plan |
+
+---
+
 ## Common Pitfalls
 
 > Pitfalls 1-80 archived to `.claude/reference/pitfalls-archive.md` (loaded on-demand by context-loader hook).

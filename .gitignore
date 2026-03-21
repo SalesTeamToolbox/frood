@@ -32,7 +32,8 @@ cron_jobs.json
 /tmp/agent42/
 .agent42/
 data/
-apps/
+apps/*
+!apps/meatheadgear
 
 # Linting & formatting
 .ruff_cache/
@@ -73,6 +74,11 @@ test_app_task.py
 index.html
 script.js
 style.css
+
+# Allow MeatheadGear frontend (these are real app files, not scratch)
+!apps/meatheadgear/frontend/index.html
+!apps/meatheadgear/frontend/style.css
+!apps/meatheadgear/frontend/app.js
 solar_dashboard/
 
 # Playwright MCP artifacts (logs, screenshots)
