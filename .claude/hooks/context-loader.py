@@ -191,6 +191,32 @@ WORK_TYPE_KEYWORDS = {
         "files": [],
         "section": None,
     },
+    "gsd": {
+        "keywords": [
+            "build",
+            "create",
+            "implement",
+            "refactor",
+            "add feature",
+            "set up",
+            "migrate",
+            "convert",
+            "redesign",
+            "scaffold",
+            "flask app",
+            "django",
+            "react app",
+            "vue app",
+            "fastapi app",
+            "plan",
+            "roadmap",
+            "milestone",
+            "phases",
+            "workstream",
+        ],
+        "files": [],
+        "section": None,
+    },
 }
 
 # Map work types to reference files loaded from .claude/reference/
@@ -425,6 +451,11 @@ def main():
     # Detect work types
     work_types = detect_work_types(prompt)
 
+    # GSD nudge for multi-step prompts (per D-06, D-10)
+    if "gsd" in work_types:
+        _emit_gsd_nudge(prompt, project_dir)
+        work_types.discard("gsd")
+
     if not work_types:
         sys.exit(0)
 
@@ -504,6 +535,37 @@ def _emit_memory_nudge(prompt):
         "[context-loader] Memory reminder: If you discover something non-obvious "
         "during this task (a fix, a gotcha, a config detail), store it using the "
         "agent42_memory MCP tool with action=store so it's available in future sessions.",
+        file=sys.stderr,
+    )
+
+
+def _emit_gsd_nudge(prompt, project_dir):
+    """Suggest GSD for multi-step prompts when not already in a GSD session.
+
+    Per D-06: One-line stderr nudge, not intrusive.
+    Per D-10: Secondary mechanism — the always-on skill is primary.
+    """
+    if not prompt or len(prompt.strip()) < 30:
+        return
+    stripped = prompt.strip()
+    if stripped.startswith("/"):
+        return
+    # Skip trivial question patterns per D-02
+    trivial_starts = ("what ", "how ", "why ", "explain ", "show me ", "what's ")
+    if any(stripped.lower().startswith(t) for t in trivial_starts):
+        return
+    # Skip if GSD session already active per D-13
+    active_ws = os.path.join(project_dir, ".planning", "active-workstream")
+    if os.path.exists(active_ws):
+        try:
+            with open(active_ws) as f:
+                if f.read().strip():
+                    return  # Active workstream — no nudge
+        except OSError:
+            pass
+    print(
+        "[agent42] Tip: This looks like a multi-step task \u2014 "
+        "/gsd:new-project or /gsd:quick available",
         file=sys.stderr,
     )
 
