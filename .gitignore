@@ -32,7 +32,8 @@ cron_jobs.json
 /tmp/agent42/
 .agent42/
 data/
-apps/
+apps/*
+!apps/meatheadgear
 
 # Linting & formatting
 .ruff_cache/
