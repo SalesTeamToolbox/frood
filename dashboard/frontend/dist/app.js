@@ -506,6 +506,7 @@ function handleWSMessage(msg) {
   } else if (msg.type === "system_health") {
     state.status = msg.data;
     if (state.page === "status") renderStatus();
+    updateGsdIndicator();
   } else if (msg.type === "app_status") {
     // Real-time app status update
     const idx = state.apps.findIndex((a) => a.id === msg.data.id);
@@ -2523,6 +2524,26 @@ function renderTeamRunDetail(el) {
 
   html += '</div>';
   el.innerHTML = html;
+}
+
+function updateGsdIndicator() {
+  var slot = document.getElementById("gsd-indicator-slot");
+  if (!slot) return;
+  var ws = state.status && state.status.gsd_workstream;
+  while (slot.firstChild) slot.removeChild(slot.firstChild);
+  if (ws) {
+    var indicator = document.createElement("div");
+    indicator.className = "gsd-indicator";
+    var wsEl = document.createElement("div");
+    wsEl.className = "gsd-workstream";
+    wsEl.textContent = "\u25BA " + ws;
+    var phaseEl = document.createElement("div");
+    phaseEl.className = "gsd-phase";
+    phaseEl.textContent = state.status.gsd_phase ? "Phase " + state.status.gsd_phase : "";
+    indicator.appendChild(wsEl);
+    indicator.appendChild(phaseEl);
+    slot.appendChild(indicator);
+  }
 }
 
 function renderStatus() {
@@ -6936,12 +6957,7 @@ function render() {
           <a href="#" data-page="reports" class="${state.page === "reports" ? "active" : ""}" onclick="event.preventDefault();navigate('reports');closeMobileSidebar()">&#128202; Reports</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings');closeMobileSidebar()">&#9881; Settings</a>
         </nav>
-        ${state.status && state.status.gsd_workstream ? `
-        <div class="gsd-indicator">
-          <div class="gsd-workstream">&#9654; ${state.status.gsd_workstream}</div>
-          <div class="gsd-phase">${state.status.gsd_phase ? "Phase " + state.status.gsd_phase : ""}</div>
-        </div>
-        ` : ""}
+        <div id="gsd-indicator-slot">${state.status && state.status.gsd_workstream ? `<div class="gsd-indicator"><div class="gsd-workstream">&#9654; ${state.status.gsd_workstream}</div><div class="gsd-phase">${state.status.gsd_phase ? "Phase " + state.status.gsd_phase : ""}</div></div>` : ""}</div>
         <div class="sidebar-footer">
           <span id="ws-dot" class="ws-dot ${state.wsConnected ? "connected" : "disconnected"}"></span>
           <span id="ws-label">${state.wsConnected ? "Connected to the Guide" : "Disconnected"}</span>
