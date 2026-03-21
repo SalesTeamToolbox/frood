@@ -1933,24 +1933,60 @@ def create_app(
         if etype == "system":
             subtype = event.get("subtype", "")
             if subtype == "init":
-                # PTY-02: Relay per-MCP-server connection status
-                mcp_servers = event.get("mcp_servers", [])
-                for srv in mcp_servers:
+                # UX-01: Collapse per-server messages into a single init_progress chip
+                mcp_names = []
+                for srv in event.get("mcp_servers", []):
                     srv_name = (srv.get("name", "") if isinstance(srv, dict) else str(srv)).strip()
                     if srv_name:
-                        envelopes.append(
-                            {"type": "status", "data": {"message": f"Connected to {srv_name}"}}
-                        )
-                # Always emit ready message after init, even if mcp_servers is empty
-                envelopes.append({"type": "status", "data": {"message": "Claude Code ready"}})
+                        mcp_names.append(srv_name)
+                envelopes.append(
+                    {
+                        "type": "init_progress",
+                        "data": {
+                            "message": "Initializing Claude Code...",
+                            "servers": mcp_names,
+                            "phase": "ready",
+                        },
+                    }
+                )
             elif subtype == "hook_started":
-                # PTY-02: Show hook loading progress
+                # UX-01: Show hook loading as init_progress (not status)
                 hook_name = event.get("hook_name") or event.get("name") or ""
                 if hook_name:
                     envelopes.append(
-                        {"type": "status", "data": {"message": f"Loading {hook_name}..."}}
+                        {
+                            "type": "init_progress",
+                            "data": {
+                                "message": f"Loading {hook_name}...",
+                                "phase": "loading",
+                            },
+                        }
                     )
-            # hook_response: suppress (too verbose for UI)
+            elif subtype == "hook_response":
+                # MEM-01/MEM-02: Parse memory hook responses, suppress all others
+                hook_name = event.get("hook_name") or event.get("name") or ""
+                hook_output = event.get("output", "")
+                if "memory-recall" in hook_name.lower():
+                    import re as _re_mod
+
+                    count_match = _re_mod.search(r"Recall:\s*(\d+)\s*memories", hook_output)
+                    count = int(count_match.group(1)) if count_match else 0
+                    if count > 0:
+                        envelopes.append(
+                            {
+                                "type": "memory_loaded",
+                                "data": {"count": count, "message": f"Loaded {count} memories"},
+                            }
+                        )
+                elif "memory-learn" in hook_name.lower() or "learning-engine" in hook_name.lower():
+                    if "captured" in hook_output.lower() or "Learn:" in hook_output:
+                        envelopes.append(
+                            {
+                                "type": "memory_saved",
+                                "data": {"message": "Memory saved"},
+                            }
+                        )
+                # All other hook_response subtypes remain suppressed (too verbose)
         elif etype == "stream_event":
             raw = event.get("event", {})
             raw_type = raw.get("type", "")
@@ -1996,6 +2032,7 @@ def create_app(
                             "data": {"text": delta.get("text", "")},
                         }
                     )
+                    session_state["has_streamed_text"] = True
                 elif delta.get("type") == "input_json_delta":
                     partial = delta.get("partial_json", "")
                     if index in tool_id_map:
@@ -2048,18 +2085,21 @@ def create_app(
                             }
                         )
         elif etype == "assistant":
-            # Fallback for pipe-buffered stdout: stream_event deltas are block-buffered
-            # by Node.js and may not arrive individually. The "assistant" event carries
-            # the full response text — emit as text_delta so the chat UI renders it.
-            msg = event.get("message", {})
-            for block in msg.get("content", []):
-                if block.get("type") == "text":
-                    text = block.get("text", "")
-                    if text:
-                        envelopes.append({"type": "text_delta", "data": {"text": text}})
+            # UX-03: Dedup guard — only use assistant event as fallback when stream_event
+            # text_deltas were NOT already emitted (pipe-buffered mode). When PTY streaming
+            # works, stream_event text_deltas arrive first and set has_streamed_text=True,
+            # so we skip this to prevent the same text appearing twice.
+            if not session_state.get("has_streamed_text"):
+                msg = event.get("message", {})
+                for block in msg.get("content", []):
+                    if block.get("type") == "text":
+                        text = block.get("text", "")
+                        if text:
+                            envelopes.append({"type": "text_delta", "data": {"text": text}})
         elif etype == "result":
             cc_sid = event.get("session_id")
             session_state["cc_session_id"] = cc_sid
+            session_state["has_streamed_text"] = False  # UX-03: reset per-turn flag
             usage = event.get("usage", {})
             envelopes.append(
                 {
@@ -2123,6 +2163,7 @@ def create_app(
         session_state["trust_mode"] = False
         session_state["message_count"] = session_data.get("message_count", 0)
         session_state["last_assistant_text"] = ""
+        session_state["has_streamed_text"] = False
 
         # PTY-03: Check for ?warm=true and spawn warm process in background
         warm_requested = websocket.query_params.get("warm", "").lower() in ("true", "1", "yes")
