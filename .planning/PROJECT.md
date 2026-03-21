@@ -33,6 +33,11 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 - ✓ context7 MCP server for live library documentation queries — v1.2
 - ✓ GitHub MCP server for issue/PR/CI management from Claude Code — v1.2
 - ✓ Playwright MCP server for browser automation from Claude Code — v1.2
+- ✓ PreToolUse security gate blocks edits to 12 security-critical files — v1.2
+- ✓ Developer scaffolding skills: /test-coverage, /add-tool, /add-provider — v1.2
+- ✓ Operational skills: /prod-check (SSH health sweep) and /add-pitfall (CLAUDE.md maintenance) — v1.2
+- ✓ 4 specialized subagents: test-coverage-auditor, dependency-health, migration-impact, deploy-verifier — v1.2
+- ✓ jcodemunch deep integration: context-loader guidance + drift detection + GSD workflow pre-fetch — v1.2
 
 ### Active
 
@@ -164,6 +169,10 @@ Tech stack: Python 3.11+, FastAPI, AsyncOpenAI, aiofiles, pytest.
 | Safe DOM manipulation only | createElement/textContent, no innerHTML per security rules | ✓ Good — XSS prevention |
 | GitHub token via env var reference | ${GITHUB_PERSONAL_ACCESS_TOKEN} in .mcp.json, not embedded | ✓ Good — secrets stay out of repo |
 | Single .mcp.json config | All MCP servers in one file, npx for all runners | ✓ Good — simple, standard pattern |
+| Shared security_config.py registry | Single source of truth for security file list used by both pre/post hooks | ✓ Good — no sync drift between hooks |
+| Inline templates in skills | Self-contained SKILL.md with templates, no external template files | ✓ Good — skills work without file dependencies |
+| Plain markdown agent definitions | No frontmatter, matches security-reviewer.md pattern for consistency | ✓ Good — uniform agent format across project |
+| jcodemunch guidance per work-type | context-loader detects work type and emits relevant symbol guidance | ✓ Good — reduces blind exploration tokens |
 
 | StrongWall.ai as L1 workhorse | $16/mo unlimited Kimi K2.5 beats unreliable free OR models for coding | -- Pending |
 | L1/L2 tier architecture | Cleaner than free/cheap/paid mix; user-configurable per agent | -- Pending |
@@ -171,4 +180,4 @@ Tech stack: Python 3.11+, FastAPI, AsyncOpenAI, aiofiles, pytest.
 | Non-streaming accepted for L1 | StrongWall doesn't stream; simulate for chat, accept for background | -- Pending |
 
 ---
-*Last updated: 2026-03-17 after v3.0 GSD & jcodemunch Integration milestone start*
+*Last updated: 2026-03-21 after v1.2 Claude Code Automation Enhancements milestone completion*
