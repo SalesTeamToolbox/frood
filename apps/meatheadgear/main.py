@@ -5,6 +5,7 @@ AI-powered gym apparel storefront with Printful POD integration.
 Runs on port 8001 (Agent42 dashboard is on 8000).
 """
 
+import asyncio
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -17,14 +18,20 @@ from fastapi.staticfiles import StaticFiles
 sys.path.insert(0, str(Path(__file__).parent))
 
 from database import init_db
+from routers.auth import router as auth_router
+from routers.catalog import router as catalog_router
+from services.catalog import start_background_sync, sync_catalog
 
 from config import settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifecycle: init DB on startup."""
+    """Application lifecycle: init DB on startup, then kick off catalog sync."""
     await init_db()
+    # Non-blocking catalog sync — server starts immediately, catalog populates in background
+    asyncio.create_task(sync_catalog())
+    asyncio.create_task(start_background_sync())
     yield
 
 
@@ -34,6 +41,10 @@ app = FastAPI(
     description="AI-powered gym apparel storefront with Printful POD integration",
     lifespan=lifespan,
 )
+
+# Register routers
+app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+app.include_router(catalog_router, prefix="/api/catalog", tags=["catalog"])
 
 # Serve frontend assets
 _frontend_dir = Path(__file__).parent / "frontend"
