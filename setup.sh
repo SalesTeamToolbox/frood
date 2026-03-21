@@ -6,6 +6,7 @@
 # Subcommands:
 #   bash setup.sh              Full local setup (default)
 #   bash setup.sh sync-auth    Sync CC credentials to remote VPS
+#   bash setup.sh create-shortcut  Create desktop shortcut for Agent42
 #   bash setup.sh --quiet      Quiet mode (for install-server.sh)
 
 set -e
@@ -50,6 +51,135 @@ except: pass
     else
         warn "Credentials copied but auth status unclear. Run 'claude auth status' on VPS to verify."
     fi
+    exit 0
+fi
+
+# ── Subcommand: create-shortcut ───────────────────────────────────────────────
+if [ "$1" = "create-shortcut" ]; then
+    OS="$(uname -s)"
+    BROWSER_PATH=""
+    BROWSER_NAME=""
+    BROWSER_CMD=""
+
+    # ── Detect platform and browser ──────────────────────────────────────────
+    case "$OS" in
+        MINGW*|MSYS*|CYGWIN*)
+            # Windows via Git Bash / MSYS2 / Cygwin
+            if [ -f "/c/Program Files/Google/Chrome/Application/chrome.exe" ]; then
+                BROWSER_PATH="/c/Program Files/Google/Chrome/Application/chrome.exe"
+                BROWSER_NAME="Google Chrome"
+            elif [ -f "/c/Program Files (x86)/Google/Chrome/Application/chrome.exe" ]; then
+                BROWSER_PATH="/c/Program Files (x86)/Google/Chrome/Application/chrome.exe"
+                BROWSER_NAME="Google Chrome"
+            elif [ -f "/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" ]; then
+                BROWSER_PATH="/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+                BROWSER_NAME="Microsoft Edge"
+            else
+                error "No Chromium-based browser found. Install Google Chrome: https://www.google.com/chrome/"
+            fi
+
+            info "Using browser: $BROWSER_NAME"
+            ICON_PATH="$(cygpath -w "$PROJECT_DIR/dashboard/frontend/dist/assets/icons/icon-512.png" 2>/dev/null || echo "$PROJECT_DIR\\dashboard\\frontend\\dist\\assets\\icons\\icon-512.png")"
+            BROWSER_WIN="$(cygpath -w "$BROWSER_PATH" 2>/dev/null || echo "$BROWSER_PATH")"
+
+            powershell.exe -NoProfile -Command "
+  \$desktop = [Environment]::GetFolderPath('Desktop');
+  \$ws = New-Object -ComObject WScript.Shell;
+  \$sc = \$ws.CreateShortcut(\"\$desktop\\Agent42.lnk\");
+  \$sc.TargetPath = '$BROWSER_WIN';
+  \$sc.Arguments = '--app=http://localhost:8000';
+  \$sc.IconLocation = '$ICON_PATH';
+  \$sc.Description = 'Agent42 - AI Agent Platform';
+  \$sc.Save()
+"
+            info "Shortcut created! Find Agent42 on your Desktop."
+            ;;
+
+        Darwin)
+            # macOS
+            if [ -f "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ]; then
+                BROWSER_NAME="Google Chrome"
+            else
+                warn "Safari does not support the --app flag required for chromeless mode."
+                warn "Install Google Chrome for the best experience: https://www.google.com/chrome/"
+                error "No Chromium-based browser found. Install Google Chrome: https://www.google.com/chrome/"
+            fi
+
+            info "Using browser: $BROWSER_NAME"
+            APP_DIR="$HOME/Applications/Agent42.app/Contents/MacOS"
+            mkdir -p "$APP_DIR"
+            mkdir -p "$HOME/Applications/Agent42.app/Contents/Resources"
+
+            cp "$PROJECT_DIR/dashboard/frontend/dist/assets/icons/icon-512.png" \
+               "$HOME/Applications/Agent42.app/Contents/Resources/agent42.png"
+
+            cat > "$APP_DIR/Agent42" << 'LAUNCHER'
+#!/bin/bash
+open -a "Google Chrome" --args --app=http://localhost:8000
+LAUNCHER
+            chmod +x "$APP_DIR/Agent42"
+
+            cat > "$HOME/Applications/Agent42.app/Contents/Info.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>Agent42</string>
+  <key>CFBundleDisplayName</key>
+  <string>Agent42</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.agent42.app</string>
+  <key>CFBundleExecutable</key>
+  <string>Agent42</string>
+  <key>CFBundleVersion</key>
+  <string>1.0</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+</dict>
+</plist>
+PLIST
+            info "Shortcut created! Find Agent42 in ~/Applications/."
+            ;;
+
+        Linux)
+            # Linux — detect available Chromium-based browser
+            if command -v google-chrome &>/dev/null; then
+                BROWSER_CMD="google-chrome"
+            elif command -v google-chrome-stable &>/dev/null; then
+                BROWSER_CMD="google-chrome-stable"
+            elif command -v chromium-browser &>/dev/null; then
+                BROWSER_CMD="chromium-browser"
+            elif command -v chromium &>/dev/null; then
+                BROWSER_CMD="chromium"
+            else
+                error "No Chromium-based browser found. Install Google Chrome: https://www.google.com/chrome/"
+            fi
+
+            info "Using browser: $BROWSER_CMD"
+            DESKTOP_DIR="$HOME/.local/share/applications"
+            mkdir -p "$DESKTOP_DIR"
+            ICON_PATH="$PROJECT_DIR/dashboard/frontend/dist/assets/icons/icon-512.png"
+
+            cat > "$DESKTOP_DIR/agent42.desktop" << DESKTOP
+[Desktop Entry]
+Name=Agent42
+Comment=AI Agent Platform — Don't Panic
+Exec=$BROWSER_CMD --app=http://localhost:8000
+Icon=$ICON_PATH
+Type=Application
+Categories=Development;
+StartupWMClass=agent42
+DESKTOP
+            chmod +x "$DESKTOP_DIR/agent42.desktop"
+            info "Shortcut created! Find Agent42 in your application launcher."
+            ;;
+
+        *)
+            error "Unsupported platform: $OS. Supported: Windows (Git Bash/MSYS2), macOS, Linux."
+            ;;
+    esac
+
     exit 0
 fi
 
