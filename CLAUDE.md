@@ -456,6 +456,8 @@ Skip GSD for trivial tasks (Claude handles these directly):
 | 117 | Tests | `core.task_queue` removed in v2.0 but 3 test files still imported it inside `try` blocks — caused `HAS_TESTCLIENT=False` silently, then `NameError` on classes that used names from the failed import | When removing a module, grep all test files for references. `try/except ImportError` blocks mask the real cause — split imports so unrelated names aren't lost |
 | 118 | Tests | Tests referencing `/api/tasks` endpoint broke silently after v2.0 removed it — returned 404 instead of expected 401 | After removing API endpoints, grep `tests/` for the route path and update or remove affected tests |
 | 119 | Deploy | Unstaged local changes block `git checkout main` during deploy, forcing stash/pop which causes merge conflicts | Always check `git status` before deploy. Commit or explicitly stash WIP first — don't let deploy workflow hit stash conflicts mid-flight |
+| 120 | CC Chat | On session resume/page reload, `sessionStorage` restores the session ID so CC retains conversation context via `--resume`, but the chat DOM is empty — messages were never persisted | Save user and assistant messages to `localStorage` keyed by `cc_hist_<sessionId>`; restore via `ccRestoreHistory()` in `ws.onopen` when `sessionResumed === true` |
+| 121 | Startup | `agent42.py` called `PluginLoader(self.tool_registry)` (old instance-based API) — but `PluginLoader` has no constructor; only a static `load_all(directory, context, registry)` method | Use `PluginLoader.load_all(custom_tools_dir, ctx, self.tool_registry)` and only call it when `CUSTOM_TOOLS_DIR` is configured |
 
 ---
 
