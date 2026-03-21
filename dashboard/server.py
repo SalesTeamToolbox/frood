@@ -1920,6 +1920,8 @@ def create_app(
 
     # Constant: MCP tool name CC uses when requesting user permission
     _CC_PERMISSION_TOOL = "mcp__agent42__cc_permission"
+    # Built-in CC tool that blocks waiting for human input
+    _CC_ASK_QUESTION_TOOL = "AskUserQuestion"
 
     def _parse_cc_event(event: dict, tool_id_map: dict, session_state: dict) -> list:
         """Translate one CC NDJSON event into WS envelope dicts.
@@ -1997,20 +1999,22 @@ def create_app(
                     tool_name = cb.get("name", "")
                     tool_id = cb.get("id", "")
                     is_perm = tool_name == _CC_PERMISSION_TOOL
+                    is_ask = tool_name == _CC_ASK_QUESTION_TOOL
                     tool_id_map[index] = {
                         "id": tool_id,
                         "name": tool_name,
                         "input_buf": "",
                         "is_permission": is_perm,
+                        "is_ask_question": is_ask,
                     }
-                    if not is_perm:
+                    if not is_perm and not is_ask:
                         envelopes.append(
                             {
                                 "type": "tool_start",
                                 "data": {"id": tool_id, "name": tool_name, "input": {}},
                             }
                         )
-                    # Permission tool: no envelope yet — wait for input_json_delta + content_block_stop
+                    # Permission/AskUserQuestion: no envelope yet — wait for input_json_delta + content_block_stop
                 elif cb.get("type") == "tool_result":
                     # TOOL-03: Relay tool output to frontend so tool cards can show result content
                     envelopes.append(
@@ -2039,7 +2043,9 @@ def create_app(
                         tool_id_map[index]["input_buf"] = (
                             tool_id_map[index].get("input_buf", "") + partial
                         )
-                        if not tool_id_map[index].get("is_permission"):
+                        if not tool_id_map[index].get("is_permission") and not tool_id_map[
+                            index
+                        ].get("is_ask_question"):
                             envelopes.append(
                                 {
                                     "type": "tool_delta",
@@ -2049,7 +2055,7 @@ def create_app(
                                     },
                                 }
                             )
-                    # Permission tool deltas: silently buffered, not forwarded to frontend
+                    # Permission/AskUserQuestion tool deltas: silently buffered, not forwarded to frontend
             elif raw_type == "content_block_stop":
                 if index in tool_id_map:
                     t = tool_id_map.pop(index)
@@ -2069,6 +2075,30 @@ def create_app(
                                     "id": t["id"],
                                     "name": t["name"],
                                     "input": perm_input,
+                                },
+                            }
+                        )
+                    elif t.get("is_ask_question"):
+                        # AskUserQuestion: parse question text and emit interactive prompt
+                        ask_input = {}
+                        try:
+                            import json as _json_mod2
+
+                            ask_input = _json_mod2.loads(t.get("input_buf", "{}") or "{}")
+                        except Exception:
+                            pass
+                        question_text = (
+                            ask_input.get("question")
+                            or ask_input.get("prompt")
+                            or ask_input.get("text")
+                            or str(ask_input)
+                        )
+                        envelopes.append(
+                            {
+                                "type": "ask_question",
+                                "data": {
+                                    "id": t["id"],
+                                    "question": question_text,
                                 },
                             }
                         )
@@ -2160,6 +2190,7 @@ def create_app(
         created_at: str = session_data.get("created_at", _datetime.datetime.utcnow().isoformat())
         session_state["permission_events"] = {}  # tool_id -> asyncio.Event
         session_state["permission_results"] = {}  # tool_id -> bool
+        session_state["question_pending"] = {}  # tool_id -> True (awaiting stdin response)
         session_state["trust_mode"] = False
         session_state["message_count"] = session_data.get("message_count", 0)
         session_state["last_assistant_text"] = ""
@@ -2520,6 +2551,27 @@ def create_app(
                                 evt = session_state["permission_events"].get(perm_id)
                                 if evt:
                                     evt.set()
+                            elif inner.get("type") == "question_response":
+                                # User answered an AskUserQuestion — write answer to CC stdin
+                                answer_text = inner.get("text", "")
+                                if (
+                                    answer_text
+                                    and cc_proc is not None
+                                    and hasattr(cc_proc, "stdin")
+                                    and cc_proc.stdin
+                                    and not cc_proc.stdin.is_closing()
+                                ):
+                                    try:
+                                        cc_proc.stdin.write((answer_text + "\n").encode("utf-8"))
+                                        await cc_proc.stdin.drain()
+                                        logger.info(
+                                            "CC AskUserQuestion: wrote answer to stdin (%d chars)",
+                                            len(answer_text),
+                                        )
+                                    except Exception as q_err:
+                                        logger.warning(
+                                            "CC AskUserQuestion: stdin write failed: %s", q_err
+                                        )
                             elif inner.get("type") == "trust_mode":
                                 session_state["trust_mode"] = inner.get("enabled", False)
                             # Not a stop — re-arm receive and check if read_task also completed
