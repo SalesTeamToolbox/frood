@@ -4226,6 +4226,133 @@ function ccResolvePermission(tab, permId, approved) {
   }
 }
 
+// Parse question text for embedded numbered/bullet options.
+// Returns { questionText, options: string[] } — options is [] if none detected.
+function ccParseQuestion(raw) {
+  var lines = raw.split("\n").map(function(l) { return l.trim(); }).filter(Boolean);
+  var options = [];
+  var questionLines = [];
+  var inOptions = false;
+  var numberedRe = /^(\d+)[.)]\s+(.+)$/;
+  var bulletRe = /^[-*•]\s+(.+)$/;
+
+  lines.forEach(function(line) {
+    var nm = line.match(numberedRe);
+    var bm = line.match(bulletRe);
+    if (nm) { options.push(nm[2]); inOptions = true; }
+    else if (bm) { options.push(bm[1]); inOptions = true; }
+    else if (!inOptions) { questionLines.push(line); }
+  });
+
+  // If all "options" are just single words they might be part of the question — keep as text
+  if (options.length <= 1) options = [];
+
+  return {
+    questionText: questionLines.join("\n") || raw,
+    options: options,
+  };
+}
+
+function ccCreateQuestionCard(tab, questionId, questionText) {
+  var container = tab.el.querySelector(".cc-chat-messages");
+  if (!container) return;
+
+  // Remove typing indicator — we have a question to answer
+  var typingInd = container.querySelector(".cc-typing-indicator");
+  if (typingInd) typingInd.remove();
+
+  var parsed = ccParseQuestion(questionText || "");
+
+  var card = document.createElement("div");
+  card.className = "cc-question-card";
+  card.id = "cc-question-" + questionId;
+
+  // Header
+  var header = document.createElement("div");
+  header.className = "cc-question-header";
+  var icon = document.createElement("span");
+  icon.textContent = "\u2753";
+  icon.style.marginRight = "0.4rem";
+  header.appendChild(icon);
+  var label = document.createElement("span");
+  label.textContent = "Agent42 is asking";
+  header.appendChild(label);
+  card.appendChild(header);
+
+  // Question text
+  var qEl = document.createElement("div");
+  qEl.className = "cc-question-text";
+  qEl.innerHTML = DOMPurify.sanitize(ccRenderMarkdown(parsed.questionText));
+  card.appendChild(qEl);
+
+  // Options (if any) rendered as choice buttons
+  var answered = false;
+  var sendAnswer = function(text) {
+    if (answered) return;
+    answered = true;
+    // Show answered state
+    var actionsEl = card.querySelector(".cc-question-actions");
+    if (actionsEl) actionsEl.style.display = "none";
+    var answerEl = document.createElement("div");
+    answerEl.className = "cc-question-answered";
+    answerEl.textContent = "\u2714 " + text;
+    card.appendChild(answerEl);
+    // Send to backend
+    if (tab.ws && tab.ws.readyState === 1) {
+      tab.ws.send(JSON.stringify({ type: "question_response", id: questionId, text: text }));
+    }
+    // Also save as user message in history
+    ccSaveMessage(tab.ccSessionId, "user", text);
+  };
+
+  var actions = document.createElement("div");
+  actions.className = "cc-question-actions";
+
+  if (parsed.options.length > 0) {
+    // Multiple choice — render as button grid
+    var grid = document.createElement("div");
+    grid.className = "cc-question-options";
+    parsed.options.forEach(function(opt) {
+      var btn = document.createElement("button");
+      btn.className = "cc-question-option";
+      btn.textContent = opt;
+      btn.addEventListener("click", function() { sendAnswer(opt); });
+      grid.appendChild(btn);
+    });
+    actions.appendChild(grid);
+  }
+
+  // Always include free-text input fallback
+  var inputRow = document.createElement("div");
+  inputRow.className = "cc-question-input-row";
+  var inp = document.createElement("input");
+  inp.type = "text";
+  inp.className = "cc-question-input";
+  inp.placeholder = parsed.options.length > 0 ? "Or type a custom answer..." : "Type your answer...";
+  inp.addEventListener("keydown", function(e) {
+    if (e.key === "Enter" && inp.value.trim()) { sendAnswer(inp.value.trim()); }
+  });
+  var sendBtn = document.createElement("button");
+  sendBtn.className = "cc-question-send";
+  sendBtn.textContent = "Send";
+  sendBtn.addEventListener("click", function() {
+    if (inp.value.trim()) sendAnswer(inp.value.trim());
+  });
+  inputRow.appendChild(inp);
+  inputRow.appendChild(sendBtn);
+  actions.appendChild(inputRow);
+
+  card.appendChild(actions);
+  container.appendChild(card);
+
+  // Focus the input
+  setTimeout(function() { inp.focus(); }, 50);
+
+  if (tab.autoScroll) {
+    requestAnimationFrame(function() { container.scrollTop = container.scrollHeight; });
+  }
+}
+
 function ccToggleTrustMode(tabIdx) {
   var tab = ccGetTab(tabIdx);
   if (!tab) return;
@@ -4273,6 +4400,10 @@ function ccMakeWsHandler(tab, msgs) {
 
     } else if (msgType === "tool_output") {
       ccSetToolOutput(msgData.id, msgData.content, msgData.content_type);
+
+    } else if (msgType === "ask_question") {
+      // AskUserQuestion tool — render interactive question widget
+      ccCreateQuestionCard(tab, msgData.id, msgData.question || "");
 
     } else if (msgType === "permission_request") {
       // Backend emits permission_request at content_block_stop with fully parsed input
