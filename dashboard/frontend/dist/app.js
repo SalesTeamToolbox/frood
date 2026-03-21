@@ -4355,6 +4355,7 @@ function ccMakeWsHandler(tab, msgs) {
         finalEl.textContent = "";
         finalEl.insertAdjacentHTML("afterbegin", DOMPurify.sanitize(rendered));
         finalEl.classList.remove("cc-streaming-body");
+        ccSaveMessage(tab.ccSessionId, "agent42", finalBuf);  // persist for session resume
       }
       // SESS-06: accumulate token usage
       tab.totalInputTokens += (msgData.input_tokens || 0);
@@ -4816,6 +4817,9 @@ function ideOpenCCChat(node) {
   tab.ws = ws;
 
   ws.onopen = function() {
+    if (sessionResumed) {
+      ccRestoreHistory(messagesDiv, sessionId);
+    }
     var notice = document.createElement("div");
     notice.style.cssText = "color:var(--text-muted);font-size:0.8rem;padding:0.5rem 0;text-align:center";
     notice.textContent = "Claude Code connected";
@@ -4826,6 +4830,9 @@ function ideOpenCCChat(node) {
       resumeNotice.textContent = "Session resumed \u2014 context preserved";
       messagesDiv.appendChild(resumeNotice);
     }
+    if (tab.autoScroll) requestAnimationFrame(function() {
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    });
   };
 
   ws.onmessage = ccMakeWsHandler(tab, messagesDiv);
@@ -4894,6 +4901,134 @@ function ccSetupScrollBehavior(tab) {
   }, 100);
 }
 
+// -- CC Chat History Persistence ---------------------------------------------
+
+var CC_HISTORY_MAX_MSGS = 100;    // messages per session
+var CC_HISTORY_MAX_SESSIONS = 20; // sessions to keep in localStorage
+
+function ccHistoryKey(sessionId) {
+  return "cc_hist_" + sessionId;
+}
+
+function ccSaveMessage(sessionId, role, text) {
+  if (!sessionId || !text) return;
+  try {
+    var key = ccHistoryKey(sessionId);
+    var stored = localStorage.getItem(key);
+    var msgs = stored ? JSON.parse(stored) : [];
+    msgs.push({ role: role, text: text, ts: Date.now() });
+    if (msgs.length > CC_HISTORY_MAX_MSGS) msgs = msgs.slice(-CC_HISTORY_MAX_MSGS);
+    localStorage.setItem(key, JSON.stringify(msgs));
+    // Prune old sessions
+    ccPruneHistorySessions(sessionId);
+  } catch(e) {}
+}
+
+function ccLoadHistory(sessionId) {
+  if (!sessionId) return [];
+  try {
+    var stored = localStorage.getItem(ccHistoryKey(sessionId));
+    return stored ? JSON.parse(stored) : [];
+  } catch(e) { return []; }
+}
+
+function ccPruneHistorySessions(currentSessionId) {
+  try {
+    var sessionKeys = [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf("cc_hist_") === 0) sessionKeys.push(k);
+    }
+    if (sessionKeys.length <= CC_HISTORY_MAX_SESSIONS) return;
+    // Sort by recency (parse last message ts) and drop oldest
+    var withTs = sessionKeys.map(function(k) {
+      try {
+        var msgs = JSON.parse(localStorage.getItem(k) || "[]");
+        return { key: k, ts: msgs.length ? msgs[msgs.length - 1].ts : 0 };
+      } catch(e) { return { key: k, ts: 0 }; }
+    });
+    withTs.sort(function(a, b) { return a.ts - b.ts; });
+    var toRemove = withTs.slice(0, withTs.length - CC_HISTORY_MAX_SESSIONS);
+    toRemove.forEach(function(item) {
+      if (item.key !== ccHistoryKey(currentSessionId)) localStorage.removeItem(item.key);
+    });
+  } catch(e) {}
+}
+
+function ccClearHistory(sessionId) {
+  try { localStorage.removeItem(ccHistoryKey(sessionId)); } catch(e) {}
+}
+
+function ccRestoreHistory(messagesDiv, sessionId) {
+  var history = ccLoadHistory(sessionId);
+  if (!history.length) return;
+  // Divider
+  var divider = document.createElement("div");
+  divider.style.cssText = "text-align:center;color:var(--text-muted);font-size:0.75rem;padding:0.5rem 0;opacity:0.6;border-top:1px solid var(--border,#333);margin-bottom:0.25rem";
+  divider.textContent = "\u2500\u2500 Previous conversation \u2500\u2500";
+  messagesDiv.appendChild(divider);
+  history.forEach(function(msg) {
+    var wrapper = document.createElement("div");
+    wrapper.style.cssText = "opacity:0.7";
+    if (msg.role === "user") {
+      var d = document.createElement("div");
+      d.className = "chat-msg chat-msg-user";
+      var content = document.createElement("div");
+      content.className = "chat-msg-content";
+      var header = document.createElement("div");
+      header.className = "chat-msg-header";
+      var sender = document.createElement("span");
+      sender.className = "chat-msg-sender";
+      sender.textContent = "You";
+      header.appendChild(sender);
+      var body = document.createElement("div");
+      body.className = "chat-msg-body chat-msg-body-user";
+      body.textContent = msg.text;
+      content.appendChild(header);
+      content.appendChild(body);
+      var av = document.createElement("div");
+      av.className = "chat-avatar chat-avatar-user";
+      av.textContent = "U";
+      d.appendChild(content);
+      d.appendChild(av);
+      wrapper.appendChild(d);
+    } else {
+      var d2 = document.createElement("div");
+      d2.className = "chat-msg chat-msg-agent";
+      var content2 = document.createElement("div");
+      content2.className = "chat-msg-content";
+      var header2 = document.createElement("div");
+      header2.className = "chat-msg-header";
+      var sender2 = document.createElement("span");
+      sender2.className = "chat-msg-sender";
+      sender2.textContent = "Agent42";
+      header2.appendChild(sender2);
+      var body2 = document.createElement("div");
+      body2.className = "chat-msg-body";
+      body2.innerHTML = DOMPurify.sanitize(ccRenderMarkdown(msg.text));
+      content2.appendChild(header2);
+      content2.appendChild(body2);
+      var av2 = document.createElement("div");
+      av2.className = "chat-avatar chat-avatar-agent";
+      var img2 = document.createElement("img");
+      img2.src = "/assets/agent42-avatar.svg";
+      img2.alt = "42";
+      img2.width = 20;
+      img2.height = 20;
+      img2.style.borderRadius = "50%";
+      av2.appendChild(img2);
+      d2.appendChild(content2);
+      d2.appendChild(av2);
+      wrapper.appendChild(d2);
+    }
+    messagesDiv.appendChild(wrapper);
+  });
+  // Spacer before "Session resumed" notice
+  var spacer = document.createElement("div");
+  spacer.style.cssText = "height:0.5rem";
+  messagesDiv.appendChild(spacer);
+}
+
 // -- CC Chat Input Controls --------------------------------------------------
 
 var CC_INPUT_MAX_HEIGHT = 200; // px (INPUT-03)
@@ -4915,6 +5050,7 @@ function ccSend(tabIdx) {
   if (text === "/clear") {
     var msgs = tab.el.querySelector(".cc-chat-messages");
     if (msgs) { while (msgs.firstChild) msgs.removeChild(msgs.firstChild); }
+    ccClearHistory(tab.ccSessionId);  // also wipe persisted history
     input.value = "";
     ccInputResize(input);
     return;
@@ -4928,6 +5064,7 @@ function ccSend(tabIdx) {
     return;
   }
   ccAppendUserBubble(tab, text);  // CHAT-01: immediate user bubble before send
+  ccSaveMessage(tab.ccSessionId, "user", text);  // persist for session resume
   // UX-02: Show typing indicator immediately after user bubble
   var msgsForTyping = tab.el.querySelector(".cc-chat-messages");
   var typingEl = document.createElement("div");
