@@ -72,6 +72,13 @@ class EffectivenessStore:
             )
             await db.execute("CREATE INDEX IF NOT EXISTS idx_task_id ON tool_invocations (task_id)")
             await db.commit()
+            # Phase rewards: add agent_id column to existing databases
+            # SQLite ALTER TABLE ADD COLUMN is idempotent-safe via try/except
+            try:
+                await db.execute("ALTER TABLE tool_invocations ADD COLUMN agent_id TEXT DEFAULT ''")
+                await db.commit()
+            except Exception:
+                pass  # Column already exists — safe to ignore
         self._db_initialized = True
 
     async def record(
@@ -81,6 +88,7 @@ class EffectivenessStore:
         task_id: str,
         success: bool,
         duration_ms: float,
+        agent_id: str = "",
     ) -> None:
         """Write one effectiveness record. Never raises."""
         if not AIOSQLITE_AVAILABLE:
@@ -90,8 +98,8 @@ class EffectivenessStore:
             async with aiosqlite.connect(self._db_path) as db:
                 await db.execute(
                     """INSERT INTO tool_invocations
-                       (tool_name, task_type, task_id, success, duration_ms, ts)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
+                       (tool_name, task_type, task_id, success, duration_ms, ts, agent_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     (
                         tool_name,
                         task_type,
@@ -99,6 +107,7 @@ class EffectivenessStore:
                         int(success),
                         duration_ms,
                         time.time(),
+                        agent_id,
                     ),
                 )
                 await db.commit()
@@ -158,6 +167,41 @@ class EffectivenessStore:
         except Exception as e:
             logger.warning("EffectivenessStore task query failed: %s", e)
             return []
+
+    async def get_agent_stats(self, agent_id: str) -> dict | None:
+        """Return performance stats for a specific agent.
+
+        Returns dict with keys: success_rate (float 0-1), task_volume (int),
+        avg_speed (float ms). Returns None if no records exist for agent_id.
+        """
+        if not AIOSQLITE_AVAILABLE:
+            return None
+        try:
+            await self._ensure_db()
+            async with aiosqlite.connect(self._db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(
+                    """
+                    SELECT
+                        COUNT(*)                   AS task_volume,
+                        AVG(CAST(success AS REAL)) AS success_rate,
+                        AVG(duration_ms)           AS avg_speed
+                    FROM tool_invocations
+                    WHERE agent_id = ?
+                    """,
+                    (agent_id,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+            if row is None or dict(row)["task_volume"] == 0:
+                return None
+            return {
+                "success_rate": dict(row)["success_rate"],
+                "task_volume": int(dict(row)["task_volume"]),
+                "avg_speed": dict(row)["avg_speed"],
+            }
+        except Exception as exc:
+            logger.warning("EffectivenessStore get_agent_stats failed: %s", exc)
+            return None
 
     async def get_recommendations(
         self,
