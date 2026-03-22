@@ -79,7 +79,7 @@ Deferred to future release. Tracked but not in current roadmap.
 Explicitly excluded. Documented to prevent scope creep.
 
 | Feature | Reason |
-|---------|--------|
+| ------- | ------ |
 | Points/XP accumulation | Creates perverse incentives — volume over quality. Rolling success rate is recency-weighted and more accurate |
 | Real-time tier recalculation per request | Violates "cached/fast" constraint. Scheduled recalculation with cache is the correct pattern |
 | Cross-agent competitive leaderboard | Meaningless across different task types and complexities. Per-tier grouping only |
@@ -95,7 +95,7 @@ Explicitly excluded. Documented to prevent scope creep.
 Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
-|-------------|-------|--------|
+| ----------- | ----- | ------ |
 | CONF-01 | Phase 1 | Pending |
 | CONF-02 | Phase 1 | Pending |
 | CONF-03 | Phase 1 | Pending |
@@ -115,11 +115,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ADMN-01 | Phase 2 | Pending |
 | ADMN-02 | Phase 4 | Pending |
 | ADMN-03 | Phase 2 | Pending |
-| DASH-01 | Phase 5 | Pending |
-| DASH-02 | Phase 5 | Pending |
-| DASH-03 | Phase 5 | Pending |
-| DASH-04 | Phase 5 | Pending |
-| DASH-05 | Phase 5 | Pending |
+| DASH-01 | Phase 4 | Pending |
+| DASH-02 | Phase 4 | Pending |
+| DASH-03 | Phase 4 | Pending |
+| DASH-04 | Phase 4 | Pending |
+| DASH-05 | Phase 4 | Pending |
 | TEST-01 | Phase 1 | Pending |
 | TEST-02 | Phase 2 | Pending |
 | TEST-03 | Phase 3 | Pending |
@@ -127,10 +127,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEST-05 | Phase 1 | Pending |
 
 **Coverage:**
-- v1 requirements: 27 total
-- Mapped to phases: 27
+
+- v1 requirements: 29 total (note: original count of 27 was a counting error; actual count is 29)
+- Mapped to phases: 29
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-22*
-*Last updated: 2026-03-22 after initial definition*
+*Last updated: 2026-03-22 — traceability updated after roadmap creation (Phase 5 collapsed into Phase 4 for coarse granularity)*
