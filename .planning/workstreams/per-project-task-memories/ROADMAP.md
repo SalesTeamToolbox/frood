@@ -66,7 +66,11 @@ Plans:
   1. For a given task_type with 5+ recorded observations, the agent receives a ranked list of up to 3 tool/skill recommendations at task start, based on historical success_rate
   2. No recommendations are surfaced for a task_type with fewer than 5 recorded observations — the engine stays silent rather than extrapolating from noise
   3. The aggregation query for a given task_type returns the correct success_rate and avg_duration from the EffectivenessStore records
-**Plans**: TBD
+**Plans:** 2 plans
+
+Plans:
+- [ ] 23-01-PLAN.md — Recommendations data layer and API endpoint (get_recommendations() method, GET /api/recommendations/retrieve, config field, tests)
+- [ ] 23-02-PLAN.md — Hook extension for recommendations injection (fetch_recommendations(), format output, updated main() dual-call flow, hook tests)
 
 ---
 
@@ -77,7 +81,7 @@ Plans:
 | 20. Task Metadata Foundation | 2/2 | Complete    | 2026-03-17 |
 | 21. Effectiveness Tracking and Learning Extraction | 2/2 | Complete    | 2026-03-18 |
 | 22. Proactive Context Injection | 2/2 | Complete   | 2026-03-22 |
-| 23. Recommendations Engine | 0/? | Not started | - |
+| 23. Recommendations Engine | 0/2 | Planning complete | - |
 
 ---
 
