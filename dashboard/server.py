@@ -3345,6 +3345,90 @@ def create_app(
             logger.error("Learning record failed: %s", e)
             return {"status": "error", "detail": str(e)}
 
+    @app.get("/api/learnings/retrieve")
+    async def retrieve_learnings(
+        task_type: str = "",
+        top_k: int = 3,
+        min_score: float = 0.80,
+        query: str = "",
+    ):
+        """Retrieve non-quarantined past learnings filtered by task type with score gating.
+
+        Called by the proactive injection hook (Plan 02) to fetch relevant context
+        before new tasks start.  No authentication required — local hook access only.
+
+        Query parameters:
+          task_type   — Required.  Only learnings matching this task type are returned.
+                        Returns empty list when omitted or empty string.
+          top_k       — Max number of results (default 3).
+          min_score   — Minimum raw_score threshold (default 0.80, RETR-04 gate).
+          query       — Optional embedding query text for semantic relevance.
+                        Falls back to task_type when empty.
+
+        Returns: {"results": [...], "total_tokens": int, "task_type": str}
+        """
+        if not task_type:
+            return {"results": [], "total_tokens": 0, "task_type": ""}
+
+        try:
+            if memory_store is None:
+                return {"results": [], "total_tokens": 0, "task_type": task_type}
+
+            # Use the user's prompt for semantic matching; fall back to task_type string
+            embed_query = query if query else task_type
+
+            # Fetch extra results (top_k * 3) since we filter post-hoc
+            raw_results = await memory_store.semantic_search(
+                query=embed_query,
+                top_k=top_k * 3,
+                task_type=task_type,
+                lifecycle_aware=True,
+            )
+
+            # Apply score gate (RETR-04) and quarantine gate
+            filtered = []
+            for r in raw_results:
+                raw = r.get("raw_score", r.get("score", 0))
+                if raw < min_score:
+                    continue
+                if r.get("metadata", {}).get("quarantined") is True:
+                    continue
+                filtered.append(r)
+
+            # Take first top_k results
+            filtered = filtered[:top_k]
+
+            # Apply token cap: max 500 tokens (approximated as whitespace-split words)
+            _TOKEN_CAP = 500
+            results_out = []
+            total_tokens = 0
+            for r in filtered:
+                text = r.get("text", "")
+                word_count = len(text.split())
+                if total_tokens + word_count > _TOKEN_CAP:
+                    # Truncate text to fit within remaining budget
+                    remaining = _TOKEN_CAP - total_tokens
+                    if remaining > 0:
+                        text = " ".join(text.split()[:remaining])
+                        word_count = remaining
+                    else:
+                        break
+                total_tokens += word_count
+                results_out.append(
+                    {
+                        "text": text,
+                        "score": r.get("score", 0),
+                        "raw_score": r.get("raw_score", r.get("score", 0)),
+                        "task_type": r.get("metadata", {}).get("task_type", ""),
+                        "outcome": r.get("metadata", {}).get("outcome", ""),
+                    }
+                )
+
+            return {"results": results_out, "total_tokens": total_tokens, "task_type": task_type}
+
+        except Exception:
+            return {"results": [], "total_tokens": 0, "task_type": task_type}
+
     @app.post("/api/knowledge/learn")
     async def extract_knowledge(request: Request):
         """Extract structured learnings from session context via LLM.
