@@ -6,6 +6,7 @@ Covers:
 - Quarantine gate: quarantined learnings never returned
 - Token cap: total_tokens <= 500
 - Graceful degradation: empty results when Qdrant unavailable or no matches
+- TestProactiveInjectHook: hook logic for task_type inference and session guard
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -255,3 +256,135 @@ class TestLearningsRetrieve:
         # query should be the user prompt, not the task_type fallback
         called_query = call_kwargs.kwargs.get("query") or call_kwargs.args[0]
         assert called_query == "build flask app"
+
+
+# ---------------------------------------------------------------------------
+# TestProactiveInjectHook — hook logic tests (no server needed)
+# ---------------------------------------------------------------------------
+
+import importlib.util
+import json
+import os
+import sys
+
+
+def _load_hook_module():
+    """Load proactive-inject.py hook module directly from .claude/hooks/."""
+    hook_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        ".claude",
+        "hooks",
+        "proactive-inject.py",
+    )
+    spec = importlib.util.spec_from_file_location("proactive_inject", hook_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestProactiveInjectHook:
+    """Tests for .claude/hooks/proactive-inject.py hook logic."""
+
+    @pytest.fixture(autouse=True)
+    def load_hook(self):
+        """Load the hook module once per test."""
+        self.hook = _load_hook_module()
+
+    def test_infer_task_type_debugging(self):
+        """Test 1: infer_task_type('fix the login bug in auth.py') returns 'debugging'."""
+        result = self.hook.infer_task_type("fix the login bug in auth.py")
+        assert result == "debugging"
+
+    def test_infer_task_type_coding(self):
+        """Test 2: infer_task_type('build a new REST API endpoint') returns 'coding'."""
+        result = self.hook.infer_task_type("build a new REST API endpoint")
+        assert result == "coding"
+
+    def test_infer_task_type_too_short(self):
+        """Test 3: infer_task_type('what is this?') returns '' (too short/no signal)."""
+        result = self.hook.infer_task_type("what is this?")
+        assert result == ""
+
+    def test_infer_task_type_app_create(self):
+        """Test 4: infer_task_type('create a flask app') returns 'app_create'."""
+        result = self.hook.infer_task_type("create a flask app")
+        assert result == "app_create"
+
+    def test_is_injection_done_no_file(self, tmp_path):
+        """Test 5: is_injection_done() returns False when injection-done.json does not exist."""
+        result = self.hook.is_injection_done(str(tmp_path), "test-session-123")
+        assert result is False
+
+    def test_is_injection_done_after_mark(self, tmp_path, monkeypatch):
+        """Test 6: is_injection_done() returns True after mark_injection_done() is called."""
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        session_id = "test-session-abc"
+        self.hook.mark_injection_done(str(tmp_path), session_id)
+        result = self.hook.is_injection_done(str(tmp_path), session_id)
+        assert result is True
+
+    def test_is_injection_done_different_session(self, tmp_path, monkeypatch):
+        """Test 7: is_injection_done() returns False when injection-done.json has different session_id."""
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        self.hook.mark_injection_done(str(tmp_path), "session-original")
+        result = self.hook.is_injection_done(str(tmp_path), "session-different")
+        assert result is False
+
+    def test_format_injection_output_truncates(self):
+        """Test 8: format_injection_output truncates to MAX_OUTPUT_CHARS (2000)."""
+        # Build a list of results with very long text
+        results = [
+            {"score": 0.95, "text": "word " * 1000},
+            {"score": 0.92, "text": "word " * 1000},
+            {"score": 0.88, "text": "word " * 1000},
+        ]
+        output = self.hook.format_injection_output(results, "coding")
+        assert len(output) <= self.hook.MAX_OUTPUT_CHARS
+
+    def test_hook_skips_slash_commands(self, tmp_path, monkeypatch):
+        """Test 9: Hook skips injection when prompt starts with '/'."""
+        # We test via the main() function logic by checking that infer_task_type
+        # is never called when the prompt starts with '/'. We verify via the
+        # is_injection_done guard: if the hook runs but skips due to slash,
+        # the injection-done file should NOT be written.
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        monkeypatch.setenv("AGENT42_DATA_DIR", ".agent42")
+        # A slash command that would otherwise match a task type keyword
+        prompt = "/gsd:execute-phase build a new API endpoint for authentication"
+        # The hook should detect slash command and skip — infer_task_type handles
+        # but main() should short-circuit. We test main() behavior via stdin mock.
+        import io
+
+        event = {
+            "hook_event_name": "UserPromptSubmit",
+            "project_dir": str(tmp_path),
+            "user_prompt": prompt,
+            "session_id": "slash-session",
+        }
+        stdin_data = json.dumps(event)
+        monkeypatch.setattr(sys, "stdin", io.StringIO(stdin_data))
+        # main() should exit 0 without writing guard file
+        with pytest.raises(SystemExit) as exc:
+            self.hook.main()
+        assert exc.value.code == 0
+        guard_file = tmp_path / ".agent42" / "injection-done.json"
+        assert not guard_file.exists()
+
+    def test_hook_skips_short_prompts(self, tmp_path, monkeypatch):
+        """Test 10: Hook skips injection when prompt length < 15 characters."""
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        import io
+
+        event = {
+            "hook_event_name": "UserPromptSubmit",
+            "project_dir": str(tmp_path),
+            "user_prompt": "build API",  # 9 chars, below MIN_PROMPT_LEN=15
+            "session_id": "short-session",
+        }
+        stdin_data = json.dumps(event)
+        monkeypatch.setattr(sys, "stdin", io.StringIO(stdin_data))
+        with pytest.raises(SystemExit) as exc:
+            self.hook.main()
+        assert exc.value.code == 0
+        guard_file = tmp_path / ".agent42" / "injection-done.json"
+        assert not guard_file.exists()
