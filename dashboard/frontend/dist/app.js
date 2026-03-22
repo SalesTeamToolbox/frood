@@ -4788,39 +4788,67 @@ function ccResumeSession(tab, wsSessionId, title) {
   var protocol = location.protocol === "https:" ? "wss:" : "ws:";
   var wsUrl = protocol + "//" + location.host + "/ws/cc-chat?token="
     + encodeURIComponent(state.token) + "&session_id=" + encodeURIComponent(wsSessionId);
-  var ws = new WebSocket(wsUrl);
-  tab.ws = ws;
 
-  // Reuse the shared WS handler factory (defined in Plan 03-03)
-  // This prevents handler duplication -- any changes to ccMakeWsHandler
-  // automatically apply to both ideOpenCCChat and ccResumeSession
-  ws.onmessage = ccMakeWsHandler(tab, msgs);
+  var _ccResumeReconnectCount = 0;
+  var _ccResumeReconnectTimer = null;
 
-  ws.onopen = function() {
-    var connNotice = document.createElement("div");
-    connNotice.style.cssText = "color:var(--text-muted);font-size:0.8rem;padding:0.5rem 0;text-align:center";
-    connNotice.textContent = "Claude Code reconnected";
-    if (msgs) msgs.appendChild(connNotice);
-  };
+  function _startResumeWS() {
+    if (_ccResumeReconnectTimer) { clearTimeout(_ccResumeReconnectTimer); _ccResumeReconnectTimer = null; }
+    var isReconnect = _ccResumeReconnectCount > 0;
+    var ws = new WebSocket(wsUrl);
+    tab.ws = ws;
 
-  ws.onclose = function() {
-    clearInterval(tab.streamTimer);
-    tab.streamTimer = null;
-    if (tab.streamMsgEl && tab.streamBuffer) {
-      tab.streamMsgEl.textContent = tab.streamBuffer;
-      tab.streamMsgEl.classList.remove("cc-streaming-body");
-      tab.streamBuffer = "";
-      tab.streamMsgEl = null;
-    }
-    ccSetSendingState(tab, false);
-  };
+    // Reuse the shared WS handler factory (defined in Plan 03-03)
+    ws.onmessage = ccMakeWsHandler(tab, msgs);
 
-  ws.onerror = function() {
-    var errDiv = document.createElement("div");
-    errDiv.style.cssText = "color:var(--danger,#ef4444);padding:0.5rem;font-size:0.85rem";
-    errDiv.textContent = "WebSocket connection error";
-    if (msgs) msgs.appendChild(errDiv);
-  };
+    ws.onopen = function() {
+      _ccResumeReconnectCount = 0;
+      if (isReconnect) {
+        // Clear stale DOM, restore history fresh
+        while (msgs.firstChild) msgs.removeChild(msgs.firstChild);
+        ccRestoreHistory(msgs, wsSessionId);
+        var reconNotice = document.createElement("div");
+        reconNotice.style.cssText = "color:var(--success,#22c55e);font-size:0.8rem;padding:0.5rem 0;text-align:center";
+        reconNotice.textContent = "Reconnected \u2014 session restored";
+        msgs.appendChild(reconNotice);
+      } else {
+        ccRestoreHistory(msgs, wsSessionId);
+        var connNotice = document.createElement("div");
+        connNotice.style.cssText = "color:var(--text-muted);font-size:0.8rem;padding:0.5rem 0;text-align:center";
+        connNotice.textContent = "Claude Code reconnected";
+        msgs.appendChild(connNotice);
+      }
+    };
+
+    ws.onclose = function() {
+      clearInterval(tab.streamTimer);
+      tab.streamTimer = null;
+      if (tab.streamMsgEl && tab.streamBuffer) {
+        tab.streamMsgEl.textContent = tab.streamBuffer;
+        tab.streamMsgEl.classList.remove("cc-streaming-body");
+        tab.streamBuffer = "";
+        tab.streamMsgEl = null;
+      }
+      ccSetSendingState(tab, false);
+      // Auto-reconnect with exponential backoff
+      _ccResumeReconnectCount++;
+      var delay = Math.min(1000 * Math.pow(1.5, _ccResumeReconnectCount - 1), 15000);
+      var disconnNotice = document.createElement("div");
+      disconnNotice.style.cssText = "color:var(--text-muted);font-size:0.8rem;padding:0.5rem 0;text-align:center";
+      disconnNotice.textContent = "Disconnected \u2014 reconnecting in " + Math.round(delay / 1000) + "s\u2026";
+      msgs.appendChild(disconnNotice);
+      _ccResumeReconnectTimer = setTimeout(_startResumeWS, delay);
+    };
+
+    ws.onerror = function() {
+      var errDiv = document.createElement("div");
+      errDiv.style.cssText = "color:var(--danger,#ef4444);padding:0.5rem;font-size:0.85rem";
+      errDiv.textContent = "WebSocket connection error";
+      msgs.appendChild(errDiv);
+    };
+  }
+
+  _startResumeWS();
 }
 
 function ccToggleSessionSidebar(tabIdx) {
@@ -5012,50 +5040,77 @@ function ideOpenCCChat(node) {
   // Guard against duplicate WS (Pitfall 6)
   if (tab.ws && tab.ws.readyState <= 1) { ideActivateTab(); return; }
 
-  var ws = new WebSocket(wsUrl);
-  tab.ws = ws;
+  var _ccReconnectCount = 0;
+  var _ccReconnectTimer = null;
 
-  ws.onopen = function() {
-    if (sessionResumed) {
-      ccRestoreHistory(messagesDiv, sessionId);
-    }
-    var notice = document.createElement("div");
-    notice.style.cssText = "color:var(--text-muted);font-size:0.8rem;padding:0.5rem 0;text-align:center";
-    notice.textContent = "Claude Code connected";
-    messagesDiv.appendChild(notice);
-    if (sessionResumed) {
-      var resumeNotice = document.createElement("div");
-      resumeNotice.style.cssText = "color:var(--success,#22c55e);font-size:0.8rem;padding:0.5rem 0;text-align:center";
-      resumeNotice.textContent = "Session resumed \u2014 context preserved";
-      messagesDiv.appendChild(resumeNotice);
-    }
-    if (tab.autoScroll) requestAnimationFrame(function() {
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
-    });
-  };
+  function _startCCWS() {
+    if (_ccReconnectTimer) { clearTimeout(_ccReconnectTimer); _ccReconnectTimer = null; }
+    var isReconnect = _ccReconnectCount > 0;
+    var ws = new WebSocket(wsUrl);
+    tab.ws = ws;
 
-  ws.onmessage = ccMakeWsHandler(tab, messagesDiv);
+    ws.onopen = function() {
+      _ccReconnectCount = 0;
+      if (isReconnect) {
+        // Clear stale DOM, restore history fresh
+        while (messagesDiv.firstChild) messagesDiv.removeChild(messagesDiv.firstChild);
+        ccRestoreHistory(messagesDiv, sessionId);
+        var reconNotice = document.createElement("div");
+        reconNotice.style.cssText = "color:var(--success,#22c55e);font-size:0.8rem;padding:0.5rem 0;text-align:center";
+        reconNotice.textContent = "Reconnected \u2014 session restored";
+        messagesDiv.appendChild(reconNotice);
+      } else {
+        if (sessionResumed) {
+          ccRestoreHistory(messagesDiv, sessionId);
+        }
+        var notice = document.createElement("div");
+        notice.style.cssText = "color:var(--text-muted);font-size:0.8rem;padding:0.5rem 0;text-align:center";
+        notice.textContent = "Claude Code connected";
+        messagesDiv.appendChild(notice);
+        if (sessionResumed) {
+          var resumeNotice = document.createElement("div");
+          resumeNotice.style.cssText = "color:var(--success,#22c55e);font-size:0.8rem;padding:0.5rem 0;text-align:center";
+          resumeNotice.textContent = "Session resumed \u2014 context preserved";
+          messagesDiv.appendChild(resumeNotice);
+        }
+      }
+      if (tab.autoScroll) requestAnimationFrame(function() {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      });
+    };
 
-  ws.onclose = function() {
-    clearInterval(tab.streamTimer);
-    tab.streamTimer = null;
-    if (tab.streamMsgEl && tab.streamBuffer) {
-      // Safe: ccRenderMarkdown always returns DOMPurify.sanitize() output
-      tab.streamMsgEl.innerHTML = ccRenderMarkdown(tab.streamBuffer);
-      tab.streamMsgEl.classList.remove("cc-streaming-body");
-      tab.streamBuffer = "";
-      tab.streamMsgEl = null;
-    }
-    ccSetSendingState(tab, false);
-  };
+    ws.onmessage = ccMakeWsHandler(tab, messagesDiv);
 
-  ws.onerror = function() {
-    var errDiv = document.createElement("div");
-    errDiv.style.cssText = "color:var(--danger,#ef4444);padding:0.5rem;font-size:0.85rem";
-    errDiv.textContent = "WebSocket connection error";
-    messagesDiv.appendChild(errDiv);
-  };
+    ws.onclose = function() {
+      clearInterval(tab.streamTimer);
+      tab.streamTimer = null;
+      if (tab.streamMsgEl && tab.streamBuffer) {
+        // Safe: ccRenderMarkdown always returns DOMPurify.sanitize() output
+        tab.streamMsgEl.innerHTML = ccRenderMarkdown(tab.streamBuffer);
+        tab.streamMsgEl.classList.remove("cc-streaming-body");
+        tab.streamBuffer = "";
+        tab.streamMsgEl = null;
+      }
+      ccSetSendingState(tab, false);
+      // Auto-reconnect with exponential backoff (1s → 1.5s → 2.25s … ≤15s)
+      _ccReconnectCount++;
+      var delay = Math.min(1000 * Math.pow(1.5, _ccReconnectCount - 1), 15000);
+      var disconnNotice = document.createElement("div");
+      disconnNotice.style.cssText = "color:var(--text-muted);font-size:0.8rem;padding:0.5rem 0;text-align:center";
+      disconnNotice.textContent = "Disconnected \u2014 reconnecting in " + Math.round(delay / 1000) + "s\u2026";
+      messagesDiv.appendChild(disconnNotice);
+      _ccReconnectTimer = setTimeout(_startCCWS, delay);
+    };
 
+    ws.onerror = function() {
+      var errDiv = document.createElement("div");
+      errDiv.style.cssText = "color:var(--danger,#ef4444);padding:0.5rem;font-size:0.85rem";
+      errDiv.textContent = "WebSocket connection error";
+      messagesDiv.appendChild(errDiv);
+    };
+  }
+
+  _startCCWS();
   ideActivateTab();
 }
 
