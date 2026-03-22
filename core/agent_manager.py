@@ -148,6 +148,12 @@ class AgentConfig:
     total_runs: int = 0
     total_tokens: int = 0
 
+    # -- Rewards tier fields (Phase 2) ----------------------------------------
+    reward_tier: str = ""  # Computed tier: 'provisional'/'bronze'/'silver'/'gold'
+    tier_override: str | None = None  # Admin override; None means "use computed tier" (D-03)
+    performance_score: float = 0.0  # Last computed composite score
+    tier_computed_at: str = ""  # ISO timestamp of last computation
+
     def __post_init__(self):
         if not self.id:
             self.id = uuid.uuid4().hex[:12]
@@ -175,6 +181,15 @@ class AgentConfig:
             provider = config.get("provider", "anthropic")
             config["model"] = resolve_model(provider, task_cat)
         return cls.from_dict(config)
+
+    def effective_tier(self) -> str:
+        """Return the active tier for this agent.
+
+        Returns tier_override when set (not None), otherwise reward_tier.
+        This is the single read point for Phase 3 enforcement and Phase 4 dashboard.
+        None is the sentinel for "no override" per D-03.
+        """
+        return self.tier_override if self.tier_override is not None else self.reward_tier
 
 
 class AgentManager:
