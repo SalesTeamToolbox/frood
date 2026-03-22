@@ -30,6 +30,11 @@
             "type": "command",
             "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/memory-recall.py",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/proactive-inject.py",
+            "timeout": 10
           }
         ]
       }
