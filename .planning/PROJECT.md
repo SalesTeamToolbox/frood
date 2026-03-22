@@ -103,7 +103,7 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 - Per-project memory namespace wired into MemoryTool (ProjectMemoryStore already exists, needs wiring)
 - GSD workstream state surfaced in context engine
 
-## Planned: Performance-Based Rewards System
+## In Progress: Performance-Based Rewards System (Phase 1/4 complete)
 
 **Goal:** Create a tiered rewards system where agents earn better resources and capabilities through demonstrated business success. Bronze/Silver/Gold tiers with admin controls, performance-based resource allocation, and integration with existing effectiveness tracking.
 
@@ -198,4 +198,4 @@ Desktop experience: PWA manifest + shortcuts, GSD auto-activation, dashboard wit
 | Non-streaming accepted for L1 | StrongWall doesn't stream; simulate for chat, accept for background | -- Pending |
 
 ---
-*Last updated: 2026-03-22 after v1.4, v1.5, v1.6 milestone completion*
+*Last updated: 2026-03-22 after Rewards System Phase 1 (Foundation) completion*
