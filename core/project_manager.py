@@ -162,11 +162,34 @@ class ProjectManager:
 
     def get_project_tasks(self, project_id: str) -> list:
         """Get all tasks associated with a project."""
+        if self._task_queue is None:
+            return []
         return [t for t in self._task_queue.all_tasks() if t.project_id == project_id]
 
     def project_stats(self, project_id: str) -> dict:
         """Compute aggregate task progress for a project."""
-        from core.task_queue import TaskStatus
+        if self._task_queue is None:
+            return {
+                "total": 0,
+                "done": 0,
+                "running": 0,
+                "failed": 0,
+                "pending": 0,
+                "blocked": 0,
+                "review": 0,
+            }
+        try:
+            from core.task_queue import TaskStatus
+        except ImportError:
+            return {
+                "total": 0,
+                "done": 0,
+                "running": 0,
+                "failed": 0,
+                "pending": 0,
+                "blocked": 0,
+                "review": 0,
+            }
 
         tasks = self.get_project_tasks(project_id)
         total = len(tasks)
