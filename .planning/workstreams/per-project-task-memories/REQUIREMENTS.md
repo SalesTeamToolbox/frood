@@ -34,10 +34,10 @@ Requirements for task-aware memory. Each maps to roadmap phases.
 
 - [x] **RETR-01**: `search_with_lifecycle()` accepts optional `task_type_filter` parameter
 - [x] **RETR-02**: `build_context_semantic()` passes task_type through to filtered search
-- [ ] **RETR-03**: Proactive context injection on UserPromptSubmit injects top-3 past learnings by inferred task_type
-- [ ] **RETR-04**: Injection score threshold (>0.80) prevents irrelevant context injection
-- [ ] **RETR-05**: Recommendations engine suggests top-3 tools/skills by success_rate for given task_type
-- [ ] **RETR-06**: Recommendations require minimum sample size (>=5 observations per task_type) before surfacing
+- [x] **RETR-03**: Proactive context injection on UserPromptSubmit injects top-3 past learnings by inferred task_type
+- [x] **RETR-04**: Injection score threshold (>0.80) prevents irrelevant context injection
+- [x] **RETR-05**: Recommendations engine suggests top-3 tools/skills by success_rate for given task_type
+- [x] **RETR-06**: Recommendations require minimum sample size (>=5 observations per task_type) before surfacing
 
 ## v1.5 Requirements
 
@@ -83,10 +83,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LEARN-03 | Phase 21 | Pending |
 | LEARN-04 | Phase 21 | Pending |
 | LEARN-05 | Phase 21 | Pending |
-| RETR-03 | Phase 22 | Pending |
-| RETR-04 | Phase 22 | Pending |
-| RETR-05 | Phase 23 | Pending |
-| RETR-06 | Phase 23 | Pending |
+| RETR-03 | Phase 22 | Complete |
+| RETR-04 | Phase 22 | Complete |
+| RETR-05 | Phase 23 | Complete |
+| RETR-06 | Phase 23 | Complete |
 
 **Coverage:**
 - v1.4 requirements: 20 total

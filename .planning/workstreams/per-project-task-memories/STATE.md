@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: milestone
-status: Phase complete — ready for verification
-stopped_at: Phase 23 context gathered
-last_updated: "2026-03-22T19:50:30.810Z"
+status: Ready to execute
+stopped_at: Completed 23-01-PLAN.md
+last_updated: "2026-03-22T20:14:35.195Z"
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
+  total_plans: 8
+  completed_plans: 7
 ---
 
 # Project State
@@ -19,11 +19,11 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-17)
 
 **Core value:** Agent42 must always be able to run agents reliably, with tiered provider routing ensuring no single provider outage stops the platform.
-**Current focus:** Phase 22 — Proactive Context Injection
+**Current focus:** Phase 23 — recommendations-engine
 
 ## Current Position
 
-Phase: 22 (Proactive Context Injection) — EXECUTING
+Phase: 23 (recommendations-engine) — EXECUTING
 Plan: 2 of 2
 
 ## Performance Metrics
@@ -44,6 +44,7 @@ Plan: 2 of 2
 | 23. Recommendations Engine | 0 | — | — |
 | Phase 22 P01 | 8 | 1 tasks | 2 files |
 | Phase 22 P02 | 6 | 2 tasks | 2 files |
+| Phase 23 P01 | 8 | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -73,6 +74,8 @@ Plan: 2 of 2
 - [Phase 22]: Token count approximated as whitespace-split word count — consistent with rest of codebase
 - [Phase 22]: app_create multi-word phrases checked first to prevent 'create' keyword matching coding when user meant 'create a flask app'
 - [Phase 22]: Session ID falls back to MD5 hash of project_dir if event has no session_id — stable per project without requiring CC to pass session_id
+- [Phase 23]: min_observations=0 sentinel triggers fallback to settings.recommendations_min_observations — avoids two separate query params with overlapping semantics
+- [Phase 23]: Endpoint uses module-level settings import (not closure parameter) — consistent with existing endpoints in create_app
 
 ### Key Architecture Constraints (from research)
 
@@ -99,6 +102,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-22T19:50:30.805Z
-Stopped at: Phase 23 context gathered
-Resume file: .planning/workstreams/per-project-task-memories/phases/23-recommendations-engine/23-CONTEXT.md
+Last session: 2026-03-22T20:14:35.191Z
+Stopped at: Completed 23-01-PLAN.md
+Resume file: None
