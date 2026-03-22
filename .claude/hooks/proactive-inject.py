@@ -287,6 +287,50 @@ def format_injection_output(results: list, task_type: str) -> str:
     return output
 
 
+def fetch_recommendations(task_type: str) -> list:
+    """Fetch tool recommendations from the Agent42 API.
+
+    Args:
+        task_type: The inferred task type string.
+
+    Returns:
+        List of recommendation dicts from /api/recommendations/retrieve, or [] on any error.
+    """
+    try:
+        params = urllib.parse.urlencode({"task_type": task_type, "top_k": 3})
+        url = f"{DASHBOARD_URL}/api/recommendations/retrieve?{params}"
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        return data.get("recommendations", [])
+    except Exception:
+        return []
+
+
+def format_recommendations_output(recs: list, task_type: str) -> str:
+    """Format recommendations as a compact ranked list for stderr.
+
+    Args:
+        recs: List of recommendation dicts (each with tool_name, success_rate, avg_duration_ms).
+        task_type: The task type string used for retrieval.
+
+    Returns:
+        Formatted string truncated to MAX_OUTPUT_CHARS, or "" if no recommendations.
+    """
+    if not recs:
+        return ""
+    lines = [f"[agent42-recommendations] Top tools for {task_type}:"]
+    for i, r in enumerate(recs, 1):
+        name = r.get("tool_name", "?")
+        rate = r.get("success_rate", 0.0)
+        dur = r.get("avg_duration_ms", 0.0)
+        lines.append(f"  {i}. {name} ({rate:.0%} success, {dur:.0f}ms avg)")
+    output = "\n".join(lines)
+    if len(output) > MAX_OUTPUT_CHARS:
+        output = output[:MAX_OUTPUT_CHARS]
+    return output
+
+
 def main():
     """Main hook entry point. Always exits 0."""
     try:
@@ -320,16 +364,28 @@ def main():
     if not task_type:
         sys.exit(0)
 
-    # Fetch learnings from API
-    results = fetch_learnings(prompt[:500], task_type)
-    if not results:
+    # Fetch learnings from API (existing)
+    learnings = fetch_learnings(prompt[:500], task_type)
+
+    # Fetch recommendations from API (new — per D-01, D-03)
+    recs = fetch_recommendations(task_type)
+
+    # Exit early only if BOTH are empty
+    if not learnings and not recs:
         sys.exit(0)
 
-    # Format and emit output to stderr
-    output = format_injection_output(results, task_type)
-    print(output, file=sys.stderr)
+    # Emit learnings block to stderr (if any)
+    if learnings:
+        learnings_output = format_injection_output(learnings, task_type)
+        print(learnings_output, file=sys.stderr)
 
-    # Mark injection as done for this session
+    # Emit recommendations block to stderr as separate section (per D-07)
+    if recs:
+        recs_output = format_recommendations_output(recs, task_type)
+        if recs_output:
+            print(recs_output, file=sys.stderr)
+
+    # Mark injection as done for this session (after BOTH calls per D-03)
     mark_injection_done(project_dir, session_id)
 
     sys.exit(0)

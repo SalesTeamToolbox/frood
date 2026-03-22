@@ -506,3 +506,152 @@ class TestProactiveInjectHook:
         assert exc.value.code == 0
         guard_file = tmp_path / ".agent42" / "injection-done.json"
         assert not guard_file.exists()
+
+
+# ---------------------------------------------------------------------------
+# TestRecommendationsHook — tests for fetch_recommendations, format, updated main()
+# ---------------------------------------------------------------------------
+
+
+class TestRecommendationsHook:
+    """Tests for recommendations functions in proactive-inject.py hook."""
+
+    @pytest.fixture(autouse=True)
+    def load_hook(self):
+        """Load the hook module once per test."""
+        self.hook = _load_hook_module()
+
+    def test_format_recommendations_output_with_recs(self):
+        """format_recommendations_output produces ranked list with correct format."""
+        recs = [
+            {"tool_name": "shell", "success_rate": 0.92, "avg_duration_ms": 45.0},
+            {"tool_name": "code_intel", "success_rate": 0.87, "avg_duration_ms": 120.0},
+            {"tool_name": "grep", "success_rate": 0.85, "avg_duration_ms": 30.0},
+        ]
+        output = self.hook.format_recommendations_output(recs, "coding")
+        assert "[agent42-recommendations]" in output
+        assert "Top tools for coding" in output
+        assert "1. shell (92% success, 45ms avg)" in output
+        assert "2. code_intel (87% success, 120ms avg)" in output
+        assert "3. grep (85% success, 30ms avg)" in output
+
+    def test_format_recommendations_output_empty(self):
+        """format_recommendations_output returns empty string for no recs."""
+        output = self.hook.format_recommendations_output([], "coding")
+        assert output == ""
+
+    def test_format_recommendations_output_truncates(self):
+        """format_recommendations_output truncates to MAX_OUTPUT_CHARS."""
+        recs = [
+            {"tool_name": "x" * 500, "success_rate": 0.9, "avg_duration_ms": 100.0}
+            for _ in range(20)
+        ]
+        output = self.hook.format_recommendations_output(recs, "coding")
+        assert len(output) <= self.hook.MAX_OUTPUT_CHARS
+
+    def test_main_emits_recs_when_learnings_empty(self, tmp_path, monkeypatch, capsys):
+        """main() emits recommendations even when learnings return empty."""
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        # Mock fetch_learnings to return empty, fetch_recommendations to return data
+        monkeypatch.setattr(self.hook, "fetch_learnings", lambda q, t: [])
+        monkeypatch.setattr(
+            self.hook,
+            "fetch_recommendations",
+            lambda t: [{"tool_name": "shell", "success_rate": 0.9, "avg_duration_ms": 50.0}],
+        )
+        import io
+
+        event = {
+            "hook_event_name": "UserPromptSubmit",
+            "project_dir": str(tmp_path),
+            "user_prompt": "implement a new REST API endpoint for users",
+            "session_id": "recs-only-session",
+        }
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(event)))
+        with pytest.raises(SystemExit) as exc:
+            self.hook.main()
+        assert exc.value.code == 0
+        # Recommendations should appear in stderr
+        captured = capsys.readouterr()
+        assert "[agent42-recommendations]" in captured.err
+        assert "shell" in captured.err
+
+    def test_main_writes_guard_with_recs_only(self, tmp_path, monkeypatch, capsys):
+        """main() writes guard file when only recommendations are emitted."""
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        monkeypatch.setattr(self.hook, "fetch_learnings", lambda q, t: [])
+        monkeypatch.setattr(
+            self.hook,
+            "fetch_recommendations",
+            lambda t: [{"tool_name": "shell", "success_rate": 0.9, "avg_duration_ms": 50.0}],
+        )
+        import io
+
+        event = {
+            "hook_event_name": "UserPromptSubmit",
+            "project_dir": str(tmp_path),
+            "user_prompt": "implement a new REST API endpoint for users",
+            "session_id": "recs-guard-session",
+        }
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(event)))
+        with pytest.raises(SystemExit):
+            self.hook.main()
+        guard_file = tmp_path / ".agent42" / "injection-done.json"
+        assert guard_file.exists()
+        data = json.loads(guard_file.read_text())
+        assert data["session_id"] == "recs-guard-session"
+
+    def test_main_no_guard_when_both_empty(self, tmp_path, monkeypatch, capsys):
+        """main() does NOT write guard file when both learnings and recs are empty."""
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        monkeypatch.setattr(self.hook, "fetch_learnings", lambda q, t: [])
+        monkeypatch.setattr(self.hook, "fetch_recommendations", lambda t: [])
+        import io
+
+        event = {
+            "hook_event_name": "UserPromptSubmit",
+            "project_dir": str(tmp_path),
+            "user_prompt": "implement a new REST API endpoint for users",
+            "session_id": "empty-session",
+        }
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(event)))
+        with pytest.raises(SystemExit) as exc:
+            self.hook.main()
+        assert exc.value.code == 0
+        guard_file = tmp_path / ".agent42" / "injection-done.json"
+        assert not guard_file.exists()
+
+    def test_fetch_recommendations_graceful_on_error(self, monkeypatch):
+        """fetch_recommendations returns [] on any exception."""
+        monkeypatch.setattr(self.hook, "DASHBOARD_URL", "http://localhost:99999")
+        result = self.hook.fetch_recommendations("coding")
+        assert result == []
+
+    def test_main_emits_both_blocks_separately(self, tmp_path, monkeypatch, capsys):
+        """main() emits learnings and recommendations as separate stderr blocks (D-07)."""
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        monkeypatch.setattr(
+            self.hook,
+            "fetch_learnings",
+            lambda q, t: [{"score": 0.9, "text": "Use async for file I/O"}],
+        )
+        monkeypatch.setattr(
+            self.hook,
+            "fetch_recommendations",
+            lambda t: [{"tool_name": "shell", "success_rate": 0.92, "avg_duration_ms": 45.0}],
+        )
+        import io
+
+        event = {
+            "hook_event_name": "UserPromptSubmit",
+            "project_dir": str(tmp_path),
+            "user_prompt": "implement a new REST API endpoint for users",
+            "session_id": "both-blocks-session",
+        }
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(event)))
+        with pytest.raises(SystemExit):
+            self.hook.main()
+        captured = capsys.readouterr()
+        # Both distinct headers present in stderr
+        assert "[agent42-learnings]" in captured.err
+        assert "[agent42-recommendations]" in captured.err
