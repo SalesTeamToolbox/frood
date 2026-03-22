@@ -294,6 +294,22 @@ class Settings:
     rlm_timeout_seconds: int = 300
     rlm_docker_image: str = "python:3.11-slim"
 
+    # Performance-based rewards (Phase rewards)
+    rewards_enabled: bool = False
+    rewards_silver_threshold: float = 0.65
+    rewards_gold_threshold: float = 0.85
+    rewards_min_observations: int = 10
+    rewards_weight_success: float = 0.60
+    rewards_weight_volume: float = 0.25
+    rewards_weight_speed: float = 0.15
+    # Per-tier resource limits (consumed by Phase 3)
+    rewards_bronze_rate_limit_multiplier: float = 1.0
+    rewards_silver_rate_limit_multiplier: float = 1.5
+    rewards_gold_rate_limit_multiplier: float = 2.0
+    rewards_bronze_max_concurrent: int = 2
+    rewards_silver_max_concurrent: int = 5
+    rewards_gold_max_concurrent: int = 10
+
     @classmethod
     def from_env(cls) -> "Settings":
         # Enforce secure JWT secret
@@ -564,6 +580,26 @@ class Settings:
             consolidation_auto_threshold=float(os.getenv("CONSOLIDATION_AUTO_THRESHOLD", "0.95")),
             consolidation_flag_threshold=float(os.getenv("CONSOLIDATION_FLAG_THRESHOLD", "0.85")),
             consolidation_trigger_count=int(os.getenv("CONSOLIDATION_TRIGGER_COUNT", "100")),
+            # Performance-based rewards
+            rewards_enabled=os.getenv("REWARDS_ENABLED", "false").lower() in ("true", "1", "yes"),
+            rewards_silver_threshold=float(os.getenv("REWARDS_SILVER_THRESHOLD", "0.65")),
+            rewards_gold_threshold=float(os.getenv("REWARDS_GOLD_THRESHOLD", "0.85")),
+            rewards_min_observations=int(os.getenv("REWARDS_MIN_OBSERVATIONS", "10")),
+            rewards_weight_success=float(os.getenv("REWARDS_WEIGHT_SUCCESS", "0.60")),
+            rewards_weight_volume=float(os.getenv("REWARDS_WEIGHT_VOLUME", "0.25")),
+            rewards_weight_speed=float(os.getenv("REWARDS_WEIGHT_SPEED", "0.15")),
+            rewards_bronze_rate_limit_multiplier=float(
+                os.getenv("REWARDS_BRONZE_RATE_LIMIT_MULTIPLIER", "1.0")
+            ),
+            rewards_silver_rate_limit_multiplier=float(
+                os.getenv("REWARDS_SILVER_RATE_LIMIT_MULTIPLIER", "1.5")
+            ),
+            rewards_gold_rate_limit_multiplier=float(
+                os.getenv("REWARDS_GOLD_RATE_LIMIT_MULTIPLIER", "2.0")
+            ),
+            rewards_bronze_max_concurrent=int(os.getenv("REWARDS_BRONZE_MAX_CONCURRENT", "2")),
+            rewards_silver_max_concurrent=int(os.getenv("REWARDS_SILVER_MAX_CONCURRENT", "5")),
+            rewards_gold_max_concurrent=int(os.getenv("REWARDS_GOLD_MAX_CONCURRENT", "10")),
         )
 
     def get_discord_guild_ids(self) -> list[int]:
