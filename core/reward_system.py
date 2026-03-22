@@ -13,11 +13,13 @@ Patterns used:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -355,3 +357,94 @@ class TierDeterminator:
         if score >= cfg.silver_threshold:
             return "silver"
         return "bronze"
+
+
+# ---------------------------------------------------------------------------
+# Tier Recalculation Loop (Background Service)
+# ---------------------------------------------------------------------------
+
+
+class TierRecalcLoop:
+    """Background service that periodically recomputes agent tiers.
+
+    Follows the HeartbeatService pattern (core/heartbeat.py):
+    - async start() creates an asyncio task
+    - synchronous stop() cancels it
+    - _recalc_loop() sleeps first, then recalculates
+
+    Agents with tier_override is not None are skipped — admin overrides
+    are never clobbered by automated recalculation (ADMN-01).
+    """
+
+    def __init__(
+        self,
+        agent_manager,
+        reward_system: RewardSystem,
+        effectiveness_store,
+        interval: int = 900,
+    ) -> None:
+        self._agent_manager = agent_manager
+        self._reward_system = reward_system
+        self._store = effectiveness_store
+        self._interval = interval
+        self._determinator = TierDeterminator()
+        self._running = False
+        self._task: asyncio.Task | None = None
+
+    async def start(self) -> None:
+        """Start the background recalculation loop."""
+        self._running = True
+        self._task = asyncio.create_task(self._recalc_loop())
+        logger.info("TierRecalcLoop started (interval: %ds)", self._interval)
+
+    def stop(self) -> None:
+        """Stop the background recalculation loop. Synchronous — matches HeartbeatService."""
+        self._running = False
+        if self._task:
+            self._task.cancel()
+            self._task = None
+        logger.info("TierRecalcLoop stopped")
+
+    async def _recalc_loop(self) -> None:
+        """Run the recalculation cycle on each interval."""
+        while self._running:
+            try:
+                await asyncio.sleep(self._interval)
+                await self._run_recalculation()
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.error("TierRecalcLoop: unhandled error in loop: %s", exc)
+
+    async def _run_recalculation(self) -> None:
+        """Compute and update tiers for all non-overridden agents.
+
+        Per-agent errors are logged and skipped — one bad agent never
+        aborts the fleet-wide recalculation.
+        """
+        agents = self._agent_manager.list_all()
+        for agent in agents:
+            if agent.tier_override is not None:  # D-03: skip overridden agents
+                continue
+            try:
+                score = await self._reward_system.score(agent.id)
+                stats = await self._store.get_agent_stats(agent.id)
+                obs_count = stats["task_volume"] if stats else 0
+                tier = self._determinator.determine(score, obs_count)
+                old_tier = agent.reward_tier
+                self._agent_manager.update(
+                    agent.id,
+                    reward_tier=tier,
+                    performance_score=score,
+                    tier_computed_at=datetime.utcnow().isoformat() + "Z",
+                )
+                if tier != old_tier:
+                    logger.info(
+                        "Agent %s tier changed: %s -> %s (score=%.3f)",
+                        agent.id,
+                        old_tier,
+                        tier,
+                        score,
+                    )
+            except Exception as exc:
+                logger.warning("TierRecalcLoop: error processing agent %s: %s", agent.id, exc)
