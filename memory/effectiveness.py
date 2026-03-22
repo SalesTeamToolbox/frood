@@ -158,3 +158,42 @@ class EffectivenessStore:
         except Exception as e:
             logger.warning("EffectivenessStore task query failed: %s", e)
             return []
+
+    async def get_recommendations(
+        self,
+        task_type: str,
+        min_observations: int = 5,
+        top_k: int = 3,
+    ) -> list:
+        """Return top tools ranked by success_rate for a given task_type.
+
+        Only includes tools with >= min_observations invocations.
+        Ordered by success_rate DESC, avg_duration_ms ASC (tie-break per D-08).
+        Returns empty list on any failure or insufficient data.
+        """
+        if not AIOSQLITE_AVAILABLE or not task_type:
+            return []
+        try:
+            await self._ensure_db()
+            query = """
+                SELECT
+                    tool_name,
+                    task_type,
+                    COUNT(*)                   AS invocations,
+                    AVG(CAST(success AS REAL)) AS success_rate,
+                    AVG(duration_ms)           AS avg_duration_ms
+                FROM tool_invocations
+                WHERE task_type = ?
+                GROUP BY tool_name, task_type
+                HAVING COUNT(*) >= ?
+                ORDER BY success_rate DESC, avg_duration_ms ASC
+                LIMIT ?
+            """
+            async with aiosqlite.connect(self._db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(query, (task_type, min_observations, top_k)) as cursor:
+                    rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            logger.warning("EffectivenessStore recommendations query failed: %s", e)
+            return []

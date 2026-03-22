@@ -161,6 +161,108 @@ class TestEffectivenessStore:
         assert all(r["task_id"] == "task-42" for r in records)
 
 
+class TestEffectivenessRecommendations:
+    """RETR-05, RETR-06: EffectivenessStore.get_recommendations() method."""
+
+    @pytest.mark.asyncio
+    async def test_returns_top_tools_by_success_rate(self, tmp_path):
+        """RETR-05: Returns tools ranked by success_rate DESC."""
+        from memory.effectiveness import EffectivenessStore
+
+        store = EffectivenessStore(tmp_path / "test.db")
+        # tool_a: 5/5 = 100% success
+        for _ in range(5):
+            await store.record("tool_a", "coding", "t1", True, 10.0)
+        # tool_b: 4/5 = 80% success
+        for _ in range(4):
+            await store.record("tool_b", "coding", "t1", True, 20.0)
+        await store.record("tool_b", "coding", "t1", False, 20.0)
+        # tool_c: 3/5 = 60% success
+        for _ in range(3):
+            await store.record("tool_c", "coding", "t1", True, 15.0)
+        for _ in range(2):
+            await store.record("tool_c", "coding", "t1", False, 15.0)
+        recs = await store.get_recommendations("coding", min_observations=5, top_k=3)
+        assert len(recs) == 3
+        assert recs[0]["tool_name"] == "tool_a"
+        assert recs[0]["success_rate"] == pytest.approx(1.0)
+        assert recs[1]["tool_name"] == "tool_b"
+        assert recs[1]["success_rate"] == pytest.approx(0.8)
+        assert recs[2]["tool_name"] == "tool_c"
+        assert recs[2]["success_rate"] == pytest.approx(0.6)
+
+    @pytest.mark.asyncio
+    async def test_excludes_tools_below_min_observations(self, tmp_path):
+        """RETR-06: Tools with < min_observations are excluded."""
+        from memory.effectiveness import EffectivenessStore
+
+        store = EffectivenessStore(tmp_path / "test.db")
+        # tool_a: 5 invocations (meets threshold)
+        for _ in range(5):
+            await store.record("tool_a", "coding", "t1", True, 10.0)
+        # tool_b: 3 invocations (below threshold of 5)
+        for _ in range(3):
+            await store.record("tool_b", "coding", "t1", True, 10.0)
+        recs = await store.get_recommendations("coding", min_observations=5)
+        assert len(recs) == 1
+        assert recs[0]["tool_name"] == "tool_a"
+
+    @pytest.mark.asyncio
+    async def test_tie_break_by_avg_duration(self, tmp_path):
+        """D-08: Identical success_rate ties broken by avg_duration_ms ASC (faster wins)."""
+        from memory.effectiveness import EffectivenessStore
+
+        store = EffectivenessStore(tmp_path / "test.db")
+        # tool_slow: 100% success, 200ms avg
+        for _ in range(5):
+            await store.record("tool_slow", "coding", "t1", True, 200.0)
+        # tool_fast: 100% success, 50ms avg
+        for _ in range(5):
+            await store.record("tool_fast", "coding", "t1", True, 50.0)
+        recs = await store.get_recommendations("coding", min_observations=5)
+        assert len(recs) == 2
+        assert recs[0]["tool_name"] == "tool_fast"
+        assert recs[1]["tool_name"] == "tool_slow"
+
+    @pytest.mark.asyncio
+    async def test_empty_db_returns_empty_list(self, tmp_path):
+        """RETR-06: No data returns [] silently."""
+        from memory.effectiveness import EffectivenessStore
+
+        store = EffectivenessStore(tmp_path / "test.db")
+        recs = await store.get_recommendations("coding", min_observations=5)
+        assert recs == []
+
+    @pytest.mark.asyncio
+    async def test_top_k_cap(self, tmp_path):
+        """D-10: At most top_k results returned even when more tools qualify."""
+        from memory.effectiveness import EffectivenessStore
+
+        store = EffectivenessStore(tmp_path / "test.db")
+        for i in range(5):
+            tool_name = f"tool_{i}"
+            for _ in range(5):
+                await store.record(tool_name, "coding", "t1", True, 10.0 + i)
+        recs = await store.get_recommendations("coding", min_observations=5, top_k=3)
+        assert len(recs) == 3
+
+    @pytest.mark.asyncio
+    async def test_graceful_degradation_bad_path(self, tmp_path):
+        """Returns [] without raising on unwritable DB path."""
+        from memory.effectiveness import EffectivenessStore
+
+        store = EffectivenessStore(tmp_path / "test.db")
+        import os
+
+        store._db_path = (
+            Path("/dev/null/impossible/test.db")
+            if os.name != "nt"
+            else Path("Z:\\nonexistent\\test.db")
+        )
+        recs = await store.get_recommendations("coding")
+        assert recs == []
+
+
 class TestToolRegistryTracking:
     """EFFT-02: ToolRegistry fire-and-forget tracking."""
 
@@ -168,7 +270,6 @@ class TestToolRegistryTracking:
     async def test_execute_records_to_effectiveness_store(self, tmp_path):
         """ToolRegistry.execute() fires a background task to record."""
         from memory.effectiveness import EffectivenessStore
-
         from tools.base import Tool, ToolResult
         from tools.registry import ToolRegistry
 
@@ -216,7 +317,6 @@ class TestToolRegistryTracking:
         import time
 
         from memory.effectiveness import EffectivenessStore
-
         from tools.base import Tool, ToolResult
         from tools.registry import ToolRegistry
 
@@ -253,7 +353,6 @@ class TestToolRegistryTracking:
     async def test_execute_records_failure(self, tmp_path):
         """Failed tool executions are also recorded with success=0."""
         from memory.effectiveness import EffectivenessStore
-
         from tools.base import Tool
         from tools.registry import ToolRegistry
 
