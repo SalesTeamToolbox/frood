@@ -416,3 +416,108 @@ class TestToolRegistryTracking:
         registry.register(SimpleTool())
         result = await registry.execute("simple")
         assert result.output == "ok"
+
+
+class TestEffectivenessAgentId:
+    """DATA-01, DATA-02: agent_id column and get_agent_stats()."""
+
+    @pytest.mark.asyncio
+    async def test_record_stores_agent_id(self, tmp_path):
+        """DATA-01: agent_id is written to the agent_id column."""
+        import aiosqlite
+
+        from memory.effectiveness import EffectivenessStore
+
+        store = EffectivenessStore(tmp_path / "test.db")
+        await store.record("shell", "coding", "t-1", True, 10.0, agent_id="agent-abc")
+        async with aiosqlite.connect(tmp_path / "test.db") as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT agent_id FROM tool_invocations") as cur:
+                row = dict(await cur.fetchone())
+        assert row["agent_id"] == "agent-abc"
+
+    @pytest.mark.asyncio
+    async def test_record_default_agent_id_empty(self, tmp_path):
+        """Backward-compatible: no agent_id arg stores empty string."""
+        import aiosqlite
+
+        from memory.effectiveness import EffectivenessStore
+
+        store = EffectivenessStore(tmp_path / "test.db")
+        await store.record("shell", "coding", "t-1", True, 10.0)
+        async with aiosqlite.connect(tmp_path / "test.db") as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT agent_id FROM tool_invocations") as cur:
+                row = dict(await cur.fetchone())
+        assert row["agent_id"] == ""
+
+    @pytest.mark.asyncio
+    async def test_get_agent_stats_returns_correct_aggregates(self, tmp_path):
+        """DATA-02: success_rate, task_volume, avg_speed from agent records."""
+        from memory.effectiveness import EffectivenessStore
+
+        store = EffectivenessStore(tmp_path / "test.db")
+        await store.record("shell", "coding", "t-1", True, 10.0, agent_id="agent-abc")
+        await store.record("shell", "coding", "t-2", True, 20.0, agent_id="agent-abc")
+        await store.record("shell", "coding", "t-3", False, 30.0, agent_id="agent-abc")
+        stats = await store.get_agent_stats("agent-abc")
+        assert stats is not None
+        assert stats["task_volume"] == 3
+        assert stats["success_rate"] == pytest.approx(2 / 3, abs=0.01)
+        assert stats["avg_speed"] == pytest.approx(20.0, abs=0.01)
+
+    @pytest.mark.asyncio
+    async def test_get_agent_stats_returns_none_for_unknown_agent(self, tmp_path):
+        """DATA-02: returns None for agent with no records."""
+        from memory.effectiveness import EffectivenessStore
+
+        store = EffectivenessStore(tmp_path / "test.db")
+        stats = await store.get_agent_stats("nonexistent-agent")
+        assert stats is None
+
+    @pytest.mark.asyncio
+    async def test_get_agent_stats_ignores_other_agents(self, tmp_path):
+        """DATA-02: stats are scoped to the specified agent_id only."""
+        from memory.effectiveness import EffectivenessStore
+
+        store = EffectivenessStore(tmp_path / "test.db")
+        await store.record("shell", "coding", "t-1", True, 10.0, agent_id="agent-abc")
+        await store.record("shell", "coding", "t-2", False, 50.0, agent_id="agent-xyz")
+        stats = await store.get_agent_stats("agent-abc")
+        assert stats is not None
+        assert stats["task_volume"] == 1
+        assert stats["success_rate"] == pytest.approx(1.0)
+        assert stats["avg_speed"] == pytest.approx(10.0)
+
+
+class TestRewardsGracefulDegradation:
+    """TEST-05: REWARDS_ENABLED=false produces identical baseline behavior."""
+
+    def test_settings_rewards_disabled_by_default(self):
+        """CONF-01: rewards_enabled defaults to False without env var."""
+        import os
+
+        # Ensure env var is unset for this test
+        os.environ.pop("REWARDS_ENABLED", None)
+        from core.config import Settings
+
+        s = Settings()
+        assert s.rewards_enabled is False
+
+    def test_settings_rewards_enabled_via_env(self, monkeypatch):
+        """CONF-01: rewards_enabled=True when REWARDS_ENABLED=true."""
+        monkeypatch.setenv("REWARDS_ENABLED", "true")
+        from core.config import Settings
+
+        s = Settings.from_env()
+        assert s.rewards_enabled is True
+
+    def test_rewards_config_defaults_when_no_file(self, tmp_path):
+        """CONF-05: RewardsConfig returns defaults when backing file absent."""
+        from core.rewards_config import RewardsConfig
+
+        RewardsConfig.set_path(str(tmp_path / "nonexistent.json"))
+        cfg = RewardsConfig.load()
+        assert cfg.enabled is True
+        assert cfg.silver_threshold == pytest.approx(0.65)
+        assert cfg.gold_threshold == pytest.approx(0.85)
