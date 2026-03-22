@@ -2529,7 +2529,22 @@ function renderTeamRunDetail(el) {
 function updateGsdIndicator() {
   var slot = document.getElementById("gsd-indicator-slot");
   if (!slot) return;
-  var ws = state.status && state.status.gsd_workstream;
+
+  // Prefer active CC tab's workstream over global heartbeat
+  var ws = "";
+  var phase = "";
+  if (typeof _ideActiveTab !== "undefined" && _ideActiveTab >= 0 &&
+      typeof _ideTabs !== "undefined" && _ideTabs[_ideActiveTab] &&
+      _ideTabs[_ideActiveTab].type === "claude" && _ideTabs[_ideActiveTab].gsd_workstream) {
+    ws = _ideTabs[_ideActiveTab].gsd_workstream;
+    phase = _ideTabs[_ideActiveTab].gsd_phase || "";
+  }
+  // Fallback to global status
+  if (!ws && state.status) {
+    ws = state.status.gsd_workstream || "";
+    phase = state.status.gsd_phase || "";
+  }
+
   while (slot.firstChild) slot.removeChild(slot.firstChild);
   if (ws) {
     var indicator = document.createElement("div");
@@ -2539,7 +2554,7 @@ function updateGsdIndicator() {
     wsEl.textContent = "\u25BA " + ws;
     var phaseEl = document.createElement("div");
     phaseEl.className = "gsd-phase";
-    phaseEl.textContent = state.status.gsd_phase ? "Phase " + state.status.gsd_phase : "";
+    phaseEl.textContent = phase ? "Phase " + phase : "";
     indicator.appendChild(wsEl);
     indicator.appendChild(phaseEl);
     slot.appendChild(indicator);
@@ -3620,6 +3635,7 @@ function ideActivateTab() {
       if (statusEl2) statusEl2.textContent = tab.path;
       ideRenderTabs();
       ideRenderTree();
+      updateGsdIndicator();
       return;
     }
     // Claude Code tab: hide Monaco, show CC terminal
@@ -3664,6 +3680,7 @@ function ideActivateTab() {
   if (statusEl) statusEl.textContent = tab.type === "claude" ? tab.path : tab.path + (tab.modified ? " (modified)" : "");
   ideRenderTabs();
   ideRenderTree();
+  updateGsdIndicator();
 }
 
 function ideRenderTabs() {
@@ -4566,6 +4583,11 @@ function ccMakeWsHandler(tab, msgs) {
         msgs.scrollTop = msgs.scrollHeight;
       });
 
+    } else if (msgType === "workstream_update") {
+      tab.gsd_workstream = msgData.workstream || "";
+      tab.gsd_phase = msgData.phase || "";
+      updateGsdIndicator();
+
     } else if (msgType === "thinking_complete") {
       ccAppendThinkingBlock(tab, msgData.text || "");
 
@@ -5027,6 +5049,8 @@ function ideOpenCCChat(node) {
     totalOutputTokens: 0,
     totalCostUsd: 0,
     _lastTurnHash: "",  // UX-03: dedup guard for duplicate turn content
+    gsd_workstream: "",
+    gsd_phase: "",
   };
   _ideTabs.push(tab);
   _ideActiveTab = _ideTabs.length - 1;
