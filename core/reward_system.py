@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from core.rewards_config import RewardsConfig
+
 if TYPE_CHECKING:
     from memory.effectiveness import EffectivenessStore
 
@@ -319,3 +321,37 @@ class RewardSystem:
         except Exception as exc:
             logger.warning("RewardSystem: fleet stats fetch failed: %s", exc)
             return {"max_volume": 1, "min_speed": 1.0}
+
+
+# ---------------------------------------------------------------------------
+# Tier Determinator
+# ---------------------------------------------------------------------------
+
+
+class TierDeterminator:
+    """Maps (score, observation_count) to a tier string.
+
+    Pure computation — no I/O, no side effects. Thresholds read from
+    RewardsConfig (mtime-cached, cheap). Tier names are lowercase strings
+    per D-06: 'provisional', 'bronze', 'silver', 'gold'.
+    """
+
+    def determine(self, score: float, observation_count: int) -> str:
+        """Return tier string for the given score and observation count.
+
+        Returns 'provisional' when observation_count is below the minimum
+        required for tier assignment (settings.rewards_min_observations, default 10).
+        This prevents new agents from being penalized to Bronze.
+
+        Per D-03: None is the override sentinel; empty string is NOT None.
+        """
+        from core.config import settings  # deferred to avoid circular at module load
+
+        if observation_count < settings.rewards_min_observations:
+            return "provisional"
+        cfg = RewardsConfig.load()
+        if score >= cfg.gold_threshold:
+            return "gold"
+        if score >= cfg.silver_threshold:
+            return "silver"
+        return "bronze"
