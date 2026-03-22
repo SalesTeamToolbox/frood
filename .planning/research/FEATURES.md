@@ -1,391 +1,270 @@
-# Feature Landscape: SambaNova Cloud API Integration
+# Feature Research: Performance-Based Rewards System
 
-**Domain:** Free LLM provider integration — SambaNova Cloud inference API
-**Researched:** 2026-03-01
-**Research Mode:** Ecosystem / Features dimension
-
----
-
-## CRITICAL ALERT: Model IDs in PROJECT.md Are Outdated
-
-The PROJECT.md references "Llama 3.1 405B" and "Qwen 2.5 72B" as SambaNova's target models.
-**Neither model appears in SambaNova's current supported-models documentation.**
-
-SambaNova has migrated to newer model families. The integration must use the models actually
-available today, not the ones from the PROJECT.md notes (which appear to be ~6 months stale).
-
-See "Current Model Roster" section below for exact model IDs to use.
+**Domain:** Performance-based tier/rewards system for an AI agent platform
+**Researched:** 2026-03-22
+**Confidence:** HIGH
 
 ---
 
-## API Connection Details
-
-### Base URL and Authentication
-
-| Property | Value | Confidence |
-|----------|-------|------------|
-| API base URL | `https://api.sambanova.ai/v1` | HIGH — confirmed via official SDK blog and docs |
-| Auth method | Bearer token (API key) in `Authorization` header | HIGH — standard OpenAI client pattern |
-| API key source | `cloud.sambanova.ai/apis` — "Create API Key" in dashboard | HIGH — confirmed via official UI |
-| Env var convention | `SAMBANOVA_API_KEY` | HIGH — per LiteLLM integration docs |
-| Client pattern | `AsyncOpenAI(base_url="https://api.sambanova.ai/v1", api_key=os.getenv("SAMBANOVA_API_KEY"))` | HIGH — confirmed via official SDK docs |
-| Endpoint | `/v1/chat/completions` (standard OpenAI path) | HIGH |
-
-### OpenAI Compatibility Level
-
-SambaNova's API is explicitly designed as an OpenAI-compatible drop-in replacement.
-The AsyncOpenAI client pattern used for all other Agent42 providers works without modification.
-
-**Supported (confirmed HIGH confidence):**
-- Chat completions (streaming and non-streaming)
-- Async completions
-- Function calling / tool use (`tools`, `tool_choice` parameters)
-- Vision (multimodal — on Llama-4-Maverick model only)
-- Embeddings (`E5-Mistral-7B-Instruct`)
-- Audio transcription (`Whisper-Large-v3`)
-- `top_k` parameter (SambaNova extension, not in OpenAI standard)
-
-**NOT supported — will be silently ignored:**
-- `logprobs` / `top_logprobs`
-- `n` (multiple completions)
-- `presence_penalty`
-- `frequency_penalty`
-- `logit_bias`
-- `seed`
-- Function calling `strict: true` (only `strict: false` works)
-
-**Parameter difference:**
-- OpenAI supports `temperature` 0–2; SambaNova supports 0–1 only. Values > 1 will likely be clamped or error.
-
----
-
-## Current Model Roster
-
-These are the models actually available as of March 2026, per official SambaNova docs.
-(Sources: `docs.sambanova.ai/docs/en/models/sambacloud-models` and rate limits page)
-
-### Production Models (stable, suitable for integration)
-
-| Model ID (exact API value) | Context | Function Calling | Notes |
-|---------------------------|---------|-----------------|-------|
-| `Meta-Llama-3.3-70B-Instruct` | 128k | YES | Best free-tier general model; replaces Llama 3.1 70B |
-| `Meta-Llama-3.1-8B-Instruct` | 16k | YES (unreliable for conv+tools) | High RPM; good for fast non-agentic tasks |
-| `DeepSeek-V3.1` | 128k | YES | Strong coding; production-grade |
-| `DeepSeek-V3-0324` | 128k | YES | Versioned DeepSeek V3; function calling confirmed |
-| `DeepSeek-R1` | 128k | No (reasoning model) | Use for critic/analysis only, not tool use |
-| `DeepSeek-R1-Distill-Llama-70B` | 128k | No (reasoning model) | Reasoning distillation; no function calling |
-
-### Preview Models (experimental, NOT for production routing)
-
-| Model ID (exact API value) | Context | Function Calling | Notes |
-|---------------------------|---------|-----------------|-------|
-| `Llama-4-Maverick-17B-128E-Instruct` | 128k | YES | Multimodal (up to 5 images, ≤20MB each); preview only |
-| `gpt-oss-120b` | 128k | YES | Best function calling; set `reasoning_effort: "high"` |
-| `Qwen3-235B-A22B-Instruct-2507` | 64k | NO (not listed) | Largest available; preview only; no function calling confirmed |
-| `Qwen3-32B` | 8k | YES | Preview only; low RPM; small context |
-| `Whisper-Large-v3` | N/A (audio) | N/A | Audio transcription only; 25MB max |
-| `E5-Mistral-7B-Instruct` | 4k | N/A | Embeddings only |
-| `Llama-3.3-Swallow-70B-Instruct-v0.4` | 16k | NO | Japanese-specialized; skip |
-
-### Deprecated / Removed Models (DO NOT USE)
-
-These were in PROJECT.md's notes but are no longer in current documentation:
-
-| Model (from PROJECT.md) | Status | Replacement |
-|------------------------|--------|------------|
-| `Meta-Llama-3.1-405B-Instruct` | REMOVED — not in current docs; was deprecated mid-2025 | `Meta-Llama-3.3-70B-Instruct` (production), `gpt-oss-120b` (preview) |
-| `Qwen2.5-72B-Instruct` | REMOVED — not in current docs | `Qwen3-235B-A22B-Instruct-2507` (preview, lower RPM) |
-
-**Confidence:** MEDIUM — the official model list from `docs.sambanova.ai/docs/en/models/sambacloud-models`
-does not include these models. No explicit deprecation notice was found for these specific IDs,
-but their absence from the current docs strongly indicates they are gone. Verify at signup time.
-
----
-
-## Free Tier vs Trial Credits: Critical Distinction
-
-This is the most important thing to understand for Agent42 routing decisions.
-
-### The Current Situation (as of February 2025 — Developer Tier launch)
-
-SambaNova **replaced its free tier** with a Developer Tier (pay-as-you-go). The old
-"free with no payment method" model is gone. What exists now:
-
-| Aspect | Detail | Confidence |
-|--------|--------|------------|
-| Trial credits | $5 per new account | HIGH |
-| Credit expiry | 90 days (3 months) from account creation | HIGH |
-| Credit trigger | Credits used first; paid usage begins when $5 exhausted OR after 90 days | HIGH |
-| Payment required? | Payment method must be added for continued use after credit exhaustion | HIGH |
-| "Free tier" limits | A no-payment-method state still exists with 200K TPD cap | MEDIUM — docs show "Free Tier" limits alongside "Developer Tier" limits |
-
-### What "Free Tier" Limits Actually Mean
-
-The docs still show a "Free Tier" with 200K TPD and lower RPM limits. Based on community
-discussion, this appears to be the state for accounts without a linked payment method.
-The $5 credit is consumed first; once exhausted, if no payment method, the user is rate-limited
-to "Free Tier" caps (very low RPM/RPD).
-
-**For Agent42 routing:** SambaNova cannot be treated as a "zero cost" provider equivalent
-to Cerebras or Groq free tiers. The $5 credit will be exhausted quickly in production use.
-Users should add a payment method and manage spending via the spending tracker.
-
----
-
-## Rate Limits
-
-### Free Tier (no payment method linked, or credit exhausted without card)
-
-| Model ID | RPM | RPD | TPD |
-|----------|-----|-----|-----|
-| `Meta-Llama-3.3-70B-Instruct` | 40 | 40 | 200,000 |
-| `Meta-Llama-3.1-8B-Instruct` | 40 | 40 | 200,000 |
-| `DeepSeek-R1` | 20 | 40 | 200,000 |
-| `DeepSeek-R1-Distill-Llama-70B` | 40 | 40 | 200,000 |
-| `DeepSeek-V3-0324` | 20 | 40 | 200,000 |
-| `DeepSeek-V3.1` | 20 | 40 | 200,000 |
-| `Qwen3-235B-A22B-Instruct-2507` | 20 | 20 | 200,000 |
-| `Qwen3-32B` | 10 | 40 | 200,000 |
-| `Llama-4-Maverick-17B-128E-Instruct` | 20 | 40 | 200,000 |
-| `gpt-oss-120b` | 20 | 40 | 200,000 |
-
-**Confidence:** HIGH — from official rate limits documentation page
-
-**Key observation:** 40 RPD is extremely low. At 40 requests/day, a single active agentic task
-(which may make 10-20 tool calls, each spawning an LLM call) will exhaust the daily limit in
-2-4 tasks. Free tier SambaNova is suitable for experimentation, not production agentic workloads.
-
-### Developer Tier (payment method linked, using credits or paid)
-
-| Model ID | RPM | RPD |
-|----------|-----|-----|
-| `Meta-Llama-3.3-70B-Instruct` | 240 | 48,000 |
-| `Meta-Llama-3.1-8B-Instruct` | 1,440 | 288,000 |
-| `DeepSeek-V3-0324` | 60 | 12,000 |
-| `DeepSeek-V3.1` | 60 | 12,000 |
-| `DeepSeek-R1` | 60 | 12,000 |
-| `DeepSeek-R1-Distill-Llama-70B` | 240 | 48,000 |
-| `Qwen3-235B-A22B-Instruct-2507` | 30 | 6,000 |
-| `Qwen3-32B` | 30 | 6,000 |
-| `Llama-4-Maverick-17B-128E-Instruct` | 60 | 12,000 |
-| `gpt-oss-120b` | 60 | 12,000 |
-
-**Note:** No TPM (tokens per minute) limit documented — only TPD applies to free tier.
-Developer tier has no published TPD cap (subject to spend limit).
-
-**Confidence:** HIGH — from official rate limits documentation page
-
----
-
-## Rate Limit Headers
-
-Response headers for monitoring rate limit state (confirmed HIGH confidence):
-
-| Header | Meaning |
-|--------|---------|
-| `x-ratelimit-limit-requests` | Max RPM |
-| `x-ratelimit-remaining-requests` | Remaining requests this minute |
-| `x-ratelimit-reset-requests` | Seconds until RPM window resets |
-| `x-ratelimit-limit-requests-day` | Max RPD |
-| `x-ratelimit-remaining-requests-day` | Remaining requests today |
-| `x-ratelimit-reset-requests-day` | Seconds until RPD window resets |
-
-**No `Retry-After` header documented** — use `x-ratelimit-reset-requests` to determine
-backoff duration after a 429 response.
-
----
-
-## Error Codes
-
-| HTTP Code | Meaning | Agent42 Handling |
-|-----------|---------|-----------------|
-| 401 | Auth failure (bad/missing API key) | `_is_auth_error()` — skip retries, skip model |
-| 429 | Rate limit exceeded (RPM or RPD) | Standard retry with backoff; check `x-ratelimit-reset-requests` |
-| 503 / model unavailable | Model temporarily down | Add to `_failed_models`; fall back |
-| Other 4xx/5xx | Request or server error | Standard retry behavior |
-
-**Confidence:** MEDIUM — error code format confirmed (JSON with error code + message);
-specific 401/429/503 behavior inferred from OpenAI compatibility pattern and community reports.
-
----
-
-## Function Calling: Confirmed Support Details
-
-Function calling is supported and confirmed via official docs. Format is OpenAI-compatible.
-
-### Models That Support Function Calling
-
-- `Meta-Llama-3.1-8B-Instruct` — works for zero-shot only; **unreliable** for conversation + tools
-- `Meta-Llama-3.3-70B-Instruct` — **recommended** production function calling model
-- `DeepSeek-V3-0324` — confirmed function calling support
-- `DeepSeek-V3.1` — confirmed function calling support
-- `Llama-4-Maverick-17B-128E-Instruct` — confirmed (preview)
-- `Qwen3-32B` — confirmed (preview)
-- `gpt-oss-120b` — confirmed; best quality with `reasoning_effort: "high"` (preview)
-
-### Models That Do NOT Support Function Calling
-
-- `DeepSeek-R1` — reasoning model; no tool use
-- `DeepSeek-R1-Distill-Llama-70B` — reasoning model; no tool use
-- `Qwen3-235B-A22B-Instruct-2507` — not listed in function calling docs
-- `Whisper-Large-v3` — audio only
-- `E5-Mistral-7B-Instruct` — embeddings only
-
-### Tool Choice Options
-
-Standard OpenAI options work:
-- `tool_choice: "auto"` (default)
-- `tool_choice: "required"`
-- `tool_choice: {"type": "function", "function": {"name": "..."}}`
-
-### Known Limitation
-
-`strict: true` in tool definitions is NOT supported. Only `strict: false`.
-This means the model may not always produce valid JSON for function arguments.
-Agent42 should validate tool call outputs defensively.
-
-**Confidence:** HIGH — confirmed via official function calling documentation page.
-
----
-
-## Recommended Models for Agent42 Integration
-
-Based on research findings, these are the models to register in `MODELS` dict:
-
-### For FREE_ROUTING integration
-
-| Role | Model ID | Rationale |
-|------|----------|-----------|
-| Primary (coding/agentic) | `Meta-Llama-3.3-70B-Instruct` | Production model, 128k context, function calling, 40 RPM (free) / 240 RPM (dev) |
-| Critic | `DeepSeek-V3.1` | 128k context, function calling, different architecture from primary |
-| Fast/lightweight | `Meta-Llama-3.1-8B-Instruct` | 40 RPM, good for simple tasks; 16k context limit |
-
-### Do NOT use in production routing
-
-| Model | Reason |
-|-------|--------|
-| `Qwen3-235B-A22B-Instruct-2507` | Preview only, 20 RPD free tier, no confirmed function calling |
-| `gpt-oss-120b` | Preview only — "may be removed at short notice" |
-| `Llama-4-Maverick-17B-128E-Instruct` | Preview only — "may be removed at short notice" |
-| Any Llama 3.1 405B model | Not in current docs — likely deprecated |
-
----
-
-## Table Stakes (Must Build)
-
-Features required for a working SambaNova integration in Agent42.
-
-| Feature | Why Required | Complexity | Notes |
-|---------|-------------|-----------|-------|
-| `ProviderType.SAMBANOVA` enum value | All providers need enum entry | Low | In `providers/registry.py` |
-| `ProviderSpec` for SambaNova | Defines base URL, API key env var, client config | Low | `base_url="https://api.sambanova.ai/v1"`, `api_key_env="SAMBANOVA_API_KEY"` |
-| `ModelSpec` entries for 3 production models | Route to correct models | Low | Llama 3.3 70B, Llama 3.1 8B, DeepSeek V3.1 |
-| Temperature clamping to 0–1 | SambaNova rejects > 1; OpenAI allows up to 2 | Low | Guard in `_build_client()` or request params |
-| `SAMBANOVA_API_KEY` in `.env.example` | User onboarding | Low | With comment explaining Developer Tier |
-| Health check model | Verify key + connectivity | Low | Use `Meta-Llama-3.1-8B-Instruct` (highest RPM) |
-| `_is_auth_error()` coverage | Skip retries on 401 | Low | Already exists in Agent42 codebase |
-| Spending tracker entry | Track SambaNova token costs | Low | Free models = $0; dev tier has pricing |
-| 429 + `x-ratelimit-reset-requests` backoff | Respect rate limits | Medium | Use header value for backoff duration |
-| `strict: false` enforcement in tool definitions | Prevent API errors | Low | Strip `strict: true` before sending |
-
-## Differentiators (Nice to Have)
-
-| Feature | Value | Complexity | Notes |
-|---------|-------|-----------|-------|
-| DeepSeek-R1 as reasoning critic | High-quality analysis without tool use | Low | Register as separate model for critic-only roles |
-| `reasoning_effort` param support | Exposes gpt-oss-120b quality mode | Low | SambaNova extension; pass through if set in ModelSpec |
-| Embeddings via E5-Mistral | Provider-diverse embeddings | Medium | Only 4k context; limited utility |
-
-## Anti-Features (Do NOT Build)
-
-| Anti-Feature | Why Avoid | Instead |
-|-------------|-----------|---------|
-| Route preview models as production primaries | "May be removed at short notice" — causes Pitfall #56 pattern | Mark preview models with `is_preview=True` flag; exclude from primary routing |
-| Treat SambaNova as cost-free equivalent to Cerebras | $5 credit expires in 90 days; after that, costs money | Document in `.env.example` that this is a paid tier with starter credits |
-| Use Llama 3.1 8B for agentic tool calling | Unreliable for conversation + tools | Use 70B for any task requiring function calling |
-| Set `temperature > 1.0` | SambaNova range is 0–1, not 0–2 like OpenAI | Clamp to 1.0 maximum |
-| Register deprecated 405B/Qwen 2.5 72B model IDs | Will cause 404s; Pitfall #56 pattern | Use current IDs listed above |
+## Feature Landscape
+
+### Table Stakes (Users Expect These)
+
+These features define the minimum viable rewards system. Without them the feature feels
+like a configuration knob, not a rewards system.
+
+| Feature | Why Expected | Complexity | Notes |
+| ------- | ------------ | ---------- | ----- |
+| Three named tiers (Bronze/Silver/Gold) | Industry-standard naming; users instantly understand the hierarchy | LOW | Fixed names reduce cognitive load vs. configurable names |
+| Performance score calculation | Without a score, tier assignment is opaque — users can't understand or trust it | MEDIUM | Must derive from existing effectiveness data (success_rate, duration_ms, invocations per `EffectivenessStore`) |
+| Automatic tier assignment | Manual assignment by admin for every agent defeats the purpose | MEDIUM | Runs on a schedule or lazily on access; must be cached |
+| Resource differentiation per tier | If all tiers get the same resources, tiers are cosmetic only | MEDIUM | Model access, rate limits, concurrent task capacity |
+| Admin tier override | Operators need to correct misclassified agents (new agents with no data, exceptional cases) | LOW | Manual override that bypasses automatic scoring; stored on AgentConfig |
+| Tier visibility in dashboard | Users must always know their agent's current tier and score | LOW | Badge/label on agent card; dedicated metrics section |
+| REWARDS_ENABLED=false default | Zero-impact on existing deployments without opt-in | LOW | Required constraint from PROJECT.md; flag in `Settings` frozen dataclass |
+| Graceful degradation when disabled | When REWARDS_ENABLED=false, agents get default resources — never errors | LOW | Code paths fall through to baseline limits; no crashes |
+| Tier persistence | Tier must survive server restarts — not recomputed on every request | LOW | Stored on AgentConfig JSON; recalculated on schedule, not per-request |
+| Minimum data threshold | Agents with fewer than N task records should not be penalized — hold at Bronze | LOW | Configurable minimum; prevents new agents being locked out |
+
+### Differentiators (Competitive Advantage)
+
+Features that make the rewards system feel like a quality loop, not just access control.
+
+| Feature | Value Proposition | Complexity | Notes |
+| ------- | ----------------- | ---------- | ----- |
+| Composite score with multiple weighted dimensions | Success rate alone is gamed by easy tasks; weighting by task volume + duration reflects real contribution | MEDIUM | Recommended weights: success_rate (60%), task_volume_normalized (25%), avg_speed_normalized (15%) |
+| Hysteresis on tier transitions | Prevents thrashing when an agent hovers near a threshold — needs sustained performance to promote, one bad stretch doesn't immediately demote | MEDIUM | Promotion requires N consecutive periods above threshold; demotion has a grace window |
+| Score trend direction | Showing "+12 pts this week" is more motivating than showing a static score — operators take action on trend, not number | MEDIUM | Requires storing score snapshots over time (weekly) |
+| Per-tier model routing integration | Gold agents get L1 workhorse (StrongWall/Synthetic), Silver get reliable premium, Bronze get free-tier fallback — creates a measurable quality loop | HIGH | Must hook into existing model routing in agent_manager.py; requires `resolve_model()` to accept tier context |
+| Tier promotion/demotion audit log | Admins need to understand why an agent changed tier — essential for trust | MEDIUM | Append-only log with timestamp, previous tier, new tier, triggering score |
+| Cooldown period after promotion | Prevents yo-yo between tiers due to task clustering; ensures new tier reflects sustained behavior | LOW | Configurable `REWARDS_PROMOTION_COOLDOWN_DAYS` (default: 7 days) |
+| Bulk tier recalculation endpoint | When thresholds are changed, admins want to recompute all agents at once rather than waiting for the schedule | LOW | Admin API endpoint; runs in background |
+| Score explanation per agent | Shows breakdown: "success_rate: 0.87 (weight 60%) + volume: 0.7 (weight 25%) + speed: 0.6 (weight 15%) = 0.80 -> Gold" | MEDIUM | Returned by tier service; displayed in dashboard agent detail panel |
+
+### Anti-Features (Commonly Requested, Often Problematic)
+
+| Feature | Why Requested | Why Problematic | Alternative |
+| ------- | ------------- | --------------- | ----------- |
+| Fully configurable tier names | "Our team uses Iron/Steel/Diamond" | Adds UI/config complexity with no behavioral benefit; names don't affect resource allocation | Use fixed Bronze/Silver/Gold; document the thresholds as configurable |
+| Points accumulation (XP system) | Gamification research shows points feel rewarding | Points detach from actual performance — an agent could accumulate points running trivial tasks; creates perverse incentive | Use rolling success rate over recent N tasks — recency-weighted, not cumulative |
+| Real-time tier recalculation on every task | "Always current" appeals | Per-request computation breaks the "cached/fast" constraint from PROJECT.md; creates latency spikes | Schedule recalculation (e.g., every 15 minutes or on-demand) with cached tier stored on AgentConfig |
+| Automatic tier demotion below Bronze | "Penalize underperformers" | Below Bronze there is nowhere to go — agents would just get disabled, which is a separate concern | Keep Bronze as the floor; let admins manually pause agents that consistently underperform |
+| Cross-agent leaderboard / competitive ranking | "Motivates better agents" | Agents serve different task types at different complexities — ranking Devops (5 iterations, fast) vs. Research (25 iterations, slow) is meaningless | Per-tier grouping only; no cross-agent score ranking |
+| Tier-gated tool access (some tools Bronze-only) | "Reserve premium tools for top performers" | Tool access is a security boundary, not a performance reward; mixing the two creates unpredictable behavior | Keep tool access in skills/tool config; only resource limits (models, rate limits, concurrency) vary by tier |
+| Retroactive scoring from pre-rewards data | "All historical task data should count" | Pre-rewards data has no tier context; mixing unlabeled historical data distorts baselines | Score only from data collected after REWARDS_ENABLED=true; use minimum threshold to handle cold start |
+| Negative score for failures | "Failures should hurt more than successes help" | Creates over-cautious agents that avoid complex tasks to protect their tier | Use success_rate (fraction) not signed delta accumulation — success rate already penalizes failures proportionally |
 
 ---
 
 ## Feature Dependencies
 
+```text
+REWARDS_ENABLED flag (Settings)
+    └──enables──> PerformanceScoreCalculator
+                      └──reads──> EffectivenessStore (already exists)
+                          └──produces──> composite_score
+                              └──feeds──> TierDeterminator
+                                  └──writes──> AgentConfig.reward_tier (new field)
+                                      ├──read by──> ResourceAllocator
+                                      │                 └──applied in──> AgentManager task dispatch
+                                      │                 └──applied in──> ModelRouting (resolve_model)
+                                      │                 └──applied in──> ToolRateLimiter (per-tier limits)
+                                      └──read by──> Dashboard tier display
+                                      └──read by──> Admin override endpoint
+
+Admin override
+    └──writes──> AgentConfig.reward_tier_override (new field)
+        └──bypasses──> TierDeterminator output
+            └──still subject to──> ResourceAllocator (override tier controls resources)
+
+Hysteresis / cooldown
+    └──requires──> AgentConfig.tier_promoted_at (timestamp, new field)
+    └──requires──> AgentConfig.tier_score_history (list[float], new field)
+
+Audit log
+    └──appended by──> TierDeterminator on every tier change
+    └──readable by──> Dashboard audit section
 ```
-SAMBANOVA_API_KEY in .env.example
-    → ProviderSpec (base_url, api_key_env)
-        → ProviderType.SAMBANOVA enum
-            → ModelSpec for each model
-                → FREE_ROUTING entries for SAMBANOVA models
-                    → Health check for SAMBANOVA
-                        → SpendingTracker pricing for SAMBANOVA
+
+### Dependency Notes
+
+- **PerformanceScoreCalculator requires EffectivenessStore:** The score must come from
+  existing data — no new collection. EffectivenessStore provides `get_aggregated_stats()`
+  and `get_task_records()` today; calculator reads these and derives a per-agent composite score.
+
+- **TierDeterminator requires PerformanceScoreCalculator:** Tier is always a function of
+  score — never assigned directly by the algorithm (admin override is a separate code path
+  that routes around the determinator).
+
+- **ResourceAllocator requires TierDeterminator output:** Allocator is the single point
+  where tier maps to concrete limits. Everything downstream (model routing, rate limiter,
+  concurrency cap) reads from the allocator, not from the raw tier string.
+
+- **Dashboard display requires ResourceAllocator:** Display should show effective limits
+  (what the agent actually gets) not raw tier label — users understand "Gold: GPT-oss-120b,
+  10 concurrent tasks" better than "Gold tier."
+
+- **Admin override conflicts with TierDeterminator:** Override must clearly signal that
+  the tier was set manually — otherwise ops can't tell if a Gold agent earned it or was
+  manually elevated. Store `reward_tier_override` separately from `reward_tier`.
+
+- **Hysteresis requires score history:** Can't compute "N consecutive periods above threshold"
+  without storing N prior scores. Keep history shallow (last 4 periods) to bound storage.
+
+---
+
+## MVP Definition
+
+### Launch With (v1.4)
+
+Minimum viable system that delivers the self-reinforcing quality loop described in PROJECT.md.
+
+- [ ] `REWARDS_ENABLED` flag in `Settings` (frozen dataclass, `os.getenv`, default `false`) — controls all behavior
+- [ ] `PerformanceScoreCalculator` — derives composite score from EffectivenessStore data (success_rate, task volume, avg duration per agent_id/task_type)
+- [ ] `TierDeterminator` — maps composite score to Bronze/Silver/Gold with configurable thresholds; respects minimum data threshold (default: 10 tasks)
+- [ ] `AgentConfig` new fields: `reward_tier`, `reward_tier_override`, `tier_promoted_at`
+- [ ] `ResourceAllocator` — per-tier lookup table for model routing class, rate limit multiplier, max concurrent tasks
+- [ ] `AgentManager` integration — apply resource limits from allocator at task dispatch
+- [ ] Model routing integration — `resolve_model()` accepts tier context and selects model class accordingly
+- [ ] Admin override API endpoint — `PATCH /api/agents/{id}/reward-tier` with tier value or `null` to clear
+- [ ] Dashboard tier badge on agent cards (Bronze/Silver/Gold or "unranked")
+- [ ] Dashboard performance metrics panel per agent (score, tier, task count, success rate)
+- [ ] Tier recalculation scheduled task (every 15 minutes, configurable)
+- [ ] Tier cache — stored on AgentConfig, never computed per-request
+- [ ] Full unit + integration tests
+
+### Add After Validation (v1.4.x)
+
+Features to add once the core loop is proven to work.
+
+- [ ] Hysteresis / cooldown — add `tier_score_history` to AgentConfig; require N periods sustained above threshold for promotion — reduces operational noise
+- [ ] Tier change audit log — append-only log stored per agent; surfaced in dashboard
+- [ ] Score explanation endpoint — `GET /api/agents/{id}/reward-score` returns full dimension breakdown
+- [ ] Bulk recalculation admin endpoint — `POST /api/admin/rewards/recalculate-all`
+
+### Future Consideration (v2+)
+
+Features to defer until the base system is running in production.
+
+- [ ] Score trend visualization — weekly score delta charts in dashboard; needs at least 4 weeks of history data first
+- [ ] Per-task-type tier specialization — agent could be Gold for "coding" but Silver for "research"; adds significant complexity, value unclear until base system is in use
+- [ ] Email/webhook notifications on tier change — useful for fleet operators managing many agents; not needed for single-user deployment
+- [ ] Tier analytics across the full agent fleet — fleet-level dashboards for identifying systemic quality issues
+
+---
+
+## Feature Prioritization Matrix
+
+| Feature | User Value | Implementation Cost | Priority |
+| ------- | ---------- | ------------------- | -------- |
+| REWARDS_ENABLED flag + graceful degradation | HIGH | LOW | P1 |
+| PerformanceScoreCalculator (from existing data) | HIGH | MEDIUM | P1 |
+| TierDeterminator with thresholds | HIGH | LOW | P1 |
+| ResourceAllocator (model + rate + concurrency) | HIGH | MEDIUM | P1 |
+| AgentManager integration (dispatch) | HIGH | MEDIUM | P1 |
+| Model routing integration | HIGH | MEDIUM | P1 |
+| Admin tier override | HIGH | LOW | P1 |
+| Dashboard tier badge + metrics panel | MEDIUM | LOW | P1 |
+| Scheduled recalculation + cache | HIGH | LOW | P1 |
+| Hysteresis / cooldown | MEDIUM | MEDIUM | P2 |
+| Tier change audit log | MEDIUM | LOW | P2 |
+| Score explanation breakdown | MEDIUM | LOW | P2 |
+| Bulk recalculation endpoint | LOW | LOW | P2 |
+| Score trend visualization | LOW | HIGH | P3 |
+| Per-task-type tier specialization | LOW | HIGH | P3 |
+| Fleet-level tier analytics | LOW | HIGH | P3 |
+
+**Priority key:**
+
+- P1: Must have for v1.4 launch
+- P2: Should have, add in v1.4.x patch
+- P3: Future consideration, v2+
+
+---
+
+## Domain Patterns Research
+
+### How Tier Thresholds Should Be Set
+
+Based on research into API platform tier systems (Azure OpenAI, Google Gemini, OpenAI) and
+gamification systems, the standard pattern is:
+
+- **Bronze (entry):** Default tier for all agents; requires no threshold. Any agent with
+  insufficient data starts here. Resources: free-tier fallback model, baseline rate limits.
+- **Silver (mid):** Agents that demonstrate consistent reliability. Recommended default
+  threshold: composite score >= 0.65, with at least 10 completed tasks.
+  Resources: reliable premium model (e.g., Synthetic general), 1.5x rate limit multiplier.
+- **Gold (top):** Agents with sustained excellence. Recommended default threshold:
+  composite score >= 0.85, with at least 25 completed tasks.
+  Resources: L1 workhorse model (e.g., Synthetic coding/reasoning), 2x rate limit multiplier,
+  increased concurrent task capacity.
+
+All thresholds should be configurable via environment variables:
+
+- `REWARDS_SILVER_THRESHOLD` (default: 0.65)
+- `REWARDS_GOLD_THRESHOLD` (default: 0.85)
+- `REWARDS_MIN_TASKS` (default: 10)
+
+### Composite Score Formula
+
+Research into AI agent evaluation frameworks (Galileo, Anthropic evals, MachineLearningMastery)
+confirms that multi-dimension scoring outperforms single-metric scoring for real-world agents.
+The recommended formula for Agent42, using only data already in EffectivenessStore:
+
+```python
+score = (success_rate * 0.60)
+      + (min(invocations, 100) / 100 * 0.25)   # volume, capped at 100
+      + (speed_score * 0.15)                     # normalized avg_duration, inverted
 ```
 
-Temperature clamping → must be applied before any SambaNova request
-`strict: false` enforcement → must be applied in tool schema construction
+Where `speed_score = 1 - min(avg_duration_ms / MAX_EXPECTED_MS, 1.0)` with a configurable
+`MAX_EXPECTED_MS` (default: 30,000ms). Speed is the smallest weight because it's task-type
+dependent — a research agent is expected to be slow.
 
----
+Confidence: MEDIUM — formula derived from research principles; weights should be validated
+against real agent data in production and adjusted if success_rate proves insufficient signal.
 
-## MVP Recommendation
+### Resource Allocation per Tier
 
-Prioritize (minimum viable SambaNova integration):
-1. `ProviderSpec` + `ProviderType.SAMBANOVA` — foundation
-2. `ModelSpec` for `Meta-Llama-3.3-70B-Instruct` — primary workhorse
-3. `ModelSpec` for `Meta-Llama-3.1-8B-Instruct` — high-RPM health check model
-4. Temperature clamping to 0–1
-5. `strict: false` enforcement in tool definitions
-6. `SAMBANOVA_API_KEY` in `.env.example` with Developer Tier documentation
+Based on how API providers (OpenAI, Azure Foundry, Gemini) structure their tier systems,
+resource allocation should be a multiplier applied to a configurable baseline:
 
-Defer:
-- DeepSeek-R1 as reasoning critic — useful but adds complexity; do in second pass
-- Embeddings via E5-Mistral — low value (4k context); skip for now
-- Preview model registration — too unstable for v1 integration
+| Resource | Bronze | Silver | Gold |
+| -------- | ------ | ------ | ---- |
+| Model routing class | free-tier fallback | Synthetic general / Gemini | Synthetic coding/reasoning |
+| Rate limit multiplier | 1.0x (baseline) | 1.5x | 2.0x |
+| Max concurrent tasks | 1 | 2 | 4 |
+| Max iterations per task | AgentConfig.max_iterations unchanged | +20% | +50% |
 
----
-
-## Pricing (Developer Tier, for SpendingTracker)
-
-Pricing from eesel.ai blog (MEDIUM confidence — verify against official pricing page):
-
-| Model ID | Input ($/1M tokens) | Output ($/1M tokens) |
-|----------|--------------------|--------------------|
-| `DeepSeek-R1-0528` | $5.00 | $7.00 |
-| `DeepSeek-V3.1` | $3.00 | $4.50 |
-| `Meta-Llama-3.3-70B-Instruct` | $0.60 | $1.20 |
-| `Meta-Llama-3.1-8B-Instruct` | $0.10 | $0.20 |
-| `Qwen3-32B` | $0.40 | $0.80 |
-| `gpt-oss-120b` | $0.22 | $0.59 |
-
-**Note:** Verify against `cloud.sambanova.ai/plans` at implementation time. SpendingTracker
-must use actual pricing; the $5 credit means early usage appears "free" but is consumed.
-
----
-
-## Quality Gate Checklist
-
-- [x] API base URL verified: `https://api.sambanova.ai/v1` (HIGH confidence, multiple sources)
-- [x] Model IDs verified against current docs (not from training data — Llama 405B ABSENT)
-- [x] Free tier vs trial credits clearly distinguished ($5 credit, 90 days, then paid)
-- [x] Function calling support confirmed for Llama 3.3 70B, DeepSeek V3.1
-- [x] Rate limits documented with confidence levels (HIGH — from official rate limits page)
-- [x] Temperature parameter difference documented (0–1 not 0–2)
-- [x] Rate limit headers documented
-- [x] Unsupported OpenAI parameters listed
+The multiplier approach (not absolute values) lets the baseline be configurable without
+re-specifying all tier limits — only the deltas need tier-specific env vars.
 
 ---
 
 ## Sources
 
-| Source | Confidence | URL |
-|--------|-----------|-----|
-| SambaNova official supported models | HIGH | https://docs.sambanova.ai/docs/en/models/sambacloud-models |
-| SambaNova rate limits (official docs) | HIGH | https://docs.sambanova.ai/docs/en/models/rate-limits |
-| SambaNova function calling docs | HIGH | https://docs.sambanova.ai/docs/en/features/function-calling |
-| SambaNova OpenAI compatibility guide | HIGH | https://docs.sambanova.ai/docs/en/features/openai-compatibility |
-| SambaNova SDK blog (base URL, auth) | HIGH | https://sambanova.ai/blog/introducing-the-sambanova-sdk |
-| Developer Tier announcement | HIGH | https://sambanova.ai/blog/sambanova-cloud-developer-tier-is-live |
-| Function calling community article | MEDIUM | https://community.sambanova.ai/t/function-calling-and-json-mode-in-sambanova-cloud/540 |
-| API rate limit community thread | MEDIUM | https://community.sambanova.ai/t/rate-limits/321 |
-| SambaNova cloud API page (base URL, keys) | MEDIUM | https://cloud.sambanova.ai/apis |
-| LiteLLM SambaNova integration | MEDIUM | https://docs.litellm.ai/docs/providers/sambanova |
-| Pricing data (third-party) | MEDIUM | https://www.eesel.ai/blog/sambanova-cloud-pricing |
-| Free tier deprecation thread | MEDIUM | https://community.sambanova.ai/t/is-free-tier-going-away/847 |
+- Azure OpenAI quota tiers — automatic tier upgrade on usage (HIGH confidence):
+  [Azure OpenAI Quotas and Limits](https://learn.microsoft.com/en-us/azure/foundry/openai/quotas-limits)
+- Google Gemini API rate limit tiers (HIGH confidence):
+  [Gemini API Rate Limits](https://ai.google.dev/gemini-api/docs/rate-limits)
+- OpenAI API rate limit tiers (HIGH confidence):
+  [OpenAI Rate Limits](https://developers.openai.com/api/docs/guides/rate-limits)
+- Galileo AI agent metrics guide (MEDIUM confidence):
+  [Galileo AI Agent Metrics](https://galileo.ai/blog/ai-agent-metrics)
+- Anthropic agent evaluation guide (MEDIUM confidence):
+  [Demystifying Evals for AI Agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
+- Gamification tier mechanics — Xtremepush (MEDIUM confidence):
+  [7 Gamification Mechanics That Drive Player Loyalty](https://www.xtremepush.com/blog/7-gamification-mechanics-that-drive-player-loyalty-points-badges-leaderboards-tiers-challenges-streaks-and-rewards)
+- Enterprise Integration Patterns: Hysteresis design (MEDIUM confidence):
+  [Hysteresis of Design Decisions](https://www.enterpriseintegrationpatterns.com/ramblings/06_hysteresis.html)
+- Feature flags and graceful degradation — Unleash (HIGH confidence):
+  [Graceful Degradation with FeatureOps](https://www.getunleash.io/blog/graceful-degradation-featureops-resilience)
+- Agent42 EffectivenessStore source (HIGH confidence — direct read):
+  `memory/effectiveness.py`
+- Agent42 AgentConfig + AgentManager source (HIGH confidence — direct read):
+  `core/agent_manager.py`
+
+---
+
+*Feature research for: Agent42 v1.4 Performance-Based Rewards System*
+*Researched: 2026-03-22*

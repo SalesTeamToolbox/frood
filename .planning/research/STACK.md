@@ -1,336 +1,260 @@
-# Technology Stack — Cerebras Provider Integration
+# Stack Research
 
-**Project:** Agent42 Free LLM Provider Expansion (Cerebras)
-**Researched:** 2026-03-01
-**Research mode:** Ecosystem / Feasibility
-**Overall confidence:** HIGH (all core facts verified against official Cerebras docs)
-
----
-
-## Cerebras API — Verified Specifications
-
-### 1. API Base URL and Authentication
-
-| Field | Value |
-|-------|-------|
-| Base URL | `https://api.cerebras.ai/v1` |
-| Auth method | Bearer token via `Authorization: Bearer <key>` header |
-| Key env var convention | `CEREBRAS_API_KEY` |
-| Key source | [cloud.cerebras.ai](https://cloud.cerebras.ai/) |
-
-**Confirmed working with `AsyncOpenAI` client** (Agent42's existing pattern):
-
-```python
-from openai import AsyncOpenAI
-
-client = AsyncOpenAI(
-    base_url="https://api.cerebras.ai/v1",
-    api_key=os.getenv("CEREBRAS_API_KEY"),
-    max_retries=0,  # Agent42 manages retries in _complete_with_retry
-)
-```
-
-No native Cerebras SDK required. The OpenAI Python SDK works as-is.
-
-Source: [Cerebras OpenAI Compatibility](https://inference-docs.cerebras.ai/resources/openai)
+**Domain:** Performance-based tier/rewards system for Python async agent platform
+**Researched:** 2026-03-22
+**Confidence:** HIGH — recommendations derived from existing Agent42 codebase patterns, stdlib capabilities, and verified library versions
 
 ---
 
-### 2. OpenAI Compatibility Level
+## Context: This Is an Additive Feature, Not a New Stack
 
-**Verdict: HIGH compatibility. Drop-in for chat completions, tool calling, and streaming.**
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Chat completions (`/v1/chat/completions`) | SUPPORTED | Full OpenAI-compatible format |
-| Streaming (`stream=True`) | SUPPORTED | SSE streaming identical to OpenAI |
-| Function/tool calling (`tools=`) | SUPPORTED | Parallel tool calls, `tool_choice="auto"`, strict mode |
-| Structured outputs | SUPPORTED | Constrained decoding, `strict: true` in tool schema |
-| Prompt caching | SUPPORTED | On `gpt-oss-120b`, `qwen-3-235b-a22b-instruct-2507`, `zai-glm-4.7` |
-| Text completions (`/v1/completions`) | SUPPORTED | Available but limited |
-| Embeddings | NOT OFFERED | No `/v1/embeddings` endpoint |
-| Vision / multimodal | NOT SUPPORTED | Text input/output only on all models |
-| `frequency_penalty` | NOT SUPPORTED | Returns 400 error if passed |
-| `logit_bias` | NOT SUPPORTED | Returns 400 error if passed |
-| `presence_penalty` | NOT SUPPORTED | Returns 400 error if passed |
-
-**Critical difference from OpenAI:** The `gpt-oss-120b` model maps `system` role messages to a "developer-level instruction layer" — system messages have stronger weight than in OpenAI's implementation. Identical prompts may produce different outputs.
-
-**Custom Cerebras parameters** (e.g., `disable_reasoning`, `clear_thinking` for `zai-glm-4.7`) must be passed via `extra_body` when using the OpenAI client:
-
-```python
-response = await client.chat.completions.create(
-    model="zai-glm-4.7",
-    messages=[...],
-    extra_body={"disable_reasoning": True}
-)
-```
-
-Source: [Cerebras OpenAI Compatibility](https://inference-docs.cerebras.ai/resources/openai), [Tool Calling](https://inference-docs.cerebras.ai/capabilities/tool-use)
+Agent42 already runs Python 3.11+, FastAPI, aiosqlite, asyncio throughout. The rewards system
+must fit inside the existing stack without new runtime dependencies where possible. The
+recommendations below are split into: **stdlib only** (preferred), **existing deps** (already
+in requirements.txt), and **new optional deps** (add only if the stdlib approach is insufficient).
 
 ---
 
-### 3. Available Models — Exact Model IDs (Current as of 2026-03-01)
+## Recommended Stack
 
-#### Production Models (stable)
+### Core Technologies (Stdlib — No New Dependencies)
 
-| Agent42 Key | API Model ID | Parameters | Speed | Context (Free) | Context (Paid) | Max Output (Free) | Function Calling | Tier |
-|-------------|--------------|-----------|-------|---------------|----------------|------------------|-----------------|------|
-| `cerebras-gpt-oss-120b` | `gpt-oss-120b` | 120B (MoE, 5.1B active) | ~3,000 tok/s | 65k | 131k | 32k | YES | FREE |
-| `cerebras-llama-8b` | `llama3.1-8b` | 8B | ~2,200 tok/s | 8k | 32k | 8k | YES | FREE |
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| `enum.IntEnum` (stdlib) | Python 3.11+ | `RewardTier` enum (BRONZE/SILVER/GOLD) | Standard, hashable, sortable — IntEnum supports `tier >= SILVER` comparisons which plain Enum does not. Zero deps. Project already uses dataclasses + enum throughout. |
+| `dataclasses` (stdlib) | Python 3.11+ | `TierConfig`, `TierLimits`, `AgentTierState` frozen dataclasses | Matches the frozen-dataclass pattern used throughout `core/config.py` and `core/rate_limiter.py`. Immutable tier config objects prevent accidental mutation in concurrent code. |
+| `asyncio.Semaphore` (stdlib) | Python 3.11+ | Per-tier concurrent task caps | Agent Manager already manages agent lifecycle. Semaphores keyed per-agent give each tier its concurrent task ceiling. Cannot resize after creation — swap on promotion (see Pattern 3 below). |
+| `asyncio.Lock` (stdlib) | Python 3.11+ | Tier state mutation guard | Tier promotions are rare but must be atomic. A per-agent lock prevents race between a score recompute and an in-flight task dispatch. |
+| `time.monotonic()` (stdlib) | Python 3.11+ | Cache expiry timestamps | Already used in `rate_limiter.py`. Use for TTL-based tier cache invalidation without importing cachetools. |
+| `aiosqlite` (existing dep) | >=0.20.0 | Tier history log | Already in requirements.txt for effectiveness tracking. Add a `tier_history` table alongside existing effectiveness tables. Append-only rows (agent_id, tier, score, timestamp) give full audit trail at zero extra cost. |
 
-#### Preview Models (stable enough for production use, may change)
+### Supporting Libraries (Existing Dependencies — Already Installed)
 
-| Agent42 Key | API Model ID | Parameters | Speed | Context (Free) | Context (Paid) | Max Output (Free) | Function Calling | Tier |
-|-------------|--------------|-----------|-------|---------------|----------------|------------------|-----------------|------|
-| `cerebras-qwen3-235b` | `qwen-3-235b-a22b-instruct-2507` | 235B (MoE) | ~1,400 tok/s | 65k | 131k | 32k | YES | FREE |
-| `cerebras-zai-glm47` | `zai-glm-4.7` | 355B (MoE, ~32B active) | ~1,000 tok/s | 64k | 131k | 40k | YES | FREE |
+| Library | Version | Purpose | When to Use |
+|---------|---------|---------|-------------|
+| `aiofiles` (existing) | >=23.0.0 | Persist tier overrides to `.agent42/rewards/overrides.json` | Admin override JSONL for human-readable backup alongside the SQLite audit log. Matches existing file-persistence patterns. |
+| FastAPI (existing) | >=0.115.0 | REST endpoints for tier management dashboard | `/api/rewards/tiers`, `/api/rewards/agents/{id}/override`, `/api/rewards/status`. No new framework needed. |
+| WebSocket (existing) | >=12.0 | Push tier-change events to dashboard | When an agent promotes from Bronze to Silver, push a `tier_changed` event over the existing WS bus. Dashboard already subscribes to agent status events. |
 
-#### Deprecated — DO NOT USE
+### New Optional Dependency (Add Only If TTL Cache Complexity Warrants It)
 
-| API Model ID | Deprecation Date | Replacement |
-|--------------|-----------------|------------|
-| `qwen-3-32b` | 2026-02-16 | `qwen-3-235b-a22b-instruct-2507` |
-| `llama-3.3-70b` | 2026-02-16 | `gpt-oss-120b` |
-| `llama3.3-70b` (alt ID) | 2026-02-16 | `gpt-oss-120b` |
+| Library | Version | Purpose | When to Use |
+|---------|---------|---------|-------------|
+| `cachetools` | 7.0.5 (2026-03-09) | `TTLCache` for computed tier scores | Only add if the hand-rolled TTL dict approach grows messy. `TTLCache(maxsize=512, ttl=300)` keyed by `agent_id` is cleaner than dict + timestamp bookkeeping at scale. Likely already installed as a transitive dep — run `pip show cachetools` before adding. |
 
-**Recommended primary model for Agent42:** `gpt-oss-120b` — fastest (3,000 tok/s), 65k context on free tier, full tool calling, OpenAI-developed weights (best instruction following).
+**Do NOT add `asyncache` 0.3.1** — unmaintained since November 2022, incompatible with
+cachetools 7.x (requires <=5.x). If async-safe caching is needed, use `cachetools-async`
+0.0.5 (released June 2025, actively maintained) or a simple `asyncio.Lock`-guarded dict.
 
-**Recommended for reasoning/complex tasks:** `zai-glm-4.7` — top open-source benchmark scores (beats Kimi K2), strong agentic tool use, built-in reasoning mode. Lower RPM (10 vs 30) limits it to critic/review roles.
+### Development Tools (Existing)
 
-Sources: [Models Overview](https://inference-docs.cerebras.ai/models/overview), [GPT-OSS-120B](https://inference-docs.cerebras.ai/models/openai-oss), [Qwen 3 235B](https://inference-docs.cerebras.ai/models/qwen-3-235b-2507), [Llama 3.1 8B](https://inference-docs.cerebras.ai/models/llama-31-8b), [ZAI GLM 4.7](https://inference-docs.cerebras.ai/models/zai-glm-47)
-
----
-
-### 4. Free Tier Rate Limits
-
-Cerebras uses **token-bucket algorithm** — capacity replenishes continuously, not on fixed intervals.
-
-#### Per-Model Free Tier Limits
-
-| API Model ID | RPM (free) | Input Tokens/min (free) | RPD (free) | TPD (free) |
-|--------------|-----------|------------------------|-----------|-----------|
-| `gpt-oss-120b` | 30 | 60,000 | 14,400 | 1,000,000 |
-| `llama3.1-8b` | 30 | 60,000 | 14,400 | 1,000,000 |
-| `qwen-3-235b-a22b-instruct-2507` | 30 | 60,000 | 14,400 | 1,000,000 |
-| `zai-glm-4.7` | **10** | 60,000 | **100** | 1,000,000 |
-
-**Key observations:**
-- 1M tokens/day is shared across all requests to that model (not all models combined)
-- `zai-glm-4.7` has a severely restricted RPD (100/day) due to high demand — use only for critic/review
-- Context window is reduced on free tier: 65k (not 131k) for most models, 8k for Llama 3.1 8B
-- High-demand note: Cerebras has temporarily reduced free-tier limits on `zai-glm-4.7` and `qwen-3-235b-a22b-instruct-2507`
-
-Source: [Rate Limits](https://inference-docs.cerebras.ai/support/rate-limits)
+| Tool | Purpose | Notes |
+|------|---------|-------|
+| pytest + pytest-asyncio | Unit and async integration tests for tier logic | Already configured with `asyncio_mode = "auto"`. Test tier transitions, score calculations, semaphore enforcement. |
+| ruff | Linting and formatting | Already configured. Run `make format && make lint` after adding new modules. |
 
 ---
 
-### 5. Rate Limit Headers
+## Installation
 
-All responses include these headers for client-side throttling:
+```bash
+# No new core dependencies required.
+# All recommendations use stdlib or packages already in requirements.txt.
 
-| Header | Description |
-|--------|-------------|
-| `x-ratelimit-limit-requests-day` | Maximum requests allowed per day |
-| `x-ratelimit-limit-tokens-minute` | Maximum input tokens per minute |
-| `x-ratelimit-remaining-requests-day` | Remaining requests today |
-| `x-ratelimit-remaining-tokens-minute` | Remaining input tokens this minute |
-| `x-ratelimit-reset-requests-day` | When daily request limit resets (Unix timestamp) |
-| `x-ratelimit-reset-tokens-minute` | When per-minute token limit resets (Unix timestamp) |
-
-**Agent42 integration note:** Access via `response.headers` with `with_raw_response` wrapper, or read from `APIStatusError.response.headers` inside `except RateLimitError` blocks. The existing `_is_rate_limit_error()` check catches 429 status codes — no changes needed there.
-
-Source: [Rate Limits](https://inference-docs.cerebras.ai/support/rate-limits)
-
----
-
-### 6. Error Codes
-
-| HTTP Code | Cerebras SDK Exception | Description | Agent42 Handling |
-|-----------|----------------------|-------------|-----------------|
-| 400 | `BadRequestError` | Invalid params (e.g., `frequency_penalty`) | Skip retry, log error |
-| 401 | `AuthenticationError` | Missing/invalid API key | `_is_auth_error()` — skip retry |
-| 402 | `PaymentRequired` | Billing issue (free tier exceeded?) | `_is_payment_error()` — skip retry |
-| 403 | `PermissionDeniedError` | Insufficient permissions | Skip retry |
-| 404 | `NotFoundError` | Model not found (deprecated model ID) | `_is_auth_error()` handles 404 already |
-| 422 | `UnprocessableEntityError` | Validation failure | Skip retry |
-| 429 | `RateLimitError` | Rate limit exceeded | `_is_rate_limit_error()` — exponential backoff + add to `_failed_models` |
-| 500 | `InternalServerError` | Server error | Retry with backoff |
-| 503 | `ServiceUnavailable` | Temporary outage | Retry with backoff |
-| N/A | `APIConnectionError` | Network failure | Retry with backoff |
-| N/A | `APITimeoutError` | Request timeout | Default 60s; retry twice |
-
-**SDK retry behavior:** The native Cerebras SDK auto-retries 2x by default. Since Agent42 uses the OpenAI client with `max_retries=0`, Agent42's `_complete_with_retry` handles all retry logic — which is correct. Do not use native Cerebras SDK.
-
-Source: [Error Codes](https://inference-docs.cerebras.ai/support/error)
-
----
-
-### 7. SDK and Client Requirements
-
-**Recommendation: Use existing `AsyncOpenAI` client — no new SDK needed.**
-
-| Option | Package | Async Support | Verdict |
-|--------|---------|--------------|---------|
-| OpenAI Python SDK | `openai` (already installed) | YES (`AsyncOpenAI`) | USE THIS |
-| Cerebras native SDK | `cerebras_cloud_sdk` | YES | Do not use — adds dependency, no benefit |
-
-**Important Cerebras SDK caveats (if ever used):**
-- TCP warming: SDK sends a warmup request to `/v1/tcp_warming` on construction — can cause unexpected network calls in tests
-- Instance reuse: Repeatedly constructing the SDK instance degrades performance
-- These caveats do NOT apply when using the OpenAI client
-
----
-
-### 8. Known Limitations and Gotchas
-
-| # | Limitation | Impact | Mitigation |
-|---|-----------|--------|-----------|
-| L1 | `frequency_penalty`, `logit_bias`, `presence_penalty` not supported — 400 error | Medium | Never pass these parameters to Cerebras models. Agent42's `complete_with_tools` doesn't currently send them — safe. |
-| L2 | `zai-glm-4.7` RPD is only 100/day on free tier | High | Reserve `zai-glm-4.7` for critic role only; primary loops must use `gpt-oss-120b` |
-| L3 | Free tier context window is 8k for `llama3.1-8b` (vs 32k paid) | Medium | Use `gpt-oss-120b` (65k free) for context-heavy tasks; `llama3.1-8b` only for lightweight tasks |
-| L4 | No embeddings endpoint | Low | Agent42 already falls back to OpenAI for embeddings (pitfall #46) — no change needed |
-| L5 | No vision/multimodal | Low | Document clearly; no workaround |
-| L6 | `qwen-3-235b` only supports non-thinking mode (no `<think>` tags) | Low | Noted in model spec; don't rely on reasoning traces |
-| L7 | `zai-glm-4.7` reasoning is ON by default — adds tokens to output | Medium | Pass `extra_body={"disable_reasoning": True}` for non-reasoning tasks to save tokens |
-| L8 | `gpt-oss-120b` system role behavior differs from OpenAI | Low | System prompts will be more strictly obeyed — generally positive for agents |
-| L9 | Preview models (`qwen-3-235b`, `zai-glm-4.7`) may change without notice | Medium | Pin model IDs; monitor Cerebras changelog; test after rate limit changes |
-| L10 | Free tier 1M TPD is per-model, not per-account | Low | Diversify across models to maximize total daily capacity |
-
----
-
-## Recommended Agent42 Provider Spec
-
-```python
-# providers/registry.py additions
-
-class ProviderType(str, Enum):
-    # ... existing entries ...
-    CEREBRAS = "cerebras"
-
-PROVIDERS[ProviderType.CEREBRAS] = ProviderSpec(
-    provider_type=ProviderType.CEREBRAS,
-    base_url="https://api.cerebras.ai/v1",
-    api_key_env="CEREBRAS_API_KEY",
-    display_name="Cerebras (World's Fastest Inference)",
-    default_model="gpt-oss-120b",
-    supports_function_calling=True,
-)
-```
-
-## Recommended Agent42 Model Entries
-
-```python
-# providers/registry.py — FREE TIER section additions
-
-# Cerebras direct — independent of OpenRouter, own API key
-"cerebras-gpt-oss": ModelSpec(
-    "gpt-oss-120b",
-    ProviderType.CEREBRAS,
-    max_tokens=8192,
-    display_name="GPT-OSS 120B via Cerebras",
-    tier=ModelTier.FREE,
-    max_context_tokens=65536,   # 65k on free tier
-),
-"cerebras-qwen3-235b": ModelSpec(
-    "qwen-3-235b-a22b-instruct-2507",
-    ProviderType.CEREBRAS,
-    max_tokens=8192,
-    display_name="Qwen3 235B via Cerebras",
-    tier=ModelTier.FREE,
-    max_context_tokens=65536,   # 65k on free tier
-),
-"cerebras-llama-8b": ModelSpec(
-    "llama3.1-8b",
-    ProviderType.CEREBRAS,
-    max_tokens=4096,
-    display_name="Llama 3.1 8B via Cerebras",
-    tier=ModelTier.FREE,
-    max_context_tokens=8192,    # 8k on free tier
-),
-"cerebras-zai-glm47": ModelSpec(
-    "zai-glm-4.7",
-    ProviderType.CEREBRAS,
-    max_tokens=8192,
-    display_name="ZAI GLM 4.7 via Cerebras",
-    tier=ModelTier.FREE,
-    max_context_tokens=65536,   # 64k on free tier (rounded to power of 2)
-),
-```
-
-## Recommended SpendingTracker Pricing Entries
-
-All Cerebras free-tier models are $0. Add pricing for completeness (paid tier):
-
-```python
-# providers/registry.py — SpendingTracker._BUILTIN_PRICES additions
-# Cerebras free tier = $0; these are paid tier prices (safety net if tier changes)
-"gpt-oss-120b": (0.35e-6, 0.75e-6),       # $0.35/M input, $0.75/M output
-"llama3.1-8b": (0.10e-6, 0.10e-6),        # $0.10/M both
-"qwen-3-235b-a22b-instruct-2507": (0.60e-6, 1.20e-6),  # $0.60/M in, $1.20/M out
-"zai-glm-4.7": (2.25e-6, 2.75e-6),        # $2.25/M in, $2.75/M out
-```
-
-The existing `_get_price()` free model detection does NOT cover Cerebras (it checks for `or-free-` prefix or `:free` suffix). Cerebras models will fall through to the conservative $5/$15 estimate. Add explicit $0 entries for free tier to prevent false cost tracking:
-
-```python
-# Add to _BUILTIN_PRICES with $0 for free tier models
-# OR extend _get_price() to also check ProviderType.CEREBRAS
-# Simplest: add a cerebras_free set and return (0.0, 0.0) for it
-```
-
-## FREE_ROUTING Recommendations
-
-Based on rate limits and capabilities:
-
-```python
-# Primary (agent loops) — use gpt-oss-120b: fastest, 30 RPM, 65k context
-# Critic — use cerebras-qwen3-235b or cerebras-zai-glm47 (but watch zai-glm47's 100 RPD)
-
-FREE_ROUTING additions for each TaskType:
-  primary:  "cerebras-gpt-oss"      # 3000 tok/s, best for iterative coding
-  critic:   "cerebras-qwen3-235b"   # 1400 tok/s, 30 RPM, high quality
-  # OR
-  critic:   "cerebras-zai-glm47"    # ONLY if task count is low (100 RPD limit)
+# Optional — only if TTLCache is added:
+# First check if it is already a transitive dep:
+pip show cachetools
+# If not present:
+pip install "cachetools>=7.0.5"
 ```
 
 ---
 
-## Pricing Summary (for reference)
+## Architectural Patterns for This Feature
 
-| Model | Tier | Input ($/M tok) | Output ($/M tok) |
-|-------|------|-----------------|-----------------|
-| `llama3.1-8b` | Free | $0 | $0 |
-| `gpt-oss-120b` | Free | $0 | $0 |
-| `qwen-3-235b-a22b-instruct-2507` | Free | $0 | $0 |
-| `zai-glm-4.7` | Free | $0 | $0 |
-| `llama3.1-8b` | Developer | $0.10 | $0.10 |
-| `gpt-oss-120b` | Developer | $0.35 | $0.75 |
-| `qwen-3-235b-a22b-instruct-2507` | Developer | $0.60 | $1.20 |
-| `zai-glm-4.7` | Developer | $2.25 | $2.75 |
+### Pattern 1: Tier as a Computed Projection, Not Stored State
+
+**What:** Tier is computed on-demand from effectiveness scores, then cached with a TTL
+(5–15 minutes). The canonical data source remains the existing effectiveness store.
+
+**Why:** Avoids a separate "tier store" that can drift from the effectiveness data. The
+tier is a view over performance data, not an independent fact. This also means the
+rewards engine does not need its own database — it reads from what already exists.
+
+```python
+# core/rewards_engine.py
+import time
+from dataclasses import dataclass
+from enum import IntEnum
+
+class RewardTier(IntEnum):
+    BRONZE = 1
+    SILVER = 2
+    GOLD   = 3
+
+@dataclass(frozen=True)
+class TierConfig:
+    silver_threshold: float = 0.70  # success_rate floor for Silver
+    gold_threshold: float   = 0.85  # success_rate floor for Gold
+    min_tasks: int          = 10    # minimum completed tasks to qualify for Silver+
+    cache_ttl_seconds: int  = 300   # how long before tier is recomputed
+
+# In-memory cache: {agent_id: (tier, computed_at)}
+_tier_cache: dict[str, tuple[RewardTier, float]] = {}
+
+async def get_agent_tier(agent_id: str, store, config: TierConfig) -> RewardTier:
+    now = time.monotonic()
+    cached = _tier_cache.get(agent_id)
+    if cached and (now - cached[1]) < config.cache_ttl_seconds:
+        return cached[0]
+    score = await store.get_agent_score(agent_id)
+    tier = _compute_tier(score, config)
+    _tier_cache[agent_id] = (tier, now)
+    return tier
+```
+
+### Pattern 2: Frozen Dataclass Tier Limits
+
+**What:** Each tier has an associated `TierLimits` frozen dataclass specifying resource
+ceilings — max concurrent tasks, model access level, API rate multiplier.
+
+**Why:** Matches the `frozen=True` pattern used throughout Agent42 config and rate
+limiter. Immutable, hashable, passable without defensive copying. Tier limit lookups
+are O(1) dict reads.
+
+```python
+@dataclass(frozen=True)
+class TierLimits:
+    max_concurrent_tasks: int
+    rate_limit_multiplier: float  # Applied to ToolRateLimiter defaults
+    model_tier: str               # fast, general, or reasoning
+
+TIER_LIMITS: dict[RewardTier, TierLimits] = {
+    RewardTier.BRONZE: TierLimits(max_concurrent_tasks=2, rate_limit_multiplier=1.0, model_tier="fast"),
+    RewardTier.SILVER: TierLimits(max_concurrent_tasks=4, rate_limit_multiplier=2.0, model_tier="general"),
+    RewardTier.GOLD:   TierLimits(max_concurrent_tasks=8, rate_limit_multiplier=3.0, model_tier="reasoning"),
+}
+```
+
+### Pattern 3: Semaphore-per-Agent with Swap-on-Promotion
+
+**What:** Each agent holds a semaphore reference sized to its tier's `max_concurrent_tasks`.
+On tier change, the semaphore is replaced with a new one. The swap is guarded by an
+`asyncio.Lock` per agent.
+
+**Why:** `asyncio.Semaphore` cannot be resized after creation. This is the standard
+Python pattern for dynamic concurrency limits.
+
+**Critical rule:** On promotion (Bronze to Silver), swap immediately — more capacity
+is always safe. On demotion (Gold to Bronze), drain in-flight tasks first (wait until
+no tasks hold the semaphore before replacing it) to avoid tasks running at higher
+concurrency than the new tier allows.
+
+### Pattern 4: Opt-In via Settings, Graceful Degradation When Disabled
+
+**What:** Add `rewards_enabled: bool = False` to `Settings` (frozen dataclass in
+`core/config.py`). When False, `get_agent_tier()` returns `RewardTier.BRONZE`
+immediately, and `TierLimits` returns Bronze defaults. Zero behavioral change for
+existing deployments.
+
+**Why:** The PROJECT.md constraint is explicit: `REWARDS_ENABLED=false` default.
+Follows the exact same pattern as `tool_rate_limiting_enabled`, `qdrant_enabled`,
+`l2_enabled`, etc. throughout the existing settings file.
+
+### Pattern 5: Composite Score as Weighted Sum (No ML Library Needed)
+
+**What:** Performance score is a weighted average of 2–4 floats from the effectiveness
+store. Weights are configurable via Settings.
+
+**Why:** The data coming from the effectiveness store (success_rate, quality_score, etc.)
+are already normalized 0–1 floats. A weighted sum requires no external library — scikit-learn
+would be extreme overkill for `score = 0.6 * success_rate + 0.4 * quality_score`.
+
+```python
+def compute_performance_score(
+    success_rate: float,
+    quality_score: float,
+    weight_success: float = 0.6,
+    weight_quality: float = 0.4,
+) -> float:
+    return (weight_success * success_rate) + (weight_quality * quality_score)
+```
 
 ---
 
-## Quality Gate Checklist
+## Alternatives Considered
 
-- [x] API base URL verified: `https://api.cerebras.ai/v1` — confirmed in official docs
-- [x] Model IDs are current: verified against [models/overview](https://inference-docs.cerebras.ai/models/overview) and individual model pages (2026-03-01); deprecated IDs (`qwen-3-32b`, `llama-3.3-70b`) documented
-- [x] Free tier limits documented: 1M TPD, 30 RPM (10 for zai-glm-4.7), 14,400 RPD (100 for zai-glm-4.7)
-- [x] Function calling support confirmed: all 4 active models support `tools=`, `parallel_tool_calls`, strict mode
-- [x] Error handling patterns documented: full HTTP status code table, SDK exception hierarchy, retry recommendations
+| Recommended | Alternative | When to Use Alternative |
+|-------------|-------------|-------------------------|
+| `IntEnum` for tiers | String literals "bronze"/"silver"/"gold" | Never for internal code — strings lose comparability. Strings acceptable only at the API/JSON serialization boundary. |
+| In-memory TTL dict | `cachetools.TTLCache` | Use `cachetools` only if tier cache needs LRU eviction (thousands of agents). For tens to hundreds of agents, a plain dict with monotonic timestamps is simpler with zero deps. |
+| Append to aiosqlite `tier_history` | Separate JSONL audit file | JSONL is fine for human inspection; SQLite is better if you need to query "all agents that were Gold last week". Since aiosqlite is already a dep, prefer it. |
+| `asyncio.Semaphore` per-agent | Token bucket rate limiter library (e.g., `aiometer`) | Use a library only if you need continuous rate (requests-per-second) rather than concurrency (in-flight task count). Tier system needs concurrency caps, not rate caps. |
+| Pure Python weighted average | scikit-learn metrics | scikit-learn is a 300 MB ML library for a 2-float weighted sum. Never appropriate here. |
+| FastAPI endpoints on existing server | Separate microservice | Never. This is an additive feature on Agent42, not a separate service. |
+
+---
+
+## What NOT to Use
+
+| Avoid | Why | Use Instead |
+|-------|-----|-------------|
+| `asyncache` 0.3.1 | Unmaintained since November 2022; requires cachetools <=5.x, incompatible with cachetools 7.x | `cachetools-async` 0.0.5 (June 2025) or a Lock-guarded dict |
+| Redis Streams or Kafka for tier-change events | Enormous operational overhead for an in-process state change; Redis is optional in Agent42 | `asyncio.Queue` or direct WebSocket push via existing heartbeat/WS infrastructure |
+| Celery or task queue for score recomputation | Brings sync worker overhead and hard Redis dependency; Agent42 is async-native | `asyncio.create_task()` scheduled background recompute in the existing event loop |
+| scikit-learn | 300 MB dependency for a weighted average of floats | Pure Python arithmetic |
+| Separate database for tier state | Tier is a derived view of effectiveness data; a separate DB creates drift risk | Compute from existing effectiveness store; cache in-memory; audit log in the existing aiosqlite DB |
+
+---
+
+## Stack Patterns by Variant
+
+**If `REWARDS_ENABLED=false` (default):**
+
+- `get_agent_tier()` returns `RewardTier.BRONZE` immediately, no DB queries, no cache writes
+- All `TierLimits` return Bronze defaults — existing behavior is unchanged
+
+**If `REWARDS_ENABLED=true`, Redis unavailable:**
+
+- Use in-memory TTL dict for tier cache (already the primary approach)
+- No degradation — Redis is not required for this feature
+
+**If agent has fewer than `min_tasks` completions:**
+
+- Return `RewardTier.BRONZE` regardless of score
+- Surface a reason string: "Needs N more task completions to qualify for Silver"
+
+**If admin override is set for an agent:**
+
+- Store override in `.agent42/rewards/overrides.json` (keyed by agent_id), persisted via `aiofiles`
+- `get_agent_tier()` checks overrides first, bypasses score computation entirely
+- Dashboard displays "Admin Override: Gold" with a clear visual indicator
+
+---
+
+## Version Compatibility
+
+| Package | Compatible With | Notes |
+|---------|-----------------|-------|
+| `cachetools>=7.0.5` | Python 3.10+ | Safe with existing stack (Python 3.11+). If added, do NOT also add `asyncache` (incompatible with 7.x). |
+| `aiosqlite>=0.20.0` | Python 3.11+ | Already in requirements.txt. Use `async with aiosqlite.connect()` pattern consistent with existing usage. |
+| `asyncio.Semaphore` | Python 3.11+ stdlib | Cannot be resized — design semaphore lifecycle carefully (see Pattern 3). |
+| `enum.IntEnum` | Python 3.11+ stdlib | Supports `>=` and `<` comparisons directly, which plain `enum.Enum` does not. |
 
 ---
 
 ## Sources
 
-- [Cerebras OpenAI Compatibility](https://inference-docs.cerebras.ai/resources/openai) — HIGH confidence
-- [Cerebras Rate Limits](https://inference-docs.cerebras.ai/support/rate-limits) — HIGH confidence
-- [Cerebras Pricing](https://www.cerebras.ai/pricing) — HIGH confidence
-- [Models Overview](https://inference-docs.cerebras.ai/models/overview) — HIGH confidence
-- [GPT-OSS 120B model page](https://inference-docs.cerebras.ai/models/openai-oss) — HIGH confidence
-- [Qwen 3 235B model page](https://inference-docs.cerebras.ai/models/qwen-3-235b-2507) — HIGH confidence
-- [Llama 3.1 8B model page](https://inference-docs.cerebras.ai/models/llama-31-8b) — HIGH confidence
-- [ZAI GLM 4.7 model page](https://inference-docs.cerebras.ai/models/zai-glm-47) — HIGH confidence
-- [Tool Calling docs](https://inference-docs.cerebras.ai/capabilities/tool-use) — HIGH confidence
-- [Error Codes](https://inference-docs.cerebras.ai/support/error) — HIGH confidence
-- [Cerebras Python SDK README](https://github.com/Cerebras/cerebras-cloud-sdk-python/blob/main/README.md) — HIGH confidence
+- Agent42 codebase — `core/rate_limiter.py` (sliding-window per-agent pattern), `core/config.py` (frozen dataclass settings pattern), `core/agent_manager.py` (AgentConfig dataclass), `requirements.txt` (existing deps) — HIGH confidence
+- [cachetools 7.0.5 on PyPI](https://pypi.org/project/cachetools/) — latest version verified 2026-03-22 — HIGH confidence
+- [asyncache 0.3.1 on PyPI](https://pypi.org/project/asyncache/) — confirmed unmaintained (last release November 2022), incompatible with cachetools 7.x — HIGH confidence
+- [cachetools-async 0.0.5 on PyPI](https://pypi.org/project/cachetools-async/) — confirmed active (released June 2025) — HIGH confidence
+- [Python asyncio.Semaphore docs](https://docs.python.org/3/library/asyncio-sync.html) — fixed-at-creation limit confirmed — HIGH confidence
+- [Python enum.IntEnum docs](https://docs.python.org/3/library/enum.html) — IntEnum for tier comparison operators — HIGH confidence
+- [cachetools TTLCache docs](https://cachetools.readthedocs.io/en/stable/) — TTL eviction semantics — HIGH confidence
+- [asyncio semaphore concurrency pattern](https://rednafi.com/python/limit-concurrency-with-semaphore/) — separate semaphore per scope, cannot resize — MEDIUM confidence (WebSearch, consistent with official docs)
+
+---
+
+*Stack research for: Performance-based rewards/tier system on Agent42 (v1.4 milestone)*
+*Researched: 2026-03-22*
