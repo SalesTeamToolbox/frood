@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed 22-01 (Learnings retrieval API endpoint)
-last_updated: "2026-03-22T19:14:19.225Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 22-02 (Proactive injection hook)
+last_updated: "2026-03-22T19:30:34.404Z"
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 6
-  completed_plans: 5
+  completed_plans: 6
 ---
 
 # Project State
@@ -43,6 +43,7 @@ Plan: 2 of 2
 | 22. Proactive Injection | 0 | — | — |
 | 23. Recommendations Engine | 0 | — | — |
 | Phase 22 P01 | 8 | 1 tasks | 2 files |
+| Phase 22 P02 | 6 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,8 @@ Plan: 2 of 2
 - [Phase 22]: query falls back to task_type string when no user prompt provided — enables semantic relevance without requiring caller to pass query
 - [Phase 22]: top_k * 3 fetched from semantic_search so post-hoc filtering has sufficient candidates
 - [Phase 22]: Token count approximated as whitespace-split word count — consistent with rest of codebase
+- [Phase 22]: app_create multi-word phrases checked first to prevent 'create' keyword matching coding when user meant 'create a flask app'
+- [Phase 22]: Session ID falls back to MD5 hash of project_dir if event has no session_id — stable per project without requiring CC to pass session_id
 
 ### Key Architecture Constraints (from research)
 
@@ -96,6 +99,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-22T19:14:19.221Z
-Stopped at: Completed 22-01 (Learnings retrieval API endpoint)
+Last session: 2026-03-22T19:30:34.400Z
+Stopped at: Completed 22-02 (Proactive injection hook)
 Resume file: None

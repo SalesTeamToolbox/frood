@@ -11,7 +11,7 @@
 
 - [x] **Phase 20: Task Metadata Foundation** - Establish task_id/task_type payload schema and type-aware retrieval
 - [x] **Phase 21: Effectiveness Tracking and Learning Extraction** - Async tool tracking, SQLite store, and post-task learning pipeline
-- [ ] **Phase 22: Proactive Context Injection** - Inject past learnings into new tasks at UserPromptSubmit
+- [x] **Phase 22: Proactive Context Injection** - Inject past learnings into new tasks at UserPromptSubmit (completed 2026-03-22)
 - [ ] **Phase 23: Recommendations Engine** - Surface tool/skill recommendations from aggregated effectiveness data
 
 ---
@@ -52,11 +52,11 @@
   2. A past learning with a semantic similarity score below 0.80 is never injected, even if it matches the task type
   3. Injected context does not exceed 500 tokens, regardless of how many past learnings are available
   4. Past learnings are injected once when the task starts — not re-injected on every subsequent message in the same task
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 - [x] 22-01-PLAN.md — Learnings retrieval API endpoint (GET /api/learnings/retrieve with score gate, quarantine filter, token cap)
-- [ ] 22-02-PLAN.md — Proactive injection UserPromptSubmit hook (keyword task-type inference, session-once guard, formatted stderr output)
+- [x] 22-02-PLAN.md — Proactive injection UserPromptSubmit hook (keyword task-type inference, session-once guard, formatted stderr output)
 
 ### Phase 23: Recommendations Engine
 **Goal**: Agent42 recommends which tools and skills to use based on aggregated effectiveness data from past tasks of the same type
@@ -76,7 +76,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 20. Task Metadata Foundation | 2/2 | Complete    | 2026-03-17 |
 | 21. Effectiveness Tracking and Learning Extraction | 2/2 | Complete    | 2026-03-18 |
-| 22. Proactive Context Injection | 1/2 | In Progress|  |
+| 22. Proactive Context Injection | 2/2 | Complete   | 2026-03-22 |
 | 23. Recommendations Engine | 0/? | Not started | - |
 
 ---
