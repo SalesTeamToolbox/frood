@@ -23,8 +23,8 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Scoring & Tiers
 
 - [ ] **TIER-01**: Composite performance score calculated from existing effectiveness data (success_rate, volume, speed with configurable weights)
-- [ ] **TIER-02**: Automatic tier assignment — Bronze/Silver/Gold based on composite score vs configurable thresholds
-- [ ] **TIER-03**: Provisional tier assigned to new agents below minimum observation threshold (not penalized to Bronze)
+- [x] **TIER-02**: Automatic tier assignment — Bronze/Silver/Gold based on composite score vs configurable thresholds
+- [x] **TIER-03**: Provisional tier assigned to new agents below minimum observation threshold (not penalized to Bronze)
 - [ ] **TIER-04**: Tier cached in memory with TTL — never computed on the routing hot path
 - [ ] **TIER-05**: Tier persisted to file for restart recovery — cache warmed from file on startup
 
@@ -37,9 +37,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Admin Controls
 
-- [ ] **ADMN-01**: Admin can override any agent's tier via dashboard — override stored separately, not clobbered by recalculation
+- [x] **ADMN-01**: Admin can override any agent's tier via dashboard — override stored separately, not clobbered by recalculation
 - [ ] **ADMN-02**: Admin can toggle rewards system on/off via dashboard without server restart
-- [ ] **ADMN-03**: Background recalculation runs on schedule (default every 15 minutes) and skips overridden agents
+- [x] **ADMN-03**: Background recalculation runs on schedule (default every 15 minutes) and skips overridden agents
 
 ### Dashboard
 
@@ -52,7 +52,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Testing
 
 - [ ] **TEST-01**: Unit tests for score calculation logic (composite weights, edge cases, zero data)
-- [ ] **TEST-02**: Unit tests for tier determination (threshold boundaries, provisional tier, override precedence)
+- [x] **TEST-02**: Unit tests for tier determination (threshold boundaries, provisional tier, override precedence)
 - [ ] **TEST-03**: Integration tests for Agent Manager tier enforcement (model routing, rate limits, concurrency)
 - [ ] **TEST-04**: Dashboard API tests including 401 auth verification for all rewards endpoints
 - [x] **TEST-05**: Graceful degradation tests — rewards disabled produces identical behavior to pre-feature baseline
@@ -104,24 +104,24 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DATA-01 | Phase 1 | Complete |
 | DATA-02 | Phase 1 | Complete |
 | TIER-01 | Phase 1 | Pending |
-| TIER-02 | Phase 2 | Pending |
-| TIER-03 | Phase 2 | Pending |
+| TIER-02 | Phase 2 | Complete |
+| TIER-03 | Phase 2 | Complete |
 | TIER-04 | Phase 1 | Pending |
 | TIER-05 | Phase 1 | Pending |
 | RSRC-01 | Phase 3 | Pending |
 | RSRC-02 | Phase 3 | Pending |
 | RSRC-03 | Phase 3 | Pending |
 | RSRC-04 | Phase 3 | Pending |
-| ADMN-01 | Phase 2 | Pending |
+| ADMN-01 | Phase 2 | Complete |
 | ADMN-02 | Phase 4 | Pending |
-| ADMN-03 | Phase 2 | Pending |
+| ADMN-03 | Phase 2 | Complete |
 | DASH-01 | Phase 4 | Pending |
 | DASH-02 | Phase 4 | Pending |
 | DASH-03 | Phase 4 | Pending |
 | DASH-04 | Phase 4 | Pending |
 | DASH-05 | Phase 4 | Pending |
 | TEST-01 | Phase 1 | Pending |
-| TEST-02 | Phase 2 | Pending |
+| TEST-02 | Phase 2 | Complete |
 | TEST-03 | Phase 3 | Pending |
 | TEST-04 | Phase 4 | Pending |
 | TEST-05 | Phase 1 | Complete |

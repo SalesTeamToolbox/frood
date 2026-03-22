@@ -59,7 +59,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 2 plans
 
 - [x] 02-01-PLAN.md — TierDeterminator, AgentConfig tier fields (reward_tier/tier_override/performance_score/tier_computed_at), effective_tier() method, and unit tests (TestTierDeterminator + TestAgentConfigTierFields)
-- [ ] 02-02-PLAN.md — TierRecalcLoop background service, AgentManager moved to agent42.py scope, startup/shutdown wiring, and TestTierRecalcLoop tests
+- [x] 02-02-PLAN.md — TierRecalcLoop background service, AgentManager moved to agent42.py scope, startup/shutdown wiring, and TestTierRecalcLoop tests
 
 ### Phase 3: Resource Enforcement
 

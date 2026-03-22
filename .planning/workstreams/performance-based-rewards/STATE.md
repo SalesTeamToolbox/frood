@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed 02-tier-assignment-01-PLAN.md
-last_updated: "2026-03-22T23:02:24.100Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 02-tier-assignment-02-PLAN.md
+last_updated: "2026-03-22T23:20:10.716Z"
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Project State
@@ -49,6 +49,7 @@ Plan: 2 of 2
 | Phase 01-foundation P01 | 15m | 2 tasks | 5 files |
 | Phase 01-foundation P02 | 11m | 2 tasks | 3 files |
 | Phase 02-tier-assignment P01 | 8 | 2 tasks | 3 files |
+| Phase 02-tier-assignment P02 | 13 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,9 @@ Recent decisions affecting current work:
 - [Phase 01-foundation P02]: RewardSystem._get_fleet_stats() falls back to safe defaults on any failure — score() never crashes when EffectivenessStore is unavailable
 - [Phase 02-tier-assignment]: TierDeterminator uses deferred settings import inside determine() to avoid circular at module load; RewardsConfig imported at module level
 - [Phase 02-tier-assignment]: effective_tier() uses None sentinel (is not None check) per D-03 — empty string is not a no-override signal
+- [Phase 02-tier-assignment]: TierRecalcLoop stop() is synchronous matching HeartbeatService pattern
+- [Phase 02-tier-assignment]: AgentManager instantiated in Agent42.__init__() and shared to create_app() via agent_manager kwarg for TierRecalcLoop access
+- [Phase 02-tier-assignment]: create_app() uses agent_manager or AgentManager() fallback for backward compatibility in headless/test usage
 
 ### Pending Todos
 
@@ -82,6 +86,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T23:02:24.096Z
-Stopped at: Completed 02-tier-assignment-01-PLAN.md
+Last session: 2026-03-22T23:20:10.713Z
+Stopped at: Completed 02-tier-assignment-02-PLAN.md
 Resume file: None
