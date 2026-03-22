@@ -82,35 +82,48 @@ during Claude Code sessions without manual activation.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  User Prompt Submitted                                           │
+│  SessionStart → credential-sync.py (syncs CC creds to VPS)      │
 └──────────────────────┬───────────────────────────────────────────┘
                        │
                        ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  context-loader.py (UserPromptSubmit)                            │
-│  - Detects work type from file paths + keywords                  │
-│  - Loads relevant lessons, patterns, standards from lessons.md   │
-│  - Loads relevant reference docs from .claude/reference/         │
+│  User Prompt Submitted (UserPromptSubmit)                        │
+│  ├─ context-loader.py    — loads lessons + reference docs        │
+│  ├─ memory-recall.py     — surfaces relevant memories from Qdrant│
+│  └─ proactive-inject.py  — injects past learnings for task type  │
 └──────────────────────┬───────────────────────────────────────────┘
                        │
                        ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  Claude Processes Request                                        │
-│  (may use Write/Edit tools)                                      │
-└──────────────┬──────────────────────────┬────────────────────────┘
-               │                          │
-               ▼                          ▼
-┌──────────────────────────┐   ┌───────────────────────────────────┐
-│  security-monitor.py     │   │  (other tool processing)          │
-│  (PostToolUse Write/Edit)│   │                                   │
-│  - Flags security risks  │   │                                   │
-└──────────────────────────┘   └───────────────────────────────────┘
-               │
-               ▼
+│  PreToolUse → security-gate.py (blocks edits to security files)  │
+└──────────────────────┬───────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Claude Processes Request (may use Write/Edit tools)             │
+└──────────────────────┬───────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  PostToolUse (Write/Edit):                                       │
+│  ├─ security-monitor.py  — flags security-sensitive changes      │
+│  ├─ format-on-write.py   — auto-formats Python with ruff         │
+│  └─ cc-memory-sync.py    — embeds CC memory files into Qdrant    │
+│  PostToolUse (all):                                              │
+│  ├─ jcodemunch-token-tracker.py — tracks token savings           │
+│  └─ jcodemunch-reindex.py       — re-indexes after file changes  │
+└──────────────────────┬───────────────────────────────────────────┘
+                       │
+                       ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │  Stop Event Triggers:                                            │
-│  ├─ test-validator.py   — runs pytest, checks test coverage      │
-│  └─ learning-engine.py  — records patterns, updates lessons.md   │
+│  ├─ session-handoff.py       — captures state for auto-resume    │
+│  ├─ test-validator.py        — runs pytest, checks coverage      │
+│  ├─ learning-engine.py       — records patterns, updates lessons │
+│  ├─ memory-learn.py          — captures learnings to memory      │
+│  ├─ effectiveness-learn.py   — structured learning extraction    │
+│  ├─ knowledge-learn.py       — session knowledge to Qdrant       │
+│  └─ jcodemunch-reindex.py    — final re-index                    │
 └──────────────────────────────────────────────────────────────────┘
 ```
 

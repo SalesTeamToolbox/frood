@@ -21,6 +21,7 @@
   <img src="https://img.shields.io/badge/version-3.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/tools-28+-orange" alt="Tools">
   <img src="https://img.shields.io/badge/skills-53-purple" alt="Skills">
+  <img src="https://img.shields.io/badge/hooks-16-green" alt="Hooks">
   <img src="https://img.shields.io/badge/nodes-local%20%2B%20remote-teal" alt="Multi-Node">
   <img src="https://img.shields.io/badge/answer-42-yellow" alt="42">
   <img src="https://img.shields.io/badge/license-BSL--1.1-lightgrey" alt="License">
@@ -72,7 +73,7 @@ Claude Code subscription, Anthropic API key, or alternative providers like
                     ┌────┴─────────┴───────────┴─────┐
                     │       Agent42 Platform          │
                     │ 28+ MCP Tools | 53 Skills | Memory│
-                    │ 200+ API Routes | 8-Layer Security│
+                    │ 125+ API Routes | 8-Layer Security│
                     ├──────────────┬──────────────────┤
                     │ Local Node   │ Remote Node (VPS)│
                     │ (laptop)     │ (SSH transport)  │
@@ -667,26 +668,31 @@ See `docker-compose.yml` and `Dockerfile` for the full configuration.
 
 ## Claude Code Hooks (The Sub-Etha Sense-O-Matic)
 
-Agent42 ships 11 hooks in `.claude/hooks/` that run automatically during Claude Code
+Agent42 ships 16 hooks in `.claude/hooks/` that run automatically during Claude Code
 sessions. They form the nervous system -- memory recall, security enforcement, code
-formatting, and session continuity happen without you lifting a finger.
+formatting, learning, and session continuity happen without you lifting a finger.
 
 | Hook | Trigger | What It Does |
 |------|---------|--------------|
 | `context-loader.py` | UserPromptSubmit | Loads relevant lessons and reference docs based on work type |
 | `memory-recall.py` | UserPromptSubmit | Surfaces relevant memories from Qdrant before Claude thinks |
+| `proactive-inject.py` | UserPromptSubmit | Surfaces past learnings relevant to the detected task type |
 | `security-gate.py` | PreToolUse | Blocks edits to security-sensitive files (requires approval) |
 | `security-monitor.py` | PostToolUse (Write/Edit) | Flags security-sensitive changes for review |
 | `format-on-write.py` | PostToolUse (Write/Edit) | Auto-formats Python files with ruff on every write |
+| `cc-memory-sync.py` | PostToolUse (Write/Edit) | Embeds CC memory files into Qdrant for semantic recall |
 | `jcodemunch-reindex.py` | Stop + PostToolUse | Re-indexes codebase after structural file changes |
 | `jcodemunch-token-tracker.py` | PostToolUse | Tracks token savings from jcodemunch vs full file reads |
 | `session-handoff.py` | Stop | Captures session state for auto-resume continuity |
 | `test-validator.py` | Stop | Validates tests pass, checks test coverage for new modules |
 | `learning-engine.py` | Stop | Records development patterns and vocabulary |
 | `memory-learn.py` | Stop | Captures new learnings into memory system for future recall |
+| `effectiveness-learn.py` | Stop | Extracts structured learnings with LLM for quarantine review |
+| `knowledge-learn.py` | Stop | Extracts session knowledge and upserts to Qdrant |
+| `credential-sync.py` | SessionStart | Syncs CC credentials to remote VPS on session start |
 
-Note: `security_config.py` in the hooks directory is a shared config module used by
-both `security-gate.py` and `security-monitor.py` -- not a hook itself.
+Supporting files (not hooks themselves): `security_config.py` (shared config),
+`cc-memory-sync-worker.py` and `knowledge-learn-worker.py` (background workers).
 
 ## Project Structure (The Total Perspective Vortex)
 
@@ -734,16 +740,21 @@ agent42/
 |   '-- frontend/              # Static frontend assets
 |
 |-- .claude/                   # Claude Code integration
-|   |-- hooks/                 # 11 hooks: memory, security, formatting, learning
+|   |-- hooks/                 # 16 hooks: memory, security, formatting, learning
 |   |   |-- memory-recall.py   # Auto-surfaces relevant memories per prompt
 |   |   |-- memory-learn.py    # Captures learnings at session end
+|   |   |-- proactive-inject.py # Surfaces past learnings for detected task type
 |   |   |-- context-loader.py  # Loads relevant reference docs
 |   |   |-- security-gate.py   # PreToolUse: blocks edits to security files
 |   |   |-- security-monitor.py # PostToolUse: flags security-sensitive changes
 |   |   |-- format-on-write.py # Auto-formats Python files on write
+|   |   |-- cc-memory-sync.py  # Embeds CC memory files into Qdrant
 |   |   |-- session-handoff.py # Captures session state for continuity
 |   |   |-- learning-engine.py # Records development patterns
 |   |   |-- test-validator.py  # Validates tests pass on stop
+|   |   |-- effectiveness-learn.py     # Structured learning extraction
+|   |   |-- knowledge-learn.py         # Session knowledge to Qdrant
+|   |   |-- credential-sync.py         # Syncs CC credentials to VPS
 |   |   |-- jcodemunch-reindex.py      # Re-indexes after structural changes
 |   |   '-- jcodemunch-token-tracker.py # Tracks token savings
 |   |-- settings.json          # Hook configuration
