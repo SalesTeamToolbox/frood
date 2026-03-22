@@ -259,6 +259,124 @@ class TestLearningsRetrieve:
 
 
 # ---------------------------------------------------------------------------
+# _make_app_with_mock_effectiveness_store helper
+# ---------------------------------------------------------------------------
+
+
+def _make_app_with_mock_effectiveness_store(mock_recs: list):
+    """Create a TestClient app where effectiveness_store.get_recommendations returns mock_recs."""
+    ws = WebSocketManager()
+    ag = MagicMock()
+    mock_store = MagicMock()
+    mock_store.get_recommendations = AsyncMock(return_value=mock_recs)
+    with patch("dashboard.server.settings") as mock_settings:
+        mock_settings.get_cors_origins.return_value = []
+        mock_settings.max_websocket_connections = 50
+        mock_settings.recommendations_min_observations = 5
+        app = create_app(ws, ag, effectiveness_store=mock_store)
+    return TestClient(app), mock_store
+
+
+@pytest.mark.skipif(not HAS_TESTCLIENT, reason="fastapi test dependencies not installed")
+class TestRecommendationsRetrieve:
+    """RETR-05, RETR-06: GET /api/recommendations/retrieve endpoint."""
+
+    def setup_method(self):
+        self.mock_recs = [
+            {
+                "tool_name": "shell",
+                "task_type": "coding",
+                "invocations": 10,
+                "success_rate": 0.92,
+                "avg_duration_ms": 45.0,
+            },
+            {
+                "tool_name": "code_intel",
+                "task_type": "coding",
+                "invocations": 8,
+                "success_rate": 0.87,
+                "avg_duration_ms": 120.0,
+            },
+            {
+                "tool_name": "grep",
+                "task_type": "coding",
+                "invocations": 6,
+                "success_rate": 0.85,
+                "avg_duration_ms": 30.0,
+            },
+        ]
+
+    def test_returns_recommendations_json_structure(self):
+        """RETR-05: Endpoint returns {recommendations: [...], task_type: str}."""
+        client, _ = _make_app_with_mock_effectiveness_store(self.mock_recs)
+        resp = client.get("/api/recommendations/retrieve?task_type=coding")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "recommendations" in data
+        assert "task_type" in data
+        assert data["task_type"] == "coding"
+
+    def test_recommendation_fields(self):
+        """Each recommendation has tool_name, success_rate, avg_duration_ms, invocations."""
+        client, _ = _make_app_with_mock_effectiveness_store(self.mock_recs)
+        resp = client.get("/api/recommendations/retrieve?task_type=coding")
+        data = resp.json()
+        assert len(data["recommendations"]) == 3
+        for rec in data["recommendations"]:
+            assert "tool_name" in rec
+            assert "success_rate" in rec
+            assert "avg_duration_ms" in rec
+            assert "invocations" in rec
+
+    def test_empty_task_type_returns_empty(self):
+        """Empty task_type returns empty recommendations."""
+        client, _ = _make_app_with_mock_effectiveness_store(self.mock_recs)
+        resp = client.get("/api/recommendations/retrieve?task_type=")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {"recommendations": [], "task_type": ""}
+
+    def test_graceful_degradation_none_effectiveness_store(self):
+        """When effectiveness_store is None, returns empty recommendations."""
+        ws = WebSocketManager()
+        ag = MagicMock()
+        with patch("dashboard.server.settings") as mock_settings:
+            mock_settings.get_cors_origins.return_value = []
+            mock_settings.max_websocket_connections = 50
+            mock_settings.recommendations_min_observations = 5
+            app = create_app(ws, ag, effectiveness_store=None)
+        client = TestClient(app)
+        resp = client.get("/api/recommendations/retrieve?task_type=coding")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {"recommendations": [], "task_type": "coding"}
+
+    def test_graceful_degradation_store_raises(self):
+        """When get_recommendations raises, returns empty recommendations."""
+        ws = WebSocketManager()
+        ag = MagicMock()
+        mock_store = MagicMock()
+        mock_store.get_recommendations = AsyncMock(side_effect=RuntimeError("DB error"))
+        with patch("dashboard.server.settings") as mock_settings:
+            mock_settings.get_cors_origins.return_value = []
+            mock_settings.max_websocket_connections = 50
+            mock_settings.recommendations_min_observations = 5
+            app = create_app(ws, ag, effectiveness_store=mock_store)
+        client = TestClient(app)
+        resp = client.get("/api/recommendations/retrieve?task_type=coding")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["recommendations"] == []
+
+    def test_min_observations_uses_config_default(self):
+        """min_observations=0 falls back to settings.recommendations_min_observations."""
+        client, mock_store = _make_app_with_mock_effectiveness_store([])
+        client.get("/api/recommendations/retrieve?task_type=coding")
+        call_kwargs = mock_store.get_recommendations.call_args
+        assert call_kwargs.kwargs.get("min_observations") == 5
+
+
+# ---------------------------------------------------------------------------
 # TestProactiveInjectHook — hook logic tests (no server needed)
 # ---------------------------------------------------------------------------
 

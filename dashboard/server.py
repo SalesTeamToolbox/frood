@@ -3192,6 +3192,44 @@ def create_app(
         stats = await effectiveness_store.get_aggregated_stats(tool_name, task_type)
         return {"stats": stats}
 
+    @app.get("/api/recommendations/retrieve")
+    async def retrieve_recommendations(
+        task_type: str = "",
+        top_k: int = 3,
+        min_observations: int = 0,
+    ) -> dict:
+        """Return top-N tool recommendations for a given task_type.
+
+        Uses EffectivenessStore historical success_rate data.
+        Called by proactive-inject.py hook at session start.
+
+        Query parameters:
+          task_type        - Required. Returns empty list when omitted.
+          top_k            - Max results (default 3, RETR-05 cap).
+          min_observations - Override config minimum (0 = use settings default).
+
+        Returns: {"recommendations": [...], "task_type": str}
+        Each item: {tool_name, success_rate, avg_duration_ms, invocations}
+        """
+        if not task_type:
+            return {"recommendations": [], "task_type": ""}
+        try:
+            if not effectiveness_store:
+                return {"recommendations": [], "task_type": task_type}
+            min_obs = (
+                min_observations
+                if min_observations > 0
+                else settings.recommendations_min_observations
+            )
+            recs = await effectiveness_store.get_recommendations(
+                task_type=task_type,
+                min_observations=min_obs,
+                top_k=top_k,
+            )
+            return {"recommendations": recs, "task_type": task_type}
+        except Exception:
+            return {"recommendations": [], "task_type": task_type}
+
     async def _maybe_promote_quarantined(ms, task_type: str, outcome: str, summary: str):
         """Increment observation_count on matching quarantined learnings.
 
