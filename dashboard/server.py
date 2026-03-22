@@ -470,6 +470,7 @@ def create_app(
     github_account_store=None,
     memory_store=None,
     effectiveness_store=None,
+    agent_manager=None,  # passed from agent42.py after Phase 2
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -3784,7 +3785,9 @@ Focus on learnings that would help in future similar sessions."""
     from core.agent_manager import AGENT_TEMPLATES, PROVIDER_MODELS, AgentManager
     from core.agent_runtime import AgentRuntime
 
-    _agent_manager = AgentManager(workspace / ".agent42" / "agents")
+    _agent_manager = agent_manager or AgentManager(workspace / ".agent42" / "agents")
+    # NOTE: agent_manager passed from agent42.py when available (Phase 2+).
+    # Fallback preserves backward compatibility for headless/test usage.
     _agent_runtime = AgentRuntime(workspace)
 
     class AgentCreateRequest(BaseModel):

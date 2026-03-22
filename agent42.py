@@ -31,6 +31,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
 from commands import BackupCommandHandler, CloneCommandHandler, RestoreCommandHandler
+from core.agent_manager import AgentManager
 from core.app_manager import AppManager
 from core.config import settings
 from core.device_auth import DeviceStore
@@ -91,7 +92,12 @@ class Agent42:
         data_dir = Path(__file__).parent / ".agent42"
 
         self.ws_manager = WebSocketManager()
-        self.heartbeat = HeartbeatService()
+
+        _cpu_count = os.cpu_count() or 4
+        _max_agents = (
+            settings.max_concurrent_agents if settings.max_concurrent_agents > 0 else _cpu_count * 4
+        )
+        self.heartbeat = HeartbeatService(configured_max_agents=_max_agents)
         self.cron_scheduler = CronScheduler()
         self.device_store = DeviceStore(data_dir / "devices.json")
         init_device_store(self.device_store)
@@ -137,6 +143,29 @@ class Agent42:
         self.effectiveness_store = EffectivenessStore(data_dir / "effectiveness.db")
         self.tool_registry._effectiveness_store = self.effectiveness_store
 
+        # ── Agent manager (moved here from server.py to enable TierRecalcLoop access) ──
+        agents_dir = data_dir / "agents"
+        self.agent_manager = AgentManager(agents_dir)
+
+        # ── Rewards tier recalculation (optional, gated on REWARDS_ENABLED) ──────
+        self.tier_recalc = None
+        if settings.rewards_enabled:
+            from core.reward_system import RewardSystem, TierRecalcLoop
+
+            data_dir_path = Path(__file__).parent / ".agent42"
+            self.reward_system = RewardSystem(
+                effectiveness_store=self.effectiveness_store,
+                enabled=True,
+                persistence_path=data_dir_path / "tier_assignments.json",
+            )
+            self.tier_recalc = TierRecalcLoop(
+                agent_manager=self.agent_manager,
+                reward_system=self.reward_system,
+                effectiveness_store=self.effectiveness_store,
+            )
+        else:
+            self.reward_system = None
+
         # ── Project manager ──────────────────────────────────────────────
         self.project_manager = ProjectManager(data_dir / "projects", task_queue=None)
 
@@ -179,6 +208,10 @@ class Agent42:
         # Start heartbeat
         await self.heartbeat.start()
 
+        # Start tier recalculation loop (only when rewards enabled)
+        if self.tier_recalc:
+            await self.tier_recalc.start()
+
         tasks_to_run = [
             self.cron_scheduler.start(),
         ]
@@ -204,6 +237,7 @@ class Agent42:
                 memory_store=self.memory_store,
                 effectiveness_store=self.effectiveness_store,
                 app_manager=app_manager,
+                agent_manager=self.agent_manager,
             )
             config = uvicorn.Config(
                 app,
@@ -222,6 +256,8 @@ class Agent42:
         """Graceful shutdown."""
         logger.info("Agent42 shutting down...")
         await self.heartbeat.stop()
+        if self.tier_recalc:
+            self.tier_recalc.stop()
         self.cron_scheduler.stop()
         logger.info("Agent42 stopped")
 
