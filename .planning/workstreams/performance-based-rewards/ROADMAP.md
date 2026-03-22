@@ -38,7 +38,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Plans**: 2 plans
 
-- [ ] 01-01-PLAN.md — Config extension (Settings + RewardsConfig), schema migration (agent_id), get_agent_stats()
+- [x] 01-01-PLAN.md — Config extension (Settings + RewardsConfig), schema migration (agent_id), get_agent_stats()
 - [ ] 01-02-PLAN.md — ScoreCalculator, TierCache with TTL, file persistence, RewardSystem facade
 
 ### Phase 2: Tier Assignment
@@ -109,7 +109,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/2 | Planned | - |
+| 1. Foundation | 1/2 | In Progress|  |
 | 2. Tier Assignment | 0/2 | Not started | - |
 | 3. Resource Enforcement | 0/1 | Not started | - |
 | 4. Dashboard | 0/2 | Not started | - |
