@@ -68,6 +68,12 @@ dummy_test.py
 load_test.py
 load_test_monitor.py
 test_app_task.py
+show_greeting.py
+
+# Scratch review/analysis docs in repo root
+REVIEW-*.md
+SECURITY_REVIEW.md
+plan.md
 
 # Agent-generated app artifacts in repo root
 index.html

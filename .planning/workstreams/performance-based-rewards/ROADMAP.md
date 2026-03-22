@@ -13,7 +13,7 @@ This roadmap delivers a Bronze/Silver/Gold performance tier system for Agent42 a
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation** - Config, schema, scoring core, and tier cache with restart recovery
+- [x] **Phase 1: Foundation** - Config, schema, scoring core, and tier cache with restart recovery
 - [ ] **Phase 2: Tier Assignment** - Tier determination logic, provisional handling, admin overrides, and background recalculation
 - [ ] **Phase 3: Resource Enforcement** - Wire tier into model routing, rate limits, and concurrent task capacity
 - [ ] **Phase 4: Dashboard** - REST API, UI badges, metrics panel, admin controls, and real-time tier events
@@ -38,8 +38,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Plans**: 2 plans
 
-- [ ] 01-01-PLAN.md — Config extension (Settings + RewardsConfig), schema migration (agent_id), get_agent_stats()
-- [ ] 01-02-PLAN.md — ScoreCalculator, TierCache with TTL, file persistence, RewardSystem facade
+- [x] 01-01-PLAN.md — Config extension (Settings + RewardsConfig), schema migration (agent_id), get_agent_stats()
+- [x] 01-02-PLAN.md — ScoreCalculator, TierCache with TTL, file persistence, RewardSystem facade
 
 ### Phase 2: Tier Assignment
 
@@ -107,9 +107,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Execution Order:**
 Phases execute in numeric order: 1 → 2 → 3 → 4
 
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 1. Foundation | 0/2 | Planned | - |
-| 2. Tier Assignment | 0/2 | Not started | - |
-| 3. Resource Enforcement | 0/1 | Not started | - |
-| 4. Dashboard | 0/2 | Not started | - |
+| Phase                   | Plans Complete | Status      | Completed  |
+|-------------------------|----------------|-------------|------------|
+| 1. Foundation           | 2/2            | Complete    | 2026-03-22 |
+| 2. Tier Assignment      | 0/2            | Not started | -          |
+| 3. Resource Enforcement | 0/1            | Not started | -          |
+| 4. Dashboard            | 0/2            | Not started | -          |

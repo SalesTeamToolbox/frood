@@ -9,16 +9,16 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Configuration
 
-- [ ] **CONF-01**: System respects `REWARDS_ENABLED` flag (default `false`) — zero behavioral change when disabled
-- [ ] **CONF-02**: Tier thresholds configurable via environment variables (`REWARDS_SILVER_THRESHOLD`, `REWARDS_GOLD_THRESHOLD`)
-- [ ] **CONF-03**: Per-tier resource limits configurable via environment variables (model tier, rate limit multiplier, max concurrent tasks)
-- [ ] **CONF-04**: Score weights configurable via environment variables (`REWARDS_WEIGHT_SUCCESS`, `REWARDS_WEIGHT_VOLUME`, `REWARDS_WEIGHT_SPEED`)
-- [ ] **CONF-05**: Runtime toggle via mutable `RewardsConfig` file (separate from frozen `Settings`) takes effect without server restart
+- [x] **CONF-01**: System respects `REWARDS_ENABLED` flag (default `false`) — zero behavioral change when disabled
+- [x] **CONF-02**: Tier thresholds configurable via environment variables (`REWARDS_SILVER_THRESHOLD`, `REWARDS_GOLD_THRESHOLD`)
+- [x] **CONF-03**: Per-tier resource limits configurable via environment variables (model tier, rate limit multiplier, max concurrent tasks)
+- [x] **CONF-04**: Score weights configurable via environment variables (`REWARDS_WEIGHT_SUCCESS`, `REWARDS_WEIGHT_VOLUME`, `REWARDS_WEIGHT_SPEED`)
+- [x] **CONF-05**: Runtime toggle via mutable `RewardsConfig` file (separate from frozen `Settings`) takes effect without server restart
 
 ### Schema & Data
 
-- [ ] **DATA-01**: Effectiveness tracking includes `agent_id` for per-agent performance queries
-- [ ] **DATA-02**: `get_agent_stats(agent_id)` method on EffectivenessStore returns success_rate, task_volume, avg_speed per agent
+- [x] **DATA-01**: Effectiveness tracking includes `agent_id` for per-agent performance queries
+- [x] **DATA-02**: `get_agent_stats(agent_id)` method on EffectivenessStore returns success_rate, task_volume, avg_speed per agent
 
 ### Scoring & Tiers
 
@@ -55,7 +55,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **TEST-02**: Unit tests for tier determination (threshold boundaries, provisional tier, override precedence)
 - [ ] **TEST-03**: Integration tests for Agent Manager tier enforcement (model routing, rate limits, concurrency)
 - [ ] **TEST-04**: Dashboard API tests including 401 auth verification for all rewards endpoints
-- [ ] **TEST-05**: Graceful degradation tests — rewards disabled produces identical behavior to pre-feature baseline
+- [x] **TEST-05**: Graceful degradation tests — rewards disabled produces identical behavior to pre-feature baseline
 
 ## v2 Requirements
 
@@ -96,13 +96,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 | ----------- | ----- | ------ |
-| CONF-01 | Phase 1 | Pending |
-| CONF-02 | Phase 1 | Pending |
-| CONF-03 | Phase 1 | Pending |
-| CONF-04 | Phase 1 | Pending |
-| CONF-05 | Phase 1 | Pending |
-| DATA-01 | Phase 1 | Pending |
-| DATA-02 | Phase 1 | Pending |
+| CONF-01 | Phase 1 | Complete |
+| CONF-02 | Phase 1 | Complete |
+| CONF-03 | Phase 1 | Complete |
+| CONF-04 | Phase 1 | Complete |
+| CONF-05 | Phase 1 | Complete |
+| DATA-01 | Phase 1 | Complete |
+| DATA-02 | Phase 1 | Complete |
 | TIER-01 | Phase 1 | Pending |
 | TIER-02 | Phase 2 | Pending |
 | TIER-03 | Phase 2 | Pending |
@@ -124,7 +124,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEST-02 | Phase 2 | Pending |
 | TEST-03 | Phase 3 | Pending |
 | TEST-04 | Phase 4 | Pending |
-| TEST-05 | Phase 1 | Pending |
+| TEST-05 | Phase 1 | Complete |
 
 **Coverage:**
 

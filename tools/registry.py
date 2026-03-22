@@ -127,6 +127,7 @@ class ToolRegistry:
         if self._effectiveness_store:
             try:
                 from core.task_context import get_task_context
+
                 task_id, task_type = get_task_context()
                 asyncio.create_task(
                     self._effectiveness_store.record(
@@ -135,6 +136,7 @@ class ToolRegistry:
                         task_id=task_id or "",
                         success=result.success,
                         duration_ms=duration_ms,
+                        agent_id=agent_id,
                     )
                 )
             except Exception:
