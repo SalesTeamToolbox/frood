@@ -1923,6 +1923,36 @@ def create_app(
     # Built-in CC tool that blocks waiting for human input
     _CC_ASK_QUESTION_TOOL = "AskUserQuestion"
 
+    def _read_gsd_workstream(root_path) -> dict:
+        """Read current GSD workstream name and phase from .planning/ directory."""
+        import re as _re_ws
+
+        result: dict = {"workstream": "", "phase": ""}
+        try:
+            aw_path = Path(root_path) / ".planning" / "active-workstream"
+            if aw_path.is_file():
+                ws_name = aw_path.read_text().strip()
+                if ws_name:
+                    display = ws_name
+                    for prefix in ("agent42-", "a42-"):
+                        if display.startswith(prefix):
+                            display = display[len(prefix) :]
+                            break
+                    if len(display) > 20:
+                        display = display[:17] + "..."
+                    result["workstream"] = display
+                    state_path = (
+                        Path(root_path) / ".planning" / "workstreams" / ws_name / "STATE.md"
+                    )
+                    if state_path.is_file():
+                        content = state_path.read_text()
+                        m = _re_ws.search(r"^Phase:\s*(\d+)", content, _re_ws.MULTILINE)
+                        if m:
+                            result["phase"] = m.group(1)
+        except Exception:
+            pass
+        return result
+
     def _parse_cc_event(event: dict, tool_id_map: dict, session_state: dict) -> list:
         """Translate one CC NDJSON event into WS envelope dicts.
 
@@ -2232,12 +2262,29 @@ def create_app(
         session_state["last_assistant_text"] = ""
         session_state["has_streamed_text"] = False
 
+        # GSD: Read workstream for this session (from saved data or current file)
+        _gsd_info = _read_gsd_workstream(workspace)
+        session_state["gsd_workstream"] = session_data.get("gsd_workstream") or _gsd_info.get(
+            "workstream", ""
+        )
+        session_state["gsd_phase"] = session_data.get("gsd_phase") or _gsd_info.get("phase", "")
+
         # PTY-03: Check for ?warm=true and spawn warm process in background
         warm_requested = websocket.query_params.get("warm", "").lower() in ("true", "1", "yes")
         if warm_requested and _cc_user not in _cc_warm_pool:
             _asyncio.create_task(_cc_spawn_warm(_cc_user, workspace))
 
         try:
+            # Send initial workstream to frontend
+            await websocket.send_json(
+                {
+                    "type": "workstream_update",
+                    "data": {
+                        "workstream": session_state["gsd_workstream"],
+                        "phase": session_state["gsd_phase"],
+                    },
+                }
+            )
             while True:
                 raw_msg = await websocket.receive_text()
                 try:
@@ -2631,6 +2678,24 @@ def create_app(
                         except OSError:
                             pass
 
+                # GSD: Re-read workstream (may have changed during this turn)
+                _gsd_updated = _read_gsd_workstream(workspace)
+                if _gsd_updated.get("workstream"):
+                    session_state["gsd_workstream"] = _gsd_updated["workstream"]
+                    session_state["gsd_phase"] = _gsd_updated.get("phase", "")
+                try:
+                    await websocket.send_json(
+                        {
+                            "type": "workstream_update",
+                            "data": {
+                                "workstream": session_state.get("gsd_workstream", ""),
+                                "phase": session_state.get("gsd_phase", ""),
+                            },
+                        }
+                    )
+                except Exception:
+                    pass  # WS may be closing
+
                 await _save_session(
                     ws_session_id,
                     {
@@ -2641,6 +2706,8 @@ def create_app(
                         "title": session_title,
                         "preview_text": session_state.get("last_assistant_text", "")[:60],
                         "message_count": session_state.get("message_count", 0),
+                        "gsd_workstream": session_state.get("gsd_workstream", ""),
+                        "gsd_phase": session_state.get("gsd_phase", ""),
                     },
                 )
 
