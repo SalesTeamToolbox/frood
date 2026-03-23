@@ -669,6 +669,23 @@ async function loadStorageStatus() {
   } catch { state.storageStatus = null; }
 }
 
+async function loadRewardsStatus() {
+  try {
+    state.rewardsStatus = (await api("/rewards")) || null;
+  } catch { state.rewardsStatus = null; }
+}
+
+async function toggleRewardsSystem(newEnabled) {
+  var label = newEnabled ? "enable" : "disable";
+  if (!confirm("Are you sure you want to " + label + " the rewards system?")) return;
+  try {
+    await api("/rewards/toggle", { method: "POST", body: JSON.stringify({ enabled: newEnabled }) });
+    await loadRewardsStatus();
+    toast("Rewards system " + (newEnabled ? "enabled" : "disabled"), "success");
+    renderSettingsPanel();
+  } catch (e) { toast("Failed to toggle rewards: " + e.message, "error"); }
+}
+
 async function loadTokenStats() {
   try {
     state.tokenStats = (await api("/stats/tokens")) || null;
@@ -2446,8 +2463,48 @@ async function agentShowDetail(id) {
           '</div>' +
           '<div style="margin-top:1rem"><strong>Tools:</strong><div style="margin-top:0.3rem">' + (tools || "None") + '</div></div>' +
           '<div style="margin-top:0.75rem"><strong>Skills:</strong><div style="margin-top:0.3rem">' + (skills || "None") + '</div></div>' +
+          '<div style="margin-top:1.25rem;border-top:1px solid var(--border);padding-top:1rem">' +
+            '<h4 style="margin:0 0 0.75rem;font-size:0.95rem">Performance and Tier</h4>' +
+            '<div id="agent-perf-' + esc(agent.id) + '" style="margin-bottom:0.75rem;color:var(--text-muted);font-size:0.85rem">Loading...</div>' +
+            '<div style="margin-bottom:0.5rem">' +
+              '<label style="display:block;margin-bottom:0.3rem;font-size:0.85rem;font-weight:600">Tier Override</label>' +
+              '<select id="tier-override-' + esc(agent.id) + '" onchange="setTierOverride(\'' + esc(agent.id) + '\')" style="padding:0.4rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:0.85rem">' +
+                '<option value=""' + (agent.tier_override == null ? ' selected' : '') + '>Auto (computed)</option>' +
+                '<option value="bronze"' + (agent.tier_override === 'bronze' ? ' selected' : '') + '>Bronze</option>' +
+                '<option value="silver"' + (agent.tier_override === 'silver' ? ' selected' : '') + '>Silver</option>' +
+                '<option value="gold"' + (agent.tier_override === 'gold' ? ' selected' : '') + '>Gold</option>' +
+                '<option value="provisional"' + (agent.tier_override === 'provisional' ? ' selected' : '') + '>Provisional</option>' +
+              '</select>' +
+            '</div>' +
+            '<div>' +
+              '<label style="display:block;margin-bottom:0.3rem;font-size:0.85rem;font-weight:600">Override expires</label>' +
+              '<input type="date" id="tier-expiry-' + esc(agent.id) + '" value="' + esc(agent.tier_expiry_date || '') + '" style="padding:0.4rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:0.85rem">' +
+            '</div>' +
+          '</div>' +
         '</div>' +
       '</div>';
+    try {
+      var perfRes = await fetch("/api/agents/" + id + "/performance", { headers: { Authorization: "Bearer " + state.token } });
+      if (perfRes.ok) {
+        var perf = await perfRes.json();
+        var perfEl = document.getElementById("agent-perf-" + id);
+        if (perfEl) {
+          perfEl.innerHTML =
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;font-size:0.85rem">' +
+              '<div><strong>Tier:</strong> ' + esc(perf.tier || "none") + '</div>' +
+              '<div><strong>Score:</strong> ' + (typeof perf.performance_score === 'number' ? perf.performance_score.toFixed(3) : 'N/A') + '</div>' +
+              '<div><strong>Tasks:</strong> ' + (perf.task_count || 0) + '</div>' +
+              '<div><strong>Success Rate:</strong> ' + (typeof perf.success_rate === 'number' ? Math.round(perf.success_rate * 100) + '%' : 'N/A') + '</div>' +
+            '</div>';
+        }
+      } else {
+        var perfEl2 = document.getElementById("agent-perf-" + id);
+        if (perfEl2) perfEl2.textContent = "Performance data unavailable.";
+      }
+    } catch (e2) {
+      var perfEl3 = document.getElementById("agent-perf-" + id);
+      if (perfEl3) perfEl3.textContent = "Performance data unavailable.";
+    }
   } catch (e) { toast("Error loading agent", "error"); }
 }
 
@@ -2468,6 +2525,29 @@ async function agentDelete(id) {
   await fetch("/api/agents/" + id, { method: "DELETE", headers: { Authorization: "Bearer " + state.token } });
   toast("Agent deleted", "success");
   renderAgents();
+}
+
+async function setTierOverride(id) {
+  var tierSelect = document.getElementById("tier-override-" + id);
+  var expiryInput = document.getElementById("tier-expiry-" + id);
+  var tier = tierSelect ? tierSelect.value : "";
+  var expiresAt = expiryInput ? expiryInput.value : "";
+  var label = tier || "Auto";
+  if (!confirm("Set tier override to " + label + " for this agent?")) return;
+  try {
+    var res = await fetch("/api/agents/" + id + "/reward-tier", {
+      method: "PATCH",
+      headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
+      body: JSON.stringify({ tier: tier, expires_at: expiresAt || null }),
+    });
+    if (res.ok) {
+      toast("Tier override set to " + label, "success");
+    } else {
+      var errData = await res.json().catch(function() { return {}; });
+      toast("Failed to set tier: " + (errData.detail || res.status), "error");
+    }
+    agentShowDetail(id);
+  } catch (e) { toast("Error: " + e.message, "error"); }
 }
 
 // ---------------------------------------------------------------------------
@@ -6980,6 +7060,7 @@ function renderSettings() {
     { id: "security", label: "Security" },
     { id: "orchestrator", label: "Orchestrator" },
     { id: "storage", label: "Storage & Paths" },
+    { id: "rewards", label: "Rewards" },
   ];
 
   el.innerHTML = `
@@ -7232,6 +7313,36 @@ function renderSettingsPanel() {
       ${settingReadonly("SKILLS_DIRS", "Extra skill directories", "Comma-separated paths. Skills are auto-discovered from these + builtins.")}
       ${_envSaveBtn()}
     `; },
+    rewards: () => {
+      if (!state.rewardsStatus) {
+        loadRewardsStatus().then(renderSettingsPanel);
+        return `<h3>Rewards</h3><p style="color:var(--text-muted)">Loading...</p>`;
+      }
+      const rs = state.rewardsStatus;
+      const enabled = rs.enabled !== false;
+      const tc = rs.tier_counts || {};
+      const tierSummary = (tc.gold || tc.silver || tc.bronze || tc.provisional)
+        ? `<div style="margin-top:1rem;font-size:0.85rem;color:var(--text-secondary)">
+            Tier distribution: Gold ${tc.gold || 0} &bull; Silver ${tc.silver || 0} &bull; Bronze ${tc.bronze || 0} &bull; Provisional ${tc.provisional || 0}
+          </div>`
+        : '';
+      return `
+        <h3>Rewards</h3>
+        <p class="section-desc">Performance-based rewards assign Bronze, Silver, Gold, or Provisional tiers to agents based on task success rates. Higher tiers unlock better models and higher rate limits.</p>
+        <div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <strong style="font-size:0.95rem">Rewards System</strong>
+              <div style="font-size:0.82rem;color:var(--text-muted);margin-top:0.25rem">Currently <strong>${enabled ? "enabled" : "disabled"}</strong>. Tier recalculation runs on schedule.</div>
+            </div>
+            <button class="btn ${enabled ? 'btn-outline' : 'btn-primary'}" onclick="toggleRewardsSystem(${!enabled})">
+              ${enabled ? "Disable Rewards" : "Enable Rewards"}
+            </button>
+          </div>
+          ${tierSummary}
+        </div>
+      `;
+    },
   };
 
   el.innerHTML = (panels[state.settingsTab] || panels.providers)();
@@ -7583,7 +7694,7 @@ function renderRoutingPanel() {
 async function loadAll() {
   await Promise.all([
     loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(),
-    loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(),
+    loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(), loadRewardsStatus(),
     loadChatMessages(), loadTokenStats(), loadChatSessions(), loadCodeSessions(),
     loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(), loadGithubAccounts(), loadOrStatus(),
     loadReports(), loadProfiles(), loadPersona(), loadRoutingModels(), loadRoutingConfig(),
