@@ -307,7 +307,9 @@ class TestRestore:
             tasks = json.load(f)
             assert tasks[0]["id"] == "task1"
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="Unix file permissions not enforced on Windows")
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Unix file permissions not enforced on Windows"
+    )
     def test_restore_preserves_settings_permissions(self):
         path = create_backup(self.source, self.output)
         restore_backup(path, self.restore_dir)

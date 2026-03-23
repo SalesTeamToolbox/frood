@@ -1,22 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- Agent42 Favicon — Geometric bot face, 32x32 -->
-  <rect width="32" height="32" rx="6" fill="#E8A838"/>
+  <!-- Agent42 Favicon — Bold robot face, app-icon style -->
 
-  <!-- Antenna -->
-  <line x1="16" y1="7" x2="16" y2="3.5" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
-  <circle cx="16" cy="2.5" r="2" fill="#fff"/>
+  <!-- Background with rounded corners (app-icon shape) -->
+  <rect width="32" height="32" rx="7" fill="#E8A838"/>
 
-  <!-- Robot head -->
-  <rect x="6" y="7" width="20" height="19" rx="5" fill="#fff" fill-opacity="0.15"/>
+  <!-- Subtle inner glow / depth -->
+  <rect x="1" y="1" width="30" height="30" rx="6" fill="none" stroke="#D4922A" stroke-width="0.5" opacity="0.5"/>
 
-  <!-- Happy arc eyes -->
-  <path d="M10 14 Q12.5 11 15 14" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
-  <path d="M17 14 Q19.5 11 22 14" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- Robot head — more visible -->
+  <rect x="5.5" y="7" width="21" height="20" rx="5" fill="#fff" fill-opacity="0.25"/>
 
-  <!-- Smile -->
-  <path d="M10 21 Q16 26 22 21" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- Antenna stem -->
+  <line x1="16" y1="7" x2="16" y2="3" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+  <!-- Antenna ball -->
+  <circle cx="16" cy="2.5" r="2.2" fill="#fff"/>
 
-  <!-- Ear sensors -->
-  <rect x="3" y="13" width="3" height="6" rx="1.5" fill="#fff" fill-opacity="0.4"/>
-  <rect x="26" y="13" width="3" height="6" rx="1.5" fill="#fff" fill-opacity="0.4"/>
+  <!-- Eyes — bold filled arcs for visibility at small sizes -->
+  <path d="M9.5 15 Q12.5 10.5 15.5 15" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M16.5 15 Q19.5 10.5 22.5 15" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
+
+  <!-- Smile — wider and bolder -->
+  <path d="M9.5 21 Q16 27 22.5 21" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
+
+  <!-- Ear sensors — more prominent -->
+  <rect x="2" y="13" width="3.5" height="7" rx="1.75" fill="#fff" fill-opacity="0.5"/>
+  <rect x="26.5" y="13" width="3.5" height="7" rx="1.75" fill="#fff" fill-opacity="0.5"/>
 </svg>

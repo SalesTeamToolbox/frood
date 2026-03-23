@@ -110,7 +110,9 @@ class TestGitHubAccountStore:
         # label should fall back to account id (non-empty)
         assert result["label"]
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="Unix file permissions not enforced on Windows")
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Unix file permissions not enforced on Windows"
+    )
     def test_file_permissions_restrictive(self, tmp_path):
         import stat
 

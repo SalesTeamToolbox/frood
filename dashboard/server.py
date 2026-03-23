@@ -471,6 +471,7 @@ def create_app(
     memory_store=None,
     effectiveness_store=None,
     agent_manager=None,  # passed from agent42.py after Phase 2
+    reward_system=None,  # passed from agent42.py when REWARDS_ENABLED=true
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -2964,6 +2965,228 @@ def create_app(
         async with _chat_aiofiles.open(path, "w") as fh:
             await fh.write(_chat_json.dumps(messages, indent=2))
 
+    async def _chat_via_cc(prompt: str) -> str | None:
+        """Try Claude Code subprocess (uses CC subscription). Returns None if unavailable.
+
+        Security: claude binary path is resolved via shutil.which (no user input in args).
+        The prompt is passed as a positional arg to create_subprocess_exec (not shell).
+        """
+        import shutil as _shutil_cc
+
+        claude_bin = _shutil_cc.which("claude")
+        if not claude_bin:
+            return None
+
+        try:
+            # create_subprocess_exec — no shell injection risk (args are not shell-interpreted)
+            proc = await _asyncio.create_subprocess_exec(
+                claude_bin,
+                "-p",
+                prompt,
+                "--output-format",
+                "stream-json",
+                stdout=_asyncio.subprocess.PIPE,
+                stderr=_asyncio.subprocess.PIPE,
+                cwd=str(workspace),
+            )
+            stdout, stderr = await _asyncio.wait_for(proc.communicate(), timeout=120.0)
+            if proc.returncode == 0 and stdout:
+                raw = stdout.decode("utf-8", errors="replace")
+                # NDJSON stream: one JSON object per line. Extract "result" event.
+                for line in raw.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = _json.loads(line)
+                        if isinstance(event, dict) and event.get("type") == "result":
+                            result_text = event.get("result", "")
+                            if result_text:
+                                return result_text
+                    except _json.JSONDecodeError:
+                        continue
+                # Fallback: return raw if no result event found
+                if raw.strip():
+                    return raw.strip()
+            logger.warning(
+                "CC chat failed (rc=%s): %s",
+                proc.returncode,
+                stderr.decode()[:200] if stderr else "",
+            )
+        except TimeoutError:
+            logger.warning("CC chat timed out (120s)")
+        except Exception as e:
+            logger.warning("CC chat error: %s", e)
+        return None
+
+    async def _chat_complete(system_prompt: str, messages: list[dict]) -> str:
+        """Try CC subscription first, then API providers: Anthropic -> Gemini -> OpenRouter -> OpenAI."""
+
+        # 1. Try Claude Code subscription (primary)
+        context_parts = []
+        if system_prompt:
+            context_parts.append(system_prompt)
+        for m in messages[-10:]:
+            role = "Human" if m["role"] == "user" else "Assistant"
+            context_parts.append(f"{role}: {m['content']}")
+        cc_prompt = "\n\n".join(context_parts)
+
+        cc_result = await _chat_via_cc(cc_prompt)
+        if cc_result:
+            return cc_result
+
+        logger.info("CC subscription unavailable, trying API providers...")
+
+        # 2. Fall back to API providers
+        chat_model = _os.environ.get("CHAT_MODEL", "")
+        providers = []
+
+        anthropic_key = _os.environ.get("ANTHROPIC_API_KEY", "")
+        if anthropic_key:
+            providers.append(("anthropic", anthropic_key))
+
+        synthetic_key = _os.environ.get("SYNTHETIC_API_KEY", "")
+        if synthetic_key:
+            providers.append(("synthetic", synthetic_key))
+
+        gemini_key = _os.environ.get("GEMINI_API_KEY", "") or _os.environ.get("GOOGLE_API_KEY", "")
+        if gemini_key:
+            providers.append(("gemini", gemini_key))
+
+        or_key = _os.environ.get("OPENROUTER_API_KEY", "")
+        if or_key:
+            providers.append(("openrouter", or_key))
+
+        openai_key = _os.environ.get("OPENAI_API_KEY", "")
+        if openai_key:
+            providers.append(("openai", openai_key))
+
+        if not providers:
+            return (
+                "Claude Code is not available and no API keys are configured. "
+                "Install Claude Code (`npm install -g @anthropic-ai/claude-code`) or "
+                "set an API key in Dashboard Settings."
+            )
+
+        last_error = ""
+        for provider_name, api_key in providers:
+            try:
+                if provider_name == "anthropic":
+                    base = _os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+                    model = chat_model or "claude-sonnet-4-5-20250514"
+                    headers = {
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    }
+                    body = {
+                        "model": model,
+                        "max_tokens": 4096,
+                        "system": system_prompt,
+                        "messages": messages,
+                    }
+                    async with _httpx.AsyncClient(timeout=120.0) as client:
+                        resp = await client.post(
+                            base.rstrip("/") + "/v1/messages",
+                            headers=headers,
+                            json=body,
+                        )
+                        if resp.status_code == 200:
+                            text = ""
+                            for block in resp.json().get("content", []):
+                                if block.get("type") == "text":
+                                    text += block.get("text", "")
+                            return text
+                        last_error = f"Anthropic {resp.status_code}: {resp.text[:200]}"
+
+                elif provider_name == "synthetic":
+                    # Synthetic.new — Anthropic-compatible API
+                    base = "https://api.synthetic.new"
+                    model = chat_model or "claude-sonnet-4-5-20250514"
+                    headers = {
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    }
+                    body = {
+                        "model": model,
+                        "max_tokens": 4096,
+                        "system": system_prompt,
+                        "messages": messages,
+                    }
+                    async with _httpx.AsyncClient(timeout=120.0) as client:
+                        resp = await client.post(
+                            base.rstrip("/") + "/v1/messages",
+                            headers=headers,
+                            json=body,
+                        )
+                        if resp.status_code == 200:
+                            text = ""
+                            for block in resp.json().get("content", []):
+                                if block.get("type") == "text":
+                                    text += block.get("text", "")
+                            return text
+                        last_error = f"Synthetic {resp.status_code}: {resp.text[:200]}"
+
+                elif provider_name == "gemini":
+                    model = chat_model or "gemini-2.0-flash"
+                    gemini_msgs = [
+                        {
+                            "role": m["role"] if m["role"] != "assistant" else "model",
+                            "parts": [{"text": m["content"]}],
+                        }
+                        for m in messages
+                    ]
+                    body = {
+                        "system_instruction": {"parts": [{"text": system_prompt}]},
+                        "contents": gemini_msgs,
+                        "generationConfig": {"maxOutputTokens": 4096},
+                    }
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                    async with _httpx.AsyncClient(timeout=120.0) as client:
+                        resp = await client.post(url, json=body)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            candidates = data.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                return "".join(p.get("text", "") for p in parts)
+                            return "(Empty response from Gemini)"
+                        last_error = f"Gemini {resp.status_code}: {resp.text[:200]}"
+
+                elif provider_name in ("openrouter", "openai"):
+                    if provider_name == "openrouter":
+                        base = "https://openrouter.ai/api"
+                        model = chat_model or "google/gemini-2.0-flash-exp:free"
+                    else:
+                        base = _os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
+                        model = chat_model or "gpt-4o-mini"
+                    oai_msgs = [{"role": "system", "content": system_prompt}] + messages
+                    headers = {
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    }
+                    body = {"model": model, "messages": oai_msgs, "max_tokens": 4096}
+                    async with _httpx.AsyncClient(timeout=120.0) as client:
+                        resp = await client.post(
+                            base.rstrip("/") + "/v1/chat/completions",
+                            headers=headers,
+                            json=body,
+                        )
+                        if resp.status_code == 200:
+                            choices = resp.json().get("choices", [])
+                            if choices:
+                                return choices[0].get("message", {}).get("content", "")
+                            return "(Empty response)"
+                        last_error = f"{provider_name} {resp.status_code}: {resp.text[:200]}"
+
+            except _httpx.TimeoutException:
+                last_error = f"{provider_name} timed out"
+            except Exception as e:
+                last_error = f"{provider_name} error: {e}"
+
+        return f"All providers failed. Last error: {last_error}"
+
     @app.get("/api/chat/messages")
     async def chat_messages_legacy(_user: str = Depends(get_current_user)):
         """Get messages for legacy (no-session) chat mode."""
@@ -3003,6 +3226,7 @@ def create_app(
 
     class SendMessageRequest(BaseModel):
         message: str
+        file_context: str = ""
 
     @app.post("/api/chat/sessions/{session_id}/send")
     async def chat_session_send(
@@ -3043,53 +3267,20 @@ def create_app(
         for m in messages[-20:]:
             ai_messages.append({"role": m["role"], "content": m["content"]})
 
-        # Get AI response
-        api_key = _os.environ.get("ANTHROPIC_API_KEY", "")
-        provider_url = _os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-        model = _os.environ.get("CHAT_MODEL", "claude-sonnet-4-5-20250514")
+        # Build system prompt
+        system_parts = [
+            "You are Agent42, an AI assistant. Be helpful, concise, and accurate.",
+            "You can help with coding, debugging, project management, and general questions.",
+        ]
+        persona = _load_persona() if callable(_load_persona) else ""
+        if persona:
+            system_parts.insert(0, persona)
+        if req.file_context:
+            system_parts.append(f"\nCurrently open file:\n```\n{req.file_context[:3000]}\n```")
+        system_prompt = "\n".join(system_parts)
 
-        response_text = ""
-        if not api_key:
-            response_text = (
-                "No API key configured. Set `ANTHROPIC_API_KEY` in your `.env` file "
-                "or configure it in Dashboard Settings to enable AI chat."
-            )
-        else:
-            # Build system prompt
-            system_parts = [
-                "You are Agent42, an AI assistant. Be helpful, concise, and accurate.",
-                "You can help with coding, debugging, project management, and general questions.",
-            ]
-            persona = _load_persona() if callable(_load_persona) else ""
-            if persona:
-                system_parts.insert(0, persona)
-
-            headers = {
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            }
-            body = {
-                "model": model,
-                "max_tokens": 4096,
-                "system": "\n".join(system_parts),
-                "messages": ai_messages,
-            }
-            try:
-                async with _httpx.AsyncClient(timeout=120.0) as client:
-                    url = provider_url.rstrip("/") + "/v1/messages"
-                    resp = await client.post(url, headers=headers, json=body)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        for block in data.get("content", []):
-                            if block.get("type") == "text":
-                                response_text += block.get("text", "")
-                    else:
-                        response_text = f"AI provider error ({resp.status_code}): {resp.text[:200]}"
-            except _httpx.TimeoutException:
-                response_text = "AI provider timed out. Please try again."
-            except Exception as e:
-                response_text = f"Chat error: {e}"
+        # Get AI response — try providers in priority order
+        response_text = await _chat_complete(system_prompt, ai_messages)
 
         # Save assistant message
         assistant_msg = {
@@ -3788,6 +3979,7 @@ Focus on learnings that would help in future similar sessions."""
     _agent_manager = agent_manager or AgentManager(workspace / ".agent42" / "agents")
     # NOTE: agent_manager passed from agent42.py when available (Phase 2+).
     # Fallback preserves backward compatibility for headless/test usage.
+    _effectiveness_store = effectiveness_store  # may be None in tests/headless usage
     _agent_runtime = AgentRuntime(workspace)
 
     class AgentCreateRequest(BaseModel):
@@ -3865,12 +4057,30 @@ Focus on learnings that would help in future similar sessions."""
         agent = _agent_manager.get(agent_id)
         if not agent:
             raise HTTPException(404, f"Agent not found: {agent_id}")
+
+        # Acquire concurrency semaphore for this agent's tier (RSRC-03).
+        # Returns None when rewards disabled or tier is empty/provisional — no cap (D-09).
+        tier = agent.effective_tier()
+        sem = _agent_manager._get_tier_semaphore(tier)
+        if sem is not None:
+            try:
+                await asyncio.wait_for(sem.acquire(), timeout=0.0)
+            except TimeoutError:
+                raise HTTPException(
+                    503,
+                    f"Tier '{tier}' concurrent task limit reached. Try again later.",
+                )
+
         # Launch the agent process
         result = await _agent_runtime.start_agent(agent.to_dict())
         if not result:
+            if sem is not None:
+                sem.release()
             raise HTTPException(500, "Failed to start agent — is Claude Code CLI installed?")
         _agent_manager.set_status(agent_id, "active")
         _agent_manager.record_run(agent_id)
+        if sem is not None:
+            sem.release()
         return {**agent.to_dict(), "pid": result.pid, "status": "active"}
 
     @app.post("/api/agents/{agent_id}/stop")
@@ -3900,6 +4110,111 @@ Focus on learnings that would help in future similar sessions."""
     async def list_running_agents(_user: str = Depends(get_current_user)):
         """List all currently running agent processes."""
         return _agent_runtime.list_running()
+
+    # -- Rewards API (Phase 4) — only when agent_manager + reward_system present --
+
+    if agent_manager and reward_system:
+
+        class RewardsToggleRequest(BaseModel):
+            enabled: bool
+
+        class TierOverrideRequest(BaseModel):
+            tier: str
+            expires_at: str | None = None
+
+        @app.get("/api/rewards")
+        async def get_rewards_status(_user: str = Depends(get_current_user)):
+            """Return rewards system status including enabled flag, config, and tier counts."""
+            from core.rewards_config import RewardsConfig
+
+            cfg = RewardsConfig.load()
+            agents = _agent_manager.list_all()
+            tier_counts = {"bronze": 0, "silver": 0, "gold": 0, "provisional": 0}
+            for a in agents:
+                t = (a.effective_tier() or "provisional").lower()
+                if t in tier_counts:
+                    tier_counts[t] += 1
+            return {
+                "enabled": cfg.enabled,
+                "startup_enabled": settings.rewards_enabled,
+                "config": {
+                    "silver_threshold": cfg.silver_threshold,
+                    "gold_threshold": cfg.gold_threshold,
+                },
+                "tier_counts": tier_counts,
+            }
+
+        @app.post("/api/rewards/toggle")
+        async def toggle_rewards(
+            req: RewardsToggleRequest,
+            _admin: AuthContext = Depends(require_admin),
+        ):
+            """Enable or disable the rewards system at runtime without a server restart."""
+            from core.rewards_config import RewardsConfig
+
+            cfg = RewardsConfig.load()
+            updated = RewardsConfig(
+                enabled=req.enabled,
+                silver_threshold=cfg.silver_threshold,
+                gold_threshold=cfg.gold_threshold,
+            )
+            updated.save()
+            return {"enabled": req.enabled}
+
+        @app.get("/api/agents/{agent_id}/performance")
+        async def agent_performance(agent_id: str, _user: str = Depends(get_current_user)):
+            """Return performance metrics for a specific agent."""
+            agent = _agent_manager.get(agent_id)
+            if not agent:
+                raise HTTPException(status_code=404, detail="Agent not found")
+            stats = (
+                await _effectiveness_store.get_agent_stats(agent_id)
+                if _effectiveness_store
+                else None
+            )
+            return {
+                "agent_id": agent_id,
+                "tier": agent.effective_tier(),
+                "performance_score": agent.performance_score or 0.0,
+                "task_count": stats["task_volume"] if stats else 0,
+                "success_rate": stats["success_rate"] if stats else 0.0,
+            }
+
+        @app.patch("/api/agents/{agent_id}/reward-tier")
+        async def set_reward_tier(
+            agent_id: str,
+            req: TierOverrideRequest,
+            _admin: AuthContext = Depends(require_admin),
+        ):
+            """Set a tier override for a specific agent (admin only)."""
+            valid_tiers = {"bronze", "silver", "gold", "provisional", ""}
+            if req.tier.lower() not in valid_tiers:
+                raise HTTPException(status_code=422, detail=f"Invalid tier: {req.tier}")
+            override = req.tier if req.tier else None
+            agent = _agent_manager.update(agent_id, tier_override=override)
+            if not agent:
+                raise HTTPException(status_code=404, detail="Agent not found")
+            await ws_manager.broadcast(
+                "tier_update",
+                {
+                    "agents": [
+                        {
+                            "agent_id": agent_id,
+                            "tier": agent.effective_tier(),
+                            "score": agent.performance_score or 0.0,
+                        }
+                    ]
+                },
+            )
+            return {"agent_id": agent_id, "tier_override": override}
+
+        @app.post("/api/admin/rewards/recalculate-all", status_code=202)
+        async def recalculate_all(_admin: AuthContext = Depends(require_admin)):
+            """Trigger an immediate tier recalculation for all agents (admin only)."""
+            import asyncio
+
+            asyncio.create_task(reward_system._run_recalculation())
+            return {"status": "queued"}
 
     # -- Approvals -------------------------------------------------------------
 

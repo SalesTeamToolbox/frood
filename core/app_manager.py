@@ -769,9 +769,7 @@ class AppManager:
                 env=auth_env,
             )
             try:
-                stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(), timeout=60.0
-                )
+                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=60.0)
             except TimeoutError:
                 proc.kill()
                 await proc.wait()
@@ -1215,14 +1213,10 @@ class AppManager:
                 for member in zf.namelist():
                     member_path = Path(member)
                     if member_path.is_absolute() or ".." in member_path.parts:
-                        raise ValueError(
-                            f"Zip slip detected: '{member}' escapes target directory"
-                        )
+                        raise ValueError(f"Zip slip detected: '{member}' escapes target directory")
                     resolved = (temp_dir / member).resolve()
                     if not str(resolved).startswith(str(temp_dir.resolve())):
-                        raise ValueError(
-                            f"Zip slip detected: '{member}' resolves outside target"
-                        )
+                        raise ValueError(f"Zip slip detected: '{member}' resolves outside target")
                 zf.extractall(str(temp_dir))
 
             # Read manifest

@@ -55,9 +55,7 @@ def discover_endpoints() -> list[Endpoint]:
         return []
 
     endpoints = []
-    pattern = re.compile(
-        r'@app\.(get|post|put|patch|delete)\(\s*["\']([^"\']+)["\']'
-    )
+    pattern = re.compile(r'@app\.(get|post|put|patch|delete)\(\s*["\']([^"\']+)["\']')
     no_auth_paths = {"/health", "/api/login", "/api/setup/status", "/api/setup/complete"}
 
     with open(server_py, encoding="utf-8") as f:
@@ -65,12 +63,14 @@ def discover_endpoints() -> list[Endpoint]:
             m = pattern.search(line)
             if m:
                 method, path = m.group(1).upper(), m.group(2)
-                endpoints.append(Endpoint(
-                    method=method,
-                    path=path,
-                    auth_required=path not in no_auth_paths,
-                    line_number=lineno,
-                ))
+                endpoints.append(
+                    Endpoint(
+                        method=method,
+                        path=path,
+                        auth_required=path not in no_auth_paths,
+                        line_number=lineno,
+                    )
+                )
     return endpoints
 
 
@@ -89,11 +89,13 @@ def discover_tools() -> list[ToolInfo]:
             tree = ast.parse(source)
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef) and node.name.endswith("Tool"):
-                    tools.append(ToolInfo(
-                        name=py_file.stem,
-                        file=str(py_file.relative_to(AGENT42_ROOT)),
-                        class_name=node.name,
-                    ))
+                    tools.append(
+                        ToolInfo(
+                            name=py_file.stem,
+                            file=str(py_file.relative_to(AGENT42_ROOT)),
+                            class_name=node.name,
+                        )
+                    )
         except (SyntaxError, UnicodeDecodeError):
             tools.append(ToolInfo(name=py_file.stem, file=str(py_file.relative_to(AGENT42_ROOT))))
     return tools
@@ -116,7 +118,7 @@ def discover_task_types() -> list[str]:
                 stripped = line.strip()
                 if not stripped or stripped.startswith("class ") or stripped.startswith("def "):
                     break
-                m = re.match(r'(\w+)\s*=', stripped)
+                m = re.match(r"(\w+)\s*=", stripped)
                 if m:
                     types.append(m.group(1))
     return types
@@ -149,11 +151,11 @@ def discover_frontend_views() -> list[str]:
     views = []
     content = app_js.read_text(encoding="utf-8", errors="replace")
     # Match patterns like showView('tasks'), renderXxxView, data-view="xxx"
-    for m in re.finditer(r'''showView\s*\(\s*['"](\w+)['"]''', content):
+    for m in re.finditer(r"""showView\s*\(\s*['"](\w+)['"]""", content):
         views.append(m.group(1))
-    for m in re.finditer(r'''data-view\s*=\s*['"](\w+)['"]''', content):
+    for m in re.finditer(r"""data-view\s*=\s*['"](\w+)['"]""", content):
         views.append(m.group(1))
-    for m in re.finditer(r'''render(\w+)View''', content):
+    for m in re.finditer(r"""render(\w+)View""", content):
         views.append(m.group(1).lower())
     return list(dict.fromkeys(views))
 

@@ -99,7 +99,9 @@ class NodeSyncTool(Tool):
     async def _run_ssh(self, host, command, timeout=15):
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ssh", host, command,
+                "ssh",
+                host,
+                command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -144,8 +146,7 @@ class NodeSyncTool(Tool):
 
         lines.append(f"\n### Remote Node ({host})")
         rc, stdout, stderr = await self._run_ssh(
-            host,
-            f"ls -la {REMOTE_MEMORY_DIR}/MEMORY.md {REMOTE_MEMORY_DIR}/HISTORY.md 2>/dev/null"
+            host, f"ls -la {REMOTE_MEMORY_DIR}/MEMORY.md {REMOTE_MEMORY_DIR}/HISTORY.md 2>/dev/null"
         )
         if rc == 0 and stdout.strip():
             for line in stdout.strip().split("\n"):
@@ -219,7 +220,7 @@ class NodeSyncTool(Tool):
 
         rc, stdout, _ = await self._run_ssh(
             host,
-            f"stat -c '%Y %s' {REMOTE_MEMORY_DIR}/MEMORY.md {REMOTE_MEMORY_DIR}/HISTORY.md 2>/dev/null"
+            f"stat -c '%Y %s' {REMOTE_MEMORY_DIR}/MEMORY.md {REMOTE_MEMORY_DIR}/HISTORY.md 2>/dev/null",
         )
         if rc != 0:
             return ToolResult(output="", error="Cannot reach remote node", success=False)
@@ -235,26 +236,34 @@ class NodeSyncTool(Tool):
 
             if local_mtime > remote_mtime:
                 if not dry_run:
-                    await self._run_rsync(str(local_memory), f"{host}:{REMOTE_MEMORY_DIR}/MEMORY.md")
-                results.append(f"  - MEMORY.md: local is newer -> {'would push' if dry_run else 'pushed'}")
+                    await self._run_rsync(
+                        str(local_memory), f"{host}:{REMOTE_MEMORY_DIR}/MEMORY.md"
+                    )
+                results.append(
+                    f"  - MEMORY.md: local is newer -> {'would push' if dry_run else 'pushed'}"
+                )
             elif remote_mtime > local_mtime:
                 if not dry_run:
-                    await self._run_rsync(f"{host}:{REMOTE_MEMORY_DIR}/MEMORY.md", str(local_memory))
-                results.append(f"  - MEMORY.md: remote is newer -> {'would pull' if dry_run else 'pulled'}")
+                    await self._run_rsync(
+                        f"{host}:{REMOTE_MEMORY_DIR}/MEMORY.md", str(local_memory)
+                    )
+                results.append(
+                    f"  - MEMORY.md: remote is newer -> {'would pull' if dry_run else 'pulled'}"
+                )
             else:
                 results.append("  - MEMORY.md: in sync")
 
         # HISTORY.md: append-merge unique entries
         local_history = local_dir / "HISTORY.md"
         if local_history.exists():
-            rc, remote_content, _ = await self._run_ssh(
-                host, f"cat {REMOTE_MEMORY_DIR}/HISTORY.md"
-            )
+            rc, remote_content, _ = await self._run_ssh(host, f"cat {REMOTE_MEMORY_DIR}/HISTORY.md")
             if rc == 0 and remote_content.strip():
                 local_content = local_history.read_text(encoding="utf-8")
 
                 local_entries = set(e.strip() for e in local_content.split("\n---\n") if e.strip())
-                remote_entries = set(e.strip() for e in remote_content.split("\n---\n") if e.strip())
+                remote_entries = set(
+                    e.strip() for e in remote_content.split("\n---\n") if e.strip()
+                )
 
                 new_from_remote = remote_entries - local_entries
                 new_from_local = local_entries - remote_entries
@@ -265,7 +274,9 @@ class NodeSyncTool(Tool):
 
                     if not dry_run:
                         local_history.write_text(merged_content, encoding="utf-8")
-                        await self._run_rsync(str(local_history), f"{host}:{REMOTE_MEMORY_DIR}/HISTORY.md")
+                        await self._run_rsync(
+                            str(local_history), f"{host}:{REMOTE_MEMORY_DIR}/HISTORY.md"
+                        )
 
                     results.append(
                         f"  - HISTORY.md: merged ({len(new_from_remote)} from remote, "

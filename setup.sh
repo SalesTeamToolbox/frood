@@ -79,18 +79,55 @@ if [ "$1" = "create-shortcut" ]; then
             fi
 
             info "Using browser: $BROWSER_NAME"
-            ICON_PATH="$(cygpath -w "$PROJECT_DIR/dashboard/frontend/dist/assets/icons/icon-512.png" 2>/dev/null || echo "$PROJECT_DIR\\dashboard\\frontend\\dist\\assets\\icons\\icon-512.png")"
+
+            # Generate .ico if missing (Windows shortcuts require .ico, not .png)
+            ICO_FILE="$PROJECT_DIR/dashboard/frontend/dist/assets/icons/agent42.ico"
+            if [ ! -f "$ICO_FILE" ]; then
+                info "Generating .ico icon file..."
+                python3 "$PROJECT_DIR/scripts/generate-icons.py" --ico-only 2>/dev/null || \
+                python3 -c "
+from PIL import Image
+import struct, io
+src = Image.open('$PROJECT_DIR/dashboard/frontend/dist/assets/icons/icon-512.png').convert('RGBA')
+sizes = [16, 32, 48, 64, 128, 256]
+entries = []
+for s in sizes:
+    buf = io.BytesIO()
+    src.resize((s, s), Image.LANCZOS).save(buf, format='PNG')
+    entries.append((s, buf.getvalue()))
+header = struct.pack('<HHH', 0, 1, len(entries))
+data_offset = 6 + 16 * len(entries)
+dir_entries = image_data = b''
+for s, png in entries:
+    w = h = 0 if s >= 256 else s
+    dir_entries += struct.pack('<BBBBHHII', w, h, 0, 0, 1, 32, len(png), data_offset + len(image_data))
+    image_data += png
+open('$ICO_FILE', 'wb').write(header + dir_entries + image_data)
+" 2>/dev/null
+                if [ -f "$ICO_FILE" ]; then
+                    info "Generated agent42.ico"
+                else
+                    warn "Could not generate .ico — shortcut will use default browser icon"
+                fi
+            fi
+
+            ICON_PATH="$(cygpath -w "$ICO_FILE" 2>/dev/null || echo "${ICO_FILE//\//\\}")"
             BROWSER_WIN="$(cygpath -w "$BROWSER_PATH" 2>/dev/null || echo "$BROWSER_PATH")"
+            WORKDIR_WIN="$(cygpath -w "$PROJECT_DIR" 2>/dev/null || echo "$PROJECT_DIR")"
 
             powershell.exe -NoProfile -Command "
   \$desktop = [Environment]::GetFolderPath('Desktop');
+  \$lnkPath = Join-Path \$desktop 'Agent42.lnk';
+  if (Test-Path \$lnkPath) { Remove-Item \$lnkPath -Force };
   \$ws = New-Object -ComObject WScript.Shell;
-  \$sc = \$ws.CreateShortcut(\"\$desktop\\Agent42.lnk\");
+  \$sc = \$ws.CreateShortcut(\$lnkPath);
   \$sc.TargetPath = '$BROWSER_WIN';
   \$sc.Arguments = '--app=http://localhost:8000';
-  \$sc.IconLocation = '$ICON_PATH';
+  \$sc.IconLocation = '$ICON_PATH,0';
   \$sc.Description = 'Agent42 - AI Agent Platform';
-  \$sc.Save()
+  \$sc.WorkingDirectory = '$WORKDIR_WIN';
+  \$sc.Save();
+  attrib -U +P \$lnkPath 2>\$null
 "
             info "Shortcut created! Find Agent42 on your Desktop."
             ;;

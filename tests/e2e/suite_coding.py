@@ -77,7 +77,7 @@ class CodingSuite(BaseSuite):
     def _find_ref(self, snap: str, pattern: str) -> str | None:
         for line in snap.split("\n"):
             if pattern.lower() in line.lower():
-                m = re.search(r'\[ref=(e\d+)\]', line)
+                m = re.search(r"\[ref=(e\d+)\]", line)
                 if m:
                     return m.group(1)
         return None
@@ -105,10 +105,14 @@ class CodingSuite(BaseSuite):
         """Create a new chat session via API."""
         result.covers.append("POST /api/chat/sessions")
         self._login()
-        status, data = self._fetch("POST", "/api/chat/sessions", {
-            "title": "E2E Test Chat",
-            "type": "chat",
-        })
+        status, data = self._fetch(
+            "POST",
+            "/api/chat/sessions",
+            {
+                "title": "E2E Test Chat",
+                "type": "chat",
+            },
+        )
         assert status in (200, 201), f"Chat session creation failed: {status} {data}"
         if isinstance(data, dict):
             self._chat_session_id = data.get("id") or data.get("session_id")
@@ -180,10 +184,14 @@ class CodingSuite(BaseSuite):
     def test_07_create_code_session(self, result):
         """Create a code-type session."""
         self._login()
-        status, data = self._fetch("POST", "/api/chat/sessions", {
-            "title": "E2E Code Session",
-            "type": "code",
-        })
+        status, data = self._fetch(
+            "POST",
+            "/api/chat/sessions",
+            {
+                "title": "E2E Code Session",
+                "type": "code",
+            },
+        )
         assert status in (200, 201), f"Code session creation failed: {status}"
         if isinstance(data, dict):
             self._code_session_id = data.get("id") or data.get("session_id")
@@ -199,8 +207,7 @@ class CodingSuite(BaseSuite):
             time.sleep(2)
         snap = self.cli.snapshot_content()
         has_code = any(
-            kw in snap.lower()
-            for kw in ["code", "session", "setup", "canvas", "send", "welcome"]
+            kw in snap.lower() for kw in ["code", "session", "setup", "canvas", "send", "welcome"]
         )
         assert has_code, f"Code UI should render:\n{snap[:500]}"
 
@@ -269,9 +276,11 @@ class CodingSuite(BaseSuite):
         _, original = self._fetch("GET", "/api/persona")
         original_prompt = original.get("prompt", "") if isinstance(original, dict) else ""
 
-        status, _ = self._fetch("PUT", "/api/persona", {
-            "prompt": "E2E test persona - You are a helpful coding assistant."
-        })
+        status, _ = self._fetch(
+            "PUT",
+            "/api/persona",
+            {"prompt": "E2E test persona - You are a helpful coding assistant."},
+        )
         assert status == 200, f"Update persona failed: {status}"
 
         _, updated = self._fetch("GET", "/api/persona")

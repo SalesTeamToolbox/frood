@@ -40,12 +40,14 @@ _INSECURE_JWT_SECRETS = {
 class Settings:
     """Immutable application settings derived from environment variables."""
 
-    # API keys — providers (Phase 5)
+    # API keys — active providers
     openai_api_key: str = ""
     anthropic_api_key: str = ""
-    deepseek_api_key: str = ""
+    synthetic_api_key: str = ""  # Synthetic.new (Anthropic-compatible, autonomous agents)
     gemini_api_key: str = ""
     openrouter_api_key: str = ""
+    # Dead providers — keys kept for backward compat but no routing logic exists
+    deepseek_api_key: str = ""
     vllm_api_key: str = ""
     cerebras_api_key: str = ""
     groq_api_key: str = ""
@@ -349,12 +351,14 @@ class Settings:
                 )
 
         return cls(
-            # Provider API keys
+            # Provider API keys — active
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-            deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
+            synthetic_api_key=os.getenv("SYNTHETIC_API_KEY", ""),
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
+            # Dead providers (kept for backward compat)
+            deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
             vllm_api_key=os.getenv("VLLM_API_KEY", ""),
             cerebras_api_key=os.getenv("CEREBRAS_API_KEY", ""),
             groq_api_key=os.getenv("GROQ_API_KEY", ""),

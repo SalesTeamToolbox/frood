@@ -109,8 +109,9 @@ class PlaywrightCLI:
         """Run async Playwright code snippet (has access to `page`)."""
         return self._run(["run-code", code], timeout=30)
 
-    def fetch_api(self, method: str, path: str, body: dict | None = None,
-                  token: str | None = None) -> tuple[int, str]:
+    def fetch_api(
+        self, method: str, path: str, body: dict | None = None, token: str | None = None
+    ) -> tuple[int, str]:
         """Execute a fetch() call in the browser context. Returns (status, body_text)."""
         headers = {"Content-Type": "application/json"}
         if token:
@@ -151,7 +152,8 @@ class PlaywrightCLI:
         # Extract snapshot file path from output like:
         # [Snapshot](.playwright-cli\page-2026-...yml)
         import re
-        m = re.search(r'\[Snapshot\]\(([^)]+)\)', output)
+
+        m = re.search(r"\[Snapshot\]\(([^)]+)\)", output)
         if m:
             snap_path = config.agent42_root / m.group(1).replace("\\", "/")
             if snap_path.exists():
@@ -162,13 +164,14 @@ class PlaywrightCLI:
     def login_ui(self, username: str, password: str) -> str | None:
         """Login via the browser UI, return the JWT token from localStorage."""
         import re
+
         snap = self.snapshot_content()
 
         # Find login form refs
         def _ref(pattern):
             for line in snap.split("\n"):
                 if pattern.lower() in line.lower():
-                    m = re.search(r'\[ref=(e\d+)\]', line)
+                    m = re.search(r"\[ref=(e\d+)\]", line)
                     if m:
                         return m.group(1)
             return None

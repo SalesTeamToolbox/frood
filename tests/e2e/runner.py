@@ -35,6 +35,7 @@ from .discovery import build_manifest
 # Test result types
 # ---------------------------------------------------------------------------
 
+
 class TestResult:
     def __init__(self, name: str, suite: str):
         self.name = name
@@ -60,9 +61,11 @@ _SUITES: dict[str, "type"] = {}
 
 def register_suite(name: str):
     """Decorator to register a test suite class."""
+
     def decorator(cls):
         _SUITES[name] = cls
         return cls
+
     return decorator
 
 
@@ -112,8 +115,7 @@ def assert_contains(output: str, expected: str, msg: str = ""):
     """Assert that output contains expected substring."""
     if expected.lower() not in output.lower():
         raise AssertionError(
-            f"{msg or 'Missing expected content'}: "
-            f"expected '{expected}' in output:\n{output[:500]}"
+            f"{msg or 'Missing expected content'}: expected '{expected}' in output:\n{output[:500]}"
         )
 
 
@@ -121,8 +123,7 @@ def assert_not_contains(output: str, unexpected: str, msg: str = ""):
     """Assert that output does NOT contain unexpected substring."""
     if unexpected.lower() in output.lower():
         raise AssertionError(
-            f"{msg or 'Found unexpected content'}: "
-            f"found '{unexpected}' in output:\n{output[:500]}"
+            f"{msg or 'Found unexpected content'}: found '{unexpected}' in output:\n{output[:500]}"
         )
 
 
@@ -138,6 +139,7 @@ def assert_snapshot_has(output: str, element_pattern: str, msg: str = ""):
 # ---------------------------------------------------------------------------
 # Coverage analysis
 # ---------------------------------------------------------------------------
+
 
 def compute_coverage(results: list[TestResult], manifest):
     """Compute what % of discovered features are tested."""
@@ -160,8 +162,7 @@ def compute_coverage(results: list[TestResult], manifest):
         "total_views": len(manifest.frontend_views),
         "total_channels": len(manifest.channels),
         "coverage_pct": (
-            round(len(tested_endpoints) / len(endpoint_paths) * 100, 1)
-            if endpoint_paths else 0
+            round(len(tested_endpoints) / len(endpoint_paths) * 100, 1) if endpoint_paths else 0
         ),
     }
 
@@ -169,6 +170,7 @@ def compute_coverage(results: list[TestResult], manifest):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main():
     parser = argparse.ArgumentParser(description="Agent42 E2E Test Runner")
@@ -228,13 +230,15 @@ def main():
 
     # Run
     all_results: list[TestResult] = []
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Agent42 E2E Tests — {datetime.now(timezone.utc).isoformat()}")
     print(f"Target: {config.base_url}")
     print(f"Suites: {', '.join(suites_to_run)}")
-    print(f"Manifest: {len(manifest.endpoints)} endpoints, "
-          f"{len(manifest.tools)} tools, {len(manifest.task_types)} task types")
-    print(f"{'='*60}\n")
+    print(
+        f"Manifest: {len(manifest.endpoints)} endpoints, "
+        f"{len(manifest.tools)} tools, {len(manifest.task_types)} task types"
+    )
+    print(f"{'=' * 60}\n")
 
     for suite_name, suite_cls in suites_to_run.items():
         print(f"--- Suite: {suite_name} ---")
@@ -256,20 +260,22 @@ def main():
     skipped = sum(1 for r in all_results if r.skipped)
     total = len(all_results)
 
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Results: {passed}/{total} passed, {failed} failed, {skipped} skipped")
 
     # Coverage
     coverage = compute_coverage(all_results, manifest)
-    print(f"API Coverage: {coverage['tested_endpoints']}/{coverage['total_endpoints']} "
-          f"endpoints ({coverage['coverage_pct']}%)")
+    print(
+        f"API Coverage: {coverage['tested_endpoints']}/{coverage['total_endpoints']} "
+        f"endpoints ({coverage['coverage_pct']}%)"
+    )
     if coverage["untested_endpoints"] and (args.coverage or not args.json):
         print(f"\nUntested endpoints ({len(coverage['untested_endpoints'])}):")
         for ep in coverage["untested_endpoints"][:20]:
             print(f"  - {ep}")
         if len(coverage["untested_endpoints"]) > 20:
             print(f"  ... and {len(coverage['untested_endpoints']) - 20} more")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     # Save results
     report = {

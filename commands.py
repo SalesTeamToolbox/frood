@@ -1,4 +1,3 @@
-
 import argparse
 import sys
 import logging
@@ -9,12 +8,14 @@ from core.portability import create_backup, restore_backup, create_clone
 
 logger = logging.getLogger("agent42")
 
+
 class CommandHandler(ABC):
     """Abstract base class for command handlers."""
 
     @abstractmethod
     def run(self, args: argparse.Namespace):
         pass
+
 
 class BackupCommandHandler(CommandHandler):
     """Handles the 'backup' subcommand."""
@@ -32,6 +33,7 @@ class BackupCommandHandler(CommandHandler):
             logger.error("Backup failed: %s", e)
             print(f"Error: {e}")
             sys.exit(1)
+
 
 class RestoreCommandHandler(CommandHandler):
     """Handles the 'restore' subcommand."""
@@ -51,6 +53,7 @@ class RestoreCommandHandler(CommandHandler):
             logger.error("Restore failed: %s", e)
             print(f"Error: {e}")
             sys.exit(1)
+
 
 class CloneCommandHandler(CommandHandler):
     """Handles the 'clone' subcommand."""

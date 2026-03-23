@@ -52,7 +52,7 @@ class UISuite(BaseSuite):
         """Find a ref=eXX for an element matching pattern in snapshot YAML."""
         for line in snap_content.split("\n"):
             if pattern.lower() in line.lower():
-                m = re.search(r'\[ref=(e\d+)\]', line)
+                m = re.search(r"\[ref=(e\d+)\]", line)
                 if m:
                     return m.group(1)
         return None
@@ -105,8 +105,9 @@ class UISuite(BaseSuite):
         has_login = "sign in" in snap.lower() or "password" in snap.lower()
         has_dashboard = "mission" in snap.lower() or "sidebar" in snap.lower()
         has_setup = "setup" in snap.lower()
-        assert has_login or has_dashboard or has_setup, \
+        assert has_login or has_dashboard or has_setup, (
             f"Should show login, dashboard, or setup wizard:\n{snap[:500]}"
+        )
 
     def test_03_login_flow(self, result):
         """Can log in with valid credentials."""
@@ -134,8 +135,7 @@ class UISuite(BaseSuite):
         self._nav_to("Status")
         snap = self.cli.snapshot_content()
         has_content = any(
-            kw in snap.lower()
-            for kw in ["agent", "capacity", "cpu", "memory", "uptime", "active"]
+            kw in snap.lower() for kw in ["agent", "capacity", "cpu", "memory", "uptime", "active"]
         )
         assert has_content, f"Status page should show system metrics:\n{snap[:500]}"
         result.covers.append("GET /api/status")
@@ -158,8 +158,7 @@ class UISuite(BaseSuite):
         self._nav_to("Tools")
         snap = self.cli.snapshot_content()
         has_tools = any(
-            kw in snap.lower()
-            for kw in ["tool", "enabled", "toggle", "checkbox", "switch"]
+            kw in snap.lower() for kw in ["tool", "enabled", "toggle", "checkbox", "switch"]
         )
         assert has_tools, f"Tools page should list tools:\n{snap[:500]}"
         result.covers.append("GET /api/tools")
@@ -169,10 +168,7 @@ class UISuite(BaseSuite):
         self._login()
         self._nav_to("Skills")
         snap = self.cli.snapshot_content()
-        has_skills = any(
-            kw in snap.lower()
-            for kw in ["skill", "enabled", "auto-load", "task"]
-        )
+        has_skills = any(kw in snap.lower() for kw in ["skill", "enabled", "auto-load", "task"])
         assert has_skills, f"Skills page should list skills:\n{snap[:500]}"
         result.covers.append("GET /api/skills")
 
@@ -194,8 +190,7 @@ class UISuite(BaseSuite):
         self._nav_to("Approvals")
         snap = self.cli.snapshot_content()
         has_approvals = any(
-            kw in snap.lower()
-            for kw in ["approval", "pending", "no pending", "approve", "deny"]
+            kw in snap.lower() for kw in ["approval", "pending", "no pending", "approve", "deny"]
         )
         assert has_approvals, f"Approvals page should render:\n{snap[:500]}"
         result.covers.append("GET /api/approvals")
@@ -206,8 +201,7 @@ class UISuite(BaseSuite):
         self._nav_to("Agents")
         snap = self.cli.snapshot_content()
         has_agents = any(
-            kw in snap.lower()
-            for kw in ["agent", "profile", "default", "persona", "create"]
+            kw in snap.lower() for kw in ["agent", "profile", "default", "persona", "create"]
         )
         assert has_agents, f"Agents page should render:\n{snap[:500]}"
         result.covers.append("GET /api/profiles")
@@ -218,8 +212,7 @@ class UISuite(BaseSuite):
         self._nav_to("Apps")
         snap = self.cli.snapshot_content()
         has_apps = any(
-            kw in snap.lower()
-            for kw in ["app", "running", "stopped", "create", "total", "no app"]
+            kw in snap.lower() for kw in ["app", "running", "stopped", "create", "total", "no app"]
         )
         assert has_apps, f"Apps page should render:\n{snap[:500]}"
 
@@ -229,8 +222,7 @@ class UISuite(BaseSuite):
         self._nav_to("Reports")
         snap = self.cli.snapshot_content()
         has_reports = any(
-            kw in snap.lower()
-            for kw in ["report", "token", "overview", "analytics", "usage"]
+            kw in snap.lower() for kw in ["report", "token", "overview", "analytics", "usage"]
         )
         assert has_reports, f"Reports page should render:\n{snap[:500]}"
         result.covers.append("GET /api/reports")
@@ -241,8 +233,7 @@ class UISuite(BaseSuite):
         self._nav_to("Mission Control")
         snap = self.cli.snapshot_content()
         has_ws = any(
-            kw in snap.lower()
-            for kw in ["connected", "disconnected", "ws", "websocket", "online"]
+            kw in snap.lower() for kw in ["connected", "disconnected", "ws", "websocket", "online"]
         )
         # Soft check — ws indicator may not be in the accessibility tree
         if has_ws:
@@ -254,10 +245,9 @@ class UISuite(BaseSuite):
         console = self.cli.console("error")
         # Filter benign errors
         lines = [
-            line for line in console.split("\n")
-            if line.strip()
-            and "favicon" not in line.lower()
-            and "websocket" not in line.lower()
+            line
+            for line in console.split("\n")
+            if line.strip() and "favicon" not in line.lower() and "websocket" not in line.lower()
         ]
 
     def test_16_kanban_board_renders(self, result):
@@ -281,7 +271,7 @@ class UISuite(BaseSuite):
         create_ref = (
             self._find_ref(snap, "Create Task")
             or self._find_ref(snap, "New Task")
-            or self._find_ref(snap, "button \"+\"")
+            or self._find_ref(snap, 'button "+"')
             or self._find_ref(snap, "Create")
         )
         if create_ref:
@@ -303,9 +293,7 @@ class UISuite(BaseSuite):
         """Take a screenshot of the dashboard for visual verification."""
         self._login()
         self._nav_to("Mission Control")
-        output = self.cli.screenshot(
-            filename=f"{config.output_dir}/dashboard-tasks.png"
-        )
+        output = self.cli.screenshot(filename=f"{config.output_dir}/dashboard-tasks.png")
         result.screenshots.append(f"{config.output_dir}/dashboard-tasks.png")
 
     def test_19_dynamic_view_coverage(self, result):

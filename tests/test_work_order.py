@@ -1,6 +1,5 @@
 """Tests for core.work_order — work order management for the cowork system."""
 
-
 import pytest
 
 from core.work_order import (

@@ -36,9 +36,7 @@ class TestWorkspaceSandbox:
         assert self.sandbox.check_path("../../etc/passwd") is False
 
     def test_disabled_sandbox_allows_all(self):
-        disabled = WorkspaceSandbox(
-            os.path.join(tempfile.gettempdir(), "test"), enabled=False
-        )
+        disabled = WorkspaceSandbox(os.path.join(tempfile.gettempdir(), "test"), enabled=False)
         resolved = disabled.resolve_path("/etc/passwd")
         # On Windows, Path("/etc/passwd") resolves to C:/etc/passwd
         assert str(resolved).replace("\\", "/").endswith("/etc/passwd")

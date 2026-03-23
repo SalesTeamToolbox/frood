@@ -15,6 +15,7 @@ _env_file = AGENT42_ROOT / ".env"
 if _env_file.exists():
     try:
         from dotenv import load_dotenv
+
         load_dotenv(_env_file, override=False)
     except ImportError:
         # Manual .env loading as fallback
@@ -46,10 +47,10 @@ class E2EConfig:
         self.port = self.port or int(os.getenv("DASHBOARD_PORT", "8000"))
         self.base_url = self.base_url or f"http://{self.host}:{self.port}"
         self.username = self.username or os.getenv("DASHBOARD_USERNAME", "admin")
-        self.password = self.password or os.getenv("E2E_PASSWORD", "") or os.getenv("DASHBOARD_PASSWORD", "")
-        self.output_dir = self.output_dir or str(
-            AGENT42_ROOT / ".agent42" / "e2e-results"
+        self.password = (
+            self.password or os.getenv("E2E_PASSWORD", "") or os.getenv("DASHBOARD_PASSWORD", "")
         )
+        self.output_dir = self.output_dir or str(AGENT42_ROOT / ".agent42" / "e2e-results")
         os.makedirs(self.output_dir, exist_ok=True)
 
 

@@ -23,6 +23,7 @@ ADMIN_CONFIGURABLE_KEYS = frozenset(
         "OPENROUTER_API_KEY",
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
+        "SYNTHETIC_API_KEY",
         "DEEPSEEK_API_KEY",
         "GEMINI_API_KEY",
         "CEREBRAS_API_KEY",
