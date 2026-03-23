@@ -84,12 +84,17 @@ class ToolRegistry:
         """Return True if the tool exists and is not disabled."""
         return name in self._tools and name not in self._disabled
 
-    async def execute(self, tool_name: str, agent_id: str = "default", **kwargs) -> ToolResult:
+    async def execute(
+        self, tool_name: str, agent_id: str = "default", tier: str = "", **kwargs
+    ) -> ToolResult:
         """Execute a tool by name with the given parameters.
 
         Args:
             tool_name: Name of the registered tool to execute.
             agent_id: Agent identifier for rate limiting.
+            tier: Reward tier for rate limit scaling ("gold", "silver", "bronze", or "").
+                Passed to ToolRateLimiter.check() to apply the tier's rate multiplier.
+                NOT forwarded to tool.execute() — it's a registry-layer concern only.
             **kwargs: Arguments forwarded to the tool's execute() method.
 
         Note: The first parameter is named ``tool_name`` (not ``name``) to
@@ -103,9 +108,9 @@ class ToolRegistry:
         if tool_name in self._disabled:
             return ToolResult(error=f"Tool '{tool_name}' is disabled", success=False)
 
-        # Rate limit check
+        # Rate limit check — pass tier for multiplier-scaled enforcement
         if self._rate_limiter:
-            allowed, reason = self._rate_limiter.check(tool_name, agent_id)
+            allowed, reason = self._rate_limiter.check(tool_name, agent_id, tier=tier)
             if not allowed:
                 logger.warning(f"Rate limited: {reason}")
                 return ToolResult(error=reason, success=False)

@@ -8,6 +8,7 @@ Agents are user-defined configurations that specify:
 - Memory scope and iteration limits
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -16,6 +17,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger("agent42.agent_manager")
+
+# Module-level settings reference — used by _get_tier_semaphore() and get_effective_limits().
+# Monkeypatched in tests via monkeypatch.setattr("core.agent_manager.settings", ...).
+# Deferred import avoids circular-import risk at module load time.
+from core.config import settings
 
 # ── Model mapping per provider ────────────────────────────────────────────
 # Each agent task type maps to the best model per provider.
@@ -52,14 +58,34 @@ PROVIDER_MODELS = {
 }
 
 
-def resolve_model(provider: str, task_category: str) -> str:
+# ── Tier-to-model-category upgrade map (Phase 3: Resource Enforcement) ───────
+# Maps reward tier to an upgraded task category for model routing.
+# "provisional" and "" (no tier) are deliberately absent — they fall back to
+# the caller's task_category with no upgrade applied (D-10, D-11).
+_TIER_CATEGORY_UPGRADE: dict[str, str] = {
+    "gold": "reasoning",
+    "silver": "general",
+    "bronze": "fast",
+}
+
+
+def resolve_model(provider: str, task_category: str, tier: str = "") -> str:
     """Resolve the best model for a provider + task category.
+
+    Args:
+        provider: Provider key (e.g. "anthropic", "synthetic").
+        task_category: Base task category (e.g. "general", "fast", "coding").
+        tier: Optional reward tier ("gold", "silver", "bronze", or "").
+            When a named tier is provided, it upgrades the effective category
+            via _TIER_CATEGORY_UPGRADE. Empty string or unrecognized tiers
+            (e.g. "provisional") pass through unchanged — backward compat (D-03).
 
     Returns the model ID string. Falls back to 'general' if the
     task category isn't mapped for the given provider.
     """
+    effective_category = _TIER_CATEGORY_UPGRADE.get(tier, task_category)
     models = PROVIDER_MODELS.get(provider, PROVIDER_MODELS.get("anthropic", {}))
-    return models.get(task_category, models.get("general", "claude-sonnet-4-6"))
+    return models.get(effective_category, models.get("general", "claude-sonnet-4-6"))
 
 
 # ── Agent Templates ──────────────────────────────────────────────────────
@@ -199,6 +225,8 @@ class AgentManager:
         self.agents_dir = Path(agents_dir)
         self.agents_dir.mkdir(parents=True, exist_ok=True)
         self._agents: dict[str, AgentConfig] = {}
+        # Tier concurrency semaphores — created lazily in async context (Pitfall 1)
+        self._tier_semaphores: dict[str, asyncio.Semaphore] = {}
         self._load_all()
 
     def _load_all(self):
@@ -269,6 +297,74 @@ class AgentManager:
             agent.total_tokens += tokens_used
             agent.last_run_at = time.time()
             self._save(agent)
+
+    def _get_tier_semaphore(self, tier: str) -> "asyncio.Semaphore | None":
+        """Return the concurrency semaphore for the given tier, or None if uncapped.
+
+        Semaphores are created lazily (on first call from an async context) to
+        avoid RuntimeError from creating asyncio primitives outside an event loop
+        (Pitfall 1). The dict _tier_semaphores is initialized empty in __init__.
+
+        Returns None when:
+        - rewards_enabled is False (no enforcement)
+        - tier is empty string (no tier assigned)
+        - tier is "provisional" (treated identically to no tier — D-10, D-11)
+        - tier is unrecognized (unknown strings are uncapped)
+        """
+
+        if not settings.rewards_enabled or not tier or tier == "provisional":
+            return None
+
+        if tier not in self._tier_semaphores:
+            cap_map = {
+                "bronze": settings.rewards_bronze_max_concurrent,
+                "silver": settings.rewards_silver_max_concurrent,
+                "gold": settings.rewards_gold_max_concurrent,
+            }
+            cap = cap_map.get(tier)
+            if cap is None:
+                return None  # Unknown tier string — no cap (Pitfall 3)
+            self._tier_semaphores[tier] = asyncio.Semaphore(cap)
+
+        return self._tier_semaphores[tier]
+
+    def get_effective_limits(self, agent_id: str) -> dict:
+        """Return the effective resource limits for an agent based on its tier.
+
+        Returns:
+            dict with keys:
+                model_tier (str): Model category for routing ("reasoning", "general", "fast", or "")
+                rate_multiplier (float): Rate limit multiplier (1.0 = baseline)
+                max_concurrent (int): Max concurrent tasks (0 = uncapped)
+
+        When rewards_enabled=False or agent has no/provisional tier, returns safe defaults
+        identical to pre-rewards behavior (D-09, D-10).
+        """
+
+        agent = self._agents.get(agent_id)
+        tier = agent.effective_tier() if agent else ""
+
+        # No enforcement: rewards disabled or tier is empty/provisional
+        if not settings.rewards_enabled or not tier or tier == "provisional":
+            return {"model_tier": "", "rate_multiplier": 1.0, "max_concurrent": 0}
+
+        multiplier_map = {
+            "bronze": settings.rewards_bronze_rate_limit_multiplier,
+            "silver": settings.rewards_silver_rate_limit_multiplier,
+            "gold": settings.rewards_gold_rate_limit_multiplier,
+        }
+        concurrent_map = {
+            "bronze": settings.rewards_bronze_max_concurrent,
+            "silver": settings.rewards_silver_max_concurrent,
+            "gold": settings.rewards_gold_max_concurrent,
+        }
+        category_map = _TIER_CATEGORY_UPGRADE  # gold→reasoning, silver→general, bronze→fast
+
+        return {
+            "model_tier": category_map.get(tier, ""),
+            "rate_multiplier": multiplier_map.get(tier, 1.0),
+            "max_concurrent": concurrent_map.get(tier, 0),
+        }
 
     @staticmethod
     def get_templates() -> dict:
