@@ -100,7 +100,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: TBD
 
 - [x] 04-01: Rewards REST API with router-level auth and 401 tests
-- [ ] 04-02: Dashboard UI — tier badges, metrics panel, toggle, override UI, and WebSocket events
+- [x] 04-02: Dashboard UI — tier badges, metrics panel, toggle, override UI, and WebSocket events
 
 ## Progress
 
