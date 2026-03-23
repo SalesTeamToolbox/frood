@@ -68,6 +68,10 @@ const state = {
   codeSetupStep: 0,  // 0=not started, 1=mode, 2=config, 3=done
   codeSending: false,
   codeCanvasOpen: false,
+  // IDE Chat Panel
+  idePanelSessionId: "",
+  idePanelMessages: [],
+  idePanelSending: false,
   // Projects
   projects: [],
   selectedProject: null,
@@ -103,6 +107,9 @@ const state = {
   // Teams
   teamRuns: [],
   selectedTeamRun: null,
+  // Rewards
+  agents: [],
+  rewardsStatus: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -563,6 +570,22 @@ function handleWSMessage(msg) {
           else updateChatTypingIndicator(state.codeSending, true);
         }
       }
+    } else if (sid && sid === state.idePanelSessionId) {
+      // IDE panel chat session
+      let needsAppend = false;
+      if (msg.data.role === "user") {
+        const idx = state.idePanelMessages.findIndex(m => m.id?.startsWith("local-") && m.content === msg.data.content);
+        if (idx >= 0) state.idePanelMessages[idx] = msg.data;
+        else { state.idePanelMessages.push(msg.data); needsAppend = true; }
+      } else {
+        state.idePanelMessages.push(msg.data);
+        state.idePanelSending = false;
+        needsAppend = true;
+      }
+      if (needsAppend) {
+        appendPanelChatMsg(msg.data);
+      }
+      updatePanelTypingIndicator(state.idePanelSending);
     } else if (!sid) {
       // Legacy messages without session_id (backward compat)
       let needsAppend = false;
@@ -600,12 +623,24 @@ function handleWSMessage(msg) {
       if (state.page === "code") {
         if (!updateChatTypingIndicator(thinking, true)) renderCode();
       }
+    } else if (sid && sid === state.idePanelSessionId) {
+      state.idePanelSending = thinking;
+      updatePanelTypingIndicator(thinking);
     } else if (!sid) {
       state.chatSending = thinking;
       if (state.page === "chat") {
         if (!updateChatTypingIndicator(thinking, false)) renderChat();
       }
     }
+  } else if (msg.type === 'tier_update') {
+    (msg.data.agents || []).forEach(function(u) {
+      var idx = state.agents ? state.agents.findIndex(function(a) { return a.id === u.agent_id; }) : -1;
+      if (idx >= 0) {
+        state.agents[idx].effective_tier = u.tier;
+        state.agents[idx].performance_score = u.score;
+      }
+    });
+    if (state.page === 'agents') renderAgents();
   }
 }
 
@@ -2232,9 +2267,12 @@ function renderAgents() {
   // Fetch agents from API
   fetch("/api/agents", { headers: { Authorization: "Bearer " + state.token } })
     .then(function(r) { return r.json(); })
-    .then(function(agents) { _renderAgentCards(el, agents); })
+    .then(function(agents) { state.agents = agents; _renderAgentCards(el, agents); })
     .catch(function() { _renderAgentCards(el, []); });
 }
+
+var TIER_COLORS = { bronze: '#cd7f32', silver: '#94a3b8', gold: '#eab308', provisional: '#6366f1' };
+function tierColor(t) { return TIER_COLORS[(t || '').toLowerCase()] || '#64748b'; }
 
 function _renderAgentCards(el, agents) {
   var statusColors = { active: "#34d399", running: "#38bdf8", paused: "#facc15", stopped: "#64748b", error: "#f87171" };
@@ -2246,7 +2284,9 @@ function _renderAgentCards(el, agents) {
     return '<div class="agent-card" onclick="agentShowDetail(\'' + a.id + '\')">' +
       '<div class="agent-card-header">' +
         '<div class="agent-card-title"><h4>' + esc(a.name) + '</h4>' +
-        '<span class="badge-tier" style="background:' + color + ';color:#000">' + esc(a.status) + '</span></div>' +
+        '<span class="badge-tier" style="background:' + color + ';color:#000">' + esc(a.status) + '</span>' +
+        (a.effective_tier ? '<span class="badge-tier" style="background:' + tierColor(a.effective_tier) + ';color:#fff;margin-left:0.25rem">' + esc(a.effective_tier) + '</span>' : '') +
+        '</div>' +
       '</div>' +
       '<p class="agent-card-desc">' + esc(a.description || "No description") + '</p>' +
       '<div class="agent-card-meta">' +
@@ -2867,24 +2907,23 @@ function extractCodeBlocks(text) {
 // Chat rendering (Claude-like)
 // ---------------------------------------------------------------------------
 
-// Build HTML for a single chat message (shared by full render and incremental append)
+// Build HTML for a single chat message (shared by panel, code page, and incremental append)
 function buildChatMsgHtml(m, idx, msgArrayName, isCode) {
   const isUser = m.role === "user";
-  const sender = m.sender || (isUser ? "You" : "Agent42");
   const time = m.timestamp ? formatChatTime(m.timestamp) : "";
   const content = isUser ? esc(m.content).replace(/\n/g, "<br>") : renderMarkdown(m.content);
 
   if (isUser) {
-    return `<div class="chat-msg chat-msg-user"><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-user">${content}</div></div><div class="chat-avatar chat-avatar-user">U</div></div>`;
+    return `<div class="chat-msg chat-msg-user"><div class="chat-msg-bubble chat-bubble-user">${content}</div><span class="chat-msg-ts">${time}</span></div>`;
   }
   const codeBlocks = extractCodeBlocks(m.content || "");
   m.__codeBlocks = codeBlocks;
-  const avatarStyle = isCode ? ' style="background:var(--success-dim);color:var(--success)"' : "";
+  const sender = m.sender || "Agent42";
   const canvasButtons = codeBlocks.map((b, j) =>
     `<button class="chat-canvas-btn" onclick="openCanvas(${msgArrayName}[${idx}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
   ).join("");
   const taskRef = !isCode && m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : "";
-  return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent"${avatarStyle}>${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div></div>`;
+  return `<div class="chat-msg chat-msg-agent"><div class="chat-msg-label">${esc(sender)} <span class="chat-msg-ts">${time}</span></div><div class="chat-msg-bubble chat-bubble-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div>`;
 }
 
 // Scroll chat to bottom reliably (after browser paint)
@@ -2954,9 +2993,8 @@ function updateChatTypingIndicator(show, isCode) {
 
 // Internal: insert typing indicator element into container
 function _insertTypingIndicator(container, isCode) {
-  const avatarStyle = isCode ? ' style="background:var(--success-dim);color:var(--success)"' : "";
   container.insertAdjacentHTML("beforeend",
-    `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-avatar chat-avatar-agent"${avatarStyle}>${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>`
+    `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-msg-label">Agent42</div><div class="chat-msg-bubble chat-bubble-agent"><div class="typing-dots"><span></span><span></span><span></span></div></div></div>`
   );
 }
 
@@ -3001,7 +3039,7 @@ function renderChat() {
           <div class="chat-welcome">
             <div class="chat-welcome-icon"><img src="/assets/agent42-avatar.svg" alt="Agent42" width="64" height="64"></div>
             <h2>Chat with Agent42</h2>
-            <p>Start a new conversation or pick up where you left off.</p>
+            <p>Start a conversation or pick up where you left off.</p>
             <div class="chat-suggestions">
               <button class="chat-suggestion" onclick="createChatSession('chat')">+ New Chat</button>
               <button class="chat-suggestion" onclick="applySuggestion('What tasks are currently running?')">What tasks are running?</button>
@@ -3012,9 +3050,7 @@ function renderChat() {
             <div class="chat-composer-inner">
               <textarea id="chat-input" class="chat-textarea" rows="1" placeholder="Message Agent42..."
                         oninput="autoGrowTextarea(this)" onkeydown="handleChatKeydown(event)"></textarea>
-              <button class="chat-send-btn" onclick="sendChatMessage()" title="Send message">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
-              </button>
+              <button class="chat-send-btn" onclick="sendChatMessage()" title="Send message">Send</button>
             </div>
           </div>
         </div>
@@ -3022,27 +3058,26 @@ function renderChat() {
     return;
   }
 
-  // Build messages
+  // Build messages — CC-style: compact, no avatars, clean bubbles
+  const msgArray = hasSession ? "state.currentSessionMessages" : "state.chatMessages";
   const msgs = messages.map((m, i) => {
     const isUser = m.role === "user";
-    const sender = m.sender || (isUser ? "You" : "Agent42");
     const time = m.timestamp ? formatChatTime(m.timestamp) : "";
-    const codeBlocks = isUser ? [] : extractCodeBlocks(m.content || "");
     const content = isUser ? esc(m.content).replace(/\n/g, "<br>") : renderMarkdown(m.content);
-    const msgArray = hasSession ? "state.currentSessionMessages" : "state.chatMessages";
 
     if (isUser) {
-      return `<div class="chat-msg chat-msg-user"><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-user">${content}</div></div><div class="chat-avatar chat-avatar-user">U</div></div>`;
+      return `<div class="chat-msg chat-msg-user"><div class="chat-msg-bubble chat-bubble-user">${content}</div><span class="chat-msg-ts">${time}</span></div>`;
     }
+    const codeBlocks = extractCodeBlocks(m.content || "");
+    m.__codeBlocks = codeBlocks;
     const canvasButtons = codeBlocks.map((b, j) =>
       `<button class="chat-canvas-btn" onclick="openCanvas(${msgArray}[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
     ).join("");
-    return `<div class="chat-msg chat-msg-agent"><div class="chat-avatar chat-avatar-agent">${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-msg-header"><span class="chat-msg-sender">${esc(sender)}</span><span class="chat-msg-time">${time}</span></div><div class="chat-msg-body chat-msg-body-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : ""}</div></div>`;
+    const taskRef = m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : "";
+    return `<div class="chat-msg chat-msg-agent"><div class="chat-msg-label">Agent42 <span class="chat-msg-ts">${time}</span></div><div class="chat-msg-bubble chat-bubble-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div>`;
   }).join("");
 
-  messages.forEach(m => { if (m.role !== "user") m.__codeBlocks = extractCodeBlocks(m.content || ""); });
-
-  const typingHtml = state.chatSending ? `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-avatar chat-avatar-agent">${AGENT42_AVATAR}</div><div class="chat-msg-content"><div class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></div></div></div>` : "";
+  const typingHtml = state.chatSending ? `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-msg-label">Agent42</div><div class="chat-msg-bubble chat-bubble-agent"><div class="typing-dots"><span></span><span></span><span></span></div></div></div>` : "";
 
   el.innerHTML = `
     <div class="chat-layout">
@@ -3057,9 +3092,7 @@ function renderChat() {
             <textarea id="chat-input" class="chat-textarea" rows="1" placeholder="Message Agent42..."
                       oninput="autoGrowTextarea(this)" onkeydown="${keydownFn}"
                       ${state.chatSending ? "disabled" : ""}></textarea>
-            <button class="chat-send-btn" onclick="${sendFn}" ${state.chatSending ? "disabled" : ""} title="Send message">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
-            </button>
+            <button class="chat-send-btn" onclick="${sendFn}" ${state.chatSending ? "disabled" : ""} title="Send message">Send</button>
           </div>
           <div class="chat-composer-hint">Enter to send, Shift+Enter for new line</div>
         </div>
@@ -3330,8 +3363,8 @@ function renderCode() {
           <button class="ide-activity-btn" onclick="ideShowPanel('search',event)" title="Search">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
           </button>
-          <button class="ide-activity-btn" onclick="ideToggleCCPanel()" title="Claude Code Panel">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+          <button class="ide-activity-btn" onclick="ideToggleChatPanel()" title="Chat Panel">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
           </button>
         </div>
         <div id="ide-sidebar-panel" class="ide-sidebar">
@@ -3656,28 +3689,6 @@ function ideActivateTab() {
   var ccContainer = document.getElementById("ide-cc-container");
 
   if (tab.type === "claude") {
-    // Panel mode: CC session is already in the right panel — switch which tab is visible
-    if (_ccPanelMode && tab.inPanel) {
-      if (_monacoEditor) _monacoEditor.setModel(null);
-      if (container) container.style.display = "none";
-      if (welcome) welcome.style.display = "none";
-      if (ccContainer) ccContainer.style.display = "none";
-      // In the CC panel, hide all CC sessions then show the requested one
-      var panel = document.getElementById("ide-cc-panel");
-      if (panel) {
-        var panelDivs = panel.querySelectorAll(".ide-cc-term, .ide-cc-chat");
-        panelDivs.forEach(function(d) { d.style.display = "none"; });
-      }
-      if (tab.el) tab.el.style.display = tab.chatPanel ? "flex" : "block";
-      var langEl2 = document.getElementById("ide-status-lang");
-      if (langEl2) langEl2.textContent = "Claude Code";
-      var statusEl2 = document.getElementById("ide-status-left");
-      if (statusEl2) statusEl2.textContent = tab.path;
-      ideRenderTabs();
-      ideRenderTree();
-      updateGsdIndicator();
-      return;
-    }
     // Claude Code tab: hide Monaco, show CC terminal
     if (_monacoEditor) _monacoEditor.setModel(null);
     if (container) container.style.display = "none";
@@ -3727,8 +3738,7 @@ function ideRenderTabs() {
   var el = document.getElementById("ide-tabs");
   if (!el) return;
   el.innerHTML = _ideTabs.map(function(t, i) {
-    // Hide CC tabs from the tab bar when they are displayed in the panel
-    if (t.type === "claude" && t.inPanel) return "";
+    // CC tabs always shown in tab bar
     var active = i === _ideActiveTab ? "active" : "";
     var mod = t.modified ? '<span class="modified">&#9679;</span>' : "";
     var name = t.type === "claude" ? t.path : t.path.split("/").pop();
@@ -6199,7 +6209,7 @@ function initDragHandle() {
 // ---------------------------------------------------------------------------
 // CC Panel drag handle for horizontal resize (LAYOUT-02)
 // ---------------------------------------------------------------------------
-var _ccPanelMode = false;
+var _chatPanelMode = false;
 var _isPanelDragging = false;
 var _panelDragStartX = 0;
 var _panelDragStartWidth = 0;
@@ -6238,26 +6248,15 @@ function initPanelDragHandle() {
   });
 }
 
-function ideToggleCCPanel() {
-  // Three-state toggle (Plan 04-03 full implementation):
-  // 1. Panel open → close and move sessions back to tabs
-  // 2. CC tabs exist → open panel and move sessions into it
-  // 3. No CC open → open panel and start a new session
-  var ccTabs = _ideTabs.filter(function(t) { return t.type === "claude"; });
-  if (_ccPanelMode) {
-    ideMoveSessionsToTab();
-    ideCloseCCPanel();
-  } else if (ccTabs.length > 0) {
-    ideOpenCCPanel();
-    ideMoveSessionsToPanel();
+function ideToggleChatPanel() {
+  if (_chatPanelMode) {
+    ideCloseChatPanel();
   } else {
-    ideOpenCCPanel();
-    ideOpenCCChat("local");
-    setTimeout(ideMoveSessionsToPanel, 50);
+    ideOpenChatPanel();
   }
 }
 
-function ideOpenCCPanel() {
+async function ideOpenChatPanel() {
   var panel = document.getElementById("ide-cc-panel");
   var handle = document.getElementById("ide-panel-drag-handle");
   if (!panel) return;
@@ -6268,75 +6267,213 @@ function ideOpenCCPanel() {
   panel.style.width = savedWidth + "px";
   panel.style.flex = "none";
   if (handle) handle.style.display = "";
-  _ccPanelMode = true;
+  _chatPanelMode = true;
+
+  // Load or create ide_chat session
+  if (!state.idePanelSessionId) {
+    try {
+      var savedId = localStorage.getItem("ide_panel_session_id");
+      if (savedId) {
+        var msgs = await api("/chat/sessions/" + savedId + "/messages");
+        state.idePanelSessionId = savedId;
+        state.idePanelMessages = msgs || [];
+      }
+    } catch(e) {
+      localStorage.removeItem("ide_panel_session_id");
+    }
+  }
+
+  renderIdeChatPanel();
   setTimeout(function() { if (_monacoEditor) _monacoEditor.layout(); }, 50);
 }
 
-function ideCloseCCPanel() {
+function ideCloseChatPanel() {
   var panel = document.getElementById("ide-cc-panel");
   var handle = document.getElementById("ide-panel-drag-handle");
   if (!panel) return;
   try { localStorage.setItem("cc_panel_width", Math.round(panel.getBoundingClientRect().width)); } catch(e) {}
   panel.style.display = "none";
   if (handle) handle.style.display = "none";
-  _ccPanelMode = false;
+  _chatPanelMode = false;
   setTimeout(function() { if (_monacoEditor) _monacoEditor.layout(); }, 50);
 }
 
-function ideMoveSessionsToPanel() {
+// -- IDE Chat Panel Rendering --
+// Note: innerHTML usage here builds chat UI from trusted internal state only.
+// All user content is escaped via esc() through buildChatMsgHtml().
+
+function renderIdeChatPanel() {
   var panel = document.getElementById("ide-cc-panel");
-  var ccContainer = document.getElementById("ide-cc-container");
   if (!panel) return;
-  // Move each CC tab's DOM element into the panel (appendChild moves, does not clone)
-  _ideTabs.forEach(function(tab) {
-    if (tab.type === "claude" && tab.el) {
-      panel.appendChild(tab.el);
-      tab.el.style.display = tab.chatPanel ? "flex" : "block";
-      tab.inPanel = true;
-    }
-  });
-  // Hide the CC container (no longer houses CC sessions)
-  if (ccContainer) ccContainer.style.display = "none";
-  // Show the first active CC tab in the panel
-  var ccTabs = _ideTabs.filter(function(t) { return t.type === "claude"; });
-  if (ccTabs.length > 0) {
-    var activeCC = ccTabs[0];
-    ccTabs.forEach(function(t) { if (t.el) t.el.style.display = "none"; });
-    if (activeCC.el) activeCC.el.style.display = activeCC.chatPanel ? "flex" : "block";
-  }
-  // Activate the first non-CC tab (show editor), or welcome if none
-  var fileTabs = _ideTabs.filter(function(t) { return t.type !== "claude"; });
-  if (fileTabs.length > 0) {
-    _ideActiveTab = _ideTabs.indexOf(fileTabs[0]);
-    ideActivateTab();
+
+  var msgs = state.idePanelMessages;
+  var msgsHtml = "";
+  if (msgs.length === 0) {
+    msgsHtml = '<div class="panel-chat-welcome">' +
+      '<p>Ask questions about your code. Responses use your configured LLM.</p>' +
+      '</div>';
   } else {
-    _ideActiveTab = -1;
-    if (_monacoEditor) _monacoEditor.setModel(null);
-    var container = document.getElementById("ide-editor-container");
-    var welcome = document.getElementById("ide-welcome");
-    if (container) container.style.display = "none";
-    if (welcome) welcome.style.display = "flex";
+    msgsHtml = msgs.map(function(m, i) {
+      return buildChatMsgHtml(m, i, "state.idePanelMessages", false);
+    }).join("");
   }
-  ideRenderTabs();
+
+  // Context badge
+  var contextBadge = "";
+  if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab] && _ideTabs[_ideActiveTab].type === "file") {
+    var fname = _ideTabs[_ideActiveTab].path.split("/").pop();
+    contextBadge = '<div class="panel-context-badge" title="' + esc(_ideTabs[_ideActiveTab].path) + '">' + esc(fname) + '</div>';
+  }
+
+  panel.innerHTML =
+    '<div class="ide-panel-chat">' +
+      '<div class="panel-chat-header">' +
+        '<span>Chat</span>' +
+        '<button onclick="ideCloseChatPanel()" title="Close panel">\u2715</button>' +
+      '</div>' +
+      '<div class="panel-chat-messages" id="panel-messages">' + msgsHtml + '</div>' +
+      '<div class="panel-chat-composer">' +
+        contextBadge +
+        '<div class="panel-chat-composer-inner">' +
+          '<textarea id="panel-chat-input" class="panel-chat-input" rows="1" placeholder="Ask about this code..."' +
+            ' oninput="autoGrowTextarea(this)"' +
+            ' onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();sendPanelChatMessage()}"></textarea>' +
+          '<button class="panel-chat-send-btn" onclick="sendPanelChatMessage()">Send</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  var container = document.getElementById("panel-messages");
+  if (container) container.scrollTop = container.scrollHeight;
 }
 
-function ideMoveSessionsToTab() {
-  var ccContainer = document.getElementById("ide-cc-container");
-  if (!ccContainer) return;
-  // Move CC tab DOM elements back into the CC container
-  _ideTabs.forEach(function(tab) {
-    if (tab.type === "claude" && tab.el) {
-      ccContainer.appendChild(tab.el);
-      tab.inPanel = false;
-    }
-  });
-  // Activate the first CC tab
-  var ccTabs = _ideTabs.filter(function(t) { return t.type === "claude"; });
-  if (ccTabs.length > 0) {
-    _ideActiveTab = _ideTabs.indexOf(ccTabs[0]);
-    ideActivateTab();
+function appendPanelChatMsg(msg) {
+  var container = document.getElementById("panel-messages");
+  if (!container) return false;
+
+  var welcome = container.querySelector(".panel-chat-welcome");
+  if (welcome) welcome.remove();
+
+  var idx = state.idePanelMessages.indexOf(msg);
+  var msgIdx = idx >= 0 ? idx : state.idePanelMessages.length - 1;
+  var html = buildChatMsgHtml(msg, msgIdx, "state.idePanelMessages", false);
+
+  var typing = document.getElementById("panel-typing-indicator");
+  if (typing) typing.remove();
+
+  container.insertAdjacentHTML("beforeend", html);
+
+  if (state.idePanelSending) {
+    _insertPanelTypingIndicator(container);
   }
-  ideRenderTabs();
+
+  container.scrollTop = container.scrollHeight;
+  return true;
+}
+
+function updatePanelTypingIndicator(show) {
+  var container = document.getElementById("panel-messages");
+  if (!container) return false;
+
+  var existing = document.getElementById("panel-typing-indicator");
+  if (show && !existing) {
+    _insertPanelTypingIndicator(container);
+    container.scrollTop = container.scrollHeight;
+  } else if (!show && existing) {
+    existing.remove();
+  }
+
+  var input = document.getElementById("panel-chat-input");
+  if (input) input.disabled = show;
+  var chatEl = container.closest(".ide-panel-chat");
+  var sendBtn = chatEl ? chatEl.querySelector(".panel-chat-send-btn") : null;
+  if (sendBtn) sendBtn.disabled = show;
+
+  return true;
+}
+
+function _insertPanelTypingIndicator(container) {
+  var div = document.createElement("div");
+  div.className = "chat-msg chat-msg-agent";
+  div.id = "panel-typing-indicator";
+  var avatar = document.createElement("div");
+  avatar.className = "chat-msg-avatar";
+  avatar.textContent = "A";
+  var body = document.createElement("div");
+  body.className = "chat-msg-body";
+  var dots = document.createElement("div");
+  dots.className = "typing-dots";
+  dots.appendChild(document.createElement("span"));
+  dots.appendChild(document.createElement("span"));
+  dots.appendChild(document.createElement("span"));
+  body.appendChild(dots);
+  div.appendChild(avatar);
+  div.appendChild(body);
+  container.appendChild(div);
+}
+
+// -- IDE Chat Panel Send --
+
+async function sendPanelChatMessage() {
+  var input = document.getElementById("panel-chat-input");
+  var text = (input ? input.value : "").trim();
+  if (!text || state.idePanelSending) return;
+  state.idePanelSending = true;
+
+  // Gather file context from Monaco editor
+  var fileContext = "";
+  if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab] && _ideTabs[_ideActiveTab].type === "file") {
+    var tab = _ideTabs[_ideActiveTab];
+    var sel = _monacoEditor ? _monacoEditor.getSelection() : null;
+    if (sel && !sel.isEmpty() && _monacoEditor.getModel()) {
+      fileContext = "File: " + tab.path + "\nSelected code:\n" + _monacoEditor.getModel().getValueInRange(sel);
+    } else if (tab.model) {
+      fileContext = "File: " + tab.path + "\n" + tab.model.getValue().substring(0, 3000);
+    }
+  }
+
+  var newMsg = {
+    id: "local-" + Date.now(),
+    role: "user",
+    content: text,
+    timestamp: Date.now() / 1000,
+    sender: "You",
+    session_id: state.idePanelSessionId,
+  };
+  state.idePanelMessages.push(newMsg);
+  if (input) { input.value = ""; input.style.height = "auto"; }
+
+  appendPanelChatMsg(newMsg);
+  updatePanelTypingIndicator(true);
+
+  try {
+    // Ensure session exists
+    if (!state.idePanelSessionId) {
+      var session = await api("/chat/sessions", {
+        method: "POST",
+        body: JSON.stringify({ title: "IDE Chat", session_type: "ide_chat" }),
+      });
+      state.idePanelSessionId = session.id;
+      try { localStorage.setItem("ide_panel_session_id", session.id); } catch(e) {}
+    }
+
+    await api("/chat/sessions/" + state.idePanelSessionId + "/send", {
+      method: "POST",
+      body: JSON.stringify({ message: text, file_context: fileContext }),
+    });
+  } catch (e) {
+    state.idePanelSending = false;
+    updatePanelTypingIndicator(false);
+    var errMsg = {
+      id: "err-" + Date.now(),
+      role: "assistant",
+      content: "Failed to send: " + (e.message || "Unknown error"),
+      timestamp: Date.now() / 1000,
+      sender: "Agent42",
+    };
+    state.idePanelMessages.push(errMsg);
+    appendPanelChatMsg(errMsg);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -7601,6 +7738,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadAll();
     connectWS();
   }
+  // Restore IDE chat panel session
+  try {
+    var savedPanelId = localStorage.getItem("ide_panel_session_id");
+    if (savedPanelId) state.idePanelSessionId = savedPanelId;
+  } catch(e) {}
   render();
   // Towel Day Easter Egg (May 25)
   if (isTowelDay()) {
