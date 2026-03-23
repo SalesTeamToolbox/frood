@@ -1855,6 +1855,15 @@ body.towel-day .dont-panic-watermark {
                         padding: 0.75rem; overflow-x: auto; }
 .cc-chat-messages pre code { font-family: var(--mono); font-size: 0.82rem;
                               line-height: 1.6; white-space: pre; }
+/* Tables in CC chat: prevent overflow, add horizontal scroll */
+.cc-chat-messages table { width: 100%; border-collapse: collapse; font-size: 0.82rem;
+                          display: block; overflow-x: auto; }
+.cc-chat-messages th, .cc-chat-messages td { padding: 0.35rem 0.5rem;
+                          border: 1px solid var(--border); text-align: left;
+                          white-space: nowrap; }
+.cc-chat-messages th { background: var(--bg-tertiary); font-weight: 600; }
+/* Ensure long content wraps within message bubbles */
+.cc-chat-messages .chat-msg-body { overflow-wrap: break-word; word-break: break-word; }
 /* User message body in CC chat preserves paragraph breaks (INPUT-02) */
 .cc-chat-messages .chat-msg-body-user { white-space: pre-wrap; }
 .ide-node-select { display: flex; gap: 0.5rem; align-items: center; }

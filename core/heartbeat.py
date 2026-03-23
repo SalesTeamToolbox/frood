@@ -196,6 +196,43 @@ class HeartbeatService:
             load = (0.0, 0.0, 0.0)
         cpu_cores = os.cpu_count() or 1
 
+        # System memory (cross-platform)
+        mem_total_mb = 0
+        mem_avail_mb = 0
+        try:
+            import sys as _sys
+
+            if _sys.platform == "win32":
+                import ctypes
+
+                class MEMORYSTATUSEX(ctypes.Structure):
+                    _fields_ = [
+                        ("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                    ]
+
+                memstat = MEMORYSTATUSEX()
+                memstat.dwLength = ctypes.sizeof(memstat)
+                if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memstat)):
+                    mem_total_mb = memstat.ullTotalPhys / (1024 * 1024)
+                    mem_avail_mb = memstat.ullAvailPhys / (1024 * 1024)
+            else:
+                with open("/proc/meminfo") as f:
+                    for line in f:
+                        if line.startswith("MemTotal:"):
+                            mem_total_mb = int(line.split()[1]) / 1024
+                        elif line.startswith("MemAvailable:"):
+                            mem_avail_mb = int(line.split()[1]) / 1024
+        except (ImportError, OSError, AttributeError):
+            pass
+
         health = SystemHealth(
             active_agents=len(self.active_agents),
             stalled_agents=len(self.stalled_agents),
@@ -205,8 +242,8 @@ class HeartbeatService:
             cpu_load_15m=load[2],
             cpu_cores=cpu_cores,
             load_per_core=round(load[0] / cpu_cores, 2),
-            memory_total_mb=0,
-            memory_available_mb=0,
+            memory_total_mb=round(mem_total_mb, 1),
+            memory_available_mb=round(mem_avail_mb, 1),
             effective_max_agents=self._configured_max_agents,
             configured_max_agents=self._configured_max_agents,
             capacity_auto_mode=False,

@@ -483,6 +483,9 @@ Skip GSD for trivial tasks (Claude handles these directly):
 | 119 | Deploy | Unstaged local changes block `git checkout main` during deploy, forcing stash/pop which causes merge conflicts | Always check `git status` before deploy. Commit or explicitly stash WIP first — don't let deploy workflow hit stash conflicts mid-flight |
 | 120 | CC Chat | On session resume/page reload, `sessionStorage` restores the session ID so CC retains conversation context via `--resume`, but the chat DOM is empty — messages were never persisted | Save user and assistant messages to `localStorage` keyed by `cc_hist_<sessionId>`; restore via `ccRestoreHistory()` in `ws.onopen` when `sessionResumed === true` |
 | 121 | Startup | `agent42.py` called `PluginLoader(self.tool_registry)` (old instance-based API) — but `PluginLoader` has no constructor; only a static `load_all(directory, context, registry)` method | Use `PluginLoader.load_all(custom_tools_dir, ctx, self.tool_registry)` and only call it when `CUSTOM_TOOLS_DIR` is configured |
+| 122 | GSD | `gsd-tools.cjs` resolves `project_root` to parent repo (agent42) when working in nested repos with their own `.git/` (e.g. `apps/meatheadgear/`) | GSD planning for nested app repos must be done manually or with `cd` to the app directory first. GSD needs a fix to detect and respect nested git roots |
+| 123 | Status | System RAM showed `0 / 0 MB` on Windows — `memory_total_mb` and `memory_available_mb` were hardcoded to 0 in heartbeat | Use `GlobalMemoryStatusEx` on Windows, `/proc/meminfo` on Linux to populate system memory fields |
+| 124 | Frontend | `/api/tasks` endpoint removed in v2.0 but frontend `loadTasks()` still called it — caused 404 on every page load | Replace `await api("/tasks")` with `state.tasks = []` (tasks are project-scoped now) |
 
 ---
 
