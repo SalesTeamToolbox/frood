@@ -9,10 +9,10 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 
 ## Current Position
 
-Phase: 1 of 4 (Foundation)
-Plan: 0 of 2 in current phase
-Status: Ready to plan
-Last activity: 2026-03-22 — Roadmap created from requirements and research
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements for v2.1 Multi-Project Workspace
+Last activity: 2026-03-23 — Milestone v2.1 started
 
 Progress: [░░░░░░░░░░] 0%
 

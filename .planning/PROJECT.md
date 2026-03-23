@@ -58,7 +58,21 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 
 ### Active
 
-## Current Milestone: v1.3 Agent LLM Control
+## Current Milestone: v2.1 Multi-Project Workspace
+
+**Goal:** Add tabbed workspace support where each tab scopes to a project folder with its own file explorer, editor, CC sessions, and terminal — like multiple VS Code windows in one dashboard.
+
+**Target features:**
+- Workspace tab bar at the top of the Workspace page
+- Each workspace tab has its own file explorer rooted at that project folder
+- CC sessions scoped per workspace (cwd set to project root)
+- Monaco editor tabs scoped per workspace
+- Terminal sessions scoped per workspace (cwd set to project root)
+- Workspace management: add/remove/rename project workspaces
+- Persist workspace configuration across reloads
+- Support Agent42 internal apps (apps/ subdirectory) as workspace targets
+
+## Previous Milestone: v1.3 Agent LLM Control
 
 **Goal:** Restructure model routing around L1/L2 tiers with StrongWall.ai as primary workhorse, add per-agent routing configuration in the dashboard, and modernize the fallback chain
 
