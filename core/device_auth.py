@@ -218,9 +218,7 @@ def _hash_key(raw_key: str) -> str:
         logger.critical("JWT_SECRET is not set! Cannot securely hash API keys.")
         raise ValueError("JWT_SECRET is not configured.")
 
-    return "hmac:" + hmac.new(
-        jwt_secret.encode(), raw_key.encode(), hashlib.sha256
-    ).hexdigest()
+    return "hmac:" + hmac.new(jwt_secret.encode(), raw_key.encode(), hashlib.sha256).hexdigest()
 
 
 def _legacy_hash_key(raw_key: str) -> str:

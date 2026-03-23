@@ -1130,35 +1130,44 @@ async function sendChatMessage() {
   const text = (input?.value || "").trim();
   if (!text || state.chatSending) return;
   state.chatSending = true;
-  // Optimistic: add user message immediately
-  const newMsg = {
-    id: "local-" + Date.now(),
-    role: "user",
-    content: text,
-    timestamp: Date.now() / 1000,
-    sender: "You",
-  };
-  state.chatMessages.push(newMsg);
-  if (input) input.value = "";
-
-  // Incremental append: only add the new message to the DOM instead of rebuilding everything
-  if (state.page === "chat") {
-    if (!appendChatMsgToDOM(newMsg, state.chatMessages, false)) {
-      renderChat();
-    } else {
-      updateChatTypingIndicator(true, false);
-    }
-  }
 
   try {
-    await api("/chat/send", {
+    // Auto-create a session if none active (legacy /api/chat/send no longer exists)
+    if (!state.currentSessionId) {
+      var session = await api("/chat/sessions", {
+        method: "POST",
+        body: JSON.stringify({ title: text.substring(0, 80), session_type: "chat" }),
+      });
+      state.currentSessionId = session.id;
+      state.currentSessionMessages = [];
+      await loadChatSessions();
+    }
+
+    // Now use the session send path
+    const newMsg = {
+      id: "local-" + Date.now(),
+      role: "user",
+      content: text,
+      timestamp: Date.now() / 1000,
+      sender: "You",
+      session_id: state.currentSessionId,
+    };
+    state.currentSessionMessages.push(newMsg);
+    if (input) input.value = "";
+
+    if (state.page === "chat") {
+      if (!appendChatMsgToDOM(newMsg, state.currentSessionMessages, false)) {
+        renderChat();
+      } else {
+        updateChatTypingIndicator(true, false);
+      }
+    }
+
+    await api("/chat/sessions/" + state.currentSessionId + "/send", {
       method: "POST",
       body: JSON.stringify({ message: text }),
     });
-    // Don't reset chatSending here — the WebSocket "chat_thinking" event
-    // controls the typing indicator based on actual agent processing state.
   } catch (e) {
-    // Structured errors already shown by api(); only toast unstructured ones
     if (!e.code) toast("Failed to send: " + e.message, "error");
     state.chatSending = false;
     if (state.page === "chat") renderChat();

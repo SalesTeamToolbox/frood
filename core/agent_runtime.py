@@ -20,6 +20,7 @@ logger = logging.getLogger("agent42.agent_runtime")
 @dataclass
 class AgentProcess:
     """Tracks a running agent process."""
+
     agent_id: str
     pid: int
     process: object = None
@@ -112,8 +113,10 @@ class AgentRuntime:
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         log_path = self._logs_dir / f"{agent_id}-{timestamp}.log"
 
-        logger.info(f"Starting agent {agent_id} provider={agent_config.get('provider')} "
-                     f"model={agent_config.get('model', 'default')}")
+        logger.info(
+            f"Starting agent {agent_id} provider={agent_config.get('provider')} "
+            f"model={agent_config.get('model', 'default')}"
+        )
 
         try:
             log_file = open(log_path, "w", encoding="utf-8")
@@ -125,7 +128,11 @@ class AgentRuntime:
             log_file.flush()
 
             proc = await asyncio.create_subprocess_exec(
-                claude_bin, "-p", prompt, "--output-format", "text",
+                claude_bin,
+                "-p",
+                prompt,
+                "--output-format",
+                "text",
                 stdout=log_file,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=str(self.workspace),
@@ -133,8 +140,12 @@ class AgentRuntime:
             )
 
             agent_proc = AgentProcess(
-                agent_id=agent_id, pid=proc.pid, process=proc,
-                started_at=time.time(), log_file=str(log_path), status="running",
+                agent_id=agent_id,
+                pid=proc.pid,
+                process=proc,
+                started_at=time.time(),
+                log_file=str(log_path),
+                status="running",
             )
             self._processes[agent_id] = agent_proc
             asyncio.create_task(self._monitor(agent_id, proc, log_file))
@@ -160,9 +171,7 @@ class AgentRuntime:
             except Exception:
                 pass
             if agent_id in self._processes:
-                self._processes[agent_id].status = (
-                    "completed" if proc.returncode == 0 else "error"
-                )
+                self._processes[agent_id].status = "completed" if proc.returncode == 0 else "error"
 
     async def stop_agent(self, agent_id):
         """Stop a running agent."""
@@ -200,10 +209,13 @@ class AgentRuntime:
                 pass
 
         return {
-            "agent_id": ap.agent_id, "pid": ap.pid, "status": ap.status,
+            "agent_id": ap.agent_id,
+            "pid": ap.pid,
+            "status": ap.status,
             "started_at": ap.started_at,
             "uptime": time.time() - ap.started_at if ap.status == "running" else 0,
-            "log_file": ap.log_file, "last_output": last_output[-500:],
+            "log_file": ap.log_file,
+            "last_output": last_output[-500:],
         }
 
     def list_running(self):

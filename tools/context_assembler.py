@@ -215,7 +215,11 @@ class ContextAssemblerTool(Tool):
         workspace = self._workspace or "."
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git", "log", "--oneline", "--name-only", "-20",
+                "git",
+                "log",
+                "--oneline",
+                "--name-only",
+                "-20",
                 cwd=workspace,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

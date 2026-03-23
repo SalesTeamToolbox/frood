@@ -76,7 +76,7 @@ class HarnessSuite(BaseSuite):
     def _find_ref(self, snap: str, pattern: str) -> str | None:
         for line in snap.split("\n"):
             if pattern.lower() in line.lower():
-                m = re.search(r'\[ref=(e\d+)\]', line)
+                m = re.search(r"\[ref=(e\d+)\]", line)
                 if m:
                     return m.group(1)
         return None
@@ -89,12 +89,16 @@ class HarnessSuite(BaseSuite):
         """Create a test task via API."""
         result.covers.append("POST /api/tasks")
         self._login()
-        status, data = self._fetch("POST", "/api/tasks", {
-            "title": "E2E Harness Test Task",
-            "description": "Automated test for agent harness lifecycle",
-            "task_type": "CODING",
-            "priority": "normal",
-        })
+        status, data = self._fetch(
+            "POST",
+            "/api/tasks",
+            {
+                "title": "E2E Harness Test Task",
+                "description": "Automated test for agent harness lifecycle",
+                "task_type": "CODING",
+                "priority": "normal",
+            },
+        )
         assert status in (200, 201), f"Task creation failed: {status} {data}"
         if isinstance(data, dict):
             self._created_task_id = data.get("id") or data.get("task_id")
@@ -115,9 +119,13 @@ class HarnessSuite(BaseSuite):
         if not self._created_task_id:
             raise SkipTest("No task created")
         result.covers.append("POST /api/tasks/{task_id}/comment")
-        status, _ = self._fetch("POST", f"/api/tasks/{self._created_task_id}/comment", {
-            "message": "Automated test comment from e2e runner",
-        })
+        status, _ = self._fetch(
+            "POST",
+            f"/api/tasks/{self._created_task_id}/comment",
+            {
+                "message": "Automated test comment from e2e runner",
+            },
+        )
         assert status == 200, f"Comment failed: {status}"
 
     def test_04_set_priority(self, result):
@@ -126,9 +134,13 @@ class HarnessSuite(BaseSuite):
         if not self._created_task_id:
             raise SkipTest("No task created")
         result.covers.append("PATCH /api/tasks/{task_id}/priority")
-        status, _ = self._fetch("PATCH", f"/api/tasks/{self._created_task_id}/priority", {
-            "priority": "high",
-        })
+        status, _ = self._fetch(
+            "PATCH",
+            f"/api/tasks/{self._created_task_id}/priority",
+            {
+                "priority": "high",
+            },
+        )
         assert status == 200, f"Priority change failed: {status}"
 
     def test_05_block_task(self, result):
@@ -137,9 +149,13 @@ class HarnessSuite(BaseSuite):
         if not self._created_task_id:
             raise SkipTest("No task created")
         result.covers.append("PATCH /api/tasks/{task_id}/block")
-        status, _ = self._fetch("PATCH", f"/api/tasks/{self._created_task_id}/block", {
-            "reason": "Blocked by e2e test",
-        })
+        status, _ = self._fetch(
+            "PATCH",
+            f"/api/tasks/{self._created_task_id}/block",
+            {
+                "reason": "Blocked by e2e test",
+            },
+        )
         if status == 200:
             result.covers.append("PATCH /api/tasks/{task_id}/unblock")
             self._fetch("PATCH", f"/api/tasks/{self._created_task_id}/unblock")
@@ -194,8 +210,7 @@ class HarnessSuite(BaseSuite):
 
         snap = self.cli.snapshot_content()
         has_board = any(
-            kw in snap.lower()
-            for kw in ["pending", "running", "done", "kanban", "mission", "task"]
+            kw in snap.lower() for kw in ["pending", "running", "done", "kanban", "mission", "task"]
         )
         assert has_board, f"Task board should render:\n{snap[:500]}"
 
@@ -206,7 +221,7 @@ class HarnessSuite(BaseSuite):
         task_ref = None
         for line in snap.split("\n"):
             if "task" in line.lower() and "[ref=" in line:
-                m = re.search(r'\[ref=(e\d+)\]', line)
+                m = re.search(r"\[ref=(e\d+)\]", line)
                 if m:
                     task_ref = m.group(1)
                     break
@@ -224,11 +239,15 @@ class HarnessSuite(BaseSuite):
         result.covers.append("POST /api/profiles")
         self._login()
         self._created_profile_name = "e2e-test-profile"
-        status, _ = self._fetch("POST", "/api/profiles", {
-            "name": self._created_profile_name,
-            "description": "Created by E2E test runner",
-            "preferred_task_types": ["CODING"],
-        })
+        status, _ = self._fetch(
+            "POST",
+            "/api/profiles",
+            {
+                "name": self._created_profile_name,
+                "description": "Created by E2E test runner",
+                "preferred_task_types": ["CODING"],
+            },
+        )
         assert status in (200, 201, 409), f"Profile creation failed: {status}"
 
     def test_12_get_profile(self, result):
@@ -246,9 +265,13 @@ class HarnessSuite(BaseSuite):
         if not self._created_profile_name:
             raise SkipTest("No profile created")
         result.covers.append("PUT /api/profiles/{name}")
-        status, _ = self._fetch("PUT", f"/api/profiles/{self._created_profile_name}", {
-            "description": "Updated by E2E test runner",
-        })
+        status, _ = self._fetch(
+            "PUT",
+            f"/api/profiles/{self._created_profile_name}",
+            {
+                "description": "Updated by E2E test runner",
+            },
+        )
         assert status == 200, f"Profile update failed: {status}"
 
     def test_14_delete_profile(self, result):
@@ -285,11 +308,15 @@ class HarnessSuite(BaseSuite):
 
         created_ids = []
         for tt in task_types[:5]:
-            status, data = self._fetch("POST", "/api/tasks", {
-                "title": f"E2E type test: {tt}",
-                "description": f"Testing task type {tt}",
-                "task_type": tt,
-            })
+            status, data = self._fetch(
+                "POST",
+                "/api/tasks",
+                {
+                    "title": f"E2E type test: {tt}",
+                    "description": f"Testing task type {tt}",
+                    "task_type": tt,
+                },
+            )
             if status in (200, 201) and isinstance(data, dict):
                 tid = data.get("id") or data.get("task_id")
                 if tid:

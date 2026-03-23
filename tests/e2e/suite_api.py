@@ -117,12 +117,16 @@ class APISuite(BaseSuite):
         """POST /api/tasks creates a new task."""
         result.covers.append("POST /api/tasks")
         self._login()
-        status, body = self._fetch("POST", "/api/tasks", {
-            "title": "E2E API Test Task",
-            "description": "Created by e2e test runner",
-            "task_type": "CODING",
-            "priority": "normal",
-        })
+        status, body = self._fetch(
+            "POST",
+            "/api/tasks",
+            {
+                "title": "E2E API Test Task",
+                "description": "Created by e2e test runner",
+                "task_type": "CODING",
+                "priority": "normal",
+            },
+        )
         assert status in (200, 201), f"Task creation should succeed: {status} {body[:200]}"
 
     def test_08_get_task_board(self, result):
@@ -285,17 +289,34 @@ class APISuite(BaseSuite):
         """Auto-test new GET endpoints not explicitly tested above."""
         self._login()
         tested = {
-            "/health", "/api/health", "/api/setup/status", "/api/tasks",
-            "/api/tasks/board", "/api/profiles", "/api/tools", "/api/skills",
-            "/api/providers", "/api/settings/keys", "/api/settings/env",
-            "/api/status", "/api/activity", "/api/stats/tokens", "/api/reports",
-            "/api/approvals", "/api/chat/sessions", "/api/persona",
-            "/api/channels", "/api/devices", "/api/models/health",
-            "/api/settings/openrouter-status", "/api/settings/storage",
+            "/health",
+            "/api/health",
+            "/api/setup/status",
+            "/api/tasks",
+            "/api/tasks/board",
+            "/api/profiles",
+            "/api/tools",
+            "/api/skills",
+            "/api/providers",
+            "/api/settings/keys",
+            "/api/settings/env",
+            "/api/status",
+            "/api/activity",
+            "/api/stats/tokens",
+            "/api/reports",
+            "/api/approvals",
+            "/api/chat/sessions",
+            "/api/persona",
+            "/api/channels",
+            "/api/devices",
+            "/api/models/health",
+            "/api/settings/openrouter-status",
+            "/api/settings/storage",
             "/api/settings/rlm-status",
         }
         new = [
-            e for e in self.manifest.endpoints
+            e
+            for e in self.manifest.endpoints
             if e.method == "GET" and e.path not in tested and "{" not in e.path
         ]
         if not new:

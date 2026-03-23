@@ -427,9 +427,7 @@ class RepositoryManager:
                 env=auth_env,
             )
             try:
-                stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(), timeout=120.0
-                )
+                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=120.0)
             except TimeoutError:
                 proc.kill()
                 await proc.wait()

@@ -619,9 +619,7 @@ class TestEnsureAppVenv:
         (src_dir / "app.py").write_text("import sys; sys.exit(0)")
 
         env = dict()
-        proc = await self.manager._start_python_app(
-            app_path, "src/app.py", 9100, env
-        )
+        proc = await self.manager._start_python_app(app_path, "src/app.py", 9100, env)
         # Wait for the process to finish
         await asyncio.wait_for(proc.communicate(), timeout=30.0)
 
@@ -643,9 +641,7 @@ class TestEnsureAppVenv:
         (src_dir / "app.py").write_text("import sys; sys.exit(0)")
 
         env = dict()
-        proc = await self.manager._start_python_app(
-            app_path, "src/app.py", 9100, env
-        )
+        proc = await self.manager._start_python_app(app_path, "src/app.py", 9100, env)
         await asyncio.wait_for(proc.communicate(), timeout=30.0)
 
         # Verify venv was created and pip ran (venv should have pip)

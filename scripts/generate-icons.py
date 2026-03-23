@@ -19,13 +19,13 @@ def _draw_agent42_icon(size: int, output_path: str) -> None:
     """
     Render the Agent42 robot-face icon at any pixel size using Pillow.
 
-    Faithfully replicates the SVG favicon (32x32 viewBox) at the target resolution:
-      - Gold rounded-rect background (#E8A838)
+    Bold, app-icon style matching the SVG favicon (32x32 viewBox):
+      - Gold rounded-rect background (#E8A838) with subtle border
       - White antenna stem + ball
       - Semi-transparent white robot head box
-      - Two curved-arc eyes
-      - Smile arc
-      - Ear sensor rectangles
+      - Bold curved-arc eyes (thick strokes for visibility at small sizes)
+      - Wide smile arc
+      - Prominent ear sensor rectangles
     """
     from PIL import Image, ImageDraw
 
@@ -39,35 +39,7 @@ def _draw_agent42_icon(size: int, output_path: str) -> None:
         """Scale a SVG coordinate to pixel space."""
         return v * scale
 
-    # --- Background: rect 0 0 32 32 rx=6 fill=#E8A838 ---
-    bg_r = sc(6)
-    draw.rounded_rectangle([0, 0, s - 1, s - 1], radius=bg_r, fill=(232, 168, 56, 255))
-
-    # --- Antenna stem: line x1=16 y1=7 x2=16 y2=3.5 stroke=#fff width=1.5 ---
-    aw = max(1, int(sc(1.5)))
-    draw.line([(sc(16), sc(7)), (sc(16), sc(3.5))], fill=(255, 255, 255, 255), width=aw)
-
-    # --- Antenna ball: circle cx=16 cy=2.5 r=2 fill=#fff ---
-    ar = sc(2)
-    cx, cy = sc(16), sc(2.5)
-    draw.ellipse([cx - ar, cy - ar, cx + ar, cy + ar], fill=(255, 255, 255, 255))
-
-    # --- Robot head: rect x=6 y=7 w=20 h=19 rx=5 fill=#fff fill-opacity=0.15 ---
-    head_color = (255, 255, 255, int(0.15 * 255))
-    head_r = sc(5)
-    draw.rounded_rectangle(
-        [sc(6), sc(7), sc(6 + 20), sc(7 + 19)],
-        radius=head_r,
-        fill=head_color,
-    )
-
-    # --- Eyes: two arc paths drawn as bezier curves ---
-    # Left eye: path "M10 14 Q12.5 11 15 14" — quadratic bezier
-    # Right eye: path "M17 14 Q19.5 11 22 14"
-    eye_w = max(1, int(sc(1.5)))
-    eye_color = (255, 255, 255, 255)
-
-    def draw_quad_bezier(draw_obj, p0, p1, p2, fill, width, steps=20):
+    def draw_quad_bezier(draw_obj, p0, p1, p2, fill, width, steps=32):
         """Draw a quadratic Bezier curve as a polyline."""
         points = []
         for i in range(steps + 1):
@@ -78,49 +50,83 @@ def _draw_agent42_icon(size: int, output_path: str) -> None:
         for i in range(len(points) - 1):
             draw_obj.line([points[i], points[i + 1]], fill=fill, width=width)
 
-    # Left eye: M10 14 Q12.5 11 15 14
+    # --- Background: rounded rect with subtle border ---
+    bg_r = sc(7)
+    draw.rounded_rectangle([0, 0, s - 1, s - 1], radius=bg_r, fill=(232, 168, 56, 255))
+    # Subtle darker border for depth
+    draw.rounded_rectangle(
+        [0, 0, s - 1, s - 1],
+        radius=bg_r,
+        fill=None,
+        outline=(212, 146, 42, 128),
+        width=max(1, int(sc(0.5))),
+    )
+
+    # --- Robot head: more visible (0.25 opacity) ---
+    head_color = (255, 255, 255, int(0.25 * 255))
+    head_r = sc(5)
+    draw.rounded_rectangle(
+        [sc(5.5), sc(7), sc(26.5), sc(27)],
+        radius=head_r,
+        fill=head_color,
+    )
+
+    # --- Antenna stem: thicker ---
+    aw = max(2, int(sc(2)))
+    draw.line([(sc(16), sc(7)), (sc(16), sc(3))], fill=(255, 255, 255, 255), width=aw)
+
+    # --- Antenna ball: slightly larger ---
+    ar = sc(2.2)
+    cx, cy = sc(16), sc(2.5)
+    draw.ellipse([cx - ar, cy - ar, cx + ar, cy + ar], fill=(255, 255, 255, 255))
+
+    # --- Eyes: bold arcs (stroke-width=2.2 in SVG) ---
+    eye_w = max(2, int(sc(2.2)))
+    eye_color = (255, 255, 255, 255)
+
+    # Left eye: M9.5 15 Q12.5 10.5 15.5 15
     draw_quad_bezier(
         draw,
-        (sc(10), sc(14)),
-        (sc(12.5), sc(11)),
-        (sc(15), sc(14)),
+        (sc(9.5), sc(15)),
+        (sc(12.5), sc(10.5)),
+        (sc(15.5), sc(15)),
         eye_color,
         eye_w,
     )
 
-    # Right eye: M17 14 Q19.5 11 22 14
+    # Right eye: M16.5 15 Q19.5 10.5 22.5 15
     draw_quad_bezier(
         draw,
-        (sc(17), sc(14)),
-        (sc(19.5), sc(11)),
-        (sc(22), sc(14)),
+        (sc(16.5), sc(15)),
+        (sc(19.5), sc(10.5)),
+        (sc(22.5), sc(15)),
         eye_color,
         eye_w,
     )
 
-    # --- Smile: M10 21 Q16 26 22 21 ---
-    smile_w = max(1, int(sc(1.5)))
+    # --- Smile: wider and bolder ---
+    smile_w = max(2, int(sc(2.2)))
     draw_quad_bezier(
         draw,
-        (sc(10), sc(21)),
-        (sc(16), sc(26)),
-        (sc(22), sc(21)),
+        (sc(9.5), sc(21)),
+        (sc(16), sc(27)),
+        (sc(22.5), sc(21)),
         (255, 255, 255, 255),
         smile_w,
     )
 
-    # --- Ear sensors: two rects fill-opacity=0.4 ---
-    ear_color = (255, 255, 255, int(0.4 * 255))
-    ear_r = sc(1.5)
-    # Left: x=3 y=13 w=3 h=6
+    # --- Ear sensors: more prominent (0.5 opacity, larger) ---
+    ear_color = (255, 255, 255, int(0.5 * 255))
+    ear_r = sc(1.75)
+    # Left: x=2 y=13 w=3.5 h=7
     draw.rounded_rectangle(
-        [sc(3), sc(13), sc(3 + 3), sc(13 + 6)],
+        [sc(2), sc(13), sc(5.5), sc(20)],
         radius=ear_r,
         fill=ear_color,
     )
-    # Right: x=26 y=13 w=3 h=6
+    # Right: x=26.5 y=13 w=3.5 h=7
     draw.rounded_rectangle(
-        [sc(26), sc(13), sc(26 + 3), sc(13 + 6)],
+        [sc(26.5), sc(13), sc(30), sc(20)],
         radius=ear_r,
         fill=ear_color,
     )
@@ -129,6 +135,48 @@ def _draw_agent42_icon(size: int, output_path: str) -> None:
     final = Image.new("RGB", (s, s), (232, 168, 56))
     final.paste(img, mask=img.split()[3])
     final.save(output_path, "PNG", optimize=True)
+
+
+def _generate_ico(source_png: str, output_dir: str) -> None:
+    """Generate a multi-size .ico file from an existing PNG (for Windows shortcuts)."""
+    import io
+    import struct
+
+    from PIL import Image
+
+    src = Image.open(source_png).convert("RGBA")
+    sizes = [16, 32, 48, 64, 128, 256]
+    entries = []
+    for s in sizes:
+        buf = io.BytesIO()
+        src.resize((s, s), Image.LANCZOS).save(buf, format="PNG")
+        entries.append((s, buf.getvalue()))
+
+    # Build ICO binary: header + directory entries + image data
+    header = struct.pack("<HHH", 0, 1, len(entries))
+    data_offset = 6 + 16 * len(entries)
+    dir_entries = b""
+    image_data = b""
+    for s, png_data in entries:
+        w = h = 0 if s >= 256 else s
+        dir_entries += struct.pack(
+            "<BBBBHHII",
+            w,
+            h,
+            0,
+            0,
+            1,
+            32,
+            len(png_data),
+            data_offset + len(image_data),
+        )
+        image_data += png_data
+
+    ico_path = os.path.join(output_dir, "agent42.ico")
+    with open(ico_path, "wb") as f:
+        f.write(header + dir_entries + image_data)
+    file_size = os.path.getsize(ico_path)
+    print(f"Generated: {ico_path} ({file_size} bytes)")
 
 
 def generate_with_pillow(svg_path: str, output_dir: str) -> None:
@@ -146,6 +194,11 @@ def generate_with_pillow(svg_path: str, output_dir: str) -> None:
         _draw_agent42_icon(size, out_path)
         file_size = os.path.getsize(out_path)
         print(f"Generated: {out_path} ({file_size} bytes)")
+
+    # Also generate .ico for Windows desktop shortcuts
+    png_512 = os.path.join(output_dir, "icon-512.png")
+    if os.path.isfile(png_512):
+        _generate_ico(png_512, output_dir)
 
 
 def generate(svg_path: str, output_dir: str) -> None:
@@ -180,6 +233,11 @@ def generate(svg_path: str, output_dir: str) -> None:
             size = os.path.getsize(out_path)
             print(f"Generated: {out_path} ({size} bytes)")
 
+        # Generate .ico for Windows desktop shortcuts
+        png_512 = os.path.join(output_dir, "icon-512.png")
+        if os.path.isfile(png_512):
+            _generate_ico(png_512, output_dir)
+
         return
 
     except (ImportError, OSError):
@@ -207,6 +265,11 @@ def generate(svg_path: str, output_dir: str) -> None:
             img.save(out_path, "PNG")
             size = os.path.getsize(out_path)
             print(f"Generated: {out_path} ({size} bytes)")
+
+        # Generate .ico for Windows desktop shortcuts
+        png_512 = os.path.join(output_dir, "icon-512.png")
+        if os.path.isfile(png_512):
+            _generate_ico(png_512, output_dir)
 
         return
 

@@ -279,11 +279,17 @@ class ScheduledSecurityScanner:
         """Find an existing open security-scan issue."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "gh", "issue", "list",
-                "--label", "security-scan",
-                "--state", "open",
-                "--json", "number",
-                "--limit", "1",
+                "gh",
+                "issue",
+                "list",
+                "--label",
+                "security-scan",
+                "--state",
+                "open",
+                "--json",
+                "number",
+                "--limit",
+                "1",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._workspace,
@@ -339,9 +345,12 @@ class ScheduledSecurityScanner:
         """Add a comment to an existing GitHub issue."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "gh", "issue", "comment",
+                "gh",
+                "issue",
+                "comment",
                 str(issue_number),
-                "--body", body,
+                "--body",
+                body,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._workspace,
@@ -364,9 +373,12 @@ class ScheduledSecurityScanner:
         """Close a GitHub issue with a comment."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "gh", "issue", "close",
+                "gh",
+                "issue",
+                "close",
                 str(issue_number),
-                "--comment", comment,
+                "--comment",
+                comment,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._workspace,

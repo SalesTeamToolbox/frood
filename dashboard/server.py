@@ -2965,38 +2965,107 @@ def create_app(
         async with _chat_aiofiles.open(path, "w") as fh:
             await fh.write(_chat_json.dumps(messages, indent=2))
 
-    async def _chat_complete(system_prompt: str, messages: list[dict]) -> str:
-        """Try LLM providers in priority order: Anthropic → Gemini → OpenRouter → OpenAI."""
-        chat_model = _os.environ.get("CHAT_MODEL", "")
+    async def _chat_via_cc(prompt: str) -> str | None:
+        """Try Claude Code subprocess (uses CC subscription). Returns None if unavailable.
 
-        # Provider configs: (env_key, url_builder, body_builder, response_parser)
+        Security: claude binary path is resolved via shutil.which (no user input in args).
+        The prompt is passed as a positional arg to create_subprocess_exec (not shell).
+        """
+        import shutil as _shutil_cc
+
+        claude_bin = _shutil_cc.which("claude")
+        if not claude_bin:
+            return None
+
+        try:
+            # create_subprocess_exec — no shell injection risk (args are not shell-interpreted)
+            proc = await _asyncio.create_subprocess_exec(
+                claude_bin,
+                "-p",
+                prompt,
+                "--output-format",
+                "stream-json",
+                stdout=_asyncio.subprocess.PIPE,
+                stderr=_asyncio.subprocess.PIPE,
+                cwd=str(workspace),
+            )
+            stdout, stderr = await _asyncio.wait_for(proc.communicate(), timeout=120.0)
+            if proc.returncode == 0 and stdout:
+                raw = stdout.decode("utf-8", errors="replace")
+                # NDJSON stream: one JSON object per line. Extract "result" event.
+                for line in raw.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = _json.loads(line)
+                        if isinstance(event, dict) and event.get("type") == "result":
+                            result_text = event.get("result", "")
+                            if result_text:
+                                return result_text
+                    except _json.JSONDecodeError:
+                        continue
+                # Fallback: return raw if no result event found
+                if raw.strip():
+                    return raw.strip()
+            logger.warning(
+                "CC chat failed (rc=%s): %s",
+                proc.returncode,
+                stderr.decode()[:200] if stderr else "",
+            )
+        except TimeoutError:
+            logger.warning("CC chat timed out (120s)")
+        except Exception as e:
+            logger.warning("CC chat error: %s", e)
+        return None
+
+    async def _chat_complete(system_prompt: str, messages: list[dict]) -> str:
+        """Try CC subscription first, then API providers: Anthropic -> Gemini -> OpenRouter -> OpenAI."""
+
+        # 1. Try Claude Code subscription (primary)
+        context_parts = []
+        if system_prompt:
+            context_parts.append(system_prompt)
+        for m in messages[-10:]:
+            role = "Human" if m["role"] == "user" else "Assistant"
+            context_parts.append(f"{role}: {m['content']}")
+        cc_prompt = "\n\n".join(context_parts)
+
+        cc_result = await _chat_via_cc(cc_prompt)
+        if cc_result:
+            return cc_result
+
+        logger.info("CC subscription unavailable, trying API providers...")
+
+        # 2. Fall back to API providers
+        chat_model = _os.environ.get("CHAT_MODEL", "")
         providers = []
 
-        # 1. Anthropic (if key set)
         anthropic_key = _os.environ.get("ANTHROPIC_API_KEY", "")
         if anthropic_key:
             providers.append(("anthropic", anthropic_key))
 
-        # 2. Gemini (free tier — if key set)
+        synthetic_key = _os.environ.get("SYNTHETIC_API_KEY", "")
+        if synthetic_key:
+            providers.append(("synthetic", synthetic_key))
+
         gemini_key = _os.environ.get("GEMINI_API_KEY", "") or _os.environ.get("GOOGLE_API_KEY", "")
         if gemini_key:
             providers.append(("gemini", gemini_key))
 
-        # 3. OpenRouter (if key set)
         or_key = _os.environ.get("OPENROUTER_API_KEY", "")
         if or_key:
             providers.append(("openrouter", or_key))
 
-        # 4. OpenAI (if key set)
         openai_key = _os.environ.get("OPENAI_API_KEY", "")
         if openai_key:
             providers.append(("openai", openai_key))
 
         if not providers:
             return (
-                "No LLM API key configured. Set one of: `ANTHROPIC_API_KEY`, "
-                "`GEMINI_API_KEY`, `OPENROUTER_API_KEY`, or `OPENAI_API_KEY` "
-                "in your `.env` file or Dashboard Settings."
+                "Claude Code is not available and no API keys are configured. "
+                "Install Claude Code (`npm install -g @anthropic-ai/claude-code`) or "
+                "set an API key in Dashboard Settings."
             )
 
         last_error = ""
@@ -3029,6 +3098,35 @@ def create_app(
                                     text += block.get("text", "")
                             return text
                         last_error = f"Anthropic {resp.status_code}: {resp.text[:200]}"
+
+                elif provider_name == "synthetic":
+                    # Synthetic.new — Anthropic-compatible API
+                    base = "https://api.synthetic.new"
+                    model = chat_model or "claude-sonnet-4-5-20250514"
+                    headers = {
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    }
+                    body = {
+                        "model": model,
+                        "max_tokens": 4096,
+                        "system": system_prompt,
+                        "messages": messages,
+                    }
+                    async with _httpx.AsyncClient(timeout=120.0) as client:
+                        resp = await client.post(
+                            base.rstrip("/") + "/v1/messages",
+                            headers=headers,
+                            json=body,
+                        )
+                        if resp.status_code == 200:
+                            text = ""
+                            for block in resp.json().get("content", []):
+                                if block.get("type") == "text":
+                                    text += block.get("text", "")
+                            return text
+                        last_error = f"Synthetic {resp.status_code}: {resp.text[:200]}"
 
                 elif provider_name == "gemini":
                     model = chat_model or "gemini-2.0-flash"
