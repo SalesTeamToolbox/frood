@@ -56,24 +56,24 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ## Traceability
 
-| Requirement | Phase | Status |
-| ----------- | ----- | ------ |
-| FOUND-01 | Phase 1 | Pending |
-| FOUND-02 | Phase 1 | Pending |
-| FOUND-03 | Phase 2 | Pending |
-| FOUND-04 | Phase 1 | Pending |
-| FOUND-05 | Phase 2 | Pending |
-| FOUND-06 | Phase 1 | Pending |
-| ISOL-01 | Phase 2 | Pending |
-| ISOL-02 | Phase 2 | Pending |
-| ISOL-03 | Phase 2 | Pending |
-| ISOL-04 | Phase 2 | Pending |
-| ISOL-05 | Phase 2 | Pending |
-| ISOL-06 | Phase 1 | Pending |
-| ISOL-07 | Phase 1 | Pending |
-| MGMT-01 | Phase 3 | Pending |
-| MGMT-02 | Phase 3 | Pending |
-| MGMT-03 | Phase 3 | Pending |
+| Requirement | Phase | Phase Name | Status |
+| ----------- | ----- | ---------- | ------ |
+| FOUND-01 | Phase 1 | Registry & Namespacing | Pending |
+| FOUND-02 | Phase 1 | Registry & Namespacing | Pending |
+| FOUND-04 | Phase 1 | Registry & Namespacing | Pending |
+| FOUND-06 | Phase 1 | Registry & Namespacing | Pending |
+| ISOL-06 | Phase 1 | Registry & Namespacing | Pending |
+| ISOL-07 | Phase 1 | Registry & Namespacing | Pending |
+| FOUND-03 | Phase 2 | IDE Surface Integration | Pending |
+| FOUND-05 | Phase 2 | IDE Surface Integration | Pending |
+| ISOL-01 | Phase 2 | IDE Surface Integration | Pending |
+| ISOL-02 | Phase 2 | IDE Surface Integration | Pending |
+| ISOL-03 | Phase 2 | IDE Surface Integration | Pending |
+| ISOL-04 | Phase 2 | IDE Surface Integration | Pending |
+| ISOL-05 | Phase 2 | IDE Surface Integration | Pending |
+| MGMT-01 | Phase 3 | Workspace Management | Pending |
+| MGMT-02 | Phase 3 | Workspace Management | Pending |
+| MGMT-03 | Phase 3 | Workspace Management | Pending |
 
 **Coverage:**
 - v2.1 requirements: 16 total
@@ -82,4 +82,4 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ---
 *Requirements defined: 2026-03-23*
-*Last updated: 2026-03-23 after initial definition*
+*Last updated: 2026-03-23 after roadmap creation*
