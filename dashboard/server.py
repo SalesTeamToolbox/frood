@@ -3865,12 +3865,30 @@ Focus on learnings that would help in future similar sessions."""
         agent = _agent_manager.get(agent_id)
         if not agent:
             raise HTTPException(404, f"Agent not found: {agent_id}")
+
+        # Acquire concurrency semaphore for this agent's tier (RSRC-03).
+        # Returns None when rewards disabled or tier is empty/provisional — no cap (D-09).
+        tier = agent.effective_tier()
+        sem = _agent_manager._get_tier_semaphore(tier)
+        if sem is not None:
+            try:
+                await asyncio.wait_for(sem.acquire(), timeout=0.0)
+            except TimeoutError:
+                raise HTTPException(
+                    503,
+                    f"Tier '{tier}' concurrent task limit reached. Try again later.",
+                )
+
         # Launch the agent process
         result = await _agent_runtime.start_agent(agent.to_dict())
         if not result:
+            if sem is not None:
+                sem.release()
             raise HTTPException(500, "Failed to start agent — is Claude Code CLI installed?")
         _agent_manager.set_status(agent_id, "active")
         _agent_manager.record_run(agent_id)
+        if sem is not None:
+            sem.release()
         return {**agent.to_dict(), "pid": result.pid, "status": "active"}
 
     @app.post("/api/agents/{agent_id}/stop")
