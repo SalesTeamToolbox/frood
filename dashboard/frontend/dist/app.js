@@ -624,9 +624,14 @@ function updateWSIndicator() {
 // Data loading
 // ---------------------------------------------------------------------------
 async function loadTasks() {
+  // /api/tasks removed in v2.0 — tasks are project-scoped now
+  state.tasks = [];
+}
+
+async function loadStorageStatus() {
   try {
-    state.tasks = (await api("/tasks")) || [];
-  } catch { state.tasks = []; }
+    state.storageStatus = (await api("/settings/storage")) || null;
+  } catch { state.storageStatus = null; }
 }
 
 async function loadTokenStats() {
@@ -2561,6 +2566,39 @@ function updateGsdIndicator() {
   }
 }
 
+function renderMemorySystemCard() {
+  const ss = state.storageStatus;
+  if (!ss) return '<div class="card status-section" style="margin-bottom:1.5rem"><div class="card-header"><h3>Memory System</h3></div><div class="card-body"><p style="color:var(--text-muted)">Loading...</p></div></div>';
+  const qStatus = ss.qdrant?.status || "unknown";
+  const rStatus = ss.redis?.status || "unknown";
+  const qBadge = qStatus === "connected" ? "badge-success" : "badge-danger";
+  const rBadge = rStatus === "connected" ? "badge-success" : "badge-danger";
+  const qUrl = ss.qdrant?.url || ss.qdrant?.local_path || "embedded";
+  const rUrl = ss.redis?.url || "not configured";
+  const synced = ss.cc_sync?.total_synced || 0;
+  const lastSync = ss.cc_sync?.last_sync ? new Date(ss.cc_sync.last_sync * 1000).toLocaleString() : "never";
+  const consScanned = ss.consolidation?.last_scanned || 0;
+  const consRemoved = ss.consolidation?.last_removed || 0;
+  return `<div class="card status-section" style="margin-bottom:1.5rem">
+    <div class="card-header"><h3>Memory System</h3></div>
+    <div class="card-body">
+      <p style="color:var(--text-muted);margin-bottom:0.75rem">ONNX embeddings + Qdrant vector search + Redis session cache.</p>
+      <div class="status-metric-row"><span class="metric-label">Qdrant</span><span class="badge ${qBadge}" style="font-size:0.8rem">${esc(qStatus)}</span></div>
+      <div class="status-metric-row"><span class="metric-label" style="padding-left:1rem">URL</span><span class="metric-value" style="font-size:0.8rem;color:var(--text-muted)">${esc(qUrl)}</span></div>
+      <div class="status-metric-row"><span class="metric-label">Redis</span><span class="badge ${rBadge}" style="font-size:0.8rem">${esc(rStatus)}</span></div>
+      <div class="status-metric-row"><span class="metric-label" style="padding-left:1rem">URL</span><span class="metric-value" style="font-size:0.8rem;color:var(--text-muted)">${esc(rUrl)}</span></div>
+      <div style="margin-top:0.75rem;border-top:1px solid var(--border);padding-top:0.75rem">
+        <div class="status-metric-row"><span class="metric-label">CC Memories Synced</span><span class="metric-value">${synced}</span></div>
+        <div class="status-metric-row"><span class="metric-label">Last Sync</span><span class="metric-value" style="font-size:0.8rem">${lastSync}</span></div>
+        <div class="status-metric-row"><span class="metric-label">Consolidation Scanned</span><span class="metric-value">${consScanned}</span></div>
+        <div class="status-metric-row"><span class="metric-label">Duplicates Removed</span><span class="metric-value">${consRemoved}</span></div>
+      </div>
+      <div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)">Mode: ${esc(ss.mode || "unknown")}${ss.configured_mode && ss.configured_mode !== ss.mode ? " (configured: " + esc(ss.configured_mode) + ")" : ""}</div>
+    </div>
+  </div>`;
+}
+
+
 function renderStatus() {
   const el = document.getElementById("page-content");
   if (!el || state.page !== "status") return;
@@ -2644,6 +2682,8 @@ function renderStatus() {
         <div class="status-metric-row"><span class="metric-label">Remote Node</span><span class="badge badge-muted" style="font-size:0.8rem;opacity:0.6">Not configured</span></div>
       </div>
     </div>
+
+    ${renderMemorySystemCard()}
 
     <div class="status-grid">
       <div>
