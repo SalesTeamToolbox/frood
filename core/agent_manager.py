@@ -189,7 +189,9 @@ class AgentConfig:
             self.updated_at = time.time()
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        d["effective_tier"] = self.effective_tier()
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "AgentConfig":

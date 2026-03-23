@@ -382,11 +382,13 @@ class TierRecalcLoop:
         reward_system: RewardSystem,
         effectiveness_store,
         interval: int = 900,
+        ws_manager=None,
     ) -> None:
         self._agent_manager = agent_manager
         self._reward_system = reward_system
         self._store = effectiveness_store
         self._interval = interval
+        self._ws_manager = ws_manager
         self._determinator = TierDeterminator()
         self._running = False
         self._task: asyncio.Task | None = None
@@ -421,8 +423,13 @@ class TierRecalcLoop:
 
         Per-agent errors are logged and skipped — one bad agent never
         aborts the fleet-wide recalculation.
+
+        After the loop, broadcasts a single "tier_update" WebSocket event
+        for all changed agents (D-06). No broadcast when ws_manager is None
+        or when no tiers changed (graceful degradation).
         """
         agents = self._agent_manager.list_all()
+        changed = []
         for agent in agents:
             if agent.tier_override is not None:  # D-03: skip overridden agents
                 continue
@@ -446,5 +453,9 @@ class TierRecalcLoop:
                         tier,
                         score,
                     )
+                    changed.append({"agent_id": agent.id, "tier": tier, "score": score})
             except Exception as exc:
                 logger.warning("TierRecalcLoop: error processing agent %s: %s", agent.id, exc)
+
+        if changed and self._ws_manager:
+            await self._ws_manager.broadcast("tier_update", {"agents": changed})

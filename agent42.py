@@ -162,6 +162,7 @@ class Agent42:
                 agent_manager=self.agent_manager,
                 reward_system=self.reward_system,
                 effectiveness_store=self.effectiveness_store,
+                ws_manager=self.ws_manager,
             )
         else:
             self.reward_system = None
@@ -238,6 +239,7 @@ class Agent42:
                 effectiveness_store=self.effectiveness_store,
                 app_manager=app_manager,
                 agent_manager=self.agent_manager,
+                reward_system=self.reward_system,
             )
             config = uvicorn.Config(
                 app,
