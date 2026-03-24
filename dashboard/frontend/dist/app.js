@@ -3451,6 +3451,7 @@ function _ensureWsState(wsId) {
   if (!_wsTabState[wsId]) _wsTabState[wsId] = { tabs: [], activeTab: -1 };
   if (!_wsTermSessions[wsId]) _wsTermSessions[wsId] = [];
   if (_wsTermActiveIdx[wsId] === undefined) _wsTermActiveIdx[wsId] = -1;
+  if (_wsTabState[wsId].ccTabCount === undefined) _wsTabState[wsId].ccTabCount = 0;
 }
 
 function _syncAliasesToWorkspace(wsId) {
@@ -4906,11 +4907,22 @@ function ccMakeWsHandler(tab, msgs) {
 // -- CC Session Management (SESS-01 through SESS-06) --------------------------
 
 function ccGetStoredSessionId() {
-  try { return sessionStorage.getItem("cc_active_session") || ""; } catch(e) { return ""; }
+  try {
+    if (_activeWorkspaceId) {
+      return sessionStorage.getItem(wsKey(_activeWorkspaceId, "cc_active_session")) || "";
+    }
+    return sessionStorage.getItem("cc_active_session") || "";
+  } catch(e) { return ""; }
 }
 
 function ccStoreSessionId(sessionId) {
-  try { sessionStorage.setItem("cc_active_session", sessionId); } catch(e) {}
+  try {
+    if (_activeWorkspaceId) {
+      sessionStorage.setItem(wsKey(_activeWorkspaceId, "cc_active_session"), sessionId);
+    } else {
+      sessionStorage.setItem("cc_active_session", sessionId);
+    }
+  } catch(e) {}
 }
 
 function ccRelativeTime(isoString) {
@@ -4944,7 +4956,9 @@ function ccLoadSessionSidebar(tab) {
   var listEl = sidebar.querySelector(".cc-session-list");
   if (!listEl) return;
 
-  fetch("/api/cc/sessions", {
+  var sessionsUrl = "/api/cc/sessions";
+  if (_activeWorkspaceId) sessionsUrl += "?workspace_id=" + encodeURIComponent(_activeWorkspaceId);
+  fetch(sessionsUrl, {
     headers: { "Authorization": "Bearer " + (state.token || "") }
   })
   .then(function(resp) { return resp.json(); })
@@ -5133,13 +5147,17 @@ function ideOpenCCChat(node) {
   var storedSession = ccGetStoredSessionId();
   var sessionResumed = false;
   var sessionId;
-  if (storedSession && _ccTabCounter === 1) {
+  var wsTabCount = _activeWorkspaceId ? (_wsTabState[_activeWorkspaceId] || {}).ccTabCount || 0 : _ccTabCounter;
+  if (storedSession && wsTabCount === 0) {
     sessionId = storedSession;
     sessionResumed = true;
   } else {
     sessionId = (typeof crypto !== "undefined" && crypto.randomUUID)
       ? crypto.randomUUID()
       : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+  if (_activeWorkspaceId && _wsTabState[_activeWorkspaceId]) {
+    _wsTabState[_activeWorkspaceId].ccTabCount = (_wsTabState[_activeWorkspaceId].ccTabCount || 0) + 1;
   }
   ccStoreSessionId(sessionId);
 
