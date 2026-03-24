@@ -1522,6 +1522,72 @@ def create_app(
                     continue
         return {"query": q, "results": results, "truncated": False}
 
+    # -- IDE Lint --------------------------------------------------------------
+
+    @app.get("/api/ide/lint")
+    async def ide_lint(
+        workspace_id: str = None,
+        _user: str = Depends(get_current_user),
+    ):
+        """Run ruff check on the workspace and return structured issues."""
+        import shutil as _lint_shutil
+        import subprocess as _sp
+
+        ws_path = _resolve_workspace(workspace_id)
+        ruff_bin = _lint_shutil.which("ruff")
+        if not ruff_bin:
+            return {"raw": "ruff not found", "issues": []}
+
+        try:
+            result = _sp.run(
+                [ruff_bin, "check", "--output-format=json", str(ws_path)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=str(ws_path),
+            )
+            raw_text = result.stdout or result.stderr or "No output"
+
+            # Also get human-readable output
+            result_text = _sp.run(
+                [ruff_bin, "check", str(ws_path)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=str(ws_path),
+            )
+            human_raw = result_text.stdout or result_text.stderr or "No output"
+
+            # Parse JSON output into structured issues
+            issues = []
+            try:
+                import json as _lint_json
+
+                entries = _lint_json.loads(raw_text)
+                for e in entries:
+                    rel_path = e.get("filename", "")
+                    # Make path relative to workspace
+                    try:
+                        rel_path = str(Path(rel_path).relative_to(ws_path))
+                    except ValueError:
+                        pass
+                    issues.append(
+                        {
+                            "file": rel_path,
+                            "line": e.get("location", {}).get("row", 0),
+                            "col": e.get("location", {}).get("column", 0),
+                            "code": e.get("code", ""),
+                            "message": e.get("message", ""),
+                            "severity": "error" if e.get("code", "").startswith("E") else "warning",
+                        }
+                    )
+            except Exception:
+                pass  # JSON parse failed — return raw only
+
+            return {"raw": human_raw, "issues": issues}
+        except Exception as ex:
+            return {"raw": f"Lint error: {ex}", "issues": []}
+
     # -- Terminal WebSocket ----------------------------------------------------
 
     import asyncio as _asyncio
