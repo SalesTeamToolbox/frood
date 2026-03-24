@@ -3441,6 +3441,42 @@ let _ideActiveTab = -1;
 let _ideTreeCache = {};
 let _ideExpandedDirs = new Set([""]);
 
+// Workspace state management (Phase 2)
+var _activeWorkspaceId = "";
+var _wsTabState = {};     // { workspaceId: { tabs: [], activeTab: -1 } }
+var _wsTermSessions = {}; // { workspaceId: [ ...sessions ] }
+var _wsTermActiveIdx = {}; // { workspaceId: number }
+
+function _ensureWsState(wsId) {
+  if (!_wsTabState[wsId]) _wsTabState[wsId] = { tabs: [], activeTab: -1 };
+  if (!_wsTermSessions[wsId]) _wsTermSessions[wsId] = [];
+  if (_wsTermActiveIdx[wsId] === undefined) _wsTermActiveIdx[wsId] = -1;
+}
+
+function _syncAliasesToWorkspace(wsId) {
+  _ensureWsState(wsId);
+  // Clear _ideTabs array and repopulate from workspace state
+  _ideTabs.length = 0;
+  var wsTabs = _wsTabState[wsId].tabs;
+  for (var i = 0; i < wsTabs.length; i++) _ideTabs.push(wsTabs[i]);
+  _ideActiveTab = _wsTabState[wsId].activeTab;
+
+  // Terminal aliases
+  _termSessions.length = 0;
+  var wsTerms = _wsTermSessions[wsId];
+  for (var j = 0; j < wsTerms.length; j++) _termSessions.push(wsTerms[j]);
+  _termActiveIdx = _wsTermActiveIdx[wsId];
+}
+
+function _saveCurrentWsState() {
+  if (!_activeWorkspaceId) return;
+  _ensureWsState(_activeWorkspaceId);
+  _wsTabState[_activeWorkspaceId].tabs = _ideTabs.slice();
+  _wsTabState[_activeWorkspaceId].activeTab = _ideActiveTab;
+  _wsTermSessions[_activeWorkspaceId] = _termSessions.slice();
+  _wsTermActiveIdx[_activeWorkspaceId] = _termActiveIdx;
+}
+
 function ideDetectLanguage(filename) {
   if (!filename) return "plaintext";
   var ext = filename.split(".").pop().toLowerCase();
@@ -3728,7 +3764,9 @@ function ideInitMonaco() {
 
 async function ideLoadTree(path) {
   try {
-    const res = await fetch("/api/ide/tree?path=" + encodeURIComponent(path), {
+    var treeUrl = "/api/ide/tree?path=" + encodeURIComponent(path);
+    if (_activeWorkspaceId) treeUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
+    const res = await fetch(treeUrl, {
       headers: { Authorization: "Bearer " + state.token },
     });
     const data = await res.json();
@@ -3794,7 +3832,9 @@ async function ideOpenFile(path) {
   try {
     var statusEl = document.getElementById("ide-status-left");
     if (statusEl) statusEl.textContent = "Loading " + path + "...";
-    var res = await fetch("/api/ide/file?path=" + encodeURIComponent(path), {
+    var fileUrl = "/api/ide/file?path=" + encodeURIComponent(path);
+    if (_activeWorkspaceId) fileUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
+    var res = await fetch(fileUrl, {
       headers: { Authorization: "Bearer " + state.token },
     });
     if (!res.ok) { toast("Failed to load file", "error"); return; }
@@ -3981,6 +4021,7 @@ function ccOpenDiffFromToolCard(filePath, toolId) {
 
   // Fetch original file content from server
   var url = "/api/ide/file?path=" + encodeURIComponent(filePath);
+  if (_activeWorkspaceId) url += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
   fetch(url, { headers: { Authorization: "Bearer " + state.token } }).then(function(resp) {
     if (!resp.ok) return Promise.resolve("");
     return resp.text();
@@ -4991,6 +5032,7 @@ function ccResumeSession(tab, wsSessionId, title) {
   var protocol = location.protocol === "https:" ? "wss:" : "ws:";
   var wsUrl = protocol + "//" + location.host + "/ws/cc-chat?token="
     + encodeURIComponent(state.token) + "&session_id=" + encodeURIComponent(wsSessionId);
+  if (_activeWorkspaceId) wsUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
 
   var _ccResumeReconnectCount = 0;
   var _ccResumeReconnectTimer = null;
@@ -5241,6 +5283,7 @@ function ideOpenCCChat(node) {
   var protocol = location.protocol === "https:" ? "wss:" : "ws:";
   var wsUrl = protocol + "//" + location.host + "/ws/cc-chat?token="
     + encodeURIComponent(state.token) + "&session_id=" + encodeURIComponent(sessionId);
+  if (_activeWorkspaceId) wsUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
 
   // Guard against duplicate WS (Pitfall 6)
   if (tab.ws && tab.ws.readyState <= 1) { ideActivateTab(); return; }
@@ -5701,10 +5744,12 @@ async function ideSaveCurrentFile() {
   var statusEl = document.getElementById("ide-status-left");
   try {
     if (statusEl) statusEl.textContent = "Saving " + tab.path + "...";
+    var saveBody = { path: tab.path, content: content };
+    if (_activeWorkspaceId) saveBody.workspace_id = _activeWorkspaceId;
     var res = await fetch("/api/ide/file", {
       method: "POST",
       headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
-      body: JSON.stringify({ path: tab.path, content: content }),
+      body: JSON.stringify(saveBody),
     });
     if (!res.ok) { toast("Save failed", "error"); return; }
     tab.modified = false;
@@ -5846,6 +5891,7 @@ function termNew(node) {
     // Build WebSocket URL
     var protocol = location.protocol === "https:" ? "wss:" : "ws:";
     var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" + encodeURIComponent(state.token) + "&node=" + encodeURIComponent(node || "local");
+    if (_activeWorkspaceId) wsUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
 
     // Build label: "bash (remote)" for remote, "bash N" for local
     var localCount = _termSessions.filter(function(s) { return s.node !== "remote" && s.label.indexOf("bash") === 0; }).length;
@@ -5906,6 +5952,7 @@ function termNewClaude(node) {
 
     var protocol = location.protocol === "https:" ? "wss:" : "ws:";
     var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" + encodeURIComponent(state.token) + "&node=" + encodeURIComponent(node || "local") + "&cmd=claude";
+    if (_activeWorkspaceId) wsUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
 
     var label = (node === "remote") ? "Claude (remote)" : "Claude (local)";
 
@@ -6533,6 +6580,7 @@ function _connectPanelWS() {
   var wsUrl = protocol + "//" + location.host + "/ws/cc-chat?token="
     + encodeURIComponent(state.token) + "&session_id=" + encodeURIComponent(sessionId)
     + "&lightweight=true";
+  if (_activeWorkspaceId) wsUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
 
   var ws = new WebSocket(wsUrl);
   tab.ws = ws;
