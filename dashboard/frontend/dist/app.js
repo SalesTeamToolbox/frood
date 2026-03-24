@@ -3542,17 +3542,20 @@ function ideRenderWorkspaceTabs() {
       return function() { switchWorkspace(wsId); };
     })(ws.id);
 
-    // Name span — click to rename (active tab only)
+    // Name span — right-click to rename (avoids click collision with tab switch)
     var nameSpan = document.createElement("span");
     nameSpan.className = "ide-ws-tab-name";
     nameSpan.textContent = ws.name;  // textContent — XSS safe
-    nameSpan.onclick = (function(wsId, wsName, span) {
+    tab.appendChild(nameSpan);
+
+    // Right-click context menu for rename
+    tab.oncontextmenu = (function(wsId, wsName, span) {
       return function(e) {
+        e.preventDefault();
         e.stopPropagation();
-        if (wsId === _activeWorkspaceId) enterWsRenameMode(wsId, wsName, span);
+        enterWsRenameMode(wsId, wsName, span);
       };
     })(ws.id, ws.name, nameSpan);
-    tab.appendChild(nameSpan);
 
     // Close button — disabled when only 1 workspace remains
     var closeBtn = document.createElement("button");
