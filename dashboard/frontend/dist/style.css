@@ -1829,7 +1829,8 @@ body.towel-day .dont-panic-watermark {
   flex-shrink: 0;
 }
 .ide-ws-tab {
-  padding: 6px 16px;
+  position: relative;
+  padding: 6px 24px 6px 12px;
   background: transparent;
   color: #8b949e;
   border: none;
@@ -1848,6 +1849,46 @@ body.towel-day .dont-panic-watermark {
   color: #e6edf3;
   border-bottom-color: #58a6ff;
   background: #161b22;
+}
+.ide-ws-tab-name { cursor: pointer; }
+.ide-ws-tab-close {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.ide-ws-tab:hover .ide-ws-tab-close { opacity: 1; }
+.ide-ws-tab-close:hover { color: #f85149; }
+.ide-ws-tab-close:disabled { display: none; }
+.ide-ws-tab-add {
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 16px;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+.ide-ws-tab-add:hover { color: #e6edf3; }
+.ide-ws-rename-input {
+  background: #0d1117;
+  border: 1px solid #58a6ff;
+  color: #e6edf3;
+  font-size: 12px;
+  font-family: inherit;
+  padding: 1px 4px;
+  outline: none;
+  width: 120px;
 }
 .ide-tabs { display: flex; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
   overflow-x: auto; min-height: 35px; }

@@ -3530,23 +3530,127 @@ function ideRenderWorkspaceTabs() {
   // Clear existing tabs
   while (container.firstChild) container.removeChild(container.firstChild);
 
-  // Only show tab bar when there are 2+ workspaces
-  if (_workspaceList.length <= 1) {
-    container.style.display = "none";
-    return;
-  }
+  // Always show tab bar (D-02: "+" button must always be accessible)
   container.style.display = "flex";
 
   for (var i = 0; i < _workspaceList.length; i++) {
     var ws = _workspaceList[i];
     var tab = document.createElement("button");
     tab.className = "ide-ws-tab" + (ws.id === _activeWorkspaceId ? " active" : "");
-    tab.textContent = ws.name;  // textContent, not innerHTML — safe
     tab.setAttribute("data-ws-id", ws.id);
     tab.onclick = (function(wsId) {
       return function() { switchWorkspace(wsId); };
     })(ws.id);
+
+    // Name span — click to rename (active tab only)
+    var nameSpan = document.createElement("span");
+    nameSpan.className = "ide-ws-tab-name";
+    nameSpan.textContent = ws.name;  // textContent — XSS safe
+    nameSpan.onclick = (function(wsId, wsName, span) {
+      return function(e) {
+        e.stopPropagation();
+        if (wsId === _activeWorkspaceId) enterWsRenameMode(wsId, wsName, span);
+      };
+    })(ws.id, ws.name, nameSpan);
+    tab.appendChild(nameSpan);
+
+    // Close button — disabled when only 1 workspace remains
+    var closeBtn = document.createElement("button");
+    closeBtn.className = "ide-ws-tab-close";
+    closeBtn.textContent = "\u00d7";
+    closeBtn.disabled = _workspaceList.length <= 1;
+    closeBtn.onclick = (function(wsId) {
+      return function(e) {
+        e.stopPropagation();
+        removeWorkspace(wsId);
+      };
+    })(ws.id);
+    tab.appendChild(closeBtn);
+
     container.appendChild(tab);
+  }
+
+  // "+" add workspace button (always appended after tabs)
+  var addBtn = document.createElement("button");
+  addBtn.className = "ide-ws-tab-add";
+  addBtn.textContent = "+";
+  addBtn.onclick = function() { showAddWorkspaceModal(); };
+  container.appendChild(addBtn);
+}
+
+function showAddWorkspaceModal() {
+  var html = '<div class="modal">' +
+    '<div class="modal-header"><h3>Add Workspace</h3>' +
+      '<button class="btn btn-icon btn-outline" onclick="closeModal()">\u00d7</button>' +
+    '</div>' +
+    '<div class="modal-body">' +
+      '<div class="form-group">' +
+        '<label for="aw-path">Folder path</label>' +
+        '<input type="text" id="aw-path" placeholder="/home/user/projects/myapp">' +
+        '<div class="help">Absolute path to a project folder on the server.</div>' +
+      '</div>' +
+      '<div id="aw-apps-section" style="display:none">' +
+        '<div class="form-group">' +
+          '<label for="aw-app">Or choose an Agent42 app</label>' +
+          '<select id="aw-app" onchange="onAddWsAppChange(this.value)">' +
+            '<option value="">-- select an app --</option>' +
+          '</select>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="modal-footer">' +
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>' +
+      '<button class="btn btn-primary" onclick="submitAddWorkspace()">Add</button>' +
+    '</div>' +
+  '</div>';
+  showModal(html);
+  var pathEl = document.getElementById("aw-path");
+  if (pathEl) pathEl.focus();
+  _populateWsAppDropdown();  // MUST be called AFTER showModal (Pitfall 5)
+}
+
+function _populateWsAppDropdown() {
+  api("/apps").then(function(apps) {
+    if (!apps || !apps.length) return;
+    var section = document.getElementById("aw-apps-section");
+    var select = document.getElementById("aw-app");
+    if (!section || !select) return;
+    section.style.display = "";
+    for (var i = 0; i < apps.length; i++) {
+      var opt = document.createElement("option");
+      opt.value = apps[i].path;         // App.path field (verified in app_manager.py:114)
+      opt.textContent = apps[i].name;   // textContent — XSS safe
+      select.appendChild(opt);
+    }
+  }).catch(function() { /* app_manager not configured or network error -- section stays hidden */ });
+}
+
+function onAddWsAppChange(value) {
+  var pathInput = document.getElementById("aw-path");
+  if (pathInput && value) pathInput.value = value;
+}
+
+async function submitAddWorkspace() {
+  var pathInput = document.getElementById("aw-path");
+  var path = pathInput ? pathInput.value.trim() : "";
+  if (!path) { toast("Path is required", "error"); return; }
+  // Client-side duplicate check
+  for (var i = 0; i < _workspaceList.length; i++) {
+    if (_workspaceList[i].root_path === path) {
+      toast("Workspace already open", "error");
+      return;
+    }
+  }
+  try {
+    var ws = await api("/workspaces", { method: "POST", body: JSON.stringify({ path: path }) });
+    closeModal();
+    // Append, update cache (Pitfall 3), re-render, switch
+    _workspaceList.push(ws);
+    try { localStorage.setItem("workspaces_cache", JSON.stringify(_workspaceList)); } catch(e) {}
+    ideRenderWorkspaceTabs();  // Must come AFTER _workspaceList.push (Pitfall 6)
+    switchWorkspace(ws.id);
+  } catch(err) {
+    toast(err.message || "Failed to add workspace", "error");
   }
 }
 
