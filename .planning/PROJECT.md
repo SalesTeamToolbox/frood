@@ -212,4 +212,4 @@ Desktop experience: PWA manifest + shortcuts, GSD auto-activation, dashboard wit
 | Non-streaming accepted for L1 | StrongWall doesn't stream; simulate for chat, accept for background | -- Pending |
 
 ---
-*Last updated: 2026-03-24 after Multi-Project Workspace Phase 1 (Registry & Namespacing) completion*
+*Last updated: 2026-03-24 after Multi-Project Workspace Phase 2 (IDE Surface Integration) completion*
