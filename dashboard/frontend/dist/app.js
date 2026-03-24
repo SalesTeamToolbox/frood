@@ -68,10 +68,8 @@ const state = {
   codeSetupStep: 0,  // 0=not started, 1=mode, 2=config, 3=done
   codeSending: false,
   codeCanvasOpen: false,
-  // IDE Chat Panel
-  idePanelSessionId: "",
-  idePanelMessages: [],
-  idePanelSending: false,
+  // IDE Chat Panel (WebSocket-based)
+  panelTab: null,
   // Projects
   projects: [],
   selectedProject: null,
@@ -158,6 +156,47 @@ function rotateTagline() {
   }, 800);
 }
 setInterval(rotateTagline, 8000);
+
+// ---------------------------------------------------------------------------
+// Workspace namespace conventions (Phase 1: definition only)
+// Phase 2 will migrate ideOpenFile() and storage call sites to use these.
+// ---------------------------------------------------------------------------
+var WORKSPACE_URI_SCHEME = "workspace";
+
+/**
+ * Build a Monaco-compatible URI for a file in a specific workspace.
+ * Format: "workspace://{workspaceId}/{filePath}"
+ * @param {string} workspaceId - 12-char hex workspace ID
+ * @param {string} filePath - relative file path within workspace
+ * @returns {string} workspace URI string
+ */
+function makeWorkspaceUri(workspaceId, filePath) {
+  return WORKSPACE_URI_SCHEME + "://" + workspaceId + "/" + filePath.replace(/^\//, "");
+}
+
+/**
+ * Build a workspace-namespaced storage key.
+ * Format: "ws_{workspaceId}_{key}"
+ * @param {string} workspaceId - 12-char hex workspace ID
+ * @param {string} key - the base key name (e.g., "cc_active_session", "cc_panel_width")
+ * @returns {string} namespaced storage key
+ */
+function wsKey(workspaceId, key) {
+  return "ws_" + workspaceId + "_" + key;
+}
+
+// Storage key namespace mapping (Phase 2 will migrate these call sites):
+//   wsKey(id, "cc_active_session")    replaces  "cc_active_session"
+//   wsKey(id, "cc_panel_width")       replaces  "cc_panel_width"
+//   wsKey(id, "cc_panel_session_id")  replaces  "cc_panel_session_id"
+//
+// Keys that stay GLOBAL (no namespace prefix):
+//   "agent42_token"   — auth is workspace-independent
+//   "a42_first_done"  — one-time onboarding flag
+//
+// Keys that stay SESSION-SCOPED (no workspace prefix needed):
+//   "cc_hist_{sessionId}" — session UUIDs are already globally unique
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -564,28 +603,12 @@ function handleWSMessage(msg) {
         state.codeSending = false;
         needsAppend = true;
       }
-      if (state.page === "code") {
+      if (state.page === "workspace") {
         if (needsAppend) {
           if (!appendChatMsgToDOM(msg.data, state.codeCurrentMessages, true)) renderCode();
           else updateChatTypingIndicator(state.codeSending, true);
         }
       }
-    } else if (sid && sid === state.idePanelSessionId) {
-      // IDE panel chat session
-      let needsAppend = false;
-      if (msg.data.role === "user") {
-        const idx = state.idePanelMessages.findIndex(m => m.id?.startsWith("local-") && m.content === msg.data.content);
-        if (idx >= 0) state.idePanelMessages[idx] = msg.data;
-        else { state.idePanelMessages.push(msg.data); needsAppend = true; }
-      } else {
-        state.idePanelMessages.push(msg.data);
-        state.idePanelSending = false;
-        needsAppend = true;
-      }
-      if (needsAppend) {
-        appendPanelChatMsg(msg.data);
-      }
-      updatePanelTypingIndicator(state.idePanelSending);
     } else if (!sid) {
       // Legacy messages without session_id (backward compat)
       let needsAppend = false;
@@ -620,12 +643,9 @@ function handleWSMessage(msg) {
       }
     } else if (sid && sid === state.codeCurrentSessionId) {
       state.codeSending = thinking;
-      if (state.page === "code") {
+      if (state.page === "workspace") {
         if (!updateChatTypingIndicator(thinking, true)) renderCode();
       }
-    } else if (sid && sid === state.idePanelSessionId) {
-      state.idePanelSending = thinking;
-      updatePanelTypingIndicator(thinking);
     } else if (!sid) {
       state.chatSending = thinking;
       if (state.page === "chat") {
@@ -984,7 +1004,7 @@ async function switchCodeSession(sessionId) {
       }
     }
   } catch { state.codeCurrentMessages = []; }
-  if (state.page === "code") renderCode();
+  if (state.page === "workspace") renderCode();
 }
 
 async function sendSessionMessage(sessionId, isCode) {
@@ -1008,7 +1028,7 @@ async function sendSessionMessage(sessionId, isCode) {
   if (input) input.value = "";
 
   // Incremental append: only add the new message to the DOM instead of rebuilding everything
-  const onCorrectPage = isCode ? state.page === "code" : state.page === "chat";
+  const onCorrectPage = isCode ? state.page === "workspace" : state.page === "chat";
   if (onCorrectPage) {
     if (!appendChatMsgToDOM(newMsg, messages, isCode)) {
       // Container not found — fall back to full render
@@ -1031,7 +1051,7 @@ async function sendSessionMessage(sessionId, isCode) {
     // Only reset on error so the typing indicator disappears
     if (isCode) state.codeSending = false;
     else state.chatSending = false;
-    if (isCode && state.page === "code") renderCode();
+    if (isCode && state.page === "workspace") renderCode();
     else if (!isCode && state.page === "chat") renderChat();
   }
 }
@@ -1055,7 +1075,7 @@ async function deleteChatSession(sessionId, sessionType) {
       }
     }
     if (state.page === "chat") renderChat();
-    if (state.page === "code") renderCode();
+    if (state.page === "workspace") renderCode();
   } catch (e) { toast("Delete failed: " + e.message, "error"); }
 }
 
@@ -1422,8 +1442,15 @@ async function doHandleApproval(taskId, action, approved) {
 // Navigation
 // ---------------------------------------------------------------------------
 function navigate(page, data) {
+  // Chat redirects to workspace with panel auto-open
+  if (page === "chat") {
+    page = "workspace";
+    setTimeout(function() { if (!_chatPanelMode) ideOpenChatPanel(); }, 100);
+  }
+  // Legacy "code" redirects to workspace
+  if (page === "code") page = "workspace";
   state.page = page;
-  // Remove IDE layout class when leaving code page
+  // Remove IDE layout class when leaving workspace
   var pc = document.getElementById("page-content");
   if (pc) pc.classList.remove("ide-layout-parent");
   if (data) {
@@ -3012,7 +3039,14 @@ function buildChatMsgHtml(m, idx, msgArrayName, isCode) {
     `<button class="chat-canvas-btn" onclick="openCanvas(${msgArrayName}[${idx}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
   ).join("");
   const taskRef = !isCode && m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : "";
-  return `<div class="chat-msg chat-msg-agent"><div class="chat-msg-label">${esc(sender)} <span class="chat-msg-ts">${time}</span></div><div class="chat-msg-bubble chat-bubble-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div>`;
+  // Response time + provider badge
+  var metaBadge = "";
+  if (m.response_ms) {
+    var secs = (m.response_ms / 1000).toFixed(1);
+    var prov = m.provider || "";
+    metaBadge = `<span class="chat-response-meta">${secs}s` + (prov && prov !== "none" ? ` via ${esc(prov)}` : "") + `</span>`;
+  }
+  return `<div class="chat-msg chat-msg-agent"><div class="chat-msg-label">${esc(sender)} <span class="chat-msg-ts">${time}</span> ${metaBadge}</div><div class="chat-msg-bubble chat-bubble-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div>`;
 }
 
 // Scroll chat to bottom reliably (after browser paint)
@@ -3088,8 +3122,10 @@ function _insertTypingIndicator(container, isCode) {
 }
 
 function renderChat() {
-  const el = document.getElementById("page-content");
-  if (!el || state.page !== "chat") return;
+  // DEPRECATED: Chat page removed — consolidated into Workspace chat panel.
+  // This function is kept as a no-op stub because ~10 call sites reference it.
+  // All calls no-op because state.page is never "chat" (navigate() redirects to "workspace").
+  return;
 
   const sessions = state.chatSessions;
   const hasSession = !!state.currentSessionId;
@@ -3163,7 +3199,13 @@ function renderChat() {
       `<button class="chat-canvas-btn" onclick="openCanvas(${msgArray}[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
     ).join("");
     const taskRef = m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : "";
-    return `<div class="chat-msg chat-msg-agent"><div class="chat-msg-label">Agent42 <span class="chat-msg-ts">${time}</span></div><div class="chat-msg-bubble chat-bubble-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div>`;
+    var rmBadge = "";
+    if (m.response_ms) {
+      var rs = (m.response_ms / 1000).toFixed(1);
+      var rp = m.provider || "";
+      rmBadge = `<span class="chat-response-meta">${rs}s` + (rp && rp !== "none" ? ` via ${rp}` : "") + `</span>`;
+    }
+    return `<div class="chat-msg chat-msg-agent"><div class="chat-msg-label">Agent42 <span class="chat-msg-ts">${time}</span> ${rmBadge}</div><div class="chat-msg-bubble chat-bubble-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div>`;
   }).join("");
 
   const typingHtml = state.chatSending ? `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-msg-label">Agent42</div><div class="chat-msg-bubble chat-bubble-agent"><div class="typing-dots"><span></span><span></span><span></span></div></div></div>` : "";
@@ -3416,7 +3458,7 @@ function ideDetectLanguage(filename) {
 function renderCode() {
   var pageContent = document.getElementById("page-content");
   var persistent = document.getElementById("ide-persistent");
-  if (!pageContent || !persistent || state.page !== "code") return;
+  if (!pageContent || !persistent || state.page !== "workspace") return;
 
   // Hide normal page content, show persistent IDE container
   pageContent.style.display = "none";
@@ -3477,8 +3519,8 @@ function renderCode() {
             <div id="ide-editor-container" class="ide-editor-container" style="flex:1;overflow:hidden"></div>
             <div id="ide-cc-container" class="ide-cc-container" style="display:none;flex:1;overflow:hidden;background:#1a1a2e"></div>
             <div id="ide-welcome" class="ide-welcome" style="display:flex">
-              <h2>Agent42 IDE</h2>
-              <p>Select a file from the explorer to start editing.<br>Changes are saved with Ctrl+S.</p>
+              <h2>Agent42 Workspace</h2>
+              <p>Edit files, chat with AI, or open an agent session.<br>Use the Chat panel for quick questions.</p>
               <button class="ide-cc-launch-btn" onclick="ideOpenCCChat('local')">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:middle"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
                 Open Claude Code
@@ -3563,7 +3605,7 @@ function renderCode() {
   if (!window._ideKeyListenerAttached) {
     window._ideKeyListenerAttached = true;
     document.addEventListener("keydown", function(e) {
-      if (state.page !== "code") return;
+      if (state.page !== "workspace") return;
       if (e.key === "`" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         termToggle();
@@ -5290,6 +5332,13 @@ function ccSetSendingState(tab, sending) {
   var stopBtn2 = document.getElementById("cc-stop-" + tab.tabIdx);
   if (sendBtn) sendBtn.style.display = sending ? "none" : "inline-block";
   if (stopBtn2) stopBtn2.style.display = sending ? "inline-block" : "none";
+  // Panel chat: re-enable input/button
+  if (tab === state.panelTab && tab.el) {
+    var pInput = document.getElementById("panel-chat-input");
+    var pBtn = tab.el.querySelector(".panel-chat-send-btn");
+    if (pInput) pInput.disabled = sending;
+    if (pBtn) pBtn.disabled = sending;
+  }
 }
 
 function ccScrollToBottom(tabIdx) {
@@ -6142,8 +6191,7 @@ function ideToggleMainSidebar() {
         {icon:'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4', page:'tasks', title:'Mission Control'},
         {icon:'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', page:'status', title:'Status'},
         {icon:'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z', page:'approvals', title:'Approvals'},
-        {icon:'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z', page:'chat', title:'Chat'},
-        {icon:'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4', page:'code', title:'Code'},
+        {icon:'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4', page:'workspace', title:'Workspace'},
         {icon:'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z', page:'tools', title:'Tools'},
         {icon:'M13 10V3L4 14h7v7l9-11h-7z', page:'skills', title:'Skills'},
         {icon:'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z', page:'agents', title:'Agents'},
@@ -6161,7 +6209,7 @@ function ideToggleMainSidebar() {
     } else {
       // Update active state
       var btns = miniBar.querySelectorAll('.ide-mini-btn');
-      var pages = ['tasks','status','approvals','chat','code','tools','skills','agents','teams','apps','reports','settings'];
+      var pages = ['tasks','status','approvals','workspace','tools','skills','agents','teams','apps','reports','settings'];
       btns.forEach(function(b, i) { b.classList.toggle('active', pages[i] === state.page); });
     }
     miniBar.style.display = "flex";
@@ -6345,10 +6393,12 @@ function ideToggleChatPanel() {
   }
 }
 
-async function ideOpenChatPanel() {
+function ideOpenChatPanel() {
   var panel = document.getElementById("ide-cc-panel");
   var handle = document.getElementById("ide-panel-drag-handle");
   if (!panel) return;
+
+  // Show panel visually
   var savedWidth = 400;
   try { savedWidth = parseInt(localStorage.getItem("cc_panel_width")) || 400; } catch(e) {}
   panel.style.display = "flex";
@@ -6358,22 +6408,158 @@ async function ideOpenChatPanel() {
   if (handle) handle.style.display = "";
   _chatPanelMode = true;
 
-  // Load or create ide_chat session
-  if (!state.idePanelSessionId) {
-    try {
-      var savedId = localStorage.getItem("ide_panel_session_id");
-      if (savedId) {
-        var msgs = await api("/chat/sessions/" + savedId + "/messages");
-        state.idePanelSessionId = savedId;
-        state.idePanelMessages = msgs || [];
-      }
-    } catch(e) {
-      localStorage.removeItem("ide_panel_session_id");
-    }
+  // If panel already built and WS alive, just show it
+  if (state.panelTab && state.panelTab.ws && state.panelTab.ws.readyState <= 1) {
+    setTimeout(function() { if (_monacoEditor) _monacoEditor.layout(); }, 50);
+    return;
   }
 
-  renderIdeChatPanel();
+  // Build panel DOM (once)
+  if (!panel.querySelector(".ide-panel-chat")) {
+    _buildPanelChatDOM(panel);
+  }
+
+  // Open WebSocket (lightweight CC — no MCP servers)
+  _connectPanelWS();
+
   setTimeout(function() { if (_monacoEditor) _monacoEditor.layout(); }, 50);
+}
+
+function _buildPanelChatDOM(panel) {
+  var chatDiv = document.createElement("div");
+  chatDiv.className = "ide-panel-chat ide-cc-chat";
+
+  // Header
+  var header = document.createElement("div");
+  header.className = "panel-chat-header";
+  var title = document.createElement("span");
+  title.textContent = "Chat";
+  var headerRight = document.createElement("div");
+  headerRight.style.display = "flex";
+  headerRight.style.gap = "0.4rem";
+  headerRight.style.alignItems = "center";
+  var escalateBtn = document.createElement("button");
+  escalateBtn.textContent = "Agent";
+  escalateBtn.title = "Open full agent session";
+  escalateBtn.className = "panel-escalate-btn";
+  escalateBtn.setAttribute("onclick", "panelEscalateToCC()");
+  var closeBtn = document.createElement("button");
+  closeBtn.textContent = "\u2715";
+  closeBtn.title = "Close panel";
+  closeBtn.setAttribute("onclick", "ideCloseChatPanel()");
+  headerRight.appendChild(escalateBtn);
+  headerRight.appendChild(closeBtn);
+  header.appendChild(title);
+  header.appendChild(headerRight);
+  chatDiv.appendChild(header);
+
+  // Messages container (same class as CC tabs for ccMakeWsHandler compat)
+  var msgs = document.createElement("div");
+  msgs.className = "cc-chat-messages";
+  msgs.id = "panel-messages";
+  // Welcome message
+  var welcome = document.createElement("div");
+  welcome.className = "panel-chat-welcome";
+  var welcomeP = document.createElement("p");
+  welcomeP.textContent = "Quick chat powered by your CC subscription. Use \"Agent\" for tasks requiring tools.";
+  welcome.appendChild(welcomeP);
+  msgs.appendChild(welcome);
+  chatDiv.appendChild(msgs);
+
+  // Composer
+  var composer = document.createElement("div");
+  composer.className = "panel-chat-composer";
+  var composerInner = document.createElement("div");
+  composerInner.className = "panel-chat-composer-inner";
+  var input = document.createElement("textarea");
+  input.id = "panel-chat-input";
+  input.className = "panel-chat-input";
+  input.rows = 1;
+  input.placeholder = "Ask about this code...";
+  input.setAttribute("oninput", "autoGrowTextarea(this)");
+  input.setAttribute("onkeydown", "if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();panelSend()}");
+  var sendBtn = document.createElement("button");
+  sendBtn.className = "panel-chat-send-btn";
+  sendBtn.textContent = "Send";
+  sendBtn.setAttribute("onclick", "panelSend()");
+  composerInner.appendChild(input);
+  composerInner.appendChild(sendBtn);
+  composer.appendChild(composerInner);
+  chatDiv.appendChild(composer);
+
+  panel.appendChild(chatDiv);
+}
+
+function _connectPanelWS() {
+  // Restore or create session ID
+  var sessionId = "";
+  try { sessionId = localStorage.getItem("cc_panel_session_id") || ""; } catch(e) {}
+  if (!sessionId) {
+    sessionId = crypto.randomUUID ? crypto.randomUUID() : "panel-" + Date.now();
+    try { localStorage.setItem("cc_panel_session_id", sessionId); } catch(e) {}
+  }
+
+  var panel = document.getElementById("ide-cc-panel");
+  var msgsDiv = panel ? panel.querySelector(".cc-chat-messages") : null;
+  if (!msgsDiv) return;
+
+  // Create a virtual tab object (same shape as CC tabs for handler compat)
+  var tab = {
+    type: "panel-chat",
+    path: "Chat",
+    chatPanel: true,
+    el: panel.querySelector(".ide-panel-chat"),
+    ws: null,
+    node: "local",
+    tabIdx: -1,
+    sending: false,
+    autoScroll: true,
+    streamBuffer: "",
+    streamMsgEl: null,
+    streamTimer: null,
+    ccSessionId: sessionId,
+    toolCards: {},
+    trustMode: false,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCostUsd: 0,
+    _lastTurnHash: "",
+    gsd_workstream: "",
+    gsd_phase: "",
+  };
+  state.panelTab = tab;
+
+  var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  var wsUrl = protocol + "//" + location.host + "/ws/cc-chat?token="
+    + encodeURIComponent(state.token) + "&session_id=" + encodeURIComponent(sessionId)
+    + "&lightweight=true";
+
+  var ws = new WebSocket(wsUrl);
+  tab.ws = ws;
+
+  ws.onopen = function() {
+    // Remove welcome, show connected notice
+    var welcome = msgsDiv.querySelector(".panel-chat-welcome");
+    if (welcome) welcome.remove();
+    var notice = document.createElement("div");
+    notice.className = "cc-system-notice";
+    notice.textContent = "Connected";
+    notice.style.cssText = "text-align:center;color:var(--success);font-size:0.75rem;padding:0.5rem;";
+    msgsDiv.appendChild(notice);
+    setTimeout(function() { notice.style.opacity = "0"; setTimeout(function() { notice.remove(); }, 500); }, 2000);
+  };
+
+  ws.onmessage = ccMakeWsHandler(tab, msgsDiv);
+  ws.onerror = function() {};
+
+  ws.onclose = function() {
+    // Show disconnected notice
+    var disc = document.createElement("div");
+    disc.className = "cc-system-notice";
+    disc.textContent = "Disconnected";
+    disc.style.cssText = "text-align:center;color:var(--text-muted);font-size:0.75rem;padding:0.5rem;";
+    if (msgsDiv) msgsDiv.appendChild(disc);
+  };
 }
 
 function ideCloseChatPanel() {
@@ -6384,185 +6570,34 @@ function ideCloseChatPanel() {
   panel.style.display = "none";
   if (handle) handle.style.display = "none";
   _chatPanelMode = false;
+  // Keep WS alive for fast reopen — don't disconnect
   setTimeout(function() { if (_monacoEditor) _monacoEditor.layout(); }, 50);
 }
 
-// -- IDE Chat Panel Rendering --
-// Note: innerHTML usage here builds chat UI from trusted internal state only.
-// All user content is escaped via esc() through buildChatMsgHtml().
-
-function renderIdeChatPanel() {
-  var panel = document.getElementById("ide-cc-panel");
-  if (!panel) return;
-
-  var msgs = state.idePanelMessages;
-  var msgsHtml = "";
-  if (msgs.length === 0) {
-    msgsHtml = '<div class="panel-chat-welcome">' +
-      '<p>Ask questions about your code. Responses use your configured LLM.</p>' +
-      '</div>';
-  } else {
-    msgsHtml = msgs.map(function(m, i) {
-      return buildChatMsgHtml(m, i, "state.idePanelMessages", false);
-    }).join("");
-  }
-
-  // Context badge
-  var contextBadge = "";
-  if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab] && _ideTabs[_ideActiveTab].type === "file") {
-    var fname = _ideTabs[_ideActiveTab].path.split("/").pop();
-    contextBadge = '<div class="panel-context-badge" title="' + esc(_ideTabs[_ideActiveTab].path) + '">' + esc(fname) + '</div>';
-  }
-
-  panel.innerHTML =
-    '<div class="ide-panel-chat">' +
-      '<div class="panel-chat-header">' +
-        '<span>Chat</span>' +
-        '<button onclick="ideCloseChatPanel()" title="Close panel">\u2715</button>' +
-      '</div>' +
-      '<div class="panel-chat-messages" id="panel-messages">' + msgsHtml + '</div>' +
-      '<div class="panel-chat-composer">' +
-        contextBadge +
-        '<div class="panel-chat-composer-inner">' +
-          '<textarea id="panel-chat-input" class="panel-chat-input" rows="1" placeholder="Ask about this code..."' +
-            ' oninput="autoGrowTextarea(this)"' +
-            ' onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();sendPanelChatMessage()}"></textarea>' +
-          '<button class="panel-chat-send-btn" onclick="sendPanelChatMessage()">Send</button>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-
-  var container = document.getElementById("panel-messages");
-  if (container) container.scrollTop = container.scrollHeight;
-}
-
-function appendPanelChatMsg(msg) {
-  var container = document.getElementById("panel-messages");
-  if (!container) return false;
-
-  var welcome = container.querySelector(".panel-chat-welcome");
-  if (welcome) welcome.remove();
-
-  var idx = state.idePanelMessages.indexOf(msg);
-  var msgIdx = idx >= 0 ? idx : state.idePanelMessages.length - 1;
-  var html = buildChatMsgHtml(msg, msgIdx, "state.idePanelMessages", false);
-
-  var typing = document.getElementById("panel-typing-indicator");
-  if (typing) typing.remove();
-
-  container.insertAdjacentHTML("beforeend", html);
-
-  if (state.idePanelSending) {
-    _insertPanelTypingIndicator(container);
-  }
-
-  container.scrollTop = container.scrollHeight;
-  return true;
-}
-
-function updatePanelTypingIndicator(show) {
-  var container = document.getElementById("panel-messages");
-  if (!container) return false;
-
-  var existing = document.getElementById("panel-typing-indicator");
-  if (show && !existing) {
-    _insertPanelTypingIndicator(container);
-    container.scrollTop = container.scrollHeight;
-  } else if (!show && existing) {
-    existing.remove();
-  }
-
-  var input = document.getElementById("panel-chat-input");
-  if (input) input.disabled = show;
-  var chatEl = container.closest(".ide-panel-chat");
-  var sendBtn = chatEl ? chatEl.querySelector(".panel-chat-send-btn") : null;
-  if (sendBtn) sendBtn.disabled = show;
-
-  return true;
-}
-
-function _insertPanelTypingIndicator(container) {
-  var div = document.createElement("div");
-  div.className = "chat-msg chat-msg-agent";
-  div.id = "panel-typing-indicator";
-  var avatar = document.createElement("div");
-  avatar.className = "chat-msg-avatar";
-  avatar.textContent = "A";
-  var body = document.createElement("div");
-  body.className = "chat-msg-body";
-  var dots = document.createElement("div");
-  dots.className = "typing-dots";
-  dots.appendChild(document.createElement("span"));
-  dots.appendChild(document.createElement("span"));
-  dots.appendChild(document.createElement("span"));
-  body.appendChild(dots);
-  div.appendChild(avatar);
-  div.appendChild(body);
-  container.appendChild(div);
-}
-
-// -- IDE Chat Panel Send --
-
-async function sendPanelChatMessage() {
+function panelSend() {
+  var tab = state.panelTab;
+  if (!tab || !tab.ws || tab.ws.readyState !== 1) return;
   var input = document.getElementById("panel-chat-input");
   var text = (input ? input.value : "").trim();
-  if (!text || state.idePanelSending) return;
-  state.idePanelSending = true;
+  if (!text || tab.sending) return;
 
-  // Gather file context from Monaco editor
-  var fileContext = "";
-  if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab] && _ideTabs[_ideActiveTab].type === "file") {
-    var tab = _ideTabs[_ideActiveTab];
-    var sel = _monacoEditor ? _monacoEditor.getSelection() : null;
-    if (sel && !sel.isEmpty() && _monacoEditor.getModel()) {
-      fileContext = "File: " + tab.path + "\nSelected code:\n" + _monacoEditor.getModel().getValueInRange(sel);
-    } else if (tab.model) {
-      fileContext = "File: " + tab.path + "\n" + tab.model.getValue().substring(0, 3000);
-    }
-  }
-
-  var newMsg = {
-    id: "local-" + Date.now(),
-    role: "user",
-    content: text,
-    timestamp: Date.now() / 1000,
-    sender: "You",
-    session_id: state.idePanelSessionId,
-  };
-  state.idePanelMessages.push(newMsg);
+  // Append user bubble (reuse CC pattern)
+  ccAppendUserBubble(tab, text);
   if (input) { input.value = ""; input.style.height = "auto"; }
 
-  appendPanelChatMsg(newMsg);
-  updatePanelTypingIndicator(true);
+  // Send via WebSocket
+  tab.ws.send(JSON.stringify({ message: text }));
+  tab.sending = true;
 
-  try {
-    // Ensure session exists
-    if (!state.idePanelSessionId) {
-      var session = await api("/chat/sessions", {
-        method: "POST",
-        body: JSON.stringify({ title: "IDE Chat", session_type: "ide_chat" }),
-      });
-      state.idePanelSessionId = session.id;
-      try { localStorage.setItem("ide_panel_session_id", session.id); } catch(e) {}
-    }
+  // Update button state
+  var sendBtn = tab.el ? tab.el.querySelector(".panel-chat-send-btn") : null;
+  if (sendBtn) sendBtn.disabled = true;
+  if (input) input.disabled = true;
+}
 
-    await api("/chat/sessions/" + state.idePanelSessionId + "/send", {
-      method: "POST",
-      body: JSON.stringify({ message: text, file_context: fileContext }),
-    });
-  } catch (e) {
-    state.idePanelSending = false;
-    updatePanelTypingIndicator(false);
-    var errMsg = {
-      id: "err-" + Date.now(),
-      role: "assistant",
-      content: "Failed to send: " + (e.message || "Unknown error"),
-      timestamp: Date.now() / 1000,
-      sender: "Agent42",
-    };
-    state.idePanelMessages.push(errMsg);
-    appendPanelChatMsg(errMsg);
-  }
+function panelEscalateToCC() {
+  // Open a full CC tab with tools
+  ideOpenCCChat("local");
 }
 
 // ---------------------------------------------------------------------------
@@ -7753,8 +7788,7 @@ function render() {
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks');closeMobileSidebar()">&#127919; Mission Control</a>
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status');closeMobileSidebar()">&#128200; Status</a>
           <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals');closeMobileSidebar()">&#128274; Approvals ${approvalBadge}</a>
-          <a href="#" data-page="chat" class="${state.page === "chat" ? "active" : ""}" onclick="event.preventDefault();navigate('chat');closeMobileSidebar()">&#128172; Chat</a>
-          <a href="#" data-page="code" class="${state.page === "code" ? "active" : ""}" onclick="event.preventDefault();navigate('code');closeMobileSidebar()">&#128187; Code</a>
+          <a href="#" data-page="workspace" class="${state.page === "workspace" ? "active" : ""}" onclick="event.preventDefault();navigate('workspace');closeMobileSidebar()">&#128187; Workspace</a>
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
           <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills');closeMobileSidebar()">&#9889; Skills</a>
           <a href="#" data-page="agents" class="${state.page === "agents" ? "active" : ""}" onclick="event.preventDefault();navigate('agents');closeMobileSidebar()">&#129302; Agents</a>
@@ -7777,7 +7811,7 @@ function render() {
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
           <button class="ide-sidebar-toggle" onclick="ideToggleMainSidebar()" title="Toggle sidebar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>
-          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", agents: "Agent Profiles", apps: "Apps", reports: "Reports", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", agents: "Agent Profiles", apps: "Apps", reports: "Reports", settings: "Settings", detail: "Task Detail", chat: "Workspace", workspace: "Workspace", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? `
               <button class="btn btn-primary btn-sm" onclick="${state.missionControlTab === 'projects' ? 'showCreateProjectModal()' : 'showCreateTaskModal()'}">+ New ${state.missionControlTab === 'projects' ? 'Project' : 'Task'}</button>
@@ -7798,8 +7832,7 @@ function render() {
     tasks: renderMissionControl,
     status: renderStatus,
     approvals: renderApprovals,
-    chat: renderChat,
-    code: renderCode,
+    workspace: renderCode,
     tools: renderTools,
     skills: renderSkills,
     agents: renderAgents,
@@ -7824,7 +7857,7 @@ function render() {
   }
 
   // When NOT on Code page, ensure page-content is visible and IDE is hidden
-  if (state.page !== "code") {
+  if (state.page !== "workspace") {
     var _pc = document.getElementById("page-content");
     var _ip = document.getElementById("ide-persistent");
     if (_pc) _pc.style.display = "";
@@ -7843,7 +7876,7 @@ function render() {
     if (miniBar) {
       miniBar.style.display = "flex";
       var btns = miniBar.querySelectorAll('.ide-mini-btn');
-      var pages = ['tasks','status','approvals','chat','code','tools','skills','agents','teams','apps','reports','settings'];
+      var pages = ['tasks','status','approvals','workspace','tools','skills','agents','teams','apps','reports','settings'];
       btns.forEach(function(b, i) { b.classList.toggle('active', pages[i] === state.page); });
     }
   }
@@ -7858,11 +7891,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadAll();
     connectWS();
   }
-  // Restore IDE chat panel session
-  try {
-    var savedPanelId = localStorage.getItem("ide_panel_session_id");
-    if (savedPanelId) state.idePanelSessionId = savedPanelId;
-  } catch(e) {}
   render();
   // Towel Day Easter Egg (May 25)
   if (isTowelDay()) {
