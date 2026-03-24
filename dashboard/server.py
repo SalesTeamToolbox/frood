@@ -1560,6 +1560,8 @@ def create_app(
 
         node = websocket.query_params.get("node", "local")
         cmd = websocket.query_params.get("cmd", "shell")
+        ws_workspace_id = websocket.query_params.get("workspace_id")
+        workspace_path = _resolve_workspace(ws_workspace_id)
         shell = _shutil.which("bash") or _shutil.which("sh") or _shutil.which("cmd")
         if not shell:
             await websocket.send_text("\r\nNo shell found\r\n")
@@ -1644,7 +1646,7 @@ def create_app(
             if _sys.platform == "win32":
                 from winpty import PtyProcess
 
-                pty_process = PtyProcess.spawn(pty_cmd, cwd=str(workspace))
+                pty_process = PtyProcess.spawn(pty_cmd, cwd=str(workspace_path))
                 use_pty = True
             else:
                 import pty as _pty_mod
@@ -1656,7 +1658,7 @@ def create_app(
                     stdin=slave_fd,
                     stdout=slave_fd,
                     stderr=slave_fd,
-                    cwd=str(workspace),
+                    cwd=str(workspace_path),
                     preexec_fn=_os.setsid,
                 )
                 _os.close(slave_fd)
@@ -1765,7 +1767,7 @@ def create_app(
                     stdin=_asyncio.subprocess.PIPE,
                     stdout=_asyncio.subprocess.PIPE,
                     stderr=_asyncio.subprocess.STDOUT,
-                    cwd=str(workspace),
+                    cwd=str(workspace_path),
                 )
             except Exception as e:
                 await websocket.send_text(f"\r\nFailed to start shell: {e}\r\n")
@@ -2336,6 +2338,8 @@ def create_app(
             return
 
         ws_session_id = websocket.query_params.get("session_id") or str(_uuid.uuid4())
+        ws_workspace_id = websocket.query_params.get("workspace_id")
+        workspace_path = _resolve_workspace(ws_workspace_id)
         lightweight = websocket.query_params.get("lightweight", "").lower() in ("true", "1")
         session_data = await _load_session(ws_session_id)
         session_state: dict = {"cc_session_id": session_data.get("cc_session_id")}
@@ -2350,7 +2354,7 @@ def create_app(
         session_state["has_streamed_text"] = False
 
         # GSD: Read workstream for this session (from saved data or current file)
-        _gsd_info = _read_gsd_workstream(workspace)
+        _gsd_info = _read_gsd_workstream(workspace_path)
         session_state["gsd_workstream"] = session_data.get("gsd_workstream") or _gsd_info.get(
             "workstream", ""
         )
@@ -2478,7 +2482,7 @@ def create_app(
                             stdin=_cc_slave_fd,
                             stdout=_cc_slave_fd,
                             stderr=_cc_slave_fd,
-                            cwd=str(workspace),
+                            cwd=str(workspace_path),
                             preexec_fn=_os.setsid,
                         )
                         _os.close(_cc_slave_fd)
@@ -2492,13 +2496,15 @@ def create_app(
                         logger.info(
                             "CC PIPE: spawning subprocess with %d args, cwd=%s",
                             len(args),
-                            workspace,
+                            workspace_path,
                         )
                         # Use home dir as cwd to avoid loading project-level
                         # .claude/ configs with platform-specific paths (e.g. Windows
                         # MCP paths on a Linux VPS). The workspace is still accessible
                         # to CC via --add-dir if needed.
-                        _cc_cwd = str(Path.home()) if _sys.platform != "win32" else str(workspace)
+                        _cc_cwd = (
+                            str(Path.home()) if _sys.platform != "win32" else str(workspace_path)
+                        )
                         cc_proc = await _asyncio.create_subprocess_exec(
                             *args,
                             stdout=_asyncio.subprocess.PIPE,
@@ -2803,6 +2809,7 @@ def create_app(
                         "message_count": session_state.get("message_count", 0),
                         "gsd_workstream": session_state.get("gsd_workstream", ""),
                         "gsd_phase": session_state.get("gsd_phase", ""),
+                        "workspace_id": ws_workspace_id or "",
                     },
                 )
 
@@ -2814,8 +2821,15 @@ def create_app(
     # -- CC Session REST API ---------------------------------------------------
 
     @app.get("/api/cc/sessions")
-    async def cc_sessions(_user: str = Depends(get_current_user)):
-        """List all CC chat sessions, sorted by last modified time."""
+    async def cc_sessions(
+        workspace_id: str | None = None,
+        _user: str = Depends(get_current_user),
+    ):
+        """List all CC chat sessions, sorted by last modified time.
+
+        If workspace_id is provided, returns only sessions whose workspace_id matches,
+        plus legacy sessions (no workspace_id field) which belong to any workspace.
+        """
         sessions = []
         cc_dir = workspace / ".agent42" / "cc-sessions"
         if cc_dir.exists():
@@ -2823,6 +2837,11 @@ def create_app(
                 try:
                     async with _aiofiles.open(f) as fh:
                         data = _json.loads(await fh.read())
+                    if workspace_id is not None:
+                        session_ws = data.get("workspace_id")
+                        # Include if: matches filter, or is a legacy session (no workspace_id field)
+                        if session_ws and session_ws != workspace_id:
+                            continue
                     sessions.append(data)
                 except Exception:
                     pass
