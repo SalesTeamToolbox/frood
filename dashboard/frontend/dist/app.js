@@ -3976,6 +3976,7 @@ function renderCode() {
           <button class="ide-panel-tab" onclick="idePanelTab('problems')">PROBLEMS</button>
           <button class="ide-panel-tab" onclick="idePanelTab('output')">OUTPUT</button>
           <button class="ide-panel-tab active" onclick="idePanelTab('terminal')">TERMINAL</button>
+          <button class="ide-panel-tab" onclick="runLint()" style="margin-left:auto;color:#58a6ff;font-size:11px" title="Run ruff lint on workspace">&#9654; Lint</button>
           <div class="ide-panel-actions">
             <div id="ide-terminal-tabs" class="ide-terminal-tabs"></div>
             <div style="display:flex;gap:0.2rem;align-items:center;position:relative">
@@ -4008,6 +4009,8 @@ function renderCode() {
           </div>
         </div>
         <div id="ide-terminal-container" style="flex:1;overflow:hidden"></div>
+        <div id="ide-problems-container" style="flex:1;overflow:auto;display:none;padding:8px;font-family:var(--mono);font-size:12px;color:#c9d1d9"></div>
+        <div id="ide-output-container" style="flex:1;overflow:auto;display:none;padding:8px;font-family:var(--mono);font-size:12px;color:#c9d1d9"></div>
       </div>
       <div id="ide-statusbar" class="ide-statusbar">
         <div class="ide-statusbar-left">
@@ -6706,13 +6709,74 @@ function ideToggleMainSidebar() {
 
 function idePanelTab(tab) {
   var btns = document.querySelectorAll(".ide-panel-tab");
-  btns.forEach(function(b) { b.classList.remove("active"); });
-  event.currentTarget.classList.add("active");
-  // Only terminal tab is functional for now
+  btns.forEach(function(b) {
+    b.classList.remove("active");
+    // Match tab name from button text (PROBLEMS, OUTPUT, TERMINAL)
+    if (b.textContent.trim().toLowerCase() === tab.toLowerCase()) b.classList.add("active");
+  });
   var termContainer = document.getElementById("ide-terminal-container");
-  if (termContainer) termContainer.style.display = tab === "terminal" ? "" : "none";
   var termTabs = document.getElementById("ide-terminal-tabs");
+  var problemsContainer = document.getElementById("ide-problems-container");
+  var outputContainer = document.getElementById("ide-output-container");
+  if (termContainer) termContainer.style.display = tab === "terminal" ? "" : "none";
   if (termTabs) termTabs.style.display = tab === "terminal" ? "" : "none";
+  if (problemsContainer) problemsContainer.style.display = tab === "problems" ? "" : "none";
+  if (outputContainer) outputContainer.style.display = tab === "output" ? "" : "none";
+}
+
+async function runLint() {
+  var outputEl = document.getElementById("ide-output-container");
+  var problemsEl = document.getElementById("ide-problems-container");
+  if (outputEl) outputEl.textContent = "Running ruff check...\n";
+  // Switch to output tab
+  idePanelTab("output");
+  try {
+    var res = await fetch(API + "/ide/lint?workspace_id=" + _activeWorkspaceId, {
+      headers: { "Authorization": "Bearer " + state.token }
+    });
+    var data = await res.json();
+    // Populate OUTPUT with raw lint text (safe — textContent only)
+    if (outputEl) {
+      outputEl.textContent = data.raw || "No lint output";
+    }
+    // Populate PROBLEMS with structured issues (DOM-built, no innerHTML)
+    if (problemsEl && data.issues && data.issues.length > 0) {
+      while (problemsEl.firstChild) problemsEl.removeChild(problemsEl.firstChild);
+      var header = document.createElement("div");
+      header.style.cssText = "margin-bottom:6px;color:#8b949e;font-size:11px";
+      header.textContent = data.issues.length + " problem(s) found";
+      problemsEl.appendChild(header);
+      data.issues.forEach(function(issue) {
+        var row = document.createElement("div");
+        row.style.cssText = "padding:2px 0;cursor:pointer";
+        row.onclick = function() { ideOpenFile(issue.file); };
+        var icon = document.createElement("span");
+        icon.style.cssText = "font-weight:bold;margin-right:6px;color:" +
+          (issue.severity === "error" ? "#f85149" : "#d29922");
+        icon.textContent = issue.severity === "error" ? "E" : "W";
+        row.appendChild(icon);
+        var loc = document.createElement("span");
+        loc.style.color = "#58a6ff";
+        loc.textContent = issue.file + ":" + issue.line;
+        row.appendChild(loc);
+        var code = document.createElement("span");
+        code.style.cssText = "color:#8b949e;margin:0 4px";
+        code.textContent = issue.code;
+        row.appendChild(code);
+        var msg = document.createTextNode(issue.message);
+        row.appendChild(msg);
+        problemsEl.appendChild(row);
+      });
+    } else if (problemsEl) {
+      problemsEl.textContent = "No problems found.";
+    }
+    // Auto-switch to problems if issues found
+    if (data.issues && data.issues.length > 0) {
+      idePanelTab("problems");
+    }
+  } catch(err) {
+    if (outputEl) outputEl.textContent = "Lint failed: " + err.message;
+  }
 }
 
 function termSplit() {
