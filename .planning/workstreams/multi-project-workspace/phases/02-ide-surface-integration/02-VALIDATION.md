@@ -40,9 +40,9 @@ created: 2026-03-24
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
 | 02-01-01 | 01 | 1 | ISOL-01 | integration | `pytest tests/test_ide_workspace.py -k "test_file_explorer_scoping"` | ❌ W0 | ⬜ pending |
 | 02-01-02 | 01 | 1 | ISOL-04 | integration | `pytest tests/test_ide_workspace.py -k "test_terminal_scoping"` | ❌ W0 | ⬜ pending |
-| 02-02-01 | 02 | 2 | ISOL-02 | manual-only | — | — | ⬜ pending |
-| 02-02-02 | 02 | 2 | ISOL-03 | manual-only | — | — | ⬜ pending |
-| 02-03-01 | 03 | 3 | FOUND-03 | manual-only | — | — | ⬜ pending |
+| 02-02-01 | 02 | 2 | ISOL-02 | integration | `pytest tests/test_ide_html.py -x -q` | ✅ | ⬜ pending |
+| 02-02-02 | 02 | 2 | ISOL-03 | integration | `pytest tests/test_ide_html.py -x -q` | ✅ | ⬜ pending |
+| 02-03-01 | 03 | 3 | FOUND-03 | integration | `pytest tests/test_ide_html.py -x -q` | ✅ | ⬜ pending |
 | 02-03-02 | 03 | 3 | ISOL-05 | manual-only | — | — | ⬜ pending |
 | 02-03-03 | 03 | 3 | FOUND-05 | manual-only | — | — | ⬜ pending |
 

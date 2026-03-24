@@ -17,7 +17,7 @@ Thread workspace_id into all IDE surfaces: file explorer, editor tabs, CC sessio
 - **D-01:** Tab bar renders above the editor tab bar, inside the IDE page layout — clicking a tab switches all surfaces
 - **D-02:** Active tab has a visual indicator (highlight/underline); inactive tabs are subdued
 - **D-03:** Tab bar loads workspace list from `/api/workspaces` on page load, with stale-while-revalidate from localStorage
-- **D-04:** Active workspace ID stored in `localStorage` via `wsKey(id, "active_workspace")` — persists across reloads
+- **D-04:** Active workspace ID stored in `localStorage` under bare key `"active_workspace_id"` (global, not per-workspace — there is no workspace scope for "which workspace is active"). Persists across reloads.
 
 ### File Explorer Scoping
 - **D-05:** File explorer calls `/api/ide/tree?workspace_id={activeId}` — re-roots to the active workspace folder on every tab switch
