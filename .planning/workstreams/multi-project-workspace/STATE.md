@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.1
 milestone_name: milestone
-status: Ready to plan
-stopped_at: Phase 3 planned (1 plan, verification passed)
-last_updated: "2026-03-24T21:31:51.819Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 03-workspace-management-01-PLAN.md
+last_updated: "2026-03-24T21:50:37.772Z"
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 6
-  completed_plans: 5
+  completed_plans: 6
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-23)
 
 **Core value:** Agent42 must always be able to run agents reliably — multi-workspace extends this to running agents scoped to specific projects.
-**Current focus:** Phase 02 — ide-surface-integration
+**Current focus:** Phase 03 — workspace-management
 
 ## Current Position
 
-Phase: 3
-Plan: Not started
+Phase: 03 (workspace-management) — EXECUTING
+Plan: 1 of 1
 
 ## Performance Metrics
 
@@ -50,6 +50,7 @@ Plan: Not started
 | Phase 02 P01 | 19m | 2 tasks | 3 files |
 | Phase 02-ide-surface-integration P02 | 10m | 2 tasks | 1 files |
 | Phase 02-ide-surface-integration P03 | 8m | 2 tasks | 2 files |
+| Phase 03-workspace-management P01 | 13m | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,9 @@ Recent decisions affecting current work:
 - [Phase 02-ide-surface-integration]: Tab bar hidden when only 1 workspace exists — no UI clutter for single-project users
 - [Phase 02-ide-surface-integration]: switchWorkspace saves Monaco view state before swapping — cursor/scroll preserved across workspace switches
 - [Phase 02-ide-surface-integration]: _ideTreeCache cleared and _ideExpandedDirs reset on workspace switch — prevents cross-workspace file tree bleed
+- [Phase 03-workspace-management]: Always show workspace tab bar (removed <=1 hide guard) — '+' button must always be accessible
+- [Phase 03-workspace-management]: Direct terminal cleanup in removeWorkspace via ws.close/term.dispose instead of termClose() — avoids _termSessions splice index mismatch
+- [Phase 03-workspace-management]: Optimistic rename applied to DOM + _workspaceList simultaneously; both rolled back on API failure
 
 ### Pending Todos
 
@@ -85,6 +89,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T21:31:51.812Z
-Stopped at: Phase 3 planned (1 plan, verification passed)
-Resume file: .planning/workstreams/multi-project-workspace/phases/03-workspace-management/03-01-PLAN.md
+Last session: 2026-03-24T21:50:37.768Z
+Stopped at: Completed 03-workspace-management-01-PLAN.md
+Resume file: None

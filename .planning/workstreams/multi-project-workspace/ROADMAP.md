@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Registry & Namespacing** - Server-side WorkspaceRegistry, CRUD API, default seeding, ID-based path resolution, and client-side storage/URI namespace conventions (completed 2026-03-24)
 - [x] **Phase 2: IDE Surface Integration** - Thread workspace_id into file explorer, editor tabs, CC sessions, and terminals; render workspace tab bar (completed 2026-03-24)
-- [ ] **Phase 3: Workspace Management** - Add, remove, and rename workspaces with validation and guards
+- [x] **Phase 3: Workspace Management** - Add, remove, and rename workspaces with validation and guards (completed 2026-03-24)
 
 ## Phase Details
 
@@ -63,7 +63,7 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 03-01: Add workspace modal (path input + app dropdown, server-side validation); remove workspace with unsaved-files guard and last-workspace protection; inline rename
+- [x] 03-01: Add workspace modal (path input + app dropdown, server-side validation); remove workspace with unsaved-files guard and last-workspace protection; inline rename
 
 ## Progress
 
@@ -74,4 +74,4 @@ Phases execute in numeric order: 1 → 2 → 3
 |-------|----------------|--------|-----------|
 | 1. Registry & Namespacing | 2/2 | Complete    | 2026-03-24 |
 | 2. IDE Surface Integration | 3/3 | Complete    | 2026-03-24 |
-| 3. Workspace Management | 0/1 | Not started | - |
+| 3. Workspace Management | 1/1 | Complete   | 2026-03-24 |
