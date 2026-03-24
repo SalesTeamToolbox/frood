@@ -3478,6 +3478,150 @@ function _saveCurrentWsState() {
   _wsTermActiveIdx[_activeWorkspaceId] = _termActiveIdx;
 }
 
+var _workspaceList = [];
+
+function initWorkspaceTabs() {
+  // stale-while-revalidate: render from cache first, then fetch fresh
+  var cached = null;
+  try { cached = JSON.parse(localStorage.getItem("workspaces_cache")); } catch(e) {}
+  var savedActiveId = localStorage.getItem("active_workspace_id") || "";
+
+  if (cached && Array.isArray(cached) && cached.length > 0) {
+    _setWorkspaceList(cached, savedActiveId);
+  }
+
+  // Fetch fresh workspace list from server
+  fetch("/api/workspaces", {
+    headers: { "Authorization": "Bearer " + (state.token || "") }
+  })
+  .then(function(resp) { return resp.json(); })
+  .then(function(data) {
+    var workspaces = data.workspaces || [];
+    if (workspaces.length === 0) return;
+    try { localStorage.setItem("workspaces_cache", JSON.stringify(workspaces)); } catch(e) {}
+    // Reconcile: if saved active workspace no longer exists, fall back to first
+    var activeId = savedActiveId;
+    var found = false;
+    for (var i = 0; i < workspaces.length; i++) {
+      if (workspaces[i].id === activeId) { found = true; break; }
+    }
+    if (!found) activeId = workspaces[0].id;
+    _setWorkspaceList(workspaces, activeId);
+  })
+  .catch(function(err) {
+    console.error("Failed to load workspaces:", err);
+  });
+}
+
+function _setWorkspaceList(workspaces, activeId) {
+  _workspaceList = workspaces;
+  if (!_activeWorkspaceId && activeId) {
+    _activeWorkspaceId = activeId;
+    _ensureWsState(_activeWorkspaceId);
+    _syncAliasesToWorkspace(_activeWorkspaceId);
+    try { localStorage.setItem("active_workspace_id", _activeWorkspaceId); } catch(e) {}
+  }
+  ideRenderWorkspaceTabs();
+}
+
+function ideRenderWorkspaceTabs() {
+  var container = document.getElementById("ide-workspace-tabs");
+  if (!container) return;
+  // Clear existing tabs
+  while (container.firstChild) container.removeChild(container.firstChild);
+
+  // Only show tab bar when there are 2+ workspaces
+  if (_workspaceList.length <= 1) {
+    container.style.display = "none";
+    return;
+  }
+  container.style.display = "flex";
+
+  for (var i = 0; i < _workspaceList.length; i++) {
+    var ws = _workspaceList[i];
+    var tab = document.createElement("button");
+    tab.className = "ide-ws-tab" + (ws.id === _activeWorkspaceId ? " active" : "");
+    tab.textContent = ws.name;  // textContent, not innerHTML — safe
+    tab.setAttribute("data-ws-id", ws.id);
+    tab.onclick = (function(wsId) {
+      return function() { switchWorkspace(wsId); };
+    })(ws.id);
+    container.appendChild(tab);
+  }
+}
+
+function switchWorkspace(newId) {
+  if (newId === _activeWorkspaceId) return;
+  var oldId = _activeWorkspaceId;
+
+  // 1. Save Monaco view state for current active tab
+  if (_monacoEditor && _ideActiveTab >= 0 && _ideTabs[_ideActiveTab]) {
+    var currentTab = _ideTabs[_ideActiveTab];
+    if (currentTab.model) {
+      currentTab.viewState = _monacoEditor.saveViewState();
+    }
+  }
+
+  // 2. Save current workspace state to keyed dicts
+  _saveCurrentWsState();
+
+  // 3. Hide current workspace's terminal DOM elements (per D-14)
+  var oldTerms = _wsTermSessions[oldId] || [];
+  for (var t = 0; t < oldTerms.length; t++) {
+    if (oldTerms[t].el) oldTerms[t].el.style.display = "none";
+  }
+
+  // 4. Switch active workspace
+  _activeWorkspaceId = newId;
+  _ensureWsState(newId);
+
+  // 5. Swap aliases to new workspace's state
+  _syncAliasesToWorkspace(newId);
+
+  // 6. Clear tree cache (prevents cross-workspace file bleed per Pitfall 3)
+  _ideTreeCache = {};
+  _ideExpandedDirs = new Set([""]);
+
+  // 7. Re-render workspace tab bar (active indicator update)
+  ideRenderWorkspaceTabs();
+
+  // 8. Re-root file explorer
+  ideLoadTree("");
+
+  // 9. Re-render editor tabs and activate current tab or show welcome
+  ideRenderTabs();
+  if (_ideTabs.length > 0 && _ideActiveTab >= 0) {
+    ideActivateTab();
+  } else {
+    // Show welcome screen, hide editor
+    var welcome = document.getElementById("ide-welcome");
+    var editorContainer = document.getElementById("ide-editor-container");
+    var ccContainer = document.getElementById("ide-cc-container");
+    if (welcome) welcome.style.display = "flex";
+    if (editorContainer) editorContainer.style.display = "none";
+    if (ccContainer) ccContainer.style.display = "none";
+  }
+
+  // 10. Show new workspace's terminals and re-fit (per D-14, Pitfall 4)
+  var newTerms = _wsTermSessions[newId] || [];
+  if (newTerms.length > 0) {
+    var activeTermIdx = _wsTermActiveIdx[newId];
+    if (activeTermIdx >= 0 && activeTermIdx < newTerms.length) {
+      newTerms[activeTermIdx].el.style.display = "block";
+    }
+  }
+  termRenderTabs();
+  setTimeout(function() {
+    if (typeof termFitAll === "function") termFitAll();
+  }, 50);
+
+  // 11. Persist active workspace (per D-04)
+  try { localStorage.setItem("active_workspace_id", _activeWorkspaceId); } catch(e) {}
+
+  // 12. Reload CC session sidebar if a CC tab is active
+  // (ccLoadSessionSidebar already filters by _activeWorkspaceId from Plan 02)
+}
+
 function ideDetectLanguage(filename) {
   if (!filename) return "plaintext";
   var ext = filename.split(".").pop().toLowerCase();
@@ -3552,6 +3696,7 @@ function renderCode() {
         </div>
         <div class="ide-main" style="flex:1;display:flex;flex-direction:row;overflow:hidden">
           <div class="ide-main-editor-area" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
+            <div id="ide-workspace-tabs" class="ide-workspace-tabs"></div>
             <div id="ide-tabs" class="ide-tabs"></div>
             <div id="ide-editor-container" class="ide-editor-container" style="flex:1;overflow:hidden"></div>
             <div id="ide-cc-container" class="ide-cc-container" style="display:none;flex:1;overflow:hidden;background:#1a1a2e"></div>
@@ -3625,6 +3770,7 @@ function renderCode() {
   ideInitMonaco();
   initDragHandle();
   initPanelDragHandle();
+  initWorkspaceTabs();
 
   // Open default local terminal on first load
   if (_termSessions.length === 0) {

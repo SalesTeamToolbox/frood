@@ -830,6 +830,12 @@ td.task-title:hover { color: var(--accent); }
   border-radius: 8px 8px 8px 2px;
 }
 
+/* Response time badge */
+.chat-response-meta {
+  font-size: 0.65rem; color: var(--text-muted, #666); font-weight: 400;
+  margin-left: 0.4rem; opacity: 0.7;
+}
+
 /* Markdown in agent messages */
 .chat-bubble-agent pre {
   margin: 0.5rem 0; background: var(--bg-primary);
@@ -1811,6 +1817,38 @@ body.towel-day .dont-panic-watermark {
 .ide-tree-file { }
 .ide-tree-indent { display: inline-block; width: 16px; }
 .ide-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.ide-workspace-tabs {
+  display: none;
+  align-items: center;
+  gap: 0;
+  background: #0d1117;
+  border-bottom: 1px solid #21262d;
+  padding: 0;
+  min-height: 32px;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.ide-ws-tab {
+  padding: 6px 16px;
+  background: transparent;
+  color: #8b949e;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+.ide-ws-tab:hover {
+  color: #c9d1d9;
+  background: #161b22;
+}
+.ide-ws-tab.active {
+  color: #e6edf3;
+  border-bottom-color: #58a6ff;
+  background: #161b22;
+}
 .ide-tabs { display: flex; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
   overflow-x: auto; min-height: 35px; }
 .ide-tab { padding: 0.4rem 0.75rem; font-size: 0.8rem; cursor: pointer;
@@ -2398,6 +2436,12 @@ body.towel-day .dont-panic-watermark {
   display: flex; align-items: center; justify-content: space-between;
   flex-shrink: 0;
 }
+.panel-escalate-btn {
+  font-size: 0.7rem !important; padding: 0.15rem 0.5rem !important;
+  border: 1px solid var(--accent, #6366f1) !important; color: var(--accent, #6366f1) !important;
+  border-radius: 3px; cursor: pointer;
+}
+.panel-escalate-btn:hover { background: var(--accent-dim, rgba(99,102,241,0.15)) !important; }
 .panel-chat-header button {
   background: none; border: none; color: var(--text-muted, #888);
   cursor: pointer; font-size: 1.1rem; padding: 0.1rem 0.4rem;
