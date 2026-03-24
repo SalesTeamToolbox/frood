@@ -40,6 +40,7 @@ from core.project_manager import ProjectManager
 from core.rate_limiter import ToolRateLimiter
 from core.repo_manager import RepositoryManager
 from core.security_scanner import ScheduledSecurityScanner
+from core.workspace_registry import WorkspaceRegistry
 from dashboard.auth import init_device_store
 from dashboard.server import create_app
 from dashboard.websocket_manager import WebSocketManager
@@ -170,6 +171,9 @@ class Agent42:
         # ── Project manager ──────────────────────────────────────────────
         self.project_manager = ProjectManager(data_dir / "projects", task_queue=None)
 
+        # ── Workspace registry ────────────────────────────────────────────
+        self.workspace_registry = WorkspaceRegistry(data_dir / "workspaces.json")
+
         # ── Security scanner ─────────────────────────────────────────────
         self.security_scanner = ScheduledSecurityScanner(
             workspace_path=str(workspace),
@@ -205,6 +209,10 @@ class Agent42:
         # Load persisted data
         await self.repo_manager.load()
         await self.project_manager.load()
+        await self.workspace_registry.load()
+        await self.workspace_registry.seed_default(
+            os.environ.get("AGENT42_WORKSPACE", str(Path.cwd()))
+        )
 
         # Start heartbeat
         await self.heartbeat.start()
@@ -240,6 +248,7 @@ class Agent42:
                 app_manager=app_manager,
                 agent_manager=self.agent_manager,
                 reward_system=self.reward_system,
+                workspace_registry=self.workspace_registry,
             )
             config = uvicorn.Config(
                 app,
