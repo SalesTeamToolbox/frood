@@ -3839,12 +3839,13 @@ async function ideOpenFile(path) {
     });
     if (!res.ok) { toast("Failed to load file", "error"); return; }
     var data = await res.json();
-    var uri = monaco.Uri.parse("file:///" + path);
+    var uri = monaco.Uri.parse(makeWorkspaceUri(_activeWorkspaceId || "default", path));
     var model = monaco.editor.getModel(uri);
     if (model) model.dispose();
     model = monaco.editor.createModel(data.content, data.language, uri);
-    _ideTabs.push({ path: path, modified: false, model: model, language: data.language, originalContent: data.content });
+    _ideTabs.push({ path: path, modified: false, model: model, language: data.language, originalContent: data.content, workspaceId: _activeWorkspaceId });
     _ideActiveTab = _ideTabs.length - 1;
+    if (_activeWorkspaceId) _saveCurrentWsState();
     ideActivateTab();
     if (statusEl) statusEl.textContent = path;
   } catch (e) {
@@ -3853,6 +3854,15 @@ async function ideOpenFile(path) {
 }
 
 function ideActivateTab() {
+  // Save view state of the currently displayed model before switching
+  if (_monacoEditor) {
+    for (var s = 0; s < _ideTabs.length; s++) {
+      if (_ideTabs[s].model && _monacoEditor.getModel() === _ideTabs[s].model) {
+        _ideTabs[s].viewState = _monacoEditor.saveViewState();
+        break;
+      }
+    }
+  }
   if (_ideActiveTab < 0 || !_ideTabs[_ideActiveTab]) return;
   var tab = _ideTabs[_ideActiveTab];
   var container = document.getElementById("ide-editor-container");
@@ -3890,6 +3900,9 @@ function ideActivateTab() {
     // File tab: show Monaco, hide CC terminal
     if (_monacoEditor) {
       _monacoEditor.setModel(tab.model);
+      if (tab.viewState) {
+        _monacoEditor.restoreViewState(tab.viewState);
+      }
       if (container) container.style.display = "block";
     }
     if (welcome) welcome.style.display = "none";
@@ -3944,6 +3957,7 @@ function ideCloseTab(index) {
     if (tab.model) tab.model.dispose();
   }
   _ideTabs.splice(index, 1);
+  if (_activeWorkspaceId) _saveCurrentWsState();
   if (_ideActiveTab >= _ideTabs.length) _ideActiveTab = _ideTabs.length - 1;
   if (_ideTabs.length === 0) {
     _ideActiveTab = -1;
