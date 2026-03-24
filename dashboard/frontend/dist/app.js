@@ -2687,39 +2687,111 @@ function renderTeamRunDetail(el) {
   el.innerHTML = html;
 }
 
+var _gsdWorkstreams = [];
+var _gsdDropdownOpen = false;
+
 function updateGsdIndicator() {
   var slot = document.getElementById("gsd-indicator-slot");
   if (!slot) return;
 
-  // Prefer active CC tab's workstream over global heartbeat
-  var ws = "";
-  var phase = "";
+  // Fetch full workstream list from server (cached, refreshed on heartbeat)
+  if (_gsdWorkstreams.length === 0) {
+    loadGsdWorkstreams();
+  }
+
+  // Prefer active CC tab's workstream over global heartbeat for the highlight
+  var activeWs = "";
+  var activePhase = "";
   if (typeof _ideActiveTab !== "undefined" && _ideActiveTab >= 0 &&
       typeof _ideTabs !== "undefined" && _ideTabs[_ideActiveTab] &&
       _ideTabs[_ideActiveTab].type === "claude" && _ideTabs[_ideActiveTab].gsd_workstream) {
-    ws = _ideTabs[_ideActiveTab].gsd_workstream;
-    phase = _ideTabs[_ideActiveTab].gsd_phase || "";
+    activeWs = _ideTabs[_ideActiveTab].gsd_workstream;
+    activePhase = _ideTabs[_ideActiveTab].gsd_phase || "";
   }
-  // Fallback to global status
-  if (!ws && state.status) {
-    ws = state.status.gsd_workstream || "";
-    phase = state.status.gsd_phase || "";
+  if (!activeWs && state.status) {
+    activeWs = state.status.gsd_workstream || "";
+    activePhase = state.status.gsd_phase || "";
   }
 
   while (slot.firstChild) slot.removeChild(slot.firstChild);
-  if (ws) {
-    var indicator = document.createElement("div");
-    indicator.className = "gsd-indicator";
-    var wsEl = document.createElement("div");
-    wsEl.className = "gsd-workstream";
-    wsEl.textContent = "\u25BA " + ws;
-    var phaseEl = document.createElement("div");
-    phaseEl.className = "gsd-phase";
-    phaseEl.textContent = phase ? "Phase " + phase : "";
-    indicator.appendChild(wsEl);
-    indicator.appendChild(phaseEl);
-    slot.appendChild(indicator);
+
+  // Build the indicator with dropdown toggle
+  var indicator = document.createElement("div");
+  indicator.className = "gsd-indicator";
+
+  // Active workstream summary (clickable to toggle dropdown)
+  var summary = document.createElement("div");
+  summary.className = "gsd-summary";
+  summary.onclick = function() { toggleGsdDropdown(); };
+
+  var label = document.createElement("span");
+  label.className = "gsd-summary-label";
+  label.textContent = activeWs ? activeWs : "Workstreams";
+
+  var phaseTag = document.createElement("span");
+  phaseTag.className = "gsd-summary-phase";
+  phaseTag.textContent = activePhase ? "Phase " + activePhase : "";
+
+  var arrow = document.createElement("span");
+  arrow.className = "gsd-summary-arrow";
+  arrow.textContent = _gsdDropdownOpen ? "\u25B2" : "\u25BC";
+
+  summary.appendChild(label);
+  if (activePhase) summary.appendChild(phaseTag);
+  summary.appendChild(arrow);
+  indicator.appendChild(summary);
+
+  // Dropdown list (hidden by default)
+  var dropdown = document.createElement("div");
+  dropdown.className = "gsd-dropdown";
+  dropdown.id = "gsd-ws-dropdown";
+  dropdown.style.display = _gsdDropdownOpen ? "" : "none";
+
+  if (_gsdWorkstreams.length > 0) {
+    _gsdWorkstreams.forEach(function(ws) {
+      var item = document.createElement("div");
+      item.className = "gsd-dropdown-item" + (ws.is_active ? " active" : "") + (ws.is_complete ? " complete" : "");
+
+      var name = document.createElement("div");
+      name.className = "gsd-dropdown-name";
+      name.textContent = ws.display;
+
+      var meta = document.createElement("div");
+      meta.className = "gsd-dropdown-meta";
+      var progress = ws.completed_phases + "/" + ws.total_phases + " phases";
+      var phaseText = ws.phase ? "Phase " + ws.phase : "";
+      meta.textContent = [progress, phaseText].filter(Boolean).join(" \u00B7 ");
+
+      item.appendChild(name);
+      item.appendChild(meta);
+      dropdown.appendChild(item);
+    });
+  } else {
+    var empty = document.createElement("div");
+    empty.className = "gsd-dropdown-empty";
+    empty.textContent = "No workstreams found";
+    dropdown.appendChild(empty);
   }
+
+  indicator.appendChild(dropdown);
+  slot.appendChild(indicator);
+}
+
+function toggleGsdDropdown() {
+  _gsdDropdownOpen = !_gsdDropdownOpen;
+  var dd = document.getElementById("gsd-ws-dropdown");
+  if (dd) dd.style.display = _gsdDropdownOpen ? "" : "none";
+  var arrows = document.querySelectorAll(".gsd-summary-arrow");
+  arrows.forEach(function(a) { a.textContent = _gsdDropdownOpen ? "\u25B2" : "\u25BC"; });
+}
+
+function loadGsdWorkstreams() {
+  api("/gsd/workstreams").then(function(data) {
+    if (data && data.workstreams) {
+      _gsdWorkstreams = data.workstreams;
+      updateGsdIndicator();
+    }
+  }).catch(function() {});
 }
 
 function renderMemorySystemCard() {

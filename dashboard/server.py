@@ -1522,6 +1522,77 @@ def create_app(
                     continue
         return {"query": q, "results": results, "truncated": False}
 
+    # -- GSD Workstreams -------------------------------------------------------
+
+    @app.get("/api/gsd/workstreams")
+    async def gsd_workstreams(
+        workspace_id: str = None,
+        _user: str = Depends(get_current_user),
+    ):
+        """List all GSD workstreams with status for the active workspace."""
+        import re as _re_gsd
+
+        ws_path = _resolve_workspace(workspace_id)
+        planning = Path(ws_path) / ".planning"
+        ws_dir = planning / "workstreams"
+
+        # Read active workstream
+        active_ws = ""
+        aw_file = planning / "active-workstream"
+        if aw_file.is_file():
+            active_ws = aw_file.read_text().strip()
+
+        workstreams = []
+        if ws_dir.is_dir():
+            for d in sorted(ws_dir.iterdir()):
+                if not d.is_dir():
+                    continue
+                name = d.name
+                state_file = d / "STATE.md"
+                roadmap_file = d / "ROADMAP.md"
+                phase = ""
+                status = "unknown"
+                total_phases = 0
+                completed_phases = 0
+                if state_file.is_file():
+                    content = state_file.read_text(errors="replace")
+                    m = _re_gsd.search(r"^Phase:\s*(\d+)", content, _re_gsd.MULTILINE)
+                    if m:
+                        phase = m.group(1)
+                    m2 = _re_gsd.search(r"^status:\s*(.+)", content, _re_gsd.MULTILINE)
+                    if m2:
+                        status = m2.group(1).strip()
+                if roadmap_file.is_file():
+                    rm_content = roadmap_file.read_text(errors="replace")
+                    total_phases = len(
+                        _re_gsd.findall(r"^- \[[ x]\] \*\*Phase", rm_content, _re_gsd.MULTILINE)
+                    )
+                    completed_phases = len(
+                        _re_gsd.findall(r"^- \[x\] \*\*Phase", rm_content, _re_gsd.MULTILINE)
+                    )
+
+                # Display name: remove common prefixes
+                display = name
+                for prefix in ("agent42-", "a42-"):
+                    if display.startswith(prefix):
+                        display = display[len(prefix) :]
+                        break
+
+                workstreams.append(
+                    {
+                        "name": name,
+                        "display": display,
+                        "phase": phase,
+                        "status": status,
+                        "total_phases": total_phases,
+                        "completed_phases": completed_phases,
+                        "is_active": name == active_ws,
+                        "is_complete": completed_phases == total_phases and total_phases > 0,
+                    }
+                )
+
+        return {"workstreams": workstreams, "active": active_ws}
+
     # -- IDE Lint --------------------------------------------------------------
 
     @app.get("/api/ide/lint")
@@ -2099,8 +2170,6 @@ def create_app(
                         if display.startswith(prefix):
                             display = display[len(prefix) :]
                             break
-                    if len(display) > 20:
-                        display = display[:17] + "..."
                     result["workstream"] = display
                     state_path = (
                         Path(root_path) / ".planning" / "workstreams" / ws_name / "STATE.md"
