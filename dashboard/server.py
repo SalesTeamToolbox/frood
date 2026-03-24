@@ -1644,8 +1644,15 @@ def create_app(
         use_pty = False
         try:
             if _sys.platform == "win32":
+                # Windows paths with spaces (C:\Program Files\...) break PtyProcess.spawn.
+                # Convert to 8.3 short path to avoid the issue entirely.
+                import ctypes
+
                 from winpty import PtyProcess
 
+                buf = ctypes.create_unicode_buffer(260)
+                if ctypes.windll.kernel32.GetShortPathNameW(pty_cmd, buf, 260):
+                    pty_cmd = buf.value
                 pty_process = PtyProcess.spawn(pty_cmd, cwd=str(workspace_path))
                 use_pty = True
             else:
