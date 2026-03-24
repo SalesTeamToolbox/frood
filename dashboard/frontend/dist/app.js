@@ -3654,6 +3654,156 @@ async function submitAddWorkspace() {
   }
 }
 
+async function removeWorkspace(wsId) {
+  // D-10: Last-workspace gate (frontend-only)
+  if (_workspaceList.length <= 1) return;
+
+  // D-11: Count unsaved files and CC sessions
+  var wsState = _wsTabState[wsId] || { tabs: [], ccTabCount: 0 };
+  var unsavedCount = 0;
+  var wsTabs = wsState.tabs || [];
+  for (var i = 0; i < wsTabs.length; i++) {
+    if (wsTabs[i].modified) unsavedCount++;
+  }
+  var ccCount = wsState.ccTabCount || 0;
+
+  // D-12/D-13: Confirm only when there is something to lose
+  if (unsavedCount > 0 || ccCount > 0) {
+    var msg = "This workspace has " + unsavedCount + " unsaved file(s) and " +
+              ccCount + " CC session(s). Remove anyway?";
+    if (!confirm(msg)) return;
+  }
+
+  // D-18: Switch active workspace BEFORE teardown
+  // switchWorkspace needs the current state to be intact for save
+  if (wsId === _activeWorkspaceId) {
+    var currentIdx = -1;
+    for (var i = 0; i < _workspaceList.length; i++) {
+      if (_workspaceList[i].id === wsId) { currentIdx = i; break; }
+    }
+    // Pick adjacent: prefer previous, else next (skip self)
+    var nextWs = null;
+    if (currentIdx > 0) {
+      nextWs = _workspaceList[currentIdx - 1];
+    } else {
+      for (var i = 0; i < _workspaceList.length; i++) {
+        if (i !== currentIdx) { nextWs = _workspaceList[i]; break; }
+      }
+    }
+    if (nextWs) switchWorkspace(nextWs.id);
+  }
+
+  // API DELETE
+  try {
+    await api("/workspaces/" + wsId, { method: "DELETE" });
+  } catch(err) {
+    toast("Failed to remove workspace", "error");
+    return;
+  }
+
+  // D-14: Close terminal WebSocket connections directly
+  // DO NOT use termClose() -- it splices _termSessions which causes index mismatch (Pitfall 2)
+  var terms = _wsTermSessions[wsId] || [];
+  for (var i = 0; i < terms.length; i++) {
+    var s = terms[i];
+    if (s.ws) s.ws.close();
+    if (s.term) s.term.dispose();
+    if (s.el) s.el.remove();
+  }
+
+  // D-16: Prune localStorage keys with ws_{id}_ prefix
+  // Leave cc_hist_{sessionId} keys alone (globally unique UUIDs)
+  var prefix = "ws_" + wsId + "_";
+  var keysToRemove = [];
+  for (var i = 0; i < localStorage.length; i++) {
+    var k = localStorage.key(i);
+    if (k && k.startsWith(prefix)) keysToRemove.push(k);
+  }
+  keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
+
+  // D-17: Delete in-memory state
+  delete _wsTabState[wsId];
+  delete _wsTermSessions[wsId];
+  delete _wsTermActiveIdx[wsId];
+
+  // Remove from _workspaceList
+  for (var i = 0; i < _workspaceList.length; i++) {
+    if (_workspaceList[i].id === wsId) {
+      _workspaceList.splice(i, 1);
+      break;
+    }
+  }
+
+  // Pitfall 3: Update workspaces_cache after mutation
+  try { localStorage.setItem("workspaces_cache", JSON.stringify(_workspaceList)); } catch(e) {}
+
+  // Re-render tabs (close button disabled state updates automatically)
+  ideRenderWorkspaceTabs();
+}
+
+function enterWsRenameMode(wsId, currentName, nameSpan) {
+  // Guard: prevent double-activation
+  if (nameSpan.parentNode && nameSpan.parentNode.querySelector("input.ide-ws-rename-input")) return;
+
+  var input = document.createElement("input");
+  input.type = "text";
+  input.value = currentName;
+  input.maxLength = 64;  // D-24
+  input.className = "ide-ws-rename-input";
+
+  var committed = false;
+  function commit() {
+    if (committed) return;
+    committed = true;
+    var newName = input.value.trim();
+    if (!newName) {
+      // D-24: reject empty, restore original
+      nameSpan.textContent = currentName;
+      input.replaceWith(nameSpan);
+      return;
+    }
+    if (newName === currentName) {
+      // No change -- just restore
+      input.replaceWith(nameSpan);
+      return;
+    }
+    // Optimistic update: BOTH _workspaceList AND DOM (Pitfall 4)
+    for (var i = 0; i < _workspaceList.length; i++) {
+      if (_workspaceList[i].id === wsId) { _workspaceList[i].name = newName; break; }
+    }
+    nameSpan.textContent = newName;
+    input.replaceWith(nameSpan);
+    // Pitfall 3: persist to workspaces_cache
+    try { localStorage.setItem("workspaces_cache", JSON.stringify(_workspaceList)); } catch(e) {}
+    // D-21: API call
+    api("/workspaces/" + wsId, { method: "PATCH", body: JSON.stringify({ name: newName }) })
+      .catch(function(err) {
+        // Pitfall 4: Rollback BOTH _workspaceList AND nameSpan.textContent
+        for (var i = 0; i < _workspaceList.length; i++) {
+          if (_workspaceList[i].id === wsId) { _workspaceList[i].name = currentName; break; }
+        }
+        nameSpan.textContent = currentName;
+        try { localStorage.setItem("workspaces_cache", JSON.stringify(_workspaceList)); } catch(e) {}
+        toast("Rename failed", "error");
+      });
+  }
+
+  input.addEventListener("keydown", function(e) {
+    if (e.key === "Enter") { e.preventDefault(); commit(); }
+    if (e.key === "Escape") {
+      // D-22: Escape discards
+      committed = true;
+      nameSpan.textContent = currentName;
+      input.replaceWith(nameSpan);
+    }
+  });
+  input.addEventListener("blur", commit);  // D-23: blur commits
+
+  nameSpan.replaceWith(input);
+  input.focus();
+  input.select();  // D-20: auto-focused and text-selected
+}
+
 function switchWorkspace(newId) {
   if (newId === _activeWorkspaceId) return;
   var oldId = _activeWorkspaceId;
