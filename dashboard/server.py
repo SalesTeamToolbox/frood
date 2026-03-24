@@ -1529,10 +1529,11 @@ def create_app(
         workspace_id: str = None,
         _user: str = Depends(get_current_user),
     ):
-        """List all GSD workstreams with status for the active workspace."""
+        """List all GSD workstreams. Uses AGENT42_WORKSPACE (project root) since GSD data is project-level."""
         import re as _re_gsd
 
-        ws_path = _resolve_workspace(workspace_id)
+        # GSD .planning/ is always at the project root, not per-workspace
+        ws_path = workspace
         planning = Path(ws_path) / ".planning"
         ws_dir = planning / "workstreams"
 
