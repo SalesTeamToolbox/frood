@@ -58,9 +58,11 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 
 ### Active
 
-## Current Milestone: v2.1 Multi-Project Workspace
+## Complete: v2.1 Multi-Project Workspace (3/3 phases complete)
 
 **Goal:** Add tabbed workspace support where each tab scopes to a project folder with its own file explorer, editor, CC sessions, and terminal — like multiple VS Code windows in one dashboard.
+
+**Status:** All 3 phases complete (Registry & Namespacing, IDE Surface Integration, Workspace Management). Users can add/remove/rename workspace tabs with full isolation across file explorer, editor, CC sessions, and terminals.
 
 **Target features:**
 - Workspace tab bar at the top of the Workspace page
@@ -212,4 +214,4 @@ Desktop experience: PWA manifest + shortcuts, GSD auto-activation, dashboard wit
 | Non-streaming accepted for L1 | StrongWall doesn't stream; simulate for chat, accept for background | -- Pending |
 
 ---
-*Last updated: 2026-03-24 after Multi-Project Workspace Phase 2 (IDE Surface Integration) completion*
+*Last updated: 2026-03-24 after Multi-Project Workspace Phase 3 (Workspace Management) completion — milestone v2.1 complete*
