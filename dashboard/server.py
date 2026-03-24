@@ -472,6 +472,7 @@ def create_app(
     effectiveness_store=None,
     agent_manager=None,  # passed from agent42.py after Phase 2
     reward_system=None,  # passed from agent42.py when REWARDS_ENABLED=true
+    workspace_registry=None,  # passed from agent42.py for multi-project workspace
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -1293,18 +1294,85 @@ def create_app(
             "email_recipients": settings.get_notification_email_recipients(),
         }
 
+    # -- Workspaces (multi-project registry) -----------------------------------
+
+    @app.get("/api/workspaces")
+    async def list_workspaces(_user: str = Depends(get_current_user)):
+        if not workspace_registry:
+            raise HTTPException(503, "Workspace registry not initialized")
+        workspaces = workspace_registry.list_all()
+        default = workspace_registry.get_default()
+        return {
+            "workspaces": [ws.to_dict() for ws in workspaces],
+            "default_id": default.id if default else None,
+        }
+
+    @app.post("/api/workspaces", status_code=201)
+    async def create_workspace(body: dict, _user: str = Depends(get_current_user)):
+        if not workspace_registry:
+            raise HTTPException(503, "Workspace registry not initialized")
+        path = body.get("path", "")
+        name = body.get("name", "")
+        if not path:
+            raise HTTPException(400, "path is required")
+        try:
+            ws = await workspace_registry.create(name=name or Path(path).name, root_path=path)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return ws.to_dict()
+
+    @app.patch("/api/workspaces/{ws_id}")
+    async def update_workspace(ws_id: str, body: dict, _user: str = Depends(get_current_user)):
+        if not workspace_registry:
+            raise HTTPException(503, "Workspace registry not initialized")
+        ws = await workspace_registry.update(
+            ws_id,
+            name=body.get("name"),
+            ordering=body.get("ordering"),
+        )
+        if not ws:
+            raise HTTPException(404, "Workspace not found")
+        return ws.to_dict()
+
+    @app.delete("/api/workspaces/{ws_id}")
+    async def delete_workspace(ws_id: str, _user: str = Depends(get_current_user)):
+        if not workspace_registry:
+            raise HTTPException(503, "Workspace registry not initialized")
+        deleted = await workspace_registry.delete(ws_id)
+        if not deleted:
+            raise HTTPException(404, "Workspace not found")
+        return {"status": "deleted", "id": ws_id}
+
     # -- IDE (Web IDE file operations) -----------------------------------------
 
     import os as _os
     import sys as _sys
 
+    # Server-level workspace root (used by CC chat bridge, terminal, etc.)
+    # This is the env-var configured workspace, separate from the multi-project registry.
     workspace = Path(_os.environ.get("AGENT42_WORKSPACE", str(Path.cwd())))
 
+    def _resolve_workspace(workspace_id: "str | None" = None) -> Path:
+        """Resolve workspace_id to a Path via registry, with env-var fallback."""
+        if workspace_registry:
+            ws = workspace_registry.resolve(workspace_id)
+            if ws:
+                return Path(ws.root_path)
+            if workspace_id is not None:
+                raise HTTPException(404, "Workspace not found")
+            # No default in registry — fall through to env var
+        return workspace
+
     @app.get("/api/ide/tree")
-    async def ide_tree(path: str = "", _user: str = Depends(get_current_user)):
+    async def ide_tree(
+        path: str = "",
+        workspace_id: str | None = None,
+        _user: str = Depends(get_current_user),
+    ):
         """List directory tree for the IDE file explorer."""
-        target = (workspace / path).resolve()
-        if not str(target).startswith(str(workspace.resolve())):
+        ws_root = _resolve_workspace(workspace_id)
+        target = (ws_root / path).resolve()
+        if not str(target).startswith(str(ws_root.resolve())):
             raise HTTPException(403, "Path outside workspace")
         if not target.exists():
             raise HTTPException(404, f"Path not found: {path}")
@@ -1322,7 +1390,7 @@ def create_app(
                 entries.append(
                     {
                         "name": name,
-                        "path": str(item.relative_to(workspace)).replace("\\", "/"),
+                        "path": str(item.relative_to(ws_root)).replace("\\", "/"),
                         "type": "dir" if item.is_dir() else "file",
                         "size": item.stat().st_size if item.is_file() else 0,
                     }
@@ -1332,10 +1400,15 @@ def create_app(
         return {"path": path, "entries": entries}
 
     @app.get("/api/ide/file")
-    async def ide_read_file(path: str, _user: str = Depends(get_current_user)):
+    async def ide_read_file(
+        path: str,
+        workspace_id: str | None = None,
+        _user: str = Depends(get_current_user),
+    ):
         """Read file contents for the IDE editor."""
-        target = (workspace / path).resolve()
-        if not str(target).startswith(str(workspace.resolve())):
+        ws_root = _resolve_workspace(workspace_id)
+        target = (ws_root / path).resolve()
+        if not str(target).startswith(str(ws_root.resolve())):
             raise HTTPException(403, "Path outside workspace")
         if not target.exists():
             raise HTTPException(404, f"File not found: {path}")
@@ -1387,10 +1460,15 @@ def create_app(
         content: str
 
     @app.post("/api/ide/file")
-    async def ide_write_file(req: IDEWriteRequest, _user: str = Depends(get_current_user)):
+    async def ide_write_file(
+        req: IDEWriteRequest,
+        workspace_id: str | None = None,
+        _user: str = Depends(get_current_user),
+    ):
         """Write file contents from the IDE editor."""
-        target = (workspace / req.path).resolve()
-        if not str(target).startswith(str(workspace.resolve())):
+        ws_root = _resolve_workspace(workspace_id)
+        target = (ws_root / req.path).resolve()
+        if not str(target).startswith(str(ws_root.resolve())):
             raise HTTPException(403, "Path outside workspace")
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -1400,12 +1478,18 @@ def create_app(
         return {"status": "ok", "path": req.path, "size": len(req.content)}
 
     @app.get("/api/ide/search")
-    async def ide_search(q: str, path: str = "", _user: str = Depends(get_current_user)):
+    async def ide_search(
+        q: str,
+        path: str = "",
+        workspace_id: str | None = None,
+        _user: str = Depends(get_current_user),
+    ):
         """Search file contents in workspace."""
         import re
 
-        target = (workspace / path).resolve()
-        if not str(target).startswith(str(workspace.resolve())):
+        ws_root = _resolve_workspace(workspace_id)
+        target = (ws_root / path).resolve()
+        if not str(target).startswith(str(ws_root.resolve())):
             raise HTTPException(403, "Path outside workspace")
 
         results = []
@@ -1427,7 +1511,7 @@ def create_app(
                         if pattern.search(line):
                             results.append(
                                 {
-                                    "file": str(fpath.relative_to(workspace)).replace("\\", "/"),
+                                    "file": str(fpath.relative_to(ws_root)).replace("\\", "/"),
                                     "line": i,
                                     "text": line.strip()[:200],
                                 }
@@ -2252,6 +2336,7 @@ def create_app(
             return
 
         ws_session_id = websocket.query_params.get("session_id") or str(_uuid.uuid4())
+        lightweight = websocket.query_params.get("lightweight", "").lower() in ("true", "1")
         session_data = await _load_session(ws_session_id)
         session_state: dict = {"cc_session_id": session_data.get("cc_session_id")}
         session_title: str = session_data.get("title", "")
@@ -2363,6 +2448,14 @@ def create_app(
                 cc_session_id = session_state.get("cc_session_id")
                 if cc_session_id:
                     args += ["--resume", cc_session_id]
+
+                # Lightweight mode: skip MCP servers for fast chat (~8s vs 30s+)
+                if lightweight:
+                    _empty_mcp = workspace / ".agent42" / "empty-mcp.json"
+                    if not _empty_mcp.exists():
+                        _empty_mcp.parent.mkdir(parents=True, exist_ok=True)
+                        _empty_mcp.write_text('{"mcpServers":{}}')
+                    args += ["--mcp-config", str(_empty_mcp), "--strict-mcp-config"]
 
                 # --- PTY spawn (PTY-01) with PIPE fallback (PTY-04) ---
                 use_cc_pty = False
@@ -2978,6 +3071,12 @@ def create_app(
             return None
 
         try:
+            # Write empty MCP config to temp file (avoids JSON arg escaping on Windows)
+            _empty_mcp = workspace / ".agent42" / "empty-mcp.json"
+            if not _empty_mcp.exists():
+                _empty_mcp.parent.mkdir(parents=True, exist_ok=True)
+                _empty_mcp.write_text('{"mcpServers":{}}')
+
             # create_subprocess_exec — no shell injection risk (args are not shell-interpreted)
             proc = await _asyncio.create_subprocess_exec(
                 claude_bin,
@@ -2985,44 +3084,63 @@ def create_app(
                 prompt,
                 "--output-format",
                 "stream-json",
+                "--mcp-config",
+                str(_empty_mcp),
+                "--strict-mcp-config",
                 stdout=_asyncio.subprocess.PIPE,
                 stderr=_asyncio.subprocess.PIPE,
                 cwd=str(workspace),
             )
-            stdout, stderr = await _asyncio.wait_for(proc.communicate(), timeout=120.0)
-            if proc.returncode == 0 and stdout:
-                raw = stdout.decode("utf-8", errors="replace")
-                # NDJSON stream: one JSON object per line. Extract "result" event.
-                for line in raw.splitlines():
-                    line = line.strip()
-                    if not line:
+            logger.info("CC chat subprocess started, PID=%s", proc.pid)
+
+            # Stream stdout line-by-line. Return as soon as "result" event arrives.
+            # Don't use communicate() — Stop hooks run 30s+ after result, blocking exit.
+            async def _read_cc_result():
+                while True:
+                    raw_line = await proc.stdout.readline()
+                    if not raw_line:
+                        break
+                    decoded = raw_line.decode("utf-8", errors="replace").strip()
+                    if not decoded:
                         continue
                     try:
-                        event = _json.loads(line)
-                        if isinstance(event, dict) and event.get("type") == "result":
-                            result_text = event.get("result", "")
-                            if result_text:
-                                return result_text
+                        ev = _json.loads(decoded)
+                        if isinstance(ev, dict) and ev.get("type") == "result":
+                            return ev.get("result", "")
                     except _json.JSONDecodeError:
                         continue
-                # Fallback: return raw if no result event found
-                if raw.strip():
-                    return raw.strip()
-            logger.warning(
-                "CC chat failed (rc=%s): %s",
-                proc.returncode,
-                stderr.decode()[:200] if stderr else "",
-            )
-        except TimeoutError:
-            logger.warning("CC chat timed out (120s)")
+                return None
+
+            try:
+                result_text = await _asyncio.wait_for(_read_cc_result(), timeout=45.0)
+            except TimeoutError:
+                result_text = None
+                logger.warning("CC chat stream timed out (45s)")
+
+            # Kill subprocess — don't wait for Stop hooks
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+            if result_text:
+                logger.info("CC chat got result (%d chars)", len(result_text))
+                return result_text
+
+            logger.warning("CC chat: no result event in stream")
         except Exception as e:
             logger.warning("CC chat error: %s", e)
         return None
 
-    async def _chat_complete(system_prompt: str, messages: list[dict]) -> str:
-        """Try CC subscription first, then API providers: Anthropic -> Gemini -> OpenRouter -> OpenAI."""
+    async def _chat_complete(
+        system_prompt: str,
+        messages: list[dict],
+        user_query: str = "",
+        mem_store=None,
+    ) -> tuple[str, str]:
+        """Try CC subscription first, then API providers. Returns (text, provider_name)."""
 
-        # 1. Try Claude Code subscription (primary)
+        # 1. Try Claude Code subscription (primary — CC loads memory via its own hooks)
         context_parts = []
         if system_prompt:
             context_parts.append(system_prompt)
@@ -3033,9 +3151,22 @@ def create_app(
 
         cc_result = await _chat_via_cc(cc_prompt)
         if cc_result:
-            return cc_result
+            return cc_result, "claude-code"
 
         logger.info("CC subscription unavailable, trying API providers...")
+
+        # Load memory context for API fallback (CC handles this via hooks)
+        if user_query and mem_store:
+            try:
+                from memory.store import build_conversational_memory_context
+
+                mem_ctx = await build_conversational_memory_context(
+                    mem_store, user_query, timeout=5.0
+                )
+                if mem_ctx and mem_ctx.strip():
+                    system_prompt += "\n\n" + mem_ctx
+            except Exception:
+                pass
 
         # 2. Fall back to API providers
         chat_model = _os.environ.get("CHAT_MODEL", "")
@@ -3065,7 +3196,8 @@ def create_app(
             return (
                 "Claude Code is not available and no API keys are configured. "
                 "Install Claude Code (`npm install -g @anthropic-ai/claude-code`) or "
-                "set an API key in Dashboard Settings."
+                "set an API key in Dashboard Settings.",
+                "none",
             )
 
         last_error = ""
@@ -3096,7 +3228,7 @@ def create_app(
                             for block in resp.json().get("content", []):
                                 if block.get("type") == "text":
                                     text += block.get("text", "")
-                            return text
+                            return text, "anthropic"
                         last_error = f"Anthropic {resp.status_code}: {resp.text[:200]}"
 
                 elif provider_name == "synthetic":
@@ -3125,7 +3257,7 @@ def create_app(
                             for block in resp.json().get("content", []):
                                 if block.get("type") == "text":
                                     text += block.get("text", "")
-                            return text
+                            return text, "synthetic"
                         last_error = f"Synthetic {resp.status_code}: {resp.text[:200]}"
 
                 elif provider_name == "gemini":
@@ -3150,8 +3282,8 @@ def create_app(
                             candidates = data.get("candidates", [])
                             if candidates:
                                 parts = candidates[0].get("content", {}).get("parts", [])
-                                return "".join(p.get("text", "") for p in parts)
-                            return "(Empty response from Gemini)"
+                                return "".join(p.get("text", "") for p in parts), "gemini"
+                            return "(Empty response from Gemini)", "gemini"
                         last_error = f"Gemini {resp.status_code}: {resp.text[:200]}"
 
                 elif provider_name in ("openrouter", "openai"):
@@ -3176,8 +3308,10 @@ def create_app(
                         if resp.status_code == 200:
                             choices = resp.json().get("choices", [])
                             if choices:
-                                return choices[0].get("message", {}).get("content", "")
-                            return "(Empty response)"
+                                return choices[0].get("message", {}).get(
+                                    "content", ""
+                                ), provider_name
+                            return "(Empty response)", provider_name
                         last_error = f"{provider_name} {resp.status_code}: {resp.text[:200]}"
 
             except _httpx.TimeoutException:
@@ -3185,7 +3319,7 @@ def create_app(
             except Exception as e:
                 last_error = f"{provider_name} error: {e}"
 
-        return f"All providers failed. Last error: {last_error}"
+        return f"All providers failed. Last error: {last_error}", "none"
 
     @app.get("/api/chat/messages")
     async def chat_messages_legacy(_user: str = Depends(get_current_user)):
@@ -3277,10 +3411,15 @@ def create_app(
             system_parts.insert(0, persona)
         if req.file_context:
             system_parts.append(f"\nCurrently open file:\n```\n{req.file_context[:3000]}\n```")
+
         system_prompt = "\n".join(system_parts)
 
-        # Get AI response — try providers in priority order
-        response_text = await _chat_complete(system_prompt, ai_messages)
+        # Get AI response — CC first (has its own memory via hooks), then API with memory
+        _t0 = _chat_time.time()
+        response_text, provider_used = await _chat_complete(
+            system_prompt, ai_messages, req.message, memory_store
+        )
+        _elapsed_ms = int((_chat_time.time() - _t0) * 1000)
 
         # Save assistant message
         assistant_msg = {
@@ -3290,6 +3429,8 @@ def create_app(
             "timestamp": _chat_time.time(),
             "sender": "Agent42",
             "session_id": session_id,
+            "response_ms": _elapsed_ms,
+            "provider": provider_used,
         }
         messages.append(assistant_msg)
 

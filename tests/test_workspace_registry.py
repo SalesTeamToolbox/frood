@@ -330,7 +330,7 @@ class TestWorkspaceEndpoints:
         from dashboard.websocket_manager import WebSocketManager
 
         registry = WorkspaceRegistry(tmp_path / "workspaces.json")
-        asyncio.get_event_loop().run_until_complete(registry.seed_default(str(tmp_path)))
+        asyncio.run(registry.seed_default(str(tmp_path)))
 
         app = create_app(
             ws_manager=WebSocketManager(),
@@ -385,9 +385,7 @@ class TestWorkspaceEndpoints:
         c, registry, tmp_path = client
         new_dir = tmp_path / "todel"
         new_dir.mkdir()
-        ws = asyncio.get_event_loop().run_until_complete(
-            registry.create(name="ToDelete", root_path=str(new_dir))
-        )
+        ws = asyncio.run(registry.create(name="ToDelete", root_path=str(new_dir)))
         res = c.delete(f"/api/workspaces/{ws.id}")
         assert res.status_code == 200
         data = res.json()
