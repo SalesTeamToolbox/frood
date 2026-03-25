@@ -238,5 +238,17 @@ Project (top-level entity)
 
 **Why:** A project like "Customer Acquisition Campaign" has no workspace but has agent tasks (research leads, draft emails, analyze responses). A project like "Agent42 v2.1" has a workspace, code tasks, and a sandbox for testing. This makes the platform useful for non-developers too.
 
+### 999.2 Cross-Node Monitoring
+**Vision:** Local dashboard queries remote Agent42 VPS API to show unified app status, health, and logs across nodes.
+
+**Key features:**
+- "Remote Nodes" panel in dashboard — add VPS endpoints, see app status across all nodes
+- Extend `node_sync` SSH connectivity to poll remote AppManager state
+- Unified health view: local + remote apps in one dashboard
+- Remote log streaming via WebSocket relay
+- Alert on remote app crashes (push notification to local dashboard)
+
+**Why:** Running MHG or other sandboxed apps on the VPS requires checking the VPS dashboard separately. This unifies local dev and remote production into one view.
+
 ---
 *Last updated: 2026-03-24 after Multi-Project Workspace Phase 3 (Workspace Management) completion — milestone v2.1 complete*
