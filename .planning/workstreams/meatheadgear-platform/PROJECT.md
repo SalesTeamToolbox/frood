@@ -12,16 +12,15 @@ A customer can go from "I want a shirt with an angry gorilla" to checkout in und
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] Customer auth (sign up, log in, session persistence) — Validated in Phase 1
+- [x] Product catalog synced from Printful (t-shirts, hoodies, leggings, hats, bags) — Validated in Phase 1
+- [x] AI design generation: Flux 1.1 Pro for graphics, Ideogram v3 for text/slogans — Validated in Phase 2
+- [x] Background removal + upscaling pipeline (fal.ai BiRefNet + Real-ESRGAN) — Validated in Phase 2
+- [x] Fabric.js canvas editor: place design on product mockup, resize, position — Validated in Phase 2
+- [x] Printful Mockup Generator API: render photorealistic product mockup from design — Validated in Phase 2
 
 ### Active
 
-- [ ] Customer auth (sign up, log in, session persistence)
-- [ ] Product catalog synced from Printful (t-shirts, hoodies, leggings, hats, bags)
-- [ ] AI design generation: Flux 1.1 Pro for graphics, Ideogram v3 for text/slogans
-- [ ] Background removal + upscaling pipeline (fal.ai BiRefNet + Real-ESRGAN)
-- [ ] Fabric.js canvas editor: place design on product mockup, resize, position
-- [ ] Dynamic Mockups API: render photorealistic product mockup from design
 - [ ] Stripe checkout: create payment intent, handle webhook, create Printful order
 - [ ] Order tracking: sync Printful fulfillment status to customer order page
 - [ ] Agent infrastructure: registry, Redis report bus, webhook routing, scheduler
@@ -72,4 +71,4 @@ A customer can go from "I want a shirt with an angry gorilla" to checkout in und
 | Dollar-threshold escalation | Simple, auditable — <$75 auto, >$500 human | — Pending |
 
 ---
-*Last updated: 2026-03-20 after initial project definition*
+*Last updated: 2026-03-25 after Phase 02 completion*
