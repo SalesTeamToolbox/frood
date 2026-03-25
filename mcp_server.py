@@ -265,6 +265,27 @@ def _build_registry() -> ToolRegistry:
         else None
     )
 
+    # ── Unified Context (Phase 4 — context engine with code symbols + GSD + effectiveness) ──
+    UnifiedContextTool = _safe_import("tools.unified_context", "UnifiedContextTool")
+    effectiveness_store = None
+    try:
+        from memory.effectiveness import EffectivenessStore
+
+        _eff_db = workspace / ".agent42" / "effectiveness.db"
+        effectiveness_store = EffectivenessStore(_eff_db)
+    except Exception as e:
+        logger.info(f"EffectivenessStore not available: {e}")
+    _register(
+        UnifiedContextTool(
+            memory_store=memory_store,
+            skill_loader=None,
+            workspace=workspace_str,
+            effectiveness_store=effectiveness_store,
+        )
+        if UnifiedContextTool
+        else None
+    )
+
     # ── Node Sync (Phase 9 — memory sync between nodes) ────────────────
     NodeSyncTool = _safe_import("tools.node_sync", "NodeSyncTool")
     _register(
