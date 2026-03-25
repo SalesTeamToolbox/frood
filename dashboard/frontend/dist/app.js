@@ -216,7 +216,7 @@ if (_authChannel) {
       state.token = ev.data.token;
       localStorage.setItem("agent42_token", ev.data.token);
       connectWS();
-      loadAll().then(render);
+      loadAll().then(function() { render(); updateGsdIndicator(); });
     }
   };
 }
@@ -362,6 +362,7 @@ async function handleSetupStep3() {
       connectWS();
       await loadAll();
       render();
+      updateGsdIndicator();
       if (data.setup_task_id) {
         toast("Welcome! A setup task has been queued to verify memory services.", "success");
       } else {
@@ -2724,9 +2725,14 @@ function updateGsdIndicator() {
   summary.className = "gsd-summary";
   summary.onclick = function() { toggleGsdDropdown(); };
 
+  // Use full display name from API data if available (heartbeat truncates)
+  var displayName = activeWs || "Workstreams";
+  for (var i = 0; i < _gsdWorkstreams.length; i++) {
+    if (_gsdWorkstreams[i].is_active) { displayName = _gsdWorkstreams[i].display; break; }
+  }
   var label = document.createElement("span");
   label.className = "gsd-summary-label";
-  label.textContent = activeWs ? activeWs : "Workstreams";
+  label.textContent = displayName;
 
   var phaseTag = document.createElement("span");
   phaseTag.className = "gsd-summary-phase";
@@ -8357,7 +8363,7 @@ function renderRoutingPanel() {
 async function loadAll() {
   await Promise.all([
     loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(),
-    loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(), loadRewardsStatus(),
+    loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(), loadRewardsStatus(), loadGsdWorkstreams(),
     loadChatMessages(), loadTokenStats(), loadChatSessions(), loadCodeSessions(),
     loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(), loadGithubAccounts(), loadOrStatus(),
     loadReports(), loadProfiles(), loadPersona(), loadRoutingModels(), loadRoutingConfig(),
@@ -8416,7 +8422,7 @@ function render() {
           <a href="#" data-page="reports" class="${state.page === "reports" ? "active" : ""}" onclick="event.preventDefault();navigate('reports');closeMobileSidebar()">&#128202; Reports</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings');closeMobileSidebar()">&#9881; Settings</a>
         </nav>
-        <div id="gsd-indicator-slot">${state.status && state.status.gsd_workstream ? `<div class="gsd-indicator"><div class="gsd-workstream">&#9654; ${state.status.gsd_workstream}</div><div class="gsd-phase">${state.status.gsd_phase ? "Phase " + state.status.gsd_phase : ""}</div></div>` : ""}</div>
+        <div id="gsd-indicator-slot"></div>
         <div class="sidebar-footer">
           <span id="ws-dot" class="ws-dot ${state.wsConnected ? "connected" : "disconnected"}"></span>
           <span id="ws-label">${state.wsConnected ? "Connected to the Guide" : "Disconnected"}</span>
@@ -8511,6 +8517,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     connectWS();
   }
   render();
+  updateGsdIndicator();
   // Towel Day Easter Egg (May 25)
   if (isTowelDay()) {
     document.body.classList.add("towel-day");
