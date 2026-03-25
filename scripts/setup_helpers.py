@@ -126,6 +126,277 @@ agent42_memory(action="log", event_type="task_completed", content="<summary>")
 """
 
 
+def _detect_project_context(project_dir: str) -> dict:
+    """Detect project name, jcodemunch repo ID, and active GSD workstream.
+
+    Args:
+        project_dir: Absolute path to the project root.
+
+    Returns:
+        Dict with keys: project_name, jcodemunch_repo, active_workstream, venv_python.
+    """
+    project_name = os.path.basename(os.path.abspath(project_dir))
+
+    # Try to get a better name from git remote
+    try:
+        result = subprocess.run(
+            ["git", "-C", project_dir, "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            url = result.stdout.strip()
+            # Handle SSH: git@github.com:org/repo.git
+            # Handle HTTPS: https://github.com/org/repo.git
+            if ":" in url and not url.startswith("http"):
+                repo_part = url.split(":")[-1]
+            else:
+                repo_part = url
+            name = repo_part.split("/")[-1].removesuffix(".git")
+            if name:
+                project_name = name
+    except Exception:
+        pass
+
+    jcodemunch_repo = f"local/{project_name}"
+
+    active_workstream = None
+    workstreams_dir = os.path.join(project_dir, ".planning", "workstreams")
+    if os.path.isdir(workstreams_dir):
+        for ws_name in sorted(os.listdir(workstreams_dir)):
+            state_path = os.path.join(workstreams_dir, ws_name, "STATE.md")
+            if os.path.isfile(state_path):
+                try:
+                    with open(state_path, encoding="utf-8") as f:
+                        content = f.read()
+                    if "status: active" in content or "status: in-progress" in content:
+                        active_workstream = ws_name
+                        break
+                except OSError:
+                    continue
+
+    return {
+        "project_name": project_name,
+        "jcodemunch_repo": jcodemunch_repo,
+        "active_workstream": active_workstream,
+        "venv_python": _venv_python(project_dir),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Full CLAUDE.md template for consumer projects using Agent42 as MCP server
+# ---------------------------------------------------------------------------
+
+_FULL_CLAUDE_MD_TEMPLATE = """\
+## Quick Reference
+
+```bash
+python -m pytest tests/ -x -q    # Run tests (stop on first failure)
+python -m pytest tests/ -v        # Verbose: see all test names
+```
+
+---
+
+## Codebase Navigation (jcodemunch)
+
+This project is indexed by jcodemunch MCP server (`{jcodemunch_repo}`).
+**Use jcodemunch tools before reading files** to understand structure and find the right code:
+
+| When you need to... | Use this tool |
+|----------------------|---------------|
+| Understand a module before editing | `get_file_outline` — shows all classes, functions, signatures |
+| Find where something is defined | `search_symbols` — search by name across the codebase |
+| Explore a directory's structure | `get_file_tree` with `path_prefix` |
+| Read a specific symbol's code | `get_symbol` — returns the full source of a function/class |
+| Find text patterns across files | `search_text` — grep-like search across indexed files |
+| Re-index after major changes | `index_folder` with `incremental: true` |
+
+**Repo identifier:** `{jcodemunch_repo}` (use this as the `repo` parameter in all jcodemunch calls)
+
+---
+
+## Agent42 Hook Protocol
+
+Agent42 registers Claude Code hooks that run automatically during development sessions.
+No manual activation required — hooks are registered by `bash setup.sh`.
+
+| Hook Trigger | What It Does For You |
+|--------------|----------------------|
+| UserPromptSubmit | Surfaces relevant memories and past decisions before Claude responds |
+| UserPromptSubmit | Loads task-type-specific lessons and reference docs |
+| PreToolUse (Write/Edit) | Blocks edits to security-sensitive files (requires approval) |
+| PostToolUse (Write/Edit) | Auto-formats Python files, embeds learnings into Qdrant |
+| Stop | Captures session state, runs tests, records patterns for future sessions |
+| SessionStart | Syncs Claude Code credentials to configured remote nodes |
+
+**Hook protocol details:**
+- Hooks receive JSON on stdin with `hook_event_name`, `project_dir`, and event-specific data
+- Output to stderr is shown to Claude as feedback
+- Exit code 0 = allow, exit code 2 = block (for PreToolUse hooks)
+
+---
+
+## Agent42 Memory
+
+Agent42 provides a persistent, semantically-searchable memory layer via the `agent42_memory`
+MCP tool. These instructions configure Claude Code to use Agent42 as its primary memory system.
+
+### When to search memory
+
+ALWAYS call `agent42_memory` with action `search` before answering any question that
+could draw on past project decisions, user preferences, debugging history, or architectural
+choices. Do not rely solely on your context window or built-in memory files.
+
+```
+agent42_memory(action="search", content="<your query>")
+```
+
+### When to store
+
+After learning something important — a user preference, a project decision, a fix for
+a recurring bug — call `agent42_memory` with action `store` IN ADDITION to any
+built-in memory write. This ensures the information is searchable by semantic meaning,
+not just file name.
+
+```
+agent42_memory(action="store", section="<Category>", content="<what to remember>")
+```
+
+### When to log
+
+After completing a significant task or resolving a non-obvious problem, call
+`agent42_memory` with action `log` to record the event in the project timeline.
+
+```
+agent42_memory(action="log", event_type="task_completed", content="<summary>")
+```
+
+---
+
+## Testing Standards
+
+Run tests before and after any change to confirm a green baseline:
+
+```bash
+python -m pytest tests/ -x -q              # Quick: stop on first failure
+python -m pytest tests/ -v                  # Verbose: see all test names
+python -m pytest tests/test_foo.py -v       # Single file
+python -m pytest tests/ -k "test_name"      # Filter by name
+```
+
+**Test writing conventions:**
+- Every new module needs a corresponding `tests/test_*.py` file
+- Use `pytest-asyncio` for async tests (`asyncio_mode = "auto"` in pyproject.toml)
+- Use `tmp_path` fixture for filesystem tests — never hardcode `/tmp` paths
+- Use class-based organization: `class TestClassName` with descriptive method names
+- Mock external services (APIs, databases) — never hit real services in tests
+- Name tests: `test_<function>_<scenario>_<expected>`
+
+---
+
+## Common Pitfalls
+
+| # | Area | Pitfall | Correct Pattern |
+|---|------|---------|-----------------|
+| 1 | Async | Blocking I/O in async functions blocks the entire event loop | Use `aiofiles` for file I/O, `httpx.AsyncClient` for HTTP, `asyncio`-native queue ops |
+| 2 | Config | Mutable global config modified at runtime causes race conditions | Use frozen dataclasses for config — `@dataclass(frozen=True)`; load once at import time |
+| 3 | Tests | Hardcoding `/tmp` paths makes tests fail on Windows | Use pytest `tmp_path` fixture — cross-platform, auto-cleaned |
+| 4 | Tests | Running real external services in tests makes CI flaky | Mock all external calls: `mock.patch("subprocess.run")`, `mock.patch("urllib.request.urlopen")` |
+| 5 | Deploy | Local changes block `git checkout main` during deploy | Always `git stash` or commit WIP before deploying; check `git status` first |
+| 6 | Security | Plaintext secrets in env vars logged at DEBUG level | Never log API keys, passwords, or tokens — even at DEBUG; use `***` masking |
+| 7 | Security | Path traversal via `../` in user-supplied file paths | Validate all file paths with `os.path.abspath()` and check they're inside allowed root |
+| 8 | Windows | `python3` command not found on Windows | Use `python` on Windows; detect with `sys.platform == 'win32'` |
+| 9 | Windows | CRLF line endings in bash scripts cause `$'\\r': command not found` | Set `.gitattributes` with `*.sh text eol=lf`; strip CRLF with `sed -i 's/\\r$//'` before running |
+| 10 | Memory | Agent claims to remember things not in context | Use `agent42_memory(action="search", ...)` before answering; only reference actual retrieved content |
+| 11 | Memory | Storing memories without semantic search defeats the purpose | Always use `action="store"` with a descriptive `section` so memories are retrievable by topic |
+| 12 | Imports | Circular imports cause `ImportError` at startup | Move shared utilities to a separate module; avoid importing from `__init__.py` that imports from submodules |
+| 13 | Errors | Bare `except:` swallows all exceptions including `KeyboardInterrupt` | Use `except Exception:` minimum; prefer specific exception types; always log the error |
+| 14 | CLI | Script assumes it's run from project root but cwd varies | Use `os.path.dirname(os.path.abspath(__file__))` to get script's own directory |
+| 15 | Git | Force-pushing to main/master destroys teammates' history | Never `git push --force` to shared branches; use `--force-with-lease` if absolutely necessary |
+| 16 | Deps | Installing dependencies globally breaks other projects | Always use a virtualenv (`.venv/`); activate before installing: `source .venv/bin/activate` |
+| 17 | Perf | Synchronous subprocess calls in hot paths add latency | Use `asyncio.create_subprocess_exec` for async subprocess; or run in thread pool |
+| 18 | jcodemunch | Reading entire files costs tokens when only a function is needed | Use `get_symbol("ClassName.method_name")` instead of reading the whole file |
+| 19 | jcodemunch | Index goes stale after adding new files or major refactors | Re-index with `index_folder(incremental=true)` after structural changes |
+| 20 | Setup | `bash setup.sh` run from wrong directory fails silently | `setup.sh` uses `PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"` — always run from repo root |
+
+---
+
+## Project
+
+**{project_name}**{active_workstream_line}
+
+**jcodemunch repo:** `{jcodemunch_repo}`
+"""
+
+
+def generate_full_claude_md(project_dir: str) -> None:
+    """Generate or merge a full CLAUDE.md template with Agent42 conventions.
+
+    If CLAUDE.md does not exist, creates it from template.
+    If CLAUDE.md exists, merges Agent42 sections using marker boundaries.
+    Prints a summary of what changed.
+
+    Args:
+        project_dir: Absolute path to the project root.
+    """
+    import difflib
+
+    ctx = _detect_project_context(project_dir)
+    active_ws_line = ""
+    if ctx["active_workstream"]:
+        active_ws_line = f"\n**Active workstream:** {ctx['active_workstream']}"
+
+    template_content = _FULL_CLAUDE_MD_TEMPLATE.format(
+        project_name=ctx["project_name"],
+        jcodemunch_repo=ctx["jcodemunch_repo"],
+        active_workstream_line=active_ws_line,
+        venv_python=ctx["venv_python"],
+    )
+
+    # Wrap in markers for merge
+    managed_block = f"{_CLAUDE_MD_BEGIN}\n{template_content}\n{_CLAUDE_MD_END}\n"
+
+    claude_md_path = os.path.join(project_dir, "CLAUDE.md")
+
+    if os.path.isfile(claude_md_path):
+        with open(claude_md_path, encoding="utf-8") as f:
+            original = f.read()
+    else:
+        original = ""
+
+    if _CLAUDE_MD_BEGIN in original and _CLAUDE_MD_END in original:
+        # Replace content between markers
+        before = original[: original.index(_CLAUDE_MD_BEGIN)]
+        after = original[original.index(_CLAUDE_MD_END) + len(_CLAUDE_MD_END) :]
+        if after.startswith("\n"):
+            after = after[1:]
+        new_content = before + managed_block + after
+    elif original:
+        # Append to existing file
+        new_content = original.rstrip("\n") + "\n\n" + managed_block
+    else:
+        # Create from scratch
+        new_content = f"# {ctx['project_name']} — CLAUDE.md\n\n" + managed_block
+
+    # Diff summary
+    if original:
+        original_lines = original.splitlines(keepends=True)
+        new_lines = new_content.splitlines(keepends=True)
+        diff = list(difflib.unified_diff(original_lines, new_lines, n=0))
+        if diff:
+            added = sum(1 for line in diff if line.startswith("+") and not line.startswith("+++"))
+            removed = sum(1 for line in diff if line.startswith("-") and not line.startswith("---"))
+            print(f"  CLAUDE.md updated: +{added} lines, -{removed} lines")
+        else:
+            print("  CLAUDE.md already up to date - no changes")
+    else:
+        print(f"  CLAUDE.md created for {ctx['project_name']}")
+
+    with open(claude_md_path, "w", encoding="utf-8") as f:
+        f.write(new_content)
+
+
 def generate_claude_md_section(project_dir: str) -> None:
     """Append or replace the Agent42 memory section in CLAUDE.md.
 
@@ -649,8 +920,15 @@ if __name__ == "__main__":
         project_dir = sys.argv[2]
         generate_claude_md_section(project_dir)
 
+    elif cmd == "generate-claude-md":
+        if len(sys.argv) < 3:
+            print(f"Usage: {sys.argv[0]} generate-claude-md <project_dir>")
+            sys.exit(1)
+        project_dir = sys.argv[2]
+        generate_full_claude_md(project_dir)
+
     else:
         print(
-            f"Usage: {sys.argv[0]} {{mcp-config|register-hooks|health|claude-md}} <project_dir> [options]"
+            f"Usage: {sys.argv[0]} {{mcp-config|register-hooks|health|claude-md|generate-claude-md}} <project_dir> [options]"
         )
         sys.exit(1)
