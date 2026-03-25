@@ -1,8 +1,23 @@
-# Feature Research: Performance-Based Rewards System
+# Feature Research: Multi-Project Workspace Tabs
 
-**Domain:** Performance-based tier/rewards system for an AI agent platform
-**Researched:** 2026-03-22
+**Domain:** Multi-project workspace tabs for an embedded web IDE (VS Code-style)
+**Researched:** 2026-03-23
 **Confidence:** HIGH
+
+---
+
+## Context: What Already Exists
+
+The Agent42 Workspace page is a single-workspace VS Code-style IDE with:
+
+- Monaco editor with per-file models, tab bar (`_ideTabs`), view state save/restore
+- File explorer panel (ide-file-tree) rooted at a single workspace directory
+- CC (Claude Code) chat tabs with `--resume` session support and per-session localStorage history
+- Terminal tabs with PTY sessions
+- Activity bar: Explorer, Search, Chat Panel buttons
+- Diff editor, syntax highlighting, Ctrl+B explorer toggle
+
+This milestone adds a **workspace switcher** — a second level of tabs above the existing editor tab bar. Each workspace tab scopes ALL IDE surfaces to a project folder.
 
 ---
 
@@ -10,146 +25,112 @@
 
 ### Table Stakes (Users Expect These)
 
-These features define the minimum viable rewards system. Without them the feature feels
-like a configuration knob, not a rewards system.
+Features users assume exist when they hear "multi-project workspace tabs." Missing any of these makes the feature feel half-built.
 
 | Feature | Why Expected | Complexity | Notes |
 | ------- | ------------ | ---------- | ----- |
-| Three named tiers (Bronze/Silver/Gold) | Industry-standard naming; users instantly understand the hierarchy | LOW | Fixed names reduce cognitive load vs. configurable names |
-| Performance score calculation | Without a score, tier assignment is opaque — users can't understand or trust it | MEDIUM | Must derive from existing effectiveness data (success_rate, duration_ms, invocations per `EffectivenessStore`) |
-| Automatic tier assignment | Manual assignment by admin for every agent defeats the purpose | MEDIUM | Runs on a schedule or lazily on access; must be cached |
-| Resource differentiation per tier | If all tiers get the same resources, tiers are cosmetic only | MEDIUM | Model access, rate limits, concurrent task capacity |
-| Admin tier override | Operators need to correct misclassified agents (new agents with no data, exceptional cases) | LOW | Manual override that bypasses automatic scoring; stored on AgentConfig |
-| Tier visibility in dashboard | Users must always know their agent's current tier and score | LOW | Badge/label on agent card; dedicated metrics section |
-| REWARDS_ENABLED=false default | Zero-impact on existing deployments without opt-in | LOW | Required constraint from PROJECT.md; flag in `Settings` frozen dataclass |
-| Graceful degradation when disabled | When REWARDS_ENABLED=false, agents get default resources — never errors | LOW | Code paths fall through to baseline limits; no crashes |
-| Tier persistence | Tier must survive server restarts — not recomputed on every request | LOW | Stored on AgentConfig JSON; recalculated on schedule, not per-request |
-| Minimum data threshold | Agents with fewer than N task records should not be penalized — hold at Bronze | LOW | Configurable minimum; prevents new agents being locked out |
+| Workspace tab bar | The entire milestone premise — tabs at top of workspace page to switch projects | LOW | Horizontal strip above editor tab bar; active tab highlighted; add/close buttons |
+| Per-workspace file explorer | Each workspace tab shows only its own project folder tree | MEDIUM | File tree re-rooted to workspace `root_path` on tab switch; not shared across tabs |
+| Per-workspace editor tabs | Open files from workspace A must not appear when switched to workspace B | MEDIUM | `_ideTabs` array must be partitioned per workspace; save/restore on switch |
+| Per-workspace CC sessions | CC `--cwd` must match the active workspace root; switching tabs should not mix sessions from different projects | MEDIUM | Each workspace has its own CC tab collection; `--resume` uses workspace-scoped session IDs |
+| Per-workspace terminal sessions | Terminal `cwd` must be set to project root; switching workspace tabs must not share terminal instances | MEDIUM | PTY sessions keyed per-workspace; switching hides/shows correct terminals |
+| Workspace persistence across reloads | Workspaces configured today should still be there after page refresh or server restart | MEDIUM | Store workspace list + last-active tab in `localStorage` (client) and optionally `/api/workspaces` (server) |
+| Add workspace action | Users must be able to add a new project folder to the workspace tab bar | LOW | Modal or inline input: pick path or browse; validates path is accessible |
+| Remove workspace action | Users must be able to close/remove a workspace tab | LOW | Close button on tab (with confirmation if unsaved files exist); cannot remove last workspace |
+| Workspace name display | Tab label should show project folder name (basename), not full path | LOW | Use `path.basename(root_path)` for display; full path in tooltip |
+| Active workspace visual indicator | User must always know which workspace is active | LOW | Standard active tab styling — matches existing IDE tab pattern already in codebase |
+| Agent42 internal apps as workspaces | `apps/` subdirectory items must be selectable as workspace targets | LOW | Populate "add workspace" picker from `/api/apps` in addition to manual path entry |
 
 ### Differentiators (Competitive Advantage)
 
-Features that make the rewards system feel like a quality loop, not just access control.
+Features that make Agent42 workspace tabs better than just "VS Code multi-root" — specifically in the AI agent context where CC sessions and agents are project-aware.
 
 | Feature | Value Proposition | Complexity | Notes |
 | ------- | ----------------- | ---------- | ----- |
-| Composite score with multiple weighted dimensions | Success rate alone is gamed by easy tasks; weighting by task volume + duration reflects real contribution | MEDIUM | Recommended weights: success_rate (60%), task_volume_normalized (25%), avg_speed_normalized (15%) |
-| Hysteresis on tier transitions | Prevents thrashing when an agent hovers near a threshold — needs sustained performance to promote, one bad stretch doesn't immediately demote | MEDIUM | Promotion requires N consecutive periods above threshold; demotion has a grace window |
-| Score trend direction | Showing "+12 pts this week" is more motivating than showing a static score — operators take action on trend, not number | MEDIUM | Requires storing score snapshots over time (weekly) |
-| Per-tier model routing integration | Gold agents get L1 workhorse (StrongWall/Synthetic), Silver get reliable premium, Bronze get free-tier fallback — creates a measurable quality loop | HIGH | Must hook into existing model routing in agent_manager.py; requires `resolve_model()` to accept tier context |
-| Tier promotion/demotion audit log | Admins need to understand why an agent changed tier — essential for trust | MEDIUM | Append-only log with timestamp, previous tier, new tier, triggering score |
-| Cooldown period after promotion | Prevents yo-yo between tiers due to task clustering; ensures new tier reflects sustained behavior | LOW | Configurable `REWARDS_PROMOTION_COOLDOWN_DAYS` (default: 7 days) |
-| Bulk tier recalculation endpoint | When thresholds are changed, admins want to recompute all agents at once rather than waiting for the schedule | LOW | Admin API endpoint; runs in background |
-| Score explanation per agent | Shows breakdown: "success_rate: 0.87 (weight 60%) + volume: 0.7 (weight 25%) + speed: 0.6 (weight 15%) = 0.80 -> Gold" | MEDIUM | Returned by tier service; displayed in dashboard agent detail panel |
+| CC session scoped to workspace cwd | Claude Code launches with `--cwd` pointing to the workspace root — AI understands which project it's working in without manual prompting | LOW | Pass workspace `root_path` as `cwd` argument when spawning `claude` process; already threaded through PTY backend |
+| GSD workstream indicator per workspace | Show active GSD phase/workstream state for the active workspace — not a global indicator | MEDIUM | Heartbeat already carries GSD state; filter by project root to show workspace-relevant phase |
+| Agent dispatch scoped to workspace | When creating a task from the workspace page, default the workspace field to the active project | LOW | Pre-populate task creation modal with active workspace path; agents get correct cwd |
+| Workspace-level MCP context | Per-workspace CLAUDE.md and `.planning/` directories auto-surface in the CC session — agents get project-specific context | LOW | `--cwd` already achieves this if CC is launched from the workspace root |
+| Quick workspace switcher (keyboard shortcut) | Power users switch between projects without mouse; reduces context-switch friction | LOW | Ctrl+\` or similar hotkey cycles through workspace tabs; same pattern as VS Code window switching |
+| Workspace status indicator | Show a small badge per workspace tab: git branch, dirty files count, or active agent count | HIGH | Requires polling per workspace for git status; do not block on this for MVP |
+| Workspace drag-to-reorder | Users organize their tab order to match their mental model of priority | MEDIUM | HTML drag-and-drop on tab strip; save order to persistence layer |
 
 ### Anti-Features (Commonly Requested, Often Problematic)
 
 | Feature | Why Requested | Why Problematic | Alternative |
 | ------- | ------------- | --------------- | ----------- |
-| Fully configurable tier names | "Our team uses Iron/Steel/Diamond" | Adds UI/config complexity with no behavioral benefit; names don't affect resource allocation | Use fixed Bronze/Silver/Gold; document the thresholds as configurable |
-| Points accumulation (XP system) | Gamification research shows points feel rewarding | Points detach from actual performance — an agent could accumulate points running trivial tasks; creates perverse incentive | Use rolling success rate over recent N tasks — recency-weighted, not cumulative |
-| Real-time tier recalculation on every task | "Always current" appeals | Per-request computation breaks the "cached/fast" constraint from PROJECT.md; creates latency spikes | Schedule recalculation (e.g., every 15 minutes or on-demand) with cached tier stored on AgentConfig |
-| Automatic tier demotion below Bronze | "Penalize underperformers" | Below Bronze there is nowhere to go — agents would just get disabled, which is a separate concern | Keep Bronze as the floor; let admins manually pause agents that consistently underperform |
-| Cross-agent leaderboard / competitive ranking | "Motivates better agents" | Agents serve different task types at different complexities — ranking Devops (5 iterations, fast) vs. Research (25 iterations, slow) is meaningless | Per-tier grouping only; no cross-agent score ranking |
-| Tier-gated tool access (some tools Bronze-only) | "Reserve premium tools for top performers" | Tool access is a security boundary, not a performance reward; mixing the two creates unpredictable behavior | Keep tool access in skills/tool config; only resource limits (models, rate limits, concurrency) vary by tier |
-| Retroactive scoring from pre-rewards data | "All historical task data should count" | Pre-rewards data has no tier context; mixing unlabeled historical data distorts baselines | Score only from data collected after REWARDS_ENABLED=true; use minimum threshold to handle cold start |
-| Negative score for failures | "Failures should hurt more than successes help" | Creates over-cautious agents that avoid complex tasks to protect their tier | Use success_rate (fraction) not signed delta accumulation — success rate already penalizes failures proportionally |
+| Global search across all workspaces | "Search everything at once" | Mixes results from unrelated projects; adds result-grouping UI complexity; VS Code does this and it's confusing | Search scoped to active workspace only; user switches workspace to search the other project |
+| Shared editor tabs across workspaces | "I want to compare files from two projects" | Destroys the isolation guarantee — users lose the context boundary that makes tabs valuable | Open diff editor within one workspace; or open the second workspace in a new browser tab |
+| Sync CC session across workspace switch | "Keep my conversation going when I switch tabs" | CC sessions are cwd-bound; the same session in a different directory causes tool errors and confabulation about wrong project | New workspace = new CC session (or resume a prior session for that workspace); never port a session across workspaces |
+| Auto-discover all git repos and add them as workspaces | "Add all my projects automatically" | Projects in deeply nested paths or unrelated repos create noise; startup scan is slow and surprising | Manual "Add Workspace" with optional `/api/apps` pre-population; let user decide what belongs |
+| Per-workspace settings panels | "Set different editor preferences per project" | Dramatically increases UI surface area; only needed for polyglot shops | Use Monaco `modelOptions` for per-language settings; workspace-level settings are a v2+ concern |
+| Workspace "projects" vs Agent42 "Projects" | "Use existing projects as workspaces" | Agent42 Projects are task-management entities (Kanban cards), not file-system roots; conflating them creates dual-meaning confusion | Keep separate; workspace tabs reference file system paths; Agent42 Projects remain task collections |
 
 ---
 
 ## Feature Dependencies
 
 ```text
-REWARDS_ENABLED flag (Settings)
-    └──enables──> PerformanceScoreCalculator
-                      └──reads──> EffectivenessStore (already exists)
-                          └──produces──> composite_score
-                              └──feeds──> TierDeterminator
-                                  └──writes──> AgentConfig.reward_tier (new field)
-                                      ├──read by──> ResourceAllocator
-                                      │                 └──applied in──> AgentManager task dispatch
-                                      │                 └──applied in──> ModelRouting (resolve_model)
-                                      │                 └──applied in──> ToolRateLimiter (per-tier limits)
-                                      └──read by──> Dashboard tier display
-                                      └──read by──> Admin override endpoint
+Workspace Tab Bar (tab UI + add/remove)
+    └──requires──> Workspace Config Store (client-side localStorage + optional server persist)
+                       └──produces──> workspace list [{id, root_path, name}]
+                           ├──feeds──> File Explorer (re-root on tab switch)
+                           ├──feeds──> Editor Tab Partition (_ideTabs scoped per workspace_id)
+                           │               └──requires──> Save/Restore active tab state on switch (already in Monaco viewState API)
+                           ├──feeds──> CC Session Scoping (cwd = workspace root_path)
+                           │               └──enhances──> GSD workstream indicator (filter by root_path)
+                           └──feeds──> Terminal Session Scoping (cwd = workspace root_path)
 
-Admin override
-    └──writes──> AgentConfig.reward_tier_override (new field)
-        └──bypasses──> TierDeterminator output
-            └──still subject to──> ResourceAllocator (override tier controls resources)
+Workspace Persistence
+    └──requires──> Workspace Config Store
+    └──optional──> /api/workspaces backend endpoint (for cross-device or multi-tab sync)
 
-Hysteresis / cooldown
-    └──requires──> AgentConfig.tier_promoted_at (timestamp, new field)
-    └──requires──> AgentConfig.tier_score_history (list[float], new field)
-
-Audit log
-    └──appended by──> TierDeterminator on every tier change
-    └──readable by──> Dashboard audit section
+Agent42 Apps as Workspace Targets
+    └──requires──> /api/apps (already exists)
+    └──enhances──> Add Workspace picker (pre-populate with apps/ paths)
 ```
 
 ### Dependency Notes
 
-- **PerformanceScoreCalculator requires EffectivenessStore:** The score must come from
-  existing data — no new collection. EffectivenessStore provides `get_aggregated_stats()`
-  and `get_task_records()` today; calculator reads these and derives a per-agent composite score.
-
-- **TierDeterminator requires PerformanceScoreCalculator:** Tier is always a function of
-  score — never assigned directly by the algorithm (admin override is a separate code path
-  that routes around the determinator).
-
-- **ResourceAllocator requires TierDeterminator output:** Allocator is the single point
-  where tier maps to concrete limits. Everything downstream (model routing, rate limiter,
-  concurrency cap) reads from the allocator, not from the raw tier string.
-
-- **Dashboard display requires ResourceAllocator:** Display should show effective limits
-  (what the agent actually gets) not raw tier label — users understand "Gold: GPT-oss-120b,
-  10 concurrent tasks" better than "Gold tier."
-
-- **Admin override conflicts with TierDeterminator:** Override must clearly signal that
-  the tier was set manually — otherwise ops can't tell if a Gold agent earned it or was
-  manually elevated. Store `reward_tier_override` separately from `reward_tier`.
-
-- **Hysteresis requires score history:** Can't compute "N consecutive periods above threshold"
-  without storing N prior scores. Keep history shallow (last 4 periods) to bound storage.
+- **File explorer re-root requires workspace root_path on tab switch:** The current file tree calls the server with a path argument. Switching workspace tabs simply changes the root path argument — no new API needed, only state management.
+- **Editor tab partition requires workspace_id on each `_ideTabs` entry:** Add a `workspace_id` field to the existing tab object. On switch: hide current workspace tabs, show target workspace tabs. Monaco models persist in memory across the switch (no re-read needed).
+- **CC session scoping is already architected:** The `claude` process already takes `--cwd`. The workspace tab just passes a different `root_path`. No backend changes needed if the frontend passes cwd when opening a new CC tab.
+- **Terminal session scoping uses existing PTY pattern:** PTY backend accepts a `cwd` argument at session creation. Workspace tab stores its terminal session IDs; switching shows/hides the relevant xterm instances.
+- **Workspace persistence can start client-only:** `localStorage` with key `agent42_workspaces` is sufficient for MVP. Server persistence (`/api/workspaces`) adds cross-device sync and is a v1.x addition.
+- **GSD workstream indicator enhancement has no blocking dependency:** Existing heartbeat data already carries workstream state. The enhancement is a display filter — can be added independently of core workspace tab work.
 
 ---
 
 ## MVP Definition
 
-### Launch With (v1.4)
+### Launch With (v2.1 — initial release)
 
-Minimum viable system that delivers the self-reinforcing quality loop described in PROJECT.md.
+Minimum viable feature that delivers the core context-isolation benefit.
 
-- [ ] `REWARDS_ENABLED` flag in `Settings` (frozen dataclass, `os.getenv`, default `false`) — controls all behavior
-- [ ] `PerformanceScoreCalculator` — derives composite score from EffectivenessStore data (success_rate, task volume, avg duration per agent_id/task_type)
-- [ ] `TierDeterminator` — maps composite score to Bronze/Silver/Gold with configurable thresholds; respects minimum data threshold (default: 10 tasks)
-- [ ] `AgentConfig` new fields: `reward_tier`, `reward_tier_override`, `tier_promoted_at`
-- [ ] `ResourceAllocator` — per-tier lookup table for model routing class, rate limit multiplier, max concurrent tasks
-- [ ] `AgentManager` integration — apply resource limits from allocator at task dispatch
-- [ ] Model routing integration — `resolve_model()` accepts tier context and selects model class accordingly
-- [ ] Admin override API endpoint — `PATCH /api/agents/{id}/reward-tier` with tier value or `null` to clear
-- [ ] Dashboard tier badge on agent cards (Bronze/Silver/Gold or "unranked")
-- [ ] Dashboard performance metrics panel per agent (score, tier, task count, success rate)
-- [ ] Tier recalculation scheduled task (every 15 minutes, configurable)
-- [ ] Tier cache — stored on AgentConfig, never computed per-request
-- [ ] Full unit + integration tests
+- [ ] Workspace tab bar rendered above editor tab bar in Workspace page
+- [ ] Workspace config stored in `localStorage` as `[{id, root_path, name}]`; last-active workspace id stored separately
+- [ ] Add workspace modal: manual path input + dropdown populated from `/api/apps`
+- [ ] Remove workspace: close button on tab with "unsaved files" guard
+- [ ] File explorer re-rooted to active workspace `root_path` on tab switch
+- [ ] Editor tabs partitioned by `workspace_id` (add field to `_ideTabs` entries); save/restore Monaco view state on switch
+- [ ] CC session tabs scoped per workspace: new CC tab spawned with `--cwd` = workspace `root_path`; existing sessions stored per-workspace and restored on switch
+- [ ] Terminal sessions scoped per workspace: PTY spawned with `cwd` = workspace `root_path`; terminals hidden/shown on switch
+- [ ] Workspace tab label = basename of `root_path`; full path in `title` attribute tooltip
+- [ ] Default workspace seeded from existing `AGENT42_WORKSPACE` env var so current single-workspace users see no change
 
-### Add After Validation (v1.4.x)
+### Add After Validation (v2.1.x)
 
-Features to add once the core loop is proven to work.
+- [ ] Server-side workspace persistence (`/api/workspaces` GET/POST/DELETE) — enables cross-device sync and multi-browser-tab awareness
+- [ ] Drag-to-reorder workspace tabs — saves order to persistence layer
+- [ ] Quick workspace switcher keyboard shortcut (Ctrl+\` or similar)
+- [ ] Rename workspace: double-click tab label to edit display name
 
-- [ ] Hysteresis / cooldown — add `tier_score_history` to AgentConfig; require N periods sustained above threshold for promotion — reduces operational noise
-- [ ] Tier change audit log — append-only log stored per agent; surfaced in dashboard
-- [ ] Score explanation endpoint — `GET /api/agents/{id}/reward-score` returns full dimension breakdown
-- [ ] Bulk recalculation admin endpoint — `POST /api/admin/rewards/recalculate-all`
+### Future Consideration (v2.2+)
 
-### Future Consideration (v2+)
-
-Features to defer until the base system is running in production.
-
-- [ ] Score trend visualization — weekly score delta charts in dashboard; needs at least 4 weeks of history data first
-- [ ] Per-task-type tier specialization — agent could be Gold for "coding" but Silver for "research"; adds significant complexity, value unclear until base system is in use
-- [ ] Email/webhook notifications on tier change — useful for fleet operators managing many agents; not needed for single-user deployment
-- [ ] Tier analytics across the full agent fleet — fleet-level dashboards for identifying systemic quality issues
+- [ ] Per-workspace git status badge on tab (branch name, dirty file count) — requires polling `/api/git/status?path=...` per workspace; complex with many workspaces
+- [ ] Workspace-level agent/task count indicator — shows how many active agents are running in each workspace
+- [ ] Workspace "favorite" / pinned ordering — persisted across sessions
+- [ ] Export/import workspace configuration — useful for team setups or reproducing dev environments
 
 ---
 
@@ -157,114 +138,67 @@ Features to defer until the base system is running in production.
 
 | Feature | User Value | Implementation Cost | Priority |
 | ------- | ---------- | ------------------- | -------- |
-| REWARDS_ENABLED flag + graceful degradation | HIGH | LOW | P1 |
-| PerformanceScoreCalculator (from existing data) | HIGH | MEDIUM | P1 |
-| TierDeterminator with thresholds | HIGH | LOW | P1 |
-| ResourceAllocator (model + rate + concurrency) | HIGH | MEDIUM | P1 |
-| AgentManager integration (dispatch) | HIGH | MEDIUM | P1 |
-| Model routing integration | HIGH | MEDIUM | P1 |
-| Admin tier override | HIGH | LOW | P1 |
-| Dashboard tier badge + metrics panel | MEDIUM | LOW | P1 |
-| Scheduled recalculation + cache | HIGH | LOW | P1 |
-| Hysteresis / cooldown | MEDIUM | MEDIUM | P2 |
-| Tier change audit log | MEDIUM | LOW | P2 |
-| Score explanation breakdown | MEDIUM | LOW | P2 |
-| Bulk recalculation endpoint | LOW | LOW | P2 |
-| Score trend visualization | LOW | HIGH | P3 |
-| Per-task-type tier specialization | LOW | HIGH | P3 |
-| Fleet-level tier analytics | LOW | HIGH | P3 |
+| Workspace tab bar + add/remove | HIGH | LOW | P1 |
+| localStorage persistence | HIGH | LOW | P1 |
+| File explorer re-root on switch | HIGH | LOW | P1 |
+| Editor tab partition per workspace | HIGH | MEDIUM | P1 |
+| CC session scoping (--cwd) | HIGH | LOW | P1 |
+| Terminal session scoping | HIGH | MEDIUM | P1 |
+| Apps as workspace targets | MEDIUM | LOW | P1 |
+| Default workspace from env var | HIGH | LOW | P1 |
+| Server-side workspace persistence | MEDIUM | MEDIUM | P2 |
+| Drag-to-reorder tabs | LOW | MEDIUM | P2 |
+| Quick keyboard switcher | MEDIUM | LOW | P2 |
+| Rename workspace | LOW | LOW | P2 |
+| Git status badge on tab | MEDIUM | HIGH | P3 |
+| Agent/task count indicator | LOW | HIGH | P3 |
 
 **Priority key:**
 
-- P1: Must have for v1.4 launch
-- P2: Should have, add in v1.4.x patch
-- P3: Future consideration, v2+
+- P1: Must have for v2.1 launch
+- P2: Should have, add in v2.1.x patch
+- P3: Nice to have, v2.2+
 
 ---
 
-## Domain Patterns Research
+## IDE Pattern Analysis
 
-### How Tier Thresholds Should Be Set
+### VS Code Multi-Root Workspaces (HIGH confidence)
 
-Based on research into API platform tier systems (Azure OpenAI, Google Gemini, OpenAI) and
-gamification systems, the standard pattern is:
+VS Code's pattern for multi-root workspaces: multiple folder roots shown as sibling entries in the single Explorer panel. File tabs include folder-name disambiguation in the tab label when collisions exist. Search operates globally but groups results by folder. Settings have three scopes: User, Workspace (global), and per-Folder. Terminals are not automatically scoped — any terminal can navigate anywhere. Workspace config lives in `.code-workspace` JSON file.
 
-- **Bronze (entry):** Default tier for all agents; requires no threshold. Any agent with
-  insufficient data starts here. Resources: free-tier fallback model, baseline rate limits.
-- **Silver (mid):** Agents that demonstrate consistent reliability. Recommended default
-  threshold: composite score >= 0.65, with at least 10 completed tasks.
-  Resources: reliable premium model (e.g., Synthetic general), 1.5x rate limit multiplier.
-- **Gold (top):** Agents with sustained excellence. Recommended default threshold:
-  composite score >= 0.85, with at least 25 completed tasks.
-  Resources: L1 workhorse model (e.g., Synthetic coding/reasoning), 2x rate limit multiplier,
-  increased concurrent task capacity.
+**Agent42 divergence:** VS Code renders all roots simultaneously in one Explorer. Agent42 should render only the active workspace root — tabs switch context entirely. This is closer to VS Code's "open new window" model than its multi-root model, but confined to a single browser tab. The tab-switch-entire-context approach matches how JetBrains workspaces and how Cursor users request multi-project support.
 
-All thresholds should be configurable via environment variables:
+### JetBrains Workspaces (MEDIUM confidence)
 
-- `REWARDS_SILVER_THRESHOLD` (default: 0.65)
-- `REWARDS_GOLD_THRESHOLD` (default: 0.85)
-- `REWARDS_MIN_TASKS` (default: 10)
+IntelliJ IDEA's workspace feature (preview as of 2025) treats a workspace as a meta-container of independent projects. Each project keeps its own `.idea/` config. Workspace stores only folder structure and VCS roots — everything else stays on the project level. Key design principle: "workspace is responsible for storing the workspace folder structure; everything else remains on the project level." Projects can be loaded/unloaded within the workspace.
 
-### Composite Score Formula
+**Agent42 alignment:** Same principle: workspace tabs own only `{root_path, name, session_ids}`; all other state (open files, CC history, terminal content) lives per-tab, not globally.
 
-Research into AI agent evaluation frameworks (Galileo, Anthropic evals, MachineLearningMastery)
-confirms that multi-dimension scoring outperforms single-metric scoring for real-world agents.
-The recommended formula for Agent42, using only data already in EffectivenessStore:
+### Known Cross-Project Contamination Bugs to Avoid (HIGH confidence)
 
-```python
-score = (success_rate * 0.60)
-      + (min(invocations, 100) / 100 * 0.25)   # volume, capped at 100
-      + (speed_score * 0.15)                     # normalized avg_duration, inverted
-```
+Real-world issues found in VS Code and JetBrains multi-project workspaces:
 
-Where `speed_score = 1 - min(avg_duration_ms / MAX_EXPECTED_MS, 1.0)` with a configurable
-`MAX_EXPECTED_MS` (default: 30,000ms). Speed is the smallest weight because it's task-type
-dependent — a research agent is expected to be slow.
-
-Confidence: MEDIUM — formula derived from research principles; weights should be validated
-against real agent data in production and adjusted if success_rate proves insufficient signal.
-
-### Resource Allocation per Tier
-
-Based on how API providers (OpenAI, Azure Foundry, Gemini) structure their tier systems,
-resource allocation should be a multiplier applied to a configurable baseline:
-
-| Resource | Bronze | Silver | Gold |
-| -------- | ------ | ------ | ---- |
-| Model routing class | free-tier fallback | Synthetic general / Gemini | Synthetic coding/reasoning |
-| Rate limit multiplier | 1.0x (baseline) | 1.5x | 2.0x |
-| Max concurrent tasks | 1 | 2 | 4 |
-| Max iterations per task | AgentConfig.max_iterations unchanged | +20% | +50% |
-
-The multiplier approach (not absolute values) lets the baseline be configurable without
-re-specifying all tier limits — only the deltas need tier-specific env vars.
+1. AI conversation history leaking across projects (Zed issue #41240) — CC session IDs must be keyed by `workspace_id`, never shared
+2. Wrong project hooks executing (Claude Code issues #5386, #5387) — CC `--cwd` scoping prevents this
+3. Copilot output files placed in wrong project (Microsoft feedback #275) — agent dispatch must default to active workspace
 
 ---
 
 ## Sources
 
-- Azure OpenAI quota tiers — automatic tier upgrade on usage (HIGH confidence):
-  [Azure OpenAI Quotas and Limits](https://learn.microsoft.com/en-us/azure/foundry/openai/quotas-limits)
-- Google Gemini API rate limit tiers (HIGH confidence):
-  [Gemini API Rate Limits](https://ai.google.dev/gemini-api/docs/rate-limits)
-- OpenAI API rate limit tiers (HIGH confidence):
-  [OpenAI Rate Limits](https://developers.openai.com/api/docs/guides/rate-limits)
-- Galileo AI agent metrics guide (MEDIUM confidence):
-  [Galileo AI Agent Metrics](https://galileo.ai/blog/ai-agent-metrics)
-- Anthropic agent evaluation guide (MEDIUM confidence):
-  [Demystifying Evals for AI Agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)
-- Gamification tier mechanics — Xtremepush (MEDIUM confidence):
-  [7 Gamification Mechanics That Drive Player Loyalty](https://www.xtremepush.com/blog/7-gamification-mechanics-that-drive-player-loyalty-points-badges-leaderboards-tiers-challenges-streaks-and-rewards)
-- Enterprise Integration Patterns: Hysteresis design (MEDIUM confidence):
-  [Hysteresis of Design Decisions](https://www.enterpriseintegrationpatterns.com/ramblings/06_hysteresis.html)
-- Feature flags and graceful degradation — Unleash (HIGH confidence):
-  [Graceful Degradation with FeatureOps](https://www.getunleash.io/blog/graceful-degradation-featureops-resilience)
-- Agent42 EffectivenessStore source (HIGH confidence — direct read):
-  `memory/effectiveness.py`
-- Agent42 AgentConfig + AgentManager source (HIGH confidence — direct read):
-  `core/agent_manager.py`
+- [VS Code Multi-Root Workspaces official docs](https://code.visualstudio.com/docs/editing/workspaces/multi-root-workspaces) (HIGH confidence)
+- [VS Code workspace concepts](https://code.visualstudio.com/docs/editing/workspaces/workspaces) (HIGH confidence)
+- [JetBrains Workspaces in IntelliJ IDEA blog](https://blog.jetbrains.com/idea/2024/08/workspaces-in-intellij-idea/) (MEDIUM confidence)
+- [JetBrains IDE Workspaces challenges and plans 2025](https://blog.jetbrains.com/idea/2025/03/ide-workspaces-development-challenges-and-plans/) (MEDIUM confidence)
+- [Zed AI conversation history cross-project leak](https://github.com/zed-industries/zed/issues/41240) (HIGH confidence — real bug report)
+- [Claude Code wrong project hooks in multi-project workspace](https://github.com/anthropics/claude-code/issues/5386) (HIGH confidence — real bug report)
+- [Copilot output in wrong project in multi-project workspace](https://github.com/microsoft/copilot-intellij-feedback/issues/275) (HIGH confidence — real bug report)
+- [Multi-project workspace feature request Cursor](https://forum.cursor.com/t/multi-project-workspace/92547) (MEDIUM confidence)
+- [Monaco editor tab implementation (createModel/setModel/saveViewState/restoreViewState pattern)](https://github.com/microsoft/monaco-editor/issues/604) (HIGH confidence)
+- Agent42 `app.js` — existing tab state implementation (`_ideTabs`, `ideRenderTabs`, ccTabs pattern) (HIGH confidence — direct code read)
 
 ---
 
-*Feature research for: Agent42 v1.4 Performance-Based Rewards System*
-*Researched: 2026-03-22*
+*Feature research for: Agent42 v2.1 Multi-Project Workspace Tabs*
+*Researched: 2026-03-23*

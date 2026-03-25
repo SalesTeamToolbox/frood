@@ -1,247 +1,257 @@
 # Project Research Summary
 
-**Project:** Agent42 v1.4 — Performance-Based Rewards System
-**Domain:** Performance-based tier/rewards system for an AI agent platform
-**Researched:** 2026-03-22
+**Project:** Agent42 v2.1 — Multi-Project Workspace Tabs
+**Domain:** Multi-project context isolation in an embedded web IDE (VS Code-style)
+**Researched:** 2026-03-23
 **Confidence:** HIGH
+
+> Note: ARCHITECTURE.md researcher timed out. Architecture findings are fully covered by STACK.md
+> (integration patterns, component boundaries, API design) and PITFALLS.md (data model design,
+> component interaction failures). Coverage is functionally complete.
+
+---
 
 ## Executive Summary
 
-Agent42 v1.4 adds a Bronze/Silver/Gold rewards tier system that creates a self-reinforcing quality loop: high-performing agents earn access to better models and higher resource limits, which in turn enables them to perform even better. Research confirms this is a well-understood pattern in API platform tier systems (Azure OpenAI, Google Gemini) and gamification frameworks, and the recommended approach treats tier as a **computed projection of existing performance data** rather than an independent stored state. The feature must be entirely additive — `REWARDS_ENABLED=false` by default, zero behavioral change for existing deployments, and all implementation layered on top of the existing `EffectivenessStore`, `AgentManager`, `ToolRateLimiter`, and frozen-dataclass `Settings` infrastructure already in place.
+This milestone adds multi-project workspace tabs to the Agent42 IDE page — a second tier of tabs above the existing editor tab bar that scopes all IDE surfaces (file explorer, Monaco editor, CC sessions, terminals) to a project folder. The good news: every mechanism required already exists in the codebase. Monaco model swapping, PTY cwd parameters, CC session workspace_path routing, and localStorage persistence are all in place. The work is composition and state management, not new technology. No new dependencies are required.
 
-The critical architectural constraint is that tier lookups must never touch the database on the routing hot path. Tier is computed on a background schedule (every 15 minutes), cached in memory, persisted to a JSON file for restart recovery, and stored on `AgentConfig` for O(1) reads at dispatch time. The composite performance score derives from the existing `EffectivenessStore` data (success rate 60%, task volume 25%, speed 15%) — no new ML libraries, no new databases, and no new async frameworks are required. The entire implementation can be delivered with Python stdlib (`IntEnum`, `dataclasses`, `asyncio.Semaphore`) plus dependencies already in `requirements.txt`.
+The recommended approach is a two-phase core build. Phase 1 establishes the foundational data model: a server-side `WorkspaceRegistry` (authoritative source of truth), a workspace-ID-prefixed URI convention for Monaco models, a namespaced storage key schema for localStorage/sessionStorage, and `/api/workspaces` CRUD endpoints. This foundation must be locked before any UI is built — eight of the ten identified pitfalls stem from missing namespace isolation that is trivially cheap to design in from the start but expensive to retrofit after tab switching is wired. Phase 2 threads the registry into every IDE surface (file API, terminal WS, CC warm pool, Monaco model switching, editor tab snapshot/restore) and builds the workspace tab bar UI.
 
-The highest-priority risks are: (1) the existing `EffectivenessStore` schema has no `agent_id` column, meaning per-agent performance data cannot currently be queried — this schema gap must be resolved before any scoring logic is built; (2) the frozen-dataclass `Settings` pattern cannot support a runtime toggle without a separate mutable `RewardsConfig` file; and (3) cold-start agents will be permanently stuck at Bronze if a provisional-tier mechanism is not implemented from the start. These are Phase 1 decisions that cannot be deferred.
+The primary risk is cross-workspace state contamination: Monaco URI collisions causing silent file corruption, CC sessions resuming in the wrong project directory, and localStorage history bleeding across workspace switches. These are not hypothetical — identical bugs are documented in Zed (issue #41240), Claude Code (issues #5386, #5387), and VS Code Copilot (feedback #275). All are prevented by the same root principle: every file reference, session ID, storage key, and API call must carry a workspace identifier, and the server must resolve workspace paths from a registered allowlist rather than accepting client-supplied paths directly.
+
+---
 
 ## Key Findings
 
 ### Recommended Stack
 
-The rewards system requires no new runtime dependencies. All recommendations use Python 3.11+ stdlib or packages already in `requirements.txt`. The feature fits directly into Agent42's existing async, frozen-dataclass, plugin-oriented architecture.
+The entire feature is buildable with existing dependencies. The stack is the existing Agent42 stack: FastAPI for new `/api/workspaces` endpoints, `aiofiles` + JSON for the `WorkspaceRegistry` persistence file (`.agent42/workspaces.json`), `crypto.randomUUID()` for workspace IDs, `localStorage` for client-side tab state, and plain JS object arrays (matching the existing `state.chatSessions` / `state.codeSessions` pattern) for in-memory workspace state.
+
+See `.planning/research/STACK.md` for the full integration point analysis.
 
 **Core technologies:**
 
-- `enum.IntEnum` (stdlib): `RewardTier` enum — supports `>=` comparisons (unlike plain `Enum`), zero cost
-- `dataclasses` (stdlib): `TierConfig`, `TierLimits`, `TierResult` frozen dataclasses — matches project pattern throughout `core/config.py` and `core/rate_limiter.py`
-- `asyncio.Semaphore` (stdlib): per-tier concurrent task caps — cannot be resized after creation; swap on promotion, drain before demotion
-- `aiosqlite` (existing dep): `tier_history` and `agent_performance` table — already in `requirements.txt` for effectiveness tracking
-- `time.monotonic()` (stdlib): TTL-based cache invalidation — already used in `rate_limiter.py`
-- FastAPI + WebSocket (existing): REST endpoints and push events — no new framework needed
+- `localStorage` (browser stdlib): Workspace config persistence — stale-while-revalidate against server registry; small JSON (<2KB); same pattern as existing CC session history
+- `state.workspaces` plain JS array: In-memory workspace tab state — matches `state.chatSessions` pattern exactly; no framework needed
+- `crypto.randomUUID()` (browser stdlib): Stable workspace IDs — already used for CC session IDs in `ideOpenCCChat()`
+- `aiofiles` (existing dep, 23.0.0+): Registry persistence at `.agent42/workspaces.json`
+- FastAPI `Query()` params (existing, 0.115.0+): New `workspace_id` param on `/api/ide/tree`, `/api/ide/file`, `/api/ide/search`, `/ws/terminal`, `/ws/cc-chat`
+- Monaco `setModel()` + `saveViewState()` / `restoreViewState()` (existing, Monaco 0.52.2): Per-workspace editor tab state — stable API since 0.20+; view state is lightweight
 
-Optional: `cachetools>=7.0.5` for `TTLCache` if the hand-rolled TTL dict grows unwieldy (check `pip show cachetools` first — likely already a transitive dependency). Do NOT use `asyncache 0.3.1` — unmaintained since November 2022, incompatible with cachetools 7.x.
+**What not to use:** Multiple Monaco editor instances (80MB RAM each; use model swapping), `sessionStorage` for workspace config (dies on tab close), arbitrary absolute paths from client in any API or WebSocket (path traversal risk), any new frontend framework (no build system exists in this project).
 
 ### Expected Features
 
-**Must have (table stakes) — v1.4:**
+See `.planning/research/FEATURES.md` for the full prioritization matrix and feature dependency graph.
 
-- `REWARDS_ENABLED` flag in `Settings` (default `false`) with graceful degradation — required per PROJECT.md constraints
-- `PerformanceScoreCalculator` reading from `EffectivenessStore` — composite weighted score (success_rate 60%, volume 25%, speed 15%)
-- `TierDeterminator` mapping score to Bronze/Silver/Gold with configurable thresholds (`REWARDS_SILVER_THRESHOLD=0.65`, `REWARDS_GOLD_THRESHOLD=0.85`)
-- `ResourceAllocator` — per-tier model routing class, rate limit multiplier, max concurrent tasks
-- `AgentManager` integration — apply resource limits from allocator at task dispatch
-- Model routing integration — `resolve_model()` accepts tier context and selects appropriate model class
-- Admin tier override API — `PATCH /api/agents/{id}/reward-tier`; override stored separately from computed tier and never clobbered by recalculation
-- Dashboard tier badge and performance metrics panel per agent
-- Scheduled recalculation (every 15 min) + in-memory cache + JSON file persistence for restart recovery
-- Provisional tier for new agents (default Silver, not Bronze) until `min_observations` threshold is met
+**Must have (table stakes) — v2.1 launch:**
 
-**Should have — v1.4.x patch:**
+- Workspace tab bar above editor tab bar with active tab indicator
+- Per-workspace file explorer (re-rooted to workspace `root_path` on tab switch)
+- Per-workspace editor tabs (`_ideTabs` partitioned by `workspace_id`; Monaco view state saved/restored on switch)
+- Per-workspace CC sessions (`--cwd` = workspace root; session list filtered per workspace; warm pool keyed by `(user, workspace_id)`)
+- Per-workspace terminal sessions (PTY spawned with `cwd` = workspace root; terminals hidden/shown on switch)
+- Workspace persistence across reloads (`localStorage` cache + server `/api/workspaces` as authoritative source)
+- Add workspace modal (manual path input + `/api/apps` dropdown for Agent42 internal apps)
+- Remove workspace (close button with unsaved-files guard; cannot remove last workspace)
+- Default workspace seeded from `AGENT42_WORKSPACE` — zero behavior change for existing single-workspace users
 
-- Hysteresis / cooldown — require N sustained periods above threshold for promotion; configurable `REWARDS_PROMOTION_COOLDOWN_DAYS`
-- Tier change audit log — append-only, timestamp + old/new tier + reason (automated vs override)
-- Score explanation endpoint — `GET /api/agents/{id}/reward-score` returns dimension breakdown
-- Bulk recalculation admin endpoint — `POST /api/admin/rewards/recalculate-all`
+**Should have (competitive advantage) — v2.1.x patches:**
 
-**Defer (v2+):**
+- Server-side workspace persistence as authoritative source (enables cross-device sync; `/api/workspaces` already exists from Phase 1)
+- Drag-to-reorder workspace tabs
+- Quick keyboard switcher (Ctrl+` cycling through workspace tabs)
+- Rename workspace (double-click tab label)
+- CC session scoped to workspace cwd (differentiator: AI understands which project without manual prompting)
+- GSD workstream indicator filtered per active workspace root
 
-- Score trend visualization — needs at least 4 weeks of historical data before charts are meaningful
-- Per-task-type tier specialization — adds significant complexity; value unclear until base system is in production use
-- Email/webhook notifications on tier change — useful for fleet operators, not needed for single-user deployments
-- Fleet-level tier analytics — requires steady-state history first
+**Defer (v2.2+):**
 
-**Anti-features to avoid:**
+- Per-workspace git status badge on tab (requires polling per workspace; complex at scale)
+- Workspace-level agent/task count indicator
+- Export/import workspace configuration
 
-- Points/XP accumulation — creates perverse incentives (volume over quality)
-- Real-time tier recalculation on every request — violates PROJECT.md "cached/fast" constraint
-- Cross-agent competitive leaderboard — meaningless across different task types and complexities
-- Tier-gated tool access — tool access is a security boundary, not a performance reward; mixing the two is dangerous
+**Anti-features (do not build):**
+
+- Global search across all workspaces — mixes results from unrelated projects
+- Shared editor tabs across workspaces — destroys the context isolation guarantee
+- Sync CC session across workspace switch — CC sessions are cwd-bound; cross-workspace sessions cause confabulation about wrong project
+- Auto-discover all git repos — noisy, slow, and surprising
 
 ### Architecture Approach
 
-The rewards system is a new `core/reward_system.py` module that reads from `EffectivenessStore` (read-only), writes computed tiers back to `AgentConfig` via `AgentManager.update()`, and broadcasts tier change events over the existing WebSocket infrastructure. The key pattern is: tier is computed on a background schedule, cached in memory (TTL), persisted to `.agent42/tier_assignments.json`, and stored on `AgentConfig` for O(1) hot-path reads. All existing components (`AgentRuntime`, `ToolRateLimiter`, model routing) read from `AgentConfig.effective_tier()` and an `AgentLimits` dataclass — they never call `RewardSystem` directly.
-
-A separate mutable `RewardsConfig` file (not in frozen `Settings`) handles the runtime toggle and threshold overrides that must take effect without a server restart.
+The architecture is entirely additive to the existing single-workspace IDE. The central design decision is the `WorkspaceRegistry`: a server-side in-memory dict (loaded from `.agent42/workspaces.json` at startup, written via `aiofiles`) that maps workspace IDs to validated absolute paths. All API endpoints and WebSocket handlers accept `workspace_id` as a parameter and resolve the actual path from the registry — never from client-supplied path strings. The client never sends paths; it sends IDs. This single architectural principle prevents the entire security attack surface (path traversal, workspace spoofing) and the data integrity problems (Monaco URI collision, file API sandbox bypass).
 
 **Major components:**
 
-1. `core/reward_system.py` (NEW) — score calculation, tier determination, in-memory cache, file persistence, background recalculation loop
-2. `core/agent_manager.py` (EXTEND) — `reward_tier`, `tier_override`, `performance_score`, `tier_computed_at` fields on `AgentConfig`; `effective_tier()` helper; `get_effective_limits()` method
-3. `core/config.py` (EXTEND) — `rewards_enabled` startup gate + all threshold/limit env vars as frozen Settings fields; separate mutable `RewardsConfig` for runtime toggle
-4. `memory/effectiveness.py` (EXTEND) — add `agent_id` column to `tool_invocations` table OR create separate `agent_performance` table; add `get_agent_stats(agent_id)` method
-5. `core/rate_limiter.py` (EXTEND) — extend existing `ToolRateLimiter` with per-agent tier limit overrides, NOT a parallel rate limiter
-6. `dashboard/server.py` (EXTEND) — rewards REST endpoints with router-level `require_auth` dependency
+1. `WorkspaceRegistry` (new, `server.py` or `core/workspace_registry.py`): authoritative ID-to-path mapping; validates paths on registration; caches in memory; persists to `.agent42/workspaces.json`
+2. `/api/workspaces` CRUD endpoints (new, `server.py`): GET/POST/DELETE/PATCH; thin layer over `WorkspaceRegistry`
+3. Modified IDE API endpoints (`/api/ide/tree`, `/api/ide/file`, `/api/ide/search`): add `workspace_id` Query param; sandbox check against registry-resolved root instead of global `workspace` variable
+4. Modified WebSocket handlers (`/ws/terminal`, `/ws/cc-chat`): accept `workspace_id` query param; terminal uses `registry.get_path(id)` as PTY cwd; CC warm pool keyed by `(user, workspace_id)` tuple
+5. Frontend workspace state (`app.js`): `state.workspaces[]`, `state.activeWorkspaceId`, per-workspace `_wsEditorTabs`, `_wsTreeCache`, `_wsExpandedDirs` dicts; `localStorage` persistence under `a42_workspaces`
+6. Workspace tab bar UI (new section in `app.js`): renders above editor tab bar; add/remove controls; active tab highlight; switches all IDE surfaces on click; workspace name = `basename(root_path)` with full path tooltip
 
 ### Critical Pitfalls
 
-1. **Tier lookup on the routing hot path** — `get_tier(agent_id)` inside model routing or task dispatch will hit SQLite on every agent iteration, stalling all concurrent agents. Cache tier in memory with TTL; routing code reads `AgentConfig.reward_tier` (O(1) dict lookup), never queries the DB directly.
+See `.planning/research/PITFALLS.md` for all 10 pitfalls with code line references and recovery strategies.
 
-2. **No `agent_id` in `EffectivenessStore` schema** — the `tool_invocations` table has no `agent_id` column; all effectiveness data is indexed by `(tool_name, task_type, task_id)`. Per-agent scoring is impossible without either a schema migration (add `agent_id` column, default existing rows to `""`) or a separate `agent_performance` table. Must be resolved in Phase 1 before any scoring logic is built.
+1. **Monaco URI collisions between workspaces** — Two workspaces containing `src/main.py` get the same model URI (`file:///src/main.py`); `monaco.editor.getModel(uri)` returns the first workspace's model; the second workspace silently edits the wrong file. Prevention: prefix all Monaco URIs with workspace ID (`file:///ws-<id>/relative/path`). Must be established in Phase 1 before any editor state is tracked — cannot be retrofitted.
 
-3. **Frozen dataclass `Settings` cannot support runtime toggle** — `Settings` is frozen at import time. Use `Settings.rewards_enabled` as a startup gate only; a separate mutable `RewardsConfig` (file-backed, non-frozen) handles runtime on/off state and threshold overrides.
+2. **File API accepts client-supplied paths** — Passing `workspace_root` as a client query parameter to `/api/ide/tree` or `/api/ide/file` is a path traversal vulnerability. Prevention: client sends only `workspace_id`; server resolves path from `WorkspaceRegistry`; sandbox check validates against the resolved root, not the global `workspace` variable.
 
-4. **Admin override silently clobbered by recalculation** — the background recalculation job will overwrite admin-set tier overrides unless it explicitly checks for active overrides. Store overrides in a separate dict; recalculation skips overridden agents; overrides have a visible timestamp and optional expiry.
+3. **CC warm pool keyed by user only** — `_cc_warm_pool[user]` (line 1737 of `server.py`) causes workspace A's warm CC session to be consumed when workspace B opens CC. Claude starts in the wrong project's cwd with the wrong git context. Prevention: key pool by `(user, workspace_id)` tuple.
 
-5. **Cold-start penalty traps new agents at Bronze** — agents below `min_observations` threshold should receive a "Provisional" status mapping to the configured neutral tier (recommended: Silver), not Bronze. Bronze's resource restrictions create a negative feedback loop that prevents new agents from accumulating the data needed to promote.
+4. **Global `_ideTabs` and `_termSessions` are shared singletons** — Workspace switch either leaves old workspace tabs visible (contamination) or clears all tabs (UX regression — user loses open files). Prevention: snapshot current workspace tab state to its localStorage slot on switch; restore on return; Monaco models stay in memory registry across switches.
 
-6. **Parallel rate limiter conflicts** — adding a new tier-based concurrent task limiter alongside the existing `ToolRateLimiter` creates two independent enforcement points that can conflict under concurrent dispatch. Extend the existing architecture; do not build a parallel one.
+5. **localStorage key collisions** — CC session history keys (`cc_hist_<sessionId>`) and active session pointer (`cc_active_session`) are workspace-agnostic; after a page reload, history from workspace A appears in workspace B's CC panel. Prevention: namespace all keys by workspace ID from day one (`cc_hist_<wsId>_<sessionId>`, `cc_active_session_<wsId>`). Key schema must be locked in Phase 1 before any storage code is written.
 
-7. **Missing auth on new dashboard endpoints** — apply `require_auth` at the router level (`APIRouter(dependencies=[Depends(require_auth)])`), not per-endpoint. An unauthenticated attacker could promote agents to Gold or disable the rewards system entirely.
+Additional documented pitfalls: CC sessions directory shared across workspaces (Pitfall 7), file search results returning workspace-ambiguous relative paths (Pitfall 8), workspace config stored in localStorage only without server validation (Pitfall 9), Monaco view state lost on workspace switch due to DOM re-render triggering editor dispose (Pitfall 10).
 
-8. **Tier state lost on restart** — the in-memory tier cache is empty after every restart. Persist computed tiers to `.agent42/tier_assignments.json` after each recalculation; warm the cache from this file on startup.
+---
 
 ## Implications for Roadmap
 
-Research strongly suggests a 6-phase build order driven by data dependencies: schema must exist before scoring, scoring must work before enforcement, enforcement must work before dashboard visualization. Each phase is independently testable before the next begins.
+The dependency graph is clear and unambiguous. All ten pitfalls map to one of two phases. The `WorkspaceRegistry` is the prerequisite for every other piece of work.
 
-### Phase 1: Foundation — Config, Schema, and Tier Cache
+### Phase 1: Foundation — Workspace Data Model and Registry
 
-**Rationale:** Three hard blockers must be resolved before any other work is possible: the `EffectivenessStore` lacks an `agent_id` column (Pitfall 2), the frozen `Settings` pattern is incompatible with a runtime toggle (Pitfall 3), and the tier cache persistence model must be established before any routing integration (Pitfall 10). These are architectural decisions that cannot be made after the feature is partially built.
+**Rationale:** Eight of ten pitfalls require Phase 1 decisions. The Monaco URI convention, storage key schema, and server-side registry must all be locked before any UI is built. This phase produces no visible user-facing UI — it is infrastructure only. Building the tab switcher before this foundation is in place guarantees retrofitting pain.
 
-**Delivers:** `rewards_enabled` gate in `Settings`; mutable `RewardsConfig` file-backed runtime config; `agent_id` in effectiveness schema; `RewardSystem` class with score calculation, tier determination, in-memory TTL cache, and JSON file persistence; `get_agent_stats(agent_id)` on `EffectivenessStore`
+**Delivers:**
 
-**Addresses features:** REWARDS_ENABLED flag, graceful degradation, tier cache, scoring foundation
+- `WorkspaceRegistry` class: in-memory dict, `workspaces.json` persistence, `register()`, `get_path(id)`, `validate()`, `list()`, `delete()` methods; startup path validation
+- `/api/workspaces` CRUD endpoints (GET/POST/DELETE/PATCH)
+- Monaco URI namespacing convention: `file:///ws-<workspaceId>/<relative-path>` — applied to `ideOpenFile()` and all consumers before any tab state is built
+- localStorage / sessionStorage key schema locked: `a42_workspaces`, `cc_hist_<wsId>_<sessionId>`, `cc_active_session_<wsId>` — established before any storage code is written
+- `(workspace_id, relative_path)` as the canonical file reference pair across all APIs
+- Frontend: `state.workspaces[]`, `state.activeWorkspaceId`, per-workspace state dicts; `localStorage` persistence under `a42_workspaces`
+- Default workspace seeded from `AGENT42_WORKSPACE` so existing single-workspace behavior is unchanged
 
-**Avoids pitfalls:** Pitfall 1 (hot path), Pitfall 2 (schema gap), Pitfall 3 (frozen dataclass), Pitfall 7 (volume vs quality — task type weights in formula from day 1), Pitfall 10 (restart recovery)
+**Addresses features:** Workspace persistence, default workspace, add/remove workspace (backend only)
 
-**Research flag:** Well-understood — all patterns derived directly from codebase inspection. No additional research needed.
+**Avoids pitfalls:** Pitfall 1 (Monaco URIs), Pitfall 4 (file API sandbox), Pitfall 5 (localStorage keys), Pitfall 8 (file path workspace-ambiguity), Pitfall 9 (server as authority)
 
-### Phase 2: Tier Assignment Logic
+**Research flag:** Well-understood. All patterns derived from direct codebase inspection. No additional research phase needed.
 
-**Rationale:** With the schema and cache in place, tier determination logic can be built and tested in isolation before any dispatch integration. Provisional tier handling (Pitfall 5) and admin override semantics (Pitfall 4) must be designed at this stage because the recalculation loop is built here.
+---
 
-**Delivers:** `TierDeterminator` with configurable thresholds; provisional tier for new agents; admin override data model (`tier_overrides` dict keyed by agent_id with timestamps and optional expiry); recalculation loop that skips overridden agents; background scheduled recalculation task; `AgentConfig` new fields (`reward_tier`, `tier_override`, `performance_score`, `tier_computed_at`); `effective_tier()` helper
+### Phase 2: Wiring — IDE Surface Scoping and Tab UI
 
-**Addresses features:** Automatic tier assignment, admin override, minimum data threshold, provisional tier
+**Rationale:** With the registry and data model in place, Phase 2 threads workspace context through every IDE surface and builds the tab switcher. Recommended execution order within the phase: backend API changes first (add `workspace_id` params to existing endpoints), then CC session scoping (warm pool key fix is a correctness issue, not polish), then terminal scoping, then frontend tab state snapshot/restore logic, then the tab bar UI last.
 
-**Avoids pitfalls:** Pitfall 4 (override clobbered by recalculation), Pitfall 5 (cold-start Bronze penalty)
+**Delivers:**
 
-**Research flag:** Well-understood — standard pattern. No additional research needed.
+- Modified `/api/ide/tree`, `/api/ide/file`, `/api/ide/search`: `workspace_id` Query param; sandbox check against registry-resolved root
+- Modified `/ws/terminal`: `workspace_id` query param; PTY spawns with `cwd = registry.get_path(workspace_id)`, not global `workspace`
+- Modified `/ws/cc-chat`: `workspace_id` query param; warm pool keyed by `(user, workspace_id)` tuple; CC session directory per workspace root (`.agent42/cc-sessions/` inside each workspace's folder)
+- CC session list endpoint filtered to active workspace; session picker shows only current workspace sessions
+- Frontend tab state snapshot/restore: serialize `_ideTabs` + `_termSessions` to per-workspace localStorage slot on switch; restore on return; Monaco `viewState` saved/restored per model URI
+- Workspace tab bar UI: horizontal strip above editor tab bar; active tab indicator; add/remove buttons; workspace name = `basename(root_path)` with full path in `title` tooltip
 
-### Phase 3: Resource Enforcement
+**Addresses features:** All P1 table-stakes features from FEATURES.md MVP list
 
-**Rationale:** Tier labels are meaningless without resource differentiation. This phase wires the computed tier into actual enforcement: concurrent task limits, model routing, and rate limit multipliers. Must audit all existing rate limiting surfaces before adding tier limits (Pitfall 6), and must establish explicit precedence rules before model routing integration (Pitfall 9).
+**Avoids pitfalls:** Pitfall 2 (terminal cwd), Pitfall 3 (CC warm pool), Pitfall 6 (global IDE arrays), Pitfall 7 (CC session directory shared), Pitfall 10 (Monaco view state lost on DOM re-render)
 
-**Delivers:** `TierLimits` frozen dataclass per tier; `AgentManager.get_effective_limits()` returning `AgentLimits`; `ToolRateLimiter` extended with per-agent tier overrides (not a parallel limiter); model routing tier-awareness in `resolve_model()` with explicit precedence (manual override > tier > global default); `allow_tier_routing_override` field on `AgentConfig`
+**Verification checkpoints (from PITFALLS.md "Looks Done But Isn't" checklist):**
 
-**Addresses features:** Resource differentiation per tier, model routing integration, AgentManager integration
+- `monaco.editor.getModels()` shows distinct URI-prefixed models for same-relative-path files in two workspaces
+- New terminal `pwd` in workspace B shows workspace B root, not `AGENT42_WORKSPACE`
+- CC session list shows only workspace B sessions when workspace B is active
+- Path traversal test: `/api/ide/file?path=../../../etc/passwd&workspace_id=<valid>` returns 403
+- Switch workspaces 3x; verify each retains its own open tabs, cursor positions, and terminal sessions
 
-**Avoids pitfalls:** Pitfall 6 (parallel rate limiter conflict), Pitfall 9 (model routing precedence silently overrides per-agent config)
+**Research flag:** One targeted pre-read before Phase 2 planning: inspect how `renderCode()` interacts with the Monaco singleton dispose/recreate cycle (lines 3587-3591 of `app.js`). If workspace tab switching triggers a full re-render, the `setModel()` + `restoreViewState()` approach needs adjustment. Not a full research phase — a 15-minute code trace.
 
-**Research flag:** Targeted pre-read of `core/rate_limiter.py` interface recommended before writing the `ToolRateLimiter` extension — not a full research-phase, just a 15-minute code review.
+---
 
-### Phase 4: Dashboard REST API
+### Phase 3: Polish — UX Enhancements and Full Server Persistence
 
-**Rationale:** Once enforcement works end-to-end, the dashboard API can expose the full rewards feature. New endpoints must use router-level auth (Pitfall 8), not per-endpoint decorators.
+**Rationale:** After core isolation is verified working, add features that improve experience. Server-side persistence is deferred here (not Phase 1) because the MVP is correct and functional with localStorage-only; server persistence adds cross-device sync which is quality-of-life, not correctness.
 
-**Delivers:** `GET /api/rewards` (status, enabled state, config); `POST /api/rewards/toggle`; `GET /api/agents/{id}/performance`; `PATCH /api/agents/{id}/reward-tier` (override); `POST /api/admin/rewards/recalculate-all`; all endpoints under `APIRouter(dependencies=[Depends(require_auth)])`; automated 401 tests for every endpoint
+**Delivers:**
 
-**Addresses features:** Admin tier override API, performance metrics endpoint, bulk recalculation
+- Server-side workspace persistence as authoritative source (localStorage becomes stale-while-revalidate cache; `/api/workspaces` is fully authoritative)
+- Drag-to-reorder workspace tabs (order persisted to server)
+- Quick keyboard switcher (Ctrl+` cycles through workspace tabs)
+- Rename workspace (double-click tab label to edit display name)
+- Workspace deletion cleanup: invalidate CC sessions, sweep localStorage namespace, unregister from `WorkspaceRegistry`; inline error in tab when workspace folder is missing or inaccessible
+- Workspace tab max count enforcement (8 workspaces max; workspace switcher modal for more)
 
-**Avoids pitfalls:** Pitfall 8 (missing auth on rewards endpoints)
+**Research flag:** Standard patterns throughout. No research phase needed. Playwright UAT is the appropriate verification method for UX work.
 
-**Research flag:** Standard FastAPI patterns — no research needed. Auth pattern already established in `server.py`.
-
-### Phase 5: Dashboard UI
-
-**Rationale:** Visual layer added last, after all data flows are verified and tested. Purely additive — no behavioral changes.
-
-**Delivers:** Tier badge on agent cards (Bronze/Silver/Gold/Provisional); performance metrics panel per agent (score, tier, task count, success rate); rewards toggle switch with confirmation dialog; admin override UI with expiry date; real-time tier update via WebSocket `tier_update` events
-
-**Addresses features:** Tier visibility in dashboard, admin override UI, dashboard metrics panel
-
-**Avoids pitfalls:** UX pitfalls (raw score without context, no explanation, override without expiry, no tier change history visible)
-
-**Research flag:** No research needed — Playwright UAT is the appropriate verification method per project conventions.
-
-### Phase 6: Hysteresis and Audit Trail
-
-**Rationale:** Hysteresis and audit logging are v1.4.x "should have" features. Implementing them after Phase 5 means the base system is already validated in production and the history data needed for hysteresis computation is accumulating.
-
-**Delivers:** `tier_score_history` field on `AgentConfig` (last 4 periods); promotion requires N consecutive periods above threshold; demotion has a grace window; append-only tier change audit log (timestamp, old tier, new tier, reason); score explanation endpoint `GET /api/agents/{id}/reward-score`; audit log visible in dashboard
-
-**Addresses features:** Hysteresis/cooldown, tier change audit log, score explanation breakdown
-
-**Research flag:** Well-documented pattern — standard hysteresis design from enterprise integration patterns and game matchmaking literature.
+---
 
 ### Phase Ordering Rationale
 
-- Phases 1-2 are blocked by data dependencies: schema must exist before scoring, scoring before assignment logic
-- Phase 3 is blocked by Phase 2: enforcement requires knowing the agent's computed tier
-- Phase 4 is blocked by Phase 3: API endpoints surface enforcement state that must work before it's exposed
-- Phase 5 is blocked by Phase 4: UI has no backend to call without the API
-- Phase 6 is independent of Phases 4-5 and could be parallelized if needed, but is deferred to after production validation so real data informs hysteresis thresholds
-
-The 10 critical pitfalls from PITFALLS.md map cleanly onto Phases 1-3. All critical pitfalls are resolved before the dashboard is even started, ensuring the core correctness of tier computation and enforcement is verifiable in isolation.
+- Phase 1 before Phase 2: the registry and namespace schema are structural prerequisites; building tab UI on top of a broken data model means rebuilt UI, not just added functionality
+- Backend API changes before frontend wiring in Phase 2: frontend cannot pass `workspace_id` to endpoints that don't accept it yet
+- CC warm pool key fix in Phase 2 (not Phase 3): this is a correctness issue — consuming workspace A's warm session for workspace B is silent and wrong, not just inconvenient
+- Server persistence in Phase 3 (not Phase 1): the registry API already exists from Phase 1; Phase 3 just makes the client treat it as authoritative rather than supplementary
 
 ### Research Flags
 
 Phases with standard, well-documented patterns (skip `/gsd:research-phase`):
 
-- **Phase 1:** All patterns derived directly from existing codebase inspection — frozen dataclass, TTL cache, aiosqlite schema migration
-- **Phase 2:** Standard tier determination pattern — thresholds, provisional handling, admin override
-- **Phase 4:** Standard FastAPI router auth pattern, already established in `server.py`
-- **Phase 5:** No research needed; Playwright UAT for verification
-- **Phase 6:** Standard hysteresis pattern from well-documented domain literature
+- **Phase 1:** All patterns derived from direct codebase inspection — aiofiles JSON, FastAPI Query params, localStorage schema, Monaco URI API
+- **Phase 2 (most of it):** WebSocket query param routing, PTY cwd, CC session directory are documented and straightforward
+- **Phase 3:** Drag-to-reorder (standard HTML5 drag-and-drop on flex tab bar), keyboard shortcuts, rename — all standard web patterns
 
-Phases that may benefit from targeted review (not full research-phase):
+Targeted pre-read recommended before Phase 2 planning (not a full research phase):
 
-- **Phase 3:** Review `core/rate_limiter.py` interface in detail before writing `ToolRateLimiter` extension — targeted pre-read to avoid Pitfall 6, not a research phase
+- **Phase 2 (Monaco re-render interaction):** Trace `renderCode()` call sites to understand whether workspace tab switching triggers full DOM re-render that would invoke the Monaco dispose/recreate guard at lines 3587-3591 of `app.js`. If so, design around it before implementing the tab switcher.
+- **Phase 2 (CC sessions_dir threading):** Confirm `sessions_dir` parameter is used consistently through all `_save_session()` / `_load_session()` call sites in `cc_chat_ws` before planning CC scoping implementation.
+
+---
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
-| ---- | ---------- | ----- |
-| Stack | HIGH | All recommendations from direct codebase inspection + verified PyPI versions; no speculative deps; no new packages required |
-| Features | HIGH | Derived from existing EffectivenessStore data model and PROJECT.md constraints; feature boundaries are clear; anti-features well-justified |
-| Architecture | HIGH | Based on direct inspection of `core/agent_manager.py`, `memory/effectiveness.py`, `core/config.py`, `core/rate_limiter.py`, `core/agent_runtime.py`, `dashboard/server.py` |
-| Pitfalls | HIGH (codebase-specific) / MEDIUM (scoring formula weights) | Integration pitfalls derived from direct code inspection; composite score weights (60/25/15) need production validation |
+| --- | --- | --- |
+| Stack | HIGH | Direct codebase inspection (app.js, server.py, requirements.txt); no speculative choices; zero new dependencies |
+| Features | HIGH | Derived from existing IDE capabilities and VS Code/JetBrains patterns; anti-features from real bug reports |
+| Architecture | HIGH | ARCHITECTURE.md timed out; STACK.md and PITFALLS.md provide equivalent coverage with code line citations |
+| Pitfalls | HIGH | 10 pitfalls with code line references; 5 backed by production bug reports from Zed, Claude Code, VS Code |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **Composite score weights (60/25/15 split):** Research-informed starting point; must be calibrated against real agent data after 2-4 weeks of production operation. Use configurable env vars (`REWARDS_WEIGHT_SUCCESS`, `REWARDS_WEIGHT_VOLUME`, `REWARDS_WEIGHT_SPEED`) from day one so weights can be adjusted without code changes.
+- **Monaco DOM re-render interaction:** Whether workspace tab switching triggers `renderCode()` which disposes and recreates the Monaco editor (lines 3587-3591 of `app.js`) must be confirmed before Phase 2 planning. If it does, the `setModel()` + `restoreViewState()` approach needs a guard or alternative.
 
-- **`agent_id` schema approach (migration vs separate table):** Research identified two options — adding `agent_id` to `tool_invocations` (schema migration, cleaner long-term) or creating a separate `agent_performance` table (avoids migration, cleaner separation). The right choice depends on whether existing `task_id` values already carry agent context. Inspect a sample of live `task_id` values in the production `tool_invocations` table before committing to either approach.
+- **CC `sessions_dir` threading completeness:** The `_save_session()` and `_load_session()` functions accept an optional `sessions_dir` parameter, but it is unclear if all call sites within `cc_chat_ws` use it consistently. Verify this before finalizing the CC scoping design in Phase 2.
 
-- **Provisional tier default (Silver vs Bronze):** Research recommends Silver as the cold-start default, but the right value depends on how Bronze resource limits affect early agent performance in practice. If Bronze limits are not materially worse than Silver for simple tasks, Bronze provisional may be acceptable. Validate this assumption against the production model routing configuration before Phase 2 implementation is finalized.
+- **External repository paths (outside AGENT42_WORKSPACE):** Whether v2.1 MVP supports workspace roots outside `AGENT42_WORKSPACE` (requiring the registered-roots allowlist) or only internal `apps/` subdirectories (simpler, uses existing sandbox model) is a scoping decision to make in Phase 1 planning. Restricting to internal paths is a valid MVP simplification.
 
-- **Task complexity weight mapping:** Research identified the risk that monitoring agents (high volume, high success rate) will outrank coding agents (lower volume, higher complexity). A `task_complexity_weight` per task type is recommended but specific values must be defined before Phase 1 implementation — they cannot be retrofitted without re-scoring all historical data.
+- **Windows PTY cwd behavior:** `PtyProcess.spawn(cwd=...)` is confirmed working on Windows (CLAUDE.md documents pywinpty usage), but behavior with non-`AGENT42_WORKSPACE` paths should be smoke-tested early in Phase 2 execution.
+
+---
 
 ## Sources
 
 ### Primary (HIGH confidence)
 
-- Agent42 codebase — `core/agent_manager.py`, `core/config.py`, `core/rate_limiter.py`, `core/agent_runtime.py`, `memory/effectiveness.py`, `dashboard/server.py`, `dashboard/websocket_manager.py` — direct codebase inspection
-- Python 3.11 stdlib docs — `enum.IntEnum`, `asyncio.Semaphore`, `dataclasses` — confirmed behavior
-- `cachetools 7.0.5` on PyPI — version and API verified 2026-03-22
-- `asyncache 0.3.1` on PyPI — confirmed unmaintained (November 2022), incompatible with cachetools 7.x
-- `cachetools-async 0.0.5` on PyPI — confirmed active (June 2025)
-- `.planning/PROJECT.md` — v1.4 milestone constraints and opt-in requirements
+- Agent42 codebase — `dashboard/frontend/dist/app.js` (direct inspection: `_ideTabs` line 3398, Monaco URI construction line 3761, `_termSessions` line 5720, `cc_hist_*` localStorage keys line 5335, `cc_active_session` sessionStorage line 4813, Monaco singleton init lines 3587-3598)
+- Agent42 codebase — `dashboard/server.py` (direct inspection: workspace variable line 1301, file API sandbox check lines 1306-1409, terminal PTY spawn lines 1447-1690, CC sessions directory line 1727, warm pool dict line 1737, `_cc_spawn_warm()` workspace_path arg line 1747)
+- Agent42 codebase — `requirements.txt`, `.planning/PROJECT.md` — version confirmation, v2.1 milestone requirements
+- CLAUDE.md pitfall #120 (localStorage CC history design and session restore on reload)
+- CLAUDE.md pitfall #122 (nested git root detection failure — parallel problem to workspace root confusion)
+- CLAUDE.md pitfall #83 (duplicate API calls from workspace-scoped state)
 
 ### Secondary (MEDIUM confidence)
 
-- Azure OpenAI, Google Gemini, OpenAI API tier documentation — tier threshold patterns and resource allocation multiplier approach
-- Galileo AI agent metrics guide — multi-dimension scoring rationale
-- Anthropic agent evaluation guide — scoring formula principles
-- Xtremepush gamification mechanics — tier hysteresis and cooldown patterns
-- Enterprise Integration Patterns — hysteresis design documentation
+- [VS Code Multi-Root Workspaces official docs](https://code.visualstudio.com/docs/editing/workspaces/multi-root-workspaces) — multi-root vs. full context-switch tab model comparison; VS Code divergence noted
+- [VS Code workspace concepts](https://code.visualstudio.com/docs/editing/workspaces/workspaces) — workspace config file design
+- [JetBrains IDE Workspaces blog 2025](https://blog.jetbrains.com/idea/2025/03/ide-workspaces-development-challenges-and-plans/) — workspace as meta-container; per-project state isolation principle
+- Monaco Editor API docs — `createModel`, `setModel`, `saveViewState`, `restoreViewState` stable since 0.20
 
-### Tertiary (LOW confidence / needs production validation)
+### Tertiary (HIGH confidence — real bug reports, production evidence)
 
-- Composite score weights (60/25/15) — research-informed starting point; must be calibrated against real Agent42 agent data in production
-- Task complexity weight mapping per task type — domain reasoning; specific values TBD before Phase 1
+- [Zed AI cross-project history leak issue #41240](https://github.com/zed-industries/zed/issues/41240) — CC session IDs must be workspace-keyed; real production bug
+- [Claude Code wrong project hooks issues #5386, #5387](https://github.com/anthropics/claude-code/issues/5386) — `--cwd` scoping prevents hook cross-contamination; real production bug
+- [VS Code Copilot wrong project output feedback #275](https://github.com/microsoft/copilot-intellij-feedback/issues/275) — agent dispatch must default to active workspace; real production bug
 
 ---
-*Research completed: 2026-03-22*
+
+*Research completed: 2026-03-23*
+*Architecture researcher timed out — coverage sourced from STACK.md and PITFALLS.md (functionally complete)*
 *Ready for roadmap: yes*

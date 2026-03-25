@@ -23,6 +23,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/conversation-accumulator.py",
+            "timeout": 5
+          },
+          {
+            "type": "command",
             "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/context-loader.py",
             "timeout": 30
           },

@@ -1,260 +1,210 @@
 # Stack Research
 
-**Domain:** Performance-based tier/rewards system for Python async agent platform
-**Researched:** 2026-03-22
-**Confidence:** HIGH — recommendations derived from existing Agent42 codebase patterns, stdlib capabilities, and verified library versions
+**Domain:** Multi-project workspace tabs for Agent42 IDE (additive feature)
+**Researched:** 2026-03-23
+**Confidence:** HIGH — all conclusions derived directly from the existing codebase and identified integration points; no speculative new-technology choices
 
 ---
 
-## Context: This Is an Additive Feature, Not a New Stack
+## Context: No New Dependencies Required
 
-Agent42 already runs Python 3.11+, FastAPI, aiosqlite, asyncio throughout. The rewards system
-must fit inside the existing stack without new runtime dependencies where possible. The
-recommendations below are split into: **stdlib only** (preferred), **existing deps** (already
-in requirements.txt), and **new optional deps** (add only if the stdlib approach is insufficient).
+Agent42's workspace page already has a fully-operational VS Code-style IDE built with:
+
+- **Monaco Editor 0.52.2** (CDN-loaded via AMD loader, single `_monacoEditor` instance)
+- **xterm.js** (self-hosted in `dist/xterm/`, loaded lazily via `termLoadXterm()`)
+- **FastAPI** backend (`/api/ide/tree`, `/api/ide/file`, `/api/ide/search`, `/ws/terminal`, `/ws/cc-chat`)
+- **Plain-object state** in `app.js` global `state`, with `localStorage` for persistence
+
+Multi-project workspace tabs need to scope the file explorer, Monaco editor, xterm terminals, and CC subprocess cwd per workspace. Every mechanism required already exists. The work is composition and state management, not new technology.
 
 ---
 
 ## Recommended Stack
 
-### Core Technologies (Stdlib — No New Dependencies)
+### Core Technologies (All Already In Use — No New Dependencies)
 
 | Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| `enum.IntEnum` (stdlib) | Python 3.11+ | `RewardTier` enum (BRONZE/SILVER/GOLD) | Standard, hashable, sortable — IntEnum supports `tier >= SILVER` comparisons which plain Enum does not. Zero deps. Project already uses dataclasses + enum throughout. |
-| `dataclasses` (stdlib) | Python 3.11+ | `TierConfig`, `TierLimits`, `AgentTierState` frozen dataclasses | Matches the frozen-dataclass pattern used throughout `core/config.py` and `core/rate_limiter.py`. Immutable tier config objects prevent accidental mutation in concurrent code. |
-| `asyncio.Semaphore` (stdlib) | Python 3.11+ | Per-tier concurrent task caps | Agent Manager already manages agent lifecycle. Semaphores keyed per-agent give each tier its concurrent task ceiling. Cannot resize after creation — swap on promotion (see Pattern 3 below). |
-| `asyncio.Lock` (stdlib) | Python 3.11+ | Tier state mutation guard | Tier promotions are rare but must be atomic. A per-agent lock prevents race between a score recompute and an in-flight task dispatch. |
-| `time.monotonic()` (stdlib) | Python 3.11+ | Cache expiry timestamps | Already used in `rate_limiter.py`. Use for TTL-based tier cache invalidation without importing cachetools. |
-| `aiosqlite` (existing dep) | >=0.20.0 | Tier history log | Already in requirements.txt for effectiveness tracking. Add a `tier_history` table alongside existing effectiveness tables. Append-only rows (agent_id, tier, score, timestamp) give full audit trail at zero extra cost. |
+| --- | --- | --- | --- |
+| `localStorage` (browser stdlib) | N/A | Persist workspace configurations across reloads | Already used for auth token, CC session history (`cc_hist_*`), and first-task flag. Workspace config is small JSON (<2KB) — well within the 5–10MB localStorage limit. No IndexedDB needed. |
+| `state.workspaces` plain JS object array | N/A | In-memory workspace tab state | The existing `state` object in `app.js` holds all UI state as plain objects. A `workspaces` array with `{ id, name, rootPath, editorTabs, activeEditorTab, treeCache, expandedDirs }` per entry follows the exact same pattern as `state.codeSessions`, `state.chatSessions`, etc. |
+| `crypto.randomUUID()` (browser stdlib) | N/A | Workspace tab IDs | Already used for CC session IDs in `ideOpenCCChat()`. Generates stable, collision-proof IDs for per-workspace state keying. |
+| FastAPI + `Path` stdlib | 0.115.0+ | Multi-root file tree endpoint | `/api/ide/tree` currently resolves paths relative to `AGENT42_WORKSPACE`. Adding an optional `?root=<registered_path>` query param (with server-side allowlist validation) scopes the tree to a registered workspace root without changing security model. |
+| `asyncio` + existing PTY/subprocess | stdlib | Per-workspace terminal cwd | `termNew()` calls `/ws/terminal` with node and cmd params. Adding a `cwd` query param passed through to `PtyProcess.spawn(cwd=...)` and `subprocess.Popen(cwd=...)` is a one-line server change. |
+| `/ws/cc-chat` workspace_path param | existing | Per-workspace CC subprocess cwd | `_cc_spawn_warm()` and the main CC run in `cc_chat_ws` already use `workspace_path` (hardcoded to global workspace). Exposing it as a WebSocket query param (validated against registered roots) scopes CC sessions per workspace. |
+| `aiofiles` | 23.0.0+ | Persist workspace registry | Already in requirements.txt. Workspace registry (`list[{id, name, rootPath}]`) saved to `.agent42/workspaces.json` via `aiofiles.open()`. Matches existing persistence patterns for overrides, lessons, etc. |
+| FastAPI REST | 0.115.0+ | Workspace CRUD API | New endpoints `/api/workspaces` (GET/POST), `/api/workspaces/{id}` (DELETE/PATCH) added to `server.py` following the same pattern as existing `/api/ide/*` routes. |
 
-### Supporting Libraries (Existing Dependencies — Already Installed)
+### Supporting Patterns (In-Codebase, No Library Needed)
 
-| Library | Version | Purpose | When to Use |
-|---------|---------|---------|-------------|
-| `aiofiles` (existing) | >=23.0.0 | Persist tier overrides to `.agent42/rewards/overrides.json` | Admin override JSONL for human-readable backup alongside the SQLite audit log. Matches existing file-persistence patterns. |
-| FastAPI (existing) | >=0.115.0 | REST endpoints for tier management dashboard | `/api/rewards/tiers`, `/api/rewards/agents/{id}/override`, `/api/rewards/status`. No new framework needed. |
-| WebSocket (existing) | >=12.0 | Push tier-change events to dashboard | When an agent promotes from Bronze to Silver, push a `tier_changed` event over the existing WS bus. Dashboard already subscribes to agent status events. |
-
-### New Optional Dependency (Add Only If TTL Cache Complexity Warrants It)
-
-| Library | Version | Purpose | When to Use |
-|---------|---------|---------|-------------|
-| `cachetools` | 7.0.5 (2026-03-09) | `TTLCache` for computed tier scores | Only add if the hand-rolled TTL dict approach grows messy. `TTLCache(maxsize=512, ttl=300)` keyed by `agent_id` is cleaner than dict + timestamp bookkeeping at scale. Likely already installed as a transitive dep — run `pip show cachetools` before adding. |
-
-**Do NOT add `asyncache` 0.3.1** — unmaintained since November 2022, incompatible with
-cachetools 7.x (requires <=5.x). If async-safe caching is needed, use `cachetools-async`
-0.0.5 (released June 2025, actively maintained) or a simple `asyncio.Lock`-guarded dict.
+| Pattern | Current Location | Reuse For |
+| --- | --- | --- |
+| Per-session state isolation | `state.chatSessions` / `state.codeSessions` arrays | Per-workspace editor tab list, tree cache, expanded dir set |
+| `ccHistoryKey(sessionId)` keying | Lines 5334-5336 of `app.js` | `workspaceTreeKey(wsId)` for localStorage tree expansion state |
+| Lazy script loading guard | `termLoadXterm()` / `_xtermLoaded` flag | No change needed — xterm is already loaded once globally |
+| Monaco `_monacoEditor.dispose()` + `monaco.editor.create()` | Lines 3587-3598 of `app.js` | Swap Monaco content when switching workspace tabs (editor is already rebuilt on SPA re-render; the same mechanism applies) |
+| Security: path-outside-workspace check | `ide_tree`, `ide_read_file`, `ide_write_file` in `server.py` | Add registered-roots allowlist check before resolving multi-root paths |
 
 ### Development Tools (Existing)
 
 | Tool | Purpose | Notes |
-|------|---------|-------|
-| pytest + pytest-asyncio | Unit and async integration tests for tier logic | Already configured with `asyncio_mode = "auto"`. Test tier transitions, score calculations, semaphore enforcement. |
-| ruff | Linting and formatting | Already configured. Run `make format && make lint` after adding new modules. |
+| --- | --- | --- |
+| pytest + pytest-asyncio | Test new `/api/workspaces` endpoints and path validation | Already configured. Add `tests/test_workspace_api.py`. |
+| ruff | Linting and formatting for server.py additions | Already configured. Run `make format && make lint` after adding routes. |
 
 ---
 
 ## Installation
 
 ```bash
-# No new core dependencies required.
-# All recommendations use stdlib or packages already in requirements.txt.
-
-# Optional — only if TTLCache is added:
-# First check if it is already a transitive dep:
-pip show cachetools
-# If not present:
-pip install "cachetools>=7.0.5"
+# No new dependencies required.
+# All stack components are either browser stdlib, Python stdlib,
+# or packages already in requirements.txt.
 ```
 
 ---
 
-## Architectural Patterns for This Feature
+## Integration Points and How They Work
 
-### Pattern 1: Tier as a Computed Projection, Not Stored State
+### 1. Frontend: Workspace State Shape
 
-**What:** Tier is computed on-demand from effectiveness scores, then cached with a TTL
-(5–15 minutes). The canonical data source remains the existing effectiveness store.
-
-**Why:** Avoids a separate "tier store" that can drift from the effectiveness data. The
-tier is a view over performance data, not an independent fact. This also means the
-rewards engine does not need its own database — it reads from what already exists.
-
-```python
-# core/rewards_engine.py
-import time
-from dataclasses import dataclass
-from enum import IntEnum
-
-class RewardTier(IntEnum):
-    BRONZE = 1
-    SILVER = 2
-    GOLD   = 3
-
-@dataclass(frozen=True)
-class TierConfig:
-    silver_threshold: float = 0.70  # success_rate floor for Silver
-    gold_threshold: float   = 0.85  # success_rate floor for Gold
-    min_tasks: int          = 10    # minimum completed tasks to qualify for Silver+
-    cache_ttl_seconds: int  = 300   # how long before tier is recomputed
-
-# In-memory cache: {agent_id: (tier, computed_at)}
-_tier_cache: dict[str, tuple[RewardTier, float]] = {}
-
-async def get_agent_tier(agent_id: str, store, config: TierConfig) -> RewardTier:
-    now = time.monotonic()
-    cached = _tier_cache.get(agent_id)
-    if cached and (now - cached[1]) < config.cache_ttl_seconds:
-        return cached[0]
-    score = await store.get_agent_score(agent_id)
-    tier = _compute_tier(score, config)
-    _tier_cache[agent_id] = (tier, now)
-    return tier
+```javascript
+// New addition to state object in app.js
+workspaces: [],            // [{id, name, rootPath, color}]
+activeWorkspaceId: "",     // which tab is active
+// Per-workspace ephemeral state (not persisted):
+_wsEditorTabs: {},         // wsId -> [{path, model, viewState}]
+_wsActiveEditorTab: {},    // wsId -> index
+_wsTreeCache: {},          // wsId -> {path: entries[]}
+_wsExpandedDirs: {},       // wsId -> Set([...])
 ```
 
-### Pattern 2: Frozen Dataclass Tier Limits
+Workspace configs (`workspaces`, `activeWorkspaceId`) persist to localStorage under key `a42_workspaces`. Editor tab lists do NOT persist — they rebuild from the file tree on tab switch (consistent with how the current IDE rebuilds on page revisit).
 
-**What:** Each tier has an associated `TierLimits` frozen dataclass specifying resource
-ceilings — max concurrent tasks, model access level, API rate multiplier.
+### 2. Backend: Workspace Registry
 
-**Why:** Matches the `frozen=True` pattern used throughout Agent42 config and rate
-limiter. Immutable, hashable, passable without defensive copying. Tier limit lookups
-are O(1) dict reads.
+New endpoints in `server.py`:
 
-```python
-@dataclass(frozen=True)
-class TierLimits:
-    max_concurrent_tasks: int
-    rate_limit_multiplier: float  # Applied to ToolRateLimiter defaults
-    model_tier: str               # fast, general, or reasoning
-
-TIER_LIMITS: dict[RewardTier, TierLimits] = {
-    RewardTier.BRONZE: TierLimits(max_concurrent_tasks=2, rate_limit_multiplier=1.0, model_tier="fast"),
-    RewardTier.SILVER: TierLimits(max_concurrent_tasks=4, rate_limit_multiplier=2.0, model_tier="general"),
-    RewardTier.GOLD:   TierLimits(max_concurrent_tasks=8, rate_limit_multiplier=3.0, model_tier="reasoning"),
-}
+```text
+GET  /api/workspaces          -> list[{id, name, rootPath}]
+POST /api/workspaces          -> body: {name, rootPath} -> {id, name, rootPath}
+DELETE /api/workspaces/{id}   -> {status: "ok"}
+PATCH /api/workspaces/{id}    -> body: {name?, rootPath?} -> updated workspace
 ```
 
-### Pattern 3: Semaphore-per-Agent with Swap-on-Promotion
+Registry stored at `AGENT42_WORKSPACE / ".agent42" / "workspaces.json"` — same `.agent42/` convention as `cc-sessions/`, `overrides.json`, etc.
 
-**What:** Each agent holds a semaphore reference sized to its tier's `max_concurrent_tasks`.
-On tier change, the semaphore is replaced with a new one. The swap is guarded by an
-`asyncio.Lock` per agent.
+### 3. Backend: Multi-Root File Tree
 
-**Why:** `asyncio.Semaphore` cannot be resized after creation. This is the standard
-Python pattern for dynamic concurrency limits.
+The existing `/api/ide/tree` endpoint anchors all paths relative to the global `workspace` variable (set once from `AGENT42_WORKSPACE`). For multi-workspace support, paths inside registered project workspaces need their own root anchor.
 
-**Critical rule:** On promotion (Bronze to Silver), swap immediately — more capacity
-is always safe. On demotion (Gold to Bronze), drain in-flight tasks first (wait until
-no tasks hold the semaphore before replacing it) to avoid tasks running at higher
-concurrency than the new tier allows.
+Two options — **Option A is recommended:**
 
-### Pattern 4: Opt-In via Settings, Graceful Degradation When Disabled
+**Option A (add `?root=<id>` param):** Caller passes workspace ID; server resolves registered root from registry and uses that as anchor. Security: root must be in the registered list (not an arbitrary path).
 
-**What:** Add `rewards_enabled: bool = False` to `Settings` (frozen dataclass in
-`core/config.py`). When False, `get_agent_tier()` returns `RewardTier.BRONZE`
-immediately, and `TierLimits` returns Bronze defaults. Zero behavioral change for
-existing deployments.
+**Option B (accept absolute path param):** Too broad — any registered path could be guessed.
 
-**Why:** The PROJECT.md constraint is explicit: `REWARDS_ENABLED=false` default.
-Follows the exact same pattern as `tool_rate_limiting_enabled`, `qdrant_enabled`,
-`l2_enabled`, etc. throughout the existing settings file.
+This keeps the path traversal protection model intact: `target.resolve()` must start with the registered workspace root rather than the global root.
 
-### Pattern 5: Composite Score as Weighted Sum (No ML Library Needed)
+### 4. Backend: Scoped Terminal cwd
 
-**What:** Performance score is a weighted average of 2–4 floats from the effectiveness
-store. Weights are configurable via Settings.
-
-**Why:** The data coming from the effectiveness store (success_rate, quality_score, etc.)
-are already normalized 0–1 floats. A weighted sum requires no external library — scikit-learn
-would be extreme overkill for `score = 0.6 * success_rate + 0.4 * quality_score`.
+`/ws/terminal` already accepts `node` and `cmd` query params. Add optional `cwd` param:
 
 ```python
-def compute_performance_score(
-    success_rate: float,
-    quality_score: float,
-    weight_success: float = 0.6,
-    weight_quality: float = 0.4,
-) -> float:
-    return (weight_success * success_rate) + (weight_quality * quality_score)
+cwd_param = websocket.query_params.get("cwd", "")
+# Validate: cwd_param must resolve to a registered workspace root
+effective_cwd = _resolve_registered_cwd(cwd_param) or workspace
+pty_process = PtyProcess.spawn(pty_cmd, cwd=str(effective_cwd))
 ```
+
+Frontend `termNew()` passes `&cwd=<encoded_workspace_root>` based on `state.activeWorkspaceId`.
+
+### 5. Backend: Scoped CC Subprocess cwd
+
+`/ws/cc-chat` uses `workspace` (global) for both the warm pool spawn and every real turn's subprocess cwd. Exposing a `workspace_root` query param (validated against registered paths) allows each CC session spawned from a workspace tab to start in that project's directory. The `--resume` flow works unchanged — CC session IDs are per-run, so different workspace tabs naturally get different CC sessions.
+
+### 6. Monaco: Per-Workspace Models
+
+Monaco already creates one global editor instance (`_monacoEditor`). When switching workspace tabs:
+
+1. Save current tab's `viewState` via `_monacoEditor.saveViewState()`
+2. Swap to the target workspace's active file model (or create new model)
+3. Call `_monacoEditor.setModel(targetModel)` + `_monacoEditor.restoreViewState(saved)`
+
+`monaco.editor.createModel()` is already called per-file in `ideOpenFile()`. The existing tab tracking in `_ideTabs` can be namespaced by workspace ID.
 
 ---
 
 ## Alternatives Considered
 
 | Recommended | Alternative | When to Use Alternative |
-|-------------|-------------|-------------------------|
-| `IntEnum` for tiers | String literals "bronze"/"silver"/"gold" | Never for internal code — strings lose comparability. Strings acceptable only at the API/JSON serialization boundary. |
-| In-memory TTL dict | `cachetools.TTLCache` | Use `cachetools` only if tier cache needs LRU eviction (thousands of agents). For tens to hundreds of agents, a plain dict with monotonic timestamps is simpler with zero deps. |
-| Append to aiosqlite `tier_history` | Separate JSONL audit file | JSONL is fine for human inspection; SQLite is better if you need to query "all agents that were Gold last week". Since aiosqlite is already a dep, prefer it. |
-| `asyncio.Semaphore` per-agent | Token bucket rate limiter library (e.g., `aiometer`) | Use a library only if you need continuous rate (requests-per-second) rather than concurrency (in-flight task count). Tier system needs concurrency caps, not rate caps. |
-| Pure Python weighted average | scikit-learn metrics | scikit-learn is a 300 MB ML library for a 2-float weighted sum. Never appropriate here. |
-| FastAPI endpoints on existing server | Separate microservice | Never. This is an additive feature on Agent42, not a separate service. |
+| --- | --- | --- |
+| Per-workspace state in plain JS objects (same `state` pattern) | Separate SPA component framework (React, Vue) | Never for this project — no build system, single bundled `app.js`. Component framework would require adding a build pipeline, which is explicitly out of scope. |
+| `localStorage` for workspace config | `IndexedDB` | Use IndexedDB only if workspace configs exceed tens of KB or need structured queries. Workspace config is a small flat list. |
+| `aiofiles` JSON for workspace registry | SQLite workspace table | SQLite adds schema migration complexity for what is a 10-line JSON file. Existing pattern for small config lists (e.g., `github_accounts.json`) uses aiofiles + JSON. |
+| Single Monaco instance, swap models | One Monaco instance per workspace | Multiple editor instances per page cause massive memory overhead (~80MB each). VS Code itself uses model swapping, not multiple instances. |
+| Registered-roots allowlist for multi-root tree | Accept any absolute path from client | Client-supplied arbitrary paths are a path traversal risk. Registered roots validated on the server prevent this. |
+| Lazy Monaco `viewState` save/restore per workspace | Full dispose+recreate on workspace switch | Dispose+recreate costs ~200ms per switch. `setModel()` + `restoreViewState()` is near-instant and is what VS Code multi-root workspaces do. |
 
 ---
 
 ## What NOT to Use
 
 | Avoid | Why | Use Instead |
-|-------|-----|-------------|
-| `asyncache` 0.3.1 | Unmaintained since November 2022; requires cachetools <=5.x, incompatible with cachetools 7.x | `cachetools-async` 0.0.5 (June 2025) or a Lock-guarded dict |
-| Redis Streams or Kafka for tier-change events | Enormous operational overhead for an in-process state change; Redis is optional in Agent42 | `asyncio.Queue` or direct WebSocket push via existing heartbeat/WS infrastructure |
-| Celery or task queue for score recomputation | Brings sync worker overhead and hard Redis dependency; Agent42 is async-native | `asyncio.create_task()` scheduled background recompute in the existing event loop |
-| scikit-learn | 300 MB dependency for a weighted average of floats | Pure Python arithmetic |
-| Separate database for tier state | Tier is a derived view of effectiveness data; a separate DB creates drift risk | Compute from existing effectiveness store; cache in-memory; audit log in the existing aiosqlite DB |
+| --- | --- | --- |
+| New frontend framework (React, Vue, Svelte) | Requires build tooling; the project explicitly has no build system (single `app.js`). This would be a project-wide migration, not a feature addition. | Plain JS state management already in place in `app.js` |
+| Multiple Monaco editor instances | Each instance uses ~80MB RAM and causes layout conflicts. Monaco is designed for one instance per container. | `monaco.editor.setModel()` + per-workspace `ITextModel` objects |
+| Multiple xterm.js Terminal instances with separate DOM containers per workspace | Xterm terminals are expensive to create (PTY subprocess per terminal). Existing pattern already manages N terminals in `_termSessions`. | Reuse existing `_termSessions` array, tag each session with a `workspaceId` field for filtering/display |
+| `sessionStorage` for workspace config | Dies on tab close; user would lose workspace layout on every browser close. | `localStorage` — workspace config is persistent user preference |
+| Arbitrary absolute path from client in `/api/ide/tree` | Path traversal vulnerability — client could supply `../../etc/` | Server-side registered roots allowlist: client sends workspace ID, server resolves path |
+| Separate backend service for workspace management | This is a dashboard feature, not an independent service. Adds deployment complexity for no gain. | Add endpoints to existing `server.py` following the `/api/ide/*` pattern |
 
 ---
 
 ## Stack Patterns by Variant
 
-**If `REWARDS_ENABLED=false` (default):**
+**If a workspace points to an Agent42 app (inside `apps/` subdirectory):**
 
-- `get_agent_tier()` returns `RewardTier.BRONZE` immediately, no DB queries, no cache writes
-- All `TierLimits` return Bronze defaults — existing behavior is unchanged
+- `rootPath` is `AGENT42_WORKSPACE / "apps" / appname`
+- Already inside the global workspace sandbox — no special allowlist entry needed
+- File tree and terminal cwd both resolve correctly within existing security model
 
-**If `REWARDS_ENABLED=true`, Redis unavailable:**
+**If a workspace points to an external repo (outside `AGENT42_WORKSPACE`):**
 
-- Use in-memory TTL dict for tier cache (already the primary approach)
-- No degradation — Redis is not required for this feature
+- Must be explicitly registered in `workspaces.json` during workspace creation
+- Server validates the path exists and is a directory at registration time
+- Sandbox check at each file operation: `target.resolve().startswith(registered_root.resolve())`
+- This is the only case that requires the registered-roots allowlist instead of the global workspace root
 
-**If agent has fewer than `min_tasks` completions:**
+**If no workspaces are configured (fresh install or feature toggled off):**
 
-- Return `RewardTier.BRONZE` regardless of score
-- Surface a reason string: "Needs N more task completions to qualify for Silver"
-
-**If admin override is set for an agent:**
-
-- Store override in `.agent42/rewards/overrides.json` (keyed by agent_id), persisted via `aiofiles`
-- `get_agent_tier()` checks overrides first, bypasses score computation entirely
-- Dashboard displays "Admin Override: Gold" with a clear visual indicator
+- Workspace tab bar renders a single implicit default workspace rooted at `AGENT42_WORKSPACE`
+- No behavioral change from current single-workspace mode
+- Zero impact on existing deployments
 
 ---
 
 ## Version Compatibility
 
-| Package | Compatible With | Notes |
-|---------|-----------------|-------|
-| `cachetools>=7.0.5` | Python 3.10+ | Safe with existing stack (Python 3.11+). If added, do NOT also add `asyncache` (incompatible with 7.x). |
-| `aiosqlite>=0.20.0` | Python 3.11+ | Already in requirements.txt. Use `async with aiosqlite.connect()` pattern consistent with existing usage. |
-| `asyncio.Semaphore` | Python 3.11+ stdlib | Cannot be resized — design semaphore lifecycle carefully (see Pattern 3). |
-| `enum.IntEnum` | Python 3.11+ stdlib | Supports `>=` and `<` comparisons directly, which plain `enum.Enum` does not. |
+| Component | Version in Use | Notes |
+| --- | --- | --- |
+| Monaco Editor | 0.52.2 (CDN) | `monaco.editor.createModel()`, `editor.setModel()`, `editor.saveViewState()`, `editor.restoreViewState()` all stable since 0.20+. No version change needed. |
+| xterm.js | Self-hosted (dist/xterm/) | `Terminal` constructor, `FitAddon` — both stable API. No per-workspace changes needed; tag sessions with `workspaceId` in existing session objects. |
+| FastAPI | 0.115.0+ | `Query()` parameters for new `root`/`cwd` params on existing endpoints; new router for `/api/workspaces`. No version change needed. |
+| pywinpty | 2.0.0+ (Windows) | `PtyProcess.spawn(cwd=str(path))` already used. Passing a different registered path is equivalent. |
+| aiofiles | 23.0.0+ | Already in requirements.txt for `workspaces.json` persistence. |
+| Python stdlib Path | 3.11+ | `Path.resolve()` for symlink-safe path containment check. |
 
 ---
 
 ## Sources
 
-- Agent42 codebase — `core/rate_limiter.py` (sliding-window per-agent pattern), `core/config.py` (frozen dataclass settings pattern), `core/agent_manager.py` (AgentConfig dataclass), `requirements.txt` (existing deps) — HIGH confidence
-- [cachetools 7.0.5 on PyPI](https://pypi.org/project/cachetools/) — latest version verified 2026-03-22 — HIGH confidence
-- [asyncache 0.3.1 on PyPI](https://pypi.org/project/asyncache/) — confirmed unmaintained (last release November 2022), incompatible with cachetools 7.x — HIGH confidence
-- [cachetools-async 0.0.5 on PyPI](https://pypi.org/project/cachetools-async/) — confirmed active (released June 2025) — HIGH confidence
-- [Python asyncio.Semaphore docs](https://docs.python.org/3/library/asyncio-sync.html) — fixed-at-creation limit confirmed — HIGH confidence
-- [Python enum.IntEnum docs](https://docs.python.org/3/library/enum.html) — IntEnum for tier comparison operators — HIGH confidence
-- [cachetools TTLCache docs](https://cachetools.readthedocs.io/en/stable/) — TTL eviction semantics — HIGH confidence
-- [asyncio semaphore concurrency pattern](https://rednafi.com/python/limit-concurrency-with-semaphore/) — separate semaphore per scope, cannot resize — MEDIUM confidence (WebSearch, consistent with official docs)
+- Agent42 codebase — `dashboard/frontend/dist/app.js` (direct inspection of IDE state, terminal spawning, Monaco init, localStorage usage, CC chat session management) — HIGH confidence
+- Agent42 codebase — `dashboard/server.py` lines 1296–1440 (IDE endpoints), 1441–1720 (terminal WS), 1721–2290 (CC chat WS including `workspace_path` parameter usage) — HIGH confidence
+- `dashboard/frontend/dist/index.html` — Monaco 0.52.2, marked 17.0.4, highlight.js 11.11.1, DOMPurify 3.3.3 version confirmation — HIGH confidence
+- Monaco Editor API docs — `ITextModel`, `editor.setModel()`, `editor.saveViewState()` / `restoreViewState()` confirmed stable since 0.20 — MEDIUM confidence (training data consistent with 0.52.x API surface; version-specific verification not done via Context7)
+- PROJECT.md — v2.1 milestone requirements: workspace tab bar, scoped file explorer, scoped CC sessions, scoped terminals, workspace management, localStorage persistence — HIGH confidence
 
 ---
 
-*Stack research for: Performance-based rewards/tier system on Agent42 (v1.4 milestone)*
-*Researched: 2026-03-22*
+*Stack research for: Multi-project workspace tabs (v2.1 milestone on Agent42)*
+*Researched: 2026-03-23*

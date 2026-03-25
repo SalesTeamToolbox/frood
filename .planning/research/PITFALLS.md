@@ -1,234 +1,234 @@
 # Pitfalls Research
 
-**Domain:** Performance-based tier/rewards systems for AI agent platforms
-**Researched:** 2026-03-22
-**Confidence:** HIGH for Agent42-specific integration risks (direct code inspection); MEDIUM for general rewards-system patterns (domain reasoning from known anti-patterns in similar systems)
+**Domain:** Multi-project workspace tabs in an existing single-workspace web IDE (Agent42 v2.1)
+**Researched:** 2026-03-23
+**Confidence:** HIGH for Agent42-specific integration risks (direct code inspection); MEDIUM for general multi-workspace IDE patterns (domain reasoning from known VS Code / Monaco patterns)
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause rewrites, agent outages, or silent correctness bugs.
+Mistakes that cause data corruption, subprocess leakage, or silent state bleed between workspaces.
 
 ---
 
-### Pitfall 1: Tier Lookup on Every Routing Decision Kills Throughput
+### Pitfall 1: Monaco URI Collisions Between Workspaces
 
 **What goes wrong:**
-`get_tier(agent_id)` is called inside the hot path of every model routing decision — once per iteration of the agent loop. With no caching, this hits the SQLite effectiveness DB on every call. A 10-iteration coding task with 3 agents running concurrently generates 30+ synchronous DB reads while the routing path is supposed to be non-blocking. Even with `aiofiles`-style async SQLite, the query overhead accumulates and the effective iteration rate drops noticeably.
+Monaco uses `monaco.Uri.parse("file:///" + path)` to construct a globally unique model key. The current path is always relative to the single workspace root (e.g., `src/main.py`). When two workspace tabs are open and both contain a file at the same relative path (e.g., `agent42/src/main.py` and `meatheadgear/src/main.py`), both get the URI `file:///src/main.py`. `monaco.editor.getModel(uri)` returns the first model — whichever was opened first. The second workspace silently edits the wrong file. Saves propagate to the wrong path. The bug is invisible in the editor (the file appears to load correctly) but corrupts the second project's files on disk.
 
 **Why it happens:**
-The constraint "tier lookups must be cached/fast" is stated but not enforced structurally. The rewards module is written with a `get_tier(agent_id)` method that reads from the effectiveness DB and the temptation is to call it wherever the tier is needed. There is no forcing function that makes the cached path the default.
+The current code at line 3761 of `app.js` constructs the URI from the file path returned by `/api/ide/file`, which is a path relative to the single `workspace` root. When multi-workspace is added, developers typically just add a workspace selector to the tree and reuse the existing `ideOpenFile()` path without making the URI workspace-scoped. The collision only manifests when two workspaces share a relative path, which is common (`README.md`, `requirements.txt`, `.gitignore` appear in nearly every project root).
 
 **How to avoid:**
-Cache tier assignments at a `TierCache` layer with a TTL (suggested: 15 minutes). The cache is keyed by `agent_id` and stores `(tier, expires_at)`. Routing code calls `tier_cache.get(agent_id)` — not the DB directly. Background recalculation runs on a timer, not on the routing hot path. The `TierCache` must be a singleton shared across all routing code, not instantiated per-request.
+Prefix Monaco URIs with the workspace ID: `"file:///ws-" + workspaceId + "/" + relativePath`. Each workspace must have a stable, unique ID (UUID or URL-safe name slug). The `ideOpenFile()` function must receive the workspace context, not just the path. When switching workspace tabs, the editor must call `setModel()` to the correct model for the new workspace context, not just re-open by path.
 
 **Warning signs:**
 
-- Iteration throughput decreases noticeably when `REWARDS_ENABLED=true` vs `false` under load
-- SQLite DB file read activity spikes proportionally with concurrent agents
-- `time.monotonic()` profiling shows `get_tier()` consistently in the top 5 slowest calls during agent execution
+- Saving a file in workspace B overwrites a file in workspace A
+- `monaco.editor.getModels()` returns fewer models than expected (duplicates were silently ignored)
+- File content from one project appears in the editor when the other project is active
 
 **Phase to address:**
-Phase 1 (Tier calculation engine) — design the cache layer before any integration with routing. Define the interface first: routing code should never call the DB directly.
+Phase 1 (workspace model and data layer) — URI namespacing must be established before any editor state is tracked. Cannot be retrofitted after tab switching is built.
 
 ---
 
-### Pitfall 2: Effectiveness Data Does Not Map to Agent Identity
+### Pitfall 2: Terminal PTY Sessions Spawned With Global `workspace` Variable
 
 **What goes wrong:**
-The existing `EffectivenessStore` records `(tool_name, task_type, task_id, success, duration_ms)`. There is no `agent_id` column. The rewards system needs to score per-agent performance, but the effectiveness data is recorded at the tool-invocation level with no agent attribution. Attempting to infer agent identity from `task_id` is fragile — tasks can be reassigned, retried by different agents, or created without agent context.
+The current terminal WebSocket handler (`/ws/terminal`) spawns all PTY processes with `cwd=str(workspace)`, where `workspace` is the single global `Path` resolved from `AGENT42_WORKSPACE` at server startup (line 1301 of `server.py`). When multi-workspace support is added and users open terminals in different workspace tabs, all terminals still spawn in the same global workspace directory regardless of which tab opened them. The user types `ls` and sees the wrong project's files. More critically, they may run `git commit` or `python manage.py migrate` in the wrong project directory without noticing.
 
 **Why it happens:**
-`EffectivenessStore` was built for tool/skill effectiveness recommendations (which tools work best for which task types), not for agent-level performance scoring. Adding agent-level scoring on top of this schema requires either a schema migration or a separate agent-performance table.
+`workspace` is a module-level variable set once at server start inside `create_app()`. Every endpoint and WebSocket handler in that closure captures the same `workspace` reference. When a second workspace is added, the temptation is to add it as a query parameter to the WebSocket connection — but the module-level `workspace` variable is already used by dozens of code paths and changing them all is error-prone.
 
 **How to avoid:**
-Add an `agent_id` column to `tool_invocations` with a schema migration that defaults existing rows to `""` (unknown). Alternatively — and cleaner for the rewards scope — create a separate `agent_performance` table that aggregates effectiveness data by agent rather than mutating the existing schema. The separate table avoids touching 1,956 existing tests and keeps concerns separated. Record agent_id at the point where agents execute tasks, piped through from `AgentRuntime`.
+The terminal WebSocket (`/ws/terminal`) must accept a `workspace_root` query parameter and resolve it server-side from the workspace configuration store (not from user-controlled path input directly). The server must maintain a `WorkspaceRegistry` that maps workspace IDs to resolved absolute paths. The terminal handler looks up the path by ID: `cwd = workspace_registry.get_path(workspace_id)`. User-supplied workspace_root strings must be validated against the registry — they cannot be arbitrary paths (this would be a path traversal vulnerability).
 
 **Warning signs:**
 
-- Performance score queries return identical scores for all agents (data is not differentiated by agent)
-- `get_aggregated_stats()` results are grouped by `(tool_name, task_type)` with no way to filter by agent
-- Tier assignments are random-looking or always map to the same tier for all agents
+- New terminals always open in `AGENT42_WORKSPACE` regardless of which workspace tab is active
+- `pwd` in a new terminal shows the default workspace root, not the selected workspace
+- Git operations in terminal affect the wrong repository
 
 **Phase to address:**
-Phase 1 (Tier calculation engine) — data schema must be resolved before building any scoring logic on top of it.
+Phase 1 (workspace model and data layer) — the `WorkspaceRegistry` must exist before any terminal spawning is changed. Phase 2 (terminal scoping) wires the registry into the WebSocket handler.
 
 ---
 
-### Pitfall 3: Frozen Dataclass Config Means No Runtime Toggle
+### Pitfall 3: CC Subprocess cwd Baked Into the Warm Pool Key
 
 **What goes wrong:**
-`Settings` is a frozen dataclass loaded once at import time from environment variables. `REWARDS_ENABLED` must be added as a field to `Settings` following this pattern. However, the dashboard "global toggle" for rewards requires the value to change at runtime without a restart. If the dashboard writes to `.env` and the reload path tries to mutate `settings.rewards_enabled`, it will raise `FrozenInstanceError`. If instead the dashboard stores the toggle in a separate mutable config file, and routing code checks both `settings.rewards_enabled` AND the mutable file, the two sources of truth will diverge silently.
+The CC warm pool is keyed by `user` only (`_cc_warm_pool[user]`). The warm process is spawned with `cwd=str(workspace_path)` passed to `_cc_spawn_warm()`. When multi-workspace is added, the warm pool must be keyed by `(user, workspace_id)`. If the key stays as just `user`, the warm session for workspace A will be consumed when workspace B opens its first CC session — Claude Code launches in the wrong directory. The `--resume` flag then resumes a session that was started in the wrong project tree, meaning Claude's context is contaminated with the other project's file paths and git state.
 
 **Why it happens:**
-The frozen dataclass pattern is correct for startup config, but rewards has a UI toggle that implies runtime mutability. These two requirements are in direct conflict. The path of least resistance — adding a `rewards_enabled` mutable global variable — breaks the architectural pattern and creates a hidden state leak.
+`_cc_spawn_warm()` already accepts a `workspace_path` argument (line 1747), so the warm spawning code is workspace-aware. But the pool dict at line 1737 (`_cc_warm_pool: dict = {}`) only supports one entry per user. This is a silent semantic mismatch — the spawning code is correct but the storage key is wrong.
 
 **How to avoid:**
-Treat `settings.rewards_enabled` as the "can this feature activate at all" gate (false = fully disabled, feature is inert). A separate `RewardsConfig` dataclass (mutable, file-backed, not frozen) handles runtime state: the global on/off toggle, tier thresholds, and override table. The dashboard writes to `rewards_config.json` and the rewards module reads from it. This mirrors the existing pattern used by `agents.json` and `cron_jobs.json`. The key invariant: if `settings.rewards_enabled=false`, nothing in `RewardsConfig` is consulted.
+Change `_cc_warm_pool` to key on `(user, workspace_id)` tuple. The warm pool expiry cleanup loop (line 1912) must iterate by tuple key. When a CC WebSocket connects with a `workspace_id` query parameter, it pops from `_cc_warm_pool.get((user, workspace_id))` not `_cc_warm_pool.get(user)`. Add the `workspace_id` to the WebSocket's `session_id` namespace as well so CC sessions from different workspaces never share `--resume` sessions.
 
 **Warning signs:**
 
-- Dashboard toggle appears to work but agent behavior does not change until restart
-- `FrozenInstanceError` in logs when dashboard writes config
-- `settings.rewards_enabled` is `True` (from `.env`) but the dashboard shows it toggled off — state mismatch
+- Claude Code opens and immediately references files from the other workspace project
+- `--resume` session shows a different project's context (wrong git root, wrong file paths)
+- CC warm pool entry is consumed by a different workspace than expected
 
 **Phase to address:**
-Phase 1 (config layer) and Phase 3 (dashboard toggle) — the config architecture must be established before the dashboard wires up.
+Phase 2 (CC session scoping) — must be addressed before warm pool is retained across workspace switches.
 
 ---
 
-### Pitfall 4: Admin Override Silently Lost on Tier Recalculation
+### Pitfall 4: File API Paths Resolved Against Single Global `workspace`
 
 **What goes wrong:**
-Admin sets agent "Researcher-7" to Gold tier override via the dashboard because it's a critical production agent. Two hours later, the background tier recalculation job runs and promotes or demotes the agent based on its actual performance score, overwriting the admin's override. The admin has no indication this happened unless they check the dashboard again.
+All four IDE file endpoints (`/api/ide/tree`, `/api/ide/file` GET, `/api/ide/file` POST, `/api/ide/search`) resolve paths against the module-level `workspace` variable (lines 1306–1409 of `server.py`). The sandbox check (`not str(target).startswith(str(workspace.resolve()))`) ensures the path stays inside the single workspace. When multi-workspace is added, paths for workspace B will always fail this check (they are outside workspace A's directory). Developers who work around this by removing the sandbox check have created a path traversal vulnerability. Developers who add a `workspace_root` query parameter that the server uses directly (without validation against a registry) have also created a vulnerability.
 
 **Why it happens:**
-The recalculation job operates on all agents in a loop. Without an explicit check for the `admin_override` flag before writing the new tier, every recalculation silently clobbers overrides. This is the classic "manual-data vs automated-data" conflict that appears in any system where humans and automation write to the same field.
+The four endpoints were written for a single workspace and the sandbox check is a direct string comparison against a known root. Adding a second workspace naively means either disabling the check or duplicating it with a user-supplied root path.
 
 **How to avoid:**
-Store admin overrides in a separate `tier_overrides` dict (keyed by `agent_id`). The tier resolution logic is: if `agent_id in tier_overrides`, return the override tier — never recalculate. The recalculation job skips agents with active overrides. The override must have a visible timestamp and optional expiry so admins know when they set it and it doesn't become permanent by accident. When a recalculation is skipped due to override, log it at INFO level so audit trails exist.
+The `WorkspaceRegistry` (from Pitfall 2 prevention) is the correct solution here too. Each endpoint accepts a `workspace_id` query parameter; the server resolves the workspace root from the registry; the sandbox check is performed against the resolved root. The registry lookup must not accept arbitrary paths from the client — only registered workspace IDs. The resolution pattern becomes: `root = registry.resolve(workspace_id)` then `target = (root / path).resolve()` then `assert str(target).startswith(str(root))`.
 
 **Warning signs:**
 
-- Admins repeatedly set the same override and it keeps reverting
-- Logs show recalculation completing successfully for agents that have active overrides
-- Tier history shows rapid oscillation for an agent that was manually overridden
+- Files from workspace B return 403 when workspace B's path is not under `AGENT42_WORKSPACE`
+- Developer removes sandbox check to "fix" 403 errors
+- Client sends full absolute paths in `path` parameter to work around the root mismatch
 
 **Phase to address:**
-Phase 2 (tier assignment logic) — override semantics must be designed before the recalculation job is implemented.
+Phase 1 (workspace model and data layer) — WorkspaceRegistry is the prerequisite; Phase 2 (file API scoping) threads it through the four IDE endpoints.
 
 ---
 
-### Pitfall 5: New Agents Stuck at Bronze With No Path to Promotion
+### Pitfall 5: localStorage Keys Collide Across Workspaces
 
 **What goes wrong:**
-The scoring logic requires `min_observations` (currently 5 in `get_recommendations()`) before assigning a score. A brand new agent has zero history. With no score, it defaults to Bronze. Bronze tier gets restricted resources and worse models. With worse models, the agent is less effective, accumulates mediocre scores, and may never accumulate enough high-quality completions to promote to Silver. The rewards system creates a negative feedback loop for new agents.
+CC session history is stored with keys of the form `cc_hist_<sessionId>` (line 5335 of `app.js`). The `cc_active_session` key in `sessionStorage` (line 4813) tracks which CC session is active. Neither key includes a workspace identifier. When workspace A and workspace B each have their own CC sessions, and the user switches tabs, the `cc_active_session` value in sessionStorage is overwritten with the new workspace's session ID. On the next page reload, the history restoration logic (`ccRestoreHistory`) pulls from a `cc_hist_*` key that was last set by whichever workspace was active at reload time. Workspace A's chat history appears in workspace B's CC panel, or vice versa.
 
 **Why it happens:**
-Tier systems optimized for steady-state operation don't account for the cold-start problem. The `min_observations` floor is correct for the recommendations use case (don't recommend a tool you've seen 2 times), but applying the same floor to tier assignment means new agents start penalized rather than neutral.
+The existing localStorage architecture (pitfall #120 in CLAUDE.md) was designed for a single workspace with multiple CC sessions. The session ID is workspace-agnostic — it is a UUID assigned by the server with no workspace metadata embedded. A page reload with `sessionStorage.cc_active_session = "abc"` will always restore session "abc" regardless of which workspace the user was in.
 
 **How to avoid:**
-New agents (< `min_observations` completions) receive a "provisional" status that maps to a configured default tier (recommended: Silver as the neutral default, not Bronze). The provisional tier uses the same resource allocation as the default tier. Only after `min_observations` completions does the agent enter the scoring pool. This prevents the cold-start penalty without inflating Bronze scores. Document this clearly in the dashboard so admins understand why new agents show "Provisional (Silver)" rather than Bronze.
+Namespace all localStorage and sessionStorage keys with the active workspace ID. The `cc_active_session_<workspaceId>` pattern ensures each workspace tab has its own "last active CC session" pointer. Workspace configuration (list of workspaces, their names and roots) must be persisted in localStorage under a stable key like `agent42_workspaces` so the workspace tab bar can be rebuilt after reload without a round-trip. When a workspace is deleted, sweep localStorage for all keys prefixed with that workspace ID.
 
 **Warning signs:**
 
-- All new agents are Bronze immediately upon creation
-- New agents complete fewer tasks over time while same-age agents without the rewards system do not show this pattern
-- Agents created for short tasks accumulate scores very slowly and stay at Bronze indefinitely
+- CC chat history from workspace A appears in workspace B after switching tabs
+- Page reload restores the wrong workspace's CC session
+- Adding a new workspace does not create isolated CC session state
 
 **Phase to address:**
-Phase 2 (tier assignment logic) — provisional handling must be part of the initial design, not added as a hotfix.
+Phase 1 (workspace model and data layer) — key namespacing schema must be locked before any storage is implemented. Cannot be renamed later without breaking existing persisted data.
 
 ---
 
-### Pitfall 6: Resource Allocation Bypasses Existing Rate Limiter Architecture
+### Pitfall 6: `_ideTabs` Array and `_termSessions` Array Are Global Singletons
 
 **What goes wrong:**
-The rewards system introduces per-tier resource limits: Bronze gets 2 concurrent tasks, Silver gets 5, Gold gets 10. The implementation naively adds a `max_concurrent` check in the agent dispatch code, duplicating logic that already exists in `ToolRateLimiter` and `max_concurrent_agents` in `Settings`. When both the legacy rate limiter and the new tier-based limiter are active, they can conflict: the old limiter allows a Gold agent to proceed but the new limiter hasn't been checked yet, or vice versa. Race conditions emerge under concurrent dispatch.
+The editor tabs array (`_ideTabs`, line 3398 of `app.js`) and terminal sessions array (`_termSessions`, line 5720) are global JavaScript singletons. When the user switches workspace tabs, these arrays still contain the editor tabs and terminal sessions from the previous workspace. If the workspace switch just changes the file tree root but leaves `_ideTabs` intact, the tab bar shows files from the old workspace. If the workspace switch clears and re-fills these arrays, all open editor tabs from the previous workspace are closed (UX regression — user loses their open files). Neither behavior is correct.
 
 **Why it happens:**
-Resource limiting is added as a new concept in rewards without auditing the existing limiting surfaces. The dispatch path already has `max_concurrent_agents` logic — adding a second enforcement point creates two separate state machines that must stay in sync.
+The single-workspace design assumes there is exactly one logical "workspace context" per page load. The global arrays are the entire editor state. There is no concept of "save this workspace's tab state and restore it later."
 
 **How to avoid:**
-Extend the existing `ToolRateLimiter` architecture rather than building a parallel one. Tier-based concurrent limits become `ToolLimit` entries applied at the agent level (not per-tool). Alternatively, integrate tier limits into the existing `max_concurrent_agents` logic by making it tier-aware: instead of a global max, it becomes a per-tier max enforced by the same dispatch guard. One enforcement point, one place to audit.
+Snapshot and restore tab/terminal state per workspace. When switching workspaces: (1) serialize the current workspace's `_ideTabs` and `_termSessions` state into the workspace's localStorage slot; (2) deserialize the new workspace's saved state; (3) re-open the Monaco models for the new workspace. Monaco models from the old workspace stay in the editor registry (they are not disposed) so they can be restored when the user switches back. The serialized state should contain paths and model content (not Monaco model objects, which are not serializable) — the models are recreated lazily when the tab becomes active again.
 
 **Warning signs:**
 
-- Gold agents occasionally get rejected with "concurrent limit reached" when the Gold limit should not be hit
-- Rate limit errors appear inconsistently — sometimes agents are allowed, sometimes not, for the same apparent load
-- `ToolRateLimiter.reset()` clearing agent state doesn't affect the tier-based limiter
+- Switching workspace tabs clears all open editor tabs
+- Files from workspace A remain open in the editor tab bar after switching to workspace B
+- Terminal sessions don't reset when switching workspaces (wrong cwd)
 
 **Phase to address:**
-Phase 3 (Agent Manager integration) — before wiring tier limits into dispatch, audit all existing rate limiting code paths.
+Phase 2 (frontend workspace switching) — workspace state snapshot/restore must be designed before the workspace tab switcher UI is built.
 
 ---
 
-### Pitfall 7: Performance Score Is Actually Task Volume, Not Task Quality
+### Pitfall 7: CC Sessions Directory Lives Under the Single `workspace` Root
 
 **What goes wrong:**
-The composite performance score is built from effectiveness tracking data: success rate, average duration, tool invocation counts. An agent that runs many short tasks (e.g., a monitoring agent that pings a health endpoint 200 times/day with near-100% success) scores higher than an agent that runs 3 complex coding tasks with 85% success. The monitoring agent reaches Gold. The coding agent stays Bronze. "Business success" is not what is being measured.
+CC session files are stored at `workspace / ".agent42" / "cc-sessions"` (line 1727 of `server.py`). This is a fixed path relative to the global `workspace`. When multi-workspace is added, all workspace tabs share the same CC session directory. Session IDs are UUIDs so there is no collision between sessions — but if the user is in workspace B and resumes a CC session that was started in workspace A (because the session picker shows all sessions regardless of workspace), Claude Code resumes with workspace A's cwd and git context.
 
 **Why it happens:**
-The effectiveness data (`tool_invocations` table) measures tool call outcomes, not task outcomes. A successful tool call is not the same as a valuable task completion. Correlating tool-level success with agent-level "business value" requires a layer of judgment that the raw data does not provide.
+The CC session store was designed as a shared per-server resource, not a per-workspace resource. Sessions are distinguished by UUID, not by workspace. The session picker in the UI (lines 2736–2750 of `server.py`) lists all sessions from the shared directory.
 
 **How to avoid:**
-Weight the composite score by task type complexity, not just success count. Add a `task_complexity_weight` mapping (e.g., `coding=3.0`, `research=2.0`, `monitoring=0.5`) that scales contributions to the performance score. Alternatively, use task-level outcomes (critic score on final output, human approval rate) as the primary signal rather than tool-invocation success rate. Be explicit in the dashboard about what the score represents so admins can interpret and override it meaningfully.
+Store CC sessions under each workspace's `.agent42/cc-sessions/` subdirectory, not under the global workspace root. The workspace-scoped session directory is passed to `_save_session()` and `_load_session()` (which already accept an optional `sessions_dir` parameter at lines 2215–2224). The session list endpoint must filter by workspace. When the user opens the session picker, they only see sessions from the current workspace. Cross-workspace resume is not a supported use case.
 
 **Warning signs:**
 
-- High-volume, low-complexity agents consistently outrank low-volume, high-complexity agents
-- Agents used for health checks or cron tasks always achieve Gold quickly
-- Admin overrides are routinely needed to fix tier assignments that "don't feel right"
+- Session list shows sessions from all workspaces mixed together
+- Resuming a session launches Claude Code in the wrong project directory
+- Sessions from deleted workspaces still appear in the picker
 
 **Phase to address:**
-Phase 1 (scoring engine design) — scoring formula must account for task type before any data is collected against it.
+Phase 2 (CC session scoping) — must be aligned with the WorkspaceRegistry design from Phase 1.
 
 ---
 
-### Pitfall 8: Dashboard Tier Controls Are Not Protected by Existing Auth Middleware
+### Pitfall 8: File Search Results Return Relative Paths That Are Workspace-Ambiguous
 
 **What goes wrong:**
-New dashboard API endpoints for tier management (`/api/rewards/tiers`, `/api/rewards/override`, `/api/rewards/config`) are added without applying the existing `require_auth` JWT middleware decorator. Because the rewards module is new, it's easy to miss applying the middleware consistently — especially if the endpoints are scaffolded quickly from a template. An unauthenticated attacker could promote their agent to Gold tier or disable the rewards system entirely.
+`/api/ide/search` returns matches with `"file"` set to a workspace-relative path (line 1430 of `server.py`). The frontend's `ccOpenDiffFromToolCard()` and `ideOpenFile()` functions consume these paths directly. When two workspaces are open and the user performs a search in workspace B while workspace A has a file open with the same relative path, clicking a search result silently opens the wrong file (the one already loaded from workspace A's model, due to Pitfall 1). The user edits workspace A's copy instead of workspace B's.
 
 **Why it happens:**
-Agent42 has a working JWT auth layer (`server.py`) but new endpoint files don't inherit it automatically. Every new router must explicitly apply the auth dependency. This is a consistent pattern issue across the codebase — pitfall #95 in CLAUDE.md documents auth issues with bcrypt, showing auth correctness has been a repeat problem.
+Paths returned by the API are workspace-relative by design (they're stripped via `fpath.relative_to(workspace)`). The frontend has no way to know which workspace the path belongs to — it just calls `ideOpenFile(path)`. The ambiguity only manifests under multi-workspace.
 
 **How to avoid:**
-Apply the auth dependency at the router level, not per-endpoint. Use `APIRouter(dependencies=[Depends(require_auth)])` so all routes under the rewards router are protected by construction. Add an integration test that hits each rewards endpoint without a valid JWT and asserts 401. This test should be part of the phase definition of done.
+All API responses that return file paths must include a `workspace_id` field. The frontend `ideOpenFile()` must be updated to accept `(path, workspaceId)`. The search result click handler must pass both the path and workspace ID. The CC tool card diff handler must include workspace context. This is a systemic change to the file path data model — it cannot be patched one endpoint at a time.
 
 **Warning signs:**
 
-- Rewards API endpoints return 200 without an `Authorization` header
-- No `require_auth` import in the rewards router file
-- Manual curl to `/api/rewards/config` succeeds without a token
+- Clicking search results in workspace B opens files from workspace A's Monaco model
+- Diff viewer shows content from the wrong workspace
+- CC tool card "Open File" links navigate to the wrong project's file
 
 **Phase to address:**
-Phase 3 (dashboard integration) — auth must be verified for every new endpoint before the phase closes.
+Phase 1 (workspace model) — define the `(workspace_id, path)` pair as the canonical file reference before any API or frontend uses it; Phase 2 (API threading) propagates it through every endpoint.
 
 ---
 
-### Pitfall 9: Dynamic Model Routing Upgrade Doesn't Respect Per-Agent Config Overrides
+### Pitfall 9: Workspace Configuration Persisted to localStorage Without Server Validation
 
 **What goes wrong:**
-When an agent reaches Gold tier, the system upgrades its routing to access premium models (e.g., Claude Sonnet instead of Gemini Flash). But agents can have per-agent model overrides set in their config (`agent.model`, `agent.provider`). The tier-based routing upgrade silently overrides the explicit per-agent model config, or the explicit config silently blocks the tier upgrade. Neither behavior is correct without explicit precedence rules.
+The workspace tab bar's configuration (workspace name, root path, ID) is most naturally persisted in `localStorage` for instant reload. However, if the server's `WorkspaceRegistry` is the authoritative source (for security reasons — arbitrary paths must not be accepted from the client), then localStorage and server state can diverge. A workspace is added on machine A, then the user opens Agent42 on machine B — localStorage is empty, the workspace tabs bar is empty, but the workspaces exist on the server. Conversely, a workspace is removed from the server directly (its folder deleted), but localStorage still shows it as a tab — clicking it shows errors.
 
 **Why it happens:**
-The `AgentRuntime._build_env()` constructs the environment by reading `agent_config.get("provider")` and `agent_config.get("model")`. The tier-based routing needs to inject into this same config. Without explicit precedence logic, whichever value is set last wins — and that depends on code order, not declared intent.
+localStorage is a client-only store with no synchronization mechanism. Single-workspace systems can use it freely because there is only one implicit workspace. Multi-workspace systems need a canonical source of truth, and the choice between client and server has UX trade-offs.
 
 **How to avoid:**
-Establish explicit precedence: per-agent manual override > tier-based routing > global default. The agent config should carry an `allow_tier_routing_override: bool = True` field. When `true`, tier-based routing can upgrade the model. When `false`, the per-agent model config is locked and tier routing is skipped for that agent. Document this in the dashboard so admins know why a Gold agent might still use a specific model.
+Server is the authoritative workspace registry. On page load, the frontend fetches the workspace list from a new `/api/workspaces` endpoint and replaces the localStorage cache. localStorage is used only as a stale-while-revalidate performance optimization (to render the tab bar immediately before the API responds), not as a source of truth. The server validates that workspace root paths exist and are accessible before accepting them into the registry.
 
 **Warning signs:**
 
-- Gold agents use the same model as Bronze agents (tier routing silently blocked)
-- Agents with explicit model overrides get reassigned to different models after tier promotion (override silently overwritten)
-- Model used by an agent changes unpredictably across task runs
+- Workspace tabs bar shows workspaces that no longer exist on disk
+- Opening Agent42 on a different machine shows no workspaces even though they were configured
+- Workspace paths from localStorage are used directly in API calls without server-side validation
 
 **Phase to address:**
-Phase 3 (Agent Manager integration) — precedence rules must be documented and tested before tier routing is wired into `_build_env()`.
+Phase 1 (workspace model and data layer) — server-side registry is the design prerequisite for all other workspace work.
 
 ---
 
-### Pitfall 10: Rewards State Is Lost on Server Restart Without Persistence
+### Pitfall 10: The Single Monaco Editor Instance Loses Layout After Workspace Switches
 
 **What goes wrong:**
-The `TierCache` stores computed tiers in memory. If Agent42 restarts (deploy, crash, update), the cache is empty. All agents reset to their default tier until the next recalculation completes. If the recalculation takes 30-60 seconds, there is a window where Gold agents are running as Bronze. Worse, if the background recalculation never triggers (e.g., because no tasks are running), the cache stays empty indefinitely and all agents run at the default tier.
+`_monacoEditor` is a single editor instance. When the workspace tab switches, `_monacoEditor.setModel()` is called to show the new workspace's current file. But if the workspace tab switch triggers a DOM re-render (e.g., if `renderCode()` is called, which rebuilds the IDE layout from scratch), the Monaco container is destroyed and recreated. The current code at line 3587–3591 handles the "container was destroyed" case by disposing and recreating the editor. Each dispose/create cycle loses the cursor position, scroll position, folding state, and undo history for all previously open models. Users lose their editing context on every workspace switch.
 
 **Why it happens:**
-In-memory caches are fast to implement but their persistence boundary is the process lifetime. Most development and testing happens without restarts, so the empty-on-startup case is never encountered until production deployment.
+The single-editor pattern assumes the container DOM is stable (only one page). In a tabbed workspace, if the outer layout re-renders, the editor container's DOM node is replaced even though it looks the same. Monaco models survive DOM replacement (they're in a global registry) but the editor instance's per-model view state (cursor, scroll, folding) does not survive editor disposal.
 
 **How to avoid:**
-Persist computed tier assignments to a lightweight JSON file (`.agent42/tier_assignments.json`) after each recalculation. On startup, load this file to warm the cache before the first recalculation runs. The file format: `{agent_id: {tier, score, calculated_at, override}}`. This is the same pattern used by `agents.json`, `cron_jobs.json` — consistent with the project's file-backed persistence convention.
+Save and restore Monaco view state on model switches. When switching from file A to file B (whether within one workspace or across workspaces), call `editorViewStateMap[modelUri] = editor.saveViewState()` before calling `setModel()`. After `setModel()`, call `editor.restoreViewState(editorViewStateMap[newModelUri])`. This map is keyed by the workspace-scoped URI (from Pitfall 1 prevention). View state is lightweight (cursor position, scroll offset, folding) and doesn't need to be persisted across page loads.
 
 **Warning signs:**
 
-- After every deployment, Gold agents run at Bronze speeds for a period
-- Agent logs show model downgrades immediately after startup
-- Admin reports that "it broke after the update" but the system looks healthy
+- Cursor jumps to line 1 every time you switch workspace tabs
+- Scroll position resets when switching workspace tabs
+- Undo history is lost after switching to another workspace and returning
 
 **Phase to address:**
-Phase 1 (tier calculation engine) — persistence must be designed before the cache layer, not retrofitted.
+Phase 2 (frontend workspace switching) — view state saving must be part of the tab-switching logic, not added as a polish step later.
 
 ---
 
@@ -238,12 +238,13 @@ Shortcuts that seem reasonable but create long-term problems.
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
 | --- | --- | --- | --- |
-| Scoring from tool success rate only (no task-type weighting) | Simple to implement, uses existing data | Volume-based agents game the system; score loses meaning | Never — include task type weights from the start |
-| In-memory-only tier cache (no persistence) | Fast dev, no file I/O | Agents downgraded on every restart until recalculation | Never — warm from file at startup |
-| Per-endpoint auth guards (not router-level) | Quick to add per route | Easy to miss a new endpoint, silently unauthenticated | Never for admin operations |
-| Computing performance score on-demand per request | No background job to manage | Every dashboard page load hits the DB for full aggregation | Acceptable only during initial prototyping, not production |
-| Single global `min_observations` threshold for all agents | Mirrors existing `get_recommendations()` | New agents stuck at Bronze; cold-start kills early performance | Never — use provisional tier for new agents |
-| Mutating `Settings` frozen dataclass for runtime toggle | Avoids separate config file | `FrozenInstanceError` in production; violates architecture | Never |
+| Using file path (not workspace_id + path) as the canonical file reference | No API changes needed initially | Silent file open collisions when two workspaces share a relative path (Pitfall 1, 8) | Never |
+| Storing workspace config in localStorage only (no server registry) | Zero backend changes for workspace persistence | Diverges across machines; client can inject arbitrary paths (security risk); Pitfall 9 | Never |
+| Passing `workspace_root` as a client-supplied query parameter to terminal WS | Simple to implement | Path traversal vulnerability — user can supply any path the server process can access | Never |
+| Reusing the single global `workspace` variable by mutating it on workspace switch | No new data model required | All concurrent users (or concurrent tabs in same browser) share one global workspace — mutual corruption | Never |
+| Clearing `_ideTabs` on workspace switch instead of saving/restoring state | Simpler state management | All open editor tabs are lost on every workspace switch — major UX regression | Only during initial prototype/demo |
+| Single CC sessions directory for all workspaces | No migration needed | Session list is workspace-polluted; resume loads wrong project context (Pitfall 7) | Never for production |
+| Skipping warm pool key change (keep `user`-only key) | No disruption to existing CC session logic | Wrong workspace warm session consumed; CC starts in wrong project directory (Pitfall 3) | Never |
 
 ---
 
@@ -253,26 +254,27 @@ Common mistakes when connecting to the existing Agent42 systems.
 
 | Integration | Common Mistake | Correct Approach |
 | --- | --- | --- |
-| `EffectivenessStore` | Query per-request inside routing hot path | Cache tier results in `TierCache` with TTL; never query DB during routing |
-| `ToolRateLimiter` | Add parallel rate limiting for tier resource caps | Extend existing `ToolRateLimiter` with tier-aware limits, not a second limiter |
-| `Settings` frozen dataclass | Add mutable `rewards_enabled` field to `Settings` | Keep `Settings.rewards_enabled` as startup gate; use separate mutable `RewardsConfig` |
-| `AgentRuntime._build_env()` | Inject tier routing before precedence rules defined | Define explicit precedence (manual override > tier > default) and test it |
-| Dashboard auth (`require_auth`) | Apply auth per-endpoint via decorator | Use `APIRouter(dependencies=[Depends(require_auth)])` for whole rewards router |
-| Background recalculation | Run recalculation inside request handler on first request | Run recalculation on a background `asyncio.Task`; startup warms from persisted JSON |
-| `aiosqlite` | Open a new connection per `get_tier()` call | Use connection pooling or the existing `EffectivenessStore` interface; don't bypass it |
+| Monaco `editor.getModel(uri)` | URI is workspace-relative path (`file:///src/main.py`) | URI must include workspace ID prefix (`file:///ws-<id>/src/main.py`) |
+| `/api/ide/tree`, `/api/ide/file`, `/api/ide/search` | Passing absolute `workspace_root` path from client | Pass `workspace_id`; server resolves root from `WorkspaceRegistry` |
+| `/ws/terminal` PTY spawn | `cwd=str(workspace)` (module-level global) | `cwd=str(registry.get_path(workspace_id))` from query param |
+| `/ws/cc` warm pool | `_cc_warm_pool[user]` dict key | `_cc_warm_pool[(user, workspace_id)]` tuple key |
+| `_CC_SESSIONS_DIR` (shared) | All workspaces share `workspace / ".agent42" / "cc-sessions"` | Each workspace stores sessions under its own `.agent42/cc-sessions/` |
+| `localStorage` CC history keys | `cc_hist_<sessionId>` (workspace-agnostic) | `cc_hist_<workspaceId>_<sessionId>` or workspace-scoped prefix |
+| `sessionStorage` active CC session | `cc_active_session` (single value) | `cc_active_session_<workspaceId>` per workspace |
+| `_ideTabs` / `_termSessions` global arrays | Shared across all workspace tabs | Snapshot on switch; restore on return; scoped to active workspace context |
 
 ---
 
 ## Performance Traps
 
-Patterns that work at small scale but fail as the agent count grows.
+Patterns that work at small scale but fail as workspace count grows.
 
 | Trap | Symptoms | Prevention | When It Breaks |
 | --- | --- | --- | --- |
-| Score recalculation for all agents on a fixed timer | Timer fires, all agents pause briefly as scores are recomputed | Stagger recalculation by agent (not all at once); use async background task | At ~20+ agents |
-| Full `tool_invocations` table scan for each agent's score | Dashboard page load slow; DB lock contention | Index `tool_invocations` by `agent_id`; materialize scores into `agent_performance` table | At ~10K invocation rows |
-| Dashboard loads full tier history on page open | History grows unbounded; page response slow | Paginate tier history; cap retained history to last 90 days | After 6 months of operation |
-| Tier recalculation holds SQLite write lock | Other effectiveness writes block during recalculation | Recalculation reads only; writes go to separate aggregation table | Any time concurrent agents are active |
+| All Monaco models for all workspaces kept in memory simultaneously | Browser memory grows linearly with total open files across all workspaces | Dispose models for workspaces that have been inactive >30 min; recreate on next switch | At ~3 workspaces with ~20 files each open |
+| File tree for all workspaces fetched on page load | Slow initial load, unnecessary API calls for inactive workspaces | Lazy-load file tree on workspace tab activation; cache with TTL | At ~5 workspaces |
+| CC warm pool spawns one process per workspace on login | Startup takes 5–15 seconds; API rate-limit spikes | Only warm the default/active workspace; warm others lazily on first tab open | At ~3 workspaces |
+| WorkspaceRegistry reads config from disk on every API request | File I/O on every `/api/ide/tree` call | Cache registry in memory; invalidate on write; startup load only | At any scale under concurrent requests |
 
 ---
 
@@ -282,26 +284,26 @@ Domain-specific security issues beyond general web security.
 
 | Mistake | Risk | Prevention |
 | --- | --- | --- |
-| Rewards API endpoints without auth | Unauthenticated tier override (attacker promotes to Gold) | Router-level `require_auth` dependency; test 401 on all endpoints |
-| Admin override field editable by non-admin | Any dashboard user can override tiers | Check role/permission on override endpoint; Agent42 currently has single admin role — document the assumption |
-| Performance scores exposed to agents themselves | Agent could modify behavior to game the scoring metric | Scores used only in background recalculation; never injected into agent prompt or tool context |
-| Tier assignment file (`.agent42/tier_assignments.json`) world-readable | Exposes agent performance data | File permissions match existing `.agent42/` files; not served by any API without auth |
-| `REWARDS_ENABLED` in `.env` treated as security control | Admin assumes disabling in `.env` is instant | Document that env change requires restart; dashboard toggle takes effect immediately (runtime config, not Settings) |
+| Accepting raw `workspace_root` path from client in any API or WebSocket | Path traversal: attacker supplies `../../etc` as workspace root | Server-side `WorkspaceRegistry`; client only supplies `workspace_id`; server resolves and validates the path |
+| Workspace config stored in localStorage and used directly in API calls | Client can modify localStorage to craft any path and send it | Server is authoritative; API accepts only registered workspace IDs |
+| CC warm pool keyed by user only | User A's warm session (workspace A's cwd) consumed when user A opens workspace B | Key pool by `(user, workspace_id)` tuple |
+| File path collision allowed to silently succeed | Reads/writes affect wrong workspace's files | Workspace-prefixed Monaco URIs + API workspace_id enforcement catches mismatches |
+| Workspace deletion leaves dangling CC session files and localStorage keys | Stale sessions can be resumed (in a deleted/now-different directory) | On workspace deletion: invalidate CC sessions, clear localStorage namespace, unregister from WorkspaceRegistry |
 
 ---
 
 ## UX Pitfalls
 
-Common user experience mistakes in tier/rewards system dashboards.
+Common user experience mistakes in multi-workspace IDE features.
 
 | Pitfall | User Impact | Better Approach |
 | --- | --- | --- |
-| Showing raw score number without context | "What does 7.3 mean? Is that good?" | Show score + tier badge + trend arrow (up/down from last period) |
-| No explanation for why an agent is at a tier | Admin can't fix what they don't understand | Show top contributing factors (e.g., "High success rate on coding tasks" or "Insufficient data — provisional") |
-| Override UI without expiry date | Overrides accumulate; admins forget they set them | Require expiry or explicit "permanent" selection; show override age on dashboard |
-| Tier change history not visible | Admin can't tell when a demotion happened | Log tier transitions with timestamp, old tier, new tier, reason (automated vs override) |
-| Rewards toggle with no confirmation | Accidental disable in production | Require confirmation dialog for disabling rewards when agents are currently running |
-| All metrics visible to non-admin users | Users see other agents' performance data | Scope metrics visibility to admin role; if multi-user access is ever added |
+| Workspace tab switch loses all open editor tabs | User must re-open every file after switching workspaces | Save/restore tab state per workspace (Pitfall 6 prevention) |
+| No visual indicator of which workspace a terminal is scoped to | User runs git command in wrong project | Show workspace name in terminal tab label |
+| CC session picker shows all sessions from all workspaces | User resumes wrong project's session | Filter session list to active workspace |
+| Saving workspace config via a modal with no persistence feedback | User closes modal; wonders if it was saved | Show workspace name in tab immediately; persist to server before closing modal |
+| No indication when a workspace folder is missing or inaccessible | File tree is empty; no error message | `WorkspaceRegistry.validate()` on load; show inline error in the tab if folder is gone |
+| Workspace tabs without a max-count limit | More than ~6 workspaces makes the tab bar unusable | Enforce a max of 8 workspaces with a clear UX message; offer a workspace switcher modal for more |
 
 ---
 
@@ -309,14 +311,14 @@ Common user experience mistakes in tier/rewards system dashboards.
 
 Things that appear complete but are missing critical pieces.
 
-- [ ] **Tier cache:** Cache is populated but not persisted — verify `.agent42/tier_assignments.json` is written after each recalculation
-- [ ] **Admin override:** Override UI saves to DB but verify recalculation job skips agents with active overrides
-- [ ] **New agent cold start:** New agents show a tier — verify it's "Provisional" not Bronze (check agent with 0 completed tasks)
-- [ ] **Auth on all endpoints:** Dashboard shows tier data — verify `/api/rewards/override` returns 401 without token (curl test)
-- [ ] **REWARDS_ENABLED=false:** Toggle is in `.env` — verify no tier lookup code runs at all (zero DB reads in rewards module when disabled)
-- [ ] **Model routing precedence:** Gold agent shows premium model — verify agent with explicit `model` override in config does NOT get overridden by tier routing
-- [ ] **Background recalculation:** Tier updates after task completion — verify recalculation does NOT block agent iteration (measure iteration timing with and without rewards enabled)
-- [ ] **Restart recovery:** Redeploy and verify Gold agents retain Gold tier within 5 seconds of startup (loaded from persisted JSON, not waiting for first recalculation)
+- [ ] **Monaco URI scoping:** File opens successfully in workspace B — verify `monaco.editor.getModels()` shows distinct URIs for same-relative-path files in workspace A and workspace B
+- [ ] **Terminal cwd:** New terminal in workspace B tab — verify `pwd` shows workspace B's root, not the default `AGENT42_WORKSPACE`
+- [ ] **CC session scoping:** Open CC in workspace B — verify `claude` launches with `cwd` of workspace B's root; verify resume session list only shows workspace B sessions
+- [ ] **File API sandbox:** Request `/api/ide/file?path=../../../etc/passwd&workspace_id=<valid_id>` — must return 403, not file content
+- [ ] **localStorage isolation:** Open CC in workspace A (chat), switch to workspace B, reload page — verify workspace A's CC history does not appear in workspace B's panel
+- [ ] **Workspace switch preserves editor state:** Switch from workspace A to B and back — verify cursor position in workspace A's open file is the same as before the switch
+- [ ] **Warm pool isolation:** Trigger warm session for workspace A, then open CC in workspace B — verify workspace B spawns its own warm session (workspace A's is not consumed)
+- [ ] **Workspace deletion cleanup:** Delete workspace B from the registry — verify workspace B's CC sessions, localStorage keys, and Monaco models are all cleaned up
 
 ---
 
@@ -326,12 +328,12 @@ When pitfalls occur despite prevention, how to recover.
 
 | Pitfall | Recovery Cost | Recovery Steps |
 | --- | --- | --- |
-| All agents demoted to Bronze after restart (no persistence) | LOW | Add file-based persistence for tier cache; redeploy; tiers restore on next recalculation |
-| Admin override silently cleared by recalculation job | LOW | Add `admin_override` guard to recalculation loop; re-apply overrides manually from dashboard |
-| Performance score rewards task volume not quality | HIGH | Requires scoring formula redesign + historical data re-scoring; may need to reset all tiers and restart accumulation |
-| Rewards endpoints exposed without auth | MEDIUM | Emergency: disable `REWARDS_ENABLED` in `.env` and restart; then apply router-level auth and redeploy |
-| Tier lookup causing routing slowdown | MEDIUM | Disable rewards temporarily (`REWARDS_ENABLED=false`); add caching layer; re-enable |
-| Frozen dataclass mutation error at runtime | HIGH | Revert to `Settings.rewards_enabled=false` in `.env`; redesign runtime config as separate mutable file |
+| Monaco URI collision corrupts files (Pitfall 1) | HIGH | Audit git history of affected files; restore from last clean commit; implement URI namespacing before re-enabling multi-workspace |
+| Terminal spawns in wrong workspace (Pitfall 2) | LOW | Close terminal; add workspace_id to terminal WS params; reopen |
+| CC warm pool consumed wrong workspace (Pitfall 3) | LOW | Clear `_cc_warm_pool`; restart Agent42; warm pool re-initializes on next CC open |
+| File API accepts raw paths — path traversal exploited (Pitfall 4) | HIGH | Audit server logs for unauthorized reads; rotate credentials; implement WorkspaceRegistry immediately; redeploy |
+| localStorage keys collide — history contamination (Pitfall 5) | LOW | Clear localStorage for agent42 keys; re-open workspaces; history is also server-persisted |
+| Global `_ideTabs` cleared on every workspace switch (Pitfall 6) | LOW | Implement snapshot/restore; existing open tabs cannot be recovered but new behavior prevents recurrence |
 
 ---
 
@@ -341,31 +343,30 @@ How roadmap phases should address these pitfalls.
 
 | Pitfall | Prevention Phase | Verification |
 | --- | --- | --- |
-| Tier lookup on hot path (Pitfall 1) | Phase 1: Tier engine — design `TierCache` with TTL before any routing integration | Measure routing call duration with and without tier lookup; must be < 1ms with cache |
-| No agent_id in effectiveness data (Pitfall 2) | Phase 1: Tier engine — add `agent_id` column or separate `agent_performance` table first | Query returns distinct per-agent scores; not the same value for all agents |
-| Frozen dataclass conflict (Pitfall 3) | Phase 1: Config layer — establish `RewardsConfig` mutable file before dashboard wiring | Dashboard toggle takes effect without restart; `settings.rewards_enabled=false` blocks all rewards code |
-| Override cleared by recalculation (Pitfall 4) | Phase 2: Tier assignment logic — override semantics in recalculation loop | Set override, trigger recalculation manually, verify override survives |
-| Cold-start Bronze penalty (Pitfall 5) | Phase 2: Tier assignment logic — provisional tier for new agents | Create new agent with 0 history; confirm tier is "Provisional" at configured default, not Bronze |
-| Parallel rate limiter conflict (Pitfall 6) | Phase 3: Agent Manager integration — audit existing rate limiting before adding new | No duplicate enforcement; one check per resource limit in dispatch path |
-| Volume beats quality in scoring (Pitfall 7) | Phase 1: Scoring engine design — task-type weights before data collection | Monitoring agent with 200 successful pings does not outrank coding agent with 5 complex successes |
-| Missing auth on rewards endpoints (Pitfall 8) | Phase 3: Dashboard integration — router-level auth; automated 401 test | `curl /api/rewards/config` without token returns 401 |
-| Tier routing overrides per-agent model config (Pitfall 9) | Phase 3: Agent Manager integration — precedence rules tested explicitly | Agent with `model` override retains it after Gold promotion |
-| Tier state lost on restart (Pitfall 10) | Phase 1: Tier engine — file-based persistence before deployment testing | Restart Agent42; verify Gold agents show Gold within 5 seconds (from persisted file) |
+| Monaco URI collision (Pitfall 1) | Phase 1: Workspace data model — establish URI namespacing convention | `monaco.editor.getModels()` shows workspace-prefixed URIs; no collisions on same-relative-path files |
+| Terminal cwd wrong (Pitfall 2) | Phase 1: WorkspaceRegistry + Phase 2: terminal scoping | New terminal `pwd` == workspace root; verified with two workspaces pointing to different dirs |
+| CC warm pool wrong workspace (Pitfall 3) | Phase 2: CC session scoping | Warm pool dict keyed by tuple; confirmed in code review + test with 2 users and 2 workspaces |
+| File API sandbox bypass (Pitfall 4) | Phase 1: WorkspaceRegistry + Phase 2: API scoping | Path traversal curl test returns 403; workspace_id-only API tested |
+| localStorage key collisions (Pitfall 5) | Phase 1: Storage key schema | localStorage keys contain workspace_id; verified by inspecting browser devtools storage |
+| Global IDE arrays not scoped (Pitfall 6) | Phase 2: Frontend workspace switching | Switch workspaces 3 times; verify each workspace retains its own open tabs and terminal sessions |
+| CC session directory shared (Pitfall 7) | Phase 2: CC session scoping | Session list endpoint filtered by workspace; verified with two workspaces each having sessions |
+| File path workspace-ambiguous (Pitfall 8) | Phase 1: Data model + Phase 2: API threading | All file API responses include `workspace_id`; frontend passes it to `ideOpenFile()` |
+| Workspace config in localStorage only (Pitfall 9) | Phase 1: Server-side registry | Workspace list fetched from `/api/workspaces` on load; localStorage is cache only |
+| Monaco view state lost on switch (Pitfall 10) | Phase 2: Frontend workspace switching | Switch workspace, return, verify cursor position preserved |
 
 ---
 
 ## Sources
 
-- Direct code inspection: `memory/effectiveness.py` — `EffectivenessStore` schema, `tool_invocations` table, absence of `agent_id` column (HIGH confidence)
-- Direct code inspection: `core/config.py` — frozen dataclass pattern, `Settings.from_env()` (HIGH confidence)
-- Direct code inspection: `core/rate_limiter.py` — `ToolRateLimiter`, `DEFAULT_TOOL_LIMITS`, sliding window pattern (HIGH confidence)
-- Direct code inspection: `core/agent_manager.py` — `AgentRuntime._build_env()`, `PROVIDER_MODELS`, per-agent model config (HIGH confidence)
-- Project context: `PROJECT.md` v1.4 constraints ("tier lookups must be cached/fast", "opt-in via REWARDS_ENABLED=false", "must use existing effectiveness tracking") (HIGH confidence)
-- Pattern reasoning: Cold-start problem in tier/rating systems — well-documented in game matchmaking (Elo/MMR), content ranking, and marketplace reputation systems (MEDIUM confidence — general domain knowledge)
-- Pattern reasoning: Volume vs quality bias in metric-based incentive systems (Goodhart's Law) — documented in agent evaluation literature (MEDIUM confidence)
-- CLAUDE.md pitfalls #95, #97, #104 — auth correctness, attribute access patterns, and security in Agent42 (HIGH confidence — project history)
+- Direct code inspection: `dashboard/server.py` lines 1301–1430 (workspace variable, sandbox check, file APIs), lines 1447–1690 (terminal PTY spawn with `cwd=str(workspace)`), lines 1727–2450 (CC sessions directory, warm pool keyed by user, CC WebSocket handler) — HIGH confidence
+- Direct code inspection: `dashboard/frontend/dist/app.js` lines 3396–3930 (`_monacoEditor` singleton, `_ideTabs` global array, Monaco URI construction at line 3761), lines 5720–5990 (`_termSessions` global array), lines 5332–5395 (`cc_hist_<sessionId>` localStorage keys), lines 4813–4817 (`cc_active_session` sessionStorage) — HIGH confidence
+- CLAUDE.md pitfall #120: localStorage CC history design, session restore on reload — HIGH confidence (project history)
+- CLAUDE.md pitfall #122: GSD nested repo root detection failure — MEDIUM confidence (parallel problem to workspace root confusion)
+- CLAUDE.md pitfall #83: duplicate API calls from workspace-scoped state — HIGH confidence (project history showing state isolation bugs)
+- VS Code architecture documentation: editor model registry, URI-based model identity — MEDIUM confidence (web search + known Monaco internals)
+- Monaco Editor docs: `editor.createModel(content, language, uri)`, `editor.getModel(uri)`, `editor.saveViewState()`/`editor.restoreViewState()` — HIGH confidence (official Monaco API)
 
 ---
 
-*Pitfalls research for: Performance-based tier/rewards systems (Agent42 v1.4)*
-*Researched: 2026-03-22*
+*Pitfalls research for: Multi-project workspace tabs (Agent42 v2.1)*
+*Researched: 2026-03-23*
