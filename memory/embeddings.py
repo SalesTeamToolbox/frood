@@ -21,11 +21,16 @@ import json
 import logging
 import math
 import os
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger("agent42.memory.embeddings")
+
+# Strips [ISO_TIMESTAMP SHORT_UUID] tags from bullet lines before embedding.
+# Example: "- [2026-03-24T14:22:10Z a4f7b2c1] some text" → "- some text"
+_ENTRY_TAG_RE = re.compile(r"\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z) ([0-9a-f]{8})\] ")
 
 # ── Local ONNX embedding support ──────────────────────────────────────────
 LOCAL_MODEL_NAME = "all-MiniLM-L6-v2"
@@ -622,32 +627,38 @@ class EmbeddingStore:
 
     @staticmethod
     def _split_into_chunks(text: str, source: str = "", min_chunk_len: int = 20) -> list[dict]:
-        """Split markdown text into meaningful chunks by section."""
+        """Split markdown text into meaningful chunks by section.
+
+        Strips [ISO_TIMESTAMP SHORT_UUID] tags from bullet lines before embedding
+        so that the identifier prefix does not pollute semantic search vectors.
+        """
         chunks = []
         current_section = ""
         current_lines: list[str] = []
 
         for line in text.split("\n"):
-            if line.startswith("## "):
+            # Strip UUID entry tags from bullet lines before indexing
+            stripped = _ENTRY_TAG_RE.sub("", line)
+            if stripped.startswith("## "):
                 if current_lines:
                     content = "\n".join(current_lines).strip()
                     if len(content) >= min_chunk_len:
                         chunks.append(
                             {"text": content, "section": current_section, "source": source}
                         )
-                current_section = line.lstrip("#").strip()
-                current_lines = [line]
-            elif line.startswith("# "):
+                current_section = stripped.lstrip("#").strip()
+                current_lines = [stripped]
+            elif stripped.startswith("# "):
                 if current_lines:
                     content = "\n".join(current_lines).strip()
                     if len(content) >= min_chunk_len:
                         chunks.append(
                             {"text": content, "section": current_section, "source": source}
                         )
-                current_section = line.lstrip("#").strip()
-                current_lines = [line]
+                current_section = stripped.lstrip("#").strip()
+                current_lines = [stripped]
             else:
-                current_lines.append(line)
+                current_lines.append(stripped)
 
         if current_lines:
             content = "\n".join(current_lines).strip()

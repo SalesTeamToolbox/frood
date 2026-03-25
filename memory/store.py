@@ -15,13 +15,35 @@ key is configured (OpenAI or OpenRouter). Falls back to grep when no
 embedding API is available.
 """
 
+import asyncio
 import logging
+import re
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 from memory.embeddings import EmbeddingStore
 
 logger = logging.getLogger("agent42.memory")
+
+# ── UUID entry format constants ──────────────────────────────────────────────
+# Matches: [2026-03-24T14:22:10Z a4f7b2c1] at start of bullet content
+_ENTRY_TAG_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z) ([0-9a-f]{8})\] ")
+# Matches bullet lines that do NOT already have a UUID prefix (old format)
+_ENTRY_NO_UUID_RE = re.compile(r"^(- )(?!\[)(.+)$")
+# Matches YAML frontmatter block at start of file
+_FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
+# Lock for async migration to prevent concurrent runs
+_MIGRATION_LOCK = asyncio.Lock()
+# Deterministic UUID namespace (reused from memory_tool.py and cc-memory-sync-worker.py)
+_UUID5_NAMESPACE = uuid.UUID("a42a42a4-2a42-4a42-a42a-42a42a42a42a")
+
+
+def _make_entry_prefix() -> str:
+    """Generate a [ISO_TIMESTAMP SHORT_UUID] prefix for new bullet entries."""
+    ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    short_id = uuid.uuid4().hex[:8]
+    return f"[{ts} {short_id}]"
 
 
 class MemoryStore:
@@ -63,17 +85,102 @@ class MemoryStore:
                 "# Agent42 History\n\nChronological log of significant events.\n\n"
             )
 
+    # -- UUID identity helpers --
+
+    def _ensure_uuid_frontmatter(self, content: str) -> str:
+        """Ensure YAML frontmatter with file_id and last_modified is present.
+
+        Preserves existing file_id (stable identity across updates).
+        Updates last_modified on every call.
+        If the new content has no frontmatter, tries to recover file_id from
+        the existing on-disk file to maintain identity across full replacements.
+        """
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        m = _FRONTMATTER_RE.match(content)
+        if m:
+            # Content already has frontmatter — preserve file_id
+            existing = m.group(1)
+            file_id = None
+            for line in existing.splitlines():
+                if line.startswith("file_id:"):
+                    file_id = line.split(":", 1)[1].strip()
+                    break
+            if not file_id:
+                file_id = uuid.uuid4().hex
+            new_fm = f"---\nfile_id: {file_id}\nlast_modified: {now}\n---\n"
+            return new_fm + content[m.end() :]
+        else:
+            # Content has no frontmatter — try to recover file_id from disk
+            file_id = None
+            if self.memory_path.exists():
+                try:
+                    existing_content = self.memory_path.read_text(encoding="utf-8")
+                    em = _FRONTMATTER_RE.match(existing_content)
+                    if em:
+                        for line in em.group(1).splitlines():
+                            if line.startswith("file_id:"):
+                                file_id = line.split(":", 1)[1].strip()
+                                break
+                except OSError:
+                    pass
+            if not file_id:
+                file_id = uuid.uuid4().hex
+            return f"---\nfile_id: {file_id}\nlast_modified: {now}\n---\n{content}"
+
+    async def _maybe_migrate(self):
+        """Auto-migrate old-format bullets (no UUID) to UUID format.
+
+        Uses UUID5 from content hash for deterministic IDs — both nodes independently
+        arrive at the same UUIDs for the same content.
+        Guards against concurrent migration with a lock + sentinel file.
+        """
+        sentinel = self.workspace_dir / ".migration_v1"
+        if sentinel.exists():
+            return
+        async with _MIGRATION_LOCK:
+            if sentinel.exists():
+                return  # Another coroutine migrated while we waited
+            if not self.memory_path.exists():
+                return
+            content = self.memory_path.read_text(encoding="utf-8")
+            ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            def _migrate_line(line: str) -> str:
+                m = _ENTRY_NO_UUID_RE.match(line)
+                if not m:
+                    return line
+                text = m.group(2)
+                short_id = uuid.uuid5(_UUID5_NAMESPACE, text).hex[:8]
+                return f"- [{ts} {short_id}] {text}"
+
+            migrated = "\n".join(_migrate_line(line) for line in content.splitlines())
+            migrated = self._ensure_uuid_frontmatter(migrated)
+            self.memory_path.write_text(migrated, encoding="utf-8")
+            sentinel.write_text("migrated\n", encoding="utf-8")
+            logger.info("MEMORY.md migrated to UUID format")
+
     # -- MEMORY.md (consolidated facts) --
 
     def read_memory(self) -> str:
-        """Read the current memory."""
+        """Read the current memory, triggering auto-migration of legacy format if needed."""
+        # Check sentinel (sync fast-path: sentinel exists = skip migration entirely)
+        sentinel = self.workspace_dir / ".migration_v1"
+        if not sentinel.exists() and self.memory_path.exists():
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._maybe_migrate())
+            except RuntimeError:
+                # No running event loop — run synchronously
+                asyncio.run(self._maybe_migrate())
         return self.memory_path.read_text(encoding="utf-8")
 
     def update_memory(self, content: str):
         """Replace the entire memory contents.
 
+        Ensures YAML frontmatter (file_id + last_modified) is present.
         Schedules an async reindex of embeddings if semantic search is available.
         """
+        content = self._ensure_uuid_frontmatter(content)
         self.memory_path.write_text(content, encoding="utf-8")
         # Notify Redis of memory change (cache invalidation)
         if self._redis and self._redis.is_available:
@@ -116,10 +223,12 @@ class MemoryStore:
             idx = memory.index(marker) + len(marker)
             # Find end of line
             nl = memory.index("\n", idx) if "\n" in memory[idx:] else len(memory)
-            memory = memory[:nl] + f"\n- {content}" + memory[nl:]
+            prefix = _make_entry_prefix()
+            memory = memory[:nl] + f"\n- {prefix} {content}" + memory[nl:]
         else:
             # Add new section
-            memory += f"\n## {section}\n\n- {content}\n"
+            prefix = _make_entry_prefix()
+            memory += f"\n## {section}\n\n- {prefix} {content}\n"
 
         self.update_memory(memory)
 
@@ -342,10 +451,13 @@ class MemoryStore:
         """Re-index MEMORY.md for semantic search.
 
         Call this after updating memory contents.
+        Reads raw file content directly to avoid triggering migration in
+        the middle of an update_memory() → _schedule_reindex() cycle.
         """
         if not self.embeddings.is_available:
             return 0
-        memory = self.read_memory()
+        # Use raw file read to avoid triggering auto-migration during reindex
+        memory = self.memory_path.read_text(encoding="utf-8") if self.memory_path.exists() else ""
         return await self.embeddings.index_memory(memory)
 
     async def log_event_semantic(self, event_type: str, summary: str, details: str = ""):
