@@ -235,6 +235,10 @@ class Agent42:
                 apps_dir=str(settings.apps_dir) if hasattr(settings, "apps_dir") else "apps",
                 dashboard_port=self.dashboard_port,
             )
+            from core.github_accounts import GitHubAccountStore
+
+            github_account_store = GitHubAccountStore()
+            github_account_store.load()
             app = create_app(
                 ws_manager=self.ws_manager,
                 tool_registry=self.tool_registry,
@@ -249,6 +253,7 @@ class Agent42:
                 agent_manager=self.agent_manager,
                 reward_system=self.reward_system,
                 workspace_registry=self.workspace_registry,
+                github_account_store=github_account_store,
             )
             config = uvicorn.Config(
                 app,

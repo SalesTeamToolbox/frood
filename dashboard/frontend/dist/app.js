@@ -2272,6 +2272,19 @@ function renderApps() {
       <div class="stat-card"><div class="stat-label">Building</div><div class="stat-value text-warning">${counts.building}</div></div>
       <div class="stat-card"><div class="stat-label">Errors</div><div class="stat-value text-danger">${counts.error}</div></div>
     </div>
+    <details class="platform-info" style="margin-bottom:1rem;padding:0.5rem 0.75rem;border:1px solid var(--border);border-radius:6px;font-size:0.82rem;color:var(--text-muted)">
+      <summary style="cursor:pointer;color:var(--text-secondary);font-weight:500">What do sandboxed apps get from Agent42?</summary>
+      <div style="margin-top:0.5rem;line-height:1.6">
+        <strong style="color:var(--text-primary)">Every app runs in an isolated sandbox with access to:</strong><br>
+        &bull; <strong>Memory</strong> &mdash; Semantic search via ONNX embeddings + Qdrant (shared or per-app namespace)<br>
+        &bull; <strong>AI Agents</strong> &mdash; Assign agents to app tasks with tiered model routing (L1/L2/free fallback)<br>
+        &bull; <strong>Monitoring</strong> &mdash; Health checks, auto-restart, log streaming, and status in this dashboard<br>
+        &bull; <strong>Workspaces</strong> &mdash; Each app can be opened as a workspace tab for editing + terminal access<br>
+        &bull; <strong>Git Integration</strong> &mdash; Per-app GitHub repo with push-on-build and version tracking<br>
+        &bull; <strong>Security</strong> &mdash; Path sandboxing, command filtering, and optional dashboard auth for public apps<br>
+        &bull; <strong>Port Management</strong> &mdash; Auto-assigned ports with reverse proxy for clean URLs
+      </div>
+    </details>
     <div class="apps-filters">${filterChips}</div>
     ${filtered.length ? `<div class="apps-grid">${cards}</div>` : '<div class="empty-state" style="padding:3rem;text-align:center"><p style="font-size:1.1rem;margin-bottom:1rem">No apps yet</p><p style="color:var(--text-muted)">In the beginning there were no apps. This has since been rectified.</p><button class="btn btn-primary" style="margin-top:1rem" onclick="showCreateAppModal()">+ Create App</button></div>'}
   `;
