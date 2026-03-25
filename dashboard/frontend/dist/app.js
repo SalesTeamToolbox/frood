@@ -73,7 +73,7 @@ const state = {
   // Projects
   projects: [],
   selectedProject: null,
-  missionControlTab: "tasks",  // "tasks" or "projects"
+  missionControlTab: "projects",  // "projects" or "tasks"
   projectViewMode: "kanban",
   // GitHub
   githubConnected: false,
@@ -8432,12 +8432,12 @@ function render() {
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks');closeMobileSidebar()">&#127919; Mission Control</a>
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status');closeMobileSidebar()">&#128200; Status</a>
           <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals');closeMobileSidebar()">&#128274; Approvals ${approvalBadge}</a>
-          <a href="#" data-page="workspace" class="${state.page === "workspace" ? "active" : ""}" onclick="event.preventDefault();navigate('workspace');closeMobileSidebar()">&#128187; Workspace</a>
-          <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
-          <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills');closeMobileSidebar()">&#9889; Skills</a>
+          <a href="#" data-page="workspace" class="${state.page === "workspace" ? "active" : ""}" onclick="event.preventDefault();navigate('workspace');closeMobileSidebar()">&#128187; Workspaces</a>
+          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Sandboxes</a>
           <a href="#" data-page="agents" class="${state.page === "agents" ? "active" : ""}" onclick="event.preventDefault();navigate('agents');closeMobileSidebar()">&#129302; Agents</a>
           <a href="#" data-page="teams" class="${state.page === "teams" ? "active" : ""}" onclick="event.preventDefault();navigate('teams');closeMobileSidebar()">&#129309; Teams</a>
-          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Apps</a>
+          <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
+          <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills');closeMobileSidebar()">&#9889; Skills</a>
           <a href="#" data-page="reports" class="${state.page === "reports" ? "active" : ""}" onclick="event.preventDefault();navigate('reports');closeMobileSidebar()">&#128202; Reports</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings');closeMobileSidebar()">&#9881; Settings</a>
         </nav>
@@ -8455,7 +8455,7 @@ function render() {
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
           <button class="ide-sidebar-toggle" onclick="ideToggleMainSidebar()" title="Toggle sidebar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>
-          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", agents: "Agent Profiles", apps: "Apps", reports: "Reports", settings: "Settings", detail: "Task Detail", chat: "Workspace", workspace: "Workspace", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", agents: "Agent Profiles", apps: "Sandboxes", reports: "Reports", settings: "Settings", detail: "Task Detail", chat: "Workspaces", workspace: "Workspaces", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? `
               <button class="btn btn-primary btn-sm" onclick="${state.missionControlTab === 'projects' ? 'showCreateProjectModal()' : 'showCreateTaskModal()'}">+ New ${state.missionControlTab === 'projects' ? 'Project' : 'Task'}</button>

@@ -213,5 +213,30 @@ Desktop experience: PWA manifest + shortcuts, GSD auto-activation, dashboard wit
 | Gemini as default L2 | Reliable premium provider, already integrated | -- Pending |
 | Non-streaming accepted for L1 | StrongWall doesn't stream; simulate for chat, accept for background | -- Pending |
 
+## Future Milestones (Backlog)
+
+### 999.1 Project-Workspace-Task Integration
+**Vision:** Connect Projects to Workspaces and Sandboxes. Mission Control becomes the project-scoped command center.
+
+**Key features:**
+- Projects are the top-level entity: each project optionally links to a Workspace (code folder) and/or Sandbox (runtime)
+- Tasks tracked in kanban per-project — both programmatic (coding, debugging, deployment) and non-programmatic (research, design, outreach, reports)
+- Agents and teams assigned to project tasks
+- Recurring and one-off projects/tasks supported
+- Mission Control shows project-scoped view: what's happening across workspaces, agents, and tasks for THAT project
+
+**Architecture sketch:**
+```
+Project (top-level entity)
+  ├── Workspace (code folder — optional, only for dev projects)
+  ├── Tasks (kanban items — tracked in Mission Control)
+  │   ├── Programmatic tasks (coding, debugging, deployment)
+  │   └── Non-programmatic (research, design, outreach, reports)
+  ├── Agents (assigned to tasks — can be teams)
+  └── Sandbox (runtime — optional, for projects that produce services)
+```
+
+**Why:** A project like "Customer Acquisition Campaign" has no workspace but has agent tasks (research leads, draft emails, analyze responses). A project like "Agent42 v2.1" has a workspace, code tasks, and a sandbox for testing. This makes the platform useful for non-developers too.
+
 ---
 *Last updated: 2026-03-24 after Multi-Project Workspace Phase 3 (Workspace Management) completion — milestone v2.1 complete*
