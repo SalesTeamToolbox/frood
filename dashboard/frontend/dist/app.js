@@ -68,14 +68,12 @@ const state = {
   codeSetupStep: 0,  // 0=not started, 1=mode, 2=config, 3=done
   codeSending: false,
   codeCanvasOpen: false,
-  // IDE Chat Panel
-  idePanelSessionId: "",
-  idePanelMessages: [],
-  idePanelSending: false,
+  // IDE Chat Panel (WebSocket-based)
+  panelTab: null,
   // Projects
   projects: [],
   selectedProject: null,
-  missionControlTab: "tasks",  // "tasks" or "projects"
+  missionControlTab: "projects",  // "projects" or "tasks"
   projectViewMode: "kanban",
   // GitHub
   githubConnected: false,
@@ -160,6 +158,47 @@ function rotateTagline() {
 setInterval(rotateTagline, 8000);
 
 // ---------------------------------------------------------------------------
+// Workspace namespace conventions (Phase 1: definition only)
+// Phase 2 will migrate ideOpenFile() and storage call sites to use these.
+// ---------------------------------------------------------------------------
+var WORKSPACE_URI_SCHEME = "workspace";
+
+/**
+ * Build a Monaco-compatible URI for a file in a specific workspace.
+ * Format: "workspace://{workspaceId}/{filePath}"
+ * @param {string} workspaceId - 12-char hex workspace ID
+ * @param {string} filePath - relative file path within workspace
+ * @returns {string} workspace URI string
+ */
+function makeWorkspaceUri(workspaceId, filePath) {
+  return WORKSPACE_URI_SCHEME + "://" + workspaceId + "/" + filePath.replace(/^\//, "");
+}
+
+/**
+ * Build a workspace-namespaced storage key.
+ * Format: "ws_{workspaceId}_{key}"
+ * @param {string} workspaceId - 12-char hex workspace ID
+ * @param {string} key - the base key name (e.g., "cc_active_session", "cc_panel_width")
+ * @returns {string} namespaced storage key
+ */
+function wsKey(workspaceId, key) {
+  return "ws_" + workspaceId + "_" + key;
+}
+
+// Storage key namespace mapping (Phase 2 will migrate these call sites):
+//   wsKey(id, "cc_active_session")    replaces  "cc_active_session"
+//   wsKey(id, "cc_panel_width")       replaces  "cc_panel_width"
+//   wsKey(id, "cc_panel_session_id")  replaces  "cc_panel_session_id"
+//
+// Keys that stay GLOBAL (no namespace prefix):
+//   "agent42_token"   — auth is workspace-independent
+//   "a42_first_done"  — one-time onboarding flag
+//
+// Keys that stay SESSION-SCOPED (no workspace prefix needed):
+//   "cc_hist_{sessionId}" — session UUIDs are already globally unique
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // API helpers
 // ---------------------------------------------------------------------------
 const API = "/api";
@@ -177,7 +216,7 @@ if (_authChannel) {
       state.token = ev.data.token;
       localStorage.setItem("agent42_token", ev.data.token);
       connectWS();
-      loadAll().then(render);
+      loadAll().then(function() { render(); updateGsdIndicator(); });
     }
   };
 }
@@ -323,6 +362,7 @@ async function handleSetupStep3() {
       connectWS();
       await loadAll();
       render();
+      updateGsdIndicator();
       if (data.setup_task_id) {
         toast("Welcome! A setup task has been queued to verify memory services.", "success");
       } else {
@@ -564,28 +604,12 @@ function handleWSMessage(msg) {
         state.codeSending = false;
         needsAppend = true;
       }
-      if (state.page === "code") {
+      if (state.page === "workspace") {
         if (needsAppend) {
           if (!appendChatMsgToDOM(msg.data, state.codeCurrentMessages, true)) renderCode();
           else updateChatTypingIndicator(state.codeSending, true);
         }
       }
-    } else if (sid && sid === state.idePanelSessionId) {
-      // IDE panel chat session
-      let needsAppend = false;
-      if (msg.data.role === "user") {
-        const idx = state.idePanelMessages.findIndex(m => m.id?.startsWith("local-") && m.content === msg.data.content);
-        if (idx >= 0) state.idePanelMessages[idx] = msg.data;
-        else { state.idePanelMessages.push(msg.data); needsAppend = true; }
-      } else {
-        state.idePanelMessages.push(msg.data);
-        state.idePanelSending = false;
-        needsAppend = true;
-      }
-      if (needsAppend) {
-        appendPanelChatMsg(msg.data);
-      }
-      updatePanelTypingIndicator(state.idePanelSending);
     } else if (!sid) {
       // Legacy messages without session_id (backward compat)
       let needsAppend = false;
@@ -620,12 +644,9 @@ function handleWSMessage(msg) {
       }
     } else if (sid && sid === state.codeCurrentSessionId) {
       state.codeSending = thinking;
-      if (state.page === "code") {
+      if (state.page === "workspace") {
         if (!updateChatTypingIndicator(thinking, true)) renderCode();
       }
-    } else if (sid && sid === state.idePanelSessionId) {
-      state.idePanelSending = thinking;
-      updatePanelTypingIndicator(thinking);
     } else if (!sid) {
       state.chatSending = thinking;
       if (state.page === "chat") {
@@ -984,7 +1005,7 @@ async function switchCodeSession(sessionId) {
       }
     }
   } catch { state.codeCurrentMessages = []; }
-  if (state.page === "code") renderCode();
+  if (state.page === "workspace") renderCode();
 }
 
 async function sendSessionMessage(sessionId, isCode) {
@@ -1008,7 +1029,7 @@ async function sendSessionMessage(sessionId, isCode) {
   if (input) input.value = "";
 
   // Incremental append: only add the new message to the DOM instead of rebuilding everything
-  const onCorrectPage = isCode ? state.page === "code" : state.page === "chat";
+  const onCorrectPage = isCode ? state.page === "workspace" : state.page === "chat";
   if (onCorrectPage) {
     if (!appendChatMsgToDOM(newMsg, messages, isCode)) {
       // Container not found — fall back to full render
@@ -1031,7 +1052,7 @@ async function sendSessionMessage(sessionId, isCode) {
     // Only reset on error so the typing indicator disappears
     if (isCode) state.codeSending = false;
     else state.chatSending = false;
-    if (isCode && state.page === "code") renderCode();
+    if (isCode && state.page === "workspace") renderCode();
     else if (!isCode && state.page === "chat") renderChat();
   }
 }
@@ -1055,7 +1076,7 @@ async function deleteChatSession(sessionId, sessionType) {
       }
     }
     if (state.page === "chat") renderChat();
-    if (state.page === "code") renderCode();
+    if (state.page === "workspace") renderCode();
   } catch (e) { toast("Delete failed: " + e.message, "error"); }
 }
 
@@ -1422,8 +1443,15 @@ async function doHandleApproval(taskId, action, approved) {
 // Navigation
 // ---------------------------------------------------------------------------
 function navigate(page, data) {
+  // Chat redirects to workspace with panel auto-open
+  if (page === "chat") {
+    page = "workspace";
+    setTimeout(function() { if (!_chatPanelMode) ideOpenChatPanel(); }, 100);
+  }
+  // Legacy "code" redirects to workspace
+  if (page === "code") page = "workspace";
   state.page = page;
-  // Remove IDE layout class when leaving code page
+  // Remove IDE layout class when leaving workspace
   var pc = document.getElementById("page-content");
   if (pc) pc.classList.remove("ide-layout-parent");
   if (data) {
@@ -2244,6 +2272,19 @@ function renderApps() {
       <div class="stat-card"><div class="stat-label">Building</div><div class="stat-value text-warning">${counts.building}</div></div>
       <div class="stat-card"><div class="stat-label">Errors</div><div class="stat-value text-danger">${counts.error}</div></div>
     </div>
+    <details class="platform-info" style="margin-bottom:1rem;padding:0.5rem 0.75rem;border:1px solid var(--border);border-radius:6px;font-size:0.82rem;color:var(--text-muted)">
+      <summary style="cursor:pointer;color:var(--text-secondary);font-weight:500">What do sandboxed apps get from Agent42?</summary>
+      <div style="margin-top:0.5rem;line-height:1.6">
+        <strong style="color:var(--text-primary)">Every app runs in an isolated sandbox with access to:</strong><br>
+        &bull; <strong>Memory</strong> &mdash; Semantic search via ONNX embeddings + Qdrant (shared or per-app namespace)<br>
+        &bull; <strong>AI Agents</strong> &mdash; Assign agents to app tasks with tiered model routing (L1/L2/free fallback)<br>
+        &bull; <strong>Monitoring</strong> &mdash; Health checks, auto-restart, log streaming, and status in this dashboard<br>
+        &bull; <strong>Workspaces</strong> &mdash; Each app can be opened as a workspace tab for editing + terminal access<br>
+        &bull; <strong>Git Integration</strong> &mdash; Per-app GitHub repo with push-on-build and version tracking<br>
+        &bull; <strong>Security</strong> &mdash; Path sandboxing, command filtering, and optional dashboard auth for public apps<br>
+        &bull; <strong>Port Management</strong> &mdash; Auto-assigned ports with reverse proxy for clean URLs
+      </div>
+    </details>
     <div class="apps-filters">${filterChips}</div>
     ${filtered.length ? `<div class="apps-grid">${cards}</div>` : '<div class="empty-state" style="padding:3rem;text-align:center"><p style="font-size:1.1rem;margin-bottom:1rem">No apps yet</p><p style="color:var(--text-muted)">In the beginning there were no apps. This has since been rectified.</p><button class="btn btn-primary" style="margin-top:1rem" onclick="showCreateAppModal()">+ Create App</button></div>'}
   `;
@@ -2660,39 +2701,135 @@ function renderTeamRunDetail(el) {
   el.innerHTML = html;
 }
 
+var _gsdWorkstreams = [];
+var _gsdDropdownOpen = false;
+
 function updateGsdIndicator() {
   var slot = document.getElementById("gsd-indicator-slot");
   if (!slot) return;
 
-  // Prefer active CC tab's workstream over global heartbeat
-  var ws = "";
-  var phase = "";
+  // Fetch full workstream list from server (cached, refreshed on heartbeat)
+  if (_gsdWorkstreams.length === 0) {
+    loadGsdWorkstreams();
+  }
+
+  // Prefer active CC tab's workstream over global heartbeat for the highlight
+  var activeWs = "";
+  var activePhase = "";
   if (typeof _ideActiveTab !== "undefined" && _ideActiveTab >= 0 &&
       typeof _ideTabs !== "undefined" && _ideTabs[_ideActiveTab] &&
       _ideTabs[_ideActiveTab].type === "claude" && _ideTabs[_ideActiveTab].gsd_workstream) {
-    ws = _ideTabs[_ideActiveTab].gsd_workstream;
-    phase = _ideTabs[_ideActiveTab].gsd_phase || "";
+    activeWs = _ideTabs[_ideActiveTab].gsd_workstream;
+    activePhase = _ideTabs[_ideActiveTab].gsd_phase || "";
   }
-  // Fallback to global status
-  if (!ws && state.status) {
-    ws = state.status.gsd_workstream || "";
-    phase = state.status.gsd_phase || "";
+  if (!activeWs && state.status) {
+    activeWs = state.status.gsd_workstream || "";
+    activePhase = state.status.gsd_phase || "";
   }
 
   while (slot.firstChild) slot.removeChild(slot.firstChild);
-  if (ws) {
-    var indicator = document.createElement("div");
-    indicator.className = "gsd-indicator";
-    var wsEl = document.createElement("div");
-    wsEl.className = "gsd-workstream";
-    wsEl.textContent = "\u25BA " + ws;
-    var phaseEl = document.createElement("div");
-    phaseEl.className = "gsd-phase";
-    phaseEl.textContent = phase ? "Phase " + phase : "";
-    indicator.appendChild(wsEl);
-    indicator.appendChild(phaseEl);
-    slot.appendChild(indicator);
+
+  // Build the indicator with dropdown toggle
+  var indicator = document.createElement("div");
+  indicator.className = "gsd-indicator";
+
+  // Active workstream summary (clickable to toggle dropdown)
+  var summary = document.createElement("div");
+  summary.className = "gsd-summary";
+  summary.onclick = function() { toggleGsdDropdown(); };
+
+  // Use full display name from API data if available (heartbeat truncates)
+  var displayName = activeWs || "Workstreams";
+  for (var i = 0; i < _gsdWorkstreams.length; i++) {
+    if (_gsdWorkstreams[i].is_active) { displayName = _gsdWorkstreams[i].display; break; }
   }
+  var label = document.createElement("span");
+  label.className = "gsd-summary-label";
+  label.textContent = displayName;
+
+  var phaseTag = document.createElement("span");
+  phaseTag.className = "gsd-summary-phase";
+  phaseTag.textContent = activePhase ? "Phase " + activePhase : "";
+
+  var arrow = document.createElement("span");
+  arrow.className = "gsd-summary-arrow";
+  arrow.textContent = _gsdDropdownOpen ? "\u25B2" : "\u25BC";
+
+  summary.appendChild(label);
+  if (activePhase) summary.appendChild(phaseTag);
+  summary.appendChild(arrow);
+  indicator.appendChild(summary);
+
+  // Dropdown list (hidden by default)
+  var dropdown = document.createElement("div");
+  dropdown.className = "gsd-dropdown";
+  dropdown.id = "gsd-ws-dropdown";
+  dropdown.style.display = _gsdDropdownOpen ? "" : "none";
+
+  if (_gsdWorkstreams.length > 0) {
+    _gsdWorkstreams.forEach(function(ws) {
+      var item = document.createElement("div");
+      item.className = "gsd-dropdown-item" + (ws.is_active ? " active" : "") + (ws.is_complete ? " complete" : "");
+
+      var name = document.createElement("div");
+      name.className = "gsd-dropdown-name";
+      name.textContent = ws.display;
+
+      var meta = document.createElement("div");
+      meta.className = "gsd-dropdown-meta";
+      var progress = ws.completed_phases + "/" + ws.total_phases + " phases";
+      var phaseText = ws.phase ? "Phase " + ws.phase : "";
+      meta.textContent = [progress, phaseText].filter(Boolean).join(" \u00B7 ");
+
+      item.appendChild(name);
+      item.appendChild(meta);
+      item.style.cursor = "pointer";
+      item.onclick = (function(wsName) {
+        return function(e) {
+          e.stopPropagation();
+          switchGsdWorkstream(wsName);
+        };
+      })(ws.name);
+      dropdown.appendChild(item);
+    });
+  } else {
+    var empty = document.createElement("div");
+    empty.className = "gsd-dropdown-empty";
+    empty.textContent = "No workstreams found";
+    dropdown.appendChild(empty);
+  }
+
+  indicator.appendChild(dropdown);
+  slot.appendChild(indicator);
+}
+
+function toggleGsdDropdown() {
+  _gsdDropdownOpen = !_gsdDropdownOpen;
+  var dd = document.getElementById("gsd-ws-dropdown");
+  if (dd) dd.style.display = _gsdDropdownOpen ? "" : "none";
+  var arrows = document.querySelectorAll(".gsd-summary-arrow");
+  arrows.forEach(function(a) { a.textContent = _gsdDropdownOpen ? "\u25B2" : "\u25BC"; });
+}
+
+function switchGsdWorkstream(wsName) {
+  api("/gsd/workstreams/active", { method: "PUT", body: JSON.stringify({ name: wsName }) })
+    .then(function() {
+      // Update local state
+      _gsdWorkstreams.forEach(function(w) { w.is_active = (w.name === wsName); });
+      _gsdDropdownOpen = false;
+      updateGsdIndicator();
+      toast("Switched to " + wsName, "success");
+    })
+    .catch(function(err) { toast("Failed to switch: " + err.message, "error"); });
+}
+
+function loadGsdWorkstreams() {
+  api("/gsd/workstreams").then(function(data) {
+    if (data && data.workstreams) {
+      _gsdWorkstreams = data.workstreams;
+      updateGsdIndicator();
+    }
+  }).catch(function() {});
 }
 
 function renderMemorySystemCard() {
@@ -3012,7 +3149,14 @@ function buildChatMsgHtml(m, idx, msgArrayName, isCode) {
     `<button class="chat-canvas-btn" onclick="openCanvas(${msgArrayName}[${idx}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
   ).join("");
   const taskRef = !isCode && m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : "";
-  return `<div class="chat-msg chat-msg-agent"><div class="chat-msg-label">${esc(sender)} <span class="chat-msg-ts">${time}</span></div><div class="chat-msg-bubble chat-bubble-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div>`;
+  // Response time + provider badge
+  var metaBadge = "";
+  if (m.response_ms) {
+    var secs = (m.response_ms / 1000).toFixed(1);
+    var prov = m.provider || "";
+    metaBadge = `<span class="chat-response-meta">${secs}s` + (prov && prov !== "none" ? ` via ${esc(prov)}` : "") + `</span>`;
+  }
+  return `<div class="chat-msg chat-msg-agent"><div class="chat-msg-label">${esc(sender)} <span class="chat-msg-ts">${time}</span> ${metaBadge}</div><div class="chat-msg-bubble chat-bubble-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div>`;
 }
 
 // Scroll chat to bottom reliably (after browser paint)
@@ -3088,8 +3232,10 @@ function _insertTypingIndicator(container, isCode) {
 }
 
 function renderChat() {
-  const el = document.getElementById("page-content");
-  if (!el || state.page !== "chat") return;
+  // DEPRECATED: Chat page removed — consolidated into Workspace chat panel.
+  // This function is kept as a no-op stub because ~10 call sites reference it.
+  // All calls no-op because state.page is never "chat" (navigate() redirects to "workspace").
+  return;
 
   const sessions = state.chatSessions;
   const hasSession = !!state.currentSessionId;
@@ -3163,7 +3309,13 @@ function renderChat() {
       `<button class="chat-canvas-btn" onclick="openCanvas(${msgArray}[${i}].__codeBlocks[${j}].code, '${esc(b.lang)}', '${esc(b.lang)}')">Open ${esc(b.lang)} in canvas</button>`
     ).join("");
     const taskRef = m.task_id ? `<div class="chat-task-ref"><a href="#" onclick="event.preventDefault();state.selectedTask=state.tasks.find(t=>t.id==='${m.task_id}');navigate('detail')">View task &rarr;</a></div>` : "";
-    return `<div class="chat-msg chat-msg-agent"><div class="chat-msg-label">Agent42 <span class="chat-msg-ts">${time}</span></div><div class="chat-msg-bubble chat-bubble-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div>`;
+    var rmBadge = "";
+    if (m.response_ms) {
+      var rs = (m.response_ms / 1000).toFixed(1);
+      var rp = m.provider || "";
+      rmBadge = `<span class="chat-response-meta">${rs}s` + (rp && rp !== "none" ? ` via ${rp}` : "") + `</span>`;
+    }
+    return `<div class="chat-msg chat-msg-agent"><div class="chat-msg-label">Agent42 <span class="chat-msg-ts">${time}</span> ${rmBadge}</div><div class="chat-msg-bubble chat-bubble-agent">${content}</div>${canvasButtons ? `<div class="chat-canvas-btns">${canvasButtons}</div>` : ""}${taskRef}</div>`;
   }).join("");
 
   const typingHtml = state.chatSending ? `<div class="chat-msg chat-msg-agent" id="chat-typing-indicator"><div class="chat-msg-label">Agent42</div><div class="chat-msg-bubble chat-bubble-agent"><div class="typing-dots"><span></span><span></span><span></span></div></div></div>` : "";
@@ -3399,6 +3551,444 @@ let _ideActiveTab = -1;
 let _ideTreeCache = {};
 let _ideExpandedDirs = new Set([""]);
 
+// Workspace state management (Phase 2)
+var _activeWorkspaceId = "";
+var _wsTabState = {};     // { workspaceId: { tabs: [], activeTab: -1 } }
+var _wsTermSessions = {}; // { workspaceId: [ ...sessions ] }
+var _wsTermActiveIdx = {}; // { workspaceId: number }
+
+function _ensureWsState(wsId) {
+  if (!_wsTabState[wsId]) _wsTabState[wsId] = { tabs: [], activeTab: -1 };
+  if (!_wsTermSessions[wsId]) _wsTermSessions[wsId] = [];
+  if (_wsTermActiveIdx[wsId] === undefined) _wsTermActiveIdx[wsId] = -1;
+  if (_wsTabState[wsId].ccTabCount === undefined) _wsTabState[wsId].ccTabCount = 0;
+}
+
+function _syncAliasesToWorkspace(wsId) {
+  _ensureWsState(wsId);
+  // Clear _ideTabs array and repopulate from workspace state
+  _ideTabs.length = 0;
+  var wsTabs = _wsTabState[wsId].tabs;
+  for (var i = 0; i < wsTabs.length; i++) _ideTabs.push(wsTabs[i]);
+  _ideActiveTab = _wsTabState[wsId].activeTab;
+
+  // Terminal aliases
+  _termSessions.length = 0;
+  var wsTerms = _wsTermSessions[wsId];
+  for (var j = 0; j < wsTerms.length; j++) _termSessions.push(wsTerms[j]);
+  _termActiveIdx = _wsTermActiveIdx[wsId];
+}
+
+function _saveCurrentWsState() {
+  if (!_activeWorkspaceId) return;
+  _ensureWsState(_activeWorkspaceId);
+  _wsTabState[_activeWorkspaceId].tabs = _ideTabs.slice();
+  _wsTabState[_activeWorkspaceId].activeTab = _ideActiveTab;
+  _wsTermSessions[_activeWorkspaceId] = _termSessions.slice();
+  _wsTermActiveIdx[_activeWorkspaceId] = _termActiveIdx;
+}
+
+var _workspaceList = [];
+
+function initWorkspaceTabs() {
+  // stale-while-revalidate: render from cache first, then fetch fresh
+  var cached = null;
+  try { cached = JSON.parse(localStorage.getItem("workspaces_cache")); } catch(e) {}
+  var savedActiveId = localStorage.getItem("active_workspace_id") || "";
+
+  if (cached && Array.isArray(cached) && cached.length > 0) {
+    _setWorkspaceList(cached, savedActiveId);
+  }
+
+  // Fetch fresh workspace list from server
+  fetch("/api/workspaces", {
+    headers: { "Authorization": "Bearer " + (state.token || "") }
+  })
+  .then(function(resp) { return resp.json(); })
+  .then(function(data) {
+    var workspaces = data.workspaces || [];
+    if (workspaces.length === 0) return;
+    try { localStorage.setItem("workspaces_cache", JSON.stringify(workspaces)); } catch(e) {}
+    // Reconcile: if saved active workspace no longer exists, fall back to first
+    var activeId = savedActiveId;
+    var found = false;
+    for (var i = 0; i < workspaces.length; i++) {
+      if (workspaces[i].id === activeId) { found = true; break; }
+    }
+    if (!found) activeId = workspaces[0].id;
+    _setWorkspaceList(workspaces, activeId);
+  })
+  .catch(function(err) {
+    console.error("Failed to load workspaces:", err);
+  });
+}
+
+function _setWorkspaceList(workspaces, activeId) {
+  _workspaceList = workspaces;
+  if (!_activeWorkspaceId && activeId) {
+    _activeWorkspaceId = activeId;
+    _ensureWsState(_activeWorkspaceId);
+    _syncAliasesToWorkspace(_activeWorkspaceId);
+    try { localStorage.setItem("active_workspace_id", _activeWorkspaceId); } catch(e) {}
+  }
+  ideRenderWorkspaceTabs();
+}
+
+function ideRenderWorkspaceTabs() {
+  var container = document.getElementById("ide-workspace-tabs");
+  if (!container) return;
+  // Clear existing tabs
+  while (container.firstChild) container.removeChild(container.firstChild);
+
+  // Always show tab bar (D-02: "+" button must always be accessible)
+  container.style.display = "flex";
+
+  for (var i = 0; i < _workspaceList.length; i++) {
+    var ws = _workspaceList[i];
+    var tab = document.createElement("button");
+    tab.className = "ide-ws-tab" + (ws.id === _activeWorkspaceId ? " active" : "");
+    tab.setAttribute("data-ws-id", ws.id);
+    tab.onclick = (function(wsId) {
+      return function() { switchWorkspace(wsId); };
+    })(ws.id);
+
+    // Name span — right-click to rename (avoids click collision with tab switch)
+    var nameSpan = document.createElement("span");
+    nameSpan.className = "ide-ws-tab-name";
+    nameSpan.textContent = ws.name;  // textContent — XSS safe
+    tab.appendChild(nameSpan);
+
+    // Right-click context menu for rename
+    tab.oncontextmenu = (function(wsId, wsName, span) {
+      return function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        enterWsRenameMode(wsId, wsName, span);
+      };
+    })(ws.id, ws.name, nameSpan);
+
+    // Close button — disabled when only 1 workspace remains
+    var closeBtn = document.createElement("button");
+    closeBtn.className = "ide-ws-tab-close";
+    closeBtn.textContent = "\u00d7";
+    closeBtn.disabled = _workspaceList.length <= 1;
+    closeBtn.onclick = (function(wsId) {
+      return function(e) {
+        e.stopPropagation();
+        removeWorkspace(wsId);
+      };
+    })(ws.id);
+    tab.appendChild(closeBtn);
+
+    container.appendChild(tab);
+  }
+
+  // "+" add workspace button (always appended after tabs)
+  var addBtn = document.createElement("button");
+  addBtn.className = "ide-ws-tab-add";
+  addBtn.textContent = "+";
+  addBtn.onclick = function() { showAddWorkspaceModal(); };
+  container.appendChild(addBtn);
+}
+
+function showAddWorkspaceModal() {
+  var html = '<div class="modal">' +
+    '<div class="modal-header"><h3>Add Workspace</h3>' +
+      '<button class="btn btn-icon btn-outline" onclick="closeModal()">\u00d7</button>' +
+    '</div>' +
+    '<div class="modal-body">' +
+      '<div class="form-group">' +
+        '<label for="aw-path">Folder path</label>' +
+        '<input type="text" id="aw-path" placeholder="/home/user/projects/myapp">' +
+        '<div class="help">Absolute path to a project folder on the server.</div>' +
+      '</div>' +
+      '<div id="aw-apps-section" style="display:none">' +
+        '<div class="form-group">' +
+          '<label for="aw-app">Or choose an Agent42 app</label>' +
+          '<select id="aw-app" onchange="onAddWsAppChange(this.value)">' +
+            '<option value="">-- select an app --</option>' +
+          '</select>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="modal-footer">' +
+      '<button class="btn btn-outline" onclick="closeModal()">Cancel</button>' +
+      '<button class="btn btn-primary" onclick="submitAddWorkspace()">Add</button>' +
+    '</div>' +
+  '</div>';
+  showModal(html);
+  var pathEl = document.getElementById("aw-path");
+  if (pathEl) pathEl.focus();
+  _populateWsAppDropdown();  // MUST be called AFTER showModal (Pitfall 5)
+}
+
+function _populateWsAppDropdown() {
+  api("/apps").then(function(apps) {
+    if (!apps || !apps.length) return;
+    var section = document.getElementById("aw-apps-section");
+    var select = document.getElementById("aw-app");
+    if (!section || !select) return;
+    section.style.display = "";
+    for (var i = 0; i < apps.length; i++) {
+      var opt = document.createElement("option");
+      opt.value = apps[i].path;         // App.path field (verified in app_manager.py:114)
+      opt.textContent = apps[i].name;   // textContent — XSS safe
+      select.appendChild(opt);
+    }
+  }).catch(function() { /* app_manager not configured or network error -- section stays hidden */ });
+}
+
+function onAddWsAppChange(value) {
+  var pathInput = document.getElementById("aw-path");
+  if (pathInput && value) pathInput.value = value;
+}
+
+async function submitAddWorkspace() {
+  var pathInput = document.getElementById("aw-path");
+  var path = pathInput ? pathInput.value.trim() : "";
+  if (!path) { toast("Path is required", "error"); return; }
+  // Client-side duplicate check
+  for (var i = 0; i < _workspaceList.length; i++) {
+    if (_workspaceList[i].root_path === path) {
+      toast("Workspace already open", "error");
+      return;
+    }
+  }
+  try {
+    var ws = await api("/workspaces", { method: "POST", body: JSON.stringify({ path: path }) });
+    closeModal();
+    // Append, update cache (Pitfall 3), re-render, switch
+    _workspaceList.push(ws);
+    try { localStorage.setItem("workspaces_cache", JSON.stringify(_workspaceList)); } catch(e) {}
+    ideRenderWorkspaceTabs();  // Must come AFTER _workspaceList.push (Pitfall 6)
+    switchWorkspace(ws.id);
+  } catch(err) {
+    toast(err.message || "Failed to add workspace", "error");
+  }
+}
+
+async function removeWorkspace(wsId) {
+  // D-10: Last-workspace gate (frontend-only)
+  if (_workspaceList.length <= 1) return;
+
+  // D-11: Count unsaved files and CC sessions
+  var wsState = _wsTabState[wsId] || { tabs: [], ccTabCount: 0 };
+  var unsavedCount = 0;
+  var wsTabs = wsState.tabs || [];
+  for (var i = 0; i < wsTabs.length; i++) {
+    if (wsTabs[i].modified) unsavedCount++;
+  }
+  var ccCount = wsState.ccTabCount || 0;
+
+  // D-12/D-13: Confirm only when there is something to lose
+  if (unsavedCount > 0 || ccCount > 0) {
+    var msg = "This workspace has " + unsavedCount + " unsaved file(s) and " +
+              ccCount + " CC session(s). Remove anyway?";
+    if (!confirm(msg)) return;
+  }
+
+  // D-18: Switch active workspace BEFORE teardown
+  // switchWorkspace needs the current state to be intact for save
+  if (wsId === _activeWorkspaceId) {
+    var currentIdx = -1;
+    for (var i = 0; i < _workspaceList.length; i++) {
+      if (_workspaceList[i].id === wsId) { currentIdx = i; break; }
+    }
+    // Pick adjacent: prefer previous, else next (skip self)
+    var nextWs = null;
+    if (currentIdx > 0) {
+      nextWs = _workspaceList[currentIdx - 1];
+    } else {
+      for (var i = 0; i < _workspaceList.length; i++) {
+        if (i !== currentIdx) { nextWs = _workspaceList[i]; break; }
+      }
+    }
+    if (nextWs) switchWorkspace(nextWs.id);
+  }
+
+  // API DELETE
+  try {
+    await api("/workspaces/" + wsId, { method: "DELETE" });
+  } catch(err) {
+    toast("Failed to remove workspace", "error");
+    return;
+  }
+
+  // D-14: Close terminal WebSocket connections directly
+  // DO NOT use termClose() -- it splices _termSessions which causes index mismatch (Pitfall 2)
+  var terms = _wsTermSessions[wsId] || [];
+  for (var i = 0; i < terms.length; i++) {
+    var s = terms[i];
+    if (s.ws) s.ws.close();
+    if (s.term) s.term.dispose();
+    if (s.el) s.el.remove();
+  }
+
+  // D-16: Prune localStorage keys with ws_{id}_ prefix
+  // Leave cc_hist_{sessionId} keys alone (globally unique UUIDs)
+  var prefix = "ws_" + wsId + "_";
+  var keysToRemove = [];
+  for (var i = 0; i < localStorage.length; i++) {
+    var k = localStorage.key(i);
+    if (k && k.startsWith(prefix)) keysToRemove.push(k);
+  }
+  keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
+
+  // D-17: Delete in-memory state
+  delete _wsTabState[wsId];
+  delete _wsTermSessions[wsId];
+  delete _wsTermActiveIdx[wsId];
+
+  // Remove from _workspaceList
+  for (var i = 0; i < _workspaceList.length; i++) {
+    if (_workspaceList[i].id === wsId) {
+      _workspaceList.splice(i, 1);
+      break;
+    }
+  }
+
+  // Pitfall 3: Update workspaces_cache after mutation
+  try { localStorage.setItem("workspaces_cache", JSON.stringify(_workspaceList)); } catch(e) {}
+
+  // Re-render tabs (close button disabled state updates automatically)
+  ideRenderWorkspaceTabs();
+}
+
+function enterWsRenameMode(wsId, currentName, nameSpan) {
+  // Guard: prevent double-activation
+  if (nameSpan.parentNode && nameSpan.parentNode.querySelector("input.ide-ws-rename-input")) return;
+
+  var input = document.createElement("input");
+  input.type = "text";
+  input.value = currentName;
+  input.maxLength = 64;  // D-24
+  input.className = "ide-ws-rename-input";
+
+  var committed = false;
+  function commit() {
+    if (committed) return;
+    committed = true;
+    var newName = input.value.trim();
+    if (!newName) {
+      // D-24: reject empty, restore original
+      nameSpan.textContent = currentName;
+      input.replaceWith(nameSpan);
+      return;
+    }
+    if (newName === currentName) {
+      // No change -- just restore
+      input.replaceWith(nameSpan);
+      return;
+    }
+    // Optimistic update: BOTH _workspaceList AND DOM (Pitfall 4)
+    for (var i = 0; i < _workspaceList.length; i++) {
+      if (_workspaceList[i].id === wsId) { _workspaceList[i].name = newName; break; }
+    }
+    nameSpan.textContent = newName;
+    input.replaceWith(nameSpan);
+    // Pitfall 3: persist to workspaces_cache
+    try { localStorage.setItem("workspaces_cache", JSON.stringify(_workspaceList)); } catch(e) {}
+    // D-21: API call
+    api("/workspaces/" + wsId, { method: "PATCH", body: JSON.stringify({ name: newName }) })
+      .catch(function(err) {
+        // Pitfall 4: Rollback BOTH _workspaceList AND nameSpan.textContent
+        for (var i = 0; i < _workspaceList.length; i++) {
+          if (_workspaceList[i].id === wsId) { _workspaceList[i].name = currentName; break; }
+        }
+        nameSpan.textContent = currentName;
+        try { localStorage.setItem("workspaces_cache", JSON.stringify(_workspaceList)); } catch(e) {}
+        toast("Rename failed", "error");
+      });
+  }
+
+  input.addEventListener("keydown", function(e) {
+    if (e.key === "Enter") { e.preventDefault(); commit(); }
+    if (e.key === "Escape") {
+      // D-22: Escape discards
+      committed = true;
+      nameSpan.textContent = currentName;
+      input.replaceWith(nameSpan);
+    }
+  });
+  input.addEventListener("blur", commit);  // D-23: blur commits
+
+  nameSpan.replaceWith(input);
+  input.focus();
+  input.select();  // D-20: auto-focused and text-selected
+}
+
+function switchWorkspace(newId) {
+  if (newId === _activeWorkspaceId) return;
+  var oldId = _activeWorkspaceId;
+
+  // 1. Save Monaco view state for current active tab
+  if (_monacoEditor && _ideActiveTab >= 0 && _ideTabs[_ideActiveTab]) {
+    var currentTab = _ideTabs[_ideActiveTab];
+    if (currentTab.model) {
+      currentTab.viewState = _monacoEditor.saveViewState();
+    }
+  }
+
+  // 2. Save current workspace state to keyed dicts
+  _saveCurrentWsState();
+
+  // 3. Hide current workspace's terminal DOM elements (per D-14)
+  var oldTerms = _wsTermSessions[oldId] || [];
+  for (var t = 0; t < oldTerms.length; t++) {
+    if (oldTerms[t].el) oldTerms[t].el.style.display = "none";
+  }
+
+  // 4. Switch active workspace
+  _activeWorkspaceId = newId;
+  _ensureWsState(newId);
+
+  // 5. Swap aliases to new workspace's state
+  _syncAliasesToWorkspace(newId);
+
+  // 6. Clear tree cache (prevents cross-workspace file bleed per Pitfall 3)
+  _ideTreeCache = {};
+  _ideExpandedDirs = new Set([""]);
+
+  // 7. Re-render workspace tab bar (active indicator update)
+  ideRenderWorkspaceTabs();
+
+  // 8. Re-root file explorer
+  ideLoadTree("");
+
+  // 9. Re-render editor tabs and activate current tab or show welcome
+  ideRenderTabs();
+  if (_ideTabs.length > 0 && _ideActiveTab >= 0) {
+    ideActivateTab();
+  } else {
+    // Show welcome screen, hide editor
+    var welcome = document.getElementById("ide-welcome");
+    var editorContainer = document.getElementById("ide-editor-container");
+    var ccContainer = document.getElementById("ide-cc-container");
+    if (welcome) welcome.style.display = "flex";
+    if (editorContainer) editorContainer.style.display = "none";
+    if (ccContainer) ccContainer.style.display = "none";
+  }
+
+  // 10. Show new workspace's terminals and re-fit (per D-14, Pitfall 4)
+  var newTerms = _wsTermSessions[newId] || [];
+  if (newTerms.length > 0) {
+    var activeTermIdx = _wsTermActiveIdx[newId];
+    if (activeTermIdx >= 0 && activeTermIdx < newTerms.length) {
+      newTerms[activeTermIdx].el.style.display = "block";
+    }
+  }
+  termRenderTabs();
+  setTimeout(function() {
+    if (typeof termFitAll === "function") termFitAll();
+  }, 50);
+
+  // 11. Persist active workspace (per D-04)
+  try { localStorage.setItem("active_workspace_id", _activeWorkspaceId); } catch(e) {}
+
+  // 12. Reload CC session sidebar if a CC tab is active
+  // (ccLoadSessionSidebar already filters by _activeWorkspaceId from Plan 02)
+}
+
 function ideDetectLanguage(filename) {
   if (!filename) return "plaintext";
   var ext = filename.split(".").pop().toLowerCase();
@@ -3416,7 +4006,7 @@ function ideDetectLanguage(filename) {
 function renderCode() {
   var pageContent = document.getElementById("page-content");
   var persistent = document.getElementById("ide-persistent");
-  if (!pageContent || !persistent || state.page !== "code") return;
+  if (!pageContent || !persistent || state.page !== "workspace") return;
 
   // Hide normal page content, show persistent IDE container
   pageContent.style.display = "none";
@@ -3473,12 +4063,13 @@ function renderCode() {
         </div>
         <div class="ide-main" style="flex:1;display:flex;flex-direction:row;overflow:hidden">
           <div class="ide-main-editor-area" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0">
+            <div id="ide-workspace-tabs" class="ide-workspace-tabs"></div>
             <div id="ide-tabs" class="ide-tabs"></div>
             <div id="ide-editor-container" class="ide-editor-container" style="flex:1;overflow:hidden"></div>
             <div id="ide-cc-container" class="ide-cc-container" style="display:none;flex:1;overflow:hidden;background:#1a1a2e"></div>
             <div id="ide-welcome" class="ide-welcome" style="display:flex">
-              <h2>Agent42 IDE</h2>
-              <p>Select a file from the explorer to start editing.<br>Changes are saved with Ctrl+S.</p>
+              <h2>Agent42 Workspace</h2>
+              <p>Edit files, chat with AI, or open an agent session.<br>Use the Chat panel for quick questions.</p>
               <button class="ide-cc-launch-btn" onclick="ideOpenCCChat('local')">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:middle"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
                 Open Claude Code
@@ -3495,6 +4086,7 @@ function renderCode() {
           <button class="ide-panel-tab" onclick="idePanelTab('problems')">PROBLEMS</button>
           <button class="ide-panel-tab" onclick="idePanelTab('output')">OUTPUT</button>
           <button class="ide-panel-tab active" onclick="idePanelTab('terminal')">TERMINAL</button>
+          <button class="ide-panel-tab" onclick="runLint()" style="margin-left:auto;color:#58a6ff;font-size:11px" title="Run ruff lint on workspace">&#9654; Lint</button>
           <div class="ide-panel-actions">
             <div id="ide-terminal-tabs" class="ide-terminal-tabs"></div>
             <div style="display:flex;gap:0.2rem;align-items:center;position:relative">
@@ -3527,6 +4119,8 @@ function renderCode() {
           </div>
         </div>
         <div id="ide-terminal-container" style="flex:1;overflow:hidden"></div>
+        <div id="ide-problems-container" style="flex:1;overflow:auto;display:none;padding:8px;font-family:var(--mono);font-size:12px;color:#c9d1d9"></div>
+        <div id="ide-output-container" style="flex:1;overflow:auto;display:none;padding:8px;font-family:var(--mono);font-size:12px;color:#c9d1d9"></div>
       </div>
       <div id="ide-statusbar" class="ide-statusbar">
         <div class="ide-statusbar-left">
@@ -3546,6 +4140,7 @@ function renderCode() {
   ideInitMonaco();
   initDragHandle();
   initPanelDragHandle();
+  initWorkspaceTabs();
 
   // Open default local terminal on first load
   if (_termSessions.length === 0) {
@@ -3563,7 +4158,7 @@ function renderCode() {
   if (!window._ideKeyListenerAttached) {
     window._ideKeyListenerAttached = true;
     document.addEventListener("keydown", function(e) {
-      if (state.page !== "code") return;
+      if (state.page !== "workspace") return;
       if (e.key === "`" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         termToggle();
@@ -3686,7 +4281,9 @@ function ideInitMonaco() {
 
 async function ideLoadTree(path) {
   try {
-    const res = await fetch("/api/ide/tree?path=" + encodeURIComponent(path), {
+    var treeUrl = "/api/ide/tree?path=" + encodeURIComponent(path);
+    if (_activeWorkspaceId) treeUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
+    const res = await fetch(treeUrl, {
       headers: { Authorization: "Bearer " + state.token },
     });
     const data = await res.json();
@@ -3752,17 +4349,20 @@ async function ideOpenFile(path) {
   try {
     var statusEl = document.getElementById("ide-status-left");
     if (statusEl) statusEl.textContent = "Loading " + path + "...";
-    var res = await fetch("/api/ide/file?path=" + encodeURIComponent(path), {
+    var fileUrl = "/api/ide/file?path=" + encodeURIComponent(path);
+    if (_activeWorkspaceId) fileUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
+    var res = await fetch(fileUrl, {
       headers: { Authorization: "Bearer " + state.token },
     });
     if (!res.ok) { toast("Failed to load file", "error"); return; }
     var data = await res.json();
-    var uri = monaco.Uri.parse("file:///" + path);
+    var uri = monaco.Uri.parse(makeWorkspaceUri(_activeWorkspaceId || "default", path));
     var model = monaco.editor.getModel(uri);
     if (model) model.dispose();
     model = monaco.editor.createModel(data.content, data.language, uri);
-    _ideTabs.push({ path: path, modified: false, model: model, language: data.language, originalContent: data.content });
+    _ideTabs.push({ path: path, modified: false, model: model, language: data.language, originalContent: data.content, workspaceId: _activeWorkspaceId });
     _ideActiveTab = _ideTabs.length - 1;
+    if (_activeWorkspaceId) _saveCurrentWsState();
     ideActivateTab();
     if (statusEl) statusEl.textContent = path;
   } catch (e) {
@@ -3771,6 +4371,15 @@ async function ideOpenFile(path) {
 }
 
 function ideActivateTab() {
+  // Save view state of the currently displayed model before switching
+  if (_monacoEditor) {
+    for (var s = 0; s < _ideTabs.length; s++) {
+      if (_ideTabs[s].model && _monacoEditor.getModel() === _ideTabs[s].model) {
+        _ideTabs[s].viewState = _monacoEditor.saveViewState();
+        break;
+      }
+    }
+  }
   if (_ideActiveTab < 0 || !_ideTabs[_ideActiveTab]) return;
   var tab = _ideTabs[_ideActiveTab];
   var container = document.getElementById("ide-editor-container");
@@ -3808,6 +4417,9 @@ function ideActivateTab() {
     // File tab: show Monaco, hide CC terminal
     if (_monacoEditor) {
       _monacoEditor.setModel(tab.model);
+      if (tab.viewState) {
+        _monacoEditor.restoreViewState(tab.viewState);
+      }
       if (container) container.style.display = "block";
     }
     if (welcome) welcome.style.display = "none";
@@ -3862,6 +4474,7 @@ function ideCloseTab(index) {
     if (tab.model) tab.model.dispose();
   }
   _ideTabs.splice(index, 1);
+  if (_activeWorkspaceId) _saveCurrentWsState();
   if (_ideActiveTab >= _ideTabs.length) _ideActiveTab = _ideTabs.length - 1;
   if (_ideTabs.length === 0) {
     _ideActiveTab = -1;
@@ -3939,6 +4552,7 @@ function ccOpenDiffFromToolCard(filePath, toolId) {
 
   // Fetch original file content from server
   var url = "/api/ide/file?path=" + encodeURIComponent(filePath);
+  if (_activeWorkspaceId) url += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
   fetch(url, { headers: { Authorization: "Bearer " + state.token } }).then(function(resp) {
     if (!resp.ok) return Promise.resolve("");
     return resp.text();
@@ -4809,11 +5423,22 @@ function ccMakeWsHandler(tab, msgs) {
 // -- CC Session Management (SESS-01 through SESS-06) --------------------------
 
 function ccGetStoredSessionId() {
-  try { return sessionStorage.getItem("cc_active_session") || ""; } catch(e) { return ""; }
+  try {
+    if (_activeWorkspaceId) {
+      return sessionStorage.getItem(wsKey(_activeWorkspaceId, "cc_active_session")) || "";
+    }
+    return sessionStorage.getItem("cc_active_session") || "";
+  } catch(e) { return ""; }
 }
 
 function ccStoreSessionId(sessionId) {
-  try { sessionStorage.setItem("cc_active_session", sessionId); } catch(e) {}
+  try {
+    if (_activeWorkspaceId) {
+      sessionStorage.setItem(wsKey(_activeWorkspaceId, "cc_active_session"), sessionId);
+    } else {
+      sessionStorage.setItem("cc_active_session", sessionId);
+    }
+  } catch(e) {}
 }
 
 function ccRelativeTime(isoString) {
@@ -4847,7 +5472,9 @@ function ccLoadSessionSidebar(tab) {
   var listEl = sidebar.querySelector(".cc-session-list");
   if (!listEl) return;
 
-  fetch("/api/cc/sessions", {
+  var sessionsUrl = "/api/cc/sessions";
+  if (_activeWorkspaceId) sessionsUrl += "?workspace_id=" + encodeURIComponent(_activeWorkspaceId);
+  fetch(sessionsUrl, {
     headers: { "Authorization": "Bearer " + (state.token || "") }
   })
   .then(function(resp) { return resp.json(); })
@@ -4949,6 +5576,7 @@ function ccResumeSession(tab, wsSessionId, title) {
   var protocol = location.protocol === "https:" ? "wss:" : "ws:";
   var wsUrl = protocol + "//" + location.host + "/ws/cc-chat?token="
     + encodeURIComponent(state.token) + "&session_id=" + encodeURIComponent(wsSessionId);
+  if (_activeWorkspaceId) wsUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
 
   var _ccResumeReconnectCount = 0;
   var _ccResumeReconnectTimer = null;
@@ -5035,13 +5663,17 @@ function ideOpenCCChat(node) {
   var storedSession = ccGetStoredSessionId();
   var sessionResumed = false;
   var sessionId;
-  if (storedSession && _ccTabCounter === 1) {
+  var wsTabCount = _activeWorkspaceId ? (_wsTabState[_activeWorkspaceId] || {}).ccTabCount || 0 : _ccTabCounter;
+  if (storedSession && wsTabCount === 0) {
     sessionId = storedSession;
     sessionResumed = true;
   } else {
     sessionId = (typeof crypto !== "undefined" && crypto.randomUUID)
       ? crypto.randomUUID()
       : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+  if (_activeWorkspaceId && _wsTabState[_activeWorkspaceId]) {
+    _wsTabState[_activeWorkspaceId].ccTabCount = (_wsTabState[_activeWorkspaceId].ccTabCount || 0) + 1;
   }
   ccStoreSessionId(sessionId);
 
@@ -5199,6 +5831,7 @@ function ideOpenCCChat(node) {
   var protocol = location.protocol === "https:" ? "wss:" : "ws:";
   var wsUrl = protocol + "//" + location.host + "/ws/cc-chat?token="
     + encodeURIComponent(state.token) + "&session_id=" + encodeURIComponent(sessionId);
+  if (_activeWorkspaceId) wsUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
 
   // Guard against duplicate WS (Pitfall 6)
   if (tab.ws && tab.ws.readyState <= 1) { ideActivateTab(); return; }
@@ -5290,6 +5923,13 @@ function ccSetSendingState(tab, sending) {
   var stopBtn2 = document.getElementById("cc-stop-" + tab.tabIdx);
   if (sendBtn) sendBtn.style.display = sending ? "none" : "inline-block";
   if (stopBtn2) stopBtn2.style.display = sending ? "inline-block" : "none";
+  // Panel chat: re-enable input/button
+  if (tab === state.panelTab && tab.el) {
+    var pInput = document.getElementById("panel-chat-input");
+    var pBtn = tab.el.querySelector(".panel-chat-send-btn");
+    if (pInput) pInput.disabled = sending;
+    if (pBtn) pBtn.disabled = sending;
+  }
 }
 
 function ccScrollToBottom(tabIdx) {
@@ -5652,10 +6292,12 @@ async function ideSaveCurrentFile() {
   var statusEl = document.getElementById("ide-status-left");
   try {
     if (statusEl) statusEl.textContent = "Saving " + tab.path + "...";
+    var saveBody = { path: tab.path, content: content };
+    if (_activeWorkspaceId) saveBody.workspace_id = _activeWorkspaceId;
     var res = await fetch("/api/ide/file", {
       method: "POST",
       headers: { Authorization: "Bearer " + state.token, "Content-Type": "application/json" },
-      body: JSON.stringify({ path: tab.path, content: content }),
+      body: JSON.stringify(saveBody),
     });
     if (!res.ok) { toast("Save failed", "error"); return; }
     tab.modified = false;
@@ -5797,6 +6439,7 @@ function termNew(node) {
     // Build WebSocket URL
     var protocol = location.protocol === "https:" ? "wss:" : "ws:";
     var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" + encodeURIComponent(state.token) + "&node=" + encodeURIComponent(node || "local");
+    if (_activeWorkspaceId) wsUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
 
     // Build label: "bash (remote)" for remote, "bash N" for local
     var localCount = _termSessions.filter(function(s) { return s.node !== "remote" && s.label.indexOf("bash") === 0; }).length;
@@ -5857,6 +6500,7 @@ function termNewClaude(node) {
 
     var protocol = location.protocol === "https:" ? "wss:" : "ws:";
     var wsUrl = protocol + "//" + location.host + "/ws/terminal?token=" + encodeURIComponent(state.token) + "&node=" + encodeURIComponent(node || "local") + "&cmd=claude";
+    if (_activeWorkspaceId) wsUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
 
     var label = (node === "remote") ? "Claude (remote)" : "Claude (local)";
 
@@ -6142,8 +6786,7 @@ function ideToggleMainSidebar() {
         {icon:'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4', page:'tasks', title:'Mission Control'},
         {icon:'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', page:'status', title:'Status'},
         {icon:'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z', page:'approvals', title:'Approvals'},
-        {icon:'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z', page:'chat', title:'Chat'},
-        {icon:'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4', page:'code', title:'Code'},
+        {icon:'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4', page:'workspace', title:'Workspace'},
         {icon:'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z', page:'tools', title:'Tools'},
         {icon:'M13 10V3L4 14h7v7l9-11h-7z', page:'skills', title:'Skills'},
         {icon:'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z', page:'agents', title:'Agents'},
@@ -6161,7 +6804,7 @@ function ideToggleMainSidebar() {
     } else {
       // Update active state
       var btns = miniBar.querySelectorAll('.ide-mini-btn');
-      var pages = ['tasks','status','approvals','chat','code','tools','skills','agents','teams','apps','reports','settings'];
+      var pages = ['tasks','status','approvals','workspace','tools','skills','agents','teams','apps','reports','settings'];
       btns.forEach(function(b, i) { b.classList.toggle('active', pages[i] === state.page); });
     }
     miniBar.style.display = "flex";
@@ -6176,13 +6819,74 @@ function ideToggleMainSidebar() {
 
 function idePanelTab(tab) {
   var btns = document.querySelectorAll(".ide-panel-tab");
-  btns.forEach(function(b) { b.classList.remove("active"); });
-  event.currentTarget.classList.add("active");
-  // Only terminal tab is functional for now
+  btns.forEach(function(b) {
+    b.classList.remove("active");
+    // Match tab name from button text (PROBLEMS, OUTPUT, TERMINAL)
+    if (b.textContent.trim().toLowerCase() === tab.toLowerCase()) b.classList.add("active");
+  });
   var termContainer = document.getElementById("ide-terminal-container");
-  if (termContainer) termContainer.style.display = tab === "terminal" ? "" : "none";
   var termTabs = document.getElementById("ide-terminal-tabs");
+  var problemsContainer = document.getElementById("ide-problems-container");
+  var outputContainer = document.getElementById("ide-output-container");
+  if (termContainer) termContainer.style.display = tab === "terminal" ? "" : "none";
   if (termTabs) termTabs.style.display = tab === "terminal" ? "" : "none";
+  if (problemsContainer) problemsContainer.style.display = tab === "problems" ? "" : "none";
+  if (outputContainer) outputContainer.style.display = tab === "output" ? "" : "none";
+}
+
+async function runLint() {
+  var outputEl = document.getElementById("ide-output-container");
+  var problemsEl = document.getElementById("ide-problems-container");
+  if (outputEl) outputEl.textContent = "Running ruff check...\n";
+  // Switch to output tab
+  idePanelTab("output");
+  try {
+    var res = await fetch(API + "/ide/lint?workspace_id=" + _activeWorkspaceId, {
+      headers: { "Authorization": "Bearer " + state.token }
+    });
+    var data = await res.json();
+    // Populate OUTPUT with raw lint text (safe — textContent only)
+    if (outputEl) {
+      outputEl.textContent = data.raw || "No lint output";
+    }
+    // Populate PROBLEMS with structured issues (DOM-built, no innerHTML)
+    if (problemsEl && data.issues && data.issues.length > 0) {
+      while (problemsEl.firstChild) problemsEl.removeChild(problemsEl.firstChild);
+      var header = document.createElement("div");
+      header.style.cssText = "margin-bottom:6px;color:#8b949e;font-size:11px";
+      header.textContent = data.issues.length + " problem(s) found";
+      problemsEl.appendChild(header);
+      data.issues.forEach(function(issue) {
+        var row = document.createElement("div");
+        row.style.cssText = "padding:2px 0;cursor:pointer";
+        row.onclick = function() { ideOpenFile(issue.file); };
+        var icon = document.createElement("span");
+        icon.style.cssText = "font-weight:bold;margin-right:6px;color:" +
+          (issue.severity === "error" ? "#f85149" : "#d29922");
+        icon.textContent = issue.severity === "error" ? "E" : "W";
+        row.appendChild(icon);
+        var loc = document.createElement("span");
+        loc.style.color = "#58a6ff";
+        loc.textContent = issue.file + ":" + issue.line;
+        row.appendChild(loc);
+        var code = document.createElement("span");
+        code.style.cssText = "color:#8b949e;margin:0 4px";
+        code.textContent = issue.code;
+        row.appendChild(code);
+        var msg = document.createTextNode(issue.message);
+        row.appendChild(msg);
+        problemsEl.appendChild(row);
+      });
+    } else if (problemsEl) {
+      problemsEl.textContent = "No problems found.";
+    }
+    // Auto-switch to problems if issues found
+    if (data.issues && data.issues.length > 0) {
+      idePanelTab("problems");
+    }
+  } catch(err) {
+    if (outputEl) outputEl.textContent = "Lint failed: " + err.message;
+  }
 }
 
 function termSplit() {
@@ -6345,10 +7049,12 @@ function ideToggleChatPanel() {
   }
 }
 
-async function ideOpenChatPanel() {
+function ideOpenChatPanel() {
   var panel = document.getElementById("ide-cc-panel");
   var handle = document.getElementById("ide-panel-drag-handle");
   if (!panel) return;
+
+  // Show panel visually
   var savedWidth = 400;
   try { savedWidth = parseInt(localStorage.getItem("cc_panel_width")) || 400; } catch(e) {}
   panel.style.display = "flex";
@@ -6358,22 +7064,159 @@ async function ideOpenChatPanel() {
   if (handle) handle.style.display = "";
   _chatPanelMode = true;
 
-  // Load or create ide_chat session
-  if (!state.idePanelSessionId) {
-    try {
-      var savedId = localStorage.getItem("ide_panel_session_id");
-      if (savedId) {
-        var msgs = await api("/chat/sessions/" + savedId + "/messages");
-        state.idePanelSessionId = savedId;
-        state.idePanelMessages = msgs || [];
-      }
-    } catch(e) {
-      localStorage.removeItem("ide_panel_session_id");
-    }
+  // If panel already built and WS alive, just show it
+  if (state.panelTab && state.panelTab.ws && state.panelTab.ws.readyState <= 1) {
+    setTimeout(function() { if (_monacoEditor) _monacoEditor.layout(); }, 50);
+    return;
   }
 
-  renderIdeChatPanel();
+  // Build panel DOM (once)
+  if (!panel.querySelector(".ide-panel-chat")) {
+    _buildPanelChatDOM(panel);
+  }
+
+  // Open WebSocket (lightweight CC — no MCP servers)
+  _connectPanelWS();
+
   setTimeout(function() { if (_monacoEditor) _monacoEditor.layout(); }, 50);
+}
+
+function _buildPanelChatDOM(panel) {
+  var chatDiv = document.createElement("div");
+  chatDiv.className = "ide-panel-chat ide-cc-chat";
+
+  // Header
+  var header = document.createElement("div");
+  header.className = "panel-chat-header";
+  var title = document.createElement("span");
+  title.textContent = "Chat";
+  var headerRight = document.createElement("div");
+  headerRight.style.display = "flex";
+  headerRight.style.gap = "0.4rem";
+  headerRight.style.alignItems = "center";
+  var escalateBtn = document.createElement("button");
+  escalateBtn.textContent = "Agent";
+  escalateBtn.title = "Open full agent session";
+  escalateBtn.className = "panel-escalate-btn";
+  escalateBtn.setAttribute("onclick", "panelEscalateToCC()");
+  var closeBtn = document.createElement("button");
+  closeBtn.textContent = "\u2715";
+  closeBtn.title = "Close panel";
+  closeBtn.setAttribute("onclick", "ideCloseChatPanel()");
+  headerRight.appendChild(escalateBtn);
+  headerRight.appendChild(closeBtn);
+  header.appendChild(title);
+  header.appendChild(headerRight);
+  chatDiv.appendChild(header);
+
+  // Messages container (same class as CC tabs for ccMakeWsHandler compat)
+  var msgs = document.createElement("div");
+  msgs.className = "cc-chat-messages";
+  msgs.id = "panel-messages";
+  // Welcome message
+  var welcome = document.createElement("div");
+  welcome.className = "panel-chat-welcome";
+  var welcomeP = document.createElement("p");
+  welcomeP.textContent = "Quick chat powered by your CC subscription. Use \"Agent\" for tasks requiring tools.";
+  welcome.appendChild(welcomeP);
+  msgs.appendChild(welcome);
+  chatDiv.appendChild(msgs);
+
+  // Composer
+  var composer = document.createElement("div");
+  composer.className = "panel-chat-composer";
+  var composerInner = document.createElement("div");
+  composerInner.className = "panel-chat-composer-inner";
+  var input = document.createElement("textarea");
+  input.id = "panel-chat-input";
+  input.className = "panel-chat-input";
+  input.rows = 1;
+  input.placeholder = "Ask about this code...";
+  input.setAttribute("oninput", "autoGrowTextarea(this)");
+  input.setAttribute("onkeydown", "if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();panelSend()}");
+  var sendBtn = document.createElement("button");
+  sendBtn.className = "panel-chat-send-btn";
+  sendBtn.textContent = "Send";
+  sendBtn.setAttribute("onclick", "panelSend()");
+  composerInner.appendChild(input);
+  composerInner.appendChild(sendBtn);
+  composer.appendChild(composerInner);
+  chatDiv.appendChild(composer);
+
+  panel.appendChild(chatDiv);
+}
+
+function _connectPanelWS() {
+  // Restore or create session ID
+  var sessionId = "";
+  try { sessionId = localStorage.getItem("cc_panel_session_id") || ""; } catch(e) {}
+  if (!sessionId) {
+    sessionId = crypto.randomUUID ? crypto.randomUUID() : "panel-" + Date.now();
+    try { localStorage.setItem("cc_panel_session_id", sessionId); } catch(e) {}
+  }
+
+  var panel = document.getElementById("ide-cc-panel");
+  var msgsDiv = panel ? panel.querySelector(".cc-chat-messages") : null;
+  if (!msgsDiv) return;
+
+  // Create a virtual tab object (same shape as CC tabs for handler compat)
+  var tab = {
+    type: "panel-chat",
+    path: "Chat",
+    chatPanel: true,
+    el: panel.querySelector(".ide-panel-chat"),
+    ws: null,
+    node: "local",
+    tabIdx: -1,
+    sending: false,
+    autoScroll: true,
+    streamBuffer: "",
+    streamMsgEl: null,
+    streamTimer: null,
+    ccSessionId: sessionId,
+    toolCards: {},
+    trustMode: false,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCostUsd: 0,
+    _lastTurnHash: "",
+    gsd_workstream: "",
+    gsd_phase: "",
+  };
+  state.panelTab = tab;
+
+  var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  var wsUrl = protocol + "//" + location.host + "/ws/cc-chat?token="
+    + encodeURIComponent(state.token) + "&session_id=" + encodeURIComponent(sessionId)
+    + "&lightweight=true";
+  if (_activeWorkspaceId) wsUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
+
+  var ws = new WebSocket(wsUrl);
+  tab.ws = ws;
+
+  ws.onopen = function() {
+    // Remove welcome, show connected notice
+    var welcome = msgsDiv.querySelector(".panel-chat-welcome");
+    if (welcome) welcome.remove();
+    var notice = document.createElement("div");
+    notice.className = "cc-system-notice";
+    notice.textContent = "Connected";
+    notice.style.cssText = "text-align:center;color:var(--success);font-size:0.75rem;padding:0.5rem;";
+    msgsDiv.appendChild(notice);
+    setTimeout(function() { notice.style.opacity = "0"; setTimeout(function() { notice.remove(); }, 500); }, 2000);
+  };
+
+  ws.onmessage = ccMakeWsHandler(tab, msgsDiv);
+  ws.onerror = function() {};
+
+  ws.onclose = function() {
+    // Show disconnected notice
+    var disc = document.createElement("div");
+    disc.className = "cc-system-notice";
+    disc.textContent = "Disconnected";
+    disc.style.cssText = "text-align:center;color:var(--text-muted);font-size:0.75rem;padding:0.5rem;";
+    if (msgsDiv) msgsDiv.appendChild(disc);
+  };
 }
 
 function ideCloseChatPanel() {
@@ -6384,185 +7227,34 @@ function ideCloseChatPanel() {
   panel.style.display = "none";
   if (handle) handle.style.display = "none";
   _chatPanelMode = false;
+  // Keep WS alive for fast reopen — don't disconnect
   setTimeout(function() { if (_monacoEditor) _monacoEditor.layout(); }, 50);
 }
 
-// -- IDE Chat Panel Rendering --
-// Note: innerHTML usage here builds chat UI from trusted internal state only.
-// All user content is escaped via esc() through buildChatMsgHtml().
-
-function renderIdeChatPanel() {
-  var panel = document.getElementById("ide-cc-panel");
-  if (!panel) return;
-
-  var msgs = state.idePanelMessages;
-  var msgsHtml = "";
-  if (msgs.length === 0) {
-    msgsHtml = '<div class="panel-chat-welcome">' +
-      '<p>Ask questions about your code. Responses use your configured LLM.</p>' +
-      '</div>';
-  } else {
-    msgsHtml = msgs.map(function(m, i) {
-      return buildChatMsgHtml(m, i, "state.idePanelMessages", false);
-    }).join("");
-  }
-
-  // Context badge
-  var contextBadge = "";
-  if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab] && _ideTabs[_ideActiveTab].type === "file") {
-    var fname = _ideTabs[_ideActiveTab].path.split("/").pop();
-    contextBadge = '<div class="panel-context-badge" title="' + esc(_ideTabs[_ideActiveTab].path) + '">' + esc(fname) + '</div>';
-  }
-
-  panel.innerHTML =
-    '<div class="ide-panel-chat">' +
-      '<div class="panel-chat-header">' +
-        '<span>Chat</span>' +
-        '<button onclick="ideCloseChatPanel()" title="Close panel">\u2715</button>' +
-      '</div>' +
-      '<div class="panel-chat-messages" id="panel-messages">' + msgsHtml + '</div>' +
-      '<div class="panel-chat-composer">' +
-        contextBadge +
-        '<div class="panel-chat-composer-inner">' +
-          '<textarea id="panel-chat-input" class="panel-chat-input" rows="1" placeholder="Ask about this code..."' +
-            ' oninput="autoGrowTextarea(this)"' +
-            ' onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();sendPanelChatMessage()}"></textarea>' +
-          '<button class="panel-chat-send-btn" onclick="sendPanelChatMessage()">Send</button>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-
-  var container = document.getElementById("panel-messages");
-  if (container) container.scrollTop = container.scrollHeight;
-}
-
-function appendPanelChatMsg(msg) {
-  var container = document.getElementById("panel-messages");
-  if (!container) return false;
-
-  var welcome = container.querySelector(".panel-chat-welcome");
-  if (welcome) welcome.remove();
-
-  var idx = state.idePanelMessages.indexOf(msg);
-  var msgIdx = idx >= 0 ? idx : state.idePanelMessages.length - 1;
-  var html = buildChatMsgHtml(msg, msgIdx, "state.idePanelMessages", false);
-
-  var typing = document.getElementById("panel-typing-indicator");
-  if (typing) typing.remove();
-
-  container.insertAdjacentHTML("beforeend", html);
-
-  if (state.idePanelSending) {
-    _insertPanelTypingIndicator(container);
-  }
-
-  container.scrollTop = container.scrollHeight;
-  return true;
-}
-
-function updatePanelTypingIndicator(show) {
-  var container = document.getElementById("panel-messages");
-  if (!container) return false;
-
-  var existing = document.getElementById("panel-typing-indicator");
-  if (show && !existing) {
-    _insertPanelTypingIndicator(container);
-    container.scrollTop = container.scrollHeight;
-  } else if (!show && existing) {
-    existing.remove();
-  }
-
-  var input = document.getElementById("panel-chat-input");
-  if (input) input.disabled = show;
-  var chatEl = container.closest(".ide-panel-chat");
-  var sendBtn = chatEl ? chatEl.querySelector(".panel-chat-send-btn") : null;
-  if (sendBtn) sendBtn.disabled = show;
-
-  return true;
-}
-
-function _insertPanelTypingIndicator(container) {
-  var div = document.createElement("div");
-  div.className = "chat-msg chat-msg-agent";
-  div.id = "panel-typing-indicator";
-  var avatar = document.createElement("div");
-  avatar.className = "chat-msg-avatar";
-  avatar.textContent = "A";
-  var body = document.createElement("div");
-  body.className = "chat-msg-body";
-  var dots = document.createElement("div");
-  dots.className = "typing-dots";
-  dots.appendChild(document.createElement("span"));
-  dots.appendChild(document.createElement("span"));
-  dots.appendChild(document.createElement("span"));
-  body.appendChild(dots);
-  div.appendChild(avatar);
-  div.appendChild(body);
-  container.appendChild(div);
-}
-
-// -- IDE Chat Panel Send --
-
-async function sendPanelChatMessage() {
+function panelSend() {
+  var tab = state.panelTab;
+  if (!tab || !tab.ws || tab.ws.readyState !== 1) return;
   var input = document.getElementById("panel-chat-input");
   var text = (input ? input.value : "").trim();
-  if (!text || state.idePanelSending) return;
-  state.idePanelSending = true;
+  if (!text || tab.sending) return;
 
-  // Gather file context from Monaco editor
-  var fileContext = "";
-  if (_ideActiveTab >= 0 && _ideTabs[_ideActiveTab] && _ideTabs[_ideActiveTab].type === "file") {
-    var tab = _ideTabs[_ideActiveTab];
-    var sel = _monacoEditor ? _monacoEditor.getSelection() : null;
-    if (sel && !sel.isEmpty() && _monacoEditor.getModel()) {
-      fileContext = "File: " + tab.path + "\nSelected code:\n" + _monacoEditor.getModel().getValueInRange(sel);
-    } else if (tab.model) {
-      fileContext = "File: " + tab.path + "\n" + tab.model.getValue().substring(0, 3000);
-    }
-  }
-
-  var newMsg = {
-    id: "local-" + Date.now(),
-    role: "user",
-    content: text,
-    timestamp: Date.now() / 1000,
-    sender: "You",
-    session_id: state.idePanelSessionId,
-  };
-  state.idePanelMessages.push(newMsg);
+  // Append user bubble (reuse CC pattern)
+  ccAppendUserBubble(tab, text);
   if (input) { input.value = ""; input.style.height = "auto"; }
 
-  appendPanelChatMsg(newMsg);
-  updatePanelTypingIndicator(true);
+  // Send via WebSocket
+  tab.ws.send(JSON.stringify({ message: text }));
+  tab.sending = true;
 
-  try {
-    // Ensure session exists
-    if (!state.idePanelSessionId) {
-      var session = await api("/chat/sessions", {
-        method: "POST",
-        body: JSON.stringify({ title: "IDE Chat", session_type: "ide_chat" }),
-      });
-      state.idePanelSessionId = session.id;
-      try { localStorage.setItem("ide_panel_session_id", session.id); } catch(e) {}
-    }
+  // Update button state
+  var sendBtn = tab.el ? tab.el.querySelector(".panel-chat-send-btn") : null;
+  if (sendBtn) sendBtn.disabled = true;
+  if (input) input.disabled = true;
+}
 
-    await api("/chat/sessions/" + state.idePanelSessionId + "/send", {
-      method: "POST",
-      body: JSON.stringify({ message: text, file_context: fileContext }),
-    });
-  } catch (e) {
-    state.idePanelSending = false;
-    updatePanelTypingIndicator(false);
-    var errMsg = {
-      id: "err-" + Date.now(),
-      role: "assistant",
-      content: "Failed to send: " + (e.message || "Unknown error"),
-      timestamp: Date.now() / 1000,
-      sender: "Agent42",
-    };
-    state.idePanelMessages.push(errMsg);
-    appendPanelChatMsg(errMsg);
-  }
+function panelEscalateToCC() {
+  // Open a full CC tab with tools
+  ideOpenCCChat("local");
 }
 
 // ---------------------------------------------------------------------------
@@ -7703,7 +8395,7 @@ function renderRoutingPanel() {
 async function loadAll() {
   await Promise.all([
     loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(),
-    loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(), loadRewardsStatus(),
+    loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(), loadRewardsStatus(), loadGsdWorkstreams(),
     loadChatMessages(), loadTokenStats(), loadChatSessions(), loadCodeSessions(),
     loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(), loadGithubAccounts(), loadOrStatus(),
     loadReports(), loadProfiles(), loadPersona(), loadRoutingModels(), loadRoutingConfig(),
@@ -7753,17 +8445,16 @@ function render() {
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks');closeMobileSidebar()">&#127919; Mission Control</a>
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status');closeMobileSidebar()">&#128200; Status</a>
           <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals');closeMobileSidebar()">&#128274; Approvals ${approvalBadge}</a>
-          <a href="#" data-page="chat" class="${state.page === "chat" ? "active" : ""}" onclick="event.preventDefault();navigate('chat');closeMobileSidebar()">&#128172; Chat</a>
-          <a href="#" data-page="code" class="${state.page === "code" ? "active" : ""}" onclick="event.preventDefault();navigate('code');closeMobileSidebar()">&#128187; Code</a>
-          <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
-          <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills');closeMobileSidebar()">&#9889; Skills</a>
+          <a href="#" data-page="workspace" class="${state.page === "workspace" ? "active" : ""}" onclick="event.preventDefault();navigate('workspace');closeMobileSidebar()">&#128187; Workspaces</a>
+          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Sandboxed Apps</a>
           <a href="#" data-page="agents" class="${state.page === "agents" ? "active" : ""}" onclick="event.preventDefault();navigate('agents');closeMobileSidebar()">&#129302; Agents</a>
           <a href="#" data-page="teams" class="${state.page === "teams" ? "active" : ""}" onclick="event.preventDefault();navigate('teams');closeMobileSidebar()">&#129309; Teams</a>
-          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Apps</a>
+          <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
+          <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills');closeMobileSidebar()">&#9889; Skills</a>
           <a href="#" data-page="reports" class="${state.page === "reports" ? "active" : ""}" onclick="event.preventDefault();navigate('reports');closeMobileSidebar()">&#128202; Reports</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings');closeMobileSidebar()">&#9881; Settings</a>
         </nav>
-        <div id="gsd-indicator-slot">${state.status && state.status.gsd_workstream ? `<div class="gsd-indicator"><div class="gsd-workstream">&#9654; ${state.status.gsd_workstream}</div><div class="gsd-phase">${state.status.gsd_phase ? "Phase " + state.status.gsd_phase : ""}</div></div>` : ""}</div>
+        <div id="gsd-indicator-slot"></div>
         <div class="sidebar-footer">
           <span id="ws-dot" class="ws-dot ${state.wsConnected ? "connected" : "disconnected"}"></span>
           <span id="ws-label">${state.wsConnected ? "Connected to the Guide" : "Disconnected"}</span>
@@ -7777,7 +8468,7 @@ function render() {
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
           <button class="ide-sidebar-toggle" onclick="ideToggleMainSidebar()" title="Toggle sidebar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg></button>
-          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", agents: "Agent Profiles", apps: "Apps", reports: "Reports", settings: "Settings", detail: "Task Detail", chat: "Chat with Agent42", code: "Code with Agent42", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ tasks: "Mission Control", status: "Platform Status", approvals: "Approvals", tools: "Tools", skills: "Skills", agents: "Agent Profiles", apps: "Sandboxed Apps", reports: "Reports", settings: "Settings", detail: "Task Detail", chat: "Workspaces", workspace: "Workspaces", projectDetail: "Project Detail" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "tasks" ? `
               <button class="btn btn-primary btn-sm" onclick="${state.missionControlTab === 'projects' ? 'showCreateProjectModal()' : 'showCreateTaskModal()'}">+ New ${state.missionControlTab === 'projects' ? 'Project' : 'Task'}</button>
@@ -7798,8 +8489,7 @@ function render() {
     tasks: renderMissionControl,
     status: renderStatus,
     approvals: renderApprovals,
-    chat: renderChat,
-    code: renderCode,
+    workspace: renderCode,
     tools: renderTools,
     skills: renderSkills,
     agents: renderAgents,
@@ -7824,7 +8514,7 @@ function render() {
   }
 
   // When NOT on Code page, ensure page-content is visible and IDE is hidden
-  if (state.page !== "code") {
+  if (state.page !== "workspace") {
     var _pc = document.getElementById("page-content");
     var _ip = document.getElementById("ide-persistent");
     if (_pc) _pc.style.display = "";
@@ -7843,7 +8533,7 @@ function render() {
     if (miniBar) {
       miniBar.style.display = "flex";
       var btns = miniBar.querySelectorAll('.ide-mini-btn');
-      var pages = ['tasks','status','approvals','chat','code','tools','skills','agents','teams','apps','reports','settings'];
+      var pages = ['tasks','status','approvals','workspace','tools','skills','agents','teams','apps','reports','settings'];
       btns.forEach(function(b, i) { b.classList.toggle('active', pages[i] === state.page); });
     }
   }
@@ -7858,12 +8548,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadAll();
     connectWS();
   }
-  // Restore IDE chat panel session
-  try {
-    var savedPanelId = localStorage.getItem("ide_panel_session_id");
-    if (savedPanelId) state.idePanelSessionId = savedPanelId;
-  } catch(e) {}
   render();
+  updateGsdIndicator();
   // Towel Day Easter Egg (May 25)
   if (isTowelDay()) {
     document.body.classList.add("towel-day");

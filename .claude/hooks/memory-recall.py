@@ -9,7 +9,12 @@ to the user's current prompt and injects it into Claude's context via stderr.
 This is the core of Agent42's "human-like memory" — relevant past experiences
 surface automatically when context triggers them, without being asked.
 
+Also surfaces previous session's conversation context from handoff.json on the
+first prompt of a new session. This ensures decisions and options from the
+previous session survive context window clears.
+
 Search strategy (layered, best-available):
+0. Previous session context from handoff.json (first prompt only)
 1. Semantic search via Qdrant + embeddings (if available)
 2. Keyword search on MEMORY.md sections
 3. Keyword search on HISTORY.md entries
@@ -24,6 +29,7 @@ import json
 import os
 import re
 import sys
+from datetime import UTC
 from pathlib import Path
 
 # ── Configuration ───────────────────────────────────────────────────────
@@ -399,6 +405,130 @@ def deduplicate(memories):
     return unique
 
 
+# ── Previous Session Context (Layer 0) ────────────────────────────────────
+
+# Max age for session context to be surfaced (4 hours)
+SESSION_CONTEXT_MAX_AGE_S = 4 * 3600
+# Max chars for the session context block
+SESSION_CONTEXT_MAX_CHARS = 3000
+# Guard file to prevent re-surfacing within same session
+SESSION_CONTEXT_GUARD = "context-surfaced.json"
+
+
+def _context_guard_path(project_dir):
+    """Return path to the context-surfaced guard file."""
+    return os.path.join(project_dir, ".agent42", SESSION_CONTEXT_GUARD)
+
+
+def is_context_already_surfaced(project_dir, session_id):
+    """Check if previous session context was already surfaced this session."""
+
+    guard_path = _context_guard_path(project_dir)
+    if not os.path.exists(guard_path):
+        return False
+    try:
+        with open(guard_path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("session_id") == session_id
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
+def mark_context_surfaced(project_dir, session_id):
+    """Write guard file to prevent re-surfacing."""
+    guard_path = _context_guard_path(project_dir)
+    try:
+        os.makedirs(os.path.dirname(guard_path), exist_ok=True)
+        with open(guard_path, "w", encoding="utf-8") as f:
+            import time
+
+            json.dump({"session_id": session_id, "ts": time.time()}, f)
+    except OSError:
+        pass
+
+
+def load_previous_session_context(project_dir):
+    """Load conversation_context from handoff.json if recent enough.
+
+    Returns the context list and clears it from handoff.json to prevent
+    stale re-surfacing on subsequent sessions.
+    """
+
+    handoff_path = os.path.join(project_dir, ".claude", "handoff.json")
+    if not os.path.exists(handoff_path):
+        return []
+
+    try:
+        with open(handoff_path, encoding="utf-8") as f:
+            handoff = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    context = handoff.get("conversation_context", [])
+    if not context:
+        return []
+
+    # Check age — only surface if handoff was updated recently
+    updated = handoff.get("updated", "")
+    if updated:
+        try:
+            from datetime import datetime
+
+            updated_dt = datetime.fromisoformat(updated)
+            if updated_dt.tzinfo is None:
+                updated_dt = updated_dt.replace(tzinfo=UTC)
+            age_s = (datetime.now(UTC) - updated_dt).total_seconds()
+            if age_s > SESSION_CONTEXT_MAX_AGE_S:
+                return []
+        except (ValueError, TypeError):
+            pass  # Can't parse — surface anyway
+
+    return context
+
+
+def format_session_context(context):
+    """Format previous session's conversation context for stderr output."""
+    if not context:
+        return ""
+
+    lines = [
+        "[agent42-session-context] Previous session conversation (for continuity):",
+        "---",
+    ]
+
+    for entry in context:
+        role = entry.get("role", "?")
+        content = entry.get("content", "").strip()
+        entry_type = entry.get("type", "")
+
+        if not content:
+            continue
+
+        if role == "user":
+            lines.append(f"  USER: {content}")
+        elif role == "assistant":
+            if entry_type == "question":
+                lines.append(f"  CLAUDE: {content}")
+            elif entry_type == "planning":
+                lines.append(f"  CLAUDE: {content}")
+            elif entry_type == "delegation":
+                lines.append(f"  CLAUDE: {content}")
+            else:
+                lines.append(f"  CLAUDE: {content}")
+
+    lines.append("---")
+    lines.append(
+        "(This is your previous session's conversation. "
+        "Use it to understand references like 'do option 1' or 'proceed with 3'.)"
+    )
+
+    output = "\n".join(lines)
+    if len(output) > SESSION_CONTEXT_MAX_CHARS:
+        output = output[:SESSION_CONTEXT_MAX_CHARS] + "\n  ... (truncated)"
+
+    return output
+
+
 def main():
     try:
         event = json.loads(sys.stdin.read())
@@ -426,6 +556,23 @@ def main():
         sys.exit(0)
     if prompt.strip().startswith("/"):
         sys.exit(0)
+
+    # ── Determine session ID for guard ────────────────────────────────────
+    import hashlib
+
+    session_id = event.get("session_id", "")
+    if not session_id:
+        session_id = hashlib.md5(f"{project_dir}-{os.getpid()}".encode()).hexdigest()[:16]
+
+    # ── Layer 0: Previous session context ─────────────────────────────────
+    # Surface once per session — gives Claude the previous conversation flow
+    if not is_context_already_surfaced(project_dir, session_id):
+        prev_context = load_previous_session_context(project_dir)
+        if prev_context:
+            context_output = format_session_context(prev_context)
+            if context_output:
+                print(context_output, file=sys.stderr)
+        mark_context_surfaced(project_dir, session_id)
 
     # ── Locate memory directory ──────────────────────────────────────────
     memory_dir = Path(project_dir) / ".agent42" / "memory"

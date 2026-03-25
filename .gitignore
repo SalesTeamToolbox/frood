@@ -121,3 +121,4 @@ apps/*/.claude/
 
 # Screenshots in repo root
 *.png
+lint_me.py

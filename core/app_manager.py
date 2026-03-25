@@ -182,22 +182,68 @@ class AppManager:
     # -- Persistence -----------------------------------------------------------
 
     async def load(self):
-        """Load app registry from disk."""
-        if not self._data_path.exists():
-            return
-        try:
-            async with aiofiles.open(self._data_path) as f:
-                data = json.loads(await f.read())
-            for item in data:
-                app = App.from_dict(item)
-                # Running apps are marked stopped on reload (process is gone)
-                if app.status == AppStatus.RUNNING.value:
-                    app.status = AppStatus.STOPPED.value
-                    app.pid = 0
-                self._apps[app.id] = app
-            logger.info("Loaded %d app(s) from %s", len(self._apps), self._data_path)
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Failed to load apps registry: %s", e)
+        """Load app registry from disk, then auto-discover unregistered apps."""
+        if self._data_path.exists():
+            try:
+                async with aiofiles.open(self._data_path) as f:
+                    data = json.loads(await f.read())
+                for item in data:
+                    app = App.from_dict(item)
+                    # Running apps are marked stopped on reload (process is gone)
+                    if app.status == AppStatus.RUNNING.value:
+                        app.status = AppStatus.STOPPED.value
+                        app.pid = 0
+                    self._apps[app.id] = app
+                logger.info("Loaded %d app(s) from %s", len(self._apps), self._data_path)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to load apps registry: %s", e)
+
+        # Auto-discover apps with APP.json that aren't in the registry
+        discovered = 0
+        known_paths = {a.path for a in self._apps.values()}
+        for app_dir in self._apps_dir.iterdir():
+            if not app_dir.is_dir():
+                continue
+            manifest = app_dir / "APP.json"
+            if not manifest.exists():
+                continue
+            rel_path = (
+                str(app_dir.relative_to(Path.cwd())) if app_dir.is_absolute() else str(app_dir)
+            )
+            if rel_path in known_paths or str(app_dir) in known_paths:
+                continue
+            # Check by id/slug too
+            try:
+                mdata = json.loads(manifest.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+            app_id = mdata.get("id", app_dir.name)
+            if app_id in self._apps:
+                continue
+            # Register the discovered app
+            app = App(
+                id=app_id,
+                name=mdata.get("name", app_dir.name),
+                slug=mdata.get("slug", _make_slug(app_dir.name)),
+                description=mdata.get("description", ""),
+                version=mdata.get("version", "0.1.0"),
+                runtime=mdata.get("runtime", "python"),
+                entry_point=mdata.get("entry_point", "main.py"),
+                port=mdata.get("port", 0),
+                path=rel_path,
+                tags=mdata.get("tags", []),
+                status=AppStatus.STOPPED.value,
+                app_mode=mdata.get("app_mode", "internal"),
+                git_enabled=mdata.get("git_enabled", False),
+                github_repo=mdata.get("github_repo", ""),
+                visibility=mdata.get("visibility", "private"),
+            )
+            self._apps[app.id] = app
+            discovered += 1
+            logger.info("Auto-discovered app: %s (%s)", app.name, rel_path)
+        if discovered:
+            await self._persist()
+            logger.info("Auto-registered %d new app(s)", discovered)
 
     async def _persist(self):
         """Save app registry to disk."""
