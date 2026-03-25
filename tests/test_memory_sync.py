@@ -6,6 +6,12 @@ Covers MEM-01 requirements:
 - Auto-migration of legacy bullets with deterministic UUID5
 - Sentinel file prevents double migration
 - Embedding pipeline strips [timestamp uuid] tags before vectorizing
+
+Also covers MEM-03 requirements:
+- MemoryTool project routing via factory callable
+- Backward compat: project="global" uses global store
+- Factory fallback + warning when project_memory_factory=None
+- Factory caches ProjectMemoryStore instances by project_id
 """
 
 import re
@@ -284,3 +290,244 @@ class TestEmbeddingTagStripping:
         for chunk in pattern_chunks:
             assert "plain bullet with no uuid tag" in chunk["text"]
             assert "another plain line" in chunk["text"]
+
+
+# ── Plan 02: Entry-level union merge tests ────────────────────────────────────
+
+from tools.node_sync import (
+    _parse_memory_entries,
+    _rebuild_memory,
+    _resolve_entry_conflict,
+)
+
+
+class TestEntryParsing:
+    """Tests for _parse_memory_entries() — UUID bullet parsing."""
+
+    def test_parse_uuid_bullets(self):
+        """_parse_memory_entries() with UUID-format bullets returns dict keyed by short UUID."""
+        content = "# Memory\n\n- [2026-03-24T14:22:10Z a4f7b2c1] hello\n"
+        result = _parse_memory_entries(content)
+        assert "a4f7b2c1" in result
+        entry = result["a4f7b2c1"]
+        assert entry["ts"] == "2026-03-24T14:22:10Z"
+        assert entry["content"] == "hello"
+        assert entry["section"] == ""
+
+    def test_parse_with_sections(self):
+        """Entries under ## sections have the section name recorded."""
+        content = "# Memory\n\n## MySection\n\n- [2026-03-24T14:22:10Z b1c2d3e4] text\n"
+        result = _parse_memory_entries(content)
+        assert "b1c2d3e4" in result
+        assert result["b1c2d3e4"]["section"] == "MySection"
+
+    def test_parse_ignores_non_uuid_lines(self):
+        """Plain bullets, headings, and blank lines are not in the returned dict."""
+        content = "# Heading\n\n## Section\n\n- plain bullet\n\nSome prose text\n"
+        result = _parse_memory_entries(content)
+        assert len(result) == 0, f"Expected empty dict, got: {result}"
+
+    def test_parse_normalizes_crlf(self):
+        """Content with \\r\\n line endings parses identically to \\n."""
+        content_lf = "# Memory\n\n- [2026-03-24T14:22:10Z deadbeef] value\n"
+        content_crlf = content_lf.replace("\n", "\r\n")
+        result_lf = _parse_memory_entries(content_lf)
+        result_crlf = _parse_memory_entries(content_crlf)
+        assert result_lf == result_crlf, (
+            f"CRLF should parse same as LF.\nLF: {result_lf}\nCRLF: {result_crlf}"
+        )
+
+
+class TestUnionMerge:
+    """Tests for the union-merge logic using _parse_memory_entries and _rebuild_memory."""
+
+    def test_merge_disjoint_entries(self):
+        """Local has UUID-A, remote has UUID-B -> merged result contains both entries."""
+        from tools.node_sync import _resolve_entry_conflict
+
+        local_content = "# Memory\n\n- [2026-03-24T10:00:00Z aaaaaaaa] local entry\n"
+        remote_content = "# Memory\n\n- [2026-03-24T11:00:00Z bbbbbbbb] remote entry\n"
+
+        local_entries = _parse_memory_entries(local_content)
+        remote_entries = _parse_memory_entries(remote_content)
+
+        merged = {}
+        for uid in set(local_entries) | set(remote_entries):
+            l = local_entries.get(uid)
+            r = remote_entries.get(uid)
+            if l and r:
+                merged[uid] = _resolve_entry_conflict(l, r) if l["content"] != r["content"] else l
+            elif l:
+                merged[uid] = l
+            else:
+                merged[uid] = r
+
+        assert "aaaaaaaa" in merged, "Local entry should be in merged"
+        assert "bbbbbbbb" in merged, "Remote entry should be in merged"
+        assert merged["aaaaaaaa"]["content"] == "local entry"
+        assert merged["bbbbbbbb"]["content"] == "remote entry"
+
+    def test_merge_identical_entries(self):
+        """Both nodes have UUID-A with same content -> merged has exactly one copy."""
+        from tools.node_sync import _resolve_entry_conflict
+
+        shared_content = "# Memory\n\n- [2026-03-24T10:00:00Z cccccccc] shared\n"
+        local_entries = _parse_memory_entries(shared_content)
+        remote_entries = _parse_memory_entries(shared_content)
+
+        merged = {}
+        for uid in set(local_entries) | set(remote_entries):
+            l = local_entries.get(uid)
+            r = remote_entries.get(uid)
+            if l and r:
+                merged[uid] = _resolve_entry_conflict(l, r) if l["content"] != r["content"] else l
+            elif l:
+                merged[uid] = l
+            else:
+                merged[uid] = r
+
+        assert len(merged) == 1, f"Expected exactly one merged entry, got: {merged}"
+        assert "cccccccc" in merged
+        assert merged["cccccccc"]["content"] == "shared"
+
+    def test_merge_missing_remote(self, tmp_path):
+        """Remote MEMORY.md missing (ssh cat rc!=0) -> local content untouched."""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from tools.node_sync import NodeSyncTool
+
+        local_memory = tmp_path / "MEMORY.md"
+        local_memory.write_text(
+            "# Memory\n\n- [2026-03-24T10:00:00Z eeeeeeee] local only\n",
+            encoding="utf-8",
+        )
+
+        tool = NodeSyncTool(memory_store=None, workspace=str(tmp_path))
+
+        # Mock _run_ssh to fail (remote missing) and _run_rsync to succeed
+        tool._run_ssh = AsyncMock(return_value=(1, "", "No such file"))
+        tool._run_rsync = AsyncMock(return_value=(0, "", ""))
+
+        result = asyncio.run(tool._merge("agent42-prod", tmp_path, dry_run=True))
+        assert result.success
+        # Local content should be unchanged
+        assert local_memory.read_text(encoding="utf-8") == (
+            "# Memory\n\n- [2026-03-24T10:00:00Z eeeeeeee] local only\n"
+        )
+
+
+class TestConflictResolution:
+    """Tests for _resolve_entry_conflict() — newest wins, older becomes history note."""
+
+    def test_conflict_newest_wins(self):
+        """Remote with newer timestamp wins; local content becomes history note."""
+        local = {
+            "ts": "2026-03-24T10:00:00Z",
+            "content": "local version",
+            "section": "",
+        }
+        remote = {
+            "ts": "2026-03-24T12:00:00Z",
+            "content": "remote version (newer)",
+            "section": "",
+        }
+        winner = _resolve_entry_conflict(local, remote)
+        assert "remote version (newer)" in winner["content"], (
+            f"Newer (remote) content should be in winner: {winner['content']!r}"
+        )
+        assert "local version" in winner["content"], (
+            f"Older (local) content should appear in history note: {winner['content']!r}"
+        )
+        assert "2026-03-24T10:00:00Z" in winner["content"], (
+            f"Older timestamp should appear in history note: {winner['content']!r}"
+        )
+
+    def test_conflict_preserves_history(self):
+        """Both winner content and loser content appear in merged entry."""
+        local = {"ts": "2026-03-24T09:00:00Z", "content": "older text", "section": ""}
+        remote = {"ts": "2026-03-24T10:00:00Z", "content": "newer text", "section": ""}
+        winner = _resolve_entry_conflict(local, remote)
+        # Winner's content is present
+        assert "newer text" in winner["content"]
+        # Loser's content is preserved as a history note
+        assert "older text" in winner["content"]
+        # History note marker format
+        assert "[prev:" in winner["content"]
+
+
+class TestSectionOrderPreservation:
+    """Tests that _rebuild_memory preserves local section order."""
+
+    def test_local_section_order_preserved(self):
+        """Local sections A, B, C; remote-only section D -> merged order A, B, C, D."""
+        local_content = (
+            "# Memory\n\n"
+            "## SectionA\n\n"
+            "- [2026-03-24T10:00:00Z aaaaaaaa] alpha\n\n"
+            "## SectionB\n\n"
+            "- [2026-03-24T10:00:00Z bbbbbbbb] beta\n\n"
+            "## SectionC\n\n"
+            "- [2026-03-24T10:00:00Z cccccccc] gamma\n"
+        )
+        remote_content = (
+            "# Memory\n\n"
+            "## SectionB\n\n"
+            "- [2026-03-24T10:00:00Z bbbbbbbb] beta\n\n"
+            "## SectionD\n\n"
+            "- [2026-03-24T10:00:00Z dddddddd] delta\n"
+        )
+
+        local_entries = _parse_memory_entries(local_content)
+        remote_entries = _parse_memory_entries(remote_content)
+
+        # Union merge
+        merged = {}
+        for uid in set(local_entries) | set(remote_entries):
+            l = local_entries.get(uid)
+            r = remote_entries.get(uid)
+            merged[uid] = l if l else r
+
+        result = _rebuild_memory(local_content, merged)
+
+        # Section order: A before B before C before D
+        pos_a = result.find("## SectionA")
+        pos_b = result.find("## SectionB")
+        pos_c = result.find("## SectionC")
+        pos_d = result.find("## SectionD")
+
+        assert pos_a != -1, "SectionA should be in merged output"
+        assert pos_b != -1, "SectionB should be in merged output"
+        assert pos_c != -1, "SectionC should be in merged output"
+        assert pos_d != -1, "SectionD should be in merged output"
+        assert pos_a < pos_b < pos_c < pos_d, (
+            f"Sections should be in order A<B<C<D, got positions {pos_a},{pos_b},{pos_c},{pos_d}"
+        )
+
+
+class TestMigrateAction:
+    """Tests for node_sync migrate --dry-run action."""
+
+    def test_migrate_dry_run(self, tmp_path):
+        """node_sync migrate --dry-run previews migration without modifying files."""
+        import asyncio
+
+        from tools.node_sync import NodeSyncTool
+
+        old_content = "# Memory\n\n- old bullet without uuid\n- another old bullet\n"
+        memory_file = tmp_path / "MEMORY.md"
+        memory_file.write_text(old_content, encoding="utf-8")
+
+        tool = NodeSyncTool(memory_store=None, workspace=str(tmp_path))
+        result = asyncio.run(tool._migrate_action(tmp_path, dry_run=True))
+
+        assert result.success, f"migrate --dry-run should succeed: {result}"
+        assert "dry run" in result.output.lower() or "would migrate" in result.output.lower(), (
+            f"Output should mention dry run: {result.output!r}"
+        )
+        # File should be unchanged
+        assert memory_file.read_text(encoding="utf-8") == old_content, (
+            "Dry run should not modify MEMORY.md"
+        )
+        # Sentinel should NOT be created
+        assert not (tmp_path / ".migration_v1").exists(), "Dry run should not create sentinel"
