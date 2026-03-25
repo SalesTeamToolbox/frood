@@ -7,6 +7,7 @@
 #   bash setup.sh              Full local setup (default)
 #   bash setup.sh sync-auth    Sync CC credentials to remote VPS
 #   bash setup.sh create-shortcut  Create desktop shortcut for Agent42
+#   bash setup.sh generate-claude-md  Generate CLAUDE.md with Agent42 conventions
 #   bash setup.sh --quiet      Quiet mode (for install-server.sh)
 
 set -e
@@ -230,6 +231,14 @@ DESKTOP
             ;;
     esac
 
+    exit 0
+fi
+
+# ── Subcommand: generate-claude-md ───────────────────────────────────────────
+if [ "$1" = "generate-claude-md" ]; then
+    info "Generating CLAUDE.md with Agent42 conventions..."
+    $PYTHON_CMD scripts/setup_helpers.py generate-claude-md "$PROJECT_DIR"
+    info "Done! Review CLAUDE.md for your project."
     exit 0
 fi
 
