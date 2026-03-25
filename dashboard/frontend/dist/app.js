@@ -2770,6 +2770,13 @@ function updateGsdIndicator() {
 
       item.appendChild(name);
       item.appendChild(meta);
+      item.style.cursor = "pointer";
+      item.onclick = (function(wsName) {
+        return function(e) {
+          e.stopPropagation();
+          switchGsdWorkstream(wsName);
+        };
+      })(ws.name);
       dropdown.appendChild(item);
     });
   } else {
@@ -2789,6 +2796,18 @@ function toggleGsdDropdown() {
   if (dd) dd.style.display = _gsdDropdownOpen ? "" : "none";
   var arrows = document.querySelectorAll(".gsd-summary-arrow");
   arrows.forEach(function(a) { a.textContent = _gsdDropdownOpen ? "\u25B2" : "\u25BC"; });
+}
+
+function switchGsdWorkstream(wsName) {
+  api("/gsd/workstreams/active", { method: "PUT", body: JSON.stringify({ name: wsName }) })
+    .then(function() {
+      // Update local state
+      _gsdWorkstreams.forEach(function(w) { w.is_active = (w.name === wsName); });
+      _gsdDropdownOpen = false;
+      updateGsdIndicator();
+      toast("Switched to " + wsName, "success");
+    })
+    .catch(function(err) { toast("Failed to switch: " + err.message, "error"); });
 }
 
 function loadGsdWorkstreams() {

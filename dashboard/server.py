@@ -1594,6 +1594,29 @@ def create_app(
 
         return {"workstreams": workstreams, "active": active_ws}
 
+    @app.put("/api/gsd/workstreams/active")
+    async def set_active_workstream(
+        body: dict,
+        _user: str = Depends(get_current_user),
+    ):
+        """Switch the active GSD workstream by writing to .planning/active-workstream."""
+        import aiofiles as _aio_ws
+
+        ws_name = body.get("name", "").strip()
+        if not ws_name:
+            raise HTTPException(400, "Workstream name required")
+
+        planning = workspace / ".planning"
+        ws_dir = planning / "workstreams" / ws_name
+        if not ws_dir.is_dir():
+            raise HTTPException(404, f"Workstream not found: {ws_name}")
+
+        aw_file = planning / "active-workstream"
+        async with _aio_ws.open(str(aw_file), "w") as f:
+            await f.write(ws_name)
+
+        return {"active": ws_name}
+
     # -- IDE Lint --------------------------------------------------------------
 
     @app.get("/api/ide/lint")
