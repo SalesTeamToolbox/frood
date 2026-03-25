@@ -12,7 +12,7 @@
 - [ ] **SETUP-03**: User can run `bash setup.sh` on Linux/VPS and have the project repo indexed by jcodemunch automatically
 - [ ] **SETUP-04**: User can re-run `bash setup.sh` without overwriting existing configuration (idempotent)
 - [ ] **SETUP-05**: User can see a post-setup health report confirming MCP server, jcodemunch, and Qdrant are reachable
-- [ ] **SETUP-06**: User on Windows with Git Bash can run `bash setup.sh` without path errors or CRLF failures
+- [x] **SETUP-06**: User on Windows with Git Bash can run `bash setup.sh` without path errors or CRLF failures
 - [ ] **SETUP-07**: User can run a setup command to generate a CLAUDE.md template with Agent42 conventions and pitfall patterns baked in
 
 ### Memory
@@ -54,7 +54,7 @@
 | SETUP-03 | Phase 1 | Pending (01-03) |
 | SETUP-04 | Phase 1 | Helpers done (01-02), setup.sh integration pending (01-03) |
 | SETUP-05 | Phase 1 | Helpers done (01-02), setup.sh integration pending (01-03) |
-| SETUP-06 | Phase 2 | Pending |
+| SETUP-06 | Phase 2 | Complete |
 | SETUP-07 | Phase 2 | Pending |
 | MEM-01 | Phase 3 | Pending |
 | MEM-02 | Phase 3 | Pending |

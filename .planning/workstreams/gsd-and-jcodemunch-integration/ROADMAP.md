@@ -46,7 +46,7 @@ This milestone unifies Agent42's developer tooling into a zero-friction platform
   3. Generated CLAUDE.md is project-aware (references the correct project name, repo identifier, and active workstream)
 **Plans**: 2 plans
 
-- [ ] 02-01-PLAN.md — Windows Git Bash compatibility: platform detection, venv paths, .gitattributes (Wave 1)
+- [x] 02-01-PLAN.md — Windows Git Bash compatibility: platform detection, venv paths, .gitattributes (Wave 1)
 - [ ] 02-02-PLAN.md — CLAUDE.md template generation: generate-claude-md subcommand + project-aware template (Wave 2)
 
 ### Phase 3: Memory Sync
@@ -81,6 +81,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Setup Foundation | 3/3 | Complete | 2026-03-18 |
-| 2. Windows + CLAUDE.md | 0/2 | Planning complete | - |
+| 2. Windows + CLAUDE.md | 1/2 | In Progress|  |
 | 3. Memory Sync | 0/TBD | Not started | - |
 | 4. Context Engine | 0/TBD | Not started | - |
