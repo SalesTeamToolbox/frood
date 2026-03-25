@@ -2174,6 +2174,11 @@ def create_app(
     async def _start_warm_pool_cleanup():
         _asyncio.create_task(_cc_prewarm_idle_task())
 
+    @app.on_event("startup")
+    async def _load_app_manager():
+        if app_manager:
+            await app_manager.load()
+
     # Constant: MCP tool name CC uses when requesting user permission
     _CC_PERMISSION_TOOL = "mcp__agent42__cc_permission"
     # Built-in CC tool that blocks waiting for human input

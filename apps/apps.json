@@ -1,0 +1,23 @@
+[
+  {
+    "id": "meatheadgear",
+    "name": "MeatheadGear",
+    "slug": "meatheadgear",
+    "description": "AI-powered gym apparel storefront with Printful POD integration",
+    "version": "0.1.0",
+    "runtime": "python",
+    "entry_point": "main.py",
+    "port": 8001,
+    "path": "apps/meatheadgear",
+    "tags": [
+      "ecommerce",
+      "gym",
+      "printful",
+      "pod"
+    ],
+    "status": "stopped",
+    "created_at": 1774399447.8422549,
+    "app_mode": "external",
+    "git_enabled": true
+  }
+]
