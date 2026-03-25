@@ -9,12 +9,15 @@ Sync strategy:
 - Markdown files are the source of truth (not Qdrant vectors)
 - Vectors are re-derived after sync via reindex_memory()
 - HISTORY.md uses append-merge (events from both nodes combined)
-- MEMORY.md uses timestamp-wins (most recently modified version wins)
+- MEMORY.md uses entry-level union merge keyed by UUID (lossless, conflict-resistant)
 """
 
 import asyncio
 import logging
+import re
 import time
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from tools.base import Tool, ToolResult
@@ -24,6 +27,105 @@ logger = logging.getLogger("agent42.tools.node_sync")
 DEFAULT_REMOTE = "agent42-prod"
 MEMORY_FILES = ["MEMORY.md", "HISTORY.md"]
 REMOTE_MEMORY_DIR = "~/agent42/.agent42/memory"
+
+# ── Entry-level merge helpers ─────────────────────────────────────────────────
+# Matches UUID-prefixed bullets: - [ISO_TS SHORT_UUID] content
+_ENTRY_RE = re.compile(r"^- \[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z) ([0-9a-f]{8})\] (.+)$")
+# Matches YAML frontmatter block
+_FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
+# Matches old-format bullets (no UUID prefix)
+_NO_UUID_RE = re.compile(r"^(- )(?!\[)(.+)$")
+# Deterministic UUID5 namespace (shared with memory.store and memory_tool)
+_UUID5_NAMESPACE = uuid.UUID("a42a42a4-2a42-4a42-a42a-42a42a42a42a")
+
+
+def _parse_memory_entries(content: str) -> dict:
+    """Parse UUID-format bullets into {short_uuid: {ts, content, section}}.
+
+    Lines without UUID format (plain bullets, headings, blank lines) are ignored.
+    CRLF line endings are normalised to LF before parsing.
+    """
+    entries = {}
+    current_section = ""
+    for line in content.replace("\r\n", "\n").splitlines():
+        if line.startswith("## "):
+            current_section = line[3:].strip()
+        elif m := _ENTRY_RE.match(line):
+            ts, short_id, text = m.group(1), m.group(2), m.group(3)
+            entries[short_id] = {"ts": ts, "content": text, "section": current_section}
+    return entries
+
+
+def _resolve_entry_conflict(local: dict, remote: dict) -> dict:
+    """Resolve same-UUID different-content conflict: newest wins, older becomes history note."""
+    if local["ts"] >= remote["ts"]:
+        winner, loser = dict(local), remote
+    else:
+        winner, loser = dict(remote), local
+    winner["content"] = winner["content"] + f"\n  > [prev: {loser['ts']}] {loser['content']}"
+    return winner
+
+
+def _rebuild_memory(local_content: str, merged_entries: dict) -> str:
+    """Rebuild MEMORY.md from merged entries, preserving local section order.
+
+    - Sections from local file keep their original order.
+    - Remote-only sections are appended at the end.
+    - Frontmatter is preserved from local.
+    - Entries with no section are placed at the end.
+    """
+    content = local_content.replace("\r\n", "\n")
+
+    # Extract frontmatter if present
+    frontmatter = ""
+    fm_match = _FRONTMATTER_RE.match(content)
+    if fm_match:
+        frontmatter = fm_match.group(0)
+        content = content[fm_match.end() :]
+
+    # Parse local section order and header lines (lines before first ## section)
+    local_sections: list[str] = []
+    header_lines: list[str] = []
+    in_header = True
+    for line in content.splitlines():
+        if line.startswith("## "):
+            in_header = False
+            section_name = line[3:].strip()
+            if section_name not in local_sections:
+                local_sections.append(section_name)
+        elif in_header:
+            header_lines.append(line)
+
+    # Collect remote-only sections from merged entries
+    all_sections = list(local_sections)
+    for entry in merged_entries.values():
+        sec = entry["section"]
+        if sec and sec not in all_sections:
+            all_sections.append(sec)
+
+    # Group entries by section
+    entries_by_section: dict[str, list] = {}
+    for eid, entry in merged_entries.items():
+        sec = entry["section"] or ""
+        entries_by_section.setdefault(sec, []).append((eid, entry))
+
+    # Rebuild output
+    lines: list[str] = []
+    if frontmatter:
+        lines.append(frontmatter.rstrip("\n"))
+    if header_lines:
+        lines.extend(header_lines)
+
+    for section in all_sections:
+        lines.append(f"\n## {section}\n")
+        for eid, entry in entries_by_section.get(section, []):
+            lines.append(f"- [{entry['ts']} {eid}] {entry['content']}")
+
+    # Entries with no section (placed at end)
+    for eid, entry in entries_by_section.get("", []):
+        lines.append(f"- [{entry['ts']} {eid}] {entry['content']}")
+
+    return "\n".join(lines) + "\n"
 
 
 class NodeSyncTool(Tool):
@@ -54,8 +156,8 @@ class NodeSyncTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["push", "pull", "merge", "status"],
-                    "description": "push (local->remote), pull (remote->local), merge (bidirectional), status (show diff)",
+                    "enum": ["push", "pull", "merge", "status", "migrate"],
+                    "description": "push (local->remote), pull (remote->local), merge (bidirectional), status (show diff), migrate (convert old-format bullets to UUID format)",
                 },
                 "host": {
                     "type": "string",
@@ -89,6 +191,8 @@ class NodeSyncTool(Tool):
             return await self._pull(host, local_dir, dry_run)
         elif action == "merge":
             return await self._merge(host, local_dir, dry_run)
+        elif action == "migrate":
+            return await self._migrate_action(local_dir, dry_run)
         else:
             return ToolResult(output="", error=f"Unknown action: {action}", success=False)
 
@@ -107,7 +211,7 @@ class NodeSyncTool(Tool):
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             return proc.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return -1, "", "SSH command timed out"
         except Exception as e:
             return -1, "", str(e)
@@ -126,7 +230,7 @@ class NodeSyncTool(Tool):
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             return proc.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return -1, "", "rsync timed out"
         except Exception as e:
             return -1, "", str(e)
@@ -162,7 +266,7 @@ class NodeSyncTool(Tool):
             lines.append("  - No memory files found on remote")
 
         rc2, _, _ = await self._run_ssh(host, "echo ok")
-        lines.append(f"\n### Connectivity")
+        lines.append("\n### Connectivity")
         lines.append(f"  - SSH to {host}: {'connected' if rc2 == 0 else 'FAILED'}")
 
         return ToolResult(output="\n".join(lines), success=True)
@@ -216,75 +320,96 @@ class NodeSyncTool(Tool):
         return ToolResult(output=header + "\n".join(results), success=True)
 
     async def _merge(self, host, local_dir, dry_run):
+        """Entry-level union merge of MEMORY.md + append-merge of HISTORY.md."""
         results = []
 
-        rc, stdout, _ = await self._run_ssh(
-            host,
-            f"stat -c '%Y %s' {REMOTE_MEMORY_DIR}/MEMORY.md {REMOTE_MEMORY_DIR}/HISTORY.md 2>/dev/null",
-        )
-        if rc != 0:
-            return ToolResult(output="", error="Cannot reach remote node", success=False)
-
-        remote_stats = stdout.strip().split("\n")
-
-        # MEMORY.md: newest wins
+        # --- MEMORY.md: entry-level union merge ---
         local_memory = local_dir / "MEMORY.md"
-        if local_memory.exists() and len(remote_stats) >= 1:
-            local_mtime = local_memory.stat().st_mtime
-            remote_parts = remote_stats[0].split()
-            remote_mtime = float(remote_parts[0]) if remote_parts else 0
+        local_content = ""
+        if local_memory.exists():
+            local_content = local_memory.read_text(encoding="utf-8")
 
-            if local_mtime > remote_mtime:
-                if not dry_run:
-                    await self._run_rsync(
-                        str(local_memory), f"{host}:{REMOTE_MEMORY_DIR}/MEMORY.md"
-                    )
-                results.append(
-                    f"  - MEMORY.md: local is newer -> {'would push' if dry_run else 'pushed'}"
-                )
-            elif remote_mtime > local_mtime:
-                if not dry_run:
-                    await self._run_rsync(
-                        f"{host}:{REMOTE_MEMORY_DIR}/MEMORY.md", str(local_memory)
-                    )
-                results.append(
-                    f"  - MEMORY.md: remote is newer -> {'would pull' if dry_run else 'pulled'}"
-                )
-            else:
-                results.append("  - MEMORY.md: in sync")
+        # Fetch remote content via SSH cat (not rsync/stat)
+        rc, remote_content, stderr = await self._run_ssh(
+            host, f"cat {REMOTE_MEMORY_DIR}/MEMORY.md", timeout=15
+        )
+        remote_content = remote_content.replace("\r\n", "\n")  # normalize CRLF
 
-        # HISTORY.md: append-merge unique entries
+        if rc != 0 or not remote_content.strip():
+            # Remote missing or empty — push local to remote
+            if local_content.strip() and not dry_run:
+                await self._run_rsync(str(local_memory), f"{host}:{REMOTE_MEMORY_DIR}/MEMORY.md")
+            results.append(
+                f"  - MEMORY.md: remote {'missing' if rc != 0 else 'empty'} "
+                f"-> {'would push local' if dry_run else 'pushed local'}"
+            )
+        else:
+            local_entries = _parse_memory_entries(local_content)
+            remote_entries = _parse_memory_entries(remote_content)
+
+            # Union merge
+            merged: dict = {}
+            all_uuids = set(local_entries) | set(remote_entries)
+            conflicts = 0
+            for uid in all_uuids:
+                l = local_entries.get(uid)
+                r = remote_entries.get(uid)
+                if l and r:
+                    if l["content"] == r["content"]:
+                        merged[uid] = l  # identical
+                    else:
+                        merged[uid] = _resolve_entry_conflict(l, r)
+                        conflicts += 1
+                elif l:
+                    merged[uid] = l
+                else:
+                    merged[uid] = r
+
+            # Rebuild the file
+            merged_content = _rebuild_memory(local_content, merged)
+
+            new_from_remote = len(set(remote_entries) - set(local_entries))
+            new_from_local = len(set(local_entries) - set(remote_entries))
+
+            if not dry_run:
+                local_memory.write_text(merged_content, encoding="utf-8")
+                # Push merged result to remote
+                await self._run_rsync(str(local_memory), f"{host}:{REMOTE_MEMORY_DIR}/MEMORY.md")
+
+            conflict_note = f", {conflicts} conflict(s) resolved" if conflicts else ""
+            results.append(
+                f"  - MEMORY.md: {'would merge' if dry_run else 'merged'} "
+                f"({new_from_remote} from remote, {new_from_local} from local{conflict_note})"
+            )
+
+        # --- HISTORY.md: append-merge unique entries (unchanged from previous strategy) ---
         local_history = local_dir / "HISTORY.md"
         if local_history.exists():
-            rc, remote_content, _ = await self._run_ssh(host, f"cat {REMOTE_MEMORY_DIR}/HISTORY.md")
-            if rc == 0 and remote_content.strip():
-                local_content = local_history.read_text(encoding="utf-8")
+            rc, remote_hist, _ = await self._run_ssh(host, f"cat {REMOTE_MEMORY_DIR}/HISTORY.md")
+            if rc == 0 and remote_hist.strip():
+                local_hist = local_history.read_text(encoding="utf-8")
+                local_entries_h = set(e.strip() for e in local_hist.split("\n---\n") if e.strip())
+                remote_entries_h = set(e.strip() for e in remote_hist.split("\n---\n") if e.strip())
+                new_from_remote_h = remote_entries_h - local_entries_h
+                new_from_local_h = local_entries_h - remote_entries_h
 
-                local_entries = set(e.strip() for e in local_content.split("\n---\n") if e.strip())
-                remote_entries = set(
-                    e.strip() for e in remote_content.split("\n---\n") if e.strip()
-                )
-
-                new_from_remote = remote_entries - local_entries
-                new_from_local = local_entries - remote_entries
-
-                if new_from_remote or new_from_local:
-                    merged = local_entries | remote_entries
-                    merged_content = "\n---\n".join(sorted(merged))
-
+                if new_from_remote_h or new_from_local_h:
+                    merged_h = local_entries_h | remote_entries_h
+                    merged_hist = "\n---\n".join(sorted(merged_h))
                     if not dry_run:
-                        local_history.write_text(merged_content, encoding="utf-8")
+                        local_history.write_text(merged_hist, encoding="utf-8")
                         await self._run_rsync(
-                            str(local_history), f"{host}:{REMOTE_MEMORY_DIR}/HISTORY.md"
+                            str(local_history),
+                            f"{host}:{REMOTE_MEMORY_DIR}/HISTORY.md",
                         )
-
                     results.append(
-                        f"  - HISTORY.md: merged ({len(new_from_remote)} from remote, "
-                        f"{len(new_from_local)} from local)"
+                        f"  - HISTORY.md: {'would merge' if dry_run else 'merged'} "
+                        f"({len(new_from_remote_h)} from remote, {len(new_from_local_h)} from local)"
                     )
                 else:
                     results.append("  - HISTORY.md: in sync")
 
+        # Re-index after merge
         if not dry_run:
             if self._memory_store:
                 try:
@@ -303,3 +428,46 @@ class NodeSyncTool(Tool):
         action_label = "Merge (dry run)" if dry_run else "Merge"
         header = f"## {action_label}: bidirectional sync with {host}\n"
         return ToolResult(output=header + "\n".join(results), success=True)
+
+    async def _migrate_action(self, local_dir, dry_run):
+        """Migrate old-format MEMORY.md bullets to UUID format (per D-11)."""
+        memory_path = local_dir / "MEMORY.md"
+        if not memory_path.exists():
+            return ToolResult(output="No MEMORY.md found.", success=False)
+
+        content = memory_path.read_text(encoding="utf-8")
+        namespace = uuid.UUID("a42a42a4-2a42-4a42-a42a-42a42a42a42a")
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        count = 0
+        result_lines = []
+
+        for line in content.splitlines():
+            m = _NO_UUID_RE.match(line)
+            if m:
+                text = m.group(2)
+                short_id = uuid.uuid5(namespace, text).hex[:8]
+                new_line = f"- [{ts} {short_id}] {text}"
+                result_lines.append(new_line)
+                count += 1
+                if dry_run:
+                    logger.info("Would migrate: '%s' -> '%s'", line[:60], new_line[:60])
+            else:
+                result_lines.append(line)
+
+        if dry_run:
+            return ToolResult(
+                output=f"Dry run: would migrate {count} old-format entries in MEMORY.md.",
+                success=True,
+            )
+
+        migrated = "\n".join(result_lines)
+        memory_path.write_text(migrated, encoding="utf-8")
+
+        # Write sentinel
+        sentinel = local_dir / ".migration_v1"
+        sentinel.write_text("migrated\n", encoding="utf-8")
+
+        return ToolResult(
+            output=f"Migrated {count} entries to UUID format in MEMORY.md.",
+            success=True,
+        )

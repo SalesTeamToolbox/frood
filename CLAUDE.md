@@ -56,7 +56,7 @@ during Claude Code sessions without manual activation.
 | Hook | Trigger | Action |
 |------|---------|--------|
 | `conversation-accumulator.py` | UserPromptSubmit | Captures user prompts to buffer for session context persistence |
-| `context-loader.py` | UserPromptSubmit | Detects work type from file paths and keywords, loads relevant lessons and reference docs |
+| ~~`context-loader.py`~~ | ~~UserPromptSubmit~~ | **REMOVED** — was injecting ~25K tokens/conversation loading reference docs on every prompt. Docs still in `.claude/reference/` for manual lookup. |
 | `memory-recall.py` | UserPromptSubmit | Surfaces relevant memories from Qdrant + previous session context before Claude thinks |
 | `proactive-inject.py` | UserPromptSubmit | Surfaces past learnings relevant to detected task type |
 | `security-gate.py` | PreToolUse (Write/Edit/Bash) | Blocks edits to security-sensitive files (requires approval) |
@@ -460,41 +460,11 @@ Skip GSD for trivial tasks (Claude handles these directly):
 
 ## Common Pitfalls
 
-> Pitfalls 1-80 archived to `.claude/reference/pitfalls-archive.md` (loaded on-demand by context-loader hook).
-> Recent pitfalls (81+) kept inline for immediate reference.
+> Pitfalls 1-110 archived to `.claude/reference/pitfalls-archive.md` (loaded on-demand by context-loader hook).
+> Recent pitfalls (111+) kept inline for immediate reference.
 
 | # | Area | Pitfall | Correct Pattern |
 |---|------|---------|-----------------|
-| 81 | Chat | Agent processes dashboard chat messages in isolation — no conversation history | Pass `chat_session_manager` to Agent; load history in `_build_context()` via `origin_metadata["chat_session_id"]` |
-| 82 | Prompts | System prompts encouraged confabulation — "never say you don't know" + memory skill implied cross-server recall | Added truthfulness guardrails to `GENERAL_ASSISTANT_PROMPT`, `platform-identity`, and `memory` skills; agent must only reference actual context, never fabricate |
-| 83 | Dashboard | `submitCreateTask()` called `doCreateTask()` twice — copy-paste error with separate `projectId` and `repoId` calls | Merge all form fields into a single `doCreateTask(title, desc, type, projectId, repoId, branch)` call |
-| 84 | Apps | `install_deps` only checks `apps/{id}/requirements.txt` but agents sometimes place it in `apps/{id}/src/` | Check `src/requirements.txt` as fallback in both `AppTool._install_deps()` and `AppManager._start_python_app()` |
-| 85 | Classifier | "Build me a Flask app" misclassified as `marketing` by LLM — keyword fallback had no framework-specific terms | Add framework keywords (`flask app`, `django app`, etc.) to `APP_CREATE` in `_TASK_TYPE_KEYWORDS`; add classification rule to LLM prompt |
-| 86 | Dashboard | `/api/reports` crashes with 500 if any service (`model_evaluator`, `model_catalog`, etc.) throws | Wrap endpoint in try/except returning valid empty report structure on failure |
-| 87 | Heartbeat | `_monitor_loop` calls `get_health()` with no args — periodic WS broadcasts overwrite tools/tasks with 0 | Store `task_queue` and `tool_registry` on `HeartbeatService`; pass them in the broadcast loop |
-| 88 | Heartbeat | `ctypes.windll.psapi.GetProcessMemoryInfo` silently returns 0 on Windows (missing argtypes) | Use `ctypes.WinDLL("psapi")` with explicit `argtypes`/`restype`; also fix macOS `ru_maxrss` bytes-vs-KB conversion |
-| 89 | Dashboard | Chat session sidebar empty after server restart — WS reconnect doesn't reload data | Add `loadChatSessions(); loadCodeSessions(); loadTasks(); loadStatus();` to `ws.onopen` when `wsRetries > 0` |
-| 90 | Routing | ComplexityAssessor, IntentClassifier, and Learner all used dead OR free models (`or-free-mistral-small`, `or-free-deepseek-chat`) — teams never formed, classification fell back to keywords, learning never happened | Route internal LLM consumers to `gemini-2-flash` (reliable, free tier); don't use OR free models for infrastructure-critical calls |
-| 91 | Routing | Critics tried dead OR free models first, then fell back to Gemini — wasted 5-7s per iteration on 429 retries | Validate critic health/API key in `get_routing()` and pre-upgrade to `gemini-2-flash` before task execution begins |
-| 92 | RLM | RLM threshold at 50K tokens triggered for most tasks, causing 3-5x token amplification and API rate-limit spikes | Raise `RLM_THRESHOLD_TOKENS` to 200K — RLM should only activate for genuinely massive contexts, not routine tasks |
-| 93 | Dispatch | Multiple agents dispatched simultaneously cause Gemini 1M TPM rate-limit spikes | Add `AGENT_DISPATCH_DELAY` (default 2.0s) to stagger agent launches in `_process_queue()` |
-| 94 | Deploy | `agent42.py` refactored command handlers into `commands.py` but file wasn't committed — `ModuleNotFoundError` on production startup | Always verify new module files are staged before pushing; `git status` shows untracked files that may be required imports |
-| 95 | Auth | Bcrypt password hash in `.env` doesn't match intended password after manual edits — login silently fails with 401 | Regenerate hash on server: `python3 -c "import bcrypt; print(bcrypt.hashpw(b'password', bcrypt.gensalt()).decode())"` and update `.env`; restart service |
-| 96 | Dashboard | `project_manager.all_projects()` renamed to `list_projects()` — `/api/reports` crashes with AttributeError | Check method names against current API when refactoring; `server.py` calls must match `project_manager` interface |
-| 97 | Dashboard | `skill.enabled` attribute doesn't exist — use `skill_loader.is_enabled(s.name)` instead | Skills don't have an `enabled` field; enablement is managed by the SkillLoader, not the Skill object |
-| 98 | Search | Brave Search returns 422 on production — API key or query format issue | `web_search` tool has DuckDuckGo fallback; search still works but with lower quality results. Check `BRAVE_API_KEY` in `.env` |
-| 99 | AppTest | `AppTestTool._findings` accumulates across calls — stale findings leak into reports | Call `generate_report` to consume and clear findings, or check `_findings` list is reset between test sessions |
-| 100 | AppTest | `app_test smoke_test` returns success even when health check fails | Tool always returns `ToolResult(success=True)` for completed checks — failures are in the output text and findings, not in `success=False` |
-| 101 | Critic | Visual critic sends multimodal `content` (list of dicts) but some models only accept string content | `_extract_screenshot_b64` returns None on any failure — critic falls back to text-only; only vision-capable models get image |
-| 102 | Apps | `pip install` fails on Ubuntu 24+ with "externally-managed-environment" (PEP 668) | `_ensure_app_venv()` creates a per-app `.venv`; both `_start_python_app()` and `_install_deps()` use the venv's Python for pip and app execution |
-| 103 | Memory | `_direct_response()` and server.py conversational path skip memory loading — agent claims no memory of past conversations | Use `build_conversational_memory_context()` helper to inject MEMORY.md + HISTORY.md into system prompt for all response paths |
-| 104 | Security | GitHub tokens stored as plaintext in `github_accounts.json` and `settings.json` | Use `core.encryption.encrypt_value()`/`decrypt_value()` with Fernet; legacy plaintext auto-migrates on next persist |
-| 105 | Security | GitHub token embedded in clone/push URLs visible in `ps` and `/proc` | Use `core.git_auth.git_askpass_env()` context manager — token is injected via `GIT_ASKPASS` temp script, not URL |
-| 106 | Security | `SANDBOX_ENABLED=false` silently disables all path restrictions | `config.py` force-enables sandbox when host is exposed or `SANDBOX_DISABLE_CONFIRM` not set; `sandbox.py` logs CRITICAL |
-| 107 | Security | `zipfile.extractall()` vulnerable to zip-slip (path traversal via `../`) | Validate every `zf.namelist()` entry: reject absolute paths, `..` components, and resolved paths outside target |
-| 108 | Security | Device API key hashes used plain SHA-256 (no secret) | `_hash_key()` uses HMAC-SHA256 keyed by JWT_SECRET; `validate_api_key()` auto-upgrades legacy SHA-256 hashes |
-| 109 | Memory | `QdrantStore.is_available` only checked `self._client is not None` — returned True even when server was unreachable | `is_available` now probes via `get_collections()` with cached TTL (60s success, 15s fail); embedded mode skips probe |
-| 110 | Memory | `EmbeddingStore.search()` took Qdrant path when `is_available=True` but never fell through to JSON on Qdrant failure | Refactored to try/except around Qdrant search; falls through to `_search_json()` on any exception |
 | 111 | Memory | Agent claims "stored in MEMORY.md" but has no tool to actually write — memory skill described the system but no corresponding tool existed | Created `tools/memory_tool.py` with store/recall/log/search actions; registered in `_register_tools()` |
 | 112 | Dashboard | Storage status showed configured mode ("Qdrant + Redis") even when Qdrant was unreachable | Endpoint now returns `effective_mode` based on actual connectivity; frontend shows degradation warning when `configured_mode != mode` |
 | 113 | Init | `_register_tools()` called before `memory_store` initialized — AttributeError on startup | Move `_register_tools()` call to after MemoryStore initialization in `agent42.py` |
@@ -543,89 +513,8 @@ An AI agent platform that operates across 9 LLM providers with tiered routing (L
 <!-- GSD:stack-start source:research/STACK.md -->
 ## Technology Stack
 
-## Context: This Is an Additive Feature, Not a New Stack
-## Recommended Stack
-### Core Technologies (Stdlib — No New Dependencies)
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| `enum.IntEnum` (stdlib) | Python 3.11+ | `RewardTier` enum (BRONZE/SILVER/GOLD) | Standard, hashable, sortable — IntEnum supports `tier >= SILVER` comparisons which plain Enum does not. Zero deps. Project already uses dataclasses + enum throughout. |
-| `dataclasses` (stdlib) | Python 3.11+ | `TierConfig`, `TierLimits`, `AgentTierState` frozen dataclasses | Matches the frozen-dataclass pattern used throughout `core/config.py` and `core/rate_limiter.py`. Immutable tier config objects prevent accidental mutation in concurrent code. |
-| `asyncio.Semaphore` (stdlib) | Python 3.11+ | Per-tier concurrent task caps | Agent Manager already manages agent lifecycle. Semaphores keyed per-agent give each tier its concurrent task ceiling. Cannot resize after creation — swap on promotion (see Pattern 3 below). |
-| `asyncio.Lock` (stdlib) | Python 3.11+ | Tier state mutation guard | Tier promotions are rare but must be atomic. A per-agent lock prevents race between a score recompute and an in-flight task dispatch. |
-| `time.monotonic()` (stdlib) | Python 3.11+ | Cache expiry timestamps | Already used in `rate_limiter.py`. Use for TTL-based tier cache invalidation without importing cachetools. |
-| `aiosqlite` (existing dep) | >=0.20.0 | Tier history log | Already in requirements.txt for effectiveness tracking. Add a `tier_history` table alongside existing effectiveness tables. Append-only rows (agent_id, tier, score, timestamp) give full audit trail at zero extra cost. |
-### Supporting Libraries (Existing Dependencies — Already Installed)
-| Library | Version | Purpose | When to Use |
-|---------|---------|---------|-------------|
-| `aiofiles` (existing) | >=23.0.0 | Persist tier overrides to `.agent42/rewards/overrides.json` | Admin override JSONL for human-readable backup alongside the SQLite audit log. Matches existing file-persistence patterns. |
-| FastAPI (existing) | >=0.115.0 | REST endpoints for tier management dashboard | `/api/rewards/tiers`, `/api/rewards/agents/{id}/override`, `/api/rewards/status`. No new framework needed. |
-| WebSocket (existing) | >=12.0 | Push tier-change events to dashboard | When an agent promotes from Bronze to Silver, push a `tier_changed` event over the existing WS bus. Dashboard already subscribes to agent status events. |
-### New Optional Dependency (Add Only If TTL Cache Complexity Warrants It)
-| Library | Version | Purpose | When to Use |
-|---------|---------|---------|-------------|
-| `cachetools` | 7.0.5 (2026-03-09) | `TTLCache` for computed tier scores | Only add if the hand-rolled TTL dict approach grows messy. `TTLCache(maxsize=512, ttl=300)` keyed by `agent_id` is cleaner than dict + timestamp bookkeeping at scale. Likely already installed as a transitive dep — run `pip show cachetools` before adding. |
-### Development Tools (Existing)
-| Tool | Purpose | Notes |
-|------|---------|-------|
-| pytest + pytest-asyncio | Unit and async integration tests for tier logic | Already configured with `asyncio_mode = "auto"`. Test tier transitions, score calculations, semaphore enforcement. |
-| ruff | Linting and formatting | Already configured. Run `make format && make lint` after adding new modules. |
-## Installation
-# No new core dependencies required.
-# All recommendations use stdlib or packages already in requirements.txt.
-# Optional — only if TTLCache is added:
-# First check if it is already a transitive dep:
-# If not present:
-## Architectural Patterns for This Feature
-### Pattern 1: Tier as a Computed Projection, Not Stored State
-# core/rewards_engine.py
-# In-memory cache: {agent_id: (tier, computed_at)}
-### Pattern 2: Frozen Dataclass Tier Limits
-### Pattern 3: Semaphore-per-Agent with Swap-on-Promotion
-### Pattern 4: Opt-In via Settings, Graceful Degradation When Disabled
-### Pattern 5: Composite Score as Weighted Sum (No ML Library Needed)
-## Alternatives Considered
-| Recommended | Alternative | When to Use Alternative |
-|-------------|-------------|-------------------------|
-| `IntEnum` for tiers | String literals "bronze"/"silver"/"gold" | Never for internal code — strings lose comparability. Strings acceptable only at the API/JSON serialization boundary. |
-| In-memory TTL dict | `cachetools.TTLCache` | Use `cachetools` only if tier cache needs LRU eviction (thousands of agents). For tens to hundreds of agents, a plain dict with monotonic timestamps is simpler with zero deps. |
-| Append to aiosqlite `tier_history` | Separate JSONL audit file | JSONL is fine for human inspection; SQLite is better if you need to query "all agents that were Gold last week". Since aiosqlite is already a dep, prefer it. |
-| `asyncio.Semaphore` per-agent | Token bucket rate limiter library (e.g., `aiometer`) | Use a library only if you need continuous rate (requests-per-second) rather than concurrency (in-flight task count). Tier system needs concurrency caps, not rate caps. |
-| Pure Python weighted average | scikit-learn metrics | scikit-learn is a 300 MB ML library for a 2-float weighted sum. Never appropriate here. |
-| FastAPI endpoints on existing server | Separate microservice | Never. This is an additive feature on Agent42, not a separate service. |
-## What NOT to Use
-| Avoid | Why | Use Instead |
-|-------|-----|-------------|
-| `asyncache` 0.3.1 | Unmaintained since November 2022; requires cachetools <=5.x, incompatible with cachetools 7.x | `cachetools-async` 0.0.5 (June 2025) or a Lock-guarded dict |
-| Redis Streams or Kafka for tier-change events | Enormous operational overhead for an in-process state change; Redis is optional in Agent42 | `asyncio.Queue` or direct WebSocket push via existing heartbeat/WS infrastructure |
-| Celery or task queue for score recomputation | Brings sync worker overhead and hard Redis dependency; Agent42 is async-native | `asyncio.create_task()` scheduled background recompute in the existing event loop |
-| scikit-learn | 300 MB dependency for a weighted average of floats | Pure Python arithmetic |
-| Separate database for tier state | Tier is a derived view of effectiveness data; a separate DB creates drift risk | Compute from existing effectiveness store; cache in-memory; audit log in the existing aiosqlite DB |
-## Stack Patterns by Variant
-- `get_agent_tier()` returns `RewardTier.BRONZE` immediately, no DB queries, no cache writes
-- All `TierLimits` return Bronze defaults — existing behavior is unchanged
-- Use in-memory TTL dict for tier cache (already the primary approach)
-- No degradation — Redis is not required for this feature
-- Return `RewardTier.BRONZE` regardless of score
-- Surface a reason string: "Needs N more task completions to qualify for Silver"
-- Store override in `.agent42/rewards/overrides.json` (keyed by agent_id), persisted via `aiofiles`
-- `get_agent_tier()` checks overrides first, bypasses score computation entirely
-- Dashboard displays "Admin Override: Gold" with a clear visual indicator
-## Version Compatibility
-| Package | Compatible With | Notes |
-|---------|-----------------|-------|
-| `cachetools>=7.0.5` | Python 3.10+ | Safe with existing stack (Python 3.11+). If added, do NOT also add `asyncache` (incompatible with 7.x). |
-| `aiosqlite>=0.20.0` | Python 3.11+ | Already in requirements.txt. Use `async with aiosqlite.connect()` pattern consistent with existing usage. |
-| `asyncio.Semaphore` | Python 3.11+ stdlib | Cannot be resized — design semaphore lifecycle carefully (see Pattern 3). |
-| `enum.IntEnum` | Python 3.11+ stdlib | Supports `>=` and `<` comparisons directly, which plain `enum.Enum` does not. |
-## Sources
-- Agent42 codebase — `core/rate_limiter.py` (sliding-window per-agent pattern), `core/config.py` (frozen dataclass settings pattern), `core/agent_manager.py` (AgentConfig dataclass), `requirements.txt` (existing deps) — HIGH confidence
-- [cachetools 7.0.5 on PyPI](https://pypi.org/project/cachetools/) — latest version verified 2026-03-22 — HIGH confidence
-- [asyncache 0.3.1 on PyPI](https://pypi.org/project/asyncache/) — confirmed unmaintained (last release November 2022), incompatible with cachetools 7.x — HIGH confidence
-- [cachetools-async 0.0.5 on PyPI](https://pypi.org/project/cachetools-async/) — confirmed active (released June 2025) — HIGH confidence
-- [Python asyncio.Semaphore docs](https://docs.python.org/3/library/asyncio-sync.html) — fixed-at-creation limit confirmed — HIGH confidence
-- [Python enum.IntEnum docs](https://docs.python.org/3/library/enum.html) — IntEnum for tier comparison operators — HIGH confidence
-- [cachetools TTLCache docs](https://cachetools.readthedocs.io/en/stable/) — TTL eviction semantics — HIGH confidence
-- [asyncio semaphore concurrency pattern](https://rednafi.com/python/limit-concurrency-with-semaphore/) — separate semaphore per scope, cannot resize — MEDIUM confidence (WebSearch, consistent with official docs)
+Rewards/tier system stack research extracted to `.claude/reference/stack-rewards.md` (loaded on-demand).
+Core stack: Python 3.11+, stdlib (`IntEnum`, `asyncio.Semaphore`, `dataclasses`), existing deps (`aiosqlite`, `aiofiles`, FastAPI).
 <!-- GSD:stack-end -->
 
 <!-- GSD:conventions-start source:CONVENTIONS.md -->

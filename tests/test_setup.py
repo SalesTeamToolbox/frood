@@ -13,8 +13,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.jcodemunch_index import index_project
 from scripts.setup_helpers import (
+    _detect_project_context,
     check_health,
     generate_claude_md_section,
+    generate_full_claude_md,
     generate_mcp_config,
     print_health_report,
     read_hook_metadata,
@@ -27,8 +29,17 @@ from scripts.setup_helpers import (
 
 
 def _make_fake_venv(tmp_path):
-    """Create a fake .venv/bin/python file so generate_mcp_config thinks venv exists."""
-    python_path = tmp_path / ".venv" / "bin" / "python"
+    """Create a fake venv python so generate_mcp_config thinks venv exists.
+
+    Creates the platform-correct path: .venv/Scripts/python.exe on Windows,
+    .venv/bin/python on Linux/macOS.
+    """
+    import sys as _sys
+
+    if _sys.platform == "win32":
+        python_path = tmp_path / ".venv" / "Scripts" / "python.exe"
+    else:
+        python_path = tmp_path / ".venv" / "bin" / "python"
     python_path.parent.mkdir(parents=True, exist_ok=True)
     python_path.touch()
     return str(python_path)
@@ -163,7 +174,8 @@ class TestMcpConfigMerge:
         config = json.loads((tmp_path / ".mcp.json").read_text())
         cmd = config["mcpServers"]["agent42"]["command"]
         assert cmd != "/nonexistent/path/to/python", "Stale path was not replaced"
-        assert os.path.basename(cmd) == "python"
+        # On Windows basename is python.exe, on Linux/macOS it is python
+        assert os.path.basename(cmd) in ("python", "python.exe")
 
 
 # ---------------------------------------------------------------------------
@@ -738,3 +750,278 @@ class TestMcpHealthProbe:
     def test_health_flag_exits_nonzero_on_failure(self):
         """python mcp_server.py --health exits 1 on import/config error."""
         pytest.skip("Integration test — run manually")
+
+
+# ---------------------------------------------------------------------------
+# TestWindowsCompat
+# ---------------------------------------------------------------------------
+
+
+class TestWindowsCompat:
+    """SETUP-06: Windows Git Bash compatibility — platform-aware venv paths."""
+
+    def test_venv_python_returns_scripts_on_win32(self):
+        """On win32, _venv_python returns .venv/Scripts/python.exe path."""
+        from scripts.setup_helpers import _venv_python
+
+        with mock.patch("scripts.setup_helpers.sys") as mock_sys:
+            mock_sys.platform = "win32"
+            result = _venv_python("/project")
+
+        assert result == os.path.join("/project", ".venv", "Scripts", "python.exe")
+
+    def test_venv_python_returns_bin_on_linux(self):
+        """On linux, _venv_python returns .venv/bin/python path."""
+        from scripts.setup_helpers import _venv_python
+
+        with mock.patch("scripts.setup_helpers.sys") as mock_sys:
+            mock_sys.platform = "linux"
+            result = _venv_python("/project")
+
+        assert result == os.path.join("/project", ".venv", "bin", "python")
+
+    def test_mcp_config_uses_venv_python_win32(self, tmp_path):
+        """On win32, generate_mcp_config writes .mcp.json with Scripts/python.exe path."""
+        # Create the Windows-style venv python path
+        scripts_python = tmp_path / ".venv" / "Scripts" / "python.exe"
+        scripts_python.parent.mkdir(parents=True, exist_ok=True)
+        scripts_python.touch()
+
+        with mock.patch("scripts.setup_helpers.sys") as mock_sys:
+            mock_sys.platform = "win32"
+            generate_mcp_config(str(tmp_path))
+
+        config = json.loads((tmp_path / ".mcp.json").read_text())
+        command = config["mcpServers"]["agent42"]["command"]
+        assert "Scripts" in command and "python.exe" in command, (
+            f"Expected Scripts/python.exe in command, got: {command}"
+        )
+
+    def test_mcp_config_uses_venv_python_linux(self, tmp_path):
+        """On linux, generate_mcp_config writes .mcp.json with .venv/bin/python path."""
+        # Create the Linux-style venv python path
+        bin_python = tmp_path / ".venv" / "bin" / "python"
+        bin_python.parent.mkdir(parents=True, exist_ok=True)
+        bin_python.touch()
+
+        with mock.patch("scripts.setup_helpers.sys") as mock_sys:
+            mock_sys.platform = "linux"
+            generate_mcp_config(str(tmp_path))
+
+        config = json.loads((tmp_path / ".mcp.json").read_text())
+        command = config["mcpServers"]["agent42"]["command"]
+        # Normalize to forward slashes for cross-platform comparison
+        command_normalized = command.replace("\\", "/")
+        assert ".venv/bin/python" in command_normalized, (
+            f"Expected .venv/bin/python in command, got: {command}"
+        )
+
+    def test_health_check_uses_platform_venv_path(self, tmp_path):
+        """check_health calls subprocess with platform-correct venv python path."""
+        captured_calls = []
+
+        def capture_run(args, **kwargs):
+            captured_calls.append(args)
+            result = mock.MagicMock()
+            result.returncode = 0
+            result.stderr = b""
+            return result
+
+        with (
+            mock.patch("scripts.setup_helpers.sys") as mock_sys,
+            mock.patch("subprocess.run", side_effect=capture_run),
+            mock.patch("urllib.request.urlopen", side_effect=OSError("refused")),
+        ):
+            mock_sys.platform = "win32"
+            check_health(str(tmp_path))
+
+        # Find the MCP server call (first subprocess.run call with venv python)
+        mcp_calls = [c for c in captured_calls if len(c) >= 1 and "mcp_server" in str(c)]
+        assert len(mcp_calls) >= 1, f"No MCP server call found in: {captured_calls}"
+        mcp_cmd = mcp_calls[0]
+        assert "Scripts" in str(mcp_cmd) and "python.exe" in str(mcp_cmd), (
+            f"Expected Scripts/python.exe in MCP call, got: {mcp_cmd}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestProjectContext
+# ---------------------------------------------------------------------------
+
+
+class TestProjectContext:
+    """SETUP-07: Project context detection for CLAUDE.md generation."""
+
+    def test_detect_project_name_from_directory(self, tmp_path):
+        """_detect_project_context returns project_name equal to directory basename."""
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.MagicMock(returncode=1, stdout="")
+            ctx = _detect_project_context(str(tmp_path))
+        assert ctx["project_name"] == tmp_path.name
+
+    def test_detect_project_name_from_git_remote_https(self, tmp_path):
+        """When git remote returns HTTPS URL, project_name is extracted from repo name."""
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.MagicMock(
+                returncode=0, stdout="https://github.com/org/myrepo.git\n"
+            )
+            ctx = _detect_project_context(str(tmp_path))
+        assert ctx["project_name"] == "myrepo"
+
+    def test_detect_project_name_from_git_remote_ssh(self, tmp_path):
+        """When git remote returns SSH URL, project_name is extracted from repo name."""
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.MagicMock(
+                returncode=0, stdout="git@github.com:org/myrepo.git\n"
+            )
+            ctx = _detect_project_context(str(tmp_path))
+        assert ctx["project_name"] == "myrepo"
+
+    def test_detect_jcodemunch_repo_id(self, tmp_path):
+        """_detect_project_context returns jcodemunch_repo as 'local/{project_name}'."""
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.MagicMock(
+                returncode=0, stdout="https://github.com/org/coolproject.git\n"
+            )
+            ctx = _detect_project_context(str(tmp_path))
+        assert ctx["jcodemunch_repo"] == "local/coolproject"
+
+    def test_detect_active_workstream(self, tmp_path):
+        """When .planning/workstreams/my-ws/STATE.md contains 'status: active', returns it."""
+        ws_dir = tmp_path / ".planning" / "workstreams" / "my-ws"
+        ws_dir.mkdir(parents=True)
+        (ws_dir / "STATE.md").write_text("---\nstatus: active\n---\n# State\n")
+
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.MagicMock(returncode=1, stdout="")
+            ctx = _detect_project_context(str(tmp_path))
+        assert ctx["active_workstream"] == "my-ws"
+
+    def test_detect_no_workstream(self, tmp_path):
+        """When no .planning/ directory exists, active_workstream is None."""
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.MagicMock(returncode=1, stdout="")
+            ctx = _detect_project_context(str(tmp_path))
+        assert ctx["active_workstream"] is None
+
+
+# ---------------------------------------------------------------------------
+# TestClaudeMdFull
+# ---------------------------------------------------------------------------
+
+
+def _mock_git_https(tmp_path):
+    """Return a mock subprocess.run that returns an HTTPS git remote URL."""
+    result = mock.MagicMock(returncode=0, stdout=f"https://github.com/org/{tmp_path.name}.git\n")
+    return result
+
+
+class TestClaudeMdFull:
+    """SETUP-07: Full CLAUDE.md template generation with project-aware content."""
+
+    def _run_generate(self, tmp_path):
+        """Helper: run generate_full_claude_md with mocked git remote."""
+        with mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = _mock_git_https(tmp_path)
+            generate_full_claude_md(str(tmp_path))
+
+    def test_full_claude_md_creates_file_with_hook_protocol(self, tmp_path):
+        """generate_full_claude_md() creates CLAUDE.md with Agent42 Hook Protocol section."""
+        self._run_generate(tmp_path)
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "## Agent42 Hook Protocol" in content
+
+    def test_full_claude_md_contains_memory_instructions(self, tmp_path):
+        """Generated CLAUDE.md contains agent42_memory tool instructions."""
+        self._run_generate(tmp_path)
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "agent42_memory" in content
+
+    def test_full_claude_md_contains_project_name(self, tmp_path):
+        """Generated CLAUDE.md contains the detected project name."""
+        self._run_generate(tmp_path)
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert tmp_path.name in content
+
+    def test_full_claude_md_contains_jcodemunch_repo(self, tmp_path):
+        """Generated CLAUDE.md contains 'local/{project_name}' jcodemunch repo ID."""
+        self._run_generate(tmp_path)
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert f"local/{tmp_path.name}" in content
+
+    def test_full_claude_md_merges_into_existing(self, tmp_path):
+        """When CLAUDE.md exists with user content, merge preserves user content."""
+        (tmp_path / "CLAUDE.md").write_text("# My Existing Project\n\nUser content here.\n")
+        self._run_generate(tmp_path)
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "My Existing Project" in content
+        assert "User content here." in content
+        assert "## Agent42 Hook Protocol" in content
+
+    def test_full_claude_md_idempotent(self, tmp_path):
+        """Running generate_full_claude_md() twice produces identical file content."""
+        self._run_generate(tmp_path)
+        first = (tmp_path / "CLAUDE.md").read_text()
+        self._run_generate(tmp_path)
+        second = (tmp_path / "CLAUDE.md").read_text()
+        assert first == second
+
+    def test_full_claude_md_contains_pitfalls(self, tmp_path):
+        """Generated CLAUDE.md contains a Common Pitfalls section."""
+        self._run_generate(tmp_path)
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "## Common Pitfalls" in content
+
+    def test_full_claude_md_contains_testing_standards(self, tmp_path):
+        """Generated CLAUDE.md contains Testing Standards or pytest reference."""
+        self._run_generate(tmp_path)
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "## Testing Standards" in content or "pytest" in content
+
+    def test_full_claude_md_contains_codebase_navigation(self, tmp_path):
+        """Generated CLAUDE.md contains Codebase Navigation section."""
+        self._run_generate(tmp_path)
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "## Codebase Navigation" in content
+
+    def test_full_claude_md_preserves_outside_markers(self, tmp_path):
+        """Content before and after existing markers is preserved during merge."""
+        (tmp_path / "CLAUDE.md").write_text(
+            "# Header\n\nBefore.\n\n"
+            "<!-- BEGIN AGENT42 MEMORY -->\nOLD CONTENT\n<!-- END AGENT42 MEMORY -->\n\n"
+            "After.\n"
+        )
+        self._run_generate(tmp_path)
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "Before." in content
+        assert "After." in content
+        assert "OLD CONTENT" not in content
+
+    def test_full_claude_md_contains_hook_table_rows(self, tmp_path):
+        """Generated CLAUDE.md hook protocol includes UserPromptSubmit and Stop rows."""
+        self._run_generate(tmp_path)
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "UserPromptSubmit" in content
+        assert "Stop" in content
+
+    def test_full_claude_md_existing_markers_replaced(self, tmp_path):
+        """Old managed block is fully replaced when markers already exist."""
+        (tmp_path / "CLAUDE.md").write_text(
+            "# Project\n\n<!-- BEGIN AGENT42 MEMORY -->\nSTALE\n<!-- END AGENT42 MEMORY -->\n"
+        )
+        self._run_generate(tmp_path)
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "STALE" not in content
+        assert "agent42_memory" in content
+
+    def test_full_claude_md_project_section_included(self, tmp_path):
+        """Generated CLAUDE.md has a Project section with the project name."""
+        self._run_generate(tmp_path)
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "## Project" in content
+
+    def test_full_claude_md_contains_quick_reference(self, tmp_path):
+        """Generated CLAUDE.md contains a Quick Reference section with setup commands."""
+        self._run_generate(tmp_path)
+        content = (tmp_path / "CLAUDE.md").read_text()
+        assert "pytest" in content or "Quick Reference" in content or "## Testing" in content

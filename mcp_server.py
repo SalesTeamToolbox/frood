@@ -218,10 +218,37 @@ def _build_registry() -> ToolRegistry:
     MemoryTool = _safe_import("tools.memory_tool", "MemoryTool")
     WorkflowTool = _safe_import("tools.workflow_tool", "WorkflowTool")
 
+    # Project memory factory for MemoryTool project namespace routing (MEM-03)
+    _project_store_cache: dict = {}
+
+    def _project_memory_factory(project_id: str):
+        if project_id not in _project_store_cache:
+            try:
+                from memory.project_memory import ProjectMemoryStore
+
+                _project_store_cache[project_id] = ProjectMemoryStore(
+                    project_id=project_id,
+                    base_dir=workspace / ".agent42",
+                    global_store=memory_store,
+                    qdrant_store=qdrant_store,
+                    redis_backend=redis_backend,
+                )
+            except Exception as e:
+                logger.warning("Failed to create project store for '%s': %s", project_id, e)
+                return memory_store  # Fallback to global
+        return _project_store_cache[project_id]
+
     _register(
         BehaviourTool(memory_dir=workspace / ".agent42" / "memory") if BehaviourTool else None
     )
-    _register(MemoryTool(memory_store=memory_store) if MemoryTool else None)
+    _register(
+        MemoryTool(
+            memory_store=memory_store,
+            project_memory_factory=_project_memory_factory if memory_store else None,
+        )
+        if MemoryTool
+        else None
+    )
     _register(WorkflowTool(workspace_str, registry) if WorkflowTool else None)
 
     # ── Context Assembler (Phase 7 — smart project context retrieval) ────
@@ -235,6 +262,27 @@ def _build_registry() -> ToolRegistry:
             workspace=workspace_str,
         )
         if ContextAssemblerTool
+        else None
+    )
+
+    # ── Unified Context (Phase 4 — context engine with code symbols + GSD + effectiveness) ──
+    UnifiedContextTool = _safe_import("tools.unified_context", "UnifiedContextTool")
+    effectiveness_store = None
+    try:
+        from memory.effectiveness import EffectivenessStore
+
+        _eff_db = workspace / ".agent42" / "effectiveness.db"
+        effectiveness_store = EffectivenessStore(_eff_db)
+    except Exception as e:
+        logger.info(f"EffectivenessStore not available: {e}")
+    _register(
+        UnifiedContextTool(
+            memory_store=memory_store,
+            skill_loader=None,
+            workspace=workspace_str,
+            effectiveness_store=effectiveness_store,
+        )
+        if UnifiedContextTool
         else None
     )
 

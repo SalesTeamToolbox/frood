@@ -7,6 +7,7 @@
 #   bash setup.sh              Full local setup (default)
 #   bash setup.sh sync-auth    Sync CC credentials to remote VPS
 #   bash setup.sh create-shortcut  Create desktop shortcut for Agent42
+#   bash setup.sh generate-claude-md  Generate CLAUDE.md with Agent42 conventions
 #   bash setup.sh --quiet      Quiet mode (for install-server.sh)
 
 set -e
@@ -20,6 +21,19 @@ NC='\033[0m'
 info()    { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+
+# ── Platform detection ────────────────────────────────────────────────────
+OS_TYPE="$(uname -s)"
+case "$OS_TYPE" in
+    MINGW*|MSYS*|CYGWIN*)
+        VENV_ACTIVATE=".venv/Scripts/activate"
+        PYTHON_CMD="python"
+        ;;
+    *)
+        VENV_ACTIVATE=".venv/bin/activate"
+        PYTHON_CMD="python3"
+        ;;
+esac
 
 # ── Subcommand: sync-auth ──────────────────────────────────────────────────
 if [ "$1" = "sync-auth" ]; then
@@ -41,7 +55,7 @@ if [ "$1" = "sync-auth" ]; then
     NEW_STATUS=$(ssh -o ConnectTimeout=5 "$SSH_ALIAS" "claude auth status 2>&1" 2>/dev/null | grep -o '"loggedIn": *[a-z]*' | head -1 || echo "unknown")
     if echo "$NEW_STATUS" | grep -q "true"; then
         info "CC credentials synced successfully!"
-        ssh "$SSH_ALIAS" "claude auth status 2>&1" 2>/dev/null | python3 -c "
+        ssh "$SSH_ALIAS" "claude auth status 2>&1" 2>/dev/null | $PYTHON_CMD -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -84,8 +98,8 @@ if [ "$1" = "create-shortcut" ]; then
             ICO_FILE="$PROJECT_DIR/dashboard/frontend/dist/assets/icons/agent42.ico"
             if [ ! -f "$ICO_FILE" ]; then
                 info "Generating .ico icon file..."
-                python3 "$PROJECT_DIR/scripts/generate-icons.py" --ico-only 2>/dev/null || \
-                python3 -c "
+                $PYTHON_CMD "$PROJECT_DIR/scripts/generate-icons.py" --ico-only 2>/dev/null || \
+                $PYTHON_CMD -c "
 from PIL import Image
 import struct, io
 src = Image.open('$PROJECT_DIR/dashboard/frontend/dist/assets/icons/icon-512.png').convert('RGBA')
@@ -220,6 +234,14 @@ DESKTOP
     exit 0
 fi
 
+# ── Subcommand: generate-claude-md ───────────────────────────────────────────
+if [ "$1" = "generate-claude-md" ]; then
+    info "Generating CLAUDE.md with Agent42 conventions..."
+    $PYTHON_CMD scripts/setup_helpers.py generate-claude-md "$PROJECT_DIR"
+    info "Done! Review CLAUDE.md for your project."
+    exit 0
+fi
+
 QUIET=false
 [ "$1" = "--quiet" ] && QUIET=true
 
@@ -237,13 +259,13 @@ if ! $QUIET; then
 fi
 
 # ── Check Python 3.11+ ──────────────────────────────────────────────────────
-if ! command -v python3 &>/dev/null; then
+if ! command -v $PYTHON_CMD &>/dev/null; then
     error "Python 3 not found. Install Python 3.11+."
 fi
 
-PY_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-PY_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
-PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
+PY_VERSION=$($PYTHON_CMD -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+PY_MAJOR=$($PYTHON_CMD -c "import sys; print(sys.version_info.major)")
+PY_MINOR=$($PYTHON_CMD -c "import sys; print(sys.version_info.minor)")
 
 if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 11 ]; }; then
     error "Python 3.11+ required. Found: $PY_VERSION"
@@ -271,8 +293,8 @@ info "git version: $(git --version)"
 
 # ── Python venv ──────────────────────────────────────────────────────────────
 info "Creating Python virtual environment..."
-python3 -m venv .venv
-source .venv/bin/activate
+$PYTHON_CMD -m venv .venv
+source "$VENV_ACTIVATE"
 
 info "Installing Python dependencies..."
 pip install --quiet --upgrade pip
@@ -310,25 +332,25 @@ fi
 # ── MCP configuration ────────────────────────────────────────────────────────
 info "Configuring MCP servers..."
 if [ -n "$SSH_ALIAS" ]; then
-    python3 scripts/setup_helpers.py mcp-config "$PROJECT_DIR" "$SSH_ALIAS"
+    $PYTHON_CMD scripts/setup_helpers.py mcp-config "$PROJECT_DIR" "$SSH_ALIAS"
 else
-    python3 scripts/setup_helpers.py mcp-config "$PROJECT_DIR"
+    $PYTHON_CMD scripts/setup_helpers.py mcp-config "$PROJECT_DIR"
 fi
 info "MCP configuration complete"
 
 # ── Hook registration ────────────────────────────────────────────────────────
 info "Registering Claude Code hooks..."
-python3 scripts/setup_helpers.py register-hooks "$PROJECT_DIR"
+$PYTHON_CMD scripts/setup_helpers.py register-hooks "$PROJECT_DIR"
 info "Hooks registered"
 
 # ── CLAUDE.md memory section ─────────────────────────────────────────────────
 info "Generating CLAUDE.md memory section..."
-python3 scripts/setup_helpers.py claude-md "$PROJECT_DIR"
+$PYTHON_CMD scripts/setup_helpers.py claude-md "$PROJECT_DIR"
 info "CLAUDE.md memory section updated"
 
 # ── jcodemunch indexing ───────────────────────────────────────────────────────
 info "Indexing project with jcodemunch..."
-if ! python3 scripts/jcodemunch_index.py "$PROJECT_DIR" --timeout=120; then
+if ! $PYTHON_CMD scripts/jcodemunch_index.py "$PROJECT_DIR" --timeout=120; then
     warn "jcodemunch indexing failed — run manually: uvx jcodemunch-mcp"
 fi
 
@@ -336,7 +358,7 @@ fi
 if ! $QUIET; then
     echo ""
     info "Running health checks..."
-    python3 scripts/setup_helpers.py health "$PROJECT_DIR"
+    $PYTHON_CMD scripts/setup_helpers.py health "$PROJECT_DIR"
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────
@@ -344,7 +366,7 @@ if ! $QUIET; then
     echo ""
     info "Setup complete!"
     echo ""
-    echo "  1. Start Agent42:  source .venv/bin/activate && python agent42.py"
+    echo "  1. Start Agent42:  source $VENV_ACTIVATE && python agent42.py"
     echo "  2. Open http://localhost:8000 to complete setup in your browser"
     echo "  3. MCP config:     .mcp.json (configured for Claude Code)"
     echo "  4. Hooks:          .claude/settings.json (auto-registered)"
