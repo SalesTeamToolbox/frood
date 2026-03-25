@@ -72,10 +72,23 @@ class MemoryTool(Tool):
     Requires ``memory_store`` from ToolContext injection.
     """
 
-    requires = ["memory_store"]
+    requires = ["memory_store", "project_memory_factory"]
 
-    def __init__(self, memory_store=None, **kwargs):
+    def __init__(self, memory_store=None, project_memory_factory=None, **kwargs):
         self._store = memory_store
+        self._project_factory = project_memory_factory
+
+    def _get_store(self, project: str = "global"):
+        """Route to project-scoped or global store based on project parameter."""
+        if project and project != "global" and self._project_factory:
+            return self._project_factory(project)
+        if project and project != "global" and not self._project_factory:
+            logger.warning(
+                "project_memory_factory not registered; project='%s' will use global store. "
+                "Project namespace isolation is not active.",
+                project,
+            )
+        return self._store
 
     @property
     def name(self) -> str:
@@ -177,7 +190,7 @@ class MemoryTool(Tool):
         if action == "store":
             return await self._handle_store(section, content, project)
         elif action == "recall":
-            return self._handle_recall()
+            return self._handle_recall(project)
         elif action == "log":
             return await self._handle_log(event_type, content)
         elif action == "search":
@@ -210,10 +223,12 @@ class MemoryTool(Tool):
         content = content.strip()
 
         try:
+            store = self._get_store(project)
+
             # Write-time dedup: check if a near-duplicate already exists
-            if self._store.semantic_available:
+            if store.semantic_available:
                 try:
-                    existing = await self._store.semantic_search(content, top_k=1)
+                    existing = await store.semantic_search(content, top_k=1)
                     if existing:
                         top = existing[0]
                         score = top.get("score", 0)
@@ -234,7 +249,7 @@ class MemoryTool(Tool):
                     logger.debug("Dedup check failed, storing anyway: %s", e)
 
             # 1. Write to MEMORY.md (flat file, always works)
-            self._store.append_to_section(section, content)
+            store.append_to_section(section, content)
 
             # 2. Index in Qdrant for semantic search (if available)
             semantic_indexed = False
@@ -321,9 +336,10 @@ class MemoryTool(Tool):
                 success=False,
             )
 
-    def _handle_recall(self) -> ToolResult:
+    def _handle_recall(self, project: str = "global") -> ToolResult:
         try:
-            memory = self._store.read_memory()
+            store = self._get_store(project)
+            memory = store.read_memory()
             if not memory or not memory.strip():
                 return ToolResult(output="Memory is empty. Nothing stored yet.")
             return ToolResult(output=memory)
@@ -520,6 +536,7 @@ class MemoryTool(Tool):
 
         try:
             results = []
+            store = self._get_store(project)
 
             # 1. Semantic search via Qdrant (finds by meaning, not keywords)
             # Uses lifecycle-aware scoring when available
@@ -541,8 +558,8 @@ class MemoryTool(Tool):
                     if text:
                         results.append(f"[{source} {meta}] {text.strip()}")
 
-            # 2. Keyword fallback — search memory text
-            memory = self._store.read_memory()
+            # 2. Keyword fallback — search project-scoped memory text
+            memory = store.read_memory()
             for line in memory.splitlines():
                 line_stripped = line.strip()
                 if line_stripped and query.lower() in line_stripped.lower():
@@ -550,8 +567,8 @@ class MemoryTool(Tool):
                     if entry not in results:
                         results.append(entry)
 
-            # 3. History keyword search
-            history_matches = self._store.search_history(query)
+            # 3. History keyword search (project-scoped)
+            history_matches = store.search_history(query)
             for match in history_matches[:10]:
                 results.append(f"[history] {match.strip()}")
 

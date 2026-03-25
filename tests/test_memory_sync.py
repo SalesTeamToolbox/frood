@@ -14,12 +14,17 @@ Also covers MEM-03 requirements:
 - Factory caches ProjectMemoryStore instances by project_id
 """
 
+import logging
 import re
 import time
 from pathlib import Path
 
+import pytest
+
 from memory.embeddings import EmbeddingStore
+from memory.project_memory import ProjectMemoryStore
 from memory.store import MemoryStore
+from tools.memory_tool import MemoryTool
 
 # ── Regex for a valid UUID-prefixed bullet ─────────────────────────────────
 BULLET_UUID_RE = re.compile(r"^- \[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z [0-9a-f]{8}\] .+$")
@@ -290,6 +295,203 @@ class TestEmbeddingTagStripping:
         for chunk in pattern_chunks:
             assert "plain bullet with no uuid tag" in chunk["text"]
             assert "another plain line" in chunk["text"]
+
+
+# ── MEM-03: Project namespace routing tests ──────────────────────────────────
+
+
+def _make_factory(tmp_path: Path, global_store: MemoryStore):
+    """Create a real project_memory_factory with a dict cache for testing."""
+    cache: dict = {}
+
+    def factory(project_id: str):
+        if project_id not in cache:
+            cache[project_id] = ProjectMemoryStore(
+                project_id=project_id,
+                base_dir=tmp_path / "agent42",
+                global_store=global_store,
+                qdrant_store=None,
+                redis_backend=None,
+            )
+        return cache[project_id]
+
+    return factory, cache
+
+
+class TestProjectRouting:
+    """Tests that MemoryTool routes project-scoped operations to ProjectMemoryStore."""
+
+    @pytest.mark.asyncio
+    async def test_store_routes_to_project_store(self, tmp_path):
+        """store action with project='myproject' writes to ProjectMemoryStore, not global."""
+        global_store = MemoryStore(tmp_path / "global", qdrant_store=None, redis_backend=None)
+        factory, _cache = _make_factory(tmp_path, global_store)
+        tool = MemoryTool(memory_store=global_store, project_memory_factory=factory)
+
+        result = await tool.execute(
+            action="store", section="Test", content="project-specific fact", project="myproject"
+        )
+        assert result.success, f"Expected success, got: {result.output}"
+
+        # Content should be in the project store, not global
+        project_memory_path = tmp_path / "agent42" / "projects" / "myproject" / "MEMORY.md"
+        assert project_memory_path.exists(), "Project MEMORY.md should be created"
+        project_content = project_memory_path.read_text(encoding="utf-8")
+        assert "project-specific fact" in project_content
+
+        # Global store should NOT contain the content
+        global_memory_path = tmp_path / "global" / "MEMORY.md"
+        global_content = (
+            global_memory_path.read_text(encoding="utf-8") if global_memory_path.exists() else ""
+        )
+        assert "project-specific fact" not in global_content
+
+    @pytest.mark.asyncio
+    async def test_recall_routes_to_project_store(self, tmp_path):
+        """recall action with project='myproject' reads from ProjectMemoryStore."""
+        global_store = MemoryStore(tmp_path / "global", qdrant_store=None, redis_backend=None)
+        factory, _cache = _make_factory(tmp_path, global_store)
+        tool = MemoryTool(memory_store=global_store, project_memory_factory=factory)
+
+        # Pre-populate project store directly
+        project_store = factory("myproject")
+        project_store.append_to_section("Facts", "project recall content")
+
+        result = await tool.execute(action="recall", project="myproject")
+        assert result.success, f"Expected success, got: {result.output}"
+        assert "project recall content" in result.output
+
+    @pytest.mark.asyncio
+    async def test_search_routes_to_project_store(self, tmp_path):
+        """search action with project='myproject' searches ProjectMemoryStore."""
+        global_store = MemoryStore(tmp_path / "global", qdrant_store=None, redis_backend=None)
+        factory, _cache = _make_factory(tmp_path, global_store)
+        tool = MemoryTool(memory_store=global_store, project_memory_factory=factory)
+
+        # Populate project store with searchable content
+        project_store = factory("myproject")
+        project_store.append_to_section("Facts", "unique project search term xyz123")
+
+        # Also add different content to global store (should NOT appear in project search)
+        global_store.append_to_section("Facts", "global-only fact abc456")
+
+        result = await tool.execute(action="search", content="xyz123", project="myproject")
+        assert result.success, f"Expected success, got: {result.output}"
+        assert "xyz123" in result.output
+
+
+class TestBackwardCompat:
+    """Tests that project='global' and default project use global MemoryStore."""
+
+    @pytest.mark.asyncio
+    async def test_global_project_uses_global_store(self, tmp_path):
+        """store with project='global' writes to global store."""
+        global_store = MemoryStore(tmp_path / "global", qdrant_store=None, redis_backend=None)
+        factory, _cache = _make_factory(tmp_path, global_store)
+        tool = MemoryTool(memory_store=global_store, project_memory_factory=factory)
+
+        result = await tool.execute(
+            action="store", section="Test", content="global fact here", project="global"
+        )
+        assert result.success
+
+        global_memory_path = tmp_path / "global" / "MEMORY.md"
+        assert global_memory_path.exists(), "Global MEMORY.md should be written"
+        content = global_memory_path.read_text(encoding="utf-8")
+        assert "global fact here" in content
+
+    @pytest.mark.asyncio
+    async def test_empty_project_uses_global_store(self, tmp_path):
+        """store with default project (no project param) writes to global store."""
+        global_store = MemoryStore(tmp_path / "global", qdrant_store=None, redis_backend=None)
+        factory, _cache = _make_factory(tmp_path, global_store)
+        tool = MemoryTool(memory_store=global_store, project_memory_factory=factory)
+
+        result = await tool.execute(action="store", section="Test", content="default project fact")
+        assert result.success
+
+        global_memory_path = tmp_path / "global" / "MEMORY.md"
+        assert global_memory_path.exists()
+        content = global_memory_path.read_text(encoding="utf-8")
+        assert "default project fact" in content
+
+    @pytest.mark.asyncio
+    async def test_no_factory_uses_global_store(self, tmp_path):
+        """MemoryTool with factory=None and project='global' uses global store."""
+        global_store = MemoryStore(tmp_path / "global", qdrant_store=None, redis_backend=None)
+        tool = MemoryTool(memory_store=global_store, project_memory_factory=None)
+
+        result = await tool.execute(
+            action="store", section="Test", content="no factory global fact", project="global"
+        )
+        assert result.success
+
+        global_memory_path = tmp_path / "global" / "MEMORY.md"
+        content = global_memory_path.read_text(encoding="utf-8")
+        assert "no factory global fact" in content
+
+
+class TestFactoryFallback:
+    """Tests that MemoryTool falls back gracefully when factory=None and project is non-global."""
+
+    @pytest.mark.asyncio
+    async def test_no_factory_with_project_falls_back_and_warns(self, tmp_path, caplog):
+        """MemoryTool with factory=None and project='myproject' falls back to global and logs warning."""
+        global_store = MemoryStore(tmp_path / "global", qdrant_store=None, redis_backend=None)
+        tool = MemoryTool(memory_store=global_store, project_memory_factory=None)
+
+        with caplog.at_level(logging.WARNING, logger="agent42.tools.memory"):
+            result = await tool.execute(
+                action="store",
+                section="Test",
+                content="fallback content",
+                project="myproject",
+            )
+
+        assert result.success, f"Expected success (falls back to global): {result.output}"
+
+        # Warning should mention the fallback
+        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any(
+            "project_memory_factory" in msg or "project namespace" in msg
+            for msg in warning_messages
+        ), f"Expected warning about missing factory, got: {warning_messages}"
+
+        # Content should land in global store (fallback)
+        global_memory_path = tmp_path / "global" / "MEMORY.md"
+        assert global_memory_path.exists()
+        content = global_memory_path.read_text(encoding="utf-8")
+        assert "fallback content" in content
+
+
+class TestFactoryCache:
+    """Tests that the factory caches ProjectMemoryStore instances by project_id."""
+
+    def test_factory_caches_instances(self, tmp_path):
+        """Two calls to factory('myproject') return the same ProjectMemoryStore instance."""
+        global_store = MemoryStore(tmp_path / "global", qdrant_store=None, redis_backend=None)
+        factory, cache = _make_factory(tmp_path, global_store)
+
+        store_a = factory("myproject")
+        store_b = factory("myproject")
+
+        assert id(store_a) == id(store_b), (
+            "Factory should cache and return the same instance for the same project_id"
+        )
+
+    def test_factory_different_projects_different_instances(self, tmp_path):
+        """Different project IDs return different ProjectMemoryStore instances."""
+        global_store = MemoryStore(tmp_path / "global", qdrant_store=None, redis_backend=None)
+        factory, _cache = _make_factory(tmp_path, global_store)
+
+        store_proj_a = factory("project-a")
+        store_proj_b = factory("project-b")
+
+        assert id(store_proj_a) != id(store_proj_b), (
+            "Different project IDs should produce different instances"
+        )
+        assert store_proj_a.project_id == "project-a"
+        assert store_proj_b.project_id == "project-b"
 
 
 # ── Plan 02: Entry-level union merge tests ────────────────────────────────────
