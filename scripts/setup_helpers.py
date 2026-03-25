@@ -15,8 +15,17 @@ Uses only Python stdlib — no external dependencies required.
 import json
 import os
 import subprocess
+import sys
 import urllib.error
 import urllib.request
+
+
+def _venv_python(project_dir: str) -> str:
+    """Return the correct venv python executable path for the current platform."""
+    if sys.platform == "win32":
+        return os.path.join(project_dir, ".venv", "Scripts", "python.exe")
+    return os.path.join(project_dir, ".venv", "bin", "python")
+
 
 # ---------------------------------------------------------------------------
 # Server template definitions
@@ -213,7 +222,7 @@ def generate_mcp_config(project_dir: str, ssh_alias: str | None = None) -> None:
         ssh_alias:   SSH config alias for the remote node (optional).
     """
     mcp_path = os.path.join(project_dir, ".mcp.json")
-    venv_python = os.path.join(project_dir, ".venv", "bin", "python")
+    venv_python = _venv_python(project_dir)
 
     # Load existing config or start fresh
     config = {"mcpServers": {}}
@@ -388,7 +397,7 @@ def check_health(project_dir: str) -> list:
         List of dicts with keys: name, healthy, detail, fix, level.
         level is 'error' (red) or 'warn' (yellow).
     """
-    venv_python = os.path.join(project_dir, ".venv", "bin", "python")
+    venv_python = _venv_python(project_dir)
     mcp_server_path = os.path.join(project_dir, "mcp_server.py")
     results = []
 
@@ -606,8 +615,6 @@ def print_health_report(results: list) -> None:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    import sys
-
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
 
     if cmd == "mcp-config":

@@ -27,8 +27,17 @@ from scripts.setup_helpers import (
 
 
 def _make_fake_venv(tmp_path):
-    """Create a fake .venv/bin/python file so generate_mcp_config thinks venv exists."""
-    python_path = tmp_path / ".venv" / "bin" / "python"
+    """Create a fake venv python so generate_mcp_config thinks venv exists.
+
+    Creates the platform-correct path: .venv/Scripts/python.exe on Windows,
+    .venv/bin/python on Linux/macOS.
+    """
+    import sys as _sys
+
+    if _sys.platform == "win32":
+        python_path = tmp_path / ".venv" / "Scripts" / "python.exe"
+    else:
+        python_path = tmp_path / ".venv" / "bin" / "python"
     python_path.parent.mkdir(parents=True, exist_ok=True)
     python_path.touch()
     return str(python_path)
@@ -163,7 +172,8 @@ class TestMcpConfigMerge:
         config = json.loads((tmp_path / ".mcp.json").read_text())
         cmd = config["mcpServers"]["agent42"]["command"]
         assert cmd != "/nonexistent/path/to/python", "Stale path was not replaced"
-        assert os.path.basename(cmd) == "python"
+        # On Windows basename is python.exe, on Linux/macOS it is python
+        assert os.path.basename(cmd) in ("python", "python.exe")
 
 
 # ---------------------------------------------------------------------------
@@ -798,7 +808,9 @@ class TestWindowsCompat:
 
         config = json.loads((tmp_path / ".mcp.json").read_text())
         command = config["mcpServers"]["agent42"]["command"]
-        assert ".venv/bin/python" in command or command.endswith("bin/python"), (
+        # Normalize to forward slashes for cross-platform comparison
+        command_normalized = command.replace("\\", "/")
+        assert ".venv/bin/python" in command_normalized, (
             f"Expected .venv/bin/python in command, got: {command}"
         )
 
