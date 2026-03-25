@@ -1,0 +1,5 @@
+# Normalize line endings: enforce LF for shell and Python files
+* text=auto
+*.sh    text eol=lf
+*.py    text eol=lf
+*.bash  text eol=lf
