@@ -7,6 +7,7 @@ This milestone unifies Agent42's developer tooling into a zero-friction platform
 ## Phases
 
 **Phase Numbering:**
+
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
@@ -18,6 +19,7 @@ This milestone unifies Agent42's developer tooling into a zero-friction platform
 ## Phase Details
 
 ### Phase 1: Setup Foundation
+
 **Goal**: Users can run a single command on Linux/VPS and have a fully configured Agent42 + Claude Code environment with working MCP, hooks, and jcodemunch index
 **Depends on**: Nothing (first phase)
 **Requirements**: SETUP-01, SETUP-02, SETUP-03, SETUP-04, SETUP-05
@@ -34,6 +36,7 @@ This milestone unifies Agent42's developer tooling into a zero-friction platform
 - [x] 01-03-PLAN.md — jcodemunch indexer + setup.sh integration + tests (Wave 2)
 
 ### Phase 2: Windows + CLAUDE.md
+
 **Goal**: Users on Windows with Git Bash can run the same setup command without errors, and any user can generate a project CLAUDE.md pre-loaded with Agent42 conventions and pitfall patterns
 **Depends on**: Phase 1
 **Requirements**: SETUP-06, SETUP-07
@@ -41,9 +44,13 @@ This milestone unifies Agent42's developer tooling into a zero-friction platform
   1. User on Windows runs `bash setup.sh` in Git Bash without path errors, CRLF failures, or Python venv activation errors — setup completes successfully
   2. User runs the CLAUDE.md generation command and receives a CLAUDE.md file containing Agent42 hook protocol, memory system description, and at least the current pitfall patterns from CLAUDE.md
   3. Generated CLAUDE.md is project-aware (references the correct project name, repo identifier, and active workstream)
-**Plans**: TBD
+**Plans**: 2 plans
+
+- [ ] 02-01-PLAN.md — Windows Git Bash compatibility: platform detection, venv paths, .gitattributes (Wave 1)
+- [ ] 02-02-PLAN.md — CLAUDE.md template generation: generate-claude-md subcommand + project-aware template (Wave 2)
 
 ### Phase 3: Memory Sync
+
 **Goal**: Memory entries carry stable identifiers so sync across nodes produces a lossless union of all entries, and MemoryTool isolates memories by project namespace when a project parameter is provided
 **Depends on**: Phase 1
 **Requirements**: MEM-01, MEM-02, MEM-03
@@ -55,6 +62,7 @@ This milestone unifies Agent42's developer tooling into a zero-friction platform
 **Plans**: TBD
 
 ### Phase 4: Context Engine
+
 **Goal**: A single `agent42_context` call returns a unified response that merges code symbols from jcodemunch, the active GSD workstream phase plan, and effectiveness-ranked tools/skills — all within a single token budget
 **Depends on**: Phase 3
 **Requirements**: CTX-01, CTX-02, CTX-03
@@ -68,11 +76,11 @@ This milestone unifies Agent42's developer tooling into a zero-friction platform
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Setup Foundation | 3/3 | Complete | 2026-03-18 |
-| 2. Windows + CLAUDE.md | 0/TBD | Not started | - |
+| 2. Windows + CLAUDE.md | 0/2 | Planning complete | - |
 | 3. Memory Sync | 0/TBD | Not started | - |
 | 4. Context Engine | 0/TBD | Not started | - |
