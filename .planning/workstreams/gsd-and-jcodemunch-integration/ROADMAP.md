@@ -62,7 +62,7 @@ This milestone unifies Agent42's developer tooling into a zero-friction platform
 **Plans**: 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — UUID injection + frontmatter + auto-migration + embedding tag stripping (Wave 1)
+- [x] 03-01-PLAN.md — UUID injection + frontmatter + auto-migration + embedding tag stripping (Wave 1)
 - [ ] 03-02-PLAN.md — Entry-level union merge in NodeSyncTool (Wave 2)
 - [ ] 03-03-PLAN.md — Project namespace factory wiring in MemoryTool + mcp_server.py (Wave 2)
 
@@ -87,5 +87,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 |-------|----------------|--------|-----------|
 | 1. Setup Foundation | 3/3 | Complete | 2026-03-18 |
 | 2. Windows + CLAUDE.md | 2/2 | Complete   | 2026-03-25 |
-| 3. Memory Sync | 0/3 | Planning complete | - |
+| 3. Memory Sync | 1/3 | In Progress|  |
 | 4. Context Engine | 0/TBD | Not started | - |
