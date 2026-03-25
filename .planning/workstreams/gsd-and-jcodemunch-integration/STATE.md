@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed 02-01-PLAN.md (_venv_python helper + setup.sh Windows compat + .gitattributes — Phase 02 Plan 1 of 2)
-last_updated: "2026-03-25T02:29:46.300Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 02-02-PLAN.md (CLAUDE.md template generation with generate-claude-md subcommand — Phase 02 Plan 2 of 2)
+last_updated: "2026-03-25T02:40:34.919Z"
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 5
-  completed_plans: 4
+  completed_plans: 5
 ---
 
 # Project State
@@ -46,6 +46,7 @@ Plan: 2 of 2
 
 Updated after each plan completion.
 | Phase 02-windows-claude-md P01 | 15 | 2 tasks | 4 files |
+| Phase 02 P02 | 9 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,9 @@ Updated after each plan completion.
 - [Phase 02-01]: Use sys.platform == 'win32' (not os.name == 'nt') for explicit Windows detection per plan decision D-02
 - [Phase 02-01]: Use OS_TYPE (not OS) as uname variable name to avoid collision with create-shortcut subcommand's local OS variable
 - [Phase 02-01]: Remote SSH python3 calls left as-is — they execute on remote Linux server, not locally
+- [Phase 02]: Template is for consumer projects using Agent42 as MCP server, not a copy of Agent42's own CLAUDE.md (per D-06)
+- [Phase 02]: generate-claude-md is a standalone subcommand, not part of default setup flow (per D-08)
+- [Phase 02]: Reused existing _CLAUDE_MD_BEGIN/_CLAUDE_MD_END marker merge logic for idempotency (per D-09)
 
 ### Pending Todos
 
@@ -79,6 +83,6 @@ Pre-existing: tests/test_auth_flow.py::TestAuthIntegration::test_protected_endpo
 
 ## Session Continuity
 
-Last session: 2026-03-25T02:29:46.295Z
-Stopped at: Completed 02-01-PLAN.md (_venv_python helper + setup.sh Windows compat + .gitattributes — Phase 02 Plan 1 of 2)
+Last session: 2026-03-25T02:40:34.914Z
+Stopped at: Completed 02-02-PLAN.md (CLAUDE.md template generation with generate-claude-md subcommand — Phase 02 Plan 2 of 2)
 Resume file: None
