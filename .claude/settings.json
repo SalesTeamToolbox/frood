@@ -28,11 +28,6 @@
           },
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/context-loader.py",
-            "timeout": 30
-          },
-          {
-            "type": "command",
             "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/memory-recall.py",
             "timeout": 10
           },
