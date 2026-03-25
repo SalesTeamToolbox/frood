@@ -1,5 +1,25 @@
 # Milestones
 
+## v1.0 Performance-Based Rewards (Shipped: 2026-03-25)
+
+**Phases completed:** 4 phases (01-04), 7 plans, 95 tests passing
+**Timeline:** 2 days (2026-03-22 → 2026-03-23)
+**Workstream:** performance-based-rewards
+
+**Key accomplishments:**
+
+1. Foundation — RewardSystem facade with ScoreCalculator (weighted composite), TierCache (TTL + file persistence), mutable RewardsConfig (no restart needed)
+2. Tier Assignment — TierDeterminator (Bronze/Silver/Gold/Provisional), AgentConfig tier fields with effective_tier(), TierRecalcLoop background service (15-min cycle)
+3. Resource Enforcement — Model routing upgrade by tier, rate limit multipliers (1.0x/1.5x/2.0x), semaphore-based concurrent task caps (2/5/10)
+4. Dashboard — 5 REST API endpoints, tier badges in frontend, admin override UI, WebSocket tier_update events, full auth coverage
+5. Graceful degradation — REWARDS_ENABLED=false default, zero change for existing deployments
+
+**Delivered:** Bronze/Silver/Gold performance tier system where agents earn better models, higher rate limits, and more concurrent tasks through demonstrated effectiveness.
+
+**Verification:** 29/29 requirements complete, 95/95 tests green across 5 test files.
+
+---
+
 ## v1.6 UX & Workflow Automation (Shipped: 2026-03-22)
 
 **Phases completed:** 4 phases (01-04), 8 plans

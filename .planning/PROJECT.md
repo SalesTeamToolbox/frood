@@ -119,29 +119,9 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 - Per-project memory namespace wired into MemoryTool (ProjectMemoryStore already exists, needs wiring)
 - GSD workstream state surfaced in context engine
 
-## Complete: Performance-Based Rewards System (4/4 phases complete)
+## Complete: Performance-Based Rewards System v1.0 (4/4 phases, shipped 2026-03-25)
 
-**Goal:** Create a tiered rewards system where agents earn better resources and capabilities through demonstrated business success. Bronze/Silver/Gold tiers with admin controls, performance-based resource allocation, and integration with existing effectiveness tracking.
-
-**Target features:**
-
-- Reward tier configuration via environment variables (rewards_enabled, tier thresholds, tier resource limits)
-- Performance score calculation from existing effectiveness tracking data
-- Tier determination logic (Bronze/Silver/Gold) based on composite performance scores
-- Resource allocation per tier (model access, API rate limits, concurrent task capacity)
-- Agent Manager integration — dynamic capability limits based on current tier
-- Dynamic model routing — higher-tier agents get access to better models
-- Dashboard toggle to enable/disable rewards system globally
-- Dashboard tier management and performance metrics display
-- Dashboard reward tier override controls for admin intervention
-- Full test coverage (unit, integration, dashboard)
-
-**Constraints:**
-
-- Opt-in via REWARDS_ENABLED=false default — zero impact on existing deployments
-- Must use existing effectiveness tracking data, not new data collection
-- Tier lookups must be cached/fast, not computed per-request
-- Follows existing Agent42 patterns (frozen dataclass config, async I/O, graceful degradation)
+**Delivered:** Bronze/Silver/Gold performance tier system where agents earn better models (gold→reasoning, silver→general, bronze→fast), higher rate limits (1.0x/1.5x/2.0x), and more concurrent tasks (2/5/10) through demonstrated effectiveness. 29/29 requirements complete, 95 tests green. Fully opt-in via `REWARDS_ENABLED=false` default.
 
 ### Out of Scope
 
