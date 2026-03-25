@@ -7,6 +7,12 @@ Triggered on Stop event. Extracts what happened during the session (files
 modified, tools used, errors) and writes/updates .claude/handoff.json so
 the auto-resume wrapper script can build an informed resume prompt.
 
+Also captures conversation context (user prompts accumulated during the session
++ tool usage summaries) so that the next session can recall what was discussed.
+This is critical for surviving context window clears — when Claude suggests
+"clear context and come back with your choice", the options and discussion
+are preserved in handoff.json and surfaced by memory-recall.py.
+
 Also detects GSD planning state (.planning/ directory) to provide
 phase-level context for GSD workflow resumption.
 
@@ -212,6 +218,155 @@ def detect_completion(session_data, gsd_state):
     return False  # Default: assume not complete
 
 
+def read_conversation_buffer(project_dir):
+    """Read and consume the conversation buffer written by conversation-accumulator.py.
+
+    Returns list of prompt entries and deletes the buffer file.
+    """
+
+    buffer_path = os.path.join(project_dir, ".agent42", "conversation-buffer.jsonl")
+    if not os.path.exists(buffer_path):
+        return []
+
+    entries = []
+    try:
+        with open(buffer_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+    except OSError:
+        return []
+
+    # Delete the buffer after reading (consumed)
+    try:
+        os.unlink(buffer_path)
+    except OSError:
+        pass
+
+    return entries
+
+
+def extract_tool_summaries(event):
+    """Extract meaningful assistant-side context from tool calls.
+
+    Captures tool interactions that reveal what Claude was doing/discussing,
+    especially AskUserQuestion calls (which contain presented options) and
+    key tool outputs that show the conversation flow.
+    """
+    summaries = []
+
+    for tool_use in event.get("tool_uses", []):
+        tool_name = tool_use.get("tool_name", "")
+        tool_input = tool_use.get("tool_input", {})
+        tool_output = tool_use.get("tool_output", {})
+
+        # AskUserQuestion — captures presented options (the key missing piece)
+        if tool_name == "AskUserQuestion":
+            question = tool_input.get("question", "")
+            options = tool_input.get("options", [])
+            header = tool_input.get("header", "")
+            if question:
+                summary = f"[Asked] {header}: {question}" if header else f"[Asked] {question}"
+                if options:
+                    opt_labels = []
+                    for opt in options:
+                        if isinstance(opt, dict):
+                            opt_labels.append(opt.get("label", str(opt)))
+                        else:
+                            opt_labels.append(str(opt))
+                    summary += f" Options: {', '.join(opt_labels)}"
+
+                # Capture the user's response
+                if isinstance(tool_output, dict):
+                    response = tool_output.get("result", tool_output.get("text", ""))
+                elif isinstance(tool_output, str):
+                    response = tool_output
+                else:
+                    response = ""
+                if response:
+                    summary += f" -> User chose: {str(response)[:200]}"
+
+                summaries.append(
+                    {
+                        "role": "assistant",
+                        "content": summary[:500],
+                        "type": "question",
+                    }
+                )
+
+        # TodoWrite — shows what tasks were planned
+        elif tool_name == "TodoWrite":
+            todos = tool_input.get("todos", [])
+            if todos:
+                task_names = [t.get("content", "")[:80] for t in todos[:5]]
+                summaries.append(
+                    {
+                        "role": "assistant",
+                        "content": f"[Tasks planned] {'; '.join(task_names)}",
+                        "type": "planning",
+                    }
+                )
+
+        # Agent — shows what subagents were spawned
+        elif tool_name == "Agent":
+            desc = tool_input.get("description", "")
+            if desc:
+                summaries.append(
+                    {
+                        "role": "assistant",
+                        "content": f"[Agent spawned] {desc}",
+                        "type": "delegation",
+                    }
+                )
+
+    return summaries
+
+
+def build_conversation_context(user_prompts, tool_summaries, max_entries=20):
+    """Merge user prompts and tool summaries into a conversation timeline.
+
+    Returns a list of entries sorted by timestamp (or insertion order for
+    tool summaries), capped at max_entries.
+    """
+    import time as _time
+
+    timeline = []
+
+    # Add user prompts with timestamps
+    for entry in user_prompts:
+        timeline.append(
+            {
+                "role": "user",
+                "content": entry.get("content", "")[:1000],
+                "timestamp": entry.get("timestamp", 0),
+            }
+        )
+
+    # Tool summaries don't have timestamps — assign them based on position
+    # They represent what happened between user prompts
+    if tool_summaries:
+        # Space them evenly between first and last user prompt timestamps
+        if user_prompts:
+            t_start = user_prompts[0].get("timestamp", _time.time() - 3600)
+            t_end = user_prompts[-1].get("timestamp", _time.time())
+        else:
+            t_end = _time.time()
+            t_start = t_end - 3600
+
+        interval = (t_end - t_start) / max(len(tool_summaries) + 1, 1)
+        for i, summary in enumerate(tool_summaries):
+            summary["timestamp"] = t_start + interval * (i + 1)
+            timeline.append(summary)
+
+    # Sort by timestamp and cap
+    timeline.sort(key=lambda x: x.get("timestamp", 0))
+    return timeline[-max_entries:]
+
+
 def main():
     try:
         event = json.loads(sys.stdin.read())
@@ -245,6 +400,16 @@ def main():
     # Detect completion
     is_complete = detect_completion(session_data, gsd_state)
 
+    # ── Build conversation context ────────────────────────────────────────
+    # Read user prompts accumulated during the session
+    user_prompts = read_conversation_buffer(project_dir)
+
+    # Extract assistant-side context from tool calls
+    tool_summaries = extract_tool_summaries(event)
+
+    # Merge into a conversation timeline
+    conversation_context = build_conversation_context(user_prompts, tool_summaries)
+
     # Update handoff
     handoff["updated"] = datetime.now(UTC).isoformat()
     handoff["session_count"] = handoff.get("session_count", 0) + 1
@@ -256,6 +421,10 @@ def main():
         "had_errors": session_data["had_errors"],
         "bash_commands": session_data["bash_commands"],
     }
+
+    # Store conversation context (the key new field)
+    if conversation_context:
+        handoff["conversation_context"] = conversation_context
 
     # Accumulate files modified across all sessions
     all_modified = set(handoff.get("all_files_modified", []))
@@ -270,9 +439,11 @@ def main():
     # Report to Claude
     session_num = handoff["session_count"]
     n_files = len(session_data["files_modified"])
+    n_context = len(conversation_context)
     status = handoff["status"]
     print(
-        f"[session-handoff] Session #{session_num}: {n_files} files modified, status={status}",
+        f"[session-handoff] Session #{session_num}: {n_files} files modified, "
+        f"{n_context} conversation entries captured, status={status}",
         file=sys.stderr,
     )
 

@@ -23,7 +23,7 @@
   <img src="https://img.shields.io/badge/version-3.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/tools-28+-orange" alt="Tools">
   <img src="https://img.shields.io/badge/skills-53-purple" alt="Skills">
-  <img src="https://img.shields.io/badge/hooks-16-green" alt="Hooks">
+  <img src="https://img.shields.io/badge/hooks-17-green" alt="Hooks">
   <img src="https://img.shields.io/badge/nodes-local%20%2B%20remote-teal" alt="Multi-Node">
   <img src="https://img.shields.io/badge/answer-42-yellow" alt="42">
   <img src="https://img.shields.io/badge/license-BSL--1.1-lightgrey" alt="License">
@@ -38,7 +38,7 @@
 Agent42 is an **autonomous agent platform** with a web IDE, MCP tools, associative
 memory, agent teams, an apps platform, and self-improving learning. Use it as:
 
-- **An MCP server** for Claude Code in VS Code (28+ MCP tools, 53 skills, 16 hooks)
+- **An MCP server** for Claude Code in VS Code (28+ MCP tools, 53 skills, 17 hooks)
 - **A web IDE** with Monaco editor, terminal, and AI chat (accessible from any browser)
 - **An agent management platform** that runs custom AI agents and teams 24/7 on your VPS
 - **An apps platform** where agents build and operate full applications using Agent42's
@@ -920,14 +920,15 @@ See `docker-compose.yml` and `Dockerfile` for the full configuration.
 
 ## Claude Code Hooks (The Sub-Etha Sense-O-Matic)
 
-Agent42 ships 16 hooks in `.claude/hooks/` that run automatically during Claude Code
+Agent42 ships 17 hooks in `.claude/hooks/` that run automatically during Claude Code
 sessions. They form the nervous system -- memory recall, security enforcement, code
 formatting, learning, and session continuity happen without you lifting a finger.
 
 | Hook | Trigger | What It Does |
 |------|---------|--------------|
+| `conversation-accumulator.py` | UserPromptSubmit | Captures user prompts to buffer for conversation context persistence |
 | `context-loader.py` | UserPromptSubmit | Loads relevant lessons and reference docs based on work type |
-| `memory-recall.py` | UserPromptSubmit | Surfaces relevant memories from Qdrant before Claude thinks |
+| `memory-recall.py` | UserPromptSubmit | Surfaces relevant memories from Qdrant + previous session context |
 | `proactive-inject.py` | UserPromptSubmit | Surfaces past learnings relevant to the detected task type |
 | `security-gate.py` | PreToolUse | Blocks edits to security-sensitive files (requires approval) |
 | `security-monitor.py` | PostToolUse (Write/Edit) | Flags security-sensitive changes for review |
@@ -935,7 +936,7 @@ formatting, learning, and session continuity happen without you lifting a finger
 | `cc-memory-sync.py` | PostToolUse (Write/Edit) | Embeds CC memory files into Qdrant for semantic recall |
 | `jcodemunch-reindex.py` | Stop + PostToolUse | Re-indexes codebase after structural file changes |
 | `jcodemunch-token-tracker.py` | PostToolUse | Tracks token savings from jcodemunch vs full file reads |
-| `session-handoff.py` | Stop | Captures session state for auto-resume continuity |
+| `session-handoff.py` | Stop | Captures session state + conversation context for continuity |
 | `test-validator.py` | Stop | Validates tests pass, checks test coverage for new modules |
 | `learning-engine.py` | Stop | Records development patterns and vocabulary |
 | `memory-learn.py` | Stop | Captures new learnings into memory system for future recall |
@@ -1002,7 +1003,7 @@ agent42/
 |   '-- (your apps here)       # Each app: APP.json + src/ + public/
 |
 |-- .claude/                   # Claude Code integration
-|   |-- hooks/                 # 16 hooks: memory, security, formatting, learning
+|   |-- hooks/                 # 17 hooks: memory, security, formatting, learning, context
 |   |   |-- memory-recall.py   # Auto-surfaces relevant memories per prompt
 |   |   |-- memory-learn.py    # Captures learnings at session end
 |   |   |-- proactive-inject.py # Surfaces past learnings for detected task type

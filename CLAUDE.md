@@ -55,8 +55,9 @@ during Claude Code sessions without manual activation.
 
 | Hook | Trigger | Action |
 |------|---------|--------|
+| `conversation-accumulator.py` | UserPromptSubmit | Captures user prompts to buffer for session context persistence |
 | `context-loader.py` | UserPromptSubmit | Detects work type from file paths and keywords, loads relevant lessons and reference docs |
-| `memory-recall.py` | UserPromptSubmit | Surfaces relevant memories from Qdrant before Claude thinks |
+| `memory-recall.py` | UserPromptSubmit | Surfaces relevant memories from Qdrant + previous session context before Claude thinks |
 | `proactive-inject.py` | UserPromptSubmit | Surfaces past learnings relevant to detected task type |
 | `security-gate.py` | PreToolUse (Write/Edit/Bash) | Blocks edits to security-sensitive files (requires approval) |
 | `security-monitor.py` | PostToolUse (Write/Edit) | Flags security-sensitive changes for review (sandbox, auth, command filter) |
@@ -78,6 +79,27 @@ during Claude Code sessions without manual activation.
 - Output to stderr is shown to Claude as feedback
 - Exit code 0 = allow, exit code 2 = block (for PreToolUse hooks)
 
+### Context Clear Protocol
+
+When suggesting the user clear their context window (e.g., "clear context and reply with
+your choice"), **you MUST save the decision state first**. The hooks capture user prompts
+automatically, but assistant-side content (numbered options, proposals, analysis) is NOT
+captured by hooks — only tool calls are.
+
+**Before suggesting a context clear:**
+
+1. Write a summary of pending decisions/options to CC auto-memory (e.g., a file in
+   `~/.claude/projects/.../memory/`) so the next session can find it
+2. Include: what options were presented, any analysis or recommendations, and what the
+   user needs to respond with
+3. The `conversation-accumulator.py` hook captures user prompts automatically, and
+   `session-handoff.py` captures tool interactions (AskUserQuestion, TodoWrite, Agent),
+   but plain text options in assistant responses are invisible to hooks
+
+**On session resume:** `memory-recall.py` automatically surfaces the previous session's
+conversation context from `handoff.json`. Check `[agent42-session-context]` in the hook
+output for previous session state.
+
 ### How It Works
 
 ```
@@ -88,8 +110,9 @@ during Claude Code sessions without manual activation.
                        ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │  User Prompt Submitted (UserPromptSubmit)                        │
+│  ├─ conversation-accumulator.py — captures prompt to buffer      │
 │  ├─ context-loader.py    — loads lessons + reference docs        │
-│  ├─ memory-recall.py     — surfaces relevant memories from Qdrant│
+│  ├─ memory-recall.py     — surfaces memories + prev session ctx  │
 │  └─ proactive-inject.py  — injects past learnings for task type  │
 └──────────────────────┬───────────────────────────────────────────┘
                        │
