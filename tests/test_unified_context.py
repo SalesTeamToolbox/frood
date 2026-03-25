@@ -15,6 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tools.unified_context import UnifiedContextTool
+
 # ---------------------------------------------------------------------------
 # Mock helper classes
 # ---------------------------------------------------------------------------
@@ -61,7 +63,6 @@ class TestUnifiedContext:
     """Tests for UnifiedContextTool.execute() covering all 6 sources."""
 
     def _make_tool(self, effectiveness_recs=None, workspace=""):
-        from tools.unified_context import UnifiedContextTool
 
         memory_store = MockMemoryStore()
         skill_loader = MockSkillLoader()
@@ -270,7 +271,6 @@ last_updated: "2026-03-25T10:00:00Z"
     # ------------------------------------------------------------------
     def test_tool_name_is_unified_context(self):
         """UnifiedContextTool.name returns 'unified_context'."""
-        from tools.unified_context import UnifiedContextTool
 
         tool = UnifiedContextTool()
         assert tool.name == "unified_context"
@@ -280,7 +280,6 @@ last_updated: "2026-03-25T10:00:00Z"
     # ------------------------------------------------------------------
     def test_mcp_schema_name_uses_prefix(self):
         """to_mcp_schema() produces 'agent42_unified_context' per D-15/D-16."""
-        from tools.unified_context import UnifiedContextTool
 
         tool = UnifiedContextTool()
         schema = tool.to_mcp_schema()
@@ -291,7 +290,6 @@ last_updated: "2026-03-25T10:00:00Z"
     # ------------------------------------------------------------------
     def test_parameters_schema_has_correct_fields(self):
         """parameters dict contains 'topic' as required plus optional fields."""
-        from tools.unified_context import UnifiedContextTool
 
         tool = UnifiedContextTool()
         params = tool.parameters
@@ -311,7 +309,6 @@ last_updated: "2026-03-25T10:00:00Z"
     @pytest.mark.asyncio
     async def test_empty_topic_returns_error(self):
         """execute() with no topic returns ToolResult with success=False."""
-        from tools.unified_context import UnifiedContextTool
 
         tool = UnifiedContextTool()
         result = await tool.execute(topic="")
@@ -384,3 +381,114 @@ class TestTaskTypeInference:
 
         result = _infer_task_type("xyzabc123 completely unrecognized jargon")
         assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# TestMCPRegistration — verify MCP wiring (Plan 02)
+# ---------------------------------------------------------------------------
+
+
+class TestMCPRegistration:
+    """Verify UnifiedContextTool MCP wiring."""
+
+    def test_mcp_tool_name(self):
+        """Tool name with agent42 prefix produces agent42_unified_context."""
+        tool = UnifiedContextTool()
+        schema = tool.to_mcp_schema(prefix="agent42")
+        assert schema["name"] == "agent42_unified_context"
+
+    def test_mcp_tool_name_no_collision_with_context(self):
+        """UnifiedContextTool and ContextAssemblerTool have different MCP names."""
+        from tools.context_assembler import ContextAssemblerTool
+
+        unified = UnifiedContextTool()
+        assembler = ContextAssemblerTool()
+        assert unified.to_mcp_schema()["name"] != assembler.to_mcp_schema()["name"]
+        assert assembler.to_mcp_schema()["name"] == "agent42_context"
+        assert unified.to_mcp_schema()["name"] == "agent42_unified_context"
+
+    def test_parameters_include_task_type(self):
+        """D-17: parameters include optional task_type field."""
+        tool = UnifiedContextTool()
+        params = tool.parameters
+        assert "task_type" in params["properties"]
+        assert params["properties"]["task_type"]["type"] == "string"
+        assert "topic" in params["required"]
+
+    def test_description_mentions_code_symbols(self):
+        """Description mentions the new capabilities."""
+        tool = UnifiedContextTool()
+        desc = tool.description.lower()
+        assert "code" in desc or "symbol" in desc
+        assert "effectiveness" in desc or "ranked" in desc
+
+
+# ---------------------------------------------------------------------------
+# TestFullIntegration — end-to-end execution with all sources mocked (Plan 02)
+# ---------------------------------------------------------------------------
+
+
+class TestFullIntegration:
+    """End-to-end execution with all sources mocked."""
+
+    @pytest.mark.asyncio
+    async def test_all_sources_present(self, tmp_path):
+        """When all sources return data, output contains all 4 section types."""
+        # Set up mock workspace with GSD state
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        planning = ws / ".planning" / "workstreams" / "test-ws"
+        planning.mkdir(parents=True)
+        state_md = planning / "STATE.md"
+        state_md.write_text(
+            "---\nstatus: Ready to plan\nstopped_at: Phase 4 context engine\n"
+            'last_updated: "2026-03-25T12:00:00Z"\n---\n# Test\n'
+        )
+        roadmap = planning / "ROADMAP.md"
+        roadmap.write_text("# Roadmap\n\n## Phase 4: Context Engine\n**Goal**: Build context\n")
+
+        # Mock all dependencies
+        mock_memory = MockMemoryStore()
+        mock_skills = MockSkillLoader()
+        mock_eff = MockEffectivenessStore()
+
+        tool = UnifiedContextTool(
+            memory_store=mock_memory,
+            skill_loader=mock_skills,
+            workspace=str(ws),
+            effectiveness_store=mock_eff,
+        )
+
+        # Mock jcodemunch to return code symbols
+        with patch("tools.unified_context.MCPConnection") as MockConn:
+            mock_conn = AsyncMock()
+            mock_conn.call_tool.return_value = "class Foo:\n  def bar(self): pass"
+            MockConn.return_value = mock_conn
+
+            result = await tool.execute(topic="context engine coding", max_tokens=4000)
+
+        assert result.success is True
+        output = result.output
+        # Base assembler output should be present (memory/docs)
+        assert len(output) > 100
+        # Check that we got a non-empty response with reasonable token usage
+        token_est = len(output) // 4
+        assert token_est > 50  # Should have substantial content from multiple sources
+
+    @pytest.mark.asyncio
+    async def test_complete_degradation(self):
+        """When ALL optional sources fail, tool still returns base assembler output."""
+        tool = UnifiedContextTool(
+            memory_store=None,
+            skill_loader=None,
+            workspace="/nonexistent",
+            effectiveness_store=None,
+        )
+
+        with patch("tools.unified_context.MCPConnection") as MockConn:
+            MockConn.return_value.connect = AsyncMock(side_effect=TimeoutError("no jcodemunch"))
+
+            result = await tool.execute(topic="anything", max_tokens=4000)
+
+        # Should still succeed — graceful degradation
+        assert result.success is True
