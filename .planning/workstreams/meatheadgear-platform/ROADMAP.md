@@ -60,7 +60,7 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Backend purchase flow: DB migrations, Stripe checkout with shipping + design_id, webhook order creation, Printful order confirm, branded email
+- [x] 03-01-PLAN.md — Backend purchase flow: DB migrations, Stripe checkout with shipping + design_id, webhook order creation, Printful order confirm, branded email
 - [ ] 03-02-PLAN.md — Printful webhook receiver: status updates, tracking data, shipping notification email
 - [ ] 03-03-PLAN.md — Frontend: checkout button wiring, enhanced status badges, tracking link
 
@@ -120,7 +120,7 @@ Plans:
 |-------|-------|--------|-----------|
 | 1. Store Foundation | 4/4 | Complete |  |
 | 2. Design Studio | 3/3 | Complete | 2026-03-25 |
-| 3. Checkout & Fulfillment | 0/3 | In progress | — |
+| 3. Checkout & Fulfillment | 1/3 | In progress | — |
 | 4. Agent Infrastructure | 2/2 | Complete   | 2026-03-21 |
 | 5. Order & Finance Agents | TBD | Not started | — |
 | 6. Support & CEO Agents | TBD | Not started | — |
