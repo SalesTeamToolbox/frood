@@ -27,7 +27,7 @@
 - [ ] **DES-04**: Image is upscaled to 300 DPI print-ready resolution (Real-ESRGAN via fal.ai)
 - [ ] **DES-05**: Customer can place design on a Fabric.js canvas showing selected product
 - [ ] **DES-06**: Customer can resize, reposition, and rotate design on the canvas
-- [ ] **DES-07**: Canvas generates a photorealistic mockup via Dynamic Mockups API
+- [ ] **DES-07**: Canvas generates a photorealistic mockup via Printful Mockup Generator API
 - [ ] **DES-08**: Customer can upload their own PNG/SVG instead of AI generation
 - [ ] **DES-09**: Design is saved to customer account for reuse
 
