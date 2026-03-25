@@ -37,7 +37,7 @@
 - [x] **ORD-02**: Stripe checkout flow with card payment
 - [x] **ORD-03**: On successful payment, order automatically created in Printful
 - [x] **ORD-04**: Customer receives order confirmation email via Resend
-- [ ] **ORD-05**: Customer can view order status (processing → printed → shipped → delivered)
+- [x] **ORD-05**: Customer can view order status (processing → printed → shipped → delivered)
 - [ ] **ORD-06**: Printful fulfillment webhooks update order status in real-time
 - [ ] **ORD-07**: Customer receives shipping confirmation email with tracking number
 
@@ -125,7 +125,8 @@
 | CAT-01–04 | Phase 1 | Verified |
 | DES-01–09 | Phase 2 | Verified (human UAT pending) |
 | ORD-01–04 | Phase 3 Plan 01 | Backend implemented |
-| ORD-05–07 | Phase 3 | Pending |
+| ORD-05 | Phase 3 Plan 03 | Implemented — 7-color status badges + tracking link UI |
+| ORD-06–07 | Phase 3 | Pending |
 | INF-01–05 | Phase 4 | Pending |
 | AGT-01–03 | Phase 5 | Pending |
 | AGT-04–06 | Phase 5 | Pending |
