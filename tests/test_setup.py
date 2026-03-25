@@ -738,3 +738,93 @@ class TestMcpHealthProbe:
     def test_health_flag_exits_nonzero_on_failure(self):
         """python mcp_server.py --health exits 1 on import/config error."""
         pytest.skip("Integration test — run manually")
+
+
+# ---------------------------------------------------------------------------
+# TestWindowsCompat
+# ---------------------------------------------------------------------------
+
+
+class TestWindowsCompat:
+    """SETUP-06: Windows Git Bash compatibility — platform-aware venv paths."""
+
+    def test_venv_python_returns_scripts_on_win32(self):
+        """On win32, _venv_python returns .venv/Scripts/python.exe path."""
+        from scripts.setup_helpers import _venv_python
+
+        with mock.patch("scripts.setup_helpers.sys") as mock_sys:
+            mock_sys.platform = "win32"
+            result = _venv_python("/project")
+
+        assert result == os.path.join("/project", ".venv", "Scripts", "python.exe")
+
+    def test_venv_python_returns_bin_on_linux(self):
+        """On linux, _venv_python returns .venv/bin/python path."""
+        from scripts.setup_helpers import _venv_python
+
+        with mock.patch("scripts.setup_helpers.sys") as mock_sys:
+            mock_sys.platform = "linux"
+            result = _venv_python("/project")
+
+        assert result == os.path.join("/project", ".venv", "bin", "python")
+
+    def test_mcp_config_uses_venv_python_win32(self, tmp_path):
+        """On win32, generate_mcp_config writes .mcp.json with Scripts/python.exe path."""
+        # Create the Windows-style venv python path
+        scripts_python = tmp_path / ".venv" / "Scripts" / "python.exe"
+        scripts_python.parent.mkdir(parents=True, exist_ok=True)
+        scripts_python.touch()
+
+        with mock.patch("scripts.setup_helpers.sys") as mock_sys:
+            mock_sys.platform = "win32"
+            generate_mcp_config(str(tmp_path))
+
+        config = json.loads((tmp_path / ".mcp.json").read_text())
+        command = config["mcpServers"]["agent42"]["command"]
+        assert "Scripts" in command and "python.exe" in command, (
+            f"Expected Scripts/python.exe in command, got: {command}"
+        )
+
+    def test_mcp_config_uses_venv_python_linux(self, tmp_path):
+        """On linux, generate_mcp_config writes .mcp.json with .venv/bin/python path."""
+        # Create the Linux-style venv python path
+        bin_python = tmp_path / ".venv" / "bin" / "python"
+        bin_python.parent.mkdir(parents=True, exist_ok=True)
+        bin_python.touch()
+
+        with mock.patch("scripts.setup_helpers.sys") as mock_sys:
+            mock_sys.platform = "linux"
+            generate_mcp_config(str(tmp_path))
+
+        config = json.loads((tmp_path / ".mcp.json").read_text())
+        command = config["mcpServers"]["agent42"]["command"]
+        assert ".venv/bin/python" in command or command.endswith("bin/python"), (
+            f"Expected .venv/bin/python in command, got: {command}"
+        )
+
+    def test_health_check_uses_platform_venv_path(self, tmp_path):
+        """check_health calls subprocess with platform-correct venv python path."""
+        captured_calls = []
+
+        def capture_run(args, **kwargs):
+            captured_calls.append(args)
+            result = mock.MagicMock()
+            result.returncode = 0
+            result.stderr = b""
+            return result
+
+        with (
+            mock.patch("scripts.setup_helpers.sys") as mock_sys,
+            mock.patch("subprocess.run", side_effect=capture_run),
+            mock.patch("urllib.request.urlopen", side_effect=OSError("refused")),
+        ):
+            mock_sys.platform = "win32"
+            check_health(str(tmp_path))
+
+        # Find the MCP server call (first subprocess.run call with venv python)
+        mcp_calls = [c for c in captured_calls if len(c) >= 1 and "mcp_server" in str(c)]
+        assert len(mcp_calls) >= 1, f"No MCP server call found in: {captured_calls}"
+        mcp_cmd = mcp_calls[0]
+        assert "Scripts" in str(mcp_cmd) and "python.exe" in str(mcp_cmd), (
+            f"Expected Scripts/python.exe in MCP call, got: {mcp_cmd}"
+        )
