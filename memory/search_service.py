@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Persistent memory search service — keeps embedding model loaded.
+"""Persistent memory search service — keeps ONNX embedding model loaded.
 
 Runs as a lightweight HTTP server alongside Qdrant. The memory-recall hook
-calls this instead of loading sentence-transformers on every prompt.
+calls this instead of loading the model on every prompt.
 
 Endpoints:
   POST /search  {"query": "text", "top_k": 5, "threshold": 0.25}
+  POST /index   {"text": "...", "section": "session"}
   GET  /health   → {"status": "ok", "model": "...", "qdrant": true/false}
 
 Usage:
@@ -16,6 +17,8 @@ import argparse
 import json
 import logging
 import sys
+import time
+import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -39,16 +42,24 @@ _model_name = "all-MiniLM-L6-v2"
 
 
 def _init_model():
-    """Load the sentence-transformers model (one-time cost)."""
+    """Load the ONNX embedding model (one-time cost, ~23 MB RAM)."""
     global _model
     try:
-        from sentence_transformers import SentenceTransformer
+        from memory.embeddings import _find_onnx_model_dir, _OnnxEmbedder
 
-        logger.info(f"Loading embedding model: {_model_name}...")
-        _model = SentenceTransformer(_model_name)
-        logger.info(f"Model loaded ({_model.get_sentence_embedding_dimension()} dims)")
+        model_dir = _find_onnx_model_dir()
+        if model_dir is None:
+            logger.error(
+                "ONNX model directory not found (expected .agent42/models/all-MiniLM-L6-v2/)"
+            )
+            _model = None
+            return
+
+        logger.info(f"Loading ONNX embedding model: {_model_name} from {model_dir}...")
+        _model = _OnnxEmbedder(model_dir)
+        logger.info(f"ONNX model loaded ({_model.dim} dims, ~23 MB)")
     except Exception as e:
-        logger.error(f"Failed to load model: {e}")
+        logger.error(f"Failed to load ONNX model: {e}")
         _model = None
 
 
@@ -77,6 +88,57 @@ def _refresh_collections():
             pass
 
 
+def index_entry(text, section="session"):
+    """Vectorize a text entry and upsert into agent42_history collection.
+
+    Uses UUID5 deterministic IDs (from text content) to avoid duplicates on retry.
+    Returns True on success, False on failure.
+    """
+    if _model is None or _qdrant_client is None:
+        return False
+
+    try:
+        from qdrant_client import models as qdrant_models
+
+        # Deterministic point ID — same text always maps to same UUID
+        _NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+        point_id = str(uuid.uuid5(_NAMESPACE, text))
+
+        # Generate embedding (ONNX encode returns list[float] directly)
+        vector = _model.encode(text)
+
+        # Ensure collection exists
+        existing = [c.name for c in _qdrant_client.get_collections().collections]
+        if "agent42_history" not in existing:
+            _qdrant_client.create_collection(
+                collection_name="agent42_history",
+                vectors_config=qdrant_models.VectorParams(
+                    size=384, distance=qdrant_models.Distance.COSINE
+                ),
+            )
+
+        _qdrant_client.upsert(
+            collection_name="agent42_history",
+            points=[
+                qdrant_models.PointStruct(
+                    id=point_id,
+                    vector=vector,
+                    payload={
+                        "text": text,
+                        "event_type": section,
+                        "summary": text,
+                        "timestamp": time.time(),
+                        "source": "hook",
+                    },
+                )
+            ],
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Index error: {e}")
+        return False
+
+
 def search(query, top_k=5, threshold=0.15):
     """Semantic search across all Qdrant collections."""
     if not _model or not _qdrant_client:
@@ -85,8 +147,8 @@ def search(query, top_k=5, threshold=0.15):
     # Refresh collections in case new ones were created
     _refresh_collections()
 
-    # Generate query embedding
-    vector = _model.encode(query).tolist()
+    # Generate query embedding (ONNX encode returns list[float] directly)
+    vector = _model.encode(query)
 
     results = []
     for collection_name in _collections:
@@ -177,6 +239,28 @@ class SearchHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 logger.error(f"Search error: {e}")
                 self._send_json({"error": str(e)}, 500)
+        elif self.path == "/index":
+            if _model is None or _qdrant_client is None:
+                self._send_json({"error": "model or qdrant not available"}, 503)
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(content_length))
+                text = body.get("text", "")
+                section = body.get("section", "session")
+
+                if not text:
+                    self._send_json({"error": "text is required"}, 400)
+                    return
+
+                success = index_entry(text, section=section)
+                if success:
+                    self._send_json({"indexed": True})
+                else:
+                    self._send_json({"error": "indexing failed"}, 500)
+            except Exception as e:
+                logger.error(f"Index error: {e}")
+                self._send_json({"error": str(e)}, 500)
         else:
             self._send_json({"error": "not found"}, 404)
 
@@ -191,7 +275,7 @@ def main():
     _init_qdrant(args.qdrant_url)
 
     if not _model:
-        logger.error("No embedding model — exiting")
+        logger.error("No ONNX embedding model — exiting (check .agent42/models/all-MiniLM-L6-v2/)")
         sys.exit(1)
 
     server = HTTPServer(("127.0.0.1", args.port), SearchHandler)
