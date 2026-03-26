@@ -1,7 +1,7 @@
-# Common Pitfalls Archive (1-110)
+# Common Pitfalls Archive (1-124)
 
-These are resolved pitfalls from earlier development. Loaded on-demand by context-loader
-when debugging, fixing bugs, or working on areas covered by these entries.
+Resolved pitfalls from earlier development. Loaded on-demand when debugging or
+working on areas covered by these entries.
 
 | # | Area | Pitfall | Correct Pattern |
 |---|------|---------|-----------------|
@@ -115,3 +115,17 @@ when debugging, fixing bugs, or working on areas covered by these entries.
 | 108 | Security | Device API key hashes used plain SHA-256 (no secret) | `_hash_key()` uses HMAC-SHA256 keyed by JWT_SECRET; `validate_api_key()` auto-upgrades legacy SHA-256 hashes |
 | 109 | Memory | `QdrantStore.is_available` only checked `self._client is not None` — returned True even when server was unreachable | `is_available` now probes via `get_collections()` with cached TTL (60s success, 15s fail); embedded mode skips probe |
 | 110 | Memory | `EmbeddingStore.search()` took Qdrant path when `is_available=True` but never fell through to JSON on Qdrant failure | Refactored to try/except around Qdrant search; falls through to `_search_json()` on any exception |
+| 111 | Memory | Agent claims "stored in MEMORY.md" but has no tool to actually write — memory skill described the system but no corresponding tool existed | Created `tools/memory_tool.py` with store/recall/log/search actions; registered in `_register_tools()` |
+| 112 | Dashboard | Storage status showed configured mode ("Qdrant + Redis") even when Qdrant was unreachable | Endpoint now returns `effective_mode` based on actual connectivity; frontend shows degradation warning when `configured_mode != mode` |
+| 113 | Init | `_register_tools()` called before `memory_store` initialized — AttributeError on startup | Move `_register_tools()` call to after MemoryStore initialization in `agent42.py` |
+| 114 | Deploy | `install-server.sh` used `--storage-path` CLI arg removed in Qdrant v1.14+; service crash-looped 37K+ times | Use `--config-path /etc/qdrant/config.yaml` + `WorkingDirectory=/var/lib/qdrant` in systemd unit; create config file with `storage.storage_path` |
+| 115 | Deploy | `.env` had `QDRANT_URL=http://qdrant:6333` (Docker hostname) on bare-metal server — Qdrant unreachable | Bare-metal deployments must use `http://localhost:6333`; Docker Compose uses `http://qdrant:6333` (service name resolves inside Docker network only) |
+| 116 | Server | `from starlette.responses import Response` at `create_app()` scope shadows `fastapi.Response` — causes `UnboundLocalError` on startup, crash-loops the service | Never import at `create_app` scope; use module-level FastAPI imports or import inside nested functions. FastAPI re-exports starlette's `Response` already. |
+| 117 | Tests | `core.task_queue` removed in v2.0 but 3 test files still imported it inside `try` blocks — caused `HAS_TESTCLIENT=False` silently, then `NameError` on classes that used names from the failed import | When removing a module, grep all test files for references. `try/except ImportError` blocks mask the real cause — split imports so unrelated names aren't lost |
+| 118 | Tests | Tests referencing `/api/tasks` endpoint broke silently after v2.0 removed it — returned 404 instead of expected 401 | After removing API endpoints, grep `tests/` for the route path and update or remove affected tests |
+| 119 | Deploy | Unstaged local changes block `git checkout main` during deploy, forcing stash/pop which causes merge conflicts | Always check `git status` before deploy. Commit or explicitly stash WIP first — don't let deploy workflow hit stash conflicts mid-flight |
+| 120 | CC Chat | On session resume/page reload, `sessionStorage` restores the session ID so CC retains conversation context via `--resume`, but the chat DOM is empty — messages were never persisted | Save user and assistant messages to `localStorage` keyed by `cc_hist_<sessionId>`; restore via `ccRestoreHistory()` in `ws.onopen` when `sessionResumed === true` |
+| 121 | Startup | `agent42.py` called `PluginLoader(self.tool_registry)` (old instance-based API) — but `PluginLoader` has no constructor; only a static `load_all(directory, context, registry)` method | Use `PluginLoader.load_all(custom_tools_dir, ctx, self.tool_registry)` and only call it when `CUSTOM_TOOLS_DIR` is configured |
+| 122 | GSD | `gsd-tools.cjs` resolves `project_root` to parent repo (agent42) when working in nested repos with their own `.git/` (e.g. `apps/meatheadgear/`) | GSD planning for nested app repos must be done manually or with `cd` to the app directory first. GSD needs a fix to detect and respect nested git roots |
+| 123 | Status | System RAM showed `0 / 0 MB` on Windows — `memory_total_mb` and `memory_available_mb` were hardcoded to 0 in heartbeat | Use `GlobalMemoryStatusEx` on Windows, `/proc/meminfo` on Linux to populate system memory fields |
+| 124 | Frontend | `/api/tasks` endpoint removed in v2.0 but frontend `loadTasks()` still called it — caused 404 on every page load | Replace `await api("/tasks")` with `state.tasks = []` (tasks are project-scoped now) |

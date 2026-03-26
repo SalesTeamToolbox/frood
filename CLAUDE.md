@@ -9,489 +9,71 @@ python -m pytest tests/ -x -q    # Run tests (stop on first failure)
 make lint                        # Run linter (ruff)
 make format                      # Auto-format code (ruff)
 make check                       # Run lint + tests together
-make security                    # Run security scanning (bandit + safety)
 ```
 
-## IMPORTANT: Document Your Fixes!
+## Key Rules
 
-When you resolve a non-obvious bug or discover a new pitfall, you **MUST** add it to the
-[Common Pitfalls](#common-pitfalls) table at the end of this document. This keeps the
-knowledge base current and prevents future regressions.
-
-Ask yourself: *"Would this have saved me time if it was documented?"* If yes, add it.
-
----
+- **All I/O is async** — use `aiofiles`, `httpx`, `asyncio`. Never blocking I/O in tools.
+- **Frozen config** — `Settings` dataclass in `core/config.py`. Add fields there + `from_env()` + `.env.example`.
+- **Graceful degradation** — Redis, Qdrant, MCP are optional. Handle absence, never crash.
+- **Sandbox always on** — validate paths via `sandbox.resolve_path()`. Never disable in prod.
+- **New pitfalls** — add to `.claude/reference/pitfalls-archive.md` when you discover non-obvious issues.
 
 ## Codebase Navigation (jcodemunch)
 
-This project is indexed by jcodemunch MCP server (`local/agent42`, 197 files, 4700+ symbols).
-**Use jcodemunch tools before reading files** to understand structure and find the right code:
+Repo: `local/agent42` (197 files, 4700+ symbols). **Use jcodemunch before reading files:**
 
-| When you need to... | Use this tool |
-|----------------------|---------------|
-| Understand a module before editing | `get_file_outline` — shows all classes, functions, signatures |
-| Find where something is defined | `search_symbols` — search by name across the codebase |
-| Explore a directory's structure | `get_file_tree` with `path_prefix` (e.g., `tools/`, `core/`) |
-| Read a specific symbol's code | `get_symbol` — returns the full source of a function/class |
-| Find text patterns across files | `search_text` — grep-like search across indexed files |
-| Re-index after major changes | `index_folder` with `incremental: true` |
+| Need | Tool |
+|------|------|
+| Module overview | `get_file_outline` |
+| Find definitions | `search_symbols` |
+| Directory structure | `get_file_tree` with `path_prefix` |
+| Symbol source | `get_symbol` |
+| Text search | `search_text` |
 
-**Workflow for feature development:**
-1. `get_file_tree` to orient — understand what exists in the relevant directory
-2. `search_symbols` to find related classes/functions across the codebase
-3. `get_file_outline` on files you plan to modify — understand the full API surface
-4. Only then `Read` the specific sections you need to change
+## Hooks
 
-**Repo identifier:** `local/agent42` (use this as the `repo` parameter in all jcodemunch calls)
+Automated hooks run in `.claude/`. Key behaviors:
+- **UserPromptSubmit**: memory recall, learning injection, prompt accumulation
+- **PreToolUse**: security gate blocks edits to sensitive files
+- **PostToolUse**: auto-format (ruff), security monitoring, Qdrant sync, jcodemunch reindex
+- **Stop**: session handoff, test validation, learning capture
 
----
-
-## Automated Development Workflow
-
-This project uses automated hooks in the `.claude/` directory. These run automatically
-during Claude Code sessions without manual activation.
-
-### Active Hooks (Automatic)
-
-| Hook | Trigger | Action |
-|------|---------|--------|
-| `conversation-accumulator.py` | UserPromptSubmit | Captures user prompts to buffer for session context persistence |
-| ~~`context-loader.py`~~ | ~~UserPromptSubmit~~ | **REMOVED** — was injecting ~25K tokens/conversation loading reference docs on every prompt. Docs still in `.claude/reference/` for manual lookup. |
-| `memory-recall.py` | UserPromptSubmit | Surfaces relevant memories from Qdrant + previous session context before Claude thinks |
-| `proactive-inject.py` | UserPromptSubmit | Surfaces past learnings relevant to detected task type |
-| `security-gate.py` | PreToolUse (Write/Edit/Bash) | Blocks edits to security-sensitive files (requires approval) |
-| `security-monitor.py` | PostToolUse (Write/Edit) | Flags security-sensitive changes for review (sandbox, auth, command filter) |
-| `format-on-write.py` | PostToolUse (Write/Edit) | Auto-formats Python files with ruff on every write |
-| `cc-memory-sync.py` | PostToolUse (Write/Edit) | Embeds CC memory files into Qdrant for semantic recall |
-| `jcodemunch-reindex.py` | Stop + PostToolUse | Re-indexes codebase after structural file changes |
-| `jcodemunch-token-tracker.py` | PostToolUse | Tracks token savings from jcodemunch vs full file reads |
-| `session-handoff.py` | Stop | Captures session state for auto-resume continuity |
-| `test-validator.py` | Stop | Validates tests pass, checks new modules have test coverage |
-| `learning-engine.py` | Stop | Records development patterns, vocabulary, and skill candidates |
-| `memory-learn.py` | Stop | Captures new learnings into memory system for future recall |
-| `effectiveness-learn.py` | Stop | Extracts structured learnings with LLM for quarantine review |
-| `knowledge-learn.py` | Stop | Extracts session knowledge and upserts to Qdrant |
-| `credential-sync.py` | SessionStart | Syncs CC credentials to remote VPS on session start |
-
-### Hook Protocol
-
-- Hooks receive JSON on stdin with `hook_event_name`, `project_dir`, and event-specific data
-- Output to stderr is shown to Claude as feedback
-- Exit code 0 = allow, exit code 2 = block (for PreToolUse hooks)
-
-### Context Clear Protocol
-
-When suggesting the user clear their context window (e.g., "clear context and reply with
-your choice"), **you MUST save the decision state first**. The hooks capture user prompts
-automatically, but assistant-side content (numbered options, proposals, analysis) is NOT
-captured by hooks — only tool calls are.
-
-**Before suggesting a context clear:**
-
-1. Write a summary of pending decisions/options to CC auto-memory (e.g., a file in
-   `~/.claude/projects/.../memory/`) so the next session can find it
-2. Include: what options were presented, any analysis or recommendations, and what the
-   user needs to respond with
-3. The `conversation-accumulator.py` hook captures user prompts automatically, and
-   `session-handoff.py` captures tool interactions (AskUserQuestion, TodoWrite, Agent),
-   but plain text options in assistant responses are invisible to hooks
-
-**On session resume:** `memory-recall.py` automatically surfaces the previous session's
-conversation context from `handoff.json`. Check `[agent42-session-context]` in the hook
-output for previous session state.
-
-### How It Works
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  SessionStart → credential-sync.py (syncs CC creds to VPS)      │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  User Prompt Submitted (UserPromptSubmit)                        │
-│  ├─ conversation-accumulator.py — captures prompt to buffer      │
-│  ├─ context-loader.py    — loads lessons + reference docs        │
-│  ├─ memory-recall.py     — surfaces memories + prev session ctx  │
-│  └─ proactive-inject.py  — injects past learnings for task type  │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  PreToolUse → security-gate.py (blocks edits to security files)  │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  Claude Processes Request (may use Write/Edit tools)             │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  PostToolUse (Write/Edit):                                       │
-│  ├─ security-monitor.py  — flags security-sensitive changes      │
-│  ├─ format-on-write.py   — auto-formats Python with ruff         │
-│  └─ cc-memory-sync.py    — embeds CC memory files into Qdrant    │
-│  PostToolUse (all):                                              │
-│  ├─ jcodemunch-token-tracker.py — tracks token savings           │
-│  └─ jcodemunch-reindex.py       — re-indexes after file changes  │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│  Stop Event Triggers:                                            │
-│  ├─ session-handoff.py       — captures state for auto-resume    │
-│  ├─ test-validator.py        — runs pytest, checks coverage      │
-│  ├─ learning-engine.py       — records patterns, updates lessons │
-│  ├─ memory-learn.py          — captures learnings to memory      │
-│  ├─ effectiveness-learn.py   — structured learning extraction    │
-│  ├─ knowledge-learn.py       — session knowledge to Qdrant       │
-│  └─ jcodemunch-reindex.py    — final re-index                    │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### Available Agents (On-Demand)
-
-| Agent | Use Case | Invocation |
-|-------|----------|------------|
-| security-reviewer | Audit security-sensitive code changes | Request security review |
-| performance-auditor | Review async patterns, resource usage, timeouts | Ask about performance |
-
-### Related Files
-
-- `.claude/settings.json` — Hook configuration
-- `.claude/lessons.md` — Accumulated patterns and vocabulary (referenced by hooks)
-- `.claude/learned-patterns.json` — Auto-generated pattern data
-- `.claude/reference/` — On-demand reference docs (loaded by context-loader hook)
-- `.claude/agents/` — Specialized agent definitions
-
----
-
-## Architecture Patterns
-
-### All I/O is Async
-
-Every file operation uses `aiofiles`, every HTTP call uses `httpx` or `openai.AsyncOpenAI`,
-every queue operation is `asyncio`-native. **Never use blocking I/O** in tool implementations.
-
-```python
-# CORRECT
-async with aiofiles.open(path, "r") as f:
-    content = await f.read()
-
-# WRONG — blocks the event loop
-with open(path, "r") as f:
-    content = f.read()
-```
-
-### Frozen Dataclass Configuration
-
-`Settings` is a frozen dataclass loaded once from environment at import time (`core/config.py`).
-When adding new configuration:
-1. Add field to `Settings` class with default
-2. Add `os.getenv()` call in `Settings.from_env()`
-3. Add to `.env.example` with documentation
-
-```python
-# Boolean fields use this pattern:
-sandbox_enabled=os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes")
-
-# Comma-separated fields have get_*() helper methods:
-def get_discord_guild_ids(self) -> list[int]: ...
-```
-
-### Plugin Architecture
-
-**Tools (built-in):** Subclass `tools.base.Tool`, implement `name`/`description`/`parameters`/`execute()`,
-register in `agent42.py` `_register_tools()`.
-
-```python
-class MyTool(Tool):
-    @property
-    def name(self) -> str: return "my_tool"
-    @property
-    def description(self) -> str: return "Does something useful"
-    @property
-    def parameters(self) -> dict:
-        return {"type": "object", "properties": {"input": {"type": "string"}}}
-    async def execute(self, input: str = "", **kwargs) -> ToolResult:
-        return ToolResult(output=f"Result: {input}")
-```
-
-**Tools (custom plugins):** Drop a `.py` file into `CUSTOM_TOOLS_DIR` and it will be
-auto-discovered at startup via `tools/plugin_loader.py`. No core code changes needed.
-Tools declare dependencies via a `requires` class variable for `ToolContext` injection.
-
-```python
-# custom_tools/hello.py
-from tools.base import Tool, ToolResult
-
-class HelloTool(Tool):
-    requires = ["workspace"]  # Injects workspace from ToolContext
-
-    def __init__(self, workspace="", **kwargs):
-        self._workspace = workspace
-
-    @property
-    def name(self) -> str: return "hello"
-    @property
-    def description(self) -> str: return "Says hello"
-    @property
-    def parameters(self) -> dict:
-        return {"type": "object", "properties": {}}
-    async def execute(self, **kwargs) -> ToolResult:
-        return ToolResult(output=f"Hello from {self._workspace}!")
-```
-
-**Tool extensions (custom plugins):** To *extend* an existing tool instead of
-creating a new one, subclass `ToolExtension` instead of `Tool`.  Extensions add
-parameters and pre/post execution hooks without replacing the base tool.  Multiple
-extensions can layer onto one base — just like skills.
-
-```python
-# custom_tools/shell_audit.py
-from tools.base import ToolExtension, ToolResult
-
-class ShellAuditExtension(ToolExtension):
-    extends = "shell"                      # Name of the tool to extend
-    requires = ["workspace"]               # ToolContext injection (same as Tool)
-
-    def __init__(self, workspace="", **kwargs):
-        self._workspace = workspace
-
-    @property
-    def name(self) -> str: return "shell_audit"
-
-    @property
-    def extra_parameters(self) -> dict:    # Merged into the base tool's schema
-        return {"audit": {"type": "boolean", "description": "Log command to audit file"}}
-
-    @property
-    def description_suffix(self) -> str:   # Appended to the base tool's description
-        return "Supports audit logging."
-
-    async def pre_execute(self, **kwargs) -> dict:
-        # Called before the base tool — can inspect/modify kwargs
-        return kwargs
-
-    async def post_execute(self, result: ToolResult, **kwargs) -> ToolResult:
-        # Called after the base tool — can inspect/modify result
-        return result
-```
-
-**Skills:** Create a directory with `SKILL.md` containing YAML frontmatter:
-
-```markdown
----
-name: my-skill
-description: One-line description of what this skill does.
-always: false
-task_types: [coding, debugging]
----
-
-# My Skill
-
-Instructions for the agent when this skill is active...
-```
-
-### Graceful Degradation
-
-Redis, Qdrant, channels, and MCP servers are all optional. Code **must** handle their
-absence with fallback behavior, never with crashes.
-
-```python
-# CORRECT — conditional import and check
-if settings.redis_url:
-    from memory.redis_session import RedisSessionStore
-    session_store = RedisSessionStore(settings.redis_url)
-else:
-    session_store = FileSessionStore(settings.sessions_dir)
-
-# WRONG — crashes if Redis isn't installed
-from memory.redis_session import RedisSessionStore
-```
-
-### MCP Architecture (v2.0)
-
-Claude Code provides the intelligence layer (LLM, orchestration). Agent42 provides
-the tooling layer via MCP:
-
-- **MCP Server** (`mcp_server.py`) — 36+ tools exposed via stdio transport
-- **Memory** — ONNX embeddings + Qdrant for semantic search (~25 MB RAM)
-- **Associative Recall** — Hook auto-surfaces relevant memories on every prompt
-- **Context Assembler** — `agent42_context` tool pulls from memory, docs, git, skills
-- **Dashboard** — FastAPI web UI for monitoring and configuration
-
-### Security Layers (Defense in Depth)
-
-| Layer | Module | Purpose |
-|-------|--------|---------|
-| 1 | `WorkspaceSandbox` | Path resolution, traversal blocking, symlink defense |
-| 2 | `CommandFilter` | 6-layer shell command filtering (structural, deny, interpreter, metachar, indirect, allowlist) |
-| 3 | `ApprovalGate` | Human review for protected actions |
-| 4 | `ToolRateLimiter` | Per-agent per-tool sliding window |
-| 5 | `URLPolicy` | Allowlist/denylist for HTTP requests (SSRF protection) |
-| 6 | `BrowserGatewayToken` | Per-session token for browser tool |
-| 7 | `SpendingTracker` | Daily API cost cap across all providers |
-| 8 | `LoginRateLimit` | Per-IP brute force protection on dashboard |
-
----
+Full details: `.claude/reference/hooks-reference.md`
 
 ## Security Requirements
 
-These rules are **non-negotiable** for a platform that runs AI agents on people's servers:
-
 1. **NEVER** disable sandbox in production (`SANDBOX_ENABLED=true`)
-2. **ALWAYS** use bcrypt password hash, not plaintext (`DASHBOARD_PASSWORD_HASH`)
-3. **ALWAYS** set `JWT_SECRET` to a persistent value (auto-generated secrets break sessions across restarts)
-4. **NEVER** expose `DASHBOARD_HOST=0.0.0.0` without nginx/firewall in front
-5. **ALWAYS** run with `COMMAND_FILTER_MODE=deny` (default) or `COMMAND_FILTER_MODE=allowlist`
-6. **REVIEW** `URL_DENYLIST` to block internal network ranges (`169.254.x.x`, `10.x.x.x`, etc.)
-7. **NEVER** log API keys, passwords, or tokens — even at DEBUG level
-8. **ALWAYS** validate file paths through `sandbox.resolve_path()` before file operations
+2. **ALWAYS** use bcrypt password hash (`DASHBOARD_PASSWORD_HASH`)
+3. **ALWAYS** set `JWT_SECRET` to a persistent value
+4. **NEVER** expose `DASHBOARD_HOST=0.0.0.0` without nginx/firewall
+5. **ALWAYS** run with `COMMAND_FILTER_MODE=deny` or `allowlist`
+6. **NEVER** log API keys, passwords, or tokens — even at DEBUG level
+7. **ALWAYS** validate file paths through `sandbox.resolve_path()`
 
----
-
-## Development Workflow
-
-### Before Writing Code
-
-1. Run tests to confirm green baseline: `python -m pytest tests/ -x -q`
-2. Check if related test files exist for the module you're changing
-3. Read the module's docstring and understand the pattern
-4. For security-sensitive files, read `.claude/lessons.md` security section
-
-### After Writing Code
-
-1. Run the formatter: `make format` (or `ruff format .`)
-2. Run the full test suite: `python -m pytest tests/ -x -q`
-3. Run linter: `make lint`
-4. For security-sensitive changes: `python -m pytest tests/test_security.py tests/test_sandbox.py tests/test_command_filter.py -v`
-5. Update this CLAUDE.md pitfalls table if you discovered a non-obvious issue
-6. For new modules: ensure a corresponding `tests/test_*.py` file exists
-7. Update README.md if new features, skills, tools, or config were added
-
----
-
-## Testing Standards
-
-**Always install dependencies before running tests.** Tests should always be
-runnable — if a dependency is missing, install it rather than skipping the test:
+## Testing
 
 ```bash
-pip install -r requirements.txt            # Full production dependencies
-pip install -r requirements-dev.txt        # Dev/test tooling (pytest, ruff, etc.)
-# If the venv is missing, install at minimum:
-pip install pytest pytest-asyncio aiofiles openai fastapi python-jose bcrypt cffi
+python -m pytest tests/ -x -q              # Quick
+python -m pytest tests/ -v                  # Verbose
+python -m pytest tests/test_security.py -v  # Security suite
 ```
 
-Run tests:
-```bash
-python -m pytest tests/ -x -q              # Quick: stop on first failure
-python -m pytest tests/ -v                  # Verbose: see all test names
-python -m pytest tests/test_security.py -v  # Single file
-python -m pytest tests/ -k "test_sandbox"   # Filter by name
-python -m pytest tests/ -m security         # Filter by marker
-```
+New modules need `tests/test_*.py`. Full standards: `.claude/reference/development-workflow.md`
 
-Some tests require `fastapi`, `python-jose`, `bcrypt`, and `redis` — install the full
-`requirements.txt` to avoid import errors. If the `cryptography` backend fails with
-`_cffi_backend` errors, install `cffi` (`pip install cffi`).
+## Reference Docs (on-demand)
 
-### Test Writing Rules
-
-- Every new module in `core/`, `agents/`, `tools/`, `providers/` needs a `tests/test_*.py` file
-- Use `pytest-asyncio` for async tests (configured as `asyncio_mode = "auto"` in pyproject.toml)
-- Use `tmp_path` fixture (or conftest.py `tmp_workspace`) for filesystem tests — never hardcode `/tmp` paths
-- Use class-based organization: `class TestClassName` with `setup_method`
-- Mock external services (LLM calls, Redis, Qdrant) — never hit real APIs in tests
-- Use conftest.py fixtures: `sandbox`, `command_filter`, `tool_registry`, `mock_tool`
-- Name tests descriptively: `test_<function>_<scenario>_<expected>`
-
-```python
-class TestWorkspaceSandbox:
-    def setup_method(self):
-        self.sandbox = WorkspaceSandbox(tmp_path, enabled=True)
-
-    def test_block_path_traversal(self):
-        with pytest.raises(SandboxViolation):
-            self.sandbox.resolve_path("../../etc/passwd")
-
-    @pytest.mark.asyncio
-    async def test_async_tool_execution(self):
-        result = await tool.execute(input="test")
-        assert result.success
-```
-
----
-
-## Development Methodology
-
-Agent42 uses **GSD (Get Shit Done)** as the default methodology for multi-step work.
-The always-on `gsd-auto-activate` skill handles detection automatically.
-
-### When to Use GSD
-
-Use GSD for any task involving multiple files, phases, or coordinated steps:
-- New features, tools, skills, or providers
-- Refactors touching 3+ files
-- Architecture changes or migrations
-- Any task where you'd naturally say "first I need to... then..."
-
-### When to Skip GSD
-
-Skip GSD for trivial tasks (Claude handles these directly):
-- Quick questions ("what does X do?")
-- Single-file typo/style fixes
-- Configuration lookups
-- Debugging a specific known error
-
-### Key GSD Commands
-
-| Command | When to Use |
-|---------|-------------|
-| `/gsd:new-project` | Initialize a new multi-phase workstream |
-| `/gsd:quick` | Ad-hoc task with GSD tracking but no full phase plan |
-| `/gsd:plan-phase` | Plan a specific phase when already in a workstream |
-| `/gsd:execute-phase` | Execute a planned phase |
-| `/gsd:next` | Advance to the next task in the current plan |
-
----
-
-## Common Pitfalls
-
-> Pitfalls 1-110 archived to `.claude/reference/pitfalls-archive.md` (loaded on-demand by context-loader hook).
-> Recent pitfalls (111+) kept inline for immediate reference.
-
-| # | Area | Pitfall | Correct Pattern |
-|---|------|---------|-----------------|
-| 111 | Memory | Agent claims "stored in MEMORY.md" but has no tool to actually write — memory skill described the system but no corresponding tool existed | Created `tools/memory_tool.py` with store/recall/log/search actions; registered in `_register_tools()` |
-| 112 | Dashboard | Storage status showed configured mode ("Qdrant + Redis") even when Qdrant was unreachable | Endpoint now returns `effective_mode` based on actual connectivity; frontend shows degradation warning when `configured_mode != mode` |
-| 113 | Init | `_register_tools()` called before `memory_store` initialized — AttributeError on startup | Move `_register_tools()` call to after MemoryStore initialization in `agent42.py` |
-| 114 | Deploy | `install-server.sh` used `--storage-path` CLI arg removed in Qdrant v1.14+; service crash-looped 37K+ times | Use `--config-path /etc/qdrant/config.yaml` + `WorkingDirectory=/var/lib/qdrant` in systemd unit; create config file with `storage.storage_path` |
-| 115 | Deploy | `.env` had `QDRANT_URL=http://qdrant:6333` (Docker hostname) on bare-metal server — Qdrant unreachable | Bare-metal deployments must use `http://localhost:6333`; Docker Compose uses `http://qdrant:6333` (service name resolves inside Docker network only) |
-| 116 | Server | `from starlette.responses import Response` at `create_app()` scope shadows `fastapi.Response` — causes `UnboundLocalError` on startup, crash-loops the service | Never import at `create_app` scope; use module-level FastAPI imports or import inside nested functions. FastAPI re-exports starlette's `Response` already. |
-| 117 | Tests | `core.task_queue` removed in v2.0 but 3 test files still imported it inside `try` blocks — caused `HAS_TESTCLIENT=False` silently, then `NameError` on classes that used names from the failed import | When removing a module, grep all test files for references. `try/except ImportError` blocks mask the real cause — split imports so unrelated names aren't lost |
-| 118 | Tests | Tests referencing `/api/tasks` endpoint broke silently after v2.0 removed it — returned 404 instead of expected 401 | After removing API endpoints, grep `tests/` for the route path and update or remove affected tests |
-| 119 | Deploy | Unstaged local changes block `git checkout main` during deploy, forcing stash/pop which causes merge conflicts | Always check `git status` before deploy. Commit or explicitly stash WIP first — don't let deploy workflow hit stash conflicts mid-flight |
-| 120 | CC Chat | On session resume/page reload, `sessionStorage` restores the session ID so CC retains conversation context via `--resume`, but the chat DOM is empty — messages were never persisted | Save user and assistant messages to `localStorage` keyed by `cc_hist_<sessionId>`; restore via `ccRestoreHistory()` in `ws.onopen` when `sessionResumed === true` |
-| 121 | Startup | `agent42.py` called `PluginLoader(self.tool_registry)` (old instance-based API) — but `PluginLoader` has no constructor; only a static `load_all(directory, context, registry)` method | Use `PluginLoader.load_all(custom_tools_dir, ctx, self.tool_registry)` and only call it when `CUSTOM_TOOLS_DIR` is configured |
-| 122 | GSD | `gsd-tools.cjs` resolves `project_root` to parent repo (agent42) when working in nested repos with their own `.git/` (e.g. `apps/meatheadgear/`) | GSD planning for nested app repos must be done manually or with `cd` to the app directory first. GSD needs a fix to detect and respect nested git roots |
-| 123 | Status | System RAM showed `0 / 0 MB` on Windows — `memory_total_mb` and `memory_available_mb` were hardcoded to 0 in heartbeat | Use `GlobalMemoryStatusEx` on Windows, `/proc/meminfo` on Linux to populate system memory fields |
-| 124 | Frontend | `/api/tasks` endpoint removed in v2.0 but frontend `loadTasks()` still called it — caused 404 on every page load | Replace `await api("/tasks")` with `state.tasks = []` (tasks are project-scoped now) |
-
----
-
-## Extended Reference (loaded on-demand)
-
-Detailed reference docs are in `.claude/reference/` and loaded automatically by the
-context-loader hook when relevant work types are detected. Files:
-- `terminology.md` — Full glossary of 50 terms
+- `hooks-reference.md` — Full hook table, protocol, architecture diagram
+- `architecture-patterns.md` — Plugin architecture, tool/extension/skill patterns, MCP, security layers
+- `development-workflow.md` — Pre/post coding checklists, test writing rules
+- `pitfalls-archive.md` — All resolved pitfalls (1-124)
 - `project-structure.md` — Complete directory tree
 - `configuration.md` — All 80+ environment variables
 - `new-components.md` — Procedures for adding tools, skills, providers
 - `conventions.md` — Naming, commits, documentation maintenance
 - `deployment.md` — Local, production, and Docker deployment
+- `terminology.md` — Full glossary of 50 terms
+- `stack-rewards.md` — Rewards/tier system stack research
 
 <!-- GSD:project-start source:PROJECT.md -->
 ## Project
@@ -513,7 +95,6 @@ An AI agent platform that operates across 9 LLM providers with tiered routing (L
 <!-- GSD:stack-start source:research/STACK.md -->
 ## Technology Stack
 
-Rewards/tier system stack research extracted to `.claude/reference/stack-rewards.md` (loaded on-demand).
 Core stack: Python 3.11+, stdlib (`IntEnum`, `asyncio.Semaphore`, `dataclasses`), existing deps (`aiosqlite`, `aiofiles`, FastAPI).
 <!-- GSD:stack-end -->
 
