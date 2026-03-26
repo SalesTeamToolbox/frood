@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.1
 milestone_name: milestone
-status: Gap closure in progress
-stopped_at: Gap closure phases 4-5 created from audit
-last_updated: "2026-03-25T20:30:00.000Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 04-fix-workspace-id-api-wiring-01-PLAN.md
+last_updated: "2026-03-26T03:37:10.575Z"
 progress:
   total_phases: 5
-  completed_phases: 3
-  total_plans: 8
-  completed_plans: 6
+  completed_phases: 4
+  total_plans: 7
+  completed_plans: 7
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-23)
 
 **Core value:** Agent42 must always be able to run agents reliably — multi-workspace extends this to running agents scoped to specific projects.
-**Current focus:** Phase 03 — workspace-management
+**Current focus:** Phase 04 — fix-workspace-id-api-wiring
 
 ## Current Position
 
-Phase: 03
-Plan: Not started
+Phase: 04 (fix-workspace-id-api-wiring) — EXECUTING
+Plan: 1 of 1
 
 ## Performance Metrics
 
@@ -51,6 +51,7 @@ Plan: Not started
 | Phase 02-ide-surface-integration P02 | 10m | 2 tasks | 1 files |
 | Phase 02-ide-surface-integration P03 | 8m | 2 tasks | 2 files |
 | Phase 03-workspace-management P01 | 13m | 3 tasks | 2 files |
+| Phase 04 P01 | 12 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,8 @@ Recent decisions affecting current work:
 - [Phase 03-workspace-management]: Always show workspace tab bar (removed <=1 hide guard) — '+' button must always be accessible
 - [Phase 03-workspace-management]: Direct terminal cleanup in removeWorkspace via ws.close/term.dispose instead of termClose() — avoids _termSessions splice index mismatch
 - [Phase 03-workspace-management]: Optimistic rename applied to DOM + _workspaceList simultaneously; both rolled back on API failure
+- [Phase 04]: workspace_id moved from standalone FastAPI query param into IDEWriteRequest Pydantic model body field — aligns with how frontend sends it via JSON body
+- [Phase 04]: ideDoSearch builds searchUrl variable before fetch, appending workspace_id only when _activeWorkspaceId is set — matches established ideLoadTree pattern
 
 ### Pending Todos
 
@@ -89,6 +92,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T21:50:37.768Z
-Stopped at: Completed 03-workspace-management-01-PLAN.md
+Last session: 2026-03-26T03:37:10.571Z
+Stopped at: Completed 04-fix-workspace-id-api-wiring-01-PLAN.md
 Resume file: None

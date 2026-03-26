@@ -11,7 +11,7 @@
 - [x] **FOUND-03**: File explorer re-roots to active workspace on tab switch `[Phase 2]`
 - [x] **FOUND-04**: No raw filesystem path accepted from client — all calls use workspace_id `[Phase 1]`
 - [x] **FOUND-05**: Each workspace has independent editor tabs, cursor, scroll, and selection state `[Phase 2]`
-- [ ] **FOUND-06**: All IDE API calls pass workspace_id so file ops and search resolve to active workspace `[Phase 1, 2 | Gap closure: Phase 4]`
+- [x] **FOUND-06**: All IDE API calls pass workspace_id so file ops and search resolve to active workspace `[Phase 1, 2 | Gap closure: Phase 4]`
 
 ### Isolation (ISOL)
 
