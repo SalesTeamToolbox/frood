@@ -152,12 +152,11 @@ def is_trivial_session(event):
     if stop_reason == "interrupted":
         return True
 
-    # CC Stop events include transcript_summary — if present, session is not trivial
     transcript = event.get("transcript_summary", "")
-    if isinstance(transcript, str) and len(transcript.strip()) > 10:
-        return False
+    has_transcript = isinstance(transcript, str) and len(transcript.strip()) > 10
 
-    # CC sessions without transcript_summary: check for git changes as evidence of work
+    # Check for git changes as evidence of work
+    has_git_changes = False
     project_dir = event.get("project_dir", "")
     if project_dir:
         try:
@@ -171,9 +170,14 @@ def is_trivial_session(event):
                 timeout=5,
             )
             if result.returncode == 0 and result.stdout.strip():
-                return False  # Uncommitted changes = non-trivial session
+                has_git_changes = True
         except Exception:
             pass
+
+    # CC Stop events include transcript_summary. If there are also git changes,
+    # the session did real work — not trivial.
+    if has_transcript and has_git_changes:
+        return False
 
     # Agent42 standalone mode: check tool_results
     tool_results = event.get("tool_results", [])
@@ -192,12 +196,63 @@ def is_trivial_session(event):
                 if fp and tool_name in ("Write", "Edit", "agent42_write_file", "agent42_edit_file"):
                     files_modified.add(fp)
 
+    # If transcript present and files were modified via tool_results, not trivial
+    if has_transcript and files_modified:
+        return False
+
     if not files_modified and tool_count < 3:
         return True
 
     # Session duration check (if start_time in event)
     start_time = event.get("session_start_time", 0)
     if start_time and (time.time() - start_time) < 30:
+        return True
+
+    return False
+
+
+def is_noise_entry(summary: str) -> bool:
+    """Return True if the summary is noise that should not be stored.
+
+    Noise patterns:
+    1. Only .claude/learned-patterns.json was modified (trivial pattern updates)
+    2. Only .planning/ bookkeeping files were modified (config.json, active-workstream, etc.)
+       with no real code changes
+    """
+    if not summary:
+        return False
+
+    # Only flag "Modified:" git-diff fallback entries (not Summary: or Last commit: entries)
+    if not summary.startswith("Modified:"):
+        return False
+
+    # Extract the file list from "Modified: file1, file2, ... | Changes: ..."
+    modified_part = summary.split(" | Changes:")[0].replace("Modified:", "").strip()
+    modified_files = [f.strip() for f in modified_part.split(",") if f.strip()]
+
+    if not modified_files:
+        return False
+
+    # Pattern 1: Only learned-patterns.json
+    only_patterns_json = all(
+        f.endswith("learned-patterns.json") or "learned-patterns" in f for f in modified_files
+    )
+    if only_patterns_json:
+        return True
+
+    # Pattern 2: Only .planning/ bookkeeping files (no code files)
+    planning_files = {".planning/active-workstream", ".planning/config.json"}
+    planning_prefixes = (".planning/", ".../")  # abbreviated paths shown by git
+
+    def is_planning_only_file(f):
+        return (
+            any(f.startswith(p) for p in planning_prefixes)
+            or f in planning_files
+            or "learned-patterns" in f
+        )
+
+    only_planning = all(is_planning_only_file(f) for f in modified_files)
+    if only_planning:
         return True
 
     return False
@@ -253,6 +308,10 @@ def main():
 
     # Skip trivial sessions
     if is_trivial_session(event):
+        sys.exit(0)
+
+    # Skip noise entries (learned-patterns.json only, .planning/ bookkeeping only)
+    if is_noise_entry(summary):
         sys.exit(0)
 
     # ── Append to HISTORY.md ─────────────────────────────────────────────
