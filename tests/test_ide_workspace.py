@@ -18,10 +18,35 @@ import pytest
 # ---------------------------------------------------------------------------
 
 _SERVER_PY = Path(__file__).parent.parent / "dashboard" / "server.py"
+_APP_JS = Path(__file__).parent.parent / "dashboard" / "frontend" / "dist" / "app.js"
 
 
 def _read_server():
     return _SERVER_PY.read_text(encoding="utf-8")
+
+
+def _read_app_js():
+    return _APP_JS.read_text(encoding="utf-8")
+
+
+def _find_js_function_body(source: str, func_name: str) -> str:
+    """Extract JS function body by searching for 'function func_name' and collecting until brace depth 0."""
+    lines = source.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if re.search(r"function\s+" + re.escape(func_name) + r"\s*\(", line):
+            start = i
+            break
+    if start is None:
+        return ""
+    body_lines = [lines[start]]
+    brace_depth = lines[start].count("{") - lines[start].count("}")
+    for line in lines[start + 1 :]:
+        body_lines.append(line)
+        brace_depth += line.count("{") - line.count("}")
+        if brace_depth <= 0:
+            break
+    return "\n".join(body_lines)
 
 
 def _find_function_body(source: str, func_name: str) -> str:
@@ -332,3 +357,74 @@ class TestIdeWriteFileWorkspaceWiring:
         assert not (tmp_path / "test.txt").exists(), (
             "File should NOT be written to default workspace"
         )
+
+
+# ---------------------------------------------------------------------------
+# Source-scan + integration tests — ide_search workspace_id wiring
+# ---------------------------------------------------------------------------
+
+
+class TestIdeSearchWorkspaceWiring:
+    """Verify that ideDoSearch appends workspace_id and server-side search respects it."""
+
+    def test_ide_do_search_sends_workspace_id(self):
+        """ideDoSearch function body must contain workspace_id query param."""
+        source = _read_app_js()
+        body = _find_js_function_body(source, "ideDoSearch")
+        assert body, "ideDoSearch function not found in app.js"
+        assert "workspace_id" in body, "ideDoSearch should append workspace_id to the search URL"
+
+    def test_ide_search_routes_to_correct_workspace(self, tmp_path, monkeypatch):
+        """GET /api/ide/search?workspace_id=B returns results from workspace B only."""
+        from fastapi.testclient import TestClient
+
+        from core.workspace_registry import WorkspaceRegistry
+        from dashboard.auth import get_current_user
+        from dashboard.server import create_app
+        from dashboard.websocket_manager import WebSocketManager
+
+        # Use separate sibling directories so workspace B is NOT nested inside workspace A
+        ws_a_path = tmp_path / "workspace_a"
+        ws_a_path.mkdir()
+        ws_b_path = tmp_path / "workspace_b"
+        ws_b_path.mkdir()
+
+        monkeypatch.setenv("AGENT42_WORKSPACE", str(ws_a_path))
+
+        registry = WorkspaceRegistry(tmp_path / "workspaces.json")
+        asyncio.run(registry.seed_default(str(ws_a_path)))
+        default_ws = registry.get_default()
+
+        # Create a second workspace
+        ws_b = asyncio.run(registry.create(name="Workspace B", root_path=str(ws_b_path)))
+
+        # Write a file with unique content to workspace B only (not in workspace A)
+        (ws_b_path / "searchable.txt").write_text("UNIQUE_MARKER_XYZ", encoding="utf-8")
+
+        app = create_app(
+            ws_manager=WebSocketManager(),
+            workspace_registry=registry,
+        )
+        app.dependency_overrides[get_current_user] = lambda: "test_user"
+
+        with TestClient(app) as c:
+            # Search in workspace B — should find the file
+            res_b = c.get(
+                f"/api/ide/search?q=UNIQUE_MARKER_XYZ&workspace_id={ws_b.id}",
+                headers={"Authorization": "Bearer test"},
+            )
+            assert res_b.status_code == 200, f"Expected 200, got {res_b.status_code}: {res_b.text}"
+            data_b = res_b.json()
+            assert len(data_b["results"]) > 0, "Search in workspace B should find the file"
+            assert any("searchable.txt" in r["file"] for r in data_b["results"])
+
+            # Search in default workspace (workspace A) — should not find the file
+            res_a = c.get(
+                f"/api/ide/search?q=UNIQUE_MARKER_XYZ&workspace_id={default_ws.id}",
+                headers={"Authorization": "Bearer test"},
+            )
+            assert res_a.status_code == 200, f"Expected 200, got {res_a.status_code}: {res_a.text}"
+            data_a = res_a.json()
+            assert len(data_a["results"]) == 0, (
+                "Search in default workspace should not find file that only exists in workspace B"
+            )
