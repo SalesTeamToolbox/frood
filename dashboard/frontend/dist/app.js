@@ -3771,6 +3771,9 @@ async function removeWorkspace(wsId) {
   // D-10: Last-workspace gate (frontend-only)
   if (_workspaceList.length <= 1) return;
 
+  // Sync live _ideTabs modified state into _wsTabState before counting
+  if (wsId === _activeWorkspaceId) _saveCurrentWsState();
+
   // D-11: Count unsaved files and CC sessions
   var wsState = _wsTabState[wsId] || { tabs: [], ccTabCount: 0 };
   var unsavedCount = 0;
@@ -7038,7 +7041,7 @@ function initPanelDragHandle() {
     document.body.style.userSelect = "";
     var panel = document.getElementById("ide-cc-panel");
     if (panel) {
-      try { localStorage.setItem("cc_panel_width", Math.round(panel.getBoundingClientRect().width)); } catch(e) {}
+      try { localStorage.setItem(wsKey(_activeWorkspaceId, "cc_panel_width"), Math.round(panel.getBoundingClientRect().width)); } catch(e) {}
     }
   });
 }
@@ -7058,7 +7061,7 @@ function ideOpenChatPanel() {
 
   // Show panel visually
   var savedWidth = 400;
-  try { savedWidth = parseInt(localStorage.getItem("cc_panel_width")) || 400; } catch(e) {}
+  try { savedWidth = parseInt(localStorage.getItem(wsKey(_activeWorkspaceId, "cc_panel_width"))) || 400; } catch(e) {}
   panel.style.display = "flex";
   panel.style.flexDirection = "column";
   panel.style.width = savedWidth + "px";
@@ -7151,10 +7154,10 @@ function _buildPanelChatDOM(panel) {
 function _connectPanelWS() {
   // Restore or create session ID
   var sessionId = "";
-  try { sessionId = localStorage.getItem("cc_panel_session_id") || ""; } catch(e) {}
+  try { sessionId = localStorage.getItem(wsKey(_activeWorkspaceId, "cc_panel_session_id")) || ""; } catch(e) {}
   if (!sessionId) {
     sessionId = crypto.randomUUID ? crypto.randomUUID() : "panel-" + Date.now();
-    try { localStorage.setItem("cc_panel_session_id", sessionId); } catch(e) {}
+    try { localStorage.setItem(wsKey(_activeWorkspaceId, "cc_panel_session_id"), sessionId); } catch(e) {}
   }
 
   var panel = document.getElementById("ide-cc-panel");
@@ -7225,7 +7228,7 @@ function ideCloseChatPanel() {
   var panel = document.getElementById("ide-cc-panel");
   var handle = document.getElementById("ide-panel-drag-handle");
   if (!panel) return;
-  try { localStorage.setItem("cc_panel_width", Math.round(panel.getBoundingClientRect().width)); } catch(e) {}
+  try { localStorage.setItem(wsKey(_activeWorkspaceId, "cc_panel_width"), Math.round(panel.getBoundingClientRect().width)); } catch(e) {}
   panel.style.display = "none";
   if (handle) handle.style.display = "none";
   _chatPanelMode = false;
