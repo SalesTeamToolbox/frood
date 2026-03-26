@@ -2,63 +2,46 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-22)
+See: .planning/PROJECT.md (updated 2026-03-25)
 
-**Core value:** Agents that consistently deliver value get better tools to deliver more value — a self-reinforcing quality loop tied to measurable outcomes.
-**Current focus:** Phase 1 — Foundation
+**Core value:** Agent42 must always be able to run agents reliably, with tiered provider routing ensuring no single provider outage stops the platform.
+**Current focus:** GSD & jcodemunch Integration (active workstream) — Phase 4 Context Engine next
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Between milestones
 Plan: —
-Status: Defining requirements for v2.1 Multi-Project Workspace
-Last activity: 2026-03-23 — Milestone v2.1 started
+Status: rewards-v1.0 milestone completed; GSD integration workstream active
+Last activity: 2026-03-25 — rewards-v1.0 milestone completion workflow
 
-Progress: [░░░░░░░░░░] 0%
+## Completed Milestones
 
-## Performance Metrics
+- v1.0, v1.1, v1.2, v1.4, v1.5, v1.6 — see MILESTONES.md
+- rewards-v1.0 Performance-Based Rewards — shipped 2026-03-25
+- v2.1 Multi-Project Workspace — shipped 2026-03-24
 
-**Velocity:**
-- Total plans completed: 0
-- Average duration: -
-- Total execution time: -
+## Active Workstreams
 
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| - | - | - | - |
-
-**Recent Trend:**
-- Last 5 plans: -
-- Trend: -
-
-*Updated after each plan completion*
+- **gsd-and-jcodemunch-integration** — Phases 1-3 complete, Phase 4 (Context Engine) next
+- **custom-claude-code-ui** — Phases 1-4 complete, Phases 5-6 remaining
 
 ## Accumulated Context
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
-
-- [Roadmap]: 4 coarse phases (Foundation → Tier Assignment → Resource Enforcement → Dashboard); Dashboard API and UI merged per coarse granularity
-- [Roadmap]: Hysteresis (HYST-01..04) deferred to v2 — excluded from roadmap
-- [Research]: Tier must be cached in memory (TTL), never computed on routing hot path — O(1) AgentConfig read at dispatch
-- [Research]: agent_id schema gap in EffectivenessStore must be resolved in Phase 1 before any scoring logic is built
-- [Research]: Frozen Settings cannot support runtime toggle — separate mutable RewardsConfig file required
+See workstream-specific STATE.md files for per-workstream decisions.
 
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
-- [Pre-Phase 1]: Inspect production tool_invocations table for existing task_id format — determines whether to add agent_id column (migration) or create separate agent_performance table
-- [Pre-Phase 1]: Confirm Provisional tier default (Silver vs Bronze) against actual Bronze resource limits in production model routing config
+None active. Previous rewards blockers (agent_id schema, Provisional tier default) resolved in rewards-v1.0.
 
 ## Session Continuity
 
-Last session: 2026-03-22
-Stopped at: Roadmap created, STATE.md initialized, REQUIREMENTS.md traceability updated
+Last session: 2026-03-25
+Stopped at: rewards-v1.0 milestone completion workflow
 Resume file: None

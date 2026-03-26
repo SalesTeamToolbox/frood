@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: in-progress
-stopped_at: Phase 03 context gathered
-last_updated: "2026-03-25T22:45:09.728Z"
+status: Ready to plan
+stopped_at: Completed Phase 03 Plan 02 — Printful webhook receiver (all Phase 03 plans complete)
+last_updated: "2026-03-25T23:48:10.156Z"
 progress:
   total_phases: 7
-  completed_phases: 2
-  total_plans: 7
-  completed_plans: 7
+  completed_phases: 3
+  total_plans: 10
+  completed_plans: 10
 ---
 
 # State: MeatheadGear Platform
@@ -23,12 +23,15 @@ See: .planning/workstreams/meatheadgear-platform/PROJECT.md (updated 2026-03-20)
 
 ## Current Position
 
-Phase: 02 (design-studio) — COMPLETE (2026-03-25)
-Next: Phase 03 (checkout-fulfillment)
+Phase: 4
+Plan: Not started
 
 ## Performance Metrics
 
 **Velocity:** Phase 02 complete — 3 plans across 2 waves. 02-01 (fal.ai pipeline), 02-02 (Fabric.js canvas), 02-03 (wiring endpoints). All verified.
+Phase 03 Plan 01 complete in 7 min — stripe checkout + Printful order + branded email pipeline.
+Phase 03 Plan 03 complete in 8 min — frontend checkout wired, 7-color order status badges, tracking links.
+Phase 03 Plan 02 complete in 6 min — Printful webhook receiver, composite idempotency, tracking persistence, shipping email trigger.
 
 ## Accumulated Context
 
@@ -53,6 +56,15 @@ Next: Phase 03 (checkout-fulfillment)
 - [Phase 02-design-studio]: Use fabric.FabricImage.fromURL (not fabric.Image) — Fabric v6 renamed the class
 - [Phase 02-design-studio]: Upload handler uses raw fetch() not authFetch() to avoid Content-Type override breaking multipart boundary
 - [Phase 02-design-studio]: Uploaded designs placed using backend image_url (not FileReader data URL) to link design_id for save/mockup ops
+- [Phase 03-checkout-01]: design_id and variant_id in session-level metadata (not payment_intent_data.metadata) — webhook reads session.metadata
+- [Phase 03-checkout-01]: Printful order confirmed immediately after creation to exit draft state — Order Agent handles confirm retry if needed
+- [Phase 03-checkout-01]: base_url config field for public design image URLs sent to Printful (ngrok in dev, domain in prod)
+- [Phase 03-checkout-01]: Branded dark-theme email: #0d0d0d bg, #ff2020 accent, Impact font uppercase — matches MeatheadGear brand
+- [Phase 03-checkout-03]: Default selectedSize='M' in state — size picker UI enhancement deferred; backend accepts any size string
+- [Phase 03-checkout-03]: STATUS_CLASS_MAP/STATUS_LABEL_MAP as module-level constants in app.js for reuse across order rendering
+- [Phase 03-checkout-03]: Tracking link uses target="_blank" with rel="noopener noreferrer" for security
+- [Phase 03-checkout-02]: Idempotency key for package_shipped uses tracking_number (not status) — allows re-delivery for different shipments on same order
+- [Phase 03-checkout-02]: _handle_package_shipped uses direct SQL UPDATE for tracking fields — update_order_status does not handle tracking_url/tracking_number
 
 ### Known State
 
@@ -76,6 +88,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T22:45:09.720Z
-Stopped at: Phase 03 context gathered
-Resume file: .planning/workstreams/meatheadgear-platform/phases/03-checkout-fulfillment/03-CONTEXT.md
+Last session: 2026-03-25T23:42:00Z
+Stopped at: Completed Phase 03 Plan 02 — Printful webhook receiver (all Phase 03 plans complete)
+Resume file: .planning/workstreams/meatheadgear-platform/phases/04-agent-infrastructure/04-01-PLAN.md

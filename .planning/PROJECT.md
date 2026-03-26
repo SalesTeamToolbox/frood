@@ -2,7 +2,7 @@
 
 ## What This Is
 
-An AI agent platform that operates across 9 LLM providers with tiered routing (L1 workhorse, L2 premium, free fallback), per-agent model configuration, and graceful degradation. Features intelligent memory (ONNX + Qdrant with auto-sync from Claude Code), task-aware learning (effectiveness tracking + proactive injection), and native desktop app experience (PWA + GSD auto-activation).
+An AI agent platform that operates across 9 LLM providers with tiered routing (L1 workhorse, L2 premium, free fallback), per-agent model configuration, performance-based rewards (Bronze/Silver/Gold tiers earn better models and higher limits), and graceful degradation. Features intelligent memory (ONNX + Qdrant with auto-sync from Claude Code), task-aware learning (effectiveness tracking + proactive injection), and native desktop app experience (PWA + GSD auto-activation).
 
 ## Core Value
 
@@ -55,6 +55,12 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 - ✓ GSD auto-activation (always-on skill + CLAUDE.md methodology + context-loader nudge) — v1.6
 - ✓ PWA manifest + cross-platform desktop shortcuts (Windows .lnk, macOS .app, Linux .desktop) — v1.6
 - ✓ Dashboard GSD integration (sidebar workstream/phase via WebSocket heartbeat) — v1.6
+
+- ✓ Performance-based rewards system with Bronze/Silver/Gold/Provisional tiers — rewards-v1.0
+- ✓ Composite scoring (success rate, volume, speed) with configurable weights and mutable RewardsConfig — rewards-v1.0
+- ✓ Per-tier model routing, rate limit multipliers (1.0x/1.5x/2.0x), concurrent task caps (2/5/10) — rewards-v1.0
+- ✓ Dashboard tier badges, admin override UI, rewards toggle, WebSocket tier_update events — rewards-v1.0
+- ✓ Graceful opt-in via REWARDS_ENABLED=false default — zero behavioral change for existing deployments — rewards-v1.0
 
 ### Active
 
@@ -132,10 +138,12 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 
 ## Context
 
-Shipped v1.6 with 6 milestones completed (v1.0, v1.1, v1.2, v1.4, v1.5, v1.6).
+Shipped 8 milestones (v1.0, v1.1, v1.2, v1.4, v1.5, v1.6, rewards-v1.0, v2.1).
 Tech stack: Python 3.11+, FastAPI, AsyncOpenAI, aiofiles, pytest, ONNX Runtime, Qdrant.
 Memory system: ONNX embeddings + Qdrant + Redis, with auto-sync from Claude Code, task-aware retrieval, proactive injection, and recommendations engine.
+Rewards system: Performance-based Bronze/Silver/Gold tiers with model routing, rate limit multipliers, and semaphore-based concurrency enforcement. Opt-in via REWARDS_ENABLED.
 Desktop experience: PWA manifest + shortcuts, GSD auto-activation, dashboard with live workstream status.
+Multi-project workspaces: Tabbed workspace scoping with isolated file explorer, editor, CC sessions, and terminals per project.
 
 **Current routing:**
 - Cerebras primary for coding/debugging/app_create (fastest inference)
@@ -192,6 +200,11 @@ Desktop experience: PWA manifest + shortcuts, GSD auto-activation, dashboard wit
 | L1/L2 tier architecture | Cleaner than free/cheap/paid mix; user-configurable per agent | -- Pending |
 | Gemini as default L2 | Reliable premium provider, already integrated | -- Pending |
 | Non-streaming accepted for L1 | StrongWall doesn't stream; simulate for chat, accept for background | -- Pending |
+| Mutable RewardsConfig over frozen Settings | Runtime toggle without restart; Settings is frozen at import | ✓ Good — follows AgentRoutingStore mtime-cache pattern |
+| Composite score clamped to [0.0, 1.0] | Floating-point drift protection; normalize before threshold comparison | ✓ Good — eliminates edge case scoring errors |
+| None sentinel for tier override | Distinguishes "no override" from "empty string override" | ✓ Good — clean tri-state: computed, overridden, provisional |
+| Non-blocking semaphore via wait_for(timeout=0.0) | O(1) concurrency check without accessing CPython sem._value | ✓ Good — portable across Python implementations |
+| TierRecalcLoop batch broadcast | One WebSocket message per recalc cycle, not per-agent | ✓ Good — O(1) instead of O(N) per cycle |
 
 ## Future Milestones (Backlog)
 
@@ -231,4 +244,4 @@ Project (top-level entity)
 **Why:** Running MHG or other sandboxed apps on the VPS requires checking the VPS dashboard separately. This unifies local dev and remote production into one view.
 
 ---
-*Last updated: 2026-03-24 after Multi-Project Workspace Phase 3 (Workspace Management) completion — milestone v2.1 complete*
+*Last updated: 2026-03-25 after rewards-v1.0 milestone completion*

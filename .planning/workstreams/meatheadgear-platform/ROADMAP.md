@@ -8,7 +8,7 @@ Build a fully autonomous AI-run gym apparel e-commerce platform as an Agent42 ap
 
 - [x] **Phase 1: Store Foundation** — FastAPI app, auth, Printful catalog sync, product browsing UI
 - [x] **Phase 2: Design Studio** — AI generation (Flux + Ideogram), canvas editor, mockup preview (completed 2026-03-25)
-- [ ] **Phase 3: Checkout & Fulfillment** — Stripe payments, Printful order creation, order tracking
+- [x] **Phase 3: Checkout & Fulfillment** — Stripe payments, Printful order creation, order tracking (completed 2026-03-25)
 - [x] **Phase 4: Agent Infrastructure** — Webhook receivers, Redis report bus, scheduler, escalation (completed 2026-03-21)
 - [ ] **Phase 5: Order & Finance Agents** — Fulfillment loop, P&L tracking, daily reports
 - [ ] **Phase 6: Support & CEO Agents** — Inbound email handling, refunds, daily business digest
@@ -57,6 +57,13 @@ Plans:
 **Goal**: Customer can pay and their order flows automatically to Printful for printing and shipping
 **Depends on**: Phase 2 (needs design + product selection)
 **Requirements**: ORD-01–07
+**Plans:** 3 plans
+
+Plans:
+- [x] 03-01-PLAN.md — Backend purchase flow: DB migrations, Stripe checkout with shipping + design_id, webhook order creation, Printful order confirm, branded email
+- [x] 03-02-PLAN.md — Printful webhook receiver: status updates, tracking data, shipping notification email
+- [x] 03-03-PLAN.md — Frontend: checkout button wiring, enhanced status badges, tracking link
+
 **Success Criteria:**
   1. Stripe checkout completes with real (test mode) card
   2. Printful order created automatically within 60s of payment
@@ -113,7 +120,7 @@ Plans:
 |-------|-------|--------|-----------|
 | 1. Store Foundation | 4/4 | Complete |  |
 | 2. Design Studio | 3/3 | Complete | 2026-03-25 |
-| 3. Checkout & Fulfillment | TBD | Not started | — |
+| 3. Checkout & Fulfillment | 3/3 | Complete | 2026-03-25 |
 | 4. Agent Infrastructure | 2/2 | Complete   | 2026-03-21 |
 | 5. Order & Finance Agents | TBD | Not started | — |
 | 6. Support & CEO Agents | TBD | Not started | — |

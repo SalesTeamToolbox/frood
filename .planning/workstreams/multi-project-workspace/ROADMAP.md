@@ -15,6 +15,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Registry & Namespacing** - Server-side WorkspaceRegistry, CRUD API, default seeding, ID-based path resolution, and client-side storage/URI namespace conventions (completed 2026-03-24)
 - [x] **Phase 2: IDE Surface Integration** - Thread workspace_id into file explorer, editor tabs, CC sessions, and terminals; render workspace tab bar (completed 2026-03-24)
 - [x] **Phase 3: Workspace Management** - Add, remove, and rename workspaces with validation and guards (completed 2026-03-24)
+- [ ] **Phase 4: Fix Workspace ID API Wiring** - Fix workspace_id body/query mismatch on file save and missing workspace_id on search (gap closure)
+- [ ] **Phase 5: Fix Frontend State Isolation** - Migrate remaining bare localStorage keys to wsKey() and fix stale unsaved-files guard (gap closure)
 
 ## Phase Details
 
@@ -65,13 +67,47 @@ Plans:
 Plans:
 - [x] 03-01: Add workspace modal (path input + app dropdown, server-side validation); remove workspace with unsaved-files guard and last-workspace protection; inline rename
 
+### Phase 4: Fix Workspace ID API Wiring
+
+**Goal:** All IDE API calls correctly pass workspace_id so file operations and search resolve to the active workspace, not the default
+**Depends on:** Phases 1, 2
+**Requirements:** FOUND-06
+**Gap Closure:** Closes gaps from v2.1 audit (critical + medium severity)
+**Success Criteria** (what must be TRUE):
+
+  1. `POST /api/ide/file` receives `workspace_id` via the Pydantic request model (not query param mismatch) — file saves in workspace B write to workspace B's root
+  2. `GET /api/ide/search` includes `workspace_id` parameter — search in workspace B returns results from workspace B only
+  3. Both flows verified end-to-end in a non-default workspace
+
+Plans:
+
+- [ ] 04-01-PLAN.md — Fix workspace_id wiring on file save and search endpoints
+
+### Phase 5: Fix Frontend State Isolation
+
+**Goal:** All frontend state keys are workspace-namespaced and the unsaved-files guard reads current (not stale) modified state
+**Depends on:** Phase 2
+**Requirements:** ISOL-07, MGMT-02
+**Gap Closure:** Closes gaps from v2.1 audit (low severity)
+**Success Criteria** (what must be TRUE):
+
+  1. `cc_panel_width` and `cc_panel_session_id` localStorage keys use `wsKey()` namespace — switching workspaces restores per-workspace panel width and session
+  2. `removeWorkspace()` syncs current tab modified state before counting unsaved files — guard fires correctly even without a prior tab switch
+  3. Editing a file and immediately closing the workspace triggers the unsaved-files confirmation dialog
+
+Plans:
+
+- [ ] 05-01-PLAN.md — Migrate bare localStorage keys to wsKey() and fix unsaved guard state sync
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 1. Registry & Namespacing | 2/2 | Complete    | 2026-03-24 |
-| 2. IDE Surface Integration | 3/3 | Complete    | 2026-03-24 |
-| 3. Workspace Management | 1/1 | Complete   | 2026-03-24 |
+|---|---|---|---|
+| 1. Registry & Namespacing | 2/2 | Complete | 2026-03-24 |
+| 2. IDE Surface Integration | 3/3 | Complete | 2026-03-24 |
+| 3. Workspace Management | 1/1 | Complete | 2026-03-24 |
+| 4. Fix Workspace ID API Wiring | 0/1 | Pending | — |
+| 5. Fix Frontend State Isolation | 0/1 | Pending | — |

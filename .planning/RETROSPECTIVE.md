@@ -211,6 +211,50 @@
 
 ---
 
+## Milestone: rewards-v1.0 — Performance-Based Rewards
+
+**Shipped:** 2026-03-25
+**Phases:** 4 | **Plans:** 7 | **Commits:** 19 (code)
+
+### What Was Built
+- RewardSystem facade: ScoreCalculator (weighted composite), TierCache (TTL + file persistence), mutable RewardsConfig (no restart needed)
+- TierDeterminator: Bronze/Silver/Gold/Provisional automatic assignment, AgentConfig tier fields with effective_tier()
+- TierRecalcLoop: background service recalculates all non-overridden agents every 15 minutes
+- Resource enforcement: model routing upgrade by tier, rate limit multipliers (1.0x/1.5x/2.0x), semaphore-based concurrent task caps (2/5/10)
+- Dashboard: 5 REST API endpoints, tier badges on agent cards, admin override UI, rewards toggle, WebSocket tier_update events
+- 95 tests across 5 test files, 29/29 requirements verified
+
+### What Worked
+- **Strict TDD red-green cycle** — Every plan started with failing tests, then implementation; caught contract mismatches early
+- **O(1) hot-path reads** — Tier cached in AgentConfig field, never computed during request dispatch; background recalc keeps it current
+- **Mutable config pattern** — RewardsConfig uses class-level mtime-cache matching AgentRoutingStore pattern; runtime toggle without restart
+- **Coarse granularity** — 4 phases instead of fine-grained split; Dashboard API+UI merged into one phase; reduced planning overhead
+- **Workstream isolation** — Own ROADMAP/REQUIREMENTS/STATE; no interference with parallel workstreams
+
+### What Was Inefficient
+- **Main ROADMAP.md left stale** — Rewards roadmap placed in main `.planning/ROADMAP.md` but progress table never updated (showed 0/0 everywhere); workstream ROADMAP was the actual source of truth
+- **Milestone version collision** — Workstream used "v1.0" internally, conflicting with existing global v1.0; resolved with `rewards-v1.0` tag
+- **Partial completion** — `milestone complete` CLI ran but full workflow (PROJECT.md evolution, ROADMAP reorganization, RETROSPECTIVE) deferred to separate session
+
+### Patterns Established
+- **Mutable config file for runtime toggles** — When frozen Settings can't support runtime changes, use a separate JSON config with class-level mtime-cache
+- **None sentinel for optional overrides** — `is not None` check distinguishes "no override" from any falsy value
+- **Non-blocking semaphore** — `asyncio.wait_for(sem.acquire(), timeout=0.0)` for O(1) capacity check without touching CPython internals
+- **Batch WebSocket broadcast** — Collect all changes in one recalc cycle, send one message; O(1) not O(N)
+
+### Key Lessons
+1. **Update the main ROADMAP.md when using workstreams** — If the main ROADMAP has workstream content, either keep it current or replace with a project-level overview. Stale data confuses milestone completion.
+2. **Use prefixed tags for workstream milestones** — `rewards-v1.0` avoids collision with global version numbering. Establish convention early.
+3. **Run full `complete-milestone` immediately** — Partial completion (CLI only) leaves PROJECT.md, RETROSPECTIVE, and ROADMAP inconsistent until someone runs the full workflow.
+4. **Coarse phase granularity works for well-understood domains** — 4 phases with clear data dependencies (foundation → scoring → enforcement → dashboard) executed faster than fine-grained splits would have.
+
+### Cost Observations
+- Model mix: balanced profile (sonnet for planning/execution)
+- Sessions: ~3 sessions across 2 days
+- Notable: 7 plans completed in ~90 min total execution time; average 13 min/plan
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -222,6 +266,7 @@
 | v1.4 | 12 | 4 | Task-aware memory with fire-and-forget tracking; TDD red-green throughout |
 | v1.5 | 27 | 4 | CC-to-Qdrant memory bridge; detached subprocess pattern for hooks |
 | v1.6 | ~20 | 4 | PWA + GSD auto-activation; first Playwright-verified milestone |
+| rewards-v1.0 | 19 | 4 | Performance-based tiers; coarse granularity; workstream-scoped milestone |
 
 ### Cumulative Quality
 
@@ -232,6 +277,7 @@
 | v1.4 | ~1,980 | ~20 (effectiveness, injection, recommendations) | ~15 |
 | v1.5 | ~2,010 | ~30 (sync, learning, consolidation) | ~12 |
 | v1.6 | ~2,040 | ~30 (hooks, PWA, GSD) | ~15 |
+| rewards-v1.0 | ~2,135 | 95 (scoring, tiers, enforcement, dashboard API) | 56 |
 
 ### Top Lessons (Verified Across Milestones)
 
@@ -241,3 +287,5 @@
 4. Update REQUIREMENTS.md checkboxes when writing SUMMARY.md — checkbox lag creates false "incomplete" signals (verified v1.4, v1.5, v1.6)
 5. Fire-and-forget with blanket try/except is the only safe pattern for observability hooks — one tracking failure must never crash a tool (verified v1.4, v1.5)
 6. Tag all feature commits with workstream name for accurate milestone stats (verified v1.6)
+7. Use prefixed git tags for workstream milestones to avoid version collision with global numbering (verified rewards-v1.0)
+8. Coarse phase granularity works for well-understood domains — 4 phases with clear data dependencies execute faster than fine splits (verified rewards-v1.0)

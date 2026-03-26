@@ -18,11 +18,11 @@ A customer can go from "I want a shirt with an angry gorilla" to checkout in und
 - [x] Background removal + upscaling pipeline (fal.ai BiRefNet + Real-ESRGAN) — Validated in Phase 2
 - [x] Fabric.js canvas editor: place design on product mockup, resize, position — Validated in Phase 2
 - [x] Printful Mockup Generator API: render photorealistic product mockup from design — Validated in Phase 2
+- [x] Stripe checkout: create payment intent, handle webhook, create Printful order — Validated in Phase 3
+- [x] Order tracking: sync Printful fulfillment status to customer order page — Validated in Phase 3
 
 ### Active
 
-- [ ] Stripe checkout: create payment intent, handle webhook, create Printful order
-- [ ] Order tracking: sync Printful fulfillment status to customer order page
 - [ ] Agent infrastructure: registry, Redis report bus, webhook routing, scheduler
 - [ ] Order Agent: Stripe→Printful→Resend confirmation loop
 - [ ] Finance Agent: daily P&L, margin tracking, Stripe reconciliation
@@ -71,4 +71,4 @@ A customer can go from "I want a shirt with an angry gorilla" to checkout in und
 | Dollar-threshold escalation | Simple, auditable — <$75 auto, >$500 human | — Pending |
 
 ---
-*Last updated: 2026-03-25 after Phase 02 completion*
+*Last updated: 2026-03-25 after Phase 03 completion*
