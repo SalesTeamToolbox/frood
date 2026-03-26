@@ -1458,15 +1458,15 @@ def create_app(
     class IDEWriteRequest(BaseModel):
         path: str
         content: str
+        workspace_id: str | None = None
 
     @app.post("/api/ide/file")
     async def ide_write_file(
         req: IDEWriteRequest,
-        workspace_id: str | None = None,
         _user: str = Depends(get_current_user),
     ):
         """Write file contents from the IDE editor."""
-        ws_root = _resolve_workspace(workspace_id)
+        ws_root = _resolve_workspace(req.workspace_id)
         target = (ws_root / req.path).resolve()
         if not str(target).startswith(str(ws_root.resolve())):
             raise HTTPException(403, "Path outside workspace")
