@@ -6333,7 +6333,9 @@ async function ideDoSearch(query) {
   if (!resultsEl) return;
   resultsEl.textContent = "Searching...";
   try {
-    var res = await fetch("/api/ide/search?q=" + encodeURIComponent(query), {
+    var searchUrl = "/api/ide/search?q=" + encodeURIComponent(query);
+    if (_activeWorkspaceId) searchUrl += "&workspace_id=" + encodeURIComponent(_activeWorkspaceId);
+    var res = await fetch(searchUrl, {
       headers: { Authorization: "Bearer " + state.token },
     });
     var data = await res.json();
