@@ -23,9 +23,9 @@
 
 ### Context
 
-- [ ] **CTX-01**: User can call `agent42_context` and receive code symbols from jcodemunch merged with memory results in a single response
-- [ ] **CTX-02**: User can call `agent42_context` and see the active GSD workstream phase plan when the query matches current work context
-- [ ] **CTX-03**: User can call `agent42_context` and see effectiveness-ranked tools/skills for the current task type at the top of results
+- [x] **CTX-01**: User can call `agent42_context` and receive code symbols from jcodemunch merged with memory results in a single response
+- [x] **CTX-02**: User can call `agent42_context` and see the active GSD workstream phase plan when the query matches current work context
+- [x] **CTX-03**: User can call `agent42_context` and see effectiveness-ranked tools/skills for the current task type at the top of results
 
 ## v2 Requirements
 
@@ -59,9 +59,9 @@
 | MEM-01 | Phase 3 | Complete |
 | MEM-02 | Phase 3 | Complete |
 | MEM-03 | Phase 3 | Complete |
-| CTX-01 | Phase 4 | Pending |
-| CTX-02 | Phase 4 | Pending |
-| CTX-03 | Phase 4 | Pending |
+| CTX-01 | Phase 4 | Complete |
+| CTX-02 | Phase 4 | Complete |
+| CTX-03 | Phase 4 | Complete |
 
 **Coverage:**
 - v1 requirements: 13 total
