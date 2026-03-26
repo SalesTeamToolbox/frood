@@ -62,23 +62,14 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 - ✓ Dashboard tier badges, admin override UI, rewards toggle, WebSocket tier_update events — rewards-v1.0
 - ✓ Graceful opt-in via REWARDS_ENABLED=false default — zero behavioral change for existing deployments — rewards-v1.0
 
+- ✓ WorkspaceRegistry with SQLite persistence, CRUD API, default workspace auto-seeding — v2.1
+- ✓ Full IDE surface isolation — file explorer, editor, CC sessions, terminals scoped per workspace — v2.1
+- ✓ Workspace tab bar with switchWorkspace orchestrator and stale-while-revalidate persistence — v2.1
+- ✓ Workspace lifecycle management — add/remove/rename with unsaved-files guard — v2.1
+- ✓ Monaco model URIs workspace-prefixed to prevent filename collision — v2.1
+- ✓ All localStorage/sessionStorage keys namespace-isolated via wsKey() — v2.1
+
 ### Active
-
-## Complete: v2.1 Multi-Project Workspace (3/3 phases complete)
-
-**Goal:** Add tabbed workspace support where each tab scopes to a project folder with its own file explorer, editor, CC sessions, and terminal — like multiple VS Code windows in one dashboard.
-
-**Status:** All 3 phases complete (Registry & Namespacing, IDE Surface Integration, Workspace Management). Users can add/remove/rename workspace tabs with full isolation across file explorer, editor, CC sessions, and terminals.
-
-**Target features:**
-- Workspace tab bar at the top of the Workspace page
-- Each workspace tab has its own file explorer rooted at that project folder
-- CC sessions scoped per workspace (cwd set to project root)
-- Monaco editor tabs scoped per workspace
-- Terminal sessions scoped per workspace (cwd set to project root)
-- Workspace management: add/remove/rename project workspaces
-- Persist workspace configuration across reloads
-- Support Agent42 internal apps (apps/ subdirectory) as workspace targets
 
 ## Previous Milestone: v1.3 Agent LLM Control
 
@@ -125,6 +116,10 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 - Per-project memory namespace wired into MemoryTool (ProjectMemoryStore already exists, needs wiring)
 - GSD workstream state surfaced in context engine
 
+## Complete: v2.1 Multi-Project Workspace (5/5 phases, shipped 2026-03-26)
+
+**Delivered:** Tabbed workspace support where each tab scopes an independent project — its own file explorer, editor tabs, CC sessions, and terminal — with full state isolation via wsKey() namespace. 16/16 requirements satisfied, 51 tests, 9/9 E2E flows. Gap closure phases 4-5 added after audit to fix API wiring and frontend state isolation.
+
 ## Complete: Performance-Based Rewards System v1.0 (4/4 phases, shipped 2026-03-25)
 
 **Delivered:** Bronze/Silver/Gold performance tier system where agents earn better models (gold→reasoning, silver→general, bronze→fast), higher rate limits (1.0x/1.5x/2.0x), and more concurrent tasks (2/5/10) through demonstrated effectiveness. 29/29 requirements complete, 95 tests green. Fully opt-in via `REWARDS_ENABLED=false` default.
@@ -138,7 +133,7 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 
 ## Context
 
-Shipped 8 milestones (v1.0, v1.1, v1.2, v1.4, v1.5, v1.6, rewards-v1.0, v2.1).
+Shipped 9 milestones (v1.0, v1.1, v1.2, v1.4, v1.5, v1.6, rewards-v1.0, v2.1).
 Tech stack: Python 3.11+, FastAPI, AsyncOpenAI, aiofiles, pytest, ONNX Runtime, Qdrant.
 Memory system: ONNX embeddings + Qdrant + Redis, with auto-sync from Claude Code, task-aware retrieval, proactive injection, and recommendations engine.
 Rewards system: Performance-based Bronze/Silver/Gold tiers with model routing, rate limit multipliers, and semaphore-based concurrency enforcement. Opt-in via REWARDS_ENABLED.
@@ -205,6 +200,12 @@ Multi-project workspaces: Tabbed workspace scoping with isolated file explorer, 
 | None sentinel for tier override | Distinguishes "no override" from "empty string override" | ✓ Good — clean tri-state: computed, overridden, provisional |
 | Non-blocking semaphore via wait_for(timeout=0.0) | O(1) concurrency check without accessing CPython sem._value | ✓ Good — portable across Python implementations |
 | TierRecalcLoop batch broadcast | One WebSocket message per recalc cycle, not per-agent | ✓ Good — O(1) instead of O(N) per cycle |
+| Namespace isolation in Phase 1 before UI | Retrofitting workspace_id costs 8x more than designing in up front | ✓ Good — Phases 2-3 consumed contracts cleanly |
+| Server resolves workspace IDs to paths | Never accept raw paths from client — path traversal risk | ✓ Good — security by design |
+| Monaco model swapping over multiple editors | setModel + saveViewState/restoreViewState avoids 80MB RAM per editor instance | ✓ Good — efficient memory usage |
+| stale-while-revalidate for workspace tabs | Render from localStorage immediately, reconcile with server async | ✓ Good — instant tab bar on reload |
+| workspace_id in Pydantic model body | Query param mismatch found by audit, moved to request body (Phase 4) | ✓ Good — audit caught real bug |
+| Always show workspace tab bar | Removed <=1 hide guard so '+' button is always accessible | ✓ Good — discoverability over minimalism |
 
 ## Future Milestones (Backlog)
 
@@ -244,4 +245,4 @@ Project (top-level entity)
 **Why:** Running MHG or other sandboxed apps on the VPS requires checking the VPS dashboard separately. This unifies local dev and remote production into one view.
 
 ---
-*Last updated: 2026-03-25 after rewards-v1.0 milestone completion*
+*Last updated: 2026-03-26 after v2.1 milestone completion*

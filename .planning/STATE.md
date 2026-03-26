@@ -2,7 +2,7 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-25)
+See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Core value:** Agent42 must always be able to run agents reliably, with tiered provider routing ensuring no single provider outage stops the platform.
 **Current focus:** GSD & jcodemunch Integration (active workstream) — Phase 4 Context Engine next
@@ -18,7 +18,7 @@ Last activity: 2026-03-25 — rewards-v1.0 milestone completion workflow
 
 - v1.0, v1.1, v1.2, v1.4, v1.5, v1.6 — see MILESTONES.md
 - rewards-v1.0 Performance-Based Rewards — shipped 2026-03-25
-- v2.1 Multi-Project Workspace — shipped 2026-03-24
+- v2.1 Multi-Project Workspace — shipped 2026-03-26 (5 phases, 16/16 reqs, 51 tests)
 
 ## Active Workstreams
 

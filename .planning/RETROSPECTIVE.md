@@ -255,6 +255,54 @@
 
 ---
 
+## Milestone: v2.1 — Multi-Project Workspace
+
+**Shipped:** 2026-03-26
+**Phases:** 5 | **Plans:** 8 | **Tasks:** 15
+
+### What Was Built
+
+- WorkspaceRegistry with SQLite persistence, CRUD API, and default workspace auto-seeding
+- Full IDE surface isolation — file explorer, Monaco editor, CC sessions, terminals scoped per workspace
+- Workspace tab bar with switchWorkspace orchestrator and stale-while-revalidate persistence
+- Workspace lifecycle management — add/remove/rename with unsaved-files guard
+- Gap closure — fixed API wiring (file save body/query mismatch, search missing workspace_id) and frontend state isolation (5 bare localStorage keys migrated to wsKey())
+
+### What Worked
+
+- **Namespace-first architecture** — locking workspace_id conventions in Phase 1 (URI scheme, storage key prefix, API params) before any UI made Phases 2-3 mechanical threading work
+- **Milestone audit caught real bugs** — the audit identified 3 cross-phase wiring gaps (FOUND-06 body/query mismatch, ISOL-07 bare keys, MGMT-02 stale guard) that would have been production bugs
+- **Gap closure phases** — Phases 4-5 were added post-audit and completed in ~25 min total; small, focused fixes with clear audit evidence
+- **Coarse granularity** — 3 main phases + 2 gap closure phases covered the full feature cleanly
+- **Re-audit verification** — re-running the audit after gap closure confirmed all 16/16 requirements satisfied and 9/9 E2E flows complete
+
+### What Was Inefficient
+
+- **ROADMAP.md not updated after Phase 5** — Phase 5 showed 0/1 plans and "Pending" in the progress table despite being complete; STATE.md was updated but ROADMAP wasn't
+- **CLI milestone-complete archived wrong files** — the CLI doesn't understand workstream directories, so it archived the main `.planning/ROADMAP.md` (GSD Integration) instead of the workstream's files; required manual correction
+- **Phase count mismatch** — CLI reported 3 phases (from main roadmap?) instead of 5; stats needed manual override
+
+### Patterns Established
+
+- **Workspace isolation recipe**: WorkspaceRegistry (server) → workspace_id on all API calls → wsKey() for localStorage → makeWorkspaceUri() for Monaco models
+- **Gap closure pattern**: Milestone audit → categorize gaps by severity → create focused phases → re-audit to confirm closure
+- **Stale-while-revalidate for UI state**: Render from localStorage immediately, reconcile with server async — reusable pattern for any persistent UI state
+
+### Key Lessons
+
+1. **Lock namespace conventions before building UI** — the 8x retrofitting cost estimate from research proved accurate; Phases 2-3 consumed Phase 1's contracts without modification
+2. **Milestone audit is not optional** — the audit found 3 bugs that code review missed (body/query param mismatch, bare localStorage keys, stale guard state). Always audit before shipping.
+3. **CLI tools don't understand workstreams** — `milestone complete` operates on `.planning/` root; workstream milestones need manual archive correction. Consider adding `--ws` flag to CLI.
+4. **Keep ROADMAP.md progress table in sync** — the plan executor updates STATE.md but not always ROADMAP.md; check both after phase completion.
+
+### Cost Observations
+
+- Model mix: balanced profile (sonnet for planning/execution, opus for audit)
+- Sessions: ~4 sessions across 3 days
+- Notable: 8 plans completed efficiently; gap closure phases averaged 12 min each
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -267,6 +315,7 @@
 | v1.5 | 27 | 4 | CC-to-Qdrant memory bridge; detached subprocess pattern for hooks |
 | v1.6 | ~20 | 4 | PWA + GSD auto-activation; first Playwright-verified milestone |
 | rewards-v1.0 | 19 | 4 | Performance-based tiers; coarse granularity; workstream-scoped milestone |
+| v2.1 | 39 | 5 | Namespace-first architecture; milestone audit caught real bugs; gap closure phases |
 
 ### Cumulative Quality
 
@@ -278,6 +327,7 @@
 | v1.5 | ~2,010 | ~30 (sync, learning, consolidation) | ~12 |
 | v1.6 | ~2,040 | ~30 (hooks, PWA, GSD) | ~15 |
 | rewards-v1.0 | ~2,135 | 95 (scoring, tiers, enforcement, dashboard API) | 56 |
+| v2.1 | ~2,186 | 51 (workspace registry, IDE workspace wiring) | ~10 |
 
 ### Top Lessons (Verified Across Milestones)
 
@@ -289,3 +339,5 @@
 6. Tag all feature commits with workstream name for accurate milestone stats (verified v1.6)
 7. Use prefixed git tags for workstream milestones to avoid version collision with global numbering (verified rewards-v1.0)
 8. Coarse phase granularity works for well-understood domains — 4 phases with clear data dependencies execute faster than fine splits (verified rewards-v1.0)
+9. Milestone audit catches cross-phase wiring bugs that per-phase verification misses — always audit before shipping (verified v2.1)
+10. CLI tools don't understand workstream directories — workstream milestones need manual archive correction until `--ws` flag is added (verified v2.1)

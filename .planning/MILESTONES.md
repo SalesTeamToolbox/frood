@@ -1,5 +1,34 @@
 # Milestones
 
+## v2.1 Multi-Project Workspace (Shipped: 2026-03-26)
+
+**Phases completed:** 5 phases (01-05), 8 plans, 15 tasks
+**Timeline:** 3 days (2026-03-23 → 2026-03-25)
+**Workstream:** multi-project-workspace
+**Tests:** 51 workspace-specific (all passing)
+**Audit:** PASSED — 16/16 requirements, 9/9 E2E flows, 3 gaps closed by Phases 4-5
+
+**Key accomplishments:**
+
+1. WorkspaceRegistry with SQLite persistence, CRUD API, default workspace auto-seeding from AGENT42_WORKSPACE — foundational data layer with 36 tests
+2. Full IDE surface isolation — file explorer, Monaco editor (view state save/restore), CC sessions, and terminals all scoped per workspace_id
+3. Workspace tab bar with switchWorkspace orchestrator — atomically saves state, swaps all IDE surfaces, re-roots file explorer; stale-while-revalidate localStorage persistence
+4. Workspace lifecycle management — add modal (path input + app dropdown), remove with unsaved-files guard, optimistic inline rename with API rollback
+5. Gap closure — fixed workspace_id Pydantic model mismatch on file save, missing workspace_id on search, migrated 5 bare localStorage keys to wsKey(), fixed stale unsaved guard
+6. All localStorage/sessionStorage keys namespace-isolated via wsKey() — no cross-workspace state contamination
+
+**Delivered:** Tabbed multi-project workspace where each tab scopes an independent project — its own file explorer, editor tabs, CC sessions, and terminal — with full state isolation and workspace management UI.
+
+**Verification:** 16/16 requirements satisfied, 9/9 E2E flows complete, re-audit passed.
+
+**Archives:**
+
+- [v2.1-ROADMAP.md](milestones/v2.1-ROADMAP.md)
+- [v2.1-REQUIREMENTS.md](milestones/v2.1-REQUIREMENTS.md)
+- [v2.1-MILESTONE-AUDIT.md](milestones/v2.1-MILESTONE-AUDIT.md)
+
+---
+
 ## v1.0 Performance-Based Rewards (Shipped: 2026-03-25)
 
 **Phases completed:** 4 phases (01-04), 7 plans, 95 tests passing
