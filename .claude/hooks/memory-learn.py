@@ -142,13 +142,40 @@ def is_trivial_session(event):
 
     Skip if ANY of these conditions are true:
     - stop_reason is 'interrupted'
-    - No files modified AND fewer than 3 tool calls
+    - No transcript_summary AND no files modified AND fewer than 3 tool calls
     - Session duration < 30 seconds (if timestamps available)
+
+    Claude Code Stop events provide transcript_summary but NOT tool_results.
+    A session with a meaningful transcript_summary is never trivial.
     """
     stop_reason = event.get("stop_reason", "")
     if stop_reason == "interrupted":
         return True
 
+    # CC Stop events include transcript_summary — if present, session is not trivial
+    transcript = event.get("transcript_summary", "")
+    if isinstance(transcript, str) and len(transcript.strip()) > 10:
+        return False
+
+    # CC sessions without transcript_summary: check for git changes as evidence of work
+    project_dir = event.get("project_dir", "")
+    if project_dir:
+        try:
+            import subprocess
+
+            result = subprocess.run(
+                ["git", "diff", "--stat", "HEAD"],
+                capture_output=True,
+                text=True,
+                cwd=project_dir,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return False  # Uncommitted changes = non-trivial session
+        except Exception:
+            pass
+
+    # Agent42 standalone mode: check tool_results
     tool_results = event.get("tool_results", [])
     tool_count = len(tool_results) if isinstance(tool_results, list) else 0
 
