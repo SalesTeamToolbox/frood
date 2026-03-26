@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 Phase: Between milestones
 Plan: —
 Status: rewards-v1.0 milestone completed; GSD integration workstream active
-Last activity: 2026-03-25 — rewards-v1.0 milestone completion workflow
+Last activity: 2026-03-26 — Completed quick task 260325-uwr: Fix Agent42 memory system (4 issues)
 
 ## Completed Milestones
 
@@ -39,6 +39,12 @@ None.
 ### Blockers/Concerns
 
 None active. Previous rewards blockers (agent_id schema, Provisional tier default) resolved in rewards-v1.0.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260325-uwr | Fix Agent42 memory system — 4 issues (vectorization gap, dedup, noise, format) | 2026-03-26 | 32589a1 | [260325-uwr](./quick/260325-uwr-fix-agent42-memory-system-4-issues-vecto/) |
 
 ## Session Continuity
 
