@@ -238,7 +238,7 @@ class Agent42:
             from core.github_accounts import GitHubAccountStore
 
             github_account_store = GitHubAccountStore()
-            github_account_store.load()
+            github_account_store._load()
             app = create_app(
                 ws_manager=self.ws_manager,
                 tool_registry=self.tool_registry,
