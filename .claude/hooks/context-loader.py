@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 # hook_event: UserPromptSubmit
-# hook_timeout: 30
-"""Context loader hook — detects work type and loads relevant context.
+# hook_timeout: 15
+"""Context loader hook — lightweight, high-value context injection.
 
-Triggered on UserPromptSubmit. Analyzes the prompt to detect what area of
-the codebase is being worked on, then outputs relevant patterns and lessons
-from .claude/lessons.md and reference docs from .claude/reference/ to stderr
-for Claude to use.
+Triggered on UserPromptSubmit. Detects work type from prompt keywords, then
+emits only high-value context to stderr:
+1. Filtered pitfalls (only rows matching work type, not the full 26KB archive)
+2. jcodemunch MCP tool call guidance (what to run before starting work)
+3. GSD nudge (for multi-step prompts not already in a GSD session)
+4. Memory nudge (reminder to store discoveries during knowledge-producing work)
+
+Reference docs (terminology, conventions, etc.) are NOT injected — Claude can
+read them on-demand via the pointers in CLAUDE.md. Lessons are folded into
+reference docs. This keeps per-prompt injection under ~800 tokens.
 
 Hook protocol:
 - Receives JSON on stdin with hook_event_name, project_dir, user_prompt
@@ -41,7 +47,7 @@ def _cached_read(path: str) -> str:
     return content
 
 
-# Work type detection keywords mapped to lessons.md sections
+# Work type detection keywords (section field kept for backward compat but unused)
 WORK_TYPE_KEYWORDS = {
     "security": {
         "keywords": [
@@ -72,7 +78,6 @@ WORK_TYPE_KEYWORDS = {
             "tools/shell.py",
             "core/security_scanner.py",
         ],
-        "section": "Security Patterns",
     },
     "tools": {
         "keywords": [
@@ -85,7 +90,6 @@ WORK_TYPE_KEYWORDS = {
             "parameters",
         ],
         "files": ["tools/"],
-        "section": "Tool Development",
     },
     "testing": {
         "keywords": [
@@ -99,7 +103,6 @@ WORK_TYPE_KEYWORDS = {
             "test_",
         ],
         "files": ["tests/"],
-        "section": "Testing Patterns",
     },
     "providers": {
         "keywords": [
@@ -117,7 +120,6 @@ WORK_TYPE_KEYWORDS = {
             "api_key",
         ],
         "files": ["providers/"],
-        "section": "Provider Patterns",
     },
     "skills": {
         "keywords": [
@@ -130,7 +132,6 @@ WORK_TYPE_KEYWORDS = {
             "loader",
         ],
         "files": ["skills/"],
-        "section": "Skill Development",
     },
     "async": {
         "keywords": [
@@ -144,7 +145,6 @@ WORK_TYPE_KEYWORDS = {
             "TaskGroup",
         ],
         "files": [],
-        "section": "Async Patterns",
     },
     "config": {
         "keywords": [
@@ -157,7 +157,6 @@ WORK_TYPE_KEYWORDS = {
             ".env",
         ],
         "files": ["core/config.py", ".env.example"],
-        "section": "Configuration Patterns",
     },
     "dashboard": {
         "keywords": [
@@ -171,7 +170,6 @@ WORK_TYPE_KEYWORDS = {
             "route",
         ],
         "files": ["dashboard/"],
-        "section": "Dashboard Patterns",
     },
     "memory": {
         "keywords": [
@@ -185,7 +183,6 @@ WORK_TYPE_KEYWORDS = {
             "consolidat",
         ],
         "files": ["memory/"],
-        "section": "Memory Patterns",
     },
     "deployment": {
         "keywords": [
@@ -199,7 +196,6 @@ WORK_TYPE_KEYWORDS = {
             "compose",
         ],
         "files": ["deploy/", "Dockerfile", "docker-compose.yml"],
-        "section": "Deployment Patterns",
     },
     "structure": {
         "keywords": [
@@ -212,7 +208,6 @@ WORK_TYPE_KEYWORDS = {
             "project layout",
         ],
         "files": [],
-        "section": None,
     },
     "gsd": {
         "keywords": [
@@ -238,29 +233,10 @@ WORK_TYPE_KEYWORDS = {
             "workstream",
         ],
         "files": [],
-        "section": None,
     },
 }
 
-# Map work types to reference files loaded from .claude/reference/
-# NOTE: pitfalls-archive.md is handled separately via filtered loading — do NOT
-# include it here. Only small, targeted reference files belong in this dict.
-REFERENCE_FILES = {
-    "tools": ["terminology.md", "new-components.md", "conventions.md"],
-    "skills": ["terminology.md", "new-components.md", "conventions.md"],
-    "providers": ["terminology.md", "new-components.md"],
-    "config": ["configuration.md"],
-    "dashboard": ["terminology.md"],
-    "deployment": ["deployment.md", "configuration.md"],
-    "security": ["terminology.md"],
-    "memory": ["terminology.md"],
-    "structure": ["project-structure.md", "terminology.md"],
-    "testing": [],
-    "async": [],
-}
-
 # Map work types to relevant pitfall Area values for filtered loading.
-# Each work type pulls only the pitfall rows whose Area column matches.
 PITFALL_AREAS = {
     "tools": {"Tools", "Extensions", "Registry", "Import"},
     "security": {"Security", "Auth", "JWT", "Shell", "Subprocess"},
@@ -275,11 +251,10 @@ PITFALL_AREAS = {
     "structure": set(),
 }
 
-# Maximum characters for reference doc output (prevents unbounded injection)
-MAX_REFERENCE_CHARS = 6000  # ~1,500 tokens
+# Maximum characters for pitfalls output
+MAX_PITFALLS_CHARS = 4000  # ~1,000 tokens
 
 # Map work types to jcodemunch MCP tool call recommendations.
-# repo_id is NOT included here — it is injected by emit_jcodemunch_guidance().
 JCODEMUNCH_GUIDANCE = {
     "tools": [
         {
@@ -346,20 +321,7 @@ JCODEMUNCH_GUIDANCE = {
 
 
 def emit_jcodemunch_guidance(work_types, repo_id="local/agent42"):
-    """Generate jcodemunch MCP tool call recommendations for detected work types.
-
-    Collects guidance items for all detected work types, deduplicates by
-    (tool, key_param) tuple, and returns a list of formatted guidance strings.
-
-    Does NOT print — returns the strings for the caller to emit.
-
-    Args:
-        work_types: Set of detected work type strings.
-        repo_id: The jcodemunch repository identifier to inject into params.
-
-    Returns:
-        List of formatted guidance strings (one per recommended MCP call).
-    """
+    """Generate jcodemunch MCP tool call recommendations for detected work types."""
     if not work_types:
         return []
 
@@ -368,7 +330,6 @@ def emit_jcodemunch_guidance(work_types, repo_id="local/agent42"):
 
     for wt in sorted(work_types):
         for item in JCODEMUNCH_GUIDANCE.get(wt, []):
-            # Build dedup key from tool name + distinguishing param
             params = item["params"]
             key_param = params.get("file_path") or params.get("query", "")
             dedup_key = (item["tool"], key_param)
@@ -376,7 +337,6 @@ def emit_jcodemunch_guidance(work_types, repo_id="local/agent42"):
                 continue
             seen.add(dedup_key)
 
-            # Build parameter string with repo_id injected
             all_params = {"repo": repo_id}
             all_params.update(params)
             param_lines = "\n".join(f"      {k}: {json.dumps(v)}" for k, v in all_params.items())
@@ -393,13 +353,11 @@ def detect_work_types(prompt_text, tool_input=None):
     text = (prompt_text or "").lower()
 
     for work_type, config in WORK_TYPE_KEYWORDS.items():
-        # Check keywords in prompt
         for keyword in config["keywords"]:
             if keyword.lower() in text:
                 detected.add(work_type)
                 break
 
-        # Check file paths if tool input has them
         if tool_input:
             file_path = tool_input.get("file_path", "") or tool_input.get("path", "")
             for pattern in config["files"]:
@@ -410,45 +368,8 @@ def detect_work_types(prompt_text, tool_input=None):
     return detected
 
 
-def load_lessons(project_dir, sections):
-    """Load relevant sections from lessons.md."""
-    lessons_path = os.path.join(project_dir, ".claude", "lessons.md")
-    if not os.path.exists(lessons_path):
-        return ""
-
-    content = _cached_read(lessons_path)
-    if not content:
-        return ""
-
-    # Extract relevant sections
-    relevant = []
-    current_section = None
-    current_lines = []
-
-    for line in content.split("\n"):
-        if line.startswith("## "):
-            if current_section and current_section in sections:
-                relevant.extend(current_lines)
-            current_section = line[3:].strip()
-            current_lines = [line]
-        else:
-            current_lines.append(line)
-
-    # Don't forget the last section
-    if current_section and current_section in sections:
-        relevant.extend(current_lines)
-
-    return "\n".join(relevant).strip()
-
-
 def _filter_pitfalls(content, work_types):
-    """Filter pitfalls-archive.md to only rows matching detected work types.
-
-    Parses the markdown table and returns only the header + rows whose Area
-    column matches the PITFALL_AREAS for the detected work types.
-
-    Returns empty string if no rows match.
-    """
+    """Filter pitfalls-archive.md to only rows matching detected work types."""
     relevant_areas = set()
     for wt in work_types:
         relevant_areas.update(PITFALL_AREAS.get(wt, set()))
@@ -464,11 +385,9 @@ def _filter_pitfalls(content, work_types):
         stripped = line.strip()
         if not stripped.startswith("|"):
             continue
-        # Capture header row and separator
         if stripped.startswith("| #") or stripped.startswith("|---"):
             header_lines.append(stripped)
             continue
-        # Parse Area column (column index 2 after split)
         parts = [p.strip() for p in stripped.split("|")]
         if len(parts) >= 4:
             area = parts[2]
@@ -481,51 +400,22 @@ def _filter_pitfalls(content, work_types):
     result_lines = [f"# Relevant Pitfalls ({len(matching_rows)} of 124)"]
     result_lines.extend(header_lines)
     result_lines.extend(matching_rows)
-    return "\n".join(result_lines)
 
-
-def load_reference_files(project_dir, work_types):
-    """Load relevant reference files for detected work types.
-
-    Small reference files are loaded in full. pitfalls-archive.md is filtered
-    to only include rows matching the detected work types' areas.
-    Total output is capped at MAX_REFERENCE_CHARS (~1,500 tokens).
-    """
-    ref_dir = os.path.join(project_dir, ".claude", "reference")
-    if not os.path.isdir(ref_dir):
-        return ""
-
-    # Collect small reference files
-    files_to_load = set()
-    for wt in work_types:
-        for fname in REFERENCE_FILES.get(wt, []):
-            files_to_load.add(fname)
-
-    # Filtered pitfalls first — these are the most actionable reference
-    pitfalls_path = os.path.join(ref_dir, "pitfalls-archive.md")
-    parts = []
-    if os.path.exists(pitfalls_path):
-        pitfalls_content = _cached_read(pitfalls_path)
-        if pitfalls_content:
-            filtered = _filter_pitfalls(pitfalls_content, work_types)
-            if filtered:
-                parts.append(filtered)
-
-    # Then append smaller reference files with remaining budget
-    for fname in sorted(files_to_load):
-        path = os.path.join(ref_dir, fname)
-        if os.path.exists(path):
-            content = _cached_read(path)
-            if content:
-                parts.append(content.strip())
-
-    if not parts:
-        return ""
-
-    output = "\n\n".join(parts)
-    if len(output) > MAX_REFERENCE_CHARS:
-        output = output[:MAX_REFERENCE_CHARS] + "\n... (truncated)"
+    output = "\n".join(result_lines)
+    if len(output) > MAX_PITFALLS_CHARS:
+        output = output[:MAX_PITFALLS_CHARS] + "\n... (truncated)"
     return output
+
+
+def load_filtered_pitfalls(project_dir, work_types):
+    """Load only the relevant pitfalls for detected work types."""
+    pitfalls_path = os.path.join(project_dir, ".claude", "reference", "pitfalls-archive.md")
+    if not os.path.exists(pitfalls_path):
+        return ""
+    content = _cached_read(pitfalls_path)
+    if not content:
+        return ""
+    return _filter_pitfalls(content, work_types)
 
 
 def main():
@@ -537,7 +427,6 @@ def main():
     project_dir = event.get("project_dir", ".")
     prompt = ""
 
-    # Extract prompt text from the event
     if "user_prompt" in event:
         prompt = event["user_prompt"]
     elif "messages" in event:
@@ -553,66 +442,53 @@ def main():
     # Detect work types
     work_types = detect_work_types(prompt)
 
-    # GSD nudge for multi-step prompts (per D-06, D-10)
+    # GSD nudge for multi-step prompts
     if "gsd" in work_types:
         _emit_gsd_nudge(prompt, project_dir)
         work_types.discard("gsd")
 
     if not work_types:
+        # Even without work types, check for memory nudge
+        _emit_memory_nudge(prompt)
         sys.exit(0)
 
-    # Load relevant lessons
-    sections = set()
-    for wt in work_types:
-        config = WORK_TYPE_KEYWORDS.get(wt, {})
-        section = config.get("section") if isinstance(config, dict) else None
-        if section:
-            sections.add(section)
-
-    lessons = load_lessons(project_dir, sections)
-
-    # Load relevant reference files
-    references = load_reference_files(project_dir, work_types)
-
-    if lessons or references:
+    # Emit filtered pitfalls (only matching rows)
+    pitfalls = load_filtered_pitfalls(project_dir, work_types)
+    if pitfalls:
         print(
             f"[context-loader] Detected work types: {', '.join(sorted(work_types))}",
             file=sys.stderr,
         )
-        if lessons:
-            print(f"[context-loader] Relevant patterns:\n{lessons}", file=sys.stderr)
-        if references:
-            print(f"[context-loader] Reference docs:\n{references}", file=sys.stderr)
+        print(f"[context-loader] Pitfalls:\n{pitfalls}", file=sys.stderr)
 
     # Emit jcodemunch MCP tool call guidance
     guidance = emit_jcodemunch_guidance(work_types)
     if guidance:
         numbered = "\n".join(f"  {i + 1}. {g}" for i, g in enumerate(guidance))
+        if not pitfalls:
+            print(
+                f"[context-loader] Detected work types: {', '.join(sorted(work_types))}",
+                file=sys.stderr,
+            )
         print(
             f"[context-loader] jcodemunch guidance -- run these before starting work:\n{numbered}",
             file=sys.stderr,
         )
 
-    # Memory storage reminder — nudge Claude to persist important findings
+    # Memory storage reminder
     _emit_memory_nudge(prompt)
 
     sys.exit(0)
 
 
 def _emit_memory_nudge(prompt):
-    """Remind Claude to store important discoveries via agent42_memory.
-
-    Triggers on prompts that suggest knowledge-producing work (debugging,
-    investigating, deploying, fixing, configuring). Skips trivial prompts
-    and slash commands.
-    """
+    """Remind Claude to store important discoveries via agent42_memory."""
     if not prompt or len(prompt.strip()) < 20:
         return
     if prompt.strip().startswith("/"):
         return
 
     text = prompt.lower()
-    # Detect prompts likely to produce store-worthy knowledge
     knowledge_signals = [
         "fix",
         "debug",
@@ -642,27 +518,21 @@ def _emit_memory_nudge(prompt):
 
 
 def _emit_gsd_nudge(prompt, project_dir):
-    """Suggest GSD for multi-step prompts when not already in a GSD session.
-
-    Per D-06: One-line stderr nudge, not intrusive.
-    Per D-10: Secondary mechanism — the always-on skill is primary.
-    """
+    """Suggest GSD for multi-step prompts when not already in a GSD session."""
     if not prompt or len(prompt.strip()) < 30:
         return
     stripped = prompt.strip()
     if stripped.startswith("/"):
         return
-    # Skip trivial question patterns per D-02
     trivial_starts = ("what ", "how ", "why ", "explain ", "show me ", "what's ")
     if any(stripped.lower().startswith(t) for t in trivial_starts):
         return
-    # Skip if GSD session already active per D-13
     active_ws = os.path.join(project_dir, ".planning", "active-workstream")
     if os.path.exists(active_ws):
         try:
             with open(active_ws) as f:
                 if f.read().strip():
-                    return  # Active workstream — no nudge
+                    return
         except OSError:
             pass
     print(
