@@ -18,6 +18,29 @@ import json
 import os
 import sys
 
+# Module-level mtime-based file cache: path -> (mtime, content)
+_file_cache: dict[str, tuple[float, str]] = {}
+
+
+def _cached_read(path: str) -> str:
+    """Read a file, using cached content if mtime is unchanged."""
+    try:
+        mtime = os.stat(path).st_mtime
+    except OSError:
+        return ""
+    if path in _file_cache:
+        cached_mtime, cached_content = _file_cache[path]
+        if cached_mtime == mtime:
+            return cached_content
+    try:
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return ""
+    _file_cache[path] = (mtime, content)
+    return content
+
+
 # Work type detection keywords mapped to lessons.md sections
 WORK_TYPE_KEYWORDS = {
     "security": {
@@ -372,10 +395,8 @@ def load_lessons(project_dir, sections):
     if not os.path.exists(lessons_path):
         return ""
 
-    try:
-        with open(lessons_path) as f:
-            content = f.read()
-    except OSError:
+    content = _cached_read(lessons_path)
+    if not content:
         return ""
 
     # Extract relevant sections
@@ -417,11 +438,9 @@ def load_reference_files(project_dir, work_types):
     for fname in sorted(files_to_load):
         path = os.path.join(ref_dir, fname)
         if os.path.exists(path):
-            try:
-                with open(path) as f:
-                    parts.append(f.read().strip())
-            except OSError:
-                continue
+            content = _cached_read(path)
+            if content:
+                parts.append(content.strip())
 
     return "\n\n".join(parts)
 
