@@ -243,19 +243,40 @@ WORK_TYPE_KEYWORDS = {
 }
 
 # Map work types to reference files loaded from .claude/reference/
+# NOTE: pitfalls-archive.md is handled separately via filtered loading — do NOT
+# include it here. Only small, targeted reference files belong in this dict.
 REFERENCE_FILES = {
-    "tools": ["terminology.md", "new-components.md", "conventions.md", "pitfalls-archive.md"],
+    "tools": ["terminology.md", "new-components.md", "conventions.md"],
     "skills": ["terminology.md", "new-components.md", "conventions.md"],
-    "providers": ["terminology.md", "new-components.md", "pitfalls-archive.md"],
-    "config": ["configuration.md", "pitfalls-archive.md"],
-    "dashboard": ["terminology.md", "pitfalls-archive.md"],
-    "deployment": ["deployment.md", "configuration.md", "pitfalls-archive.md"],
-    "security": ["terminology.md", "pitfalls-archive.md"],
-    "memory": ["terminology.md", "pitfalls-archive.md"],
+    "providers": ["terminology.md", "new-components.md"],
+    "config": ["configuration.md"],
+    "dashboard": ["terminology.md"],
+    "deployment": ["deployment.md", "configuration.md"],
+    "security": ["terminology.md"],
+    "memory": ["terminology.md"],
     "structure": ["project-structure.md", "terminology.md"],
-    "testing": ["pitfalls-archive.md"],
-    "async": ["pitfalls-archive.md"],
+    "testing": [],
+    "async": [],
 }
+
+# Map work types to relevant pitfall Area values for filtered loading.
+# Each work type pulls only the pitfall rows whose Area column matches.
+PITFALL_AREAS = {
+    "tools": {"Tools", "Extensions", "Registry", "Import"},
+    "security": {"Security", "Auth", "JWT", "Shell", "Subprocess"},
+    "providers": {"Providers", "Registry", "Catalog", "Tokens"},
+    "config": {"Config", "Init", "Init Order", "Startup"},
+    "dashboard": {"Dashboard", "Auth", "JWT", "Frontend", "Server"},
+    "deployment": {"Deploy", "Server", "Startup", "Config"},
+    "memory": {"Memory", "Embeddings", "Search", "Context"},
+    "testing": {"Tests", "AppTest", "Formatting"},
+    "async": {"Async", "Subprocess"},
+    "skills": set(),
+    "structure": set(),
+}
+
+# Maximum characters for reference doc output (prevents unbounded injection)
+MAX_REFERENCE_CHARS = 6000  # ~1,500 tokens
 
 # Map work types to jcodemunch MCP tool call recommendations.
 # repo_id is NOT included here — it is injected by emit_jcodemunch_guidance().
@@ -420,21 +441,77 @@ def load_lessons(project_dir, sections):
     return "\n".join(relevant).strip()
 
 
+def _filter_pitfalls(content, work_types):
+    """Filter pitfalls-archive.md to only rows matching detected work types.
+
+    Parses the markdown table and returns only the header + rows whose Area
+    column matches the PITFALL_AREAS for the detected work types.
+
+    Returns empty string if no rows match.
+    """
+    relevant_areas = set()
+    for wt in work_types:
+        relevant_areas.update(PITFALL_AREAS.get(wt, set()))
+
+    if not relevant_areas:
+        return ""
+
+    lines = content.split("\n")
+    header_lines = []
+    matching_rows = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        # Capture header row and separator
+        if stripped.startswith("| #") or stripped.startswith("|---"):
+            header_lines.append(stripped)
+            continue
+        # Parse Area column (column index 2 after split)
+        parts = [p.strip() for p in stripped.split("|")]
+        if len(parts) >= 4:
+            area = parts[2]
+            if area in relevant_areas:
+                matching_rows.append(stripped)
+
+    if not matching_rows:
+        return ""
+
+    result_lines = [f"# Relevant Pitfalls ({len(matching_rows)} of 124)"]
+    result_lines.extend(header_lines)
+    result_lines.extend(matching_rows)
+    return "\n".join(result_lines)
+
+
 def load_reference_files(project_dir, work_types):
-    """Load relevant reference files for detected work types."""
+    """Load relevant reference files for detected work types.
+
+    Small reference files are loaded in full. pitfalls-archive.md is filtered
+    to only include rows matching the detected work types' areas.
+    Total output is capped at MAX_REFERENCE_CHARS (~1,500 tokens).
+    """
     ref_dir = os.path.join(project_dir, ".claude", "reference")
     if not os.path.isdir(ref_dir):
         return ""
 
+    # Collect small reference files
     files_to_load = set()
     for wt in work_types:
         for fname in REFERENCE_FILES.get(wt, []):
             files_to_load.add(fname)
 
-    if not files_to_load:
-        return ""
-
+    # Filtered pitfalls first — these are the most actionable reference
+    pitfalls_path = os.path.join(ref_dir, "pitfalls-archive.md")
     parts = []
+    if os.path.exists(pitfalls_path):
+        pitfalls_content = _cached_read(pitfalls_path)
+        if pitfalls_content:
+            filtered = _filter_pitfalls(pitfalls_content, work_types)
+            if filtered:
+                parts.append(filtered)
+
+    # Then append smaller reference files with remaining budget
     for fname in sorted(files_to_load):
         path = os.path.join(ref_dir, fname)
         if os.path.exists(path):
@@ -442,7 +519,13 @@ def load_reference_files(project_dir, work_types):
             if content:
                 parts.append(content.strip())
 
-    return "\n\n".join(parts)
+    if not parts:
+        return ""
+
+    output = "\n\n".join(parts)
+    if len(output) > MAX_REFERENCE_CHARS:
+        output = output[:MAX_REFERENCE_CHARS] + "\n... (truncated)"
+    return output
 
 
 def main():
