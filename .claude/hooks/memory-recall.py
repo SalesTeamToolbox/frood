@@ -29,8 +29,33 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import UTC
 from pathlib import Path
+
+# Module-level TTL-based search result cache: cache_key -> (timestamp, results)
+_search_cache: dict[str, tuple[float, list]] = {}
+_SEARCH_CACHE_TTL = 60  # seconds
+
+
+def _cache_key(keywords: list[str]) -> str:
+    """Build a cache key from sorted keywords."""
+    return "|".join(sorted(keywords))
+
+
+def _get_cached_search(key: str) -> list | None:
+    """Return cached results if key exists and within TTL, else None."""
+    if key in _search_cache:
+        timestamp, results = _search_cache[key]
+        if time.time() - timestamp < _SEARCH_CACHE_TTL:
+            return results
+    return None
+
+
+def _set_cached_search(key: str, results: list) -> None:
+    """Store results in the search cache with current timestamp."""
+    _search_cache[key] = (time.time(), results)
+
 
 # ── Configuration ───────────────────────────────────────────────────────
 HIGH_RELEVANCE = 0.85  # Always inject
@@ -592,54 +617,65 @@ def main():
     if not keywords:
         sys.exit(0)
 
-    memories = []
-    search_source = None  # Track which layer provided results
-
-    # Layer 1: Semantic search (best quality, requires embedding API + Qdrant)
-    # Try dedicated search service first, then fall back to Agent42 API
-    semantic_results = try_semantic_search(memory_dir, prompt, agent42_root)
-    if semantic_results:
-        search_source = "semantic"
+    # Check search cache before hitting any search layers
+    search_key = _cache_key(keywords)
+    cached_memories = _get_cached_search(search_key)
+    if cached_memories is not None:
+        memories = cached_memories
+        search_source = "cache"
     else:
-        semantic_results = try_agent42_api_search(prompt)
+        memories = []
+        search_source = None  # Track which layer provided results
+
+        # Layer 1: Semantic search (best quality, requires embedding API + Qdrant)
+        # Try dedicated search service first, then fall back to Agent42 API
+        semantic_results = try_semantic_search(memory_dir, prompt, agent42_root)
         if semantic_results:
-            search_source = "agent42-api"
-    memories.extend(semantic_results)
+            search_source = "semantic"
+        else:
+            semantic_results = try_agent42_api_search(prompt)
+            if semantic_results:
+                search_source = "agent42-api"
+        memories.extend(semantic_results)
 
-    # Layer 1.5: Qdrant direct scroll + keyword match (when search service is down)
-    if not semantic_results:
-        qdrant_results = try_qdrant_direct_search(keywords)
-        if qdrant_results:
-            search_source = "qdrant"
-        memories.extend(qdrant_results)
+        # Layer 1.5: Qdrant direct scroll + keyword match (when search service is down)
+        if not semantic_results:
+            qdrant_results = try_qdrant_direct_search(keywords)
+            if qdrant_results:
+                search_source = "qdrant"
+            memories.extend(qdrant_results)
 
-    # Layer 2: MEMORY.md keyword search
-    memory_file = memory_dir / "MEMORY.md"
-    if memory_file.exists():
-        try:
-            content = memory_file.read_text(encoding="utf-8")
-            file_results = search_memory_sections(content, keywords)
-            if file_results and not search_source:
-                search_source = "keyword"
-            memories.extend(file_results)
-        except Exception:
-            pass
+        # Layer 2: MEMORY.md keyword search
+        memory_file = memory_dir / "MEMORY.md"
+        if memory_file.exists():
+            try:
+                content = memory_file.read_text(encoding="utf-8")
+                file_results = search_memory_sections(content, keywords)
+                if file_results and not search_source:
+                    search_source = "keyword"
+                memories.extend(file_results)
+            except Exception:
+                pass
 
-    # Layer 3: HISTORY.md keyword search
-    history_file = memory_dir / "HISTORY.md"
-    if history_file.exists():
-        try:
-            content = history_file.read_text(encoding="utf-8")
-            file_results = search_history_entries(content, keywords)
-            if file_results and not search_source:
-                search_source = "history"
-            memories.extend(file_results)
-        except Exception:
-            pass
+        # Layer 3: HISTORY.md keyword search
+        history_file = memory_dir / "HISTORY.md"
+        if history_file.exists():
+            try:
+                content = history_file.read_text(encoding="utf-8")
+                file_results = search_history_entries(content, keywords)
+                if file_results and not search_source:
+                    search_source = "history"
+                memories.extend(file_results)
+            except Exception:
+                pass
+
+        # ── Rank, deduplicate, and cache ─────────────────────────────────
+        memories = deduplicate(memories)
+        memories = sorted(memories, key=lambda m: m.get("score", 0), reverse=True)
+        memories = memories[:MAX_MEMORIES]
+        _set_cached_search(search_key, memories)
 
     # ── Rank, deduplicate, and inject ────────────────────────────────────
-    memories = deduplicate(memories)
-    memories = sorted(memories, key=lambda m: m.get("score", 0), reverse=True)
     memories = memories[:MAX_MEMORIES]
 
     if not memories:
