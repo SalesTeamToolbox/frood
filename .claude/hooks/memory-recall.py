@@ -16,8 +16,10 @@ previous session survive context window clears.
 Search strategy (layered, best-available):
 0. Previous session context from handoff.json (first prompt only)
 1. Semantic search via Qdrant + embeddings (if available)
-2. Keyword search on MEMORY.md sections
-3. Keyword search on HISTORY.md entries
+1.5. Qdrant direct scroll + keyword match (fallback when search service is down)
+
+Note: MEMORY.md/HISTORY.md keyword search (layers 2-3) removed — Claude Code's
+auto-memory already loads its own MEMORY.md, making keyword search redundant.
 
 Hook protocol:
 - Receives JSON on stdin: {hook_event_name, project_dir, user_prompt, ...}
@@ -645,29 +647,9 @@ def main():
                 search_source = "qdrant"
             memories.extend(qdrant_results)
 
-        # Layer 2: MEMORY.md keyword search
-        memory_file = memory_dir / "MEMORY.md"
-        if memory_file.exists():
-            try:
-                content = memory_file.read_text(encoding="utf-8")
-                file_results = search_memory_sections(content, keywords)
-                if file_results and not search_source:
-                    search_source = "keyword"
-                memories.extend(file_results)
-            except Exception:
-                pass
-
-        # Layer 3: HISTORY.md keyword search
-        history_file = memory_dir / "HISTORY.md"
-        if history_file.exists():
-            try:
-                content = history_file.read_text(encoding="utf-8")
-                file_results = search_history_entries(content, keywords)
-                if file_results and not search_source:
-                    search_source = "history"
-                memories.extend(file_results)
-            except Exception:
-                pass
+        # Layers 2-3 (MEMORY.md/HISTORY.md keyword search) removed —
+        # Claude Code's auto-memory already loads its own MEMORY.md,
+        # so keyword-searching Agent42's copy is redundant.
 
         # ── Rank, deduplicate, and cache ─────────────────────────────────
         memories = deduplicate(memories)
