@@ -1043,19 +1043,43 @@ def create_app(
 
     @app.get("/api/stats/tokens")
     async def get_token_stats(_user: str = Depends(get_current_user)):
-        """Get aggregate token usage across all tasks."""
-        total_tokens = 0
-        total_prompt = 0
-        total_completion = 0
-        by_model: dict = {}
+        """Get aggregate token usage — reads jcodemunch token savings from stats file."""
+        import json as _json_ts
+
+        import aiofiles as _aiofiles_ts
+
+        project_root = Path(__file__).parent.parent
+        stats_path = project_root / ".claude" / ".jcodemunch-stats.json"
+
+        jcm_stats: dict = {}
+        try:
+            async with _aiofiles_ts.open(stats_path) as f:
+                jcm_stats = _json_ts.loads(await f.read())
+        except (OSError, ValueError):
+            pass
+
+        total_tokens = jcm_stats.get("tokens_used", 0)
+        tokens_saved = jcm_stats.get("tokens_saved", 0)
+        total_calls = jcm_stats.get("calls", 0)
+        by_tool = jcm_stats.get("tool_breakdown", {})
 
         return {
             "total_tokens": total_tokens,
-            "total_prompt_tokens": total_prompt,
-            "total_completion_tokens": total_completion,
-            "by_model": by_model,
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
+            "by_model": {},
             "daily_spend_usd": 0.0,
-            "daily_tokens": 0,
+            "daily_tokens": total_tokens,
+            "jcodemunch": {
+                "tokens_used": total_tokens,
+                "tokens_saved": tokens_saved,
+                "tokens_avoided": jcm_stats.get("tokens_avoided", 0),
+                "calls": total_calls,
+                "files_targeted": jcm_stats.get("files_targeted", 0),
+                "by_tool": by_tool,
+                "session_start": jcm_stats.get("session_start"),
+                "last_updated": jcm_stats.get("last_updated"),
+            },
         }
 
     # -- Reports (admin analytics) -------------------------------------------
