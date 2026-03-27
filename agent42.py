@@ -102,7 +102,10 @@ class Agent42:
         self.cron_scheduler = CronScheduler()
         self.device_store = DeviceStore(data_dir / "devices.json")
         init_device_store(self.device_store)
-        self.repo_manager = RepositoryManager(data_dir / "repos")
+        self.repo_manager = RepositoryManager(
+            repos_json_path=str(data_dir / "repos.json"),
+            clone_dir=str(data_dir / "repos"),
+        )
         self.session_manager = SessionManager(str(data_dir / "sessions"))
         skill_dirs = [
             Path(__file__).parent / "skills" / "builtins",
