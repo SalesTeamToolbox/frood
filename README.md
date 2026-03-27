@@ -23,7 +23,7 @@
   <img src="https://img.shields.io/badge/version-3.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/tools-28+-orange" alt="Tools">
   <img src="https://img.shields.io/badge/skills-53-purple" alt="Skills">
-  <img src="https://img.shields.io/badge/hooks-17-green" alt="Hooks">
+  <img src="https://img.shields.io/badge/hooks-16-green" alt="Hooks">
   <img src="https://img.shields.io/badge/nodes-local%20%2B%20remote-teal" alt="Multi-Node">
   <img src="https://img.shields.io/badge/answer-42-yellow" alt="42">
   <img src="https://img.shields.io/badge/license-BSL--1.1-lightgrey" alt="License">
@@ -38,7 +38,7 @@
 Agent42 is an **autonomous agent platform** with a web IDE, MCP tools, associative
 memory, agent teams, an apps platform, and self-improving learning. Use it as:
 
-- **An MCP server** for Claude Code in VS Code (28+ MCP tools, 53 skills, 17 hooks)
+- **An MCP server** for Claude Code in VS Code (28+ MCP tools, 53 skills, 16 hooks)
 - **A web IDE** with Monaco editor, terminal, and AI chat (accessible from any browser)
 - **An agent management platform** that runs custom AI agents and teams 24/7 on your VPS
 - **An apps platform** where agents build and operate full applications using Agent42's
@@ -108,7 +108,8 @@ Claude Code subscription, Anthropic API key, or alternative providers like
    agents, and tools with the platform. Managed via dashboard or agent API calls.
 
 ```
-                  .--- memory-recall hook (auto-surfaces relevant memories)
+                  .--- memory-recall (Qdrant semantic, ~190 tokens)
+                 |--- context-loader (filtered pitfalls + jcodemunch guidance, ~700 tokens)
                  |
 User Prompt --> Claude Code --> agent42_shell("git log")
                             --> agent42_memory("recall", "deployment notes")
@@ -298,10 +299,11 @@ User says something --> ONNX Embeddings (all-MiniLM-L6-v2, 384 dims, ~25MB RAM)
 
 ### Associative Recall
 
-A `UserPromptSubmit` hook (`memory-recall.py`) fires on every prompt. It embeds your
-message, searches Qdrant for related memories, and injects them into Claude's context
+A `UserPromptSubmit` hook (`memory-recall.py`) fires on every prompt. It searches
+Qdrant for semantically related memories and injects them into Claude's context
 before it starts thinking. You don't need to ask for memories -- they surface
-automatically when relevant.
+automatically when relevant. On the first prompt of a new session, previous
+conversation context from `handoff.json` is also surfaced for continuity.
 
 This means if you're working on authentication and you previously discovered that
 "bcrypt hashes break when copied between machines," that memory automatically appears
@@ -840,23 +842,26 @@ begins appearing in proactive injection.
 
 This prevents one-off flukes from polluting the knowledge base.
 
-### Proactive Injection
+### Context Injection (Optimized)
 
-The `proactive-inject.py` hook fires on every prompt. It:
+The hook pipeline is optimized for minimal token overhead (~890 tokens per prompt):
 
-1. Infers the task type from prompt keywords (no LLM call -- instant)
-2. Fetches top-3 learnings with score >= 0.80 from the effectiveness store
-3. Injects them into Claude's context before it starts thinking
-4. Guards against re-injection (once per session)
+1. **`context-loader.py`** detects work type from prompt keywords, then emits only
+   filtered pitfalls (matching rows from 124 archived gotchas) and jcodemunch MCP tool
+   recommendations. Reference docs (terminology, conventions, etc.) are available
+   on-demand via CLAUDE.md pointers, not injected per-prompt.
+2. **`memory-recall.py`** searches Qdrant semantically and surfaces session context
+   from the previous session's handoff. Keyword search on flat files was removed --
+   Claude Code's own auto-memory handles that layer.
+3. **`effectiveness-learn.py`** and **`knowledge-learn.py`** fire at session end
+   to extract new learnings and upsert them to Qdrant for future recall.
 
-The `effectiveness-learn.py` and `knowledge-learn.py` hooks fire at session end
-to extract new learnings and upsert them to Qdrant for future recall.
-
-### Recommendations Engine
-
-Based on accumulated effectiveness data, Agent42 recommends the top-3 tools and
-skills by success rate (minimum 5 observations) for each task type. These surface
-via the `/api/recommendations/retrieve` endpoint and the proactive injection hook.
+| Hook | Per-Prompt Cost | What It Injects |
+|------|----------------|-----------------|
+| `conversation-accumulator` | 0 tokens | Writes to buffer only (no stderr) |
+| `memory-recall` | ~190 tokens | Qdrant semantic results + session context |
+| `context-loader` | ~700 tokens | Filtered pitfalls + jcodemunch guidance |
+| **Total** | **~890 tokens** | |
 
 ## Security (The Conditions of Conditions)
 
@@ -920,16 +925,17 @@ See `docker-compose.yml` and `Dockerfile` for the full configuration.
 
 ## Claude Code Hooks (The Sub-Etha Sense-O-Matic)
 
-Agent42 ships 17 hooks in `.claude/hooks/` that run automatically during Claude Code
+Agent42 ships 16 hooks in `.claude/hooks/` that run automatically during Claude Code
 sessions. They form the nervous system -- memory recall, security enforcement, code
 formatting, learning, and session continuity happen without you lifting a finger.
 
+The prompt-time hooks are optimized for minimal context overhead (~890 tokens total).
+
 | Hook | Trigger | What It Does |
 |------|---------|--------------|
-| `conversation-accumulator.py` | UserPromptSubmit | Captures user prompts to buffer for conversation context persistence |
-| `context-loader.py` | UserPromptSubmit | Loads relevant lessons and reference docs based on work type |
-| `memory-recall.py` | UserPromptSubmit | Surfaces relevant memories from Qdrant + previous session context |
-| `proactive-inject.py` | UserPromptSubmit | Surfaces past learnings relevant to the detected task type |
+| `conversation-accumulator.py` | UserPromptSubmit | Captures user prompts to buffer for session context persistence (0 tokens) |
+| `memory-recall.py` | UserPromptSubmit | Surfaces relevant memories from Qdrant + previous session context (~190 tokens) |
+| `context-loader.py` | UserPromptSubmit | Emits filtered pitfalls + jcodemunch guidance for detected work type (~700 tokens) |
 | `security-gate.py` | PreToolUse | Blocks edits to security-sensitive files (requires approval) |
 | `security-monitor.py` | PostToolUse (Write/Edit) | Flags security-sensitive changes for review |
 | `format-on-write.py` | PostToolUse (Write/Edit) | Auto-formats Python files with ruff on every write |
@@ -946,6 +952,7 @@ formatting, learning, and session continuity happen without you lifting a finger
 
 Supporting files (not hooks themselves): `security_config.py` (shared config),
 `cc-memory-sync-worker.py` and `knowledge-learn-worker.py` (background workers).
+`proactive-inject.py` is retained as a static reference but no longer registered.
 
 ## Project Structure (The Total Perspective Vortex)
 
@@ -1003,11 +1010,10 @@ agent42/
 |   '-- (your apps here)       # Each app: APP.json + src/ + public/
 |
 |-- .claude/                   # Claude Code integration
-|   |-- hooks/                 # 17 hooks: memory, security, formatting, learning, context
-|   |   |-- memory-recall.py   # Auto-surfaces relevant memories per prompt
+|   |-- hooks/                 # 16 hooks: memory, security, formatting, learning, context
+|   |   |-- memory-recall.py   # Auto-surfaces Qdrant memories + session context per prompt
 |   |   |-- memory-learn.py    # Captures learnings at session end
-|   |   |-- proactive-inject.py # Surfaces past learnings for detected task type
-|   |   |-- context-loader.py  # Loads relevant reference docs
+|   |   |-- context-loader.py  # Filtered pitfalls + jcodemunch guidance (~700 tokens)
 |   |   |-- security-gate.py   # PreToolUse: blocks edits to security files
 |   |   |-- security-monitor.py # PostToolUse: flags security-sensitive changes
 |   |   |-- format-on-write.py # Auto-formats Python files on write
@@ -1021,7 +1027,7 @@ agent42/
 |   |   |-- jcodemunch-reindex.py      # Re-indexes after structural changes
 |   |   '-- jcodemunch-token-tracker.py # Tracks token savings
 |   |-- settings.json          # Hook configuration
-|   '-- lessons.md             # Accumulated development patterns
+|   '-- lessons.md             # Accumulated development patterns (static reference)
 |
 |-- tests/                     # Test suite
 |-- deploy/                    # systemd units, nginx config
@@ -1098,6 +1104,9 @@ Building on the Apps Platform and Agent Teams:
 | **v1.4** | Per-Project Task Memories (task lifecycle, effectiveness tracking, proactive injection) |
 | **v1.5** | Intelligent Memory Bridge (CC-to-Qdrant auto-sync, learning extraction, CLAUDE.md integration) |
 | **v1.6** | UX & Workflow Automation (memory observability, GSD auto-activation, PWA, dashboard GSD state) |
+| **rewards-v1.0** | Performance-Based Agent Rewards (composite scoring, tiers, enforcement, dashboard) |
+| **v2.1** | Multi-Project Workspace (5 phases, 16 reqs, 51 tests) |
+| **v3.0** | jcodemunch + GSD integration, context injection optimization (92% token reduction) |
 
 ## Contributing
 
