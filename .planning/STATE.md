@@ -47,7 +47,7 @@ None active. Previous rewards blockers (agent_id schema, Provisional tier defaul
 | 260325-uwr | Fix Agent42 memory system — 4 issues (vectorization gap, dedup, noise, format) | 2026-03-26 | 32589a1 | [260325-uwr](./quick/260325-uwr-fix-agent42-memory-system-4-issues-vecto/) |
 | 260326-opp | Optimize context injection hooks + wire jcodemunch token stats to dashboard | 2026-03-27 | 768ffed | [260326-opp](./quick/260326-opp-optimize-context-injection-hooks-and-wir/) |
 | 260326-ufx | Wire jcodemunch + GSD + Agent42 integration — register context-loader.py hook | 2026-03-27 | 7b9e903 | [260326-ufx](./quick/260326-ufx-wire-jcodemunch-gsd-agent42-integration/) |
-| 260326-vny | Optimize hook pipeline — 92% per-prompt token reduction | 2026-03-27 | pending | [260326-vny](./quick/260326-vny-optimize-hook-pipeline-remove-redundancy/) |
+| 260326-vny | Optimize hook pipeline — 92% per-prompt token reduction | 2026-03-27 | 845f511 | [260326-vny](./quick/260326-vny-optimize-hook-pipeline-remove-redundancy/) |
 
 ## Session Continuity
 
