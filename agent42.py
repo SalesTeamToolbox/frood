@@ -235,6 +235,7 @@ class Agent42:
                 apps_dir=str(settings.apps_dir) if hasattr(settings, "apps_dir") else "apps",
                 dashboard_port=self.dashboard_port,
             )
+            await app_manager.load()
             from core.github_accounts import GitHubAccountStore
 
             github_account_store = GitHubAccountStore()
