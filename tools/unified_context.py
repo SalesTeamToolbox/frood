@@ -432,7 +432,9 @@ class UnifiedContextTool(Tool):
 
             # Search symbols
             symbols_result = await asyncio.wait_for(
-                conn.call_tool("search_symbols", {"query": query, "repo": "local/agent42"}),
+                conn.call_tool(
+                    "search_symbols", {"query": query, "repo": "local/agent42-663daaca"}
+                ),
                 timeout=5.0,
             )
 
@@ -447,7 +449,9 @@ class UnifiedContextTool(Tool):
             # Also try text search for broader coverage
             try:
                 text_result = await asyncio.wait_for(
-                    conn.call_tool("search_text", {"query": query, "repo": "local/agent42"}),
+                    conn.call_tool(
+                        "search_text", {"query": query, "repo": "local/agent42-663daaca"}
+                    ),
                     timeout=5.0,
                 )
                 if text_result:

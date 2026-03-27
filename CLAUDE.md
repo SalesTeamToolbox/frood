@@ -21,7 +21,7 @@ make check                       # Run lint + tests together
 
 ## Codebase Navigation (jcodemunch)
 
-Repo: `local/agent42` (197 files, 4700+ symbols). **Use jcodemunch before reading files:**
+Repo: `local/agent42-663daaca` (267 files, 5298 symbols). **Use jcodemunch before reading files:**
 
 | Need | Tool |
 |------|------|
