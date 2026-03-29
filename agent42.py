@@ -11,6 +11,8 @@ Usage:
     python agent42.py                     # Start dashboard (http://localhost:8000)
     python agent42.py --port 8080         # Custom dashboard port
     python agent42.py --no-dashboard      # Headless mode (services only)
+    python agent42.py --sidecar           # Sidecar mode (Paperclip adapter, port 8001)
+    python agent42.py --sidecar --sidecar-port 9001  # Sidecar on custom port
     python agent42.py backup -o ./        # Create backup archive
     python agent42.py restore backup.tar  # Restore from backup
     python agent42.py clone -o ./         # Create clone package
@@ -84,9 +86,13 @@ class Agent42:
         self,
         dashboard_port: int = 8000,
         headless: bool = False,
+        sidecar: bool = False,
+        sidecar_port: int | None = None,
     ):
         self.dashboard_port = dashboard_port
         self.headless = headless
+        self.sidecar = sidecar
+        self.sidecar_port = sidecar_port or settings.paperclip_sidecar_port
 
         # ── Core infrastructure ──────────────────────────────────────────
         workspace = Path(settings.default_repo_path or ".").resolve()
@@ -233,7 +239,26 @@ class Agent42:
             tasks_to_run.append(self.security_scanner.start())
             logger.info(f"  Security scanning: enabled (every {settings.security_scan_interval})")
 
-        if not self.headless:
+        if self.sidecar:
+            from dashboard.sidecar import create_sidecar_app
+
+            app = create_sidecar_app(
+                memory_store=self.memory_store,
+                agent_manager=self.agent_manager,
+                effectiveness_store=self.effectiveness_store,
+                reward_system=self.reward_system,
+                qdrant_store=self.memory_store._qdrant,
+            )
+            config = uvicorn.Config(
+                app,
+                host=settings.dashboard_host,
+                port=self.sidecar_port,
+                log_level="warning",
+            )
+            server = uvicorn.Server(config)
+            logger.info(f"  Sidecar: http://{settings.dashboard_host}:{self.sidecar_port}")
+            tasks_to_run.append(server.serve())
+        elif not self.headless:
             app_manager = AppManager(
                 apps_dir=str(settings.apps_dir) if hasattr(settings, "apps_dir") else "apps",
                 dashboard_port=self.dashboard_port,
@@ -291,6 +316,17 @@ def main():
     parser.add_argument(
         "--no-dashboard", action="store_true", help="Run headless without the web dashboard"
     )
+    parser.add_argument(
+        "--sidecar",
+        action="store_true",
+        help="Run as Paperclip sidecar (adapter-friendly endpoints, no dashboard)",
+    )
+    parser.add_argument(
+        "--sidecar-port",
+        type=int,
+        default=None,
+        help="Sidecar HTTP port (default: PAPERCLIP_SIDECAR_PORT or 8001)",
+    )
 
     # Backup subcommand
     backup_parser = subparsers.add_parser("backup", help="Create a full backup archive")
@@ -326,10 +362,17 @@ def main():
     else:
         # Default: start dashboard + services
         print("Agent42 v2.0 initializing (MCP architecture)...", flush=True)
+        is_sidecar = args.sidecar or settings.sidecar_enabled
+        if is_sidecar:
+            from core.sidecar_logging import configure_sidecar_logging
+
+            configure_sidecar_logging()
         try:
             agent42 = Agent42(
                 dashboard_port=args.port,
                 headless=args.no_dashboard,
+                sidecar=is_sidecar,
+                sidecar_port=args.sidecar_port,
             )
         except Exception as exc:
             logger.critical("Agent42 failed to initialize: %s", exc, exc_info=True)
