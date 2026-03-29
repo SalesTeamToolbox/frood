@@ -66,7 +66,7 @@ Phases 1-4 complete, Phases 5-6 remaining (PTY streaming + chat UX polish).
 **Plans:** 3 plans
 
 Plans:
-- [ ] 24-01-PLAN.md — Foundation: config fields, Pydantic models, JSON formatter
+- [x] 24-01-PLAN.md — Foundation: config fields, Pydantic models, JSON formatter
 - [ ] 24-02-PLAN.md — Sidecar server: app factory with routes, orchestrator
 - [ ] 24-03-PLAN.md — Integration: CLI wiring, Agent42 sidecar branch, tests
 

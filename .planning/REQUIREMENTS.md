@@ -15,9 +15,9 @@ Requirements for this milestone. Each maps to roadmap phases.
 - [ ] **SIDE-04**: Sidecar exposes `GET /sidecar/health` returning memory, provider, and Qdrant connectivity status
 - [ ] **SIDE-05**: Sidecar validates Bearer token auth on all endpoints (reuses existing JWT middleware)
 - [ ] **SIDE-06**: Sidecar deduplicates execution requests by `runId` to prevent duplicate work on retries
-- [ ] **SIDE-07**: Sidecar produces structured JSON logging (no ANSI codes, no spinners) suitable for log aggregation
+- [x] **SIDE-07**: Sidecar produces structured JSON logging (no ANSI codes, no spinners) suitable for log aggregation
 - [ ] **SIDE-08**: Core services (MemoryStore, QdrantStore, AgentRuntime, EffectivenessStore) start identically in sidecar and dashboard modes
-- [ ] **SIDE-09**: Config extends with PAPERCLIP_SIDECAR_PORT, PAPERCLIP_API_URL, SIDECAR_ENABLED settings
+- [x] **SIDE-09**: Config extends with PAPERCLIP_SIDECAR_PORT, PAPERCLIP_API_URL, SIDECAR_ENABLED settings
 
 ### Memory Bridge
 
@@ -108,9 +108,9 @@ Deferred to future release. Tracked but not in current roadmap.
 | SIDE-04 | Phase 24 | Pending |
 | SIDE-05 | Phase 24 | Pending |
 | SIDE-06 | Phase 24 | Pending |
-| SIDE-07 | Phase 24 | Pending |
+| SIDE-07 | Phase 24 | Complete — 24-01 |
 | SIDE-08 | Phase 24 | Pending |
-| SIDE-09 | Phase 24 | Pending |
+| SIDE-09 | Phase 24 | Complete — 24-01 |
 | MEM-01 | Phase 25 | Pending |
 | MEM-02 | Phase 25 | Pending |
 | MEM-03 | Phase 25 | Pending |
