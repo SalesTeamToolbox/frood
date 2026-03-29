@@ -5,6 +5,7 @@ executes agent tasks asynchronously, and POSTs results back to
 Paperclip's callback URL when complete.
 """
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -110,7 +111,7 @@ class SidecarOrchestrator:
                         ctx.agent_id,
                         run_id,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning(
                         "Memory recall timed out for run %s — proceeding without memories",
                         run_id,
