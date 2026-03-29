@@ -172,8 +172,8 @@ class QdrantStore:
             logger.error(f"Qdrant: failed to ensure collection '{name}': {e}")
 
     def _ensure_task_indexes(self, collection_name: str):
-        """Create payload indexes for task_type and task_id (idempotent)."""
-        from qdrant_client.models import PayloadSchemaType
+        """Create payload indexes for task_type, task_id, agent_id, and company_id (idempotent)."""
+        from qdrant_client.models import KeywordIndexParams, PayloadSchemaType
 
         try:
             self._client.create_payload_index(
@@ -186,12 +186,22 @@ class QdrantStore:
                 field_name="task_id",
                 field_schema=PayloadSchemaType.KEYWORD,
             )
+            self._client.create_payload_index(
+                collection_name=collection_name,
+                field_name="agent_id",
+                field_schema=KeywordIndexParams(type="keyword", is_tenant=True),
+            )
+            self._client.create_payload_index(
+                collection_name=collection_name,
+                field_name="company_id",
+                field_schema=KeywordIndexParams(type="keyword", is_tenant=True),
+            )
         except Exception as e:
             logger.warning("Qdrant: task payload index creation failed (non-critical): %s", e)
 
     def _ensure_knowledge_indexes(self, collection_name: str):
-        """Create payload indexes for learning_type and category on KNOWLEDGE collection (idempotent)."""
-        from qdrant_client.models import PayloadSchemaType
+        """Create payload indexes for learning_type, category, agent_id, and company_id on KNOWLEDGE collection (idempotent)."""
+        from qdrant_client.models import KeywordIndexParams, PayloadSchemaType
 
         try:
             self._client.create_payload_index(
@@ -203,6 +213,16 @@ class QdrantStore:
                 collection_name=collection_name,
                 field_name="category",
                 field_schema=PayloadSchemaType.KEYWORD,
+            )
+            self._client.create_payload_index(
+                collection_name=collection_name,
+                field_name="agent_id",
+                field_schema=KeywordIndexParams(type="keyword", is_tenant=True),
+            )
+            self._client.create_payload_index(
+                collection_name=collection_name,
+                field_name="company_id",
+                field_schema=KeywordIndexParams(type="keyword", is_tenant=True),
             )
         except Exception as e:
             logger.warning("Qdrant: knowledge payload index creation failed (non-critical): %s", e)

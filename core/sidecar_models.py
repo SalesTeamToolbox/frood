@@ -61,3 +61,49 @@ class HealthResponse(BaseModel):
     memory: dict[str, Any] = Field(default_factory=dict)
     providers: dict[str, Any] = Field(default_factory=dict)
     qdrant: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryRecallRequest(BaseModel):
+    """Request body for POST /memory/recall (MEM-04, D-13)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    query: str
+    agent_id: str = Field(..., alias="agentId")
+    company_id: str = Field(default="", alias="companyId")
+    top_k: int = Field(default=5, ge=1, le=50)
+    score_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
+
+
+class MemoryItem(BaseModel):
+    """A single recalled memory entry."""
+
+    text: str
+    score: float
+    source: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryRecallResponse(BaseModel):
+    """Response body for POST /memory/recall (D-13)."""
+
+    memories: list[MemoryItem] = Field(default_factory=list)
+
+
+class MemoryStoreRequest(BaseModel):
+    """Request body for POST /memory/store (MEM-04, D-14)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    text: str
+    section: str = ""
+    tags: list[str] = Field(default_factory=list)
+    agent_id: str = Field(..., alias="agentId")
+    company_id: str = Field(default="", alias="companyId")
+
+
+class MemoryStoreResponse(BaseModel):
+    """Response body for POST /memory/store."""
+
+    stored: bool = True
+    point_id: str = ""
