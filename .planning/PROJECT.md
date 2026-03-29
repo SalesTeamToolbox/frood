@@ -71,9 +71,9 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 
 ### Active
 
-- [ ] Agent42 sidecar mode with adapter-friendly endpoints
+- [x] Agent42 sidecar mode with adapter-friendly endpoints — Validated in Phase 24
 - [ ] Paperclip adapter package (TypeScript, heartbeat/execute/status)
-- [ ] Memory bridge (inject at heartbeat start, extract learnings after execution)
+- [x] Memory bridge (inject at heartbeat start, extract learnings after execution) — Validated in Phase 25
 - [ ] Tiered routing bridge (task metadata → provider/model selection)
 - [ ] Paperclip plugin (memory tools, MCP tool proxy, effectiveness panel)
 - [ ] TeamTool integration as Paperclip task strategies
