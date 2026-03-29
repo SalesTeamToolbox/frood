@@ -39,7 +39,7 @@ Phases 1-4 complete, Phases 5-6 remaining (PTY streaming + chat UX polish).
 
 ### Phases
 
-- [ ] **Phase 24: Sidecar Mode** — Agent42 runs as a stripped FastAPI sidecar with adapter-friendly endpoints
+- [x] **Phase 24: Sidecar Mode** — Agent42 runs as a stripped FastAPI sidecar with adapter-friendly endpoints
 - [ ] **Phase 25: Memory Bridge** — MemoryBridge recalls and learns from Paperclip agent transcripts
 - [ ] **Phase 26: Tiered Routing Bridge** — Paperclip agent roles map to Agent42 provider/model selection
 - [ ] **Phase 27: Paperclip Adapter** — TypeScript adapter package implements Paperclip's ServerAdapterModule
@@ -68,7 +68,7 @@ Phases 1-4 complete, Phases 5-6 remaining (PTY streaming + chat UX polish).
 Plans:
 - [x] 24-01-PLAN.md — Foundation: config fields, Pydantic models, JSON formatter
 - [x] 24-02-PLAN.md — Sidecar server: app factory with routes, orchestrator
-- [ ] 24-03-PLAN.md — Integration: CLI wiring, Agent42 sidecar branch, tests
+- [x] 24-03-PLAN.md — Integration: CLI wiring, Agent42 sidecar branch, tests
 
 ### Phase 25: Memory Bridge
 

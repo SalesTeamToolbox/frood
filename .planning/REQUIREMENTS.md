@@ -9,14 +9,14 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Sidecar Mode
 
-- [ ] **SIDE-01**: Agent42 starts in sidecar mode via `--sidecar` flag, exposing adapter-friendly endpoints without dashboard UI
-- [ ] **SIDE-02**: Sidecar accepts heartbeat execution requests via `POST /sidecar/execute` with Paperclip's AdapterExecutionContext payload
-- [ ] **SIDE-03**: Sidecar returns 202 Accepted for long-running tasks and POSTs results to Paperclip's callback endpoint when done
-- [ ] **SIDE-04**: Sidecar exposes `GET /sidecar/health` returning memory, provider, and Qdrant connectivity status
-- [ ] **SIDE-05**: Sidecar validates Bearer token auth on all endpoints (reuses existing JWT middleware)
-- [ ] **SIDE-06**: Sidecar deduplicates execution requests by `runId` to prevent duplicate work on retries
+- [x] **SIDE-01**: Agent42 starts in sidecar mode via `--sidecar` flag, exposing adapter-friendly endpoints without dashboard UI
+- [x] **SIDE-02**: Sidecar accepts heartbeat execution requests via `POST /sidecar/execute` with Paperclip's AdapterExecutionContext payload
+- [x] **SIDE-03**: Sidecar returns 202 Accepted for long-running tasks and POSTs results to Paperclip's callback endpoint when done
+- [x] **SIDE-04**: Sidecar exposes `GET /sidecar/health` returning memory, provider, and Qdrant connectivity status
+- [x] **SIDE-05**: Sidecar validates Bearer token auth on all endpoints (reuses existing JWT middleware)
+- [x] **SIDE-06**: Sidecar deduplicates execution requests by `runId` to prevent duplicate work on retries
 - [x] **SIDE-07**: Sidecar produces structured JSON logging (no ANSI codes, no spinners) suitable for log aggregation
-- [ ] **SIDE-08**: Core services (MemoryStore, QdrantStore, AgentRuntime, EffectivenessStore) start identically in sidecar and dashboard modes
+- [x] **SIDE-08**: Core services (MemoryStore, QdrantStore, AgentRuntime, EffectivenessStore) start identically in sidecar and dashboard modes
 - [x] **SIDE-09**: Config extends with PAPERCLIP_SIDECAR_PORT, PAPERCLIP_API_URL, SIDECAR_ENABLED settings
 
 ### Memory Bridge
@@ -102,14 +102,14 @@ Deferred to future release. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 | ----------- | ----- | ------ |
-| SIDE-01 | Phase 24 | Pending |
-| SIDE-02 | Phase 24 | Pending |
-| SIDE-03 | Phase 24 | Pending |
-| SIDE-04 | Phase 24 | Pending |
-| SIDE-05 | Phase 24 | Pending |
-| SIDE-06 | Phase 24 | Pending |
+| SIDE-01 | Phase 24 | Complete — 24-03 |
+| SIDE-02 | Phase 24 | Complete — 24-02 |
+| SIDE-03 | Phase 24 | Complete — 24-02 |
+| SIDE-04 | Phase 24 | Complete — 24-02 |
+| SIDE-05 | Phase 24 | Complete — 24-02 |
+| SIDE-06 | Phase 24 | Complete — 24-02 |
 | SIDE-07 | Phase 24 | Complete — 24-01 |
-| SIDE-08 | Phase 24 | Pending |
+| SIDE-08 | Phase 24 | Complete — 24-03 |
 | SIDE-09 | Phase 24 | Complete — 24-01 |
 | MEM-01 | Phase 25 | Pending |
 | MEM-02 | Phase 25 | Pending |
