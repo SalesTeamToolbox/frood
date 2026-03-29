@@ -312,6 +312,11 @@ class Settings:
     rewards_silver_max_concurrent: int = 5
     rewards_gold_max_concurrent: int = 10
 
+    # Paperclip sidecar mode (Phase 24)
+    paperclip_sidecar_port: int = 8001
+    paperclip_api_url: str = ""  # e.g. "http://paperclip:3000"
+    sidecar_enabled: bool = False
+
     @classmethod
     def from_env(cls) -> "Settings":
         # Enforce secure JWT secret
@@ -604,6 +609,10 @@ class Settings:
             rewards_bronze_max_concurrent=int(os.getenv("REWARDS_BRONZE_MAX_CONCURRENT", "2")),
             rewards_silver_max_concurrent=int(os.getenv("REWARDS_SILVER_MAX_CONCURRENT", "5")),
             rewards_gold_max_concurrent=int(os.getenv("REWARDS_GOLD_MAX_CONCURRENT", "10")),
+            # Paperclip sidecar
+            paperclip_sidecar_port=int(os.getenv("PAPERCLIP_SIDECAR_PORT", "8001")),
+            paperclip_api_url=os.getenv("PAPERCLIP_API_URL", ""),
+            sidecar_enabled=os.getenv("SIDECAR_ENABLED", "false").lower() in ("true", "1", "yes"),
         )
 
     def get_discord_guild_ids(self) -> list[int]:
