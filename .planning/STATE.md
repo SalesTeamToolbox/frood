@@ -2,16 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Custom Claude Code UI
-status: Ready to discuss
-stopped_at: Phase 25 plans verified — 2 plans, 4 tasks
-last_updated: "2026-03-29T21:10:04.165Z"
-last_activity: 2026-03-29 — Phase 24 (Sidecar Mode) complete — 3 plans, 9 requirements, 26 tests passing
+status: Ready to execute
+stopped_at: Completed 25-01-PLAN.md
+last_updated: "2026-03-29T21:23:02.016Z"
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 5
-  completed_plans: 3
-  percent: 12
+  completed_plans: 4
 ---
 
 # Project State
@@ -21,16 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-28)
 
 **Core value:** Agent42 must always be able to run agents reliably, with tiered provider routing ensuring no single provider outage stops the platform.
-**Current focus:** v4.0 Paperclip Integration — Phase 25: Memory Bridge
+**Current focus:** Phase 25 — memory-bridge
 
 ## Current Position
 
-Phase: 25 of 31 (Memory Bridge)
-Plan: 0 of TBD in current phase
-Status: Ready to discuss
-Last activity: 2026-03-29 — Phase 24 (Sidecar Mode) complete — 3 plans, 9 requirements, 26 tests passing
-
-Progress: [█░░░░░░░░░] 12%
+Phase: 25 (memory-bridge) — EXECUTING
+Plan: 2 of 2
 
 ## Completed Milestones
 
@@ -53,6 +47,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - Phase 24: No TypeScript rewrite — thin TS wrapper over Python FastAPI sidecar
 - Phase 25/26: Phases 25 and 26 can run in parallel after Phase 24 completes
 - Phase 27: Adapter depends on Phases 24+25+26 all complete before end-to-end testing
+- [Phase 25-memory-bridge]: recall() bypasses MemoryStore.semantic_search() and calls qdrant._client.query_points() directly — semantic_search() lacks agent_id filter support, scope isolation requires direct FieldCondition on agent_id
+- [Phase 25-memory-bridge]: learn_async() wraps full body in try/except for fire-and-forget safety (P7) — callers can use asyncio.create_task() without exception propagation guards
+- [Phase 25-memory-bridge]: KeywordIndexParams(type='keyword', is_tenant=True) used for agent_id/company_id indexes to enable Qdrant 1.9+ HNSW co-location optimisation (D-09, D-12)
 
 ### Pending Todos
 
@@ -76,6 +73,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-29T21:10:04.162Z
-Stopped at: Phase 25 plans verified — 2 plans, 4 tasks
-Resume file: .planning/phases/25-memory-bridge/25-01-PLAN.md
+Last session: 2026-03-29T21:23:02.013Z
+Stopped at: Completed 25-01-PLAN.md
+Resume file: None

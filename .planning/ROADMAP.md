@@ -82,7 +82,11 @@ Plans:
 3. A plugin client can POST to `/memory/recall` specifying an agentId or companyId and receive only memories scoped to that partition
 4. Two agents with different agent_ids do not see each other's memories when recalling
 
-**Plans**: TBD
+**Plans:** 2 plans
+
+Plans:
+- [x] 25-01-PLAN.md — Pydantic models, QdrantStore indexes, MemoryBridge class
+- [ ] 25-02-PLAN.md — HTTP routes, orchestrator wiring, test suite
 
 ### Phase 26: Tiered Routing Bridge
 
@@ -231,8 +235,8 @@ Archive: `milestones/v1.0-ROADMAP.md`
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 | ------- | ----------- | ---------------- | -------- | ----------- |
-| 24. Sidecar Mode | v4.0 | 2/3 | In Progress | - |
-| 25. Memory Bridge | v4.0 | 0/TBD | Not started | - |
+| 24. Sidecar Mode | v4.0 | 3/3 | Complete | 2026-03-29 |
+| 25. Memory Bridge | v4.0 | 1/2 | In Progress|  |
 | 26. Tiered Routing Bridge | v4.0 | 0/TBD | Not started | - |
 | 27. Paperclip Adapter | v4.0 | 0/TBD | Not started | - |
 | 28. Paperclip Plugin | v4.0 | 0/TBD | Not started | - |
