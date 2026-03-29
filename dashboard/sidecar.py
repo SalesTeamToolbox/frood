@@ -3,19 +3,27 @@
 create_sidecar_app() returns a FastAPI instance with only sidecar routes:
 - GET  /sidecar/health   — public, no auth (D-05)
 - POST /sidecar/execute  — Bearer auth required (D-04)
+- POST /memory/recall    — Bearer auth required (MEM-04, D-13)
+- POST /memory/store     — Bearer auth required (MEM-04, D-14)
 
 This is a SEPARATE app factory from dashboard/server.py:create_app() per D-01.
 """
 
+import asyncio
 import logging
 from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI
 
+from core.memory_bridge import MemoryBridge
 from core.sidecar_models import (
     AdapterExecutionContext,
     ExecuteResponse,
     HealthResponse,
+    MemoryRecallRequest,
+    MemoryRecallResponse,
+    MemoryStoreRequest,
+    MemoryStoreResponse,
 )
 from core.sidecar_orchestrator import (
     SidecarOrchestrator,
@@ -54,11 +62,15 @@ def create_sidecar_app(
         redoc_url=None,  # No ReDoc in sidecar
     )
 
+    # Instantiate MemoryBridge once and share between routes and orchestrator (per P6)
+    memory_bridge = MemoryBridge(memory_store=memory_store)
+
     orchestrator = SidecarOrchestrator(
         memory_store=memory_store,
         agent_manager=agent_manager,
         effectiveness_store=effectiveness_store,
         reward_system=reward_system,
+        memory_bridge=memory_bridge,
     )
 
     @app.on_event("shutdown")
@@ -138,5 +150,90 @@ def create_sidecar_app(
             external_run_id=ctx.run_id,
             deduplicated=False,
         )
+
+    # -- Memory recall endpoint (Bearer auth required per D-15) --
+
+    @app.post("/memory/recall", response_model=MemoryRecallResponse)
+    async def memory_recall(
+        req: MemoryRecallRequest,
+        _user: str = Depends(get_current_user),
+    ) -> MemoryRecallResponse:
+        """Retrieve relevant memories scoped to agent_id/company_id (MEM-04, D-13)."""
+        if not memory_bridge or not memory_bridge.memory_store:
+            return MemoryRecallResponse(memories=[])
+        try:
+            memories = await asyncio.wait_for(
+                memory_bridge.recall(
+                    query=req.query,
+                    agent_id=req.agent_id,
+                    company_id=req.company_id,
+                    top_k=req.top_k,
+                    score_threshold=req.score_threshold,
+                ),
+                timeout=0.2,
+            )
+        except TimeoutError:
+            memories = []
+        except Exception as exc:
+            logger.warning("Memory recall route failed: %s", exc)
+            memories = []
+        return MemoryRecallResponse(
+            memories=[
+                {
+                    "text": m["text"],
+                    "score": m["score"],
+                    "source": m.get("source", ""),
+                    "metadata": m.get("metadata", {}),
+                }
+                for m in memories
+            ]
+        )
+
+    # -- Memory store endpoint (Bearer auth required per D-15) --
+
+    @app.post("/memory/store", response_model=MemoryStoreResponse)
+    async def memory_store_endpoint(
+        req: MemoryStoreRequest,
+        _user: str = Depends(get_current_user),
+    ) -> MemoryStoreResponse:
+        """Store a pre-extracted learning scoped to agent_id/company_id (MEM-04, D-14)."""
+        if not memory_bridge or not memory_bridge.memory_store:
+            return MemoryStoreResponse(stored=False, point_id="")
+        try:
+            embeddings = memory_bridge.memory_store.embeddings
+            if not embeddings or not embeddings.is_available:
+                return MemoryStoreResponse(stored=False, point_id="")
+
+            vector = await embeddings.embed_text(req.text)
+            qdrant = memory_bridge.memory_store._qdrant
+            if not qdrant or not qdrant.is_available:
+                return MemoryStoreResponse(stored=False, point_id="")
+
+            import time
+
+            from memory.qdrant_store import QdrantStore
+
+            payload = {
+                "text": req.text,
+                "section": req.section,
+                "tags": req.tags,
+                "agent_id": req.agent_id,
+                "company_id": req.company_id,
+                "source": "plugin_store",
+                "timestamp": time.time(),
+            }
+
+            point_id = qdrant._make_point_id(req.text, f"plugin:{req.agent_id}")
+            success = await asyncio.to_thread(
+                qdrant.upsert_single,
+                QdrantStore.KNOWLEDGE,
+                req.text,
+                vector,
+                payload,
+            )
+            return MemoryStoreResponse(stored=success, point_id=point_id if success else "")
+        except Exception as exc:
+            logger.warning("Memory store route failed: %s", exc)
+            return MemoryStoreResponse(stored=False, point_id="")
 
     return app
