@@ -1,3 +1,19 @@
+---
+gsd_state_version: 1.0
+milestone: v2.0
+milestone_name: Custom Claude Code UI
+status: Ready to discuss
+stopped_at: Phase 25 context gathered
+last_updated: "2026-03-29T19:00:57.813Z"
+last_activity: 2026-03-29 — Phase 24 (Sidecar Mode) complete — 3 plans, 9 requirements, 26 tests passing
+progress:
+  total_phases: 8
+  completed_phases: 1
+  total_plans: 3
+  completed_plans: 3
+  percent: 12
+---
+
 # Project State
 
 ## Project Reference
@@ -60,6 +76,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-29
-Stopped at: Phase 24 (Sidecar Mode) complete — 3 plans, 3 waves, 9/9 requirements, 26 tests. Ready for Phase 25 (Memory Bridge).
-Resume file: None
+Last session: 2026-03-29T19:00:57.808Z
+Stopped at: Phase 25 context gathered
+Resume file: .planning/phases/25-memory-bridge/25-CONTEXT.md
