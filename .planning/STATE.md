@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Custom Claude Code UI
-status: Ready to execute
-stopped_at: Completed 25-01-PLAN.md
-last_updated: "2026-03-29T21:23:02.016Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 25-02-PLAN.md
+last_updated: "2026-03-29T21:31:58.735Z"
 progress:
   total_phases: 8
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 5
-  completed_plans: 4
+  completed_plans: 5
 ---
 
 # Project State
@@ -50,6 +50,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 25-memory-bridge]: recall() bypasses MemoryStore.semantic_search() and calls qdrant._client.query_points() directly — semantic_search() lacks agent_id filter support, scope isolation requires direct FieldCondition on agent_id
 - [Phase 25-memory-bridge]: learn_async() wraps full body in try/except for fire-and-forget safety (P7) — callers can use asyncio.create_task() without exception propagation guards
 - [Phase 25-memory-bridge]: KeywordIndexParams(type='keyword', is_tenant=True) used for agent_id/company_id indexes to enable Qdrant 1.9+ HNSW co-location optimisation (D-09, D-12)
+- [Phase 25]: MemoryBridge shared instance in create_sidecar_app() — one instance shared between HTTP routes and SidecarOrchestrator to prevent duplicate store connections
+- [Phase 25]: learn_async fired via asyncio.create_task AFTER _post_callback in execute_async finally block — callback never delayed by learning extraction (D-05)
+- [Phase 25]: asyncio.wait_for timeout=0.2 enforced in both HTTP route and execute_async for consistent 200ms recall timeout (MEM-02)
 
 ### Pending Todos
 
@@ -73,6 +76,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-29T21:23:02.013Z
-Stopped at: Completed 25-01-PLAN.md
+Last session: 2026-03-29T21:31:58.731Z
+Stopped at: Completed 25-02-PLAN.md
 Resume file: None
