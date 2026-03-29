@@ -67,7 +67,7 @@ Phases 1-4 complete, Phases 5-6 remaining (PTY streaming + chat UX polish).
 
 Plans:
 - [x] 24-01-PLAN.md — Foundation: config fields, Pydantic models, JSON formatter
-- [ ] 24-02-PLAN.md — Sidecar server: app factory with routes, orchestrator
+- [x] 24-02-PLAN.md — Sidecar server: app factory with routes, orchestrator
 - [ ] 24-03-PLAN.md — Integration: CLI wiring, Agent42 sidecar branch, tests
 
 ### Phase 25: Memory Bridge
@@ -231,7 +231,7 @@ Archive: `milestones/v1.0-ROADMAP.md`
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 | ------- | ----------- | ---------------- | -------- | ----------- |
-| 24. Sidecar Mode | v4.0 | 0/3 | Planned | - |
+| 24. Sidecar Mode | v4.0 | 2/3 | In Progress | - |
 | 25. Memory Bridge | v4.0 | 0/TBD | Not started | - |
 | 26. Tiered Routing Bridge | v4.0 | 0/TBD | Not started | - |
 | 27. Paperclip Adapter | v4.0 | 0/TBD | Not started | - |
