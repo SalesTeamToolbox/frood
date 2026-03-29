@@ -35,6 +35,8 @@ class AdapterExecutionContext(BaseModel):
 class ExecuteResponse(BaseModel):
     """Response body for POST /sidecar/execute (202 Accepted)."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     status: str = "accepted"
     external_run_id: str = Field(default="", alias="externalRunId")
     deduplicated: bool = False
