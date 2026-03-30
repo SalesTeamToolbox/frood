@@ -251,30 +251,36 @@ describe("Agent42Client", () => {
   // fetchWithTimeout — abort behavior
   // -------------------------------------------------------------------------
   describe("timeout behavior", () => {
-    it("aborts request after timeout duration elapses", async () => {
+    it("passes AbortSignal to fetch and abort fires on timeout", async () => {
       vi.useFakeTimers();
 
-      // Mock fetch that never resolves (hangs indefinitely)
+      let capturedSignal: AbortSignal | undefined;
+
+      // Mock fetch that captures the signal and hangs — we handle rejection via the promise chain
       const mockFetch = vi.fn().mockImplementation(
-        (_url: string, init: RequestInit) =>
-          new Promise<Response>((_resolve, reject) => {
-            // Listen for abort signal
-            (init.signal as AbortSignal).addEventListener("abort", () => {
+        (_url: string, init: RequestInit) => {
+          capturedSignal = init.signal as AbortSignal;
+          // Return a promise that resolves when abort fires, to avoid unhandled rejection
+          return new Promise<Response>((resolve, reject) => {
+            capturedSignal!.addEventListener("abort", () => {
               reject(new DOMException("The operation was aborted.", "AbortError"));
             });
-          })
+          });
+        }
       );
       vi.stubGlobal("fetch", mockFetch);
 
-      // Create a client with a very short timeout by calling health() which uses 5000ms,
-      // but we'll fast-forward timers to trigger the abort
       const clientShort = new Agent42Client("http://localhost:8001", "test-token");
-      const promise = clientShort.health();
+      // Catch to prevent unhandled rejection — we'll inspect the signal separately
+      const promise = clientShort.health().catch(() => null);
 
       // Advance timers past the 5s health timeout
       await vi.advanceTimersByTimeAsync(6000);
+      await promise;
 
-      await expect(promise).rejects.toThrow();
+      // The abort signal must have been passed and must now be aborted
+      expect(capturedSignal).toBeDefined();
+      expect(capturedSignal!.aborted).toBe(true);
 
       vi.useRealTimers();
     });
