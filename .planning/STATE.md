@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Custom Claude Code UI
-status: Ready to execute
-stopped_at: Completed 27-01-PLAN.md
-last_updated: "2026-03-30T21:13:40.708Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 27-02-PLAN.md
+last_updated: "2026-03-30T21:25:01.532Z"
 progress:
   total_phases: 8
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 9
-  completed_plans: 8
+  completed_plans: 9
 ---
 
 # Project State
@@ -60,6 +60,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 27-01]: Native fetch + AbortController over axios/got — zero runtime dependencies, Node 18+ ships fetch natively
 - [Phase 27-01]: vi.stubGlobal(fetch) over MSW — simpler for a library with no DOM; sufficient for unit-testing HTTP contracts
 - [Phase 27-01]: top_k and score_threshold kept as snake_case in MemoryRecallRequest — Python API has no camelCase alias
+- [Phase 27]: Near-identity serialize/deserialize: codec's role is defensive parsing + forward-compat, not compression
+- [Phase 27]: agentId resolved as (config.agentId || ctx.agent.id): falsy empty-string also falls back to Paperclip ID
+- [Phase 27]: JSON.stringify(sessionState) as sessionKey string: matches Python Pydantic sessionKey field type (D-08)
 
 ### Pending Todos
 
@@ -83,6 +86,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-30T21:13:40.703Z
-Stopped at: Completed 27-01-PLAN.md
+Last session: 2026-03-30T21:25:01.528Z
+Stopped at: Completed 27-02-PLAN.md
 Resume file: None

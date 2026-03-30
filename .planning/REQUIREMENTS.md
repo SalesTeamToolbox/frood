@@ -38,9 +38,9 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 - [x] **ADAPT-01**: TypeScript adapter package implements Paperclip's ServerAdapterModule interface (execute, testEnvironment)
 - [x] **ADAPT-02**: Adapter POSTs to Agent42 sidecar and handles both synchronous and async (202+callback) response patterns
-- [ ] **ADAPT-03**: Adapter maps wakeReason (heartbeat/task_assigned/manual) to appropriate execution behavior
-- [ ] **ADAPT-04**: Adapter preserves Agent42 agent ID in adapterConfig.agentId for memory and effectiveness continuity
-- [ ] **ADAPT-05**: Adapter includes sessionCodec for cross-heartbeat state persistence
+- [x] **ADAPT-03**: Adapter maps wakeReason (heartbeat/task_assigned/manual) to appropriate execution behavior
+- [x] **ADAPT-04**: Adapter preserves Agent42 agent ID in adapterConfig.agentId for memory and effectiveness continuity
+- [x] **ADAPT-05**: Adapter includes sessionCodec for cross-heartbeat state persistence
 
 ### Paperclip Plugin
 
@@ -122,9 +122,9 @@ Deferred to future release. Tracked but not in current roadmap.
 | ROUTE-04 | Phase 26 | Complete |
 | ADAPT-01 | Phase 27 | Complete |
 | ADAPT-02 | Phase 27 | Complete |
-| ADAPT-03 | Phase 27 | Pending |
-| ADAPT-04 | Phase 27 | Pending |
-| ADAPT-05 | Phase 27 | Pending |
+| ADAPT-03 | Phase 27 | Complete |
+| ADAPT-04 | Phase 27 | Complete |
+| ADAPT-05 | Phase 27 | Complete |
 | PLUG-01 | Phase 28 | Pending |
 | PLUG-02 | Phase 28 | Pending |
 | PLUG-03 | Phase 28 | Pending |
