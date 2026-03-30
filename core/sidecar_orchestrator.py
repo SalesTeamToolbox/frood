@@ -60,12 +60,14 @@ class SidecarOrchestrator:
         effectiveness_store: Any = None,
         reward_system: Any = None,
         memory_bridge: Any = None,
+        tiered_routing_bridge: Any = None,
     ):
         self.memory_store = memory_store
         self.agent_manager = agent_manager
         self.effectiveness_store = effectiveness_store
         self.reward_system = reward_system
         self.memory_bridge = memory_bridge
+        self.tiered_routing_bridge = tiered_routing_bridge
         self._http: httpx.AsyncClient | None = None
 
     async def _get_http_client(self) -> httpx.AsyncClient:
@@ -123,6 +125,34 @@ class SidecarOrchestrator:
                         exc,
                     )
 
+            # Step 1.5: Routing resolution (ROUTE-01 through ROUTE-04)
+            # TODO(phase-27): Verify agentRole key name against real Paperclip payload
+            routing = None
+            if self.tiered_routing_bridge and ctx.agent_id:
+                try:
+                    routing = await self.tiered_routing_bridge.resolve(
+                        role=ctx.context.get("agentRole", ""),
+                        agent_id=ctx.agent_id,
+                        preferred_provider=ctx.adapter_config.preferred_provider,
+                    )
+                    logger.info(
+                        "Routing run %s: agent=%s role=%s tier=%s provider=%s model=%s base_cat=%s cat=%s",
+                        run_id,
+                        ctx.agent_id,
+                        ctx.context.get("agentRole", ""),
+                        routing.tier,
+                        routing.provider,
+                        routing.model,
+                        routing.base_category,
+                        routing.task_category,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Routing resolution failed for run %s: %s -- using defaults",
+                        run_id,
+                        exc,
+                    )
+
             # Step 2: Agent execution stub (Phase 24 — full AgentRuntime wired later)
             # recalled_memories stored in context for when AgentRuntime is wired (D-04)
             result = {
@@ -135,8 +165,8 @@ class SidecarOrchestrator:
                 "inputTokens": 0,
                 "outputTokens": 0,
                 "costUsd": 0.0,
-                "model": "",
-                "provider": "",
+                "model": routing.model if routing else "",
+                "provider": routing.provider if routing else "",
             }
 
         except Exception as exc:
