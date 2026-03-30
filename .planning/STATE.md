@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Custom Claude Code UI
-status: Phase complete — ready for verification
-stopped_at: Phase 27 context gathered (assumptions mode)
-last_updated: "2026-03-30T19:27:49.869Z"
+status: Ready to execute
+stopped_at: Completed 27-01-PLAN.md
+last_updated: "2026-03-30T21:13:40.708Z"
 progress:
   total_phases: 8
   completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 9
+  completed_plans: 8
 ---
 
 # Project State
@@ -19,11 +19,11 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-28)
 
 **Core value:** Agent42 must always be able to run agents reliably, with tiered provider routing ensuring no single provider outage stops the platform.
-**Current focus:** Phase 26 — tiered-routing-bridge
+**Current focus:** Phase 27 — paperclip-adapter
 
 ## Current Position
 
-Phase: 26 (tiered-routing-bridge) — EXECUTING
+Phase: 27 (paperclip-adapter) — EXECUTING
 Plan: 2 of 2
 
 ## Completed Milestones
@@ -57,6 +57,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 26-tiered-routing-bridge]: analyst->strategy mapping uses resolve_model general-fallback on synthetic (D-07): PROVIDER_MODELS['synthetic'] has no 'strategy' key, falls back to general silently
 - [Phase 26-tiered-routing-bridge]: agentRole key in ctx.context uses Paperclip camelCase convention — TODO phase-27 to verify against real payload
 - [Phase 26-tiered-routing-bridge]: TieredRoutingBridge constructed once in create_sidecar_app, shared across requests (D-11, D-14)
+- [Phase 27-01]: Native fetch + AbortController over axios/got — zero runtime dependencies, Node 18+ ships fetch natively
+- [Phase 27-01]: vi.stubGlobal(fetch) over MSW — simpler for a library with no DOM; sufficient for unit-testing HTTP contracts
+- [Phase 27-01]: top_k and score_threshold kept as snake_case in MemoryRecallRequest — Python API has no camelCase alias
 
 ### Pending Todos
 
@@ -80,6 +83,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-30T19:27:49.847Z
-Stopped at: Phase 27 context gathered (assumptions mode)
-Resume file: .planning/phases/27-paperclip-adapter/27-CONTEXT.md
+Last session: 2026-03-30T21:13:40.703Z
+Stopped at: Completed 27-01-PLAN.md
+Resume file: None
