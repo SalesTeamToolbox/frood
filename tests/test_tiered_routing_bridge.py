@@ -5,6 +5,7 @@ Tests cover:
 - ROUTE-02: Tier-based model upgrades (gold/silver/bronze/provisional + reward_system=None)
 - ROUTE-03: Provider selection chain (preferred override > synthetic > anthropic fallback)
 - ROUTE-04: Cost estimation with static pricing table and fallback pricing
+- Integration: SidecarOrchestrator wiring (ROUTE-01 through ROUTE-04 end-to-end)
 """
 
 import os
@@ -12,6 +13,7 @@ from dataclasses import fields
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from core.tiered_routing_bridge import RoutingDecision, TieredRoutingBridge
 
 # ---------------------------------------------------------------------------
@@ -239,3 +241,137 @@ class TestCostEstimation:
         field_names = {f.name for f in fields(RoutingDecision)}
         required = {"provider", "model", "tier", "task_category", "base_category", "cost_estimate"}
         assert required == field_names, f"Missing fields: {required - field_names}"
+
+
+# ---------------------------------------------------------------------------
+# TestOrchestratorIntegration — SidecarOrchestrator wiring
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_bridge():
+    """Mock TieredRoutingBridge that returns a known RoutingDecision."""
+    bridge = MagicMock()
+    bridge.resolve = AsyncMock(
+        return_value=RoutingDecision(
+            provider="synthetic",
+            model="hf:Qwen/Qwen3-Coder-480B-A35B-Instruct",
+            tier="gold",
+            task_category="reasoning",
+            base_category="coding",
+            cost_estimate=0.0,
+        )
+    )
+    return bridge
+
+
+@pytest.fixture
+def orchestrator(mock_bridge):
+    """SidecarOrchestrator with a mocked TieredRoutingBridge and no HTTP calls."""
+    from core.sidecar_orchestrator import SidecarOrchestrator
+
+    orch = SidecarOrchestrator(tiered_routing_bridge=mock_bridge)
+    orch._post_callback = AsyncMock()  # prevent real HTTP calls
+    return orch
+
+
+@pytest.fixture
+def sample_ctx():
+    """Sample AdapterExecutionContext for integration tests."""
+    from core.sidecar_models import AdapterExecutionContext
+
+    return AdapterExecutionContext(
+        **{
+            "runId": "test-run-001",
+            "agentId": "agent-abc",
+            "context": {"agentRole": "engineer", "taskDescription": "fix a bug"},
+            "adapterConfig": {"preferredProvider": ""},
+        }
+    )
+
+
+class TestOrchestratorIntegration:
+    """Integration tests: SidecarOrchestrator wired with TieredRoutingBridge."""
+
+    @pytest.mark.asyncio
+    async def test_execute_async_populates_usage_with_routing(self, orchestrator, sample_ctx):
+        """execute_async() populates usage dict with model and provider from RoutingDecision."""
+        await orchestrator.execute_async("test-run-001", sample_ctx)
+
+        # Verify _post_callback was called
+        assert orchestrator._post_callback.called
+        call_args = orchestrator._post_callback.call_args
+
+        # usage is the 4th positional argument to _post_callback
+        # signature: _post_callback(run_id, status, result, usage, error)
+        usage = call_args.args[3]
+        assert usage["model"] == "hf:Qwen/Qwen3-Coder-480B-A35B-Instruct"
+        assert usage["provider"] == "synthetic"
+
+    @pytest.mark.asyncio
+    async def test_execute_async_routing_failure_degrades_gracefully(self, sample_ctx):
+        """Routing failure (exception) must not prevent execution or callback."""
+        from core.sidecar_orchestrator import SidecarOrchestrator
+
+        failing_bridge = MagicMock()
+        failing_bridge.resolve = AsyncMock(side_effect=RuntimeError("routing error"))
+
+        orch = SidecarOrchestrator(tiered_routing_bridge=failing_bridge)
+        orch._post_callback = AsyncMock()
+
+        await orch.execute_async("test-run-002", sample_ctx)
+
+        # Callback still called with status="completed" (not "failed")
+        assert orch._post_callback.called
+        call_args = orch._post_callback.call_args
+        status = call_args.args[1]
+        assert status == "completed"
+
+        # Usage dict has empty model/provider
+        usage = call_args.args[3]
+        assert usage["model"] == ""
+        assert usage["provider"] == ""
+
+    @pytest.mark.asyncio
+    async def test_execute_async_no_bridge_uses_empty_usage(self, sample_ctx):
+        """SidecarOrchestrator with tiered_routing_bridge=None uses empty model/provider."""
+        from core.sidecar_orchestrator import SidecarOrchestrator
+
+        orch = SidecarOrchestrator(tiered_routing_bridge=None)
+        orch._post_callback = AsyncMock()
+
+        await orch.execute_async("test-run-003", sample_ctx)
+
+        assert orch._post_callback.called
+        usage = orch._post_callback.call_args.args[3]
+        assert usage["model"] == ""
+        assert usage["provider"] == ""
+
+    @pytest.mark.asyncio
+    async def test_execute_async_routing_logged(self, orchestrator, sample_ctx, caplog):
+        """Successful routing emits a structured log line with routing fields."""
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="agent42.sidecar.orchestrator"):
+            await orchestrator.execute_async("test-run-004", sample_ctx)
+
+        # Find the routing log line
+        routing_lines = [r for r in caplog.records if "Routing run" in r.getMessage()]
+        assert len(routing_lines) >= 1, "Expected at least one 'Routing run' log line"
+
+        msg = routing_lines[0].getMessage()
+        # Verify key fields appear in the log message
+        assert "gold" in msg  # tier
+        assert "synthetic" in msg  # provider
+        assert "Qwen" in msg  # model (partial)
+        assert "reasoning" in msg  # task_category
+
+    @pytest.mark.asyncio
+    async def test_usage_dict_stub_values(self, orchestrator, sample_ctx):
+        """Usage dict always contains inputTokens=0, outputTokens=0, costUsd=0.0 (D-09)."""
+        await orchestrator.execute_async("test-run-005", sample_ctx)
+
+        usage = orchestrator._post_callback.call_args.args[3]
+        assert usage["inputTokens"] == 0
+        assert usage["outputTokens"] == 0
+        assert usage["costUsd"] == 0.0
