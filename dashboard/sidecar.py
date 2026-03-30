@@ -16,6 +16,7 @@ from typing import Any
 from fastapi import BackgroundTasks, Depends, FastAPI
 
 from core.memory_bridge import MemoryBridge
+from core.reward_system import TierDeterminator
 from core.sidecar_models import (
     AdapterExecutionContext,
     ExecuteResponse,
@@ -30,6 +31,7 @@ from core.sidecar_orchestrator import (
     is_duplicate_run,
     register_run,
 )
+from core.tiered_routing_bridge import TieredRoutingBridge
 from dashboard.auth import get_current_user
 
 logger = logging.getLogger("agent42.sidecar")
@@ -65,12 +67,19 @@ def create_sidecar_app(
     # Instantiate MemoryBridge once and share between routes and orchestrator (per P6)
     memory_bridge = MemoryBridge(memory_store=memory_store)
 
+    # Construct TieredRoutingBridge once, share between orchestrator requests (per D-11, D-14)
+    tiered_routing_bridge = TieredRoutingBridge(
+        reward_system=reward_system,
+        tier_determinator=TierDeterminator(),
+    )
+
     orchestrator = SidecarOrchestrator(
         memory_store=memory_store,
         agent_manager=agent_manager,
         effectiveness_store=effectiveness_store,
         reward_system=reward_system,
         memory_bridge=memory_bridge,
+        tiered_routing_bridge=tiered_routing_bridge,
     )
 
     @app.on_event("shutdown")
