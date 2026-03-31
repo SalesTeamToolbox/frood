@@ -143,4 +143,42 @@ describe("Plugin Worker Lifecycle", () => {
     expect(health.status).toBe("error");
     expect(health.message).toContain("not initialized");
   });
+
+  it("setup() registers agent-profile data handler", async () => {
+    const harness = createTestHarness({
+      manifest: manifest as any,
+      config: {
+        agent42BaseUrl: "http://localhost:8001",
+        apiKey: "test-token",
+      },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+
+    // agent-profile returns null when agentId is missing — just verify handler is registered
+    const result = await harness.getData("agent-profile", {});
+    expect(result).toBeNull();
+  });
+
+  it("setup() registers extract-learnings job handler", async () => {
+    const harness = createTestHarness({
+      manifest: manifest as any,
+      config: {
+        agent42BaseUrl: "http://localhost:8001",
+        apiKey: "test-token",
+      },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+
+    // Mock extractLearnings POST /memory/extract
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ extracted: 2, skipped: 0 }),
+    } as unknown as Response);
+
+    // Should complete without throwing
+    await expect(harness.runJob("extract-learnings")).resolves.not.toThrow();
+  });
 });
