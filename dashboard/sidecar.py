@@ -1,13 +1,19 @@
 """Agent42 sidecar — lightweight FastAPI server for Paperclip integration.
 
 create_sidecar_app() returns a FastAPI instance with only sidecar routes:
-- GET  /sidecar/health              — public, no auth (D-05)
-- POST /sidecar/execute             — Bearer auth required (D-04)
-- POST /memory/recall               — Bearer auth required (MEM-04, D-13)
-- POST /memory/store                — Bearer auth required (MEM-04, D-14)
-- POST /routing/resolve             — Bearer auth required (PLUG-04, Phase 28)
-- POST /effectiveness/recommendations — Bearer auth required (PLUG-05, Phase 28)
-- POST /mcp/tool                    — Bearer auth required (PLUG-06, Phase 28)
+- GET  /sidecar/health                    — public, no auth (D-05)
+- POST /sidecar/execute                   — Bearer auth required (D-04)
+- POST /memory/recall                     — Bearer auth required (MEM-04, D-13)
+- POST /memory/store                      — Bearer auth required (MEM-04, D-14)
+- POST /routing/resolve                   — Bearer auth required (PLUG-04, Phase 28)
+- POST /effectiveness/recommendations     — Bearer auth required (PLUG-05, Phase 28)
+- POST /mcp/tool                          — Bearer auth required (PLUG-06, Phase 28)
+- GET  /agent/{agent_id}/profile          — Bearer auth required (Phase 29, D-09)
+- GET  /agent/{agent_id}/effectiveness    — Bearer auth required (Phase 29, D-10)
+- GET  /agent/{agent_id}/routing-history  — Bearer auth required (Phase 29, D-11)
+- GET  /memory/run-trace/{run_id}         — Bearer auth required (Phase 29, D-13)
+- GET  /agent/{agent_id}/spend            — Bearer auth required (Phase 29, D-14)
+- POST /memory/extract                    — Bearer auth required (Phase 29, D-19)
 
 This is a SEPARATE app factory from dashboard/server.py:create_app() per D-01.
 """
@@ -24,18 +30,29 @@ from core.memory_bridge import MemoryBridge
 from core.reward_system import TierDeterminator
 from core.sidecar_models import (
     AdapterExecutionContext,
+    AgentEffectivenessResponse,
+    AgentProfileResponse,
+    AgentSpendResponse,
     EffectivenessRequest,
     EffectivenessResponse,
     ExecuteResponse,
+    ExtractLearningsRequest,
+    ExtractLearningsResponse,
     HealthResponse,
     MCPToolRequest,
     MCPToolResponse,
     MemoryRecallRequest,
     MemoryRecallResponse,
+    MemoryRunTraceResponse,
     MemoryStoreRequest,
     MemoryStoreResponse,
+    MemoryTraceItem,
+    RoutingHistoryEntry,
+    RoutingHistoryResponse,
     RoutingResolveRequest,
     RoutingResolveResponse,
+    SpendEntry,
+    TaskTypeStats,
     ToolEffectivenessItem,
 )
 from core.sidecar_orchestrator import (
@@ -121,6 +138,13 @@ def create_sidecar_app(
             except Exception as exc:
                 qdrant_status["available"] = False
                 qdrant_status["error"] = str(exc)
+
+        # Add per-provider availability to provider_status dict (D-12)
+        configured_providers: dict[str, bool] = {}
+        for attr in ("openai_api_key", "anthropic_api_key", "openrouter_api_key", "groq_api_key"):
+            provider_name = attr.replace("_api_key", "")
+            configured_providers[provider_name] = bool(getattr(settings, attr, ""))
+        provider_status["configured"] = configured_providers
 
         return HealthResponse(
             status="ok",
@@ -341,5 +365,202 @@ def create_sidecar_app(
         except Exception as exc:
             logger.warning("MCP tool proxy failed for %s: %s", req.tool_name, exc)
             return MCPToolResponse(result=None, error=str(exc))
+
+    # -------------------------------------------------------------------------
+    # Phase 29 — Plugin UI data endpoints
+    # -------------------------------------------------------------------------
+
+    @app.get("/agent/{agent_id}/profile", response_model=AgentProfileResponse)
+    async def agent_profile(
+        agent_id: str,
+        _user: str = Depends(get_current_user),
+    ) -> AgentProfileResponse:
+        """Return agent tier, success rate, and task volume (D-09, D-15)."""
+        if not effectiveness_store:
+            return AgentProfileResponse(agent_id=agent_id)
+        stats = await effectiveness_store.get_agent_stats(agent_id)
+        # Determine tier using TierDeterminator with task_volume as obs_count
+        tier = "bronze"
+        try:
+            det = TierDeterminator()
+            obs_count = stats.get("task_volume", 0) if stats else 0
+            score = stats.get("success_rate", 0.0) if stats else 0.0
+            tier = det.determine(score=score, observation_count=obs_count)
+        except Exception:
+            pass
+        if not stats:
+            return AgentProfileResponse(agent_id=agent_id, tier=tier)
+        return AgentProfileResponse(
+            agent_id=agent_id,
+            tier=tier,
+            success_rate=stats.get("success_rate", 0.0),
+            task_volume=stats.get("task_volume", 0),
+            avg_speed_ms=stats.get("avg_speed", 0.0),
+        )
+
+    @app.get("/agent/{agent_id}/effectiveness", response_model=AgentEffectivenessResponse)
+    async def agent_effectiveness(
+        agent_id: str,
+        _user: str = Depends(get_current_user),
+    ) -> AgentEffectivenessResponse:
+        """Return per-task-type success rate breakdown for an agent (D-10, D-15)."""
+        if not effectiveness_store:
+            return AgentEffectivenessResponse(agent_id=agent_id)
+        rows = await effectiveness_store.get_aggregated_stats(agent_id=agent_id)
+        stats = [
+            TaskTypeStats(
+                task_type=r.get("task_type", ""),
+                success_rate=float(r.get("success_rate", 0.0)),
+                count=int(r.get("invocations", r.get("count", 0))),
+                avg_duration_ms=float(r.get("avg_duration_ms", r.get("avg_duration", 0.0))),
+            )
+            for r in rows
+        ]
+        return AgentEffectivenessResponse(agent_id=agent_id, stats=stats)
+
+    @app.get("/agent/{agent_id}/routing-history", response_model=RoutingHistoryResponse)
+    async def agent_routing_history(
+        agent_id: str,
+        limit: int = 20,
+        _user: str = Depends(get_current_user),
+    ) -> RoutingHistoryResponse:
+        """Return recent routing decisions for an agent (D-11, D-15)."""
+        if not effectiveness_store:
+            return RoutingHistoryResponse(agent_id=agent_id)
+        rows = await effectiveness_store.get_routing_history(agent_id, limit=limit)
+        entries = [
+            RoutingHistoryEntry(
+                run_id=r.get("run_id", ""),
+                provider=r.get("provider", ""),
+                model=r.get("model", ""),
+                tier=r.get("tier", ""),
+                task_category=r.get("task_category", ""),
+                ts=r.get("ts", 0.0),
+            )
+            for r in rows
+        ]
+        return RoutingHistoryResponse(agent_id=agent_id, entries=entries)
+
+    @app.get("/memory/run-trace/{run_id}", response_model=MemoryRunTraceResponse)
+    async def memory_run_trace(
+        run_id: str,
+        _user: str = Depends(get_current_user),
+    ) -> MemoryRunTraceResponse:
+        """Return recalled memories and extracted learnings tagged with run_id (D-13, D-15)."""
+        injected: list[MemoryTraceItem] = []
+        extracted: list[MemoryTraceItem] = []
+        if memory_bridge and memory_bridge.memory_store:
+            qdrant = getattr(memory_bridge.memory_store, "_qdrant", None)
+            if qdrant and getattr(qdrant, "is_available", False):
+                try:
+                    from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+                    run_filter = Filter(
+                        must=[FieldCondition(key="run_id", match=MatchValue(value=run_id))]
+                    )
+                    # Search MEMORY + HISTORY for recalled memories tagged with this run_id
+                    for coll_suffix in (qdrant.MEMORY, qdrant.HISTORY):
+                        try:
+                            coll_name = qdrant._collection_name(coll_suffix)
+                            results = qdrant._client.scroll(
+                                collection_name=coll_name,
+                                scroll_filter=run_filter,
+                                limit=100,
+                            )
+                            for pt in results[0]:
+                                p = pt.payload or {}
+                                injected.append(
+                                    MemoryTraceItem(
+                                        text=p.get("text", ""),
+                                        score=p.get("score", 0.0),
+                                        source=p.get("source", ""),
+                                    )
+                                )
+                        except Exception:
+                            pass
+                    # Search KNOWLEDGE for extracted learnings tagged with this run_id
+                    try:
+                        kn_name = qdrant._collection_name(qdrant.KNOWLEDGE)
+                        kn_results = qdrant._client.scroll(
+                            collection_name=kn_name,
+                            scroll_filter=run_filter,
+                            limit=100,
+                        )
+                        for pt in kn_results[0]:
+                            p = pt.payload or {}
+                            extracted.append(
+                                MemoryTraceItem(
+                                    text=p.get("text", ""),
+                                    source=p.get("source", ""),
+                                    tags=p.get("tags", []),
+                                )
+                            )
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    logger.warning("memory_run_trace failed: %s", exc)
+        return MemoryRunTraceResponse(
+            run_id=run_id,
+            injected_memories=injected,
+            extracted_learnings=extracted,
+        )
+
+    @app.get("/agent/{agent_id}/spend", response_model=AgentSpendResponse)
+    async def agent_spend(
+        agent_id: str,
+        hours: int = 24,
+        _user: str = Depends(get_current_user),
+    ) -> AgentSpendResponse:
+        """Return token spend distribution grouped by provider over last N hours (D-14, D-15)."""
+        if not effectiveness_store:
+            return AgentSpendResponse(agent_id=agent_id, hours=hours)
+        rows = await effectiveness_store.get_agent_spend(agent_id=agent_id, hours=hours)
+        entries = [
+            SpendEntry(
+                provider=r.get("provider", ""),
+                model=r.get("model", ""),
+                input_tokens=r.get("input_tokens", 0),
+                output_tokens=r.get("output_tokens", 0),
+                cost_usd=r.get("cost_usd", 0.0),
+                hour_bucket=r.get("hour_bucket", ""),
+            )
+            for r in rows
+        ]
+        total = sum(e.cost_usd for e in entries)
+        return AgentSpendResponse(
+            agent_id=agent_id,
+            hours=hours,
+            entries=entries,
+            total_cost_usd=total,
+        )
+
+    @app.post("/memory/extract", response_model=ExtractLearningsResponse)
+    async def memory_extract(
+        req: ExtractLearningsRequest,
+        _user: str = Depends(get_current_user),
+    ) -> ExtractLearningsResponse:
+        """Drain pending transcripts and trigger learning extraction (D-19, D-15)."""
+        if not effectiveness_store or not memory_bridge:
+            return ExtractLearningsResponse(extracted=0, skipped=0)
+        try:
+            pending = await effectiveness_store.drain_pending_transcripts(batch_size=req.batch_size)
+            extracted_count = 0
+            skipped = 0
+            for t in pending:
+                try:
+                    await memory_bridge.learn_async(
+                        summary=t["summary"],
+                        agent_id=t["agent_id"],
+                        company_id=t.get("company_id", ""),
+                        task_type=t.get("task_type", ""),
+                        run_id=t.get("run_id", ""),
+                    )
+                    extracted_count += 1
+                except Exception:
+                    skipped += 1
+            return ExtractLearningsResponse(extracted=extracted_count, skipped=skipped)
+        except Exception as exc:
+            logger.warning("memory_extract failed: %s", exc)
+            return ExtractLearningsResponse(extracted=0, skipped=0)
 
     return app

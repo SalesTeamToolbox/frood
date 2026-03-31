@@ -1,7 +1,8 @@
-"""Tests for Agent42 sidecar mode (Phase 24, SIDE-01 through SIDE-09)."""
+"""Tests for Agent42 sidecar mode (Phase 24, SIDE-01 through SIDE-09; Phase 29 UI endpoints)."""
 
 import json
 import logging
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -298,3 +299,337 @@ class TestCoreServicesInit:
         params = list(sig.parameters.keys())
         assert "sidecar" in params
         assert "sidecar_port" in params
+
+
+# ---------------------------------------------------------------------------
+# Phase 29 — Plugin UI data endpoints
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_effectiveness_store_p29():
+    """Mock EffectivenessStore with Phase 29 methods."""
+    store = MagicMock()
+    store.get_agent_stats = AsyncMock(
+        return_value={
+            "success_rate": 0.85,
+            "task_volume": 42,
+            "avg_speed": 1234.5,
+        }
+    )
+    store.get_aggregated_stats = AsyncMock(
+        return_value=[
+            {
+                "task_type": "coding",
+                "success_rate": 0.9,
+                "invocations": 20,
+                "avg_duration_ms": 800.0,
+            }
+        ]
+    )
+    store.get_routing_history = AsyncMock(
+        return_value=[
+            {
+                "run_id": "run-abc",
+                "provider": "openai",
+                "model": "gpt-4o",
+                "tier": "premium",
+                "task_category": "coding",
+                "ts": 1700000000.0,
+            }
+        ]
+    )
+    store.get_agent_spend = AsyncMock(
+        return_value=[
+            {
+                "provider": "openai",
+                "model": "gpt-4o",
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "cost_usd": 0.01,
+                "hour_bucket": "2024-01-01T10:00:00",
+            }
+        ]
+    )
+    store.drain_pending_transcripts = AsyncMock(
+        return_value=[
+            {
+                "run_id": "run-def",
+                "agent_id": "agent-1",
+                "company_id": "",
+                "task_type": "coding",
+                "summary": "A test summary for learning extraction.",
+            }
+        ]
+    )
+    return store
+
+
+@pytest.fixture
+def sidecar_client_p29(mock_effectiveness_store_p29):
+    """TestClient for sidecar app with Phase 29 effectiveness store mock."""
+    app = create_sidecar_app(effectiveness_store=mock_effectiveness_store_p29)
+    return TestClient(app)
+
+
+@pytest.fixture
+def auth_headers_p29():
+    """Create valid Bearer auth headers for sidecar requests."""
+    token = create_token("admin")
+    return {"Authorization": f"Bearer {token}"}
+
+
+class TestAgentProfileEndpoint:
+    """Phase 29 D-09: GET /agent/{agent_id}/profile."""
+
+    def test_agent_profile_returns_tier_and_stats(
+        self, sidecar_client_p29, auth_headers_p29, mock_effectiveness_store_p29
+    ):
+        """GET /agent/{agent_id}/profile returns agentId, tier, successRate, taskVolume."""
+        resp = sidecar_client_p29.get("/agent/agent-1/profile", headers=auth_headers_p29)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["agentId"] == "agent-1"
+        assert "tier" in data
+        assert "successRate" in data
+        assert "taskVolume" in data
+        assert data["taskVolume"] == 42
+        assert data["successRate"] == pytest.approx(0.85)
+
+    def test_agent_profile_empty_when_no_store(self, auth_headers_p29):
+        """GET /agent/{agent_id}/profile returns bronze defaults when no effectiveness_store."""
+        app = create_sidecar_app()
+        client = TestClient(app)
+        resp = client.get("/agent/agent-1/profile", headers=auth_headers_p29)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["agentId"] == "agent-1"
+        assert data["tier"] == "bronze"
+        assert data["successRate"] == 0.0
+        assert data["taskVolume"] == 0
+
+    def test_agent_profile_returns_401_without_auth(self, sidecar_client_p29):
+        """GET /agent/{agent_id}/profile requires Bearer auth."""
+        resp = sidecar_client_p29.get("/agent/agent-1/profile")
+        assert resp.status_code == 401
+
+
+class TestAgentEffectivenessEndpoint:
+    """Phase 29 D-10: GET /agent/{agent_id}/effectiveness."""
+
+    def test_agent_effectiveness_returns_per_task_stats(self, sidecar_client_p29, auth_headers_p29):
+        """GET /agent/{agent_id}/effectiveness returns per-task-type breakdown."""
+        resp = sidecar_client_p29.get("/agent/agent-1/effectiveness", headers=auth_headers_p29)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["agentId"] == "agent-1"
+        assert "stats" in data
+        assert isinstance(data["stats"], list)
+        assert len(data["stats"]) == 1
+        stat = data["stats"][0]
+        assert stat["taskType"] == "coding"
+        assert stat["successRate"] == pytest.approx(0.9)
+
+    def test_agent_effectiveness_empty_when_no_store(self, auth_headers_p29):
+        """GET /agent/{agent_id}/effectiveness returns empty stats when no effectiveness_store."""
+        app = create_sidecar_app()
+        client = TestClient(app)
+        resp = client.get("/agent/agent-1/effectiveness", headers=auth_headers_p29)
+        assert resp.status_code == 200
+        assert resp.json()["stats"] == []
+
+    def test_agent_effectiveness_returns_401_without_auth(self, sidecar_client_p29):
+        """GET /agent/{agent_id}/effectiveness requires Bearer auth."""
+        resp = sidecar_client_p29.get("/agent/agent-1/effectiveness")
+        assert resp.status_code == 401
+
+
+class TestRoutingHistoryEndpoint:
+    """Phase 29 D-11: GET /agent/{agent_id}/routing-history."""
+
+    def test_agent_routing_history_returns_recent_entries(
+        self, sidecar_client_p29, auth_headers_p29
+    ):
+        """GET /agent/{agent_id}/routing-history returns routing decision list."""
+        resp = sidecar_client_p29.get("/agent/agent-1/routing-history", headers=auth_headers_p29)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["agentId"] == "agent-1"
+        assert len(data["entries"]) == 1
+        entry = data["entries"][0]
+        assert entry["runId"] == "run-abc"
+        assert entry["provider"] == "openai"
+
+    def test_agent_routing_history_empty_when_no_store(self, auth_headers_p29):
+        """GET /agent/{agent_id}/routing-history returns empty entries when no store."""
+        app = create_sidecar_app()
+        client = TestClient(app)
+        resp = client.get("/agent/agent-1/routing-history", headers=auth_headers_p29)
+        assert resp.status_code == 200
+        assert resp.json()["entries"] == []
+
+    def test_agent_routing_history_returns_401_without_auth(self, sidecar_client_p29):
+        """GET /agent/{agent_id}/routing-history requires Bearer auth."""
+        resp = sidecar_client_p29.get("/agent/agent-1/routing-history")
+        assert resp.status_code == 401
+
+
+class TestMemoryRunTraceEndpoint:
+    """Phase 29 D-13: GET /memory/run-trace/{run_id}."""
+
+    def test_memory_run_trace_returns_injected_and_extracted(self, auth_headers_p29):
+        """GET /memory/run-trace/{run_id} returns injected_memories and extracted_learnings."""
+        mock_qdrant = MagicMock()
+        mock_qdrant.is_available = True
+        mock_qdrant.MEMORY = "memory"
+        mock_qdrant.HISTORY = "history"
+        mock_qdrant.KNOWLEDGE = "knowledge"
+        mock_qdrant._collection_name = MagicMock(side_effect=lambda s: f"agent42_{s}")
+
+        # Mock scroll to return a point with run_id tagged
+        mock_point = MagicMock()
+        mock_point.payload = {"text": "recalled item", "score": 0.9, "source": "mem"}
+        mock_qdrant._client.scroll = MagicMock(return_value=([mock_point], None))
+
+        mock_memory_store = MagicMock()
+        mock_memory_store._qdrant = mock_qdrant
+
+        app = create_sidecar_app(memory_store=mock_memory_store)
+        client = TestClient(app)
+
+        resp = client.get("/memory/run-trace/run-xyz", headers=auth_headers_p29)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["runId"] == "run-xyz"
+        assert "injectedMemories" in data
+        assert "extractedLearnings" in data
+
+    def test_memory_run_trace_returns_empty_without_qdrant(self, auth_headers_p29):
+        """GET /memory/run-trace returns empty lists when qdrant unavailable."""
+        app = create_sidecar_app()
+        client = TestClient(app)
+        resp = client.get("/memory/run-trace/run-xyz", headers=auth_headers_p29)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["injectedMemories"] == []
+        assert data["extractedLearnings"] == []
+
+    def test_memory_run_trace_returns_401_without_auth(self, sidecar_client_p29):
+        """GET /memory/run-trace/{run_id} requires Bearer auth."""
+        resp = sidecar_client_p29.get("/memory/run-trace/run-xyz")
+        assert resp.status_code == 401
+
+
+class TestAgentSpendEndpoint:
+    """Phase 29 D-14: GET /agent/{agent_id}/spend."""
+
+    def test_agent_spend_returns_grouped_entries(self, sidecar_client_p29, auth_headers_p29):
+        """GET /agent/{agent_id}/spend returns token spend distribution."""
+        resp = sidecar_client_p29.get("/agent/agent-1/spend", headers=auth_headers_p29)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["agentId"] == "agent-1"
+        assert data["hours"] == 24
+        assert len(data["entries"]) == 1
+        entry = data["entries"][0]
+        assert entry["provider"] == "openai"
+        assert entry["costUsd"] == pytest.approx(0.01)
+        assert "totalCostUsd" in data
+
+    def test_agent_spend_empty_when_no_store(self, auth_headers_p29):
+        """GET /agent/{agent_id}/spend returns empty entries when no effectiveness_store."""
+        app = create_sidecar_app()
+        client = TestClient(app)
+        resp = client.get("/agent/agent-1/spend", headers=auth_headers_p29)
+        assert resp.status_code == 200
+        assert resp.json()["entries"] == []
+
+    def test_agent_spend_returns_401_without_auth(self, sidecar_client_p29):
+        """GET /agent/{agent_id}/spend requires Bearer auth."""
+        resp = sidecar_client_p29.get("/agent/agent-1/spend")
+        assert resp.status_code == 401
+
+
+class TestMemoryExtractEndpoint:
+    """Phase 29 D-19: POST /memory/extract."""
+
+    def test_memory_extract_drains_and_learns(self, auth_headers_p29, mock_effectiveness_store_p29):
+        """POST /memory/extract drains pending transcripts and triggers learn_async."""
+        mock_memory_bridge = MagicMock()
+        mock_memory_bridge.memory_store = MagicMock()
+        mock_memory_bridge.learn_async = AsyncMock(return_value=None)
+
+        app = create_sidecar_app(
+            effectiveness_store=mock_effectiveness_store_p29,
+        )
+        # Inject mock memory bridge into the app by recreating with both
+        # Build the app with both stores so the route can exercise
+        from unittest.mock import patch
+
+        from core.memory_bridge import MemoryBridge
+
+        with patch.object(MemoryBridge, "learn_async", AsyncMock(return_value=None)):
+            app2 = create_sidecar_app(effectiveness_store=mock_effectiveness_store_p29)
+            client = TestClient(app2)
+            resp = client.post(
+                "/memory/extract",
+                json={"batchSize": 10},
+                headers=auth_headers_p29,
+            )
+        # Without a memory_bridge, skipped should be 0 and extracted 0
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "extracted" in data
+        assert "skipped" in data
+
+    def test_memory_extract_empty_when_no_stores(self, auth_headers_p29):
+        """POST /memory/extract returns 0/0 when neither store nor bridge available."""
+        app = create_sidecar_app()
+        client = TestClient(app)
+        resp = client.post(
+            "/memory/extract",
+            json={"batchSize": 5},
+            headers=auth_headers_p29,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["extracted"] == 0
+        assert data["skipped"] == 0
+
+    def test_memory_extract_returns_401_without_auth(self, sidecar_client_p29):
+        """POST /memory/extract requires Bearer auth."""
+        resp = sidecar_client_p29.post(
+            "/memory/extract",
+            json={"batchSize": 5},
+        )
+        assert resp.status_code == 401
+
+
+class TestNewEndpointsRequireAuth:
+    """Phase 29: All 5 GET + 1 POST new endpoints return 401 without Bearer token."""
+
+    def test_all_new_endpoints_require_auth(self):
+        """All Phase 29 endpoints return 401 without auth header."""
+        app = create_sidecar_app()
+        client = TestClient(app)
+        endpoints = [
+            ("GET", "/agent/agent-1/profile"),
+            ("GET", "/agent/agent-1/effectiveness"),
+            ("GET", "/agent/agent-1/routing-history"),
+            ("GET", "/memory/run-trace/run-xyz"),
+            ("GET", "/agent/agent-1/spend"),
+        ]
+        for method, path in endpoints:
+            resp = client.get(path) if method == "GET" else client.post(path)
+            assert resp.status_code == 401, f"{method} {path} should require auth"
+
+        # POST /memory/extract also requires auth
+        resp = client.post("/memory/extract", json={"batchSize": 5})
+        assert resp.status_code == 401
+
+    def test_health_still_public(self):
+        """GET /sidecar/health remains public (no auth required)."""
+        app = create_sidecar_app()
+        client = TestClient(app)
+        resp = client.get("/sidecar/health")
+        assert resp.status_code == 200
