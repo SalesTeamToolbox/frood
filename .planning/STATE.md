@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Custom Claude Code UI
-status: Ready to plan
-stopped_at: Phase 30 planning complete (2 plans)
-last_updated: "2026-03-31T21:28:21.299Z"
+status: Ready to execute
+stopped_at: Completed 30-01-PLAN.md
+last_updated: "2026-03-31T21:37:26.929Z"
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 17
-  completed_plans: 15
+  completed_plans: 16
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-28)
 
 **Core value:** Agent42 must always be able to run agents reliably, with tiered provider routing ensuring no single provider outage stops the platform.
-**Current focus:** Phase 29 — plugin-ui-learning-extraction
+**Current focus:** Phase 30 — advanced-teamtool-auto-memory
 
 ## Current Position
 
-Phase: 30
-Plan: Not started
+Phase: 30 (advanced-teamtool-auto-memory) — EXECUTING
+Plan: 2 of 2
 
 ## Completed Milestones
 
@@ -69,6 +69,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 29]: routing-decisions handler calls client.getAgentSpend — spend data serves routing widget per plan spec
 - [Phase 29]: Exclude src/ui from tsc compilation — esbuild handles TSX, preventing rootDir conflict with NodeNext module
 - [Phase 29]: companyId passed as context.companyId ?? undefined to match PluginHostContext nullable string | null type
+- [Phase 30-advanced-teamtool-auto-memory]: auto_memory defaults to True in AdapterConfig — opt-in disabling via autoMemory:false in adapter payload
+- [Phase 30-advanced-teamtool-auto-memory]: Strategy detection reads ctx.context.get('strategy', 'standard') — unknown values fall back to 'standard' with warning log
+- [Phase 30-advanced-teamtool-auto-memory]: memoryContext injected into ctx.context dict between routing and execution — allows AgentRuntime to access memories when wired (D-04)
 
 ### Pending Todos
 
@@ -92,6 +95,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-31T21:28:21.293Z
-Stopped at: Phase 30 planning complete (2 plans)
-Resume file: .planning/phases/30-advanced-teamtool-auto-memory/30-01-PLAN.md
+Last session: 2026-03-31T21:37:26.918Z
+Stopped at: Completed 30-01-PLAN.md
+Resume file: None
