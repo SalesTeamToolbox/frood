@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Custom Claude Code UI
 status: Ready to execute
-stopped_at: Completed 29-plugin-ui-learning-extraction 29-01-PLAN.md
-last_updated: "2026-03-31T17:18:22.674Z"
+stopped_at: Completed 29-plugin-ui-learning-extraction 29-02-PLAN.md
+last_updated: "2026-03-31T17:28:45.883Z"
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 15
-  completed_plans: 13
+  completed_plans: 14
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-03-28)
 ## Current Position
 
 Phase: 29 (plugin-ui-learning-extraction) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 
 ## Completed Milestones
 
@@ -65,6 +65,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 27]: JSON.stringify(sessionState) as sessionKey string: matches Python Pydantic sessionKey field type (D-08)
 - [Phase 29-01]: TierDeterminator.determine(success_rate, task_volume) used for agent tier in /agent/profile endpoint — sidecar agents use tool invocation counts as obs_count
 - [Phase 29-01]: drain_pending_transcripts strips internal SQLite id before returning — prevents leaking DB internals to callers
+- [Phase 29]: TestHarness.setup() does not exist in SDK — use plugin.definition.setup(harness.ctx) pattern matching existing worker.test.ts
+- [Phase 29]: routing-decisions handler calls client.getAgentSpend — spend data serves routing widget per plan spec
 
 ### Pending Todos
 
@@ -88,6 +90,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-31T17:18:22.667Z
-Stopped at: Completed 29-plugin-ui-learning-extraction 29-01-PLAN.md
+Last session: 2026-03-31T17:28:45.879Z
+Stopped at: Completed 29-plugin-ui-learning-extraction 29-02-PLAN.md
 Resume file: None
