@@ -46,6 +46,7 @@ class MemoryBridge:
         company_id: str = "",
         top_k: int = 5,
         score_threshold: float = 0.25,
+        run_id: str = "",
     ) -> list[dict]:
         """Scope-filtered semantic memory recall.
 
@@ -55,6 +56,7 @@ class MemoryBridge:
             company_id:      Optional. Further scopes to company when provided.
             top_k:           Maximum number of results to return.
             score_threshold: Minimum cosine similarity score (0.0–1.0).
+            run_id:          Optional. Tags returned results with which run consumed them (D-22).
 
         Returns:
             List of dicts with keys: text, score, source, metadata.
@@ -105,18 +107,19 @@ class MemoryBridge:
                     )
                     for hit in response.points:
                         payload = hit.payload or {}
-                        all_results.append(
-                            {
-                                "text": payload.get("text", ""),
-                                "score": round(hit.score, 4),
-                                "source": payload.get("source", ""),
-                                "metadata": {
-                                    k: v
-                                    for k, v in payload.items()
-                                    if k not in ("text", "source", "timestamp")
-                                },
-                            }
-                        )
+                        result_dict: dict = {
+                            "text": payload.get("text", ""),
+                            "score": round(hit.score, 4),
+                            "source": payload.get("source", ""),
+                            "metadata": {
+                                k: v
+                                for k, v in payload.items()
+                                if k not in ("text", "source", "timestamp")
+                            },
+                        }
+                        if run_id:
+                            result_dict["run_id"] = run_id
+                        all_results.append(result_dict)
                 except Exception as e:
                     logger.debug("recall: collection %s search failed: %s", collection_suffix, e)
 
@@ -135,6 +138,7 @@ class MemoryBridge:
         agent_id: str,
         company_id: str = "",
         task_type: str = "",
+        run_id: str = "",
     ) -> None:
         """Extract learnings from an agent execution summary and store in KNOWLEDGE.
 
@@ -146,6 +150,7 @@ class MemoryBridge:
             agent_id:   Agent whose session produced this summary.
             company_id: Optional company scope for multi-tenant isolation.
             task_type:  Optional task type hint for categorisation.
+            run_id:     Optional. Tags Qdrant KNOWLEDGE points with the originating run (D-23).
         """
         try:
             if not summary or not agent_id or not self.memory_store:
@@ -227,6 +232,7 @@ class MemoryBridge:
                         "company_id": company_id,
                         "task_type": task_type,
                         "tags": tags,
+                        "run_id": run_id,
                         "timestamp": time.time(),
                     }
                     await asyncio.to_thread(

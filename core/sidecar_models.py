@@ -169,3 +169,124 @@ class EffectivenessResponse(BaseModel):
     """Response body for POST /effectiveness/recommendations."""
 
     tools: list[ToolEffectivenessItem] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Phase 29 — Plugin UI & Learning Extraction models
+# ---------------------------------------------------------------------------
+
+
+class AgentProfileResponse(BaseModel):
+    """Response body for GET /agent/{agent_id}/profile (D-09)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    agent_id: str = Field(..., alias="agentId")
+    tier: str = "bronze"
+    success_rate: float = Field(default=0.0, alias="successRate")
+    task_volume: int = Field(default=0, alias="taskVolume")
+    avg_speed_ms: float = Field(default=0.0, alias="avgSpeedMs")
+    composite_score: float = Field(default=0.0, alias="compositeScore")
+
+
+class TaskTypeStats(BaseModel):
+    """Per-task-type effectiveness stats."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    task_type: str = Field(default="", alias="taskType")
+    success_rate: float = Field(default=0.0, alias="successRate")
+    count: int = 0
+    avg_duration_ms: float = Field(default=0.0, alias="avgDurationMs")
+
+
+class AgentEffectivenessResponse(BaseModel):
+    """Response body for GET /agent/{agent_id}/effectiveness (D-10)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    agent_id: str = Field(..., alias="agentId")
+    stats: list[TaskTypeStats] = Field(default_factory=list)
+
+
+class RoutingHistoryEntry(BaseModel):
+    """Single routing decision entry."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    run_id: str = Field(default="", alias="runId")
+    provider: str = ""
+    model: str = ""
+    tier: str = ""
+    task_category: str = Field(default="", alias="taskCategory")
+    ts: float = 0.0
+
+
+class RoutingHistoryResponse(BaseModel):
+    """Response body for GET /agent/{agent_id}/routing-history (D-11)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    agent_id: str = Field(..., alias="agentId")
+    entries: list[RoutingHistoryEntry] = Field(default_factory=list)
+
+
+class MemoryTraceItem(BaseModel):
+    """A single recalled memory or extracted learning in a run trace."""
+
+    text: str = ""
+    score: float = 0.0
+    source: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
+class MemoryRunTraceResponse(BaseModel):
+    """Response body for GET /memory/run-trace/{run_id} (D-13)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    run_id: str = Field(..., alias="runId")
+    injected_memories: list[MemoryTraceItem] = Field(default_factory=list, alias="injectedMemories")
+    extracted_learnings: list[MemoryTraceItem] = Field(
+        default_factory=list, alias="extractedLearnings"
+    )
+
+
+class SpendEntry(BaseModel):
+    """Single spend aggregation row."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    provider: str = ""
+    model: str = ""
+    input_tokens: int = Field(default=0, alias="inputTokens")
+    output_tokens: int = Field(default=0, alias="outputTokens")
+    cost_usd: float = Field(default=0.0, alias="costUsd")
+    hour_bucket: str = Field(default="", alias="hourBucket")
+
+
+class AgentSpendResponse(BaseModel):
+    """Response body for GET /agent/{agent_id}/spend (D-14)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    agent_id: str = Field(default="", alias="agentId")
+    hours: int = 24
+    entries: list[SpendEntry] = Field(default_factory=list)
+    total_cost_usd: float = Field(default=0.0, alias="totalCostUsd")
+
+
+class ExtractLearningsRequest(BaseModel):
+    """Request body for POST /memory/extract (D-19)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    since_ts: str | None = Field(default=None, alias="sinceTs")
+    batch_size: int = Field(default=20, alias="batchSize")
+
+
+class ExtractLearningsResponse(BaseModel):
+    """Response body for POST /memory/extract."""
+
+    extracted: int = 0
+    skipped: int = 0
