@@ -96,3 +96,83 @@ export interface MCPToolResponse {
   result: unknown;
   error: string | null;
 }
+
+// -- Agent Profile (GET /agent/{agentId}/profile) -- per D-09
+export interface AgentProfileResponse {
+  agentId: string;
+  tier: string;
+  successRate: number;
+  taskVolume: number;
+  avgSpeedMs: number;
+  compositeScore: number;
+}
+
+// -- Agent Effectiveness (GET /agent/{agentId}/effectiveness) -- per D-10
+export interface TaskTypeStats {
+  taskType: string;
+  successRate: number;
+  count: number;
+  avgDurationMs: number;
+}
+
+export interface AgentEffectivenessResponse {
+  agentId: string;
+  stats: TaskTypeStats[];
+}
+
+// -- Routing History (GET /agent/{agentId}/routing-history) -- per D-11
+export interface RoutingHistoryEntry {
+  runId: string;
+  provider: string;
+  model: string;
+  tier: string;
+  taskCategory: string;
+  ts: number;
+}
+
+export interface RoutingHistoryResponse {
+  agentId: string;
+  entries: RoutingHistoryEntry[];
+}
+
+// -- Memory Run Trace (GET /memory/run-trace/{runId}) -- per D-13
+export interface MemoryTraceItem {
+  text: string;
+  score: number;
+  source: string;
+  tags: string[];
+}
+
+export interface MemoryRunTraceResponse {
+  runId: string;
+  injectedMemories: MemoryTraceItem[];
+  extractedLearnings: MemoryTraceItem[];
+}
+
+// -- Agent Spend (GET /agent/{agentId}/spend) -- per D-14
+export interface SpendEntry {
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  hourBucket: string;
+}
+
+export interface AgentSpendResponse {
+  agentId: string;
+  hours: number;
+  entries: SpendEntry[];
+  totalCostUsd: number;
+}
+
+// -- Extract Learnings (POST /memory/extract) -- per D-19
+export interface ExtractLearningsRequest {
+  sinceTs: string | null;
+  batchSize: number;
+}
+
+export interface ExtractLearningsResponse {
+  extracted: number;
+  skipped: number;
+}

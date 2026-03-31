@@ -6,6 +6,7 @@ import type {
   RoutingResolveRequest,
   EffectivenessRequest,
   MCPToolRequest,
+  ExtractLearningsRequest,
 } from "../src/types.js";
 
 // ---------------------------------------------------------------------------
@@ -248,6 +249,126 @@ describe("Agent42Client", () => {
   describe("destroy()", () => {
     it("does not throw when called", () => {
       expect(() => client.destroy()).not.toThrow();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getAgentProfile()
+  // -------------------------------------------------------------------------
+  describe("getAgentProfile()", () => {
+    it("calls GET /agent/{id}/profile with auth", async () => {
+      const profile = { agentId: "a-1", tier: "gold", successRate: 0.95, taskVolume: 100, avgSpeedMs: 50, compositeScore: 0.9 };
+      const mockFetch = vi.fn().mockResolvedValue(makeMockResponse(200, profile));
+      vi.stubGlobal("fetch", mockFetch);
+
+      const result = await client.getAgentProfile("a-1");
+
+      const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("http://localhost:8001/agent/a-1/profile");
+      expect(init.method).toBe("GET");
+      expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer test-token");
+      expect(result).toEqual(profile);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getAgentEffectiveness()
+  // -------------------------------------------------------------------------
+  describe("getAgentEffectiveness()", () => {
+    it("calls GET /agent/{id}/effectiveness with auth", async () => {
+      const effectiveness = { agentId: "a-1", stats: [{ taskType: "code", successRate: 0.9, count: 10, avgDurationMs: 500 }] };
+      const mockFetch = vi.fn().mockResolvedValue(makeMockResponse(200, effectiveness));
+      vi.stubGlobal("fetch", mockFetch);
+
+      const result = await client.getAgentEffectiveness("a-1");
+
+      const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("http://localhost:8001/agent/a-1/effectiveness");
+      expect(init.method).toBe("GET");
+      expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer test-token");
+      expect(result).toHaveProperty("stats");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getRoutingHistory()
+  // -------------------------------------------------------------------------
+  describe("getRoutingHistory()", () => {
+    it("calls GET with limit query param", async () => {
+      const history = { agentId: "a-1", entries: [] };
+      const mockFetch = vi.fn().mockResolvedValue(makeMockResponse(200, history));
+      vi.stubGlobal("fetch", mockFetch);
+
+      await client.getRoutingHistory("a-1");
+
+      const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("http://localhost:8001/agent/a-1/routing-history?limit=20");
+    });
+
+    it("uses custom limit parameter", async () => {
+      const history = { agentId: "a-1", entries: [] };
+      const mockFetch = vi.fn().mockResolvedValue(makeMockResponse(200, history));
+      vi.stubGlobal("fetch", mockFetch);
+
+      await client.getRoutingHistory("a-1", 50);
+
+      const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toContain("?limit=50");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getMemoryRunTrace()
+  // -------------------------------------------------------------------------
+  describe("getMemoryRunTrace()", () => {
+    it("calls GET /memory/run-trace/{runId} with auth", async () => {
+      const trace = { runId: "r-1", injectedMemories: [], extractedLearnings: [] };
+      const mockFetch = vi.fn().mockResolvedValue(makeMockResponse(200, trace));
+      vi.stubGlobal("fetch", mockFetch);
+
+      const result = await client.getMemoryRunTrace("r-1");
+
+      const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("http://localhost:8001/memory/run-trace/r-1");
+      expect(init.method).toBe("GET");
+      expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer test-token");
+      expect(result).toHaveProperty("runId", "r-1");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getAgentSpend()
+  // -------------------------------------------------------------------------
+  describe("getAgentSpend()", () => {
+    it("calls GET with hours query param", async () => {
+      const spend = { agentId: "a-1", hours: 24, entries: [], totalCostUsd: 0 };
+      const mockFetch = vi.fn().mockResolvedValue(makeMockResponse(200, spend));
+      vi.stubGlobal("fetch", mockFetch);
+
+      await client.getAgentSpend("a-1");
+
+      const [url] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("http://localhost:8001/agent/a-1/spend?hours=24");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // extractLearnings()
+  // -------------------------------------------------------------------------
+  describe("extractLearnings()", () => {
+    it("calls POST /memory/extract with body", async () => {
+      const extractRequest: ExtractLearningsRequest = { sinceTs: null, batchSize: 20 };
+      const mockFetch = vi.fn().mockResolvedValue(makeMockResponse(200, { extracted: 3, skipped: 0 }));
+      vi.stubGlobal("fetch", mockFetch);
+
+      const result = await client.extractLearnings(extractRequest);
+
+      const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("http://localhost:8001/memory/extract");
+      expect(init.method).toBe("POST");
+      const body = JSON.parse(init.body as string);
+      expect(body).toEqual({ sinceTs: null, batchSize: 20 });
+      expect(result).toEqual({ extracted: 3, skipped: 0 });
     });
   });
 });
