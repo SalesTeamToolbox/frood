@@ -1,0 +1,249 @@
+/**
+ * client.ts -- Agent42Client: HTTP client wrapping all 6 sidecar endpoints.
+ *
+ * Endpoints:
+ *   GET  /sidecar/health                    -- NO auth, 5s timeout, 1 retry on 5xx
+ *   POST /memory/recall                     -- Bearer auth, timeoutMs, 1 retry on 5xx
+ *   POST /memory/store                      -- Bearer auth, timeoutMs, 1 retry on 5xx
+ *   POST /routing/resolve                   -- Bearer auth, timeoutMs, 1 retry on 5xx
+ *   POST /effectiveness/recommendations     -- Bearer auth, timeoutMs, 1 retry on 5xx
+ *   POST /mcp/tool                          -- Bearer auth, timeoutMs, 1 retry on 5xx
+ *
+ * Design decisions (per Phase 28 plan):
+ *   - Native fetch + AbortController (Node 18+ ships fetch natively)
+ *   - No external HTTP libraries to minimise bundle size
+ *   - Per-endpoint timeouts (health 5s, all POST endpoints use constructor timeoutMs)
+ *   - All POST endpoints retry once on 5xx with 1s backoff
+ */
+
+import type {
+  SidecarHealthResponse,
+  MemoryRecallRequest,
+  MemoryRecallResponse,
+  MemoryStoreRequest,
+  MemoryStoreResponse,
+  RoutingResolveRequest,
+  RoutingResolveResponse,
+  EffectivenessRequest,
+  EffectivenessResponse,
+  MCPToolRequest,
+  MCPToolResponse,
+} from "./types.js";
+
+export class Agent42Client {
+  private readonly timeoutMs: number;
+
+  constructor(
+    private readonly baseUrl: string,
+    private readonly bearerToken: string,
+    timeoutMs = 10_000,
+  ) {
+    this.timeoutMs = timeoutMs;
+  }
+
+  // -------------------------------------------------------------------------
+  // Public API
+  // -------------------------------------------------------------------------
+
+  /**
+   * GET /sidecar/health
+   * Public endpoint -- no Authorization header.
+   * Retries once on 5xx with 1s delay.
+   */
+  async health(): Promise<SidecarHealthResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/sidecar/health`,
+      {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      },
+      5_000,
+    );
+
+    if (!resp.ok) {
+      throw new Error(`Agent42Client.health failed: HTTP ${resp.status}`);
+    }
+
+    return resp.json() as Promise<SidecarHealthResponse>;
+  }
+
+  /**
+   * POST /memory/recall
+   * Bearer auth required.
+   * Retries once on 5xx with 1s delay.
+   */
+  async memoryRecall(body: MemoryRecallRequest): Promise<MemoryRecallResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/memory/recall`,
+      {
+        method: "POST",
+        headers: this.authHeaders(),
+        body: JSON.stringify(body),
+      },
+      this.timeoutMs,
+    );
+
+    if (!resp.ok) {
+      throw new Error(`Agent42Client.memoryRecall failed: HTTP ${resp.status}`);
+    }
+
+    return resp.json() as Promise<MemoryRecallResponse>;
+  }
+
+  /**
+   * POST /memory/store
+   * Bearer auth required.
+   * Retries once on 5xx with 1s delay.
+   */
+  async memoryStore(body: MemoryStoreRequest): Promise<MemoryStoreResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/memory/store`,
+      {
+        method: "POST",
+        headers: this.authHeaders(),
+        body: JSON.stringify(body),
+      },
+      this.timeoutMs,
+    );
+
+    if (!resp.ok) {
+      throw new Error(`Agent42Client.memoryStore failed: HTTP ${resp.status}`);
+    }
+
+    return resp.json() as Promise<MemoryStoreResponse>;
+  }
+
+  /**
+   * POST /routing/resolve
+   * Bearer auth required.
+   * Retries once on 5xx with 1s delay.
+   */
+  async routeTask(body: RoutingResolveRequest): Promise<RoutingResolveResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/routing/resolve`,
+      {
+        method: "POST",
+        headers: this.authHeaders(),
+        body: JSON.stringify(body),
+      },
+      this.timeoutMs,
+    );
+
+    if (!resp.ok) {
+      throw new Error(`Agent42Client.routeTask failed: HTTP ${resp.status}`);
+    }
+
+    return resp.json() as Promise<RoutingResolveResponse>;
+  }
+
+  /**
+   * POST /effectiveness/recommendations
+   * Bearer auth required.
+   * Retries once on 5xx with 1s delay.
+   */
+  async toolEffectiveness(body: EffectivenessRequest): Promise<EffectivenessResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/effectiveness/recommendations`,
+      {
+        method: "POST",
+        headers: this.authHeaders(),
+        body: JSON.stringify(body),
+      },
+      this.timeoutMs,
+    );
+
+    if (!resp.ok) {
+      throw new Error(`Agent42Client.toolEffectiveness failed: HTTP ${resp.status}`);
+    }
+
+    return resp.json() as Promise<EffectivenessResponse>;
+  }
+
+  /**
+   * POST /mcp/tool
+   * Bearer auth required.
+   * Retries once on 5xx with 1s delay.
+   */
+  async mcpTool(body: MCPToolRequest): Promise<MCPToolResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/mcp/tool`,
+      {
+        method: "POST",
+        headers: this.authHeaders(),
+        body: JSON.stringify(body),
+      },
+      this.timeoutMs,
+    );
+
+    if (!resp.ok) {
+      throw new Error(`Agent42Client.mcpTool failed: HTTP ${resp.status}`);
+    }
+
+    return resp.json() as Promise<MCPToolResponse>;
+  }
+
+  /**
+   * destroy() -- no-op for clean shutdown.
+   * Native fetch has no persistent connections to close, but provided for
+   * symmetric API with any future implementation using keep-alive.
+   */
+  destroy(): void {
+    // no-op: native fetch does not maintain persistent connections
+  }
+
+  // -------------------------------------------------------------------------
+  // Private helpers
+  // -------------------------------------------------------------------------
+
+  /**
+   * Returns Content-Type + Authorization headers.
+   */
+  private authHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.bearerToken) {
+      headers["Authorization"] = `Bearer ${this.bearerToken}`;
+    }
+    return headers;
+  }
+
+  /**
+   * fetchWithTimeout -- wraps fetch with an AbortController timeout.
+   * Clears the timeout in a finally block to prevent timer leaks.
+   */
+  private async fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  /**
+   * fetchWithRetry -- calls fetchWithTimeout; on 5xx retries once after 1s.
+   * Returns the Response (caller checks resp.ok and throws if needed).
+   */
+  private async fetchWithRetry(
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
+  ): Promise<Response> {
+    const firstResp = await this.fetchWithTimeout(url, init, timeoutMs);
+
+    if (firstResp.status >= 500) {
+      // Wait 1s then retry once
+      await new Promise<void>((r) => setTimeout(r, 1000));
+      return this.fetchWithTimeout(url, init, timeoutMs);
+    }
+
+    return firstResp;
+  }
+}
