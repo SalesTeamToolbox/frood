@@ -77,7 +77,7 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 - [x] Tiered routing bridge (task metadata → provider/model selection) — Validated in Phase 26
 - [x] Paperclip plugin (memory tools, MCP tool proxy, effectiveness panel) — Validated in Phase 28
 - [x] Plugin UI + Learning extraction (effectiveness tabs, provider health widget, memory browser, hourly learning job) — Validated in Phase 29
-- [ ] TeamTool integration as Paperclip task strategies
+- [x] TeamTool integration as Paperclip task strategies (fan-out + wave via plugin team_execute tool, auto-memory injection) — Validated in Phase 30
 - [ ] Docker Compose deployment (Paperclip + Agent42 + Qdrant + PostgreSQL)
 - [ ] Migration tooling (import existing agents into Paperclip company structure)
 
