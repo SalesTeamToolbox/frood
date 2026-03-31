@@ -176,3 +176,42 @@ export interface ExtractLearningsResponse {
   extracted: number;
   skipped: number;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 30 — TeamTool + Auto Memory types
+// ---------------------------------------------------------------------------
+
+export interface SubAgentResult {
+  agentId: string;
+  runId: string;
+  status: "invoked" | "completed" | "failed";
+  output: string;
+  costUsd: number;
+}
+
+export interface WaveOutput {
+  wave: number;
+  agentId: string;
+  runId: string;
+  status: "invoked" | "completed" | "failed";
+  output: string;
+}
+
+export interface WaveDefinition {
+  agentId: string;
+  task: string;
+}
+
+export interface TeamExecuteParams {
+  strategy: "fan-out" | "wave";
+  subAgentIds?: string[];
+  waves?: WaveDefinition[];
+  task: string;
+  context?: Record<string, unknown>;
+}
+
+export interface TeamExecuteResult {
+  strategy: string;
+  subResults?: SubAgentResult[];
+  waveOutputs?: WaveOutput[];
+}
