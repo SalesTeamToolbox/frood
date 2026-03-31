@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
 import type { ToolResult } from "@paperclipai/plugin-sdk";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import manifest from "../manifest.json" with { type: "json" };
 import plugin from "../src/worker.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -180,5 +185,13 @@ describe("Plugin Worker Lifecycle", () => {
 
     // Should complete without throwing
     await expect(harness.runJob("extract-learnings")).resolves.not.toThrow();
+  });
+
+  it("manifest includes agents.invoke, events.subscribe, plugin.state.read capabilities", () => {
+    const manifestPath = resolve(__dirname, "..", "manifest.json");
+    const parsed = JSON.parse(readFileSync(manifestPath, "utf8"));
+    expect(parsed.capabilities).toContain("agents.invoke");
+    expect(parsed.capabilities).toContain("events.subscribe");
+    expect(parsed.capabilities).toContain("plugin.state.read");
   });
 });
