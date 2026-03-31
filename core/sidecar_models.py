@@ -107,3 +107,65 @@ class MemoryStoreResponse(BaseModel):
 
     stored: bool = True
     point_id: str = ""
+
+
+class MCPToolRequest(BaseModel):
+    """Request body for POST /mcp/tool (PLUG-06, D-09)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    tool_name: str = Field(..., alias="toolName")
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class MCPToolResponse(BaseModel):
+    """Response body for POST /mcp/tool."""
+
+    result: Any = None
+    error: str | None = None
+
+
+class RoutingResolveRequest(BaseModel):
+    """Request body for POST /routing/resolve (PLUG-04)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    task_type: str = Field(..., alias="taskType")
+    agent_id: str = Field(..., alias="agentId")
+    quality_target: str = Field(default="", alias="qualityTarget")
+
+
+class RoutingResolveResponse(BaseModel):
+    """Response body for POST /routing/resolve."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    provider: str
+    model: str
+    tier: str
+    task_category: str = Field(default="", alias="taskCategory")
+
+
+class EffectivenessRequest(BaseModel):
+    """Request body for POST /effectiveness/recommendations (PLUG-05)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    task_type: str = Field(..., alias="taskType")
+    agent_id: str = Field(default="", alias="agentId")
+
+
+class ToolEffectivenessItem(BaseModel):
+    """Single tool effectiveness entry."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str
+    success_rate: float = Field(default=0.0, alias="successRate")
+    observations: int = 0
+
+
+class EffectivenessResponse(BaseModel):
+    """Response body for POST /effectiveness/recommendations."""
+
+    tools: list[ToolEffectivenessItem] = Field(default_factory=list)

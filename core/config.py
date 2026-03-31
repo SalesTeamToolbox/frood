@@ -316,6 +316,7 @@ class Settings:
     paperclip_sidecar_port: int = 8001
     paperclip_api_url: str = ""  # e.g. "http://paperclip:3000"
     sidecar_enabled: bool = False
+    mcp_tool_allowlist: str = ""  # Comma-separated tool names for /mcp/tool proxy (Phase 28)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -613,6 +614,7 @@ class Settings:
             paperclip_sidecar_port=int(os.getenv("PAPERCLIP_SIDECAR_PORT", "8001")),
             paperclip_api_url=os.getenv("PAPERCLIP_API_URL", ""),
             sidecar_enabled=os.getenv("SIDECAR_ENABLED", "false").lower() in ("true", "1", "yes"),
+            mcp_tool_allowlist=os.getenv("MCP_TOOL_ALLOWLIST", ""),
         )
 
     def get_discord_guild_ids(self) -> list[int]:
