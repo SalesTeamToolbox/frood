@@ -162,7 +162,7 @@ class TestMigrateCollection:
 
         dst = MagicMock()
 
-        total = asyncio.get_event_loop().run_until_complete(
+        total = asyncio.run(
             migrate_collection(src, dst, "agent42_memory", "target-comp", 100, False)
         )
 
@@ -183,7 +183,7 @@ class TestMigrateCollection:
 
         dst = MagicMock()
 
-        total = asyncio.get_event_loop().run_until_complete(
+        total = asyncio.run(
             migrate_collection(src, dst, "agent42_memory", "target-comp", 100, True)
         )
 
@@ -327,4 +327,4 @@ class TestMigrateEffectiveness:
             assert counts["spend_history"] == 1
             assert counts["run_transcripts"] == 1
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())
