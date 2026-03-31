@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Custom Claude Code UI
-status: Ready to plan
-stopped_at: Phase 31 context gathered
-last_updated: "2026-03-31T22:17:55.917Z"
+status: Ready to execute
+stopped_at: Completed 31-01-PLAN.md
+last_updated: "2026-03-31T23:00:25.424Z"
 progress:
   total_phases: 8
   completed_phases: 7
-  total_plans: 17
-  completed_plans: 17
+  total_plans: 19
+  completed_plans: 18
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-28)
 
 **Core value:** Agent42 must always be able to run agents reliably, with tiered provider routing ensuring no single provider outage stops the platform.
-**Current focus:** Phase 30 — advanced-teamtool-auto-memory
+**Current focus:** Phase 31 — advanced-migration-docker
 
 ## Current Position
 
-Phase: 31
-Plan: Not started
+Phase: 31 (advanced-migration-docker) — EXECUTING
+Plan: 2 of 2
 
 ## Completed Milestones
 
@@ -74,6 +74,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 30-advanced-teamtool-auto-memory]: memoryContext injected into ctx.context dict between routing and execution — allows AgentRuntime to access memories when wired (D-04)
 - [Phase 30-advanced-teamtool-auto-memory]: ctx.agents.invoke is fire-and-forget — fan-out subResults have status=invoked and empty output by SDK design
 - [Phase 30-advanced-teamtool-auto-memory]: Wave crash recovery reads ctx.state.get at run scope start and resumes from saved completedWaves index
+- [Phase 31]: UUID5 namespace shared with qdrant_store.py for deterministic point ID regeneration
+- [Phase 31]: INSERT OR IGNORE for idempotent effectiveness row migration
+- [Phase 31]: ensure_target_collections reuses QdrantStore._ensure_collection via __new__ pattern
 
 ### Pending Todos
 
@@ -97,6 +100,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-31T22:17:55.913Z
-Stopped at: Phase 31 context gathered
-Resume file: .planning/phases/31-advanced-migration-docker/31-CONTEXT.md
+Last session: 2026-03-31T23:00:25.418Z
+Stopped at: Completed 31-01-PLAN.md
+Resume file: None

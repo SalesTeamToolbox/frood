@@ -194,7 +194,7 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 31-01-PLAN.md — Migration CLI: Qdrant scroll-and-upsert with company_id remapping, SQLite bulk copy, tests
+- [x] 31-01-PLAN.md — Migration CLI: Qdrant scroll-and-upsert with company_id remapping, SQLite bulk copy, tests
 - [ ] 31-02-PLAN.md — Docker Compose: 5-service topology with health checks, .env.paperclip.example template
 
 ## Completed Workstreams
@@ -268,7 +268,7 @@ Archive: `milestones/v1.0-ROADMAP.md`
 | 28. Paperclip Plugin | v4.0 | 3/3 | Complete   | 2026-03-31 |
 | 29. Plugin UI + Learning Extraction | v4.0 | 3/3 | Complete    | 2026-03-31 |
 | 30. Advanced — TeamTool + Auto Memory | v4.0 | 2/2 | Complete    | 2026-03-31 |
-| 31. Advanced — Migration + Docker | v4.0 | 0/2 | Planning complete | - |
+| 31. Advanced — Migration + Docker | v4.0 | 1/2 | In Progress|  |
 
 | Milestone | Phases | Plans | Status | Shipped |
 | ----------- | -------- | ------- | -------- | --------- |

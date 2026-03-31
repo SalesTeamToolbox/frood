@@ -66,10 +66,10 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Advanced Features
 
-- [ ] **ADV-01**: Automatic memory injection on heartbeat — plugin subscribes to heartbeat event and prepends relevant context to agent prompt
-- [ ] **ADV-02**: TeamTool fan-out strategy — tasks tagged strategy:fan-out spawn parallel sub-agents and aggregate results
-- [ ] **ADV-03**: TeamTool wave strategy — sequential wave execution mapped to single Paperclip ticket lifecycle
-- [ ] **ADV-04**: Migration CLI imports existing Agent42 agents into Paperclip company structure preserving agent IDs
+- [x] **ADV-01**: Automatic memory injection on heartbeat — plugin subscribes to heartbeat event and prepends relevant context to agent prompt
+- [x] **ADV-02**: TeamTool fan-out strategy — tasks tagged strategy:fan-out spawn parallel sub-agents and aggregate results
+- [x] **ADV-03**: TeamTool wave strategy — sequential wave execution mapped to single Paperclip ticket lifecycle
+- [x] **ADV-04**: Migration CLI imports existing Agent42 agents into Paperclip company structure preserving agent IDs
 - [ ] **ADV-05**: Docker Compose config runs Paperclip + Agent42 sidecar + Qdrant + PostgreSQL with health checks and configurable ports
 
 ## v2 Requirements
@@ -138,10 +138,10 @@ Deferred to future release. Tracked but not in current roadmap.
 | UI-04 | Phase 29 | Complete |
 | LEARN-01 | Phase 29 | Complete |
 | LEARN-02 | Phase 29 | Complete |
-| ADV-01 | Phase 30 | Pending |
-| ADV-02 | Phase 30 | Pending |
-| ADV-03 | Phase 30 | Pending |
-| ADV-04 | Phase 31 | Pending |
+| ADV-01 | Phase 30 | Complete |
+| ADV-02 | Phase 30 | Complete |
+| ADV-03 | Phase 30 | Complete |
+| ADV-04 | Phase 31 | Complete |
 | ADV-05 | Phase 31 | Pending |
 
 **Coverage:**
