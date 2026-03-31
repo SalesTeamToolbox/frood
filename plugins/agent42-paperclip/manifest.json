@@ -1,7 +1,7 @@
 {
   "id": "agent42.paperclip-plugin",
   "apiVersion": 1,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "displayName": "Agent42",
   "description": "Gives Paperclip agents access to Agent42 memory recall, memory store, routing recommendations, effectiveness data, and MCP tool proxying",
   "author": "Agent42",
@@ -12,7 +12,10 @@
     "ui.detailTab.register",
     "ui.dashboardWidget.register",
     "jobs.schedule",
-    "plugin.state.write"
+    "plugin.state.write",
+    "plugin.state.read",
+    "agents.invoke",
+    "events.subscribe"
   ],
   "entrypoints": {
     "worker": "./dist/worker.js",
@@ -142,6 +145,22 @@
           "params": { "type": "object", "description": "Tool parameters", "additionalProperties": true }
         },
         "required": ["toolName"]
+      }
+    },
+    {
+      "name": "team_execute",
+      "displayName": "Team Execute",
+      "description": "Orchestrate parallel fan-out or sequential wave sub-agent execution",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "strategy": { "type": "string", "enum": ["fan-out", "wave"], "description": "Execution strategy" },
+          "subAgentIds": { "type": "array", "items": { "type": "string" }, "description": "Agent IDs for fan-out (required for fan-out)" },
+          "waves": { "type": "array", "items": { "type": "object", "properties": { "agentId": { "type": "string" }, "task": { "type": "string" } }, "required": ["agentId", "task"] }, "description": "Wave definitions (required for wave)" },
+          "task": { "type": "string", "description": "Task description for all sub-agents" },
+          "context": { "type": "object", "description": "Additional context", "additionalProperties": true }
+        },
+        "required": ["strategy", "task"]
       }
     }
   ]
