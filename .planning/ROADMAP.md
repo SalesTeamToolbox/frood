@@ -258,7 +258,7 @@ Archive: `milestones/v1.0-ROADMAP.md`
 | 26. Tiered Routing Bridge | v4.0 | 2/2 | Complete   | 2026-03-30 |
 | 27. Paperclip Adapter | v4.0 | 2/2 | Complete    | 2026-03-30 |
 | 28. Paperclip Plugin | v4.0 | 3/3 | Complete   | 2026-03-31 |
-| 29. Plugin UI + Learning Extraction | v4.0 | 3/3 | Complete   | 2026-03-31 |
+| 29. Plugin UI + Learning Extraction | v4.0 | 3/3 | Complete    | 2026-03-31 |
 | 30. Advanced — TeamTool + Auto Memory | v4.0 | 0/TBD | Not started | - |
 | 31. Advanced — Migration + Docker | v4.0 | 0/TBD | Not started | - |
 
