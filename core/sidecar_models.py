@@ -16,6 +16,7 @@ class AdapterConfig(BaseModel):
     memory_scope: str = Field(default="agent", alias="memoryScope")
     preferred_provider: str = Field(default="", alias="preferredProvider")
     agent_id: str = Field(default="", alias="agentId")
+    auto_memory: bool = Field(default=True, alias="autoMemory")
 
 
 class AdapterExecutionContext(BaseModel):
@@ -290,3 +291,47 @@ class ExtractLearningsResponse(BaseModel):
 
     extracted: int = 0
     skipped: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 30 — TeamTool + Auto Memory models
+# ---------------------------------------------------------------------------
+
+
+class SubAgentResult(BaseModel):
+    """Result from a single sub-agent invocation in fan-out strategy."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    agent_id: str = Field(..., alias="agentId")
+    run_id: str = Field(default="", alias="runId")
+    status: str = "invoked"
+    output: str = ""
+    cost_usd: float = Field(default=0.0, alias="costUsd")
+
+
+class WaveOutput(BaseModel):
+    """Output from a single wave in wave strategy execution."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    wave: int = 1
+    agent_id: str = Field(default="", alias="agentId")
+    run_id: str = Field(default="", alias="runId")
+    status: str = "invoked"
+    output: str = ""
+
+
+class TeamExecuteRequest(BaseModel):
+    """Request body for team strategy execution (fan-out or wave)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    run_id: str = Field(..., alias="runId")
+    agent_id: str = Field(..., alias="agentId")
+    company_id: str = Field(default="", alias="companyId")
+    strategy: str = "standard"
+    sub_agent_ids: list[str] = Field(default_factory=list, alias="subAgentIds")
+    waves: list[dict[str, Any]] = Field(default_factory=list)
+    task: str = ""
+    context: dict[str, Any] = Field(default_factory=dict)
