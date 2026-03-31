@@ -1,11 +1,13 @@
 {
   "name": "@agent42/paperclip-plugin",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "main": "dist/worker.js",
   "types": "dist/worker.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node build-ui.mjs",
+    "build:worker": "tsc",
+    "build:ui": "node build-ui.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
@@ -15,6 +17,9 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "esbuild": "^0.25.0",
+    "react": "^18.3.1",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
   },

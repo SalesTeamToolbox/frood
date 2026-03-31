@@ -1,15 +1,61 @@
 {
   "id": "agent42.paperclip-plugin",
   "apiVersion": 1,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "Agent42",
   "description": "Gives Paperclip agents access to Agent42 memory recall, memory store, routing recommendations, effectiveness data, and MCP tool proxying",
   "author": "Agent42",
   "categories": ["automation"],
-  "capabilities": ["http.outbound", "agent.tools.register"],
+  "capabilities": [
+    "http.outbound",
+    "agent.tools.register",
+    "ui.detailTab.register",
+    "ui.dashboardWidget.register",
+    "jobs.schedule",
+    "plugin.state.write"
+  ],
   "entrypoints": {
-    "worker": "./dist/worker.js"
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui"
   },
+  "ui": {
+    "slots": [
+      {
+        "type": "detailTab",
+        "id": "agent-effectiveness",
+        "displayName": "Effectiveness",
+        "exportName": "AgentEffectivenessTab",
+        "entityTypes": ["agent"]
+      },
+      {
+        "type": "dashboardWidget",
+        "id": "provider-health",
+        "displayName": "Agent42 Provider Health",
+        "exportName": "ProviderHealthWidget"
+      },
+      {
+        "type": "detailTab",
+        "id": "memory-browser",
+        "displayName": "Memory",
+        "exportName": "MemoryBrowserTab",
+        "entityTypes": ["run"]
+      },
+      {
+        "type": "dashboardWidget",
+        "id": "routing-decisions",
+        "displayName": "Agent42 Routing",
+        "exportName": "RoutingDecisionsWidget"
+      }
+    ]
+  },
+  "jobs": [
+    {
+      "jobKey": "extract-learnings",
+      "displayName": "Extract Learnings",
+      "description": "Hourly job that extracts structured learnings from Paperclip run transcripts",
+      "schedule": "0 * * * *"
+    }
+  ],
   "instanceConfigSchema": {
     "type": "object",
     "properties": {

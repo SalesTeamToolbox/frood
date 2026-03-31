@@ -28,6 +28,13 @@ import type {
   EffectivenessResponse,
   MCPToolRequest,
   MCPToolResponse,
+  AgentProfileResponse,
+  AgentEffectivenessResponse,
+  RoutingHistoryResponse,
+  MemoryRunTraceResponse,
+  AgentSpendResponse,
+  ExtractLearningsRequest,
+  ExtractLearningsResponse,
 } from "./types.js";
 
 export class Agent42Client {
@@ -180,6 +187,75 @@ export class Agent42Client {
     }
 
     return resp.json() as Promise<MCPToolResponse>;
+  }
+
+  /**
+   * GET /agent/{agentId}/profile
+   * Bearer auth required. Retries once on 5xx.
+   */
+  async getAgentProfile(agentId: string): Promise<AgentProfileResponse> {
+    const url = `${this.baseUrl}/agent/${encodeURIComponent(agentId)}/profile`;
+    const resp = await this.fetchWithRetry(url, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
+    if (!resp.ok) throw new Error(`Agent42Client.getAgentProfile failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<AgentProfileResponse>;
+  }
+
+  /**
+   * GET /agent/{agentId}/effectiveness
+   * Bearer auth required. Retries once on 5xx.
+   */
+  async getAgentEffectiveness(agentId: string): Promise<AgentEffectivenessResponse> {
+    const url = `${this.baseUrl}/agent/${encodeURIComponent(agentId)}/effectiveness`;
+    const resp = await this.fetchWithRetry(url, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
+    if (!resp.ok) throw new Error(`Agent42Client.getAgentEffectiveness failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<AgentEffectivenessResponse>;
+  }
+
+  /**
+   * GET /agent/{agentId}/routing-history?limit=N
+   * Bearer auth required. Retries once on 5xx.
+   */
+  async getRoutingHistory(agentId: string, limit = 20): Promise<RoutingHistoryResponse> {
+    const url = `${this.baseUrl}/agent/${encodeURIComponent(agentId)}/routing-history?limit=${limit}`;
+    const resp = await this.fetchWithRetry(url, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
+    if (!resp.ok) throw new Error(`Agent42Client.getRoutingHistory failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<RoutingHistoryResponse>;
+  }
+
+  /**
+   * GET /memory/run-trace/{runId}
+   * Bearer auth required. Retries once on 5xx.
+   */
+  async getMemoryRunTrace(runId: string): Promise<MemoryRunTraceResponse> {
+    const url = `${this.baseUrl}/memory/run-trace/${encodeURIComponent(runId)}`;
+    const resp = await this.fetchWithRetry(url, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
+    if (!resp.ok) throw new Error(`Agent42Client.getMemoryRunTrace failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<MemoryRunTraceResponse>;
+  }
+
+  /**
+   * GET /agent/{agentId}/spend?hours=N
+   * Bearer auth required. Retries once on 5xx.
+   */
+  async getAgentSpend(agentId: string, hours = 24): Promise<AgentSpendResponse> {
+    const url = `${this.baseUrl}/agent/${encodeURIComponent(agentId)}/spend?hours=${hours}`;
+    const resp = await this.fetchWithRetry(url, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
+    if (!resp.ok) throw new Error(`Agent42Client.getAgentSpend failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<AgentSpendResponse>;
+  }
+
+  /**
+   * POST /memory/extract
+   * Bearer auth required. Retries once on 5xx.
+   */
+  async extractLearnings(body: ExtractLearningsRequest): Promise<ExtractLearningsResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/memory/extract`,
+      { method: "POST", headers: this.authHeaders(), body: JSON.stringify(body) },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.extractLearnings failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<ExtractLearningsResponse>;
   }
 
   /**
