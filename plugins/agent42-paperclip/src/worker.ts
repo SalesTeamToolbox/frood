@@ -29,6 +29,14 @@ const plugin = definePlugin({
     // Register all tools synchronously before setup() resolves (Pitfall 6)
     registerTools(ctx, client);
 
+    // Register agent.run.started event for auto-memory observability (ADV-01, D-13)
+    ctx.events.on("agent.run.started", async (event) => {
+      ctx.logger.info("Agent run started — auto-memory active", {
+        agentId: event.entityId,
+        companyId: event.companyId,
+      });
+    });
+
     // Register UI data handlers (D-16) — one per UI panel
     ctx.data.register("agent-profile", async (params) => {
       const agentId = params?.agentId as string | undefined;
