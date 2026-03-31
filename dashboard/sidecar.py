@@ -1,10 +1,13 @@
 """Agent42 sidecar — lightweight FastAPI server for Paperclip integration.
 
 create_sidecar_app() returns a FastAPI instance with only sidecar routes:
-- GET  /sidecar/health   — public, no auth (D-05)
-- POST /sidecar/execute  — Bearer auth required (D-04)
-- POST /memory/recall    — Bearer auth required (MEM-04, D-13)
-- POST /memory/store     — Bearer auth required (MEM-04, D-14)
+- GET  /sidecar/health              — public, no auth (D-05)
+- POST /sidecar/execute             — Bearer auth required (D-04)
+- POST /memory/recall               — Bearer auth required (MEM-04, D-13)
+- POST /memory/store                — Bearer auth required (MEM-04, D-14)
+- POST /routing/resolve             — Bearer auth required (PLUG-04, Phase 28)
+- POST /effectiveness/recommendations — Bearer auth required (PLUG-05, Phase 28)
+- POST /mcp/tool                    — Bearer auth required (PLUG-06, Phase 28)
 
 This is a SEPARATE app factory from dashboard/server.py:create_app() per D-01.
 """
@@ -14,17 +17,26 @@ import logging
 from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI
+from fastapi.responses import JSONResponse
 
+from core.config import settings
 from core.memory_bridge import MemoryBridge
 from core.reward_system import TierDeterminator
 from core.sidecar_models import (
     AdapterExecutionContext,
+    EffectivenessRequest,
+    EffectivenessResponse,
     ExecuteResponse,
     HealthResponse,
+    MCPToolRequest,
+    MCPToolResponse,
     MemoryRecallRequest,
     MemoryRecallResponse,
     MemoryStoreRequest,
     MemoryStoreResponse,
+    RoutingResolveRequest,
+    RoutingResolveResponse,
+    ToolEffectivenessItem,
 )
 from core.sidecar_orchestrator import (
     SidecarOrchestrator,
@@ -43,6 +55,7 @@ def create_sidecar_app(
     effectiveness_store: Any = None,
     reward_system: Any = None,
     qdrant_store: Any = None,
+    mcp_registry: Any = None,  # MCPRegistryAdapter for /mcp/tool proxy (Phase 28)
 ) -> FastAPI:
     """Create a lightweight FastAPI application for sidecar mode.
 
@@ -56,6 +69,7 @@ def create_sidecar_app(
         effectiveness_store: EffectivenessStore instance (for recording outcomes)
         reward_system: RewardSystem instance or None (for tier-based routing)
         qdrant_store: QdrantStore instance or None (for health check)
+        mcp_registry: MCPRegistryAdapter instance or None (for /mcp/tool proxy)
     """
     app = FastAPI(
         title="Agent42 Sidecar",
@@ -244,5 +258,88 @@ def create_sidecar_app(
         except Exception as exc:
             logger.warning("Memory store route failed: %s", exc)
             return MemoryStoreResponse(stored=False, point_id="")
+
+    # -- Routing resolve endpoint (Bearer auth required, PLUG-04, Phase 28) --
+
+    @app.post("/routing/resolve", response_model=RoutingResolveResponse)
+    async def routing_resolve(
+        req: RoutingResolveRequest,
+        _user: str = Depends(get_current_user),
+    ) -> RoutingResolveResponse:
+        """Resolve optimal provider+model for a task type (PLUG-04)."""
+        try:
+            decision = await tiered_routing_bridge.resolve(
+                role=req.task_type,
+                agent_id=req.agent_id,
+                preferred_provider="",
+            )
+            return RoutingResolveResponse(
+                provider=decision.provider,
+                model=decision.model,
+                tier=decision.tier,
+                task_category=decision.task_category,
+            )
+        except Exception as exc:
+            logger.warning("Routing resolve failed: %s", exc)
+            return RoutingResolveResponse(provider="", model="", tier="", task_category="")
+
+    # -- Effectiveness recommendations endpoint (Bearer auth required, PLUG-05, Phase 28) --
+
+    @app.post("/effectiveness/recommendations", response_model=EffectivenessResponse)
+    async def effectiveness_recommendations(
+        req: EffectivenessRequest,
+        _user: str = Depends(get_current_user),
+    ) -> EffectivenessResponse:
+        """Return top tools by success rate for a task type (PLUG-05)."""
+        if not effectiveness_store:
+            return EffectivenessResponse(tools=[])
+        try:
+            recs = await effectiveness_store.get_recommendations(
+                task_type=req.task_type,
+                min_observations=5,
+                top_k=3,
+            )
+            items = [
+                ToolEffectivenessItem(
+                    name=r.get("tool_name", r.get("name", "")),
+                    success_rate=float(r.get("success_rate", 0.0)),
+                    observations=int(r.get("invocations", r.get("observations", 0))),
+                )
+                for r in recs
+            ]
+            return EffectivenessResponse(tools=items)
+        except Exception as exc:
+            logger.warning("Effectiveness recommendations failed: %s", exc)
+            return EffectivenessResponse(tools=[])
+
+    # -- MCP tool proxy endpoint (Bearer auth + allowlist required, PLUG-06, Phase 28) --
+
+    @app.post("/mcp/tool", response_model=MCPToolResponse)
+    async def mcp_tool_proxy(
+        req: MCPToolRequest,
+        _user: str = Depends(get_current_user),
+    ) -> MCPToolResponse | JSONResponse:
+        """Execute an allowlisted MCP tool (PLUG-06, D-05 through D-09)."""
+        # Allowlist check
+        allowlist_str = settings.mcp_tool_allowlist
+        if not allowlist_str:
+            return MCPToolResponse(result=None, error="MCP tool proxy disabled (empty allowlist)")
+        allowlist = {t.strip() for t in allowlist_str.split(",") if t.strip()}
+        if req.tool_name not in allowlist:
+            # Return 403 for non-allowlisted tools
+            return JSONResponse(
+                status_code=403,
+                content={"result": None, "error": f"Tool '{req.tool_name}' not in allowlist"},
+            )
+        if not mcp_registry:
+            return MCPToolResponse(result=None, error="MCP registry not available")
+        try:
+            content_blocks = await mcp_registry.call_tool(req.tool_name, req.params)
+            # Extract text from content blocks
+            texts = [getattr(b, "text", str(b)) for b in content_blocks]
+            return MCPToolResponse(result="\n".join(texts), error=None)
+        except Exception as exc:
+            logger.warning("MCP tool proxy failed for %s: %s", req.tool_name, exc)
+            return MCPToolResponse(result=None, error=str(exc))
 
     return app
