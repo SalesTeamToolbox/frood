@@ -2,7 +2,7 @@
 
 import json
 import logging
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,6 +16,7 @@ from core.sidecar_models import (
     ExecuteResponse,
 )
 from core.sidecar_orchestrator import (
+    SidecarOrchestrator,
     _active_runs,
     is_duplicate_run,
     register_run,
@@ -564,7 +565,6 @@ class TestMemoryExtractEndpoint:
         )
         # Inject mock memory bridge into the app by recreating with both
         # Build the app with both stores so the route can exercise
-        from unittest.mock import patch
 
         from core.memory_bridge import MemoryBridge
 
@@ -633,3 +633,133 @@ class TestNewEndpointsRequireAuth:
         client = TestClient(app)
         resp = client.get("/sidecar/health")
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Phase 30 — Auto-memory injection + strategy detection tests
+# ---------------------------------------------------------------------------
+
+
+class TestAutoMemoryInjection:
+    """ADV-01: Auto-memory injection in execute_async + strategy detection (D-17, D-18, D-19)."""
+
+    def _make_orchestrator(self, memories=None, auto_memory=True):
+        """Create a SidecarOrchestrator with a mock memory_bridge."""
+        mock_bridge = MagicMock()
+        mock_bridge.recall = AsyncMock(return_value=memories if memories is not None else [])
+        mock_bridge.learn_async = AsyncMock(return_value=None)
+        orch = SidecarOrchestrator(memory_bridge=mock_bridge)
+        return orch, mock_bridge
+
+    def _make_ctx(self, auto_memory=True, context=None):
+        """Create an AdapterExecutionContext with given auto_memory and context."""
+        cfg = AdapterConfig(auto_memory=auto_memory)
+        return AdapterExecutionContext(
+            run_id="run-test-1",
+            agent_id="agent-test-1",
+            adapter_config=cfg,
+            context=context or {},
+        )
+
+    @pytest.mark.asyncio
+    async def test_auto_memory_injects_when_memories_recalled(self):
+        """Recalled memories are injected into ctx.context['memoryContext']."""
+        memories = [{"text": "test memory", "score": 0.9, "source": "test"}]
+        orch, _ = self._make_orchestrator(memories=memories)
+        ctx = self._make_ctx(auto_memory=True)
+
+        with patch.object(orch, "_post_callback", AsyncMock(return_value=None)):
+            await orch.execute_async("run-test-1", ctx)
+
+        assert "memoryContext" in ctx.context
+        mc = ctx.context["memoryContext"]
+        assert mc["count"] == 1
+        assert len(mc["memories"]) == 1
+        assert mc["memories"][0]["text"] == "test memory"
+        assert mc["memories"][0]["score"] == 0.9
+        assert "injectedAt" in mc
+
+    @pytest.mark.asyncio
+    async def test_auto_memory_in_callback(self):
+        """Callback result includes autoMemory metadata with count and injectedAt."""
+        memories = [{"text": "test memory", "score": 0.9, "source": "test"}]
+        orch, _ = self._make_orchestrator(memories=memories)
+        ctx = self._make_ctx(auto_memory=True)
+
+        callback_result = {}
+
+        async def capture_callback(run_id, status, result, usage, error):
+            callback_result.update(result)
+
+        with patch.object(orch, "_post_callback", side_effect=capture_callback):
+            await orch.execute_async("run-test-1", ctx)
+
+        assert "autoMemory" in callback_result
+        assert callback_result["autoMemory"] is not None
+        assert callback_result["autoMemory"]["count"] == 1
+        assert callback_result["autoMemory"]["injectedAt"] is not None
+
+    @pytest.mark.asyncio
+    async def test_auto_memory_disabled(self):
+        """When auto_memory=False, memoryContext is NOT injected into ctx.context."""
+        memories = [{"text": "test memory", "score": 0.9, "source": "test"}]
+        orch, _ = self._make_orchestrator(memories=memories)
+        ctx = self._make_ctx(auto_memory=False)
+
+        with patch.object(orch, "_post_callback", AsyncMock(return_value=None)):
+            await orch.execute_async("run-test-1", ctx)
+
+        assert "memoryContext" not in ctx.context
+
+    @pytest.mark.asyncio
+    async def test_auto_memory_no_memories(self):
+        """When memory_bridge returns [], memoryContext is NOT injected and autoMemory is None."""
+        orch, _ = self._make_orchestrator(memories=[])
+        ctx = self._make_ctx(auto_memory=True)
+
+        callback_result = {}
+
+        async def capture_callback(run_id, status, result, usage, error):
+            callback_result.update(result)
+
+        with patch.object(orch, "_post_callback", side_effect=capture_callback):
+            await orch.execute_async("run-test-1", ctx)
+
+        assert "memoryContext" not in ctx.context
+        assert callback_result.get("autoMemory") is None
+
+    @pytest.mark.asyncio
+    async def test_strategy_standard_default(self, caplog):
+        """When no strategy in context, defaults to 'standard' with no unknown-strategy warning."""
+        orch, _ = self._make_orchestrator(memories=[])
+        ctx = self._make_ctx()  # No strategy in context
+
+        with caplog.at_level(logging.WARNING, logger="agent42.sidecar.orchestrator"):
+            with patch.object(orch, "_post_callback", AsyncMock(return_value=None)):
+                await orch.execute_async("run-test-1", ctx)
+
+        assert "Unknown strategy" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_strategy_unknown_falls_back(self, caplog):
+        """Unknown strategy value produces a warning log and falls back to 'standard'."""
+        orch, _ = self._make_orchestrator(memories=[])
+        ctx = self._make_ctx(context={"strategy": "unknown"})
+
+        with caplog.at_level(logging.WARNING, logger="agent42.sidecar.orchestrator"):
+            with patch.object(orch, "_post_callback", AsyncMock(return_value=None)):
+                await orch.execute_async("run-test-1", ctx)
+
+        assert "Unknown strategy 'unknown'" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_strategy_fan_out_detected(self, caplog):
+        """fan-out strategy is detected and logged at INFO level."""
+        orch, _ = self._make_orchestrator(memories=[])
+        ctx = self._make_ctx(context={"strategy": "fan-out"})
+
+        with caplog.at_level(logging.INFO, logger="agent42.sidecar.orchestrator"):
+            with patch.object(orch, "_post_callback", AsyncMock(return_value=None)):
+                await orch.execute_async("run-test-1", ctx)
+
+        assert "strategy 'fan-out'" in caplog.text
