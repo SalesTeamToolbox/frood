@@ -12,6 +12,9 @@ import { registerTools } from "./tools.js";
 
 let client: Agent42Client | null = null;
 
+// Terminal session tracking (Phase 36) — maps sessionId to WebSocket
+const terminalSessions = new Map<string, WebSocket>();
+
 const plugin = definePlugin({
   async setup(ctx: PluginContext) {
     const config = await ctx.config.get();
@@ -91,6 +94,162 @@ const plugin = definePlugin({
         ctx.logger.warn("agent-effectiveness data handler failed", { error: String(e) });
         return null;
       }
+    });
+
+    // -- Phase 36: Data handlers for Paperclip integration --
+
+    ctx.data.register("tools-skills", async (_params) => {
+      if (!client) return null;
+      try {
+        const [toolsRes, skillsRes] = await Promise.all([
+          client.getTools(),
+          client.getSkills(),
+        ]);
+        return { tools: toolsRes.tools, skills: skillsRes.skills };
+      } catch (e) {
+        ctx.logger.warn("tools-skills data handler failed", { error: String(e) });
+        return null;
+      }
+    });
+
+    ctx.data.register("apps-list", async (_params) => {
+      if (!client) return null;
+      try {
+        return await client.getApps();
+      } catch (e) {
+        ctx.logger.warn("apps-list data handler failed", { error: String(e) });
+        return null;
+      }
+    });
+
+    ctx.data.register("agent42-settings", async (_params) => {
+      if (!client) return null;
+      try {
+        return await client.getSettings();
+      } catch (e) {
+        ctx.logger.warn("agent42-settings data handler failed", { error: String(e) });
+        return null;
+      }
+    });
+
+    // -- Phase 36: Action handlers --
+
+    ctx.actions.register("app-start", async (params) => {
+      const appId = params?.appId as string;
+      if (!appId || !client) return { ok: false, message: "Missing appId or client" };
+      try {
+        return await client.startApp(appId);
+      } catch (e) {
+        ctx.logger.warn("app-start action failed", { error: String(e) });
+        return { ok: false, message: String(e) };
+      }
+    });
+
+    ctx.actions.register("app-stop", async (params) => {
+      const appId = params?.appId as string;
+      if (!appId || !client) return { ok: false, message: "Missing appId or client" };
+      try {
+        return await client.stopApp(appId);
+      } catch (e) {
+        ctx.logger.warn("app-stop action failed", { error: String(e) });
+        return { ok: false, message: String(e) };
+      }
+    });
+
+    ctx.actions.register("update-agent42-settings", async (params) => {
+      const keyName = params?.key_name as string;
+      const value = params?.value as string;
+      if (!keyName || !client) return { ok: false, message: "Missing key_name or client" };
+      try {
+        return await client.updateSettings({ key_name: keyName, value: value ?? "" });
+      } catch (e) {
+        ctx.logger.warn("update-agent42-settings action failed", { error: String(e) });
+        return { ok: false, message: String(e) };
+      }
+    });
+
+    // -- Phase 36: Terminal stream and action handlers (PAPERCLIP-01) --
+    // Per D-01: Terminal communicates with Agent42 sidecar via WebSocket for real-time interaction
+    // Per D-12: Real-time updates via WebSocket connections
+
+    ctx.actions.register("terminal-start", async (params) => {
+      const sessionId = (params?.sessionId as string) ?? crypto.randomUUID();
+      if (!client) return { ok: false, sessionId, message: "Client not initialized" };
+
+      try {
+        const config = await ctx.config.get();
+        const httpBaseUrl = config.agent42BaseUrl as string;
+        const apiKey = config.apiKey as string;
+
+        // Per CLAUDE.md rule 6: NEVER log/expose API keys in URLs or server logs.
+        // Request a short-lived session token via authenticated REST endpoint,
+        // then open WebSocket with that token (short-lived, not the API key).
+        const tokenResp = await fetch(`${httpBaseUrl}/ws/terminal-token`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+        });
+        if (!tokenResp.ok) throw new Error(`Terminal token request failed: HTTP ${tokenResp.status}`);
+        const { token: wsToken } = (await tokenResp.json()) as { token: string };
+
+        const wsBaseUrl = httpBaseUrl.replace(/^http/, "ws");
+        const wsUrl = `${wsBaseUrl}/ws/terminal?session=${encodeURIComponent(wsToken)}`;
+
+        const ws = new WebSocket(wsUrl);
+        terminalSessions.set(sessionId, ws);
+
+        ws.onmessage = (event) => {
+          ctx.streams.emit("terminal-output", {
+            sessionId,
+            text: typeof event.data === "string" ? event.data : "",
+            ts: Date.now(),
+          });
+        };
+
+        ws.onerror = (err) => {
+          ctx.logger.warn("Terminal WebSocket error", { sessionId, error: String(err) });
+          ctx.streams.emit("terminal-output", {
+            sessionId,
+            text: "\r\n[Terminal connection error]\r\n",
+            ts: Date.now(),
+          });
+        };
+
+        ws.onclose = () => {
+          terminalSessions.delete(sessionId);
+          ctx.streams.emit("terminal-output", {
+            sessionId,
+            text: "\r\n[Terminal session closed]\r\n",
+            ts: Date.now(),
+          });
+        };
+
+        return { ok: true, sessionId };
+      } catch (e) {
+        ctx.logger.warn("terminal-start failed", { error: String(e) });
+        return { ok: false, sessionId, message: String(e) };
+      }
+    });
+
+    ctx.actions.register("terminal-input", async (params) => {
+      const sessionId = params?.sessionId as string;
+      const data = params?.data as string;
+      if (!sessionId || !data) return { ok: false };
+      const ws = terminalSessions.get(sessionId);
+      if (!ws || ws.readyState !== WebSocket.OPEN) return { ok: false, message: "No active session" };
+      ws.send(data);
+      return { ok: true };
+    });
+
+    // Per research Pitfall 4: Explicit cleanup to prevent PTY resource leaks
+    ctx.actions.register("terminal-close", async (params) => {
+      const sessionId = params?.sessionId as string;
+      if (!sessionId) return { ok: false };
+      const ws = terminalSessions.get(sessionId);
+      if (ws) {
+        ws.close();
+        terminalSessions.delete(sessionId);
+      }
+      return { ok: true };
     });
 
     // Register learning extraction job handler (D-17, D-19, D-20)
