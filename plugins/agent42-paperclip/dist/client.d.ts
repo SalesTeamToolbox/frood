@@ -15,7 +15,7 @@
  *   - Per-endpoint timeouts (health 5s, all POST endpoints use constructor timeoutMs)
  *   - All POST endpoints retry once on 5xx with 1s backoff
  */
-import type { SidecarHealthResponse, MemoryRecallRequest, MemoryRecallResponse, MemoryStoreRequest, MemoryStoreResponse, RoutingResolveRequest, RoutingResolveResponse, EffectivenessRequest, EffectivenessResponse, MCPToolRequest, MCPToolResponse, AgentProfileResponse, AgentEffectivenessResponse, RoutingHistoryResponse, MemoryRunTraceResponse, AgentSpendResponse, ExtractLearningsRequest, ExtractLearningsResponse } from "./types.js";
+import type { SidecarHealthResponse, MemoryRecallRequest, MemoryRecallResponse, MemoryStoreRequest, MemoryStoreResponse, RoutingResolveRequest, RoutingResolveResponse, EffectivenessRequest, EffectivenessResponse, MCPToolRequest, MCPToolResponse, AgentProfileResponse, AgentEffectivenessResponse, RoutingHistoryResponse, MemoryRunTraceResponse, AgentSpendResponse, ExtractLearningsRequest, ExtractLearningsResponse, ToolsListResponse, SkillsListResponse, AppsListResponse, AppActionResponse, SettingsResponse, SettingsUpdateRequest, SettingsUpdateResponse } from "./types.js";
 export declare class Agent42Client {
     private readonly baseUrl;
     private readonly bearerToken;
@@ -87,6 +87,20 @@ export declare class Agent42Client {
      * Bearer auth required. Retries once on 5xx.
      */
     extractLearnings(body: ExtractLearningsRequest): Promise<ExtractLearningsResponse>;
+    /** GET /tools — list all registered tools */
+    getTools(): Promise<ToolsListResponse>;
+    /** GET /skills — list all loaded skills */
+    getSkills(): Promise<SkillsListResponse>;
+    /** GET /apps — list all sandboxed apps */
+    getApps(): Promise<AppsListResponse>;
+    /** POST /apps/{appId}/start — start a sandboxed app */
+    startApp(appId: string): Promise<AppActionResponse>;
+    /** POST /apps/{appId}/stop — stop a sandboxed app */
+    stopApp(appId: string): Promise<AppActionResponse>;
+    /** GET /settings — get masked API keys and config */
+    getSettings(): Promise<SettingsResponse>;
+    /** POST /settings — update a single API key */
+    updateSettings(body: SettingsUpdateRequest): Promise<SettingsUpdateResponse>;
     /**
      * destroy() -- no-op for clean shutdown.
      * Native fetch has no persistent connections to close, but provided for

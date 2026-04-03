@@ -187,6 +187,58 @@ export class Agent42Client {
             throw new Error(`Agent42Client.extractLearnings failed: HTTP ${resp.status}`);
         return resp.json();
     }
+    // -------------------------------------------------------------------------
+    // Phase 36 — Paperclip Integration Core methods
+    // -------------------------------------------------------------------------
+    /** GET /tools — list all registered tools */
+    async getTools() {
+        const resp = await this.fetchWithRetry(`${this.baseUrl}/tools`, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
+        if (!resp.ok)
+            throw new Error(`Agent42Client.getTools failed: HTTP ${resp.status}`);
+        return resp.json();
+    }
+    /** GET /skills — list all loaded skills */
+    async getSkills() {
+        const resp = await this.fetchWithRetry(`${this.baseUrl}/skills`, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
+        if (!resp.ok)
+            throw new Error(`Agent42Client.getSkills failed: HTTP ${resp.status}`);
+        return resp.json();
+    }
+    /** GET /apps — list all sandboxed apps */
+    async getApps() {
+        const resp = await this.fetchWithRetry(`${this.baseUrl}/apps`, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
+        if (!resp.ok)
+            throw new Error(`Agent42Client.getApps failed: HTTP ${resp.status}`);
+        return resp.json();
+    }
+    /** POST /apps/{appId}/start — start a sandboxed app */
+    async startApp(appId) {
+        const resp = await this.fetchWithRetry(`${this.baseUrl}/apps/${encodeURIComponent(appId)}/start`, { method: "POST", headers: this.authHeaders() }, this.timeoutMs);
+        if (!resp.ok)
+            throw new Error(`Agent42Client.startApp failed: HTTP ${resp.status}`);
+        return resp.json();
+    }
+    /** POST /apps/{appId}/stop — stop a sandboxed app */
+    async stopApp(appId) {
+        const resp = await this.fetchWithRetry(`${this.baseUrl}/apps/${encodeURIComponent(appId)}/stop`, { method: "POST", headers: this.authHeaders() }, this.timeoutMs);
+        if (!resp.ok)
+            throw new Error(`Agent42Client.stopApp failed: HTTP ${resp.status}`);
+        return resp.json();
+    }
+    /** GET /settings — get masked API keys and config */
+    async getSettings() {
+        const resp = await this.fetchWithRetry(`${this.baseUrl}/settings`, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
+        if (!resp.ok)
+            throw new Error(`Agent42Client.getSettings failed: HTTP ${resp.status}`);
+        return resp.json();
+    }
+    /** POST /settings — update a single API key */
+    async updateSettings(body) {
+        const resp = await this.fetchWithRetry(`${this.baseUrl}/settings`, { method: "POST", headers: this.authHeaders(), body: JSON.stringify(body) }, this.timeoutMs);
+        if (!resp.ok)
+            throw new Error(`Agent42Client.updateSettings failed: HTTP ${resp.status}`);
+        return resp.json();
+    }
     /**
      * destroy() -- no-op for clean shutdown.
      * Native fetch has no persistent connections to close, but provided for

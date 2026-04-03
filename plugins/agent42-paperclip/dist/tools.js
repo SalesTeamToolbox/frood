@@ -161,4 +161,101 @@ export function registerTools(ctx, client) {
             return { error: `mcp_tool_proxy failed: ${String(e)}` };
         }
     });
+    // -- team_execute (ADV-02, ADV-03, D-04, D-05, D-08) --
+    ctx.tools.register("team_execute", {
+        displayName: "Team Execute",
+        description: "Orchestrate parallel fan-out or sequential wave sub-agent execution",
+        parametersSchema: {
+            type: "object",
+            properties: {
+                strategy: { type: "string", enum: ["fan-out", "wave"], description: "Execution strategy" },
+                subAgentIds: { type: "array", items: { type: "string" }, description: "Agent IDs for fan-out" },
+                waves: { type: "array", items: { type: "object" }, description: "Wave definitions [{agentId, task}]" },
+                task: { type: "string", description: "Task description for sub-agents" },
+                context: { type: "object", description: "Additional context", additionalProperties: true },
+            },
+            required: ["strategy", "task"],
+        },
+    }, async (params, runCtx) => {
+        try {
+            const p = params;
+            const strategy = p.strategy;
+            const task = p.task;
+            if (strategy === "fan-out") {
+                // Fan-out: parallel sub-agent invocation (D-05, D-06)
+                const subAgentIds = p.subAgentIds ?? [];
+                if (subAgentIds.length === 0) {
+                    return { error: "fan-out requires at least one subAgentId" };
+                }
+                const invocations = await Promise.all(subAgentIds.map((id) => ctx.agents.invoke(id, runCtx.companyId, {
+                    prompt: task,
+                    reason: "fan-out",
+                })));
+                const subResults = invocations.map((inv, i) => ({
+                    agentId: subAgentIds[i],
+                    runId: inv.runId,
+                    status: "invoked",
+                    output: "",
+                    costUsd: 0,
+                }));
+                return {
+                    content: JSON.stringify({ strategy: "fan-out", subResults }),
+                    data: { strategy: "fan-out", subResults },
+                };
+            }
+            else if (strategy === "wave") {
+                // Wave: sequential invocation with crash recovery (D-08, D-09, D-10)
+                const waveDefs = p.waves ?? [];
+                if (waveDefs.length === 0) {
+                    return { error: "wave requires at least one wave definition" };
+                }
+                // Read saved progress for crash recovery (D-09)
+                let startWave = 0;
+                let waveOutputs = [];
+                try {
+                    const saved = await ctx.state.get({
+                        scopeKind: "run",
+                        scopeId: runCtx.runId,
+                        stateKey: "wave-progress",
+                    });
+                    if (saved) {
+                        startWave = saved.completedWaves;
+                        waveOutputs = saved.waveOutputs;
+                    }
+                }
+                catch {
+                    // First run — no saved state
+                }
+                // Execute waves sequentially (D-08)
+                for (let i = startWave; i < waveDefs.length; i++) {
+                    const wavePrompt = i === 0
+                        ? `${task}\n\nWave ${i + 1}: ${waveDefs[i].task}`
+                        : `${task}\n\nWave ${i + 1}: ${waveDefs[i].task}\n\nContext from previous wave:\n${JSON.stringify(waveOutputs[i - 1])}`;
+                    const result = await ctx.agents.invoke(waveDefs[i].agentId, runCtx.companyId, {
+                        prompt: wavePrompt,
+                        reason: `wave-${i + 1}`,
+                    });
+                    waveOutputs.push({
+                        wave: i + 1,
+                        agentId: waveDefs[i].agentId,
+                        runId: result.runId,
+                        status: "invoked",
+                        output: "",
+                    });
+                    // Persist wave progress for crash recovery (D-09)
+                    await ctx.state.set({ scopeKind: "run", scopeId: runCtx.runId, stateKey: "wave-progress" }, { completedWaves: i + 1, waveOutputs });
+                }
+                return {
+                    content: JSON.stringify({ strategy: "wave", waveOutputs }),
+                    data: { strategy: "wave", waveOutputs },
+                };
+            }
+            else {
+                return { error: `Unknown strategy: ${strategy}. Use "fan-out" or "wave".` };
+            }
+        }
+        catch (e) {
+            return { error: `team_execute failed: ${String(e)}` };
+        }
+    });
 }

@@ -149,3 +149,91 @@ export interface ExtractLearningsResponse {
     extracted: number;
     skipped: number;
 }
+export interface SubAgentResult {
+    agentId: string;
+    runId: string;
+    status: "invoked" | "completed" | "failed";
+    output: string;
+    costUsd: number;
+}
+export interface WaveOutput {
+    wave: number;
+    agentId: string;
+    runId: string;
+    status: "invoked" | "completed" | "failed";
+    output: string;
+}
+export interface WaveDefinition {
+    agentId: string;
+    task: string;
+}
+export interface TeamExecuteParams {
+    strategy: "fan-out" | "wave";
+    subAgentIds?: string[];
+    waves?: WaveDefinition[];
+    task: string;
+    context?: Record<string, unknown>;
+}
+export interface TeamExecuteResult {
+    strategy: string;
+    subResults?: SubAgentResult[];
+    waveOutputs?: WaveOutput[];
+}
+export interface ToolItem {
+    name: string;
+    display_name: string;
+    description: string;
+    enabled: boolean;
+    source: string;
+}
+export interface ToolsListResponse {
+    tools: ToolItem[];
+}
+export interface SkillItem {
+    name: string;
+    display_name: string;
+    description: string;
+    enabled: boolean;
+    path: string;
+}
+export interface SkillsListResponse {
+    skills: SkillItem[];
+}
+export interface AppItem {
+    id: string;
+    name: string;
+    status: string;
+    port: number | null;
+    created_at: string;
+}
+export interface AppsListResponse {
+    apps: AppItem[];
+}
+export interface AppActionResponse {
+    ok: boolean;
+    message: string;
+}
+export interface SettingsKeyEntry {
+    name: string;
+    masked_value: string;
+    is_set: boolean;
+}
+export interface SettingsResponse {
+    keys: SettingsKeyEntry[];
+}
+export interface SettingsUpdateRequest {
+    key_name: string;
+    value: string;
+}
+export interface SettingsUpdateResponse {
+    ok: boolean;
+    key_name: string;
+}
+export interface TerminalSessionInfo {
+    session_id: string;
+    status: string;
+}
+export interface TerminalOutputEvent {
+    text: string;
+    ts: number;
+}

@@ -276,10 +276,327 @@ function RoutingDecisionsWidget({ context: _context }) {
     ] }, name)) })
   ] });
 }
+
+// src/ui/WorkspacePage.tsx
+import { usePluginStream, usePluginAction } from "@paperclipai/plugin-sdk/ui";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { jsx as jsx5, jsxs as jsxs5 } from "react/jsx-runtime";
+function WorkspacePage({ context }) {
+  const [sessionId, setSessionId] = useState(null);
+  const [outputLines, setOutputLines] = useState([]);
+  const [inputValue, setInputValue] = useState("");
+  const outputRef = useRef(null);
+  const startTerminal = usePluginAction("terminal-start");
+  const sendInput = usePluginAction("terminal-input");
+  const closeTerminal = usePluginAction("terminal-close");
+  const { events, connected } = usePluginStream("terminal-output", {
+    companyId: context.companyId ?? void 0
+  });
+  useEffect(() => {
+    if (events.length > 0) {
+      const latest = events[events.length - 1];
+      if (latest?.text) {
+        setOutputLines((prev) => [...prev, latest.text]);
+      }
+    }
+  }, [events]);
+  useEffect(() => {
+    if (outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [outputLines]);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const result = await startTerminal({});
+        if (mounted && result?.ok && result.sessionId) {
+          setSessionId(result.sessionId);
+        }
+      } catch {
+        if (mounted) setOutputLines(["[Failed to start terminal session]"]);
+      }
+    })();
+    return () => {
+      mounted = false;
+      if (sessionId) {
+        closeTerminal({ sessionId }).catch(() => {
+        });
+      }
+    };
+  }, []);
+  const handleSend = useCallback(async () => {
+    if (!sessionId || !inputValue.trim()) return;
+    await sendInput({ sessionId, data: inputValue + "\n" });
+    setOutputLines((prev) => [...prev, `$ ${inputValue}`]);
+    setInputValue("");
+  }, [sessionId, inputValue, sendInput]);
+  const handleKeyDown = useCallback(
+    (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleSend();
+      }
+    },
+    [handleSend]
+  );
+  return /* @__PURE__ */ jsxs5("div", { style: { display: "flex", flexDirection: "column", height: "100%", fontFamily: "monospace", backgroundColor: "#1e1e1e", color: "#d4d4d4" }, children: [
+    /* @__PURE__ */ jsxs5("div", { style: { padding: "8px 12px", borderBottom: "1px solid #333", display: "flex", justifyContent: "space-between", alignItems: "center" }, children: [
+      /* @__PURE__ */ jsx5("span", { style: { fontWeight: 600, fontSize: "14px" }, children: "Agent42 Terminal" }),
+      /* @__PURE__ */ jsx5("span", { style: { fontSize: "12px", color: connected ? "#22c55e" : "#ef4444" }, children: connected ? "Connected" : "Disconnected" })
+    ] }),
+    /* @__PURE__ */ jsxs5("div", { ref: outputRef, style: { flex: 1, overflow: "auto", padding: "8px 12px", fontSize: "13px", lineHeight: "1.5", whiteSpace: "pre-wrap" }, children: [
+      outputLines.length === 0 && /* @__PURE__ */ jsx5("span", { style: { color: "#6b7280" }, children: sessionId ? "Terminal ready." : "Connecting..." }),
+      outputLines.map((line, i) => /* @__PURE__ */ jsx5("div", { children: line }, i))
+    ] }),
+    /* @__PURE__ */ jsxs5("div", { style: { padding: "8px 12px", borderTop: "1px solid #333", display: "flex", gap: "8px" }, children: [
+      /* @__PURE__ */ jsx5("span", { style: { color: "#22c55e" }, children: "$" }),
+      /* @__PURE__ */ jsx5(
+        "input",
+        {
+          type: "text",
+          value: inputValue,
+          onChange: (e) => setInputValue(e.target.value),
+          onKeyDown: handleKeyDown,
+          placeholder: "Type command...",
+          style: { flex: 1, backgroundColor: "transparent", border: "none", color: "#d4d4d4", fontFamily: "monospace", fontSize: "13px", outline: "none" },
+          disabled: !sessionId
+        }
+      )
+    ] })
+  ] });
+}
+
+// src/ui/AppsPage.tsx
+import { usePluginData as usePluginData5, usePluginAction as usePluginAction2 } from "@paperclipai/plugin-sdk/ui";
+import { useState as useState2 } from "react";
+import { jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
+function AppsPage({ context }) {
+  const { data, loading, error, refresh } = usePluginData5("apps-list", {
+    companyId: context.companyId ?? void 0
+  });
+  const startApp = usePluginAction2("app-start");
+  const stopApp = usePluginAction2("app-stop");
+  const [actionPending, setActionPending] = useState2(null);
+  if (loading) return /* @__PURE__ */ jsx6("div", { style: { padding: "16px", fontFamily: "system-ui, sans-serif" }, children: "Loading apps..." });
+  if (error) return /* @__PURE__ */ jsxs6("div", { style: { padding: "16px", color: "#ef4444", fontFamily: "system-ui, sans-serif" }, children: [
+    "Error: ",
+    error.message
+  ] });
+  const apps = data?.apps ?? [];
+  const handleAction = async (appId, action) => {
+    setActionPending(appId);
+    try {
+      if (action === "start") await startApp({ appId });
+      else await stopApp({ appId });
+      refresh();
+    } catch {
+    }
+    setActionPending(null);
+  };
+  const statusColor = (s) => {
+    if (s === "running") return "#22c55e";
+    if (s === "building") return "#f59e0b";
+    if (s === "error") return "#ef4444";
+    return "#6b7280";
+  };
+  return /* @__PURE__ */ jsxs6("div", { style: { padding: "16px", fontFamily: "system-ui, sans-serif" }, children: [
+    /* @__PURE__ */ jsxs6("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }, children: [
+      /* @__PURE__ */ jsx6("h2", { style: { margin: 0, fontSize: "18px", fontWeight: 600 }, children: "Sandboxed Apps" }),
+      /* @__PURE__ */ jsx6("button", { onClick: refresh, style: { padding: "4px 12px", borderRadius: "4px", border: "1px solid #d1d5db", background: "white", cursor: "pointer", fontSize: "12px" }, children: "Refresh" })
+    ] }),
+    apps.length === 0 && /* @__PURE__ */ jsx6("p", { style: { color: "#6b7280" }, children: "No apps found. Create apps through the Agent42 workspace." }),
+    /* @__PURE__ */ jsx6("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "12px" }, children: apps.map((app) => /* @__PURE__ */ jsxs6("div", { style: { padding: "12px", borderRadius: "8px", border: "1px solid #e5e7eb", backgroundColor: "#fafafa" }, children: [
+      /* @__PURE__ */ jsxs6("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }, children: [
+        /* @__PURE__ */ jsx6("span", { style: { fontWeight: 600, fontSize: "14px" }, children: app.name || app.id }),
+        /* @__PURE__ */ jsx6("span", { style: { width: "8px", height: "8px", borderRadius: "50%", backgroundColor: statusColor(app.status), display: "inline-block" } })
+      ] }),
+      /* @__PURE__ */ jsxs6("div", { style: { fontSize: "12px", color: "#6b7280", marginBottom: "8px" }, children: [
+        "Status: ",
+        app.status,
+        app.port ? ` | Port: ${app.port}` : ""
+      ] }),
+      /* @__PURE__ */ jsxs6("div", { style: { display: "flex", gap: "6px" }, children: [
+        app.status !== "running" && /* @__PURE__ */ jsx6(
+          "button",
+          {
+            onClick: () => handleAction(app.id, "start"),
+            disabled: actionPending === app.id,
+            style: { padding: "4px 10px", borderRadius: "4px", border: "none", background: "#22c55e", color: "white", cursor: "pointer", fontSize: "12px", opacity: actionPending === app.id ? 0.5 : 1 },
+            children: "Start"
+          }
+        ),
+        app.status === "running" && /* @__PURE__ */ jsx6(
+          "button",
+          {
+            onClick: () => handleAction(app.id, "stop"),
+            disabled: actionPending === app.id,
+            style: { padding: "4px 10px", borderRadius: "4px", border: "none", background: "#ef4444", color: "white", cursor: "pointer", fontSize: "12px", opacity: actionPending === app.id ? 0.5 : 1 },
+            children: "Stop"
+          }
+        )
+      ] })
+    ] }, app.id)) })
+  ] });
+}
+
+// src/ui/ToolsSkillsTab.tsx
+import { usePluginData as usePluginData6 } from "@paperclipai/plugin-sdk/ui";
+import { jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
+function ToolsSkillsTab({ context }) {
+  const { data, loading, error } = usePluginData6("tools-skills", {
+    companyId: context.companyId ?? void 0
+  });
+  if (loading) return /* @__PURE__ */ jsx7("p", { style: { padding: "12px", fontFamily: "system-ui, sans-serif" }, children: "Loading tools & skills..." });
+  if (error) return /* @__PURE__ */ jsxs7("p", { style: { padding: "12px", color: "#ef4444", fontFamily: "system-ui, sans-serif" }, children: [
+    "Error: ",
+    error.message
+  ] });
+  if (!data) return /* @__PURE__ */ jsx7("p", { style: { padding: "12px", color: "#6b7280", fontFamily: "system-ui, sans-serif" }, children: "No tools or skills data available." });
+  const tools = data.tools ?? [];
+  const skills = data.skills ?? [];
+  return /* @__PURE__ */ jsxs7("div", { style: { padding: "12px", fontFamily: "system-ui, sans-serif" }, children: [
+    /* @__PURE__ */ jsxs7("h3", { style: { margin: "0 0 12px", fontSize: "16px", fontWeight: 600 }, children: [
+      "Tools (",
+      tools.length,
+      ")"
+    ] }),
+    tools.length === 0 && /* @__PURE__ */ jsx7("p", { style: { color: "#6b7280", fontSize: "13px" }, children: "No tools registered." }),
+    /* @__PURE__ */ jsx7("div", { style: { display: "flex", flexDirection: "column", gap: "6px", marginBottom: "20px" }, children: tools.map((t) => /* @__PURE__ */ jsxs7("div", { style: { padding: "8px 12px", borderRadius: "6px", border: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }, children: [
+      /* @__PURE__ */ jsxs7("div", { children: [
+        /* @__PURE__ */ jsx7("span", { style: { fontWeight: 500, fontSize: "13px" }, children: t.display_name || t.name }),
+        t.description && /* @__PURE__ */ jsx7("span", { style: { fontSize: "12px", color: "#6b7280", marginLeft: "8px" }, children: t.description })
+      ] }),
+      /* @__PURE__ */ jsxs7("div", { style: { display: "flex", alignItems: "center", gap: "6px" }, children: [
+        /* @__PURE__ */ jsx7("span", { style: { fontSize: "11px", padding: "2px 6px", borderRadius: "4px", backgroundColor: "#f3f4f6", color: "#6b7280" }, children: t.source }),
+        /* @__PURE__ */ jsx7("span", { style: { width: "8px", height: "8px", borderRadius: "50%", backgroundColor: t.enabled ? "#22c55e" : "#d1d5db", display: "inline-block" } })
+      ] })
+    ] }, t.name)) }),
+    /* @__PURE__ */ jsxs7("h3", { style: { margin: "0 0 12px", fontSize: "16px", fontWeight: 600 }, children: [
+      "Skills (",
+      skills.length,
+      ")"
+    ] }),
+    skills.length === 0 && /* @__PURE__ */ jsx7("p", { style: { color: "#6b7280", fontSize: "13px" }, children: "No skills loaded." }),
+    /* @__PURE__ */ jsx7("div", { style: { display: "flex", flexDirection: "column", gap: "6px" }, children: skills.map((s) => /* @__PURE__ */ jsxs7("div", { style: { padding: "8px 12px", borderRadius: "6px", border: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }, children: [
+      /* @__PURE__ */ jsxs7("div", { children: [
+        /* @__PURE__ */ jsx7("span", { style: { fontWeight: 500, fontSize: "13px" }, children: s.display_name || s.name }),
+        s.description && /* @__PURE__ */ jsx7("span", { style: { fontSize: "12px", color: "#6b7280", marginLeft: "8px" }, children: s.description })
+      ] }),
+      /* @__PURE__ */ jsx7("span", { style: { width: "8px", height: "8px", borderRadius: "50%", backgroundColor: s.enabled ? "#22c55e" : "#d1d5db", display: "inline-block" } })
+    ] }, s.name)) })
+  ] });
+}
+
+// src/ui/SettingsPage.tsx
+import { usePluginData as usePluginData7, usePluginAction as usePluginAction3 } from "@paperclipai/plugin-sdk/ui";
+import { useState as useState3, useCallback as useCallback2 } from "react";
+import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
+function SettingsPage({ context }) {
+  const { data, loading, error, refresh } = usePluginData7("agent42-settings", {
+    companyId: context.companyId ?? void 0
+  });
+  const updateSettings = usePluginAction3("update-agent42-settings");
+  const [editingKey, setEditingKey] = useState3(null);
+  const [editValue, setEditValue] = useState3("");
+  const [saving, setSaving] = useState3(false);
+  const handleSave = useCallback2(async () => {
+    if (!editingKey) return;
+    setSaving(true);
+    try {
+      await updateSettings({ key_name: editingKey, value: editValue });
+      setEditingKey(null);
+      setEditValue("");
+      refresh();
+    } catch {
+    }
+    setSaving(false);
+  }, [editingKey, editValue, updateSettings, refresh]);
+  if (loading) return /* @__PURE__ */ jsx8("div", { style: { padding: "16px", fontFamily: "system-ui, sans-serif" }, children: "Loading settings..." });
+  if (error) return /* @__PURE__ */ jsxs8("div", { style: { padding: "16px", color: "#ef4444", fontFamily: "system-ui, sans-serif" }, children: [
+    "Error: ",
+    error.message
+  ] });
+  const keys = data?.keys ?? [];
+  return /* @__PURE__ */ jsxs8("div", { style: { padding: "16px", fontFamily: "system-ui, sans-serif", maxWidth: "600px" }, children: [
+    /* @__PURE__ */ jsx8("h2", { style: { margin: "0 0 8px", fontSize: "18px", fontWeight: 600 }, children: "Agent42 Settings" }),
+    /* @__PURE__ */ jsx8("p", { style: { margin: "0 0 16px", fontSize: "13px", color: "#6b7280" }, children: "Manage API keys and configuration for the Agent42 sidecar. Changes take effect immediately." }),
+    /* @__PURE__ */ jsx8("div", { style: { display: "flex", flexDirection: "column", gap: "8px" }, children: keys.map((k) => /* @__PURE__ */ jsxs8("div", { style: { padding: "10px 12px", borderRadius: "6px", border: "1px solid #e5e7eb" }, children: [
+      /* @__PURE__ */ jsxs8("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" }, children: [
+        /* @__PURE__ */ jsxs8("div", { children: [
+          /* @__PURE__ */ jsx8("span", { style: { fontWeight: 500, fontSize: "13px", fontFamily: "monospace" }, children: k.name }),
+          /* @__PURE__ */ jsx8("span", { style: { marginLeft: "8px", fontSize: "12px", color: k.is_set ? "#22c55e" : "#d1d5db" }, children: k.is_set ? "Set" : "Not set" })
+        ] }),
+        editingKey !== k.name && /* @__PURE__ */ jsx8(
+          "button",
+          {
+            onClick: () => {
+              setEditingKey(k.name);
+              setEditValue("");
+            },
+            style: { padding: "2px 8px", borderRadius: "4px", border: "1px solid #d1d5db", background: "white", cursor: "pointer", fontSize: "12px" },
+            children: "Edit"
+          }
+        )
+      ] }),
+      k.masked_value && editingKey !== k.name && /* @__PURE__ */ jsx8("div", { style: { fontSize: "12px", color: "#9ca3af", fontFamily: "monospace", marginTop: "4px" }, children: k.masked_value }),
+      editingKey === k.name && /* @__PURE__ */ jsxs8("div", { style: { marginTop: "8px", display: "flex", gap: "6px" }, children: [
+        /* @__PURE__ */ jsx8(
+          "input",
+          {
+            type: "password",
+            value: editValue,
+            onChange: (e) => setEditValue(e.target.value),
+            placeholder: "Enter new value...",
+            style: { flex: 1, padding: "4px 8px", borderRadius: "4px", border: "1px solid #d1d5db", fontSize: "13px", fontFamily: "monospace" }
+          }
+        ),
+        /* @__PURE__ */ jsx8(
+          "button",
+          {
+            onClick: handleSave,
+            disabled: saving,
+            style: { padding: "4px 10px", borderRadius: "4px", border: "none", background: "#3b82f6", color: "white", cursor: "pointer", fontSize: "12px", opacity: saving ? 0.5 : 1 },
+            children: "Save"
+          }
+        ),
+        /* @__PURE__ */ jsx8(
+          "button",
+          {
+            onClick: () => {
+              setEditingKey(null);
+              setEditValue("");
+            },
+            style: { padding: "4px 10px", borderRadius: "4px", border: "1px solid #d1d5db", background: "white", cursor: "pointer", fontSize: "12px" },
+            children: "Cancel"
+          }
+        )
+      ] })
+    ] }, k.name)) }),
+    keys.length === 0 && /* @__PURE__ */ jsx8("p", { style: { color: "#6b7280", fontSize: "13px" }, children: "No configurable settings available." })
+  ] });
+}
+
+// src/ui/WorkspaceNavEntry.tsx
+import { jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
+function WorkspaceNavEntry({ context }) {
+  return /* @__PURE__ */ jsxs9("div", { style: { padding: "8px 0", fontFamily: "system-ui, sans-serif" }, children: [
+    /* @__PURE__ */ jsx9("div", { style: { fontSize: "11px", fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", padding: "4px 12px" }, children: "Agent42" }),
+    /* @__PURE__ */ jsxs9("div", { style: { display: "flex", flexDirection: "column", gap: "2px" }, children: [
+      /* @__PURE__ */ jsx9("a", { href: `/plugins/agent42.paperclip-plugin/workspace-terminal`, style: { padding: "6px 12px", fontSize: "13px", color: "#374151", textDecoration: "none", borderRadius: "4px", display: "block" }, children: "Terminal" }),
+      /* @__PURE__ */ jsx9("a", { href: `/plugins/agent42.paperclip-plugin/sandboxed-apps`, style: { padding: "6px 12px", fontSize: "13px", color: "#374151", textDecoration: "none", borderRadius: "4px", display: "block" }, children: "Apps" })
+    ] })
+  ] });
+}
 export {
   AgentEffectivenessTab,
+  AppsPage,
   MemoryBrowserTab,
   ProviderHealthWidget,
-  RoutingDecisionsWidget
+  RoutingDecisionsWidget,
+  SettingsPage,
+  ToolsSkillsTab,
+  WorkspaceNavEntry,
+  WorkspacePage
 };
 //# sourceMappingURL=index.js.map
