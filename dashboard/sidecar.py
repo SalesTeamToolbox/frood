@@ -699,8 +699,8 @@ def create_sidecar_app(
         items = [
             SidecarSettingsKeyEntry(
                 name=key_name,
-                masked_value=masked.get(key_name, ""),
-                is_set=bool(masked.get(key_name, "")),
+                masked_value=masked.get(key_name, {}).get("masked_value", ""),
+                is_set=masked.get(key_name, {}).get("configured", False),
             )
             for key_name in sorted(ADMIN_CONFIGURABLE_KEYS)
         ]
