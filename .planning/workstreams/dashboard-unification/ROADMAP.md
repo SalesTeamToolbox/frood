@@ -21,7 +21,7 @@
 
 Plans:
 - [x] 36-01-PLAN.md — Contracts + Backend: TypeScript types/client/manifest + sidecar endpoints + dashboard gate (COMPLETE: 839240e, df6f4cf, b27de3b)
-- [ ] 36-02-PLAN.md — Worker + UI: Worker handlers + 5 new React components + plugin build
+- [x] 36-02-PLAN.md — Worker + UI: Worker handlers + 5 new React components + plugin build (COMPLETE: 529c1be, f2fd7c7, 2266a84)
 - [ ] 36-03-PLAN.md — Tests: Python sidecar tests + TypeScript manifest/worker tests
 
 **Success Criteria** (what must be TRUE):
