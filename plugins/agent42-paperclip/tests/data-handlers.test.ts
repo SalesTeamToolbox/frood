@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
-import manifest from "../manifest.json" with { type: "json" };
+import manifest from "../dist/manifest.js";
 import plugin from "../src/worker.js";
 
 // Mock fetch globally for Agent42Client

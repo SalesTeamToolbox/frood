@@ -4,7 +4,7 @@ import type { ToolResult } from "@paperclipai/plugin-sdk";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import manifest from "../manifest.json" with { type: "json" };
+import manifest from "../dist/manifest.js";
 import plugin from "../src/worker.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -188,10 +188,9 @@ describe("Plugin Worker Lifecycle", () => {
   });
 
   it("manifest includes agents.invoke, events.subscribe, plugin.state.read capabilities", () => {
-    const manifestPath = resolve(__dirname, "..", "manifest.json");
-    const parsed = JSON.parse(readFileSync(manifestPath, "utf8"));
-    expect(parsed.capabilities).toContain("agents.invoke");
-    expect(parsed.capabilities).toContain("events.subscribe");
-    expect(parsed.capabilities).toContain("plugin.state.read");
+    // Use dist/manifest.js (manifest.json was replaced by manifest.ts in Phase 36-01)
+    expect(manifest.capabilities).toContain("agents.invoke");
+    expect(manifest.capabilities).toContain("events.subscribe");
+    expect(manifest.capabilities).toContain("plugin.state.read");
   });
 });
