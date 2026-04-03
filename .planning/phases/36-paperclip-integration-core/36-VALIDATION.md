@@ -38,13 +38,13 @@ created: 2026-04-03
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 36-01-01 | 01 | 1 | PAPERCLIP-01 | integration | `python -m pytest tests/test_sidecar_terminal.py -v` | ❌ W0 | ⬜ pending |
-| 36-01-02 | 01 | 1 | PAPERCLIP-02 | integration | `python -m pytest tests/test_sidecar_apps.py -v` | ❌ W0 | ⬜ pending |
-| 36-02-01 | 02 | 2 | PAPERCLIP-01 | type-check | `cd plugins/agent42-paperclip && npx tsc --noEmit` | ✅ | ⬜ pending |
-| 36-02-02 | 02 | 2 | PAPERCLIP-02 | type-check | `cd plugins/agent42-paperclip && npx tsc --noEmit` | ✅ | ⬜ pending |
-| 36-03-01 | 03 | 2 | PAPERCLIP-03 | integration | `python -m pytest tests/test_tools_skills.py -v` | ❌ W0 | ⬜ pending |
-| 36-04-01 | 04 | 3 | PAPERCLIP-04 | integration | `python -m pytest tests/test_dashboard_retirement.py -v` | ❌ W0 | ⬜ pending |
-| 36-04-02 | 04 | 3 | PAPERCLIP-05 | type-check | `cd plugins/agent42-paperclip && npx tsc --noEmit` | ✅ | ⬜ pending |
+| 36-01-T1 | 01 | 1 | PAPERCLIP-01 | type-check | `cd plugins/agent42-paperclip && npx tsc --noEmit` | ✅ | ⬜ pending |
+| 36-01-T2 | 01 | 1 | PAPERCLIP-02,03,04 | import-check | `python -c "from dashboard.sidecar import create_sidecar_app"` | ✅ | ⬜ pending |
+| 36-01-T3 | 01 | 1 | PAPERCLIP-05 | import-check | `python -c "from core.config import Settings; s = Settings(sidecar_enabled=True)"` | ✅ | ⬜ pending |
+| 36-02-T1 | 02 | 2 | PAPERCLIP-01 | type-check | `cd plugins/agent42-paperclip && npx tsc --noEmit` | ✅ | ⬜ pending |
+| 36-02-T2 | 02 | 2 | PAPERCLIP-02,03,04 | build | `cd plugins/agent42-paperclip && npm run build` | ✅ | ⬜ pending |
+| 36-03-T1 | 03 | 3 | PAPERCLIP-01,02,03,05 | unit | `python -m pytest tests/test_sidecar_phase36.py -x -q` | ❌ W0 | ⬜ pending |
+| 36-03-T2 | 03 | 3 | PAPERCLIP-01,02,03 | unit | `cd plugins/agent42-paperclip && npm test` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -52,12 +52,11 @@ created: 2026-04-03
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_sidecar_terminal.py` — stubs for PAPERCLIP-01 terminal endpoints
-- [ ] `tests/test_sidecar_apps.py` — stubs for PAPERCLIP-02 app endpoints
-- [ ] `tests/test_tools_skills.py` — stubs for PAPERCLIP-03 tool/skill registration
-- [ ] `tests/test_dashboard_retirement.py` — stubs for PAPERCLIP-04 redundant component removal
+- [ ] `tests/test_sidecar_phase36.py` — sidecar endpoint tests for terminal, apps, tools/skills, dashboard gate (Plan 03 Task 1)
+- [ ] `plugins/agent42-paperclip/src/__tests__/manifest.test.ts` — manifest slot declarations (Plan 03 Task 2)
+- [ ] `plugins/agent42-paperclip/src/__tests__/worker-handlers.test.ts` — worker data/action/stream handlers (Plan 03 Task 2)
 
-*Existing pytest infrastructure covers framework needs — no new install required.*
+*Existing pytest + npm test infrastructure covers framework needs — no new install required.*
 
 ---
 
