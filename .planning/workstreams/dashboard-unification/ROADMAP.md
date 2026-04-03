@@ -17,6 +17,13 @@
 **Goal**: Integrate workspace coding terminal, sandboxed apps, tools and skills into Paperclip dashboard
 **Depends on**: Nothing (first phase of this milestone)
 **Requirements**: PAPERCLIP-01, PAPERCLIP-02, PAPERCLIP-03, PAPERCLIP-04, PAPERCLIP-05
+**Plans:** 3 plans
+
+Plans:
+- [ ] 36-01-PLAN.md — Contracts + Backend: TypeScript types/client/manifest + sidecar endpoints + dashboard gate
+- [ ] 36-02-PLAN.md — Worker + UI: Worker handlers + 5 new React components + plugin build
+- [ ] 36-03-PLAN.md — Tests: Python sidecar tests + TypeScript manifest/worker tests
+
 **Success Criteria** (what must be TRUE):
 
 1. When Paperclip is active, workspace coding terminal is accessible within Paperclip dashboard
@@ -78,7 +85,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 | ----- | -------------- | ------ | --------- |
-| 36. Paperclip Integration Core | 0/1 | Not started | - |
+| 36. Paperclip Integration Core | 0/3 | Planned | - |
 | 37. Standalone Dashboard | 0/1 | Not started | - |
 | 38. Provider UI Updates | 0/1 | Not started | - |
 | 39. Unified Agent Management | 0/1 | Not started | - |
