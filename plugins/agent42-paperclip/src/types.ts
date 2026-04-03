@@ -215,3 +215,83 @@ export interface TeamExecuteResult {
   subResults?: SubAgentResult[];
   waveOutputs?: WaveOutput[];
 }
+
+// ---------------------------------------------------------------------------
+// Phase 36 — Paperclip Integration Core types
+// ---------------------------------------------------------------------------
+
+// -- Tools (GET /tools) --
+export interface ToolItem {
+  name: string;
+  display_name: string;
+  description: string;
+  enabled: boolean;
+  source: string;  // "builtin" | "mcp" | "plugin"
+}
+
+export interface ToolsListResponse {
+  tools: ToolItem[];
+}
+
+// -- Skills (GET /skills) --
+export interface SkillItem {
+  name: string;
+  display_name: string;
+  description: string;
+  enabled: boolean;
+  path: string;
+}
+
+export interface SkillsListResponse {
+  skills: SkillItem[];
+}
+
+// -- Apps (GET /apps) --
+export interface AppItem {
+  id: string;
+  name: string;
+  status: string;  // "running" | "stopped" | "building" | "error"
+  port: number | null;
+  created_at: string;
+}
+
+export interface AppsListResponse {
+  apps: AppItem[];
+}
+
+export interface AppActionResponse {
+  ok: boolean;
+  message: string;
+}
+
+// -- Settings (GET /settings, POST /settings) --
+export interface SettingsKeyEntry {
+  name: string;
+  masked_value: string;
+  is_set: boolean;
+}
+
+export interface SettingsResponse {
+  keys: SettingsKeyEntry[];
+}
+
+export interface SettingsUpdateRequest {
+  key_name: string;
+  value: string;
+}
+
+export interface SettingsUpdateResponse {
+  ok: boolean;
+  key_name: string;
+}
+
+// -- Terminal session types --
+export interface TerminalSessionInfo {
+  session_id: string;
+  status: string;
+}
+
+export interface TerminalOutputEvent {
+  text: string;
+  ts: number;
+}

@@ -35,6 +35,13 @@ import type {
   AgentSpendResponse,
   ExtractLearningsRequest,
   ExtractLearningsResponse,
+  ToolsListResponse,
+  SkillsListResponse,
+  AppsListResponse,
+  AppActionResponse,
+  SettingsResponse,
+  SettingsUpdateRequest,
+  SettingsUpdateResponse,
 } from "./types.js";
 
 export class Agent42Client {
@@ -256,6 +263,87 @@ export class Agent42Client {
     );
     if (!resp.ok) throw new Error(`Agent42Client.extractLearnings failed: HTTP ${resp.status}`);
     return resp.json() as Promise<ExtractLearningsResponse>;
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase 36 — Paperclip Integration Core methods
+  // -------------------------------------------------------------------------
+
+  /** GET /tools — list all registered tools */
+  async getTools(): Promise<ToolsListResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/tools`,
+      { method: "GET", headers: this.authHeaders() },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.getTools failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<ToolsListResponse>;
+  }
+
+  /** GET /skills — list all loaded skills */
+  async getSkills(): Promise<SkillsListResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/skills`,
+      { method: "GET", headers: this.authHeaders() },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.getSkills failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<SkillsListResponse>;
+  }
+
+  /** GET /apps — list all sandboxed apps */
+  async getApps(): Promise<AppsListResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/apps`,
+      { method: "GET", headers: this.authHeaders() },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.getApps failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<AppsListResponse>;
+  }
+
+  /** POST /apps/{appId}/start — start a sandboxed app */
+  async startApp(appId: string): Promise<AppActionResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/apps/${encodeURIComponent(appId)}/start`,
+      { method: "POST", headers: this.authHeaders() },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.startApp failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<AppActionResponse>;
+  }
+
+  /** POST /apps/{appId}/stop — stop a sandboxed app */
+  async stopApp(appId: string): Promise<AppActionResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/apps/${encodeURIComponent(appId)}/stop`,
+      { method: "POST", headers: this.authHeaders() },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.stopApp failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<AppActionResponse>;
+  }
+
+  /** GET /settings — get masked API keys and config */
+  async getSettings(): Promise<SettingsResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/settings`,
+      { method: "GET", headers: this.authHeaders() },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.getSettings failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<SettingsResponse>;
+  }
+
+  /** POST /settings — update a single API key */
+  async updateSettings(body: SettingsUpdateRequest): Promise<SettingsUpdateResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/settings`,
+      { method: "POST", headers: this.authHeaders(), body: JSON.stringify(body) },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.updateSettings failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<SettingsUpdateResponse>;
   }
 
   /**
