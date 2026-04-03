@@ -2,9 +2,8 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Dashboard Unification
-status: Executing Phase 36
-last_updated: "2026-04-03T21:35:00.000Z"
-stopped_at: "Completed 36-paperclip-integration-core/36-02-PLAN.md"
+status: Phase 36 complete — all 3 plans executed — ready for verification
+last_updated: "2026-04-03T21:52:00.000Z"
 ---
 
 # Workstream State
@@ -18,8 +17,8 @@ See: .planning/workstreams/dashboard-unification/ROADMAP.md
 
 ## Current Position
 
-Phase: 36 (Paperclip Integration Core) — EXECUTING
-Plan: 3 of 3
+Phase: 36 (Paperclip Integration Core) — COMPLETE
+Plan: 3 of 3 (all plans complete)
 
 ## Completed Phases
 
@@ -45,6 +44,19 @@ None yet.
 - Tasks: 2/2 completed
 - Files modified: 7 (+ dist rebuild)
 - Commits: 3 (529c1be, f2fd7c7, 2266a84)
+
+## Plan 36-03 Metrics
+
+- Duration: ~10 minutes
+- Tasks: 2/2 completed
+- Files created: 3 (test_sidecar_phase36.py, manifest.test.ts, worker-handlers.test.ts)
+- Files modified: 8 (sidecar.py bug fix + vitest.config.ts + 4 test import fixes + SUMMARY)
+- Commits: 2 (d252a3d, c098c72)
+- Decisions:
+  - Tests use FastAPI dependency_overrides[get_current_user] for auth-bypass in unit tests
+  - worker-handlers.test.ts uses static source analysis (readFileSync) — Paperclip SDK runtime not available
+  - Fixed Rule 1 bug: get_sidecar_settings was passing nested dict to str field (pydantic ValidationError)
+  - Fixed Rule 1: 4 existing tests imported deleted manifest.json — updated to dist/manifest.js
 
 ## Blockers/Concerns
 

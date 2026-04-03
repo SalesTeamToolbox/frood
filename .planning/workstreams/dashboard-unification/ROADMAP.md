@@ -6,7 +6,7 @@
 
 ### Phases
 
-- [ ] **Phase 36: Paperclip Integration Core** — Integrate workspace features into Paperclip dashboard
+- [x] **Phase 36: Paperclip Integration Core** — Integrate workspace features into Paperclip dashboard (COMPLETE)
 - [ ] **Phase 37: Standalone Dashboard** — Create simplified dashboard for standalone mode
 - [ ] **Phase 38: Provider UI Updates** — Update provider configuration UI to match current structure
 - [ ] **Phase 39: Unified Agent Management** — Single interface for agent monitoring and control
@@ -22,7 +22,7 @@
 Plans:
 - [x] 36-01-PLAN.md — Contracts + Backend: TypeScript types/client/manifest + sidecar endpoints + dashboard gate (COMPLETE: 839240e, df6f4cf, b27de3b)
 - [x] 36-02-PLAN.md — Worker + UI: Worker handlers + 5 new React components + plugin build (COMPLETE: 529c1be, f2fd7c7, 2266a84)
-- [ ] 36-03-PLAN.md — Tests: Python sidecar tests + TypeScript manifest/worker tests
+- [x] 36-03-PLAN.md — Tests: Python sidecar tests + TypeScript manifest/worker tests (COMPLETE: d252a3d, c098c72)
 
 **Success Criteria** (what must be TRUE):
 
