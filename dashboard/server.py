@@ -502,6 +502,24 @@ def create_app(
         body = {"error": True, "message": detail, "status": exc.status_code}
         return JSONResponse(status_code=exc.status_code, content=body)
 
+    # -- Phase 36: PAPERCLIP-05 — gate standalone dashboard in sidecar mode ----
+    if settings.sidecar_enabled:
+
+        @app.get("/")
+        async def dashboard_paperclip_redirect():
+            """Return status page when dashboard is disabled in Paperclip mode."""
+            return JSONResponse(
+                content={
+                    "status": "paperclip_mode",
+                    "message": (
+                        "Agent42 dashboard UI is disabled in Paperclip mode. "
+                        "Access workspace features through the Paperclip dashboard."
+                    ),
+                    "sidecar_port": settings.paperclip_sidecar_port,
+                },
+                status_code=503,
+            )
+
     # Shared imports used by multiple handlers within create_app scope
     import json as _json
     import time as _time_mem
@@ -535,7 +553,10 @@ def create_app(
 
         Does NOT expose task counts or connection info to unauthenticated users.
         """
-        return {"status": "ok"}
+        response_data: dict = {"status": "ok"}
+        if settings.sidecar_enabled:
+            response_data["mode"] = "paperclip_sidecar"
+        return response_data
 
     @app.get("/api/health")
     async def health_detail(_user: str = Depends(get_current_user)):
@@ -4337,6 +4358,9 @@ Focus on learnings that would help in future similar sessions."""
     _effectiveness_store = effectiveness_store  # may be None in tests/headless usage
     _agent_runtime = AgentRuntime(workspace)
 
+    # Key store for API key management
+    _key_store = key_store  # passed from agent42.py when available
+
     class AgentCreateRequest(BaseModel):
         name: str = ""
         description: str = ""
@@ -4740,14 +4764,14 @@ Focus on learnings that would help in future similar sessions."""
     @app.get("/api/settings/keys")
     async def get_api_keys(_admin: AuthContext = Depends(require_admin)):
         """Get all configurable API keys with masked values (admin only)."""
-        if not key_store:
+        if not _key_store:
             raise HTTPException(status_code=503, detail="Key store not configured")
-        return key_store.get_masked_keys()
+        return _key_store.get_masked_keys()
 
     @app.put("/api/settings/keys")
     async def update_api_keys(req: KeyUpdateRequest, _admin: AuthContext = Depends(require_admin)):
         """Update one or more API keys (admin only)."""
-        if not key_store:
+        if not _key_store:
             raise HTTPException(status_code=503, detail="Key store not configured")
 
         from core.key_store import ADMIN_CONFIGURABLE_KEYS
@@ -4760,9 +4784,9 @@ Focus on learnings that would help in future similar sessions."""
                 continue
             value = value.strip()
             if not value:
-                key_store.delete_key(env_var)
+                _key_store.delete_key(env_var)
             else:
-                key_store.set_key(env_var, value)
+                _key_store.set_key(env_var, value)
             updated.append(env_var)
 
         # Keys are injected into os.environ by set_key/delete_key.
