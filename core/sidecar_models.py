@@ -335,3 +335,91 @@ class TeamExecuteRequest(BaseModel):
     waves: list[dict[str, Any]] = Field(default_factory=list)
     task: str = ""
     context: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Phase 36 — Paperclip Integration Core models
+# ---------------------------------------------------------------------------
+
+
+class SidecarToolItem(BaseModel):
+    """A single tool entry returned by GET /tools."""
+
+    name: str
+    display_name: str = ""
+    description: str = ""
+    enabled: bool = True
+    source: str = "builtin"  # "builtin" | "mcp" | "plugin"
+
+
+class SidecarToolsResponse(BaseModel):
+    """Response body for GET /tools."""
+
+    tools: list[SidecarToolItem] = Field(default_factory=list)
+
+
+class SidecarSkillItem(BaseModel):
+    """A single skill entry returned by GET /skills."""
+
+    name: str
+    display_name: str = ""
+    description: str = ""
+    enabled: bool = True
+    path: str = ""
+
+
+class SidecarSkillsResponse(BaseModel):
+    """Response body for GET /skills."""
+
+    skills: list[SidecarSkillItem] = Field(default_factory=list)
+
+
+class SidecarAppItem(BaseModel):
+    """A single app entry returned by GET /apps."""
+
+    id: str
+    name: str
+    status: str = "stopped"
+    port: int | None = None
+    created_at: str = ""
+
+
+class SidecarAppsResponse(BaseModel):
+    """Response body for GET /apps."""
+
+    apps: list[SidecarAppItem] = Field(default_factory=list)
+
+
+class SidecarAppActionResponse(BaseModel):
+    """Response body for POST /apps/{app_id}/start and POST /apps/{app_id}/stop."""
+
+    ok: bool
+    message: str = ""
+
+
+class SidecarSettingsKeyEntry(BaseModel):
+    """A single API key entry in GET /settings response."""
+
+    name: str
+    masked_value: str
+    is_set: bool
+
+
+class SidecarSettingsResponse(BaseModel):
+    """Response body for GET /settings."""
+
+    keys: list[SidecarSettingsKeyEntry] = Field(default_factory=list)
+
+
+class SidecarSettingsUpdateRequest(BaseModel):
+    """Request body for POST /settings."""
+
+    key_name: str
+    value: str
+
+
+class SidecarSettingsUpdateResponse(BaseModel):
+    """Response body for POST /settings."""
+
+    ok: bool
+    key_name: str

@@ -38,6 +38,7 @@ from core.app_manager import AppManager
 from core.config import settings
 from core.device_auth import DeviceStore
 from core.heartbeat import HeartbeatService
+from core.key_store import KeyStore
 from core.project_manager import ProjectManager
 from core.rate_limiter import ToolRateLimiter
 from core.repo_manager import RepositoryManager
@@ -108,6 +109,11 @@ class Agent42:
         self.cron_scheduler = CronScheduler()
         self.device_store = DeviceStore(data_dir / "devices.json")
         init_device_store(self.device_store)
+
+        # ── Key store for API key management ──────────────────────────────
+        self.key_store = KeyStore(data_dir / "settings.json")
+        # Inject admin-configured keys into environment at startup
+        self.key_store.inject_into_environ()
         self.repo_manager = RepositoryManager(
             repos_json_path=str(data_dir / "repos.json"),
             clone_dir=str(data_dir / "repos"),
@@ -248,6 +254,10 @@ class Agent42:
                 effectiveness_store=self.effectiveness_store,
                 reward_system=self.reward_system,
                 qdrant_store=self.memory_store._qdrant,
+                tool_registry=self.tool_registry,
+                skill_loader=self.skill_loader,
+                app_manager=None,  # Phase 36: AppManager only in non-sidecar mode currently
+                key_store=self.key_store,
             )
             config = uvicorn.Config(
                 app,
@@ -283,6 +293,7 @@ class Agent42:
                 reward_system=self.reward_system,
                 workspace_registry=self.workspace_registry,
                 github_account_store=github_account_store,
+                key_store=self.key_store,
             )
             config = uvicorn.Config(
                 app,

@@ -51,6 +51,17 @@ from core.sidecar_models import (
     RoutingHistoryResponse,
     RoutingResolveRequest,
     RoutingResolveResponse,
+    SidecarAppActionResponse,
+    SidecarAppItem,
+    SidecarAppsResponse,
+    SidecarSettingsKeyEntry,
+    SidecarSettingsResponse,
+    SidecarSettingsUpdateRequest,
+    SidecarSettingsUpdateResponse,
+    SidecarSkillItem,
+    SidecarSkillsResponse,
+    SidecarToolItem,
+    SidecarToolsResponse,
     SpendEntry,
     TaskTypeStats,
     ToolEffectivenessItem,
@@ -73,6 +84,10 @@ def create_sidecar_app(
     reward_system: Any = None,
     qdrant_store: Any = None,
     mcp_registry: Any = None,  # MCPRegistryAdapter for /mcp/tool proxy (Phase 28)
+    tool_registry: Any = None,  # Phase 36: tools listing
+    skill_loader: Any = None,  # Phase 36: skills listing
+    app_manager: Any = None,  # Phase 36: apps listing / start / stop
+    key_store: Any = None,  # Phase 36: settings management
 ) -> FastAPI:
     """Create a lightweight FastAPI application for sidecar mode.
 
@@ -87,6 +102,10 @@ def create_sidecar_app(
         reward_system: RewardSystem instance or None (for tier-based routing)
         qdrant_store: QdrantStore instance or None (for health check)
         mcp_registry: MCPRegistryAdapter instance or None (for /mcp/tool proxy)
+        tool_registry: ToolRegistry instance or None (Phase 36: GET /tools)
+        skill_loader: SkillLoader instance or None (Phase 36: GET /skills)
+        app_manager: AppManager instance or None (Phase 36: GET/POST /apps)
+        key_store: KeyStore instance or None (Phase 36: GET/POST /settings)
     """
     app = FastAPI(
         title="Agent42 Sidecar",
@@ -562,5 +581,146 @@ def create_sidecar_app(
         except Exception as exc:
             logger.warning("memory_extract failed: %s", exc)
             return ExtractLearningsResponse(extracted=0, skipped=0)
+
+    # -------------------------------------------------------------------------
+    # Phase 36 — Paperclip Integration Core endpoints
+    # -------------------------------------------------------------------------
+
+    # -- Tools listing --
+    @app.get("/tools", response_model=SidecarToolsResponse)
+    async def list_sidecar_tools(_user: str = Depends(get_current_user)) -> SidecarToolsResponse:
+        """List all registered tools for Paperclip dashboard."""
+        if tool_registry is None:
+            return SidecarToolsResponse(tools=[])
+        raw_tools = tool_registry.list_tools()
+        items = [
+            SidecarToolItem(
+                name=t.get("name", ""),
+                display_name=t.get("display_name", t.get("name", "")),
+                description=t.get("description", ""),
+                enabled=not t.get("disabled", False),
+                source=t.get("source", "builtin"),
+            )
+            for t in raw_tools
+        ]
+        return SidecarToolsResponse(tools=items)
+
+    # -- Skills listing --
+    @app.get("/skills", response_model=SidecarSkillsResponse)
+    async def list_sidecar_skills(_user: str = Depends(get_current_user)) -> SidecarSkillsResponse:
+        """List all loaded skills for Paperclip dashboard."""
+        if skill_loader is None:
+            return SidecarSkillsResponse(skills=[])
+        raw_skills = skill_loader.all_skills()
+        items = [
+            SidecarSkillItem(
+                name=s.get("name", ""),
+                display_name=s.get("display_name", s.get("name", "")),
+                description=s.get("description", ""),
+                enabled=not s.get("disabled", False),
+                path=s.get("path", ""),
+            )
+            for s in raw_skills
+        ]
+        return SidecarSkillsResponse(skills=items)
+
+    # -- Apps listing --
+    @app.get("/apps", response_model=SidecarAppsResponse)
+    async def list_sidecar_apps(_user: str = Depends(get_current_user)) -> SidecarAppsResponse:
+        """List all sandboxed apps for Paperclip dashboard."""
+        if app_manager is None:
+            return SidecarAppsResponse(apps=[])
+        raw_apps = (
+            await app_manager.list_apps()
+            if asyncio.iscoroutinefunction(app_manager.list_apps)
+            else app_manager.list_apps()
+        )
+        items = []
+        for a in raw_apps:
+            items.append(
+                SidecarAppItem(
+                    id=getattr(a, "id", str(a)) if not isinstance(a, dict) else a.get("id", ""),
+                    name=getattr(a, "name", "") if not isinstance(a, dict) else a.get("name", ""),
+                    status=(
+                        getattr(a, "status", "stopped")
+                        if not isinstance(a, dict)
+                        else a.get("status", "stopped")
+                    ),
+                    port=(getattr(a, "port", None) if not isinstance(a, dict) else a.get("port")),
+                    created_at=str(
+                        getattr(a, "created_at", "")
+                        if not isinstance(a, dict)
+                        else a.get("created_at", "")
+                    ),
+                )
+            )
+        return SidecarAppsResponse(apps=items)
+
+    # -- App start/stop actions --
+    @app.post("/apps/{app_id}/start", response_model=SidecarAppActionResponse)
+    async def start_sidecar_app(
+        app_id: str,
+        _user: str = Depends(get_current_user),
+    ) -> SidecarAppActionResponse:
+        """Start a sandboxed app."""
+        if app_manager is None:
+            return SidecarAppActionResponse(ok=False, message="App manager not available")
+        try:
+            await app_manager.start_app(app_id)
+            return SidecarAppActionResponse(ok=True, message=f"App {app_id} started")
+        except Exception as exc:
+            return SidecarAppActionResponse(ok=False, message=str(exc))
+
+    @app.post("/apps/{app_id}/stop", response_model=SidecarAppActionResponse)
+    async def stop_sidecar_app(
+        app_id: str,
+        _user: str = Depends(get_current_user),
+    ) -> SidecarAppActionResponse:
+        """Stop a sandboxed app."""
+        if app_manager is None:
+            return SidecarAppActionResponse(ok=False, message="App manager not available")
+        try:
+            await app_manager.stop_app(app_id)
+            return SidecarAppActionResponse(ok=True, message=f"App {app_id} stopped")
+        except Exception as exc:
+            return SidecarAppActionResponse(ok=False, message=str(exc))
+
+    # -- Settings management --
+    @app.get("/settings", response_model=SidecarSettingsResponse)
+    async def get_sidecar_settings(
+        _user: str = Depends(get_current_user),
+    ) -> SidecarSettingsResponse:
+        """Return masked API keys for Paperclip settings page."""
+        if key_store is None:
+            return SidecarSettingsResponse(keys=[])
+        from core.key_store import ADMIN_CONFIGURABLE_KEYS
+
+        masked = key_store.get_masked_keys()
+        items = [
+            SidecarSettingsKeyEntry(
+                name=key_name,
+                masked_value=masked.get(key_name, ""),
+                is_set=bool(masked.get(key_name, "")),
+            )
+            for key_name in sorted(ADMIN_CONFIGURABLE_KEYS)
+        ]
+        return SidecarSettingsResponse(keys=items)
+
+    @app.post("/settings", response_model=SidecarSettingsUpdateResponse)
+    async def update_sidecar_settings(
+        req: SidecarSettingsUpdateRequest,
+        _user: str = Depends(get_current_user),
+    ) -> SidecarSettingsUpdateResponse:
+        """Update a single API key from Paperclip settings page."""
+        from fastapi import HTTPException as _HTTPException
+
+        from core.key_store import ADMIN_CONFIGURABLE_KEYS
+
+        if key_store is None:
+            raise _HTTPException(status_code=503, detail="Key store not available")
+        if req.key_name not in ADMIN_CONFIGURABLE_KEYS:
+            raise _HTTPException(status_code=400, detail=f"Key {req.key_name} is not configurable")
+        key_store.set_key(req.key_name, req.value)
+        return SidecarSettingsUpdateResponse(ok=True, key_name=req.key_name)
 
     return app
