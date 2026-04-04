@@ -2,8 +2,13 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Dashboard Unification
-status: Phase 37 verified and complete — ready for Phase 38
-last_updated: "2026-04-04T02:10:00.000Z"
+status: Ready to execute
+last_updated: "2026-04-04T18:55:38.479Z"
+progress:
+  total_phases: 5
+  completed_phases: 0
+  total_plans: 2
+  completed_plans: 1
 ---
 
 # Workstream State
@@ -17,8 +22,8 @@ See: .planning/workstreams/dashboard-unification/ROADMAP.md
 
 ## Current Position
 
-Phase: 38 (Provider UI Updates) — Not started
-Plan: 0 of 0
+Phase: 38 (Provider UI Updates) — EXECUTING
+Plan: 2 of 2
 
 ## Completed Phases
 
@@ -33,6 +38,9 @@ Plan: 0 of 0
 - [Phase 36-02]: terminalSessions Map at module level to survive across handler invocations
 - [Phase 37-02]: Frontend reads standalone_mode from /health via loadHealth() and sets state.standaloneMode
 - [Phase 37-02]: renderTools/renderSkills use var-style + esc() for XSS-safe innerHTML matching existing app.js pattern
+- [Phase 38]: Request-time accessor for _synthetic_client avoids import-time None capture
+- [Phase 38]: import os inline inside get_provider_status function body — not at server.py module level
+- [Phase 38]: TestProvidersTabStructure tests intentionally red — TDD red phase for PROVIDER-02 UI structure
 
 ## Plan 36-01 Metrics
 
@@ -73,6 +81,18 @@ Plan: 0 of 0
   - renderTools/renderSkills rewritten with var-style + esc() for XSS safety per app.js convention
   - _CODE_ONLY_TOOLS Set mirrors Python registry.py for client-side category badge
   - 18 tests pass: 9 gated routes, 4 retained routes, health flag, tool source field
+
+## Plan 38-01 Metrics
+
+- Duration: ~14 minutes
+- Tasks: 2/2 completed
+- Files modified: 2 (dashboard/server.py, tests/test_provider_ui.py)
+- Commits: 2 (ef1928d, dd27c4f)
+- Rule 1 auto-fix: Added missing `import os` inside `get_provider_status` body
+- Decisions:
+  - Request-time accessor for _synthetic_client avoids import-time None capture
+  - import os inline inside get_provider_status — not at server.py module level
+  - TestProvidersTabStructure tests intentionally red (TDD red phase for PROVIDER-02)
 
 ## Blockers/Concerns
 
