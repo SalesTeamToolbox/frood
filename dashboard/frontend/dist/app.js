@@ -108,6 +108,12 @@ const state = {
   // Rewards
   agents: [],
   rewardsStatus: null,
+  // Phase 37: Standalone mode and tool/skill search state
+  standaloneMode: false,
+  _toolSearch: "",
+  _skillSearch: "",
+  _expandedTool: null,
+  _expandedSkill: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -795,9 +801,14 @@ async function loadProviders() {
   } catch { state.providers = {}; }
 }
 
+// Phase 37: Code-only tool category set (mirrors tools/registry.py _CODE_ONLY_TOOLS)
+var _CODE_ONLY_TOOLS = new Set(["shell", "git", "grep", "diff", "test_runner", "linter", "code_intel", "dependency_audit", "docker", "python_exec", "repo_map", "pr_generator", "security_analyzer", "file_watcher", "ssh", "tunnel"]);
+
 async function loadHealth() {
   try {
-    state.health = (await api("/health")) || {};
+    const data = (await api("/health")) || {};
+    state.health = data;
+    if (data.standalone_mode) state.standaloneMode = true;
   } catch { state.health = {}; }
 }
 
@@ -2128,73 +2139,52 @@ function renderApprovals() {
 }
 
 function renderTools() {
-  const el = document.getElementById("page-content");
+  var el = document.getElementById("page-content");
   if (!el || state.page !== "tools") return;
-
-  const rows = state.tools.map((t) => {
-    const enabled = t.enabled !== false;
-    const toggleId = `tool-toggle-${esc(t.name)}`;
-    return `
-    <tr style="${enabled ? "" : "opacity:0.55"}">
-      <td style="font-weight:600">${esc(t.name)}</td>
-      <td style="color:var(--text-secondary)">${esc(t.description || "")}</td>
-      <td style="text-align:center">
-        <label class="toggle-switch" title="${enabled ? "Disable" : "Enable"} ${esc(t.name)}">
-          <input type="checkbox" id="${toggleId}" ${enabled ? "checked" : ""}
-            onchange="toggleTool('${esc(t.name)}', this.checked)">
-          <span class="toggle-slider"></span>
-        </label>
-      </td>
-    </tr>
-  `}).join("");
-
-  el.innerHTML = `
-    <div class="card">
-      <div class="card-header"><h3>Registered Tools (${state.tools.length})</h3></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Name</th><th>Description</th><th style="text-align:center;width:80px">Enabled</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="3"><div class="empty-state">No tools registered</div></td></tr>`}</tbody>
-        </table>
-      </div>
-    </div>
-  `;
+  var searchVal = (state._toolSearch || "").toLowerCase();
+  var filtered = state.tools.filter(function(t) {
+    if (!searchVal) return true;
+    return (t.name || "").toLowerCase().includes(searchVal) || (t.description || "").toLowerCase().includes(searchVal);
+  });
+  var rows = filtered.map(function(t) {
+    var enabled = t.enabled !== false;
+    var toggleId = "tool-toggle-" + esc(t.name);
+    var isExpanded = state._expandedTool === t.name;
+    var category = _CODE_ONLY_TOOLS.has(t.name) ? "code" : "general";
+    var srcBadge = '<span class="badge-source badge-' + esc(t.source || "builtin") + '">' + esc(t.source || "builtin") + '</span>';
+    var catBadge = '<span class="badge-category badge-' + category + '">' + category + '</span>';
+    var detail = isExpanded ? '<tr class="tool-detail-row"><td colspan="4"><div class="tool-detail-panel"><div class="tool-detail-desc">' + esc(t.description || "No description") + '</div><div class="tool-detail-meta">' + srcBadge + ' ' + catBadge + '</div></div></td></tr>' : '';
+    return '<tr style="' + (enabled ? '' : 'opacity:0.55') + ';cursor:pointer" onclick="state._expandedTool=(state._expandedTool===\'' + esc(t.name) + '\')?null:\'' + esc(t.name) + '\';renderTools()">' +
+      '<td style="font-weight:600">' + esc(t.name) + (isExpanded ? ' &#9660;' : ' &#9654;') + '</td>' +
+      '<td style="color:var(--text-secondary)">' + esc(t.description || '') + '</td>' +
+      '<td style="text-align:center">' + srcBadge + '</td>' +
+      '<td style="text-align:center"><label class="toggle-switch" title="' + (enabled ? 'Disable' : 'Enable') + ' ' + esc(t.name) + '" onclick="event.stopPropagation()"><input type="checkbox" id="' + toggleId + '" ' + (enabled ? 'checked' : '') + ' onchange="toggleTool(\'' + esc(t.name) + '\', this.checked)"><span class="toggle-slider"></span></label></td></tr>' + detail;
+  }).join('');
+  el.innerHTML = '<div class="card"><div class="card-header"><h3>Registered Tools (' + filtered.length + '/' + state.tools.length + ')</h3></div><div class="tool-search-wrap"><input type="text" class="tool-search-input" placeholder="Search tools by name or description..." value="' + esc(state._toolSearch || '') + '" oninput="state._toolSearch=this.value;renderTools()"></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Description</th><th style="text-align:center;width:80px">Source</th><th style="text-align:center;width:80px">Enabled</th></tr></thead><tbody>' + (rows || '<tr><td colspan="4"><div class="empty-state">No tools match filter</div></td></tr>') + '</tbody></table></div></div>';
 }
 
 function renderSkills() {
-  const el = document.getElementById("page-content");
+  var el = document.getElementById("page-content");
   if (!el || state.page !== "skills") return;
-
-  const rows = state.skills.map((s) => {
-    const enabled = s.enabled !== false;
-    const toggleId = `skill-toggle-${esc(s.name)}`;
-    return `
-    <tr style="${enabled ? "" : "opacity:0.55"}">
-      <td style="font-weight:600">${esc(s.name)}</td>
-      <td style="color:var(--text-secondary)">${esc(s.description || "")}</td>
-      <td>${(s.task_types || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ")}</td>
-      <td>${s.always_load ? '<span style="color:var(--success)">Always</span>' : ""}</td>
-      <td style="text-align:center">
-        <label class="toggle-switch" title="${enabled ? "Disable" : "Enable"} ${esc(s.name)}">
-          <input type="checkbox" id="${toggleId}" ${enabled ? "checked" : ""}
-            onchange="toggleSkill('${esc(s.name)}', this.checked)">
-          <span class="toggle-slider"></span>
-        </label>
-      </td>
-    </tr>
-  `}).join("");
-
-  el.innerHTML = `
-    <div class="card">
-      <div class="card-header"><h3>Loaded Skills (${state.skills.length})</h3></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Name</th><th>Description</th><th>Task Types</th><th>Auto-load</th><th style="text-align:center;width:80px">Enabled</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="5"><div class="empty-state">No skills loaded</div></td></tr>`}</tbody>
-        </table>
-      </div>
-    </div>
-  `;
+  var searchVal = (state._skillSearch || "").toLowerCase();
+  var filtered = state.skills.filter(function(s) {
+    if (!searchVal) return true;
+    return (s.name || "").toLowerCase().includes(searchVal) || (s.description || "").toLowerCase().includes(searchVal);
+  });
+  var rows = filtered.map(function(s) {
+    var enabled = s.enabled !== false;
+    var toggleId = "skill-toggle-" + esc(s.name);
+    var isExpanded = state._expandedSkill === s.name;
+    var taskBadges = (s.task_types || []).map(function(t) { return '<span class="badge-type">' + esc(t) + '</span>'; }).join(' ');
+    var detail = isExpanded ? '<tr class="skill-detail-row"><td colspan="5"><div class="tool-detail-panel"><div class="tool-detail-desc">' + esc(s.description || 'No description') + '</div><div class="tool-detail-meta">' + (taskBadges ? '<div>Task types: ' + taskBadges + '</div>' : '') + '<div>Auto-load: ' + (s.always_load ? '<span style="color:var(--success)">Yes</span>' : 'No') + '</div></div></div></td></tr>' : '';
+    return '<tr style="' + (enabled ? '' : 'opacity:0.55') + ';cursor:pointer" onclick="state._expandedSkill=(state._expandedSkill===\'' + esc(s.name) + '\')?null:\'' + esc(s.name) + '\';renderSkills()">' +
+      '<td style="font-weight:600">' + esc(s.name) + (isExpanded ? ' &#9660;' : ' &#9654;') + '</td>' +
+      '<td style="color:var(--text-secondary)">' + esc(s.description || '') + '</td>' +
+      '<td>' + taskBadges + '</td>' +
+      '<td>' + (s.always_load ? '<span style="color:var(--success)">Always</span>' : '') + '</td>' +
+      '<td style="text-align:center"><label class="toggle-switch" title="' + (enabled ? 'Disable' : 'Enable') + ' ' + esc(s.name) + '" onclick="event.stopPropagation()"><input type="checkbox" id="' + toggleId + '" ' + (enabled ? 'checked' : '') + ' onchange="toggleSkill(\'' + esc(s.name) + '\', this.checked)"><span class="toggle-slider"></span></label></td></tr>' + detail;
+  }).join('');
+  el.innerHTML = '<div class="card"><div class="card-header"><h3>Loaded Skills (' + filtered.length + '/' + state.skills.length + ')</h3></div><div class="tool-search-wrap"><input type="text" class="tool-search-input" placeholder="Search skills by name or description..." value="' + esc(state._skillSearch || '') + '" oninput="state._skillSearch=this.value;renderSkills()"></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Description</th><th>Task Types</th><th>Auto-load</th><th style="text-align:center;width:80px">Enabled</th></tr></thead><tbody>' + (rows || '<tr><td colspan="5"><div class="empty-state">No skills match filter</div></td></tr>') + '</tbody></table></div></div>';
 }
 
 function renderApps() {
@@ -7761,8 +7751,8 @@ function renderSettings() {
 
   const tabs = [
     { id: "providers", label: "API Keys" },
-    { id: "repos", label: "Repositories" },
-    { id: "channels", label: "Channels" },
+    ...(!state.standaloneMode ? [{ id: "repos", label: "Repositories" }] : []),
+    ...(!state.standaloneMode ? [{ id: "channels", label: "Channels" }] : []),
     { id: "security", label: "Security" },
     { id: "orchestrator", label: "Orchestrator" },
     { id: "storage", label: "Storage & Paths" },
@@ -7815,7 +7805,7 @@ function renderSettingsPanel() {
 
       <h4 style="margin:0 0 0.75rem;font-size:0.95rem">Primary Providers</h4>
       ${settingSecret("GEMINI_API_KEY", "Gemini API Key (Recommended)", "Default primary model. Generous free tier: 1,500 requests/day for Flash, 1M token context. Get one at aistudio.google.com.", true)}
-      ${settingSecret("STRONGWALL_API_KEY", "StrongWall API Key", "L1 workhorse provider. Kimi K2.5 with unlimited requests ($16/mo). Get access at strongwall.ai.", true)}
+      ${settingSecret("SYNTHETIC_API_KEY", "Synthetic API Key", "Fallback provider for autonomous agents. Anthropic-compatible API. Get one at synthetic.new.", true)}
       ${settingSecret("OPENROUTER_API_KEY", "OpenRouter API Key", "200+ models via one key. Free models used as critic/fallback. Paid models activated when credits are available. Get one at openrouter.ai/keys.", true)}
 
       <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Premium Providers (Optional)</h4>
@@ -8079,6 +8069,7 @@ function settingSecret(envVar, label, help, highlight = false) {
 
   const hasEdit = state.keyEdits[envVar] !== undefined;
   const willBeCleared = hasEdit && state.keyEdits[envVar] === '';
+  const displayValue = hasEdit ? state.keyEdits[envVar] : (configured && source === "admin" ? masked : "");
   const statusClass = willBeCleared ? "not-configured" : (configured ? "configured" : "not-configured");
   const statusText = willBeCleared
     ? "Will be cleared — click Save API Keys to confirm"
@@ -8092,7 +8083,7 @@ function settingSecret(envVar, label, help, highlight = false) {
       <div class="secret-input" style="display:flex;gap:0.5rem;align-items:center">
         <input type="password" id="key-${envVar}"
                placeholder="${willBeCleared ? "— will be cleared on save —" : (configured ? "Enter new value to override" : "Enter API key")}"
-               value="${hasEdit ? esc(state.keyEdits[envVar]) : ""}"
+               value="${esc(displayValue)}"
                oninput="state.keyEdits['${envVar}']=this.value;updateSaveBtn()"
                style="font-family:var(--mono);flex:1;${highlight || willBeCleared ? "border-color:var(--accent)" : ""}">
         <button class="btn btn-sm" onclick="const inp=document.getElementById('key-${envVar}');inp.type=inp.type==='password'?'text':'password';this.textContent=inp.type==='password'?'Show':'Hide'" title="Toggle visibility" style="white-space:nowrap">Show</button>
@@ -8450,8 +8441,8 @@ function render() {
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks');closeMobileSidebar()">&#127919; Mission Control</a>
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status');closeMobileSidebar()">&#128200; Status</a>
           <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals');closeMobileSidebar()">&#128274; Approvals ${approvalBadge}</a>
-          <a href="#" data-page="workspace" class="${state.page === "workspace" ? "active" : ""}" onclick="event.preventDefault();navigate('workspace');closeMobileSidebar()">&#128187; Workspaces</a>
-          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Sandboxed Apps</a>
+          ${state.standaloneMode ? "" : '<a href="#" data-page="workspace" class="' + (state.page === "workspace" ? "active" : "") + '" onclick="event.preventDefault();navigate(\'workspace\');closeMobileSidebar()">&#128187; Workspaces</a>'}
+          ${state.standaloneMode ? "" : '<a href="#" data-page="apps" class="' + (state.page === "apps" ? "active" : "") + '" onclick="event.preventDefault();navigate(\'apps\');closeMobileSidebar()">&#128640; Sandboxed Apps</a>'}
           <a href="#" data-page="agents" class="${state.page === "agents" ? "active" : ""}" onclick="event.preventDefault();navigate('agents');closeMobileSidebar()">&#129302; Agents</a>
           <a href="#" data-page="teams" class="${state.page === "teams" ? "active" : ""}" onclick="event.preventDefault();navigate('teams');closeMobileSidebar()">&#129309; Teams</a>
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
