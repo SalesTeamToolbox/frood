@@ -1341,7 +1341,7 @@ def create_app(
                 "daily_spend_usd": spending_tracker.daily_spend_usd,
                 "total_estimated_usd": total_cost,
                 "by_model": llm_usage,  # same list, includes estimated_cost_usd
-                "flat_rate": flat_rates,  # flat-rate provider costs (e.g. StrongWall $16/mo)
+                "flat_rate": flat_rates,  # flat-rate provider costs
             },
             "connectivity": connectivity,
             "model_performance": model_perf,
@@ -4743,6 +4743,121 @@ Focus on learnings that would help in future similar sessions."""
             "models": [],
             "note": "Provider registry removed in v2.0 MCP pivot",
         }
+
+    @app.get("/api/providers/synthetic/models")
+    async def get_synthetic_models(
+        force: bool = False,
+        _admin: AuthContext = Depends(require_admin),
+    ):
+        """Return Synthetic.new model catalog with optional cache bypass."""
+        import core.agent_manager as _am
+
+        client = _am._synthetic_client
+        if client is None:
+            return {
+                "models": [],
+                "cached_at": None,
+                "count": 0,
+                "free_count": 0,
+                "capability_mapping": {},
+            }
+        models = await client.refresh_models(force=force)
+        mapping = client.update_provider_models_mapping()
+        free_count = sum(1 for m in models if m.is_free)
+        return {
+            "models": [
+                {
+                    "id": m.id,
+                    "name": m.name,
+                    "description": m.description,
+                    "capabilities": m.capabilities,
+                    "max_context_length": m.max_context_length,
+                    "is_free": m.is_free,
+                }
+                for m in models
+            ],
+            "cached_at": client._last_refresh or None,
+            "count": len(models),
+            "free_count": free_count,
+            "capability_mapping": mapping,
+        }
+
+    @app.get("/api/settings/provider-status")
+    async def get_provider_status(
+        _admin: AuthContext = Depends(require_admin),
+    ):
+        """Return live connectivity status for each configured LLM provider."""
+        import time as _time
+
+        import httpx
+
+        results = []
+
+        # CC Subscription -- presence-only, no live ping (managed by CLI, per D-01)
+        cc_token = os.environ.get("CLAUDECODE_SUBSCRIPTION_TOKEN", "")
+        results.append(
+            {
+                "name": "claudecode",
+                "label": "Claude Code Subscription",
+                "configured": bool(cc_token),
+                "status": "ok" if cc_token else "unconfigured",
+            }
+        )
+
+        # Helper for pinging /v1/models with Bearer auth
+        async def _ping_provider(name, label, env_var, base_url, auth_header_fn):
+            key = os.environ.get(env_var, "")
+            if not key:
+                return {"name": name, "label": label, "configured": False, "status": "unconfigured"}
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    headers = auth_header_fn(key)
+                    resp = await client.get(f"{base_url}/models", headers=headers)
+                status = (
+                    "ok"
+                    if resp.status_code == 200
+                    else ("auth_error" if resp.status_code in (401, 403) else "unreachable")
+                )
+            except httpx.TimeoutException:
+                status = "timeout"
+            except Exception:
+                status = "unreachable"
+            return {"name": name, "label": label, "configured": True, "status": status}
+
+        # Synthetic.new -- ping https://api.synthetic.new/v1/models
+        results.append(
+            await _ping_provider(
+                "synthetic",
+                "Synthetic.new",
+                "SYNTHETIC_API_KEY",
+                "https://api.synthetic.new/v1",
+                lambda k: {"Authorization": f"Bearer {k}"},
+            )
+        )
+
+        # Anthropic -- ping https://api.anthropic.com/v1/models
+        results.append(
+            await _ping_provider(
+                "anthropic",
+                "Anthropic",
+                "ANTHROPIC_API_KEY",
+                "https://api.anthropic.com/v1",
+                lambda k: {"x-api-key": k, "anthropic-version": "2023-06-01"},
+            )
+        )
+
+        # OpenRouter -- ping https://openrouter.ai/api/v1/models
+        results.append(
+            await _ping_provider(
+                "openrouter",
+                "OpenRouter",
+                "OPENROUTER_API_KEY",
+                "https://openrouter.ai/api/v1",
+                lambda k: {"Authorization": f"Bearer {k}"},
+            )
+        )
+
+        return {"providers": results, "checked_at": _time.time()}
 
     # -- Tools (Phase 4) ------------------------------------------------------
 
