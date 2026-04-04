@@ -37,6 +37,12 @@ Plans:
 **Goal**: Create simplified dashboard for standalone mode (Claude Code only)
 **Depends on**: Phase 36
 **Requirements**: STANDALONE-01, STANDALONE-02, STANDALONE-03, STANDALONE-04
+**Plans:** 2 plans
+
+Plans:
+- [ ] 37-01-PLAN.md — Backend standalone infrastructure: config field, CLI flag, guard decorator, /health update, tool source field
+- [ ] 37-02-PLAN.md — Frontend mode awareness + enhanced tool/skill tables + test coverage
+
 **Success Criteria** (what must be TRUE):
 
 1. When running without Paperclip, simplified dashboard provides settings management
@@ -86,7 +92,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 | ----- | -------------- | ------ | --------- |
 | 36. Paperclip Integration Core | 3/3 | Complete | 2026-04-03 |
-| 37. Standalone Dashboard | 0/1 | Not started | - |
+| 37. Standalone Dashboard | 0/2 | Planning complete | - |
 | 38. Provider UI Updates | 0/1 | Not started | - |
 | 39. Unified Agent Management | 0/1 | Not started | - |
 | 40. Settings Consolidation | 0/1 | Not started | - |
