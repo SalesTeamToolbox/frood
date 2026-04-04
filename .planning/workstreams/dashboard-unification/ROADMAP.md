@@ -8,7 +8,7 @@
 
 - [x] **Phase 36: Paperclip Integration Core** — Integrate workspace features into Paperclip dashboard (COMPLETE)
 - [x] **Phase 37: Standalone Dashboard** — Create simplified dashboard for standalone mode (COMPLETE)
-- [ ] **Phase 38: Provider UI Updates** — Update provider configuration UI to match current structure
+- [x] **Phase 38: Provider UI Updates** — Update provider configuration UI to match current structure (COMPLETE)
 - [ ] **Phase 39: Unified Agent Management** — Single interface for agent monitoring and control
 - [ ] **Phase 40: Settings Consolidation** — Streamlined settings management across both modes
 
@@ -55,11 +55,12 @@ Plans:
 **Goal**: Update provider configuration UI to match current provider structure
 **Depends on**: Phase 36, Phase 37
 **Requirements**: PROVIDER-01, PROVIDER-02, PROVIDER-03, PROVIDER-04, PROVIDER-05
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
-- [x] 38-01-PLAN.md — Backend: StrongWall cleanup + Synthetic models endpoint + provider status endpoint + tests
-- [ ] 38-02-PLAN.md — Frontend: Providers tab restructure + dynamic agent model dropdown + visual verification
+
+- [x] 38-01-PLAN.md — Backend: StrongWall cleanup + Synthetic models endpoint + provider status endpoint + tests (COMPLETE: ef1928d, dd27c4f)
+- [x] 38-02-PLAN.md — Frontend: Providers tab restructure + dynamic agent model dropdown + visual verification (COMPLETE: 12639c8)
 
 **Success Criteria** (what must be TRUE):
 
@@ -99,6 +100,6 @@ Plans:
 | ----- | -------------- | ------ | --------- |
 | 36. Paperclip Integration Core | 3/3 | Complete | 2026-04-03 |
 | 37. Standalone Dashboard | 2/2 | Complete | 2026-04-03 |
-| 38. Provider UI Updates | 1/2 | In Progress|  |
+| 38. Provider UI Updates | 2/2 | Complete   | 2026-04-04 |
 | 39. Unified Agent Management | 0/1 | Not started | - |
 | 40. Settings Consolidation | 0/1 | Not started | - |
