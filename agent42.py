@@ -50,7 +50,6 @@ from dashboard.websocket_manager import WebSocketManager
 from memory.effectiveness import EffectivenessStore
 from memory.qdrant_store import QdrantConfig, QdrantStore
 from memory.redis_session import RedisConfig, RedisSessionBackend
-from memory.session import SessionManager
 from memory.store import MemoryStore
 from skills.loader import SkillLoader
 from tools.cron import CronScheduler
@@ -120,7 +119,6 @@ class Agent42:
             repos_json_path=str(data_dir / "repos.json"),
             clone_dir=str(data_dir / "repos"),
         )
-        self.session_manager = SessionManager(str(data_dir / "sessions"))
         skill_dirs = [
             Path(__file__).parent / "skills" / "builtins",
             Path(__file__).parent / "skills" / "workspace",
@@ -155,6 +153,22 @@ class Agent42:
 
         self.memory_store = MemoryStore(
             memory_dir, qdrant_store=qdrant_store, redis_backend=redis_backend
+        )
+
+        # ── Consolidation pipeline (LLM summarization of old sessions) ───
+        consolidation_router = ConsolidationRouter()
+        consolidation_pipeline = ConsolidationPipeline(
+            model_router=consolidation_router,
+            embedding_store=self.memory_store._embeddings,
+            qdrant_store=qdrant_store,
+        )
+        self.consolidation_pipeline = consolidation_pipeline
+
+        # ── Session manager (after redis + consolidation are ready) ──────
+        self.session_manager = SessionManager(
+            str(data_dir / "sessions"),
+            redis_backend=redis_backend,
+            consolidation_pipeline=consolidation_pipeline,
         )
 
         # ── Effectiveness tracking ────────────────────────────
