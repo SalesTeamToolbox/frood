@@ -38,11 +38,10 @@ created: 2026-04-04
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 38-01-01 | 01 | 1 | PROVIDER-01 | unit | `python -m pytest tests/ -x -q -k strongwall` | ❌ W0 | ⬜ pending |
-| 38-01-02 | 01 | 1 | PROVIDER-02 | unit | `python -m pytest tests/ -x -q -k provider` | ❌ W0 | ⬜ pending |
-| 38-02-01 | 02 | 1 | PROVIDER-03 | unit | `python -m pytest tests/ -x -q -k synthetic` | ❌ W0 | ⬜ pending |
-| 38-02-02 | 02 | 1 | PROVIDER-04 | unit | `python -m pytest tests/ -x -q -k provider_status` | ❌ W0 | ⬜ pending |
-| 38-03-01 | 03 | 2 | PROVIDER-05 | unit | `python -m pytest tests/ -x -q -k model_select` | ❌ W0 | ⬜ pending |
+| 38-01-T1 | 01 | 1 | PROVIDER-01 | grep | `! grep -q "StrongWall" dashboard/server.py` | ✅ | ⬜ pending |
+| 38-01-T2 | 01 | 1 | PROVIDER-01,03,04,05 | unit | `python -m pytest tests/test_provider_ui.py -x -q` | ❌ W0 | ⬜ pending |
+| 38-02-T1 | 02 | 2 | PROVIDER-02,03,04,05 | grep | `grep -c "loadSyntheticModels" dashboard/frontend/dist/app.js` | ✅ | ⬜ pending |
+| 38-02-T2 | 02 | 2 | PROVIDER-02 | manual | Human visual verification of Providers tab | N/A | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
