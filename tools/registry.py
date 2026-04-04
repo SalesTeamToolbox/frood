@@ -182,6 +182,7 @@ class ToolRegistry:
                 "name": t.name,
                 "description": t.description,
                 "enabled": t.name not in self._disabled,
+                "source": "builtin",
             }
             for t in self._tools.values()
         ]

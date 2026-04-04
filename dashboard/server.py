@@ -1370,6 +1370,7 @@ def create_app(
     # -- Workspaces (multi-project registry) -----------------------------------
 
     @app.get("/api/workspaces")
+    @standalone_guard
     async def list_workspaces(_user: str = Depends(get_current_user)):
         if not workspace_registry:
             raise HTTPException(503, "Workspace registry not initialized")
@@ -1381,6 +1382,7 @@ def create_app(
         }
 
     @app.post("/api/workspaces", status_code=201)
+    @standalone_guard
     async def create_workspace(body: dict, _user: str = Depends(get_current_user)):
         if not workspace_registry:
             raise HTTPException(503, "Workspace registry not initialized")
@@ -1395,6 +1397,7 @@ def create_app(
         return ws.to_dict()
 
     @app.patch("/api/workspaces/{ws_id}")
+    @standalone_guard
     async def update_workspace(ws_id: str, body: dict, _user: str = Depends(get_current_user)):
         if not workspace_registry:
             raise HTTPException(503, "Workspace registry not initialized")
@@ -1408,6 +1411,7 @@ def create_app(
         return ws.to_dict()
 
     @app.delete("/api/workspaces/{ws_id}")
+    @standalone_guard
     async def delete_workspace(ws_id: str, _user: str = Depends(get_current_user)):
         if not workspace_registry:
             raise HTTPException(503, "Workspace registry not initialized")
@@ -1437,6 +1441,7 @@ def create_app(
         return workspace
 
     @app.get("/api/ide/tree")
+    @standalone_guard
     async def ide_tree(
         path: str = "",
         workspace_id: str | None = None,
@@ -1473,6 +1478,7 @@ def create_app(
         return {"path": path, "entries": entries}
 
     @app.get("/api/ide/file")
+    @standalone_guard
     async def ide_read_file(
         path: str,
         workspace_id: str | None = None,
@@ -1534,6 +1540,7 @@ def create_app(
         workspace_id: str | None = None
 
     @app.post("/api/ide/file")
+    @standalone_guard
     async def ide_write_file(
         req: IDEWriteRequest,
         _user: str = Depends(get_current_user),
@@ -1551,6 +1558,7 @@ def create_app(
         return {"status": "ok", "path": req.path, "size": len(req.content)}
 
     @app.get("/api/ide/search")
+    @standalone_guard
     async def ide_search(
         q: str,
         path: str = "",
@@ -1598,6 +1606,7 @@ def create_app(
     # -- GSD Workstreams -------------------------------------------------------
 
     @app.get("/api/gsd/workstreams")
+    @standalone_guard
     async def gsd_workstreams(
         workspace_id: str = None,
         _user: str = Depends(get_current_user),
@@ -1668,6 +1677,7 @@ def create_app(
         return {"workstreams": workstreams, "active": active_ws}
 
     @app.put("/api/gsd/workstreams/active")
+    @standalone_guard
     async def set_active_workstream(
         body: dict,
         _user: str = Depends(get_current_user),
@@ -1693,6 +1703,7 @@ def create_app(
     # -- IDE Lint --------------------------------------------------------------
 
     @app.get("/api/ide/lint")
+    @standalone_guard
     async def ide_lint(
         workspace_id: str = None,
         _user: str = Depends(get_current_user),
@@ -3585,11 +3596,13 @@ def create_app(
         return f"All providers failed. Last error: {last_error}", "none"
 
     @app.get("/api/chat/messages")
+    @standalone_guard
     async def chat_messages_legacy(_user: str = Depends(get_current_user)):
         """Get messages for legacy (no-session) chat mode."""
         return await _chat_load_messages("_legacy")
 
     @app.get("/api/chat/sessions")
+    @standalone_guard
     async def chat_sessions_list(type: str = "", _user: str = Depends(get_current_user)):
         """List chat sessions, optionally filtered by type (chat/code)."""
         return await _chat_load_sessions(type)
@@ -3599,6 +3612,7 @@ def create_app(
         session_type: str = "chat"
 
     @app.post("/api/chat/sessions")
+    @standalone_guard
     async def chat_session_create(
         req: CreateSessionRequest, _user: str = Depends(get_current_user)
     ):
@@ -3617,6 +3631,7 @@ def create_app(
         return session
 
     @app.get("/api/chat/sessions/{session_id}/messages")
+    @standalone_guard
     async def chat_session_messages(session_id: str, _user: str = Depends(get_current_user)):
         """Get all messages for a specific session."""
         return await _chat_load_messages(session_id)
@@ -3626,6 +3641,7 @@ def create_app(
         file_context: str = ""
 
     @app.post("/api/chat/sessions/{session_id}/send")
+    @standalone_guard
     async def chat_session_send(
         session_id: str, req: SendMessageRequest, _user: str = Depends(get_current_user)
     ):
@@ -3715,6 +3731,7 @@ def create_app(
         return {"status": "ok"}
 
     @app.delete("/api/chat/sessions/{session_id}")
+    @standalone_guard
     async def chat_session_delete(session_id: str, _user: str = Depends(get_current_user)):
         """Delete a chat session and its messages."""
         session_path = _CHAT_SESSIONS_DIR / f"{session_id}.json"
@@ -3736,6 +3753,7 @@ def create_app(
         repo_id: str = ""
 
     @app.post("/api/chat/sessions/{session_id}/setup")
+    @standalone_guard
     async def chat_session_setup(
         session_id: str, req: ChatSetupRequest, _user: str = Depends(get_current_user)
     ):
@@ -4210,6 +4228,7 @@ Focus on learnings that would help in future similar sessions."""
             return {"status": "error", "detail": str(e), "learnings": []}
 
     @app.post("/api/ide/chat")
+    @standalone_guard
     async def ide_chat(req: ChatRequest, _user: str = Depends(get_current_user)):
         """Send a message to the AI provider and get a response.
 
@@ -4359,6 +4378,7 @@ Focus on learnings that would help in future similar sessions."""
             raise HTTPException(500, f"Chat error: {e}")
 
     @app.get("/api/ide/chat/config")
+    @standalone_guard
     async def ide_chat_config(_user: str = Depends(get_current_user)):
         """Return current chat provider configuration (no secrets)."""
         has_key = bool(_os.environ.get("ANTHROPIC_API_KEY", ""))
@@ -5097,6 +5117,7 @@ Focus on learnings that would help in future similar sessions."""
     # -- Channels (Phase 2) ---------------------------------------------------
 
     @app.get("/api/channels")
+    @standalone_guard
     async def list_channels(_user: str = Depends(get_current_user)):
         if channel_manager:
             return channel_manager.list_channels()
@@ -5195,6 +5216,7 @@ Focus on learnings that would help in future similar sessions."""
             priority: int = 0
 
         @app.get("/api/projects")
+        @standalone_guard
         async def list_projects(
             include_archived: bool = False,
             _user: str = Depends(get_current_user),
@@ -5209,6 +5231,7 @@ Focus on learnings that would help in future similar sessions."""
             return result
 
         @app.post("/api/projects")
+        @standalone_guard
         async def create_project(
             req: ProjectCreateRequest,
             _user: str = Depends(get_current_user),
@@ -5226,11 +5249,13 @@ Focus on learnings that would help in future similar sessions."""
             return d
 
         @app.get("/api/projects/board")
+        @standalone_guard
         async def projects_board(_user: str = Depends(get_current_user)):
             """Get projects grouped by status for Kanban board."""
             return project_manager.board()
 
         @app.get("/api/projects/{project_id}")
+        @standalone_guard
         async def get_project(
             project_id: str,
             _user: str = Depends(get_current_user),
@@ -5244,6 +5269,7 @@ Focus on learnings that would help in future similar sessions."""
             return d
 
         @app.patch("/api/projects/{project_id}")
+        @standalone_guard
         async def update_project(
             project_id: str,
             req: ProjectUpdateRequest,
@@ -5271,6 +5297,7 @@ Focus on learnings that would help in future similar sessions."""
             return d
 
         @app.patch("/api/projects/{project_id}/status")
+        @standalone_guard
         async def update_project_status(
             project_id: str,
             req: ProjectStatusRequest,
@@ -5286,6 +5313,7 @@ Focus on learnings that would help in future similar sessions."""
             return d
 
         @app.delete("/api/projects/{project_id}")
+        @standalone_guard
         async def delete_project(
             project_id: str,
             _user: str = Depends(get_current_user),
@@ -5297,6 +5325,7 @@ Focus on learnings that would help in future similar sessions."""
             return {"status": "archived"}
 
         @app.get("/api/projects/{project_id}/tasks")
+        @standalone_guard
         async def get_project_tasks(
             project_id: str,
             _user: str = Depends(get_current_user),
@@ -5309,6 +5338,7 @@ Focus on learnings that would help in future similar sessions."""
             return [t.to_dict() for t in tasks]
 
         @app.post("/api/projects/{project_id}/tasks")
+        @standalone_guard
         async def create_project_task(
             project_id: str,
             req: ProjectTaskCreateRequest,
@@ -5323,6 +5353,7 @@ Focus on learnings that would help in future similar sessions."""
     # -- Project Memory --------------------------------------------------------
 
     @app.get("/api/projects/{project_id}/memory")
+    @standalone_guard
     async def get_project_memory(
         project_id: str,
         _user: str = Depends(get_current_user),
@@ -5354,6 +5385,7 @@ Focus on learnings that would help in future similar sessions."""
         device_code: str
 
     @app.get("/api/github/status")
+    @standalone_guard
     async def github_status(_user: str = Depends(get_current_user)):
         """Check if GitHub is configured."""
         return {
@@ -5362,6 +5394,7 @@ Focus on learnings that would help in future similar sessions."""
         }
 
     @app.post("/api/github/device-auth/start")
+    @standalone_guard
     async def github_device_start(_user: str = Depends(get_current_user)):
         """Start GitHub OAuth device flow."""
         if not settings.github_client_id:
@@ -5379,6 +5412,7 @@ Focus on learnings that would help in future similar sessions."""
             raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
 
     @app.post("/api/github/device-auth/poll")
+    @standalone_guard
     async def github_device_poll(
         req: GitHubPollRequest,
         _user: str = Depends(get_current_user),
@@ -5409,6 +5443,7 @@ Focus on learnings that would help in future similar sessions."""
             raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
 
     @app.post("/api/github/create-repo")
+    @standalone_guard
     async def github_create_repo(
         name: str,
         private: bool = True,
@@ -5443,11 +5478,13 @@ Focus on learnings that would help in future similar sessions."""
             token: str
 
         @app.get("/api/github/accounts")
+        @standalone_guard
         async def list_github_accounts(_admin: AuthContext = Depends(require_admin)):
             """List all saved GitHub accounts (tokens masked)."""
             return github_account_store.list_accounts()
 
         @app.post("/api/github/accounts")
+        @standalone_guard
         async def add_github_account(
             req: GitHubAccountAddRequest,
             _admin: AuthContext = Depends(require_admin),
@@ -5489,6 +5526,7 @@ Focus on learnings that would help in future similar sessions."""
             return acct
 
         @app.delete("/api/github/accounts/{account_id}")
+        @standalone_guard
         async def remove_github_account(
             account_id: str,
             _admin: AuthContext = Depends(require_admin),
@@ -5513,11 +5551,13 @@ Focus on learnings that would help in future similar sessions."""
             account_id: str = ""  # optional: which GitHub account to use
 
         @app.get("/api/repos")
+        @standalone_guard
         async def list_repos(_user: str = Depends(get_current_user)):
             """List all connected repositories."""
             return [r.to_dict() for r in repo_manager.list_repos()]
 
         @app.post("/api/repos")
+        @standalone_guard
         async def create_repo(req: RepoCreateRequest, _admin: AuthContext = Depends(require_admin)):
             """Add a repository (local path or clone from GitHub)."""
             if req.source == "github":
@@ -5545,6 +5585,7 @@ Focus on learnings that would help in future similar sessions."""
             return repo.to_dict()
 
         @app.get("/api/repos/{repo_id}")
+        @standalone_guard
         async def get_repo(repo_id: str, _user: str = Depends(get_current_user)):
             """Get a single repository by ID."""
             repo = repo_manager.get(repo_id)
@@ -5553,6 +5594,7 @@ Focus on learnings that would help in future similar sessions."""
             return repo.to_dict()
 
         @app.delete("/api/repos/{repo_id}")
+        @standalone_guard
         async def delete_repo(repo_id: str, _admin: AuthContext = Depends(require_admin)):
             """Remove a repository from the registry."""
             try:
@@ -5562,12 +5604,14 @@ Focus on learnings that would help in future similar sessions."""
             return {"status": "removed"}
 
         @app.get("/api/repos/{repo_id}/branches")
+        @standalone_guard
         async def list_repo_branches(repo_id: str, _user: str = Depends(get_current_user)):
             """List branches for a repository."""
             branches = await repo_manager.list_branches(repo_id)
             return {"branches": branches}
 
         @app.post("/api/repos/{repo_id}/sync")
+        @standalone_guard
         async def sync_repo(repo_id: str, _user: str = Depends(get_current_user)):
             """Fetch latest changes for a repository."""
             try:
@@ -5577,6 +5621,7 @@ Focus on learnings that would help in future similar sessions."""
             return {"status": "ok", "message": msg}
 
         @app.get("/api/github/repos")
+        @standalone_guard
         async def list_github_repos(
             account_id: str = "",
             _admin: AuthContext = Depends(require_admin),
@@ -5627,6 +5672,7 @@ Focus on learnings that would help in future similar sessions."""
             description: str = ""
 
         @app.get("/api/apps")
+        @standalone_guard
         async def list_apps(mode: str = "", _user: str = Depends(get_current_user)):
             """List all apps, optionally filtered by mode (internal/external)."""
             if mode and mode in ("internal", "external"):
@@ -5636,6 +5682,7 @@ Focus on learnings that would help in future similar sessions."""
             return [a.to_dict() for a in apps]
 
         @app.post("/api/apps")
+        @standalone_guard
         async def create_user_app(req: AppCreateRequest, _user: str = Depends(get_current_user)):
             """Create a new app."""
             new_app = await app_manager.create(
@@ -5651,6 +5698,7 @@ Focus on learnings that would help in future similar sessions."""
             }
 
         @app.get("/api/apps/{app_id}")
+        @standalone_guard
         async def get_app(app_id: str, _user: str = Depends(get_current_user)):
             """Get app details."""
             found = await app_manager.get(app_id)
@@ -5659,6 +5707,7 @@ Focus on learnings that would help in future similar sessions."""
             return found.to_dict()
 
         @app.post("/api/apps/{app_id}/start")
+        @standalone_guard
         async def start_app(app_id: str, _user: str = Depends(get_current_user)):
             """Start a ready/stopped app."""
             try:
@@ -5668,6 +5717,7 @@ Focus on learnings that would help in future similar sessions."""
                 raise HTTPException(status_code=400, detail=str(e))
 
         @app.post("/api/apps/{app_id}/stop")
+        @standalone_guard
         async def stop_app(app_id: str, _user: str = Depends(get_current_user)):
             """Stop a running app."""
             try:
@@ -5677,6 +5727,7 @@ Focus on learnings that would help in future similar sessions."""
                 raise HTTPException(status_code=400, detail=str(e))
 
         @app.post("/api/apps/{app_id}/restart")
+        @standalone_guard
         async def restart_app(app_id: str, _user: str = Depends(get_current_user)):
             """Restart an app."""
             try:
@@ -5686,6 +5737,7 @@ Focus on learnings that would help in future similar sessions."""
                 raise HTTPException(status_code=400, detail=str(e))
 
         @app.delete("/api/apps/{app_id}")
+        @standalone_guard
         async def delete_app(app_id: str, _user: str = Depends(get_current_user)):
             """Permanently delete an app and remove its files."""
             try:
@@ -5695,6 +5747,7 @@ Focus on learnings that would help in future similar sessions."""
                 raise HTTPException(status_code=400, detail=str(e))
 
         @app.get("/api/apps/{app_id}/logs")
+        @standalone_guard
         async def get_app_logs(
             app_id: str, lines: int = 100, _user: str = Depends(get_current_user)
         ):
@@ -5703,11 +5756,13 @@ Focus on learnings that would help in future similar sessions."""
             return {"logs": output}
 
         @app.get("/api/apps/{app_id}/health")
+        @standalone_guard
         async def app_health(app_id: str, _user: str = Depends(get_current_user)):
             """Check app health."""
             return await app_manager.health_check(app_id)
 
         @app.post("/api/apps/{app_id}/update")
+        @standalone_guard
         async def update_app(
             app_id: str, req: AppUpdateRequest, _user: str = Depends(get_current_user)
         ):
@@ -5723,6 +5778,7 @@ Focus on learnings that would help in future similar sessions."""
             visibility: str | None = None
 
         @app.patch("/api/apps/{app_id}/settings")
+        @standalone_guard
         async def update_app_settings(
             app_id: str,
             req: AppSettingsRequest,
