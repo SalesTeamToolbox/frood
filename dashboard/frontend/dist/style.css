@@ -2755,3 +2755,20 @@ body.towel-day .dont-panic-watermark {
   color: var(--success, #22c55e);
   padding: 0.3rem 0 0;
 }
+
+/* Phase 37: Tool/Skill search and inline expansion */
+.tool-search-wrap { padding: 0.75rem 1rem 0; }
+.tool-search-input { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color 0.15s; }
+.tool-search-input:focus { border-color: var(--accent); }
+.tool-search-input::placeholder { color: var(--text-muted); }
+.tool-detail-row td { padding: 0 !important; border-top: none !important; }
+.tool-detail-panel { padding: 0.75rem 1rem 1rem; background: var(--bg-secondary); border-top: 1px solid var(--border); }
+.tool-detail-desc { margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.85rem; line-height: 1.5; }
+.tool-detail-meta { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.badge-source { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.badge-builtin { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
+.badge-mcp { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+.badge-category { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+.badge-code { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+.badge-general { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
+.skill-detail-row td { padding: 0 !important; border-top: none !important; }
