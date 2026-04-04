@@ -44,6 +44,7 @@ class Settings:
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     synthetic_api_key: str = ""  # Synthetic.new (Anthropic-compatible, autonomous agents)
+    claudecode_subscription_token: str = ""  # Claude Code Subscription token
     gemini_api_key: str = ""
     openrouter_api_key: str = ""
     # Dead providers — keys kept for backward compat but no routing logic exists
@@ -54,8 +55,6 @@ class Settings:
     mistral_api_key: str = ""
     codestral_api_key: str = ""
     sambanova_api_key: str = ""
-    strongwall_api_key: str = ""
-    strongwall_monthly_cost: float = 16.0  # Flat monthly rate in USD
     together_api_key: str = ""
 
     # Dashboard auth
@@ -316,6 +315,7 @@ class Settings:
     paperclip_sidecar_port: int = 8001
     paperclip_api_url: str = ""  # e.g. "http://paperclip:3000"
     sidecar_enabled: bool = False
+    standalone_mode: bool = False  # Simplified dashboard mode (Claude Code only)
     mcp_tool_allowlist: str = ""  # Comma-separated tool names for /mcp/tool proxy (Phase 28)
 
     @classmethod
@@ -371,8 +371,6 @@ class Settings:
             mistral_api_key=os.getenv("MISTRAL_API_KEY", ""),
             codestral_api_key=os.getenv("CODESTRAL_API_KEY", ""),
             sambanova_api_key=os.getenv("SAMBANOVA_API_KEY", ""),
-            strongwall_api_key=os.getenv("STRONGWALL_API_KEY", ""),
-            strongwall_monthly_cost=float(os.getenv("STRONGWALL_MONTHLY_COST", "16.0")),
             together_api_key=os.getenv("TOGETHER_API_KEY", ""),
             # Dashboard
             dashboard_username=os.getenv("DASHBOARD_USERNAME", "admin"),
@@ -614,6 +612,7 @@ class Settings:
             paperclip_sidecar_port=int(os.getenv("PAPERCLIP_SIDECAR_PORT", "8001")),
             paperclip_api_url=os.getenv("PAPERCLIP_API_URL", ""),
             sidecar_enabled=os.getenv("SIDECAR_ENABLED", "false").lower() in ("true", "1", "yes"),
+            standalone_mode=os.getenv("STANDALONE_MODE", "false").lower() in ("true", "1", "yes"),
             mcp_tool_allowlist=os.getenv("MCP_TOOL_ALLOWLIST", ""),
         )
 

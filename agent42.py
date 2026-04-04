@@ -89,11 +89,13 @@ class Agent42:
         headless: bool = False,
         sidecar: bool = False,
         sidecar_port: int | None = None,
+        standalone: bool = False,
     ):
         self.dashboard_port = dashboard_port
         self.headless = headless
         self.sidecar = sidecar
         self.sidecar_port = sidecar_port or settings.paperclip_sidecar_port
+        self.standalone = standalone
 
         # ── Core infrastructure ──────────────────────────────────────────
         workspace = Path(settings.default_repo_path or ".").resolve()
@@ -294,6 +296,7 @@ class Agent42:
                 workspace_registry=self.workspace_registry,
                 github_account_store=github_account_store,
                 key_store=self.key_store,
+                standalone=self.standalone,
             )
             config = uvicorn.Config(
                 app,
@@ -338,6 +341,11 @@ def main():
         default=None,
         help="Sidecar HTTP port (default: PAPERCLIP_SIDECAR_PORT or 8001)",
     )
+    parser.add_argument(
+        "--standalone",
+        action="store_true",
+        help="Run in standalone mode (simplified dashboard for Claude Code only)",
+    )
 
     # Backup subcommand
     backup_parser = subparsers.add_parser("backup", help="Create a full backup archive")
@@ -374,6 +382,7 @@ def main():
         # Default: start dashboard + services
         print("Agent42 v2.0 initializing (MCP architecture)...", flush=True)
         is_sidecar = args.sidecar or settings.sidecar_enabled
+        is_standalone = args.standalone or settings.standalone_mode
         if is_sidecar:
             from core.sidecar_logging import configure_sidecar_logging
 
@@ -384,6 +393,7 @@ def main():
                 headless=args.no_dashboard,
                 sidecar=is_sidecar,
                 sidecar_port=args.sidecar_port,
+                standalone=is_standalone,
             )
         except Exception as exc:
             logger.critical("Agent42 failed to initialize: %s", exc, exc_info=True)

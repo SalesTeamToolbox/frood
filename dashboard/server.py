@@ -473,6 +473,7 @@ def create_app(
     agent_manager=None,  # passed from agent42.py after Phase 2
     reward_system=None,  # passed from agent42.py when REWARDS_ENABLED=true
     workspace_registry=None,  # passed from agent42.py for multi-project workspace
+    standalone: bool = False,  # Phase 37: simplified dashboard mode (Claude Code only)
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -501,6 +502,31 @@ def create_app(
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         body = {"error": True, "message": detail, "status": exc.status_code}
         return JSONResponse(status_code=exc.status_code, content=body)
+
+    # -- Phase 37: STANDALONE mode route gating --------------------------------
+    def standalone_guard(fn):
+        """Decorator that returns 404 JSON for routes disabled in standalone mode.
+
+        Per D-01: guard decorator gates non-essential routes in standalone mode.
+        """
+        if not standalone:
+            return fn
+        from functools import wraps
+
+        @wraps(fn)
+        async def _guarded(*args, **kwargs):
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": True,
+                    "message": "This feature is not available in standalone mode",
+                    "standalone_mode": True,
+                },
+            )
+
+        return _guarded
+
+    # End standalone guard
 
     # -- Phase 36: PAPERCLIP-05 — gate standalone dashboard in sidecar mode ----
     if settings.sidecar_enabled:
@@ -556,6 +582,8 @@ def create_app(
         response_data: dict = {"status": "ok"}
         if settings.sidecar_enabled:
             response_data["mode"] = "paperclip_sidecar"
+        if standalone:
+            response_data["standalone_mode"] = True
         return response_data
 
     @app.get("/api/health")
