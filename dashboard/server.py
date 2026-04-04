@@ -4787,6 +4787,7 @@ Focus on learnings that would help in future similar sessions."""
         _admin: AuthContext = Depends(require_admin),
     ):
         """Return live connectivity status for each configured LLM provider."""
+        import os
         import time as _time
 
         import httpx
