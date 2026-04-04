@@ -114,6 +114,12 @@ const state = {
   _skillSearch: "",
   _expandedTool: null,
   _expandedSkill: null,
+  // Phase 38: Synthetic model catalog and provider status
+  syntheticModels: null,
+  syntheticModelsLoading: false,
+  providerStatus: null,
+  providerStatusLoading: false,
+  _syntheticCardExpanded: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -2388,9 +2394,15 @@ function agentShowCreate() {
       '<div class="form-group"><label>Name</label><input type="text" id="agent-name" placeholder="My Agent"></div>' +
       '<div class="form-group"><label>Description</label><textarea id="agent-desc" rows="2" placeholder="What does this agent do?"></textarea></div>' +
       '<div class="form-group"><label>Provider</label>' +
-        '<select id="agent-provider"><option value="anthropic">Anthropic (CC Subscription)</option><option value="synthetic">Synthetic.new</option><option value="openrouter">OpenRouter</option></select></div>' +
+        '<select id="agent-provider" onchange="loadAgentModels(this.value)">' +
+          '<option value="claudecode">Claude Code (CC Subscription)</option>' +
+          '<option value="synthetic">Synthetic.new</option>' +
+          '<option value="anthropic">Anthropic</option>' +
+          '<option value="openrouter">OpenRouter</option>' +
+        '</select></div>' +
       '<div class="form-group"><label>Model</label>' +
-        '<select id="agent-model"><option value="claude-sonnet-4-6">Sonnet 4.6</option><option value="claude-opus-4-6">Opus 4.6</option><option value="claude-haiku-4-5">Haiku 4.5</option></select></div>' +
+        '<select id="agent-model"><option value="">Loading models...</option></select>' +
+        '<div id="agent-model-cache-note" class="help" style="margin-top:0.25rem;font-size:0.77rem"></div></div>' +
       '<div class="form-group"><label>Schedule</label>' +
         '<select id="agent-schedule"><option value="manual">Manual</option><option value="always">Always On</option><option value="0 9 * * *">Daily 9am</option><option value="*/5 * * * *">Every 5 min</option></select></div>' +
       '<div class="form-group"><label>Tools (comma-separated)</label><input type="text" id="agent-tools" placeholder="shell, memory, web_search, git"></div>' +
@@ -2401,6 +2413,7 @@ function agentShowCreate() {
         '<button class="btn btn-primary" onclick="agentDoCreate()">Create Agent</button>' +
       '</div>' +
     '</div>';
+  loadAgentModels("claudecode");
 }
 
 async function agentDoCreate() {
@@ -7783,70 +7796,156 @@ function renderSettingsPanel() {
   });
 
   const panels = {
-    providers: () => `
-      <h3>LLM Providers</h3>
-      <p class="section-desc">Configure API keys for language model providers. Agent42 intelligently routes tasks to the best available model based on your configured keys.</p>
+    providers: () => {
+      // Section 1: Routing info box (D-04)
+      var html = '<h3>LLM Providers</h3>';
+      html += '<div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">';
+      html += '<h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">Provider Routing</h4>';
+      html += '<div class="help" style="line-height:1.7">';
+      html += 'Agent42 routes tasks in priority order: <strong>CC Subscription</strong> (Claude Code CLI) &rarr; <strong>Synthetic.new</strong> (autonomous agents, free tier) &rarr; <strong>Anthropic / OpenRouter</strong> (API key providers).<br>';
+      html += 'Configure keys for the providers you want to enable. Providers without keys are skipped gracefully.';
+      html += '</div></div>';
 
-      <div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">
-        <h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">Model Routing (v2.0)</h4>
-        <div class="help" style="line-height:1.7">
-          Model routing is now handled by <strong>Claude Code</strong>. Agent42 operates as an MCP server, providing tools and context to Claude Code sessions.<br><br>
-          API keys configured here are used for <strong>media generation</strong> (Replicate, Luma), <strong>web search</strong> (Brave), and <strong>embeddings</strong> (Gemini, OpenAI). LLM model selection is managed in your Claude Code configuration.
-        </div>
-      </div>
+      // Section 2: CC Subscription (D-01)
+      html += '<h4 style="margin:0 0 0.75rem;font-size:0.95rem">Claude Code Subscription</h4>';
+      var ccStatus = null;
+      if (state.providerStatus && state.providerStatus.providers) {
+        state.providerStatus.providers.forEach(function(p) { if (p.name === "claudecode") ccStatus = p; });
+      }
+      if (!state.providerStatus && !state.providerStatusLoading) {
+        loadProviderStatus().then(renderSettingsPanel);
+      }
+      html += '<div class="form-group">';
+      if (ccStatus) {
+        var ccDot = ccStatus.status === "ok" ? "h-ok" : "h-unavailable";
+        html += '<div style="display:flex;align-items:center;gap:0.5rem">';
+        html += '<span class="health-dot ' + ccDot + '"></span>';
+        html += '<span>' + (ccStatus.configured ? 'Active &mdash; managed by Claude Code CLI' : 'Not detected') + '</span>';
+        html += '</div>';
+      } else {
+        html += '<div class="help">' + (state.providerStatusLoading ? 'Loading...' : 'Status unavailable') + '</div>';
+      }
+      html += '<div class="help" style="margin-top:0.35rem">Uses your Claude Code subscription. No API key required &mdash; authenticated via Claude Code CLI.</div>';
+      html += '</div>';
 
-      <div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">
-        <h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">MCP Integration</h4>
-        <div class="help" style="line-height:1.7">
-          Agent42 runs as an MCP server that Claude Code connects to via stdio transport. Tools, memory, and workspace operations are exposed as MCP tools.<br>
-          API keys below are still used for auxiliary services (image/video generation, search, embeddings).
-        </div>
-      </div>
+      // Section 3: API Key Providers (D-03)
+      html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">API Key Providers</h4>';
+      html += settingSecret("SYNTHETIC_API_KEY", "Synthetic.new API Key", "Autonomous agent provider. Anthropic-compatible API with dynamic model discovery. Get one at synthetic.new.", true);
 
-      <h4 style="margin:0 0 0.75rem;font-size:0.95rem">Primary Providers</h4>
-      ${settingSecret("GEMINI_API_KEY", "Gemini API Key (Recommended)", "Default primary model. Generous free tier: 1,500 requests/day for Flash, 1M token context. Get one at aistudio.google.com.", true)}
-      ${settingSecret("SYNTHETIC_API_KEY", "Synthetic API Key", "Fallback provider for autonomous agents. Anthropic-compatible API. Get one at synthetic.new.", true)}
-      ${settingSecret("OPENROUTER_API_KEY", "OpenRouter API Key", "200+ models via one key. Free models used as critic/fallback. Paid models activated when credits are available. Get one at openrouter.ai/keys.", true)}
+      // Synthetic model catalog card (D-06, D-07, D-08)
+      var sm = state.syntheticModels;
+      if (!sm && !state.syntheticModelsLoading) {
+        loadSyntheticModels(false).then(renderSettingsPanel);
+      }
+      html += '<div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:0.75rem 1rem;margin-bottom:0.75rem">';
+      if (sm) {
+        var countText = esc(String(sm.count || 0)) + ' models';
+        if (sm.free_count) countText += ', ' + esc(String(sm.free_count)) + ' free';
+        var refreshedText = sm.cached_at ? new Date(sm.cached_at * 1000).toLocaleString() : 'never';
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="state._syntheticCardExpanded=!state._syntheticCardExpanded;renderSettingsPanel()">';
+        html += '<span style="font-size:0.88rem;font-weight:600">Synthetic.new Model Catalog &mdash; ' + countText + '</span>';
+        html += '<span style="font-size:0.78rem;color:var(--text-muted)">' + (state._syntheticCardExpanded ? '&#9650;' : '&#9660;') + '</span>';
+        html += '</div>';
+        html += '<div class="help" style="margin-top:0.2rem;font-size:0.77rem">Last refreshed: ' + esc(refreshedText) + ' &mdash; <a href="#" onclick="loadSyntheticModels(true).then(renderSettingsPanel);return false">Refresh</a></div>';
+        if (state._syntheticCardExpanded && sm.models && sm.models.length > 0) {
+          html += '<div style="margin-top:0.75rem;overflow-x:auto">';
+          html += '<table style="width:100%;border-collapse:collapse;font-size:0.82rem">';
+          html += '<thead><tr style="border-bottom:1px solid var(--border)">';
+          html += '<th style="text-align:left;padding:0.3rem 0.4rem;color:var(--text-muted)">Name</th>';
+          html += '<th style="text-align:left;padding:0.3rem 0.4rem;color:var(--text-muted)">Capabilities</th>';
+          html += '<th style="text-align:left;padding:0.3rem 0.4rem;color:var(--text-muted)">Context</th>';
+          html += '<th style="text-align:left;padding:0.3rem 0.4rem;color:var(--text-muted)">Tier</th>';
+          html += '<th style="text-align:left;padding:0.3rem 0.4rem;color:var(--text-muted)">Description</th>';
+          html += '</tr></thead><tbody>';
+          sm.models.forEach(function(m) {
+            var caps = (m.capabilities || []).map(function(c) { return '<span class="badge-type">' + esc(c) + '</span>'; }).join(' ');
+            var ctx = m.max_context_length ? (m.max_context_length >= 1000 ? Math.round(m.max_context_length / 1000) + 'K' : String(m.max_context_length)) : '';
+            var tier = m.is_free ? '<span class="badge-free">free</span>' : '<span class="badge-paid">paid</span>';
+            var desc = m.description ? (m.description.length > 80 ? esc(m.description.substring(0, 80)) + '&hellip;' : esc(m.description)) : '';
+            html += '<tr style="border-bottom:1px solid var(--border)">';
+            html += '<td style="padding:0.3rem 0.4rem">' + esc(m.name || m.id) + '</td>';
+            html += '<td style="padding:0.3rem 0.4rem">' + caps + '</td>';
+            html += '<td style="padding:0.3rem 0.4rem">' + esc(ctx) + '</td>';
+            html += '<td style="padding:0.3rem 0.4rem">' + tier + '</td>';
+            html += '<td style="padding:0.3rem 0.4rem;color:var(--text-muted)">' + desc + '</td>';
+            html += '</tr>';
+          });
+          html += '</tbody></table></div>';
+          if (sm.capability_mapping && Object.keys(sm.capability_mapping).length > 0) {
+            html += '<div style="margin-top:0.75rem;font-size:0.8rem;color:var(--text-muted)"><strong>Capability mapping:</strong> ';
+            var pairs = Object.entries(sm.capability_mapping).map(function(e) { return esc(e[0]) + ' &rarr; <code>' + esc(e[1]) + '</code>'; });
+            html += pairs.join(', ');
+            html += '</div>';
+          }
+        }
+      } else {
+        html += '<div class="help" style="font-size:0.82rem">' + (state.syntheticModelsLoading ? 'Loading model catalog...' : 'Model catalog unavailable. Configure Synthetic.new API key first.') + '</div>';
+      }
+      html += '</div>';
 
-      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Premium Providers (Optional)</h4>
-      <div class="help" style="margin-bottom:0.75rem">Set these to enable premium models for admin overrides (e.g., <code>AGENT42_CODING_MODEL=claude-opus-4-6</code>).</div>
-      ${settingSecret("ANTHROPIC_API_KEY", "Anthropic API Key", "For Claude Opus/Sonnet models. Get one at console.anthropic.com.")}
-      ${settingSecret("OPENAI_API_KEY", "OpenAI API Key", "For GPT-4o, o1, and DALL-E image generation. Get one at platform.openai.com.")}
-      ${settingSecret("DEEPSEEK_API_KEY", "DeepSeek API Key", "For DeepSeek Coder/R1 models. Get one at platform.deepseek.com.")}
-      ${settingSecret("CEREBRAS_API_KEY", "Cerebras API Key", "Free inference (~3000 tok/s). 4 models included. Get one at cloud.cerebras.ai.")}
+      html += settingSecret("ANTHROPIC_API_KEY", "Anthropic API Key", "For Claude Opus/Sonnet models via direct API. Get one at console.anthropic.com.");
+      html += settingSecret("OPENROUTER_API_KEY", "OpenRouter API Key", "200+ models via one key. Free models used as fallback. Get one at openrouter.ai/keys.");
 
-      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Media & Search</h4>
-      ${settingSecret("REPLICATE_API_TOKEN", "Replicate API Token", "For FLUX image generation and CogVideoX video. Get one at replicate.com.")}
-      ${settingSecret("LUMA_API_KEY", "Luma AI API Key", "For Luma Ray2 premium video generation.")}
-      ${settingSecret("BRAVE_API_KEY", "Brave Search API Key", "For web search tool. Get one at brave.com/search/api.")}
+      // Section 4: Provider Connectivity (D-12, D-13, D-14)
+      html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Provider Connectivity</h4>';
+      var ps = state.providerStatus;
+      if (ps && ps.providers && ps.providers.length > 0) {
+        var statusLabelMap = { ok: 'Connected', auth_error: 'Auth error', timeout: 'Timeout', unconfigured: 'Not configured', unreachable: 'Unreachable' };
+        var statusDotMap = { ok: 'h-ok', auth_error: 'h-auth_error', timeout: 'h-timeout', unconfigured: 'h-unavailable', unreachable: 'h-error' };
+        html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;margin-bottom:0.5rem">';
+        html += '<thead><tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem 0.5rem;color:var(--text-muted)">Provider</th><th style="text-align:left;padding:0.3rem 0.5rem;color:var(--text-muted)">Status</th></tr></thead><tbody>';
+        ps.providers.forEach(function(p) {
+          var dot = statusDotMap[p.status] || 'h-error';
+          var label = statusLabelMap[p.status] || esc(p.status);
+          html += '<tr style="border-bottom:1px solid var(--border)">';
+          html += '<td style="padding:0.35rem 0.5rem">' + esc(p.label) + '</td>';
+          html += '<td style="padding:0.35rem 0.5rem;display:flex;align-items:center;gap:0.4rem"><span class="health-dot ' + dot + '"></span>' + label + '</td>';
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+        html += '<div class="help" style="font-size:0.77rem"><a href="#" onclick="state.providerStatus=null;renderSettingsPanel();return false">Refresh</a></div>';
+      } else {
+        html += '<div class="help">' + (state.providerStatusLoading ? 'Checking connectivity...' : 'Status unavailable.') + '</div>';
+      }
 
-      <div class="form-group" style="margin-top:1.5rem">
-        <button class="btn btn-primary" id="save-keys-btn" onclick="saveApiKeys()" ${Object.keys(state.keyEdits).length === 0 || state.keySaving ? "disabled" : ""}>
-          ${state.keySaving ? "Saving..." : "Save API Keys"}
-        </button>
-        <div class="help" style="margin-top:0.5rem">Keys saved here override <code>.env</code> values and take effect immediately for new API calls.</div>
-      </div>
+      // Section 5: Media & Search (D-02, D-03)
+      html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Media &amp; Search</h4>';
+      html += settingSecret("REPLICATE_API_TOKEN", "Replicate API Token", "For FLUX image generation and CogVideoX video. Get one at replicate.com.");
+      html += settingSecret("LUMA_API_KEY", "Luma AI API Key", "For Luma Ray2 premium video generation.");
+      html += settingSecret("BRAVE_API_KEY", "Brave Search API Key", "For web search tool. Get one at brave.com/search/api.");
+      html += settingSecret("GEMINI_API_KEY", "Gemini API Key", "For embeddings via OpenRouter. Get one at aistudio.google.com.");
 
-      <h3 style="margin-top:2rem">OpenRouter Account Status</h3>
-      ${state.orStatus ? `
-        <div class="form-group">
-          <div class="secret-status ${state.orStatus.account && !state.orStatus.account.is_free_tier ? "configured" : "not-configured"}">
-            <strong>Tier:</strong> ${state.orStatus.account ? (state.orStatus.account.is_free_tier ? "Free" : "Paid") : "Unknown"}
-            ${state.orStatus.account && state.orStatus.account.limit_remaining !== null && state.orStatus.account.limit_remaining !== undefined ? ` &mdash; <strong>Credits remaining:</strong> $${Number(state.orStatus.account.limit_remaining).toFixed(2)}` : ""}
-            ${state.orStatus.account && state.orStatus.account.error ? ` &mdash; <span style="color:var(--danger)">${esc(state.orStatus.account.error)}</span>` : ""}
-          </div>
-          <div class="help" style="margin-top:0.5rem">
-            <strong>Policy:</strong> ${esc(state.orStatus.policy)} &mdash;
-            <strong>Paid models registered:</strong> ${state.orStatus.paid_models_registered}
-            &mdash; <a href="#" onclick="loadOrStatus().then(()=>renderSettingsPanel());return false">Refresh</a>
-          </div>
-          <div class="help" style="margin-top:0.25rem">
-            When policy is <em>balanced</em>, complex tasks (coding, debugging, app creation) auto-upgrade to paid models when credits are available.
-            Set policy to <em>free_only</em> in Orchestrator tab to disable paid upgrades, or <em>performance</em> to always prefer the best model.
-          </div>
-        </div>
-      ` : `<div class="help">${state.orStatusLoading ? "Loading..." : "Status not available. Configure an OpenRouter API key first."}</div>`}
-    `,
+      // Section 6: Save button
+      html += '<div class="form-group" style="margin-top:1.5rem">';
+      html += '<button class="btn btn-primary" id="save-keys-btn" onclick="saveApiKeys()" ' + (Object.keys(state.keyEdits).length === 0 || state.keySaving ? 'disabled' : '') + '>';
+      html += state.keySaving ? 'Saving...' : 'Save API Keys';
+      html += '</button>';
+      html += '<div class="help" style="margin-top:0.5rem">Keys saved here override <code>.env</code> values and take effect immediately for new API calls.</div>';
+      html += '</div>';
+
+      // Section 7: OpenRouter Account Status (D-16)
+      html += '<h3 style="margin-top:2rem">OpenRouter Account Status</h3>';
+      if (state.orStatus) {
+        html += '<div class="form-group">';
+        html += '<div class="secret-status ' + (state.orStatus.account && !state.orStatus.account.is_free_tier ? 'configured' : 'not-configured') + '">';
+        html += '<strong>Tier:</strong> ' + (state.orStatus.account ? (state.orStatus.account.is_free_tier ? 'Free' : 'Paid') : 'Unknown');
+        if (state.orStatus.account && state.orStatus.account.limit_remaining !== null && state.orStatus.account.limit_remaining !== undefined) {
+          html += ' &mdash; <strong>Credits remaining:</strong> $' + Number(state.orStatus.account.limit_remaining).toFixed(2);
+        }
+        if (state.orStatus.account && state.orStatus.account.error) {
+          html += ' &mdash; <span style="color:var(--danger)">' + esc(state.orStatus.account.error) + '</span>';
+        }
+        html += '</div>';
+        html += '<div class="help" style="margin-top:0.5rem"><strong>Policy:</strong> ' + esc(state.orStatus.policy) + ' &mdash; <strong>Paid models registered:</strong> ' + state.orStatus.paid_models_registered;
+        html += ' &mdash; <a href="#" onclick="loadOrStatus().then(()=>renderSettingsPanel());return false">Refresh</a></div>';
+        html += '<div class="help" style="margin-top:0.25rem">When policy is <em>balanced</em>, complex tasks auto-upgrade to paid models when credits are available. Set policy to <em>free_only</em> in Orchestrator tab to disable paid upgrades, or <em>performance</em> to always prefer the best model.</div>';
+        html += '</div>';
+      } else {
+        html += '<div class="help">' + (state.orStatusLoading ? 'Loading...' : 'Status not available. Configure an OpenRouter API key first.') + '</div>';
+      }
+
+      return html;
+    },
     routing: () => `<h3>LLM Routing</h3><p class="section-desc">Model routing is now handled by Claude Code. Configure models in your Claude Code settings.</p>`,
     repos: () => renderReposPanel(),
     channels: () => `
@@ -8163,6 +8262,55 @@ async function loadOrStatus() {
     state.orStatus = (await api("/settings/openrouter-status")) || null;
   } catch (e) { state.orStatus = null; }
   state.orStatusLoading = false;
+}
+
+async function loadSyntheticModels(force) {
+  state.syntheticModelsLoading = true;
+  try {
+    var url = "/providers/synthetic/models";
+    if (force) url += "?force=true";
+    state.syntheticModels = (await api(url)) || null;
+  } catch (e) { state.syntheticModels = null; }
+  state.syntheticModelsLoading = false;
+}
+
+async function loadProviderStatus() {
+  state.providerStatusLoading = true;
+  try {
+    state.providerStatus = (await api("/settings/provider-status")) || null;
+  } catch (e) { state.providerStatus = null; }
+  state.providerStatusLoading = false;
+}
+
+async function loadAgentModels(provider) {
+  var sel = document.getElementById("agent-model");
+  if (!sel) return;
+  while (sel.options.length > 0) sel.remove(0);
+  var placeholder = new Option("Loading models...", "");
+  sel.add(placeholder);
+  try {
+    var allModels = (await api("/agents/models")) || {};
+    var providerModels = allModels[provider] || {};
+    var entries = Object.entries(providerModels);
+    while (sel.options.length > 0) sel.remove(0);
+    if (entries.length === 0) {
+      sel.add(new Option("(no models for this provider)", ""));
+    } else {
+      entries.forEach(function(entry) {
+        var category = entry[0];
+        var modelId = entry[1];
+        sel.add(new Option(category + " -- " + modelId, modelId));
+      });
+    }
+    var cacheNote = document.getElementById("agent-model-cache-note");
+    if (cacheNote && provider === "synthetic" && state.syntheticModels && state.syntheticModels.cached_at) {
+      var ageHours = Math.round((Date.now() / 1000 - state.syntheticModels.cached_at) / 3600);
+      cacheNote.textContent = ageHours >= 12 ? ("Synthetic.new model list last updated " + ageHours + " hours ago") : "";
+    }
+  } catch (e) {
+    while (sel.options.length > 0) sel.remove(0);
+    sel.add(new Option("(failed to load models)", ""));
+  }
 }
 
 async function loadReports() {

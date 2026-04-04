@@ -308,6 +308,16 @@ select { cursor: pointer; }
   display: inline-block; padding: 0.15rem 0.5rem; border-radius: var(--radius-sm);
   font-size: 0.75rem; background: var(--bg-hover); color: var(--text-secondary);
 }
+.badge-free {
+  display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem;
+  border-radius: 8px; background: var(--success); color: #fff;
+  font-weight: 600; letter-spacing: 0.02em;
+}
+.badge-paid {
+  display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem;
+  border-radius: 8px; background: var(--warning); color: #1a1a2e;
+  font-weight: 600; letter-spacing: 0.02em;
+}
 .badge-tokens {
   display: inline-block; padding: 0.1rem 0.35rem; border-radius: var(--radius-sm);
   font-size: 0.7rem; font-family: var(--mono); color: var(--text-muted);
