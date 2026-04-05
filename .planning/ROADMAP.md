@@ -16,6 +16,7 @@
 - 🚧 **v5.0 Provider Selection Refactor** — Phases 32-35 (in progress)
 - 🚧 **v6.0 Dashboard Unification** — Phases 36-40 (not started)
 - ✅ **v7.0 Abacus Provider & Paperclip Autonomy** — Phase 41 (complete 2026-04-05)
+- 🚧 **v8.0 N8N Workflow Integration** — Phase 42 (in progress)
 
 ## Active Workstreams
 
