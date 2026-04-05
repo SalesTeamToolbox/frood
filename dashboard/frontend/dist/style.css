@@ -337,6 +337,9 @@ select { cursor: pointer; }
 .stat-card .stat-value.text-warning { color: var(--warning); }
 .stat-card .stat-value.text-danger { color: var(--danger); }
 .stat-card .stat-value.text-info { color: var(--info); }
+/* Memory stats cards hover (Phase 40) */
+.stat-card { transition: box-shadow 0.15s; }
+.stat-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
 
 /* ---------- Table ---------- */
 

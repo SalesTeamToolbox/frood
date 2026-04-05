@@ -7911,6 +7911,7 @@ function renderSettings() {
     { id: "security", label: "Security" },
     { id: "orchestrator", label: "Orchestrator" },
     { id: "storage", label: "Storage & Paths" },
+    { id: "memory", label: "Memory & Learning" },
     { id: "rewards", label: "Rewards" },
   ];
 
@@ -8027,6 +8028,8 @@ function renderSettingsPanel() {
 
       html += settingSecret("ANTHROPIC_API_KEY", "Anthropic API Key", "For Claude Opus/Sonnet models via direct API. Get one at console.anthropic.com.");
       html += settingSecret("OPENROUTER_API_KEY", "OpenRouter API Key", "200+ models via one key. Free models used as fallback. Get one at openrouter.ai/keys.");
+      html += settingSecret("ABACUS_API_KEY", "Abacus AI (RouteLLM) API Key", "Multi-model router — free tier includes Gemini Flash, GPT-5 Mini, Llama 4. Get one at abacus.ai/app/route-llm-apis.");
+      html += settingSecret("ZEN_API_KEY", "OpenCode Zen API Key", "Free LLM models — Qwen3.6 Plus, MiniMax M2.5, Nemotron 3 Super, Big Pickle. Get one at opencode.ai/auth.");
 
       // Section 4: Provider Connectivity (D-12, D-13, D-14)
       html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Provider Connectivity</h4>';
@@ -8280,9 +8283,88 @@ function renderSettingsPanel() {
         </div>
       `;
     },
+    memory: function() {
+      var html = '<h3>Memory &amp; Learning</h3>';
+      html += '<p class="section-desc">Memory operation statistics, learning extraction controls, and storage backend status.</p>';
+      if (!state.memoryStats) {
+        if (!state.memoryStatsLoading) {
+          state.memoryStatsLoading = true;
+          fetch('/api/memory/stats', { headers: { 'Authorization': 'Bearer ' + state.token } })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { state.memoryStats = d; state.memoryStatsLoading = false; renderSettingsPanel(); })
+            .catch(function() { state.memoryStatsLoading = false; renderSettingsPanel(); });
+        }
+        html += '<p class="help">Loading memory stats...</p>';
+      } else {
+        var ms = state.memoryStats;
+        html += '<div class="stats-row" style="margin-bottom:1.5rem">';
+        html += '<div class="stat-card" style="text-align:center"><div class="stat-value">' + esc(String(ms.recall_count || 0)) + '</div><div class="stat-label">Recalls (24h)</div></div>';
+        html += '<div class="stat-card" style="text-align:center"><div class="stat-value">' + esc(String(ms.learn_count || 0)) + '</div><div class="stat-label">Learnings (24h)</div></div>';
+        html += '<div class="stat-card" style="text-align:center"><div class="stat-value">' + esc(String(ms.error_count || 0)) + '</div><div class="stat-label">Errors (24h)</div></div>';
+        html += '<div class="stat-card" style="text-align:center"><div class="stat-value">' + esc(String(Math.round(ms.avg_latency_ms || 0))) + ' ms</div><div class="stat-label">Avg Latency</div></div>';
+        html += '</div>';
+      }
+      html += '<div class="form-group" style="margin-bottom:1.5rem">';
+      html += '<h4 style="margin:0 0 0.5rem;font-size:0.95rem">Learning Extraction</h4>';
+      var learningEnabled = (state.envSettings && state.envSettings.LEARNING_ENABLED !== 'false') ? true : false;
+      html += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer">';
+      html += '<input type="checkbox" ' + (learningEnabled ? 'checked' : '') + ' onchange="toggleLearningEnabled(this.checked)" style="width:16px;height:16px">';
+      html += '<span style="font-size:0.85rem">Enable automatic learning extraction from agent runs</span>';
+      html += '</label>';
+      html += '<p class="help">When enabled, Agent42 extracts learnings from completed agent runs and stores them in the knowledge base for future recall.</p>';
+      html += '</div>';
+      if (state.storageStatus) {
+        var ss = state.storageStatus;
+        html += '<h4 style="margin:0 0 0.5rem;font-size:0.95rem">Storage Backend</h4>';
+        html += '<div class="form-group" style="margin-bottom:1rem"><div style="display:flex;gap:12px;flex-wrap:wrap">';
+        html += '<span class="badge" style="padding:4px 8px;border-radius:4px;font-size:0.75rem;background:#dbeafe;color:#1e40af">Mode: ' + esc(ss.mode) + '</span>';
+        var qdrantOk = ss.qdrant && (ss.qdrant.status === 'connected' || ss.qdrant.status === 'embedded_ok');
+        html += '<span class="badge" style="padding:4px 8px;border-radius:4px;font-size:0.75rem;background:' + (qdrantOk ? '#dcfce7;color:#166534' : '#fef2f2;color:#991b1b') + '">Qdrant: ' + esc(ss.qdrant ? ss.qdrant.status : 'disabled') + '</span>';
+        if (ss.redis) { html += '<span class="badge" style="padding:4px 8px;border-radius:4px;font-size:0.75rem;background:' + (ss.redis.status === 'connected' ? '#dcfce7;color:#166534' : '#fef2f2;color:#991b1b') + '">Redis: ' + esc(ss.redis.status) + '</span>'; }
+        html += '</div></div>';
+        if (ss.cc_sync && ss.cc_sync.last_sync) { html += '<div class="form-group" style="margin-bottom:0.5rem"><span style="font-size:0.8rem;color:var(--text-muted)">Last CC Sync: ' + esc(ss.cc_sync.last_sync) + ' (' + esc(String(ss.cc_sync.total_synced || 0)) + ' entries)</span></div>'; }
+        if (ss.consolidation && ss.consolidation.last_run) { html += '<div class="form-group" style="margin-bottom:0.5rem"><span style="font-size:0.8rem;color:var(--text-muted)">Last Consolidation: ' + esc(ss.consolidation.last_run) + ' (scanned: ' + esc(String(ss.consolidation.last_scanned || 0)) + ', removed: ' + esc(String(ss.consolidation.last_removed || 0)) + ')</span></div>'; }
+      }
+      html += '<h4 style="margin:1.5rem 0 0.5rem;font-size:0.95rem;color:#dc2626">Danger Zone</h4>';
+      html += '<p class="help" style="margin-bottom:0.75rem">Purge operations are irreversible. All entries in the selected collection will be permanently deleted.</p>';
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+      html += '<button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5" onclick="confirmPurgeCollection(\'memory\')">Purge Memory</button>';
+      html += '<button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5" onclick="confirmPurgeCollection(\'knowledge\')">Purge Knowledge</button>';
+      html += '<button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5" onclick="confirmPurgeCollection(\'history\')">Purge History</button>';
+      html += '</div>';
+      return html;
+    },
   };
 
   el.innerHTML = (panels[state.settingsTab] || panels.providers)();
+}
+
+function toggleLearningEnabled(enabled) {
+  fetch('/api/settings/env', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
+    body: JSON.stringify({ settings: { LEARNING_ENABLED: enabled ? 'true' : 'false' } })
+  }).then(function(r) { return r.json(); }).then(function() {
+    if (state.envSettings) state.envSettings.LEARNING_ENABLED = enabled ? 'true' : 'false';
+    toast(enabled ? 'Learning enabled' : 'Learning disabled', 'success');
+  }).catch(function() { toast('Failed to update learning setting', 'error'); });
+}
+
+function confirmPurgeCollection(collection) {
+  var answer = prompt('This will permanently delete ALL entries in the "' + collection + '" collection. Type PURGE to confirm:');
+  if (answer !== 'PURGE') return;
+  fetch('/api/settings/memory/' + encodeURIComponent(collection), {
+    method: 'DELETE',
+    headers: { 'Authorization': 'Bearer ' + state.token }
+  }).then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(function() {
+    toast('Collection "' + collection + '" purged successfully', 'success');
+    state.memoryStats = null;
+    state.memoryStatsLoading = false;
+    renderSettingsPanel();
+  }).catch(function(e) { toast('Purge failed: ' + e.message, 'error'); });
 }
 
 function settingSecret(envVar, label, help, highlight = false) {
