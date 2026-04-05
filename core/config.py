@@ -44,6 +44,7 @@ class Settings:
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     synthetic_api_key: str = ""  # Synthetic.new (Anthropic-compatible, autonomous agents)
+    abacus_api_key: str = ""  # Abacus AI RouteLLM (multi-model routing)
     claudecode_subscription_token: str = ""  # Claude Code Subscription token
     gemini_api_key: str = ""
     openrouter_api_key: str = ""
@@ -362,6 +363,7 @@ class Settings:
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             synthetic_api_key=os.getenv("SYNTHETIC_API_KEY", ""),
+            abacus_api_key=os.getenv("ABACUS_API_KEY", ""),
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
             # Dead providers (kept for backward compat)
