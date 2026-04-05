@@ -403,6 +403,7 @@ class SidecarSettingsKeyEntry(BaseModel):
     name: str
     masked_value: str
     is_set: bool
+    source: str = "none"  # "admin" | "env" | "none" — per D-07
 
 
 class SidecarSettingsResponse(BaseModel):

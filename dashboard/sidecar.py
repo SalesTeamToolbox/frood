@@ -701,6 +701,7 @@ def create_sidecar_app(
                 name=key_name,
                 masked_value=masked.get(key_name, {}).get("masked_value", ""),
                 is_set=masked.get(key_name, {}).get("configured", False),
+                source=masked.get(key_name, {}).get("source", "none"),
             )
             for key_name in sorted(ADMIN_CONFIGURABLE_KEYS)
         ]
@@ -720,7 +721,10 @@ def create_sidecar_app(
             raise _HTTPException(status_code=503, detail="Key store not available")
         if req.key_name not in ADMIN_CONFIGURABLE_KEYS:
             raise _HTTPException(status_code=400, detail=f"Key {req.key_name} is not configurable")
-        key_store.set_key(req.key_name, req.value)
+        if req.value == "":
+            key_store.delete_key(req.key_name)
+        else:
+            key_store.set_key(req.key_name, req.value)
         return SidecarSettingsUpdateResponse(ok=True, key_name=req.key_name)
 
     return app

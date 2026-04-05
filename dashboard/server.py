@@ -333,6 +333,8 @@ _DASHBOARD_EDITABLE_SETTINGS = {
     "RLM_COST_LIMIT",
     "RLM_TIMEOUT_SECONDS",
     "RLM_LOG_DIR",
+    # Learning toggle (Phase 40)
+    "LEARNING_ENABLED",
 }
 
 

@@ -160,6 +160,9 @@ class Settings:
     qdrant_enabled: bool = False  # Set true to enable Qdrant (auto-enabled if qdrant_url is set)
     qdrant_local_path: str = ".agent42/qdrant"  # Path for embedded Qdrant storage
 
+    # Learning extraction toggle (Phase 40)
+    learning_enabled: bool = True
+
     # Redis (optional — fast session cache + embedding cache)
     redis_url: str = ""  # e.g. "redis://localhost:6379/0"
     redis_password: str = ""
@@ -522,6 +525,7 @@ class Settings:
             l2_auto_escalate_task_types=os.getenv("L2_AUTO_ESCALATE_TASK_TYPES", ""),
             l2_task_types=os.getenv("L2_TASK_TYPES", ""),
             # Learning extraction
+            learning_enabled=os.getenv("LEARNING_ENABLED", "true").lower() in ("true", "1", "yes"),
             learning_min_evidence=int(os.getenv("LEARNING_MIN_EVIDENCE", "3")),
             learning_quarantine_confidence=float(
                 os.getenv("LEARNING_QUARANTINE_CONFIDENCE", "0.6")
