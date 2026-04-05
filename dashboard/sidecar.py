@@ -24,6 +24,7 @@ from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from core.config import settings
 from core.memory_bridge import MemoryBridge
@@ -726,5 +727,102 @@ def create_sidecar_app(
         else:
             key_store.set_key(req.key_name, req.value)
         return SidecarSettingsUpdateResponse(ok=True, key_name=req.key_name)
+
+    # -- Memory stats proxy (D-13) --
+    @app.get("/memory-stats")
+    async def sidecar_memory_stats(
+        _user: str = Depends(get_current_user),
+    ):
+        """Proxy memory stats for Paperclip settings page (per D-13)."""
+        try:
+            from dashboard.server import _memory_stats
+
+            avg_latency = _memory_stats["total_latency_ms"] / max(_memory_stats["recall_count"], 1)
+            return {
+                "recall_count": _memory_stats["recall_count"],
+                "learn_count": _memory_stats["learn_count"],
+                "error_count": _memory_stats["error_count"],
+                "avg_latency_ms": round(avg_latency, 1),
+                "period_start": _memory_stats["last_reset"],
+            }
+        except Exception:
+            return {
+                "recall_count": 0,
+                "learn_count": 0,
+                "error_count": 0,
+                "avg_latency_ms": 0,
+                "period_start": 0,
+            }
+
+    # -- Storage status proxy (D-12) --
+    @app.get("/storage-status")
+    async def sidecar_storage_status(
+        _user: str = Depends(get_current_user),
+    ):
+        """Proxy storage configuration status for Paperclip settings page (per D-12)."""
+        qdrant_available = qdrant_store is not None and getattr(qdrant_store, "is_available", False)
+        return {
+            "mode": "qdrant" if qdrant_available else "file",
+            "qdrant_available": qdrant_available,
+            "learning_enabled": settings.learning_enabled,
+        }
+
+    # -- Memory purge proxy (D-15) --
+    @app.delete("/memory/{collection}")
+    async def sidecar_purge_memory(
+        collection: str,
+        _user: str = Depends(get_current_user),
+    ):
+        """Purge a Qdrant memory collection via sidecar (per D-15)."""
+        from fastapi import HTTPException as _HTTPException
+
+        valid_collections = {"memory", "knowledge", "history"}
+        if collection not in valid_collections:
+            raise _HTTPException(
+                status_code=400,
+                detail=f"Invalid collection '{collection}'. Must be one of: {', '.join(sorted(valid_collections))}",
+            )
+        if not qdrant_store or not getattr(qdrant_store, "is_available", False):
+            raise _HTTPException(status_code=503, detail="Qdrant store not available")
+        success = await asyncio.get_running_loop().run_in_executor(
+            None, qdrant_store.clear_collection, collection
+        )
+        if not success:
+            raise _HTTPException(status_code=500, detail=f"Failed to purge '{collection}'")
+        return {"ok": True, "collection": collection}
+
+    # -- Tool / Skill toggle endpoints (D-18, D-19) --
+    class SidecarToggleRequest(BaseModel):
+        enabled: bool
+
+    @app.patch("/tools/{name}")
+    async def toggle_sidecar_tool(
+        name: str,
+        req: SidecarToggleRequest,
+        _user: str = Depends(get_current_user),
+    ):
+        """Toggle a tool enabled/disabled from Paperclip (per D-18/D-19)."""
+        from fastapi import HTTPException as _HTTPException
+
+        if tool_registry is None:
+            raise _HTTPException(status_code=503, detail="Tool registry not available")
+        if not tool_registry.set_enabled(name, req.enabled):
+            raise _HTTPException(status_code=404, detail=f"Tool '{name}' not found")
+        return {"name": name, "enabled": req.enabled}
+
+    @app.patch("/skills/{name}")
+    async def toggle_sidecar_skill(
+        name: str,
+        req: SidecarToggleRequest,
+        _user: str = Depends(get_current_user),
+    ):
+        """Toggle a skill enabled/disabled from Paperclip (per D-18/D-19)."""
+        from fastapi import HTTPException as _HTTPException
+
+        if skill_loader is None:
+            raise _HTTPException(status_code=503, detail="Skill loader not available")
+        if not skill_loader.set_enabled(name, req.enabled):
+            raise _HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+        return {"name": name, "enabled": req.enabled}
 
     return app

@@ -5279,6 +5279,39 @@ Focus on learnings that would help in future similar sessions."""
             "errors": errors,
         }
 
+    @app.delete("/api/settings/memory/{collection}")
+    async def purge_memory_collection(
+        collection: str,
+        _admin: AuthContext = Depends(require_admin),
+    ):
+        """Purge all entries in a Qdrant memory collection (irreversible). Per D-15."""
+        valid_collections = {"memory", "knowledge", "history"}
+        if collection not in valid_collections:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid collection '{collection}'. Must be one of: {', '.join(sorted(valid_collections))}",
+            )
+        # Retrieve qdrant store from app state (set during startup)
+        _qdrant = getattr(app.state, "qdrant_store", None)
+        if not _qdrant:
+            # Fallback: try to get from memory_store
+            _ms = getattr(app.state, "memory_store", None)
+            _qdrant = getattr(_ms, "_qdrant", None) if _ms else None
+        if not _qdrant or not getattr(_qdrant, "is_available", False):
+            raise HTTPException(status_code=503, detail="Qdrant store not available")
+        success = await asyncio.get_running_loop().run_in_executor(
+            None, _qdrant.clear_collection, collection
+        )
+        if not success:
+            raise HTTPException(
+                status_code=500, detail=f"Failed to purge collection '{collection}'"
+            )
+        return {
+            "ok": True,
+            "collection": collection,
+            "message": f"Collection '{collection}' purged",
+        }
+
     @app.post("/api/consolidate/trigger")
     async def trigger_consolidation(_admin: AuthContext = Depends(require_admin)):
         """Manually trigger memory dedup consolidation.
