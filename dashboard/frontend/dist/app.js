@@ -2323,56 +2323,150 @@ async function showAppLogs(appId, name) {
 // ---------------------------------------------------------------------------
 // Agents page
 // ---------------------------------------------------------------------------
+
+function _relativeTime(epochSec) {
+  if (!epochSec) return "Never";
+  var diff = Math.floor(Date.now() / 1000) - epochSec;
+  if (diff < 60) return diff + "s ago";
+  if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+  if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+  return Math.floor(diff / 86400) + "d ago";
+}
+
+function _makeSparkline(counts) {
+  if (!counts || counts.length === 0) return "";
+  var allZero = counts.every(function(c) { return c === 0; });
+  if (allZero) return "";
+  var w = 98, h = 28;
+  var max = Math.max.apply(null, counts);
+  if (max === 0) return "";
+  var step = w / (counts.length - 1 || 1);
+  var points = counts.map(function(c, i) {
+    var x = Math.round(i * step);
+    var y = Math.round(h - (c / max) * (h - 4) - 2);
+    return x + "," + y;
+  }).join(" ");
+  return '<span class="sparkline"><svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '"><polyline points="' + points + '" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg></span>';
+}
+
 function renderAgents() {
   var el = document.getElementById("page-content");
   if (!el || state.page !== "agents") return;
 
-  // Fetch agents from API
-  fetch("/api/agents", { headers: { Authorization: "Bearer " + state.token } })
+  if (state.agentsLoaded) {
+    _renderAgentCards(el, state.agents || [], state.agentsPaperclipUnavailable);
+    return;
+  }
+
+  el.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted)">Loading agents...</div>';
+
+  fetch("/api/agents/unified", { headers: { Authorization: "Bearer " + state.token } })
     .then(function(r) { return r.json(); })
-    .then(function(agents) { state.agents = agents; _renderAgentCards(el, agents); })
-    .catch(function() { _renderAgentCards(el, []); });
+    .then(function(data) {
+      state.agents = data.agents || [];
+      state.agentsPaperclipUnavailable = data.paperclip_unavailable || false;
+      state.agentsLoaded = true;
+      _renderAgentCards(el, state.agents, state.agentsPaperclipUnavailable);
+    })
+    .catch(function() {
+      state.agents = [];
+      state.agentsLoaded = true;
+      state.agentsPaperclipUnavailable = false;
+      _renderAgentCards(el, [], false);
+    });
 }
 
 var TIER_COLORS = { bronze: '#cd7f32', silver: '#94a3b8', gold: '#eab308', provisional: '#6366f1' };
 function tierColor(t) { return TIER_COLORS[(t || '').toLowerCase()] || '#64748b'; }
 
-function _renderAgentCards(el, agents) {
+function _renderAgentCards(el, agents, paperclipUnavailable) {
   var statusColors = { active: "#34d399", running: "#38bdf8", paused: "#facc15", stopped: "#64748b", error: "#f87171" };
-  var cards = agents.map(function(a) {
+
+  // Apply client-side filters
+  var filterSource = state.agentFilterSource || "all";
+  var filterStatus = state.agentFilterStatus || "all";
+  var filtered = agents.filter(function(a) {
+    if (filterSource !== "all" && a.source !== filterSource) return false;
+    if (filterStatus !== "all" && a.status !== filterStatus) return false;
+    return true;
+  });
+
+  var cards = filtered.map(function(a) {
     var color = statusColors[a.status] || "#64748b";
+    var isReadonly = a.source === "paperclip";
+    var sourceLabel = isReadonly ? "Paperclip" : "Agent42";
+    var sourceBadgeClass = isReadonly ? "badge-paperclip" : "badge-agent42";
+    var successPct = (typeof a.success_rate === "number") ? Math.round(a.success_rate * 100) + "%" : "N/A";
+    var lastActive = _relativeTime(a.last_run_at);
+    var daily = a.daily_activity || [];
+    if (daily.length === 0 && a.total_runs) {
+      var avg = Math.floor(a.total_runs / 7);
+      daily = [avg, avg, avg, avg, avg, avg, avg];
+    }
+    var sparkline = _makeSparkline(daily);
     var tools = (a.tools || []).slice(0, 4).map(function(t) { return '<span class="badge-type">' + esc(t) + '</span>'; }).join(" ");
     var extra = (a.tools || []).length > 4 ? '<span class="badge-type">+' + ((a.tools || []).length - 4) + '</span>' : '';
     var skills = (a.skills || []).slice(0, 3).map(function(s) { return '<span class="badge-type" style="background:var(--primary-dim);color:var(--primary)">' + esc(s) + '</span>'; }).join(" ");
-    return '<div class="agent-card" onclick="agentShowDetail(\'' + a.id + '\')">' +
+    return '<div class="agent-card' + (isReadonly ? ' readonly' : '') + '" onclick="agentShowDetail(\'' + esc(a.id) + '\')">' +
       '<div class="agent-card-header">' +
         '<div class="agent-card-title"><h4>' + esc(a.name) + '</h4>' +
-        '<span class="badge-tier" style="background:' + color + ';color:#000">' + esc(a.status) + '</span>' +
+        '<span class="badge-source ' + sourceBadgeClass + '">' + esc(sourceLabel) + '</span>' +
+        '<span class="badge-tier" style="background:' + color + ';color:#000;margin-left:0.25rem">' + esc(a.status) + '</span>' +
         (a.effective_tier ? '<span class="badge-tier" style="background:' + tierColor(a.effective_tier) + ';color:#fff;margin-left:0.25rem">' + esc(a.effective_tier) + '</span>' : '') +
         '</div>' +
       '</div>' +
-      '<p class="agent-card-desc">' + esc(a.description || "No description") + '</p>' +
+      '<p class="agent-card-desc">' + esc(a.description || (isReadonly ? "Managed by Paperclip" : "No description")) + '</p>' +
       '<div class="agent-card-meta">' +
-        '<div style="font-size:0.72rem;color:var(--text-secondary)">Model: ' + esc(a.model || "default") + ' | Schedule: ' + esc(a.schedule || "manual") + '</div>' +
-        '<div class="agent-card-chips" style="margin-top:0.3rem">' + tools + extra + '</div>' +
-        '<div class="agent-card-chips" style="margin-top:0.2rem">' + skills + '</div>' +
-        '<div style="font-size:0.68rem;color:var(--text-muted);margin-top:0.3rem">Runs: ' + (a.total_runs || 0) + ' | Tokens: ' + (a.total_tokens || 0) + '</div>' +
+        (isReadonly ? '' : '<div style="font-size:0.72rem;color:var(--text-secondary)">Model: ' + esc(a.model || "default") + ' | Schedule: ' + esc(a.schedule || "manual") + '</div>') +
+        '<div class="agent-card-metrics">' +
+          '<span>Success: <span class="metric-value">' + successPct + '</span></span>' +
+          '<span>Runs: <span class="metric-value">' + (a.total_runs || 0) + '</span></span>' +
+          '<span>Last: <span class="metric-value">' + esc(lastActive) + '</span></span>' +
+          sparkline +
+        '</div>' +
+        (isReadonly ? '' : '<div class="agent-card-chips" style="margin-top:0.3rem">' + tools + extra + '</div>') +
+        (isReadonly ? '' : '<div class="agent-card-chips" style="margin-top:0.2rem">' + skills + '</div>') +
       '</div></div>';
   }).join("");
 
-  el.innerHTML =
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
+  // Stats row computation
+  var totalAgents = agents.length;
+  var activeCount = agents.filter(function(a) { return a.status === "active" || a.status === "running"; }).length;
+  var agentsWithRate = agents.filter(function(a) { return typeof a.success_rate === "number"; });
+  var avgSuccess = agentsWithRate.length > 0
+    ? Math.round(agentsWithRate.reduce(function(s, a) { return s + a.success_rate; }, 0) / agentsWithRate.length * 100) + "%"
+    : "N/A";
+  var totalTokens = agents.reduce(function(s, a) { return s + (a.total_tokens || 0); }, 0);
+
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
       '<h2 style="margin:0">Agents</h2>' +
       '<div style="display:flex;gap:0.5rem">' +
         '<button class="btn btn-primary" onclick="agentShowCreate()">+ Create Agent</button>' +
         '<button class="btn btn-outline" onclick="agentShowTemplates()">Templates</button>' +
       '</div>' +
     '</div>' +
+    (paperclipUnavailable ? '<div class="degradation-banner">Paperclip agents unavailable -- showing Agent42 agents only.</div>' : '') +
+    '<div class="agent-filter-bar">' +
+      '<label style="font-size:0.8rem;color:var(--text-secondary)">Source:</label>' +
+      '<select onchange="state.agentFilterSource=this.value;_renderAgentCards(document.getElementById(\'page-content\'),state.agents||[],state.agentsPaperclipUnavailable)">' +
+        '<option value="all"' + (filterSource === "all" ? ' selected' : '') + '>All</option>' +
+        '<option value="agent42"' + (filterSource === "agent42" ? ' selected' : '') + '>Agent42</option>' +
+        '<option value="paperclip"' + (filterSource === "paperclip" ? ' selected' : '') + '>Paperclip</option>' +
+      '</select>' +
+      '<label style="font-size:0.8rem;color:var(--text-secondary)">Status:</label>' +
+      '<select onchange="state.agentFilterStatus=this.value;_renderAgentCards(document.getElementById(\'page-content\'),state.agents||[],state.agentsPaperclipUnavailable)">' +
+        '<option value="all"' + (filterStatus === "all" ? ' selected' : '') + '>All</option>' +
+        '<option value="active"' + (filterStatus === "active" ? ' selected' : '') + '>Active</option>' +
+        '<option value="stopped"' + (filterStatus === "stopped" ? ' selected' : '') + '>Stopped</option>' +
+        '<option value="paused"' + (filterStatus === "paused" ? ' selected' : '') + '>Paused</option>' +
+        '<option value="error"' + (filterStatus === "error" ? ' selected' : '') + '>Error</option>' +
+      '</select>' +
+    '</div>' +
     '<div class="stats-row">' +
-      '<div class="stat-card"><div class="stat-label">Total Agents</div><div class="stat-value">' + agents.length + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Active</div><div class="stat-value text-success">' + agents.filter(function(a) { return a.status === "active" || a.status === "running"; }).length + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Paused</div><div class="stat-value text-warning">' + agents.filter(function(a) { return a.status === "paused"; }).length + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Total Runs</div><div class="stat-value">' + agents.reduce(function(s, a) { return s + (a.total_runs || 0); }, 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Total Agents</div><div class="stat-value">' + totalAgents + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Active</div><div class="stat-value text-success">' + activeCount + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Avg Success</div><div class="stat-value">' + avgSuccess + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Total Tokens</div><div class="stat-value">' + totalTokens + '</div></div>' +
     '</div>' +
     (cards ? '<div class="agents-grid">' + cards + '</div>' :
       '<div class="empty-state" style="padding:3rem;text-align:center">' +
@@ -2383,6 +2477,7 @@ function _renderAgentCards(el, agents) {
           '<button class="btn btn-outline" onclick="agentShowTemplates()">Use Template</button>' +
         '</div>' +
       '</div>');
+  el.innerHTML = html;
 }
 
 function agentShowCreate() {
@@ -2390,7 +2485,7 @@ function agentShowCreate() {
   if (!el) return;
   el.innerHTML =
     '<div style="max-width:600px;margin:0 auto">' +
-      '<h2>Create Agent</h2>' +
+      '<h2>Create Agent <span class="badge-source badge-agent42">Agent42</span></h2>' +
       '<div class="form-group"><label>Name</label><input type="text" id="agent-name" placeholder="My Agent"></div>' +
       '<div class="form-group"><label>Description</label><textarea id="agent-desc" rows="2" placeholder="What does this agent do?"></textarea></div>' +
       '<div class="form-group"><label>Provider</label>' +
@@ -2449,7 +2544,7 @@ function agentShowTemplates() {
         var t = templates[key];
         var tools = (t.tools || []).map(function(x) { return '<span class="badge-type">' + esc(x) + '</span>'; }).join(" ");
         return '<div class="agent-card" style="cursor:pointer" onclick="agentCreateFromTemplate(\'' + key + '\')">' +
-          '<div class="agent-card-header"><div class="agent-card-title"><h4>' + esc(t.name) + '</h4></div></div>' +
+          '<div class="agent-card-header"><div class="agent-card-title"><h4>' + esc(t.name) + '</h4><span class="badge-source badge-agent42">Agent42</span></div></div>' +
           '<p class="agent-card-desc">' + esc(t.description) + '</p>' +
           '<div class="agent-card-meta"><div class="agent-card-chips">' + tools + '</div>' +
           '<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.3rem">Model: ' + esc(t.model || "default") + ' | Schedule: ' + esc(t.schedule || "manual") + '</div></div></div>';
@@ -2481,82 +2576,129 @@ async function agentCreateFromTemplate(key) {
 
 async function agentShowDetail(id) {
   try {
-    var res = await fetch("/api/agents/" + id, { headers: { Authorization: "Bearer " + state.token } });
-    var agent = await res.json();
+    // Try to find agent from already-loaded unified list first
+    var agent = null;
+    if (state.agents) {
+      for (var i = 0; i < state.agents.length; i++) {
+        if (state.agents[i].id === id) { agent = state.agents[i]; break; }
+      }
+    }
+    // Fall back to individual fetch for Agent42 agents (provides full details)
+    if (!agent || agent.source !== "paperclip") {
+      var res = await fetch("/api/agents/" + id, { headers: { Authorization: "Bearer " + state.token } });
+      agent = await res.json();
+    }
     var el = document.getElementById("page-content");
     if (!el) return;
     var statusColors = { active: "#34d399", running: "#38bdf8", paused: "#facc15", stopped: "#64748b", error: "#f87171" };
     var color = statusColors[agent.status] || "#64748b";
-    var tools = (agent.tools || []).map(function(t) { return '<span class="badge-type">' + esc(t) + '</span>'; }).join(" ");
-    var skills = (agent.skills || []).map(function(s) { return '<span class="badge-type" style="background:var(--primary-dim);color:var(--primary)">' + esc(s) + '</span>'; }).join(" ");
     var lastRun = agent.last_run_at ? new Date(agent.last_run_at * 1000).toLocaleString() : "Never";
-    el.innerHTML =
-      '<div style="max-width:700px">' +
-        '<button class="btn btn-outline btn-sm" onclick="renderAgents()" style="margin-bottom:1rem">&larr; Back</button>' +
-        '<div class="agent-detail-card" style="background:var(--bg-secondary);padding:1.5rem;border-radius:12px;border:1px solid var(--border)">' +
-          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
-            '<div><h3 style="margin:0">' + esc(agent.name) + '</h3>' +
-            '<span class="badge-tier" style="background:' + color + ';color:#000;margin-top:0.25rem;display:inline-block">' + esc(agent.status) + '</span></div>' +
-            '<div style="display:flex;gap:0.5rem">' +
-              (agent.status === "stopped" ? '<button class="btn btn-primary btn-sm" onclick="agentStart(\'' + agent.id + '\')">Start</button>' : '') +
-              (agent.status === "active" ? '<button class="btn btn-outline btn-sm" onclick="agentStop(\'' + agent.id + '\')">Stop</button>' : '') +
-              '<button class="btn btn-outline btn-sm btn-danger-text" onclick="agentDelete(\'' + agent.id + '\')">Delete</button>' +
+    var isPaperclip = agent.source === "paperclip";
+
+    if (isPaperclip) {
+      // Read-only Paperclip agent detail view
+      var successPct = (typeof agent.success_rate === "number") ? Math.round(agent.success_rate * 100) + "%" : "N/A";
+      el.innerHTML =
+        '<div style="max-width:700px">' +
+          '<button class="btn btn-outline btn-sm" onclick="renderAgents()" style="margin-bottom:1rem">&larr; Back</button>' +
+          '<div class="agent-detail-card" style="background:var(--bg-secondary);padding:1.5rem;border-radius:12px;border:1px solid var(--border);border-left:3px solid #34d399">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
+              '<div>' +
+                '<h3 style="margin:0">' + esc(agent.name) + '</h3>' +
+                '<span class="badge-source badge-paperclip" style="margin-top:0.25rem;display:inline-block">Paperclip</span>' +
+                '<span class="badge-tier" style="background:' + color + ';color:#000;margin-left:0.5rem">' + esc(agent.status) + '</span>' +
+              '</div>' +
+              '<div style="display:flex;gap:0.5rem">' +
+                '<a href="' + esc(agent.manage_url || '#') + '" target="_blank" rel="noopener" class="btn btn-primary btn-sm">Manage in Paperclip</a>' +
+              '</div>' +
+            '</div>' +
+            '<p style="color:var(--text-secondary)">' + esc(agent.description || "Managed by Paperclip") + '</p>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">' +
+              '<div><strong>Total Runs:</strong> ' + (agent.total_runs || 0) + '</div>' +
+              '<div><strong>Success Rate:</strong> ' + successPct + '</div>' +
+              '<div><strong>Last Run:</strong> ' + esc(lastRun) + '</div>' +
+              '<div><strong>Source:</strong> Paperclip</div>' +
+            '</div>' +
+            '<div style="margin-top:1rem;padding:0.75rem;background:rgba(16,185,129,0.06);border-radius:8px;font-size:0.82rem;color:var(--text-secondary)">' +
+              'This agent is managed by Paperclip. Use the link above to configure, start, or stop it.' +
             '</div>' +
           '</div>' +
-          '<p style="color:var(--text-secondary)">' + esc(agent.description || "No description") + '</p>' +
-          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">' +
-            '<div><strong>Provider:</strong> ' + esc(agent.provider) + '</div>' +
-            '<div><strong>Model:</strong> ' + esc(agent.model) + '</div>' +
-            '<div><strong>Schedule:</strong> ' + esc(agent.schedule) + '</div>' +
-            '<div><strong>Max Iterations:</strong> ' + agent.max_iterations + '</div>' +
-            '<div><strong>Total Runs:</strong> ' + (agent.total_runs || 0) + '</div>' +
-            '<div><strong>Total Tokens:</strong> ' + (agent.total_tokens || 0) + '</div>' +
-            '<div><strong>Last Run:</strong> ' + lastRun + '</div>' +
-            '<div><strong>Memory Scope:</strong> ' + esc(agent.memory_scope) + '</div>' +
-          '</div>' +
-          '<div style="margin-top:1rem"><strong>Tools:</strong><div style="margin-top:0.3rem">' + (tools || "None") + '</div></div>' +
-          '<div style="margin-top:0.75rem"><strong>Skills:</strong><div style="margin-top:0.3rem">' + (skills || "None") + '</div></div>' +
-          '<div style="margin-top:1.25rem;border-top:1px solid var(--border);padding-top:1rem">' +
-            '<h4 style="margin:0 0 0.75rem;font-size:0.95rem">Performance and Tier</h4>' +
-            '<div id="agent-perf-' + esc(agent.id) + '" style="margin-bottom:0.75rem;color:var(--text-muted);font-size:0.85rem">Loading...</div>' +
-            '<div style="margin-bottom:0.5rem">' +
-              '<label style="display:block;margin-bottom:0.3rem;font-size:0.85rem;font-weight:600">Tier Override</label>' +
-              '<select id="tier-override-' + esc(agent.id) + '" onchange="setTierOverride(\'' + esc(agent.id) + '\')" style="padding:0.4rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:0.85rem">' +
-                '<option value=""' + (agent.tier_override == null ? ' selected' : '') + '>Auto (computed)</option>' +
-                '<option value="bronze"' + (agent.tier_override === 'bronze' ? ' selected' : '') + '>Bronze</option>' +
-                '<option value="silver"' + (agent.tier_override === 'silver' ? ' selected' : '') + '>Silver</option>' +
-                '<option value="gold"' + (agent.tier_override === 'gold' ? ' selected' : '') + '>Gold</option>' +
-                '<option value="provisional"' + (agent.tier_override === 'provisional' ? ' selected' : '') + '>Provisional</option>' +
-              '</select>' +
+        '</div>';
+    } else {
+      // Full Agent42 agent detail view
+      var tools = (agent.tools || []).map(function(t) { return '<span class="badge-type">' + esc(t) + '</span>'; }).join(" ");
+      var skills = (agent.skills || []).map(function(s) { return '<span class="badge-type" style="background:var(--primary-dim);color:var(--primary)">' + esc(s) + '</span>'; }).join(" ");
+      el.innerHTML =
+        '<div style="max-width:700px">' +
+          '<button class="btn btn-outline btn-sm" onclick="renderAgents()" style="margin-bottom:1rem">&larr; Back</button>' +
+          '<div class="agent-detail-card" style="background:var(--bg-secondary);padding:1.5rem;border-radius:12px;border:1px solid var(--border)">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
+              '<div>' +
+                '<h3 style="margin:0">' + esc(agent.name) + '</h3>' +
+                '<span class="badge-source badge-agent42" style="margin-top:0.25rem;display:inline-block">Agent42</span>' +
+                '<span class="badge-tier" style="background:' + color + ';color:#000;margin-left:0.5rem">' + esc(agent.status) + '</span>' +
+              '</div>' +
+              '<div style="display:flex;gap:0.5rem">' +
+                (agent.status === "stopped" ? '<button class="btn btn-primary btn-sm" onclick="agentStart(\'' + esc(agent.id) + '\')">Start</button>' : '') +
+                (agent.status === "active" ? '<button class="btn btn-outline btn-sm" onclick="agentStop(\'' + esc(agent.id) + '\')">Stop</button>' : '') +
+                '<button class="btn btn-outline btn-sm btn-danger-text" onclick="agentDelete(\'' + esc(agent.id) + '\')">Delete</button>' +
+              '</div>' +
             '</div>' +
-            '<div>' +
-              '<label style="display:block;margin-bottom:0.3rem;font-size:0.85rem;font-weight:600">Override expires</label>' +
-              '<input type="date" id="tier-expiry-' + esc(agent.id) + '" value="' + esc(agent.tier_expiry_date || '') + '" style="padding:0.4rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:0.85rem">' +
+            '<p style="color:var(--text-secondary)">' + esc(agent.description || "No description") + '</p>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">' +
+              '<div><strong>Provider:</strong> ' + esc(agent.provider) + '</div>' +
+              '<div><strong>Model:</strong> ' + esc(agent.model) + '</div>' +
+              '<div><strong>Schedule:</strong> ' + esc(agent.schedule) + '</div>' +
+              '<div><strong>Max Iterations:</strong> ' + agent.max_iterations + '</div>' +
+              '<div><strong>Total Runs:</strong> ' + (agent.total_runs || 0) + '</div>' +
+              '<div><strong>Total Tokens:</strong> ' + (agent.total_tokens || 0) + '</div>' +
+              '<div><strong>Last Run:</strong> ' + esc(lastRun) + '</div>' +
+              '<div><strong>Memory Scope:</strong> ' + esc(agent.memory_scope) + '</div>' +
+            '</div>' +
+            '<div style="margin-top:1rem"><strong>Tools:</strong><div style="margin-top:0.3rem">' + (tools || "None") + '</div></div>' +
+            '<div style="margin-top:0.75rem"><strong>Skills:</strong><div style="margin-top:0.3rem">' + (skills || "None") + '</div></div>' +
+            '<div style="margin-top:1.25rem;border-top:1px solid var(--border);padding-top:1rem">' +
+              '<h4 style="margin:0 0 0.75rem;font-size:0.95rem">Performance and Tier</h4>' +
+              '<div id="agent-perf-' + esc(agent.id) + '" style="margin-bottom:0.75rem;color:var(--text-muted);font-size:0.85rem">Loading...</div>' +
+              '<div style="margin-bottom:0.5rem">' +
+                '<label style="display:block;margin-bottom:0.3rem;font-size:0.85rem;font-weight:600">Tier Override</label>' +
+                '<select id="tier-override-' + esc(agent.id) + '" onchange="setTierOverride(\'' + esc(agent.id) + '\')" style="padding:0.4rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:0.85rem">' +
+                  '<option value=""' + (agent.tier_override == null ? ' selected' : '') + '>Auto (computed)</option>' +
+                  '<option value="bronze"' + (agent.tier_override === 'bronze' ? ' selected' : '') + '>Bronze</option>' +
+                  '<option value="silver"' + (agent.tier_override === 'silver' ? ' selected' : '') + '>Silver</option>' +
+                  '<option value="gold"' + (agent.tier_override === 'gold' ? ' selected' : '') + '>Gold</option>' +
+                  '<option value="provisional"' + (agent.tier_override === 'provisional' ? ' selected' : '') + '>Provisional</option>' +
+                '</select>' +
+              '</div>' +
+              '<div>' +
+                '<label style="display:block;margin-bottom:0.3rem;font-size:0.85rem;font-weight:600">Override expires</label>' +
+                '<input type="date" id="tier-expiry-' + esc(agent.id) + '" value="' + esc(agent.tier_expiry_date || '') + '" style="padding:0.4rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:0.85rem">' +
+              '</div>' +
             '</div>' +
           '</div>' +
-        '</div>' +
-      '</div>';
-    try {
-      var perfRes = await fetch("/api/agents/" + id + "/performance", { headers: { Authorization: "Bearer " + state.token } });
-      if (perfRes.ok) {
-        var perf = await perfRes.json();
-        var perfEl = document.getElementById("agent-perf-" + id);
-        if (perfEl) {
-          perfEl.innerHTML =
-            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;font-size:0.85rem">' +
-              '<div><strong>Tier:</strong> ' + esc(perf.tier || "none") + '</div>' +
-              '<div><strong>Score:</strong> ' + (typeof perf.performance_score === 'number' ? perf.performance_score.toFixed(3) : 'N/A') + '</div>' +
-              '<div><strong>Tasks:</strong> ' + (perf.task_count || 0) + '</div>' +
-              '<div><strong>Success Rate:</strong> ' + (typeof perf.success_rate === 'number' ? Math.round(perf.success_rate * 100) + '%' : 'N/A') + '</div>' +
-            '</div>';
+        '</div>';
+      try {
+        var perfRes = await fetch("/api/agents/" + id + "/performance", { headers: { Authorization: "Bearer " + state.token } });
+        if (perfRes.ok) {
+          var perf = await perfRes.json();
+          var perfEl = document.getElementById("agent-perf-" + id);
+          if (perfEl) {
+            perfEl.innerHTML =
+              '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;font-size:0.85rem">' +
+                '<div><strong>Tier:</strong> ' + esc(perf.tier || "none") + '</div>' +
+                '<div><strong>Score:</strong> ' + (typeof perf.performance_score === 'number' ? perf.performance_score.toFixed(3) : 'N/A') + '</div>' +
+                '<div><strong>Tasks:</strong> ' + (perf.task_count || 0) + '</div>' +
+                '<div><strong>Success Rate:</strong> ' + (typeof perf.success_rate === 'number' ? Math.round(perf.success_rate * 100) + '%' : 'N/A') + '</div>' +
+              '</div>';
+          }
+        } else {
+          var perfEl2 = document.getElementById("agent-perf-" + id);
+          if (perfEl2) perfEl2.textContent = "Performance data unavailable.";
         }
-      } else {
-        var perfEl2 = document.getElementById("agent-perf-" + id);
-        if (perfEl2) perfEl2.textContent = "Performance data unavailable.";
+      } catch (e2) {
+        var perfEl3 = document.getElementById("agent-perf-" + id);
+        if (perfEl3) perfEl3.textContent = "Performance data unavailable.";
       }
-    } catch (e2) {
-      var perfEl3 = document.getElementById("agent-perf-" + id);
-      if (perfEl3) perfEl3.textContent = "Performance data unavailable.";
     }
   } catch (e) { toast("Error loading agent", "error"); }
 }
