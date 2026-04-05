@@ -46,7 +46,14 @@ class AgentRuntime:
         provider_url = agent_config.get("provider_url", "")
         model = agent_config.get("model", "")
 
-        if provider == "synthetic":
+        if provider == "claudecode":
+            # Claude Code Subscription - use Claude Code CLI directly
+            env["CLAUDECODE_SUBSCRIPTION_TOKEN"] = os.environ.get(
+                "CLAUDECODE_SUBSCRIPTION_TOKEN", ""
+            )
+            if model:
+                env["CLAUDECODE_MODEL"] = model
+        elif provider == "synthetic":
             env["ANTHROPIC_API_KEY"] = ""
             env["ANTHROPIC_BASE_URL"] = provider_url or "https://api.synthetic.new/v1"
             env["SYNTHETIC_API_KEY"] = os.environ.get("SYNTHETIC_API_KEY", "")
@@ -56,6 +63,11 @@ class AgentRuntime:
             env["ANTHROPIC_API_KEY"] = ""
             env["ANTHROPIC_BASE_URL"] = provider_url or "https://openrouter.ai/api/v1"
             env["OPENROUTER_API_KEY"] = os.environ.get("OPENROUTER_API_KEY", "")
+            if model:
+                env["ANTHROPIC_MODEL"] = model
+        elif provider == "abacus":
+            env["ANTHROPIC_API_KEY"] = os.environ.get("ABACUS_API_KEY", "")
+            env["ANTHROPIC_BASE_URL"] = provider_url or "https://routellm.abacus.ai/v1"
             if model:
                 env["ANTHROPIC_MODEL"] = model
         elif provider == "anthropic":
@@ -185,7 +197,7 @@ class AgentRuntime:
             ap.process.terminate()
             try:
                 await asyncio.wait_for(ap.process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 ap.process.kill()
             ap.status = "stopped"
             return True
@@ -203,7 +215,7 @@ class AgentRuntime:
         last_output = ""
         if ap.log_file and Path(ap.log_file).exists():
             try:
-                with open(ap.log_file, "r", encoding="utf-8", errors="replace") as f:
+                with open(ap.log_file, encoding="utf-8", errors="replace") as f:
                     last_output = "".join(f.readlines()[-10:])
             except Exception:
                 pass

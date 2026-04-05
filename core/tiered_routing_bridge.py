@@ -7,7 +7,7 @@ constructed once in create_sidecar_app(), injected into SidecarOrchestrator.
 Design decisions:
 - role→category mapping is a static dict constant (D-01, D-02, D-03)
 - Tier upgrade delegates to resolve_model() — no duplicate logic (D-05)
-- Provider chain: preferredProvider > synthetic (with key) > anthropic (D-06)
+- Provider chain: preferredProvider > claudecode (with key) > synthetic (with key) > anthropic (D-06)
 - obs_count=0 is passed to TierDeterminator as safe default (Pitfall 1 from
   RESEARCH.md): new sidecar agents start provisional, never prematurely Bronze.
   Wire real obs_count from EffectivenessStore in Phase 27+.
@@ -46,7 +46,7 @@ _ROLE_CATEGORY_MAP: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Per-token costs: (input_per_token_usd, output_per_token_usd)
 # Values based on published pricing as of 2026-03-29.
-# Synthetic (StrongWall) values are estimates — update when StrongWall publishes
+# Synthetic values are estimates — update when Synthetic.new publishes
 # official pricing. See RESEARCH.md for confidence levels.
 
 _MODEL_PRICING: dict[str, tuple[float, float]] = {
@@ -54,7 +54,7 @@ _MODEL_PRICING: dict[str, tuple[float, float]] = {
     "claude-haiku-4-5-20251001": (0.80 / 1_000_000, 4.00 / 1_000_000),
     "claude-sonnet-4-6-20260217": (3.00 / 1_000_000, 15.00 / 1_000_000),
     "claude-opus-4-6-20260205": (15.00 / 1_000_000, 75.00 / 1_000_000),
-    # Synthetic (StrongWall) — estimated pricing, LOW confidence
+    # Synthetic — estimated pricing, LOW confidence
     "hf:zai-org/GLM-4.7-Flash": (0.10 / 1_000_000, 0.30 / 1_000_000),
     "hf:zai-org/GLM-4.7": (0.50 / 1_000_000, 1.50 / 1_000_000),
     "hf:moonshotai/Kimi-K2-Thinking": (2.00 / 1_000_000, 8.00 / 1_000_000),
@@ -68,6 +68,17 @@ _MODEL_PRICING: dict[str, tuple[float, float]] = {
     "google/gemini-2.0-flash-001": (0.10 / 1_000_000, 0.40 / 1_000_000),
     "anthropic/claude-sonnet-4-6": (3.00 / 1_000_000, 15.00 / 1_000_000),
     "anthropic/claude-opus-4-6": (15.00 / 1_000_000, 75.00 / 1_000_000),
+    # Abacus RouteLLM — free tier models (zero cost)
+    "gemini-3-flash": (0.0, 0.0),
+    "gpt-5-mini": (0.0, 0.0),
+    "llama-4": (0.0, 0.0),
+    "grok-code-fast": (0.0, 0.0),
+    "kimi-k2": (0.0, 0.0),
+    # Abacus RouteLLM — premium models (estimated from Abacus credits)
+    "claude-opus-4-6": (15.00 / 1_000_000, 75.00 / 1_000_000),
+    "claude-sonnet-4-6": (3.00 / 1_000_000, 15.00 / 1_000_000),
+    "gpt-5": (5.00 / 1_000_000, 15.00 / 1_000_000),
+    "route-llm": (1.00 / 1_000_000, 3.00 / 1_000_000),
 }
 
 # Fallback pricing for unknown models: conservative estimate
@@ -173,10 +184,14 @@ class TieredRoutingBridge:
         # 3. Provider selection chain (ROUTE-03, D-06, D-07, D-08)
         if preferred_provider:
             provider = preferred_provider  # (1) explicit override
+        elif os.environ.get("CLAUDECODE_SUBSCRIPTION_TOKEN"):
+            provider = "claudecode"  # (2) Claude Code Subscription default
         elif os.environ.get("SYNTHETIC_API_KEY"):
-            provider = "synthetic"  # (2) L1 workhorse default
+            provider = "synthetic"  # (3) Synthetic.new fallback
+        elif os.environ.get("ABACUS_API_KEY"):
+            provider = "abacus"  # (4) Abacus RouteLLM fallback
         else:
-            provider = "anthropic"  # (3) fallback when synthetic key missing
+            provider = "anthropic"  # (5) final fallback when other keys missing
 
         # 4. resolve_model() handles: tier upgrade + category→model + unknown-category fallback
         #    (D-05, D-07): gold→reasoning, silver→general, bronze→fast, provisional→unchanged

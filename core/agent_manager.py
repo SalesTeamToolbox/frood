@@ -16,6 +16,14 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+# Optional import for Synthetic.new API client
+try:
+    from providers.synthetic_api import SyntheticApiClient
+
+    _synthetic_client = SyntheticApiClient()
+except ImportError:
+    _synthetic_client = None
+
 logger = logging.getLogger("agent42.agent_manager")
 
 # Module-level settings reference — used by _get_tier_semaphore() and get_effective_limits().
@@ -29,6 +37,16 @@ from core.config import settings
 # avoiding rate limit conflicts on any single model.
 
 PROVIDER_MODELS = {
+    "claudecode": {
+        "fast": "claude-haiku-4-5-20251001",
+        "general": "claude-sonnet-4-6-20260217",
+        "reasoning": "claude-opus-4-6-20260205",
+        "coding": "claude-sonnet-4-6-20260217",
+        "content": "claude-sonnet-4-6-20260217",
+        "research": "claude-opus-4-6-20260205",
+        "strategy": "claude-opus-4-6-20260205",
+        "analysis": "claude-sonnet-4-6-20260217",
+    },
     "anthropic": {
         "fast": "claude-haiku-4-5-20251001",
         "general": "claude-sonnet-4-6-20260217",
@@ -55,7 +73,97 @@ PROVIDER_MODELS = {
         "coding": "anthropic/claude-sonnet-4-6",
         "content": "anthropic/claude-sonnet-4-6",
     },
+    "abacus": {
+        "fast": "gemini-3-flash",  # Free tier
+        "general": "gpt-5-mini",  # Free tier
+        "reasoning": "claude-opus-4-6",  # Premium
+        "coding": "claude-sonnet-4-6",  # Premium
+        "content": "gpt-5",  # Premium
+        "research": "claude-opus-4-6",  # Premium
+        "monitoring": "gemini-3-flash",  # Free tier
+        "marketing": "gpt-5-mini",  # Free tier
+        "analysis": "claude-sonnet-4-6",  # Premium
+        "lightweight": "llama-4",  # Free tier
+    },
 }
+
+
+def refresh_synthetic_models(force: bool = False) -> bool:
+    """Refresh Synthetic.new model mappings from API.
+
+    Args:
+        force: If True, bypass cache and fetch from API regardless
+
+    Returns:
+        True if models were successfully refreshed, False otherwise
+    """
+    global PROVIDER_MODELS
+
+    if _synthetic_client is None:
+        logger.warning("Synthetic.new API client not available")
+        return False
+
+    try:
+        import asyncio
+
+        # Check if we're in an async context
+        try:
+            loop = asyncio.get_running_loop()
+            # We're in an async context, run the async function
+            models = asyncio.run(_synthetic_client.refresh_models(force=force))
+        except RuntimeError:
+            # No running loop, run in a new event loop
+            models = asyncio.run(_synthetic_client.refresh_models(force=force))
+
+        if models:
+            # Update the PROVIDER_MODELS mapping with dynamic models
+            dynamic_mapping = _synthetic_client.update_provider_models_mapping()
+            if dynamic_mapping:
+                PROVIDER_MODELS["synthetic"] = dynamic_mapping
+                logger.info(
+                    f"Updated Synthetic.new model mappings: {len(dynamic_mapping)} categories"
+                )
+                return True
+            else:
+                logger.warning("No dynamic mappings generated from Synthetic.new models")
+                return False
+        else:
+            logger.warning("No models fetched from Synthetic.new API")
+            return False
+    except Exception as e:
+        logger.error(f"Error refreshing Synthetic.new models: {e}")
+        return False
+
+
+async def start_synthetic_model_refresh_task() -> None:
+    """Start a background task to periodically refresh Synthetic.new models."""
+    global PROVIDER_MODELS
+
+    if _synthetic_client is None:
+        logger.info("Synthetic.new API client not available, skipping background refresh")
+        return
+
+    from core.config import settings
+
+    refresh_interval_hours = settings.model_catalog_refresh_hours or 24.0
+    refresh_interval_seconds = refresh_interval_hours * 3600
+
+    logger.info(f"Starting Synthetic.new model refresh task (every {refresh_interval_hours} hours)")
+
+    while True:
+        try:
+            await asyncio.sleep(refresh_interval_seconds)
+            logger.info("Refreshing Synthetic.new models...")
+            success = refresh_synthetic_models()
+            if success:
+                logger.info("Successfully refreshed Synthetic.new models")
+            else:
+                logger.warning("Failed to refresh Synthetic.new models")
+        except asyncio.CancelledError:
+            logger.info("Synthetic.new model refresh task cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Error in Synthetic.new model refresh task: {e}")
 
 
 # ── Tier-to-model-category upgrade map (Phase 3: Resource Enforcement) ───────
@@ -230,6 +338,28 @@ class AgentManager:
         # Tier concurrency semaphores — created lazily in async context (Pitfall 1)
         self._tier_semaphores: dict[str, asyncio.Semaphore] = {}
         self._load_all()
+
+        # Start background task to refresh Synthetic.new models
+        self._start_background_tasks()
+
+    def _start_background_tasks(self):
+        """Start background tasks for model refresh."""
+        try:
+            # Create a task to refresh Synthetic.new models periodically
+            import asyncio
+
+            from core.agent_manager import start_synthetic_model_refresh_task
+
+            # Check if we're in an async context
+            try:
+                loop = asyncio.get_running_loop()
+                # Schedule the task to run in the background
+                loop.create_task(start_synthetic_model_refresh_task())
+            except RuntimeError:
+                # No running loop, create a new one
+                pass  # Skip for now, task will be started when the app runs
+        except Exception as e:
+            logger.warning(f"Failed to start background model refresh task: {e}")
 
     def _load_all(self):
         """Load all agent configs from disk."""
