@@ -124,6 +124,8 @@ def _build_registry() -> ToolRegistry:
         ("tools.scoring_tool", "ScoringTool"),
         ("tools.persona_tool", "PersonaTool"),
         ("tools.security_audit", "SecurityAuditTool"),
+        ("tools.n8n_workflow", "N8nWorkflowTool"),
+        ("tools.n8n_create_workflow", "N8nCreateWorkflowTool"),
     ]:
         ToolClass = _safe_import(mod, cls)
         _register(ToolClass() if ToolClass else None)
