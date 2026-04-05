@@ -473,6 +473,10 @@ class EffectivenessStore:
         Marks each returned transcript as extracted=1 in the same transaction.
         Returns empty list on any failure.
         """
+        from core.config import settings as _settings
+
+        if not _settings.learning_enabled:
+            return []
         if not AIOSQLITE_AVAILABLE:
             return []
         try:

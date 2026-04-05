@@ -153,6 +153,12 @@ class MemoryBridge:
             run_id:     Optional. Tags Qdrant KNOWLEDGE points with the originating run (D-23).
         """
         try:
+            from core.config import settings as _settings
+
+            if not _settings.learning_enabled:
+                logger.debug("learn_async: skipping — learning disabled via LEARNING_ENABLED=false")
+                return
+
             if not summary or not agent_id or not self.memory_store:
                 logger.debug("learn_async: skipping — missing summary, agent_id, or memory_store")
                 return
