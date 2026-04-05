@@ -46,6 +46,10 @@ import type {
   AdapterRunResponse,
   AdapterStatusResponse,
   AdapterCancelResponse,
+  MemoryStatsResponse,
+  StorageStatusResponse,
+  ToggleResponse,
+  PurgeMemoryResponse,
 } from "./types.js";
 
 export class Agent42Client {
@@ -293,6 +297,61 @@ export class Agent42Client {
     );
     if (!resp.ok) throw new Error(`Agent42Client.getSkills failed: HTTP ${resp.status}`);
     return resp.json() as Promise<SkillsListResponse>;
+  }
+
+  /** PATCH /tools/{name} — toggle tool enabled/disabled (Phase 40 D-18) */
+  async toggleTool(name: string, enabled: boolean): Promise<ToggleResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/tools/${encodeURIComponent(name)}`,
+      { method: "PATCH", headers: this.authHeaders(), body: JSON.stringify({ enabled }) },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.toggleTool failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<ToggleResponse>;
+  }
+
+  /** PATCH /skills/{name} — toggle skill enabled/disabled (Phase 40 D-18) */
+  async toggleSkill(name: string, enabled: boolean): Promise<ToggleResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/skills/${encodeURIComponent(name)}`,
+      { method: "PATCH", headers: this.authHeaders(), body: JSON.stringify({ enabled }) },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.toggleSkill failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<ToggleResponse>;
+  }
+
+  /** GET /memory-stats — 24h memory operation counters (Phase 40 D-13) */
+  async getMemoryStats(): Promise<MemoryStatsResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/memory-stats`,
+      { method: "GET", headers: this.authHeaders() },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.getMemoryStats failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<MemoryStatsResponse>;
+  }
+
+  /** GET /storage-status — storage backend configuration (Phase 40 D-12) */
+  async getStorageStatus(): Promise<StorageStatusResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/storage-status`,
+      { method: "GET", headers: this.authHeaders() },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.getStorageStatus failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<StorageStatusResponse>;
+  }
+
+  /** DELETE /memory/{collection} — purge a memory collection (Phase 40 D-15) */
+  async purgeMemory(collection: string): Promise<PurgeMemoryResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/memory/${encodeURIComponent(collection)}`,
+      { method: "DELETE", headers: this.authHeaders() },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.purgeMemory failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<PurgeMemoryResponse>;
   }
 
   /** GET /apps — list all sandboxed apps */

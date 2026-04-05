@@ -132,6 +132,26 @@ const plugin = definePlugin({
       }
     });
 
+    ctx.data.register("memory-stats", async (_params) => {
+      if (!client) return null;
+      try {
+        return await client.getMemoryStats();
+      } catch (e) {
+        ctx.logger.warn("memory-stats data handler failed", { error: String(e) });
+        return null;
+      }
+    });
+
+    ctx.data.register("storage-status", async (_params) => {
+      if (!client) return null;
+      try {
+        return await client.getStorageStatus();
+      } catch (e) {
+        ctx.logger.warn("storage-status data handler failed", { error: String(e) });
+        return null;
+      }
+    });
+
     // -- Phase 36: Action handlers --
 
     ctx.actions.register("app-start", async (params) => {
@@ -164,6 +184,41 @@ const plugin = definePlugin({
         return await client.updateSettings({ key_name: keyName, value: value ?? "" });
       } catch (e) {
         ctx.logger.warn("update-agent42-settings action failed", { error: String(e) });
+        return { ok: false, message: String(e) };
+      }
+    });
+
+    ctx.actions.register("toggle-tool", async (params) => {
+      const name = params?.name as string;
+      const enabled = params?.enabled as boolean;
+      if (!name || enabled === undefined || !client) return { ok: false, message: "Missing name/enabled or client" };
+      try {
+        return await client.toggleTool(name, enabled);
+      } catch (e) {
+        ctx.logger.warn("toggle-tool action failed", { error: String(e) });
+        return { ok: false, message: String(e) };
+      }
+    });
+
+    ctx.actions.register("toggle-skill", async (params) => {
+      const name = params?.name as string;
+      const enabled = params?.enabled as boolean;
+      if (!name || enabled === undefined || !client) return { ok: false, message: "Missing name/enabled or client" };
+      try {
+        return await client.toggleSkill(name, enabled);
+      } catch (e) {
+        ctx.logger.warn("toggle-skill action failed", { error: String(e) });
+        return { ok: false, message: String(e) };
+      }
+    });
+
+    ctx.actions.register("purge-memory", async (params) => {
+      const collection = params?.collection as string;
+      if (!collection || !client) return { ok: false, message: "Missing collection or client" };
+      try {
+        return await client.purgeMemory(collection);
+      } catch (e) {
+        ctx.logger.warn("purge-memory action failed", { error: String(e) });
         return { ok: false, message: String(e) };
       }
     });
