@@ -252,6 +252,62 @@ const plugin = definePlugin({
       return { ok: true };
     });
 
+    // -- Phase 41: Agent42 Adapter actions (ABACUS-04, ABACUS-05) --
+    // These replace claude_local for Paperclip autonomous execution.
+    // All agent tasks route through Agent42 -> Abacus RouteLLM API.
+    // Zero Claude CLI processes spawned. TOS compliant.
+
+    ctx.actions.register("adapter-run", async (params) => {
+      const task = params?.task as string;
+      const agentId = params?.agentId as string;
+      if (!task || !agentId || !client) {
+        return { ok: false, message: "Missing task, agentId, or client not initialized" };
+      }
+      try {
+        const result = await client.adapterRun({
+          task,
+          agentId,
+          role: params?.role as string | undefined,
+          provider: params?.provider as string | undefined,
+          model: params?.model as string | undefined,
+          tools: params?.tools as string[] | undefined,
+          maxIterations: params?.maxIterations as number | undefined,
+        });
+        return { ok: true, ...result };
+      } catch (e) {
+        ctx.logger.warn("adapter-run failed", { error: String(e) });
+        return { ok: false, message: String(e) };
+      }
+    });
+
+    ctx.actions.register("adapter-status", async (params) => {
+      const runId = params?.runId as string;
+      if (!runId || !client) {
+        return { ok: false, message: "Missing runId or client not initialized" };
+      }
+      try {
+        const result = await client.adapterStatus(runId);
+        return { ok: true, ...result };
+      } catch (e) {
+        ctx.logger.warn("adapter-status failed", { error: String(e) });
+        return { ok: false, message: String(e) };
+      }
+    });
+
+    ctx.actions.register("adapter-cancel", async (params) => {
+      const runId = params?.runId as string;
+      if (!runId || !client) {
+        return { ok: false, message: "Missing runId or client not initialized" };
+      }
+      try {
+        const result = await client.adapterCancel(runId);
+        return { ok: true, ...result };
+      } catch (e) {
+        ctx.logger.warn("adapter-cancel failed", { error: String(e) });
+        return { ok: false, message: String(e) };
+      }
+    });
+
     // Register learning extraction job handler (D-17, D-19, D-20)
     ctx.jobs.register("extract-learnings", async (_job) => {
       if (!client) {

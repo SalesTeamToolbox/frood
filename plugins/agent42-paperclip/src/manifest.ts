@@ -1,6 +1,9 @@
 import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
 
-const manifest: PaperclipPluginManifestV1 = {
+// Phase 41: The adapters field and adapters.register capability are Agent42 extensions
+// not yet in the upstream SDK type. We use a cast to preserve type safety for all
+// standard fields while allowing the extension fields.
+const manifest = {
   id: "agent42.paperclip-plugin",
   apiVersion: 1,
   version: "1.2.0",
@@ -21,7 +24,8 @@ const manifest: PaperclipPluginManifestV1 = {
     "events.subscribe",
     "ui.page.register",
     "ui.sidebar.register",
-  ],
+    "adapters.register",
+  ] as PaperclipPluginManifestV1["capabilities"],
   entrypoints: {
     worker: "./dist/worker-launcher.cjs",
     ui: "./dist/ui",
@@ -94,6 +98,22 @@ const manifest: PaperclipPluginManifestV1 = {
       description:
         "Hourly job that extracts structured learnings from Paperclip run transcripts",
       schedule: "0 * * * *",
+    },
+  ],
+  // Phase 41: Agent42 Sidecar adapter (ABACUS-04, ABACUS-05)
+  // Replaces claude_local for Paperclip autonomous execution.
+  adapters: [
+    {
+      id: "agent42_sidecar",
+      displayName: "Agent42 Sidecar",
+      description:
+        "Routes agent tasks through Agent42 HTTP API with tiered Abacus RouteLLM routing. " +
+        "Replaces claude_local — zero Claude CLI processes spawned. TOS compliant.",
+      actions: {
+        run: "adapter-run",
+        status: "adapter-status",
+        cancel: "adapter-cancel",
+      },
     },
   ],
   instanceConfigSchema: {
@@ -209,6 +229,6 @@ const manifest: PaperclipPluginManifestV1 = {
       },
     },
   ],
-};
+} as PaperclipPluginManifestV1 & { adapters: unknown[] };
 
 export default manifest;
