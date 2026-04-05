@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 41: Abacus AI Provider Integration — Plan 01 complete, Plan 02 next
+Phase 41: Abacus AI Provider Integration — ALL PLANS COMPLETE (2/2)
 
 ## Progress
 
-[████░░░░░░] 40% — 1/2 plans complete in Phase 41
+[██████████] 100% — 2/2 plans complete in Phase 41
 
 ## Decisions
 
@@ -15,6 +15,8 @@ Phase 41: Abacus AI Provider Integration — Plan 01 complete, Plan 02 next
 - Paperclip autonomous agent execution moves to Abacus API via Agent42 adapter
 - Used httpx instead of aiohttp for AbacusApiClient (httpx is project standard per CLAUDE.md)
 - Abacus placed at position 4 in provider chain: preferredProvider > claudecode > synthetic > abacus > anthropic
+- [41-02]: Used type cast for manifest adapters field — SDK does not yet define adapters, cast allows extension without breaking type safety
+- [41-02]: Adapter TOS compliance test filters comment lines — claude_local appears in doc comments only, not active code
 
 ## Completed
 
@@ -24,7 +26,18 @@ Phase 41: Abacus AI Provider Integration — Plan 01 complete, Plan 02 next
   - Tiered routing: abacus selected when ABACUS_API_KEY set
   - agent_runtime._build_env handles provider="abacus"
   - 27 tests all passing
+- [x] Plan 41-02: Paperclip adapter (adapter-run, adapter-status, adapter-cancel), manifest, tests (2026-04-05)
+  - AdapterRunRequest/Response/StatusResponse/CancelResponse types added
+  - adapterRun(), adapterStatus(), adapterCancel() methods on Agent42Client
+  - adapter-run, adapter-status, adapter-cancel action handlers in worker
+  - agent42_sidecar adapter declared in manifest with adapters.register capability
+  - 16 tests all passing (adapter.test.ts)
+  - Zero Claude CLI processes for Paperclip autonomous execution (TOS compliant)
 
 ## Blockers
 
 - Need Abacus AI API key from https://abacus.ai/app/route-llm-apis
+
+## Last Updated
+
+2026-04-05T07:42:00Z — Completed 41-02-PLAN.md

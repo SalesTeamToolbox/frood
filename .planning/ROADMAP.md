@@ -15,6 +15,7 @@
 - ✅ **v4.0 Paperclip Integration** — Phases 24-31 (shipped 2026-03-31)
 - 🚧 **v5.0 Provider Selection Refactor** — Phases 32-35 (in progress)
 - 🚧 **v6.0 Dashboard Unification** — Phases 36-40 (not started)
+- ✅ **v7.0 Abacus Provider & Paperclip Autonomy** — Phase 41 (complete 2026-04-05)
 
 ## Active Workstreams
 
@@ -53,6 +54,27 @@ See: `workstreams/dashboard-unification/ROADMAP.md`
 - [ ] Phase 38: Provider UI Updates (0/1 plans) — not started
 - [ ] Phase 39: Unified Agent Management (0/1 plans) — not started
 - [ ] Phase 40: Settings Consolidation (0/1 plans) — not started
+
+### 🚧 Abacus Provider & Paperclip Autonomy
+
+See: `phases/41-abacus-provider-integration/`
+
+### Phase 41: Abacus AI Provider Integration
+
+**Goal**: Add Abacus AI (RouteLLM) as a provider and build the Agent42 adapter for Paperclip, replacing `claude_local` for autonomous agent execution
+**Depends on**: Phase 33, Phase 36
+**Success Criteria** (what must be TRUE):
+
+1. Agent42 can route requests through Abacus RouteLLM API
+2. Free-tier models (Gemini Flash, Llama 4) work for L1 routing
+3. Premium models (Claude, GPT) work for L2 routing
+4. Paperclip CEO agent runs via Agent42 adapter, NOT claude_local
+5. Zero Claude CLI processes spawned by Paperclip for autonomous work
+6. Claude Code subscription usage limited to interactive/human TOS-compliant use
+
+| Phase | Plans Complete | Status | Completed |
+| ----- | -------------- | ------ | --------- |
+| 41. Abacus Provider Integration | 2/2 | Complete | 2026-04-05 |
 
 ## ✅ v4.0 Paperclip Integration (Shipped 2026-03-31)
 
