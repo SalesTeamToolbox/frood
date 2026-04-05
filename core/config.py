@@ -41,13 +41,18 @@ class Settings:
     """Immutable application settings derived from environment variables."""
 
     # API keys — active providers
-    openai_api_key: str = ""
-    anthropic_api_key: str = ""
-    synthetic_api_key: str = ""  # Synthetic.new (Anthropic-compatible, autonomous agents)
-    abacus_api_key: str = ""  # Abacus AI RouteLLM (multi-model routing)
-    claudecode_subscription_token: str = ""  # Claude Code Subscription token
+    zen_api_key: str = ""  # OpenCode Zen (primary — free/paid models)
+    zen_base_url: str = ""  # Zen base URL (default: https://opencode.ai/zen/v1)
+    zen_rate_limit_enabled: bool = True  # Adaptive rate limiting for Zen API
+    zen_rate_initial_delay: float = 2.0  # Initial delay between requests (seconds)
+    zen_rate_min_delay: float = 0.5  # Minimum delay (max throughput floor)
+    zen_rate_max_delay: float = 10.0  # Maximum delay on repeated rate limits
+    zen_proxy_enabled: bool = False  # Local proxy for OpenCode CLI traffic
+    zen_proxy_port: int = 8765  # Port for the local Zen proxy
+    openrouter_api_key: str = ""  # OpenRouter (200+ models, paid fallback)
+    anthropic_api_key: str = ""  # Anthropic API (direct Claude access)
+    openai_api_key: str = ""  # OpenAI API (direct GPT access)
     gemini_api_key: str = ""
-    openrouter_api_key: str = ""
     # Dead providers — keys kept for backward compat but no routing logic exists
     deepseek_api_key: str = ""
     vllm_api_key: str = ""
@@ -134,6 +139,11 @@ class Settings:
     mcp_servers_json: str = ""  # Path to MCP servers config file
     cron_jobs_path: str = "cron_jobs.json"
     custom_tools_dir: str = ""  # Path to directory with custom Tool .py files
+
+    # N8N workflow integration (v8.0)
+    n8n_url: str = ""  # N8N instance URL, e.g. http://localhost:5678
+    n8n_api_key: str = ""  # N8N public API key (X-N8N-API-KEY header)
+    n8n_allow_code_nodes: bool = False  # Allow code/ssh/exec nodes in generated workflows
 
     # Dynamic model routing
     model_routing_file: str = "data/dynamic_routing.json"
@@ -323,6 +333,13 @@ class Settings:
     standalone_mode: bool = False  # Simplified dashboard mode (Claude Code only)
     mcp_tool_allowlist: str = ""  # Comma-separated tool names for /mcp/tool proxy (Phase 28)
 
+    # N8N Workflow Integration (Phase 42)
+    n8n_url: str = ""  # e.g. "http://localhost:5678"
+    n8n_api_key: str = ""  # N8N API key (Settings -> n8n API)
+    n8n_allow_code_nodes: bool = (
+        False  # When true, n8n-nodes-base.code is unblocked in generated workflows
+    )
+
     @classmethod
     def from_env(cls) -> "Settings":
         # Enforce secure JWT secret
@@ -363,12 +380,20 @@ class Settings:
 
         return cls(
             # Provider API keys — active
-            openai_api_key=os.getenv("OPENAI_API_KEY", ""),
-            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-            synthetic_api_key=os.getenv("SYNTHETIC_API_KEY", ""),
-            abacus_api_key=os.getenv("ABACUS_API_KEY", ""),
-            gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+            zen_api_key=os.getenv("ZEN_API_KEY", ""),
+            zen_base_url=os.getenv("ZEN_BASE_URL", "https://opencode.ai/zen/v1"),
+            zen_rate_limit_enabled=os.getenv("ZEN_RATE_LIMIT_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
+            zen_rate_initial_delay=float(os.getenv("ZEN_RATE_INITIAL_DELAY", "2.0")),
+            zen_rate_min_delay=float(os.getenv("ZEN_RATE_MIN_DELAY", "0.5")),
+            zen_rate_max_delay=float(os.getenv("ZEN_RATE_MAX_DELAY", "10.0")),
+            zen_proxy_enabled=os.getenv("ZEN_PROXY_ENABLED", "false").lower()
+            in ("true", "1", "yes"),
+            zen_proxy_port=int(os.getenv("ZEN_PROXY_PORT", "8765")),
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
+            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+            openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+            gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
             # Dead providers (kept for backward compat)
             deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
             vllm_api_key=os.getenv("VLLM_API_KEY", ""),
@@ -622,6 +647,11 @@ class Settings:
             sidecar_enabled=os.getenv("SIDECAR_ENABLED", "false").lower() in ("true", "1", "yes"),
             standalone_mode=os.getenv("STANDALONE_MODE", "false").lower() in ("true", "1", "yes"),
             mcp_tool_allowlist=os.getenv("MCP_TOOL_ALLOWLIST", ""),
+            # N8N Workflow Integration (Phase 42)
+            n8n_url=os.getenv("N8N_URL", ""),
+            n8n_api_key=os.getenv("N8N_API_KEY", ""),
+            n8n_allow_code_nodes=os.getenv("N8N_ALLOW_CODE_NODES", "false").lower()
+            in ("true", "1", "yes"),
         )
 
     def get_discord_guild_ids(self) -> list[int]:
