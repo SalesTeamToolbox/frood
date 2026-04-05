@@ -16,7 +16,7 @@
 - 🚧 **v5.0 Provider Selection Refactor** — Phases 32-35 (in progress)
 - 🚧 **v6.0 Dashboard Unification** — Phases 36-40 (not started)
 - ✅ **v7.0 Abacus Provider & Paperclip Autonomy** — Phase 41 (complete 2026-04-05)
-- 🚧 **v8.0 N8N Workflow Integration** — Phase 42 (in progress)
+- ✅ **v8.0 N8N Workflow Integration** — Phase 42 (complete 2026-04-05)
 
 ## Active Workstreams
 
@@ -339,7 +339,7 @@ Archive: `milestones/v1.0-ROADMAP.md`
 | 29. Plugin UI + Learning Extraction | v4.0 | 3/3 | Complete    | 2026-03-31 |
 | 30. Advanced — TeamTool + Auto Memory | v4.0 | 2/2 | Complete    | 2026-03-31 |
 | 31. Advanced — Migration + Docker | v4.0 | 2/2 | Complete   | 2026-03-31 |
-| 42. N8N Workflow Integration | v8.0 | 1/3 | In Progress | — |
+| 42. N8N Workflow Integration | v8.0 | 3/3 | Complete | 2026-04-05 |
 
 | Milestone | Phases | Plans | Status | Shipped |
 | ----------- | -------- | ------- | -------- | --------- |
