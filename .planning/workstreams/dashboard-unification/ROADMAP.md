@@ -93,6 +93,13 @@ Plans:
 **Goal**: Streamlined settings management that works in both Paperclip and standalone modes
 **Depends on**: Phase 36, Phase 37, Phase 38, Phase 39
 **Requirements**: SETTINGS-01, SETTINGS-02, SETTINGS-03, SETTINGS-04
+**Plans:** 3 plans
+
+Plans:
+- [ ] 40-01-PLAN.md — Backend: Source field on settings keys, delete-on-empty, LEARNING_ENABLED config, learning guards, memory purge endpoint, sidecar proxies + tests
+- [ ] 40-02-PLAN.md — Paperclip TypeScript: Updated types, client methods (toggleTool/Skill, memoryStats, purge), worker handlers, sidecar PATCH proxies
+- [ ] 40-03-PLAN.md — Frontend: Paperclip SettingsPage 6-tab expansion + standalone Memory & Learning tab + visual verification
+
 **Success Criteria** (what must be TRUE):
 
 1. Streamlined settings management works in both Paperclip and standalone modes
@@ -108,4 +115,4 @@ Plans:
 | 37. Standalone Dashboard | 2/2 | Complete | 2026-04-03 |
 | 38. Provider UI Updates | 2/2 | Complete    | 2026-04-04 |
 | 39. Unified Agent Management | 2/2 | Complete | 2026-04-05 |
-| 40. Settings Consolidation | 0/1 | Not started | - |
+| 40. Settings Consolidation | 0/3 | Not started | - |
