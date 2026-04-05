@@ -1,12 +1,18 @@
-"""Tests for Phase 39 unified agent management endpoint (AGENT-01, AGENT-02).
+"""Tests for Phase 39 unified agent management endpoint and frontend (AGENT-01 through AGENT-04).
 
 Tests cover:
 - TestUnifiedEndpoint: Happy path — Agent42 agents with source tag, embedded performance data,
   and merged Paperclip agents.
 - TestUnifiedEndpointDegradation: Graceful degradation when Paperclip is unavailable.
 - TestUnifiedEndpointNoUrl: Behavior when PAPERCLIP_API_URL is not configured.
+- TestFrontendContent: Static analysis of app.js for unified endpoint and UI elements.
+- TestCreateFormSourceBadge: app.js agentShowCreate includes Agent42 badge.
+- TestTemplateBadge: app.js agentShowTemplates includes Agent42 badge.
+- TestStylesheet: style.css contains all required new CSS classes.
+- TestPaperclipReadOnly: app.js contains Paperclip read-only UI elements.
 """
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -14,6 +20,9 @@ from fastapi.testclient import TestClient
 from core.agent_manager import AgentConfig
 from dashboard.auth import AuthContext, get_current_user, require_admin
 from dashboard.server import create_app
+
+_APP_JS = Path("dashboard/frontend/dist/app.js").read_text(encoding="utf-8")
+_STYLE_CSS = Path("dashboard/frontend/dist/style.css").read_text(encoding="utf-8")
 
 
 def _make_agent(agent_id: str, name: str, status: str = "active") -> AgentConfig:
@@ -271,3 +280,102 @@ class TestUnifiedEndpointNoUrl:
         data = resp.json()
         assert data["agents"] == []
         assert data["paperclip_unavailable"] is False
+
+
+class TestFrontendContent:
+    """AGENT-01, AGENT-02: Static analysis of app.js for unified endpoint and UI elements."""
+
+    def test_app_js_uses_unified_endpoint(self):
+        """app.js fetches from /api/agents/unified (not legacy /api/agents)."""
+        assert "api/agents/unified" in _APP_JS
+
+    def test_app_js_has_source_badges(self):
+        """app.js references both badge-agent42 and badge-paperclip CSS classes."""
+        assert "badge-agent42" in _APP_JS
+        assert "badge-paperclip" in _APP_JS
+
+    def test_app_js_has_relative_time(self):
+        """app.js contains _relativeTime helper function."""
+        assert "_relativeTime" in _APP_JS
+
+    def test_app_js_has_sparkline(self):
+        """app.js contains _makeSparkline helper function."""
+        assert "_makeSparkline" in _APP_JS
+
+    def test_app_js_has_degradation_banner(self):
+        """app.js references degradation-banner CSS class for Paperclip unavailable state."""
+        assert "degradation-banner" in _APP_JS
+
+    def test_app_js_has_filter_controls(self):
+        """app.js contains agent source/status filter controls (agentFilterSource)."""
+        assert "agentFilterSource" in _APP_JS
+
+    def test_app_js_has_avg_success_stat(self):
+        """app.js stats row includes Avg Success metric."""
+        assert "Avg Success" in _APP_JS
+
+
+class TestCreateFormSourceBadge:
+    """AGENT-03: agentShowCreate includes Agent42 source badge."""
+
+    def test_create_form_has_agent42_badge(self):
+        """agentShowCreate section in app.js contains badge-agent42 and 'Agent42' text."""
+        # Find agentShowCreate function block
+        start = _APP_JS.find("function agentShowCreate()")
+        end = _APP_JS.find("\nfunction ", start + 1)
+        section = _APP_JS[start:end] if end != -1 else _APP_JS[start:]
+        assert "badge-agent42" in section, "badge-agent42 not found in agentShowCreate"
+        assert "Agent42" in section, "'Agent42' label not found in agentShowCreate"
+
+
+class TestTemplateBadge:
+    """AGENT-04: agentShowTemplates includes Agent42 source badge."""
+
+    def test_template_cards_have_source_badge(self):
+        """agentShowTemplates section in app.js adds badge-agent42 to template cards."""
+        start = _APP_JS.find("function agentShowTemplates()")
+        end = _APP_JS.find("\nfunction ", start + 1)
+        section = _APP_JS[start:end] if end != -1 else _APP_JS[start:]
+        assert "badge-agent42" in section, "badge-agent42 not found in agentShowTemplates"
+
+    def test_template_creation_uses_agents_api(self):
+        """agentCreateFromTemplate still POSTs to /api/agents (not unified endpoint)."""
+        start = _APP_JS.find("async function agentCreateFromTemplate(")
+        end = _APP_JS.find("\nasync function ", start + 1)
+        if end == -1:
+            end = _APP_JS.find("\nfunction ", start + 1)
+        section = _APP_JS[start:end] if end != -1 else _APP_JS[start:]
+        assert '"/api/agents"' in section, "agentCreateFromTemplate should POST to /api/agents"
+        assert "unified" not in section, "agentCreateFromTemplate must not use unified endpoint"
+
+
+class TestStylesheet:
+    """Supporting: style.css contains all required new CSS classes."""
+
+    def test_style_has_agent42_badge(self):
+        """style.css contains .badge-agent42 rule."""
+        assert ".badge-agent42" in _STYLE_CSS
+
+    def test_style_has_paperclip_badge(self):
+        """style.css contains .badge-paperclip rule."""
+        assert ".badge-paperclip" in _STYLE_CSS
+
+    def test_style_has_sparkline(self):
+        """style.css contains .sparkline rule."""
+        assert ".sparkline" in _STYLE_CSS
+
+    def test_style_has_degradation_banner(self):
+        """style.css contains .degradation-banner rule."""
+        assert ".degradation-banner" in _STYLE_CSS
+
+
+class TestPaperclipReadOnly:
+    """AGENT-01, D-03/D-08: app.js contains Paperclip read-only UI elements."""
+
+    def test_app_js_has_manage_in_paperclip(self):
+        """app.js contains 'Manage in Paperclip' deep link text."""
+        assert "Manage in Paperclip" in _APP_JS
+
+    def test_app_js_has_readonly_card(self):
+        """app.js assigns 'readonly' CSS class to Paperclip agent cards."""
+        assert "readonly" in _APP_JS
