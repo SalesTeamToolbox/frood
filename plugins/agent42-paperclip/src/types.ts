@@ -269,6 +269,7 @@ export interface SettingsKeyEntry {
   name: string;
   masked_value: string;
   is_set: boolean;
+  source: "admin" | "env" | "none";  // Phase 40 D-07
 }
 
 export interface SettingsResponse {
@@ -283,6 +284,34 @@ export interface SettingsUpdateRequest {
 export interface SettingsUpdateResponse {
   ok: boolean;
   key_name: string;
+}
+
+// -- Memory Stats (GET /memory-stats) -- Phase 40 D-13
+export interface MemoryStatsResponse {
+  recall_count: number;
+  learn_count: number;
+  error_count: number;
+  avg_latency_ms: number;
+  period_start: number;
+}
+
+// -- Storage Status (GET /storage-status) -- Phase 40 D-12
+export interface StorageStatusResponse {
+  mode: string;
+  qdrant_available: boolean;
+  learning_enabled: boolean;
+}
+
+// -- Tool/Skill Toggle (PATCH /tools/{name}, /skills/{name}) -- Phase 40 D-18
+export interface ToggleResponse {
+  name: string;
+  enabled: boolean;
+}
+
+// -- Memory Purge (DELETE /memory/{collection}) -- Phase 40 D-15
+export interface PurgeMemoryResponse {
+  ok: boolean;
+  collection: string;
 }
 
 // -- Terminal session types --
