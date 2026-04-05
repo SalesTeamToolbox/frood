@@ -140,11 +140,6 @@ class Settings:
     cron_jobs_path: str = "cron_jobs.json"
     custom_tools_dir: str = ""  # Path to directory with custom Tool .py files
 
-    # N8N workflow integration (v8.0)
-    n8n_url: str = ""  # N8N instance URL, e.g. http://localhost:5678
-    n8n_api_key: str = ""  # N8N public API key (X-N8N-API-KEY header)
-    n8n_allow_code_nodes: bool = False  # Allow code/ssh/exec nodes in generated workflows
-
     # Dynamic model routing
     model_routing_file: str = "data/dynamic_routing.json"
     model_catalog_refresh_hours: float = 24.0  # How often to sync OpenRouter catalog
@@ -648,7 +643,7 @@ class Settings:
             standalone_mode=os.getenv("STANDALONE_MODE", "false").lower() in ("true", "1", "yes"),
             mcp_tool_allowlist=os.getenv("MCP_TOOL_ALLOWLIST", ""),
             # N8N Workflow Integration (Phase 42)
-            n8n_url=os.getenv("N8N_URL", ""),
+            n8n_url=os.getenv("N8N_URL", "").rstrip("/"),
             n8n_api_key=os.getenv("N8N_API_KEY", ""),
             n8n_allow_code_nodes=os.getenv("N8N_ALLOW_CODE_NODES", "false").lower()
             in ("true", "1", "yes"),

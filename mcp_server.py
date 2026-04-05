@@ -494,6 +494,19 @@ async def run_sse(port: int = 8100):
     from starlette.applications import Starlette
     from starlette.routing import Mount, Route
 
+    # Start Zen proxy if enabled (intercepts OpenCode CLI Zen traffic)
+    zen_proxy = None
+    try:
+        from core.config import settings
+
+        if settings.zen_proxy_enabled:
+            from providers.zen_proxy import get_proxy
+
+            zen_proxy = get_proxy()
+            await zen_proxy.start()
+    except Exception as e:
+        logger.warning("Zen proxy failed to start: %s", e)
+
     server, _adapter = _create_server()
     sse = SseServerTransport("/messages/")
 
