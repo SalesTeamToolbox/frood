@@ -295,3 +295,42 @@ export interface TerminalOutputEvent {
   text: string;
   ts: number;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 41 -- Agent42 Adapter types (ABACUS-04)
+// ---------------------------------------------------------------------------
+
+/** POST /adapter/run -- route task through Agent42 instead of spawning Claude CLI */
+export interface AdapterRunRequest {
+  task: string;
+  agentId: string;
+  role?: string;          // Paperclip role (engineer, researcher, writer, analyst)
+  provider?: string;      // Override provider (default: use tiered routing)
+  model?: string;         // Override model (default: use tiered routing)
+  tools?: string[];       // Agent42 tools to enable
+  maxIterations?: number; // Max iterations (default: 10)
+}
+
+export interface AdapterRunResponse {
+  runId: string;
+  status: "started" | "queued" | "failed";
+  provider: string;       // Resolved provider (e.g. "abacus")
+  model: string;          // Resolved model (e.g. "gemini-3-flash")
+  message?: string;
+}
+
+/** GET /adapter/status/{runId} */
+export interface AdapterStatusResponse {
+  runId: string;
+  status: "running" | "completed" | "failed" | "cancelled" | "unknown";
+  output?: string;
+  costUsd?: number;
+  durationMs?: number;
+}
+
+/** POST /adapter/cancel/{runId} */
+export interface AdapterCancelResponse {
+  runId: string;
+  cancelled: boolean;
+  message?: string;
+}

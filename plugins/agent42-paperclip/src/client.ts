@@ -42,6 +42,10 @@ import type {
   SettingsResponse,
   SettingsUpdateRequest,
   SettingsUpdateResponse,
+  AdapterRunRequest,
+  AdapterRunResponse,
+  AdapterStatusResponse,
+  AdapterCancelResponse,
 } from "./types.js";
 
 export class Agent42Client {
@@ -344,6 +348,51 @@ export class Agent42Client {
     );
     if (!resp.ok) throw new Error(`Agent42Client.updateSettings failed: HTTP ${resp.status}`);
     return resp.json() as Promise<SettingsUpdateResponse>;
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase 41 -- Agent42 Adapter methods (ABACUS-04)
+  // Replaces claude_local: routes Paperclip agent tasks through Agent42 HTTP API
+  // which uses tiered routing (Abacus RouteLLM) instead of spawning Claude CLI.
+  // -------------------------------------------------------------------------
+
+  /**
+   * POST /adapter/run
+   * Start an agent task routed through Agent42 (Abacus RouteLLM, NOT Claude CLI).
+   * Bearer auth required. Retries once on 5xx.
+   */
+  async adapterRun(body: AdapterRunRequest): Promise<AdapterRunResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/adapter/run`,
+      { method: "POST", headers: this.authHeaders(), body: JSON.stringify(body) },
+      this.timeoutMs,
+    );
+    if (!resp.ok) throw new Error(`Agent42Client.adapterRun failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<AdapterRunResponse>;
+  }
+
+  /**
+   * GET /adapter/status/{runId}
+   * Check status of an adapter-launched agent run.
+   * Bearer auth required. Retries once on 5xx.
+   */
+  async adapterStatus(runId: string): Promise<AdapterStatusResponse> {
+    const url = `${this.baseUrl}/adapter/status/${encodeURIComponent(runId)}`;
+    const resp = await this.fetchWithRetry(url, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
+    if (!resp.ok) throw new Error(`Agent42Client.adapterStatus failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<AdapterStatusResponse>;
+  }
+
+  /**
+   * POST /adapter/cancel/{runId}
+   * Cancel a running adapter-launched agent.
+   * Bearer auth required. Retries once on 5xx.
+   */
+  async adapterCancel(runId: string): Promise<AdapterCancelResponse> {
+    const url = `${this.baseUrl}/adapter/cancel/${encodeURIComponent(runId)}`;
+    const resp = await this.fetchWithRetry(url, { method: "POST", headers: this.authHeaders() }, this.timeoutMs);
+    if (!resp.ok) throw new Error(`Agent42Client.adapterCancel failed: HTTP ${resp.status}`);
+    return resp.json() as Promise<AdapterCancelResponse>;
   }
 
   /**
