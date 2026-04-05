@@ -46,17 +46,10 @@ class AgentRuntime:
         provider_url = agent_config.get("provider_url", "")
         model = agent_config.get("model", "")
 
-        if provider == "claudecode":
-            # Claude Code Subscription - use Claude Code CLI directly
-            env["CLAUDECODE_SUBSCRIPTION_TOKEN"] = os.environ.get(
-                "CLAUDECODE_SUBSCRIPTION_TOKEN", ""
-            )
-            if model:
-                env["CLAUDECODE_MODEL"] = model
-        elif provider == "synthetic":
+        if provider == "zen":
             env["ANTHROPIC_API_KEY"] = ""
-            env["ANTHROPIC_BASE_URL"] = provider_url or "https://api.synthetic.new/v1"
-            env["SYNTHETIC_API_KEY"] = os.environ.get("SYNTHETIC_API_KEY", "")
+            env["ANTHROPIC_BASE_URL"] = provider_url or "https://opencode.ai/zen/v1"
+            env["OPENROUTER_API_KEY"] = os.environ.get("ZEN_API_KEY", "")
             if model:
                 env["ANTHROPIC_MODEL"] = model
         elif provider == "openrouter":
@@ -65,17 +58,15 @@ class AgentRuntime:
             env["OPENROUTER_API_KEY"] = os.environ.get("OPENROUTER_API_KEY", "")
             if model:
                 env["ANTHROPIC_MODEL"] = model
-        elif provider == "abacus":
-            env["ANTHROPIC_API_KEY"] = os.environ.get("ABACUS_API_KEY", "")
-            env["ANTHROPIC_BASE_URL"] = provider_url or "https://routellm.abacus.ai/v1"
-            if model:
-                env["ANTHROPIC_MODEL"] = model
         elif provider == "anthropic":
             if model:
                 env["ANTHROPIC_MODEL"] = model
+        elif provider == "openai":
+            env["OPENAI_API_KEY"] = os.environ.get("OPENAI_API_KEY", "")
+            env["OPENAI_BASE_URL"] = provider_url or "https://api.openai.com/v1"
+            if model:
+                env["OPENAI_MODEL"] = model
 
-        # Prevent nested Claude Code sessions
-        env.pop("CLAUDECODE", None)
         return env
 
     def _build_prompt(self, agent_config):
@@ -96,6 +87,16 @@ class AgentRuntime:
 
         scope = agent_config.get("memory_scope", "global")
         parts.append(f"\nStore important findings in memory (scope: {scope}).")
+
+        # N8N workflow automation guidance
+        if "n8n_workflow" in tools or "n8n_create_workflow" in tools:
+            parts.append(
+                "\nN8N AUTOMATION: Before repeating multi-step deterministic work "
+                "(bulk API calls, data transforms, notifications, integration glue), "
+                "check if an N8N workflow exists (n8n_workflow list) or create one "
+                "(n8n_create_workflow). Workflows run for free — no tokens per execution. "
+                "Only use LLM reasoning for tasks requiring judgment or creativity."
+            )
 
         max_iter = agent_config.get("max_iterations", 10)
         parts.append(f"\nWork autonomously. Max iterations: {max_iter}.")
