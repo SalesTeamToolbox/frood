@@ -100,7 +100,7 @@ See: `phases/42-n8n-workflow-integration/`
 
 Plans:
 - [ ] 42-01-PLAN.md — Config fields + n8n_workflow tool (list/trigger/status/output) + tests
-- [ ] 42-02-PLAN.md — n8n_create_workflow tool + templates + node validation + tests
+- [x] 42-02-PLAN.md — n8n_create_workflow tool + templates + node validation + tests
 - [ ] 42-03-PLAN.md — MCP registration wiring + Docker Compose for N8N deployment
 
 ## ✅ v4.0 Paperclip Integration (Shipped 2026-03-31)
@@ -339,7 +339,7 @@ Archive: `milestones/v1.0-ROADMAP.md`
 | 29. Plugin UI + Learning Extraction | v4.0 | 3/3 | Complete    | 2026-03-31 |
 | 30. Advanced — TeamTool + Auto Memory | v4.0 | 2/2 | Complete    | 2026-03-31 |
 | 31. Advanced — Migration + Docker | v4.0 | 2/2 | Complete   | 2026-03-31 |
-| 42. N8N Workflow Integration | v8.0 | 0/3 | Planned | — |
+| 42. N8N Workflow Integration | v8.0 | 1/3 | In Progress | — |
 
 | Milestone | Phases | Plans | Status | Shipped |
 | ----------- | -------- | ------- | -------- | --------- |
