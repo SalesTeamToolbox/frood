@@ -314,6 +314,7 @@ class Settings:
     # Paperclip sidecar mode (Phase 24)
     paperclip_sidecar_port: int = 8001
     paperclip_api_url: str = ""  # e.g. "http://paperclip:3000"
+    paperclip_agents_path: str = "/api/agents"  # Path to Paperclip agents endpoint
     sidecar_enabled: bool = False
     standalone_mode: bool = False  # Simplified dashboard mode (Claude Code only)
     mcp_tool_allowlist: str = ""  # Comma-separated tool names for /mcp/tool proxy (Phase 28)
@@ -611,6 +612,7 @@ class Settings:
             # Paperclip sidecar
             paperclip_sidecar_port=int(os.getenv("PAPERCLIP_SIDECAR_PORT", "8001")),
             paperclip_api_url=os.getenv("PAPERCLIP_API_URL", ""),
+            paperclip_agents_path=os.getenv("PAPERCLIP_AGENTS_PATH", "/api/agents"),
             sidecar_enabled=os.getenv("SIDECAR_ENABLED", "false").lower() in ("true", "1", "yes"),
             standalone_mode=os.getenv("STANDALONE_MODE", "false").lower() in ("true", "1", "yes"),
             mcp_tool_allowlist=os.getenv("MCP_TOOL_ALLOWLIST", ""),

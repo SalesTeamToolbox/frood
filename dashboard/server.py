@@ -4456,6 +4456,75 @@ Focus on learnings that would help in future similar sessions."""
         agent = _agent_manager.create(**data)
         return agent.to_dict()
 
+    @app.get("/api/agents/unified")
+    async def list_unified_agents(_user: str = Depends(get_current_user)):
+        """Return agents from Agent42 and optionally Paperclip, merged into a unified list.
+
+        Each Agent42 agent has source='agent42' and embedded performance data.
+        When PAPERCLIP_API_URL is set, Paperclip agents are fetched and merged with
+        source='paperclip'. On Paperclip failure, returns Agent42 agents only with
+        paperclip_unavailable=True (AGENT-01, AGENT-02).
+        """
+        import asyncio
+        import logging
+
+        import httpx
+
+        _log = logging.getLogger("agent42.unified_agents")
+        paperclip_unavailable = False
+        paperclip_agents: list[dict] = []
+
+        # --- Fetch Agent42 agents with embedded performance data ---
+        agent42_agents: list[dict] = []
+        if _agent_manager is not None:
+            raw_agents = _agent_manager.list_all()
+
+            async def _fetch_stats(agent):
+                stats = (
+                    await _effectiveness_store.get_agent_stats(agent.id)
+                    if _effectiveness_store
+                    else None
+                )
+                d = agent.to_dict()
+                d["source"] = "agent42"
+                d["success_rate"] = stats["success_rate"] if stats else 0.0
+                return d
+
+            agent42_agents = list(await asyncio.gather(*(_fetch_stats(a) for a in raw_agents)))
+
+        # --- Proxy to Paperclip (only when URL is configured) ---
+        if settings.paperclip_api_url:
+            try:
+                url = f"{settings.paperclip_api_url}{settings.paperclip_agents_path}"
+                async with httpx.AsyncClient(timeout=5.0) as http:
+                    resp = await http.get(url)
+                if resp.status_code == 200:
+                    payload = resp.json()
+                    raw_pc = payload if isinstance(payload, list) else payload.get("agents", [])
+                    for pc_agent in raw_pc:
+                        agent_id = pc_agent.get("id", "")
+                        paperclip_agents.append(
+                            {
+                                **pc_agent,
+                                "source": "paperclip",
+                                "manage_url": f"{settings.paperclip_api_url}/agents/{agent_id}",
+                            }
+                        )
+                else:
+                    _log.warning(
+                        "Paperclip returned non-200 (%s) — degrading gracefully",
+                        resp.status_code,
+                    )
+                    paperclip_unavailable = True
+            except (httpx.TimeoutException, httpx.ConnectError, Exception) as exc:
+                _log.warning("Paperclip unreachable (%s) — degrading gracefully", exc)
+                paperclip_unavailable = True
+
+        return {
+            "agents": agent42_agents + paperclip_agents,
+            "paperclip_unavailable": paperclip_unavailable,
+        }
+
     @app.get("/api/agents/{agent_id}")
     async def get_agent(agent_id: str, _user: str = Depends(get_current_user)):
         agent = _agent_manager.get(agent_id)

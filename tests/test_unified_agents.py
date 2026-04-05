@@ -53,10 +53,14 @@ def _make_agent_manager(agents: list[AgentConfig] | None = None) -> MagicMock:
 def _make_client(
     agent_manager=None,
     effectiveness_store=None,
-    paperclip_api_url: str = "",
     **kwargs,
 ) -> TestClient:
-    """Create a TestClient with auth overrides for agent endpoints."""
+    """Create a TestClient with auth overrides for agent endpoints.
+
+    NOTE: Does NOT patch settings. Callers needing non-default settings
+    (e.g. paperclip_api_url) must wrap their test in a settings patch that
+    stays active during request execution.
+    """
     defaults = {
         "tool_registry": None,
         "skill_loader": None,
@@ -68,18 +72,21 @@ def _make_client(
     }
     defaults.update(kwargs)
 
-    with patch("core.config.settings") as mock_settings:
-        mock_settings.paperclip_api_url = paperclip_api_url
-        mock_settings.paperclip_agents_path = "/api/agents"
-        # Forward all other attribute access to real settings to avoid breakage
-        mock_settings.rewards_enabled = False
-        mock_settings.standalone_mode = False
-        mock_settings.sidecar_enabled = False
+    app = create_app(**defaults)
+    app.dependency_overrides[get_current_user] = lambda: "test-user"
+    app.dependency_overrides[require_admin] = lambda: AuthContext(user="test-admin")
+    return TestClient(app)
 
-        app = create_app(**defaults)
-        app.dependency_overrides[get_current_user] = lambda: "test-user"
-        app.dependency_overrides[require_admin] = lambda: AuthContext(user="test-admin")
-        return TestClient(app)
+
+def _settings_mock(paperclip_api_url: str = "") -> MagicMock:
+    """Build a settings mock with required attributes for the unified endpoint."""
+    m = MagicMock()
+    m.paperclip_api_url = paperclip_api_url
+    m.paperclip_agents_path = "/api/agents"
+    m.rewards_enabled = False
+    m.standalone_mode = False
+    m.sidecar_enabled = False
+    return m
 
 
 class TestUnifiedEndpoint:
@@ -87,10 +94,9 @@ class TestUnifiedEndpoint:
 
     def test_returns_agent42_agents_with_source(self):
         """GET /api/agents/unified returns Agent42 agents each with source='agent42'."""
-        agent_manager = _make_agent_manager()
-        client = _make_client(agent_manager=agent_manager)
-
-        resp = client.get("/api/agents/unified")
+        with patch("core.config.settings", _settings_mock()):
+            client = _make_client()
+            resp = client.get("/api/agents/unified")
 
         assert resp.status_code == 200
         data = resp.json()
@@ -103,10 +109,9 @@ class TestUnifiedEndpoint:
     def test_embeds_performance_data(self):
         """AGENT-02: Each agent includes success_rate and performance_score inline (no N+1)."""
         effectiveness_store = _make_effectiveness_store(success_rate=0.85, task_volume=10)
-        agent_manager = _make_agent_manager()
-        client = _make_client(agent_manager=agent_manager, effectiveness_store=effectiveness_store)
-
-        resp = client.get("/api/agents/unified")
+        with patch("core.config.settings", _settings_mock()):
+            client = _make_client(effectiveness_store=effectiveness_store)
+            resp = client.get("/api/agents/unified")
 
         assert resp.status_code == 200
         agents = resp.json()["agents"]
@@ -130,25 +135,26 @@ class TestUnifiedEndpoint:
         mock_response.status_code = 200
         mock_response.json.return_value = paperclip_response
 
-        mock_client_instance = AsyncMock()
-        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-        mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-        mock_client_instance.get = AsyncMock(return_value=mock_response)
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=None)
+        mock_http.get = AsyncMock(return_value=mock_response)
 
-        with patch("httpx.AsyncClient", return_value=mock_client_instance):
-            client = _make_client(paperclip_api_url="http://paperclip:3000")
+        with (
+            patch("dashboard.server.settings", _settings_mock("http://paperclip:3000")),
+            patch("httpx.AsyncClient", return_value=mock_http),
+        ):
+            client = _make_client()
             resp = client.get("/api/agents/unified")
 
         assert resp.status_code == 200
         data = resp.json()
         agents = data["agents"]
 
-        # Should have Agent42 agents + Paperclip agents
         sources = [a["source"] for a in agents]
         assert "agent42" in sources
         assert "paperclip" in sources
 
-        # Paperclip agents have manage_url
         paperclip_agents = [a for a in agents if a["source"] == "paperclip"]
         assert len(paperclip_agents) == 1
         assert "manage_url" in paperclip_agents[0]
@@ -164,19 +170,21 @@ class TestUnifiedEndpointDegradation:
         """When Paperclip times out, returns Agent42 agents only with paperclip_unavailable=true."""
         import httpx
 
-        mock_client_instance = AsyncMock()
-        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-        mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-        mock_client_instance.get = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=None)
+        mock_http.get = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
 
-        with patch("httpx.AsyncClient", return_value=mock_client_instance):
-            client = _make_client(paperclip_api_url="http://paperclip:3000")
+        with (
+            patch("dashboard.server.settings", _settings_mock("http://paperclip:3000")),
+            patch("httpx.AsyncClient", return_value=mock_http),
+        ):
+            client = _make_client()
             resp = client.get("/api/agents/unified")
 
         assert resp.status_code == 200
         data = resp.json()
         assert data["paperclip_unavailable"] is True
-        # Should still have Agent42 agents
         agents = data["agents"]
         assert len(agents) == 2
         for agent in agents:
@@ -187,13 +195,16 @@ class TestUnifiedEndpointDegradation:
         mock_response = MagicMock()
         mock_response.status_code = 503
 
-        mock_client_instance = AsyncMock()
-        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-        mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-        mock_client_instance.get = AsyncMock(return_value=mock_response)
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=None)
+        mock_http.get = AsyncMock(return_value=mock_response)
 
-        with patch("httpx.AsyncClient", return_value=mock_client_instance):
-            client = _make_client(paperclip_api_url="http://paperclip:3000")
+        with (
+            patch("dashboard.server.settings", _settings_mock("http://paperclip:3000")),
+            patch("httpx.AsyncClient", return_value=mock_http),
+        ):
+            client = _make_client()
             resp = client.get("/api/agents/unified")
 
         assert resp.status_code == 200
@@ -205,13 +216,16 @@ class TestUnifiedEndpointDegradation:
         """When Paperclip connection fails, returns Agent42 agents only with paperclip_unavailable=true."""
         import httpx
 
-        mock_client_instance = AsyncMock()
-        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
-        mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-        mock_client_instance.get = AsyncMock(side_effect=httpx.ConnectError("connection refused"))
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=None)
+        mock_http.get = AsyncMock(side_effect=httpx.ConnectError("connection refused"))
 
-        with patch("httpx.AsyncClient", return_value=mock_client_instance):
-            client = _make_client(paperclip_api_url="http://paperclip:3000")
+        with (
+            patch("dashboard.server.settings", _settings_mock("http://paperclip:3000")),
+            patch("httpx.AsyncClient", return_value=mock_http),
+        ):
+            client = _make_client()
             resp = client.get("/api/agents/unified")
 
         assert resp.status_code == 200
@@ -225,8 +239,9 @@ class TestUnifiedEndpointNoUrl:
 
     def test_skips_proxy_when_no_url(self):
         """When PAPERCLIP_API_URL is empty, proxy is skipped and paperclip_unavailable=false."""
-        client = _make_client(paperclip_api_url="")
-        resp = client.get("/api/agents/unified")
+        with patch("core.config.settings", _settings_mock("")):
+            client = _make_client()
+            resp = client.get("/api/agents/unified")
 
         assert resp.status_code == 200
         data = resp.json()
@@ -238,13 +253,7 @@ class TestUnifiedEndpointNoUrl:
 
     def test_no_agent_manager(self):
         """When agent_manager is None, endpoint returns empty list gracefully."""
-        with patch("core.config.settings") as mock_settings:
-            mock_settings.paperclip_api_url = ""
-            mock_settings.paperclip_agents_path = "/api/agents"
-            mock_settings.rewards_enabled = False
-            mock_settings.standalone_mode = False
-            mock_settings.sidecar_enabled = False
-
+        with patch("core.config.settings", _settings_mock("")):
             app = create_app(
                 tool_registry=None,
                 skill_loader=None,
@@ -256,8 +265,7 @@ class TestUnifiedEndpointNoUrl:
             app.dependency_overrides[get_current_user] = lambda: "test-user"
             app.dependency_overrides[require_admin] = lambda: AuthContext(user="test-admin")
             client = TestClient(app)
-
-        resp = client.get("/api/agents/unified")
+            resp = client.get("/api/agents/unified")
 
         assert resp.status_code == 200
         data = resp.json()
