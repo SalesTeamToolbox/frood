@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Dashboard Unification
-status: Phase 39 Complete
-last_updated: "2026-04-05T05:16:00Z"
+status: Executing phase 40
+last_updated: "2026-04-05T08:43:34Z"
 progress:
   total_phases: 5
-  completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
+  completed_phases: 4
+  total_plans: 10
+  completed_plans: 8
 ---
 
 # Workstream State
@@ -18,12 +18,12 @@ progress:
 See: .planning/workstreams/dashboard-unification/ROADMAP.md
 
 **Goal:** Unify Agent42's dashboard experience for both standalone Claude Code integration and Paperclip orchestration
-**Current focus:** Phase 39 — Unified Agent Management
+**Current focus:** Phase 40 — Settings Consolidation
 
 ## Current Position
 
-Phase: 39 (Unified Agent Management) — COMPLETE
-Plan: 2 of 2 (39-01 and 39-02 complete)
+Phase: 40 (Settings Consolidation) — EXECUTING
+Plan: 2 of 3 complete (40-01 and 40-02 done)
 
 ## Completed Phases
 
@@ -45,6 +45,10 @@ Plan: 2 of 2 (39-01 and 39-02 complete)
 - [Phase 39-01]: Settings mock must patch `dashboard.server.settings` not `core.config.settings` — direct import binding
 - [Phase 39-01]: httpx imported locally inside endpoint handler per project convention
 - [Phase 39-01]: asyncio.gather() for concurrent stats fetching to avoid N+1
+- [Phase 41]: Used httpx instead of aiohttp for AbacusApiClient (httpx is project standard per CLAUDE.md)
+- [Phase 41]: Abacus placed at position 4 in provider chain: preferredProvider > claudecode > synthetic > abacus > anthropic
+- [Phase 41-abacus-provider-integration]: Used type cast for manifest adapters field — SDK does not yet define adapters, cast allows extension without breaking type safety
+- [Phase 41-abacus-provider-integration]: Adapter TOS compliance test filters comment lines — claude_local appears in doc comments only, not active code
 
 ## Plan 36-01 Metrics
 
@@ -132,6 +136,17 @@ Plan: 2 of 2 (39-01 and 39-02 complete)
   - _makeSparkline approximates daily_activity with flat distribution when data absent
   - agentShowDetail falls back to /api/agents/{id} for Agent42 full detail fields
   - Test file reads app.js/style.css at module level (not per-test) per Phase 38 pattern
+
+## Plan 40-02 Metrics
+
+- Duration: ~8 minutes
+- Tasks: 2/2 completed
+- Files modified: 3 (plugins/agent42-paperclip/src/types.ts, client.ts, worker.ts)
+- Commits: 2 (7a1e135, a0e5c82)
+- Decisions:
+  - Pre-existing @types/node errors in test files are out of scope — not caused by these changes
+  - New types placed after SettingsUpdateResponse block before Terminal section in types.ts
+  - New client methods added between getSkills() and getApps() following Phase 36 section pattern
 
 ## Blockers/Concerns
 
