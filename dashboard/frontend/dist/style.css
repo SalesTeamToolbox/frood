@@ -2778,6 +2778,16 @@ body.towel-day .dont-panic-watermark {
 .badge-source { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
 .badge-builtin { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
 .badge-mcp { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+.badge-agent42 { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
+.badge-paperclip { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+.sparkline { display: inline-block; vertical-align: middle; margin-left: 0.5rem; }
+.sparkline svg { display: block; }
+.agent-card-metrics { display: flex; gap: 0.75rem; align-items: center; font-size: 0.72rem; color: var(--text-secondary); margin-top: 0.3rem; flex-wrap: wrap; }
+.agent-card-metrics .metric-value { font-weight: 600; color: var(--text); }
+.agent-filter-bar { display: flex; gap: 0.5rem; margin-bottom: 1rem; align-items: center; }
+.agent-filter-bar select { padding: 0.35rem 0.6rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); font-size: 0.8rem; }
+.degradation-banner { padding: 0.6rem 1rem; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; color: #fbbf24; font-size: 0.82rem; margin-bottom: 1rem; }
+.agent-card.readonly { opacity: 0.85; border-left: 3px solid #34d399; }
 .badge-category { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
 .badge-code { background: rgba(16, 185, 129, 0.15); color: #34d399; }
 .badge-general { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
