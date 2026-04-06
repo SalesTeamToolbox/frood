@@ -19,14 +19,13 @@ Usage:
 import asyncio
 import json
 import logging
-import os
 import re
 from typing import Any
 
 import httpx
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from core.rate_limiter import PerModelRateLimiter
@@ -60,6 +59,170 @@ def _extract_model_from_body(body: bytes) -> str | None:
         return None
 
 
+def _is_anthropic_path(path: str) -> bool:
+    """Detect Anthropic-style API paths that need translation."""
+    return "messages" in path or "v1/messages" in path
+
+
+def _anthropic_to_openai(body: bytes) -> bytes:
+    """Translate Anthropic /v1/messages format to OpenAI /chat/completions format.
+
+    Claude Code sends POST /v1/messages with Anthropic schema:
+    - system as a separate top-level field
+    - messages array with role "user"/"assistant"/"tool"
+    - max_tokens, stop_sequences, temperature, etc.
+
+    Zen API only accepts OpenAI /chat/completions format:
+    - system as a message with role "system"
+    - messages array with role "system"/"user"/"assistant"/"tool"
+    - max_tokens, stop, temperature, etc.
+    """
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, TypeError):
+        return body
+
+    openai_body: dict[str, Any] = {}
+
+    # Model mapping
+    if "model" in data:
+        openai_body["model"] = data["model"]
+
+    # System message: Anthropic uses top-level "system" (string or array)
+    system = data.get("system")
+    if system:
+        if isinstance(system, str):
+            openai_body["messages"] = [{"role": "system", "content": system}]
+        elif isinstance(system, list):
+            content_parts = []
+            for block in system:
+                if isinstance(block, str):
+                    content_parts.append(block)
+                elif isinstance(block, dict):
+                    content_parts.append(block.get("text", ""))
+            openai_body["messages"] = [{"role": "system", "content": " ".join(content_parts)}]
+
+    # Messages array
+    messages = data.get("messages", [])
+    if "messages" not in openai_body:
+        openai_body["messages"] = []
+
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        # Anthropic content can be string or array of blocks
+        if isinstance(content, list):
+            text_parts = []
+            for block in content:
+                if isinstance(block, str):
+                    text_parts.append(block)
+                elif isinstance(block, dict):
+                    if block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                    elif block.get("type") == "tool_use":
+                        text_parts.append(json.dumps(block))
+                    elif block.get("type") == "tool_result":
+                        text_parts.append(json.dumps(block))
+            content = " ".join(text_parts)
+        openai_body["messages"].append({"role": role, "content": content})
+
+    # Parameter mapping
+    if "max_tokens" in data:
+        openai_body["max_tokens"] = data["max_tokens"]
+    if "temperature" in data:
+        openai_body["temperature"] = data["temperature"]
+    if "top_p" in data:
+        openai_body["top_p"] = data["top_p"]
+    if "stop_sequences" in data:
+        openai_body["stop"] = data["stop_sequences"]
+    if "stream" in data:
+        openai_body["stream"] = data["stream"]
+
+    return json.dumps(openai_body).encode("utf-8")
+
+
+def _openai_to_anthropic(openai_resp: dict, model: str = "") -> dict:
+    """Translate OpenAI Chat Completions response to Anthropic Messages format.
+
+    Claude Code CLI expects Anthropic Messages API responses:
+    - id, type="message", role="assistant"
+    - content: [{type: "text", text: "..."}]
+    - stop_reason, usage with input_tokens/output_tokens
+    """
+    import uuid as _uuid
+
+    choice = openai_resp.get("choices", [{}])[0]
+    msg = choice.get("message", {})
+    content_text = msg.get("content", "")
+    finish = choice.get("finish_reason", "stop")
+
+    # Map OpenAI finish reasons to Anthropic stop reasons
+    stop_reason_map = {
+        "stop": "end_turn",
+        "length": "max_tokens",
+        "content_filter": "end_turn",
+        "tool_calls": "tool_use",
+    }
+
+    usage = openai_resp.get("usage", {})
+
+    # Build content blocks
+    content_blocks = []
+    if content_text:
+        content_blocks.append({"type": "text", "text": content_text})
+
+    # Handle tool calls if present
+    tool_calls = msg.get("tool_calls", [])
+    for tc in tool_calls:
+        fn = tc.get("function", {})
+        try:
+            args = json.loads(fn.get("arguments", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            args = {}
+        content_blocks.append(
+            {
+                "type": "tool_use",
+                "id": tc.get("id", f"toolu_{_uuid.uuid4().hex[:12]}"),
+                "name": fn.get("name", ""),
+                "input": args,
+            }
+        )
+
+    if not content_blocks:
+        content_blocks.append({"type": "text", "text": ""})
+
+    return {
+        "id": f"msg_{_uuid.uuid4().hex[:12]}",
+        "type": "message",
+        "role": "assistant",
+        "content": content_blocks,
+        "model": model or openai_resp.get("model", ""),
+        "stop_reason": stop_reason_map.get(finish, "end_turn"),
+        "stop_sequence": None,
+        "usage": {
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+        },
+    }
+
+
+def _translate_auth_headers(headers: dict) -> dict:
+    """Translate Anthropic auth headers to OpenAI-style Bearer auth.
+
+    Claude Code sends: x-api-key: <key>
+    Zen/OpenRouter expect: Authorization: Bearer <key>
+    """
+    translated = dict(headers)
+    api_key = headers.get("x-api-key", "")
+    if api_key and "authorization" not in {k.lower() for k in headers}:
+        translated["Authorization"] = f"Bearer {api_key}"
+        translated.pop("x-api-key", None)
+    # Remove anthropic-specific headers that confuse OpenAI endpoints
+    translated.pop("anthropic-version", None)
+    translated.pop("anthropic-beta", None)
+    return translated
+
+
 class ZenProxy:
     """Local proxy that rate-limits all Zen API traffic per model."""
 
@@ -75,6 +238,25 @@ class ZenProxy:
         self._rate_limiter = PerModelRateLimiter()
         self._client: httpx.AsyncClient | None = None
         self._server_task: asyncio.Task | None = None
+
+    def _create_client(self) -> httpx.AsyncClient:
+        """Create an httpx client tuned for proxy reliability."""
+        limits = httpx.Limits(
+            max_connections=200,
+            max_keepalive_connections=50,
+            keepalive_expiry=30.0,
+        )
+        timeout = httpx.Timeout(
+            connect=15.0,
+            read=120.0,
+            write=30.0,
+            pool=10.0,
+        )
+        return httpx.AsyncClient(
+            timeout=timeout,
+            limits=limits,
+            http2=True,
+        )
 
     @property
     def is_enabled(self) -> bool:
@@ -95,7 +277,7 @@ class ZenProxy:
             logger.info("Zen proxy disabled — clients will connect directly")
             return
 
-        self._client = httpx.AsyncClient(timeout=120.0)
+        self._client = self._create_client()
         app = self._build_app()
 
         import uvicorn
@@ -172,6 +354,19 @@ class ZenProxy:
         # Read body
         body = await request.body()
 
+        # Proactive path detection: rewrite Anthropic-style paths to OpenAI
+        anthropic_path = _is_anthropic_path(path)
+        if anthropic_path:
+            path = "chat/completions"
+            upstream_url = f"{self._upstream}/{path}"
+            body = _anthropic_to_openai(body)
+            headers = _translate_auth_headers(headers)
+            logger.debug(
+                "Rewrote Anthropic path to OpenAI: %s -> %s",
+                request.path_params.get("path", ""),
+                path,
+            )
+
         # Extract model from body for per-model rate limiting
         model = _extract_model_from_body(body)
 
@@ -184,6 +379,7 @@ class ZenProxy:
 
         max_retries = 3
         last_error: str | None = None
+        translated_405 = False
 
         for attempt in range(max_retries + 1):
             try:
@@ -194,6 +390,22 @@ class ZenProxy:
                     content=body,
                     params=request.query_params,
                 )
+
+                # 405 — Method Not Allowed: likely Anthropic format hitting OpenAI-only endpoint
+                if resp.status_code == 405 and not translated_405:
+                    error_text = (await resp.aread()).decode("utf-8", errors="replace")[:500]
+                    logger.warning(
+                        "405 on attempt %d, translating Anthropic->OpenAI and retrying",
+                        attempt + 1,
+                    )
+                    # Re-read original body and translate
+                    original_body = await request.body()
+                    body = _anthropic_to_openai(original_body)
+                    path = "chat/completions"
+                    upstream_url = f"{self._upstream}/{path}"
+                    model = _extract_model_from_body(body)
+                    translated_405 = True
+                    continue
 
                 # 429 — rate limited by upstream
                 if resp.status_code == 429:
@@ -251,17 +463,154 @@ class ZenProxy:
                 # Success
                 if model:
                     self._rate_limiter.record_success(model)
+
+                # Stream the response through instead of buffering
+                is_stream = body and json.loads(body).get("stream", False) if body else False
+                if is_stream and anthropic_path:
+                    # Translate OpenAI SSE stream to Anthropic SSE stream
+                    async def stream_anthropic(response=resp, _model=model):
+                        import uuid as _uuid
+
+                        msg_id = f"msg_{_uuid.uuid4().hex[:12]}"
+                        # Emit message_start
+                        start_event = {
+                            "type": "message_start",
+                            "message": {
+                                "id": msg_id,
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [],
+                                "model": _model or "",
+                                "stop_reason": None,
+                                "stop_sequence": None,
+                                "usage": {"input_tokens": 0, "output_tokens": 0},
+                            },
+                        }
+                        yield f"event: message_start\ndata: {json.dumps(start_event)}\n\n".encode()
+
+                        # Emit content_block_start
+                        block_start = {
+                            "type": "content_block_start",
+                            "index": 0,
+                            "content_block": {"type": "text", "text": ""},
+                        }
+                        yield f"event: content_block_start\ndata: {json.dumps(block_start)}\n\n".encode()
+
+                        # Stream content deltas from OpenAI SSE
+                        try:
+                            buffer = b""
+                            async for chunk in response.aiter_bytes(chunk_size=8192):
+                                buffer += chunk
+                                while b"\n" in buffer:
+                                    line, buffer = buffer.split(b"\n", 1)
+                                    line_str = line.decode("utf-8", errors="replace").strip()
+                                    if not line_str.startswith("data: "):
+                                        continue
+                                    data_str = line_str[6:]
+                                    if data_str == "[DONE]":
+                                        break
+                                    try:
+                                        sse_data = json.loads(data_str)
+                                        delta = sse_data.get("choices", [{}])[0].get("delta", {})
+                                        text = delta.get("content", "")
+                                        if text:
+                                            delta_event = {
+                                                "type": "content_block_delta",
+                                                "index": 0,
+                                                "delta": {"type": "text_delta", "text": text},
+                                            }
+                                            yield f"event: content_block_delta\ndata: {json.dumps(delta_event)}\n\n".encode()
+                                    except (json.JSONDecodeError, IndexError):
+                                        pass
+                        except Exception:
+                            pass
+
+                        # Emit content_block_stop + message_delta + message_stop
+                        yield b'event: content_block_stop\ndata: {"type": "content_block_stop", "index": 0}\n\n'
+                        delta_msg = {
+                            "type": "message_delta",
+                            "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                            "usage": {"output_tokens": 0},
+                        }
+                        yield f"event: message_delta\ndata: {json.dumps(delta_msg)}\n\n".encode()
+                        yield b'event: message_stop\ndata: {"type": "message_stop"}\n\n'
+
+                    return StreamingResponse(
+                        stream_anthropic(),
+                        status_code=resp.status_code,
+                        media_type="text/event-stream",
+                        headers={"cache-control": "no-cache"},
+                    )
+
+                if is_stream and not anthropic_path:
+                    # Pass-through streaming for native OpenAI clients
+                    async def stream_upstream(response=resp):
+                        try:
+                            async for chunk in response.aiter_bytes(chunk_size=8192):
+                                yield chunk
+                        except Exception:
+                            pass
+
+                    out_headers = dict(resp.headers)
+                    out_headers.pop("content-encoding", None)
+                    out_headers.pop("transfer-encoding", None)
+                    out_headers.pop("content-length", None)
+                    return StreamingResponse(
+                        stream_upstream(),
+                        status_code=resp.status_code,
+                        headers=out_headers,
+                        media_type=resp.headers.get("content-type", "application/json"),
+                    )
+
+                resp_body = await resp.aread()
+
+                # Translate OpenAI response back to Anthropic format if needed
+                if anthropic_path:
+                    try:
+                        openai_data = json.loads(resp_body)
+                        anthropic_data = _openai_to_anthropic(openai_data, model or "")
+                        resp_body = json.dumps(anthropic_data).encode("utf-8")
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.warning("Failed to translate response to Anthropic format: %s", e)
+
+                out_headers = dict(resp.headers)
+                out_headers.pop("content-encoding", None)
+                out_headers.pop("transfer-encoding", None)
+                out_headers["content-length"] = str(len(resp_body))
                 return Response(
-                    content=await resp.aread(),
+                    content=resp_body,
                     status_code=resp.status_code,
-                    headers=dict(resp.headers),
-                    media_type=resp.headers.get("content-type", "application/json"),
+                    headers=out_headers,
+                    media_type="application/json",
                 )
+
+            except httpx.ConnectError as e:
+                if model:
+                    self._rate_limiter.record_error(model)
+                last_error = f"Connection failed: {e}"
+                logger.warning(
+                    "Zen upstream connection error (model=%s, attempt %d/%d): %s",
+                    model or "unknown",
+                    attempt + 1,
+                    max_retries,
+                    e,
+                )
+                if attempt < max_retries:
+                    wait = min(2**attempt, 10)
+                    await asyncio.sleep(wait)
+                    continue
+                return self._error_response(502, last_error)
 
             except httpx.TimeoutException:
                 if model:
                     self._rate_limiter.record_error(model)
                 last_error = "Request timed out"
+                logger.warning(
+                    "Zen upstream timeout (model=%s, attempt %d/%d)",
+                    model or "unknown",
+                    attempt + 1,
+                    max_retries,
+                )
                 if attempt < max_retries:
                     wait = 3.0
                     if model:
@@ -275,6 +624,13 @@ class ZenProxy:
                 if model:
                     self._rate_limiter.record_error(model)
                 last_error = str(e)
+                logger.warning(
+                    "Zen upstream request error (model=%s, attempt %d/%d): %s",
+                    model or "unknown",
+                    attempt + 1,
+                    max_retries,
+                    e,
+                )
                 if attempt < max_retries:
                     wait = 3.0
                     if model:
