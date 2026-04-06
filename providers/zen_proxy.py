@@ -19,6 +19,7 @@ Usage:
 import asyncio
 import json
 import logging
+import os
 import re
 from typing import Any
 
@@ -211,12 +212,22 @@ def _translate_auth_headers(headers: dict) -> dict:
 
     Claude Code sends: x-api-key: <key>
     Zen/OpenRouter expect: Authorization: Bearer <key>
+
+    If the key is empty/dummy, auto-resolve from ZEN_API_KEY in os.environ
+    (injected by KeyStore at Agent42 startup).
     """
+    import os as _os
+
     translated = dict(headers)
     api_key = headers.get("x-api-key", "")
+
+    # Auto-resolve key if missing or dummy
+    if not api_key or api_key in ("dummy", "dummy-key", "placeholder"):
+        api_key = _os.environ.get("ZEN_API_KEY", "")
+
     if api_key and "authorization" not in {k.lower() for k in headers}:
         translated["Authorization"] = f"Bearer {api_key}"
-        translated.pop("x-api-key", None)
+    translated.pop("x-api-key", None)
     # Remove anthropic-specific headers that confuse OpenAI endpoints
     translated.pop("anthropic-version", None)
     translated.pop("anthropic-beta", None)
@@ -238,6 +249,16 @@ class ZenProxy:
         self._rate_limiter = PerModelRateLimiter()
         self._client: httpx.AsyncClient | None = None
         self._server_task: asyncio.Task | None = None
+
+        # Auto-inject ZEN_API_KEY from key store if not in env
+        if not os.environ.get("ZEN_API_KEY"):
+            try:
+                from core.key_store import KeyStore
+
+                ks = KeyStore()
+                ks.inject_into_environ()
+            except Exception:
+                pass
 
     def _create_client(self) -> httpx.AsyncClient:
         """Create an httpx client tuned for proxy reliability."""
@@ -361,10 +382,19 @@ class ZenProxy:
             upstream_url = f"{self._upstream}/{path}"
             body = _anthropic_to_openai(body)
             headers = _translate_auth_headers(headers)
-            logger.debug(
-                "Rewrote Anthropic path to OpenAI: %s -> %s",
+            # Clean headers: only keep essential ones for upstream
+            clean_headers = {
+                "Authorization": headers.get("Authorization", ""),
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
+            headers = {k: v for k, v in clean_headers.items() if v}
+            logger.info(
+                "Anthropic->OpenAI: %s -> %s (model=%s, auth=%s)",
                 request.path_params.get("path", ""),
                 path,
+                _extract_model_from_body(body),
+                bool(headers.get("Authorization")),
             )
 
         # Extract model from body for per-model rate limiting
