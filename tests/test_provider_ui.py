@@ -1,8 +1,8 @@
-"""Tests for Phase 38 provider UI endpoints and structure (PROVIDER-01 through PROVIDER-05)."""
+"""Tests for provider UI endpoints and structure."""
 
 import os
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -27,7 +27,7 @@ def _make_client(**kwargs) -> TestClient:
 
 
 class TestNoStrongwallArtifacts:
-    """PROVIDER-01: StrongWall references removed."""
+    """StrongWall references removed."""
 
     def test_no_strongwall_in_server(self):
         """server.py must not contain 'StrongWall'."""
@@ -42,13 +42,7 @@ class TestNoStrongwallArtifacts:
 
 
 class TestProvidersTabStructure:
-    """PROVIDER-02: UI restructure -- verify app.js contains required section headings
-    and does NOT contain old removed labels."""
-
-    def test_has_cc_subscription_section(self):
-        """app.js must contain 'Claude Code Subscription' section heading."""
-        content = Path("dashboard/frontend/dist/app.js").read_text()
-        assert "Claude Code Subscription" in content, "Missing 'Claude Code Subscription' section"
+    """UI restructure -- verify app.js contains required section headings."""
 
     def test_has_api_key_providers_section(self):
         """app.js must contain 'API Key Providers' section heading."""
@@ -88,76 +82,16 @@ class TestProvidersTabStructure:
         )
 
 
-class TestSyntheticModelsEndpoint:
-    """PROVIDER-03: GET /api/providers/synthetic/models."""
-
-    def test_synthetic_models_no_client(self):
-        """When _synthetic_client is None, returns empty model list."""
-        with patch("core.agent_manager._synthetic_client", None):
-            client = _make_client()
-            resp = client.get("/api/providers/synthetic/models")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["models"] == []
-        assert data["count"] == 0
-        assert data["free_count"] == 0
-        assert data["cached_at"] is None
-        assert data["capability_mapping"] == {}
-
-    def test_synthetic_models_with_client(self):
-        """When _synthetic_client exists, returns model catalog."""
-        mock_model = MagicMock()
-        mock_model.id = "test-model-1"
-        mock_model.name = "Test Model"
-        mock_model.description = "A test model"
-        mock_model.capabilities = ["fast", "general"]
-        mock_model.max_context_length = 128000
-        mock_model.is_free = True
-
-        mock_client = AsyncMock()
-        mock_client.refresh_models = AsyncMock(return_value=[mock_model])
-        mock_client.update_provider_models_mapping = MagicMock(
-            return_value={"fast": "test-model-1"}
-        )
-        mock_client._last_refresh = 1712200000.0
-
-        with patch("core.agent_manager._synthetic_client", mock_client):
-            client = _make_client()
-            resp = client.get("/api/providers/synthetic/models")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["count"] == 1
-        assert data["free_count"] == 1
-        assert data["cached_at"] == 1712200000.0
-        assert data["capability_mapping"] == {"fast": "test-model-1"}
-        assert data["models"][0]["id"] == "test-model-1"
-        assert data["models"][0]["name"] == "Test Model"
-        assert "fast" in data["models"][0]["capabilities"]
-
-    def test_synthetic_models_force_refresh(self):
-        """force=true parameter is passed through to refresh_models."""
-        mock_client = AsyncMock()
-        mock_client.refresh_models = AsyncMock(return_value=[])
-        mock_client.update_provider_models_mapping = MagicMock(return_value={})
-        mock_client._last_refresh = 0.0
-
-        with patch("core.agent_manager._synthetic_client", mock_client):
-            client = _make_client()
-            resp = client.get("/api/providers/synthetic/models?force=true")
-        assert resp.status_code == 200
-        mock_client.refresh_models.assert_called_once_with(force=True)
-
-
 class TestProviderStatusEndpoint:
-    """PROVIDER-04: GET /api/settings/provider-status."""
+    """GET /api/settings/provider-status returns current provider connectivity."""
 
     def test_provider_status_no_keys(self):
         """All providers unconfigured when no env vars set."""
         env_overrides = {
-            "CLAUDECODE_SUBSCRIPTION_TOKEN": "",
-            "SYNTHETIC_API_KEY": "",
-            "ANTHROPIC_API_KEY": "",
+            "ZEN_API_KEY": "",
             "OPENROUTER_API_KEY": "",
+            "ANTHROPIC_API_KEY": "",
+            "OPENAI_API_KEY": "",
         }
         with patch.dict(os.environ, env_overrides, clear=False):
             client = _make_client()
@@ -167,22 +101,9 @@ class TestProviderStatusEndpoint:
         assert "providers" in data
         assert "checked_at" in data
         providers = {p["name"]: p for p in data["providers"]}
-        assert providers["claudecode"]["status"] == "unconfigured"
-        assert providers["claudecode"]["configured"] is False
-        assert providers["synthetic"]["status"] == "unconfigured"
-        assert providers["anthropic"]["status"] == "unconfigured"
-        assert providers["openrouter"]["status"] == "unconfigured"
-
-    def test_provider_status_cc_token_present(self):
-        """CC Subscription shows ok when token is set (no live ping)."""
-        with patch.dict(os.environ, {"CLAUDECODE_SUBSCRIPTION_TOKEN": "fake-token"}, clear=False):
-            client = _make_client()
-            resp = client.get("/api/settings/provider-status")
-        data = resp.json()
-        cc = next(p for p in data["providers"] if p["name"] == "claudecode")
-        assert cc["configured"] is True
-        assert cc["status"] == "ok"
-        assert cc["label"] == "Claude Code Subscription"
+        for name in ("zen", "openrouter", "anthropic", "openai"):
+            assert providers[name]["status"] == "unconfigured"
+            assert providers[name]["configured"] is False
 
     def test_provider_status_has_four_providers(self):
         """Response contains exactly 4 provider entries."""
@@ -190,7 +111,7 @@ class TestProviderStatusEndpoint:
         resp = client.get("/api/settings/provider-status")
         data = resp.json()
         names = [p["name"] for p in data["providers"]]
-        assert names == ["claudecode", "synthetic", "anthropic", "openrouter"]
+        assert names == ["zen", "openrouter", "anthropic", "openai"]
 
     def test_provider_status_each_has_required_fields(self):
         """Each provider entry has name, label, configured, status."""
@@ -206,25 +127,25 @@ class TestProviderStatusEndpoint:
 
 
 class TestAgentsModelsEndpoint:
-    """PROVIDER-05: GET /api/agents/models returns PROVIDER_MODELS dict."""
+    """GET /api/agents/models returns PROVIDER_MODELS dict."""
 
     def test_agents_models_has_provider_keys(self):
-        """Endpoint returns dict with claudecode, anthropic, synthetic, openrouter."""
+        """Endpoint returns dict with zen, openrouter, anthropic, openai."""
         client = _make_client()
         resp = client.get("/api/agents/models")
         assert resp.status_code == 200
         data = resp.json()
-        assert "claudecode" in data
-        assert "anthropic" in data
-        assert "synthetic" in data
+        assert "zen" in data
         assert "openrouter" in data
+        assert "anthropic" in data
+        assert "openai" in data
 
     def test_agents_models_has_categories(self):
         """Each provider has task category keys (fast, general, etc.)."""
         client = _make_client()
         resp = client.get("/api/agents/models")
         data = resp.json()
-        # claudecode should have at least fast, general, reasoning
-        assert "fast" in data["claudecode"]
-        assert "general" in data["claudecode"]
-        assert "reasoning" in data["claudecode"]
+        # zen should have at least fast, general, reasoning
+        assert "fast" in data["zen"]
+        assert "general" in data["zen"]
+        assert "reasoning" in data["zen"]

@@ -207,9 +207,12 @@ class AppManager:
             manifest = app_dir / "APP.json"
             if not manifest.exists():
                 continue
-            rel_path = (
-                str(app_dir.relative_to(Path.cwd())) if app_dir.is_absolute() else str(app_dir)
-            )
+            try:
+                rel_path = (
+                    str(app_dir.relative_to(Path.cwd())) if app_dir.is_absolute() else str(app_dir)
+                )
+            except ValueError:
+                rel_path = str(app_dir)
             if rel_path in known_paths or str(app_dir) in known_paths:
                 continue
             # Check by id/slug too

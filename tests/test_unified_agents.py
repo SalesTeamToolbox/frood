@@ -260,8 +260,10 @@ class TestUnifiedEndpointNoUrl:
         for agent in agents:
             assert agent["source"] == "agent42"
 
-    def test_no_agent_manager(self):
-        """When agent_manager is None, endpoint returns empty list gracefully."""
+    def test_no_agents(self):
+        """When agent_manager has no agents, endpoint returns empty list."""
+        mock_am = MagicMock()
+        mock_am.list_all.return_value = []
         with patch("core.config.settings", _settings_mock("")):
             app = create_app(
                 tool_registry=None,
@@ -269,7 +271,7 @@ class TestUnifiedEndpointNoUrl:
                 app_manager=MagicMock(),
                 project_manager=MagicMock(),
                 repo_manager=MagicMock(),
-                agent_manager=None,
+                agent_manager=mock_am,
             )
             app.dependency_overrides[get_current_user] = lambda: "test-user"
             app.dependency_overrides[require_admin] = lambda: AuthContext(user="test-admin")

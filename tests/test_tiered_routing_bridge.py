@@ -182,19 +182,23 @@ class TestProviderSelection:
         assert decision.provider == "openrouter"
 
     @pytest.mark.asyncio
-    async def test_default_provider_is_synthetic(self, bridge):
-        """When SYNTHETIC_API_KEY is set, default provider should be synthetic."""
-        with patch.dict(os.environ, {"SYNTHETIC_API_KEY": "test-key"}):
+    async def test_default_provider_is_zen_when_key_set(self, bridge):
+        """When ZEN_API_KEY is set, default provider should be zen."""
+        with patch.dict(os.environ, {"ZEN_API_KEY": "test-key"}):
             decision = await bridge.resolve(role="engineer", agent_id="agent-1")
-        assert decision.provider == "synthetic"
+        assert decision.provider == "zen"
 
     @pytest.mark.asyncio
-    async def test_fallback_provider_is_anthropic(self, bridge):
-        """When SYNTHETIC_API_KEY is not set, fallback provider is anthropic."""
-        env = {k: v for k, v in os.environ.items() if k != "SYNTHETIC_API_KEY"}
+    async def test_fallback_provider_is_zen(self, bridge):
+        """When no API keys are set, fallback provider is zen (free models)."""
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("ZEN_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+        }
         with patch.dict(os.environ, env, clear=True):
             decision = await bridge.resolve(role="engineer", agent_id="agent-1")
-        assert decision.provider == "anthropic"
+        assert decision.provider == "zen"
 
     @pytest.mark.asyncio
     async def test_preferred_provider_with_unmapped_category(self, bridge):

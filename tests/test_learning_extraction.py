@@ -244,18 +244,20 @@ class TestNoMidTaskWrites:
     """LEARN-05: No mid-task memory writes."""
 
     def test_hook_is_stop_event_only(self):
-        """effectiveness-learn.py is registered as a Stop hook, not PreToolUse or PostToolUse."""
+        """Learning hook is registered as a Stop hook, not PreToolUse or PostToolUse."""
         settings_path = Path(__file__).parent.parent / ".claude" / "settings.json"
         settings = json.loads(settings_path.read_text())
 
-        # Verify it's in Stop hooks
+        # Verify a learning-related hook is in Stop hooks
         stop_hooks = settings["hooks"]["Stop"][0]["hooks"]
         hook_commands = [h["command"] for h in stop_hooks]
-        assert any("effectiveness-learn.py" in cmd for cmd in hook_commands)
+        assert any("learn" in cmd for cmd in hook_commands)
 
         # Verify it's NOT in PreToolUse or PostToolUse
         for event_type in ["PreToolUse", "PostToolUse"]:
             if event_type in settings["hooks"]:
                 for hook_group in settings["hooks"][event_type]:
                     for hook in hook_group.get("hooks", []):
-                        assert "effectiveness-learn.py" not in hook.get("command", "")
+                        cmd = hook.get("command", "")
+                        assert "effectiveness-learn.py" not in cmd
+                        assert "learning-engine.py" not in cmd

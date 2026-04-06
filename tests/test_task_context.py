@@ -575,6 +575,7 @@ class TestBuildContextSemantic:
         from memory.store import MemoryStore
 
         store = MemoryStore.__new__(MemoryStore)
+        store.workspace_dir = MagicMock()
         store.memory_path = MagicMock()
         store.memory_path.read_text.return_value = "# Memory\nSome content"
 
@@ -597,6 +598,7 @@ class TestBuildContextSemantic:
         from memory.store import MemoryStore
 
         store = MemoryStore.__new__(MemoryStore)
+        store.workspace_dir = MagicMock()
         store.memory_path = MagicMock()
         store.memory_path.read_text.return_value = "# Memory"
 

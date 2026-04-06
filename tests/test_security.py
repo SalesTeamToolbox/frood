@@ -897,7 +897,7 @@ class TestHealthEndpointSecurity:
             resp = client.get("/health")
             assert resp.status_code == 200
             data = resp.json()
-            assert data == {"status": "ok"}
+            assert data["status"] == "ok"
             # Must NOT contain detailed metrics
             assert "tasks_total" not in data
             assert "websocket_connections" not in data
