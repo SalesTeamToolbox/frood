@@ -108,6 +108,19 @@ class ZenApiClient:
 
                     error_text = resp.text[:500]
                     if resp.status_code >= 400:
+                        is_exhausted = self._is_exhausted_error(error_text)
+                        if is_exhausted:
+                            if self._rate_limiting_enabled:
+                                self._rate_limiter.mark_exhausted(model)
+                            logger.warning(
+                                "Zen API free tier exhausted (model=%s): %s",
+                                model,
+                                error_text[:200],
+                            )
+                            return {
+                                "error": f"Free tier exhausted: {error_text[:200]}",
+                                "exhausted": True,
+                            }
                         is_rate_error = self._is_rate_limit_error(error_text)
                         if is_rate_error:
                             if self._rate_limiting_enabled:
@@ -187,7 +200,7 @@ class ZenApiClient:
 
     @staticmethod
     def _is_rate_limit_error(text: str) -> bool:
-        """Detect rate-limit-related errors in response body."""
+        """Detect rate-limit-related errors in response body (temporary)."""
         patterns = [
             r"rate\s*limit",
             r"too\s*many\s*requests",
@@ -195,6 +208,24 @@ class ZenApiClient:
             r"scale\s*requests\s*more\s*smoothly",
             r"slow\s*down",
             r"throttl",
+        ]
+        text_lower = text.lower()
+        return any(re.search(p, text_lower) for p in patterns)
+
+    @staticmethod
+    def _is_exhausted_error(text: str) -> bool:
+        """Detect free tier usage exhaustion (permanent until reset)."""
+        patterns = [
+            r"insufficient.*credits",
+            r"quota.*exceeded",
+            r"free.*tier.*exhaust(ed)?",
+            r"no.*free.*usage",
+            r"usage.*limit.*reached",
+            r"daily.*limit.*reached",
+            r"monthly.*limit.*reached",
+            r"exceeded.*free.*allocation",
+            r"no.*quota.*remaining",
+            r"credits.*exhausted",
         ]
         text_lower = text.lower()
         return any(re.search(p, text_lower) for p in patterns)

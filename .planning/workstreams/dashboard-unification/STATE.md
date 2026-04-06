@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Dashboard Unification
-status: Phase 40 complete
-last_updated: "2026-04-05T19:09:50Z"
+status: Milestone v6.0 complete — all phases delivered
+last_updated: "2026-04-05T20:08:17.286Z"
 progress:
   total_phases: 5
-  completed_phases: 4
-  total_plans: 10
-  completed_plans: 10
+  completed_phases: 3
+  total_plans: 7
+  completed_plans: 7
 ---
 
 # Workstream State
@@ -52,6 +52,8 @@ Plan: All plans complete. Workstream milestone v6.0 achieved.
 - [Phase 40-03]: Kept prompt() for purge confirmation in standalone mode - matches existing app.js pattern
 - [Phase 40-03]: React purge confirmation uses confirmPurge state with PURGE text input (no prompt() in React components)
 - [Phase 40-03]: Learning toggle in MemoryTab calls update-agent42-settings with LEARNING_ENABLED key (not a dedicated toggle action)
+- [Phase 42-n8n-workflow-integration]: Templates use {PLACEHOLDER} syntax in JSON string values for simple replacement without regex
+- [Phase 42-n8n-workflow-integration]: validate_workflow_nodes is module-level so tests can import it without tool instantiation
 
 ## Plan 36-01 Metrics
 

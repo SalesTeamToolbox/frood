@@ -11,11 +11,11 @@ Add Abacus AI (RouteLLM) as a provider in Agent42 and build the Agent42 adapter 
 **Goal**: Add Abacus AI (RouteLLM) as a provider and build the Agent42 adapter for Paperclip, replacing `claude_local` for autonomous agent execution
 **Depends on**: Phase 33, Phase 36
 **Requirements:** [ABACUS-01, ABACUS-02, ABACUS-03, ABACUS-04, ABACUS-05]
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 
 Plans:
-- [ ] 41-01-PLAN.md -- Abacus provider module, config, tiered routing, agent runtime, tests
-- [ ] 41-02-PLAN.md -- Paperclip adapter (agent42_sidecar), client methods, action handlers, tests
+- [x] 41-01-PLAN.md -- Abacus provider module, config, tiered routing, agent runtime, tests
+- [x] 41-02-PLAN.md -- Paperclip adapter (agent42_sidecar), client methods, action handlers, tests
 
 **Success Criteria** (what must be TRUE):
 
@@ -30,4 +30,4 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 | ----- | -------------- | ------ | --------- |
-| 41. Abacus Provider Integration | 0/2 | Not started | - |
+| 41. Abacus Provider Integration | 2/2 | Complete   | 2026-04-05 |

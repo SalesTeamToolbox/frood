@@ -69,7 +69,7 @@ class AgentRuntime:
 
         return env
 
-    def _build_prompt(self, agent_config):
+    async def _build_prompt(self, agent_config):
         """Build the task prompt for an agent."""
         parts = []
         name = agent_config.get("name", "Agent")
@@ -97,6 +97,29 @@ class AgentRuntime:
                 "(n8n_create_workflow). Workflows run for free — no tokens per execution. "
                 "Only use LLM reasoning for tasks requiring judgment or creativity."
             )
+
+        # Phase 43: Inject automation suggestions from effectiveness pattern detection
+        try:
+            import json as _json
+
+            from memory.effectiveness import get_shared_store
+
+            store = get_shared_store()
+            if store:
+                agent_id = agent_config.get("id", "")
+                suggestions = await store.get_pending_suggestions(agent_id)
+                for s in suggestions:
+                    tools_str = " -> ".join(_json.loads(s["tool_sequence"]))
+                    savings = s["tokens_saved_estimate"]
+                    count = s["execution_count"]
+                    parts.append(
+                        f"\nAUTOMATION SUGGESTION: Pattern '{tools_str}' has repeated "
+                        f"{count} times. Estimated savings: ~{savings} tokens. "
+                        "Use n8n_create_workflow to automate this."
+                    )
+                    await store.mark_suggestion_status(s["fingerprint"], agent_id, "suggested")
+        except Exception:
+            pass  # Non-critical — never block agent startup for suggestions
 
         max_iter = agent_config.get("max_iterations", 10)
         parts.append(f"\nWork autonomously. Max iterations: {max_iter}.")
@@ -129,7 +152,7 @@ class AgentRuntime:
         agent_id = agent_config.get("id", "unknown")
         provider = agent_config.get("provider", "zen")
         model = agent_config.get("model", "")
-        prompt = self._build_prompt(agent_config)
+        prompt = await self._build_prompt(agent_config)
 
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         log_path = self._logs_dir / f"{agent_id}-{timestamp}.log"
@@ -287,7 +310,7 @@ class AgentRuntime:
             return None
 
         env = self._build_env(agent_config)
-        prompt = self._build_prompt(agent_config)
+        prompt = await self._build_prompt(agent_config)
 
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         log_path = self._logs_dir / f"{agent_id}-{timestamp}.log"

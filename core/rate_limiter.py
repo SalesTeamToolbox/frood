@@ -356,6 +356,8 @@ class PerModelRateLimiter:
     resolved by prefix matching (e.g. any "qwen*" model inherits Qwen
     limits). New models from known vendors auto-inherit the right config.
 
+    Also tracks usage exhaustion (free tier quota used up).
+
     Usage:
         limiter = PerModelRateLimiter()
         await limiter.wait("qwen3.6-plus-free")
@@ -369,6 +371,7 @@ class PerModelRateLimiter:
     ):
         self._default_config = default_config or ZEN_DEFAULT_RATE_CONFIG
         self._limiters: dict[str, AdaptiveRateLimiter] = {}
+        self._exhausted: dict[str, float] = {}  # model -> timestamp when exhausted
 
     def _get_limiter(self, model: str) -> AdaptiveRateLimiter:
         """Get or create the rate limiter for a model."""
@@ -434,6 +437,47 @@ class PerModelRateLimiter:
             limiter = self._limiters.get(model)
             if limiter:
                 limiter.reset()
+            self._exhausted.pop(model, None)
         else:
             for limiter in self._limiters.values():
                 limiter.reset()
+            self._exhausted.clear()
+
+    def get_exhausted_models(self) -> list[str]:
+        """Return list of models that are currently exhausted."""
+        return [m for m in self._exhausted if self.is_exhausted(m)]
+
+    def mark_exhausted(self, model: str) -> None:
+        """Mark a model as exhausted (free tier quota used up) with timestamp."""
+        import time
+
+        self._exhausted[model] = time.time()
+        logger.info("PerModelRateLimiter: marked '%s' as exhausted (free tier)", model)
+
+    def is_exhausted(self, model: str) -> bool:
+        """Check if a model is marked as exhausted and reset period hasn't passed."""
+        from core.config import settings
+
+        if model not in self._exhausted:
+            return False
+        exhausted_at = self._exhausted[model]
+        import time
+
+        reset_seconds = settings.zen_exhaustion_reset_hours * 3600
+        if time.time() - exhausted_at > reset_seconds:
+            del self._exhausted[model]
+            logger.info("PerModelRateLimiter: '%s' exhaustion auto-reset (period expired)", model)
+            return False
+        return True
+
+    def get_exhaustion_reset_time(self, model: str) -> float | None:
+        """Return seconds until exhaustion resets, or None if not exhausted."""
+        if model not in self._exhausted:
+            return None
+        from core.config import settings
+        import time
+
+        exhausted_at = self._exhausted[model]
+        reset_seconds = settings.zen_exhaustion_reset_hours * 3600
+        remaining = reset_seconds - (time.time() - exhausted_at)
+        return max(0.0, remaining)

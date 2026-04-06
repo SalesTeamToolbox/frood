@@ -47,9 +47,11 @@ from core.workspace_registry import WorkspaceRegistry
 from dashboard.auth import init_device_store
 from dashboard.server import create_app
 from dashboard.websocket_manager import WebSocketManager
+from memory.consolidation import ConsolidationPipeline, ConsolidationRouter
 from memory.effectiveness import EffectivenessStore
 from memory.qdrant_store import QdrantConfig, QdrantStore
 from memory.redis_session import RedisConfig, RedisSessionBackend
+from memory.session import SessionManager
 from memory.store import MemoryStore
 from skills.loader import SkillLoader
 from tools.cron import CronScheduler
@@ -159,7 +161,7 @@ class Agent42:
         consolidation_router = ConsolidationRouter()
         consolidation_pipeline = ConsolidationPipeline(
             model_router=consolidation_router,
-            embedding_store=self.memory_store._embeddings,
+            embedding_store=self.memory_store.embeddings,
             qdrant_store=qdrant_store,
         )
         self.consolidation_pipeline = consolidation_pipeline

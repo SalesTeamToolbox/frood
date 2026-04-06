@@ -25,9 +25,15 @@
   "provider": {
     "zen": {
       "name": "OpenCode Zen",
-      "baseURL": "http://127.0.0.1:8765/zen/v1",
-      "apiKey": "${ZEN_API_KEY}"
+      "api": "openai",
+      "options": {
+        "baseURL": "http://127.0.0.1:8765",
+        "apiKey": "${ZEN_API_KEY}"
+      }
     }
+  },
+  "server": {
+    "port": 22329
   },
   "instructions": ["CLAUDE.md"]
 }

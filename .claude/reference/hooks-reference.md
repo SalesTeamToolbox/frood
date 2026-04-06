@@ -12,13 +12,13 @@
 | `security-monitor.py` | PostToolUse (Write/Edit) | Flags security-sensitive changes for review (sandbox, auth, command filter) |
 | `format-on-write.py` | PostToolUse (Write/Edit) | Auto-formats Python files with ruff on every write |
 | `cc-memory-sync.py` | PostToolUse (Write/Edit) | Embeds CC memory files into Qdrant for semantic recall |
-| `jcodemunch-reindex.py` | Stop + PostToolUse | Re-indexes codebase after structural file changes |
-| `jcodemunch-token-tracker.py` | PostToolUse | Tracks token savings from jcodemunch vs full file reads |
-| `session-handoff.py` | Stop | Captures session state for auto-resume continuity |
+| `jcodemunch-reindex.py` | Stop + PostToolUse (mcp__jcodemunch) | Re-indexes codebase after structural file changes |
+| `jcodemunch-token-tracker.py` | PostToolUse (mcp__jcodemunch) | Tracks token savings from jcodemunch vs full file reads |
+| ~~`session-handoff.py`~~ | ~~Stop~~ | **REMOVED** from project hooks — global `~/.claude/settings.json` already registers a Stop session-handoff, so the project copy was a duplicate. |
 | `test-validator.py` | Stop | Validates tests pass, checks new modules have test coverage |
 | `learning-engine.py` | Stop | Records development patterns, vocabulary, and skill candidates |
 | `memory-learn.py` | Stop | Captures new learnings into memory system for future recall |
-| `effectiveness-learn.py` | Stop | Extracts structured learnings with LLM for quarantine review |
+| ~~`effectiveness-learn.py`~~ | ~~Stop~~ | **REMOVED** — redundant with `knowledge-learn.py` (both do LLM extraction of session learnings; was causing double API calls per session). |
 | `knowledge-learn.py` | Stop | Extracts session knowledge and upserts to Qdrant |
 | `credential-sync.py` | SessionStart | Syncs CC credentials to remote VPS on session start |
 

@@ -2,8 +2,13 @@
   "name": "@agent42/paperclip-plugin",
   "version": "1.1.0",
   "type": "module",
-  "main": "dist/worker.js",
-  "types": "dist/worker.d.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker-launcher.cjs",
+    "ui": "./dist/ui/"
+  },
   "scripts": {
     "build": "tsc && node build-ui.mjs",
     "build:worker": "tsc",
@@ -13,7 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@paperclipai/plugin-sdk": "2026.325.0"
+    "@paperclipai/plugin-sdk": "*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

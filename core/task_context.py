@@ -86,7 +86,34 @@ def begin_task(task_type: TaskType) -> TaskContext:
 
 
 def end_task(ctx: TaskContext) -> None:
-    """End a task context. Clears task_id and task_type from the ContextVar."""
+    """End a task context. Clears task_id and task_type from the ContextVar.
+
+    Phase 43: Also flushes accumulated tool names to EffectivenessStore
+    for pattern detection via fire-and-forget asyncio.create_task().
+    Always pops the accumulator entry to prevent memory leaks.
+    """
+    # Phase 43: Pop tool accumulator FIRST (always, even if flush fails)
+    tool_names = pop_task_tools(ctx.task_id)
+
+    # Phase 43: Fire-and-forget sequence flush
+    if tool_names and len(tool_names) >= 2:
+        try:
+            import asyncio
+
+            from memory.effectiveness import get_shared_store
+
+            store = get_shared_store()
+            if store:
+                asyncio.create_task(
+                    store.record_sequence(
+                        agent_id="",
+                        task_type=ctx.task_type.value if ctx.task_type else "general",
+                        tool_names=tool_names,
+                    )
+                )
+        except Exception:
+            pass  # Non-critical — never block task cleanup for pattern tracking
+
     _task_id_var.reset(ctx._id_token)
     _task_type_var.reset(ctx._type_token)
     _remove_task_file()

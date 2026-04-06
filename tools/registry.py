@@ -147,6 +147,16 @@ class ToolRegistry:
             except Exception:
                 pass  # Never block tool execution for tracking
 
+            # Phase 43: Accumulate tool name for pattern detection
+            try:
+                from core.task_context import append_tool_to_task, get_task_context
+
+                task_id, _ = get_task_context()
+                if task_id:
+                    append_tool_to_task(task_id, tool_name)
+            except Exception:
+                pass  # Never block tool execution for pattern tracking
+
         return result
 
     def all_schemas(self) -> list[dict]:
