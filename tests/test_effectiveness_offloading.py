@@ -10,7 +10,6 @@ Covers:
 - Graceful degradation when aiosqlite unavailable
 """
 
-
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -162,6 +161,7 @@ async def test_record_sequence_skips_single_tool(store):
     result = await store.record_sequence("a1", "coding", ["shell"])
     assert result is None
 
+    await store._ensure_db()
     async with aiosqlite.connect(store._db_path) as db:
         async with db.execute("SELECT COUNT(*) FROM tool_sequences") as cursor:
             row = await cursor.fetchone()
@@ -176,6 +176,7 @@ async def test_record_sequence_skips_empty_tools(store):
     result = await store.record_sequence("a1", "coding", [])
     assert result is None
 
+    await store._ensure_db()
     async with aiosqlite.connect(store._db_path) as db:
         async with db.execute("SELECT COUNT(*) FROM tool_sequences") as cursor:
             row = await cursor.fetchone()
@@ -359,3 +360,42 @@ async def test_record_sequence_graceful_degradation(tmp_path, monkeypatch):
     store = EffectivenessStore(tmp_path / "test_degrade.db")
     result = await store.record_sequence("a1", "coding", ["http_client", "data_tool"])
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Task-context accumulator tests (Plan 01, Task 2)
+# ---------------------------------------------------------------------------
+
+
+def test_append_tool_to_task():
+    """append_tool_to_task accumulates tools, pop_task_tools returns and cleans up."""
+    from core.task_context import _current_task_tools, append_tool_to_task, pop_task_tools
+
+    task_id = "test-accumulator-001"
+    _current_task_tools.pop(task_id, None)
+
+    append_tool_to_task(task_id, "http_client")
+    append_tool_to_task(task_id, "data_tool")
+    assert _current_task_tools[task_id] == ["http_client", "data_tool"]
+
+    result = pop_task_tools(task_id)
+    assert result == ["http_client", "data_tool"]
+    assert task_id not in _current_task_tools
+
+
+def test_append_tool_empty_task_id():
+    """Empty or None task_id does not create entries."""
+    from core.task_context import _current_task_tools, append_tool_to_task
+
+    before = len(_current_task_tools)
+    append_tool_to_task("", "http_client")
+    append_tool_to_task(None, "http_client")
+    assert len(_current_task_tools) == before
+
+
+def test_pop_task_tools_missing_key():
+    """pop_task_tools returns empty list for unknown task_id."""
+    from core.task_context import pop_task_tools
+
+    result = pop_task_tools("nonexistent-task-id-xyz")
+    assert result == []

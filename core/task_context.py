@@ -102,3 +102,20 @@ def get_task_context() -> tuple[str | None, str | None]:
     task_id = _task_id_var.get()
     task_type = _task_type_var.get()
     return task_id, (task_type.value if task_type is not None else None)
+
+
+# Phase 43: Per-task tool accumulation for pattern detection
+_current_task_tools: dict[str, list[str]] = {}
+
+
+def append_tool_to_task(task_id: str, tool_name: str) -> None:
+    """Add a tool name to the accumulator for the given task_id."""
+    if task_id:
+        if task_id not in _current_task_tools:
+            _current_task_tools[task_id] = []
+        _current_task_tools[task_id].append(tool_name)
+
+
+def pop_task_tools(task_id: str) -> list[str]:
+    """Remove and return the tool list for the given task_id."""
+    return _current_task_tools.pop(task_id, [])

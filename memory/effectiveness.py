@@ -137,6 +137,68 @@ class EffectivenessStore:
                 ON run_transcripts (extracted, ts)
             """)
             await db.commit()
+
+            # Phase 43: Tool pattern detection tables
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS tool_sequences (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id        TEXT    NOT NULL DEFAULT '',
+                    task_type       TEXT    NOT NULL DEFAULT '',
+                    tool_sequence   TEXT    NOT NULL,
+                    execution_count INTEGER NOT NULL DEFAULT 1,
+                    first_seen      REAL    NOT NULL,
+                    last_seen       REAL    NOT NULL,
+                    fingerprint     TEXT    NOT NULL,
+                    status          TEXT    NOT NULL DEFAULT 'active'
+                )
+            """)
+            await db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_seq_agent_type_fp "
+                "ON tool_sequences (agent_id, task_type, fingerprint)"
+            )
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS workflow_suggestions (
+                    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id              TEXT    NOT NULL DEFAULT '',
+                    task_type             TEXT    NOT NULL DEFAULT '',
+                    fingerprint           TEXT    NOT NULL,
+                    tool_sequence         TEXT    NOT NULL,
+                    execution_count       INTEGER NOT NULL,
+                    tokens_saved_estimate INTEGER NOT NULL DEFAULT 0,
+                    suggested_at          REAL    NOT NULL,
+                    status                TEXT    NOT NULL DEFAULT 'pending'
+                )
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_suggestions_agent "
+                "ON workflow_suggestions (agent_id, status)"
+            )
+            await db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_suggestions_agent_fp "
+                "ON workflow_suggestions (agent_id, fingerprint)"
+            )
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS workflow_mappings (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id       TEXT    NOT NULL DEFAULT '',
+                    fingerprint    TEXT    NOT NULL,
+                    workflow_id    TEXT    NOT NULL,
+                    webhook_url    TEXT    NOT NULL,
+                    template       TEXT    NOT NULL DEFAULT '',
+                    created_at     REAL    NOT NULL,
+                    last_triggered REAL    NOT NULL DEFAULT 0.0,
+                    trigger_count  INTEGER NOT NULL DEFAULT 0,
+                    status         TEXT    NOT NULL DEFAULT 'active'
+                )
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mappings_agent_fp "
+                "ON workflow_mappings (agent_id, fingerprint)"
+            )
+            await db.commit()
+
         self._db_initialized = True
 
     async def record(
@@ -504,3 +566,144 @@ class EffectivenessStore:
         except Exception as exc:
             logger.warning("EffectivenessStore drain_pending_transcripts failed: %s", exc)
             return []
+
+    # -------------------------------------------------------------------------
+    # Phase 43 — Tool pattern detection and workflow suggestions
+    # -------------------------------------------------------------------------
+
+    async def record_sequence(
+        self, agent_id: str, task_type: str, tool_names: list[str]
+    ) -> int | None:
+        """Record a tool sequence. Returns execution_count if >= threshold, else None. Never raises."""
+        if not AIOSQLITE_AVAILABLE or len(tool_names) < 2:
+            return None
+        try:
+            import hashlib
+            import json
+
+            await self._ensure_db()
+            fingerprint = hashlib.md5(json.dumps(tool_names).encode()).hexdigest()
+            now = time.time()
+            tool_seq_json = json.dumps(tool_names)
+            async with aiosqlite.connect(self._db_path) as db:
+                await db.execute(
+                    """INSERT INTO tool_sequences
+                       (agent_id, task_type, tool_sequence, execution_count, first_seen, last_seen, fingerprint, status)
+                       VALUES (?, ?, ?, 1, ?, ?, ?, 'active')
+                       ON CONFLICT(agent_id, task_type, fingerprint) DO UPDATE SET
+                           execution_count = execution_count + 1,
+                           last_seen = excluded.last_seen""",
+                    (agent_id, task_type, tool_seq_json, now, now, fingerprint),
+                )
+                await db.commit()
+                async with db.execute(
+                    "SELECT execution_count FROM tool_sequences WHERE agent_id=? AND task_type=? AND fingerprint=?",
+                    (agent_id, task_type, fingerprint),
+                ) as cursor:
+                    row = await cursor.fetchone()
+            from core.config import settings
+
+            if row and row[0] >= settings.n8n_pattern_threshold:
+                return row[0]
+            return None
+        except Exception as exc:
+            logger.warning("EffectivenessStore record_sequence failed (non-critical): %s", exc)
+            return None
+
+    async def create_suggestion(
+        self,
+        agent_id: str,
+        task_type: str,
+        fingerprint: str,
+        tool_names: list[str],
+        execution_count: int,
+    ) -> None:
+        """Write a suggestion row with status='pending'. Never raises."""
+        if not AIOSQLITE_AVAILABLE:
+            return
+        try:
+            import json
+
+            await self._ensure_db()
+            tokens_saved_estimate = execution_count * 1000
+            async with aiosqlite.connect(self._db_path) as db:
+                await db.execute(
+                    """INSERT OR IGNORE INTO workflow_suggestions
+                       (agent_id, task_type, fingerprint, tool_sequence, execution_count,
+                        tokens_saved_estimate, suggested_at, status)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')""",
+                    (
+                        agent_id,
+                        task_type,
+                        fingerprint,
+                        json.dumps(tool_names),
+                        execution_count,
+                        tokens_saved_estimate,
+                        time.time(),
+                    ),
+                )
+                await db.commit()
+        except Exception as exc:
+            logger.warning("EffectivenessStore create_suggestion failed (non-critical): %s", exc)
+
+    async def get_pending_suggestions(self, agent_id: str) -> list[dict]:
+        """Return never-injected suggestions for an agent. Never raises."""
+        if not AIOSQLITE_AVAILABLE:
+            return []
+        try:
+            await self._ensure_db()
+            async with aiosqlite.connect(self._db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(
+                    """SELECT fingerprint, tool_sequence, execution_count, tokens_saved_estimate, task_type
+                       FROM workflow_suggestions
+                       WHERE agent_id=? AND status='pending'
+                       ORDER BY execution_count DESC LIMIT 3""",
+                    (agent_id,),
+                ) as cursor:
+                    rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            logger.warning("EffectivenessStore get_pending_suggestions failed: %s", exc)
+            return []
+
+    async def mark_suggestion_status(self, fingerprint: str, agent_id: str, status: str) -> None:
+        """Update suggestion status (pending -> suggested -> dismissed/created). Never raises."""
+        if not AIOSQLITE_AVAILABLE:
+            return
+        try:
+            await self._ensure_db()
+            async with aiosqlite.connect(self._db_path) as db:
+                await db.execute(
+                    "UPDATE workflow_suggestions SET status=? WHERE fingerprint=? AND agent_id=?",
+                    (status, fingerprint, agent_id),
+                )
+                await db.commit()
+        except Exception as exc:
+            logger.warning("EffectivenessStore mark_suggestion_status failed: %s", exc)
+
+    async def record_workflow_mapping(
+        self,
+        agent_id: str,
+        fingerprint: str,
+        workflow_id: str,
+        webhook_url: str,
+        template: str,
+    ) -> None:
+        """Record a workflow mapping. Never raises."""
+        if not AIOSQLITE_AVAILABLE:
+            return
+        try:
+            await self._ensure_db()
+            async with aiosqlite.connect(self._db_path) as db:
+                await db.execute(
+                    """INSERT INTO workflow_mappings
+                       (agent_id, fingerprint, workflow_id, webhook_url, template,
+                        created_at, last_triggered, trigger_count, status)
+                       VALUES (?, ?, ?, ?, ?, ?, 0.0, 0, 'active')""",
+                    (agent_id, fingerprint, workflow_id, webhook_url, template, time.time()),
+                )
+                await db.commit()
+            await self.mark_suggestion_status(fingerprint, agent_id, "created")
+        except Exception as exc:
+            logger.warning("EffectivenessStore record_workflow_mapping failed: %s", exc)
