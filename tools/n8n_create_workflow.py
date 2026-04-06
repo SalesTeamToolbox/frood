@@ -12,6 +12,7 @@ Design principles:
 - All I/O is async (httpx.AsyncClient)
 """
 
+import asyncio
 import json
 import logging
 import uuid
@@ -320,6 +321,27 @@ class N8nCreateWorkflowTool(Tool):
             )
             webhook_path = webhook_node["parameters"]["path"] if webhook_node else "unknown"
             webhook_url = f"{settings.n8n_url.rstrip('/')}/webhook/{webhook_path}"
+
+            # Phase 43: Record workflow mapping when created from a suggestion
+            fingerprint = kwargs.get("fingerprint", "")
+            fp_agent_id = kwargs.get("agent_id", "")
+            if fingerprint:
+                try:
+                    from memory.effectiveness import get_shared_store
+
+                    eff_store = get_shared_store()
+                    if eff_store:
+                        asyncio.create_task(
+                            eff_store.record_workflow_mapping(
+                                agent_id=fp_agent_id,
+                                fingerprint=fingerprint,
+                                workflow_id=workflow_id,
+                                webhook_url=webhook_url,
+                                template=template,
+                            )
+                        )
+                except Exception:
+                    pass  # Non-critical — workflow was still created successfully
 
             return ToolResult(
                 output=json.dumps(

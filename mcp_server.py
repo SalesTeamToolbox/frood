@@ -464,21 +464,38 @@ def _create_server() -> tuple[Server, MCPRegistryAdapter]:
 
 async def run_stdio():
     """Run the MCP server with stdio transport (for Claude Code)."""
+    # Start Zen proxy if enabled (intercepts OpenCode CLI Zen traffic)
+    zen_proxy = None
+    try:
+        from core.config import settings
+
+        if settings.zen_proxy_enabled:
+            from providers.zen_proxy import get_proxy
+
+            zen_proxy = get_proxy()
+            await zen_proxy.start()
+    except Exception as e:
+        logger.warning("Zen proxy failed to start: %s", e)
+
     server, _adapter = _create_server()
 
-    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name=SERVER_NAME,
-                server_version=SERVER_VERSION,
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
+    try:
+        async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
+            await server.run(
+                read_stream,
+                write_stream,
+                InitializationOptions(
+                    server_name=SERVER_NAME,
+                    server_version=SERVER_VERSION,
+                    capabilities=server.get_capabilities(
+                        notification_options=NotificationOptions(),
+                        experimental_capabilities={},
+                    ),
                 ),
-            ),
-        )
+            )
+    finally:
+        if zen_proxy:
+            await zen_proxy.stop()
 
 
 async def run_sse(port: int = 8100):

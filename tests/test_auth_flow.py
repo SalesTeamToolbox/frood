@@ -127,16 +127,21 @@ class TestAuthIntegration:
     @pytest.fixture
     def client(self):
         """Create test client with mocked dependencies."""
+        from pathlib import Path
+
         from core.device_auth import DeviceStore
+        from core.key_store import KeyStore
         from dashboard.server import create_app
         from dashboard.websocket_manager import WebSocketManager
 
         device_store = DeviceStore(path=":memory:")
         ws_manager = WebSocketManager()
+        key_store = KeyStore(Path(":memory:"))
 
         app = create_app(
             device_store=device_store,
             ws_manager=ws_manager,
+            key_store=key_store,
         )
 
         with TestClient(app) as client:

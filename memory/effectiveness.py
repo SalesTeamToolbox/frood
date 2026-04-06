@@ -707,3 +707,18 @@ class EffectivenessStore:
             await self.mark_suggestion_status(fingerprint, agent_id, "created")
         except Exception as exc:
             logger.warning("EffectivenessStore record_workflow_mapping failed: %s", exc)
+
+
+# Phase 43: Shared store singleton for cross-module access
+_shared_effectiveness_store: "EffectivenessStore | None" = None
+
+
+def set_shared_store(store: "EffectivenessStore | None") -> None:
+    """Register the shared EffectivenessStore instance for cross-module access."""
+    global _shared_effectiveness_store
+    _shared_effectiveness_store = store
+
+
+def get_shared_store() -> "EffectivenessStore | None":
+    """Return the shared EffectivenessStore instance, or None if not set."""
+    return _shared_effectiveness_store

@@ -399,3 +399,183 @@ def test_pop_task_tools_missing_key():
 
     result = pop_task_tools("nonexistent-task-id-xyz")
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Plan 02 integration tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_registry_accumulates_tools(tmp_path):
+    """ToolRegistry.execute() appends tool_name to task accumulator."""
+    from core.task_context import begin_task, end_task, pop_task_tools
+    from core.task_types import TaskType
+    from memory.effectiveness import EffectivenessStore
+    from tools.base import Tool, ToolResult
+    from tools.registry import ToolRegistry
+
+    class FakeTool(Tool):
+        name = "fake_tool"
+        description = "Test"
+        parameters = {"type": "object", "properties": {}}
+
+        async def execute(self, **kwargs):
+            return ToolResult(output="ok", success=True)
+
+    store = EffectivenessStore(tmp_path / "test.db")
+    registry = ToolRegistry(effectiveness_store=store)
+    registry.register(FakeTool())
+
+    ctx = begin_task(TaskType.CODING)
+    await registry.execute("fake_tool", agent_id="test-agent")
+    await registry.execute("fake_tool", agent_id="test-agent")
+
+    tools = pop_task_tools(ctx.task_id)
+    assert tools == ["fake_tool", "fake_tool"]
+    end_task(ctx)
+
+
+def test_end_task_pops_accumulator():
+    """end_task() always pops the accumulator, preventing memory leaks."""
+    from core.task_context import _current_task_tools, append_tool_to_task, begin_task, end_task
+    from core.task_types import TaskType
+
+    ctx = begin_task(TaskType.CODING)
+    append_tool_to_task(ctx.task_id, "tool_a")
+    append_tool_to_task(ctx.task_id, "tool_b")
+    assert ctx.task_id in _current_task_tools
+
+    end_task(ctx)
+    assert ctx.task_id not in _current_task_tools
+
+
+@pytest.mark.asyncio
+async def test_build_prompt_injects_suggestions(tmp_path):
+    """_build_prompt() injects automation suggestions from pending patterns."""
+
+    from core.agent_runtime import AgentRuntime
+    from memory.effectiveness import EffectivenessStore, set_shared_store
+
+    store = EffectivenessStore(tmp_path / "test.db")
+    set_shared_store(store)
+
+    await store.create_suggestion(
+        agent_id="test-agent",
+        task_type="coding",
+        fingerprint="abc123",
+        tool_names=["http_client", "data_tool"],
+        execution_count=5,
+    )
+
+    runtime = AgentRuntime(workspace=str(tmp_path))
+    agent_config = {
+        "id": "test-agent",
+        "name": "TestBot",
+        "description": "A test agent",
+        "tools": ["n8n_create_workflow"],
+    }
+    prompt = await runtime._build_prompt(agent_config)
+
+    assert "AUTOMATION SUGGESTION" in prompt
+    assert "http_client -> data_tool" in prompt
+    assert "5 times" in prompt
+    assert "5000 tokens" in prompt
+    assert "n8n_create_workflow" in prompt
+
+    set_shared_store(None)
+
+
+@pytest.mark.asyncio
+async def test_build_prompt_no_suggestions_when_none_pending(tmp_path):
+    """_build_prompt() works normally with no pending suggestions."""
+    from core.agent_runtime import AgentRuntime
+    from memory.effectiveness import EffectivenessStore, set_shared_store
+
+    store = EffectivenessStore(tmp_path / "test.db")
+    set_shared_store(store)
+
+    runtime = AgentRuntime(workspace=str(tmp_path))
+    agent_config = {"id": "no-suggestions-agent", "name": "Bot", "description": "test"}
+    prompt = await runtime._build_prompt(agent_config)
+
+    assert "AUTOMATION SUGGESTION" not in prompt
+    assert "You are Bot" in prompt
+
+    set_shared_store(None)
+
+
+@pytest.mark.asyncio
+async def test_suggestion_marked_suggested_after_injection(tmp_path):
+    """After injection, suggestion status changes from 'pending' to 'suggested'."""
+    from core.agent_runtime import AgentRuntime
+    from memory.effectiveness import EffectivenessStore, set_shared_store
+
+    store = EffectivenessStore(tmp_path / "test.db")
+    set_shared_store(store)
+
+    await store.create_suggestion(
+        agent_id="agent-x",
+        task_type="coding",
+        fingerprint="fp001",
+        tool_names=["tool_a", "tool_b"],
+        execution_count=3,
+    )
+
+    runtime = AgentRuntime(workspace=str(tmp_path))
+    prompt1 = await runtime._build_prompt({"id": "agent-x", "name": "Bot", "description": ""})
+    assert "AUTOMATION SUGGESTION" in prompt1
+
+    prompt2 = await runtime._build_prompt({"id": "agent-x", "name": "Bot", "description": ""})
+    assert "AUTOMATION SUGGESTION" not in prompt2
+
+    set_shared_store(None)
+
+
+@pytest.mark.asyncio
+async def test_build_prompt_graceful_without_store(tmp_path):
+    """_build_prompt() works normally when no shared store is set."""
+    from core.agent_runtime import AgentRuntime
+    from memory.effectiveness import set_shared_store
+
+    set_shared_store(None)
+
+    runtime = AgentRuntime(workspace=str(tmp_path))
+    prompt = await runtime._build_prompt({"id": "agent", "name": "Bot", "description": "test"})
+
+    assert "You are Bot" in prompt
+    assert "AUTOMATION SUGGESTION" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_create_workflow_records_mapping(tmp_path):
+    """record_workflow_mapping records mapping and marks suggestion as created."""
+    import aiosqlite
+
+    from memory.effectiveness import EffectivenessStore, set_shared_store
+
+    store = EffectivenessStore(tmp_path / "test.db")
+    set_shared_store(store)
+    await store._ensure_db()
+
+    await store.record_workflow_mapping(
+        agent_id="test-agent",
+        fingerprint="fp-wiring-test",
+        workflow_id="wf-123",
+        webhook_url="http://n8n:5678/webhook/agent42-fp-wiring",
+        template="webhook_to_http",
+    )
+
+    async with aiosqlite.connect(str(tmp_path / "test.db")) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM workflow_mappings WHERE fingerprint = ?",
+            ("fp-wiring-test",),
+        ) as cursor:
+            row = await cursor.fetchone()
+            assert row is not None
+            assert dict(row)["workflow_id"] == "wf-123"
+            assert dict(row)["webhook_url"] == "http://n8n:5678/webhook/agent42-fp-wiring"
+            assert dict(row)["status"] == "active"
+
+    set_shared_store(None)
