@@ -85,9 +85,25 @@ def _anthropic_to_openai(body: bytes) -> bytes:
 
     openai_body: dict[str, Any] = {}
 
-    # Model mapping
+    # Model mapping — remap paid Claude/GPT models to free Zen equivalents
+    _FREE_MODEL_MAP = {
+        # Claude models → free alternatives
+        "claude-sonnet-4-6": "qwen3.6-plus-free",
+        "claude-sonnet-4-5": "qwen3.6-plus-free",
+        "claude-sonnet-4": "qwen3.6-plus-free",
+        "claude-haiku-4-5": "qwen3.6-plus-free",
+        "claude-3-5-haiku": "qwen3.6-plus-free",
+        "claude-opus-4-6": "nemotron-3-super-free",
+        "claude-opus-4-5": "nemotron-3-super-free",
+        "claude-opus-4-1": "nemotron-3-super-free",
+        # Aliases used by Claude CLI
+        "sonnet": "qwen3.6-plus-free",
+        "opus": "nemotron-3-super-free",
+        "haiku": "minimax-m2.5-free",
+    }
     if "model" in data:
-        openai_body["model"] = data["model"]
+        original_model = data["model"]
+        openai_body["model"] = _FREE_MODEL_MAP.get(original_model, original_model)
 
     # System message: Anthropic uses top-level "system" (string or array)
     system = data.get("system")
@@ -221,9 +237,15 @@ def _translate_auth_headers(headers: dict) -> dict:
     translated = dict(headers)
     api_key = headers.get("x-api-key", "")
 
-    # Auto-resolve key if missing or dummy
-    if not api_key or api_key in ("dummy", "dummy-key", "placeholder"):
-        api_key = _os.environ.get("ZEN_API_KEY", "")
+    # Auto-resolve key: replace dummy/Anthropic-format keys with real Zen key
+    zen_key = _os.environ.get("ZEN_API_KEY", "")
+    if (
+        not api_key
+        or api_key.startswith("sk-ant-")
+        or api_key in ("dummy", "dummy-key", "placeholder")
+    ):
+        if zen_key:
+            api_key = zen_key
 
     if api_key and "authorization" not in {k.lower() for k in headers}:
         translated["Authorization"] = f"Bearer {api_key}"
@@ -406,6 +428,18 @@ class ZenProxy:
         # Apply per-model rate limiting on chat completion requests
         if model and path == "chat/completions":
             await self._rate_limiter.wait(model)
+
+        # Fast path: streaming + Anthropic translation uses dedicated handler
+        is_stream = False
+        try:
+            is_stream = bool(body and json.loads(body).get("stream", False))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        if is_stream and anthropic_path:
+            return await self._handle_streaming_anthropic(
+                upstream_url, headers, body, model, request.query_params
+            )
 
         max_retries = 3
         last_error: str | None = None
@@ -671,6 +705,119 @@ class ZenProxy:
                 return self._error_response(502, last_error)
 
         return self._error_response(500, last_error or "Max retries exceeded")
+
+    async def _handle_streaming_anthropic(self, upstream_url, headers, body, model, query_params):
+        """Handle streaming requests with proper SSE translation.
+
+        Uses httpx.stream() for true chunked streaming (not buffered).
+        Translates OpenAI SSE chunks to Anthropic SSE events in real-time.
+        """
+        import uuid as _uuid
+
+        async def generate():
+            msg_id = f"msg_{_uuid.uuid4().hex[:12]}"
+
+            # Emit Anthropic message_start
+            start_event = {
+                "type": "message_start",
+                "message": {
+                    "id": msg_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "model": model or "",
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                },
+            }
+            yield f"event: message_start\ndata: {json.dumps(start_event)}\n\n"
+
+            # Emit content_block_start
+            block_start = {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            }
+            yield f"event: content_block_start\ndata: {json.dumps(block_start)}\n\n"
+
+            # Stream from upstream using httpx.stream() for real chunked transfer
+            try:
+                async with self._client.stream(
+                    "POST",
+                    upstream_url,
+                    headers=headers,
+                    content=body,
+                    params=query_params,
+                ) as resp:
+                    if resp.status_code != 200:
+                        error_body = await resp.aread()
+                        error_text = error_body.decode("utf-8", errors="replace")[:300]
+                        logger.warning(
+                            "Streaming upstream error %d: %s", resp.status_code, error_text
+                        )
+                        # Send error as text delta so Claude CLI sees it
+                        err_delta = {
+                            "type": "content_block_delta",
+                            "index": 0,
+                            "delta": {
+                                "type": "text_delta",
+                                "text": f"[Proxy error {resp.status_code}: {error_text}]",
+                            },
+                        }
+                        yield f"event: content_block_delta\ndata: {json.dumps(err_delta)}\n\n"
+                    else:
+                        if model:
+                            self._rate_limiter.record_success(model)
+
+                        # Process OpenAI SSE lines as they arrive
+                        async for line in resp.aiter_lines():
+                            line = line.strip()
+                            if not line:
+                                continue
+                            if not line.startswith("data: "):
+                                continue
+                            data_str = line[6:]
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                sse_data = json.loads(data_str)
+                                delta = sse_data.get("choices", [{}])[0].get("delta", {})
+                                text = delta.get("content", "")
+                                if text:
+                                    delta_event = {
+                                        "type": "content_block_delta",
+                                        "index": 0,
+                                        "delta": {"type": "text_delta", "text": text},
+                                    }
+                                    yield f"event: content_block_delta\ndata: {json.dumps(delta_event)}\n\n"
+                            except (json.JSONDecodeError, IndexError, KeyError):
+                                pass
+
+            except Exception as e:
+                logger.error("Streaming error: %s", e)
+                err_delta = {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": f"[Stream error: {e}]"},
+                }
+                yield f"event: content_block_delta\ndata: {json.dumps(err_delta)}\n\n"
+
+            # Emit Anthropic closing events
+            yield 'event: content_block_stop\ndata: {"type": "content_block_stop", "index": 0}\n\n'
+            delta_msg = {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                "usage": {"output_tokens": 0},
+            }
+            yield f"event: message_delta\ndata: {json.dumps(delta_msg)}\n\n"
+            yield 'event: message_stop\ndata: {"type": "message_stop"}\n\n'
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={"cache-control": "no-cache", "x-accel-buffering": "no"},
+        )
 
     @staticmethod
     def _parse_retry_after(resp: httpx.Response) -> float | None:
