@@ -14,6 +14,7 @@ Extended with endpoints for providers, tools, skills, channels, and devices.
 
 import asyncio
 import logging
+import time as _time
 from pathlib import Path
 
 from fastapi import (
@@ -335,6 +336,8 @@ _DASHBOARD_EDITABLE_SETTINGS = {
     "RLM_LOG_DIR",
     # Learning toggle (Phase 40)
     "LEARNING_ENABLED",
+    # Zen proxy model selection
+    "ZEN_DEFAULT_MODEL",
 }
 
 
@@ -3413,6 +3416,8 @@ def create_app(
         messages: list[dict],
         user_query: str = "",
         mem_store=None,
+        model: str | None = None,
+        providers: list[tuple[str, str]] | None = None,
     ) -> tuple[str, str]:
         """Try CC subscription first, then API providers. Returns (text, provider_name)."""
 
@@ -3445,30 +3450,36 @@ def create_app(
                 pass
 
         # 2. Fall back to API providers
-        chat_model = _os.environ.get("CHAT_MODEL", "")
-        providers = []
+        chat_model = model if model else _os.environ.get("CHAT_MODEL", "")
 
-        anthropic_key = _os.environ.get("ANTHROPIC_API_KEY", "")
-        if anthropic_key:
-            providers.append(("anthropic", anthropic_key))
+        if providers is not None:
+            active_providers = providers
+        else:
+            active_providers = []
 
-        synthetic_key = _os.environ.get("SYNTHETIC_API_KEY", "")
-        if synthetic_key:
-            providers.append(("synthetic", synthetic_key))
+            anthropic_key = _os.environ.get("ANTHROPIC_API_KEY", "")
+            if anthropic_key:
+                active_providers.append(("anthropic", anthropic_key))
 
-        gemini_key = _os.environ.get("GEMINI_API_KEY", "") or _os.environ.get("GOOGLE_API_KEY", "")
-        if gemini_key:
-            providers.append(("gemini", gemini_key))
+            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            if zen_key:
+                active_providers.append(("zen", zen_key))
 
-        or_key = _os.environ.get("OPENROUTER_API_KEY", "")
-        if or_key:
-            providers.append(("openrouter", or_key))
+            gemini_key = _os.environ.get("GEMINI_API_KEY", "") or _os.environ.get(
+                "GOOGLE_API_KEY", ""
+            )
+            if gemini_key:
+                active_providers.append(("gemini", gemini_key))
 
-        openai_key = _os.environ.get("OPENAI_API_KEY", "")
-        if openai_key:
-            providers.append(("openai", openai_key))
+            or_key = _os.environ.get("OPENROUTER_API_KEY", "")
+            if or_key:
+                active_providers.append(("openrouter", or_key))
 
-        if not providers:
+            openai_key = _os.environ.get("OPENAI_API_KEY", "")
+            if openai_key:
+                active_providers.append(("openai", openai_key))
+
+        if not active_providers:
             return (
                 "Claude Code is not available and no API keys are configured. "
                 "Install Claude Code (`npm install -g @anthropic-ai/claude-code`) or "
@@ -3477,23 +3488,27 @@ def create_app(
             )
 
         last_error = ""
-        for provider_name, api_key in providers:
+        for provider_name, api_key in active_providers:
             try:
-                if provider_name == "anthropic":
-                    base = _os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-                    model = chat_model or "claude-sonnet-4-5-20250514"
-                    headers = {
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    }
-                    body = {
-                        "model": model,
-                        "max_tokens": 4096,
-                        "system": system_prompt,
-                        "messages": messages,
-                    }
-                    async with _httpx.AsyncClient(timeout=120.0) as client:
+                client_timeout = _httpx.Timeout(connect=15.0, read=120.0, write=30.0, pool=10.0)
+                client_limits = _httpx.Limits(max_connections=100, max_keepalive_connections=20)
+                async with _httpx.AsyncClient(
+                    timeout=client_timeout, limits=client_limits, http2=True
+                ) as client:
+                    if provider_name == "anthropic":
+                        base = _os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+                        model = chat_model or "claude-sonnet-4-5-20250514"
+                        headers = {
+                            "x-api-key": api_key,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        }
+                        body = {
+                            "model": model,
+                            "max_tokens": 4096,
+                            "system": system_prompt,
+                            "messages": messages,
+                        }
                         resp = await client.post(
                             base.rstrip("/") + "/v1/messages",
                             headers=headers,
@@ -3507,51 +3522,21 @@ def create_app(
                             return text, "anthropic"
                         last_error = f"Anthropic {resp.status_code}: {resp.text[:200]}"
 
-                elif provider_name == "synthetic":
-                    # Synthetic.new — Anthropic-compatible API
-                    base = "https://api.synthetic.new"
-                    model = chat_model or "claude-sonnet-4-5-20250514"
-                    headers = {
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    }
-                    body = {
-                        "model": model,
-                        "max_tokens": 4096,
-                        "system": system_prompt,
-                        "messages": messages,
-                    }
-                    async with _httpx.AsyncClient(timeout=120.0) as client:
-                        resp = await client.post(
-                            base.rstrip("/") + "/v1/messages",
-                            headers=headers,
-                            json=body,
-                        )
-                        if resp.status_code == 200:
-                            text = ""
-                            for block in resp.json().get("content", []):
-                                if block.get("type") == "text":
-                                    text += block.get("text", "")
-                            return text, "synthetic"
-                        last_error = f"Synthetic {resp.status_code}: {resp.text[:200]}"
-
-                elif provider_name == "gemini":
-                    model = chat_model or "gemini-2.0-flash"
-                    gemini_msgs = [
-                        {
-                            "role": m["role"] if m["role"] != "assistant" else "model",
-                            "parts": [{"text": m["content"]}],
+                    elif provider_name == "gemini":
+                        model = chat_model or "gemini-2.0-flash"
+                        gemini_msgs = [
+                            {
+                                "role": m["role"] if m["role"] != "assistant" else "model",
+                                "parts": [{"text": m["content"]}],
+                            }
+                            for m in messages
+                        ]
+                        body = {
+                            "system_instruction": {"parts": [{"text": system_prompt}]},
+                            "contents": gemini_msgs,
+                            "generationConfig": {"maxOutputTokens": 4096},
                         }
-                        for m in messages
-                    ]
-                    body = {
-                        "system_instruction": {"parts": [{"text": system_prompt}]},
-                        "contents": gemini_msgs,
-                        "generationConfig": {"maxOutputTokens": 4096},
-                    }
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-                    async with _httpx.AsyncClient(timeout=120.0) as client:
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
                         resp = await client.post(url, json=body)
                         if resp.status_code == 200:
                             data = resp.json()
@@ -3562,20 +3547,75 @@ def create_app(
                             return "(Empty response from Gemini)", "gemini"
                         last_error = f"Gemini {resp.status_code}: {resp.text[:200]}"
 
-                elif provider_name in ("openrouter", "openai"):
-                    if provider_name == "openrouter":
-                        base = "https://openrouter.ai/api"
-                        model = chat_model or "google/gemini-2.0-flash-exp:free"
-                    else:
-                        base = _os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
-                        model = chat_model or "gpt-4o-mini"
-                    oai_msgs = [{"role": "system", "content": system_prompt}] + messages
-                    headers = {
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    }
-                    body = {"model": model, "messages": oai_msgs, "max_tokens": 4096}
-                    async with _httpx.AsyncClient(timeout=120.0) as client:
+                    elif provider_name == "zen":
+                        from core.agent_manager import get_fallback_models
+
+                        model = chat_model or "qwen3.6-plus-free"
+                        fallback_models = get_fallback_models("zen", "general", model)
+                        all_models = [model] + fallback_models
+
+                        zen_client = None
+                        try:
+                            from providers.zen_api import get_zen_client
+
+                            zen_client = get_zen_client()
+                        except Exception:
+                            last_error = "Zen client unavailable"
+
+                        if not zen_client:
+                            pass
+                        else:
+                            for model_to_try in all_models:
+                                try:
+                                    result = await zen_client.chat_completion(
+                                        model_to_try,
+                                        messages,
+                                        max_tokens=4096,
+                                    )
+                                    if "error" not in result:
+                                        if model_to_try != model:
+                                            logger.info(
+                                                "Zen fallback: used '%s' instead of '%s'",
+                                                model_to_try,
+                                                model,
+                                            )
+                                        return result.get("choices", [{}])[0].get(
+                                            "message", {}
+                                        ).get("content", ""), f"zen:{model_to_try}"
+                                    is_exhausted = result.get("exhausted", False)
+                                    if is_exhausted:
+                                        reset_time = (
+                                            zen_client._rate_limiter.get_exhaustion_reset_time(
+                                                model_to_try
+                                            )
+                                        )
+                                        wait_minutes = int(reset_time / 60) if reset_time else None
+                                        msg = f"Zen model '{model_to_try}' exhausted. "
+                                        if wait_minutes:
+                                            msg += f"Try again in ~{wait_minutes} minute(s) or use a fallback model."
+                                        else:
+                                            msg += "Trying next fallback model..."
+                                        logger.warning(msg)
+                                        continue
+                                    last_error = f"Zen {model_to_try}: {result.get('error', 'Unknown error')}"
+                                    break
+                                except Exception as e:
+                                    last_error = f"Zen {model_to_try} error: {e}"
+                                    continue
+
+                    elif provider_name in ("openrouter", "openai"):
+                        if provider_name == "openrouter":
+                            base = "https://openrouter.ai/api"
+                            model = chat_model or "google/gemini-2.0-flash-exp:free"
+                        else:
+                            base = _os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
+                            model = chat_model or "gpt-4o-mini"
+                        oai_msgs = [{"role": "system", "content": system_prompt}] + messages
+                        headers = {
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        }
+                        body = {"model": model, "messages": oai_msgs, "max_tokens": 4096}
                         resp = await client.post(
                             base.rstrip("/") + "/v1/chat/completions",
                             headers=headers,
@@ -3596,6 +3636,297 @@ def create_app(
                 last_error = f"{provider_name} error: {e}"
 
         return f"All providers failed. Last error: {last_error}", "none"
+
+    @app.post("/llm/chat/completions")
+    @app.post("/llm/v1/chat/completions")
+    async def llm_chat_completions(request: Request):
+        """OpenAI-compatible LLM proxy for Claude Code.
+        
+        Use this endpoint as the API base for Claude Code to route through Agent42.
+        Claude Code can switch models via the model query param or X-Model header.
+        
+        Examples:
+          curl -X POST http://localhost:8000/llm/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer dummy" \
+            -d '{"model": "qwen3.6-plus-free", "messages": [{"role": "user", "content": "hi"}]}'
+          
+          # Switch model via header:
+          curl -X POST http://localhost:8000/llm/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "X-Model: minimax-m2.5-free" \
+            -d '{"messages": [{"role": "user", "content": "hi"}]}'
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return {"error": {"message": "Invalid JSON body", "type": "invalid_request_error"}}
+
+        model = (
+            body.get("model")
+            or request.headers.get("X-Model")
+            or _os.environ.get("LLM_PROXY_MODEL", "qwen3.6-plus-free")
+        )
+        messages = body.get("messages", [])
+        max_tokens = body.get("max_tokens", 4096)
+        temperature = body.get("temperature", 1.0)
+
+        chat_model = model
+        providers = []
+
+        if model.startswith("zen:"):
+            actual_model = model.split(":", 1)[1]
+            chat_model = actual_model
+            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            if zen_key:
+                providers.append(("zen", zen_key))
+        elif model in (
+            "qwen3.6-plus-free",
+            "minimax-m2.5-free",
+            "nemotron-3-super-free",
+            "big-pickle",
+        ):
+            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            if zen_key:
+                providers.append(("zen", zen_key))
+        else:
+            if _os.environ.get("ANTHROPIC_API_KEY", ""):
+                providers.append(("anthropic", _os.environ.get("ANTHROPIC_API_KEY", "")))
+            if _os.environ.get("OPENROUTER_API_KEY", ""):
+                providers.append(("openrouter", _os.environ.get("OPENROUTER_API_KEY", "")))
+            if _os.environ.get("OPENAI_API_KEY", ""):
+                providers.append(("openai", _os.environ.get("OPENAI_API_KEY", "")))
+
+        if not providers:
+            return {"error": {"message": "No API keys configured", "type": "invalid_request_error"}}
+
+        system_msg = ""
+        filtered_messages = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                system_msg = msg.get("content", "")
+            else:
+                filtered_messages.append(msg)
+
+        try:
+            text, provider_used = await _chat_complete(
+                system_prompt=system_msg,
+                messages=filtered_messages,
+                user_query=filtered_messages[-1].get("content", "") if filtered_messages else "",
+                model=chat_model,
+                providers=providers,
+            )
+        except Exception as e:
+            return {"error": {"message": str(e), "type": "internal_error"}}
+
+        if not text or text.startswith("All providers failed"):
+            return {"error": {"message": text or "No response", "type": "server_error"}}
+
+        import uuid as _uuid
+
+        return {
+            "id": f"chatcmpl-{_uuid.uuid4().hex[:8]}",
+            "object": "chat.completion",
+            "created": int(_time.time()),
+            "model": chat_model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": text,
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            },
+        }
+
+    @app.post("/llm/v1/messages")
+    async def llm_messages(request: Request):
+        """Anthropic-compatible Messages API endpoint for Claude Code /model switching.
+
+        Claude Code sends requests in Anthropic format:
+          POST /v1/messages
+          {"model": "...", "system": "...", "messages": [...], "max_tokens": ...}
+
+        This endpoint translates to the internal provider routing and returns
+        an Anthropic-compatible response.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "type": "error",
+                    "error": {"type": "invalid_request_error", "message": "Invalid JSON body"},
+                },
+            )
+
+        model = (
+            body.get("model")
+            or request.headers.get("X-Model")
+            or _os.environ.get("LLM_PROXY_MODEL", "qwen3.6-plus-free")
+        )
+        system_prompt = body.get("system", "")
+        messages = body.get("messages", [])
+        max_tokens = body.get("max_tokens", 4096)
+
+        # Route to internal provider logic
+        chat_model = model
+        providers = []
+
+        if model.startswith("zen:"):
+            actual_model = model.split(":", 1)[1]
+            chat_model = actual_model
+            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            if zen_key:
+                providers.append(("zen", zen_key))
+        elif model in (
+            "qwen3.6-plus-free",
+            "minimax-m2.5-free",
+            "nemotron-3-super-free",
+            "big-pickle",
+        ):
+            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            if zen_key:
+                providers.append(("zen", zen_key))
+        else:
+            if _os.environ.get("ANTHROPIC_API_KEY", ""):
+                providers.append(("anthropic", _os.environ.get("ANTHROPIC_API_KEY", "")))
+            if _os.environ.get("OPENROUTER_API_KEY", ""):
+                providers.append(("openrouter", _os.environ.get("OPENROUTER_API_KEY", "")))
+            if _os.environ.get("OPENAI_API_KEY", ""):
+                providers.append(("openai", _os.environ.get("OPENAI_API_KEY", "")))
+
+        if not providers:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "type": "error",
+                    "error": {
+                        "type": "invalid_request_error",
+                        "message": "No API keys configured",
+                    },
+                },
+            )
+
+        try:
+            text, provider_used = await _chat_complete(
+                system_prompt=system_prompt,
+                messages=messages,
+                user_query=messages[-1].get("content", "") if messages else "",
+                model=chat_model,
+                providers=providers,
+            )
+        except Exception as e:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "type": "error",
+                    "error": {"type": "api_error", "message": str(e)},
+                },
+            )
+
+        if not text or text.startswith("All providers failed"):
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "type": "error",
+                    "error": {"type": "api_error", "message": text or "No response"},
+                },
+            )
+
+        import uuid as _uuid
+
+        return {
+            "id": f"msg_{_uuid.uuid4().hex[:12]}",
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "text", "text": text}],
+            "model": chat_model,
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+            },
+        }
+
+    @app.get("/llm/models")
+    @app.get("/llm/v1/models")
+    async def llm_models():
+        """Return available models for LLM proxy."""
+        from core.agent_manager import PROVIDER_MODELS
+
+        models = []
+        for provider, category_map in PROVIDER_MODELS.items():
+            if provider == "zen":
+                for category, model_id in category_map.items():
+                    models.append(
+                        {
+                            "id": model_id,
+                            "object": "model",
+                            "created": 1700000000,
+                            "owned_by": "opencode",
+                            "provider": "zen",
+                            "category": category,
+                        }
+                    )
+            elif provider == "openrouter":
+                for category, model_id in category_map.items():
+                    models.append(
+                        {
+                            "id": model_id,
+                            "object": "model",
+                            "created": 1700000000,
+                            "owned_by": "openrouter",
+                            "provider": "openrouter",
+                            "category": category,
+                        }
+                    )
+            elif provider == "anthropic":
+                for category, model_id in category_map.items():
+                    models.append(
+                        {
+                            "id": model_id,
+                            "object": "model",
+                            "created": 1700000000,
+                            "owned_by": "anthropic",
+                            "provider": "anthropic",
+                            "category": category,
+                        }
+                    )
+
+        return {
+            "object": "list",
+            "data": models,
+        }
+
+    @app.get("/llm/config")
+    async def llm_config():
+        """Return LLM proxy configuration for Claude Code.
+
+        Claude Code can use this to discover the endpoint and available models.
+        """
+        base_url = _os.environ.get("LLM_PROXY_BASE_URL", "http://localhost:8000")
+        return {
+            "endpoint": f"{base_url}/llm/v1/chat/completions",
+            "auth_type": "none",
+            "model_header": "X-Model",
+            "default_model": _os.environ.get("LLM_PROXY_MODEL", "qwen3.6-plus-free"),
+            "available_models": [
+                {"id": "qwen3.6-plus-free", "provider": "zen", "category": "fast"},
+                {"id": "minimax-m2.5-free", "provider": "zen", "category": "general"},
+                {"id": "nemotron-3-super-free", "provider": "zen", "category": "reasoning"},
+                {"id": "big-pickle", "provider": "zen", "category": "content"},
+            ],
+        }
 
     @app.get("/api/chat/messages")
     @standalone_guard
@@ -4236,7 +4567,6 @@ Focus on learnings that would help in future similar sessions."""
 
         Uses Anthropic Messages API format. Compatible with:
         - Anthropic API (default)
-        - Synthetic.new (Anthropic-compatible)
         - Any Anthropic-compatible provider
         """
 
@@ -4391,9 +4721,10 @@ Focus on learnings that would help in future similar sessions."""
             "provider_url": provider_url,
             "model": model,
             "providers": [
-                {"name": "Anthropic", "url": "https://api.anthropic.com"},
-                {"name": "Synthetic", "url": "https://api.synthetic.new/v1"},
+                {"name": "OpenCode Zen", "url": "https://opencode.ai/zen/v1"},
                 {"name": "OpenRouter", "url": "https://openrouter.ai/api/v1"},
+                {"name": "Anthropic", "url": "https://api.anthropic.com"},
+                {"name": "OpenAI", "url": "https://api.openai.com/v1"},
             ],
         }
 
@@ -4815,44 +5146,6 @@ Focus on learnings that would help in future similar sessions."""
             "note": "Provider registry removed in v2.0 MCP pivot",
         }
 
-    @app.get("/api/providers/synthetic/models")
-    async def get_synthetic_models(
-        force: bool = False,
-        _admin: AuthContext = Depends(require_admin),
-    ):
-        """Return Synthetic.new model catalog with optional cache bypass."""
-        import core.agent_manager as _am
-
-        client = _am._synthetic_client
-        if client is None:
-            return {
-                "models": [],
-                "cached_at": None,
-                "count": 0,
-                "free_count": 0,
-                "capability_mapping": {},
-            }
-        models = await client.refresh_models(force=force)
-        mapping = client.update_provider_models_mapping()
-        free_count = sum(1 for m in models if m.is_free)
-        return {
-            "models": [
-                {
-                    "id": m.id,
-                    "name": m.name,
-                    "description": m.description,
-                    "capabilities": m.capabilities,
-                    "max_context_length": m.max_context_length,
-                    "is_free": m.is_free,
-                }
-                for m in models
-            ],
-            "cached_at": client._last_refresh or None,
-            "count": len(models),
-            "free_count": free_count,
-            "capability_mapping": mapping,
-        }
-
     @app.get("/api/settings/provider-status")
     async def get_provider_status(
         _admin: AuthContext = Depends(require_admin),
@@ -4864,17 +5157,6 @@ Focus on learnings that would help in future similar sessions."""
         import httpx
 
         results = []
-
-        # CC Subscription -- presence-only, no live ping (managed by CLI, per D-01)
-        cc_token = os.environ.get("CLAUDECODE_SUBSCRIPTION_TOKEN", "")
-        results.append(
-            {
-                "name": "claudecode",
-                "label": "Claude Code Subscription",
-                "configured": bool(cc_token),
-                "status": "ok" if cc_token else "unconfigured",
-            }
-        )
 
         # Helper for pinging /v1/models with Bearer auth
         async def _ping_provider(name, label, env_var, base_url, auth_header_fn):
@@ -4896,13 +5178,45 @@ Focus on learnings that would help in future similar sessions."""
                 status = "unreachable"
             return {"name": name, "label": label, "configured": True, "status": status}
 
-        # Synthetic.new -- ping https://api.synthetic.new/v1/models
+        # OpenCode Zen -- ping https://opencode.ai/zen/v1/models
+        zen_status = "unconfigured"
+        zen_exhausted = []
+        zen_key = os.environ.get("ZEN_API_KEY", "")
+        if zen_key:
+            try:
+                from providers.zen_api import get_zen_client
+
+                client = get_zen_client()
+                zen_exhausted = client._rate_limiter.get_exhausted_models()
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    headers = {"Authorization": f"Bearer {zen_key}"}
+                    resp = await client.get("https://opencode.ai/zen/v1/models", headers=headers)
+                zen_status = (
+                    "ok"
+                    if resp.status_code == 200
+                    else ("auth_error" if resp.status_code in (401, 403) else "unreachable")
+                )
+            except httpx.TimeoutException:
+                zen_status = "timeout"
+            except Exception:
+                zen_status = "unreachable"
+        results.append(
+            {
+                "name": "zen",
+                "label": "OpenCode Zen",
+                "configured": bool(zen_key),
+                "status": zen_status,
+                "exhausted": zen_exhausted,
+            }
+        )
+
+        # OpenRouter -- ping https://openrouter.ai/api/v1/models
         results.append(
             await _ping_provider(
-                "synthetic",
-                "Synthetic.new",
-                "SYNTHETIC_API_KEY",
-                "https://api.synthetic.new/v1",
+                "openrouter",
+                "OpenRouter",
+                "OPENROUTER_API_KEY",
+                "https://openrouter.ai/api/v1",
                 lambda k: {"Authorization": f"Bearer {k}"},
             )
         )
@@ -4918,13 +5232,13 @@ Focus on learnings that would help in future similar sessions."""
             )
         )
 
-        # OpenRouter -- ping https://openrouter.ai/api/v1/models
+        # OpenAI -- ping https://api.openai.com/v1/models
         results.append(
             await _ping_provider(
-                "openrouter",
-                "OpenRouter",
-                "OPENROUTER_API_KEY",
-                "https://openrouter.ai/api/v1",
+                "openai",
+                "OpenAI",
+                "OPENAI_API_KEY",
+                "https://api.openai.com/v1",
                 lambda k: {"Authorization": f"Bearer {k}"},
             )
         )

@@ -47,8 +47,10 @@ class Settings:
     zen_rate_initial_delay: float = 2.0  # Initial delay between requests (seconds)
     zen_rate_min_delay: float = 0.5  # Minimum delay (max throughput floor)
     zen_rate_max_delay: float = 10.0  # Maximum delay on repeated rate limits
+    zen_exhaustion_reset_hours: float = 1.0  # Reset exhaustion state after this many hours
     zen_proxy_enabled: bool = False  # Local proxy for OpenCode CLI traffic
     zen_proxy_port: int = 8765  # Port for the local Zen proxy
+    zen_default_model: str = "qwen3.6-plus-free"  # Default free model for proxy remapping
     openrouter_api_key: str = ""  # OpenRouter (200+ models, paid fallback)
     anthropic_api_key: str = ""  # Anthropic API (direct Claude access)
     openai_api_key: str = ""  # OpenAI API (direct GPT access)
@@ -334,6 +336,9 @@ class Settings:
     n8n_allow_code_nodes: bool = (
         False  # When true, n8n-nodes-base.code is unblocked in generated workflows
     )
+    # N8N Pattern Offloading (Phase 43)
+    n8n_pattern_threshold: int = 3  # Executions before suggesting N8N workflow
+    n8n_auto_create_workflows: bool = False  # When true, create without agent confirmation
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -382,9 +387,11 @@ class Settings:
             zen_rate_initial_delay=float(os.getenv("ZEN_RATE_INITIAL_DELAY", "2.0")),
             zen_rate_min_delay=float(os.getenv("ZEN_RATE_MIN_DELAY", "0.5")),
             zen_rate_max_delay=float(os.getenv("ZEN_RATE_MAX_DELAY", "10.0")),
+            zen_exhaustion_reset_hours=float(os.getenv("ZEN_EXHAUSTION_RESET_HOURS", "1.0")),
             zen_proxy_enabled=os.getenv("ZEN_PROXY_ENABLED", "false").lower()
             in ("true", "1", "yes"),
             zen_proxy_port=int(os.getenv("ZEN_PROXY_PORT", "8765")),
+            zen_default_model=os.getenv("ZEN_DEFAULT_MODEL", "qwen3.6-plus-free"),
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
@@ -646,6 +653,10 @@ class Settings:
             n8n_url=os.getenv("N8N_URL", "").rstrip("/"),
             n8n_api_key=os.getenv("N8N_API_KEY", ""),
             n8n_allow_code_nodes=os.getenv("N8N_ALLOW_CODE_NODES", "false").lower()
+            in ("true", "1", "yes"),
+            # N8N Pattern Offloading (Phase 43)
+            n8n_pattern_threshold=int(os.getenv("N8N_PATTERN_THRESHOLD", "3")),
+            n8n_auto_create_workflows=os.getenv("N8N_AUTO_CREATE_WORKFLOWS", "false").lower()
             in ("true", "1", "yes"),
         )
 

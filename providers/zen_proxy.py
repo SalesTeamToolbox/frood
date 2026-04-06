@@ -85,25 +85,21 @@ def _anthropic_to_openai(body: bytes) -> bytes:
 
     openai_body: dict[str, Any] = {}
 
-    # Model mapping — remap paid Claude/GPT models to free Zen equivalents
-    _FREE_MODEL_MAP = {
-        # Claude models → free alternatives
-        "claude-sonnet-4-6": "qwen3.6-plus-free",
-        "claude-sonnet-4-5": "qwen3.6-plus-free",
-        "claude-sonnet-4": "qwen3.6-plus-free",
-        "claude-haiku-4-5": "qwen3.6-plus-free",
-        "claude-3-5-haiku": "qwen3.6-plus-free",
-        "claude-opus-4-6": "nemotron-3-super-free",
-        "claude-opus-4-5": "nemotron-3-super-free",
-        "claude-opus-4-1": "nemotron-3-super-free",
-        # Aliases used by Claude CLI
-        "sonnet": "qwen3.6-plus-free",
-        "opus": "nemotron-3-super-free",
-        "haiku": "minimax-m2.5-free",
-    }
+    # Model remapping: resolve the user's chosen default free model from config
+    _default = os.environ.get("ZEN_DEFAULT_MODEL", "qwen3.6-plus-free")
+
+    # Any Claude/Anthropic model name gets remapped to the user's chosen default
+    _REMAP_PREFIXES = ("claude-", "anthropic/")
+    _REMAP_ALIASES = {"sonnet", "opus", "haiku"}
+
     if "model" in data:
         original_model = data["model"]
-        openai_body["model"] = _FREE_MODEL_MAP.get(original_model, original_model)
+        if original_model in _REMAP_ALIASES or any(
+            original_model.startswith(p) for p in _REMAP_PREFIXES
+        ):
+            openai_body["model"] = _default
+        else:
+            openai_body["model"] = original_model
 
     # System message: Anthropic uses top-level "system" (string or array)
     system = data.get("system")
