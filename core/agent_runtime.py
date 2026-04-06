@@ -104,8 +104,12 @@ class AgentRuntime:
 
         return "\n".join(parts)
 
+    def _uses_openai_protocol(self, provider: str) -> bool:
+        """Check if a provider uses OpenAI Chat Completions protocol."""
+        return provider in ("zen", "openrouter", "openai")
+
     async def start_agent(self, agent_config):
-        """Launch an agent as a background process."""
+        """Launch an agent — routes to Claude CLI or OpenAI runner based on provider."""
         agent_id = agent_config.get("id", "unknown")
 
         if agent_id in self._processes:
@@ -114,6 +118,168 @@ class AgentRuntime:
                 if existing.process.returncode is None:
                     logger.warning(f"Agent {agent_id} already running (PID {existing.pid})")
                     return existing
+
+        provider = agent_config.get("provider", "anthropic")
+        if self._uses_openai_protocol(provider):
+            return await self._start_openai_agent(agent_config)
+        return await self._start_claude_agent(agent_config)
+
+    async def _start_openai_agent(self, agent_config):
+        """Run agent using OpenAI Chat Completions protocol (Zen, OpenRouter, OpenAI)."""
+        agent_id = agent_config.get("id", "unknown")
+        provider = agent_config.get("provider", "zen")
+        model = agent_config.get("model", "")
+        prompt = self._build_prompt(agent_config)
+
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        log_path = self._logs_dir / f"{agent_id}-{timestamp}.log"
+
+        # Resolve API key and base URL
+        if provider == "zen":
+            api_key = os.environ.get("ZEN_API_KEY", "")
+            base_url = agent_config.get("provider_url") or "https://opencode.ai/zen/v1"
+        elif provider == "openrouter":
+            api_key = os.environ.get("OPENROUTER_API_KEY", "")
+            base_url = agent_config.get("provider_url") or "https://openrouter.ai/api/v1"
+        elif provider == "openai":
+            api_key = os.environ.get("OPENAI_API_KEY", "")
+            base_url = agent_config.get("provider_url") or "https://api.openai.com/v1"
+        else:
+            api_key = ""
+            base_url = ""
+
+        if not api_key:
+            logger.error(f"No API key for provider {provider}")
+            return None
+
+        logger.info(
+            f"Starting OpenAI-protocol agent {agent_id} provider={provider} "
+            f"model={model} base_url={base_url}"
+        )
+
+        agent_proc = AgentProcess(
+            agent_id=agent_id,
+            pid=os.getpid(),
+            process=None,
+            started_at=time.time(),
+            log_file=str(log_path),
+            status="running",
+        )
+        self._processes[agent_id] = agent_proc
+
+        asyncio.create_task(
+            self._run_openai_loop(
+                agent_id, agent_proc, log_path, prompt, api_key, base_url, model, agent_config
+            )
+        )
+        logger.info(f"Agent {agent_id} started (OpenAI protocol, in-process)")
+        return agent_proc
+
+    async def _run_openai_loop(
+        self, agent_id, agent_proc, log_path, prompt, api_key, base_url, model, agent_config
+    ):
+        """Agentic loop using OpenAI Chat Completions."""
+        import httpx as _httpx
+
+        max_iter = agent_config.get("max_iterations", 10)
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful autonomous agent. Complete the task, then summarize.",
+            },
+            {"role": "user", "content": prompt},
+        ]
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        url = f"{base_url}/chat/completions"
+
+        try:
+            with open(log_path, "w", encoding="utf-8") as log:
+                log.write(f"Agent: {agent_config.get('name', agent_id)}\n")
+                log.write(f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                log.write(f"Provider: {agent_config.get('provider', 'unknown')}\n")
+                log.write(f"Model: {model}\n")
+                log.write("Runner: OpenAI Chat Completions\n")
+                log.write("=" * 60 + "\n\n")
+                log.flush()
+
+                total_tokens = 0
+                async with _httpx.AsyncClient(timeout=120.0) as client:
+                    for iteration in range(1, max_iter + 1):
+                        log.write(f"--- Iteration {iteration}/{max_iter} ---\n")
+                        log.flush()
+
+                        payload = {
+                            "model": model,
+                            "messages": messages,
+                            "max_tokens": 2048,
+                        }
+
+                        try:
+                            resp = await client.post(url, json=payload, headers=headers)
+                            if resp.status_code != 200:
+                                error_text = resp.text[:500]
+                                log.write(f"API error ({resp.status_code}): {error_text}\n")
+                                logger.warning(f"Agent {agent_id} API error: {resp.status_code}")
+                                break
+
+                            data = resp.json()
+                            usage = data.get("usage", {})
+                            total_tokens += usage.get("total_tokens", 0)
+
+                            choice = data.get("choices", [{}])[0]
+                            msg = choice.get("message", {})
+                            content = msg.get("content", "")
+                            finish_reason = choice.get("finish_reason", "")
+
+                            log.write(f"\n{content}\n\n")
+                            log.flush()
+
+                            messages.append({"role": "assistant", "content": content})
+
+                            if finish_reason == "stop":
+                                break
+
+                        except _httpx.TimeoutException:
+                            log.write("Request timed out\n")
+                            break
+                        except Exception as e:
+                            log.write(f"Error: {e}\n")
+                            break
+
+                log.write(f"\n{'=' * 60}\n")
+                log.write(f"Finished: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                log.write(f"Total tokens: {total_tokens}\n")
+                log.write("Exit: success\n")
+
+                # Fire learning extraction if memory bridge is available
+                try:
+                    from core.memory_bridge import MemoryBridge
+
+                    memory_store = getattr(self, "_memory_store", None)
+                    if memory_store:
+                        mb = MemoryBridge(memory_store=memory_store)
+                        summary = messages[-1].get("content", "") if messages else ""
+                        await mb.learn_async(summary, agent_id)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.error(f"OpenAI agent loop failed for {agent_id}: {e}")
+            try:
+                with open(log_path, "a", encoding="utf-8") as log:
+                    log.write(f"\nFATAL: {e}\n")
+            except Exception:
+                pass
+
+        agent_proc.status = "completed"
+
+    async def _start_claude_agent(self, agent_config):
+        """Launch agent via Claude Code CLI (Anthropic protocol)."""
+        agent_id = agent_config.get("id", "unknown")
 
         claude_bin = shutil.which("claude")
         if not claude_bin:
@@ -137,6 +303,7 @@ class AgentRuntime:
             log_file.write(f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
             log_file.write(f"Provider: {agent_config.get('provider', 'anthropic')}\n")
             log_file.write(f"Model: {agent_config.get('model', 'default')}\n")
+            log_file.write("Runner: Claude Code CLI\n")
             log_file.write("=" * 60 + "\n\n")
             log_file.flush()
 
