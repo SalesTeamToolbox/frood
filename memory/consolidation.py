@@ -13,10 +13,156 @@ across any channel, without keeping thousands of raw messages in context.
 """
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 
+import httpx
+
 logger = logging.getLogger("agent42.memory.consolidation")
+
+
+class ConsolidationRouter:
+    """Lightweight LLM router for consolidation summarization.
+
+    Tries cheap/free providers first, falls back through available API keys.
+    Implements the .complete(model, messages) -> (text, provider) interface
+    expected by ConsolidationPipeline.
+    """
+
+    async def complete(self, model: str, messages: list[dict]) -> tuple[str, str | None]:
+        """Send a chat completion request through available providers.
+
+        Args:
+            model: Model identifier (used as hint; each provider maps to its own model).
+            messages: OpenAI-format message list.
+
+        Returns:
+            (response_text, provider_name) or raises if all providers fail.
+        """
+        providers = self._build_provider_chain(model)
+        if not providers:
+            raise RuntimeError("ConsolidationRouter: no API keys configured")
+
+        last_error = ""
+        for name, call in providers:
+            try:
+                text = await call(messages)
+                if text:
+                    return text, name
+            except Exception as e:
+                last_error = f"{name}: {e}"
+                logger.debug("ConsolidationRouter: %s failed — %s", name, e)
+
+        raise RuntimeError(f"ConsolidationRouter: all providers failed. Last: {last_error}")
+
+    @property
+    def has_providers(self) -> bool:
+        """Whether at least one API key is configured."""
+        return bool(self._build_provider_chain(""))
+
+    def _build_provider_chain(self, model: str) -> list[tuple[str, object]]:
+        """Build ordered list of (name, async_callable) provider attempts."""
+        chain = []
+
+        or_key = os.environ.get("OPENROUTER_API_KEY", "")
+        if or_key:
+            chain.append(
+                ("openrouter", lambda msgs, k=or_key, m=model: self._call_openrouter(k, m, msgs))
+            )
+
+        synthetic_key = os.environ.get("SYNTHETIC_API_KEY", "")
+        if synthetic_key:
+            chain.append(
+                (
+                    "synthetic",
+                    lambda msgs, k=synthetic_key: self._call_anthropic_compat(
+                        k,
+                        "https://api.synthetic.new",
+                        msgs,
+                    ),
+                )
+            )
+
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if anthropic_key:
+            base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+            chain.append(
+                (
+                    "anthropic",
+                    lambda msgs, k=anthropic_key, b=base: self._call_anthropic_compat(
+                        k,
+                        b,
+                        msgs,
+                    ),
+                )
+            )
+
+        openai_key = os.environ.get("OPENAI_API_KEY", "")
+        if openai_key:
+            chain.append(("openai", lambda msgs, k=openai_key: self._call_openai(k, msgs)))
+
+        return chain
+
+    @staticmethod
+    async def _call_openrouter(api_key: str, model: str, messages: list[dict]) -> str:
+        or_model = model if model and "/" in model else "deepseek/deepseek-chat:free"
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"model": or_model, "messages": messages, "max_tokens": 2048},
+            )
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"]
+
+    @staticmethod
+    async def _call_anthropic_compat(api_key: str, base_url: str, messages: list[dict]) -> str:
+        system = ""
+        chat_msgs = []
+        for m in messages:
+            if m.get("role") == "system":
+                system += m.get("content", "") + "\n"
+            else:
+                chat_msgs.append(m)
+        body: dict = {
+            "model": "claude-sonnet-4-5-20250514",
+            "max_tokens": 2048,
+            "messages": chat_msgs or messages,
+        }
+        if system.strip():
+            body["system"] = system.strip()
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                base_url.rstrip("/") + "/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json=body,
+            )
+            resp.raise_for_status()
+            return "".join(
+                b.get("text", "") for b in resp.json().get("content", []) if b.get("type") == "text"
+            )
+
+    @staticmethod
+    async def _call_openai(api_key: str, messages: list[dict]) -> str:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"model": "gpt-4o-mini", "messages": messages, "max_tokens": 2048},
+            )
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"]
 
 
 @dataclass

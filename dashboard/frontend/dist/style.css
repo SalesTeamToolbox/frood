@@ -308,6 +308,16 @@ select { cursor: pointer; }
   display: inline-block; padding: 0.15rem 0.5rem; border-radius: var(--radius-sm);
   font-size: 0.75rem; background: var(--bg-hover); color: var(--text-secondary);
 }
+.badge-free {
+  display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem;
+  border-radius: 8px; background: var(--success); color: #fff;
+  font-weight: 600; letter-spacing: 0.02em;
+}
+.badge-paid {
+  display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.4rem;
+  border-radius: 8px; background: var(--warning); color: #1a1a2e;
+  font-weight: 600; letter-spacing: 0.02em;
+}
 .badge-tokens {
   display: inline-block; padding: 0.1rem 0.35rem; border-radius: var(--radius-sm);
   font-size: 0.7rem; font-family: var(--mono); color: var(--text-muted);
@@ -327,6 +337,9 @@ select { cursor: pointer; }
 .stat-card .stat-value.text-warning { color: var(--warning); }
 .stat-card .stat-value.text-danger { color: var(--danger); }
 .stat-card .stat-value.text-info { color: var(--info); }
+/* Memory stats cards hover (Phase 40) */
+.stat-card { transition: box-shadow 0.15s; }
+.stat-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
 
 /* ---------- Table ---------- */
 
@@ -2755,3 +2768,30 @@ body.towel-day .dont-panic-watermark {
   color: var(--success, #22c55e);
   padding: 0.3rem 0 0;
 }
+
+/* Phase 37: Tool/Skill search and inline expansion */
+.tool-search-wrap { padding: 0.75rem 1rem 0; }
+.tool-search-input { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font-size: 0.85rem; outline: none; transition: border-color 0.15s; }
+.tool-search-input:focus { border-color: var(--accent); }
+.tool-search-input::placeholder { color: var(--text-muted); }
+.tool-detail-row td { padding: 0 !important; border-top: none !important; }
+.tool-detail-panel { padding: 0.75rem 1rem 1rem; background: var(--bg-secondary); border-top: 1px solid var(--border); }
+.tool-detail-desc { margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.85rem; line-height: 1.5; }
+.tool-detail-meta { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.badge-source { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.badge-builtin { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
+.badge-mcp { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+.badge-agent42 { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
+.badge-paperclip { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+.sparkline { display: inline-block; vertical-align: middle; margin-left: 0.5rem; }
+.sparkline svg { display: block; }
+.agent-card-metrics { display: flex; gap: 0.75rem; align-items: center; font-size: 0.72rem; color: var(--text-secondary); margin-top: 0.3rem; flex-wrap: wrap; }
+.agent-card-metrics .metric-value { font-weight: 600; color: var(--text); }
+.agent-filter-bar { display: flex; gap: 0.5rem; margin-bottom: 1rem; align-items: center; }
+.agent-filter-bar select { padding: 0.35rem 0.6rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); font-size: 0.8rem; }
+.degradation-banner { padding: 0.6rem 1rem; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; color: #fbbf24; font-size: 0.82rem; margin-bottom: 1rem; }
+.agent-card.readonly { opacity: 0.85; border-left: 3px solid #34d399; }
+.badge-category { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+.badge-code { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+.badge-general { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
+.skill-detail-row td { padding: 0 !important; border-top: none !important; }

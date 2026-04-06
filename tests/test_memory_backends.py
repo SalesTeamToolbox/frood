@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from memory.consolidation import ConsolidationPipeline
+from memory.consolidation import ConsolidationPipeline, ConsolidationRouter
 from memory.embeddings import EmbeddingStore
 from memory.qdrant_store import QDRANT_AVAILABLE, QdrantConfig, QdrantStore
 from memory.redis_session import REDIS_AVAILABLE, RedisConfig, RedisSessionBackend
@@ -301,6 +301,89 @@ Some stuff happened.
         pipeline = ConsolidationPipeline(model_router=MagicMock())
         result = await pipeline.summarize_messages([], "test", "ch1")
         assert result is None
+
+
+# ── ConsolidationRouter Tests ────────────────────────────────────────────
+
+
+class TestConsolidationRouter:
+    def test_instantiation(self):
+        router = ConsolidationRouter()
+        assert router is not None
+
+    def test_no_providers_without_keys(self):
+        """has_providers is False when no API keys are set."""
+        with patch.dict("os.environ", {}, clear=True):
+            router = ConsolidationRouter()
+            assert router.has_providers is False
+
+    def test_has_providers_with_openrouter(self):
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}):
+            router = ConsolidationRouter()
+            assert router.has_providers is True
+
+    def test_provider_chain_order(self):
+        """Provider chain follows expected priority: openrouter > synthetic > anthropic > openai."""
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENROUTER_API_KEY": "or-key",
+                "SYNTHETIC_API_KEY": "syn-key",
+                "ANTHROPIC_API_KEY": "ant-key",
+                "OPENAI_API_KEY": "oai-key",
+            },
+        ):
+            router = ConsolidationRouter()
+            chain = router._build_provider_chain("")
+            names = [name for name, _ in chain]
+            assert names == ["openrouter", "synthetic", "anthropic", "openai"]
+
+    @pytest.mark.asyncio
+    async def test_complete_returns_tuple(self):
+        """complete() returns (text, provider_name) tuple on success."""
+        router = ConsolidationRouter()
+        with patch.object(
+            router,
+            "_build_provider_chain",
+            return_value=[("mock", AsyncMock(return_value="summarized text"))],
+        ):
+            text, provider = await router.complete("model", [{"role": "user", "content": "hi"}])
+            assert text == "summarized text"
+            assert provider == "mock"
+
+    @pytest.mark.asyncio
+    async def test_complete_raises_without_keys(self):
+        """complete() raises RuntimeError when no providers available."""
+        with patch.dict("os.environ", {}, clear=True):
+            router = ConsolidationRouter()
+            with pytest.raises(RuntimeError, match="no API keys configured"):
+                await router.complete("model", [{"role": "user", "content": "hi"}])
+
+    @pytest.mark.asyncio
+    async def test_complete_falls_through_on_failure(self):
+        """complete() tries next provider when first fails."""
+        router = ConsolidationRouter()
+        failing = AsyncMock(side_effect=Exception("fail"))
+        succeeding = AsyncMock(return_value="ok")
+        with patch.object(
+            router,
+            "_build_provider_chain",
+            return_value=[("bad", failing), ("good", succeeding)],
+        ):
+            text, provider = await router.complete("model", [{"role": "user", "content": "hi"}])
+            assert text == "ok"
+            assert provider == "good"
+
+    def test_pipeline_available_with_router(self):
+        """ConsolidationPipeline.is_available works with ConsolidationRouter."""
+        mock_embeddings = MagicMock()
+        mock_embeddings.is_available = True
+        router = ConsolidationRouter()
+        pipeline = ConsolidationPipeline(
+            model_router=router,
+            embedding_store=mock_embeddings,
+        )
+        assert pipeline.is_available is True
 
 
 # ── Integration Tests: Session Manager with Redis ────────────────────────

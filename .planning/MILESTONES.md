@@ -1,5 +1,22 @@
 # Milestones
 
+## v6.0 Dashboard Unification (Planned: TBD)
+
+**Phases completed:** 0 phases, 0 plans, 0 tasks
+**Timeline:** TBD
+**Workstream:** dashboard-unification
+
+**Key accomplishments:**
+
+TBD
+
+**Delivered:** TBD
+
+**Archives:**
+
+- [v6.0-ROADMAP.md](workstreams/dashboard-unification/ROADMAP.md)
+- [v6.0-REQUIREMENTS.md](REQUIREMENTS.md)
+
 ## v2.1 Multi-Project Workspace (Shipped: 2026-03-26)
 
 **Phases completed:** 5 phases (01-05), 8 plans, 15 tasks

@@ -2,11 +2,11 @@
 
 ## What This Is
 
-An AI agent platform that operates across 9 LLM providers with tiered routing (L1 workhorse, L2 premium, free fallback), per-agent model configuration, performance-based rewards (Bronze/Silver/Gold tiers earn better models and higher limits), and graceful degradation. Features intelligent memory (ONNX + Qdrant with auto-sync from Claude Code), task-aware learning (effectiveness tracking + proactive injection), and native desktop app experience (PWA + GSD auto-activation).
+An AI intelligence layer that provides specialized tools, skills, and capabilities to Claude Code and Paperclip harnesses. When integrated with Paperclip, Agent42 contributes intelligent memory (ONNX + Qdrant with auto-sync), task-aware learning (effectiveness tracking + proactive injection), and performance-based rewards (Bronze/Silver/Gold tiers). When running standalone with Claude Code, Agent42 provides a simplified dashboard for settings and tool/skill management. Features tiered provider routing across 9 LLM providers (Claude Code Subscription first, Synthetic.new fallback) with graceful degradation.
 
 ## Core Value
 
-Agent42 must always be able to run agents reliably, with tiered provider routing (L1 workhorse -> free fallback -> L2 premium) ensuring no single provider outage stops the platform.
+Agent42 must always provide reliable intelligence services to Claude Code and Paperclip harnesses, with tiered provider routing (Claude Code Subscription first -> Synthetic.new fallback -> other providers) ensuring no single provider outage stops the platform.
 
 ## Requirements
 
@@ -71,50 +71,54 @@ Agent42 must always be able to run agents reliably, with tiered provider routing
 
 ### Active
 
+- [x] Agent42 sidecar mode with adapter-friendly endpoints — Validated in Phase 24
+- [x] Paperclip adapter package (TypeScript, heartbeat/execute/status) — Validated in Phase 27
+- [x] Memory bridge (inject at heartbeat start, extract learnings after execution) — Validated in Phase 25
+- [x] Tiered routing bridge (task metadata → provider/model selection) — Validated in Phase 26
+- [x] Paperclip plugin (memory tools, MCP tool proxy, effectiveness panel) — Validated in Phase 28
+- [x] Plugin UI + Learning extraction (effectiveness tabs, provider health widget, memory browser, hourly learning job) — Validated in Phase 29
+- [x] TeamTool integration as Paperclip task strategies (fan-out + wave via plugin team_execute tool, auto-memory injection) — Validated in Phase 30
+- [ ] Docker Compose deployment (Paperclip + Agent42 + Qdrant + PostgreSQL)
+- [ ] Migration tooling (import existing agents into Paperclip company structure)
+
+## Current Milestone: v6.0 Dashboard Unification
+
+**Goal:** Unify Agent42's dashboard experience for both standalone Claude Code integration and Paperclip orchestration, with simplified provider management and integrated workspace features.
+
+**Current state:** Phase 38 (Provider UI Updates) complete — Providers tab restructured with CC Subscription/API Key/Media & Search sections, Synthetic model catalog, connectivity health dots, dynamic agent model selection. Phases 39-40 remaining.
+
+**Target features:**
+
+- Paperclip Integration Mode — When Paperclip is active, integrate workspace coding terminal, sandboxed apps, tools and skills into Paperclip dashboard
+- Standalone Mode — When running without Paperclip (Claude Code only), provide simplified dashboard for settings and tool/skill management
+- ~~Provider UI Updates~~ — ✓ Validated in Phase 38: StrongWall removed, provider UI restructured, dynamic model selection
+- Unified Agent Management — Single interface to monitor and control agents from both Agent42 and Paperclip
+- Settings Consolidation — Streamlined settings management that works in both modes
+
+## Previous Milestone: v5.0 Provider Selection Refactor
+
+**Goal:** Modernize Agent42's provider selection system with Claude Code Subscription as the primary provider, properly integrated Synthetic.new as the reliable fallback, and dynamic model discovery for all providers.
+
+**Target features:**
+
+- Claude Code Subscription first — Check CC Subscription status before falling back to other providers
+- Remove StrongWall/fix Synthetic.new — Clean up StrongWall references and properly integrate Synthetic.new
+- Dynamic model discovery — Pull available models from Synthetic.new dynamically for agent and UI selection
+- Simplify L1/L2 tier system — Remove complex tiered routing in favor of simpler provider selection
+- Performance monitoring — Track model response times and reliability for intelligent selection
+- Cost optimization — Select models based on cost/performance ratio for different task types
+
 ## Previous Milestone: v1.3 Agent LLM Control
 
 **Goal:** Restructure model routing around L1/L2 tiers with StrongWall.ai as primary workhorse, add per-agent routing configuration in the dashboard, and modernize the fallback chain
 
-**Target features:**
-- StrongWall.ai provider integration (Kimi K2.5, unlimited API, OpenAI-compatible)
-- L1 (workhorse) / L2 (premium) tier architecture in model routing
-- Per-agent routing override (primary, critic, fallback) in dashboard
-- Global default LLM settings in Settings page with per-agent overrides on Agents page
-- OpenRouter paid models as L2 option when balance present
-- Hybrid streaming: simulated streaming for chat, non-streaming for background tasks
-- Fallback chain: StrongWall -> Free tier (Cerebras/Groq) -> L2 premium (Gemini/OR paid)
+## Paused: v2.0 Custom Claude Code UI (Phases 1-4 complete, 5-6 remaining)
 
-## Current Milestone: v2.0 Custom Claude Code UI
+**Status:** PTY streaming + chat UX polish phases remaining. Paused for Paperclip integration.
 
-**Goal:** Build a VS Code Claude Code extension-style chat interface inside the Agent42 IDE, replacing the raw xterm terminal with a rich, web-native experience.
+## Paused: v3.0 GSD & jcodemunch Integration (Phase 1 complete, 2-4 remaining)
 
-**Connection model:** Smart hybrid — interactive chat uses CC subscription (free via `claude` CLI), autonomous agent tasks use Agent42's tiered routing (Gemini L1 → free fallback → L2 premium). StrongWall.ai deprecated (causes disconnects).
-
-**Status:** Phases 1-4 complete, Phases 5-6 remaining (PTY streaming + chat UX polish)
-
-**Target features:**
-- Chat message bubbles (user/assistant, avatars, timestamps, copy buttons)
-- Markdown rendering (headers, lists, syntax-highlighted code blocks, links)
-- Tool use cards (file reads, writes, commands — expandable/collapsible with status)
-- Rich input box (multi-line, paragraph breaks, Shift+Enter, slash commands)
-- Diff viewer (side-by-side/inline code changes, accept/reject buttons)
-- Session history (browse/resume past conversations via Agent42 memory)
-- Multi-agent view (multiple CC instances in tabs or side-by-side panels)
-- Flexible layout (CC as editor tab OR dedicated side panel, user chooses)
-
-## Current Milestone: v3.0 GSD & jcodemunch Integration
-
-**Goal:** Unify Agent42's developer tooling into a zero-friction platform — one-command setup that configures Claude Code, MCP, hooks, and jcodemunch; conflict-resistant memory sync across nodes; and a unified context engine that merges code intelligence with semantic memory and GSD workflow state.
-
-**Status:** Phase 1 complete, Phases 2-4 remaining (Windows setup, memory sync, context engine)
-
-**Target features:**
-- One-command setup (Linux + Windows) — generates .mcp.json, registers hooks, indexes repo with jcodemunch, validates health
-- CLAUDE.md template generation with Agent42 conventions baked in
-- Conflict-resistant memory sync: UUID+timestamp entries, entry-union merge (replaces mtime-wins)
-- ContextAssemblerTool + jcodemunch path — code symbol search merged into unified context
-- Per-project memory namespace wired into MemoryTool (ProjectMemoryStore already exists, needs wiring)
-- GSD workstream state surfaced in context engine
+**Status:** Windows setup, memory sync, context engine phases remaining. Paused for Paperclip integration.
 
 ## Complete: v2.1 Multi-Project Workspace (5/5 phases, shipped 2026-03-26)
 
@@ -156,7 +160,7 @@ Multi-project workspaces: Tabbed workspace scoping with isolated file explorer, 
 ## Constraints
 
 - **API compatibility**: All providers use OpenAI Chat Completions compatible APIs
-- **Tiered defaults**: L1 (StrongWall) when configured, free tier fallback, L2 premium opt-in
+- **Tiered defaults**: CC Subscription first, Synthetic.new fallback, other providers as needed
 - **Graceful degradation**: Missing API keys never crash Agent42
 - **Backward compatible**: Users without new API keys keep existing routing
 
@@ -244,5 +248,24 @@ Project (top-level entity)
 
 **Why:** Running MHG or other sandboxed apps on the VPS requires checking the VPS dashboard separately. This unifies local dev and remote production into one view.
 
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd:transition`):
+
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd:complete-milestone`):
+
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
+
 ---
-*Last updated: 2026-03-26 after v2.1 milestone completion*
+*Last updated: 2026-03-31 — Phase 29 (Plugin UI + Learning Extraction) complete: 4 UI slots, hourly learning job, 128 tests*

@@ -45,7 +45,7 @@ def format_tokens(count):
 
 
 def print_session_summary(stats_path):
-    """Print jcodemunch usage summary for the session."""
+    """Print compact jcodemunch usage summary for the session."""
     try:
         with open(stats_path) as f:
             stats = json.load(f)
@@ -58,39 +58,14 @@ def print_session_summary(stats_path):
 
     saved = stats.get("tokens_saved", 0)
     used = stats.get("tokens_used", 0)
-    files = stats.get("files_targeted", 0)
-    breakdown = stats.get("tool_breakdown", {})
+    total = used + saved
+    pct = f", {saved / total * 100:.0f}% saved" if total > 0 else ""
 
     print(
-        f"\n{'=' * 52}\n"
-        f"  jcodemunch Session Summary\n"
-        f"{'=' * 52}\n"
-        f"  Calls:          {calls}\n"
-        f"  Files targeted: {files}\n"
-        f"  Tokens used:    ~{format_tokens(used)}\n"
-        f"  Tokens saved:   ~{format_tokens(saved)}\n"
-        f"{'─' * 52}",
+        f"[jcodemunch] {calls} calls, ~{format_tokens(used)} used, "
+        f"~{format_tokens(saved)} saved{pct}",
         file=sys.stderr,
     )
-
-    if breakdown:
-        print("  Breakdown:", file=sys.stderr)
-        for tool, data in sorted(breakdown.items()):
-            print(
-                f"    {tool}: {data['calls']} call(s), ~{format_tokens(data['saved'])} saved",
-                file=sys.stderr,
-            )
-
-    # Savings percentage
-    total_would_have = used + saved
-    if total_would_have > 0:
-        pct = (saved / total_would_have) * 100
-        print(
-            f"{'─' * 52}\n"
-            f"  Efficiency: {pct:.0f}% token reduction vs full file reads\n"
-            f"{'=' * 52}\n",
-            file=sys.stderr,
-        )
 
     # Clean up stats file after reporting
     try:

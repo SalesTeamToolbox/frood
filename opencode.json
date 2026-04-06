@@ -1,0 +1,39 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "agent42": {
+      "type": "local",
+      "command": [
+        "c:\\Users\\rickw\\projects\\agent42\\.venv\\Scripts\\python.exe",
+        "c:\\Users\\rickw\\projects\\agent42\\mcp_server.py"
+      ],
+      "environment": {
+        "AGENT42_WORKSPACE": "c:\\Users\\rickw\\projects\\agent42",
+        "REDIS_URL": "redis://localhost:6379/0",
+        "QDRANT_URL": "http://localhost:6333",
+        "ZEN_PROXY_ENABLED": "true",
+        "ZEN_PROXY_PORT": "8765"
+      },
+      "enabled": true
+    },
+    "jcodemunch": {
+      "type": "local",
+      "command": ["uvx", "jcodemunch-mcp"],
+      "enabled": true
+    }
+  },
+  "provider": {
+    "zen": {
+      "name": "OpenCode Zen",
+      "api": "openai",
+      "options": {
+        "baseURL": "http://127.0.0.1:8765",
+        "apiKey": "${ZEN_API_KEY}"
+      }
+    }
+  },
+  "server": {
+    "port": 22329
+  },
+  "instructions": ["CLAUDE.md"]
+}

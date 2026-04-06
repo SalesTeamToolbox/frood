@@ -20,14 +20,11 @@ logger = logging.getLogger("agent42.key_store")
 # API key env var names that can be set via the admin UI
 ADMIN_CONFIGURABLE_KEYS = frozenset(
     {
+        "ZEN_API_KEY",
         "OPENROUTER_API_KEY",
-        "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
-        "SYNTHETIC_API_KEY",
-        "DEEPSEEK_API_KEY",
+        "OPENAI_API_KEY",
         "GEMINI_API_KEY",
-        "CEREBRAS_API_KEY",
-        "STRONGWALL_API_KEY",
         "REPLICATE_API_TOKEN",
         "LUMA_API_KEY",
         "BRAVE_API_KEY",

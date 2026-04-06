@@ -1,0 +1,16 @@
+{
+  "name": "dashboard-unification",
+  "title": "Dashboard Unification",
+  "description": "Unify Agent42's dashboard experience for both standalone Claude Code integration and Paperclip orchestration",
+  "owner": "agent42-team",
+  "priority": "high",
+  "status": "active",
+  "start_date": "2026-04-02",
+  "estimated_completion": "2026-04-15",
+  "dependencies": [
+    "provider-selection-refactor"
+  ],
+  "related_milestones": [
+    "v6.0"
+  ]
+}

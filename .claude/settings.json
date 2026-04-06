@@ -61,6 +61,7 @@
         ]
       },
       {
+        "matcher": "mcp__jcodemunch",
         "hooks": [
           {
             "type": "command",
@@ -80,11 +81,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/session-handoff.py",
-            "timeout": 15
-          },
-          {
-            "type": "command",
             "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/test-validator.py",
             "timeout": 45
           },
@@ -100,11 +96,6 @@
           },
           {
             "type": "command",
-            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/effectiveness-learn.py",
-            "timeout": 30
-          },
-          {
-            "type": "command",
             "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/jcodemunch-reindex.py",
             "timeout": 15
           },
@@ -112,6 +103,11 @@
             "type": "command",
             "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/knowledge-learn.py",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "cd c:/Users/rickw/projects/agent42 && python .claude/hooks/cleanup-orphans.py",
+            "timeout": 10
           }
         ]
       }

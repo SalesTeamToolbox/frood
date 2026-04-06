@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: milestone
-status: v2.1 milestone complete
-stopped_at: "Completed quick task 260325-uwr: memory system 4-issue fix"
-last_updated: "2026-03-26T05:35:01.672Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 24-sidecar-mode 24-03-PLAN.md
+last_updated: "2026-03-29T17:26:44.414Z"
 progress:
   total_phases: 4
   completed_phases: 3
@@ -20,12 +20,12 @@ See: .planning/PROJECT.md (updated 2026-03-17)
 
 **Core value:** Agent42 must always be able to run agents reliably, with tiered provider routing ensuring no single provider outage stops the platform.
 
-**Current focus:** Phase 04 — Context Engine
+**Current focus:** Phase 24 — Sidecar Mode
 
 ## Current Position
 
-Phase: 04
-Plan: Not started
+Phase: 24 (Sidecar Mode) — EXECUTING
+Plan: 3 of 3
 
 ## Performance Metrics
 
@@ -53,6 +53,9 @@ Updated after each plan completion.
 | Phase 02-design-studio P02 | 25m | 2 tasks | 3 files |
 | Phase 02 P01 | 18 | 3 tasks | 5 files |
 | Phase 04 P04-02 | 12 | 2 tasks | 2 files |
+| Phase 24-sidecar-mode P01 | 9 | 3 tasks | 5 files |
+| Phase 24-sidecar-mode P02 | 5 | 2 tasks | 2 files |
+| Phase 24-sidecar-mode P03 | 12min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -95,6 +98,12 @@ Updated after each plan completion.
 - [Phase 02]: on_queue_update callback (not with_logs=False) per D-19 for queue progress
 - [Phase 04]: EffectivenessStore instantiated in _build_registry() with workspace/.agent42/effectiveness.db path — same pattern as memory backend initialization
 - [Phase 04]: skill_loader=None intentional in UnifiedContextTool registration — gets patched later in _create_server(), same as ContextAssemblerTool
+- [Phase 24-sidecar-mode]: Pydantic v2 populate_by_name=True with Field(alias=...) for camelCase (Paperclip) and snake_case (Python) dual access
+- [Phase 24-sidecar-mode]: configure_sidecar_logging() removes all root handlers before adding JSON handler — clean JSON-only output in sidecar mode
+- [Phase 24-sidecar-mode]: SidecarOrchestrator is separate from existing AgentRuntime — Phase 24 provides stub execution; full integration deferred to Phase 25-27
+- [Phase 24-sidecar-mode]: BackgroundTasks used instead of raw asyncio.create_task for proper FastAPI lifecycle management
+- [Phase 24-sidecar-mode]: SIDECAR_ENABLED env var supported alongside --sidecar flag for operator flexibility in Docker deployments
+- [Phase 24-sidecar-mode]: configure_sidecar_logging() called before Agent42() construction — JSON formatter must be installed before __init__ logging
 
 ### Pending Todos
 
@@ -106,6 +115,6 @@ Pre-existing: tests/test_auth_flow.py::TestAuthIntegration::test_protected_endpo
 
 ## Session Continuity
 
-Last session: 2026-03-26T05:35:01.668Z
-Stopped at: Completed quick task 260325-uwr: memory system 4-issue fix
+Last session: 2026-03-29T17:26:44.400Z
+Stopped at: Completed 24-sidecar-mode 24-03-PLAN.md
 Resume file: None

@@ -14,6 +14,7 @@ Extended with endpoints for providers, tools, skills, channels, and devices.
 
 import asyncio
 import logging
+import time as _time
 from pathlib import Path
 
 from fastapi import (
@@ -333,6 +334,11 @@ _DASHBOARD_EDITABLE_SETTINGS = {
     "RLM_COST_LIMIT",
     "RLM_TIMEOUT_SECONDS",
     "RLM_LOG_DIR",
+    # Learning toggle (Phase 40)
+    "LEARNING_ENABLED",
+    # Zen proxy model selection
+    "ZEN_DEFAULT_MODEL",
+    "ZEN_ALLOW_PAID",
 }
 
 
@@ -473,6 +479,7 @@ def create_app(
     agent_manager=None,  # passed from agent42.py after Phase 2
     reward_system=None,  # passed from agent42.py when REWARDS_ENABLED=true
     workspace_registry=None,  # passed from agent42.py for multi-project workspace
+    standalone: bool = False,  # Phase 37: simplified dashboard mode (Claude Code only)
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -501,6 +508,49 @@ def create_app(
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         body = {"error": True, "message": detail, "status": exc.status_code}
         return JSONResponse(status_code=exc.status_code, content=body)
+
+    # -- Phase 37: STANDALONE mode route gating --------------------------------
+    def standalone_guard(fn):
+        """Decorator that returns 404 JSON for routes disabled in standalone mode.
+
+        Per D-01: guard decorator gates non-essential routes in standalone mode.
+        """
+        if not standalone:
+            return fn
+        from functools import wraps
+
+        @wraps(fn)
+        async def _guarded(*args, **kwargs):
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": True,
+                    "message": "This feature is not available in standalone mode",
+                    "standalone_mode": True,
+                },
+            )
+
+        return _guarded
+
+    # End standalone guard
+
+    # -- Phase 36: PAPERCLIP-05 — gate standalone dashboard in sidecar mode ----
+    if settings.sidecar_enabled:
+
+        @app.get("/")
+        async def dashboard_paperclip_redirect():
+            """Return status page when dashboard is disabled in Paperclip mode."""
+            return JSONResponse(
+                content={
+                    "status": "paperclip_mode",
+                    "message": (
+                        "Agent42 dashboard UI is disabled in Paperclip mode. "
+                        "Access workspace features through the Paperclip dashboard."
+                    ),
+                    "sidecar_port": settings.paperclip_sidecar_port,
+                },
+                status_code=503,
+            )
 
     # Shared imports used by multiple handlers within create_app scope
     import json as _json
@@ -535,7 +585,12 @@ def create_app(
 
         Does NOT expose task counts or connection info to unauthenticated users.
         """
-        return {"status": "ok"}
+        response_data: dict = {"status": "ok"}
+        if settings.sidecar_enabled:
+            response_data["mode"] = "paperclip_sidecar"
+        if standalone:
+            response_data["standalone_mode"] = True
+        return response_data
 
     @app.get("/api/health")
     async def health_detail(_user: str = Depends(get_current_user)):
@@ -1292,7 +1347,7 @@ def create_app(
                 "daily_spend_usd": spending_tracker.daily_spend_usd,
                 "total_estimated_usd": total_cost,
                 "by_model": llm_usage,  # same list, includes estimated_cost_usd
-                "flat_rate": flat_rates,  # flat-rate provider costs (e.g. StrongWall $16/mo)
+                "flat_rate": flat_rates,  # flat-rate provider costs
             },
             "connectivity": connectivity,
             "model_performance": model_perf,
@@ -1321,6 +1376,7 @@ def create_app(
     # -- Workspaces (multi-project registry) -----------------------------------
 
     @app.get("/api/workspaces")
+    @standalone_guard
     async def list_workspaces(_user: str = Depends(get_current_user)):
         if not workspace_registry:
             raise HTTPException(503, "Workspace registry not initialized")
@@ -1332,6 +1388,7 @@ def create_app(
         }
 
     @app.post("/api/workspaces", status_code=201)
+    @standalone_guard
     async def create_workspace(body: dict, _user: str = Depends(get_current_user)):
         if not workspace_registry:
             raise HTTPException(503, "Workspace registry not initialized")
@@ -1346,6 +1403,7 @@ def create_app(
         return ws.to_dict()
 
     @app.patch("/api/workspaces/{ws_id}")
+    @standalone_guard
     async def update_workspace(ws_id: str, body: dict, _user: str = Depends(get_current_user)):
         if not workspace_registry:
             raise HTTPException(503, "Workspace registry not initialized")
@@ -1359,6 +1417,7 @@ def create_app(
         return ws.to_dict()
 
     @app.delete("/api/workspaces/{ws_id}")
+    @standalone_guard
     async def delete_workspace(ws_id: str, _user: str = Depends(get_current_user)):
         if not workspace_registry:
             raise HTTPException(503, "Workspace registry not initialized")
@@ -1388,6 +1447,7 @@ def create_app(
         return workspace
 
     @app.get("/api/ide/tree")
+    @standalone_guard
     async def ide_tree(
         path: str = "",
         workspace_id: str | None = None,
@@ -1424,6 +1484,7 @@ def create_app(
         return {"path": path, "entries": entries}
 
     @app.get("/api/ide/file")
+    @standalone_guard
     async def ide_read_file(
         path: str,
         workspace_id: str | None = None,
@@ -1485,6 +1546,7 @@ def create_app(
         workspace_id: str | None = None
 
     @app.post("/api/ide/file")
+    @standalone_guard
     async def ide_write_file(
         req: IDEWriteRequest,
         _user: str = Depends(get_current_user),
@@ -1502,6 +1564,7 @@ def create_app(
         return {"status": "ok", "path": req.path, "size": len(req.content)}
 
     @app.get("/api/ide/search")
+    @standalone_guard
     async def ide_search(
         q: str,
         path: str = "",
@@ -1549,6 +1612,7 @@ def create_app(
     # -- GSD Workstreams -------------------------------------------------------
 
     @app.get("/api/gsd/workstreams")
+    @standalone_guard
     async def gsd_workstreams(
         workspace_id: str = None,
         _user: str = Depends(get_current_user),
@@ -1619,6 +1683,7 @@ def create_app(
         return {"workstreams": workstreams, "active": active_ws}
 
     @app.put("/api/gsd/workstreams/active")
+    @standalone_guard
     async def set_active_workstream(
         body: dict,
         _user: str = Depends(get_current_user),
@@ -1644,6 +1709,7 @@ def create_app(
     # -- IDE Lint --------------------------------------------------------------
 
     @app.get("/api/ide/lint")
+    @standalone_guard
     async def ide_lint(
         workspace_id: str = None,
         _user: str = Depends(get_current_user),
@@ -3351,6 +3417,8 @@ def create_app(
         messages: list[dict],
         user_query: str = "",
         mem_store=None,
+        model: str | None = None,
+        providers: list[tuple[str, str]] | None = None,
     ) -> tuple[str, str]:
         """Try CC subscription first, then API providers. Returns (text, provider_name)."""
 
@@ -3383,30 +3451,36 @@ def create_app(
                 pass
 
         # 2. Fall back to API providers
-        chat_model = _os.environ.get("CHAT_MODEL", "")
-        providers = []
+        chat_model = model if model else _os.environ.get("CHAT_MODEL", "")
 
-        anthropic_key = _os.environ.get("ANTHROPIC_API_KEY", "")
-        if anthropic_key:
-            providers.append(("anthropic", anthropic_key))
+        if providers is not None:
+            active_providers = providers
+        else:
+            active_providers = []
 
-        synthetic_key = _os.environ.get("SYNTHETIC_API_KEY", "")
-        if synthetic_key:
-            providers.append(("synthetic", synthetic_key))
+            anthropic_key = _os.environ.get("ANTHROPIC_API_KEY", "")
+            if anthropic_key:
+                active_providers.append(("anthropic", anthropic_key))
 
-        gemini_key = _os.environ.get("GEMINI_API_KEY", "") or _os.environ.get("GOOGLE_API_KEY", "")
-        if gemini_key:
-            providers.append(("gemini", gemini_key))
+            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            if zen_key:
+                active_providers.append(("zen", zen_key))
 
-        or_key = _os.environ.get("OPENROUTER_API_KEY", "")
-        if or_key:
-            providers.append(("openrouter", or_key))
+            gemini_key = _os.environ.get("GEMINI_API_KEY", "") or _os.environ.get(
+                "GOOGLE_API_KEY", ""
+            )
+            if gemini_key:
+                active_providers.append(("gemini", gemini_key))
 
-        openai_key = _os.environ.get("OPENAI_API_KEY", "")
-        if openai_key:
-            providers.append(("openai", openai_key))
+            or_key = _os.environ.get("OPENROUTER_API_KEY", "")
+            if or_key:
+                active_providers.append(("openrouter", or_key))
 
-        if not providers:
+            openai_key = _os.environ.get("OPENAI_API_KEY", "")
+            if openai_key:
+                active_providers.append(("openai", openai_key))
+
+        if not active_providers:
             return (
                 "Claude Code is not available and no API keys are configured. "
                 "Install Claude Code (`npm install -g @anthropic-ai/claude-code`) or "
@@ -3415,23 +3489,27 @@ def create_app(
             )
 
         last_error = ""
-        for provider_name, api_key in providers:
+        for provider_name, api_key in active_providers:
             try:
-                if provider_name == "anthropic":
-                    base = _os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-                    model = chat_model or "claude-sonnet-4-5-20250514"
-                    headers = {
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    }
-                    body = {
-                        "model": model,
-                        "max_tokens": 4096,
-                        "system": system_prompt,
-                        "messages": messages,
-                    }
-                    async with _httpx.AsyncClient(timeout=120.0) as client:
+                client_timeout = _httpx.Timeout(connect=15.0, read=120.0, write=30.0, pool=10.0)
+                client_limits = _httpx.Limits(max_connections=100, max_keepalive_connections=20)
+                async with _httpx.AsyncClient(
+                    timeout=client_timeout, limits=client_limits, http2=True
+                ) as client:
+                    if provider_name == "anthropic":
+                        base = _os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+                        model = chat_model or "claude-sonnet-4-5-20250514"
+                        headers = {
+                            "x-api-key": api_key,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        }
+                        body = {
+                            "model": model,
+                            "max_tokens": 4096,
+                            "system": system_prompt,
+                            "messages": messages,
+                        }
                         resp = await client.post(
                             base.rstrip("/") + "/v1/messages",
                             headers=headers,
@@ -3445,51 +3523,21 @@ def create_app(
                             return text, "anthropic"
                         last_error = f"Anthropic {resp.status_code}: {resp.text[:200]}"
 
-                elif provider_name == "synthetic":
-                    # Synthetic.new — Anthropic-compatible API
-                    base = "https://api.synthetic.new"
-                    model = chat_model or "claude-sonnet-4-5-20250514"
-                    headers = {
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    }
-                    body = {
-                        "model": model,
-                        "max_tokens": 4096,
-                        "system": system_prompt,
-                        "messages": messages,
-                    }
-                    async with _httpx.AsyncClient(timeout=120.0) as client:
-                        resp = await client.post(
-                            base.rstrip("/") + "/v1/messages",
-                            headers=headers,
-                            json=body,
-                        )
-                        if resp.status_code == 200:
-                            text = ""
-                            for block in resp.json().get("content", []):
-                                if block.get("type") == "text":
-                                    text += block.get("text", "")
-                            return text, "synthetic"
-                        last_error = f"Synthetic {resp.status_code}: {resp.text[:200]}"
-
-                elif provider_name == "gemini":
-                    model = chat_model or "gemini-2.0-flash"
-                    gemini_msgs = [
-                        {
-                            "role": m["role"] if m["role"] != "assistant" else "model",
-                            "parts": [{"text": m["content"]}],
+                    elif provider_name == "gemini":
+                        model = chat_model or "gemini-2.0-flash"
+                        gemini_msgs = [
+                            {
+                                "role": m["role"] if m["role"] != "assistant" else "model",
+                                "parts": [{"text": m["content"]}],
+                            }
+                            for m in messages
+                        ]
+                        body = {
+                            "system_instruction": {"parts": [{"text": system_prompt}]},
+                            "contents": gemini_msgs,
+                            "generationConfig": {"maxOutputTokens": 4096},
                         }
-                        for m in messages
-                    ]
-                    body = {
-                        "system_instruction": {"parts": [{"text": system_prompt}]},
-                        "contents": gemini_msgs,
-                        "generationConfig": {"maxOutputTokens": 4096},
-                    }
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-                    async with _httpx.AsyncClient(timeout=120.0) as client:
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
                         resp = await client.post(url, json=body)
                         if resp.status_code == 200:
                             data = resp.json()
@@ -3500,20 +3548,75 @@ def create_app(
                             return "(Empty response from Gemini)", "gemini"
                         last_error = f"Gemini {resp.status_code}: {resp.text[:200]}"
 
-                elif provider_name in ("openrouter", "openai"):
-                    if provider_name == "openrouter":
-                        base = "https://openrouter.ai/api"
-                        model = chat_model or "google/gemini-2.0-flash-exp:free"
-                    else:
-                        base = _os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
-                        model = chat_model or "gpt-4o-mini"
-                    oai_msgs = [{"role": "system", "content": system_prompt}] + messages
-                    headers = {
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    }
-                    body = {"model": model, "messages": oai_msgs, "max_tokens": 4096}
-                    async with _httpx.AsyncClient(timeout=120.0) as client:
+                    elif provider_name == "zen":
+                        from core.agent_manager import get_fallback_models
+
+                        model = chat_model or "qwen3.6-plus-free"
+                        fallback_models = get_fallback_models("zen", "general", model)
+                        all_models = [model] + fallback_models
+
+                        zen_client = None
+                        try:
+                            from providers.zen_api import get_zen_client
+
+                            zen_client = get_zen_client()
+                        except Exception:
+                            last_error = "Zen client unavailable"
+
+                        if not zen_client:
+                            pass
+                        else:
+                            for model_to_try in all_models:
+                                try:
+                                    result = await zen_client.chat_completion(
+                                        model_to_try,
+                                        messages,
+                                        max_tokens=4096,
+                                    )
+                                    if "error" not in result:
+                                        if model_to_try != model:
+                                            logger.info(
+                                                "Zen fallback: used '%s' instead of '%s'",
+                                                model_to_try,
+                                                model,
+                                            )
+                                        return result.get("choices", [{}])[0].get(
+                                            "message", {}
+                                        ).get("content", ""), f"zen:{model_to_try}"
+                                    is_exhausted = result.get("exhausted", False)
+                                    if is_exhausted:
+                                        reset_time = (
+                                            zen_client._rate_limiter.get_exhaustion_reset_time(
+                                                model_to_try
+                                            )
+                                        )
+                                        wait_minutes = int(reset_time / 60) if reset_time else None
+                                        msg = f"Zen model '{model_to_try}' exhausted. "
+                                        if wait_minutes:
+                                            msg += f"Try again in ~{wait_minutes} minute(s) or use a fallback model."
+                                        else:
+                                            msg += "Trying next fallback model..."
+                                        logger.warning(msg)
+                                        continue
+                                    last_error = f"Zen {model_to_try}: {result.get('error', 'Unknown error')}"
+                                    break
+                                except Exception as e:
+                                    last_error = f"Zen {model_to_try} error: {e}"
+                                    continue
+
+                    elif provider_name in ("openrouter", "openai"):
+                        if provider_name == "openrouter":
+                            base = "https://openrouter.ai/api"
+                            model = chat_model or "google/gemini-2.0-flash-exp:free"
+                        else:
+                            base = _os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
+                            model = chat_model or "gpt-4o-mini"
+                        oai_msgs = [{"role": "system", "content": system_prompt}] + messages
+                        headers = {
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        }
+                        body = {"model": model, "messages": oai_msgs, "max_tokens": 4096}
                         resp = await client.post(
                             base.rstrip("/") + "/v1/chat/completions",
                             headers=headers,
@@ -3535,12 +3638,305 @@ def create_app(
 
         return f"All providers failed. Last error: {last_error}", "none"
 
+    @app.post("/llm/chat/completions")
+    @app.post("/llm/v1/chat/completions")
+    async def llm_chat_completions(request: Request):
+        """OpenAI-compatible LLM proxy for Claude Code.
+        
+        Use this endpoint as the API base for Claude Code to route through Agent42.
+        Claude Code can switch models via the model query param or X-Model header.
+        
+        Examples:
+          curl -X POST http://localhost:8000/llm/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer dummy" \
+            -d '{"model": "qwen3.6-plus-free", "messages": [{"role": "user", "content": "hi"}]}'
+          
+          # Switch model via header:
+          curl -X POST http://localhost:8000/llm/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "X-Model: minimax-m2.5-free" \
+            -d '{"messages": [{"role": "user", "content": "hi"}]}'
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return {"error": {"message": "Invalid JSON body", "type": "invalid_request_error"}}
+
+        model = (
+            body.get("model")
+            or request.headers.get("X-Model")
+            or _os.environ.get("LLM_PROXY_MODEL", "qwen3.6-plus-free")
+        )
+        messages = body.get("messages", [])
+        max_tokens = body.get("max_tokens", 4096)
+        temperature = body.get("temperature", 1.0)
+
+        chat_model = model
+        providers = []
+
+        if model.startswith("zen:"):
+            actual_model = model.split(":", 1)[1]
+            chat_model = actual_model
+            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            if zen_key:
+                providers.append(("zen", zen_key))
+        elif model in (
+            "qwen3.6-plus-free",
+            "minimax-m2.5-free",
+            "nemotron-3-super-free",
+            "big-pickle",
+        ):
+            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            if zen_key:
+                providers.append(("zen", zen_key))
+        else:
+            if _os.environ.get("ANTHROPIC_API_KEY", ""):
+                providers.append(("anthropic", _os.environ.get("ANTHROPIC_API_KEY", "")))
+            if _os.environ.get("OPENROUTER_API_KEY", ""):
+                providers.append(("openrouter", _os.environ.get("OPENROUTER_API_KEY", "")))
+            if _os.environ.get("OPENAI_API_KEY", ""):
+                providers.append(("openai", _os.environ.get("OPENAI_API_KEY", "")))
+
+        if not providers:
+            return {"error": {"message": "No API keys configured", "type": "invalid_request_error"}}
+
+        system_msg = ""
+        filtered_messages = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                system_msg = msg.get("content", "")
+            else:
+                filtered_messages.append(msg)
+
+        try:
+            text, provider_used = await _chat_complete(
+                system_prompt=system_msg,
+                messages=filtered_messages,
+                user_query=filtered_messages[-1].get("content", "") if filtered_messages else "",
+                model=chat_model,
+                providers=providers,
+            )
+        except Exception as e:
+            return {"error": {"message": str(e), "type": "internal_error"}}
+
+        if not text or text.startswith("All providers failed"):
+            return {"error": {"message": text or "No response", "type": "server_error"}}
+
+        import uuid as _uuid
+
+        return {
+            "id": f"chatcmpl-{_uuid.uuid4().hex[:8]}",
+            "object": "chat.completion",
+            "created": int(_time.time()),
+            "model": chat_model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": text,
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            },
+        }
+
+    @app.post("/llm/v1/messages")
+    async def llm_messages(request: Request):
+        """Anthropic-compatible Messages API endpoint for Claude Code /model switching.
+
+        Claude Code sends requests in Anthropic format:
+          POST /v1/messages
+          {"model": "...", "system": "...", "messages": [...], "max_tokens": ...}
+
+        This endpoint translates to the internal provider routing and returns
+        an Anthropic-compatible response.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "type": "error",
+                    "error": {"type": "invalid_request_error", "message": "Invalid JSON body"},
+                },
+            )
+
+        model = (
+            body.get("model")
+            or request.headers.get("X-Model")
+            or _os.environ.get("LLM_PROXY_MODEL", "qwen3.6-plus-free")
+        )
+        system_prompt = body.get("system", "")
+        messages = body.get("messages", [])
+        max_tokens = body.get("max_tokens", 4096)
+
+        # Route to internal provider logic
+        chat_model = model
+        providers = []
+
+        if model.startswith("zen:"):
+            actual_model = model.split(":", 1)[1]
+            chat_model = actual_model
+            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            if zen_key:
+                providers.append(("zen", zen_key))
+        elif model in (
+            "qwen3.6-plus-free",
+            "minimax-m2.5-free",
+            "nemotron-3-super-free",
+            "big-pickle",
+        ):
+            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            if zen_key:
+                providers.append(("zen", zen_key))
+        else:
+            if _os.environ.get("ANTHROPIC_API_KEY", ""):
+                providers.append(("anthropic", _os.environ.get("ANTHROPIC_API_KEY", "")))
+            if _os.environ.get("OPENROUTER_API_KEY", ""):
+                providers.append(("openrouter", _os.environ.get("OPENROUTER_API_KEY", "")))
+            if _os.environ.get("OPENAI_API_KEY", ""):
+                providers.append(("openai", _os.environ.get("OPENAI_API_KEY", "")))
+
+        if not providers:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "type": "error",
+                    "error": {
+                        "type": "invalid_request_error",
+                        "message": "No API keys configured",
+                    },
+                },
+            )
+
+        try:
+            text, provider_used = await _chat_complete(
+                system_prompt=system_prompt,
+                messages=messages,
+                user_query=messages[-1].get("content", "") if messages else "",
+                model=chat_model,
+                providers=providers,
+            )
+        except Exception as e:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "type": "error",
+                    "error": {"type": "api_error", "message": str(e)},
+                },
+            )
+
+        if not text or text.startswith("All providers failed"):
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "type": "error",
+                    "error": {"type": "api_error", "message": text or "No response"},
+                },
+            )
+
+        import uuid as _uuid
+
+        return {
+            "id": f"msg_{_uuid.uuid4().hex[:12]}",
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "text", "text": text}],
+            "model": chat_model,
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+            },
+        }
+
+    @app.get("/llm/models")
+    @app.get("/llm/v1/models")
+    async def llm_models():
+        """Return available models for LLM proxy."""
+        from core.agent_manager import PROVIDER_MODELS
+
+        models = []
+        for provider, category_map in PROVIDER_MODELS.items():
+            if provider == "zen":
+                for category, model_id in category_map.items():
+                    models.append(
+                        {
+                            "id": model_id,
+                            "object": "model",
+                            "created": 1700000000,
+                            "owned_by": "opencode",
+                            "provider": "zen",
+                            "category": category,
+                        }
+                    )
+            elif provider == "openrouter":
+                for category, model_id in category_map.items():
+                    models.append(
+                        {
+                            "id": model_id,
+                            "object": "model",
+                            "created": 1700000000,
+                            "owned_by": "openrouter",
+                            "provider": "openrouter",
+                            "category": category,
+                        }
+                    )
+            elif provider == "anthropic":
+                for category, model_id in category_map.items():
+                    models.append(
+                        {
+                            "id": model_id,
+                            "object": "model",
+                            "created": 1700000000,
+                            "owned_by": "anthropic",
+                            "provider": "anthropic",
+                            "category": category,
+                        }
+                    )
+
+        return {
+            "object": "list",
+            "data": models,
+        }
+
+    @app.get("/llm/config")
+    async def llm_config():
+        """Return LLM proxy configuration for Claude Code.
+
+        Claude Code can use this to discover the endpoint and available models.
+        """
+        base_url = _os.environ.get("LLM_PROXY_BASE_URL", "http://localhost:8000")
+        return {
+            "endpoint": f"{base_url}/llm/v1/chat/completions",
+            "auth_type": "none",
+            "model_header": "X-Model",
+            "default_model": _os.environ.get("LLM_PROXY_MODEL", "qwen3.6-plus-free"),
+            "available_models": [
+                {"id": "qwen3.6-plus-free", "provider": "zen", "category": "fast"},
+                {"id": "minimax-m2.5-free", "provider": "zen", "category": "general"},
+                {"id": "nemotron-3-super-free", "provider": "zen", "category": "reasoning"},
+                {"id": "big-pickle", "provider": "zen", "category": "content"},
+            ],
+        }
+
     @app.get("/api/chat/messages")
+    @standalone_guard
     async def chat_messages_legacy(_user: str = Depends(get_current_user)):
         """Get messages for legacy (no-session) chat mode."""
         return await _chat_load_messages("_legacy")
 
     @app.get("/api/chat/sessions")
+    @standalone_guard
     async def chat_sessions_list(type: str = "", _user: str = Depends(get_current_user)):
         """List chat sessions, optionally filtered by type (chat/code)."""
         return await _chat_load_sessions(type)
@@ -3550,6 +3946,7 @@ def create_app(
         session_type: str = "chat"
 
     @app.post("/api/chat/sessions")
+    @standalone_guard
     async def chat_session_create(
         req: CreateSessionRequest, _user: str = Depends(get_current_user)
     ):
@@ -3568,6 +3965,7 @@ def create_app(
         return session
 
     @app.get("/api/chat/sessions/{session_id}/messages")
+    @standalone_guard
     async def chat_session_messages(session_id: str, _user: str = Depends(get_current_user)):
         """Get all messages for a specific session."""
         return await _chat_load_messages(session_id)
@@ -3577,6 +3975,7 @@ def create_app(
         file_context: str = ""
 
     @app.post("/api/chat/sessions/{session_id}/send")
+    @standalone_guard
     async def chat_session_send(
         session_id: str, req: SendMessageRequest, _user: str = Depends(get_current_user)
     ):
@@ -3666,6 +4065,7 @@ def create_app(
         return {"status": "ok"}
 
     @app.delete("/api/chat/sessions/{session_id}")
+    @standalone_guard
     async def chat_session_delete(session_id: str, _user: str = Depends(get_current_user)):
         """Delete a chat session and its messages."""
         session_path = _CHAT_SESSIONS_DIR / f"{session_id}.json"
@@ -3687,6 +4087,7 @@ def create_app(
         repo_id: str = ""
 
     @app.post("/api/chat/sessions/{session_id}/setup")
+    @standalone_guard
     async def chat_session_setup(
         session_id: str, req: ChatSetupRequest, _user: str = Depends(get_current_user)
     ):
@@ -4161,12 +4562,12 @@ Focus on learnings that would help in future similar sessions."""
             return {"status": "error", "detail": str(e), "learnings": []}
 
     @app.post("/api/ide/chat")
+    @standalone_guard
     async def ide_chat(req: ChatRequest, _user: str = Depends(get_current_user)):
         """Send a message to the AI provider and get a response.
 
         Uses Anthropic Messages API format. Compatible with:
         - Anthropic API (default)
-        - Synthetic.new (Anthropic-compatible)
         - Any Anthropic-compatible provider
         """
 
@@ -4310,6 +4711,7 @@ Focus on learnings that would help in future similar sessions."""
             raise HTTPException(500, f"Chat error: {e}")
 
     @app.get("/api/ide/chat/config")
+    @standalone_guard
     async def ide_chat_config(_user: str = Depends(get_current_user)):
         """Return current chat provider configuration (no secrets)."""
         has_key = bool(_os.environ.get("ANTHROPIC_API_KEY", ""))
@@ -4320,9 +4722,10 @@ Focus on learnings that would help in future similar sessions."""
             "provider_url": provider_url,
             "model": model,
             "providers": [
-                {"name": "Anthropic", "url": "https://api.anthropic.com"},
-                {"name": "Synthetic", "url": "https://api.synthetic.new/v1"},
+                {"name": "OpenCode Zen", "url": "https://opencode.ai/zen/v1"},
                 {"name": "OpenRouter", "url": "https://openrouter.ai/api/v1"},
+                {"name": "Anthropic", "url": "https://api.anthropic.com"},
+                {"name": "OpenAI", "url": "https://api.openai.com/v1"},
             ],
         }
 
@@ -4336,6 +4739,9 @@ Focus on learnings that would help in future similar sessions."""
     # Fallback preserves backward compatibility for headless/test usage.
     _effectiveness_store = effectiveness_store  # may be None in tests/headless usage
     _agent_runtime = AgentRuntime(workspace)
+
+    # Key store for API key management
+    _key_store = key_store  # passed from agent42.py when available
 
     class AgentCreateRequest(BaseModel):
         name: str = ""
@@ -4383,6 +4789,75 @@ Focus on learnings that would help in future similar sessions."""
         data = req.model_dump(exclude_none=True)
         agent = _agent_manager.create(**data)
         return agent.to_dict()
+
+    @app.get("/api/agents/unified")
+    async def list_unified_agents(_user: str = Depends(get_current_user)):
+        """Return agents from Agent42 and optionally Paperclip, merged into a unified list.
+
+        Each Agent42 agent has source='agent42' and embedded performance data.
+        When PAPERCLIP_API_URL is set, Paperclip agents are fetched and merged with
+        source='paperclip'. On Paperclip failure, returns Agent42 agents only with
+        paperclip_unavailable=True (AGENT-01, AGENT-02).
+        """
+        import asyncio
+        import logging
+
+        import httpx
+
+        _log = logging.getLogger("agent42.unified_agents")
+        paperclip_unavailable = False
+        paperclip_agents: list[dict] = []
+
+        # --- Fetch Agent42 agents with embedded performance data ---
+        agent42_agents: list[dict] = []
+        if _agent_manager is not None:
+            raw_agents = _agent_manager.list_all()
+
+            async def _fetch_stats(agent):
+                stats = (
+                    await _effectiveness_store.get_agent_stats(agent.id)
+                    if _effectiveness_store
+                    else None
+                )
+                d = agent.to_dict()
+                d["source"] = "agent42"
+                d["success_rate"] = stats["success_rate"] if stats else 0.0
+                return d
+
+            agent42_agents = list(await asyncio.gather(*(_fetch_stats(a) for a in raw_agents)))
+
+        # --- Proxy to Paperclip (only when URL is configured) ---
+        if settings.paperclip_api_url:
+            try:
+                url = f"{settings.paperclip_api_url}{settings.paperclip_agents_path}"
+                async with httpx.AsyncClient(timeout=5.0) as http:
+                    resp = await http.get(url)
+                if resp.status_code == 200:
+                    payload = resp.json()
+                    raw_pc = payload if isinstance(payload, list) else payload.get("agents", [])
+                    for pc_agent in raw_pc:
+                        agent_id = pc_agent.get("id", "")
+                        paperclip_agents.append(
+                            {
+                                **pc_agent,
+                                "source": "paperclip",
+                                "manage_url": f"{settings.paperclip_api_url}/agents/{agent_id}",
+                            }
+                        )
+                else:
+                    _log.warning(
+                        "Paperclip returned non-200 (%s) — degrading gracefully",
+                        resp.status_code,
+                    )
+                    paperclip_unavailable = True
+            except (httpx.TimeoutException, httpx.ConnectError, Exception) as exc:
+                _log.warning("Paperclip unreachable (%s) — degrading gracefully", exc)
+                paperclip_unavailable = True
+
+        return {
+            "agents": agent42_agents + paperclip_agents,
+            "paperclip_unavailable": paperclip_unavailable,
+        }
 
     @app.get("/api/agents/{agent_id}")
     async def get_agent(agent_id: str, _user: str = Depends(get_current_user)):
@@ -4672,6 +5147,105 @@ Focus on learnings that would help in future similar sessions."""
             "note": "Provider registry removed in v2.0 MCP pivot",
         }
 
+    @app.get("/api/settings/provider-status")
+    async def get_provider_status(
+        _admin: AuthContext = Depends(require_admin),
+    ):
+        """Return live connectivity status for each configured LLM provider."""
+        import os
+        import time as _time
+
+        import httpx
+
+        results = []
+
+        # Helper for pinging /v1/models with Bearer auth
+        async def _ping_provider(name, label, env_var, base_url, auth_header_fn):
+            key = os.environ.get(env_var, "")
+            if not key:
+                return {"name": name, "label": label, "configured": False, "status": "unconfigured"}
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    headers = auth_header_fn(key)
+                    resp = await client.get(f"{base_url}/models", headers=headers)
+                status = (
+                    "ok"
+                    if resp.status_code == 200
+                    else ("auth_error" if resp.status_code in (401, 403) else "unreachable")
+                )
+            except httpx.TimeoutException:
+                status = "timeout"
+            except Exception:
+                status = "unreachable"
+            return {"name": name, "label": label, "configured": True, "status": status}
+
+        # OpenCode Zen -- ping https://opencode.ai/zen/v1/models
+        zen_status = "unconfigured"
+        zen_exhausted = []
+        zen_key = os.environ.get("ZEN_API_KEY", "")
+        if zen_key:
+            try:
+                from providers.zen_api import get_zen_client
+
+                client = get_zen_client()
+                zen_exhausted = client._rate_limiter.get_exhausted_models()
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    headers = {"Authorization": f"Bearer {zen_key}"}
+                    resp = await client.get("https://opencode.ai/zen/v1/models", headers=headers)
+                zen_status = (
+                    "ok"
+                    if resp.status_code == 200
+                    else ("auth_error" if resp.status_code in (401, 403) else "unreachable")
+                )
+            except httpx.TimeoutException:
+                zen_status = "timeout"
+            except Exception:
+                zen_status = "unreachable"
+        results.append(
+            {
+                "name": "zen",
+                "label": "OpenCode Zen",
+                "configured": bool(zen_key),
+                "status": zen_status,
+                "exhausted": zen_exhausted,
+            }
+        )
+
+        # OpenRouter -- ping https://openrouter.ai/api/v1/models
+        results.append(
+            await _ping_provider(
+                "openrouter",
+                "OpenRouter",
+                "OPENROUTER_API_KEY",
+                "https://openrouter.ai/api/v1",
+                lambda k: {"Authorization": f"Bearer {k}"},
+            )
+        )
+
+        # Anthropic -- ping https://api.anthropic.com/v1/models
+        results.append(
+            await _ping_provider(
+                "anthropic",
+                "Anthropic",
+                "ANTHROPIC_API_KEY",
+                "https://api.anthropic.com/v1",
+                lambda k: {"x-api-key": k, "anthropic-version": "2023-06-01"},
+            )
+        )
+
+        # OpenAI -- ping https://api.openai.com/v1/models
+        results.append(
+            await _ping_provider(
+                "openai",
+                "OpenAI",
+                "OPENAI_API_KEY",
+                "https://api.openai.com/v1",
+                lambda k: {"Authorization": f"Bearer {k}"},
+            )
+        )
+
+        return {"providers": results, "checked_at": _time.time()}
+
     # -- Tools (Phase 4) ------------------------------------------------------
 
     @app.get("/api/tools")
@@ -4740,14 +5314,14 @@ Focus on learnings that would help in future similar sessions."""
     @app.get("/api/settings/keys")
     async def get_api_keys(_admin: AuthContext = Depends(require_admin)):
         """Get all configurable API keys with masked values (admin only)."""
-        if not key_store:
+        if not _key_store:
             raise HTTPException(status_code=503, detail="Key store not configured")
-        return key_store.get_masked_keys()
+        return _key_store.get_masked_keys()
 
     @app.put("/api/settings/keys")
     async def update_api_keys(req: KeyUpdateRequest, _admin: AuthContext = Depends(require_admin)):
         """Update one or more API keys (admin only)."""
-        if not key_store:
+        if not _key_store:
             raise HTTPException(status_code=503, detail="Key store not configured")
 
         from core.key_store import ADMIN_CONFIGURABLE_KEYS
@@ -4760,9 +5334,9 @@ Focus on learnings that would help in future similar sessions."""
                 continue
             value = value.strip()
             if not value:
-                key_store.delete_key(env_var)
+                _key_store.delete_key(env_var)
             else:
-                key_store.set_key(env_var, value)
+                _key_store.set_key(env_var, value)
             updated.append(env_var)
 
         # Keys are injected into os.environ by set_key/delete_key.
@@ -5020,6 +5594,39 @@ Focus on learnings that would help in future similar sessions."""
             "errors": errors,
         }
 
+    @app.delete("/api/settings/memory/{collection}")
+    async def purge_memory_collection(
+        collection: str,
+        _admin: AuthContext = Depends(require_admin),
+    ):
+        """Purge all entries in a Qdrant memory collection (irreversible). Per D-15."""
+        valid_collections = {"memory", "knowledge", "history"}
+        if collection not in valid_collections:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid collection '{collection}'. Must be one of: {', '.join(sorted(valid_collections))}",
+            )
+        # Retrieve qdrant store from app state (set during startup)
+        _qdrant = getattr(app.state, "qdrant_store", None)
+        if not _qdrant:
+            # Fallback: try to get from memory_store
+            _ms = getattr(app.state, "memory_store", None)
+            _qdrant = getattr(_ms, "_qdrant", None) if _ms else None
+        if not _qdrant or not getattr(_qdrant, "is_available", False):
+            raise HTTPException(status_code=503, detail="Qdrant store not available")
+        success = await asyncio.get_running_loop().run_in_executor(
+            None, _qdrant.clear_collection, collection
+        )
+        if not success:
+            raise HTTPException(
+                status_code=500, detail=f"Failed to purge collection '{collection}'"
+            )
+        return {
+            "ok": True,
+            "collection": collection,
+            "message": f"Collection '{collection}' purged",
+        }
+
     @app.post("/api/consolidate/trigger")
     async def trigger_consolidation(_admin: AuthContext = Depends(require_admin)):
         """Manually trigger memory dedup consolidation.
@@ -5045,6 +5652,7 @@ Focus on learnings that would help in future similar sessions."""
     # -- Channels (Phase 2) ---------------------------------------------------
 
     @app.get("/api/channels")
+    @standalone_guard
     async def list_channels(_user: str = Depends(get_current_user)):
         if channel_manager:
             return channel_manager.list_channels()
@@ -5143,6 +5751,7 @@ Focus on learnings that would help in future similar sessions."""
             priority: int = 0
 
         @app.get("/api/projects")
+        @standalone_guard
         async def list_projects(
             include_archived: bool = False,
             _user: str = Depends(get_current_user),
@@ -5157,6 +5766,7 @@ Focus on learnings that would help in future similar sessions."""
             return result
 
         @app.post("/api/projects")
+        @standalone_guard
         async def create_project(
             req: ProjectCreateRequest,
             _user: str = Depends(get_current_user),
@@ -5174,11 +5784,13 @@ Focus on learnings that would help in future similar sessions."""
             return d
 
         @app.get("/api/projects/board")
+        @standalone_guard
         async def projects_board(_user: str = Depends(get_current_user)):
             """Get projects grouped by status for Kanban board."""
             return project_manager.board()
 
         @app.get("/api/projects/{project_id}")
+        @standalone_guard
         async def get_project(
             project_id: str,
             _user: str = Depends(get_current_user),
@@ -5192,6 +5804,7 @@ Focus on learnings that would help in future similar sessions."""
             return d
 
         @app.patch("/api/projects/{project_id}")
+        @standalone_guard
         async def update_project(
             project_id: str,
             req: ProjectUpdateRequest,
@@ -5219,6 +5832,7 @@ Focus on learnings that would help in future similar sessions."""
             return d
 
         @app.patch("/api/projects/{project_id}/status")
+        @standalone_guard
         async def update_project_status(
             project_id: str,
             req: ProjectStatusRequest,
@@ -5234,6 +5848,7 @@ Focus on learnings that would help in future similar sessions."""
             return d
 
         @app.delete("/api/projects/{project_id}")
+        @standalone_guard
         async def delete_project(
             project_id: str,
             _user: str = Depends(get_current_user),
@@ -5245,6 +5860,7 @@ Focus on learnings that would help in future similar sessions."""
             return {"status": "archived"}
 
         @app.get("/api/projects/{project_id}/tasks")
+        @standalone_guard
         async def get_project_tasks(
             project_id: str,
             _user: str = Depends(get_current_user),
@@ -5257,6 +5873,7 @@ Focus on learnings that would help in future similar sessions."""
             return [t.to_dict() for t in tasks]
 
         @app.post("/api/projects/{project_id}/tasks")
+        @standalone_guard
         async def create_project_task(
             project_id: str,
             req: ProjectTaskCreateRequest,
@@ -5271,6 +5888,7 @@ Focus on learnings that would help in future similar sessions."""
     # -- Project Memory --------------------------------------------------------
 
     @app.get("/api/projects/{project_id}/memory")
+    @standalone_guard
     async def get_project_memory(
         project_id: str,
         _user: str = Depends(get_current_user),
@@ -5302,6 +5920,7 @@ Focus on learnings that would help in future similar sessions."""
         device_code: str
 
     @app.get("/api/github/status")
+    @standalone_guard
     async def github_status(_user: str = Depends(get_current_user)):
         """Check if GitHub is configured."""
         return {
@@ -5310,6 +5929,7 @@ Focus on learnings that would help in future similar sessions."""
         }
 
     @app.post("/api/github/device-auth/start")
+    @standalone_guard
     async def github_device_start(_user: str = Depends(get_current_user)):
         """Start GitHub OAuth device flow."""
         if not settings.github_client_id:
@@ -5327,6 +5947,7 @@ Focus on learnings that would help in future similar sessions."""
             raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
 
     @app.post("/api/github/device-auth/poll")
+    @standalone_guard
     async def github_device_poll(
         req: GitHubPollRequest,
         _user: str = Depends(get_current_user),
@@ -5357,6 +5978,7 @@ Focus on learnings that would help in future similar sessions."""
             raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
 
     @app.post("/api/github/create-repo")
+    @standalone_guard
     async def github_create_repo(
         name: str,
         private: bool = True,
@@ -5391,11 +6013,13 @@ Focus on learnings that would help in future similar sessions."""
             token: str
 
         @app.get("/api/github/accounts")
+        @standalone_guard
         async def list_github_accounts(_admin: AuthContext = Depends(require_admin)):
             """List all saved GitHub accounts (tokens masked)."""
             return github_account_store.list_accounts()
 
         @app.post("/api/github/accounts")
+        @standalone_guard
         async def add_github_account(
             req: GitHubAccountAddRequest,
             _admin: AuthContext = Depends(require_admin),
@@ -5437,6 +6061,7 @@ Focus on learnings that would help in future similar sessions."""
             return acct
 
         @app.delete("/api/github/accounts/{account_id}")
+        @standalone_guard
         async def remove_github_account(
             account_id: str,
             _admin: AuthContext = Depends(require_admin),
@@ -5461,11 +6086,13 @@ Focus on learnings that would help in future similar sessions."""
             account_id: str = ""  # optional: which GitHub account to use
 
         @app.get("/api/repos")
+        @standalone_guard
         async def list_repos(_user: str = Depends(get_current_user)):
             """List all connected repositories."""
             return [r.to_dict() for r in repo_manager.list_repos()]
 
         @app.post("/api/repos")
+        @standalone_guard
         async def create_repo(req: RepoCreateRequest, _admin: AuthContext = Depends(require_admin)):
             """Add a repository (local path or clone from GitHub)."""
             if req.source == "github":
@@ -5493,6 +6120,7 @@ Focus on learnings that would help in future similar sessions."""
             return repo.to_dict()
 
         @app.get("/api/repos/{repo_id}")
+        @standalone_guard
         async def get_repo(repo_id: str, _user: str = Depends(get_current_user)):
             """Get a single repository by ID."""
             repo = repo_manager.get(repo_id)
@@ -5501,6 +6129,7 @@ Focus on learnings that would help in future similar sessions."""
             return repo.to_dict()
 
         @app.delete("/api/repos/{repo_id}")
+        @standalone_guard
         async def delete_repo(repo_id: str, _admin: AuthContext = Depends(require_admin)):
             """Remove a repository from the registry."""
             try:
@@ -5510,12 +6139,14 @@ Focus on learnings that would help in future similar sessions."""
             return {"status": "removed"}
 
         @app.get("/api/repos/{repo_id}/branches")
+        @standalone_guard
         async def list_repo_branches(repo_id: str, _user: str = Depends(get_current_user)):
             """List branches for a repository."""
             branches = await repo_manager.list_branches(repo_id)
             return {"branches": branches}
 
         @app.post("/api/repos/{repo_id}/sync")
+        @standalone_guard
         async def sync_repo(repo_id: str, _user: str = Depends(get_current_user)):
             """Fetch latest changes for a repository."""
             try:
@@ -5525,6 +6156,7 @@ Focus on learnings that would help in future similar sessions."""
             return {"status": "ok", "message": msg}
 
         @app.get("/api/github/repos")
+        @standalone_guard
         async def list_github_repos(
             account_id: str = "",
             _admin: AuthContext = Depends(require_admin),
@@ -5575,6 +6207,7 @@ Focus on learnings that would help in future similar sessions."""
             description: str = ""
 
         @app.get("/api/apps")
+        @standalone_guard
         async def list_apps(mode: str = "", _user: str = Depends(get_current_user)):
             """List all apps, optionally filtered by mode (internal/external)."""
             if mode and mode in ("internal", "external"):
@@ -5584,6 +6217,7 @@ Focus on learnings that would help in future similar sessions."""
             return [a.to_dict() for a in apps]
 
         @app.post("/api/apps")
+        @standalone_guard
         async def create_user_app(req: AppCreateRequest, _user: str = Depends(get_current_user)):
             """Create a new app."""
             new_app = await app_manager.create(
@@ -5599,6 +6233,7 @@ Focus on learnings that would help in future similar sessions."""
             }
 
         @app.get("/api/apps/{app_id}")
+        @standalone_guard
         async def get_app(app_id: str, _user: str = Depends(get_current_user)):
             """Get app details."""
             found = await app_manager.get(app_id)
@@ -5607,6 +6242,7 @@ Focus on learnings that would help in future similar sessions."""
             return found.to_dict()
 
         @app.post("/api/apps/{app_id}/start")
+        @standalone_guard
         async def start_app(app_id: str, _user: str = Depends(get_current_user)):
             """Start a ready/stopped app."""
             try:
@@ -5616,6 +6252,7 @@ Focus on learnings that would help in future similar sessions."""
                 raise HTTPException(status_code=400, detail=str(e))
 
         @app.post("/api/apps/{app_id}/stop")
+        @standalone_guard
         async def stop_app(app_id: str, _user: str = Depends(get_current_user)):
             """Stop a running app."""
             try:
@@ -5625,6 +6262,7 @@ Focus on learnings that would help in future similar sessions."""
                 raise HTTPException(status_code=400, detail=str(e))
 
         @app.post("/api/apps/{app_id}/restart")
+        @standalone_guard
         async def restart_app(app_id: str, _user: str = Depends(get_current_user)):
             """Restart an app."""
             try:
@@ -5634,6 +6272,7 @@ Focus on learnings that would help in future similar sessions."""
                 raise HTTPException(status_code=400, detail=str(e))
 
         @app.delete("/api/apps/{app_id}")
+        @standalone_guard
         async def delete_app(app_id: str, _user: str = Depends(get_current_user)):
             """Permanently delete an app and remove its files."""
             try:
@@ -5643,6 +6282,7 @@ Focus on learnings that would help in future similar sessions."""
                 raise HTTPException(status_code=400, detail=str(e))
 
         @app.get("/api/apps/{app_id}/logs")
+        @standalone_guard
         async def get_app_logs(
             app_id: str, lines: int = 100, _user: str = Depends(get_current_user)
         ):
@@ -5651,11 +6291,13 @@ Focus on learnings that would help in future similar sessions."""
             return {"logs": output}
 
         @app.get("/api/apps/{app_id}/health")
+        @standalone_guard
         async def app_health(app_id: str, _user: str = Depends(get_current_user)):
             """Check app health."""
             return await app_manager.health_check(app_id)
 
         @app.post("/api/apps/{app_id}/update")
+        @standalone_guard
         async def update_app(
             app_id: str, req: AppUpdateRequest, _user: str = Depends(get_current_user)
         ):
@@ -5671,6 +6313,7 @@ Focus on learnings that would help in future similar sessions."""
             visibility: str | None = None
 
         @app.patch("/api/apps/{app_id}/settings")
+        @standalone_guard
         async def update_app_settings(
             app_id: str,
             req: AppSettingsRequest,

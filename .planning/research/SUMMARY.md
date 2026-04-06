@@ -1,257 +1,245 @@
 # Project Research Summary
 
-**Project:** Agent42 v2.1 — Multi-Project Workspace Tabs
-**Domain:** Multi-project context isolation in an embedded web IDE (VS Code-style)
-**Researched:** 2026-03-23
+**Project:** Agent42 v4.0 — Paperclip Integration (Plugin + Adapter)
+**Domain:** Cross-language integration — Python AI platform as Paperclip intelligence layer
+**Researched:** 2026-03-28
 **Confidence:** HIGH
-
-> Note: ARCHITECTURE.md researcher timed out. Architecture findings are fully covered by STACK.md
-> (integration patterns, component boundaries, API design) and PITFALLS.md (data model design,
-> component interaction failures). Coverage is functionally complete.
-
----
 
 ## Executive Summary
 
-This milestone adds multi-project workspace tabs to the Agent42 IDE page — a second tier of tabs above the existing editor tab bar that scopes all IDE surfaces (file explorer, Monaco editor, CC sessions, terminals) to a project folder. The good news: every mechanism required already exists in the codebase. Monaco model swapping, PTY cwd parameters, CC session workspace_path routing, and localStorage persistence are all in place. The work is composition and state management, not new technology. No new dependencies are required.
+Agent42 v4.0 integrates with Paperclip as both an HTTP adapter (execution backend) and a Paperclip plugin (intelligence layer). The integration is cross-language by necessity: Paperclip's plugin and adapter systems are TypeScript/Node.js, while Agent42's intelligence stack (ONNX embeddings, Qdrant, asyncio tiered routing) is Python. The recommended architecture is a thin TypeScript wrapper layer over a Python FastAPI sidecar — not a TypeScript rewrite. The TypeScript packages (`adapters/agent42-paperclip/` and `plugins/agent42-paperclip-plugin/`) act as protocol bridges, translating JSON-RPC 2.0 and HTTP adapter contracts into calls to Agent42's existing REST endpoints. This boundary is well-defined and allows each language to do what it does best.
 
-The recommended approach is a two-phase core build. Phase 1 establishes the foundational data model: a server-side `WorkspaceRegistry` (authoritative source of truth), a workspace-ID-prefixed URI convention for Monaco models, a namespaced storage key schema for localStorage/sessionStorage, and `/api/workspaces` CRUD endpoints. This foundation must be locked before any UI is built — eight of the ten identified pitfalls stem from missing namespace isolation that is trivially cheap to design in from the start but expensive to retrofit after tab switching is wired. Phase 2 threads the registry into every IDE surface (file API, terminal WS, CC warm pool, Monaco model switching, editor tab snapshot/restore) and builds the workspace tab bar UI.
+The recommended build order is adapter-first, plugin-second. The sidecar HTTP endpoint is a hard dependency for the adapter, and the adapter is a hard dependency for everything else — without a working sidecar, Paperclip cannot invoke Agent42 at all. Once the adapter is functional, the plugin scaffold and memory tools can be layered on top without touching the adapter code. The plugin's UI slots have zero Python dependency and can be developed in parallel with the sidecar work. This creates two independent tracks: Python (sidecar + orchestrator + memory bridge) and TypeScript (adapter package + plugin package), which converge at integration test points at each phase boundary.
 
-The primary risk is cross-workspace state contamination: Monaco URI collisions causing silent file corruption, CC sessions resuming in the wrong project directory, and localStorage history bleeding across workspace switches. These are not hypothetical — identical bugs are documented in Zed (issue #41240), Claude Code (issues #5386, #5387), and VS Code Copilot (feedback #275). All are prevented by the same root principle: every file reference, session ID, storage key, and API call must carry a workspace identifier, and the server must resolve workspace paths from a registered allowlist rather than accepting client-supplied paths directly.
-
----
+The critical risks are startup race conditions (Paperclip probing Agent42 before it is ready), Windows CRLF breaking the JSON-RPC protocol in the plugin, duplicate budget tracking creating governance conflicts, and memory injection latency on the heartbeat hot path. All are well-understood and preventable with specific mitigations documented in PITFALLS.md. The most architecturally significant risk is scope creep — particularly the temptation to replicate Paperclip's budget enforcement, scheduling, or audit trail in Agent42. The research is emphatic: Agent42 is the intelligence layer, Paperclip is the control plane, and crossing that boundary creates long-term maintenance debt.
 
 ## Key Findings
 
 ### Recommended Stack
 
-The entire feature is buildable with existing dependencies. The stack is the existing Agent42 stack: FastAPI for new `/api/workspaces` endpoints, `aiofiles` + JSON for the `WorkspaceRegistry` persistence file (`.agent42/workspaces.json`), `crypto.randomUUID()` for workspace IDs, `localStorage` for client-side tab state, and plain JS object arrays (matching the existing `state.chatSessions` / `state.codeSessions` pattern) for in-memory workspace state.
+The existing Agent42 Python stack requires no new Python dependencies for the sidecar. The sidecar reuses FastAPI, uvicorn, existing MemoryStore, QdrantStore, AgentRuntime, and EffectivenessStore unchanged. The only new Python artifacts are thin wrapper classes (SidecarOrchestrator, MemoryBridge, TieredRoutingBridge) and a new FastAPI app entry point (`dashboard/sidecar.py`).
 
-See `.planning/research/STACK.md` for the full integration point analysis.
+The new additions are entirely in the TypeScript/Node.js layer required by Paperclip's extension APIs. Both the adapter package and plugin package are independent npm packages built with pnpm, located at `adapters/agent42-paperclip/` and `plugins/agent42-paperclip-plugin/` at the repo root.
 
 **Core technologies:**
 
-- `localStorage` (browser stdlib): Workspace config persistence — stale-while-revalidate against server registry; small JSON (<2KB); same pattern as existing CC session history
-- `state.workspaces` plain JS array: In-memory workspace tab state — matches `state.chatSessions` pattern exactly; no framework needed
-- `crypto.randomUUID()` (browser stdlib): Stable workspace IDs — already used for CC session IDs in `ideOpenCCChat()`
-- `aiofiles` (existing dep, 23.0.0+): Registry persistence at `.agent42/workspaces.json`
-- FastAPI `Query()` params (existing, 0.115.0+): New `workspace_id` param on `/api/ide/tree`, `/api/ide/file`, `/api/ide/search`, `/ws/terminal`, `/ws/cc-chat`
-- Monaco `setModel()` + `saveViewState()` / `restoreViewState()` (existing, Monaco 0.52.2): Per-workspace editor tab state — stable API since 0.20+; view state is lightweight
+- `TypeScript 5.7+` + `@paperclipai/plugin-sdk 2026.318.0+`: Required for Paperclip adapter and plugin development — no Python alternative exists
+- `Node.js 20+` + `pnpm 9.15+`: Paperclip's runtime and package manager requirements
+- `Docker Compose 2.x` + `PostgreSQL 16+`: Standard Paperclip deployment model; Agent42 sidecar joins as an additional service on the same Docker network
+- Python FastAPI sidecar (existing stack): New `--sidecar` CLI flag activates stripped mode — no dashboard, no WebSocket manager, no static files, shares all core services with the full server
 
-**What not to use:** Multiple Monaco editor instances (80MB RAM each; use model swapping), `sessionStorage` for workspace config (dies on tab close), arbitrary absolute paths from client in any API or WebSocket (path traversal risk), any new frontend framework (no build system exists in this project).
+**What not to add:** Python JSON-RPC libraries (plugin communicates via HTTP to sidecar, not direct JSON-RPC), gRPC (HTTP REST is simpler and matches the Paperclip HTTP adapter spec), shared PostgreSQL from Agent42 (Paperclip owns PostgreSQL; Agent42 keeps Qdrant+SQLite), or a TypeScript rewrite of the Agent42 sidecar.
+
+See `.planning/research/STACK.md` for full details and rationale.
 
 ### Expected Features
 
-See `.planning/research/FEATURES.md` for the full prioritization matrix and feature dependency graph.
+Paperclip has two distinct extension surfaces: the HTTP adapter (routes execution into Agent42) and the plugin (enriches the platform with Agent42 intelligence). Agent42 needs both.
 
-**Must have (table stakes) — v2.1 launch:**
+**Must have — adapter side (table stakes):**
 
-- Workspace tab bar above editor tab bar with active tab indicator
-- Per-workspace file explorer (re-rooted to workspace `root_path` on tab switch)
-- Per-workspace editor tabs (`_ideTabs` partitioned by `workspace_id`; Monaco view state saved/restored on switch)
-- Per-workspace CC sessions (`--cwd` = workspace root; session list filtered per workspace; warm pool keyed by `(user, workspace_id)`)
-- Per-workspace terminal sessions (PTY spawned with `cwd` = workspace root; terminals hidden/shown on switch)
-- Workspace persistence across reloads (`localStorage` cache + server `/api/workspaces` as authoritative source)
-- Add workspace modal (manual path input + `/api/apps` dropdown for Agent42 internal apps)
-- Remove workspace (close button with unsaved-files guard; cannot remove last workspace)
-- Default workspace seeded from `AGENT42_WORKSPACE` — zero behavior change for existing single-workspace users
+- `POST /api/paperclip/heartbeat` accepting `{runId, agentId, companyId, taskId, wakeReason, context}`
+- Synchronous `AdapterExecutionResult` response with `{status, result, usage, costUsd, model, provider}`
+- Async 202 + callback pattern for long-running tasks (>15s); Agent42 POSTs back to Paperclip's callback endpoint
+- `runId` idempotency guard to prevent duplicate execution on Paperclip retries
+- `GET /api/paperclip/health` for Paperclip's `doctor` command validation
+- `SIDECAR_MODE=true` with Bearer token auth and structured JSON logging (no ANSI codes)
+- Docker multi-stage `--target sidecar` image for clean deployment
 
-**Should have (competitive advantage) — v2.1.x patches:**
+**Must have — plugin side (table stakes):**
 
-- Server-side workspace persistence as authoritative source (enables cross-device sync; `/api/workspaces` already exists from Phase 1)
-- Drag-to-reorder workspace tabs
-- Quick keyboard switcher (Ctrl+` cycling through workspace tabs)
-- Rename workspace (double-click tab label)
-- CC session scoped to workspace cwd (differentiator: AI understands which project without manual prompting)
-- GSD workstream indicator filtered per active workspace root
+- Valid `manifest.json` with `apiVersion: 1`, correct capability declarations, and entrypoints
+- `setup(ctx)` worker entry point registering all tool handlers
+- `health()`, `initialize(config)`, and `onShutdown()` handlers
+- `memory_recall` and `memory_store` agent tools (wrapping existing MemoryStore — zero new backend code required)
+- `route_task` agent tool (wrapping existing tiered routing layer)
 
-**Defer (v2.2+):**
+**Should have (differentiators):**
 
-- Per-workspace git status badge on tab (requires polling per workspace; complex at scale)
-- Workspace-level agent/task count indicator
-- Export/import workspace configuration
+- `tool_effectiveness` agent tool returning top tools by success rate for a task type
+- `extract_learnings` hourly cron job fetching Paperclip run transcripts, storing structured learnings in Qdrant
+- Agent effectiveness `detailTab` on Paperclip agent pages (tier badge, success rates, model history)
+- Provider health `dashboardWidget` showing Agent42 provider availability at a glance
+- Memory browser `detailTab` on run pages showing injected memories and extracted learnings
 
-**Anti-features (do not build):**
+**Defer to Phase 4 (post-validation):**
 
-- Global search across all workspaces — mixes results from unrelated projects
-- Shared editor tabs across workspaces — destroys the context isolation guarantee
-- Sync CC session across workspace switch — CC sessions are cwd-bound; cross-workspace sessions cause confabulation about wrong project
-- Auto-discover all git repos — noisy, slow, and surprising
+- Automatic memory injection on heartbeat (requires `heartbeat.started` event — must verify this event is shipped before designing against it)
+- TeamTool fan-out and wave strategies exposed as Paperclip task strategies
+- Migration CLI (`agent42-to-paperclip`) for importing existing agents into Paperclip
+- Routing decisions `dashboardWidget` (cost analytics across providers)
+
+**Anti-features to reject:**
+
+- Agent42 managing Paperclip budgets — creates dual accounting and governance conflicts; SpendingTracker becomes a data source, not an enforcement gate
+- Agent42 scheduling heartbeats — bypasses Paperclip's approval gates and audit trail
+- Full Agent42 dashboard embedded in Paperclip via iframe — maintenance liability on every UI change
+- TypeScript rewrite of Agent42 sidecar — wastes months and loses Python-native intelligence stack value
+
+See `.planning/research/FEATURES.md` for the full feature dependency graph, interface contracts (heartbeat request/response shapes), and MVP definition.
 
 ### Architecture Approach
 
-The architecture is entirely additive to the existing single-workspace IDE. The central design decision is the `WorkspaceRegistry`: a server-side in-memory dict (loaded from `.agent42/workspaces.json` at startup, written via `aiofiles`) that maps workspace IDs to validated absolute paths. All API endpoints and WebSocket handlers accept `workspace_id` as a parameter and resolve the actual path from the registry — never from client-supplied path strings. The client never sends paths; it sends IDs. This single architectural principle prevents the entire security attack surface (path traversal, workspace spoofing) and the data integrity problems (Monaco URI collision, file API sandbox bypass).
+The integration uses three well-defined patterns running in concert: (1) HTTP adapter with async callback as the primary execution pattern — Paperclip POSTs to the sidecar, gets 202 Accepted, Agent42 works asynchronously and POSTs results back via callback; (2) plugin as out-of-process Node.js extension communicating via JSON-RPC 2.0 over stdin/stdout with the Paperclip host; (3) sidecar mode as a CLI run-mode flag (`--sidecar`) that starts a stripped FastAPI app sharing all core services with the full dashboard.
 
 **Major components:**
 
-1. `WorkspaceRegistry` (new, `server.py` or `core/workspace_registry.py`): authoritative ID-to-path mapping; validates paths on registration; caches in memory; persists to `.agent42/workspaces.json`
-2. `/api/workspaces` CRUD endpoints (new, `server.py`): GET/POST/DELETE/PATCH; thin layer over `WorkspaceRegistry`
-3. Modified IDE API endpoints (`/api/ide/tree`, `/api/ide/file`, `/api/ide/search`): add `workspace_id` Query param; sandbox check against registry-resolved root instead of global `workspace` variable
-4. Modified WebSocket handlers (`/ws/terminal`, `/ws/cc-chat`): accept `workspace_id` query param; terminal uses `registry.get_path(id)` as PTY cwd; CC warm pool keyed by `(user, workspace_id)` tuple
-5. Frontend workspace state (`app.js`): `state.workspaces[]`, `state.activeWorkspaceId`, per-workspace `_wsEditorTabs`, `_wsTreeCache`, `_wsExpandedDirs` dicts; `localStorage` persistence under `a42_workspaces`
-6. Workspace tab bar UI (new section in `app.js`): renders above editor tab bar; add/remove controls; active tab highlight; switches all IDE surfaces on click; workspace name = `basename(root_path)` with full path tooltip
+1. `SidecarOrchestrator` (NEW Python, `core/sidecar_orchestrator.py`) — drives the inject-route-execute-learn cycle: recall memories, resolve provider/model, spawn AgentRuntime subprocess, extract learnings, POST callback to Paperclip
+2. `MemoryBridge` (NEW Python, thin wrapper) — `recall()` before execution with 200ms hard timeout via `asyncio.timeout(0.2)`; `learn()` after via fire-and-forget `asyncio.create_task()`
+3. `TieredRoutingBridge` (NEW Python, thin wrapper) — maps Paperclip task metadata (wakeReason, agentRole) to Agent42 provider/model selection via existing RewardSystem
+4. `dashboard/sidecar.py` (NEW Python) — stripped FastAPI app with sidecar routes only; no WebSocket manager, no static files, no dashboard auth middleware
+5. `adapters/agent42-paperclip/` (NEW TypeScript) — implements Paperclip's `ServerAdapterModule`: `execute()`, `testEnvironment()`, `sessionCodec()`
+6. `plugins/agent42-paperclip-plugin/` (NEW TypeScript) — plugin worker with memory tools, MCP proxy, and UI slots (detailTab, dashboardWidget)
+7. All existing Agent42 services — MemoryStore, QdrantStore, AgentRuntime, EffectivenessStore, RewardSystem, AgentManager, MCP server — unchanged
+
+The SidecarOrchestrator execute cycle:
+
+```text
+Paperclip POST -> SidecarRoutes -> 202 Accepted
+                    -> MemoryBridge.recall()  (200ms cap)
+                    -> TieredRoutingBridge.resolve()
+                    -> AgentRuntime.execute() (subprocess)
+                    -> MemoryBridge.learn()   (fire-and-forget)
+                    -> EffectivenessStore.record()
+                    -> POST callback to Paperclip
+```
+
+See `.planning/research/ARCHITECTURE.md` for the full system diagram, all data flow sequences, and code patterns for each component.
 
 ### Critical Pitfalls
 
-See `.planning/research/PITFALLS.md` for all 10 pitfalls with code line references and recovery strategies.
+1. **Agent ID mismatch orphans all memories** — When importing agents into Paperclip, if IDs are regenerated, all Qdrant memories and SQLite effectiveness data become unreachable. Prevention: preserve Agent42 agent UUIDs as `adapterConfig.agentId` in Paperclip. Migration script must enforce 1:1 UUID mapping.
 
-1. **Monaco URI collisions between workspaces** — Two workspaces containing `src/main.py` get the same model URI (`file:///src/main.py`); `monaco.editor.getModel(uri)` returns the first workspace's model; the second workspace silently edits the wrong file. Prevention: prefix all Monaco URIs with workspace ID (`file:///ws-<id>/relative/path`). Must be established in Phase 1 before any editor state is tracked — cannot be retrofitted.
+2. **Sidecar health check race on Docker startup** — Paperclip probes the adapter before Agent42 is ready. FastAPI+uvicorn takes 2-5s; Qdrant embedded mode takes longer. Prevention: Docker Compose `healthcheck` on Agent42 service plus exponential backoff retry in the TypeScript adapter.
 
-2. **File API accepts client-supplied paths** — Passing `workspace_root` as a client query parameter to `/api/ide/tree` or `/api/ide/file` is a path traversal vulnerability. Prevention: client sends only `workspace_id`; server resolves path from `WorkspaceRegistry`; sandbox check validates against the resolved root, not the global `workspace` variable.
+3. **Duplicate budget tracking** — Both Paperclip and Agent42's SpendingTracker track costs. In sidecar mode, Agent42 must report costs to Paperclip but must NOT enforce its own budget limits. Budget enforcement is Paperclip's job; SpendingTracker becomes a data source only.
 
-3. **CC warm pool keyed by user only** — `_cc_warm_pool[user]` (line 1737 of `server.py`) causes workspace A's warm CC session to be consumed when workspace B opens CC. Claude starts in the wrong project's cwd with the wrong git context. Prevention: key pool by `(user, workspace_id)` tuple.
+4. **Memory injection latency on heartbeat hot path** — Qdrant search adds 200-500ms. Prevention: hard-cap recall at 200ms via `asyncio.timeout(0.2)` and always use the async 202 callback pattern so memory injection does not block the heartbeat response.
 
-4. **Global `_ideTabs` and `_termSessions` are shared singletons** — Workspace switch either leaves old workspace tabs visible (contamination) or clears all tabs (UX regression — user loses open files). Prevention: snapshot current workspace tab state to its localStorage slot on switch; restore on return; Monaco models stay in memory registry across switches.
+5. **Windows CRLF in TypeScript build artifacts** — Git on Windows converts LF to CRLF, which breaks JSON-RPC newline-delimited protocol. Prevention: `.gitattributes` on `*.ts` and `*.json` files with `eol=lf` in both adapter and plugin packages — enforce on day one.
 
-5. **localStorage key collisions** — CC session history keys (`cc_hist_<sessionId>`) and active session pointer (`cc_active_session`) are workspace-agnostic; after a page reload, history from workspace A appears in workspace B's CC panel. Prevention: namespace all keys by workspace ID from day one (`cc_hist_<wsId>_<sessionId>`, `cc_active_session_<wsId>`). Key schema must be locked in Phase 1 before any storage code is written.
+Additional documented pitfalls (MEDIUM severity): standalone mode regression (P6), multi-tenant memory isolation (P7), plugin SDK version drift (P8), duplicate transcript storage (P9), Docker Compose port conflicts (P10), iframe temptation (P11), TypeScript monorepo complexity (P12).
 
-Additional documented pitfalls: CC sessions directory shared across workspaces (Pitfall 7), file search results returning workspace-ambiguous relative paths (Pitfall 8), workspace config stored in localStorage only without server validation (Pitfall 9), Monaco view state lost on workspace switch due to DOM re-render triggering editor dispose (Pitfall 10).
-
----
+See `.planning/research/PITFALLS.md` for full list with phase assignments.
 
 ## Implications for Roadmap
 
-The dependency graph is clear and unambiguous. All ten pitfalls map to one of two phases. The `WorkspaceRegistry` is the prerequisite for every other piece of work.
+The feature dependency graph drives a clear 4-phase structure. Two tracks can run partially in parallel within phases (Python sidecar track and TypeScript plugin/adapter track), but the sidecar must reach working status before end-to-end integration testing is possible. Phase boundaries are integration test gates.
 
-### Phase 1: Foundation — Workspace Data Model and Registry
+### Phase 1: Sidecar + HTTP Adapter Foundation
 
-**Rationale:** Eight of ten pitfalls require Phase 1 decisions. The Monaco URI convention, storage key schema, and server-side registry must all be locked before any UI is built. This phase produces no visible user-facing UI — it is infrastructure only. Building the tab switcher before this foundation is in place guarantees retrofitting pain.
+**Rationale:** The sidecar endpoint is the hard dependency for everything. Without `POST /api/paperclip/heartbeat` responding correctly, Paperclip cannot invoke Agent42 and no other integration work can be validated end-to-end. The TypeScript adapter package can be scaffolded in parallel but requires the sidecar to exist before any live testing. This phase must be complete before plugin work begins.
 
-**Delivers:**
+**Delivers:** Agent42 is a functional Paperclip execution backend. Paperclip operators can configure an agent to run "on Agent42" and receive results with cost reporting in the AdapterExecutionResult shape. Docker Compose deployment is working.
 
-- `WorkspaceRegistry` class: in-memory dict, `workspaces.json` persistence, `register()`, `get_path(id)`, `validate()`, `list()`, `delete()` methods; startup path validation
-- `/api/workspaces` CRUD endpoints (GET/POST/DELETE/PATCH)
-- Monaco URI namespacing convention: `file:///ws-<workspaceId>/<relative-path>` — applied to `ideOpenFile()` and all consumers before any tab state is built
-- localStorage / sessionStorage key schema locked: `a42_workspaces`, `cc_hist_<wsId>_<sessionId>`, `cc_active_session_<wsId>` — established before any storage code is written
-- `(workspace_id, relative_path)` as the canonical file reference pair across all APIs
-- Frontend: `state.workspaces[]`, `state.activeWorkspaceId`, per-workspace state dicts; `localStorage` persistence under `a42_workspaces`
-- Default workspace seeded from `AGENT42_WORKSPACE` so existing single-workspace behavior is unchanged
+**Addresses features:** All table-stakes adapter features — heartbeat endpoint, AdapterExecutionResult response, async 202+callback, runId idempotency, health check, sidecar mode, Bearer auth, structured logging, Docker `--target sidecar` image
 
-**Addresses features:** Workspace persistence, default workspace, add/remove workspace (backend only)
+**Avoids pitfalls:** P5 (CRLF — enforce via `.gitattributes` at project creation), P2 (Docker startup race — Docker Compose healthcheck), P6 (standalone mode regression — `--sidecar` is an additive flag, existing `python agent42.py` behavior unchanged)
 
-**Avoids pitfalls:** Pitfall 1 (Monaco URIs), Pitfall 4 (file API sandbox), Pitfall 5 (localStorage keys), Pitfall 8 (file path workspace-ambiguity), Pitfall 9 (server as authority)
+**Research flag:** Standard patterns. No research phase needed. The HTTP adapter pattern is documented in Paperclip's official Mintlify docs and the hermes-paperclip-adapter is a high-quality reference implementation. Async 202+callback is standard HTTP. All components map to existing Agent42 code.
 
-**Research flag:** Well-understood. All patterns derived from direct codebase inspection. No additional research phase needed.
+### Phase 2: Plugin Scaffold + Memory Tools
 
----
+**Rationale:** Plugin scaffold is independent of adapter code (separate TypeScript package, separate Paperclip extension surface). Once the sidecar exposes memory endpoints, the plugin memory tools are thin HTTP wrappers — low complexity, high value. This phase closes the minimum viable integration: agents can recall context and store learnings within Paperclip heartbeat sessions. Memory tools require zero new Agent42 backend code — `MemoryStore.search()` and `MemoryStore.store()` already exist.
 
-### Phase 2: Wiring — IDE Surface Scoping and Tab UI
+**Delivers:** Agent42's intelligence is accessible to Paperclip agents as callable tools. Operators install the plugin and immediately see memory-enhanced agent behavior. Routing decisions are available to agents via `route_task`. Effectiveness data is surfaced via `tool_effectiveness`.
 
-**Rationale:** With the registry and data model in place, Phase 2 threads workspace context through every IDE surface and builds the tab switcher. Recommended execution order within the phase: backend API changes first (add `workspace_id` params to existing endpoints), then CC session scoping (warm pool key fix is a correctness issue, not polish), then terminal scoping, then frontend tab state snapshot/restore logic, then the tab bar UI last.
+**Uses:** `@paperclipai/plugin-sdk` (pin to specific version), existing MemoryStore, existing tiered routing layer, existing EffectivenessStore
 
-**Delivers:**
+**Implements:** Plugin scaffold (manifest + `setup(ctx)` + lifecycle handlers), `memory_recall` tool, `memory_store` tool, `route_task` tool, `tool_effectiveness` tool
 
-- Modified `/api/ide/tree`, `/api/ide/file`, `/api/ide/search`: `workspace_id` Query param; sandbox check against registry-resolved root
-- Modified `/ws/terminal`: `workspace_id` query param; PTY spawns with `cwd = registry.get_path(workspace_id)`, not global `workspace`
-- Modified `/ws/cc-chat`: `workspace_id` query param; warm pool keyed by `(user, workspace_id)` tuple; CC session directory per workspace root (`.agent42/cc-sessions/` inside each workspace's folder)
-- CC session list endpoint filtered to active workspace; session picker shows only current workspace sessions
-- Frontend tab state snapshot/restore: serialize `_ideTabs` + `_termSessions` to per-workspace localStorage slot on switch; restore on return; Monaco `viewState` saved/restored per model URI
-- Workspace tab bar UI: horizontal strip above editor tab bar; active tab indicator; add/remove buttons; workspace name = `basename(root_path)` with full path in `title` tooltip
+**Avoids pitfalls:** P3 (duplicate budget — `route_task` returns recommendations, does not gate), P7 (multi-tenant isolation — start with one sidecar per company; add `company_id` Qdrant filter only if needed), P8 (SDK version drift — pin `@paperclipai/plugin-sdk` version, abstract SDK calls behind wrapper), P11 (iframe temptation — use native plugin UI slots only, no iframe)
 
-**Addresses features:** All P1 table-stakes features from FEATURES.md MVP list
+**Research flag:** Needs `/gsd:research-phase` before implementation. Plugin SDK was released March 18, 2026 — 10 days before this research. The `executeTool` handler signatures, `ctx.http.fetch` contract, and plugin lifecycle sequence need hands-on verification from the SDK source before writing implementation code.
 
-**Avoids pitfalls:** Pitfall 2 (terminal cwd), Pitfall 3 (CC warm pool), Pitfall 6 (global IDE arrays), Pitfall 7 (CC session directory shared), Pitfall 10 (Monaco view state lost on DOM re-render)
+### Phase 3: Plugin UI + Learning Extraction
 
-**Verification checkpoints (from PITFALLS.md "Looks Done But Isn't" checklist):**
+**Rationale:** The `extract_learnings` job closes the intelligence feedback loop — extracted learnings from Paperclip run transcripts feed back into memory_recall, making agents progressively smarter over time. UI slots give operators visibility into what Agent42 is doing inside Paperclip. Both require the Phase 2 plugin scaffold to be in place and stable.
 
-- `monaco.editor.getModels()` shows distinct URI-prefixed models for same-relative-path files in two workspaces
-- New terminal `pwd` in workspace B shows workspace B root, not `AGENT42_WORKSPACE`
-- CC session list shows only workspace B sessions when workspace B is active
-- Path traversal test: `/api/ide/file?path=../../../etc/passwd&workspace_id=<valid>` returns 403
-- Switch workspaces 3x; verify each retains its own open tabs, cursor positions, and terminal sessions
+**Delivers:** Operators can see agent effectiveness tiers (Bronze/Silver/Gold), provider health status, and memory traceability on Paperclip pages. The hourly extract_learnings job continuously improves agent memory quality by processing Paperclip run transcripts through the existing learning extraction pipeline. Full Docker Compose deployment including PostgreSQL.
 
-**Research flag:** One targeted pre-read before Phase 2 planning: inspect how `renderCode()` interacts with the Monaco singleton dispose/recreate cycle (lines 3587-3591 of `app.js`). If workspace tab switching triggers a full re-render, the `setModel()` + `restoreViewState()` approach needs adjustment. Not a full research phase — a 15-minute code trace.
+**Uses:** `@paperclipai/plugin-sdk/ui` React components, Paperclip run transcript API (heartbeatRunEvents), existing learning extraction pipeline, existing SpendingTracker for provider health data
 
----
+**Implements:** `extract_learnings` hourly cron job, agent effectiveness `detailTab`, provider health `dashboardWidget`, memory browser `detailTab` on run pages, Docker Compose with PostgreSQL
 
-### Phase 3: Polish — UX Enhancements and Full Server Persistence
+**Avoids pitfalls:** P1 (agent ID mismatch — extract_learnings must key memories to preserved agent UUIDs), P9 (duplicate transcripts — store only structured learnings/embeddings, not raw transcript text), P10 (Docker port conflicts — all five ports configurable via env vars)
 
-**Rationale:** After core isolation is verified working, add features that improve experience. Server-side persistence is deferred here (not Phase 1) because the MVP is correct and functional with localStorage-only; server persistence adds cross-device sync which is quality-of-life, not correctness.
+**Research flag:** Needs `/gsd:research-phase` before planning. Two specific gaps: (a) how does a plugin access `heartbeatRunEvents` from within the plugin worker context (required for extract_learnings), and (b) what are the exact `detailTab` and `dashboardWidget` slot rendering APIs in the SDK. Neither is clearly documented in current sources.
 
-**Delivers:**
+### Phase 4: Advanced Features (Post-Validation)
 
-- Server-side workspace persistence as authoritative source (localStorage becomes stale-while-revalidate cache; `/api/workspaces` is fully authoritative)
-- Drag-to-reorder workspace tabs (order persisted to server)
-- Quick keyboard switcher (Ctrl+` cycles through workspace tabs)
-- Rename workspace (double-click tab label to edit display name)
-- Workspace deletion cleanup: invalidate CC sessions, sweep localStorage namespace, unregister from `WorkspaceRegistry`; inline error in tab when workspace folder is missing or inaccessible
-- Workspace tab max count enforcement (8 workspaces max; workspace switcher modal for more)
+**Rationale:** TeamTool strategies and automatic memory injection are high-complexity, high-value features that require production validation first. The `heartbeat.started` event (required for automatic injection) is documented only as RFC #206, not as a shipped feature. The TeamTool fan-out pattern requires async callback timing validation against Paperclip's run timeout policy. The wave strategy requires Paperclip comment threading API write access that has not been confirmed available.
 
-**Research flag:** Standard patterns throughout. No research phase needed. Playwright UAT is the appropriate verification method for UX work.
+**Delivers:** Agent42 can fan out parallel sub-agents within a single Paperclip task. Memory injection becomes automatic rather than tool-initiated. Migration tooling allows existing Agent42 users to import their agents and preserve their memory history.
 
----
+**Implements:** Automatic memory injection on heartbeat (if `heartbeat.started` event exists), TeamTool fan-out strategy, TeamTool wave strategy, migration CLI (`agent42-to-paperclip`), routing decisions `dashboardWidget`
+
+**Avoids pitfalls:** P1 (ID mismatch — migration CLI must enforce UUID preservation), P4 (memory latency — automatic injection must remain async and non-blocking)
+
+**Research flag:** Needs `/gsd:research-phase` before planning Phase 4. Must verify: (a) `heartbeat.started` event exists in shipped Paperclip (RFC #206 only), (b) TeamTool async callback timing vs. Paperclip run timeout policy, (c) Paperclip API write access for comment threading (wave strategy dependency).
 
 ### Phase Ordering Rationale
 
-- Phase 1 before Phase 2: the registry and namespace schema are structural prerequisites; building tab UI on top of a broken data model means rebuilt UI, not just added functionality
-- Backend API changes before frontend wiring in Phase 2: frontend cannot pass `workspace_id` to endpoints that don't accept it yet
-- CC warm pool key fix in Phase 2 (not Phase 3): this is a correctness issue — consuming workspace A's warm session for workspace B is silent and wrong, not just inconvenient
-- Server persistence in Phase 3 (not Phase 1): the registry API already exists from Phase 1; Phase 3 just makes the client treat it as authoritative rather than supplementary
+- Sidecar first because it unblocks all integration testing. Nothing can be validated end-to-end without it.
+- Plugin after adapter because they are independent TypeScript packages on separate extension surfaces, but memory tools require the sidecar's memory endpoints to exist before they can be tested.
+- UI and learning extraction after memory tools because they depend on the plugin scaffold and because `extract_learnings` needs the memory data model from Phase 2 to be stable.
+- Advanced features last because they depend on production validation and include unverified Paperclip API features (heartbeat.started event, comment threading write API).
+- Python track (SidecarOrchestrator, MemoryBridge, sidecar.py) and TypeScript track (adapter package, plugin package) can run in parallel within each phase, but must converge at phase-boundary integration tests.
 
 ### Research Flags
 
-Phases with standard, well-documented patterns (skip `/gsd:research-phase`):
+Phases needing `/gsd:research-phase` before implementation:
 
-- **Phase 1:** All patterns derived from direct codebase inspection — aiofiles JSON, FastAPI Query params, localStorage schema, Monaco URI API
-- **Phase 2 (most of it):** WebSocket query param routing, PTY cwd, CC session directory are documented and straightforward
-- **Phase 3:** Drag-to-reorder (standard HTML5 drag-and-drop on flex tab bar), keyboard shortcuts, rename — all standard web patterns
+- **Phase 2:** Plugin SDK `executeTool` handler signatures and `ctx.http.fetch` contract — SDK is 10 days old, verify against actual source before writing handlers.
+- **Phase 3:** Paperclip run transcript access from plugin context (`heartbeatRunEvents` API) and `detailTab`/`dashboardWidget` slot rendering APIs — not found in current documentation.
+- **Phase 4:** Three external dependencies must be verified before planning: `heartbeat.started` event availability, TeamTool async timing vs. Paperclip timeout policy, Paperclip comment threading write API.
 
-Targeted pre-read recommended before Phase 2 planning (not a full research phase):
+Phases with standard patterns (skip research-phase):
 
-- **Phase 2 (Monaco re-render interaction):** Trace `renderCode()` call sites to understand whether workspace tab switching triggers full DOM re-render that would invoke the Monaco dispose/recreate guard at lines 3587-3591 of `app.js`. If so, design around it before implementing the tab switcher.
-- **Phase 2 (CC sessions_dir threading):** Confirm `sessions_dir` parameter is used consistently through all `_save_session()` / `_load_session()` call sites in `cc_chat_ws` before planning CC scoping implementation.
-
----
+- **Phase 1 — HTTP adapter + sidecar:** Well-documented via hermes-paperclip-adapter reference implementation, official Paperclip HTTP adapter Mintlify docs, and Paperclip PLUGIN_SPEC.md. Async 202+callback is standard HTTP. All maps directly to existing Agent42 code patterns.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 | --- | --- | --- |
-| Stack | HIGH | Direct codebase inspection (app.js, server.py, requirements.txt); no speculative choices; zero new dependencies |
-| Features | HIGH | Derived from existing IDE capabilities and VS Code/JetBrains patterns; anti-features from real bug reports |
-| Architecture | HIGH | ARCHITECTURE.md timed out; STACK.md and PITFALLS.md provide equivalent coverage with code line citations |
-| Pitfalls | HIGH | 10 pitfalls with code line references; 5 backed by production bug reports from Zed, Claude Code, VS Code |
+| Stack | HIGH | TypeScript/Node.js/pnpm requirements from official Paperclip docs. Python sidecar requirements from direct Agent42 codebase inspection. No speculation. |
+| Features | HIGH (adapter), MEDIUM (plugin) | Adapter spec documented with reference implementations. Plugin SDK released March 18, 2026 — feature set documented, but runtime behavior and `executeTool` signatures need hands-on validation. |
+| Architecture | HIGH | System diagram derived from Paperclip monorepo structure (DeepWiki), hermes-paperclip-adapter reference code, official adapter spec, and direct Agent42 codebase inspection. All component boundaries are concrete. |
+| Pitfalls | HIGH (P1-P6), MEDIUM (P7-P12) | Critical pitfalls are well-documented cross-language integration patterns. Paperclip-specific pitfalls (SDK drift, transcript isolation) are based on platform maturity inference given rapid release cadence. |
 
-**Overall confidence:** HIGH
+**Overall confidence:** HIGH for Phase 1 and 2 scope. MEDIUM for Phase 3 plugin UI details. LOW for Phase 4 (depends on unverified Paperclip API features).
 
 ### Gaps to Address
 
-- **Monaco DOM re-render interaction:** Whether workspace tab switching triggers `renderCode()` which disposes and recreates the Monaco editor (lines 3587-3591 of `app.js`) must be confirmed before Phase 2 planning. If it does, the `setModel()` + `restoreViewState()` approach needs a guard or alternative.
-
-- **CC `sessions_dir` threading completeness:** The `_save_session()` and `_load_session()` functions accept an optional `sessions_dir` parameter, but it is unclear if all call sites within `cc_chat_ws` use it consistently. Verify this before finalizing the CC scoping design in Phase 2.
-
-- **External repository paths (outside AGENT42_WORKSPACE):** Whether v2.1 MVP supports workspace roots outside `AGENT42_WORKSPACE` (requiring the registered-roots allowlist) or only internal `apps/` subdirectories (simpler, uses existing sandbox model) is a scoping decision to make in Phase 1 planning. Restricting to internal paths is a valid MVP simplification.
-
-- **Windows PTY cwd behavior:** `PtyProcess.spawn(cwd=...)` is confirmed working on Windows (CLAUDE.md documents pywinpty usage), but behavior with non-`AGENT42_WORKSPACE` paths should be smoke-tested early in Phase 2 execution.
-
----
+- **`heartbeat.started` event existence:** RFC #206 proposes this event but it may not be in the shipped platform. Must verify before designing Phase 4 automatic memory injection. If it does not exist, automatic injection requires a polling alternative.
+- **Plugin SDK `executeTool` handler interface:** SDK released March 18, 2026. Exact handler signatures and `ctx.http.fetch` contract should be verified from SDK source before Phase 2 implementation begins.
+- **Paperclip run transcript access from plugin:** How a plugin reads `heartbeatRunEvents` from within the plugin worker context is not documented in current sources. Required for the Phase 3 `extract_learnings` job.
+- **Paperclip comment threading write API:** Required for TeamTool wave strategy (Phase 4). Whether Paperclip exposes a write API for comment threading needs confirmation.
+- **Multi-tenant sidecar at scale:** Research recommends one sidecar per company as the simplest approach, but at large Paperclip installations with many companies, this approach may not scale. Flag for validation during Phase 2 deployment and plan the `company_id` Qdrant filter (option b) as a fallback.
 
 ## Sources
 
 ### Primary (HIGH confidence)
 
-- Agent42 codebase — `dashboard/frontend/dist/app.js` (direct inspection: `_ideTabs` line 3398, Monaco URI construction line 3761, `_termSessions` line 5720, `cc_hist_*` localStorage keys line 5335, `cc_active_session` sessionStorage line 4813, Monaco singleton init lines 3587-3598)
-- Agent42 codebase — `dashboard/server.py` (direct inspection: workspace variable line 1301, file API sandbox check lines 1306-1409, terminal PTY spawn lines 1447-1690, CC sessions directory line 1727, warm pool dict line 1737, `_cc_spawn_warm()` workspace_path arg line 1747)
-- Agent42 codebase — `requirements.txt`, `.planning/PROJECT.md` — version confirmation, v2.1 milestone requirements
-- CLAUDE.md pitfall #120 (localStorage CC history design and session restore on reload)
-- CLAUDE.md pitfall #122 (nested git root detection failure — parallel problem to workspace root confusion)
-- CLAUDE.md pitfall #83 (duplicate API calls from workspace-scoped state)
+- [Paperclip GitHub](https://github.com/paperclipai/paperclip) — official monorepo, adapter registry, heartbeat payload shapes
+- [Paperclip PLUGIN_SPEC.md](https://github.com/paperclipai/paperclip/blob/master/doc/plugins/PLUGIN_SPEC.md) — plugin manifest format, capability declarations, JSON-RPC protocol
+- [HTTP Adapter docs — Mintlify](https://www.mintlify.com/paperclipai/paperclip/agents/http-adapter) — AdapterExecutionContext/Result shapes, async callback pattern
+- [@paperclipai/plugin-sdk npm](https://www.npmjs.com/package/@paperclipai/plugin-sdk) — released March 18, 2026; version 2026.318.0
+- Agent42 codebase — direct inspection of MemoryStore, AgentRuntime, EffectivenessStore, RewardSystem, AgentManager, MCP server
 
 ### Secondary (MEDIUM confidence)
 
-- [VS Code Multi-Root Workspaces official docs](https://code.visualstudio.com/docs/editing/workspaces/multi-root-workspaces) — multi-root vs. full context-switch tab model comparison; VS Code divergence noted
-- [VS Code workspace concepts](https://code.visualstudio.com/docs/editing/workspaces/workspaces) — workspace config file design
-- [JetBrains IDE Workspaces blog 2025](https://blog.jetbrains.com/idea/2025/03/ide-workspaces-development-challenges-and-plans/) — workspace as meta-container; per-project state isolation principle
-- Monaco Editor API docs — `createModel`, `setModel`, `saveViewState`, `restoreViewState` stable since 0.20
+- [Plugin Architecture and Runtime — DeepWiki](https://deepwiki.com/paperclipai/paperclip/9.1-plugin-architecture-and-runtime) — system architecture analysis of Paperclip monorepo
+- [Local CLI Adapters — DeepWiki](https://deepwiki.com/paperclipai/paperclip/5.2-local-cli-adapters) — adapter pattern analysis
+- [Hermes Paperclip Adapter](https://github.com/NousResearch/hermes-paperclip-adapter) — reference implementation for sessionCodec, async callback, and session key strategy
+- [OpenClaw Gateway Adapter — DeepWiki](https://deepwiki.com/paperclipai/paperclip/5.3-openclaw-gateway-adapter) — gateway adapter pattern (compared, not used)
+- [Paperclip Monorepo Structure — DeepWiki](https://deepwiki.com/paperclipai/paperclip/1.2-monorepo-structure) — package layout and adapter registry structure
 
-### Tertiary (HIGH confidence — real bug reports, production evidence)
+### Tertiary (LOW confidence / needs validation)
 
-- [Zed AI cross-project history leak issue #41240](https://github.com/zed-industries/zed/issues/41240) — CC session IDs must be workspace-keyed; real production bug
-- [Claude Code wrong project hooks issues #5386, #5387](https://github.com/anthropics/claude-code/issues/5386) — `--cwd` scoping prevents hook cross-contamination; real production bug
-- [VS Code Copilot wrong project output feedback #275](https://github.com/microsoft/copilot-intellij-feedback/issues/275) — agent dispatch must default to active workspace; real production bug
+- [RFC: Proactive heartbeat pattern #206](https://github.com/paperclipai/paperclip/issues/206) — `heartbeat.started` event proposal; not confirmed shipped; Phase 4 depends on this
+- [Plugin System Discussion #258](https://github.com/paperclipai/paperclip/discussions/258) — community discussion on plugin patterns; needs cross-reference with actual SDK
 
 ---
-
-*Research completed: 2026-03-23*
-*Architecture researcher timed out — coverage sourced from STACK.md and PITFALLS.md (functionally complete)*
+*Research completed: 2026-03-28*
 *Ready for roadmap: yes*

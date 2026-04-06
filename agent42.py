@@ -11,6 +11,8 @@ Usage:
     python agent42.py                     # Start dashboard (http://localhost:8000)
     python agent42.py --port 8080         # Custom dashboard port
     python agent42.py --no-dashboard      # Headless mode (services only)
+    python agent42.py --sidecar           # Sidecar mode (Paperclip adapter, port 8001)
+    python agent42.py --sidecar --sidecar-port 9001  # Sidecar on custom port
     python agent42.py backup -o ./        # Create backup archive
     python agent42.py restore backup.tar  # Restore from backup
     python agent42.py clone -o ./         # Create clone package
@@ -36,6 +38,7 @@ from core.app_manager import AppManager
 from core.config import settings
 from core.device_auth import DeviceStore
 from core.heartbeat import HeartbeatService
+from core.key_store import KeyStore
 from core.project_manager import ProjectManager
 from core.rate_limiter import ToolRateLimiter
 from core.repo_manager import RepositoryManager
@@ -44,6 +47,7 @@ from core.workspace_registry import WorkspaceRegistry
 from dashboard.auth import init_device_store
 from dashboard.server import create_app
 from dashboard.websocket_manager import WebSocketManager
+from memory.consolidation import ConsolidationPipeline, ConsolidationRouter
 from memory.effectiveness import EffectivenessStore
 from memory.qdrant_store import QdrantConfig, QdrantStore
 from memory.redis_session import RedisConfig, RedisSessionBackend
@@ -84,9 +88,15 @@ class Agent42:
         self,
         dashboard_port: int = 8000,
         headless: bool = False,
+        sidecar: bool = False,
+        sidecar_port: int | None = None,
+        standalone: bool = False,
     ):
         self.dashboard_port = dashboard_port
         self.headless = headless
+        self.sidecar = sidecar
+        self.sidecar_port = sidecar_port or settings.paperclip_sidecar_port
+        self.standalone = standalone
 
         # ── Core infrastructure ──────────────────────────────────────────
         workspace = Path(settings.default_repo_path or ".").resolve()
@@ -102,11 +112,15 @@ class Agent42:
         self.cron_scheduler = CronScheduler()
         self.device_store = DeviceStore(data_dir / "devices.json")
         init_device_store(self.device_store)
+
+        # ── Key store for API key management ──────────────────────────────
+        self.key_store = KeyStore(data_dir / "settings.json")
+        # Inject admin-configured keys into environment at startup
+        self.key_store.inject_into_environ()
         self.repo_manager = RepositoryManager(
             repos_json_path=str(data_dir / "repos.json"),
             clone_dir=str(data_dir / "repos"),
         )
-        self.session_manager = SessionManager(str(data_dir / "sessions"))
         skill_dirs = [
             Path(__file__).parent / "skills" / "builtins",
             Path(__file__).parent / "skills" / "workspace",
@@ -141,6 +155,22 @@ class Agent42:
 
         self.memory_store = MemoryStore(
             memory_dir, qdrant_store=qdrant_store, redis_backend=redis_backend
+        )
+
+        # ── Consolidation pipeline (LLM summarization of old sessions) ───
+        consolidation_router = ConsolidationRouter()
+        consolidation_pipeline = ConsolidationPipeline(
+            model_router=consolidation_router,
+            embedding_store=self.memory_store.embeddings,
+            qdrant_store=qdrant_store,
+        )
+        self.consolidation_pipeline = consolidation_pipeline
+
+        # ── Session manager (after redis + consolidation are ready) ──────
+        self.session_manager = SessionManager(
+            str(data_dir / "sessions"),
+            redis_backend=redis_backend,
+            consolidation_pipeline=consolidation_pipeline,
         )
 
         # ── Effectiveness tracking ────────────────────────────
@@ -233,7 +263,30 @@ class Agent42:
             tasks_to_run.append(self.security_scanner.start())
             logger.info(f"  Security scanning: enabled (every {settings.security_scan_interval})")
 
-        if not self.headless:
+        if self.sidecar:
+            from dashboard.sidecar import create_sidecar_app
+
+            app = create_sidecar_app(
+                memory_store=self.memory_store,
+                agent_manager=self.agent_manager,
+                effectiveness_store=self.effectiveness_store,
+                reward_system=self.reward_system,
+                qdrant_store=self.memory_store._qdrant,
+                tool_registry=self.tool_registry,
+                skill_loader=self.skill_loader,
+                app_manager=None,  # Phase 36: AppManager only in non-sidecar mode currently
+                key_store=self.key_store,
+            )
+            config = uvicorn.Config(
+                app,
+                host=settings.dashboard_host,
+                port=self.sidecar_port,
+                log_level="warning",
+            )
+            server = uvicorn.Server(config)
+            logger.info(f"  Sidecar: http://{settings.dashboard_host}:{self.sidecar_port}")
+            tasks_to_run.append(server.serve())
+        elif not self.headless:
             app_manager = AppManager(
                 apps_dir=str(settings.apps_dir) if hasattr(settings, "apps_dir") else "apps",
                 dashboard_port=self.dashboard_port,
@@ -258,6 +311,8 @@ class Agent42:
                 reward_system=self.reward_system,
                 workspace_registry=self.workspace_registry,
                 github_account_store=github_account_store,
+                key_store=self.key_store,
+                standalone=self.standalone,
             )
             config = uvicorn.Config(
                 app,
@@ -290,6 +345,22 @@ def main():
     parser.add_argument("--port", type=int, default=8000, help="Dashboard port (default: 8000)")
     parser.add_argument(
         "--no-dashboard", action="store_true", help="Run headless without the web dashboard"
+    )
+    parser.add_argument(
+        "--sidecar",
+        action="store_true",
+        help="Run as Paperclip sidecar (adapter-friendly endpoints, no dashboard)",
+    )
+    parser.add_argument(
+        "--sidecar-port",
+        type=int,
+        default=None,
+        help="Sidecar HTTP port (default: PAPERCLIP_SIDECAR_PORT or 8001)",
+    )
+    parser.add_argument(
+        "--standalone",
+        action="store_true",
+        help="Run in standalone mode (simplified dashboard for Claude Code only)",
     )
 
     # Backup subcommand
@@ -326,10 +397,19 @@ def main():
     else:
         # Default: start dashboard + services
         print("Agent42 v2.0 initializing (MCP architecture)...", flush=True)
+        is_sidecar = args.sidecar or settings.sidecar_enabled
+        is_standalone = args.standalone or settings.standalone_mode
+        if is_sidecar:
+            from core.sidecar_logging import configure_sidecar_logging
+
+            configure_sidecar_logging()
         try:
             agent42 = Agent42(
                 dashboard_port=args.port,
                 headless=args.no_dashboard,
+                sidecar=is_sidecar,
+                sidecar_port=args.sidecar_port,
+                standalone=is_standalone,
             )
         except Exception as exc:
             logger.critical("Agent42 failed to initialize: %s", exc, exc_info=True)
