@@ -23,10 +23,10 @@ See: .planning/PROJECT.md (updated 2026-03-28)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-04-04 - Completed quick task 260403-o1z: Wire consolidation pipeline into agent42.py
+Phase: 43 complete
+Plan: 43-02 (complete)
+Status: Phase 43 shipped, Phase 44 next
+Last activity: 2026-04-06 - Completed Phase 43: Effectiveness-Driven Workflow Offloading (2/2 plans)
 
 ## Completed Milestones
 
@@ -85,6 +85,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 42]: N8N tools use Group A registration (no constructor args) with _safe_import — MCP server gracefully skips if httpx/tools missing
 - [Phase 42]: Separate docker-compose.n8n.yml (not merged into existing compose) — matches Phase 31 pattern for independent lifecycle management
 - [Phase 42]: N8N_ENCRYPTION_KEY uses Docker Compose :? required-var syntax — fails fast rather than silently corrupting stored credentials
+- [Phase 43]: hashlib/json imported inside methods to survive ruff auto-removal of "unused" top-level imports
+- [Phase 43]: agent_id="" in end_task flush — TaskContext lacks agent_id field, global patterns grouped by task_type only
+- [Phase 43]: _build_prompt changed from sync to async — both call sites (OpenAI runner + Claude CLI) updated to await
 
 ### Pending Todos
 
@@ -109,6 +112,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-05T20:14:34Z
-Stopped at: Completed 42-03-PLAN.md (Phase 42 N8N Workflow Integration — all 3 plans complete)
+Last session: 2026-04-06T19:30:00Z
+Stopped at: Completed Phase 43 Effectiveness-Driven Workflow Offloading — both plans complete, 29 tests passing
 Resume file: None

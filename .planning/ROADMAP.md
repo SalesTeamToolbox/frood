@@ -17,7 +17,7 @@
 - 🚧 **v6.0 Dashboard Unification** — Phases 36-40 (not started)
 - ✅ **v7.0 Abacus Provider & Paperclip Autonomy** — Phase 41 (complete 2026-04-05)
 - ✅ **v8.0 N8N Workflow Integration** — Phase 42 (complete 2026-04-05)
-- 🚧 **v9.0 Intelligent Workflow Offloading** — Phases 43-44 (not started)
+- 🚧 **v9.0 Intelligent Workflow Offloading** — Phase 43 complete, Phase 44 remaining
 
 ## Active Workstreams
 
@@ -119,8 +119,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 43-01-PLAN.md — DB schema (3 tables) + EffectivenessStore methods + config + task_context accumulator helpers
-- [ ] 43-02-PLAN.md — ToolRegistry accumulator wiring + end_task flush + async _build_prompt suggestion injection
+- [x] 43-01-PLAN.md — DB schema (3 tables) + EffectivenessStore methods + config + task_context accumulator helpers
+- [x] 43-02-PLAN.md — ToolRegistry accumulator wiring + end_task flush + async _build_prompt suggestion injection
 
 ### Phase 44: Workflow Advisor Hook
 
@@ -138,8 +138,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 43-01-PLAN.md — DB schema (3 tables) + EffectivenessStore methods + config + task_context accumulator helpers
-- [ ] 43-02-PLAN.md — ToolRegistry accumulator wiring + end_task flush + async _build_prompt suggestion injection
+- [ ] 44-01-PLAN.md — Pre-execution hook + workflow matching + routing
+- [ ] 44-02-PLAN.md — Hybrid task splitting + effectiveness logging
 
 ## ✅ v4.0 Paperclip Integration (Shipped 2026-03-31)
 
@@ -378,7 +378,7 @@ Archive: `milestones/v1.0-ROADMAP.md`
 | 30. Advanced — TeamTool + Auto Memory | v4.0 | 2/2 | Complete    | 2026-03-31 |
 | 31. Advanced — Migration + Docker | v4.0 | 2/2 | Complete   | 2026-03-31 |
 | 42. N8N Workflow Integration | v8.0 | 3/3 | Complete | 2026-04-05 |
-| 43. Effectiveness-Driven Workflow Offloading | v9.0 | 0/2 | Planned | — |
+| 43. Effectiveness-Driven Workflow Offloading | v9.0 | 2/2 | Complete | 2026-04-06 |
 | 44. Workflow Advisor Hook | v9.0 | 0/0 | Not Started | — |
 
 | Milestone | Phases | Plans | Status | Shipped |
