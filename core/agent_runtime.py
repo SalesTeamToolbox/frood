@@ -47,15 +47,15 @@ class AgentRuntime:
         model = agent_config.get("model", "")
 
         if provider == "zen":
-            env["ANTHROPIC_API_KEY"] = ""
+            zen_key = os.environ.get("ZEN_API_KEY", "")
+            env["ANTHROPIC_API_KEY"] = zen_key
             env["ANTHROPIC_BASE_URL"] = provider_url or "https://opencode.ai/zen/v1"
-            env["OPENROUTER_API_KEY"] = os.environ.get("ZEN_API_KEY", "")
             if model:
                 env["ANTHROPIC_MODEL"] = model
         elif provider == "openrouter":
-            env["ANTHROPIC_API_KEY"] = ""
+            or_key = os.environ.get("OPENROUTER_API_KEY", "")
+            env["ANTHROPIC_API_KEY"] = or_key
             env["ANTHROPIC_BASE_URL"] = provider_url or "https://openrouter.ai/api/v1"
-            env["OPENROUTER_API_KEY"] = os.environ.get("OPENROUTER_API_KEY", "")
             if model:
                 env["ANTHROPIC_MODEL"] = model
         elif provider == "anthropic":
@@ -140,12 +140,19 @@ class AgentRuntime:
             log_file.write("=" * 60 + "\n\n")
             log_file.flush()
 
-            proc = await asyncio.create_subprocess_exec(
+            cmd_args = [
                 claude_bin,
                 "-p",
                 prompt,
                 "--output-format",
                 "text",
+            ]
+            model = agent_config.get("model", "")
+            if model:
+                cmd_args.extend(["--model", model])
+
+            proc = await asyncio.create_subprocess_exec(
+                *cmd_args,
                 stdout=log_file,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=str(self.workspace),
