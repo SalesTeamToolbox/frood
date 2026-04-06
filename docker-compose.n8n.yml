@@ -1,0 +1,44 @@
+# N8N Workflow Engine — Docker Compose
+#
+# Usage:
+#   Local dev:  docker compose -f docker-compose.n8n.yml up -d
+#   Production: docker compose -f docker-compose.n8n.yml up -d
+#
+# After starting:
+#   1. Open http://localhost:5678 and complete N8N setup
+#   2. Go to Settings -> n8n API -> Create API key
+#   3. Set N8N_API_KEY in your .env file
+#   4. Set N8N_URL=http://localhost:5678 in your .env file
+#
+# Generate encryption key: openssl rand -hex 32
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      # REQUIRED: Set this to a persistent value. If lost, all N8N credentials become unreadable.
+      # Generate with: openssl rand -hex 32
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?Set N8N_ENCRYPTION_KEY in .env -- generate with openssl rand -hex 32}
+      # Webhook URL -- critical for production behind proxy. Local dev uses default.
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      GENERIC_TIMEZONE: ${TZ:-UTC}
+      TZ: ${TZ:-UTC}
+      # Task runners for code node isolation
+      N8N_RUNNERS_ENABLED: "true"
+      # Auto-prune old execution data (14 days = 336 hours)
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "336"
+      # Block dangerous node types at the N8N level (belt-and-suspenders with Agent42 validation)
+      NODES_EXCLUDE: '["n8n-nodes-base.executeCommand","n8n-nodes-base.ssh","n8n-nodes-base.localFileTrigger"]'
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:
+    driver: local

@@ -108,6 +108,15 @@ const state = {
   // Rewards
   agents: [],
   rewardsStatus: null,
+  // Phase 37: Standalone mode and tool/skill search state
+  standaloneMode: false,
+  _toolSearch: "",
+  _skillSearch: "",
+  _expandedTool: null,
+  _expandedSkill: null,
+  // Provider status
+  providerStatus: null,
+  providerStatusLoading: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -795,9 +804,14 @@ async function loadProviders() {
   } catch { state.providers = {}; }
 }
 
+// Phase 37: Code-only tool category set (mirrors tools/registry.py _CODE_ONLY_TOOLS)
+var _CODE_ONLY_TOOLS = new Set(["shell", "git", "grep", "diff", "test_runner", "linter", "code_intel", "dependency_audit", "docker", "python_exec", "repo_map", "pr_generator", "security_analyzer", "file_watcher", "ssh", "tunnel"]);
+
 async function loadHealth() {
   try {
-    state.health = (await api("/health")) || {};
+    const data = (await api("/health")) || {};
+    state.health = data;
+    if (data.standalone_mode) state.standaloneMode = true;
   } catch { state.health = {}; }
 }
 
@@ -904,6 +918,37 @@ async function saveEnvSettings() {
   }
   state.envSaving = false;
   renderSettingsPanel();
+}
+
+async function saveZenDefaultModel() {
+  var sel = document.getElementById('zen-default-model');
+  if (!sel) return;
+  var model = sel.value;
+  try {
+    await api('/settings/env', {
+      method: 'PUT',
+      body: JSON.stringify({ settings: { ZEN_DEFAULT_MODEL: model } }),
+    });
+    if (state.envSettings) state.envSettings['ZEN_DEFAULT_MODEL'] = model;
+    toast('Zen default model set to ' + model, 'success');
+  } catch (e) {
+    toast('Failed to save: ' + e.message, 'error');
+  }
+}
+
+async function toggleZenAllowPaid(enabled) {
+  var val = enabled ? 'true' : 'false';
+  try {
+    await api('/settings/env', {
+      method: 'PUT',
+      body: JSON.stringify({ settings: { ZEN_ALLOW_PAID: val } }),
+    });
+    if (state.envSettings) state.envSettings['ZEN_ALLOW_PAID'] = val;
+    toast(enabled ? 'Paid Zen models enabled' : 'Paid models disabled (free only)', 'success');
+    renderSettingsPanel();
+  } catch (e) {
+    toast('Failed to save: ' + e.message, 'error');
+  }
 }
 
 async function changePassword() {
@@ -2128,73 +2173,52 @@ function renderApprovals() {
 }
 
 function renderTools() {
-  const el = document.getElementById("page-content");
+  var el = document.getElementById("page-content");
   if (!el || state.page !== "tools") return;
-
-  const rows = state.tools.map((t) => {
-    const enabled = t.enabled !== false;
-    const toggleId = `tool-toggle-${esc(t.name)}`;
-    return `
-    <tr style="${enabled ? "" : "opacity:0.55"}">
-      <td style="font-weight:600">${esc(t.name)}</td>
-      <td style="color:var(--text-secondary)">${esc(t.description || "")}</td>
-      <td style="text-align:center">
-        <label class="toggle-switch" title="${enabled ? "Disable" : "Enable"} ${esc(t.name)}">
-          <input type="checkbox" id="${toggleId}" ${enabled ? "checked" : ""}
-            onchange="toggleTool('${esc(t.name)}', this.checked)">
-          <span class="toggle-slider"></span>
-        </label>
-      </td>
-    </tr>
-  `}).join("");
-
-  el.innerHTML = `
-    <div class="card">
-      <div class="card-header"><h3>Registered Tools (${state.tools.length})</h3></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Name</th><th>Description</th><th style="text-align:center;width:80px">Enabled</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="3"><div class="empty-state">No tools registered</div></td></tr>`}</tbody>
-        </table>
-      </div>
-    </div>
-  `;
+  var searchVal = (state._toolSearch || "").toLowerCase();
+  var filtered = state.tools.filter(function(t) {
+    if (!searchVal) return true;
+    return (t.name || "").toLowerCase().includes(searchVal) || (t.description || "").toLowerCase().includes(searchVal);
+  });
+  var rows = filtered.map(function(t) {
+    var enabled = t.enabled !== false;
+    var toggleId = "tool-toggle-" + esc(t.name);
+    var isExpanded = state._expandedTool === t.name;
+    var category = _CODE_ONLY_TOOLS.has(t.name) ? "code" : "general";
+    var srcBadge = '<span class="badge-source badge-' + esc(t.source || "builtin") + '">' + esc(t.source || "builtin") + '</span>';
+    var catBadge = '<span class="badge-category badge-' + category + '">' + category + '</span>';
+    var detail = isExpanded ? '<tr class="tool-detail-row"><td colspan="4"><div class="tool-detail-panel"><div class="tool-detail-desc">' + esc(t.description || "No description") + '</div><div class="tool-detail-meta">' + srcBadge + ' ' + catBadge + '</div></div></td></tr>' : '';
+    return '<tr style="' + (enabled ? '' : 'opacity:0.55') + ';cursor:pointer" onclick="state._expandedTool=(state._expandedTool===\'' + esc(t.name) + '\')?null:\'' + esc(t.name) + '\';renderTools()">' +
+      '<td style="font-weight:600">' + esc(t.name) + (isExpanded ? ' &#9660;' : ' &#9654;') + '</td>' +
+      '<td style="color:var(--text-secondary)">' + esc(t.description || '') + '</td>' +
+      '<td style="text-align:center">' + srcBadge + '</td>' +
+      '<td style="text-align:center"><label class="toggle-switch" title="' + (enabled ? 'Disable' : 'Enable') + ' ' + esc(t.name) + '" onclick="event.stopPropagation()"><input type="checkbox" id="' + toggleId + '" ' + (enabled ? 'checked' : '') + ' onchange="toggleTool(\'' + esc(t.name) + '\', this.checked)"><span class="toggle-slider"></span></label></td></tr>' + detail;
+  }).join('');
+  el.innerHTML = '<div class="card"><div class="card-header"><h3>Registered Tools (' + filtered.length + '/' + state.tools.length + ')</h3></div><div class="tool-search-wrap"><input type="text" class="tool-search-input" placeholder="Search tools by name or description..." value="' + esc(state._toolSearch || '') + '" oninput="state._toolSearch=this.value;renderTools()"></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Description</th><th style="text-align:center;width:80px">Source</th><th style="text-align:center;width:80px">Enabled</th></tr></thead><tbody>' + (rows || '<tr><td colspan="4"><div class="empty-state">No tools match filter</div></td></tr>') + '</tbody></table></div></div>';
 }
 
 function renderSkills() {
-  const el = document.getElementById("page-content");
+  var el = document.getElementById("page-content");
   if (!el || state.page !== "skills") return;
-
-  const rows = state.skills.map((s) => {
-    const enabled = s.enabled !== false;
-    const toggleId = `skill-toggle-${esc(s.name)}`;
-    return `
-    <tr style="${enabled ? "" : "opacity:0.55"}">
-      <td style="font-weight:600">${esc(s.name)}</td>
-      <td style="color:var(--text-secondary)">${esc(s.description || "")}</td>
-      <td>${(s.task_types || []).map((t) => `<span class="badge-type">${esc(t)}</span>`).join(" ")}</td>
-      <td>${s.always_load ? '<span style="color:var(--success)">Always</span>' : ""}</td>
-      <td style="text-align:center">
-        <label class="toggle-switch" title="${enabled ? "Disable" : "Enable"} ${esc(s.name)}">
-          <input type="checkbox" id="${toggleId}" ${enabled ? "checked" : ""}
-            onchange="toggleSkill('${esc(s.name)}', this.checked)">
-          <span class="toggle-slider"></span>
-        </label>
-      </td>
-    </tr>
-  `}).join("");
-
-  el.innerHTML = `
-    <div class="card">
-      <div class="card-header"><h3>Loaded Skills (${state.skills.length})</h3></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Name</th><th>Description</th><th>Task Types</th><th>Auto-load</th><th style="text-align:center;width:80px">Enabled</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="5"><div class="empty-state">No skills loaded</div></td></tr>`}</tbody>
-        </table>
-      </div>
-    </div>
-  `;
+  var searchVal = (state._skillSearch || "").toLowerCase();
+  var filtered = state.skills.filter(function(s) {
+    if (!searchVal) return true;
+    return (s.name || "").toLowerCase().includes(searchVal) || (s.description || "").toLowerCase().includes(searchVal);
+  });
+  var rows = filtered.map(function(s) {
+    var enabled = s.enabled !== false;
+    var toggleId = "skill-toggle-" + esc(s.name);
+    var isExpanded = state._expandedSkill === s.name;
+    var taskBadges = (s.task_types || []).map(function(t) { return '<span class="badge-type">' + esc(t) + '</span>'; }).join(' ');
+    var detail = isExpanded ? '<tr class="skill-detail-row"><td colspan="5"><div class="tool-detail-panel"><div class="tool-detail-desc">' + esc(s.description || 'No description') + '</div><div class="tool-detail-meta">' + (taskBadges ? '<div>Task types: ' + taskBadges + '</div>' : '') + '<div>Auto-load: ' + (s.always_load ? '<span style="color:var(--success)">Yes</span>' : 'No') + '</div></div></div></td></tr>' : '';
+    return '<tr style="' + (enabled ? '' : 'opacity:0.55') + ';cursor:pointer" onclick="state._expandedSkill=(state._expandedSkill===\'' + esc(s.name) + '\')?null:\'' + esc(s.name) + '\';renderSkills()">' +
+      '<td style="font-weight:600">' + esc(s.name) + (isExpanded ? ' &#9660;' : ' &#9654;') + '</td>' +
+      '<td style="color:var(--text-secondary)">' + esc(s.description || '') + '</td>' +
+      '<td>' + taskBadges + '</td>' +
+      '<td>' + (s.always_load ? '<span style="color:var(--success)">Always</span>' : '') + '</td>' +
+      '<td style="text-align:center"><label class="toggle-switch" title="' + (enabled ? 'Disable' : 'Enable') + ' ' + esc(s.name) + '" onclick="event.stopPropagation()"><input type="checkbox" id="' + toggleId + '" ' + (enabled ? 'checked' : '') + ' onchange="toggleSkill(\'' + esc(s.name) + '\', this.checked)"><span class="toggle-slider"></span></label></td></tr>' + detail;
+  }).join('');
+  el.innerHTML = '<div class="card"><div class="card-header"><h3>Loaded Skills (' + filtered.length + '/' + state.skills.length + ')</h3></div><div class="tool-search-wrap"><input type="text" class="tool-search-input" placeholder="Search skills by name or description..." value="' + esc(state._skillSearch || '') + '" oninput="state._skillSearch=this.value;renderSkills()"></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Description</th><th>Task Types</th><th>Auto-load</th><th style="text-align:center;width:80px">Enabled</th></tr></thead><tbody>' + (rows || '<tr><td colspan="5"><div class="empty-state">No skills match filter</div></td></tr>') + '</tbody></table></div></div>';
 }
 
 function renderApps() {
@@ -2327,56 +2351,150 @@ async function showAppLogs(appId, name) {
 // ---------------------------------------------------------------------------
 // Agents page
 // ---------------------------------------------------------------------------
+
+function _relativeTime(epochSec) {
+  if (!epochSec) return "Never";
+  var diff = Math.floor(Date.now() / 1000) - epochSec;
+  if (diff < 60) return diff + "s ago";
+  if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+  if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+  return Math.floor(diff / 86400) + "d ago";
+}
+
+function _makeSparkline(counts) {
+  if (!counts || counts.length === 0) return "";
+  var allZero = counts.every(function(c) { return c === 0; });
+  if (allZero) return "";
+  var w = 98, h = 28;
+  var max = Math.max.apply(null, counts);
+  if (max === 0) return "";
+  var step = w / (counts.length - 1 || 1);
+  var points = counts.map(function(c, i) {
+    var x = Math.round(i * step);
+    var y = Math.round(h - (c / max) * (h - 4) - 2);
+    return x + "," + y;
+  }).join(" ");
+  return '<span class="sparkline"><svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '"><polyline points="' + points + '" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg></span>';
+}
+
 function renderAgents() {
   var el = document.getElementById("page-content");
   if (!el || state.page !== "agents") return;
 
-  // Fetch agents from API
-  fetch("/api/agents", { headers: { Authorization: "Bearer " + state.token } })
+  if (state.agentsLoaded) {
+    _renderAgentCards(el, state.agents || [], state.agentsPaperclipUnavailable);
+    return;
+  }
+
+  el.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted)">Loading agents...</div>';
+
+  fetch("/api/agents/unified", { headers: { Authorization: "Bearer " + state.token } })
     .then(function(r) { return r.json(); })
-    .then(function(agents) { state.agents = agents; _renderAgentCards(el, agents); })
-    .catch(function() { _renderAgentCards(el, []); });
+    .then(function(data) {
+      state.agents = data.agents || [];
+      state.agentsPaperclipUnavailable = data.paperclip_unavailable || false;
+      state.agentsLoaded = true;
+      _renderAgentCards(el, state.agents, state.agentsPaperclipUnavailable);
+    })
+    .catch(function() {
+      state.agents = [];
+      state.agentsLoaded = true;
+      state.agentsPaperclipUnavailable = false;
+      _renderAgentCards(el, [], false);
+    });
 }
 
 var TIER_COLORS = { bronze: '#cd7f32', silver: '#94a3b8', gold: '#eab308', provisional: '#6366f1' };
 function tierColor(t) { return TIER_COLORS[(t || '').toLowerCase()] || '#64748b'; }
 
-function _renderAgentCards(el, agents) {
+function _renderAgentCards(el, agents, paperclipUnavailable) {
   var statusColors = { active: "#34d399", running: "#38bdf8", paused: "#facc15", stopped: "#64748b", error: "#f87171" };
-  var cards = agents.map(function(a) {
+
+  // Apply client-side filters
+  var filterSource = state.agentFilterSource || "all";
+  var filterStatus = state.agentFilterStatus || "all";
+  var filtered = agents.filter(function(a) {
+    if (filterSource !== "all" && a.source !== filterSource) return false;
+    if (filterStatus !== "all" && a.status !== filterStatus) return false;
+    return true;
+  });
+
+  var cards = filtered.map(function(a) {
     var color = statusColors[a.status] || "#64748b";
+    var isReadonly = a.source === "paperclip";
+    var sourceLabel = isReadonly ? "Paperclip" : "Agent42";
+    var sourceBadgeClass = isReadonly ? "badge-paperclip" : "badge-agent42";
+    var successPct = (typeof a.success_rate === "number") ? Math.round(a.success_rate * 100) + "%" : "N/A";
+    var lastActive = _relativeTime(a.last_run_at);
+    var daily = a.daily_activity || [];
+    if (daily.length === 0 && a.total_runs) {
+      var avg = Math.floor(a.total_runs / 7);
+      daily = [avg, avg, avg, avg, avg, avg, avg];
+    }
+    var sparkline = _makeSparkline(daily);
     var tools = (a.tools || []).slice(0, 4).map(function(t) { return '<span class="badge-type">' + esc(t) + '</span>'; }).join(" ");
     var extra = (a.tools || []).length > 4 ? '<span class="badge-type">+' + ((a.tools || []).length - 4) + '</span>' : '';
     var skills = (a.skills || []).slice(0, 3).map(function(s) { return '<span class="badge-type" style="background:var(--primary-dim);color:var(--primary)">' + esc(s) + '</span>'; }).join(" ");
-    return '<div class="agent-card" onclick="agentShowDetail(\'' + a.id + '\')">' +
+    return '<div class="agent-card' + (isReadonly ? ' readonly' : '') + '" onclick="agentShowDetail(\'' + esc(a.id) + '\')">' +
       '<div class="agent-card-header">' +
         '<div class="agent-card-title"><h4>' + esc(a.name) + '</h4>' +
-        '<span class="badge-tier" style="background:' + color + ';color:#000">' + esc(a.status) + '</span>' +
+        '<span class="badge-source ' + sourceBadgeClass + '">' + esc(sourceLabel) + '</span>' +
+        '<span class="badge-tier" style="background:' + color + ';color:#000;margin-left:0.25rem">' + esc(a.status) + '</span>' +
         (a.effective_tier ? '<span class="badge-tier" style="background:' + tierColor(a.effective_tier) + ';color:#fff;margin-left:0.25rem">' + esc(a.effective_tier) + '</span>' : '') +
         '</div>' +
       '</div>' +
-      '<p class="agent-card-desc">' + esc(a.description || "No description") + '</p>' +
+      '<p class="agent-card-desc">' + esc(a.description || (isReadonly ? "Managed by Paperclip" : "No description")) + '</p>' +
       '<div class="agent-card-meta">' +
-        '<div style="font-size:0.72rem;color:var(--text-secondary)">Model: ' + esc(a.model || "default") + ' | Schedule: ' + esc(a.schedule || "manual") + '</div>' +
-        '<div class="agent-card-chips" style="margin-top:0.3rem">' + tools + extra + '</div>' +
-        '<div class="agent-card-chips" style="margin-top:0.2rem">' + skills + '</div>' +
-        '<div style="font-size:0.68rem;color:var(--text-muted);margin-top:0.3rem">Runs: ' + (a.total_runs || 0) + ' | Tokens: ' + (a.total_tokens || 0) + '</div>' +
+        (isReadonly ? '' : '<div style="font-size:0.72rem;color:var(--text-secondary)">Model: ' + esc(a.model || "default") + ' | Schedule: ' + esc(a.schedule || "manual") + '</div>') +
+        '<div class="agent-card-metrics">' +
+          '<span>Success: <span class="metric-value">' + successPct + '</span></span>' +
+          '<span>Runs: <span class="metric-value">' + (a.total_runs || 0) + '</span></span>' +
+          '<span>Last: <span class="metric-value">' + esc(lastActive) + '</span></span>' +
+          sparkline +
+        '</div>' +
+        (isReadonly ? '' : '<div class="agent-card-chips" style="margin-top:0.3rem">' + tools + extra + '</div>') +
+        (isReadonly ? '' : '<div class="agent-card-chips" style="margin-top:0.2rem">' + skills + '</div>') +
       '</div></div>';
   }).join("");
 
-  el.innerHTML =
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
+  // Stats row computation
+  var totalAgents = agents.length;
+  var activeCount = agents.filter(function(a) { return a.status === "active" || a.status === "running"; }).length;
+  var agentsWithRate = agents.filter(function(a) { return typeof a.success_rate === "number"; });
+  var avgSuccess = agentsWithRate.length > 0
+    ? Math.round(agentsWithRate.reduce(function(s, a) { return s + a.success_rate; }, 0) / agentsWithRate.length * 100) + "%"
+    : "N/A";
+  var totalTokens = agents.reduce(function(s, a) { return s + (a.total_tokens || 0); }, 0);
+
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
       '<h2 style="margin:0">Agents</h2>' +
       '<div style="display:flex;gap:0.5rem">' +
         '<button class="btn btn-primary" onclick="agentShowCreate()">+ Create Agent</button>' +
         '<button class="btn btn-outline" onclick="agentShowTemplates()">Templates</button>' +
       '</div>' +
     '</div>' +
+    (paperclipUnavailable ? '<div class="degradation-banner">Paperclip agents unavailable -- showing Agent42 agents only.</div>' : '') +
+    '<div class="agent-filter-bar">' +
+      '<label style="font-size:0.8rem;color:var(--text-secondary)">Source:</label>' +
+      '<select onchange="state.agentFilterSource=this.value;_renderAgentCards(document.getElementById(\'page-content\'),state.agents||[],state.agentsPaperclipUnavailable)">' +
+        '<option value="all"' + (filterSource === "all" ? ' selected' : '') + '>All</option>' +
+        '<option value="agent42"' + (filterSource === "agent42" ? ' selected' : '') + '>Agent42</option>' +
+        '<option value="paperclip"' + (filterSource === "paperclip" ? ' selected' : '') + '>Paperclip</option>' +
+      '</select>' +
+      '<label style="font-size:0.8rem;color:var(--text-secondary)">Status:</label>' +
+      '<select onchange="state.agentFilterStatus=this.value;_renderAgentCards(document.getElementById(\'page-content\'),state.agents||[],state.agentsPaperclipUnavailable)">' +
+        '<option value="all"' + (filterStatus === "all" ? ' selected' : '') + '>All</option>' +
+        '<option value="active"' + (filterStatus === "active" ? ' selected' : '') + '>Active</option>' +
+        '<option value="stopped"' + (filterStatus === "stopped" ? ' selected' : '') + '>Stopped</option>' +
+        '<option value="paused"' + (filterStatus === "paused" ? ' selected' : '') + '>Paused</option>' +
+        '<option value="error"' + (filterStatus === "error" ? ' selected' : '') + '>Error</option>' +
+      '</select>' +
+    '</div>' +
     '<div class="stats-row">' +
-      '<div class="stat-card"><div class="stat-label">Total Agents</div><div class="stat-value">' + agents.length + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Active</div><div class="stat-value text-success">' + agents.filter(function(a) { return a.status === "active" || a.status === "running"; }).length + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Paused</div><div class="stat-value text-warning">' + agents.filter(function(a) { return a.status === "paused"; }).length + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Total Runs</div><div class="stat-value">' + agents.reduce(function(s, a) { return s + (a.total_runs || 0); }, 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Total Agents</div><div class="stat-value">' + totalAgents + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Active</div><div class="stat-value text-success">' + activeCount + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Avg Success</div><div class="stat-value">' + avgSuccess + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Total Tokens</div><div class="stat-value">' + totalTokens + '</div></div>' +
     '</div>' +
     (cards ? '<div class="agents-grid">' + cards + '</div>' :
       '<div class="empty-state" style="padding:3rem;text-align:center">' +
@@ -2387,6 +2505,7 @@ function _renderAgentCards(el, agents) {
           '<button class="btn btn-outline" onclick="agentShowTemplates()">Use Template</button>' +
         '</div>' +
       '</div>');
+  el.innerHTML = html;
 }
 
 function agentShowCreate() {
@@ -2394,13 +2513,19 @@ function agentShowCreate() {
   if (!el) return;
   el.innerHTML =
     '<div style="max-width:600px;margin:0 auto">' +
-      '<h2>Create Agent</h2>' +
+      '<h2>Create Agent <span class="badge-source badge-agent42">Agent42</span></h2>' +
       '<div class="form-group"><label>Name</label><input type="text" id="agent-name" placeholder="My Agent"></div>' +
       '<div class="form-group"><label>Description</label><textarea id="agent-desc" rows="2" placeholder="What does this agent do?"></textarea></div>' +
       '<div class="form-group"><label>Provider</label>' +
-        '<select id="agent-provider"><option value="anthropic">Anthropic (CC Subscription)</option><option value="synthetic">Synthetic.new</option><option value="openrouter">OpenRouter</option></select></div>' +
+        '<select id="agent-provider" onchange="loadAgentModels(this.value)">' +
+          '<option value="zen">OpenCode Zen</option>' +
+          '<option value="openrouter">OpenRouter</option>' +
+          '<option value="anthropic">Anthropic</option>' +
+          '<option value="openai">OpenAI</option>' +
+        '</select></div>' +
       '<div class="form-group"><label>Model</label>' +
-        '<select id="agent-model"><option value="claude-sonnet-4-6">Sonnet 4.6</option><option value="claude-opus-4-6">Opus 4.6</option><option value="claude-haiku-4-5">Haiku 4.5</option></select></div>' +
+        '<select id="agent-model"><option value="">Loading models...</option></select>' +
+        '<div id="agent-model-cache-note" class="help" style="margin-top:0.25rem;font-size:0.77rem"></div></div>' +
       '<div class="form-group"><label>Schedule</label>' +
         '<select id="agent-schedule"><option value="manual">Manual</option><option value="always">Always On</option><option value="0 9 * * *">Daily 9am</option><option value="*/5 * * * *">Every 5 min</option></select></div>' +
       '<div class="form-group"><label>Tools (comma-separated)</label><input type="text" id="agent-tools" placeholder="shell, memory, web_search, git"></div>' +
@@ -2411,6 +2536,7 @@ function agentShowCreate() {
         '<button class="btn btn-primary" onclick="agentDoCreate()">Create Agent</button>' +
       '</div>' +
     '</div>';
+  loadAgentModels("zen");
 }
 
 async function agentDoCreate() {
@@ -2446,7 +2572,7 @@ function agentShowTemplates() {
         var t = templates[key];
         var tools = (t.tools || []).map(function(x) { return '<span class="badge-type">' + esc(x) + '</span>'; }).join(" ");
         return '<div class="agent-card" style="cursor:pointer" onclick="agentCreateFromTemplate(\'' + key + '\')">' +
-          '<div class="agent-card-header"><div class="agent-card-title"><h4>' + esc(t.name) + '</h4></div></div>' +
+          '<div class="agent-card-header"><div class="agent-card-title"><h4>' + esc(t.name) + '</h4><span class="badge-source badge-agent42">Agent42</span></div></div>' +
           '<p class="agent-card-desc">' + esc(t.description) + '</p>' +
           '<div class="agent-card-meta"><div class="agent-card-chips">' + tools + '</div>' +
           '<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:0.3rem">Model: ' + esc(t.model || "default") + ' | Schedule: ' + esc(t.schedule || "manual") + '</div></div></div>';
@@ -2478,82 +2604,129 @@ async function agentCreateFromTemplate(key) {
 
 async function agentShowDetail(id) {
   try {
-    var res = await fetch("/api/agents/" + id, { headers: { Authorization: "Bearer " + state.token } });
-    var agent = await res.json();
+    // Try to find agent from already-loaded unified list first
+    var agent = null;
+    if (state.agents) {
+      for (var i = 0; i < state.agents.length; i++) {
+        if (state.agents[i].id === id) { agent = state.agents[i]; break; }
+      }
+    }
+    // Fall back to individual fetch for Agent42 agents (provides full details)
+    if (!agent || agent.source !== "paperclip") {
+      var res = await fetch("/api/agents/" + id, { headers: { Authorization: "Bearer " + state.token } });
+      agent = await res.json();
+    }
     var el = document.getElementById("page-content");
     if (!el) return;
     var statusColors = { active: "#34d399", running: "#38bdf8", paused: "#facc15", stopped: "#64748b", error: "#f87171" };
     var color = statusColors[agent.status] || "#64748b";
-    var tools = (agent.tools || []).map(function(t) { return '<span class="badge-type">' + esc(t) + '</span>'; }).join(" ");
-    var skills = (agent.skills || []).map(function(s) { return '<span class="badge-type" style="background:var(--primary-dim);color:var(--primary)">' + esc(s) + '</span>'; }).join(" ");
     var lastRun = agent.last_run_at ? new Date(agent.last_run_at * 1000).toLocaleString() : "Never";
-    el.innerHTML =
-      '<div style="max-width:700px">' +
-        '<button class="btn btn-outline btn-sm" onclick="renderAgents()" style="margin-bottom:1rem">&larr; Back</button>' +
-        '<div class="agent-detail-card" style="background:var(--bg-secondary);padding:1.5rem;border-radius:12px;border:1px solid var(--border)">' +
-          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
-            '<div><h3 style="margin:0">' + esc(agent.name) + '</h3>' +
-            '<span class="badge-tier" style="background:' + color + ';color:#000;margin-top:0.25rem;display:inline-block">' + esc(agent.status) + '</span></div>' +
-            '<div style="display:flex;gap:0.5rem">' +
-              (agent.status === "stopped" ? '<button class="btn btn-primary btn-sm" onclick="agentStart(\'' + agent.id + '\')">Start</button>' : '') +
-              (agent.status === "active" ? '<button class="btn btn-outline btn-sm" onclick="agentStop(\'' + agent.id + '\')">Stop</button>' : '') +
-              '<button class="btn btn-outline btn-sm btn-danger-text" onclick="agentDelete(\'' + agent.id + '\')">Delete</button>' +
+    var isPaperclip = agent.source === "paperclip";
+
+    if (isPaperclip) {
+      // Read-only Paperclip agent detail view
+      var successPct = (typeof agent.success_rate === "number") ? Math.round(agent.success_rate * 100) + "%" : "N/A";
+      el.innerHTML =
+        '<div style="max-width:700px">' +
+          '<button class="btn btn-outline btn-sm" onclick="renderAgents()" style="margin-bottom:1rem">&larr; Back</button>' +
+          '<div class="agent-detail-card" style="background:var(--bg-secondary);padding:1.5rem;border-radius:12px;border:1px solid var(--border);border-left:3px solid #34d399">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
+              '<div>' +
+                '<h3 style="margin:0">' + esc(agent.name) + '</h3>' +
+                '<span class="badge-source badge-paperclip" style="margin-top:0.25rem;display:inline-block">Paperclip</span>' +
+                '<span class="badge-tier" style="background:' + color + ';color:#000;margin-left:0.5rem">' + esc(agent.status) + '</span>' +
+              '</div>' +
+              '<div style="display:flex;gap:0.5rem">' +
+                '<a href="' + esc(agent.manage_url || '#') + '" target="_blank" rel="noopener" class="btn btn-primary btn-sm">Manage in Paperclip</a>' +
+              '</div>' +
+            '</div>' +
+            '<p style="color:var(--text-secondary)">' + esc(agent.description || "Managed by Paperclip") + '</p>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">' +
+              '<div><strong>Total Runs:</strong> ' + (agent.total_runs || 0) + '</div>' +
+              '<div><strong>Success Rate:</strong> ' + successPct + '</div>' +
+              '<div><strong>Last Run:</strong> ' + esc(lastRun) + '</div>' +
+              '<div><strong>Source:</strong> Paperclip</div>' +
+            '</div>' +
+            '<div style="margin-top:1rem;padding:0.75rem;background:rgba(16,185,129,0.06);border-radius:8px;font-size:0.82rem;color:var(--text-secondary)">' +
+              'This agent is managed by Paperclip. Use the link above to configure, start, or stop it.' +
             '</div>' +
           '</div>' +
-          '<p style="color:var(--text-secondary)">' + esc(agent.description || "No description") + '</p>' +
-          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">' +
-            '<div><strong>Provider:</strong> ' + esc(agent.provider) + '</div>' +
-            '<div><strong>Model:</strong> ' + esc(agent.model) + '</div>' +
-            '<div><strong>Schedule:</strong> ' + esc(agent.schedule) + '</div>' +
-            '<div><strong>Max Iterations:</strong> ' + agent.max_iterations + '</div>' +
-            '<div><strong>Total Runs:</strong> ' + (agent.total_runs || 0) + '</div>' +
-            '<div><strong>Total Tokens:</strong> ' + (agent.total_tokens || 0) + '</div>' +
-            '<div><strong>Last Run:</strong> ' + lastRun + '</div>' +
-            '<div><strong>Memory Scope:</strong> ' + esc(agent.memory_scope) + '</div>' +
-          '</div>' +
-          '<div style="margin-top:1rem"><strong>Tools:</strong><div style="margin-top:0.3rem">' + (tools || "None") + '</div></div>' +
-          '<div style="margin-top:0.75rem"><strong>Skills:</strong><div style="margin-top:0.3rem">' + (skills || "None") + '</div></div>' +
-          '<div style="margin-top:1.25rem;border-top:1px solid var(--border);padding-top:1rem">' +
-            '<h4 style="margin:0 0 0.75rem;font-size:0.95rem">Performance and Tier</h4>' +
-            '<div id="agent-perf-' + esc(agent.id) + '" style="margin-bottom:0.75rem;color:var(--text-muted);font-size:0.85rem">Loading...</div>' +
-            '<div style="margin-bottom:0.5rem">' +
-              '<label style="display:block;margin-bottom:0.3rem;font-size:0.85rem;font-weight:600">Tier Override</label>' +
-              '<select id="tier-override-' + esc(agent.id) + '" onchange="setTierOverride(\'' + esc(agent.id) + '\')" style="padding:0.4rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:0.85rem">' +
-                '<option value=""' + (agent.tier_override == null ? ' selected' : '') + '>Auto (computed)</option>' +
-                '<option value="bronze"' + (agent.tier_override === 'bronze' ? ' selected' : '') + '>Bronze</option>' +
-                '<option value="silver"' + (agent.tier_override === 'silver' ? ' selected' : '') + '>Silver</option>' +
-                '<option value="gold"' + (agent.tier_override === 'gold' ? ' selected' : '') + '>Gold</option>' +
-                '<option value="provisional"' + (agent.tier_override === 'provisional' ? ' selected' : '') + '>Provisional</option>' +
-              '</select>' +
+        '</div>';
+    } else {
+      // Full Agent42 agent detail view
+      var tools = (agent.tools || []).map(function(t) { return '<span class="badge-type">' + esc(t) + '</span>'; }).join(" ");
+      var skills = (agent.skills || []).map(function(s) { return '<span class="badge-type" style="background:var(--primary-dim);color:var(--primary)">' + esc(s) + '</span>'; }).join(" ");
+      el.innerHTML =
+        '<div style="max-width:700px">' +
+          '<button class="btn btn-outline btn-sm" onclick="renderAgents()" style="margin-bottom:1rem">&larr; Back</button>' +
+          '<div class="agent-detail-card" style="background:var(--bg-secondary);padding:1.5rem;border-radius:12px;border:1px solid var(--border)">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">' +
+              '<div>' +
+                '<h3 style="margin:0">' + esc(agent.name) + '</h3>' +
+                '<span class="badge-source badge-agent42" style="margin-top:0.25rem;display:inline-block">Agent42</span>' +
+                '<span class="badge-tier" style="background:' + color + ';color:#000;margin-left:0.5rem">' + esc(agent.status) + '</span>' +
+              '</div>' +
+              '<div style="display:flex;gap:0.5rem">' +
+                (agent.status === "stopped" ? '<button class="btn btn-primary btn-sm" onclick="agentStart(\'' + esc(agent.id) + '\')">Start</button>' : '') +
+                (agent.status === "active" ? '<button class="btn btn-outline btn-sm" onclick="agentStop(\'' + esc(agent.id) + '\')">Stop</button>' : '') +
+                '<button class="btn btn-outline btn-sm btn-danger-text" onclick="agentDelete(\'' + esc(agent.id) + '\')">Delete</button>' +
+              '</div>' +
             '</div>' +
-            '<div>' +
-              '<label style="display:block;margin-bottom:0.3rem;font-size:0.85rem;font-weight:600">Override expires</label>' +
-              '<input type="date" id="tier-expiry-' + esc(agent.id) + '" value="' + esc(agent.tier_expiry_date || '') + '" style="padding:0.4rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:0.85rem">' +
+            '<p style="color:var(--text-secondary)">' + esc(agent.description || "No description") + '</p>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">' +
+              '<div><strong>Provider:</strong> ' + esc(agent.provider) + '</div>' +
+              '<div><strong>Model:</strong> ' + esc(agent.model) + '</div>' +
+              '<div><strong>Schedule:</strong> ' + esc(agent.schedule) + '</div>' +
+              '<div><strong>Max Iterations:</strong> ' + agent.max_iterations + '</div>' +
+              '<div><strong>Total Runs:</strong> ' + (agent.total_runs || 0) + '</div>' +
+              '<div><strong>Total Tokens:</strong> ' + (agent.total_tokens || 0) + '</div>' +
+              '<div><strong>Last Run:</strong> ' + esc(lastRun) + '</div>' +
+              '<div><strong>Memory Scope:</strong> ' + esc(agent.memory_scope) + '</div>' +
+            '</div>' +
+            '<div style="margin-top:1rem"><strong>Tools:</strong><div style="margin-top:0.3rem">' + (tools || "None") + '</div></div>' +
+            '<div style="margin-top:0.75rem"><strong>Skills:</strong><div style="margin-top:0.3rem">' + (skills || "None") + '</div></div>' +
+            '<div style="margin-top:1.25rem;border-top:1px solid var(--border);padding-top:1rem">' +
+              '<h4 style="margin:0 0 0.75rem;font-size:0.95rem">Performance and Tier</h4>' +
+              '<div id="agent-perf-' + esc(agent.id) + '" style="margin-bottom:0.75rem;color:var(--text-muted);font-size:0.85rem">Loading...</div>' +
+              '<div style="margin-bottom:0.5rem">' +
+                '<label style="display:block;margin-bottom:0.3rem;font-size:0.85rem;font-weight:600">Tier Override</label>' +
+                '<select id="tier-override-' + esc(agent.id) + '" onchange="setTierOverride(\'' + esc(agent.id) + '\')" style="padding:0.4rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:0.85rem">' +
+                  '<option value=""' + (agent.tier_override == null ? ' selected' : '') + '>Auto (computed)</option>' +
+                  '<option value="bronze"' + (agent.tier_override === 'bronze' ? ' selected' : '') + '>Bronze</option>' +
+                  '<option value="silver"' + (agent.tier_override === 'silver' ? ' selected' : '') + '>Silver</option>' +
+                  '<option value="gold"' + (agent.tier_override === 'gold' ? ' selected' : '') + '>Gold</option>' +
+                  '<option value="provisional"' + (agent.tier_override === 'provisional' ? ' selected' : '') + '>Provisional</option>' +
+                '</select>' +
+              '</div>' +
+              '<div>' +
+                '<label style="display:block;margin-bottom:0.3rem;font-size:0.85rem;font-weight:600">Override expires</label>' +
+                '<input type="date" id="tier-expiry-' + esc(agent.id) + '" value="' + esc(agent.tier_expiry_date || '') + '" style="padding:0.4rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:0.85rem">' +
+              '</div>' +
             '</div>' +
           '</div>' +
-        '</div>' +
-      '</div>';
-    try {
-      var perfRes = await fetch("/api/agents/" + id + "/performance", { headers: { Authorization: "Bearer " + state.token } });
-      if (perfRes.ok) {
-        var perf = await perfRes.json();
-        var perfEl = document.getElementById("agent-perf-" + id);
-        if (perfEl) {
-          perfEl.innerHTML =
-            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;font-size:0.85rem">' +
-              '<div><strong>Tier:</strong> ' + esc(perf.tier || "none") + '</div>' +
-              '<div><strong>Score:</strong> ' + (typeof perf.performance_score === 'number' ? perf.performance_score.toFixed(3) : 'N/A') + '</div>' +
-              '<div><strong>Tasks:</strong> ' + (perf.task_count || 0) + '</div>' +
-              '<div><strong>Success Rate:</strong> ' + (typeof perf.success_rate === 'number' ? Math.round(perf.success_rate * 100) + '%' : 'N/A') + '</div>' +
-            '</div>';
+        '</div>';
+      try {
+        var perfRes = await fetch("/api/agents/" + id + "/performance", { headers: { Authorization: "Bearer " + state.token } });
+        if (perfRes.ok) {
+          var perf = await perfRes.json();
+          var perfEl = document.getElementById("agent-perf-" + id);
+          if (perfEl) {
+            perfEl.innerHTML =
+              '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;font-size:0.85rem">' +
+                '<div><strong>Tier:</strong> ' + esc(perf.tier || "none") + '</div>' +
+                '<div><strong>Score:</strong> ' + (typeof perf.performance_score === 'number' ? perf.performance_score.toFixed(3) : 'N/A') + '</div>' +
+                '<div><strong>Tasks:</strong> ' + (perf.task_count || 0) + '</div>' +
+                '<div><strong>Success Rate:</strong> ' + (typeof perf.success_rate === 'number' ? Math.round(perf.success_rate * 100) + '%' : 'N/A') + '</div>' +
+              '</div>';
+          }
+        } else {
+          var perfEl2 = document.getElementById("agent-perf-" + id);
+          if (perfEl2) perfEl2.textContent = "Performance data unavailable.";
         }
-      } else {
-        var perfEl2 = document.getElementById("agent-perf-" + id);
-        if (perfEl2) perfEl2.textContent = "Performance data unavailable.";
+      } catch (e2) {
+        var perfEl3 = document.getElementById("agent-perf-" + id);
+        if (perfEl3) perfEl3.textContent = "Performance data unavailable.";
       }
-    } catch (e2) {
-      var perfEl3 = document.getElementById("agent-perf-" + id);
-      if (perfEl3) perfEl3.textContent = "Performance data unavailable.";
     }
   } catch (e) { toast("Error loading agent", "error"); }
 }
@@ -7592,7 +7765,7 @@ function _renderReportsOverview(d) {
       <div class="status-metric-row"><span class="metric-label">Transport</span><span class="metric-value">stdio</span></div>
       <div class="status-metric-row"><span class="metric-label">Tools Available</span><span class="metric-value">${tools.enabled || tools.total || 0}</span></div>
       <div class="status-metric-row"><span class="metric-label">Skills Loaded</span><span class="metric-value">${(skills.skills || []).length || skills.total || 0}</span></div>
-      <p style="color:var(--text-muted);font-size:0.85rem;margin-top:0.75rem">Model routing is handled by Claude Code. Token usage below reflects auxiliary API calls (embeddings, media, search).</p>
+      <p style="color:var(--text-muted);font-size:0.85rem;margin-top:0.75rem">Model routing is handled by Agent42's tiered routing. Token usage below reflects API calls (embeddings, media, search).</p>
     </div>
   </div>`;
 
@@ -7632,7 +7805,7 @@ function _renderReportsHealth(d) {
   const memCard = `<div class="card reports-section">
     <div class="card-header"><h3>System Health</h3></div>
     <div class="card-body">
-      <p style="color:var(--text-muted);margin-bottom:1rem">Agent42 operates as an MCP server. Model routing is handled by Claude Code.</p>
+      <p style="color:var(--text-muted);margin-bottom:1rem">Agent42 operates as an MCP server and plugin for CLI harnesses.</p>
       <div class="status-metric-row"><span class="metric-label">MCP Transport</span><span class="metric-value text-success">stdio</span></div>
       <div class="status-metric-row"><span class="metric-label">Tools Registered</span><span class="metric-value">${tools.total || 0}</span></div>
       <div class="status-metric-row"><span class="metric-label">Tools Enabled</span><span class="metric-value text-success">${tools.enabled || 0}</span></div>
@@ -7761,11 +7934,12 @@ function renderSettings() {
 
   const tabs = [
     { id: "providers", label: "API Keys" },
-    { id: "repos", label: "Repositories" },
-    { id: "channels", label: "Channels" },
+    ...(!state.standaloneMode ? [{ id: "repos", label: "Repositories" }] : []),
+    ...(!state.standaloneMode ? [{ id: "channels", label: "Channels" }] : []),
     { id: "security", label: "Security" },
     { id: "orchestrator", label: "Orchestrator" },
     { id: "storage", label: "Storage & Paths" },
+    { id: "memory", label: "Memory & Learning" },
     { id: "rewards", label: "Rewards" },
   ];
 
@@ -7793,71 +7967,116 @@ function renderSettingsPanel() {
   });
 
   const panels = {
-    providers: () => `
-      <h3>LLM Providers</h3>
-      <p class="section-desc">Configure API keys for language model providers. Agent42 intelligently routes tasks to the best available model based on your configured keys.</p>
+    providers: () => {
+      // Section 1: Routing info box (D-04)
+      var html = '<h3>LLM Providers</h3>';
+      html += '<div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">';
+      html += '<h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">Provider Routing</h4>';
+      html += '<div class="help" style="line-height:1.7">';
+      html += 'Agent42 routes tasks in priority order: <strong>OpenCode Zen</strong> (free/paid primary) &rarr; <strong>OpenRouter</strong> (200+ models) &rarr; <strong>Anthropic</strong> &rarr; <strong>OpenAI</strong>.<br>';
+      html += 'Configure keys for the providers you want to enable. Providers without keys are skipped gracefully.';
+      html += '</div></div>';
 
-      <div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">
-        <h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">Model Routing (v2.0)</h4>
-        <div class="help" style="line-height:1.7">
-          Model routing is now handled by <strong>Claude Code</strong>. Agent42 operates as an MCP server, providing tools and context to Claude Code sessions.<br><br>
-          API keys configured here are used for <strong>media generation</strong> (Replicate, Luma), <strong>web search</strong> (Brave), and <strong>embeddings</strong> (Gemini, OpenAI). LLM model selection is managed in your Claude Code configuration.
-        </div>
-      </div>
+      if (!state.providerStatus && !state.providerStatusLoading) {
+        loadProviderStatus().then(renderSettingsPanel);
+      }
 
-      <div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">
-        <h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">MCP Integration</h4>
-        <div class="help" style="line-height:1.7">
-          Agent42 runs as an MCP server that Claude Code connects to via stdio transport. Tools, memory, and workspace operations are exposed as MCP tools.<br>
-          API keys below are still used for auxiliary services (image/video generation, search, embeddings).
-        </div>
-      </div>
+      // Section 2: API Key Providers
+      html += '<h4 style="margin:0 0 0.75rem;font-size:0.95rem">LLM Providers</h4>';
+      html += settingSecret("ZEN_API_KEY", "OpenCode Zen API Key", "Primary provider. Free models: Qwen3.6 Plus, MiniMax M2.5, Nemotron 3 Super. Get one at opencode.ai/auth.", true);
+      html += settingSecret("OPENROUTER_API_KEY", "OpenRouter API Key", "200+ models via one key. Paid fallback. Get one at openrouter.ai/keys.");
+      html += settingSecret("ANTHROPIC_API_KEY", "Anthropic API Key", "Direct Claude access (Opus/Sonnet). Get one at console.anthropic.com.");
+      html += settingSecret("OPENAI_API_KEY", "OpenAI API Key", "Direct GPT access (GPT-4o, o3). Get one at platform.openai.com/api-keys.");
+      html += settingSecret("GEMINI_API_KEY", "Gemini API Key", "Google AI models and embeddings. Get one at aistudio.google.com.");
 
-      <h4 style="margin:0 0 0.75rem;font-size:0.95rem">Primary Providers</h4>
-      ${settingSecret("GEMINI_API_KEY", "Gemini API Key (Recommended)", "Default primary model. Generous free tier: 1,500 requests/day for Flash, 1M token context. Get one at aistudio.google.com.", true)}
-      ${settingSecret("STRONGWALL_API_KEY", "StrongWall API Key", "L1 workhorse provider. Kimi K2.5 with unlimited requests ($16/mo). Get access at strongwall.ai.", true)}
-      ${settingSecret("OPENROUTER_API_KEY", "OpenRouter API Key", "200+ models via one key. Free models used as critic/fallback. Paid models activated when credits are available. Get one at openrouter.ai/keys.", true)}
+      // Section 4: Provider Connectivity (D-12, D-13, D-14)
+      html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Provider Connectivity</h4>';
+      var ps = state.providerStatus;
+      if (ps && ps.providers && ps.providers.length > 0) {
+        var statusLabelMap = { ok: 'Connected', auth_error: 'Auth error', timeout: 'Timeout', unconfigured: 'Not configured', unreachable: 'Unreachable' };
+        var statusDotMap = { ok: 'h-ok', auth_error: 'h-auth_error', timeout: 'h-timeout', unconfigured: 'h-unavailable', unreachable: 'h-error' };
+        html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;margin-bottom:0.5rem">';
+        html += '<thead><tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem 0.5rem;color:var(--text-muted)">Provider</th><th style="text-align:left;padding:0.3rem 0.5rem;color:var(--text-muted)">Status</th></tr></thead><tbody>';
+        ps.providers.forEach(function(p) {
+          var dot = statusDotMap[p.status] || 'h-error';
+          var label = statusLabelMap[p.status] || esc(p.status);
+          html += '<tr style="border-bottom:1px solid var(--border)">';
+          html += '<td style="padding:0.35rem 0.5rem">' + esc(p.label) + '</td>';
+          html += '<td style="padding:0.35rem 0.5rem;display:flex;align-items:center;gap:0.4rem"><span class="health-dot ' + dot + '"></span>' + label + '</td>';
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+        html += '<div class="help" style="font-size:0.77rem"><a href="#" onclick="state.providerStatus=null;renderSettingsPanel();return false">Refresh</a></div>';
+      } else {
+        html += '<div class="help">' + (state.providerStatusLoading ? 'Checking connectivity...' : 'Status unavailable.') + '</div>';
+      }
 
-      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Premium Providers (Optional)</h4>
-      <div class="help" style="margin-bottom:0.75rem">Set these to enable premium models for admin overrides (e.g., <code>AGENT42_CODING_MODEL=claude-opus-4-6</code>).</div>
-      ${settingSecret("ANTHROPIC_API_KEY", "Anthropic API Key", "For Claude Opus/Sonnet models. Get one at console.anthropic.com.")}
-      ${settingSecret("OPENAI_API_KEY", "OpenAI API Key", "For GPT-4o, o1, and DALL-E image generation. Get one at platform.openai.com.")}
-      ${settingSecret("DEEPSEEK_API_KEY", "DeepSeek API Key", "For DeepSeek Coder/R1 models. Get one at platform.deepseek.com.")}
-      ${settingSecret("CEREBRAS_API_KEY", "Cerebras API Key", "Free inference (~3000 tok/s). 4 models included. Get one at cloud.cerebras.ai.")}
+      // Section 4b: Zen Proxy Model picker + paid toggle
+      html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Zen Proxy Model</h4>';
+      html += '<div style="margin-bottom:0.75rem;font-size:0.85rem;color:var(--text-muted)">Default model for Claude Code CLI / VS Code through the Zen proxy. On rate limit, falls back through other free models automatically.</div>';
+      var zenFreeModels = [
+        { id: 'qwen3.6-plus-free', label: 'Qwen 3.6 Plus', desc: 'Fast, general purpose' },
+        { id: 'minimax-m2.5-free', label: 'MiniMax M2.5', desc: 'Creative, marketing' },
+        { id: 'nemotron-3-super-free', label: 'Nemotron 3 Super', desc: 'Reasoning, analysis' },
+        { id: 'big-pickle', label: 'Big Pickle', desc: 'Content generation' },
+        { id: 'trinity-large-preview-free', label: 'Trinity Large', desc: 'Preview model' },
+      ];
+      var zenPaidModels = [
+        { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+        { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+        { id: 'gpt-5.4', label: 'GPT-5.4' },
+        { id: 'gpt-5.4-pro', label: 'GPT-5.4 Pro' },
+        { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro' },
+        { id: 'kimi-k2.5', label: 'Kimi K2.5' },
+        { id: 'minimax-m2.5', label: 'MiniMax M2.5 (Paid)' },
+        { id: 'glm-5', label: 'GLM-5' },
+      ];
+      var currentZenModel = state.envSettings && state.envSettings['ZEN_DEFAULT_MODEL'] || 'qwen3.6-plus-free';
+      var allowPaid = state.envSettings && state.envSettings['ZEN_ALLOW_PAID'] === 'true';
+      html += '<select id="zen-default-model" style="width:100%;padding:0.5rem;background:var(--card-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:0.9rem">';
+      html += '<optgroup label="Free Models (no credits needed)">';
+      zenFreeModels.forEach(function(m) {
+        var sel = m.id === currentZenModel ? ' selected' : '';
+        html += '<option value="' + esc(m.id) + '"' + sel + '>' + esc(m.label) + ' \u2014 ' + esc(m.desc) + '</option>';
+      });
+      html += '</optgroup>';
+      if (allowPaid) {
+        html += '<optgroup label="Paid Models (requires Zen credits)">';
+        zenPaidModels.forEach(function(m) {
+          var sel = m.id === currentZenModel ? ' selected' : '';
+          html += '<option value="' + esc(m.id) + '"' + sel + '>\ud83d\udcb3 ' + esc(m.label) + '</option>';
+        });
+        html += '</optgroup>';
+      }
+      html += '</select>';
+      html += '<div style="margin-top:0.6rem;display:flex;align-items:center;gap:0.75rem">';
+      html += '<button onclick="saveZenDefaultModel()" style="padding:0.4rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem">Save</button>';
+      html += '<label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer">';
+      html += '<input type="checkbox" id="zen-allow-paid" ' + (allowPaid ? 'checked' : '') + ' onchange="toggleZenAllowPaid(this.checked)" style="cursor:pointer">';
+      html += '<span>Allow paid models</span></label>';
+      html += '</div>';
+      if (allowPaid) {
+        html += '<div style="margin-top:0.5rem;padding:0.5rem;background:rgba(255,170,0,0.1);border:1px solid rgba(255,170,0,0.3);border-radius:4px;font-size:0.8rem;color:#ffa500">\u26a0\ufe0f Paid models consume Zen wallet credits. Make sure your account has funds at opencode.ai/billing.</div>';
+      }
+      html += '<div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)"><strong>Tip:</strong> In Claude Code CLI, use <code>zen:model-name</code> as the model to bypass the default (e.g. <code>--model zen:nemotron-3-super-free</code>).</div>';
 
-      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Media & Search</h4>
-      ${settingSecret("REPLICATE_API_TOKEN", "Replicate API Token", "For FLUX image generation and CogVideoX video. Get one at replicate.com.")}
-      ${settingSecret("LUMA_API_KEY", "Luma AI API Key", "For Luma Ray2 premium video generation.")}
-      ${settingSecret("BRAVE_API_KEY", "Brave Search API Key", "For web search tool. Get one at brave.com/search/api.")}
+      // Section 5: Media & Search (D-02, D-03)
+      html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Media &amp; Search</h4>';
+      html += settingSecret("REPLICATE_API_TOKEN", "Replicate API Token", "For FLUX image generation and CogVideoX video. Get one at replicate.com.");
+      html += settingSecret("LUMA_API_KEY", "Luma AI API Key", "For Luma Ray2 premium video generation.");
+      html += settingSecret("BRAVE_API_KEY", "Brave Search API Key", "For web search tool. Get one at brave.com/search/api.");
 
-      <div class="form-group" style="margin-top:1.5rem">
-        <button class="btn btn-primary" id="save-keys-btn" onclick="saveApiKeys()" ${Object.keys(state.keyEdits).length === 0 || state.keySaving ? "disabled" : ""}>
-          ${state.keySaving ? "Saving..." : "Save API Keys"}
-        </button>
-        <div class="help" style="margin-top:0.5rem">Keys saved here override <code>.env</code> values and take effect immediately for new API calls.</div>
-      </div>
+      // Section 6: Save button
+      html += '<div class="form-group" style="margin-top:1.5rem">';
+      html += '<button class="btn btn-primary" id="save-keys-btn" onclick="saveApiKeys()" ' + (Object.keys(state.keyEdits).length === 0 || state.keySaving ? 'disabled' : '') + '>';
+      html += state.keySaving ? 'Saving...' : 'Save API Keys';
+      html += '</button>';
+      html += '<div class="help" style="margin-top:0.5rem">Keys saved here override <code>.env</code> values and take effect immediately for new API calls.</div>';
+      html += '</div>';
 
-      <h3 style="margin-top:2rem">OpenRouter Account Status</h3>
-      ${state.orStatus ? `
-        <div class="form-group">
-          <div class="secret-status ${state.orStatus.account && !state.orStatus.account.is_free_tier ? "configured" : "not-configured"}">
-            <strong>Tier:</strong> ${state.orStatus.account ? (state.orStatus.account.is_free_tier ? "Free" : "Paid") : "Unknown"}
-            ${state.orStatus.account && state.orStatus.account.limit_remaining !== null && state.orStatus.account.limit_remaining !== undefined ? ` &mdash; <strong>Credits remaining:</strong> $${Number(state.orStatus.account.limit_remaining).toFixed(2)}` : ""}
-            ${state.orStatus.account && state.orStatus.account.error ? ` &mdash; <span style="color:var(--danger)">${esc(state.orStatus.account.error)}</span>` : ""}
-          </div>
-          <div class="help" style="margin-top:0.5rem">
-            <strong>Policy:</strong> ${esc(state.orStatus.policy)} &mdash;
-            <strong>Paid models registered:</strong> ${state.orStatus.paid_models_registered}
-            &mdash; <a href="#" onclick="loadOrStatus().then(()=>renderSettingsPanel());return false">Refresh</a>
-          </div>
-          <div class="help" style="margin-top:0.25rem">
-            When policy is <em>balanced</em>, complex tasks (coding, debugging, app creation) auto-upgrade to paid models when credits are available.
-            Set policy to <em>free_only</em> in Orchestrator tab to disable paid upgrades, or <em>performance</em> to always prefer the best model.
-          </div>
-        </div>
-      ` : `<div class="help">${state.orStatusLoading ? "Loading..." : "Status not available. Configure an OpenRouter API key first."}</div>`}
-    `,
-    routing: () => `<h3>LLM Routing</h3><p class="section-desc">Model routing is now handled by Claude Code. Configure models in your Claude Code settings.</p>`,
+      return html;
+    },
+    routing: () => `<h3>LLM Routing</h3><p class="section-desc">Model routing is handled by Agent42's tiered routing. Configure provider API keys in Settings to enable providers.</p>`,
     repos: () => renderReposPanel(),
     channels: () => `
       <h3>Communication Channels</h3>
@@ -8049,9 +8268,88 @@ function renderSettingsPanel() {
         </div>
       `;
     },
+    memory: function() {
+      var html = '<h3>Memory &amp; Learning</h3>';
+      html += '<p class="section-desc">Memory operation statistics, learning extraction controls, and storage backend status.</p>';
+      if (!state.memoryStats) {
+        if (!state.memoryStatsLoading) {
+          state.memoryStatsLoading = true;
+          fetch('/api/memory/stats', { headers: { 'Authorization': 'Bearer ' + state.token } })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { state.memoryStats = d; state.memoryStatsLoading = false; renderSettingsPanel(); })
+            .catch(function() { state.memoryStatsLoading = false; renderSettingsPanel(); });
+        }
+        html += '<p class="help">Loading memory stats...</p>';
+      } else {
+        var ms = state.memoryStats;
+        html += '<div class="stats-row" style="margin-bottom:1.5rem">';
+        html += '<div class="stat-card" style="text-align:center"><div class="stat-value">' + esc(String(ms.recall_count || 0)) + '</div><div class="stat-label">Recalls (24h)</div></div>';
+        html += '<div class="stat-card" style="text-align:center"><div class="stat-value">' + esc(String(ms.learn_count || 0)) + '</div><div class="stat-label">Learnings (24h)</div></div>';
+        html += '<div class="stat-card" style="text-align:center"><div class="stat-value">' + esc(String(ms.error_count || 0)) + '</div><div class="stat-label">Errors (24h)</div></div>';
+        html += '<div class="stat-card" style="text-align:center"><div class="stat-value">' + esc(String(Math.round(ms.avg_latency_ms || 0))) + ' ms</div><div class="stat-label">Avg Latency</div></div>';
+        html += '</div>';
+      }
+      html += '<div class="form-group" style="margin-bottom:1.5rem">';
+      html += '<h4 style="margin:0 0 0.5rem;font-size:0.95rem">Learning Extraction</h4>';
+      var learningEnabled = (state.envSettings && state.envSettings.LEARNING_ENABLED !== 'false') ? true : false;
+      html += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer">';
+      html += '<input type="checkbox" ' + (learningEnabled ? 'checked' : '') + ' onchange="toggleLearningEnabled(this.checked)" style="width:16px;height:16px">';
+      html += '<span style="font-size:0.85rem">Enable automatic learning extraction from agent runs</span>';
+      html += '</label>';
+      html += '<p class="help">When enabled, Agent42 extracts learnings from completed agent runs and stores them in the knowledge base for future recall.</p>';
+      html += '</div>';
+      if (state.storageStatus) {
+        var ss = state.storageStatus;
+        html += '<h4 style="margin:0 0 0.5rem;font-size:0.95rem">Storage Backend</h4>';
+        html += '<div class="form-group" style="margin-bottom:1rem"><div style="display:flex;gap:12px;flex-wrap:wrap">';
+        html += '<span class="badge" style="padding:4px 8px;border-radius:4px;font-size:0.75rem;background:#dbeafe;color:#1e40af">Mode: ' + esc(ss.mode) + '</span>';
+        var qdrantOk = ss.qdrant && (ss.qdrant.status === 'connected' || ss.qdrant.status === 'embedded_ok');
+        html += '<span class="badge" style="padding:4px 8px;border-radius:4px;font-size:0.75rem;background:' + (qdrantOk ? '#dcfce7;color:#166534' : '#fef2f2;color:#991b1b') + '">Qdrant: ' + esc(ss.qdrant ? ss.qdrant.status : 'disabled') + '</span>';
+        if (ss.redis) { html += '<span class="badge" style="padding:4px 8px;border-radius:4px;font-size:0.75rem;background:' + (ss.redis.status === 'connected' ? '#dcfce7;color:#166534' : '#fef2f2;color:#991b1b') + '">Redis: ' + esc(ss.redis.status) + '</span>'; }
+        html += '</div></div>';
+        if (ss.cc_sync && ss.cc_sync.last_sync) { html += '<div class="form-group" style="margin-bottom:0.5rem"><span style="font-size:0.8rem;color:var(--text-muted)">Last CC Sync: ' + esc(ss.cc_sync.last_sync) + ' (' + esc(String(ss.cc_sync.total_synced || 0)) + ' entries)</span></div>'; }
+        if (ss.consolidation && ss.consolidation.last_run) { html += '<div class="form-group" style="margin-bottom:0.5rem"><span style="font-size:0.8rem;color:var(--text-muted)">Last Consolidation: ' + esc(ss.consolidation.last_run) + ' (scanned: ' + esc(String(ss.consolidation.last_scanned || 0)) + ', removed: ' + esc(String(ss.consolidation.last_removed || 0)) + ')</span></div>'; }
+      }
+      html += '<h4 style="margin:1.5rem 0 0.5rem;font-size:0.95rem;color:#dc2626">Danger Zone</h4>';
+      html += '<p class="help" style="margin-bottom:0.75rem">Purge operations are irreversible. All entries in the selected collection will be permanently deleted.</p>';
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+      html += '<button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5" onclick="confirmPurgeCollection(\'memory\')">Purge Memory</button>';
+      html += '<button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5" onclick="confirmPurgeCollection(\'knowledge\')">Purge Knowledge</button>';
+      html += '<button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5" onclick="confirmPurgeCollection(\'history\')">Purge History</button>';
+      html += '</div>';
+      return html;
+    },
   };
 
   el.innerHTML = (panels[state.settingsTab] || panels.providers)();
+}
+
+function toggleLearningEnabled(enabled) {
+  fetch('/api/settings/env', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
+    body: JSON.stringify({ settings: { LEARNING_ENABLED: enabled ? 'true' : 'false' } })
+  }).then(function(r) { return r.json(); }).then(function() {
+    if (state.envSettings) state.envSettings.LEARNING_ENABLED = enabled ? 'true' : 'false';
+    toast(enabled ? 'Learning enabled' : 'Learning disabled', 'success');
+  }).catch(function() { toast('Failed to update learning setting', 'error'); });
+}
+
+function confirmPurgeCollection(collection) {
+  var answer = prompt('This will permanently delete ALL entries in the "' + collection + '" collection. Type PURGE to confirm:');
+  if (answer !== 'PURGE') return;
+  fetch('/api/settings/memory/' + encodeURIComponent(collection), {
+    method: 'DELETE',
+    headers: { 'Authorization': 'Bearer ' + state.token }
+  }).then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(function() {
+    toast('Collection "' + collection + '" purged successfully', 'success');
+    state.memoryStats = null;
+    state.memoryStatsLoading = false;
+    renderSettingsPanel();
+  }).catch(function(e) { toast('Purge failed: ' + e.message, 'error'); });
 }
 
 function settingSecret(envVar, label, help, highlight = false) {
@@ -8079,6 +8377,7 @@ function settingSecret(envVar, label, help, highlight = false) {
 
   const hasEdit = state.keyEdits[envVar] !== undefined;
   const willBeCleared = hasEdit && state.keyEdits[envVar] === '';
+  const displayValue = hasEdit ? state.keyEdits[envVar] : (configured && source === "admin" ? masked : "");
   const statusClass = willBeCleared ? "not-configured" : (configured ? "configured" : "not-configured");
   const statusText = willBeCleared
     ? "Will be cleared — click Save API Keys to confirm"
@@ -8092,7 +8391,7 @@ function settingSecret(envVar, label, help, highlight = false) {
       <div class="secret-input" style="display:flex;gap:0.5rem;align-items:center">
         <input type="password" id="key-${envVar}"
                placeholder="${willBeCleared ? "— will be cleared on save —" : (configured ? "Enter new value to override" : "Enter API key")}"
-               value="${hasEdit ? esc(state.keyEdits[envVar]) : ""}"
+               value="${esc(displayValue)}"
                oninput="state.keyEdits['${envVar}']=this.value;updateSaveBtn()"
                style="font-family:var(--mono);flex:1;${highlight || willBeCleared ? "border-color:var(--accent)" : ""}">
         <button class="btn btn-sm" onclick="const inp=document.getElementById('key-${envVar}');inp.type=inp.type==='password'?'text':'password';this.textContent=inp.type==='password'?'Show':'Hide'" title="Toggle visibility" style="white-space:nowrap">Show</button>
@@ -8172,6 +8471,40 @@ async function loadOrStatus() {
     state.orStatus = (await api("/settings/openrouter-status")) || null;
   } catch (e) { state.orStatus = null; }
   state.orStatusLoading = false;
+}
+
+async function loadProviderStatus() {
+  state.providerStatusLoading = true;
+  try {
+    state.providerStatus = (await api("/settings/provider-status")) || null;
+  } catch (e) { state.providerStatus = null; }
+  state.providerStatusLoading = false;
+}
+
+async function loadAgentModels(provider) {
+  var sel = document.getElementById("agent-model");
+  if (!sel) return;
+  while (sel.options.length > 0) sel.remove(0);
+  var placeholder = new Option("Loading models...", "");
+  sel.add(placeholder);
+  try {
+    var allModels = (await api("/agents/models")) || {};
+    var providerModels = allModels[provider] || {};
+    var entries = Object.entries(providerModels);
+    while (sel.options.length > 0) sel.remove(0);
+    if (entries.length === 0) {
+      sel.add(new Option("(no models for this provider)", ""));
+    } else {
+      entries.forEach(function(entry) {
+        var category = entry[0];
+        var modelId = entry[1];
+        sel.add(new Option(category + " -- " + modelId, modelId));
+      });
+    }
+  } catch (e) {
+    while (sel.options.length > 0) sel.remove(0);
+    sel.add(new Option("(failed to load models)", ""));
+  }
 }
 
 async function loadReports() {
@@ -8402,7 +8735,7 @@ async function loadAll() {
     loadTasks(), loadApprovals(), loadTools(), loadSkills(), loadChannels(), loadProviders(),
     loadHealth(), loadStatus(), loadActivity(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(), loadRewardsStatus(), loadGsdWorkstreams(),
     loadChatMessages(), loadTokenStats(), loadChatSessions(), loadCodeSessions(),
-    loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(), loadGithubAccounts(), loadOrStatus(),
+    loadProjects(), loadGitHubStatus(), loadRepos(), loadApps(), loadGithubAccounts(),
     loadReports(), loadProfiles(), loadPersona(), loadRoutingModels(), loadRoutingConfig(),
   ]);
 }
@@ -8450,8 +8783,8 @@ function render() {
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks');closeMobileSidebar()">&#127919; Mission Control</a>
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status');closeMobileSidebar()">&#128200; Status</a>
           <a href="#" data-page="approvals" class="${state.page === "approvals" ? "active" : ""}" onclick="event.preventDefault();navigate('approvals');closeMobileSidebar()">&#128274; Approvals ${approvalBadge}</a>
-          <a href="#" data-page="workspace" class="${state.page === "workspace" ? "active" : ""}" onclick="event.preventDefault();navigate('workspace');closeMobileSidebar()">&#128187; Workspaces</a>
-          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Sandboxed Apps</a>
+          ${state.standaloneMode ? "" : '<a href="#" data-page="workspace" class="' + (state.page === "workspace" ? "active" : "") + '" onclick="event.preventDefault();navigate(\'workspace\');closeMobileSidebar()">&#128187; Workspaces</a>'}
+          ${state.standaloneMode ? "" : '<a href="#" data-page="apps" class="' + (state.page === "apps" ? "active" : "") + '" onclick="event.preventDefault();navigate(\'apps\');closeMobileSidebar()">&#128640; Sandboxed Apps</a>'}
           <a href="#" data-page="agents" class="${state.page === "agents" ? "active" : ""}" onclick="event.preventDefault();navigate('agents');closeMobileSidebar()">&#129302; Agents</a>
           <a href="#" data-page="teams" class="${state.page === "teams" ? "active" : ""}" onclick="event.preventDefault();navigate('teams');closeMobileSidebar()">&#129309; Teams</a>
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>

@@ -29,24 +29,17 @@ from core.config import settings
 # avoiding rate limit conflicts on any single model.
 
 PROVIDER_MODELS = {
-    "anthropic": {
-        "fast": "claude-haiku-4-5-20251001",
-        "general": "claude-sonnet-4-6-20260217",
-        "reasoning": "claude-opus-4-6-20260205",
-        "coding": "claude-sonnet-4-6-20260217",
-        "content": "claude-sonnet-4-6-20260217",
-    },
-    "synthetic": {
-        "fast": "hf:zai-org/GLM-4.7-Flash",
-        "general": "hf:zai-org/GLM-4.7",
-        "reasoning": "hf:moonshotai/Kimi-K2-Thinking",
-        "coding": "hf:Qwen/Qwen3-Coder-480B-A35B-Instruct",
-        "content": "hf:Qwen/Qwen3.5-397B-A17B",
-        "research": "hf:moonshotai/Kimi-K2.5",
-        "monitoring": "hf:zai-org/GLM-4.7-Flash",
-        "marketing": "hf:MiniMaxAI/MiniMax-M2.5",
-        "analysis": "hf:deepseek-ai/DeepSeek-R1-0528",
-        "lightweight": "hf:meta-llama/Llama-3.3-70B-Instruct",
+    "zen": {
+        "fast": "qwen3.6-plus-free",
+        "general": "minimax-m2.5-free",
+        "reasoning": "nemotron-3-super-free",
+        "coding": "qwen3.6-plus-free",
+        "content": "big-pickle",
+        "research": "nemotron-3-super-free",
+        "monitoring": "qwen3.6-plus-free",
+        "marketing": "minimax-m2.5-free",
+        "analysis": "nemotron-3-super-free",
+        "lightweight": "qwen3.6-plus-free",
     },
     "openrouter": {
         "fast": "google/gemini-2.0-flash-001",
@@ -55,7 +48,116 @@ PROVIDER_MODELS = {
         "coding": "anthropic/claude-sonnet-4-6",
         "content": "anthropic/claude-sonnet-4-6",
     },
+    "anthropic": {
+        "fast": "claude-haiku-4-5-20251001",
+        "general": "claude-sonnet-4-6-20260217",
+        "reasoning": "claude-opus-4-6-20260205",
+        "coding": "claude-sonnet-4-6-20260217",
+        "content": "claude-sonnet-4-6-20260217",
+    },
+    "openai": {
+        "fast": "gpt-4o-mini",
+        "general": "gpt-4o",
+        "reasoning": "o3",
+        "coding": "gpt-4o",
+        "content": "gpt-4o",
+    },
 }
+
+
+# ── Zen model refresh ──────────────────────────────────────────────────────
+
+# Optional import for Zen API client
+try:
+    from providers.zen_api import get_zen_client
+
+    _zen_client = get_zen_client()
+except ImportError:
+    _zen_client = None
+
+_ZEN_FREE_MODEL_CATEGORIES = {
+    "fast": "qwen3.6-plus-free",
+    "general": "minimax-m2.5-free",
+    "reasoning": "nemotron-3-super-free",
+    "coding": "qwen3.6-plus-free",
+    "content": "big-pickle",
+    "research": "nemotron-3-super-free",
+    "monitoring": "qwen3.6-plus-free",
+    "marketing": "minimax-m2.5-free",
+    "analysis": "nemotron-3-super-free",
+    "lightweight": "qwen3.6-plus-free",
+}
+
+
+def refresh_zen_models(force: bool = False) -> bool:
+    """Refresh Zen free model mappings from API.
+
+    Args:
+        force: If True, bypass cache and fetch from API regardless
+
+    Returns:
+        True if models were successfully refreshed, False otherwise
+    """
+    global PROVIDER_MODELS
+
+    if _zen_client is None:
+        logger.warning("Zen API client not available")
+        return False
+
+    try:
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+            models = asyncio.run(_zen_client.list_models())
+        except RuntimeError:
+            models = asyncio.run(_zen_client.list_models())
+
+        if models:
+            dynamic_mapping = dict(_ZEN_FREE_MODEL_CATEGORIES)
+            for model_id in models:
+                if model_id not in dynamic_mapping.values():
+                    dynamic_mapping["general"] = model_id
+                    break
+
+            PROVIDER_MODELS["zen"] = dynamic_mapping
+            logger.info(f"Updated Zen model mappings: {len(dynamic_mapping)} categories")
+            return True
+        else:
+            logger.warning("No free models fetched from Zen API")
+            return False
+    except Exception as e:
+        logger.error(f"Error refreshing Zen models: {e}")
+        return False
+
+
+async def start_zen_model_refresh_task() -> None:
+    """Start a background task to periodically refresh Zen free models weekly."""
+    global PROVIDER_MODELS
+
+    if _zen_client is None:
+        logger.info("Zen API client not available, skipping background refresh")
+        return
+
+    refresh_interval_hours = 168.0  # Weekly
+    refresh_interval_seconds = refresh_interval_hours * 3600
+
+    logger.info(f"Starting Zen model refresh task (every {refresh_interval_hours} hours)")
+
+    while True:
+        try:
+            await asyncio.sleep(refresh_interval_seconds)
+            logger.info("Refreshing Zen free models...")
+            success = refresh_zen_models()
+            if success:
+                logger.info("Successfully refreshed Zen free models")
+            else:
+                logger.warning("Failed to refresh Zen free models — using cached defaults")
+        except asyncio.CancelledError:
+            logger.info("Zen model refresh task cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Error in Zen model refresh task: {e}")
 
 
 # ── Tier-to-model-category upgrade map (Phase 3: Resource Enforcement) ───────
@@ -86,6 +188,27 @@ def resolve_model(provider: str, task_category: str, tier: str = "") -> str:
     effective_category = _TIER_CATEGORY_UPGRADE.get(tier, task_category)
     models = PROVIDER_MODELS.get(provider, PROVIDER_MODELS.get("anthropic", {}))
     return models.get(effective_category, models.get("general", "claude-sonnet-4-6"))
+
+
+def get_fallback_models(provider: str, task_category: str, failed_model: str) -> list[str]:
+    """Get ordered list of fallback models when a model is exhausted.
+
+    Args:
+        provider: Provider key (e.g. "zen", "openrouter")
+        task_category: Task category (e.g. "fast", "general", "reasoning")
+        failed_model: The model that failed (to skip it)
+
+    Returns:
+        Ordered list of model IDs to try as fallback, excluding failed_model.
+    """
+    if provider != "zen":
+        return []
+
+    current_models = PROVIDER_MODELS.get("zen", {})
+    fallback_candidates = list(current_models.values())
+    fallback_candidates = [m for m in fallback_candidates if m != failed_model]
+    unique_fallbacks = list(dict.fromkeys(fallback_candidates))
+    return unique_fallbacks
 
 
 # ── Agent Templates ──────────────────────────────────────────────────────
@@ -230,6 +353,24 @@ class AgentManager:
         # Tier concurrency semaphores — created lazily in async context (Pitfall 1)
         self._tier_semaphores: dict[str, asyncio.Semaphore] = {}
         self._load_all()
+
+        # Start background task to refresh Synthetic.new models
+        self._start_background_tasks()
+
+    def _start_background_tasks(self):
+        """Start background tasks for model refresh."""
+        try:
+            import asyncio
+
+            from core.agent_manager import start_zen_model_refresh_task
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(start_zen_model_refresh_task())
+            except RuntimeError:
+                pass  # No running loop — task starts when the app runs
+        except Exception as e:
+            logger.warning(f"Failed to start background model refresh task: {e}")
 
     def _load_all(self):
         """Load all agent configs from disk."""

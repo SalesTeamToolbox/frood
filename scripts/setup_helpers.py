@@ -27,6 +27,347 @@ def _venv_python(project_dir: str) -> str:
     return os.path.join(project_dir, ".venv", "bin", "python")
 
 
+def _get_python_executable() -> str:
+    """Return the current Python executable path."""
+    return sys.executable
+
+
+def _get_project_dir() -> str:
+    """Return the project root directory."""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _download_winsw(project_dir: str) -> str:
+    """Download WinSW if not already present. Returns path to winsw.exe."""
+    winsw_path = os.path.join(project_dir, "winsw.exe")
+    if os.path.exists(winsw_path):
+        return winsw_path
+
+    print("Downloading WinSW (Windows Service Wrapper)...")
+    urls = [
+        "https://github.com/winsw/winsw/releases/download/v3.0.0-alpha.11/WinSW-x64.exe",
+        "https://github.com/winsw/winsw/releases/download/v3.0.0-alpha.10/WinSW-x64.exe",
+    ]
+
+    for url in urls:
+        try:
+            import urllib.request
+
+            urllib.request.urlretrieve(url, winsw_path)
+            if os.path.exists(winsw_path) and os.path.getsize(winsw_path) > 0:
+                print(f"WinSW downloaded to: {winsw_path}")
+                return winsw_path
+        except Exception as e:
+            print(f"Failed to download from {url}: {e}")
+            continue
+
+    # If download fails, check if user has it in PATH
+    for path in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = os.path.join(path, "winsw.exe")
+        if os.path.exists(candidate):
+            return candidate
+
+    raise RuntimeError(
+        "Failed to download WinSW. Please download manually from:\n"
+        "https://github.com/winsw/winsw/releases\n"
+        f"Place winsw.exe in: {project_dir}"
+    )
+
+
+def _create_service_xml(project_dir: str) -> str:
+    """Create the Windows service XML configuration."""
+    python_exe = _get_python_executable()
+    agent42_py = os.path.join(project_dir, "agent42.py")
+
+    xml_content = f'''<?xml version="1.0" encoding="utf-8"?>
+<service>
+  <id>agent42</id>
+  <name>Agent42</name>
+  <description>Agent42 AI Agent Platform - Dashboard, MCP Server, and LLM Proxy</description>
+  <executable>{python_exe}</executable>
+  <arguments>agent42.py</arguments>
+  <workingdirectory>{project_dir}</workingdirectory>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="20 sec"/>
+  <onfailure action="none"/>
+  <startmode>Automatic</startmode>
+  <stoptimeout>30sec</stoptimeout>
+  <env name="PYTHONUNBUFFERED" value="1"/>
+  <env name="PATH" value="{os.path.dirname(python_exe)};{os.path.dirname(python_exe)}\\Scripts;C:\\Windows\\system32;C:\\Windows"/>
+</service>'''
+
+    xml_path = os.path.join(project_dir, "agent42-service.xml")
+    with open(xml_path, "w") as f:
+        f.write(xml_content)
+
+    return xml_path
+
+
+def setup_windows_service(project_dir: str, action: str = "install") -> None:
+    """Install or uninstall Agent42 as a Windows service.
+
+    Args:
+        project_dir: Path to the Agent42 project directory.
+        action: 'install' or 'uninstall'
+    """
+    if sys.platform != "win32":
+        print("Windows service installation is only supported on Windows.")
+        return
+
+    winsw_path = _download_winsw(project_dir)
+    xml_path = _create_service_xml(project_dir)
+
+    if action == "uninstall":
+        print("Uninstalling Agent42 Windows service...")
+        result = subprocess.run([winsw_path, "uninstall", xml_path], capture_output=True, text=True)
+        if result.returncode == 0:
+            print("Agent42 service uninstalled successfully.")
+        else:
+            print(f"Error uninstalling service: {result.stderr}")
+        return
+
+    # Install
+    print("Installing Agent42 as a Windows service...")
+
+    # Check if service already exists
+    check_result = subprocess.run(["sc", "query", "agent42"], capture_output=True, text=True)
+    if "agent42" in check_result.stdout:
+        print("Agent42 service already exists. Removing old installation...")
+        subprocess.run([winsw_path, "uninstall", xml_path], capture_output=True)
+        import time
+
+        time.sleep(2)
+
+    # Install service
+    result = subprocess.run([winsw_path, "install", xml_path], capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"Error installing service: {result.stderr}")
+        return
+
+    print("Agent42 service installed successfully!")
+    print("")
+    print("Starting Agent42 service...")
+    start_result = subprocess.run(["net", "start", "agent42"], capture_output=True, text=True)
+    if start_result.returncode == 0:
+        print("Agent42 service started successfully!")
+        print("")
+        print("========================================")
+        print(" Agent42 is now running as a Windows service!")
+        print("========================================")
+        print("")
+        print("Dashboard: http://localhost:8000")
+        print("LLM Proxy: http://localhost:8000/llm/v1")
+        print("")
+        print("Commands:")
+        print("  net start agent42     - Start")
+        print("  net stop agent42      - Stop")
+        print("  sc query agent42      - Status")
+        print("")
+        print("To uninstall:")
+        print(f"  python scripts/setup_helpers.py windows-service uninstall")
+    else:
+        print(f"Warning: Service installed but may not have started: {start_result.stdout}")
+        print("Check logs in the project directory for details.")
+
+
+def _create_n8n_service_xml(project_dir: str) -> str:
+    """Create the Windows service XML configuration for n8n."""
+    # n8n runs via Docker, so we create a service that runs docker compose
+    docker_exe = "docker.exe"
+    compose_file = os.path.join(project_dir, "docker-compose.n8n.yml")
+
+    xml_content = f'''<?xml version="1.0" encoding="utf-8"?>
+<service>
+  <id>n8n-agent42</id>
+  <name>n8n (Agent42)</name>
+  <description>n8n Workflow Automation Engine for Agent42</description>
+  <executable>{docker_exe}</executable>
+  <arguments>compose -f "{compose_file}" up</arguments>
+  <workingdirectory>{project_dir}</workingdirectory>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <onfailure action="restart" delay="15 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="none"/>
+  <startmode>Automatic</startmode>
+  <stoptimeout>60sec</stoptimeout>
+  <env name="COMPOSE_PROJECT_NAME" value="agent42-n8n"/>
+  <env name="PATH" value="C:\\Program Files\\Docker\\Docker\\resources\\bin;C:\\Windows\\system32;C:\\Windows"/>
+</service>'''
+
+    xml_path = os.path.join(project_dir, "n8n-service.xml")
+    with open(xml_path, "w") as f:
+        f.write(xml_content)
+
+    return xml_path
+
+
+def setup_n8n_service(project_dir: str, action: str = "install") -> None:
+    """Install or uninstall n8n as a Windows service via Docker.
+
+    Args:
+        project_dir: Path to the Agent42 project directory.
+        action: 'install' or 'uninstall'
+    """
+    if sys.platform != "win32":
+        print("n8n Windows service installation is only supported on Windows.")
+        return
+
+    # Check if Docker is available
+    docker_check = subprocess.run(["docker", "--version"], capture_output=True, text=True)
+    if docker_check.returncode != 0:
+        print("ERROR: Docker is not installed or not in PATH.")
+        print(
+            "Install Docker Desktop for Windows first: https://www.docker.com/products/docker-desktop/"
+        )
+        return
+
+    winsw_path = _download_winsw(project_dir)
+    xml_path = _create_n8n_service_xml(project_dir)
+
+    if action == "uninstall":
+        print("Uninstalling n8n Windows service...")
+        result = subprocess.run([winsw_path, "uninstall", xml_path], capture_output=True, text=True)
+        if result.returncode == 0:
+            print("n8n service uninstalled successfully.")
+        else:
+            print(f"Error uninstalling service: {result.stderr}")
+        return
+
+    # Install
+    print("Installing n8n as a Windows service...")
+
+    # Check if service already exists
+    check_result = subprocess.run(["sc", "query", "n8n-agent42"], capture_output=True, text=True)
+    if "n8n-agent42" in check_result.stdout:
+        print("n8n service already exists. Removing old installation...")
+        subprocess.run([winsw_path, "uninstall", xml_path], capture_output=True)
+        import time
+
+        time.sleep(2)
+
+    # Install service
+    result = subprocess.run([winsw_path, "install", xml_path], capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"Error installing service: {result.stderr}")
+        return
+
+    print("n8n service installed successfully!")
+    print("")
+    print("Starting n8n service...")
+    start_result = subprocess.run(["net", "start", "n8n-agent42"], capture_output=True, text=True)
+    if start_result.returncode == 0:
+        print("n8n service started successfully!")
+        print("")
+        print("========================================")
+        print(" n8n is now running as a Windows service!")
+        print("========================================")
+        print("")
+        print("n8n Dashboard: http://localhost:5678")
+        print("")
+        print("Commands:")
+        print("  net start n8n-agent42     - Start")
+        print("  net stop n8n-agent42      - Stop")
+        print("  sc query n8n-agent42      - Status")
+        print("")
+        print("To uninstall:")
+        print(f"  python scripts/setup_helpers.py n8n-service uninstall")
+    else:
+        print(f"Warning: Service installed but may not have started: {start_result.stdout}")
+        print("Check logs in the project directory for details.")
+
+
+def run_windows_setup(project_dir: str) -> None:
+    """Run complete Windows setup: Agent42 service + n8n service + env vars."""
+    if sys.platform != "win32":
+        print("Windows setup is only supported on Windows.")
+        return
+
+    print("=" * 60)
+    print(" Agent42 Windows Setup")
+    print("=" * 60)
+    print()
+
+    # Step 1: Install Agent42 service
+    print("Step 1: Installing Agent42 Windows service...")
+    print("-" * 40)
+    try:
+        setup_windows_service(project_dir, "install")
+    except Exception as e:
+        print(f"Warning: Agent42 service installation failed: {e}")
+
+    print()
+
+    # Step 2: Install n8n service (optional)
+    print("Step 2: Installing n8n Windows service (optional)...")
+    print("-" * 40)
+    print("This requires Docker Desktop to be installed.")
+    print("If Docker is not installed, n8n will be skipped.")
+    print()
+
+    try:
+        docker_check = subprocess.run(["docker", "--version"], capture_output=True, text=True)
+        has_docker = docker_check.returncode == 0
+    except FileNotFoundError:
+        has_docker = False
+
+    if has_docker:
+        try:
+            setup_n8n_service(project_dir, "install")
+        except Exception as e:
+            print(f"Warning: n8n service installation failed: {e}")
+    else:
+        print("Docker not found - skipping n8n service installation.")
+        print("You can install Docker Desktop later and run:")
+        print(f"  python scripts/setup_helpers.py n8n-service install")
+
+    print()
+
+    # Step 3: Set environment variables
+    print("Step 3: Setting environment variables for Claude Code proxy...")
+    print("-" * 40)
+
+    env_vars = [
+        ("ANTHROPIC_BASE_URL", "http://localhost:8000/llm/v1"),
+        ("ANTHROPIC_API_KEY", "dummy"),
+        ("ANTHROPIC_MODEL", "qwen3.6-plus-free"),
+    ]
+
+    for var_name, var_value in env_vars:
+        result = subprocess.run(["setx", var_name, var_value], capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"  {var_name} = {var_value} [OK]")
+        else:
+            print(f"  {var_name} = {var_value} [FAILED]")
+
+    print()
+    print("=" * 60)
+    print(" Windows Setup Complete!")
+    print("=" * 60)
+    print()
+    print("Agent42 will start automatically on next boot.")
+    print("To start now: net start agent42")
+    print()
+    print("Access points:")
+    print("  Dashboard:   http://localhost:8000")
+    print("  LLM Proxy:   http://localhost:8000/llm/v1")
+    print("  n8n:         http://localhost:5678 (if installed)")
+    print()
+    print("To switch models in Claude Code:")
+    print("  /model qwen3.6-plus-free")
+    print("  /model claude-sonnet-4-6")
+    print()
+    print("To disable proxy and use Claude Code subscription:")
+    print("  python scripts/setup_helpers.py windows-uninstall")
+    print()
+
+
 # ---------------------------------------------------------------------------
 # Server template definitions
 # ---------------------------------------------------------------------------
@@ -926,6 +1267,29 @@ if __name__ == "__main__":
             sys.exit(1)
         project_dir = sys.argv[2]
         generate_full_claude_md(project_dir)
+
+    elif cmd == "windows-service":
+        action = sys.argv[2] if len(sys.argv) > 2 else "install"
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        setup_windows_service(project_dir, action)
+
+    elif cmd == "n8n-service":
+        action = sys.argv[2] if len(sys.argv) > 2 else "install"
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        setup_n8n_service(project_dir, action)
+
+    elif cmd == "windows-setup":
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        run_windows_setup(project_dir)
+
+    elif cmd == "windows-uninstall":
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        setup_windows_service(project_dir, "uninstall")
+        setup_n8n_service(project_dir, "uninstall")
+        # Clear env vars
+        for var in ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"]:
+            subprocess.run(["setx", var, ""], capture_output=True)
+        print("Windows services uninstalled and proxy env vars cleared.")
 
     else:
         print(

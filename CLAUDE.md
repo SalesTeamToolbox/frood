@@ -61,6 +61,37 @@ python -m pytest tests/test_security.py -v  # Security suite
 
 New modules need `tests/test_*.py`. Full standards: `.claude/reference/development-workflow.md`
 
+## On-Demand Plugins (disabled to save tokens — enable when needed, disable after)
+
+| Plugin | Enable command | Use when |
+|--------|---------------|----------|
+| pr-review-toolkit | `claude plugins enable "pr-review-toolkit@claude-plugins-official"` | PR reviews, code review |
+| feature-dev | `claude plugins enable "feature-dev@claude-plugins-official"` | Guided feature development |
+| playwright | `claude plugins enable "playwright@claude-plugins-official"` | Browser testing, UAT |
+| context7 | `claude plugins enable "context7@claude-plugins-official"` | Library/framework docs |
+| code-review | `claude plugins enable "code-review@claude-plugins-official"` | Dedicated code review |
+| plugin-dev | `claude plugins enable "plugin-dev@claude-plugins-official"` | Building CC plugins |
+| agent-sdk-dev | `claude plugins enable "agent-sdk-dev@claude-plugins-official"` | Agent SDK apps |
+| frontend-design | `claude plugins enable "frontend-design@claude-plugins-official"` | Frontend UI work |
+| skill-creator | `claude plugins enable "skill-creator@claude-plugins-official"` | Creating CC skills |
+| code-simplifier | `claude plugins enable "code-simplifier@claude-plugins-official"` | Code simplification |
+| playground | `claude plugins enable "playground@claude-plugins-official"` | Interactive HTML playgrounds |
+| claude-code-setup | `claude plugins enable "claude-code-setup@claude-plugins-official"` | CC automation setup |
+| github | `claude plugins enable "github@claude-plugins-official"` | GitHub API (beyond `gh` CLI) |
+
+After task completes: `claude plugins disable "<name>@claude-plugins-official"`
+
+## On-Demand MCP Servers (activate with `/mcp-activate <name>`, deactivate with `/mcp-deactivate <name>`)
+
+| Server | Use when |
+|--------|----------|
+| agent42 | Working on Agent42 code that needs MCP tools |
+| agent42-remote | Production server operations |
+| jcodemunch | Codebase navigation (symbols, outlines, trees) |
+| context7 | Library documentation lookup |
+| playwright | Browser automation |
+| firecrawl | Web scraping |
+
 ## Reference Docs (on-demand)
 
 - `hooks-reference.md` — Full hook table, protocol, architecture diagram

@@ -41,11 +41,21 @@ class Settings:
     """Immutable application settings derived from environment variables."""
 
     # API keys — active providers
-    openai_api_key: str = ""
-    anthropic_api_key: str = ""
-    synthetic_api_key: str = ""  # Synthetic.new (Anthropic-compatible, autonomous agents)
+    zen_api_key: str = ""  # OpenCode Zen (primary — free/paid models)
+    zen_base_url: str = ""  # Zen base URL (default: https://opencode.ai/zen/v1)
+    zen_rate_limit_enabled: bool = True  # Adaptive rate limiting for Zen API
+    zen_rate_initial_delay: float = 2.0  # Initial delay between requests (seconds)
+    zen_rate_min_delay: float = 0.5  # Minimum delay (max throughput floor)
+    zen_rate_max_delay: float = 10.0  # Maximum delay on repeated rate limits
+    zen_exhaustion_reset_hours: float = 1.0  # Reset exhaustion state after this many hours
+    zen_proxy_enabled: bool = False  # Local proxy for OpenCode CLI traffic
+    zen_proxy_port: int = 8765  # Port for the local Zen proxy
+    zen_default_model: str = "qwen3.6-plus-free"  # Default free model for proxy remapping
+    zen_allow_paid: bool = False  # Allow paid Zen models (pass through without remapping)
+    openrouter_api_key: str = ""  # OpenRouter (200+ models, paid fallback)
+    anthropic_api_key: str = ""  # Anthropic API (direct Claude access)
+    openai_api_key: str = ""  # OpenAI API (direct GPT access)
     gemini_api_key: str = ""
-    openrouter_api_key: str = ""
     # Dead providers — keys kept for backward compat but no routing logic exists
     deepseek_api_key: str = ""
     vllm_api_key: str = ""
@@ -54,8 +64,6 @@ class Settings:
     mistral_api_key: str = ""
     codestral_api_key: str = ""
     sambanova_api_key: str = ""
-    strongwall_api_key: str = ""
-    strongwall_monthly_cost: float = 16.0  # Flat monthly rate in USD
     together_api_key: str = ""
 
     # Dashboard auth
@@ -159,6 +167,9 @@ class Settings:
     qdrant_collection_prefix: str = "agent42"  # Prefix for collection names
     qdrant_enabled: bool = False  # Set true to enable Qdrant (auto-enabled if qdrant_url is set)
     qdrant_local_path: str = ".agent42/qdrant"  # Path for embedded Qdrant storage
+
+    # Learning extraction toggle (Phase 40)
+    learning_enabled: bool = True
 
     # Redis (optional — fast session cache + embedding cache)
     redis_url: str = ""  # e.g. "redis://localhost:6379/0"
@@ -312,6 +323,24 @@ class Settings:
     rewards_silver_max_concurrent: int = 5
     rewards_gold_max_concurrent: int = 10
 
+    # Paperclip sidecar mode (Phase 24)
+    paperclip_sidecar_port: int = 8001
+    paperclip_api_url: str = ""  # e.g. "http://paperclip:3000"
+    paperclip_agents_path: str = "/api/agents"  # Path to Paperclip agents endpoint
+    sidecar_enabled: bool = False
+    standalone_mode: bool = False  # Simplified dashboard mode (Claude Code only)
+    mcp_tool_allowlist: str = ""  # Comma-separated tool names for /mcp/tool proxy (Phase 28)
+
+    # N8N Workflow Integration (Phase 42)
+    n8n_url: str = ""  # e.g. "http://localhost:5678"
+    n8n_api_key: str = ""  # N8N API key (Settings -> n8n API)
+    n8n_allow_code_nodes: bool = (
+        False  # When true, n8n-nodes-base.code is unblocked in generated workflows
+    )
+    # N8N Pattern Offloading (Phase 43)
+    n8n_pattern_threshold: int = 3  # Executions before suggesting N8N workflow
+    n8n_auto_create_workflows: bool = False  # When true, create without agent confirmation
+
     @classmethod
     def from_env(cls) -> "Settings":
         # Enforce secure JWT secret
@@ -352,11 +381,23 @@ class Settings:
 
         return cls(
             # Provider API keys — active
-            openai_api_key=os.getenv("OPENAI_API_KEY", ""),
-            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-            synthetic_api_key=os.getenv("SYNTHETIC_API_KEY", ""),
-            gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+            zen_api_key=os.getenv("ZEN_API_KEY", ""),
+            zen_base_url=os.getenv("ZEN_BASE_URL", "https://opencode.ai/zen/v1"),
+            zen_rate_limit_enabled=os.getenv("ZEN_RATE_LIMIT_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
+            zen_rate_initial_delay=float(os.getenv("ZEN_RATE_INITIAL_DELAY", "2.0")),
+            zen_rate_min_delay=float(os.getenv("ZEN_RATE_MIN_DELAY", "0.5")),
+            zen_rate_max_delay=float(os.getenv("ZEN_RATE_MAX_DELAY", "10.0")),
+            zen_exhaustion_reset_hours=float(os.getenv("ZEN_EXHAUSTION_RESET_HOURS", "1.0")),
+            zen_proxy_enabled=os.getenv("ZEN_PROXY_ENABLED", "false").lower()
+            in ("true", "1", "yes"),
+            zen_proxy_port=int(os.getenv("ZEN_PROXY_PORT", "8765")),
+            zen_default_model=os.getenv("ZEN_DEFAULT_MODEL", "qwen3.6-plus-free"),
+            zen_allow_paid=os.getenv("ZEN_ALLOW_PAID", "false").lower() in ("true", "1", "yes"),
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
+            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+            openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+            gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
             # Dead providers (kept for backward compat)
             deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
             vllm_api_key=os.getenv("VLLM_API_KEY", ""),
@@ -365,8 +406,6 @@ class Settings:
             mistral_api_key=os.getenv("MISTRAL_API_KEY", ""),
             codestral_api_key=os.getenv("CODESTRAL_API_KEY", ""),
             sambanova_api_key=os.getenv("SAMBANOVA_API_KEY", ""),
-            strongwall_api_key=os.getenv("STRONGWALL_API_KEY", ""),
-            strongwall_monthly_cost=float(os.getenv("STRONGWALL_MONTHLY_COST", "16.0")),
             together_api_key=os.getenv("TOGETHER_API_KEY", ""),
             # Dashboard
             dashboard_username=os.getenv("DASHBOARD_USERNAME", "admin"),
@@ -515,6 +554,7 @@ class Settings:
             l2_auto_escalate_task_types=os.getenv("L2_AUTO_ESCALATE_TASK_TYPES", ""),
             l2_task_types=os.getenv("L2_TASK_TYPES", ""),
             # Learning extraction
+            learning_enabled=os.getenv("LEARNING_ENABLED", "true").lower() in ("true", "1", "yes"),
             learning_min_evidence=int(os.getenv("LEARNING_MIN_EVIDENCE", "3")),
             learning_quarantine_confidence=float(
                 os.getenv("LEARNING_QUARANTINE_CONFIDENCE", "0.6")
@@ -604,6 +644,22 @@ class Settings:
             rewards_bronze_max_concurrent=int(os.getenv("REWARDS_BRONZE_MAX_CONCURRENT", "2")),
             rewards_silver_max_concurrent=int(os.getenv("REWARDS_SILVER_MAX_CONCURRENT", "5")),
             rewards_gold_max_concurrent=int(os.getenv("REWARDS_GOLD_MAX_CONCURRENT", "10")),
+            # Paperclip sidecar
+            paperclip_sidecar_port=int(os.getenv("PAPERCLIP_SIDECAR_PORT", "8001")),
+            paperclip_api_url=os.getenv("PAPERCLIP_API_URL", ""),
+            paperclip_agents_path=os.getenv("PAPERCLIP_AGENTS_PATH", "/api/agents"),
+            sidecar_enabled=os.getenv("SIDECAR_ENABLED", "false").lower() in ("true", "1", "yes"),
+            standalone_mode=os.getenv("STANDALONE_MODE", "false").lower() in ("true", "1", "yes"),
+            mcp_tool_allowlist=os.getenv("MCP_TOOL_ALLOWLIST", ""),
+            # N8N Workflow Integration (Phase 42)
+            n8n_url=os.getenv("N8N_URL", "").rstrip("/"),
+            n8n_api_key=os.getenv("N8N_API_KEY", ""),
+            n8n_allow_code_nodes=os.getenv("N8N_ALLOW_CODE_NODES", "false").lower()
+            in ("true", "1", "yes"),
+            # N8N Pattern Offloading (Phase 43)
+            n8n_pattern_threshold=int(os.getenv("N8N_PATTERN_THRESHOLD", "3")),
+            n8n_auto_create_workflows=os.getenv("N8N_AUTO_CREATE_WORKFLOWS", "false").lower()
+            in ("true", "1", "yes"),
         )
 
     def get_discord_guild_ids(self) -> list[int]:
