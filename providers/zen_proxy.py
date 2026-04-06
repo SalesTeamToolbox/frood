@@ -46,6 +46,77 @@ _RATE_LIMIT_PATTERNS = [
     r"throttl",
 ]
 
+# Free Zen models — used for fallback chain ordering
+_ZEN_FREE_MODELS = [
+    "qwen3.6-plus-free",
+    "minimax-m2.5-free",
+    "nemotron-3-super-free",
+    "big-pickle",
+    "trinity-large-preview-free",
+]
+
+# Known paid Zen models (for ZEN_ALLOW_PAID passthrough check)
+_ZEN_PAID_MODELS = {
+    "claude-opus-4-6",
+    "claude-opus-4-5",
+    "claude-opus-4-1",
+    "claude-sonnet-4-6",
+    "claude-sonnet-4-5",
+    "claude-sonnet-4",
+    "claude-haiku-4-5",
+    "claude-3-5-haiku",
+    "gemini-3.1-pro",
+    "gemini-3-pro",
+    "gemini-3-flash",
+    "gpt-5.4",
+    "gpt-5.4-pro",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+    "gpt-5.3-codex-spark",
+    "gpt-5.3-codex",
+    "gpt-5.2",
+    "gpt-5.2-codex",
+    "gpt-5.1",
+    "gpt-5.1-codex-max",
+    "gpt-5.1-codex",
+    "gpt-5.1-codex-mini",
+    "gpt-5",
+    "gpt-5-codex",
+    "gpt-5-nano",
+    "glm-5",
+    "glm-4.7",
+    "glm-4.6",
+    "minimax-m2.5",
+    "minimax-m2.1",
+    "kimi-k2.5",
+    "kimi-k2",
+    "kimi-k2-thinking",
+}
+
+
+def _is_known_zen_model(model: str) -> bool:
+    """Check if a model is a known Zen model (free or paid)."""
+    return model in _ZEN_FREE_MODELS or model in _ZEN_PAID_MODELS
+
+
+def _get_fallback_chain(default_model: str) -> list[str]:
+    """Build ordered fallback chain starting with the user's default model."""
+    chain = [default_model]
+    for m in _ZEN_FREE_MODELS:
+        if m != default_model:
+            chain.append(m)
+    return chain
+
+
+def _swap_model(body: bytes, new_model: str) -> bytes:
+    """Replace the model field in a JSON body."""
+    try:
+        data = json.loads(body)
+        data["model"] = new_model
+        return json.dumps(data).encode("utf-8")
+    except (json.JSONDecodeError, TypeError):
+        return body
+
 
 def _extract_model_from_body(body: bytes) -> str | None:
     """Extract the model ID from a JSON request body.
@@ -85,18 +156,29 @@ def _anthropic_to_openai(body: bytes) -> bytes:
 
     openai_body: dict[str, Any] = {}
 
-    # Model remapping: resolve the user's chosen default free model from config
+    # Model resolution — supports 3 modes:
+    #   1. "zen:model-name"  → explicit Zen model (bypasses remapping)
+    #   2. Claude/Anthropic names → remapped to ZEN_DEFAULT_MODEL (free)
+    #   3. Already a Zen model → passed through as-is
+    # ZEN_ALLOW_PAID=true skips remapping for known paid Zen models
     _default = os.environ.get("ZEN_DEFAULT_MODEL", "qwen3.6-plus-free")
-
-    # Any Claude/Anthropic model name gets remapped to the user's chosen default
+    _allow_paid = os.environ.get("ZEN_ALLOW_PAID", "false").lower() in ("true", "1", "yes")
     _REMAP_PREFIXES = ("claude-", "anthropic/")
     _REMAP_ALIASES = {"sonnet", "opus", "haiku"}
 
     if "model" in data:
         original_model = data["model"]
-        if original_model in _REMAP_ALIASES or any(
+
+        if original_model.startswith("zen:"):
+            # Explicit Zen model selection: "zen:nemotron-3-super-free"
+            openai_body["model"] = original_model[4:]
+        elif _allow_paid and _is_known_zen_model(original_model):
+            # Paid passthrough: model is a known Zen model and paid is allowed
+            openai_body["model"] = original_model
+        elif original_model in _REMAP_ALIASES or any(
             original_model.startswith(p) for p in _REMAP_PREFIXES
         ):
+            # Claude model → remap to user's default free model
             openai_body["model"] = _default
         else:
             openai_body["model"] = original_model
@@ -703,15 +785,43 @@ class ZenProxy:
         return self._error_response(500, last_error or "Max retries exceeded")
 
     async def _handle_streaming_anthropic(self, upstream_url, headers, body, model, query_params):
-        """Handle streaming requests with proper SSE translation.
+        """Handle streaming requests with SSE translation and fallback chain.
 
-        Uses httpx.stream() for true chunked streaming (not buffered).
-        Translates OpenAI SSE chunks to Anthropic SSE events in real-time.
+        Uses httpx.stream() for true chunked streaming.
+        On 429/exhaustion, tries next free model in the fallback chain.
         """
         import uuid as _uuid
 
+        _RETRIABLE_PATTERNS = re.compile(
+            r"rate.?limit|exhaust|too.?many|credits|slow.?down|quota", re.I
+        )
+
+        async def _try_model(try_model, try_body):
+            """Attempt streaming with a specific model. Returns (success, error_text)."""
+            # Patch the model in the body
+            try:
+                bd = json.loads(try_body)
+                bd["model"] = try_model
+                patched = json.dumps(bd).encode("utf-8")
+            except (json.JSONDecodeError, TypeError):
+                patched = try_body
+
+            async with self._client.stream(
+                "POST", upstream_url, headers=headers, content=patched, params=query_params
+            ) as resp:
+                if resp.status_code == 200:
+                    return resp, None
+                error_body = await resp.aread()
+                error_text = error_body.decode("utf-8", errors="replace")[:500]
+                return None, (resp.status_code, error_text)
+
         async def generate():
             msg_id = f"msg_{_uuid.uuid4().hex[:12]}"
+
+            # Build fallback chain
+            default = os.environ.get("ZEN_DEFAULT_MODEL", "qwen3.6-plus-free")
+            chain = _get_fallback_chain(model if model in _ZEN_FREE_MODELS else default)
+            active_model = model or default
 
             # Emit Anthropic message_start
             start_event = {
@@ -721,7 +831,7 @@ class ZenProxy:
                     "type": "message",
                     "role": "assistant",
                     "content": [],
-                    "model": model or "",
+                    "model": active_model,
                     "stop_reason": None,
                     "stop_sequence": None,
                     "usage": {"input_tokens": 0, "output_tokens": 0},
@@ -729,7 +839,6 @@ class ZenProxy:
             }
             yield f"event: message_start\ndata: {json.dumps(start_event)}\n\n"
 
-            # Emit content_block_start
             block_start = {
                 "type": "content_block_start",
                 "index": 0,
@@ -737,41 +846,54 @@ class ZenProxy:
             }
             yield f"event: content_block_start\ndata: {json.dumps(block_start)}\n\n"
 
-            # Stream from upstream using httpx.stream() for real chunked transfer
-            try:
-                async with self._client.stream(
-                    "POST",
-                    upstream_url,
-                    headers=headers,
-                    content=body,
-                    params=query_params,
-                ) as resp:
-                    if resp.status_code != 200:
-                        error_body = await resp.aread()
-                        error_text = error_body.decode("utf-8", errors="replace")[:300]
-                        logger.warning(
-                            "Streaming upstream error %d: %s", resp.status_code, error_text
-                        )
-                        # Send error as text delta so Claude CLI sees it
-                        err_delta = {
-                            "type": "content_block_delta",
-                            "index": 0,
-                            "delta": {
-                                "type": "text_delta",
-                                "text": f"[Proxy error {resp.status_code}: {error_text}]",
-                            },
-                        }
-                        yield f"event: content_block_delta\ndata: {json.dumps(err_delta)}\n\n"
-                    else:
-                        if model:
-                            self._rate_limiter.record_success(model)
+            # Try each model in the fallback chain
+            success = False
+            for i, try_model in enumerate(chain):
+                try:
+                    async with self._client.stream(
+                        "POST",
+                        upstream_url,
+                        headers=headers,
+                        content=_swap_model(body, try_model),
+                        params=query_params,
+                    ) as resp:
+                        if resp.status_code != 200:
+                            error_body = await resp.aread()
+                            error_text = error_body.decode("utf-8", errors="replace")[:500]
+                            retriable = bool(_RETRIABLE_PATTERNS.search(error_text))
 
-                        # Process OpenAI SSE lines as they arrive
+                            if retriable and i < len(chain) - 1:
+                                logger.warning(
+                                    "Model %s failed (%d), falling back to %s",
+                                    try_model,
+                                    resp.status_code,
+                                    chain[i + 1],
+                                )
+                                if try_model:
+                                    self._rate_limiter.record_rate_limit(try_model)
+                                continue
+
+                            # Non-retriable or last model — emit error
+                            err_delta = {
+                                "type": "content_block_delta",
+                                "index": 0,
+                                "delta": {
+                                    "type": "text_delta",
+                                    "text": f"[All models failed. Last: {try_model} ({resp.status_code}): {error_text[:200]}]",
+                                },
+                            }
+                            yield f"event: content_block_delta\ndata: {json.dumps(err_delta)}\n\n"
+                            break
+
+                        # Success — stream content
+                        if try_model:
+                            self._rate_limiter.record_success(try_model)
+                        if try_model != active_model:
+                            logger.info("Fallback succeeded: %s -> %s", active_model, try_model)
+
                         async for line in resp.aiter_lines():
                             line = line.strip()
-                            if not line:
-                                continue
-                            if not line.startswith("data: "):
+                            if not line or not line.startswith("data: "):
                                 continue
                             data_str = line[6:]
                             if data_str == "[DONE]":
@@ -789,15 +911,19 @@ class ZenProxy:
                                     yield f"event: content_block_delta\ndata: {json.dumps(delta_event)}\n\n"
                             except (json.JSONDecodeError, IndexError, KeyError):
                                 pass
+                        success = True
+                        break
 
-            except Exception as e:
-                logger.error("Streaming error: %s", e)
-                err_delta = {
-                    "type": "content_block_delta",
-                    "index": 0,
-                    "delta": {"type": "text_delta", "text": f"[Stream error: {e}]"},
-                }
-                yield f"event: content_block_delta\ndata: {json.dumps(err_delta)}\n\n"
+                except Exception as e:
+                    logger.warning("Stream error on %s: %s", try_model, e)
+                    if i < len(chain) - 1:
+                        continue
+                    err_delta = {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "text_delta", "text": f"[Stream error: {e}]"},
+                    }
+                    yield f"event: content_block_delta\ndata: {json.dumps(err_delta)}\n\n"
 
             # Emit Anthropic closing events
             yield 'event: content_block_stop\ndata: {"type": "content_block_stop", "index": 0}\n\n'

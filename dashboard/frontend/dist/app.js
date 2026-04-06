@@ -936,6 +936,21 @@ async function saveZenDefaultModel() {
   }
 }
 
+async function toggleZenAllowPaid(enabled) {
+  var val = enabled ? 'true' : 'false';
+  try {
+    await api('/settings/env', {
+      method: 'PUT',
+      body: JSON.stringify({ settings: { ZEN_ALLOW_PAID: val } }),
+    });
+    if (state.envSettings) state.envSettings['ZEN_ALLOW_PAID'] = val;
+    toast(enabled ? 'Paid Zen models enabled' : 'Paid models disabled (free only)', 'success');
+    renderSettingsPanel();
+  } catch (e) {
+    toast('Failed to save: ' + e.message, 'error');
+  }
+}
+
 async function changePassword() {
   const errEl = document.getElementById("cp-error");
   const btn = document.getElementById("cp-btn");
@@ -7996,24 +8011,54 @@ function renderSettingsPanel() {
         html += '<div class="help">' + (state.providerStatusLoading ? 'Checking connectivity...' : 'Status unavailable.') + '</div>';
       }
 
-      // Section 4b: Zen Default Model picker
+      // Section 4b: Zen Proxy Model picker + paid toggle
       html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Zen Proxy Model</h4>';
-      html += '<div style="margin-bottom:0.75rem;font-size:0.85rem;color:var(--text-muted)">When Claude Code CLI or VS Code connects through the Zen proxy, this model is used instead of paid Claude models.</div>';
-      var zenModels = [
-        { id: 'qwen3.6-plus-free', label: 'Qwen 3.6 Plus (Free) — fast, general purpose' },
-        { id: 'minimax-m2.5-free', label: 'MiniMax M2.5 (Free) — creative, marketing' },
-        { id: 'nemotron-3-super-free', label: 'Nemotron 3 Super (Free) — reasoning, analysis' },
-        { id: 'big-pickle', label: 'Big Pickle — content generation' },
-        { id: 'trinity-large-preview-free', label: 'Trinity Large (Free) — preview' },
+      html += '<div style="margin-bottom:0.75rem;font-size:0.85rem;color:var(--text-muted)">Default model for Claude Code CLI / VS Code through the Zen proxy. On rate limit, falls back through other free models automatically.</div>';
+      var zenFreeModels = [
+        { id: 'qwen3.6-plus-free', label: 'Qwen 3.6 Plus', desc: 'Fast, general purpose' },
+        { id: 'minimax-m2.5-free', label: 'MiniMax M2.5', desc: 'Creative, marketing' },
+        { id: 'nemotron-3-super-free', label: 'Nemotron 3 Super', desc: 'Reasoning, analysis' },
+        { id: 'big-pickle', label: 'Big Pickle', desc: 'Content generation' },
+        { id: 'trinity-large-preview-free', label: 'Trinity Large', desc: 'Preview model' },
+      ];
+      var zenPaidModels = [
+        { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+        { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+        { id: 'gpt-5.4', label: 'GPT-5.4' },
+        { id: 'gpt-5.4-pro', label: 'GPT-5.4 Pro' },
+        { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro' },
+        { id: 'kimi-k2.5', label: 'Kimi K2.5' },
+        { id: 'minimax-m2.5', label: 'MiniMax M2.5 (Paid)' },
+        { id: 'glm-5', label: 'GLM-5' },
       ];
       var currentZenModel = state.envSettings && state.envSettings['ZEN_DEFAULT_MODEL'] || 'qwen3.6-plus-free';
+      var allowPaid = state.envSettings && state.envSettings['ZEN_ALLOW_PAID'] === 'true';
       html += '<select id="zen-default-model" style="width:100%;padding:0.5rem;background:var(--card-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:0.9rem">';
-      zenModels.forEach(function(m) {
+      html += '<optgroup label="Free Models (no credits needed)">';
+      zenFreeModels.forEach(function(m) {
         var sel = m.id === currentZenModel ? ' selected' : '';
-        html += '<option value="' + esc(m.id) + '"' + sel + '>' + esc(m.label) + '</option>';
+        html += '<option value="' + esc(m.id) + '"' + sel + '>' + esc(m.label) + ' \u2014 ' + esc(m.desc) + '</option>';
       });
+      html += '</optgroup>';
+      if (allowPaid) {
+        html += '<optgroup label="Paid Models (requires Zen credits)">';
+        zenPaidModels.forEach(function(m) {
+          var sel = m.id === currentZenModel ? ' selected' : '';
+          html += '<option value="' + esc(m.id) + '"' + sel + '>\ud83d\udcb3 ' + esc(m.label) + '</option>';
+        });
+        html += '</optgroup>';
+      }
       html += '</select>';
-      html += '<button onclick="saveZenDefaultModel()" style="margin-top:0.5rem;padding:0.4rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem">Save</button>';
+      html += '<div style="margin-top:0.6rem;display:flex;align-items:center;gap:0.75rem">';
+      html += '<button onclick="saveZenDefaultModel()" style="padding:0.4rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem">Save</button>';
+      html += '<label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer">';
+      html += '<input type="checkbox" id="zen-allow-paid" ' + (allowPaid ? 'checked' : '') + ' onchange="toggleZenAllowPaid(this.checked)" style="cursor:pointer">';
+      html += '<span>Allow paid models</span></label>';
+      html += '</div>';
+      if (allowPaid) {
+        html += '<div style="margin-top:0.5rem;padding:0.5rem;background:rgba(255,170,0,0.1);border:1px solid rgba(255,170,0,0.3);border-radius:4px;font-size:0.8rem;color:#ffa500">\u26a0\ufe0f Paid models consume Zen wallet credits. Make sure your account has funds at opencode.ai/billing.</div>';
+      }
+      html += '<div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)"><strong>Tip:</strong> In Claude Code CLI, use <code>zen:model-name</code> as the model to bypass the default (e.g. <code>--model zen:nemotron-3-super-free</code>).</div>';
 
       // Section 5: Media & Search (D-02, D-03)
       html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Media &amp; Search</h4>';

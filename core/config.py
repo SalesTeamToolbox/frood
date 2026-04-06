@@ -51,6 +51,7 @@ class Settings:
     zen_proxy_enabled: bool = False  # Local proxy for OpenCode CLI traffic
     zen_proxy_port: int = 8765  # Port for the local Zen proxy
     zen_default_model: str = "qwen3.6-plus-free"  # Default free model for proxy remapping
+    zen_allow_paid: bool = False  # Allow paid Zen models (pass through without remapping)
     openrouter_api_key: str = ""  # OpenRouter (200+ models, paid fallback)
     anthropic_api_key: str = ""  # Anthropic API (direct Claude access)
     openai_api_key: str = ""  # OpenAI API (direct GPT access)
@@ -392,6 +393,7 @@ class Settings:
             in ("true", "1", "yes"),
             zen_proxy_port=int(os.getenv("ZEN_PROXY_PORT", "8765")),
             zen_default_model=os.getenv("ZEN_DEFAULT_MODEL", "qwen3.6-plus-free"),
+            zen_allow_paid=os.getenv("ZEN_ALLOW_PAID", "false").lower() in ("true", "1", "yes"),
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),

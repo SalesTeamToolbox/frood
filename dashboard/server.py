@@ -338,6 +338,7 @@ _DASHBOARD_EDITABLE_SETTINGS = {
     "LEARNING_ENABLED",
     # Zen proxy model selection
     "ZEN_DEFAULT_MODEL",
+    "ZEN_ALLOW_PAID",
 }
 
 
