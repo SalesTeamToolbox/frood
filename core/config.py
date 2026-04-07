@@ -56,6 +56,7 @@ class Settings:
     anthropic_api_key: str = ""  # Anthropic API (direct Claude access)
     openai_api_key: str = ""  # OpenAI API (direct GPT access)
     gemini_api_key: str = ""
+    synthetic_api_key: str = ""  # Synthetic.new (Anthropic-compatible, autonomous agents)
     # Dead providers — keys kept for backward compat but no routing logic exists
     deepseek_api_key: str = ""
     vllm_api_key: str = ""
@@ -388,6 +389,7 @@ class Settings:
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+            synthetic_api_key=os.getenv("SYNTHETIC_API_KEY", ""),
             # Dead providers (kept for backward compat)
             deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
             vllm_api_key=os.getenv("VLLM_API_KEY", ""),
