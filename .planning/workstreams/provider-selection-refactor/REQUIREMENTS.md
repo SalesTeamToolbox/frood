@@ -1,27 +1,30 @@
 # Requirements: Agent42 v5.0 Provider Selection Refactor
 
 **Defined:** 2026-04-01
+**Closed:** 2026-04-07
 **Core Value:** Agent42 must always be able to run agents reliably, with tiered provider routing ensuring no single provider outage stops the platform.
 
 ## v1 Requirements
 
-Requirements for this milestone. Each maps to roadmap phases.
+### Provider Selection (Superseded)
 
-### Provider Selection
+Phases 32/33 assumed Claude Code Subscription and Synthetic.new adoption. Neither provider was adopted. The existing TieredRoutingBridge with Zen/OpenRouter/Anthropic/OpenAI already satisfies the core value.
 
-- [ ] **PROVIDER-01**: Claude Code Subscription is the primary provider for all agent executions
-- [ ] **PROVIDER-02**: Synthetic.new API is the fallback provider when Claude Code Subscription is unavailable or task violates CC Subscription TOS
-- [ ] **PROVIDER-03**: Remove all StrongWall.ai references and integration from the codebase
-- [ ] **PROVIDER-04**: Other LLM providers (Anthropic, OpenRouter, etc.) are used only when CC Subscription and Synthetic.new are unavailable
-- [ ] **PROVIDER-05**: Provider selection follows hierarchy: Claude Code Subscription → Synthetic.new → Other API keys
-- [ ] **PROVIDER-06**: Provider selection bridge reports which provider was used in callback response for budget tracking
+- ~~**PROVIDER-01**: Claude Code Subscription is the primary provider~~ — Superseded: CC Subscription not adopted
+- ~~**PROVIDER-02**: Synthetic.new API is the fallback provider~~ — Superseded: Synthetic.new not adopted
+- [x] **PROVIDER-03**: Remove all StrongWall.ai references and integration from the codebase — Already done prior to this milestone
+- ~~**PROVIDER-04**: Other LLM providers used only when CC Subscription and Synthetic.new unavailable~~ — Superseded: current hierarchy (Zen free → OpenRouter → Anthropic → OpenAI) is the production system
+- ~~**PROVIDER-05**: Provider selection follows hierarchy: CC Subscription → Synthetic.new → Other~~ — Superseded: hierarchy is Zen → OpenRouter → Anthropic → OpenAI via TieredRoutingBridge
+- ~~**PROVIDER-06**: Provider selection bridge reports which provider was used~~ — Superseded: TieredRoutingBridge.resolve() already returns RoutingDecision with provider field
 
-### Synthetic.new Integration
+### Synthetic.new Integration (Superseded)
 
-- [ ] **SYNTHETIC-01**: Dynamic model discovery pulls available models from Synthetic.new API and caches them
-- [ ] **SYNTHETIC-02**: Model list is refreshed every 24 hours or on demand via admin endpoint
-- [ ] **SYNTHETIC-03**: Agent configuration allows selection from available Synthetic.new models
-- [ ] **SYNTHETIC-04**: Synthetic.new API key validation on startup with health check
+Synthetic.new was never adopted. Dynamic model discovery already works via Zen API refresh.
+
+- ~~**SYNTHETIC-01**: Dynamic model discovery from Synthetic.new API~~ — Superseded
+- ~~**SYNTHETIC-02**: Model list refreshed every 24 hours~~ — Superseded (Zen refresh already exists)
+- ~~**SYNTHETIC-03**: Agent configuration allows Synthetic.new model selection~~ — Superseded
+- ~~**SYNTHETIC-04**: Synthetic.new API key validation on startup~~ — Superseded
 
 ### Provider System Simplification
 
@@ -33,10 +36,10 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### User Interface
 
-- [ ] **UI-01**: Update Paperclip plugin to work with simplified provider selection system
-- [x] **UI-02**: Provider selection dashboard shows available models from Synthetic.new
+- [x] **UI-01**: Update Paperclip plugin to work with simplified provider selection system
+- [x] **UI-02**: Provider selection dashboard shows available models
 - [x] **UI-03**: Agent configuration UI allows selection from dynamically discovered models
-- [x] **UI-04**: Provider status dashboard shows Claude Code Subscription and Synthetic.new connectivity
+- [x] **UI-04**: Provider status dashboard shows provider connectivity
 
 ## v2 Requirements
 
@@ -67,32 +70,27 @@ Deferred to future release. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 | ----------- | ----- | ------ |
-| PROVIDER-01 | Phase 32 | Pending |
-| PROVIDER-02 | Phase 32 | Pending |
-| PROVIDER-03 | Phase 32 | Pending |
-| PROVIDER-04 | Phase 32 | Pending |
-| PROVIDER-05 | Phase 32 | Pending |
-| PROVIDER-06 | Phase 32 | Pending |
-| SYNTHETIC-01 | Phase 33 | Pending |
-| SYNTHETIC-02 | Phase 33 | Pending |
-| SYNTHETIC-03 | Phase 33 | Pending |
-| SYNTHETIC-04 | Phase 33 | Pending |
+| PROVIDER-01 | — | Superseded |
+| PROVIDER-02 | — | Superseded |
+| PROVIDER-03 | — | Already done |
+| PROVIDER-04 | — | Superseded |
+| PROVIDER-05 | — | Superseded |
+| PROVIDER-06 | — | Superseded |
+| SYNTHETIC-01 | — | Superseded |
+| SYNTHETIC-02 | — | Superseded |
+| SYNTHETIC-03 | — | Superseded |
+| SYNTHETIC-04 | — | Superseded |
 | SIMPLIFY-01 | Phase 34 | Complete |
 | SIMPLIFY-02 | Phase 34 | Complete |
 | SIMPLIFY-03 | Phase 34 | Complete |
 | SIMPLIFY-04 | Phase 34 | Complete |
 | SIMPLIFY-05 | Phase 34 | Complete |
-| UI-01 | Phase 35 | Pending |
+| UI-01 | Phase 35 | Complete |
 | UI-02 | Phase 35 | Complete |
 | UI-03 | Phase 35 | Complete |
 | UI-04 | Phase 35 | Complete |
 
-**Coverage:**
-
-- v1 requirements: 16 total
-- Mapped to phases: 16
-- Unmapped: 0 ✓
-
 ---
+
 *Requirements defined: 2026-04-01*
-*Last updated: 2026-04-06 — UI-02, UI-03, UI-04 marked complete (35-02)*
+*Milestone closed: 2026-04-07 — Phases 32/33 superseded (providers not adopted), Phases 34/35 complete*
