@@ -35,6 +35,14 @@ Plans:
 **Goal**: Polish Frood branding, repurpose Reports for intelligence metrics, clean up Settings, repurpose Activity Feed for observability
 **Depends on**: Phase 50
 **Requirements**: BRAND-01 through BRAND-04, RPT-01 through RPT-04, FEED-01 through FEED-03, SET-01 through SET-04, CLEAN-05
+**Plans:** 4 plans
+
+Plans:
+- [ ] 51-01-PLAN.md — Test scaffold + branding sweep (Agent42 to Frood, Sandboxed Apps to Agent Apps) + SVG rename + Settings cleanup (Channels removal, Orchestrator to Routing)
+- [ ] 51-02-PLAN.md — Reports page repurpose (remove Tasks tab, rewrite Overview with intelligence metrics)
+- [ ] 51-03-PLAN.md — Activity Feed (server ring buffer + /api/activity + frontend page + sidebar entry + CSS)
+- [ ] 51-04-PLAN.md — Setup wizard copy update + README rewrite for Frood identity
+
 **Success Criteria** (what must be TRUE):
 
 1. "Sandboxed Apps" renamed to "Agent Apps" in sidebar, page title, and API routes
@@ -52,4 +60,4 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 | ----- | -------------- | ------ | --------- |
 | 50. Strip Harness Features | 4/4 | Complete   | 2026-04-07 |
-| 51. Rebrand & Repurpose | 0/0 | Not started | - |
+| 51. Rebrand & Repurpose | 0/4 | Planning complete | - |
