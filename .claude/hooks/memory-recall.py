@@ -9,17 +9,21 @@ to the user's current prompt and injects it into Claude's context via stderr.
 This is the core of Agent42's "human-like memory" — relevant past experiences
 surface automatically when context triggers them, without being asked.
 
-Also surfaces previous session's conversation context from handoff.json on the
-first prompt of a new session. This ensures decisions and options from the
-previous session survive context window clears.
+Also surfaces previous session's conversation context from handoff.json
+when the conversation has fewer than 3 user turns. This ensures decisions
+and context from the previous session survive CC/VS Code restarts.
 
 Search strategy (layered, best-available):
-0. Previous session context from handoff.json (first prompt only)
+0. Previous session context from handoff.json (early turns only)
 1. Semantic search via Qdrant + embeddings (if available)
 1.5. Qdrant direct scroll + keyword match (fallback when search service is down)
+1.75. Qdrant local client (embedded, no HTTP — when qdrant_client installed)
+2. MEMORY.md keyword search (always-available fallback — file I/O only)
+3. HISTORY.md keyword search (always-available fallback — file I/O only)
 
-Note: MEMORY.md/HISTORY.md keyword search (layers 2-3) removed — Claude Code's
-auto-memory already loads its own MEMORY.md, making keyword search redundant.
+Continuation signals ("I restarted", "still failing", etc.) override the
+minimum prompt length check — these indicate the user is continuing a thread
+and associative recall is critical even for short prompts.
 
 Hook protocol:
 - Receives JSON on stdin: {hook_event_name, project_dir, user_prompt, ...}
@@ -65,7 +69,45 @@ MEDIUM_RELEVANCE = 0.70  # Inject if domain matches
 MIN_KEYWORD_MATCHES = 2  # Minimum keyword hits for text search
 MAX_MEMORIES = 3  # Max memories to inject
 MAX_OUTPUT_CHARS = 2000  # Rough output cap (~500 tokens)
-MIN_PROMPT_LEN = 15  # Skip very short prompts
+MIN_PROMPT_LEN = 10  # Skip very short prompts (lowered from 15)
+
+# Continuation signals — phrases that indicate the user is resuming a thread.
+# Like hearing a song that triggers a memory: these trigger recall even for
+# short prompts because the user is clearly continuing previous context.
+CONTINUATION_SIGNALS = (
+    "i restarted",
+    "it worked",
+    "still failing",
+    "the error is",
+    "back now",
+    "ran the test",
+    "tried that",
+    "same issue",
+    "as we discussed",
+    "like you said",
+    "as you suggested",
+    "that fixed",
+    "didn't work",
+    "now it says",
+    "after restarting",
+    "i tried",
+    "got this error",
+    "here's the output",
+    "the result is",
+    "it broke",
+    "it's broken",
+    "same error",
+    "still broken",
+    "where were we",
+    "picking up",
+    "continuing",
+    "let's continue",
+    "resume",
+    "back to",
+    "following up",
+    "as planned",
+    "next step",
+)
 
 # Common words to skip during keyword extraction
 STOP_WORDS = frozenset(
@@ -420,6 +462,79 @@ def try_qdrant_direct_search(keywords):
     return memories
 
 
+def try_qdrant_local_search(keywords, project_dir):
+    """Query Qdrant using local embedded client (no HTTP server needed).
+
+    When the Qdrant HTTP server isn't running, this uses qdrant_client's
+    path-based mode to read directly from the storage files at
+    .agent42/qdrant/. This gives us always-on vector search without
+    requiring a separate server process.
+
+    Falls back silently if qdrant_client isn't installed.
+    """
+    try:
+        from qdrant_client import QdrantClient
+    except ImportError:
+        return []
+
+    qdrant_path = os.path.join(project_dir, ".agent42", "qdrant")
+    if not os.path.isdir(qdrant_path):
+        return []
+
+    memories = []
+    collections = ["agent42_memory", "agent42_history"]
+
+    try:
+        client = QdrantClient(path=qdrant_path)
+        existing = {c.name for c in client.get_collections().collections}
+
+        for collection in collections:
+            if collection not in existing:
+                continue
+            try:
+                points = client.scroll(
+                    collection_name=collection,
+                    limit=100,
+                    with_payload=True,
+                    with_vectors=False,
+                )[0]
+
+                source = collection.replace("agent42_", "")
+                for point in points:
+                    payload = point.payload or {}
+                    text = payload.get("text", payload.get("content", ""))
+                    section = payload.get("section", "")
+                    if not text:
+                        continue
+
+                    text_lower = text.lower()
+                    matches = sum(1 for kw in keywords if kw in text_lower)
+                    if matches < MIN_KEYWORD_MATCHES:
+                        continue
+
+                    score = min(matches / max(len(keywords), 1), 1.0) * 0.75
+                    label = f"[{section}]" if section else f"[{source}]"
+                    display = text[:250].strip()
+                    if len(text) > 250:
+                        display += "..."
+
+                    memories.append(
+                        {
+                            "text": f"{label} {display}",
+                            "score": score,
+                            "source": "qdrant-local",
+                        }
+                    )
+            except Exception:
+                continue
+
+        client.close()
+    except Exception:
+        pass
+
+    return memories
+
+
 def deduplicate(memories):
     """Remove near-duplicate memories by text prefix."""
     seen = set()
@@ -434,8 +549,8 @@ def deduplicate(memories):
 
 # ── Previous Session Context (Layer 0) ────────────────────────────────────
 
-# Max age for session context to be surfaced (4 hours)
-SESSION_CONTEXT_MAX_AGE_S = 4 * 3600
+# Max age for session context to be surfaced (12 hours — covers overnight breaks)
+SESSION_CONTEXT_MAX_AGE_S = 12 * 3600
 # Max chars for the session context block
 SESSION_CONTEXT_MAX_CHARS = 3000
 # Guard file to prevent re-surfacing within same session
@@ -556,6 +671,21 @@ def format_session_context(context):
     return output
 
 
+def _has_continuation_signal(prompt_lower):
+    """Check if prompt contains a continuation signal.
+
+    These phrases indicate the user is resuming a previous thread.
+    Recall is critical even for short prompts when these are present.
+    """
+    return any(signal in prompt_lower for signal in CONTINUATION_SIGNALS)
+
+
+def _count_user_turns(event):
+    """Count user messages in the current conversation."""
+    messages = event.get("messages", [])
+    return sum(1 for m in messages if m.get("role") == "user")
+
+
 def main():
     try:
         event = json.loads(sys.stdin.read())
@@ -578,10 +708,16 @@ def main():
                     prompt = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
                 break
 
-    # Skip short or slash-command prompts
-    if not prompt or len(prompt.strip()) < MIN_PROMPT_LEN:
+    # Always skip slash commands
+    if not prompt or prompt.strip().startswith("/"):
         sys.exit(0)
-    if prompt.strip().startswith("/"):
+
+    # Check for continuation signals — override min length for associative recall
+    prompt_lower = prompt.strip().lower()
+    is_continuation = _has_continuation_signal(prompt_lower)
+
+    # Skip short prompts UNLESS they contain continuation signals
+    if len(prompt.strip()) < MIN_PROMPT_LEN and not is_continuation:
         sys.exit(0)
 
     # ── Determine session ID for guard ────────────────────────────────────
@@ -592,14 +728,20 @@ def main():
         session_id = hashlib.md5(f"{project_dir}-{os.getpid()}".encode()).hexdigest()[:16]
 
     # ── Layer 0: Previous session context ─────────────────────────────────
-    # Surface once per session — gives Claude the previous conversation flow
-    if not is_context_already_surfaced(project_dir, session_id):
+    # Surface when conversation has < 3 user turns (not just first prompt).
+    # This covers: first prompt, "I restarted" follow-up, and early exchanges
+    # where the model needs prior session context to maintain continuity.
+    user_turns = _count_user_turns(event)
+    if user_turns < 3 and not is_context_already_surfaced(project_dir, session_id):
         prev_context = load_previous_session_context(project_dir)
         if prev_context:
             context_output = format_session_context(prev_context)
             if context_output:
                 print(context_output, file=sys.stderr)
-        mark_context_surfaced(project_dir, session_id)
+        # Mark surfaced after first successful injection OR after turn 1
+        # to prevent re-surfacing on every prompt
+        if prev_context or user_turns >= 1:
+            mark_context_surfaced(project_dir, session_id)
 
     # ── Locate memory directory ──────────────────────────────────────────
     memory_dir = Path(project_dir) / ".agent42" / "memory"
@@ -647,9 +789,42 @@ def main():
                 search_source = "qdrant"
             memories.extend(qdrant_results)
 
-        # Layers 2-3 (MEMORY.md/HISTORY.md keyword search) removed —
-        # Claude Code's auto-memory already loads its own MEMORY.md,
-        # so keyword-searching Agent42's copy is redundant.
+        # Layer 1.75: Qdrant local client (embedded, no HTTP server needed)
+        # Uses qdrant_client's path-based mode to read storage files directly
+        if not memories:
+            local_results = try_qdrant_local_search(keywords, project_dir)
+            if local_results:
+                search_source = "qdrant-local"
+            memories.extend(local_results)
+
+        # Layer 2: MEMORY.md keyword search (always-available, file I/O only)
+        # This is the reliable fallback that works without any external services.
+        # Agent42's .agent42/memory/MEMORY.md contains consolidated learnings
+        # from previous sessions — distinct from Claude Code's own memory files.
+        if not memories:
+            memory_file = memory_dir / "MEMORY.md"
+            if memory_file.exists():
+                try:
+                    content = memory_file.read_text(encoding="utf-8")
+                    kw_results = search_memory_sections(content, keywords)
+                    if kw_results:
+                        search_source = "keyword"
+                    memories.extend(kw_results)
+                except OSError:
+                    pass
+
+        # Layer 3: HISTORY.md keyword search (chronological session log)
+        if not memories:
+            history_file = memory_dir / "HISTORY.md"
+            if history_file.exists():
+                try:
+                    content = history_file.read_text(encoding="utf-8")
+                    hist_results = search_history_entries(content, keywords)
+                    if hist_results:
+                        search_source = "history"
+                    memories.extend(hist_results)
+                except OSError:
+                    pass
 
         # ── Rank, deduplicate, and cache ─────────────────────────────────
         memories = deduplicate(memories)

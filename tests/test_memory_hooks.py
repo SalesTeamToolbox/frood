@@ -73,13 +73,8 @@ class TestMemoryRecallHook:
         assert rc == 0
         assert stderr.strip() == ""
 
-    def test_matching_prompt_silent_without_search_service(self, tmp_path):
-        """Without semantic search or Qdrant, recall hook exits silently.
-
-        MEMORY.md keyword search layers were removed — Claude Code's
-        auto-memory loads its own MEMORY.md, so keyword-searching Agent42's
-        copy is redundant. The hook only surfaces memories via semantic/Qdrant.
-        """
+    def test_matching_prompt_produces_recall_output(self, tmp_path):
+        """Keyword search fallback surfaces matching MEMORY.md sections."""
         project_dir = self._make_memory_md(
             tmp_path,
             [
@@ -102,8 +97,8 @@ class TestMemoryRecallHook:
             },
         )
         assert rc == 0
-        # Without search service/Qdrant, no memories can be surfaced
-        # (MEMORY.md keyword layers removed)
+        assert "[agent42-memory] Recall:" in stderr
+        assert "memories surfaced" in stderr
 
     def test_no_match_is_silent(self, tmp_path):
         project_dir = self._make_memory_md(
