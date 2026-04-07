@@ -22,9 +22,9 @@
 
 ### Rebrand & Polish
 
-- [ ] **BRAND-01**: Rename "Sandboxed Apps" to "Agent Apps" throughout UI and API
+- [x] **BRAND-01**: Rename "Sandboxed Apps" to "Agent Apps" throughout UI and API
 - [ ] **BRAND-02**: Update sidebar navigation to show only kept features
-- [ ] **BRAND-03**: Ensure all remaining pages use Frood branding (no "Agent42" remnants — logo alt, provider routing text, page titles, etc.)
+- [x] **BRAND-03**: Ensure all remaining pages use Frood branding (no "Agent42" remnants — logo alt, provider routing text, page titles, etc.)
 - [ ] **BRAND-04**: Update setup wizard to reflect Frood-as-service identity
 
 ### Repurpose Reports Page
@@ -42,10 +42,10 @@
 
 ### Settings Cleanup
 
-- [ ] **SET-01**: Remove "Channels" tab — backend route removed, frontend still references it
-- [ ] **SET-02**: Rename "Orchestrator" tab to "Routing" or "LLM Proxy" — no longer an agent orchestrator
-- [ ] **SET-03**: Remove MAX_CONCURRENT_AGENTS setting from Orchestrator/Routing tab — harness concept
-- [ ] **SET-04**: Remove `loadChannels()` from `loadAll()` in app.js
+- [x] **SET-01**: Remove "Channels" tab — backend route removed, frontend still references it
+- [x] **SET-02**: Rename "Orchestrator" tab to "Routing" or "LLM Proxy" — no longer an agent orchestrator
+- [x] **SET-03**: Remove MAX_CONCURRENT_AGENTS setting from Orchestrator/Routing tab — harness concept
+- [x] **SET-04**: Remove `loadChannels()` from `loadAll()` in app.js
 
 ### Cleanup
 
