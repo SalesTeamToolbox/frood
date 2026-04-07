@@ -36,6 +36,8 @@ const state = {
   orStatusLoading: false,
   // Reports
   reportsData: null,
+  memoryStats: null,
+  effectivenessStats: null,
   reportsLoading: false,
   reportsTab: "overview",
   // Tool/skill search state
@@ -1201,9 +1203,8 @@ function renderReports() {
 
   const tab = state.reportsTab;
   const tabs = [
-    { id: "overview", label: "Overview" },
+    { id: "overview", label: "Intelligence" },
     { id: "health", label: "System Health" },
-    { id: "tasks", label: "Tasks & Projects" },
   ];
 
   // Only rebuild the full page (tab bar + body container) if not already
@@ -1228,7 +1229,6 @@ function renderReports() {
   let body = "";
   if (tab === "overview") body = _renderReportsOverview(d);
   else if (tab === "health") body = _renderReportsHealth(d);
-  else if (tab === "tasks") body = _renderReportsTasks(d);
 
   bodyEl.innerHTML = body;
 }
@@ -1240,64 +1240,56 @@ function _reportsBar(pct, label, cls) {
 }
 
 function _renderReportsOverview(d) {
-  const tb = d.task_breakdown || {};
-  const tu = d.token_usage || {};
-  const costs = d.costs || {};
-  const llm = d.llm_usage || [];
-  const conn = d.connectivity || {};
-  const byType = tb.by_type || [];
-  const byStatus = tb.by_status || {};
-  const projects = d.project_breakdown || [];
-  const tools = d.tools || {};
-  const skills = d.skills || {};
+  // Section 1: Intelligence Summary Cards
+  const mem = state.memoryStats || {};
+  const eff = state.effectivenessStats || {};
+  const effStats = Array.isArray(eff.stats) ? eff.stats : [];
+  const totalInvocations = effStats.reduce((s, e) => s + (e.invocations || 0), 0);
+  const avgSuccess = effStats.length > 0
+    ? Math.round(effStats.reduce((s, e) => s + (e.success_rate || 0), 0) / effStats.length)
+    : 0;
+  const cards = `<div class="reports-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+  <div class="stat-card"><div class="stat-value">${mem.recall_count != null ? mem.recall_count : "---"}</div><div class="stat-label">Memory Recalls (24h)</div></div>
+  <div class="stat-card"><div class="stat-value">${mem.learn_count != null ? mem.learn_count : "---"}</div><div class="stat-label">Learning Extractions</div></div>
+  <div class="stat-card"><div class="stat-value">${mem.avg_latency_ms != null ? Math.round(mem.avg_latency_ms) + "ms" : "---"}</div><div class="stat-label">Avg Recall Latency</div></div>
+  <div class="stat-card"><div class="stat-value">${avgSuccess}%</div><div class="stat-label">Tool Effectiveness</div></div>
+</div>`;
 
-  // Summary stat cards
-  const successPct = tb.overall_success_rate != null ? (tb.overall_success_rate * 100).toFixed(1) + "%" : "--";
-  const stats = `<div class="reports-stats">
-    <div class="stat-card"><div class="stat-label">Total Tasks</div><div class="stat-value">${tb.total || 0}</div></div>
-    <div class="stat-card"><div class="stat-label">Success Rate</div><div class="stat-value text-success">${successPct}</div></div>
-    <div class="stat-card"><div class="stat-label">Total Tokens</div><div class="stat-value" style="font-family:var(--mono)">${formatNumber(tu.total_tokens)}</div></div>
-    <div class="stat-card"><div class="stat-label">Est. Total Cost</div><div class="stat-value" style="font-family:var(--mono)">$${(costs.total_estimated_usd || 0).toFixed(4)}</div></div>
-    <div class="stat-card"><div class="stat-label">Daily Spend</div><div class="stat-value" style="font-family:var(--mono)">$${(tu.daily_spend_usd || 0).toFixed(4)}</div></div>
-    <div class="stat-card"><div class="stat-label">MCP Tools</div><div class="stat-value text-info">${tools.enabled || tools.total || 0}</div></div>
-    <div class="stat-card"><div class="stat-label">Projects</div><div class="stat-value">${projects.length}</div></div>
-    <div class="stat-card"><div class="stat-label">Tools</div><div class="stat-value">${tools.enabled || 0}/${tools.total || 0}</div></div>
-  </div>`;
+  // Section 2: Routing Tier Distribution (from _routing_stats in /api/reports)
+  const rs = (d && d.routing_stats) || {};
+  const routingTotal = (rs.L1 || 0) + (rs.L2 || 0) + (rs.free || 0);
+  const routingSection = `<div class="card" style="margin-bottom:1rem;padding:1rem;">
+  <h4>Routing Tier Distribution</h4>
+  ${routingTotal > 0 ? `
+  <table class="data-table"><thead><tr><th>Tier</th><th>Requests</th><th>Share</th></tr></thead>
+  <tbody>
+    <tr><td>L1 (Workhorse)</td><td>${rs.L1 || 0}</td><td>${routingTotal ? Math.round(((rs.L1 || 0) / routingTotal) * 100) : 0}%</td></tr>
+    <tr><td>L2 (Premium)</td><td>${rs.L2 || 0}</td><td>${routingTotal ? Math.round(((rs.L2 || 0) / routingTotal) * 100) : 0}%</td></tr>
+    <tr><td>Free</td><td>${rs.free || 0}</td><td>${routingTotal ? Math.round(((rs.free || 0) / routingTotal) * 100) : 0}%</td></tr>
+  </tbody></table>
+  <p style="color:var(--text-muted);font-size:0.8rem;margin-top:0.5rem;">Total: ${routingTotal} requests since restart</p>
+  ` : '<p style="color:var(--text-muted)">No routing requests yet. Counters start fresh on restart.</p>'}
+</div>`;
 
-  // MCP integration summary card
-  const mcpCard = `<div class="card reports-section">
-    <div class="card-header"><h3>MCP Integration</h3></div>
-    <div class="card-body">
-      <div class="status-metric-row"><span class="metric-label">Transport</span><span class="metric-value">stdio</span></div>
-      <div class="status-metric-row"><span class="metric-label">Tools Available</span><span class="metric-value">${tools.enabled || tools.total || 0}</span></div>
-      <div class="status-metric-row"><span class="metric-label">Skills Loaded</span><span class="metric-value">${(skills.skills || []).length || skills.total || 0}</span></div>
-      <p style="color:var(--text-muted);font-size:0.85rem;margin-top:0.75rem">Model routing is handled by Frood's tiered routing. Token usage below reflects API calls (embeddings, media, search).</p>
-    </div>
-  </div>`;
+  // Section 3: Token Spend Summary
+  const tokenSection = d && d.token_usage ? `<div class="card" style="margin-bottom:1rem;padding:1rem;">
+  <h4>Token Usage</h4>
+  <p>Total tokens: ${(d.token_usage.total_tokens || 0).toLocaleString()}</p>
+  <p>Estimated cost: $${(d.costs && d.costs.total_cost || 0).toFixed(4)}</p>
+</div>` : "";
 
-  // Task type breakdown
-  const maxType = byType.length > 0 ? Math.max(...byType.map(t => t.total)) : 1;
-  const typeRows = byType.map(t => {
-    const pct = maxType > 0 ? (t.total / maxType * 100) : 0;
-    const sr = t.success_rate != null ? (t.success_rate * 100).toFixed(0) + "%" : "--";
-    const srCls = t.success_rate >= 0.8 ? "text-success" : t.success_rate >= 0.5 ? "text-warning" : "text-danger";
-    return `<tr>
-      <td style="font-weight:600">${esc(t.type)}</td>
-      <td>${_reportsBar(pct, t.total, "bar-info")}</td>
-      <td style="text-align:right">${t.done || 0}</td>
-      <td style="text-align:right">${t.failed || 0}</td>
-      <td style="text-align:right" class="${srCls}">${sr}</td>
-    </tr>`;
-  }).join("");
-  const typesTable = byType.length > 0 ? `<div class="card reports-section">
-    <div class="card-header"><h3>Task Type Breakdown</h3></div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Type</th><th>Count</th><th style="text-align:right">Done</th><th style="text-align:right">Failed</th><th style="text-align:right">Success</th></tr></thead>
-      <tbody>${typeRows}</tbody>
-    </table></div>
-  </div>` : "";
+  // Section 4: Top Performing Tools
+  const topTools = effStats
+    .filter(e => e.invocations > 0)
+    .sort((a, b) => (b.success_rate || 0) - (a.success_rate || 0))
+    .slice(0, 5);
+  const toolTable = topTools.length > 0 ? `<div class="card" style="margin-bottom:1rem;padding:1rem;">
+  <h4>Top Performing Tools</h4>
+  <table class="data-table"><thead><tr><th>Tool</th><th>Success Rate</th><th>Invocations</th></tr></thead>
+  <tbody>${topTools.map(t => `<tr><td>${t.tool_name || t.name || "---"}</td><td>${Math.round(t.success_rate || 0)}%</td><td>${t.invocations || 0}</td></tr>`).join("")}</tbody></table>
+</div>` : "";
 
-  return stats + `<div class="reports-grid">${mcpCard}${typesTable}</div>`;
+  return cards + routingSection + tokenSection + toolTable;
 }
 
 function _renderReportsHealth(d) {
@@ -1339,99 +1331,6 @@ function _renderReportsHealth(d) {
   </div>` : "";
 
   return memCard + toolTable;
-}
-
-function _renderReportsTasks(d) {
-  const tb = d.task_breakdown || {};
-  const byType = tb.by_type || [];
-  const byStatus = tb.by_status || {};
-  const projects = d.project_breakdown || [];
-  const tools = d.tools || {};
-  const skills = d.skills || {};
-  const skillList = skills.skills || [];
-
-  // Status distribution stat cards
-  const statuses = ["pending", "assigned", "running", "review", "blocked", "done", "failed", "archived"];
-  const statusCards = `<div class="reports-stats">${statuses.map(s => {
-    const cnt = byStatus[s] || 0;
-    const cls = s === "done" ? "text-success" : s === "failed" ? "text-danger" : s === "running" ? "text-warning" : s === "blocked" ? "text-danger" : "";
-    return `<div class="stat-card"><div class="stat-label">${s}</div><div class="stat-value ${cls}">${cnt}</div></div>`;
-  }).join("")}</div>`;
-
-  // Task type table (full)
-  const maxType = byType.length > 0 ? Math.max(...byType.map(t => t.total)) : 1;
-  const typeRows = byType.map(t => {
-    const pct = maxType > 0 ? (t.total / maxType * 100) : 0;
-    const sr = t.success_rate != null ? (t.success_rate * 100).toFixed(0) + "%" : "--";
-    const srCls = t.success_rate >= 0.8 ? "text-success" : t.success_rate >= 0.5 ? "text-warning" : "text-danger";
-    return `<tr>
-      <td style="font-weight:600">${esc(t.type)}</td>
-      <td>${_reportsBar(pct, t.total, "bar-info")}</td>
-      <td style="text-align:right">${t.done || 0}</td>
-      <td style="text-align:right">${t.failed || 0}</td>
-      <td style="text-align:right" class="${srCls}">${sr}</td>
-      <td style="text-align:right;font-family:var(--mono)">${t.avg_iterations || 0}</td>
-      <td style="text-align:right;font-family:var(--mono)">${formatNumber(t.total_tokens)}</td>
-    </tr>`;
-  }).join("");
-  const typeTable = `<div class="card reports-section">
-    <div class="card-header"><h3>Task Types</h3></div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Type</th><th>Count</th><th style="text-align:right">Done</th><th style="text-align:right">Failed</th><th style="text-align:right">Success</th><th style="text-align:right">Avg Iters</th><th style="text-align:right">Tokens</th></tr></thead>
-      <tbody>${typeRows || '<tr><td colspan="7"><div style="padding:1rem;color:var(--text-muted)">No tasks</div></td></tr>'}</tbody>
-    </table></div>
-  </div>`;
-
-  // Projects table
-  const projRows = projects.map(p => {
-    const total = p.total_tasks || 0;
-    const donePct = total > 0 ? (p.done / total * 100) : 0;
-    return `<tr>
-      <td style="font-weight:600">${esc(p.name)}</td>
-      <td><span class="status-badge status-${p.status}">${esc(p.status)}</span></td>
-      <td style="text-align:right">${total}</td>
-      <td>${_reportsBar(donePct, p.done + "/" + total, "bar-success")}</td>
-      <td style="text-align:right">${p.failed || 0}</td>
-      <td style="text-align:right">${p.running || 0}</td>
-    </tr>`;
-  }).join("");
-  const projTable = projects.length > 0 ? `<div class="card reports-section">
-    <div class="card-header"><h3>Projects (${projects.length})</h3></div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Project</th><th>Status</th><th style="text-align:right">Tasks</th><th>Progress</th><th style="text-align:right">Failed</th><th style="text-align:right">Running</th></tr></thead>
-      <tbody>${projRows}</tbody>
-    </table></div>
-  </div>` : "";
-
-  // Skills table
-  const skillRows = skillList.map(s => {
-    const types = (s.task_types || []).join(", ") || "all";
-    const en = s.enabled !== false;
-    return `<tr style="${en ? "" : "opacity:0.55"}">
-      <td style="font-weight:600">${esc(s.name)}</td>
-      <td style="font-size:0.85rem;color:var(--text-secondary)">${esc(s.description || "")}</td>
-      <td style="font-size:0.82rem;font-family:var(--mono)">${esc(types)}</td>
-      <td style="text-align:center">${en ? '<span style="color:var(--success)">On</span>' : '<span style="color:var(--text-muted)">Off</span>'}</td>
-    </tr>`;
-  }).join("");
-  const skillTable = skillList.length > 0 ? `<div class="card reports-section">
-    <div class="card-header"><h3>Skills (${skills.enabled || 0}/${skills.total || 0} enabled)</h3></div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Skill</th><th>Description</th><th>Task Types</th><th style="text-align:center">Status</th></tr></thead>
-      <tbody>${skillRows}</tbody>
-    </table></div>
-  </div>` : "";
-
-  // Tools summary
-  const toolCard = `<div class="card reports-section">
-    <div class="card-header"><h3>Tools</h3></div>
-    <div class="card-body">
-      <span style="font-size:1.5rem;font-weight:700">${tools.enabled || 0}</span>
-      <span style="color:var(--text-muted)"> / ${tools.total || 0} enabled</span>
-    </div>
-  </div>`;
-
-  return statusCards + typeTable + `<div class="reports-grid">${projTable}${toolCard}</div>` + skillTable;
 }
 
 function renderSettings() {
@@ -1951,8 +1850,15 @@ async function loadAgentModels(provider) {
 async function loadReports() {
   state.reportsLoading = true;
   try {
-    state.reportsData = (await api("/reports")) || null;
-  } catch { state.reportsData = null; }
+    const [reports, memStats, effStats] = await Promise.all([
+      api("/reports"),
+      api("/memory/stats").catch(() => null),
+      api("/effectiveness/stats").catch(() => null),
+    ]);
+    state.reportsData = reports || null;
+    state.memoryStats = memStats;
+    state.effectivenessStats = effStats;
+  } catch { state.reportsData = null; state.memoryStats = null; state.effectivenessStats = null; }
   state.reportsLoading = false;
 }
 

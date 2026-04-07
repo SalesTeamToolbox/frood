@@ -105,12 +105,10 @@ class TestSettingsCleanup:
 class TestReportsTabs:
     """Reports page repurposed to show intelligence metrics."""
 
-    @pytest.mark.xfail(reason="Tasks & Projects tab removed in Plan 02")
     def test_tasks_tab_removed(self):
         """Tasks & Projects tab is removed from Reports."""
         assert '"Tasks & Projects"' not in _APP_JS
 
-    @pytest.mark.xfail(reason="_renderReportsTasks removed in Plan 02")
     def test_tasks_renderer_removed(self):
         """_renderReportsTasks function is removed."""
         assert "_renderReportsTasks" not in _APP_JS
@@ -119,10 +117,14 @@ class TestReportsTabs:
         """System Health tab is still present in Reports."""
         assert '"System Health"' in _APP_JS or '"health"' in _APP_JS
 
-    @pytest.mark.xfail(reason="Intelligence overview added in Plan 02")
     def test_intelligence_overview(self):
         """Intelligence overview shows memory recall stats."""
         assert "memory_recall" in _APP_JS or "memoryStats" in _APP_JS
+
+    def test_routing_distribution(self):
+        """Reports Overview includes routing tier distribution from _routing_stats."""
+        assert "Routing Tier Distribution" in _APP_JS
+        assert "routing_stats" in _APP_JS
 
 
 class TestActivityFeed:
