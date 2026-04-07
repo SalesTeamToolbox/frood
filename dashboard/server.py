@@ -338,6 +338,9 @@ def create_app(
         for name in _toggle_state.get("disabled_skills", []):
             skill_loader.set_enabled(name, False)
 
+    # Key store for API key management
+    _key_store = key_store  # passed from agent42.py when available
+
     # -- Health ----------------------------------------------------------------
 
     @app.get("/health")
