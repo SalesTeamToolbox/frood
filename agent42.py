@@ -275,10 +275,7 @@ class Agent42:
                 memory_store=self.memory_store,
                 effectiveness_store=self.effectiveness_store,
                 app_manager=app_manager,
-                agent_manager=self.agent_manager,
-                reward_system=self.reward_system,
                 key_store=self.key_store,
-                standalone=self.standalone,
             )
             config = uvicorn.Config(
                 app,
