@@ -1,4 +1,4 @@
-/* Agent42 Dashboard — Single-page Application */
+/* Frood Dashboard — Single-page Application */
 "use strict";
 
 // ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ const TAGLINES = [
 ];
 
 // Frood towel avatar SVG — the essential hitchhiker's companion
-const AGENT42_AVATAR = `<img src="/assets/agent42-avatar.svg" alt="Frood" width="20" height="20" style="border-radius:50%">`;
+const AGENT42_AVATAR = `<img src="/assets/frood-avatar.svg" alt="Frood" width="20" height="20" style="border-radius:50%">`;
 
 const STATUS_FLAVOR = {
   pending: "Waiting in the Infinite Improbability Queue\u2026",
@@ -332,7 +332,7 @@ function renderSetupWizard() {
   if (s === 1) {
     body = `
       <div class="login-logo">
-        <img src="/assets/agent42-logo-light.svg" alt="Frood" onerror="this.outerHTML='<h1>Frood<span style=&quot;color:var(--accent)&quot;>42</span></h1>'">
+        <img src="/assets/frood-logo-light.svg" alt="Frood" onerror="this.outerHTML='<h1>Frood<span style=&quot;color:var(--accent)&quot;>42</span></h1>'">
       </div>
       <p class="setup-subtitle">The answer to life, the universe, and all your tasks.</p>
       <p class="setup-desc">Welcome, hoopy frood. Let\u2019s secure the Guide with a passphrase.</p>
@@ -548,12 +548,6 @@ async function toggleSkill(name, enabled) {
   }
 }
 
-async function loadChannels() {
-  try {
-    state.channels = (await api("/channels")) || [];
-  } catch { state.channels = []; }
-}
-
 async function loadProviders() {
   try {
     state.providers = (await api("/providers")) || {};
@@ -621,7 +615,7 @@ async function installStoragePackages() {
     if (result.errors && result.errors.length) {
       toast("Install failed: " + result.errors.join("; "), "error");
     } else {
-      toast("Packages installed. Restart Agent42 to activate the storage backend.", "success");
+      toast("Packages installed. Restart Frood to activate the storage backend.", "success");
     }
     await loadStorageStatus();
   } catch (e) {
@@ -867,7 +861,7 @@ function showCreateAppModal() {
         <div class="form-group">
           <label for="ca-mode">Mode</label>
           <select id="ca-mode">
-            <option value="internal">Internal (Agent42 system tool)</option>
+            <option value="internal">Internal (Frood system tool)</option>
             <option value="external">External (public release)</option>
           </select>
         </div>
@@ -1100,7 +1094,7 @@ function renderApps() {
       <div class="stat-card"><div class="stat-label">Errors</div><div class="stat-value text-danger">${counts.error}</div></div>
     </div>
     <details class="platform-info" style="margin-bottom:1rem;padding:0.5rem 0.75rem;border:1px solid var(--border);border-radius:6px;font-size:0.82rem;color:var(--text-muted)">
-      <summary style="cursor:pointer;color:var(--text-secondary);font-weight:500">What do sandboxed apps get from Agent42?</summary>
+      <summary style="cursor:pointer;color:var(--text-secondary);font-weight:500">What do Agent Apps get from Frood?</summary>
       <div style="margin-top:0.5rem;line-height:1.6">
         <strong style="color:var(--text-primary)">Every app runs in an isolated sandbox with access to:</strong><br>
         &bull; <strong>Memory</strong> &mdash; Semantic search via ONNX embeddings + Qdrant (shared or per-app namespace)<br>
@@ -1277,7 +1271,7 @@ function _renderReportsOverview(d) {
       <div class="status-metric-row"><span class="metric-label">Transport</span><span class="metric-value">stdio</span></div>
       <div class="status-metric-row"><span class="metric-label">Tools Available</span><span class="metric-value">${tools.enabled || tools.total || 0}</span></div>
       <div class="status-metric-row"><span class="metric-label">Skills Loaded</span><span class="metric-value">${(skills.skills || []).length || skills.total || 0}</span></div>
-      <p style="color:var(--text-muted);font-size:0.85rem;margin-top:0.75rem">Model routing is handled by Agent42's tiered routing. Token usage below reflects API calls (embeddings, media, search).</p>
+      <p style="color:var(--text-muted);font-size:0.85rem;margin-top:0.75rem">Model routing is handled by Frood's tiered routing. Token usage below reflects API calls (embeddings, media, search).</p>
     </div>
   </div>`;
 
@@ -1317,7 +1311,7 @@ function _renderReportsHealth(d) {
   const memCard = `<div class="card reports-section">
     <div class="card-header"><h3>System Health</h3></div>
     <div class="card-body">
-      <p style="color:var(--text-muted);margin-bottom:1rem">Agent42 operates as an MCP server and plugin for CLI harnesses.</p>
+      <p style="color:var(--text-muted);margin-bottom:1rem">Frood operates as an MCP server and plugin for CLI harnesses.</p>
       <div class="status-metric-row"><span class="metric-label">MCP Transport</span><span class="metric-value text-success">stdio</span></div>
       <div class="status-metric-row"><span class="metric-label">Tools Registered</span><span class="metric-value">${tools.total || 0}</span></div>
       <div class="status-metric-row"><span class="metric-label">Tools Enabled</span><span class="metric-value text-success">${tools.enabled || 0}</span></div>
@@ -1446,9 +1440,8 @@ function renderSettings() {
 
   const tabs = [
     { id: "providers", label: "API Keys" },
-    { id: "channels", label: "Channels" },
     { id: "security", label: "Security" },
-    { id: "orchestrator", label: "Orchestrator" },
+    { id: "routing", label: "Routing" },
     { id: "storage", label: "Storage & Paths" },
     { id: "memory", label: "Memory & Learning" },
   ];
@@ -1483,7 +1476,7 @@ function renderSettingsPanel() {
       html += '<div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;margin-bottom:1.5rem">';
       html += '<h4 style="margin:0 0 0.75rem;font-size:0.95rem;color:var(--text)">Provider Routing</h4>';
       html += '<div class="help" style="line-height:1.7">';
-      html += 'Agent42 routes tasks in priority order: <strong>OpenCode Zen</strong> (free/paid primary) &rarr; <strong>OpenRouter</strong> (200+ models) &rarr; <strong>Anthropic</strong> &rarr; <strong>OpenAI</strong>.<br>';
+      html += 'Frood routes LLM requests in priority order: <strong>OpenCode Zen</strong> (free/paid primary) &rarr; <strong>OpenRouter</strong> (200+ models) &rarr; <strong>Anthropic</strong> &rarr; <strong>OpenAI</strong>.<br>';
       html += 'Configure keys for the providers you want to enable. Providers without keys are skipped gracefully.';
       html += '</div></div>';
 
@@ -1586,33 +1579,6 @@ function renderSettingsPanel() {
 
       return html;
     },
-    channels: () => `
-      <h3>Communication Channels</h3>
-      <p class="section-desc">Configure channels for receiving tasks via chat. Each channel requires its own API credentials.</p>
-
-      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Discord</h4>
-      ${settingSecret("DISCORD_BOT_TOKEN", "Bot Token", "Create a bot at discord.com/developers/applications.")}
-      ${settingReadonly("DISCORD_GUILD_IDS", "Guild IDs", "Comma-separated server IDs the bot should respond in.")}
-
-      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Slack</h4>
-      ${settingSecret("SLACK_BOT_TOKEN", "Bot Token", "xoxb-... token from api.slack.com/apps.")}
-      ${settingSecret("SLACK_APP_TOKEN", "App Token", "xapp-... token for Socket Mode.")}
-
-      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Telegram</h4>
-      ${settingSecret("TELEGRAM_BOT_TOKEN", "Bot Token", "Get one from @BotFather on Telegram.")}
-
-      <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Email (IMAP/SMTP)</h4>
-      ${settingReadonly("EMAIL_IMAP_HOST", "IMAP Host", "e.g., imap.gmail.com")}
-      ${settingReadonly("EMAIL_IMAP_PORT", "IMAP Port", "Usually 993 for SSL")}
-      ${settingSecret("EMAIL_IMAP_USER", "IMAP Username", "")}
-      ${settingSecret("EMAIL_IMAP_PASSWORD", "IMAP Password", "")}
-      ${settingReadonly("EMAIL_SMTP_HOST", "SMTP Host", "e.g., smtp.gmail.com")}
-      ${settingReadonly("EMAIL_SMTP_PORT", "SMTP Port", "Usually 587 for TLS")}
-      <div class="form-group" style="margin-top:1rem">
-        <div class="help">Active channels: ${state.channels.length > 0 ? state.channels.map((c) => `<strong>${esc(c.type || c.name || c)}</strong>`).join(", ") : "<em>None configured</em>"}</div>
-      </div>
-      ${_envSaveBtn()}
-    `,
     security: () => `
       <h3>Security</h3>
       <p class="section-desc">Authentication, rate limiting, and sandbox settings for the dashboard and agent execution.</p>
@@ -1655,11 +1621,10 @@ function renderSettingsPanel() {
       ${settingReadonly("DASHBOARD_HOST", "Dashboard bind address", "Default: 127.0.0.1 (localhost only). Use 0.0.0.0 for remote access behind a reverse proxy.")}
       ${_envSaveBtn()}
     `,
-    orchestrator: () => `
-      <h3>Orchestrator</h3>
-      <p class="section-desc">Controls how Agent42 processes tasks, including concurrency limits and spending controls.</p>
+    routing: () => `
+      <h3>Routing</h3>
+      <p class="section-desc">Controls how Frood routes LLM requests, including spending controls and model routing policy.</p>
 
-      ${settingReadonly("MAX_CONCURRENT_AGENTS", "Max concurrent agents", "Default: 0 (auto). When 0, capacity is dynamically determined by CPU/memory. Set a positive number to cap the maximum.")}
       ${settingReadonly("MAX_DAILY_API_SPEND_USD", "Daily API spend limit (USD)", "Default: 0 (unlimited). Set a positive value to cap daily spending across all providers.")}
       ${settingReadonly("MCP_SERVERS_JSON", "MCP servers config", "Path to JSON file defining MCP server connections.")}
       ${settingReadonly("CRON_JOBS_PATH", "Cron jobs file", "Default: cron_jobs.json. Scheduled task definitions.")}
@@ -1669,7 +1634,7 @@ function renderSettingsPanel() {
         {value: "free_only", label: "Free only — only free OpenRouter models"},
         {value: "balanced", label: "Balanced — upgrade complex tasks when OR credits available"},
         {value: "performance", label: "Performance — best model regardless of cost"},
-      ], "Controls whether Agent42 uses paid models when OpenRouter credits are available.")}
+      ], "Controls whether Frood uses paid models when OpenRouter credits are available.")}
 
       <h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Dynamic Model Routing</h4>
       ${settingEditable("MODEL_TRIAL_PERCENTAGE", "Trial percentage", "Default: 10. Percentage of tasks randomly assigned to unproven models for evaluation (0-100).")}
@@ -1723,16 +1688,16 @@ function renderSettingsPanel() {
             <button onclick="installStoragePackages()" ${state.storageInstalling ? "disabled" : ""} style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:0.45rem 1rem;font-size:0.84rem;cursor:pointer;opacity:${state.storageInstalling ? "0.6" : "1"}">
               ${state.storageInstalling ? "Installing&hellip;" : "Install missing packages"}
             </button>
-            <span style="margin-left:0.75rem;font-size:0.78rem;color:var(--text-muted)">Installs <code>qdrant-client</code>${ss.redis.status === "not_installed" ? " and <code>redis[hiredis]</code>" : ""} via pip. Agent42 restart required after install.</span>
+            <span style="margin-left:0.75rem;font-size:0.78rem;color:var(--text-muted)">Installs <code>qdrant-client</code>${ss.redis.status === "not_installed" ? " and <code>redis[hiredis]</code>" : ""} via pip. Frood restart required after install.</span>
           </div>` : ""}
           <div style="margin-top:0.75rem;font-size:0.78rem;color:var(--text-muted)">
-            Backend is configured in <code>.env</code>. To change it, edit <code>QDRANT_ENABLED</code>, <code>QDRANT_URL</code>, and <code>REDIS_URL</code> and restart Agent42.
+            Backend is configured in <code>.env</code>. To change it, edit <code>QDRANT_ENABLED</code>, <code>QDRANT_URL</code>, and <code>REDIS_URL</code> and restart Frood.
             <a href="#" onclick="loadStorageStatus().then(renderSettingsPanel);return false" style="margin-left:0.5rem">Refresh</a>
           </div>
         </div>` : `<div style="color:var(--text-muted);font-size:0.85rem;margin-bottom:1rem">Storage status unavailable.</div>`;
       return `
       <h3>Storage &amp; Paths</h3>
-      <p class="section-desc">Directories where Agent42 stores memory, outputs, templates, and generated media.</p>
+      <p class="section-desc">Directories where Frood stores memory, outputs, templates, and generated media.</p>
 
       ${backendSection}
 
@@ -1772,7 +1737,7 @@ function renderSettingsPanel() {
       html += '<input type="checkbox" ' + (learningEnabled ? 'checked' : '') + ' onchange="toggleLearningEnabled(this.checked)" style="width:16px;height:16px">';
       html += '<span style="font-size:0.85rem">Enable automatic learning extraction from agent runs</span>';
       html += '</label>';
-      html += '<p class="help">When enabled, Agent42 extracts learnings from completed agent runs and stores them in the knowledge base for future recall.</p>';
+      html += '<p class="help">When enabled, Frood extracts learnings from completed agent runs and stores them in the knowledge base for future recall.</p>';
       html += '</div>';
       if (state.storageStatus) {
         var ss = state.storageStatus;
@@ -2004,7 +1969,7 @@ function updateEnvSaveBtn() {
 // ---------------------------------------------------------------------------
 async function loadAll() {
   await Promise.all([
-    loadTools(), loadSkills(), loadChannels(), loadProviders(),
+    loadTools(), loadSkills(), loadProviders(),
     loadHealth(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(), loadTokenStats(),
     loadApps(), loadReports(),
   ]);
@@ -2020,7 +1985,7 @@ function render() {
       <div class="login-page">
         <div class="login-card">
           <div class="login-logo">
-            <img src="/assets/agent42-logo-light.svg" alt="Frood" onerror="this.outerHTML='<h1>Frood<span style=&quot;color:var(--accent)&quot;>42</span></h1>'">
+            <img src="/assets/frood-logo-light.svg" alt="Frood" onerror="this.outerHTML='<h1>Frood<span style=&quot;color:var(--accent)&quot;>42</span></h1>'">
           </div>
           <div class="subtitle tagline-rotate" id="login-tagline">${TAGLINES[_taglineIdx]}</div>
           <form onsubmit="event.preventDefault();doLogin(document.getElementById('login-user').value,document.getElementById('login-pass').value)">
@@ -2047,9 +2012,9 @@ function render() {
     <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeMobileSidebar()"></div>
     <div class="app-layout">
       <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand"><img src="/assets/agent42-logo-light.svg" alt="Frood" height="36" onerror="this.outerHTML='Frood<span class=&quot;num&quot;>42</span>'"></div>
+        <div class="sidebar-brand"><img src="/assets/frood-logo-light.svg" alt="Frood" height="36" onerror="this.outerHTML='Frood<span class=&quot;num&quot;>42</span>'"></div>
         <nav class="sidebar-nav">
-          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Sandboxed Apps</a>
+          <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Agent Apps</a>
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
           <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills');closeMobileSidebar()">&#9889; Skills</a>
           <a href="#" data-page="reports" class="${state.page === "reports" ? "active" : ""}" onclick="event.preventDefault();navigate('reports');closeMobileSidebar()">&#128202; Reports</a>
@@ -2068,7 +2033,7 @@ function render() {
           <button class="hamburger-btn" onclick="toggleMobileSidebar()" aria-label="Open menu">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
-          <h2>${{ apps: "Sandboxed Apps", tools: "Tools", skills: "Skills", reports: "Reports", settings: "Settings" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ apps: "Agent Apps", tools: "Tools", skills: "Skills", reports: "Reports", settings: "Settings" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "apps" ? '<button class="btn btn-primary btn-sm" onclick="showCreateAppModal()">+ New App</button>' : ""}
           </div>
