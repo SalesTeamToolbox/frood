@@ -329,6 +329,9 @@ def create_app(
         "last_reset": _time_mem.time(),
     }
 
+    # Routing tier request counters -- consumed by /api/reports
+    _routing_stats = {"L1": 0, "L2": 0, "free": 0}
+
     # Apply persisted tool/skill toggle state
     _toggle_state = _load_toggle_state()
     if tool_registry:
@@ -830,6 +833,7 @@ def create_app(
             "project_breakdown": project_list,
             "tools": tools_summary,
             "skills": skills_summary,
+            "routing_stats": dict(_routing_stats),
         }
 
     # -- Notification config endpoint -----------------------------------------
@@ -1030,6 +1034,16 @@ def create_app(
         if not text or text.startswith("All providers failed"):
             return {"error": {"message": text or "No response", "type": "server_error"}}
 
+        # Determine routing tier and increment counter
+        _free_models = {"qwen3.6-plus-free", "minimax-m2.5-free", "nemotron-3-super-free"}
+        if model in _free_models:
+            _tier = "free"
+        elif model.startswith("zen:"):
+            _tier = "L1"
+        else:
+            _tier = "L2"
+        _routing_stats[_tier] = _routing_stats.get(_tier, 0) + 1
+
         import uuid as _uuid
 
         return {
@@ -1148,6 +1162,16 @@ def create_app(
                     "error": {"type": "api_error", "message": text or "No response"},
                 },
             )
+
+        # Determine routing tier and increment counter
+        _free_models = {"qwen3.6-plus-free", "minimax-m2.5-free", "nemotron-3-super-free"}
+        if model in _free_models:
+            _tier = "free"
+        elif model.startswith("zen:"):
+            _tier = "L1"
+        else:
+            _tier = "L2"
+        _routing_stats[_tier] = _routing_stats.get(_tier, 0) + 1
 
         import uuid as _uuid
 
