@@ -14,7 +14,7 @@
 - [ ] **STRIP-05**: Remove Approvals page (human-in-the-loop task review)
 - [ ] **STRIP-06**: Remove GitHub Integration (repo cloning, OAuth, account management)
 - [ ] **STRIP-07**: Remove Chat features (chat sessions, message streaming, conversation interface)
-- [ ] **STRIP-08**: Remove Device Gateway (multi-device management, device API keys)
+- [x] **STRIP-08**: Remove Device Gateway (multi-device management, device API keys)
 - [ ] **STRIP-09**: Remove GSD Workstreams UI (phase tracking in dashboard)
 - [ ] **STRIP-10**: Remove Status page (platform capacity dashboard)
 - [ ] **STRIP-11**: Remove Agent Profiles (profile CRUD, routing overrides — already 410 Gone)
@@ -37,7 +37,7 @@
 
 - [ ] **CLEAN-01**: Remove dead server.py routes for stripped features
 - [ ] **CLEAN-02**: Remove dead frontend code for stripped pages/components
-- [ ] **CLEAN-03**: Remove unused Python modules (if any become orphaned)
+- [x] **CLEAN-03**: Remove unused Python modules (if any become orphaned)
 - [ ] **CLEAN-04**: Ensure all tests still pass after removal
 - [ ] **CLEAN-05**: Update README to reflect Frood Dashboard as intelligence layer admin panel
 
