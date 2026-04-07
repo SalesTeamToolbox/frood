@@ -32,17 +32,20 @@ Plans:
 
 ### Phase 51: Rebrand & Repurpose
 
-**Goal**: Polish the Frood Dashboard identity and repurpose Activity Feed for intelligence observability
+**Goal**: Polish Frood branding, repurpose Reports for intelligence metrics, clean up Settings, repurpose Activity Feed for observability
 **Depends on**: Phase 50
-**Requirements**: BRAND-01 through BRAND-04, FEED-01 through FEED-03, CLEAN-05
+**Requirements**: BRAND-01 through BRAND-04, RPT-01 through RPT-04, FEED-01 through FEED-03, SET-01 through SET-04, CLEAN-05
 **Success Criteria** (what must be TRUE):
 
-1. "Apps" renamed to "Agent Apps" in sidebar, page title, and API routes
+1. "Sandboxed Apps" renamed to "Agent Apps" in sidebar, page title, and API routes
 2. Sidebar shows only: Agent Apps, Tools, Skills, Reports, Settings, Activity
-3. Activity Feed logs memory recalls, routing decisions, learning extractions, effectiveness scores
-4. No "Agent42" text remains in UI (all Frood branding)
-5. README reflects Frood Dashboard as intelligence layer admin panel
-6. Setup wizard updated for Frood-as-service identity
+3. No "Agent42" text remains in UI (all Frood branding — logo, titles, descriptions)
+4. Reports Overview shows intelligence metrics (memory recalls, effectiveness, routing), not task/project counts
+5. Reports "Tasks & Projects" tab removed
+6. Settings "Channels" tab removed, "Orchestrator" renamed to "Routing", MAX_CONCURRENT_AGENTS removed
+7. Activity Feed logs memory recalls, routing decisions, learning extractions, effectiveness scores
+8. Setup wizard updated for Frood-as-service identity
+9. README reflects Frood Dashboard as intelligence layer admin panel
 
 ## Progress
 
