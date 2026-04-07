@@ -34,9 +34,9 @@ Requirements for this milestone. Each maps to roadmap phases.
 ### User Interface
 
 - [ ] **UI-01**: Update Paperclip plugin to work with simplified provider selection system
-- [ ] **UI-02**: Provider selection dashboard shows available models from Synthetic.new
-- [ ] **UI-03**: Agent configuration UI allows selection from dynamically discovered models
-- [ ] **UI-04**: Provider status dashboard shows Claude Code Subscription and Synthetic.new connectivity
+- [x] **UI-02**: Provider selection dashboard shows available models from Synthetic.new
+- [x] **UI-03**: Agent configuration UI allows selection from dynamically discovered models
+- [x] **UI-04**: Provider status dashboard shows Claude Code Subscription and Synthetic.new connectivity
 
 ## v2 Requirements
 
@@ -83,9 +83,9 @@ Deferred to future release. Tracked but not in current roadmap.
 | SIMPLIFY-04 | Phase 34 | Complete |
 | SIMPLIFY-05 | Phase 34 | Complete |
 | UI-01 | Phase 35 | Pending |
-| UI-02 | Phase 35 | Pending |
-| UI-03 | Phase 35 | Pending |
-| UI-04 | Phase 35 | Pending |
+| UI-02 | Phase 35 | Complete |
+| UI-03 | Phase 35 | Complete |
+| UI-04 | Phase 35 | Complete |
 
 **Coverage:**
 
@@ -95,4 +95,4 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ---
 *Requirements defined: 2026-04-01*
-*Last updated: 2026-04-06 — SIMPLIFY-01 through SIMPLIFY-05 marked complete (34-01)*
+*Last updated: 2026-04-06 — UI-02, UI-03, UI-04 marked complete (35-02)*

@@ -70,7 +70,7 @@ Plans:
 Plans:
 
 - [x] 35-01-PLAN.md — Server-side: Pydantic models, GET /sidecar/models endpoint, enhanced health endpoint, SYNTHETIC_API_KEY config, tests
-- [ ] 35-02-PLAN.md — Client-side: TypeScript types, client getModels() method, available-models data handler, enhanced ProviderHealthWidget
+- [x] 35-02-PLAN.md — Client-side: TypeScript types, client getModels() method, available-models data handler, enhanced ProviderHealthWidget
 
 ## Progress
 
@@ -79,4 +79,4 @@ Plans:
 | 32. Provider Selection Core | 1/1 | Planned | 2026-04-01 |
 | 33. Synthetic.new Integration | 1/1 | Planned | 2026-04-01 |
 | 34. System Simplification | 1/1 | Complete | 2026-04-06 |
-| 35. Paperclip Integration | 0/2 | Planned | - |
+| 35. Paperclip Integration | 2/2 | Complete | 2026-04-06 |
