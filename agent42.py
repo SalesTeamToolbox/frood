@@ -36,15 +36,10 @@ from commands import BackupCommandHandler, CloneCommandHandler, RestoreCommandHa
 from core.agent_manager import AgentManager
 from core.app_manager import AppManager
 from core.config import settings
-from core.device_auth import DeviceStore
 from core.heartbeat import HeartbeatService
 from core.key_store import KeyStore
-from core.project_manager import ProjectManager
 from core.rate_limiter import ToolRateLimiter
-from core.repo_manager import RepositoryManager
 from core.security_scanner import ScheduledSecurityScanner
-from core.workspace_registry import WorkspaceRegistry
-from dashboard.auth import init_device_store
 from dashboard.server import create_app
 from dashboard.websocket_manager import WebSocketManager
 from memory.consolidation import ConsolidationPipeline, ConsolidationRouter
@@ -110,17 +105,11 @@ class Agent42:
         )
         self.heartbeat = HeartbeatService(configured_max_agents=_max_agents)
         self.cron_scheduler = CronScheduler()
-        self.device_store = DeviceStore(data_dir / "devices.json")
-        init_device_store(self.device_store)
 
         # ── Key store for API key management ──────────────────────────────
         self.key_store = KeyStore(data_dir / "settings.json")
         # Inject admin-configured keys into environment at startup
         self.key_store.inject_into_environ()
-        self.repo_manager = RepositoryManager(
-            repos_json_path=str(data_dir / "repos.json"),
-            clone_dir=str(data_dir / "repos"),
-        )
         skill_dirs = [
             Path(__file__).parent / "skills" / "builtins",
             Path(__file__).parent / "skills" / "workspace",
@@ -201,12 +190,6 @@ class Agent42:
         else:
             self.reward_system = None
 
-        # ── Project manager ──────────────────────────────────────────────
-        self.project_manager = ProjectManager(data_dir / "projects", task_queue=None)
-
-        # ── Workspace registry ────────────────────────────────────────────
-        self.workspace_registry = WorkspaceRegistry(data_dir / "workspaces.json")
-
         # ── Security scanner ─────────────────────────────────────────────
         self.security_scanner = ScheduledSecurityScanner(
             workspace_path=str(workspace),
@@ -238,14 +221,6 @@ class Agent42:
         # Auth warnings
         for warning in settings.validate_dashboard_auth():
             logger.warning(warning)
-
-        # Load persisted data
-        await self.repo_manager.load()
-        await self.project_manager.load()
-        await self.workspace_registry.load()
-        await self.workspace_registry.seed_default(
-            os.environ.get("AGENT42_WORKSPACE", str(Path.cwd()))
-        )
 
         # Start heartbeat
         await self.heartbeat.start()
@@ -292,25 +267,16 @@ class Agent42:
                 dashboard_port=self.dashboard_port,
             )
             await app_manager.load()
-            from core.github_accounts import GitHubAccountStore
-
-            github_account_store = GitHubAccountStore()
-            github_account_store._load()
             app = create_app(
                 ws_manager=self.ws_manager,
                 tool_registry=self.tool_registry,
                 skill_loader=self.skill_loader,
-                device_store=self.device_store,
                 heartbeat=self.heartbeat,
-                repo_manager=self.repo_manager,
-                project_manager=self.project_manager,
                 memory_store=self.memory_store,
                 effectiveness_store=self.effectiveness_store,
                 app_manager=app_manager,
                 agent_manager=self.agent_manager,
                 reward_system=self.reward_system,
-                workspace_registry=self.workspace_registry,
-                github_account_store=github_account_store,
                 key_store=self.key_store,
                 standalone=self.standalone,
             )
