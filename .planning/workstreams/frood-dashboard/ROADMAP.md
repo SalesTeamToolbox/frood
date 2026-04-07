@@ -40,7 +40,7 @@ Plans:
 Plans:
 - [x] 51-01-PLAN.md — Test scaffold + branding sweep (Agent42 to Frood, Sandboxed Apps to Agent Apps) + SVG rename + Settings cleanup (Channels removal, Orchestrator to Routing)
 - [x] 51-02-PLAN.md — Reports page repurpose (remove Tasks tab, rewrite Overview with intelligence metrics)
-- [ ] 51-03-PLAN.md — Activity Feed (server ring buffer + /api/activity + frontend page + sidebar entry + CSS)
+- [x] 51-03-PLAN.md — Activity Feed (server ring buffer + /api/activity + frontend page + sidebar entry + CSS)
 - [ ] 51-04-PLAN.md — Setup wizard copy update + README rewrite for Frood identity
 
 **Success Criteria** (what must be TRUE):

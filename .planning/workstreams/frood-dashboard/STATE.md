@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Frood Dashboard
 status: Executing Phase 51 — Rebrand & Repurpose
-last_updated: "2026-04-07T23:23:35Z"
+last_updated: "2026-04-07T23:50:00Z"
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Workstream State
@@ -22,9 +22,9 @@ See: .planning/workstreams/frood-dashboard/ROADMAP.md
 
 ## Current Position
 
-Phase: 51 (Rebrand & Repurpose) — IN PROGRESS (2/4 plans done)
-Plan: 51-02 complete, next: 51-03 (Wave 3)
-Last session: 2026-04-07 — Completed 51-02 (Reports repurpose with intelligence metrics + routing stats)
+Phase: 51 (Rebrand & Repurpose) — IN PROGRESS (3/4 plans done)
+Plan: 51-03 complete, next: 51-04 (Wave 4)
+Last session: 2026-04-07 — Completed 51-03 (Activity Feed intelligence observability surface)
 
 ## Completed Phases
 
@@ -37,3 +37,5 @@ Last session: 2026-04-07 — Completed 51-02 (Reports repurpose with intelligenc
 - Channels panel body deleted entirely, not just hidden — removes dead code cleanly
 - Routing tier logic: zen: prefix = L1, free model set (qwen3.6-plus-free/minimax-m2.5-free/nemotron-3-super-free) = free, else = L2
 - `_routing_stats` lives inside `create_app()` closure matching `_memory_stats` pattern
+- Ring buffer and `_record_intelligence_event()` defined inside `create_app()` closure to access `ws_manager` (Pitfall 3)
+- Routing hooks use `await` directly (non-blocking in-memory append); reason field: free-model / zen-prefix / premium-fallback

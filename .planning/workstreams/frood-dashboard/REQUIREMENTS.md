@@ -23,7 +23,7 @@
 ### Rebrand & Polish
 
 - [x] **BRAND-01**: Rename "Sandboxed Apps" to "Agent Apps" throughout UI and API
-- [ ] **BRAND-02**: Update sidebar navigation to show only kept features
+- [x] **BRAND-02**: Update sidebar navigation to show only kept features
 - [x] **BRAND-03**: Ensure all remaining pages use Frood branding (no "Agent42" remnants — logo alt, provider routing text, page titles, etc.)
 - [ ] **BRAND-04**: Update setup wizard to reflect Frood-as-service identity
 
@@ -36,9 +36,9 @@
 
 ### Repurpose Activity Feed
 
-- [ ] **FEED-01**: Repurpose Activity Feed from task/agent lifecycle events to memory/routing/effectiveness event log
-- [ ] **FEED-02**: Log memory recall hits, learning extractions, routing decisions, effectiveness scores
-- [ ] **FEED-03**: Expose as intelligence layer observability surface
+- [x] **FEED-01**: Repurpose Activity Feed from task/agent lifecycle events to memory/routing/effectiveness event log
+- [x] **FEED-02**: Log memory recall hits, learning extractions, routing decisions, effectiveness scores
+- [x] **FEED-03**: Expose as intelligence layer observability surface
 
 ### Settings Cleanup
 
