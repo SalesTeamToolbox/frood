@@ -5,11 +5,40 @@
  * All other fields use camelCase per sidecar Pydantic aliases.
  */
 
+// ---------------------------------------------------------------------------
+// Phase 35 -- Provider Model Discovery + Enhanced Health
+// ---------------------------------------------------------------------------
+
+/** Single model entry from GET /sidecar/models (D-05) */
+export interface ProviderModelItem {
+  model_id: string;
+  display_name: string;
+  provider: string;
+  categories: string[];
+  available: boolean;
+}
+
+/** Response body for GET /sidecar/models (D-05) */
+export interface ModelsResponse {
+  models: ProviderModelItem[];
+  providers: string[];
+}
+
+/** Per-provider status detail in enhanced health response (D-07) */
+export interface ProviderStatusDetail {
+  name: string;
+  configured: boolean;
+  connected: boolean;
+  model_count: number;
+  last_check: number;
+}
+
 // -- Health --
 export interface SidecarHealthResponse {
   status: string;
   memory: { available: boolean; [key: string]: unknown };
-  providers: { available: boolean; [key: string]: unknown };
+  providers: { available: boolean; configured?: Record<string, boolean>; [key: string]: unknown };
+  providers_detail?: ProviderStatusDetail[];
   qdrant: { available: boolean; [key: string]: unknown };
 }
 

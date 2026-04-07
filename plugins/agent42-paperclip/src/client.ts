@@ -50,6 +50,7 @@ import type {
   StorageStatusResponse,
   ToggleResponse,
   PurgeMemoryResponse,
+  ModelsResponse,
 } from "./types.js";
 
 export class Agent42Client {
@@ -271,6 +272,33 @@ export class Agent42Client {
     );
     if (!resp.ok) throw new Error(`Agent42Client.extractLearnings failed: HTTP ${resp.status}`);
     return resp.json() as Promise<ExtractLearningsResponse>;
+  }
+
+  // -------------------------------------------------------------------------
+  // Phase 35 -- Provider Model Discovery methods
+  // -------------------------------------------------------------------------
+
+  /**
+   * GET /sidecar/models
+   * Public endpoint -- no Authorization header (per D-05).
+   * Returns available models grouped by provider.
+   * Retries once on 5xx with 1s delay.
+   */
+  async getModels(): Promise<ModelsResponse> {
+    const resp = await this.fetchWithRetry(
+      `${this.baseUrl}/sidecar/models`,
+      {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      },
+      5_000,
+    );
+
+    if (!resp.ok) {
+      throw new Error(`Agent42Client.getModels failed: HTTP ${resp.status}`);
+    }
+
+    return resp.json() as Promise<ModelsResponse>;
   }
 
   // -------------------------------------------------------------------------
