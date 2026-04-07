@@ -55,12 +55,23 @@ class CallbackPayload(BaseModel):
     error: str | None = None
 
 
+class ProviderStatusDetail(BaseModel):
+    """Per-provider status detail for enhanced health response (D-07)."""
+
+    name: str
+    configured: bool = False
+    connected: bool = False
+    model_count: int = 0
+    last_check: float = 0.0
+
+
 class HealthResponse(BaseModel):
     """Response body for GET /sidecar/health."""
 
     status: str = "ok"
     memory: dict[str, Any] = Field(default_factory=dict)
     providers: dict[str, Any] = Field(default_factory=dict)
+    providers_detail: list[ProviderStatusDetail] = Field(default_factory=list)
     qdrant: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -424,3 +435,25 @@ class SidecarSettingsUpdateResponse(BaseModel):
 
     ok: bool
     key_name: str
+
+
+# ---------------------------------------------------------------------------
+# Phase 35 — Provider Model Discovery
+# ---------------------------------------------------------------------------
+
+
+class ProviderModelItem(BaseModel):
+    """A single model entry in the GET /sidecar/models response (D-05)."""
+
+    model_id: str
+    display_name: str
+    provider: str
+    categories: list[str] = Field(default_factory=list)
+    available: bool = True
+
+
+class ModelsResponse(BaseModel):
+    """Response body for GET /sidecar/models (D-05)."""
+
+    models: list[ProviderModelItem] = Field(default_factory=list)
+    providers: list[str] = Field(default_factory=list)

@@ -26,6 +26,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from core.agent_manager import PROVIDER_MODELS
 from core.config import settings
 from core.memory_bridge import MemoryBridge
 from core.reward_system import TierDeterminator
@@ -48,6 +49,9 @@ from core.sidecar_models import (
     MemoryStoreRequest,
     MemoryStoreResponse,
     MemoryTraceItem,
+    ModelsResponse,
+    ProviderModelItem,
+    ProviderStatusDetail,
     RoutingHistoryEntry,
     RoutingHistoryResponse,
     RoutingResolveRequest,
@@ -161,17 +165,78 @@ def create_sidecar_app(
 
         # Add per-provider availability to provider_status dict (D-12)
         configured_providers: dict[str, bool] = {}
-        for attr in ("openai_api_key", "anthropic_api_key", "openrouter_api_key", "groq_api_key"):
+        for attr in (
+            "openai_api_key",
+            "anthropic_api_key",
+            "openrouter_api_key",
+            "groq_api_key",
+            "synthetic_api_key",
+        ):
             provider_name = attr.replace("_api_key", "")
             configured_providers[provider_name] = bool(getattr(settings, attr, ""))
         provider_status["configured"] = configured_providers
+
+        # Build providers_detail list (D-07)
+        providers_detail_list: list[ProviderStatusDetail] = []
+        _provider_key_map = {
+            "zen": "zen_api_key",
+            "openrouter": "openrouter_api_key",
+            "anthropic": "anthropic_api_key",
+            "openai": "openai_api_key",
+            "synthetic": "synthetic_api_key",
+        }
+        for pname, attr_name in _provider_key_map.items():
+            is_configured = bool(getattr(settings, attr_name, ""))
+            model_count = len(set(PROVIDER_MODELS.get(pname, {}).values()))
+            providers_detail_list.append(
+                ProviderStatusDetail(
+                    name=pname,
+                    configured=is_configured,
+                    connected=is_configured,  # Stub: equals configured until Phase 32/33 add real probes
+                    model_count=model_count,
+                    last_check=0.0,  # Stub: Phase 32/33 will populate with real check timestamps
+                )
+            )
 
         return HealthResponse(
             status="ok",
             memory=memory_status,
             providers=provider_status,
+            providers_detail=providers_detail_list,
             qdrant=qdrant_status,
         )
+
+    # -- Models endpoint (public -- no auth, consistent with /sidecar/health) --
+
+    @app.get("/sidecar/models", response_model=ModelsResponse)
+    async def sidecar_models() -> ModelsResponse:
+        """Return available models grouped by provider (D-05).
+
+        Public endpoint — no Bearer auth required. Consistent with /sidecar/health.
+        Currently returns models from PROVIDER_MODELS registry.
+        Will return dynamic Synthetic.new models once Phase 33 is implemented.
+        """
+        items: list[ProviderModelItem] = []
+        provider_names: list[str] = []
+        for provider, category_map in PROVIDER_MODELS.items():
+            provider_names.append(provider)
+            model_to_cats: dict[str, list[str]] = {}
+            for cat, model_id in category_map.items():
+                model_to_cats.setdefault(model_id, []).append(cat)
+            for model_id, cats in model_to_cats.items():
+                items.append(
+                    ProviderModelItem(
+                        model_id=model_id,
+                        display_name=model_id,
+                        provider=provider,
+                        categories=sorted(cats),
+                        available=True,
+                    )
+                )
+        # Synthetic.new stub — Phase 33 will populate with real models
+        if "synthetic" not in provider_names:
+            provider_names.append("synthetic")
+        return ModelsResponse(models=items, providers=sorted(provider_names))
 
     # -- Execute endpoint (Bearer auth required per D-04) --
 
