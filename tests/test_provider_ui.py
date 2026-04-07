@@ -16,8 +16,6 @@ def _make_client(**kwargs) -> TestClient:
         "tool_registry": None,
         "skill_loader": None,
         "app_manager": MagicMock(),
-        "project_manager": MagicMock(),
-        "repo_manager": MagicMock(),
     }
     defaults.update(kwargs)
     app = create_app(**defaults)
@@ -124,28 +122,3 @@ class TestProviderStatusEndpoint:
             assert "configured" in p
             assert "status" in p
             assert p["status"] in ("unconfigured", "ok", "auth_error", "unreachable", "timeout")
-
-
-class TestAgentsModelsEndpoint:
-    """GET /api/agents/models returns PROVIDER_MODELS dict."""
-
-    def test_agents_models_has_provider_keys(self):
-        """Endpoint returns dict with zen, openrouter, anthropic, openai."""
-        client = _make_client()
-        resp = client.get("/api/agents/models")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "zen" in data
-        assert "openrouter" in data
-        assert "anthropic" in data
-        assert "openai" in data
-
-    def test_agents_models_has_categories(self):
-        """Each provider has task category keys (fast, general, etc.)."""
-        client = _make_client()
-        resp = client.get("/api/agents/models")
-        data = resp.json()
-        # zen should have at least fast, general, reasoning
-        assert "fast" in data["zen"]
-        assert "general" in data["zen"]
-        assert "reasoning" in data["zen"]
