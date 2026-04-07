@@ -41,6 +41,7 @@
 **Goal**: Remove complex L1/L2 tiered routing system and simplify provider configuration
 **Depends on**: Phase 32
 **Requirements**: SIMPLIFY-01, SIMPLIFY-02, SIMPLIFY-03, SIMPLIFY-04, SIMPLIFY-05
+**Plans:** 1 plan
 **Success Criteria** (what must be TRUE):
 
 1. Complex L1/L2 tiered routing system has been removed from the codebase
@@ -48,6 +49,10 @@
 3. Provider configuration has been consolidated into a single unified system
 4. Provider health checks for unused providers have been removed
 5. AgentRuntime environment building logic has been simplified
+
+Plans:
+
+- [x] 34-01-PLAN.md — Remove dead L1/L2 config fields from Settings and .env.example
 
 ### Phase 35: Paperclip Integration
 
@@ -67,5 +72,5 @@
 | ----- | -------------- | ------ | --------- |
 | 32. Provider Selection Core | 1/1 | Planned | 2026-04-01 |
 | 33. Synthetic.new Integration | 1/1 | Planned | 2026-04-01 |
-| 34. System Simplification | 0/1 | Not started | - |
+| 34. System Simplification | 1/1 | Complete | 2026-04-06 |
 | 35. Paperclip Integration | 0/1 | Not started | - |

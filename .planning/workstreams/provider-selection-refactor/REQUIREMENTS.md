@@ -25,11 +25,11 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Provider System Simplification
 
-- [ ] **SIMPLIFY-01**: Remove complex L1/L2 tiered routing system
-- [ ] **SIMPLIFY-02**: Eliminate task category to provider mapping (engineer/researcher/writer/analyst)
-- [ ] **SIMPLIFY-03**: Consolidate provider configuration into single unified system
-- [ ] **SIMPLIFY-04**: Remove provider health checks for unused providers
-- [ ] **SIMPLIFY-05**: Simplify AgentRuntime environment building logic
+- [x] **SIMPLIFY-01**: Remove complex L1/L2 tiered routing system
+- [x] **SIMPLIFY-02**: Eliminate task category to provider mapping (engineer/researcher/writer/analyst)
+- [x] **SIMPLIFY-03**: Consolidate provider configuration into single unified system
+- [x] **SIMPLIFY-04**: Remove provider health checks for unused providers
+- [x] **SIMPLIFY-05**: Simplify AgentRuntime environment building logic
 
 ### User Interface
 
@@ -77,11 +77,11 @@ Deferred to future release. Tracked but not in current roadmap.
 | SYNTHETIC-02 | Phase 33 | Pending |
 | SYNTHETIC-03 | Phase 33 | Pending |
 | SYNTHETIC-04 | Phase 33 | Pending |
-| SIMPLIFY-01 | Phase 34 | Pending |
-| SIMPLIFY-02 | Phase 34 | Pending |
-| SIMPLIFY-03 | Phase 34 | Pending |
-| SIMPLIFY-04 | Phase 34 | Pending |
-| SIMPLIFY-05 | Phase 34 | Pending |
+| SIMPLIFY-01 | Phase 34 | Complete |
+| SIMPLIFY-02 | Phase 34 | Complete |
+| SIMPLIFY-03 | Phase 34 | Complete |
+| SIMPLIFY-04 | Phase 34 | Complete |
+| SIMPLIFY-05 | Phase 34 | Complete |
 | UI-01 | Phase 35 | Pending |
 | UI-02 | Phase 35 | Pending |
 | UI-03 | Phase 35 | Pending |
@@ -95,4 +95,4 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ---
 *Requirements defined: 2026-04-01*
-*Last updated: 2026-04-01 — v5.0 Provider Selection Refactor requirements*
+*Last updated: 2026-04-06 — SIMPLIFY-01 through SIMPLIFY-05 marked complete (34-01)*
