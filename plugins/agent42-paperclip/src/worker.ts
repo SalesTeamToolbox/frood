@@ -62,6 +62,16 @@ const plugin = definePlugin({
       }
     });
 
+    ctx.data.register("available-models", async (_params) => {
+      if (!client) return null;
+      try {
+        return await client.getModels();
+      } catch (e) {
+        ctx.logger.warn("available-models data handler failed", { error: String(e) });
+        return null;
+      }
+    });
+
     ctx.data.register("memory-run-trace", async (params) => {
       const runId = params?.runId as string | undefined;
       if (!runId || !client) return null;
