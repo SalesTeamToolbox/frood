@@ -67,7 +67,6 @@ class TestBranding:
 class TestSidebarNav:
     """Sidebar navigation shows correct pages."""
 
-    @pytest.mark.xfail(reason="Activity page added in Plan 03")
     def test_sidebar_has_activity(self):
         """Activity sidebar link exists."""
         assert 'data-page="activity"' in _APP_JS
@@ -130,20 +129,24 @@ class TestReportsTabs:
 class TestActivityFeed:
     """Activity Feed page for intelligence event log."""
 
-    @pytest.mark.xfail(reason="Activity feed renderer added in Plan 03")
     def test_activity_renderer(self):
         """renderActivity() function exists."""
         assert "renderActivity" in _APP_JS
 
-    @pytest.mark.xfail(reason="Intelligence event handling added in Plan 03")
     def test_intelligence_event_types(self):
         """Frontend handles intelligence_event WebSocket messages."""
         assert "intelligence_event" in _APP_JS
 
-    @pytest.mark.xfail(reason="/api/activity endpoint added in Plan 03")
     def test_activity_endpoint(self):
         """Server exposes /api/activity endpoint."""
         assert "/api/activity" in _SERVER_PY
+
+    def test_routing_event_hook(self):
+        """Server records routing decisions as intelligence events per D-06."""
+        assert (
+            '_record_intelligence_event("routing"' in _SERVER_PY
+            or '_record_intelligence_event(\n            "routing"' in _SERVER_PY
+        )
 
 
 class TestSetupWizard:

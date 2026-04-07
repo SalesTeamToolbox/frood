@@ -2795,3 +2795,11 @@ body.towel-day .dont-panic-watermark {
 .badge-code { background: rgba(16, 185, 129, 0.15); color: #34d399; }
 .badge-general { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
 .skill-detail-row td { padding: 0 !important; border-top: none !important; }
+
+/* Activity Feed */
+.activity-feed { display: flex; flex-direction: column; gap: 0.5rem; }
+.activity-event { background: var(--card-bg, #1e1e2e); border: 1px solid var(--border, #2a2a3e); border-radius: 8px; padding: 0.75rem 1rem; }
+.activity-event-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
+.activity-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; color: #fff; text-transform: uppercase; letter-spacing: 0.03em; }
+.activity-ts { font-size: 0.75rem; color: var(--text-muted, #888); margin-left: auto; }
+.activity-event-detail { font-size: 0.875rem; color: var(--text, #ccc); }
