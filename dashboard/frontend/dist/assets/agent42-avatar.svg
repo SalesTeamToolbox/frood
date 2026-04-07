@@ -1,23 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- Agent42 Chat Avatar — Geometric bot, the anti-Marvin -->
-  <!-- Optimistic, competent, modern — no "42" on face -->
+  <!-- Frood Avatar — Towel icon, the essential hitchhiker's companion -->
   <circle cx="16" cy="16" r="16" fill="#1a2332"/>
 
-  <!-- Antenna stalk + bulb -->
-  <line x1="16" y1="8" x2="16" y2="4.5" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
-  <circle cx="16" cy="3.5" r="2" fill="#E8A838"/>
-
-  <!-- Robot head — rounded square -->
-  <rect x="6" y="8" width="20" height="18" rx="5" fill="none" stroke="#E8A838" stroke-width="1.5"/>
-
-  <!-- Happy arc eyes -->
-  <path d="M10 15 Q12.5 12 15 15" fill="none" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
-  <path d="M17 15 Q19.5 12 22 15" fill="none" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
-
-  <!-- Confident smile -->
-  <path d="M10 21 Q16 26 22 21" fill="none" stroke="#E8A838" stroke-width="1.5" stroke-linecap="round"/>
-
-  <!-- Ear sensors -->
-  <rect x="3" y="14" width="3" height="6" rx="1.5" fill="#E8A838" opacity="0.5"/>
-  <rect x="26" y="14" width="3" height="6" rx="1.5" fill="#E8A838" opacity="0.5"/>
+  <!-- Folded towel -->
+  <rect x="7" y="9" width="18" height="15" rx="2.5" fill="none" stroke="#E8A838" stroke-width="1.5"/>
+  <!-- Fold line -->
+  <line x1="16" y1="9" x2="16" y2="24" stroke="#E8A838" stroke-width="1" stroke-dasharray="2,1.5"/>
+  <!-- Texture lines left -->
+  <line x1="9" y1="14" x2="14" y2="14" stroke="#E8A838" stroke-width="0.8" opacity="0.5"/>
+  <line x1="9" y1="17" x2="14" y2="17" stroke="#E8A838" stroke-width="0.8" opacity="0.5"/>
+  <line x1="9" y1="20" x2="14" y2="20" stroke="#E8A838" stroke-width="0.8" opacity="0.5"/>
+  <!-- Texture lines right -->
+  <line x1="18" y1="14" x2="23" y2="14" stroke="#E8A838" stroke-width="0.8" opacity="0.5"/>
+  <line x1="18" y1="17" x2="23" y2="17" stroke="#E8A838" stroke-width="0.8" opacity="0.5"/>
+  <line x1="18" y1="20" x2="23" y2="20" stroke="#E8A838" stroke-width="0.8" opacity="0.5"/>
+  <!-- Hanging loop -->
+  <path d="M13 9 Q13 5 16 5 Q19 5 19 9" fill="none" stroke="#E8A838" stroke-width="1.3"/>
 </svg>
