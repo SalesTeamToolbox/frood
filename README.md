@@ -1,11 +1,11 @@
-# Agent42
+# Frood
 
 <p align="center">
-  <img src="dashboard/frontend/dist/assets/agent42-logo.svg" alt="Agent42" width="240">
+  <img src="dashboard/frontend/dist/assets/agent42-logo.svg" alt="Frood" width="240">
 </p>
 
 <p align="center">
-  <strong>Don't Panic.</strong> Your towel for Claude Code.
+  <strong>Don't Panic.</strong> A hoopy frood who really knows where his towel is.
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
   <img src="https://img.shields.io/badge/hooks-16-green" alt="Hooks">
   <img src="https://img.shields.io/badge/nodes-local%20%2B%20remote-teal" alt="Multi-Node">
   <img src="https://img.shields.io/badge/answer-42-yellow" alt="42">
-  <img src="https://img.shields.io/badge/license-BSL--1.1-lightgrey" alt="License">
+  <img src="https://img.shields.io/badge/license-MIT-brightgreen" alt="License">
 </p>
 
 ---
@@ -35,8 +35,7 @@
 > The knack lies in learning how to throw yourself at the ground and miss."*
 > -- The same applies to extending Claude Code.
 
-Agent42 is an **autonomous agent platform** with a web IDE, MCP tools, associative
-memory, agent teams, an apps platform, and self-improving learning. Use it as:
+Frood (formerly Agent42) is the **essential enhancement layer for AI coding agents** — intelligent memory, LLM routing across 9+ providers, N8N workflow automation, and context management. Bring Frood to any agent harness:
 
 - **An MCP server** for Claude Code in VS Code (28+ MCP tools, 53 skills, 16 hooks)
 - **A web IDE** with Monaco editor, terminal, and AI chat (accessible from any browser)
