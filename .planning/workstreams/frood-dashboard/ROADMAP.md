@@ -17,7 +17,7 @@
 **Plans:** 4 plans
 
 Plans:
-- [ ] 50-01-PLAN.md — Strip all harness route groups from server.py (bottom-to-top deletion)
+- [x] 50-01-PLAN.md — Strip all harness route groups from server.py (bottom-to-top deletion)
 - [x] 50-02-PLAN.md — Strip harness render functions, sidebar, renderers map from app.js
 - [x] 50-03-PLAN.md — Simplify auth.py to JWT-only, clean websocket_manager.py, update agent42.py launcher
 - [ ] 50-04-PLAN.md — Delete harness test files, clean mixed tests, full suite validation
@@ -48,5 +48,5 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 | ----- | -------------- | ------ | --------- |
-| 50. Strip Harness Features | 2/4 | In Progress | - |
+| 50. Strip Harness Features | 3/4 | In Progress | - |
 | 51. Rebrand & Repurpose | 0/0 | Not started | - |

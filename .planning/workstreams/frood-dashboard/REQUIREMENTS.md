@@ -7,18 +7,18 @@
 
 ### Strip Harness Features
 
-- [ ] **STRIP-01**: Remove Mission Control (Kanban board, tasks, projects)
-- [ ] **STRIP-02**: Remove Workspace/IDE (Monaco editor, terminal, file browser, Claude Code chat)
-- [ ] **STRIP-03**: Remove Agents page (agent lifecycle CRUD, start/stop/delete)
-- [ ] **STRIP-04**: Remove Teams page (multi-agent team monitoring)
-- [ ] **STRIP-05**: Remove Approvals page (human-in-the-loop task review)
-- [ ] **STRIP-06**: Remove GitHub Integration (repo cloning, OAuth, account management)
-- [ ] **STRIP-07**: Remove Chat features (chat sessions, message streaming, conversation interface)
+- [x] **STRIP-01**: Remove Mission Control (Kanban board, tasks, projects)
+- [x] **STRIP-02**: Remove Workspace/IDE (Monaco editor, terminal, file browser, Claude Code chat)
+- [x] **STRIP-03**: Remove Agents page (agent lifecycle CRUD, start/stop/delete)
+- [x] **STRIP-04**: Remove Teams page (multi-agent team monitoring)
+- [x] **STRIP-05**: Remove Approvals page (human-in-the-loop task review)
+- [x] **STRIP-06**: Remove GitHub Integration (repo cloning, OAuth, account management)
+- [x] **STRIP-07**: Remove Chat features (chat sessions, message streaming, conversation interface)
 - [x] **STRIP-08**: Remove Device Gateway (multi-device management, device API keys)
-- [ ] **STRIP-09**: Remove GSD Workstreams UI (phase tracking in dashboard)
-- [ ] **STRIP-10**: Remove Status page (platform capacity dashboard)
-- [ ] **STRIP-11**: Remove Agent Profiles (profile CRUD, routing overrides — already 410 Gone)
-- [ ] **STRIP-12**: Remove Persona customization (chat system prompt — no chat = no persona)
+- [x] **STRIP-09**: Remove GSD Workstreams UI (phase tracking in dashboard)
+- [x] **STRIP-10**: Remove Status page (platform capacity dashboard)
+- [x] **STRIP-11**: Remove Agent Profiles (profile CRUD, routing overrides — already 410 Gone)
+- [x] **STRIP-12**: Remove Persona customization (chat system prompt — no chat = no persona)
 
 ### Rebrand & Polish
 
@@ -35,7 +35,7 @@
 
 ### Cleanup
 
-- [ ] **CLEAN-01**: Remove dead server.py routes for stripped features
+- [x] **CLEAN-01**: Remove dead server.py routes for stripped features
 - [ ] **CLEAN-02**: Remove dead frontend code for stripped pages/components
 - [x] **CLEAN-03**: Remove unused Python modules (if any become orphaned)
 - [ ] **CLEAN-04**: Ensure all tests still pass after removal
