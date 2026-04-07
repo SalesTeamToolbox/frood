@@ -38,7 +38,7 @@
 - [x] **CLEAN-01**: Remove dead server.py routes for stripped features
 - [ ] **CLEAN-02**: Remove dead frontend code for stripped pages/components
 - [x] **CLEAN-03**: Remove unused Python modules (if any become orphaned)
-- [ ] **CLEAN-04**: Ensure all tests still pass after removal
+- [x] **CLEAN-04**: Ensure all tests still pass after removal
 - [ ] **CLEAN-05**: Update README to reflect Frood Dashboard as intelligence layer admin panel
 
 ## Out of Scope
