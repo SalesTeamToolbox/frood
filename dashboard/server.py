@@ -36,7 +36,6 @@ from core.approval_gate import ApprovalGate
 from core.config import Settings, settings
 from core.device_auth import DeviceStore
 from dashboard.auth import (
-    API_KEY_PREFIX,
     AuthContext,
     check_rate_limit,
     create_token,
@@ -5667,51 +5666,36 @@ Focus on learnings that would help in future similar sessions."""
             await ws.close(code=4003, reason="Too many connections")
             return
 
-        # Authenticate via query parameter: ws://host/ws?token=<jwt_or_api_key>
+        # Authenticate via query parameter: ws://host/ws?token=<jwt>
         token = ws.query_params.get("token")
         if not token:
             await ws.close(code=4001, reason="Missing token")
             return
 
         user = ""
-        device_id = ""
-        device_name = ""
 
-        if token.startswith(API_KEY_PREFIX):
-            # API key authentication (device)
-            if not device_store:
-                await ws.close(code=4001, reason="Device auth not configured")
-                return
-            device = device_store.validate_api_key(token)
-            if not device:
-                await ws.close(code=4001, reason="Invalid or revoked API key")
-                return
-            user = "device"
-            device_id = device.device_id
-            device_name = device.name
-        else:
-            # JWT authentication (dashboard user)
-            try:
-                from jose import ExpiredSignatureError, JWTError
-                from jose import jwt as jose_jwt
+        # JWT authentication (dashboard user)
+        try:
+            from jose import ExpiredSignatureError, JWTError
+            from jose import jwt as jose_jwt
 
-                payload = jose_jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-                if not payload.get("sub"):
-                    await ws.close(code=4001, reason="Invalid token")
-                    return
-                user = payload["sub"]
-            except ExpiredSignatureError:
-                await ws.close(code=4001, reason="Token expired")
-                return
-            except JWTError:
+            payload = jose_jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+            if not payload.get("sub"):
                 await ws.close(code=4001, reason="Invalid token")
                 return
-            except Exception as e:
-                logger.error(f"Unexpected error in WebSocket auth: {e}")
-                await ws.close(code=1011, reason="Server error")
-                return
+            user = payload["sub"]
+        except ExpiredSignatureError:
+            await ws.close(code=4001, reason="Token expired")
+            return
+        except JWTError:
+            await ws.close(code=4001, reason="Invalid token")
+            return
+        except Exception as e:
+            logger.error(f"Unexpected error in WebSocket auth: {e}")
+            await ws.close(code=1011, reason="Server error")
+            return
 
-        await ws_manager.connect(ws, user=user, device_id=device_id, device_name=device_name)
+        await ws_manager.connect(ws, user=user)
         try:
             while True:
                 data = await ws.receive_text()
