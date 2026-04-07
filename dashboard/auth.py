@@ -1,11 +1,10 @@
 """
-JWT and API-key authentication for the dashboard and device gateway.
+JWT authentication for the dashboard.
 
 Security features:
 - Bcrypt password hashing (preferred) with plaintext fallback + warning
 - Constant-time comparison for plaintext passwords
 - JWT with configurable secret (auto-generated if not set)
-- API key authentication for registered devices (ak_ prefix)
 - Rate limiting support via login attempt tracking
 """
 
@@ -18,11 +17,10 @@ from datetime import UTC, datetime, timedelta
 import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+from jose import jwt
 from jose.exceptions import ExpiredSignatureError, JOSEError
 
 from core.config import settings
-from core.device_auth import API_KEY_PREFIX, DeviceStore
 
 logger = logging.getLogger("agent42.auth")
 
@@ -56,24 +54,13 @@ security = HTTPBearer()
 # Rate limiting: track login attempts per IP
 _login_attempts: dict[str, list[float]] = {}
 
-# Device store — injected at startup via init_device_store()
-_device_store: DeviceStore | None = None
-
-
-def init_device_store(store: DeviceStore):
-    """Inject the device store at application startup."""
-    global _device_store
-    _device_store = store
-
 
 @dataclass
 class AuthContext:
-    """Unified authentication result for both JWT and API key auth."""
+    """Authentication result for JWT auth."""
 
-    user: str  # username (JWT) or "device" (API key)
-    auth_type: str = "jwt"  # "jwt" or "api_key"
-    device_id: str = ""
-    device_name: str = ""
+    user: str  # username
+    auth_type: str = "jwt"  # always "jwt"
 
 
 def verify_password(plain: str) -> bool:
@@ -146,35 +133,11 @@ def _validate_jwt(token: str) -> AuthContext:
         )
 
 
-def _validate_api_key(token: str) -> AuthContext:
-    """Validate a device API key and return an AuthContext."""
-    if not _device_store:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Device authentication not configured",
-        )
-    device = _device_store.validate_api_key(token)
-    if not device:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or revoked API key",
-        )
-    return AuthContext(
-        user="device",
-        auth_type="api_key",
-        device_id=device.device_id,
-        device_name=device.name,
-    )
-
-
 def get_auth_context(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> AuthContext:
-    """FastAPI dependency — validates JWT or API key, returns full AuthContext."""
-    token = credentials.credentials
-    if token.startswith(API_KEY_PREFIX):
-        return _validate_api_key(token)
-    return _validate_jwt(token)
+    """FastAPI dependency — validates JWT, returns AuthContext."""
+    return _validate_jwt(credentials.credentials)
 
 
 def get_current_user(
@@ -199,7 +162,7 @@ def get_current_user_optional(request) -> str | None:
         return None
     token = auth_header[7:]
     try:
-        ctx = _validate_api_key(token) if token.startswith(API_KEY_PREFIX) else _validate_jwt(token)
+        ctx = _validate_jwt(token)
         return ctx.user
     except HTTPException:
         return None
@@ -208,11 +171,5 @@ def get_current_user_optional(request) -> str | None:
 def require_admin(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> AuthContext:
-    """FastAPI dependency — requires JWT admin auth (not device API keys)."""
-    token = credentials.credentials
-    if token.startswith(API_KEY_PREFIX):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required — device API keys cannot perform this action",
-        )
-    return _validate_jwt(token)
+    """FastAPI dependency — requires JWT admin auth."""
+    return _validate_jwt(credentials.credentials)
