@@ -270,7 +270,7 @@ def create_app(
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
-    app = FastAPI(title="Agent42 Dashboard", version="0.4.0")
+    app = FastAPI(title="Frood Dashboard", version="0.4.0")
 
     # Security headers on all responses
     app.add_middleware(SecurityHeadersMiddleware)
@@ -306,7 +306,7 @@ def create_app(
                 content={
                     "status": "paperclip_mode",
                     "message": (
-                        "Agent42 dashboard UI is disabled in Paperclip mode. "
+                        "Frood dashboard UI is disabled in Paperclip mode. "
                         "Access workspace features through the Paperclip dashboard."
                     ),
                     "sidecar_port": settings.paperclip_sidecar_port,
