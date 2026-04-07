@@ -269,16 +269,6 @@ class Settings:
     conversational_enabled: bool = True  # Enable direct chat for simple messages
     conversational_model: str = ""  # Model for direct responses (empty = primary free model)
 
-    # L1/L2 agent tier system
-    l1_default_model: str = ""  # Override L1 primary model (empty = use FALLBACK_ROUTING)
-    l1_critic_model: str = ""  # Override L1 critic model
-    l2_enabled: bool = True  # Enable L2 premium tier (auto-disabled if no premium keys)
-    l2_default_model: str = ""  # Override L2 model (empty = per-task-type premium defaults)
-    l2_default_profile: str = ""  # Override L2 profile name (empty = auto-select)
-    l2_auto_escalate: bool = False  # Auto-escalate all L1 output to L2
-    l2_auto_escalate_task_types: str = ""  # Comma-separated types to auto-escalate (empty = all)
-    l2_task_types: str = ""  # Comma-separated types eligible for L2 (empty = all)
-
     # Provider routing flags (Phase 6)
     gemini_free_tier: bool = True  # When false, Gemini excluded from FALLBACK_ROUTING and fallback
     openrouter_free_only: bool = False  # When true, only OR :free suffix models are routed
@@ -544,15 +534,6 @@ class Settings:
             conversational_enabled=os.getenv("CONVERSATIONAL_ENABLED", "true").lower()
             in ("true", "1", "yes"),
             conversational_model=os.getenv("CONVERSATIONAL_MODEL", ""),
-            # L1/L2 agent tier system
-            l1_default_model=os.getenv("L1_DEFAULT_MODEL", ""),
-            l1_critic_model=os.getenv("L1_CRITIC_MODEL", ""),
-            l2_enabled=os.getenv("L2_ENABLED", "true").lower() in ("true", "1", "yes"),
-            l2_default_model=os.getenv("L2_DEFAULT_MODEL", ""),
-            l2_default_profile=os.getenv("L2_DEFAULT_PROFILE", ""),
-            l2_auto_escalate=os.getenv("L2_AUTO_ESCALATE", "false").lower() in ("true", "1", "yes"),
-            l2_auto_escalate_task_types=os.getenv("L2_AUTO_ESCALATE_TASK_TYPES", ""),
-            l2_task_types=os.getenv("L2_TASK_TYPES", ""),
             # Learning extraction
             learning_enabled=os.getenv("LEARNING_ENABLED", "true").lower() in ("true", "1", "yes"),
             learning_min_evidence=int(os.getenv("LEARNING_MIN_EVIDENCE", "3")),
