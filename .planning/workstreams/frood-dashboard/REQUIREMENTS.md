@@ -22,16 +22,30 @@
 
 ### Rebrand & Polish
 
-- [ ] **BRAND-01**: Rename "Apps" to "Agent Apps" throughout UI and API
+- [ ] **BRAND-01**: Rename "Sandboxed Apps" to "Agent Apps" throughout UI and API
 - [ ] **BRAND-02**: Update sidebar navigation to show only kept features
-- [ ] **BRAND-03**: Ensure all remaining pages use Frood branding (no "Agent42" remnants)
+- [ ] **BRAND-03**: Ensure all remaining pages use Frood branding (no "Agent42" remnants — logo alt, provider routing text, page titles, etc.)
 - [ ] **BRAND-04**: Update setup wizard to reflect Frood-as-service identity
+
+### Repurpose Reports Page
+
+- [ ] **RPT-01**: Repurpose Overview tab — replace harness metrics (Total Tasks, Success Rate, Projects, Task Type Breakdown) with intelligence layer metrics (memory recall stats, routing decisions, effectiveness scores, learning extractions)
+- [ ] **RPT-02**: Remove "Tasks & Projects" tab entirely — pure harness content
+- [ ] **RPT-03**: Keep "System Health" tab as-is (MCP transport, tools, skills, token tracking)
+- [ ] **RPT-04**: Add memory/effectiveness data to Overview (recall hit rate, learning count, top-performing models, routing tier distribution)
 
 ### Repurpose Activity Feed
 
 - [ ] **FEED-01**: Repurpose Activity Feed from task/agent lifecycle events to memory/routing/effectiveness event log
 - [ ] **FEED-02**: Log memory recall hits, learning extractions, routing decisions, effectiveness scores
 - [ ] **FEED-03**: Expose as intelligence layer observability surface
+
+### Settings Cleanup
+
+- [ ] **SET-01**: Remove "Channels" tab — backend route removed, frontend still references it
+- [ ] **SET-02**: Rename "Orchestrator" tab to "Routing" or "LLM Proxy" — no longer an agent orchestrator
+- [ ] **SET-03**: Remove MAX_CONCURRENT_AGENTS setting from Orchestrator/Routing tab — harness concept
+- [ ] **SET-04**: Remove `loadChannels()` from `loadAll()` in app.js
 
 ### Cleanup
 
