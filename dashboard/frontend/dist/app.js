@@ -133,10 +133,13 @@ const TAGLINES = [
   "I love deadlines. I love the whooshing noise they make as they go by.",
   "This must be Thursday. I never could get the hang of Thursdays.",
   "Would it save you a lot of time if I just gave up and went mad now?",
+  "There\u2019s a frood who really knows where his towel is.",
+  "The ships hung in the sky in much the same way that bricks don\u2019t.",
+  "Ford, you\u2019re turning into a penguin. Stop it.",
 ];
 
-// Agent42 robot avatar SVG — cheerful, optimistic (the anti-Marvin)
-const AGENT42_AVATAR = `<img src="/assets/agent42-avatar.svg" alt="42" width="20" height="20" style="border-radius:50%">`;
+// Frood towel avatar SVG — the essential hitchhiker's companion
+const AGENT42_AVATAR = `<img src="/assets/agent42-avatar.svg" alt="Frood" width="20" height="20" style="border-radius:50%">`;
 
 const STATUS_FLAVOR = {
   pending: "Waiting in the Infinite Improbability Queue\u2026",
@@ -401,7 +404,7 @@ function renderSetupWizard() {
   if (s === 1) {
     body = `
       <div class="login-logo">
-        <img src="/assets/agent42-logo-light.svg" alt="Agent42" onerror="this.outerHTML='<h1>Agent<span style=&quot;color:var(--accent)&quot;>42</span></h1>'">
+        <img src="/assets/agent42-logo-light.svg" alt="Frood" onerror="this.outerHTML='<h1>Frood<span style=&quot;color:var(--accent)&quot;>42</span></h1>'">
       </div>
       <p class="setup-subtitle">The answer to life, the universe, and all your tasks.</p>
       <p class="setup-desc">Welcome, hoopy frood. Let\u2019s secure the Guide with a passphrase.</p>
@@ -421,7 +424,7 @@ function renderSetupWizard() {
   } else if (s === 2) {
     body = `
       <h2>API Key <span style="color:var(--text-muted);font-weight:400;font-size:0.9rem">(optional)</span></h2>
-      <p class="setup-desc">Agent42 uses OpenRouter for LLM access. Free models work without a key, but adding one unlocks 200+ models. It\u2019s like upgrading from a towel to a Sub-Etha Sens-O-Matic.</p>
+      <p class="setup-desc">Frood uses OpenRouter for LLM access. Free models work without a key, but adding one unlocks 200+ models. It\u2019s like upgrading from a towel to a Sub-Etha Sens-O-Matic.</p>
       ${steps}
       <div id="setup-error" style="color:var(--danger);font-size:0.85rem;min-height:1.2em;margin-bottom:0.25rem"></div>
       <div class="form-group">
@@ -436,7 +439,7 @@ function renderSetupWizard() {
   } else if (s === 3) {
     body = `
       <h2>Enhanced Memory <span style="color:var(--text-muted);font-weight:400;font-size:0.9rem">(optional)</span></h2>
-      <p class="setup-desc">Add semantic search and session caching for smarter agents. Agent42 works fully without these.</p>
+      <p class="setup-desc">Add semantic search and session caching for smarter agents. Frood works fully without these — a towel always gets the job done.</p>
       ${steps}
       <div id="setup-error" style="color:var(--danger);font-size:0.85rem;min-height:1.2em;margin-bottom:0.25rem"></div>
       <div class="memory-options">
@@ -8750,7 +8753,7 @@ function render() {
       <div class="login-page">
         <div class="login-card">
           <div class="login-logo">
-            <img src="/assets/agent42-logo-light.svg" alt="Agent42" onerror="this.outerHTML='<h1>Agent<span style=&quot;color:var(--accent)&quot;>42</span></h1>'">
+            <img src="/assets/agent42-logo-light.svg" alt="Frood" onerror="this.outerHTML='<h1>Frood<span style=&quot;color:var(--accent)&quot;>42</span></h1>'">
           </div>
           <div class="subtitle tagline-rotate" id="login-tagline">${TAGLINES[_taglineIdx]}</div>
           <form onsubmit="event.preventDefault();doLogin(document.getElementById('login-user').value,document.getElementById('login-pass').value)">
@@ -8765,7 +8768,7 @@ function render() {
             </div>
             <button type="submit" class="btn btn-primary btn-full" style="margin-top:0.5rem">Sign In</button>
           </form>
-          <div class="login-footer-text">A mostly harmless orchestrator</div>
+          <div class="login-footer-text">A hoopy frood who really knows where his towel is</div>
         </div>
       </div>
     `;
@@ -8778,7 +8781,7 @@ function render() {
     <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeMobileSidebar()"></div>
     <div class="app-layout">
       <aside class="sidebar" id="sidebar">
-        <div class="sidebar-brand"><img src="/assets/agent42-logo-light.svg" alt="Agent42" height="36" onerror="this.outerHTML='Agent<span class=&quot;num&quot;>42</span>'"></div>
+        <div class="sidebar-brand"><img src="/assets/agent42-logo-light.svg" alt="Frood" height="36" onerror="this.outerHTML='Frood<span class=&quot;num&quot;>42</span>'"></div>
         <nav class="sidebar-nav">
           <a href="#" data-page="tasks" class="${state.page === "tasks" ? "active" : ""}" onclick="event.preventDefault();navigate('tasks');closeMobileSidebar()">&#127919; Mission Control</a>
           <a href="#" data-page="status" class="${state.page === "status" ? "active" : ""}" onclick="event.preventDefault();navigate('status');closeMobileSidebar()">&#128200; Status</a>
