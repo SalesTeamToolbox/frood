@@ -157,7 +157,7 @@ if (_authChannel) {
       state.token = ev.data.token;
       localStorage.setItem("agent42_token", ev.data.token);
       connectWS();
-      loadAll().then(function() { render(); updateGsdIndicator(); });
+      loadAll().then(function() { render(); });
     }
   };
 }
@@ -303,7 +303,6 @@ async function handleSetupStep3() {
       connectWS();
       await loadAll();
       render();
-      updateGsdIndicator();
       if (data.setup_task_id) {
         toast("Welcome! A setup task has been queued to verify memory services.", "success");
       } else {
@@ -470,9 +469,7 @@ function connectWS() {
 }
 
 function handleWSMessage(msg) {
-  if (msg.type === "system_health") {
-    updateGsdIndicator();
-  } else if (msg.type === "app_status") {
+  if (msg.type === "app_status") {
     // Real-time app status update
     const idx = state.apps.findIndex((a) => a.id === msg.data.id);
     if (idx >= 0) state.apps[idx] = msg.data;
@@ -978,137 +975,6 @@ function formatNumber(n) {
 // Page renderers
 // ---------------------------------------------------------------------------
 
-function renderDetail() {
-  const el = document.getElementById("page-content");
-  if (!el) return;
-  const t = state.selectedTask;
-  if (!t) { navigate("tasks"); return; }
-
-  const result = t.result || t.error || "(no output yet)";
-  const isReview = t.status === "review";
-  const isActive = ["pending", "assigned", "running"].includes(t.status);
-
-  el.innerHTML = `
-    <div style="margin-bottom:1rem">
-      <button class="btn btn-outline btn-sm" onclick="navigate('tasks')">&larr; Back to Tasks</button>
-    </div>
-    <div class="card" style="margin-bottom:1.5rem">
-      <div class="card-header">
-        <h3>${esc(t.title)}</h3>
-        <div style="display:flex;gap:0.5rem">
-          ${isReview ? `<button class="btn btn-success btn-sm" onclick="doApproveTask('${t.id}')">Approve</button>` : ""}
-          ${isReview ? `<button class="btn btn-outline btn-sm" onclick="showReviewModal(state.selectedTask)">Review with Feedback</button>` : ""}
-          ${t.status === "pending" || t.status === "running" ? `<button class="btn btn-danger btn-sm" onclick="doCancelTask('${t.id}')">Cancel</button>` : ""}
-          ${t.status === "failed" ? `<button class="btn btn-outline btn-sm" onclick="doRetryTask('${t.id}')">Retry</button>` : ""}
-        </div>
-      </div>
-      <div class="card-body">
-        <div class="detail-grid">
-          <div class="detail-item"><label>ID</label><div class="value" style="font-family:var(--mono)">${esc(t.id)}</div></div>
-          <div class="detail-item"><label>Status</label><div class="value">${statusBadge(t.status)}<div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;font-style:italic">${STATUS_FLAVOR[t.status] || ""}</div></div></div>
-          <div class="detail-item"><label>Type</label><div class="value"><span class="badge-type">${esc(t.task_type)}</span></div></div>
-          <div class="detail-item"><label>Iterations</label><div class="value">${t.iterations || 0} / ${t.max_iterations || "?"}</div></div>
-          ${t.token_usage?.total_tokens ? `<div class="detail-item"><label>Tokens</label><div class="value" style="font-family:var(--mono)">${formatNumber(t.token_usage.total_tokens)} <span style="color:var(--text-muted);font-size:0.8rem">(${formatNumber(t.token_usage.total_prompt_tokens)} in / ${formatNumber(t.token_usage.total_completion_tokens)} out)</span></div></div>` : ""}
-          <div class="detail-item"><label>Created</label><div class="value">${t.created_at ? new Date(t.created_at * 1000).toLocaleString() : "-"}</div></div>
-          <div class="detail-item"><label>Updated</label><div class="value">${t.updated_at ? new Date(t.updated_at * 1000).toLocaleString() : "-"}</div></div>
-          ${t.origin_channel ? `<div class="detail-item"><label>Origin</label><div class="value">${esc(t.origin_channel)}</div></div>` : ""}
-          ${t.worktree_path ? `<div class="detail-item"><label>Workspace</label><div class="value" style="font-family:var(--mono);font-size:0.8rem">${esc(t.worktree_path)}</div></div>` : ""}
-          ${t.team_run_id ? `<div class="detail-item"><label>Team</label><div class="value"><a href="#" onclick="event.preventDefault();viewTeamRun('${esc(t.team_run_id)}')">${esc(t.team_name || "team")} / ${esc(t.role_name || "")}</a></div></div>` : ""}
-        </div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-bottom:1.5rem">
-      <div class="card-header"><h3>Description</h3></div>
-      <div class="card-body">
-        <div class="detail-result">${esc(t.description)}</div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-bottom:1.5rem">
-      <div class="card-header"><h3>${t.status === "failed" ? "Error" : "Output"}</h3></div>
-      <div class="card-body">
-        <div class="detail-result">${esc(result)}</div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-bottom:1.5rem">
-      <div class="card-header">
-        <h3>${isActive ? "Messages" : "Comments"} (${(t.comments||[]).length})</h3>
-        ${isActive ? '<span style="font-size:0.75rem;color:var(--success);font-weight:500">Agent is listening</span>' : ""}
-      </div>
-      <div class="card-body">
-        <div class="comment-thread" style="max-height:300px;overflow-y:auto;margin-bottom:0.75rem">
-          ${(t.comments||[]).map(c => `
-            <div style="padding:0.5rem;border-bottom:1px solid var(--border)">
-              <span style="font-weight:600;color:var(--accent);font-size:0.8rem">${esc(c.author)}</span>
-              <span style="color:var(--text-muted);font-size:0.7rem;margin-left:0.5rem">${c.timestamp ? timeSince(c.timestamp) : ""}</span>
-              <div style="margin-top:0.2rem;font-size:0.85rem">${esc(c.text)}</div>
-            </div>
-          `).join("") || '<div style="color:var(--text-muted);font-size:0.85rem">No messages yet</div>'}
-        </div>
-        ${isActive ? '<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem">Messages here are sent directly to the agent working on this task.</div>' : ""}
-        <div style="display:flex;gap:0.5rem">
-          <input type="text" id="comment-input" placeholder="${isActive ? "Send a message to the agent..." : "Add a comment..."}" style="flex:1" onkeydown="if(event.key==='Enter'){submitComment('${t.id}');event.preventDefault()}">
-          <button class="btn btn-primary btn-sm" onclick="submitComment('${t.id}')">${isActive ? "Send" : "Post"}</button>
-        </div>
-      </div>
-    </div>
-
-    ${t.token_usage?.by_model && Object.keys(t.token_usage.by_model).length > 0 ? `
-    <div class="card" style="margin-bottom:1.5rem">
-      <div class="card-header"><h3>Token Usage by Model</h3></div>
-      <div class="card-body">
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Model</th><th>Calls</th><th>Prompt</th><th>Completion</th><th>Total</th></tr></thead>
-            <tbody>
-              ${Object.entries(t.token_usage.by_model).map(([model, d]) => `
-                <tr>
-                  <td style="font-family:var(--mono);font-size:0.8rem">${esc(model)}</td>
-                  <td>${d.calls}</td>
-                  <td>${formatNumber(d.prompt_tokens)}</td>
-                  <td>${formatNumber(d.completion_tokens)}</td>
-                  <td><strong>${formatNumber(d.prompt_tokens + d.completion_tokens)}</strong></td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-    ` : ""}
-
-    <div class="card">
-      <div class="card-header"><h3>Actions</h3></div>
-      <div class="card-body" style="display:flex;gap:0.5rem;flex-wrap:wrap">
-        <select onchange="if(this.value)doSetPriority('${t.id}',parseInt(this.value));this.value=''" style="width:auto">
-          <option value="">Set Priority...</option>
-          <option value="0">Normal</option>
-          <option value="1">High</option>
-          <option value="2">Urgent</option>
-        </select>
-        ${t.status !== "blocked" ? `<button class="btn btn-outline btn-sm" onclick="promptBlock('${t.id}')">Block</button>` : ""}
-        ${t.status === "blocked" ? `<button class="btn btn-outline btn-sm" onclick="doUnblockTask('${t.id}')">Unblock</button>` : ""}
-        ${t.status === "done" || t.status === "failed" ? `<button class="btn btn-outline btn-sm" onclick="doArchiveTask('${t.id}')">Archive</button>` : ""}
-      </div>
-    </div>
-  `;
-}
-
-function submitComment(taskId) {
-  const input = document.getElementById("comment-input");
-  if (input && input.value.trim()) {
-    doAddComment(taskId, input.value.trim());
-    input.value = "";
-  }
-}
-
-function promptBlock(taskId) {
-  const reason = prompt("Block reason:");
-  if (reason) doBlockTask(taskId, reason);
-}
-
 function renderTools() {
   var el = document.getElementById("page-content");
   if (!el || state.page !== "tools") return;
@@ -1121,7 +987,7 @@ function renderTools() {
     var enabled = t.enabled !== false;
     var toggleId = "tool-toggle-" + esc(t.name);
     var isExpanded = state._expandedTool === t.name;
-    var category = _CODE_ONLY_TOOLS.has(t.name) ? "code" : "general";
+    var category = "general";
     var srcBadge = '<span class="badge-source badge-' + esc(t.source || "builtin") + '">' + esc(t.source || "builtin") + '</span>';
     var catBadge = '<span class="badge-category badge-' + category + '">' + category + '</span>';
     var detail = isExpanded ? '<tr class="tool-detail-row"><td colspan="4"><div class="tool-detail-panel"><div class="tool-detail-desc">' + esc(t.description || "No description") + '</div><div class="tool-detail-meta">' + srcBadge + ' ' + catBadge + '</div></div></td></tr>' : '';
@@ -2139,7 +2005,7 @@ function updateEnvSaveBtn() {
 async function loadAll() {
   await Promise.all([
     loadTools(), loadSkills(), loadChannels(), loadProviders(),
-    loadHealth(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(), loadTokenStats(), loadGsdWorkstreams(),
+    loadHealth(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(), loadTokenStats(),
     loadApps(), loadReports(),
   ]);
 }
@@ -2234,7 +2100,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     connectWS();
   }
   render();
-  updateGsdIndicator();
   // Towel Day Easter Egg (May 25)
   if (isTowelDay()) {
     document.body.classList.add("towel-day");
