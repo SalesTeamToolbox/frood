@@ -40,6 +40,8 @@ const state = {
   effectivenessStats: null,
   reportsLoading: false,
   reportsTab: "overview",
+  // Activity Feed
+  activityEvents: [],
   // Tool/skill search state
   _toolSearch: "",
   _skillSearch: "",
@@ -477,6 +479,9 @@ function handleWSMessage(msg) {
     if (idx >= 0) state.apps[idx] = msg.data;
     else state.apps.unshift(msg.data);
     if (state.page === "apps") renderApps();
+  } else if (msg.type === "intelligence_event") {
+    state.activityEvents = [msg.data, ...(state.activityEvents || [])].slice(0, 200);
+    if (state.page === "activity") renderActivity();
   }
 }
 
@@ -1862,6 +1867,13 @@ async function loadReports() {
   state.reportsLoading = false;
 }
 
+async function loadActivity() {
+  try {
+    const data = await api("/activity");
+    state.activityEvents = (data && data.events) || [];
+  } catch { state.activityEvents = []; }
+}
+
 function updateEnvSaveBtn() {
   const btn = document.getElementById("save-env-btn");
   if (btn) {
@@ -1871,13 +1883,69 @@ function updateEnvSaveBtn() {
 }
 
 // ---------------------------------------------------------------------------
+// Activity Feed
+// ---------------------------------------------------------------------------
+function renderActivity() {
+  const el = document.getElementById("page-content");
+  if (!el || state.page !== "activity") return;
+
+  const events = state.activityEvents || [];
+
+  if (events.length === 0) {
+    el.innerHTML = '<div class="card" style="padding:2rem;text-align:center;color:var(--text-muted)">No intelligence events yet. Events appear as memory recalls, routing decisions, and learning extractions occur.</div>';
+    return;
+  }
+
+  const badgeColors = {
+    memory_recall: "#3b82f6",
+    effectiveness: "#10b981",
+    learning: "#f59e0b",
+    routing: "#8b5cf6",
+  };
+
+  const badgeLabels = {
+    memory_recall: "Memory",
+    effectiveness: "Effectiveness",
+    learning: "Learning",
+    routing: "Routing",
+  };
+
+  const rows = events.map(ev => {
+    const t = ev.type || "unknown";
+    const d = ev.data || {};
+    const ts = ev.ts ? new Date(ev.ts * 1000).toLocaleTimeString() : "";
+    const badge = '<span class="activity-badge" style="background:' + (badgeColors[t] || '#6b7280') + '">' + (badgeLabels[t] || t) + '</span>';
+
+    let detail = "";
+    if (t === "memory_recall") {
+      detail = (d.results != null ? d.results : 0) + " results in " + (d.latency_ms != null ? d.latency_ms : "?") + "ms (" + (d.method || "search") + ")";
+    } else if (t === "effectiveness") {
+      detail = (d.tool_name || "tool") + ": " + (d.success ? "success" : "failure") + " (" + (d.duration_ms != null ? d.duration_ms : 0) + "ms)";
+    } else if (t === "learning") {
+      detail = (d.task_type || "task") + " / " + (d.outcome || "?") + ": " + (d.summary || "");
+    } else if (t === "routing") {
+      detail = (d.model || "model") + " via " + (d.tier || "?") + " - " + (d.reason || "");
+    } else {
+      detail = JSON.stringify(d).slice(0, 120);
+    }
+
+    return '<div class="activity-event">'
+      + '<div class="activity-event-header">' + badge + '<span class="activity-ts">' + ts + '</span></div>'
+      + '<div class="activity-event-detail">' + detail + '</div>'
+      + '</div>';
+  }).join("");
+
+  el.innerHTML = '<div class="activity-feed">' + rows + '</div>';
+}
+
+// ---------------------------------------------------------------------------
 // Main render
 // ---------------------------------------------------------------------------
 async function loadAll() {
   await Promise.all([
     loadTools(), loadSkills(), loadProviders(),
     loadHealth(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(), loadTokenStats(),
-    loadApps(), loadReports(),
+    loadApps(), loadReports(), loadActivity(),
   ]);
 }
 
@@ -1924,6 +1992,7 @@ function render() {
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
           <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills');closeMobileSidebar()">&#9889; Skills</a>
           <a href="#" data-page="reports" class="${state.page === "reports" ? "active" : ""}" onclick="event.preventDefault();navigate('reports');closeMobileSidebar()">&#128202; Reports</a>
+          <a href="#" data-page="activity" class="${state.page === "activity" ? "active" : ""}" onclick="event.preventDefault();navigate('activity');closeMobileSidebar()">&#128200; Activity</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings');closeMobileSidebar()">&#9881; Settings</a>
         </nav>
         <div id="gsd-indicator-slot"></div>
@@ -1939,7 +2008,7 @@ function render() {
           <button class="hamburger-btn" onclick="toggleMobileSidebar()" aria-label="Open menu">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
-          <h2>${{ apps: "Agent Apps", tools: "Tools", skills: "Skills", reports: "Reports", settings: "Settings" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ apps: "Agent Apps", tools: "Tools", skills: "Skills", reports: "Reports", activity: "Activity", settings: "Settings" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "apps" ? '<button class="btn btn-primary btn-sm" onclick="showCreateAppModal()">+ New App</button>' : ""}
           </div>
@@ -1955,6 +2024,7 @@ function render() {
     tools: renderTools,
     skills: renderSkills,
     reports: renderReports,
+    activity: renderActivity,
     settings: renderSettings,
   };
 
