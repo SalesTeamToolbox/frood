@@ -332,6 +332,21 @@ def create_app(
     # Routing tier request counters -- consumed by /api/reports
     _routing_stats = {"L1": 0, "L2": 0, "free": 0}
 
+    # Intelligence event ring buffer (in-memory, last 200 events)
+    _intelligence_events: list[dict] = []
+    _INTELLIGENCE_MAX = 200
+
+    async def _record_intelligence_event(event_type: str, data: dict) -> None:
+        """Append intelligence event to ring buffer and broadcast via WebSocket."""
+        import time as _ti
+
+        event = {"type": event_type, "data": data, "ts": _ti.time()}
+        _intelligence_events.append(event)
+        if len(_intelligence_events) > _INTELLIGENCE_MAX:
+            _intelligence_events.pop(0)
+        if ws_manager:
+            await ws_manager.broadcast("intelligence_event", event)
+
     # Apply persisted tool/skill toggle state
     _toggle_state = _load_toggle_state()
     if tool_registry:
@@ -926,6 +941,15 @@ def create_app(
             )
             _memory_stats["recall_count"] += 1
             _memory_stats["total_latency_ms"] += _elapsed
+            await _record_intelligence_event(
+                "memory_recall",
+                {
+                    "query_keywords": keyword_count,
+                    "results": len(results),
+                    "method": search_method,
+                    "latency_ms": round(_elapsed, 1),
+                },
+            )
 
             return {"results": results[:5]}
         except Exception as e:
@@ -950,6 +974,11 @@ def create_app(
             "avg_latency_ms": round(avg_latency, 1),
             "period_start": _memory_stats["last_reset"],
         }
+
+    @app.get("/api/activity")
+    async def get_activity(_: AuthContext = Depends(require_admin)):
+        """Return recent intelligence events (last 200, newest first)."""
+        return {"events": list(reversed(_intelligence_events))}
 
     @app.post("/llm/chat/completions")
     @app.post("/llm/v1/chat/completions")
@@ -1043,6 +1072,17 @@ def create_app(
         else:
             _tier = "L2"
         _routing_stats[_tier] = _routing_stats.get(_tier, 0) + 1
+        await _record_intelligence_event(
+            "routing",
+            {
+                "model": chat_model,
+                "tier": _tier,
+                "provider": provider_used,
+                "reason": "free-model"
+                if _tier == "free"
+                else ("zen-prefix" if _tier == "L1" else "premium-fallback"),
+            },
+        )
 
         import uuid as _uuid
 
@@ -1172,6 +1212,17 @@ def create_app(
         else:
             _tier = "L2"
         _routing_stats[_tier] = _routing_stats.get(_tier, 0) + 1
+        await _record_intelligence_event(
+            "routing",
+            {
+                "model": chat_model,
+                "tier": _tier,
+                "provider": provider_used,
+                "reason": "free-model"
+                if _tier == "free"
+                else ("zen-prefix" if _tier == "L1" else "premium-fallback"),
+            },
+        )
 
         import uuid as _uuid
 
@@ -1278,6 +1329,14 @@ def create_app(
                     success=bool(data.get("success", True)),
                     duration_ms=float(data.get("duration_ms", 0)),
                 )
+            await _record_intelligence_event(
+                "effectiveness",
+                {
+                    "tool_name": data.get("tool_name", "unknown"),
+                    "success": bool(data.get("success", True)),
+                    "duration_ms": float(data.get("duration_ms", 0)),
+                },
+            )
             return {"status": "ok"}
         except Exception as e:
             return {"status": "error", "detail": str(e)}
@@ -1434,6 +1493,14 @@ def create_app(
             try:
                 if memory_store:
                     await memory_store.log_event_semantic(event_type, summary, details)
+                    await _record_intelligence_event(
+                        "learning",
+                        {
+                            "task_type": task_type,
+                            "outcome": outcome,
+                            "summary": summary[:100],
+                        },
+                    )
 
                     # Add quarantine fields to the Qdrant entry
                     if (
