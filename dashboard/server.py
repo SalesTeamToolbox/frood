@@ -1,5 +1,5 @@
 """
-FastAPI dashboard server with REST API and WebSocket support.
+FastAPI dashboard server — Frood intelligence layer admin panel.
 
 Security features:
 - CORS restricted to configured origins (no wildcard)
@@ -7,9 +7,9 @@ Security features:
 - WebSocket connection limits
 - Security response headers (CSP, HSTS, X-Frame-Options, etc.)
 - Health check returns minimal info without auth
-- Device API key authentication for multi-device gateway
 
-Extended with endpoints for providers, tools, skills, channels, and devices.
+Routes: auth, memory, LLM proxy, effectiveness, providers, tools, skills,
+reports, settings, Agent Apps, WebSocket broadcast.
 """
 
 import asyncio
@@ -32,9 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from core.approval_gate import ApprovalGate
 from core.config import Settings, settings
-from core.device_auth import DeviceStore
 from dashboard.auth import (
     AuthContext,
     check_rate_limit,
@@ -47,58 +45,6 @@ from dashboard.auth import (
 from dashboard.websocket_manager import WebSocketManager
 
 logger = logging.getLogger("agent42.server")
-
-# ---------------------------------------------------------------------------
-# Stubs for modules removed in the v2.0 MCP pivot
-# ---------------------------------------------------------------------------
-# These minimal stand-ins allow the server to start and return sensible
-# responses while the full v2.0 migration is completed.
-
-import enum as _enum
-
-
-class TaskStatus(_enum.Enum):
-    PENDING = "pending"
-    ASSIGNED = "assigned"
-    RUNNING = "running"
-    REVIEW = "review"
-    DONE = "done"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    BLOCKED = "blocked"
-    ARCHIVED = "archived"
-
-
-class TaskType(_enum.Enum):
-    CODING = "coding"
-    CONTENT = "content"
-    RESEARCH = "research"
-    EMAIL = "email"
-    MARKETING = "marketing"
-    DEBUG = "debug"
-    REVIEW = "review"
-    PLANNING = "planning"
-    PROJECT_SETUP = "project_setup"
-    APP_CREATE = "app_create"
-    APP_UPDATE = "app_update"
-
-
-def infer_task_type(text: str) -> TaskType:
-    """Keyword-based task type inference (stub)."""
-    lower = text.lower()
-    if any(k in lower for k in ("bug", "fix", "error", "debug")):
-        return TaskType.DEBUG
-    if any(k in lower for k in ("write", "blog", "article", "content")):
-        return TaskType.CONTENT
-    if any(k in lower for k in ("research", "find", "search", "look up")):
-        return TaskType.RESEARCH
-    return TaskType.CODING
-
-
-GENERAL_ASSISTANT_PROMPT = (
-    "You are Agent42, a helpful AI assistant. Answer questions accurately "
-    "and honestly. If you don't know something, say so."
-)
 
 
 async def _pip_install(packages: list[str]) -> tuple[list[str], list[str]]:
@@ -183,67 +129,8 @@ class SetupRequest(BaseModel):
     memory_backend: str = ""  # "", "skip", "qdrant_embedded", "qdrant_redis"
 
 
-class TaskCreateRequest(BaseModel):
-    title: str
-    description: str
-    task_type: str = "coding"
-    priority: int = 0
-    context_window: str = "default"
-    project_id: str = ""
-    repo_id: str = ""
-    branch: str = ""
-    profile: str = ""  # Agent profile name (empty = use default)
-
-
 # Passwords treated as unconfigured — trigger the setup wizard
 _INSECURE_PASSWORDS = {"", "changeme-right-now", "password", "123456", "admin"}
-
-
-class InterventionRequest(BaseModel):
-    message: str
-
-
-class UserInputResponse(BaseModel):
-    response: str
-
-
-class TaskMoveRequest(BaseModel):
-    status: str
-    position: int = 0
-
-
-class TaskCommentRequest(BaseModel):
-    text: str
-    author: str = "admin"
-
-
-class TaskAssignRequest(BaseModel):
-    agent_id: str
-
-
-class TaskPriorityRequest(BaseModel):
-    priority: int
-
-
-class TaskBlockRequest(BaseModel):
-    reason: str
-
-
-class ApprovalAction(BaseModel):
-    task_id: str
-    action: str
-    approved: bool
-
-
-class ReviewFeedback(BaseModel):
-    feedback: str
-    approved: bool
-
-
-class DeviceRegisterRequest(BaseModel):
-    name: str
-    device_type: str = "other"
-    capabilities: list[str] = ["tasks", "monitor"]
 
 
 class KeyUpdateRequest(BaseModel):
@@ -263,38 +150,11 @@ class ToggleRequest(BaseModel):
     enabled: bool
 
 
-class ProfileCreateRequest(BaseModel):
-    name: str
-    description: str = ""
-    preferred_skills: list[str] = []
-    preferred_task_types: list[str] = []
-    prompt_overlay: str = ""
-
-
-class ProfileUpdateRequest(BaseModel):
-    description: str | None = None
-    preferred_skills: list[str] | None = None
-    preferred_task_types: list[str] | None = None
-    prompt_overlay: str | None = None
-
-
-class PersonaUpdateRequest(BaseModel):
-    prompt: str
-
-
-class AgentRoutingRequest(BaseModel):
-    primary: str | None = None
-    critic: str | None = None
-    fallback: str | None = None
-
-
 # Settings that can be changed from the dashboard (non-secret, non-security).
 # Security-critical settings (sandbox, password, JWT) are deliberately excluded.
 _DASHBOARD_EDITABLE_SETTINGS = {
     "MAX_CONCURRENT_AGENTS",
     "MAX_DAILY_API_SPEND_USD",
-    "DEFAULT_REPO_PATH",
-    "TASKS_JSON_PATH",
     "MCP_SERVERS_JSON",
     "CRON_JOBS_PATH",
     "MEMORY_DIR",
@@ -319,20 +179,6 @@ _DASHBOARD_EDITABLE_SETTINGS = {
     "MODEL_RESEARCH_ENABLED",
     "MODEL_ROUTING_POLICY",
     "OPENROUTER_BALANCE_CHECK_HOURS",
-    # Project-scoped memory
-    "PROJECT_MEMORY_ENABLED",
-    # Agent profiles
-    "AGENT_DEFAULT_PROFILE",
-    # RLM (Recursive Language Models)
-    "RLM_ENABLED",
-    "RLM_THRESHOLD_TOKENS",
-    "RLM_ENVIRONMENT",
-    "RLM_MAX_DEPTH",
-    "RLM_MAX_ITERATIONS",
-    "RLM_VERBOSE",
-    "RLM_COST_LIMIT",
-    "RLM_TIMEOUT_SECONDS",
-    "RLM_LOG_DIR",
     # Learning toggle (Phase 40)
     "LEARNING_ENABLED",
     # Zen proxy model selection
@@ -385,31 +231,6 @@ def _update_env_file(env_path: Path, updates: dict[str, str]) -> None:
 # ---------------------------------------------------------------------------
 
 _TOGGLE_STATE_FILE = Path(__file__).parent.parent / "data" / "tool_skill_state.json"
-_PERSONA_FILE = Path(__file__).parent.parent / "data" / "agent42_persona.json"
-
-
-def _load_persona() -> str:
-    """Load the custom chat persona prompt from disk.
-
-    Returns the saved prompt string, or "" if no custom persona is set.
-    """
-    import json
-
-    if _PERSONA_FILE.exists():
-        try:
-            data = json.loads(_PERSONA_FILE.read_text())
-            return data.get("prompt", "")
-        except Exception:
-            pass
-    return ""
-
-
-def _save_persona(prompt: str) -> None:
-    """Persist a custom chat persona prompt to disk."""
-    import json
-
-    _PERSONA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _PERSONA_FILE.write_text(json.dumps({"prompt": prompt}, indent=2))
 
 
 def _load_toggle_state() -> dict:
@@ -437,48 +258,15 @@ def _save_toggle_state(disabled_tools: list[str], disabled_skills: list[str]) ->
     )
 
 
-def _build_resolution_chain(store, profile: str) -> list[dict]:
-    """Show where each routing field is inherited from, for dashboard display.
-
-    Returns a list of dicts with keys: field, value, source.
-    Source is one of: "profile:{name}", "_default", "FALLBACK_ROUTING".
-    """
-    profile_ov = store.get_overrides(profile) if profile != "_default" else None
-    default_ov = store.get_overrides("_default")
-
-    chain = []
-    for field in ("primary", "critic", "fallback"):
-        if profile_ov and profile_ov.get(field):
-            chain.append(
-                {"field": field, "value": profile_ov[field], "source": f"profile:{profile}"}
-            )
-        elif default_ov and default_ov.get(field):
-            chain.append({"field": field, "value": default_ov[field], "source": "_default"})
-        else:
-            chain.append({"field": field, "value": "", "source": "removed_in_v2"})
-    return chain
-
-
 def create_app(
     ws_manager: WebSocketManager = None,
-    approval_gate: ApprovalGate | None = None,
     tool_registry=None,
     skill_loader=None,
-    channel_manager=None,
-    device_store: DeviceStore | None = None,
     heartbeat=None,
     key_store=None,
     app_manager=None,
-    project_manager=None,
-    repo_manager=None,
-    profile_loader=None,
-    github_account_store=None,
     memory_store=None,
     effectiveness_store=None,
-    agent_manager=None,  # passed from agent42.py after Phase 2
-    reward_system=None,  # passed from agent42.py when REWARDS_ENABLED=true
-    workspace_registry=None,  # passed from agent42.py for multi-project workspace
-    standalone: bool = False,  # Phase 37: simplified dashboard mode (Claude Code only)
 ) -> FastAPI:
     """Build and return the FastAPI application."""
 
@@ -507,31 +295,6 @@ def create_app(
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         body = {"error": True, "message": detail, "status": exc.status_code}
         return JSONResponse(status_code=exc.status_code, content=body)
-
-    # -- Phase 37: STANDALONE mode route gating --------------------------------
-    def standalone_guard(fn):
-        """Decorator that returns 404 JSON for routes disabled in standalone mode.
-
-        Per D-01: guard decorator gates non-essential routes in standalone mode.
-        """
-        if not standalone:
-            return fn
-        from functools import wraps
-
-        @wraps(fn)
-        async def _guarded(*args, **kwargs):
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "error": True,
-                    "message": "This feature is not available in standalone mode",
-                    "standalone_mode": True,
-                },
-            )
-
-        return _guarded
-
-    # End standalone guard
 
     # -- Phase 36: PAPERCLIP-05 — gate standalone dashboard in sidecar mode ----
     if settings.sidecar_enabled:
@@ -586,8 +349,6 @@ def create_app(
         response_data: dict = {"status": "ok"}
         if settings.sidecar_enabled:
             response_data["mode"] = "paperclip_sidecar"
-        if standalone:
-            response_data["standalone_mode"] = True
         return response_data
 
     @app.get("/api/health")
@@ -996,23 +757,8 @@ def create_app(
         # -- Connectivity / health --
         connectivity: dict = {"summary": {}, "models": {}}
 
-        # -- Project breakdown --
+        # -- Project breakdown (removed in Phase 50) --
         project_list = []
-        if project_manager:
-            for proj in project_manager.list_projects():
-                pstats = project_manager.project_stats(proj.id)
-                project_list.append(
-                    {
-                        "id": proj.id,
-                        "name": proj.name,
-                        "status": proj.status,
-                        "total_tasks": pstats.get("total", 0),
-                        "done": pstats.get("done", 0),
-                        "failed": pstats.get("failed", 0),
-                        "running": pstats.get("running", 0),
-                        "pending": pstats.get("pending", 0),
-                    }
-                )
 
         # -- Tools & skills summary --
         tools_summary = {"total": 0, "enabled": 0}
@@ -1229,8 +975,6 @@ def create_app(
             or _os.environ.get("LLM_PROXY_MODEL", "qwen3.6-plus-free")
         )
         messages = body.get("messages", [])
-        max_tokens = body.get("max_tokens", 4096)
-        temperature = body.get("temperature", 1.0)
 
         chat_model = model
         providers = []
@@ -1336,7 +1080,6 @@ def create_app(
         )
         system_prompt = body.get("system", "")
         messages = body.get("messages", [])
-        max_tokens = body.get("max_tokens", 4096)
 
         # Route to internal provider logic
         chat_model = model
@@ -2520,7 +2263,6 @@ Focus on learnings that would help in future similar sessions."""
             description: str = ""
 
         @app.get("/api/apps")
-        @standalone_guard
         async def list_apps(mode: str = "", _user: str = Depends(get_current_user)):
             """List all apps, optionally filtered by mode (internal/external)."""
             if mode and mode in ("internal", "external"):
@@ -2530,7 +2272,6 @@ Focus on learnings that would help in future similar sessions."""
             return [a.to_dict() for a in apps]
 
         @app.post("/api/apps")
-        @standalone_guard
         async def create_user_app(req: AppCreateRequest, _user: str = Depends(get_current_user)):
             """Create a new app."""
             new_app = await app_manager.create(
@@ -2546,7 +2287,6 @@ Focus on learnings that would help in future similar sessions."""
             }
 
         @app.get("/api/apps/{app_id}")
-        @standalone_guard
         async def get_app(app_id: str, _user: str = Depends(get_current_user)):
             """Get app details."""
             found = await app_manager.get(app_id)
@@ -2555,7 +2295,6 @@ Focus on learnings that would help in future similar sessions."""
             return found.to_dict()
 
         @app.post("/api/apps/{app_id}/start")
-        @standalone_guard
         async def start_app(app_id: str, _user: str = Depends(get_current_user)):
             """Start a ready/stopped app."""
             try:
@@ -2565,7 +2304,6 @@ Focus on learnings that would help in future similar sessions."""
                 raise HTTPException(status_code=400, detail=str(e))
 
         @app.post("/api/apps/{app_id}/stop")
-        @standalone_guard
         async def stop_app(app_id: str, _user: str = Depends(get_current_user)):
             """Stop a running app."""
             try:
@@ -2575,7 +2313,6 @@ Focus on learnings that would help in future similar sessions."""
                 raise HTTPException(status_code=400, detail=str(e))
 
         @app.post("/api/apps/{app_id}/restart")
-        @standalone_guard
         async def restart_app(app_id: str, _user: str = Depends(get_current_user)):
             """Restart an app."""
             try:
@@ -2585,7 +2322,6 @@ Focus on learnings that would help in future similar sessions."""
                 raise HTTPException(status_code=400, detail=str(e))
 
         @app.delete("/api/apps/{app_id}")
-        @standalone_guard
         async def delete_app(app_id: str, _user: str = Depends(get_current_user)):
             """Permanently delete an app and remove its files."""
             try:
@@ -2595,7 +2331,6 @@ Focus on learnings that would help in future similar sessions."""
                 raise HTTPException(status_code=400, detail=str(e))
 
         @app.get("/api/apps/{app_id}/logs")
-        @standalone_guard
         async def get_app_logs(
             app_id: str, lines: int = 100, _user: str = Depends(get_current_user)
         ):
@@ -2604,13 +2339,11 @@ Focus on learnings that would help in future similar sessions."""
             return {"logs": output}
 
         @app.get("/api/apps/{app_id}/health")
-        @standalone_guard
         async def app_health(app_id: str, _user: str = Depends(get_current_user)):
             """Check app health."""
             return await app_manager.health_check(app_id)
 
         @app.post("/api/apps/{app_id}/update")
-        @standalone_guard
         async def update_app(
             app_id: str, req: AppUpdateRequest, _user: str = Depends(get_current_user)
         ):
@@ -2626,7 +2359,6 @@ Focus on learnings that would help in future similar sessions."""
             visibility: str | None = None
 
         @app.patch("/api/apps/{app_id}/settings")
-        @standalone_guard
         async def update_app_settings(
             app_id: str,
             req: AppSettingsRequest,

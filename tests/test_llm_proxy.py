@@ -1,6 +1,5 @@
 """Tests for LLM proxy endpoints."""
 
-import os
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
@@ -12,21 +11,11 @@ def _make_client(**kwargs) -> TestClient:
     defaults = {
         "tool_registry": None,
         "skill_loader": None,
-        "channel_manager": None,
-        "device_store": None,
         "heartbeat": None,
         "key_store": None,
         "app_manager": MagicMock(),
-        "project_manager": MagicMock(),
-        "repo_manager": MagicMock(),
-        "profile_loader": None,
-        "github_account_store": None,
         "memory_store": None,
         "effectiveness_store": None,
-        "agent_manager": None,
-        "reward_system": None,
-        "workspace_registry": None,
-        "standalone": True,
     }
     defaults.update(kwargs)
     app = create_app(**defaults)
@@ -53,7 +42,7 @@ def test_llm_models_v1_endpoint():
     assert resp.status_code == 200
     data = resp.json()
     assert "data" in data
-    print(f"✓ LLM-02: /llm/v1/models works as alias")
+    print("✓ LLM-02: /llm/v1/models works as alias")
 
 
 def test_llm_config_endpoint():
@@ -65,7 +54,7 @@ def test_llm_config_endpoint():
     assert "endpoint" in data
     assert "default_model" in data
     assert "available_models" in data
-    print(f"✓ LLM-03: /llm/config returns proxy config")
+    print("✓ LLM-03: /llm/config returns proxy config")
 
 
 def test_llm_chat_completions_requires_json():
@@ -75,7 +64,7 @@ def test_llm_chat_completions_requires_json():
     assert resp.status_code == 200
     data = resp.json()
     assert "error" in data
-    print(f"✓ LLM-04: /llm/chat/completions validates JSON")
+    print("✓ LLM-04: /llm/chat/completions validates JSON")
 
 
 def test_llm_chat_completions_no_model():
@@ -88,7 +77,7 @@ def test_llm_chat_completions_no_model():
     assert resp.status_code == 200
     data = resp.json()
     assert "error" in data or "choices" in data
-    print(f"✓ LLM-05: /llm/chat/completions handles missing model")
+    print("✓ LLM-05: /llm/chat/completions handles missing model")
 
 
 if __name__ == "__main__":
