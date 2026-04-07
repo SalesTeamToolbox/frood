@@ -59,12 +59,18 @@ Plans:
 **Goal**: Update Paperclip integration to work with the simplified provider selection system
 **Depends on**: Phase 32, Phase 33, Phase 34
 **Requirements**: UI-01, UI-02, UI-03, UI-04
+**Plans:** 2 plans
 **Success Criteria** (what must be TRUE):
 
 1. Paperclip plugin works correctly with the simplified provider selection system
 2. Provider selection dashboard shows available models from Synthetic.new
 3. Agent configuration UI allows selection from dynamically discovered models
 4. Provider status dashboard shows Claude Code Subscription and Synthetic.new connectivity
+
+Plans:
+
+- [ ] 35-01-PLAN.md — Server-side: Pydantic models, GET /sidecar/models endpoint, enhanced health endpoint, SYNTHETIC_API_KEY config, tests
+- [ ] 35-02-PLAN.md — Client-side: TypeScript types, client getModels() method, available-models data handler, enhanced ProviderHealthWidget
 
 ## Progress
 
@@ -73,4 +79,4 @@ Plans:
 | 32. Provider Selection Core | 1/1 | Planned | 2026-04-01 |
 | 33. Synthetic.new Integration | 1/1 | Planned | 2026-04-01 |
 | 34. System Simplification | 1/1 | Complete | 2026-04-06 |
-| 35. Paperclip Integration | 0/1 | Not started | - |
+| 35. Paperclip Integration | 0/2 | Planned | - |
