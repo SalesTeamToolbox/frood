@@ -29,10 +29,10 @@
 
 ### Repurpose Reports Page
 
-- [ ] **RPT-01**: Repurpose Overview tab — replace harness metrics (Total Tasks, Success Rate, Projects, Task Type Breakdown) with intelligence layer metrics (memory recall stats, routing decisions, effectiveness scores, learning extractions)
-- [ ] **RPT-02**: Remove "Tasks & Projects" tab entirely — pure harness content
-- [ ] **RPT-03**: Keep "System Health" tab as-is (MCP transport, tools, skills, token tracking)
-- [ ] **RPT-04**: Add memory/effectiveness data to Overview (recall hit rate, learning count, top-performing models, routing tier distribution)
+- [x] **RPT-01**: Repurpose Overview tab — replace harness metrics (Total Tasks, Success Rate, Projects, Task Type Breakdown) with intelligence layer metrics (memory recall stats, routing decisions, effectiveness scores, learning extractions)
+- [x] **RPT-02**: Remove "Tasks & Projects" tab entirely — pure harness content
+- [x] **RPT-03**: Keep "System Health" tab as-is (MCP transport, tools, skills, token tracking)
+- [x] **RPT-04**: Add memory/effectiveness data to Overview (recall hit rate, learning count, top-performing models, routing tier distribution)
 
 ### Repurpose Activity Feed
 
