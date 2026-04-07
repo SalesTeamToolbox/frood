@@ -35,5 +35,5 @@
   "server": {
     "port": 22329
   },
-  "instructions": ["CLAUDE.md"]
+  "instructions": ["AGENTS.md", "CLAUDE.md"]
 }
