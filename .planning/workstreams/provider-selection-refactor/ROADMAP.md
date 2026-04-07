@@ -69,7 +69,7 @@ Plans:
 
 Plans:
 
-- [ ] 35-01-PLAN.md — Server-side: Pydantic models, GET /sidecar/models endpoint, enhanced health endpoint, SYNTHETIC_API_KEY config, tests
+- [x] 35-01-PLAN.md — Server-side: Pydantic models, GET /sidecar/models endpoint, enhanced health endpoint, SYNTHETIC_API_KEY config, tests
 - [ ] 35-02-PLAN.md — Client-side: TypeScript types, client getModels() method, available-models data handler, enhanced ProviderHealthWidget
 
 ## Progress
