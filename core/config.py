@@ -270,7 +270,7 @@ class Settings:
     conversational_model: str = ""  # Model for direct responses (empty = primary free model)
 
     # Provider routing flags (Phase 6)
-    gemini_free_tier: bool = True  # When false, Gemini excluded from FALLBACK_ROUTING and fallback
+    gemini_free_tier: bool = True  # When false, Gemini excluded from free-tier fallback routing
     openrouter_free_only: bool = False  # When true, only OR :free suffix models are routed
 
     # Memory consolidation (QUAL-01)
