@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Frood Dashboard
 status: Executing Phase 51 — Rebrand & Repurpose
-last_updated: "2026-04-07T21:00:00.000Z"
+last_updated: "2026-04-07T23:23:35Z"
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Workstream State
@@ -22,9 +22,9 @@ See: .planning/workstreams/frood-dashboard/ROADMAP.md
 
 ## Current Position
 
-Phase: 51 (Rebrand & Repurpose) — IN PROGRESS (1/4 plans done)
-Plan: 51-01 complete, next: 51-02 (Wave 2)
-Last session: 2026-04-07 — Completed 51-01 (Frood rebrand + Settings cleanup)
+Phase: 51 (Rebrand & Repurpose) — IN PROGRESS (2/4 plans done)
+Plan: 51-02 complete, next: 51-03 (Wave 3)
+Last session: 2026-04-07 — Completed 51-02 (Reports repurpose with intelligence metrics + routing stats)
 
 ## Completed Phases
 
@@ -35,3 +35,5 @@ Last session: 2026-04-07 — Completed 51-01 (Frood rebrand + Settings cleanup)
 - Deferred internal renames (agent42_token localStorage key, agent42_auth BroadcastChannel, .agent42/ paths, Python logger names) per D-15
 - Renamed Orchestrator tab ID to 'routing' in both tabs array and panels object (Pitfall 1 avoided)
 - Channels panel body deleted entirely, not just hidden — removes dead code cleanly
+- Routing tier logic: zen: prefix = L1, free model set (qwen3.6-plus-free/minimax-m2.5-free/nemotron-3-super-free) = free, else = L2
+- `_routing_stats` lives inside `create_app()` closure matching `_memory_stats` pattern
