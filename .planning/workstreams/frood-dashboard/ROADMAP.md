@@ -75,16 +75,21 @@ Plans:
 
 ### Phase 52: Core Identity Rename
 
-**Goal**: The backend fully speaks "frood" — entry point, data directory, env vars, config reads, and all Python internals use the new name with backward-compat fallbacks for existing deployments
+**Goal**: The backend fully speaks "frood" — entry point, data directory, env vars, config reads, and all Python internals use the new name with clean break (no backward-compat env var fallbacks)
 **Depends on**: Phase 51
 **Requirements**: ENTRY-01, ENTRY-02, ENTRY-03, ENTRY-04, ENTRY-05, DATA-01, DATA-02, DATA-03, PY-01, PY-02, PY-03, PY-04
 **Success Criteria** (what must be TRUE):
   1. Running `python frood.py` starts the application; running `python agent42.py` also starts it via shim
   2. Starting the app with `.agent42/` present and no `.frood/` auto-migrates the directory and logs a migration message
-  3. Setting `FROOD_*` env vars configures the app; setting the legacy `AGENT42_*` vars also works
+  3. All `AGENT42_*` env vars replaced with `FROOD_*` (clean break, no fallback)
   4. No `agent42.*` logger names or `[agent42-*]` print prefixes remain in Python source
   5. CLAUDE.md marker injection writes `FROOD_MEMORY` markers, not `AGENT42_MEMORY`
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 52-01-PLAN.md — Create frood.py entry point, agent42.py shim, config.py defaults, data dir migration
+- [ ] 52-02-PLAN.md — Rename AGENT42_* env vars, mcp_server.py internals, CLAUDE.md markers, .agent42/ paths
+- [ ] 52-03-PLAN.md — Batch logger rename, hook files, test file updates
 
 ### Phase 53: Frontend Identity + Sidecar Auth
 
@@ -132,7 +137,7 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 50. Strip Harness Features | v6.0 | 4/4 | Complete | 2026-04-07 |
 | 51. Rebrand & Repurpose | v6.0 | 4/4 | Complete | 2026-04-08 |
-| 52. Core Identity Rename | v7.0 | 0/TBD | Not started | - |
+| 52. Core Identity Rename | v7.0 | 0/3 | Planned | - |
 | 53. Frontend Identity + Sidecar Auth | v7.0 | 0/TBD | Not started | - |
 | 54. Infrastructure + Packages | v7.0 | 0/TBD | Not started | - |
 | 55. Qdrant Migration + Test Suite | v7.0 | 0/TBD | Not started | - |
