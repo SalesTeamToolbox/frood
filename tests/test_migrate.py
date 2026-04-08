@@ -41,7 +41,7 @@ class TestBuildParser:
         # All 4 required args present — should succeed
         args = parser.parse_args(
             [
-                "--agent42-db",
+                "--frood-db",
                 "/tmp/eff.db",
                 "--qdrant-url",
                 "http://localhost:6333",
@@ -51,7 +51,7 @@ class TestBuildParser:
                 "comp-123",
             ]
         )
-        assert args.agent42_db == "/tmp/eff.db"
+        assert args.frood_db == "/tmp/eff.db"
         assert args.qdrant_url == "http://localhost:6333"
         assert args.target_qdrant_url == "http://localhost:6334"
         assert args.paperclip_company_id == "comp-123"
@@ -59,9 +59,9 @@ class TestBuildParser:
         # Missing any one required arg raises SystemExit
         required_combos = [
             ["--qdrant-url", "u", "--target-qdrant-url", "u", "--paperclip-company-id", "c"],
-            ["--agent42-db", "d", "--target-qdrant-url", "u", "--paperclip-company-id", "c"],
-            ["--agent42-db", "d", "--qdrant-url", "u", "--paperclip-company-id", "c"],
-            ["--agent42-db", "d", "--qdrant-url", "u", "--target-qdrant-url", "u"],
+            ["--frood-db", "d", "--target-qdrant-url", "u", "--paperclip-company-id", "c"],
+            ["--frood-db", "d", "--qdrant-url", "u", "--paperclip-company-id", "c"],
+            ["--frood-db", "d", "--qdrant-url", "u", "--target-qdrant-url", "u"],
         ]
         for combo in required_combos:
             with pytest.raises(SystemExit):
@@ -74,7 +74,7 @@ class TestBuildParser:
         # Default collection prefix
         args = parser.parse_args(
             [
-                "--agent42-db",
+                "--frood-db",
                 "d",
                 "--qdrant-url",
                 "u",
@@ -89,7 +89,7 @@ class TestBuildParser:
         # Custom collection prefix
         args2 = parser.parse_args(
             [
-                "--agent42-db",
+                "--frood-db",
                 "d",
                 "--qdrant-url",
                 "u",

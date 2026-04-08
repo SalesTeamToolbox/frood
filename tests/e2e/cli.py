@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 from .config import config
 
@@ -48,7 +47,7 @@ class PlaywrightCLI:
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd=str(config.agent42_root),
+            cwd=str(config.frood_root),
             env=env,
             shell=(sys.platform == "win32"),
         )
@@ -155,7 +154,7 @@ class PlaywrightCLI:
 
         m = re.search(r"\[Snapshot\]\(([^)]+)\)", output)
         if m:
-            snap_path = config.agent42_root / m.group(1).replace("\\", "/")
+            snap_path = config.frood_root / m.group(1).replace("\\", "/")
             if snap_path.exists():
                 return snap_path.read_text(encoding="utf-8", errors="replace")
         # Fallback: return the raw output
@@ -278,8 +277,8 @@ class PlaywrightCLI:
 
     def wait_for_ready(self, url: str, retries: int = 30, delay: float = 1.0) -> bool:
         """Poll until the server responds at url."""
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         for _ in range(retries):
             try:
