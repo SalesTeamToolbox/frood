@@ -19,8 +19,8 @@ def run_hook(hook_path, event_data, env_overrides=None):
     """Run a hook script via subprocess, returning (returncode, stdout, stderr)."""
     env = os.environ.copy()
     # Ensure search service and Qdrant are unreachable for isolated tests
-    env["AGENT42_SEARCH_URL"] = "http://127.0.0.1:19999"  # Non-existent port
-    env["AGENT42_API_URL"] = "http://127.0.0.1:19998"
+    env["FROOD_SEARCH_URL"] = "http://127.0.0.1:19999"  # Non-existent port
+    env["FROOD_API_URL"] = "http://127.0.0.1:19998"
     env["QDRANT_URL"] = "http://127.0.0.1:19997"
     if env_overrides:
         env.update(env_overrides)
@@ -40,8 +40,8 @@ class TestMemoryRecallHook:
     """Tests for memory-recall.py hook (UserPromptSubmit)."""
 
     def _make_memory_md(self, tmp_path, sections):
-        """Create a .agent42/memory/MEMORY.md with given sections."""
-        memory_dir = tmp_path / ".agent42" / "memory"
+        """Create a .frood/memory/MEMORY.md with given sections."""
+        memory_dir = tmp_path / ".frood" / "memory"
         memory_dir.mkdir(parents=True, exist_ok=True)
         content = "\n\n".join(f"## {title}\n{body}" for title, body in sections)
         (memory_dir / "MEMORY.md").write_text(content, encoding="utf-8")
@@ -97,7 +97,7 @@ class TestMemoryRecallHook:
             },
         )
         assert rc == 0
-        assert "[agent42-memory] Recall:" in stderr
+        assert "[frood-memory] Recall:" in stderr
         assert "memories surfaced" in stderr
 
     def test_no_match_is_silent(self, tmp_path):
@@ -138,7 +138,7 @@ class TestMemoryRecallHook:
             },
         )
         assert rc == 0
-        if "[agent42-memory] Recall:" in stderr:
+        if "[frood-memory] Recall:" in stderr:
             # Count memory entries (lines starting with "  - [")
             memory_lines = [l for l in stderr.split("\n") if l.strip().startswith("- [")]
             assert len(memory_lines) <= 3
@@ -162,7 +162,7 @@ class TestMemoryRecallHook:
             },
         )
         assert rc == 0
-        if "[agent42-memory] Recall:" in stderr:
+        if "[frood-memory] Recall:" in stderr:
             # Score format: [XX%]
             assert "%" in stderr
 
@@ -185,7 +185,7 @@ class TestMemoryRecallHook:
             },
         )
         assert rc == 0
-        if "[agent42-memory] Recall:" in stderr:
+        if "[frood-memory] Recall:" in stderr:
             assert "via keyword" in stderr
 
 
@@ -193,7 +193,7 @@ class TestMemoryLearnHook:
     """Tests for memory-learn.py hook (Stop)."""
 
     def _setup_memory_dir(self, tmp_path):
-        memory_dir = tmp_path / ".agent42" / "memory"
+        memory_dir = tmp_path / ".frood" / "memory"
         memory_dir.mkdir(parents=True, exist_ok=True)
         return str(tmp_path), memory_dir
 
@@ -321,10 +321,10 @@ class TestMemoryLearnHook:
             },
         )
         assert rc == 0
-        assert "[agent42-memory] Learn: captured to" in stderr
+        assert "[frood-memory] Learn: captured to" in stderr
 
     def test_missing_memory_dir_created(self, tmp_path):
-        project_dir = str(tmp_path)  # No .agent42/memory/ exists
+        project_dir = str(tmp_path)  # No .frood/memory/ exists
         rc, stdout, stderr = run_hook(
             LEARN_HOOK,
             {
@@ -340,8 +340,8 @@ class TestMemoryLearnHook:
             },
         )
         assert rc == 0
-        assert (tmp_path / ".agent42" / "memory").is_dir()
-        assert (tmp_path / ".agent42" / "memory" / "HISTORY.md").exists()
+        assert (tmp_path / ".frood" / "memory").is_dir()
+        assert (tmp_path / ".frood" / "memory" / "HISTORY.md").exists()
 
 
 class TestMemoryDegradation:
@@ -349,7 +349,7 @@ class TestMemoryDegradation:
 
     def test_recall_falls_back_to_keyword_search(self, tmp_path):
         """With all remote services unreachable, recall still works via MEMORY.md."""
-        memory_dir = tmp_path / ".agent42" / "memory"
+        memory_dir = tmp_path / ".frood" / "memory"
         memory_dir.mkdir(parents=True, exist_ok=True)
         (memory_dir / "MEMORY.md").write_text(
             "## Deployment\nSSH config agent42-prod deploy server production VPS Contabo environment setup\n",
@@ -365,12 +365,12 @@ class TestMemoryDegradation:
         )
         assert rc == 0
         # Should still get results from keyword search on MEMORY.md
-        if "[agent42-memory] Recall:" in stderr:
+        if "[frood-memory] Recall:" in stderr:
             assert "via keyword" in stderr
 
     def test_learn_falls_back_to_file_only(self, tmp_path):
         """With search service unreachable, learn still writes to HISTORY.md."""
-        memory_dir = tmp_path / ".agent42" / "memory"
+        memory_dir = tmp_path / ".frood" / "memory"
         memory_dir.mkdir(parents=True, exist_ok=True)
         rc, stdout, stderr = run_hook(
             LEARN_HOOK,
