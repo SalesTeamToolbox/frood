@@ -1,11 +1,25 @@
 /* Frood Dashboard — Single-page Application */
 "use strict";
 
+// One-time migration: legacy -> frood namespace (Phase 53)
+(function migrateStorage() {
+  if (!localStorage.getItem("frood_token")) {
+    var _old = localStorage.getItem("agent42_token"); // migrate
+    if (_old) { localStorage.setItem("frood_token", _old); }
+  }
+  localStorage.removeItem("agent42_token"); // migrate
+  if (!localStorage.getItem("frood_first_done")) {
+    var _oldflag = localStorage.getItem("a42_first_done"); // migrate
+    if (_oldflag) { localStorage.setItem("frood_first_done", _oldflag); }
+  }
+  localStorage.removeItem("a42_first_done"); // migrate
+})();
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 const state = {
-  token: localStorage.getItem("agent42_token") || "",
+  token: localStorage.getItem("frood_token") || "",
   setupNeeded: null,  // null = checking, true = show wizard, false = show login/app
   setupStep: 1,       // 1 = password, 2 = API key, 3 = memory, 4 = done
   page: "apps",
@@ -72,7 +86,7 @@ const TAGLINES = [
 ];
 
 // Frood towel avatar SVG — the essential hitchhiker's companion
-const AGENT42_AVATAR = `<img src="/assets/frood-avatar.svg" alt="Frood" width="20" height="20" style="border-radius:50%">`;
+const FROOD_AVATAR = `<img src="/assets/frood-avatar.svg" alt="Frood" width="20" height="20" style="border-radius:50%">`;
 
 const STATUS_FLAVOR = {
   pending: "Waiting in the Infinite Improbability Queue\u2026",
@@ -136,8 +150,8 @@ function wsKey(workspaceId, key) {
 //   wsKey(id, "cc_panel_session_id")  replaces  "cc_panel_session_id"
 //
 // Keys that stay GLOBAL (no namespace prefix):
-//   "agent42_token"   — auth is workspace-independent
-//   "a42_first_done"  — one-time onboarding flag
+//   "frood_token"     — auth is workspace-independent
+//   "frood_first_done" — one-time onboarding flag
 //
 // Keys that stay SESSION-SCOPED (no workspace prefix needed):
 //   "cc_hist_{sessionId}" — session UUIDs are already globally unique
@@ -149,17 +163,17 @@ function wsKey(workspaceId, key) {
 const API = "/api";
 
 // Cross-tab auth synchronization
-const _authChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("agent42_auth") : null;
+const _authChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("frood_auth") : null;
 if (_authChannel) {
   _authChannel.onmessage = (ev) => {
     if (ev.data?.type === "logout") {
       state.token = "";
-      localStorage.removeItem("agent42_token");
+      localStorage.removeItem("frood_token");
       if (ws) ws.close();
       render();
     } else if (ev.data?.type === "login" && ev.data?.token) {
       state.token = ev.data.token;
-      localStorage.setItem("agent42_token", ev.data.token);
+      localStorage.setItem("frood_token", ev.data.token);
       connectWS();
       loadAll().then(function() { render(); });
     }
@@ -186,7 +200,7 @@ async function api(path, opts = {}) {
     } catch {}
 
     state.token = "";
-    localStorage.removeItem("agent42_token");
+    localStorage.removeItem("frood_token");
 
     // Broadcast logout to other tabs
     if (_authChannel) {
@@ -295,7 +309,7 @@ async function handleSetupStep3() {
     _setupPassword = "";
     _setupApiKey = "";
     state.token = data.token;
-    localStorage.setItem("agent42_token", data.token);
+    localStorage.setItem("frood_token", data.token);
     state._setupResult = data;
     state.setupStep = 4;
     render();
@@ -701,7 +715,7 @@ async function changePassword() {
     });
     if (data.token) {
       state.token = data.token;
-      localStorage.setItem("agent42_token", data.token);
+      localStorage.setItem("frood_token", data.token);
     }
     toast("Password changed successfully.", "success");
     if (document.getElementById("cp-current")) document.getElementById("cp-current").value = "";
@@ -739,7 +753,7 @@ async function doLogin(username, password) {
     }
     const data = await res.json();
     state.token = data.token;
-    localStorage.setItem("agent42_token", data.token);
+    localStorage.setItem("frood_token", data.token);
 
     // Broadcast login to other tabs
     if (_authChannel) {
@@ -770,7 +784,7 @@ async function doLogout() {
   }
 
   state.token = "";
-  localStorage.removeItem("agent42_token");
+  localStorage.removeItem("frood_token");
 
   // Broadcast logout to other tabs
   if (_authChannel) {
@@ -1605,11 +1619,11 @@ function renderSettingsPanel() {
 
       ${backendSection}
 
-      ${settingReadonly("MEMORY_DIR", "Memory directory", "Default: .agent42/memory. Persistent memory and learning data.")}
-      ${settingReadonly("SESSIONS_DIR", "Sessions directory", "Default: .agent42/sessions. Channel conversation history.")}
-      ${settingReadonly("OUTPUTS_DIR", "Outputs directory", "Default: .agent42/outputs. Non-code task outputs (reports, analysis, etc.).")}
-      ${settingReadonly("TEMPLATES_DIR", "Templates directory", "Default: .agent42/templates. Content templates for reuse.")}
-      ${settingReadonly("IMAGES_DIR", "Images directory", "Default: .agent42/images. Generated images from image_gen tool.")}
+      ${settingReadonly("MEMORY_DIR", "Memory directory", "Default: .frood/memory. Persistent memory and learning data.")}
+      ${settingReadonly("SESSIONS_DIR", "Sessions directory", "Default: .frood/sessions. Channel conversation history.")}
+      ${settingReadonly("OUTPUTS_DIR", "Outputs directory", "Default: .frood/outputs. Non-code task outputs (reports, analysis, etc.).")}
+      ${settingReadonly("TEMPLATES_DIR", "Templates directory", "Default: .frood/templates. Content templates for reuse.")}
+      ${settingReadonly("IMAGES_DIR", "Images directory", "Default: .frood/images. Generated images from image_gen tool.")}
       ${settingReadonly("SKILLS_DIRS", "Extra skill directories", "Comma-separated paths. Skills are auto-discovered from these + builtins.")}
       ${_envSaveBtn()}
     `; },

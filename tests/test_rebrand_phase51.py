@@ -31,11 +31,7 @@ class TestBranding:
         # Filter out lines containing deferred internal keys
         lines = _APP_JS.splitlines()
         filtered_lines = [
-            line
-            for line in lines
-            if "agent42_token" not in line
-            and "agent42_auth" not in line
-            and ".frood/" not in line
+            line for line in lines if "// migrate" not in line and ".frood/" not in line
         ]
         filtered_text = "\n".join(filtered_lines)
         assert "Agent42" not in filtered_text, (
