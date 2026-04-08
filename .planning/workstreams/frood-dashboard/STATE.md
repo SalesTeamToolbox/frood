@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Frood Dashboard
-status: Executing Phase 51 — Rebrand & Repurpose
-last_updated: "2026-04-07T23:50:00Z"
+status: Phase 51 Complete — Rebrand & Repurpose
+last_updated: "2026-04-07T24:00:00Z"
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Workstream State
@@ -18,13 +18,13 @@ progress:
 See: .planning/workstreams/frood-dashboard/ROADMAP.md
 
 **Goal:** Transform the Agent42 dashboard into the Frood Dashboard — strip harness features, rebrand, repurpose intelligence surfaces
-**Current focus:** Phase 51 — Rebrand & Repurpose
+**Current focus:** Phase 51 — COMPLETE
 
 ## Current Position
 
-Phase: 51 (Rebrand & Repurpose) — IN PROGRESS (3/4 plans done)
-Plan: 51-03 complete, next: 51-04 (Wave 4)
-Last session: 2026-04-07 — Completed 51-03 (Activity Feed intelligence observability surface)
+Phase: 51 (Rebrand & Repurpose) — COMPLETE (4/4 plans done)
+Plan: 51-04 complete, all plans done
+Last session: 2026-04-07 — Completed 51-04 (Setup wizard copy + README rewrite + all xfails removed)
 
 ## Completed Phases
 
@@ -39,3 +39,5 @@ Last session: 2026-04-07 — Completed 51-03 (Activity Feed intelligence observa
 - `_routing_stats` lives inside `create_app()` closure matching `_memory_stats` pattern
 - Ring buffer and `_record_intelligence_event()` defined inside `create_app()` closure to access `ws_manager` (Pitfall 3)
 - Routing hooks use `await` directly (non-blocking in-memory append); reason field: free-model / zen-prefix / premium-fallback
+- README rewritten from scratch — removed all harness/orchestrator content, focused on Frood Dashboard intelligence layer
+- Setup wizard tagline changed from 'all your tasks' to 'intelligent tools'; step 4 completion changed from 'Loading Mission Control' to 'Launching Frood Dashboard'
