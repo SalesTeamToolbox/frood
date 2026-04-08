@@ -12,8 +12,6 @@ per Phase 38/40 pattern. Verifies all Phase 51 requirements across:
 
 import pathlib
 
-import pytest
-
 _APP_JS = pathlib.Path("dashboard/frontend/dist/app.js").read_text(encoding="utf-8")
 _SERVER_PY = pathlib.Path("dashboard/server.py").read_text(encoding="utf-8")
 _INDEX_HTML = pathlib.Path("dashboard/frontend/dist/index.html").read_text(encoding="utf-8")
@@ -152,7 +150,6 @@ class TestActivityFeed:
 class TestSetupWizard:
     """Setup Wizard reflects Frood-as-service identity."""
 
-    @pytest.mark.xfail(reason="Setup wizard updated in Plan 04")
     def test_setup_wizard_no_mission_control(self):
         """Setup wizard does not reference Mission Control."""
         assert "Mission Control" not in _APP_JS
@@ -161,7 +158,6 @@ class TestSetupWizard:
 class TestReadme:
     """README reflects Frood Dashboard as intelligence layer admin panel."""
 
-    @pytest.mark.xfail(reason="README updated in Plan 04")
     def test_readme_no_harness_terms(self):
         """README does not contain harness/orchestrator terms."""
         for term in ["Mission Control", "Agent Teams", "Agents page"]:
