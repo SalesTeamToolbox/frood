@@ -80,8 +80,8 @@ class TestMcpConfigGeneration:
         mcp_path = tmp_path / ".mcp.json"
         assert mcp_path.exists(), ".mcp.json not created"
         config = json.loads(mcp_path.read_text())
-        assert "agent42" in config["mcpServers"]
-        assert config["mcpServers"]["agent42"]["command"] == venv_python
+        assert "frood" in config["mcpServers"]
+        assert config["mcpServers"]["frood"]["command"] == venv_python
 
     def test_includes_all_six_servers_when_ssh_alias_provided(self, tmp_path):
         """With SSH alias, all 6 servers appear in generated config."""
@@ -91,7 +91,7 @@ class TestMcpConfigGeneration:
         config = json.loads((tmp_path / ".mcp.json").read_text())
         servers = config["mcpServers"]
         assert len(servers) == 6, f"Expected 6 servers, got {len(servers)}: {list(servers)}"
-        assert "agent42-remote" in servers
+        assert "frood-remote" in servers
 
     def test_omits_agent42_remote_when_no_ssh_alias(self, tmp_path):
         """Without SSH alias, agent42-remote is not in generated config."""
@@ -100,17 +100,17 @@ class TestMcpConfigGeneration:
 
         config = json.loads((tmp_path / ".mcp.json").read_text())
         servers = config["mcpServers"]
-        assert "agent42-remote" not in servers
+        assert "frood-remote" not in servers
         assert len(servers) == 5
 
     def test_agent42_env_vars_set_correctly(self, tmp_path):
-        """agent42 entry has AGENT42_WORKSPACE, REDIS_URL, QDRANT_URL."""
+        """agent42 entry has FROOD_WORKSPACE, REDIS_URL, QDRANT_URL."""
         _make_fake_venv(tmp_path)
         generate_mcp_config(str(tmp_path))
 
         config = json.loads((tmp_path / ".mcp.json").read_text())
-        env = config["mcpServers"]["agent42"]["env"]
-        assert env["AGENT42_WORKSPACE"] == str(tmp_path)
+        env = config["mcpServers"]["frood"]["env"]
+        assert env["FROOD_WORKSPACE"] == str(tmp_path)
         assert env["REDIS_URL"] == "redis://localhost:6379/0"
         assert env["QDRANT_URL"] == "http://localhost:6333"
 
@@ -144,16 +144,16 @@ class TestMcpConfigMerge:
         existing_entry = {
             "command": venv_python,
             "args": [str(tmp_path / "mcp_server.py")],
-            "env": {"AGENT42_WORKSPACE": str(tmp_path), "CUSTOM_VAR": "kept"},
+            "env": {"FROOD_WORKSPACE": str(tmp_path), "CUSTOM_VAR": "kept"},
         }
-        existing = {"mcpServers": {"agent42": existing_entry}}
+        existing = {"mcpServers": {"frood": existing_entry}}
         (tmp_path / ".mcp.json").write_text(json.dumps(existing))
 
         generate_mcp_config(str(tmp_path))
 
         config = json.loads((tmp_path / ".mcp.json").read_text())
         # Custom env var should still be present since entry was not replaced
-        assert config["mcpServers"]["agent42"]["env"].get("CUSTOM_VAR") == "kept"
+        assert config["mcpServers"]["frood"]["env"].get("CUSTOM_VAR") == "kept"
 
     def test_replaces_agent42_entry_with_invalid_path(self, tmp_path):
         """If agent42 exists but command path is non-existent, replace it."""
@@ -172,7 +172,7 @@ class TestMcpConfigMerge:
         generate_mcp_config(str(tmp_path))
 
         config = json.loads((tmp_path / ".mcp.json").read_text())
-        cmd = config["mcpServers"]["agent42"]["command"]
+        cmd = config["mcpServers"]["frood"]["command"]
         assert cmd != "/nonexistent/path/to/python", "Stale path was not replaced"
         # On Windows basename is python.exe, on Linux/macOS it is python
         assert os.path.basename(cmd) in ("python", "python.exe")
@@ -672,14 +672,14 @@ class TestClaudeMdGeneration:
     """INTEG-01 through INTEG-03: CLAUDE.md memory section generation."""
 
     def test_creates_claude_md_when_absent(self, tmp_path):
-        """Creates CLAUDE.md with markers and agent42_memory when no file exists."""
+        """Creates CLAUDE.md with markers and frood_memory when no file exists."""
         generate_claude_md_section(str(tmp_path))
         claude_md = tmp_path / "CLAUDE.md"
         assert claude_md.exists()
         content = claude_md.read_text()
-        assert "<!-- BEGIN AGENT42 MEMORY -->" in content
-        assert "<!-- END AGENT42 MEMORY -->" in content
-        assert "agent42_memory" in content
+        assert "<!-- BEGIN FROOD MEMORY -->" in content
+        assert "<!-- END FROOD MEMORY -->" in content
+        assert "frood_memory" in content
 
     def test_appends_to_existing_claude_md(self, tmp_path):
         """Appends managed section to existing CLAUDE.md, preserving user content."""
@@ -688,7 +688,7 @@ class TestClaudeMdGeneration:
         content = (tmp_path / "CLAUDE.md").read_text()
         assert "My Project" in content
         assert "Existing content." in content
-        assert "agent42_memory" in content
+        assert "frood_memory" in content
 
     def test_idempotent_on_rerun(self, tmp_path):
         """Calling generate_claude_md_section twice produces identical file content."""
@@ -701,18 +701,18 @@ class TestClaudeMdGeneration:
     def test_replaces_managed_section_on_rerun(self, tmp_path):
         """Old content between markers is replaced; new template content is present."""
         (tmp_path / "CLAUDE.md").write_text(
-            "# Project\n\n<!-- BEGIN AGENT42 MEMORY -->\nOLD CONTENT\n<!-- END AGENT42 MEMORY -->\n"
+            "# Project\n\n<!-- BEGIN FROOD MEMORY -->\nOLD CONTENT\n<!-- END FROOD MEMORY -->\n"
         )
         generate_claude_md_section(str(tmp_path))
         content = (tmp_path / "CLAUDE.md").read_text()
         assert "OLD CONTENT" not in content
-        assert "agent42_memory" in content
+        assert "frood_memory" in content
 
     def test_preserves_content_outside_markers(self, tmp_path):
         """Content before and after markers is preserved; only inside is replaced."""
         (tmp_path / "CLAUDE.md").write_text(
             "# My Project\n\nBefore section.\n\n"
-            "<!-- BEGIN AGENT42 MEMORY -->\nOLD\n<!-- END AGENT42 MEMORY -->\n\n"
+            "<!-- BEGIN FROOD MEMORY -->\nOLD\n<!-- END FROOD MEMORY -->\n\n"
             "After section.\n"
         )
         generate_claude_md_section(str(tmp_path))
@@ -792,7 +792,7 @@ class TestWindowsCompat:
             generate_mcp_config(str(tmp_path))
 
         config = json.loads((tmp_path / ".mcp.json").read_text())
-        command = config["mcpServers"]["agent42"]["command"]
+        command = config["mcpServers"]["frood"]["command"]
         assert "Scripts" in command and "python.exe" in command, (
             f"Expected Scripts/python.exe in command, got: {command}"
         )
@@ -809,7 +809,7 @@ class TestWindowsCompat:
             generate_mcp_config(str(tmp_path))
 
         config = json.loads((tmp_path / ".mcp.json").read_text())
-        command = config["mcpServers"]["agent42"]["command"]
+        command = config["mcpServers"]["frood"]["command"]
         # Normalize to forward slashes for cross-platform comparison
         command_normalized = command.replace("\\", "/")
         assert ".venv/bin/python" in command_normalized, (
@@ -932,10 +932,10 @@ class TestClaudeMdFull:
         assert "## Agent42 Hook Protocol" in content
 
     def test_full_claude_md_contains_memory_instructions(self, tmp_path):
-        """Generated CLAUDE.md contains agent42_memory tool instructions."""
+        """Generated CLAUDE.md contains frood_memory tool instructions."""
         self._run_generate(tmp_path)
         content = (tmp_path / "CLAUDE.md").read_text()
-        assert "agent42_memory" in content
+        assert "frood_memory" in content
 
     def test_full_claude_md_contains_project_name(self, tmp_path):
         """Generated CLAUDE.md contains the detected project name."""
@@ -988,7 +988,7 @@ class TestClaudeMdFull:
         """Content before and after existing markers is preserved during merge."""
         (tmp_path / "CLAUDE.md").write_text(
             "# Header\n\nBefore.\n\n"
-            "<!-- BEGIN AGENT42 MEMORY -->\nOLD CONTENT\n<!-- END AGENT42 MEMORY -->\n\n"
+            "<!-- BEGIN FROOD MEMORY -->\nOLD CONTENT\n<!-- END FROOD MEMORY -->\n\n"
             "After.\n"
         )
         self._run_generate(tmp_path)
@@ -1007,12 +1007,12 @@ class TestClaudeMdFull:
     def test_full_claude_md_existing_markers_replaced(self, tmp_path):
         """Old managed block is fully replaced when markers already exist."""
         (tmp_path / "CLAUDE.md").write_text(
-            "# Project\n\n<!-- BEGIN AGENT42 MEMORY -->\nSTALE\n<!-- END AGENT42 MEMORY -->\n"
+            "# Project\n\n<!-- BEGIN FROOD MEMORY -->\nSTALE\n<!-- END FROOD MEMORY -->\n"
         )
         self._run_generate(tmp_path)
         content = (tmp_path / "CLAUDE.md").read_text()
         assert "STALE" not in content
-        assert "agent42_memory" in content
+        assert "frood_memory" in content
 
     def test_full_claude_md_project_section_included(self, tmp_path):
         """Generated CLAUDE.md has a Project section with the project name."""

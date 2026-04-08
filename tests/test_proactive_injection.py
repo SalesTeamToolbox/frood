@@ -435,7 +435,7 @@ class TestProactiveInjectHook:
 
     def test_is_injection_done_after_mark(self, tmp_path, monkeypatch):
         """Test 6: is_injection_done() returns True after mark_injection_done() is called."""
-        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".frood")
         session_id = "test-session-abc"
         self.hook.mark_injection_done(str(tmp_path), session_id)
         result = self.hook.is_injection_done(str(tmp_path), session_id)
@@ -443,7 +443,7 @@ class TestProactiveInjectHook:
 
     def test_is_injection_done_different_session(self, tmp_path, monkeypatch):
         """Test 7: is_injection_done() returns False when injection-done.json has different session_id."""
-        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".frood")
         self.hook.mark_injection_done(str(tmp_path), "session-original")
         result = self.hook.is_injection_done(str(tmp_path), "session-different")
         assert result is False
@@ -465,8 +465,8 @@ class TestProactiveInjectHook:
         # is never called when the prompt starts with '/'. We verify via the
         # is_injection_done guard: if the hook runs but skips due to slash,
         # the injection-done file should NOT be written.
-        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
-        monkeypatch.setenv("AGENT42_DATA_DIR", ".agent42")
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".frood")
+        monkeypatch.setenv("FROOD_DATA_DIR", ".frood")
         # A slash command that would otherwise match a task type keyword
         prompt = "/gsd:execute-phase build a new API endpoint for authentication"
         # The hook should detect slash command and skip — infer_task_type handles
@@ -485,12 +485,12 @@ class TestProactiveInjectHook:
         with pytest.raises(SystemExit) as exc:
             self.hook.main()
         assert exc.value.code == 0
-        guard_file = tmp_path / ".agent42" / "injection-done.json"
+        guard_file = tmp_path / ".frood" / "injection-done.json"
         assert not guard_file.exists()
 
     def test_hook_skips_short_prompts(self, tmp_path, monkeypatch):
         """Test 10: Hook skips injection when prompt length < 15 characters."""
-        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".frood")
         import io
 
         event = {
@@ -504,7 +504,7 @@ class TestProactiveInjectHook:
         with pytest.raises(SystemExit) as exc:
             self.hook.main()
         assert exc.value.code == 0
-        guard_file = tmp_path / ".agent42" / "injection-done.json"
+        guard_file = tmp_path / ".frood" / "injection-done.json"
         assert not guard_file.exists()
 
 
@@ -529,7 +529,7 @@ class TestRecommendationsHook:
             {"tool_name": "grep", "success_rate": 0.85, "avg_duration_ms": 30.0},
         ]
         output = self.hook.format_recommendations_output(recs, "coding")
-        assert "[agent42-recommendations]" in output
+        assert "[frood-recommendations]" in output
         assert "Top tools for coding" in output
         assert "1. shell (92% success, 45ms avg)" in output
         assert "2. code_intel (87% success, 120ms avg)" in output
@@ -551,7 +551,7 @@ class TestRecommendationsHook:
 
     def test_main_emits_recs_when_learnings_empty(self, tmp_path, monkeypatch, capsys):
         """main() emits recommendations even when learnings return empty."""
-        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".frood")
         # Mock fetch_learnings to return empty, fetch_recommendations to return data
         monkeypatch.setattr(self.hook, "fetch_learnings", lambda q, t: [])
         monkeypatch.setattr(
@@ -573,12 +573,12 @@ class TestRecommendationsHook:
         assert exc.value.code == 0
         # Recommendations should appear in stderr
         captured = capsys.readouterr()
-        assert "[agent42-recommendations]" in captured.err
+        assert "[frood-recommendations]" in captured.err
         assert "shell" in captured.err
 
     def test_main_writes_guard_with_recs_only(self, tmp_path, monkeypatch, capsys):
         """main() writes guard file when only recommendations are emitted."""
-        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".frood")
         monkeypatch.setattr(self.hook, "fetch_learnings", lambda q, t: [])
         monkeypatch.setattr(
             self.hook,
@@ -596,14 +596,14 @@ class TestRecommendationsHook:
         monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(event)))
         with pytest.raises(SystemExit):
             self.hook.main()
-        guard_file = tmp_path / ".agent42" / "injection-done.json"
+        guard_file = tmp_path / ".frood" / "injection-done.json"
         assert guard_file.exists()
         data = json.loads(guard_file.read_text())
         assert data["session_id"] == "recs-guard-session"
 
     def test_main_no_guard_when_both_empty(self, tmp_path, monkeypatch, capsys):
         """main() does NOT write guard file when both learnings and recs are empty."""
-        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".frood")
         monkeypatch.setattr(self.hook, "fetch_learnings", lambda q, t: [])
         monkeypatch.setattr(self.hook, "fetch_recommendations", lambda t: [])
         import io
@@ -618,7 +618,7 @@ class TestRecommendationsHook:
         with pytest.raises(SystemExit) as exc:
             self.hook.main()
         assert exc.value.code == 0
-        guard_file = tmp_path / ".agent42" / "injection-done.json"
+        guard_file = tmp_path / ".frood" / "injection-done.json"
         assert not guard_file.exists()
 
     def test_fetch_recommendations_graceful_on_error(self, monkeypatch):
@@ -629,7 +629,7 @@ class TestRecommendationsHook:
 
     def test_main_emits_both_blocks_separately(self, tmp_path, monkeypatch, capsys):
         """main() emits learnings and recommendations as separate stderr blocks (D-07)."""
-        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".agent42")
+        monkeypatch.setattr(self.hook, "INJECTION_GUARD_DIR", ".frood")
         monkeypatch.setattr(
             self.hook,
             "fetch_learnings",
@@ -653,5 +653,5 @@ class TestRecommendationsHook:
             self.hook.main()
         captured = capsys.readouterr()
         # Both distinct headers present in stderr
-        assert "[agent42-learnings]" in captured.err
-        assert "[agent42-recommendations]" in captured.err
+        assert "[frood-learnings]" in captured.err
+        assert "[frood-recommendations]" in captured.err

@@ -269,6 +269,6 @@ class TestMCPServerCreation:
     def test_resolve_workspace_uses_env(self, tmp_path, monkeypatch):
         from mcp_server import _resolve_workspace
 
-        monkeypatch.setenv("AGENT42_WORKSPACE", str(tmp_path))
+        monkeypatch.setenv("FROOD_WORKSPACE", str(tmp_path))
         ws = _resolve_workspace()
         assert ws == tmp_path.resolve()

@@ -23,7 +23,7 @@ from core.portability import (
 
 def _create_agent42_tree(root: str) -> None:
     """Create a representative Agent42 directory structure for testing."""
-    base = os.path.join(root, ".agent42")
+    base = os.path.join(root, ".frood")
     os.makedirs(os.path.join(base, "memory"), exist_ok=True)
     os.makedirs(os.path.join(base, "sessions"), exist_ok=True)
     os.makedirs(os.path.join(base, "outputs"), exist_ok=True)
@@ -225,11 +225,11 @@ class TestBackup:
         path = create_backup(self.source, self.output)
         with tarfile.open(path, "r:gz") as tar:
             names = tar.getnames()
-            assert ".agent42/memory/MEMORY.md" in names
+            assert ".frood/memory/MEMORY.md" in names
             assert "tasks.json" in names
             assert ".env" in names
-            assert ".agent42/settings.json" in names
-            assert ".agent42/sessions/discord_123.jsonl" in names
+            assert ".frood/settings.json" in names
+            assert ".frood/sessions/discord_123.jsonl" in names
 
     def test_backup_excludes_worktrees_by_default(self):
         # Create a fake worktree dir
@@ -250,8 +250,8 @@ class TestBackup:
         with open(os.path.join(wt_dir, "task1", "file.py"), "w") as f:
             f.write("print('hello')")
 
-        old_env = os.environ.get("AGENT42_WORKTREE_DIR", "")
-        os.environ["AGENT42_WORKTREE_DIR"] = wt_dir
+        old_env = os.environ.get("FROOD_WORKTREE_DIR", "")
+        os.environ["FROOD_WORKTREE_DIR"] = wt_dir
         try:
             path = create_backup(self.source, self.output, include_worktrees=True)
             with tarfile.open(path, "r:gz") as tar:
@@ -261,7 +261,7 @@ class TestBackup:
                 names = tar.getnames()
                 assert any("worktrees" in n for n in names)
         finally:
-            os.environ["AGENT42_WORKTREE_DIR"] = old_env
+            os.environ["FROOD_WORKTREE_DIR"] = old_env
             shutil.rmtree(wt_dir, ignore_errors=True)
 
     def test_backup_file_count_is_positive(self):
@@ -288,11 +288,11 @@ class TestRestore:
         path = create_backup(self.source, self.output)
         manifest = restore_backup(path, self.restore_dir)
 
-        assert os.path.exists(os.path.join(self.restore_dir, ".agent42", "memory", "MEMORY.md"))
+        assert os.path.exists(os.path.join(self.restore_dir, ".frood", "memory", "MEMORY.md"))
         assert os.path.exists(os.path.join(self.restore_dir, "tasks.json"))
         assert os.path.exists(os.path.join(self.restore_dir, ".env"))
         assert os.path.exists(
-            os.path.join(self.restore_dir, ".agent42", "sessions", "discord_123.jsonl")
+            os.path.join(self.restore_dir, ".frood", "sessions", "discord_123.jsonl")
         )
         assert manifest.archive_type == "backup"
 
@@ -300,7 +300,7 @@ class TestRestore:
         path = create_backup(self.source, self.output)
         restore_backup(path, self.restore_dir)
 
-        with open(os.path.join(self.restore_dir, ".agent42", "memory", "MEMORY.md")) as f:
+        with open(os.path.join(self.restore_dir, ".frood", "memory", "MEMORY.md")) as f:
             assert "Some learned facts." in f.read()
 
         with open(os.path.join(self.restore_dir, "tasks.json")) as f:
@@ -314,7 +314,7 @@ class TestRestore:
         path = create_backup(self.source, self.output)
         restore_backup(path, self.restore_dir)
 
-        settings_path = os.path.join(self.restore_dir, ".agent42", "settings.json")
+        settings_path = os.path.join(self.restore_dir, ".frood", "settings.json")
         mode = os.stat(settings_path).st_mode
         assert mode & stat.S_IRUSR  # Owner read
         assert mode & stat.S_IWUSR  # Owner write
@@ -326,7 +326,7 @@ class TestRestore:
         restore_backup(path, self.restore_dir, skip_secrets=True)
 
         assert not os.path.exists(os.path.join(self.restore_dir, ".env"))
-        assert not os.path.exists(os.path.join(self.restore_dir, ".agent42", "settings.json"))
+        assert not os.path.exists(os.path.join(self.restore_dir, ".frood", "settings.json"))
         # Non-secret files should still be restored
         assert os.path.exists(os.path.join(self.restore_dir, "tasks.json"))
 
@@ -427,10 +427,10 @@ class TestClone:
         with tarfile.open(path, "r:gz") as tar:
             names = tar.getnames()
             assert "tasks.json" not in names
-            assert ".agent42/memory/MEMORY.md" not in names
-            assert ".agent42/sessions/discord_123.jsonl" not in names
-            assert ".agent42/approvals.jsonl" not in names
-            assert ".agent42/settings.json" not in names
+            assert ".frood/memory/MEMORY.md" not in names
+            assert ".frood/sessions/discord_123.jsonl" not in names
+            assert ".frood/approvals.jsonl" not in names
+            assert ".frood/settings.json" not in names
 
     def test_clone_includes_config_files(self):
         path = create_clone(self.source, self.output)
@@ -445,11 +445,11 @@ class TestClone:
         with tarfile.open(path, "r:gz") as tar:
             names = tar.getnames()
             # Scaffold dirs should have .gitkeep files
-            assert ".agent42/memory/.gitkeep" in names
-            assert ".agent42/sessions/.gitkeep" in names
-            assert ".agent42/outputs/.gitkeep" in names
-            assert ".agent42/templates/.gitkeep" in names
-            assert ".agent42/images/.gitkeep" in names
+            assert ".frood/memory/.gitkeep" in names
+            assert ".frood/sessions/.gitkeep" in names
+            assert ".frood/outputs/.gitkeep" in names
+            assert ".frood/templates/.gitkeep" in names
+            assert ".frood/images/.gitkeep" in names
 
     def test_clone_excludes_skills_by_default(self):
         path = create_clone(self.source, self.output)
@@ -492,12 +492,12 @@ class TestRoundTrip:
 
         # Compare key files
         for rel in [
-            ".agent42/memory/MEMORY.md",
-            ".agent42/memory/HISTORY.md",
+            ".frood/memory/MEMORY.md",
+            ".frood/memory/HISTORY.md",
             "tasks.json",
             ".env",
-            ".agent42/sessions/discord_123.jsonl",
-            ".agent42/approvals.jsonl",
+            ".frood/sessions/discord_123.jsonl",
+            ".frood/approvals.jsonl",
         ]:
             src_path = os.path.join(self.source, rel)
             dst_path = os.path.join(self.restore_dir, rel)
@@ -512,8 +512,8 @@ class TestRoundTrip:
         archive = create_backup(self.source, self.output)
         restore_backup(archive, self.restore_dir)
 
-        src_img = os.path.join(self.source, ".agent42", "images", "gen.png")
-        dst_img = os.path.join(self.restore_dir, ".agent42", "images", "gen.png")
+        src_img = os.path.join(self.source, ".frood", "images", "gen.png")
+        dst_img = os.path.join(self.restore_dir, ".frood", "images", "gen.png")
         with open(src_img, "rb") as f:
             src_data = f.read()
         with open(dst_img, "rb") as f:

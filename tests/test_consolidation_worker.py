@@ -177,7 +177,7 @@ class TestConsolidationStatus:
             }
             save_consolidation_status(status, workspace)
 
-            status_file = workspace / ".agent42" / "consolidation-status.json"
+            status_file = workspace / ".frood" / "consolidation-status.json"
             assert status_file.exists()
             loaded = json.loads(status_file.read_text())
             assert loaded["last_run"] == 1234567890.0
@@ -280,7 +280,7 @@ class TestRunConsolidation:
             store = self._make_qdrant_store()
             run_consolidation(store, workspace=tmpdir)
 
-            status_file = Path(tmpdir) / ".agent42" / "consolidation-status.json"
+            status_file = Path(tmpdir) / ".frood" / "consolidation-status.json"
             assert status_file.exists()
             data = json.loads(status_file.read_text())
             assert data["last_run"] is not None

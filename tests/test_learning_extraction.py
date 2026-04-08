@@ -9,13 +9,13 @@ class TestTaskContextBridge:
     """Task context file bridge for cross-process access."""
 
     def test_begin_task_creates_json_file(self, tmp_path, monkeypatch):
-        """begin_task() writes .agent42/current-task.json."""
-        monkeypatch.setattr("core.task_context._TASK_FILE_DIR", str(tmp_path / ".agent42"))
+        """begin_task() writes .frood/current-task.json."""
+        monkeypatch.setattr("core.task_context._TASK_FILE_DIR", str(tmp_path / ".frood"))
         from core.task_context import begin_task, end_task
         from core.task_types import TaskType
 
         ctx = begin_task(TaskType.CODING)
-        task_file = tmp_path / ".agent42" / "current-task.json"
+        task_file = tmp_path / ".frood" / "current-task.json"
         assert task_file.exists()
         data = json.loads(task_file.read_text())
         assert data["task_id"] == ctx.task_id
@@ -24,12 +24,12 @@ class TestTaskContextBridge:
 
     def test_end_task_removes_json_file(self, tmp_path, monkeypatch):
         """end_task() removes current-task.json."""
-        monkeypatch.setattr("core.task_context._TASK_FILE_DIR", str(tmp_path / ".agent42"))
+        monkeypatch.setattr("core.task_context._TASK_FILE_DIR", str(tmp_path / ".frood"))
         from core.task_context import begin_task, end_task
         from core.task_types import TaskType
 
         ctx = begin_task(TaskType.DEBUGGING)
-        task_file = tmp_path / ".agent42" / "current-task.json"
+        task_file = tmp_path / ".frood" / "current-task.json"
         assert task_file.exists()
         end_task(ctx)
         assert not task_file.exists()
@@ -37,7 +37,7 @@ class TestTaskContextBridge:
     def test_read_task_context_from_file(self, tmp_path):
         """effectiveness-learn.py read_task_context() reads from file."""
         # Create the bridge file manually
-        agent42_dir = tmp_path / ".agent42"
+        agent42_dir = tmp_path / ".frood"
         agent42_dir.mkdir()
         task_file = agent42_dir / "current-task.json"
         task_file.write_text(

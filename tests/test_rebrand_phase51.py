@@ -35,7 +35,7 @@ class TestBranding:
             for line in lines
             if "agent42_token" not in line
             and "agent42_auth" not in line
-            and ".agent42/" not in line
+            and ".frood/" not in line
         ]
         filtered_text = "\n".join(filtered_lines)
         assert "Agent42" not in filtered_text, (

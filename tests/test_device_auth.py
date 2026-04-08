@@ -322,7 +322,7 @@ class TestDeviceConfig:
         from core.config import Settings
 
         s = Settings()
-        assert s.devices_file == ".agent42/devices.jsonl"
+        assert s.devices_file == ".frood/devices.jsonl"
 
     def test_devices_file_from_env(self):
         import os

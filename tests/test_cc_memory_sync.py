@@ -504,7 +504,7 @@ class TestDashboardCcSync:
         def _load_cc_sync_status_impl(workspace: str = ".") -> dict:
             import json
 
-            status_path = Path(workspace) / ".agent42" / "cc-sync-status.json"
+            status_path = Path(workspace) / ".frood" / "cc-sync-status.json"
             try:
                 if status_path.exists():
                     return json.loads(status_path.read_text())
@@ -524,7 +524,7 @@ class TestDashboardCcSync:
         """Returns correct values when cc-sync-status.json exists."""
         import json
 
-        status_dir = tmp_path / ".agent42"
+        status_dir = tmp_path / ".frood"
         status_dir.mkdir(parents=True)
         status_data = {"last_sync": 1742300000.0, "total_synced": 42, "last_error": None}
         (status_dir / "cc-sync-status.json").write_text(json.dumps(status_data))
