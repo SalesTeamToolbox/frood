@@ -84,7 +84,7 @@ Plans:
   3. All `AGENT42_*` env vars replaced with `FROOD_*` (clean break, no fallback)
   4. No `agent42.*` logger names or `[agent42-*]` print prefixes remain in Python source
   5. CLAUDE.md marker injection writes `FROOD_MEMORY` markers, not `AGENT42_MEMORY`
-**Plans:** 3 plans
+**Plans:** 3/3 plans complete
 
 Plans:
 - [x] 52-01-PLAN.md — Create frood.py entry point, agent42.py shim, config.py defaults, data dir migration
@@ -137,7 +137,7 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 50. Strip Harness Features | v6.0 | 4/4 | Complete | 2026-04-07 |
 | 51. Rebrand & Repurpose | v6.0 | 4/4 | Complete | 2026-04-08 |
-| 52. Core Identity Rename | v7.0 | 1/3 | Executing | - |
+| 52. Core Identity Rename | v7.0 | 1/3 | Complete    | 2026-04-08 |
 | 53. Frontend Identity + Sidecar Auth | v7.0 | 0/TBD | Not started | - |
 | 54. Infrastructure + Packages | v7.0 | 0/TBD | Not started | - |
 | 55. Qdrant Migration + Test Suite | v7.0 | 0/TBD | Not started | - |
