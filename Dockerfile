@@ -16,10 +16,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create non-root user for security
-RUN useradd -m -s /bin/bash agent42 && \
-    mkdir -p /app/.agent42 && \
-    chown -R agent42:agent42 /app
-USER agent42
+RUN useradd -m -s /bin/bash frood && \
+    mkdir -p /app/.frood && \
+    chown -R frood:frood /app
+USER frood
 
 # Default port
 EXPOSE 8000
@@ -28,4 +28,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-CMD ["python", "agent42.py"]
+CMD ["python", "frood.py"]

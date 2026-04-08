@@ -1,10 +1,10 @@
-# Paperclip + Agent42 deployment stack
+# Paperclip + Frood deployment stack
 # Usage: cp .env.paperclip.example .env.paperclip && nano .env.paperclip && docker compose -f docker-compose.paperclip.yml up -d
 #
 # Startup order (health-check gated):
 #   1. postgresql, redis, qdrant (parallel, no dependencies)
-#   2. agent42-sidecar (waits for postgresql + redis + qdrant healthy)
-#   3. paperclip (waits for agent42-sidecar healthy)
+#   2. frood-sidecar (waits for postgresql + redis + qdrant healthy)
+#   3. paperclip (waits for frood-sidecar healthy)
 
 services:
   postgresql:
@@ -46,16 +46,13 @@ services:
       - "${QDRANT_PORT:-6333}:6333"
     volumes:
       - qdrant-data:/qdrant/storage
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
     restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__TELEMETRY_DISABLED: "true"
 
-  agent42-sidecar:
+  frood-sidecar:
     build: .
-    command: ["python", "agent42.py", "--sidecar"]
+    command: ["python", "frood.py", "--sidecar"]
     env_file:
       - .env.paperclip
     environment:
@@ -64,50 +61,46 @@ services:
       PAPERCLIP_SIDECAR_PORT: "8001"
       REDIS_URL: "redis://redis:6379/0"
       QDRANT_URL: "http://qdrant:6333"
-      QDRANT_ENABLED: "true"
+      QDRANT_ENABLED: "false"
       PAPERCLIP_API_URL: "http://paperclip:3000"
     ports:
       - "${SIDECAR_PORT:-8001}:8001"
     volumes:
-      - agent42-data:/app/.agent42
+      - frood-data:/app/.frood
     depends_on:
-      postgresql:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - postgresql
+      - redis
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/sidecar/health"]
-      interval: 15s
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/sidecar/health || exit 1"]
+      interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 15s
     restart: unless-stopped
 
   paperclip:
-    image: paperclip/app:latest
+    # Use community image or build from source
+    # image: paperclip/app:latest  # Official - requires building from source
+    image: reeoss/paperclipai-paperclip:latest
     env_file:
       - .env.paperclip
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-paperclip}:${POSTGRES_PASSWORD}@postgresql:5432/${POSTGRES_DB:-paperclip}"
-      AGENT42_SIDECAR_URL: "http://agent42-sidecar:8001"
+      FROOD_SIDECAR_URL: "http://frood-sidecar:8001"
       REDIS_URL: "redis://redis:6379/0"
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET}"
+      PORT: "3000"
+      SERVE_UI: "true"
+      PAPERCLIP_DEPLOYMENT_MODE: "authenticated"
+      PAPERCLIP_DEPLOYMENT_EXPOSURE: "private"
     ports:
       - "${PAPERCLIP_PORT:-3000}:3000"
     depends_on:
-      agent42-sidecar:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
+      - frood-sidecar
     restart: unless-stopped
 
 volumes:
   postgresql-data:
   redis-data:
   qdrant-data:
-  agent42-data:
+  frood-data:
