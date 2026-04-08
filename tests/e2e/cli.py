@@ -191,7 +191,7 @@ class PlaywrightCLI:
 
     def _extract_token(self) -> str | None:
         """Get JWT token from localStorage."""
-        raw = self.eval_js("localStorage.getItem('agent42_token')")
+        raw = self.eval_js("localStorage.getItem('frood_token')")
         # Output: ### Result\n"eyJ..."\n...
         for line in raw.split("\n"):
             line = line.strip().strip('"')
