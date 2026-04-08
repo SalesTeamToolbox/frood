@@ -123,3 +123,40 @@
 | Git repo rename (agent42 → frood) | GitHub repo URL stays as-is for now — separate concern |
 | New dashboard features | Rename first, add features later |
 | Paperclip core changes | Only rename Frood-side adapter/plugin packages |
+
+## Traceability
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| AUTH-01 | Phase 53 | Pending |
+| AUTH-02 | Phase 53 | Pending |
+| AUTH-03 | Phase 53 | Pending |
+| ENTRY-01 | Phase 52 | Pending |
+| ENTRY-02 | Phase 52 | Pending |
+| ENTRY-03 | Phase 52 | Pending |
+| ENTRY-04 | Phase 52 | Pending |
+| ENTRY-05 | Phase 52 | Pending |
+| DATA-01 | Phase 52 | Pending |
+| DATA-02 | Phase 52 | Pending |
+| DATA-03 | Phase 52 | Pending |
+| PY-01 | Phase 52 | Pending |
+| PY-02 | Phase 52 | Pending |
+| PY-03 | Phase 52 | Pending |
+| PY-04 | Phase 52 | Pending |
+| FE-01 | Phase 53 | Pending |
+| FE-02 | Phase 53 | Pending |
+| FE-03 | Phase 53 | Pending |
+| INFRA-01 | Phase 54 | Pending |
+| INFRA-02 | Phase 54 | Pending |
+| INFRA-03 | Phase 54 | Pending |
+| INFRA-04 | Phase 54 | Pending |
+| NPM-01 | Phase 54 | Pending |
+| NPM-02 | Phase 54 | Pending |
+| NPM-03 | Phase 54 | Pending |
+| QDRANT-01 | Phase 55 | Pending |
+| QDRANT-02 | Phase 55 | Pending |
+| QDRANT-03 | Phase 55 | Pending |
+| DOCS-01 | Phase 55 | Pending |
+| DOCS-02 | Phase 55 | Pending |
+| DOCS-03 | Phase 55 | Pending |
+| DOCS-04 | Phase 55 | Pending |
