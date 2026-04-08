@@ -16,7 +16,7 @@ import re
 import time
 from datetime import UTC, datetime
 
-logger = logging.getLogger("agent42.security_scanner")
+logger = logging.getLogger("frood.security_scanner")
 
 # Severity ordering for filtering and display
 _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "none": 4}

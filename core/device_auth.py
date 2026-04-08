@@ -21,7 +21,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-logger = logging.getLogger("agent42.device_auth")
+logger = logging.getLogger("frood.device_auth")
 
 VALID_DEVICE_TYPES = {"laptop", "watch", "phone", "tablet", "desktop", "other"}
 VALID_CAPABILITIES = {"tasks", "approvals", "monitor"}

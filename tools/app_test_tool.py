@@ -25,7 +25,7 @@ from pathlib import Path
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.app_test")
+logger = logging.getLogger("frood.tools.app_test")
 
 # Patterns that indicate errors in app logs
 _ERROR_PATTERNS = [
@@ -551,7 +551,7 @@ class AppTestTool(Tool):
 
         try:
             workspace = str(self._sandbox.workspace_path)
-            screenshots_dir = Path(workspace) / ".agent42" / "screenshots"
+            screenshots_dir = Path(workspace) / ".frood" / "screenshots"
             screenshots_dir.mkdir(parents=True, exist_ok=True)
 
             timestamp = int(time.time())

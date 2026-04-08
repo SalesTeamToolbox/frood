@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 
 from core.portability import create_backup, restore_backup, create_clone
 
-logger = logging.getLogger("agent42")
+logger = logging.getLogger("frood")
 
 
 class CommandHandler(ABC):

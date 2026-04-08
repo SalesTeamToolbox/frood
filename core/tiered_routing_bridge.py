@@ -22,7 +22,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-logger = logging.getLogger("agent42.sidecar.routing")
+logger = logging.getLogger("frood.sidecar.routing")
 
 # ---------------------------------------------------------------------------
 # Role → Task Category Mapping (ROUTE-01, D-01, D-02, D-03)

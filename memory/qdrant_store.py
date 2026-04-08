@@ -16,7 +16,7 @@ import time
 import uuid
 from dataclasses import dataclass
 
-logger = logging.getLogger("agent42.memory.qdrant")
+logger = logging.getLogger("frood.memory.qdrant")
 
 # Vector dimensions for text-embedding-3-small
 VECTOR_DIM = 1536
@@ -46,7 +46,7 @@ class QdrantConfig:
     url: str = ""  # Empty = use embedded/local mode
     api_key: str = ""
     collection_prefix: str = "agent42"
-    local_path: str = ".agent42/qdrant"  # Path for embedded storage
+    local_path: str = ".frood/qdrant"  # Path for embedded storage
     vector_dim: int = VECTOR_DIM
 
 

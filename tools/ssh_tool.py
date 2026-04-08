@@ -21,7 +21,7 @@ from core.config import settings
 from core.sandbox import WorkspaceSandbox
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.ssh")
+logger = logging.getLogger("frood.tools.ssh")
 
 MAX_OUTPUT_LENGTH = 10000
 DEFAULT_CONNECT_TIMEOUT = 30

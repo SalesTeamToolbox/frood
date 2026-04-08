@@ -19,7 +19,7 @@ from pathlib import Path
 
 import aiofiles
 
-logger = logging.getLogger("agent42.memory.session")
+logger = logging.getLogger("frood.memory.session")
 
 
 @dataclass

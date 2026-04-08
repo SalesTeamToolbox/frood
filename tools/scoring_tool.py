@@ -9,7 +9,7 @@ import logging
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.scoring")
+logger = logging.getLogger("frood.tools.scoring")
 
 
 # Built-in rubrics

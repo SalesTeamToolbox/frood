@@ -17,7 +17,7 @@ from mcp.client.stdio import stdio_client
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.mcp")
+logger = logging.getLogger("frood.tools.mcp")
 
 
 class MCPConnection:

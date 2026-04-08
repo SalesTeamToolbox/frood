@@ -31,7 +31,7 @@ from starlette.routing import Route
 
 from core.rate_limiter import PerModelRateLimiter
 
-logger = logging.getLogger("agent42.zen_proxy")
+logger = logging.getLogger("frood.zen_proxy")
 
 DEFAULT_PORT = 8765
 DEFAULT_BIND = "127.0.0.1"

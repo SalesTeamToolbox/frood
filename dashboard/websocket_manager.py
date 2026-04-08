@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from fastapi import WebSocket
 
-logger = logging.getLogger("agent42.websocket")
+logger = logging.getLogger("frood.websocket")
 
 
 @dataclass

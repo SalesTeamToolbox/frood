@@ -23,7 +23,7 @@ from pathlib import Path
 
 from core.task_queue import TaskType
 
-logger = logging.getLogger("agent42.agent_routing_store")
+logger = logging.getLogger("frood.agent_routing_store")
 
 _VALID_OVERRIDE_KEYS = {"primary", "critic", "fallback"}
 

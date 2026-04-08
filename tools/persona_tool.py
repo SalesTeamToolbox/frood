@@ -9,7 +9,7 @@ import logging
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.persona")
+logger = logging.getLogger("frood.tools.persona")
 
 
 BUILTIN_PERSONAS: dict[str, dict] = {

@@ -16,7 +16,7 @@ import httpx
 from core.config import settings
 from core.sidecar_models import AdapterExecutionContext, CallbackPayload
 
-logger = logging.getLogger("agent42.sidecar.orchestrator")
+logger = logging.getLogger("frood.sidecar.orchestrator")
 
 # Idempotency guard: runId -> expiry timestamp (D-08)
 _active_runs: dict[str, float] = {}

@@ -11,7 +11,7 @@ import shutil
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.docker")
+logger = logging.getLogger("frood.tools.docker")
 
 
 class DockerTool(Tool):

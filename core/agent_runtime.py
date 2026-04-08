@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-logger = logging.getLogger("agent42.agent_runtime")
+logger = logging.getLogger("frood.agent_runtime")
 
 
 @dataclass
@@ -36,7 +36,7 @@ class AgentRuntime:
         self.workspace = Path(workspace)
         self.mcp_config = mcp_config or str(self.workspace / ".mcp.json")
         self._processes = {}
-        self._logs_dir = self.workspace / ".agent42" / "agent-logs"
+        self._logs_dir = self.workspace / ".frood" / "agent-logs"
         self._logs_dir.mkdir(parents=True, exist_ok=True)
 
     def _build_env(self, agent_config):

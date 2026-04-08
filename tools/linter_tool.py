@@ -12,7 +12,7 @@ import shutil
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.linter")
+logger = logging.getLogger("frood.tools.linter")
 
 
 class LinterTool(Tool):

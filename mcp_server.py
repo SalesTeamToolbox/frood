@@ -46,7 +46,7 @@ from core.sandbox import WorkspaceSandbox
 from mcp_registry import MCPRegistryAdapter
 from tools.registry import ToolRegistry
 
-logger = logging.getLogger("agent42.mcp.server")
+logger = logging.getLogger("frood.mcp.server")
 
 # ---------------------------------------------------------------------------
 # Server version — used in MCP initialize handshake

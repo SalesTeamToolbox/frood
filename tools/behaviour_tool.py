@@ -20,7 +20,7 @@ import aiofiles
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.behaviour")
+logger = logging.getLogger("frood.tools.behaviour")
 
 # Default header written to behaviour.md when it's first created
 _BEHAVIOUR_HEADER = """\
@@ -51,7 +51,7 @@ class BehaviourTool(Tool):
     - "Prefer functional programming patterns in Python"
     """
 
-    def __init__(self, memory_dir: str | Path = ".agent42/memory"):
+    def __init__(self, memory_dir: str | Path = ".frood/memory"):
         self._memory_dir = Path(memory_dir)
         self._behaviour_path = self._memory_dir / BEHAVIOUR_FILENAME
 

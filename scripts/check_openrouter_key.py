@@ -26,7 +26,7 @@ except ImportError:
     print("[dotenv] python-dotenv not installed — skipping .env load")
 
 # --- 2. Check settings.json (KeyStore) ----------------------------------------
-settings_path = Path(__file__).parent.parent / ".agent42" / "settings.json"
+settings_path = Path(__file__).parent.parent / ".frood" / "settings.json"
 print(f"\n[KeyStore] settings.json: {'found' if settings_path.exists() else 'NOT found'}")
 if settings_path.exists():
     try:

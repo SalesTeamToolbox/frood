@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 
 from channels.base import BaseChannel, InboundMessage, OutboundMessage
 
-logger = logging.getLogger("agent42.channels.manager")
+logger = logging.getLogger("frood.channels.manager")
 
 
 class ChannelManager:

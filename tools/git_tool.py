@@ -16,7 +16,7 @@ import re
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.git")
+logger = logging.getLogger("frood.tools.git")
 
 # Git flags that can execute arbitrary commands
 _DANGEROUS_GIT_FLAGS = re.compile(

@@ -26,7 +26,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-logger = logging.getLogger("agent42.memory.embeddings")
+logger = logging.getLogger("frood.memory.embeddings")
 
 # Strips [ISO_TIMESTAMP SHORT_UUID] tags from bullet lines before embedding.
 # Example: "- [2026-03-24T14:22:10Z a4f7b2c1] some text" → "- some text"
@@ -79,14 +79,14 @@ def _find_onnx_model_dir() -> Path | None:
     """Locate the ONNX model directory.
 
     Checks:
-    1. .agent42/models/all-MiniLM-L6-v2/ (project-local)
-    2. ~/.agent42/models/all-MiniLM-L6-v2/ (global)
+    1. .frood/models/all-MiniLM-L6-v2/ (project-local)
+    2. ~/.frood/models/all-MiniLM-L6-v2/ (global)
     """
     candidates = [
-        Path(os.environ.get("AGENT42_WORKSPACE", ".")) / ".agent42" / "models" / LOCAL_MODEL_NAME,
+        Path(os.environ.get("FROOD_WORKSPACE", ".")) / ".frood" / "models" / LOCAL_MODEL_NAME,
     ]
     try:
-        candidates.append(Path.home() / ".agent42" / "models" / LOCAL_MODEL_NAME)
+        candidates.append(Path.home() / ".frood" / "models" / LOCAL_MODEL_NAME)
     except RuntimeError:
         pass  # HOME not set (e.g. in tests with clear=True)
     for p in candidates:

@@ -10,7 +10,7 @@ import re
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.template")
+logger = logging.getLogger("frood.tools.template")
 
 
 # Built-in templates

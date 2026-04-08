@@ -10,7 +10,7 @@ import logging
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.subagent")
+logger = logging.getLogger("frood.tools.subagent")
 
 MAX_SUBAGENT_ITERATIONS = 15
 

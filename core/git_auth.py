@@ -19,7 +19,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
-logger = logging.getLogger("agent42.git_auth")
+logger = logging.getLogger("frood.git_auth")
 
 
 @contextmanager

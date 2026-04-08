@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.http_client")
+logger = logging.getLogger("frood.tools.http_client")
 
 # RFC 7230 valid header name characters
 _VALID_HEADER_NAME_RE = re.compile(r"^[a-zA-Z0-9!#$%&'*+\-.^_`|~]+$")

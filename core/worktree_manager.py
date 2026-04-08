@@ -21,12 +21,10 @@ from pathlib import Path
 
 import aiofiles
 
-logger = logging.getLogger("agent42.worktree")
+logger = logging.getLogger("frood.worktree")
 
 # Use user-specific directory instead of world-readable /tmp
-_WORKTREE_BASE = Path(
-    os.getenv("AGENT42_WORKTREE_DIR", str(Path.home() / ".agent42" / "worktrees"))
-)
+_WORKTREE_BASE = Path(os.getenv("FROOD_WORKTREE_DIR", str(Path.home() / ".frood" / "worktrees")))
 
 # Only allow alphanumeric + hyphen in task IDs
 _SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")

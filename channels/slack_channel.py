@@ -9,7 +9,7 @@ import logging
 
 from channels.base import BaseChannel, InboundMessage, OutboundMessage
 
-logger = logging.getLogger("agent42.channels.slack")
+logger = logging.getLogger("frood.channels.slack")
 
 try:
     from slack_sdk.socket_mode.aiohttp import SocketModeClient

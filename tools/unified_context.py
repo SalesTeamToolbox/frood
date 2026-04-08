@@ -31,7 +31,7 @@ from tools.context_assembler import (
 )
 from tools.mcp_client import MCPConnection
 
-logger = logging.getLogger("agent42.tools.unified_context")
+logger = logging.getLogger("frood.tools.unified_context")
 
 # ---------------------------------------------------------------------------
 # Budget fractions (D-13) — must sum to 1.0

@@ -12,7 +12,7 @@ import mcp.types as types
 from tools.base import ToolResult
 from tools.registry import ToolRegistry
 
-logger = logging.getLogger("agent42.mcp.registry")
+logger = logging.getLogger("frood.mcp.registry")
 
 # Prefix for all Agent42 tools exposed via MCP
 TOOL_PREFIX = "agent42"

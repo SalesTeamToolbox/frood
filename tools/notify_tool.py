@@ -17,7 +17,7 @@ import time
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.notify")
+logger = logging.getLogger("frood.tools.notify")
 
 # Global registry of pending input requests: task_id -> asyncio.Future
 _pending_inputs: dict[str, asyncio.Future] = {}

@@ -12,7 +12,7 @@ import time
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.file_watcher")
+logger = logging.getLogger("frood.tools.file_watcher")
 
 
 class FileWatcherTool(Tool):

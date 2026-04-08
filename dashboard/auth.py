@@ -22,7 +22,7 @@ from jose.exceptions import ExpiredSignatureError, JOSEError
 
 from core.config import settings
 
-logger = logging.getLogger("agent42.auth")
+logger = logging.getLogger("frood.auth")
 
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24

@@ -23,7 +23,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-logger = logging.getLogger("agent42.portability")
+logger = logging.getLogger("frood.portability")
 
 MANIFEST_FILENAME = "manifest.json"
 ARCHIVE_VERSION = 1
@@ -35,12 +35,12 @@ _SECRET_KEY_PATTERN = re.compile(r"_(KEY|TOKEN|PASSWORD|SECRET|HASH)$", re.IGNOR
 _BACKUP_CATEGORIES: dict[str, list[str]] = {
     "config": [".env.example", "requirements.txt", "setup.sh"],
     "state": ["tasks.json", "cron_jobs.json"],
-    "memory": [".agent42/memory"],
-    "sessions": [".agent42/sessions"],
-    "audit": [".agent42/approvals.jsonl", ".agent42/devices.jsonl"],
-    "secrets": [".env", ".agent42/settings.json", ".agent42/github_accounts.json"],
-    "media": [".agent42/outputs", ".agent42/templates", ".agent42/images"],
-    "qdrant": [".agent42/qdrant"],
+    "memory": [".frood/memory"],
+    "sessions": [".frood/sessions"],
+    "audit": [".frood/approvals.jsonl", ".frood/devices.jsonl"],
+    "secrets": [".env", ".frood/settings.json", ".frood/github_accounts.json"],
+    "media": [".frood/outputs", ".frood/templates", ".frood/images"],
+    "qdrant": [".frood/qdrant"],
     "skills": ["skills/workspace"],
 }
 
@@ -64,11 +64,11 @@ _CLONE_SOURCE_PATTERNS: list[str] = [
 
 # Empty dirs to scaffold in a clone package
 _CLONE_SCAFFOLD_DIRS: list[str] = [
-    ".agent42/memory",
-    ".agent42/sessions",
-    ".agent42/outputs",
-    ".agent42/templates",
-    ".agent42/images",
+    ".frood/memory",
+    ".frood/sessions",
+    ".frood/outputs",
+    ".frood/templates",
+    ".frood/images",
 ]
 
 
@@ -138,10 +138,10 @@ def _create_env_template(env_path: Path, template_path: Path) -> None:
 
 def _resolve_worktree_dir() -> Path:
     """Resolve the worktree directory from env or default."""
-    env_dir = os.environ.get("AGENT42_WORKTREE_DIR", "")
+    env_dir = os.environ.get("FROOD_WORKTREE_DIR", "")
     if env_dir:
         return Path(env_dir).expanduser().resolve()
-    return Path.home() / ".agent42" / "worktrees"
+    return Path.home() / ".frood" / "worktrees"
 
 
 def create_backup(
@@ -275,7 +275,7 @@ def restore_backup(
             raise ValueError(f"Expected archive_type 'backup', got '{manifest.archive_type}'")
 
         # Secret paths to skip if requested
-        secret_paths = {".env", ".agent42/settings.json"}
+        secret_paths = {".env", ".frood/settings.json"}
 
         # Copy files from extracted archive to target
         for item in extract_dir.rglob("*"):
@@ -292,7 +292,7 @@ def restore_backup(
                 shutil.copy2(str(item), str(dest))
 
                 # Restore restrictive permissions for settings.json
-                if rel_str == ".agent42/settings.json" and sys.platform != "win32":
+                if rel_str == ".frood/settings.json" and sys.platform != "win32":
                     os.chmod(str(dest), stat.S_IRUSR | stat.S_IWUSR)  # 0o600
 
         logger.info(

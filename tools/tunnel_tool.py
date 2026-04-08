@@ -24,7 +24,7 @@ from core.approval_gate import ApprovalGate, ProtectedAction
 from core.config import settings
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.tunnel")
+logger = logging.getLogger("frood.tools.tunnel")
 
 
 @dataclass

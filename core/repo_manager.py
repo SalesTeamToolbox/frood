@@ -25,7 +25,7 @@ from pathlib import Path
 
 import aiofiles
 
-logger = logging.getLogger("agent42.repo_manager")
+logger = logging.getLogger("frood.repo_manager")
 
 # Slug must be URL-safe: lowercase alphanumeric + hyphens
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -94,8 +94,8 @@ class RepositoryManager:
 
     def __init__(
         self,
-        repos_json_path: str = ".agent42/repos.json",
-        clone_dir: str = ".agent42/repos",
+        repos_json_path: str = ".frood/repos.json",
+        clone_dir: str = ".frood/repos",
         github_token: str = "",
     ):
         self._data_path = Path(repos_json_path)

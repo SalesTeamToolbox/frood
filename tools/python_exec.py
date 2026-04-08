@@ -19,7 +19,7 @@ import tempfile
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.python_exec")
+logger = logging.getLogger("frood.tools.python_exec")
 
 # Patterns that indicate dangerous code — block before execution
 _DANGEROUS_PATTERNS: list[re.Pattern] = [

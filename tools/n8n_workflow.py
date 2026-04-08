@@ -24,7 +24,7 @@ import httpx
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.n8n_workflow")
+logger = logging.getLogger("frood.tools.n8n_workflow")
 
 # ---------------------------------------------------------------------------
 # Module-level rate limit tracker (sliding window, 10 trigger calls / 60s)

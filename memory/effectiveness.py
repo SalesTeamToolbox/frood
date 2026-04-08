@@ -12,7 +12,7 @@ import logging
 import time
 from pathlib import Path
 
-logger = logging.getLogger("agent42.memory.effectiveness")
+logger = logging.getLogger("frood.memory.effectiveness")
 
 try:
     import aiosqlite
@@ -27,7 +27,7 @@ class EffectivenessStore:
     """Async SQLite store for tool invocation effectiveness data.
 
     Usage:
-        store = EffectivenessStore(Path(".agent42/effectiveness.db"))
+        store = EffectivenessStore(Path(".frood/effectiveness.db"))
         # Fire-and-forget from ToolRegistry:
         asyncio.create_task(store.record(
             tool_name="shell", task_type="coding", task_id="abc-123",

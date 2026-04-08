@@ -15,7 +15,7 @@ import smtplib
 
 from channels.base import BaseChannel, InboundMessage, OutboundMessage
 
-logger = logging.getLogger("agent42.channels.email")
+logger = logging.getLogger("frood.channels.email")
 
 
 class EmailChannel(BaseChannel):

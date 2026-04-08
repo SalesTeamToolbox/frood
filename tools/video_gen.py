@@ -16,7 +16,7 @@ from pathlib import Path
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.video_gen")
+logger = logging.getLogger("frood.tools.video_gen")
 
 
 # Video model catalog — free-first, same pattern as text LLM routing
@@ -71,7 +71,7 @@ VIDEO_MODELS: dict[str, dict] = {
 
 # Default routing
 DEFAULT_VIDEO_MODEL = "replicate-cogvideox"
-ADMIN_OVERRIDE_ENV = "AGENT42_VIDEO_MODEL"
+ADMIN_OVERRIDE_ENV = "FROOD_VIDEO_MODEL"
 
 # Prompt review model
 PROMPT_REVIEWER_MODEL = "or-free-mistral-small"

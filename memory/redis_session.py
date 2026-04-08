@@ -17,7 +17,7 @@ import logging
 import time
 from dataclasses import dataclass
 
-logger = logging.getLogger("agent42.memory.redis_session")
+logger = logging.getLogger("frood.memory.redis_session")
 
 try:
     import redis

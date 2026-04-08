@@ -17,7 +17,7 @@ import logging
 import time
 from typing import Any
 
-logger = logging.getLogger("agent42.sidecar.memory")
+logger = logging.getLogger("frood.sidecar.memory")
 
 
 class MemoryBridge:

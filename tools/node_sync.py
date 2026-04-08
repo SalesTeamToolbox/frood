@@ -22,11 +22,11 @@ from pathlib import Path
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.node_sync")
+logger = logging.getLogger("frood.tools.node_sync")
 
 DEFAULT_REMOTE = "agent42-prod"
 MEMORY_FILES = ["MEMORY.md", "HISTORY.md"]
-REMOTE_MEMORY_DIR = "~/agent42/.agent42/memory"
+REMOTE_MEMORY_DIR = "~/agent42/.frood/memory"
 
 # ── Entry-level merge helpers ─────────────────────────────────────────────────
 # Matches UUID-prefixed bullets: - [ISO_TS SHORT_UUID] content
@@ -198,7 +198,7 @@ class NodeSyncTool(Tool):
 
     def _get_local_memory_dir(self):
         workspace = Path(self._workspace) if self._workspace else Path(".")
-        return workspace / ".agent42" / "memory"
+        return workspace / ".frood" / "memory"
 
     async def _run_ssh(self, host, command, timeout=15):
         try:
@@ -285,7 +285,7 @@ class NodeSyncTool(Tool):
         if not dry_run:
             rc, _, stderr = await self._run_ssh(
                 host,
-                "cd ~/agent42 && .venv/bin/python -c \"import asyncio; from memory.store import MemoryStore; s = MemoryStore('.agent42/memory'); asyncio.run(s.reindex_memory()); print('Re-indexed')\"",
+                "cd ~/agent42 && .venv/bin/python -c \"import asyncio; from memory.store import MemoryStore; s = MemoryStore('.frood/memory'); asyncio.run(s.reindex_memory()); print('Re-indexed')\"",
                 timeout=30,
             )
             if rc == 0:
@@ -420,7 +420,7 @@ class NodeSyncTool(Tool):
 
             rc, _, _ = await self._run_ssh(
                 host,
-                "cd ~/agent42 && .venv/bin/python -c \"import asyncio; from memory.store import MemoryStore; s = MemoryStore('.agent42/memory'); asyncio.run(s.reindex_memory()); print('done')\"",
+                "cd ~/agent42 && .venv/bin/python -c \"import asyncio; from memory.store import MemoryStore; s = MemoryStore('.frood/memory'); asyncio.run(s.reindex_memory()); print('done')\"",
                 timeout=30,
             )
             results.append(f"  - Remote re-index: {'done' if rc == 0 else 'skipped'}")

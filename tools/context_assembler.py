@@ -20,7 +20,7 @@ from pathlib import Path
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.context_assembler")
+logger = logging.getLogger("frood.tools.context_assembler")
 
 # Budget allocation (fraction of max_tokens per source)
 _BUDGET_MEMORY = 0.35
@@ -29,12 +29,7 @@ _BUDGET_GIT = 0.20
 _BUDGET_SKILLS = 0.20
 
 _STOP_WORDS = frozenset(
-    "the a an is are was were be been being have has had do does did will would "
-    "could should may might can shall must need let lets please want like just "
-    "make get use this that these those its me my we our you your they them "
-    "their and or but if then else when where how what which who not no so too "
-    "very also about to for with from at by on in of up out off all any some "
-    "now here there yes ok done".split()
+    ["the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "can", "shall", "must", "need", "let", "lets", "please", "want", "like", "just", "make", "get", "use", "this", "that", "these", "those", "its", "me", "my", "we", "our", "you", "your", "they", "them", "their", "and", "or", "but", "if", "then", "else", "when", "where", "how", "what", "which", "who", "not", "no", "so", "too", "very", "also", "about", "to", "for", "with", "from", "at", "by", "on", "in", "of", "up", "out", "off", "all", "any", "some", "now", "here", "there", "yes", "ok", "done"]
 )
 
 
@@ -167,7 +162,7 @@ class ContextAssemblerTool(Tool):
         workspace = Path(self._workspace) if self._workspace else Path(".")
         doc_files = [
             workspace / "CLAUDE.md",
-            workspace / ".agent42" / "memory" / "MEMORY.md",
+            workspace / ".frood" / "memory" / "MEMORY.md",
         ]
         budget_per_doc = int(max_tokens * _BUDGET_DOCS) // max(len(doc_files), 1)
 

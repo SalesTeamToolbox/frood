@@ -12,7 +12,7 @@ import sys
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.test_runner")
+logger = logging.getLogger("frood.tools.test_runner")
 
 
 class TestRunnerTool(Tool):

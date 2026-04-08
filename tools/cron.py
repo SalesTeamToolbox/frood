@@ -23,7 +23,7 @@ from pathlib import Path
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.cron")
+logger = logging.getLogger("frood.tools.cron")
 
 
 class JobType(str, Enum):

@@ -10,7 +10,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-logger = logging.getLogger("agent42.heartbeat")
+logger = logging.getLogger("frood.heartbeat")
 
 # How often to emit heartbeats (seconds)
 DEFAULT_INTERVAL = 30

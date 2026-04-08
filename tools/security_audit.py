@@ -13,7 +13,7 @@ from pathlib import Path
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.security_audit")
+logger = logging.getLogger("frood.tools.security_audit")
 
 
 @dataclass
@@ -286,18 +286,18 @@ def run_audit() -> AuditReport:
     else:
         report.checks.append(AuditCheck(cat, ".env in .gitignore", "warn", "No .gitignore found"))
 
-    # Check .agent42 in gitignore
+    # Check .frood in gitignore
     if gitignore.exists():
         content = gitignore.read_text()
-        if ".agent42" in content:
-            report.checks.append(AuditCheck(cat, ".agent42/ in .gitignore", "pass"))
+        if ".frood" in content:
+            report.checks.append(AuditCheck(cat, ".frood/ in .gitignore", "pass"))
         else:
             report.checks.append(
-                AuditCheck(cat, ".agent42/ in .gitignore", "warn", "Add .agent42/ to .gitignore")
+                AuditCheck(cat, ".frood/ in .gitignore", "warn", "Add .frood/ to .gitignore")
             )
     else:
         report.checks.append(
-            AuditCheck(cat, ".agent42/ in .gitignore", "warn", "No .gitignore found")
+            AuditCheck(cat, ".frood/ in .gitignore", "warn", "No .gitignore found")
         )
 
     # Plaintext password check

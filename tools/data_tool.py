@@ -14,7 +14,7 @@ from collections import Counter, defaultdict
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.data")
+logger = logging.getLogger("frood.tools.data")
 
 
 class DataTool(Tool):

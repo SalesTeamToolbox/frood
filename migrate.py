@@ -7,13 +7,13 @@ Agent42 installation into a Paperclip-connected deployment.
 
 Usage:
     python migrate.py \
-        --agent42-db .agent42/effectiveness.db \
+        --frood-db .frood/effectiveness.db \
         --qdrant-url http://localhost:6333 \
         --target-qdrant-url http://localhost:6334 \
         --paperclip-company-id <uuid>
 
     python migrate.py --dry-run \
-        --agent42-db .agent42/effectiveness.db \
+        --frood-db .frood/effectiveness.db \
         --qdrant-url http://localhost:6333 \
         --target-qdrant-url http://localhost:6334 \
         --paperclip-company-id <uuid>
@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--agent42-db",
+        "--frood-db",
         required=True,
         help="Path to source effectiveness.db",
     )
@@ -262,8 +262,8 @@ async def migrate_effectiveness(src_db: str, dst_db: str) -> dict:
 async def run_migration(args) -> None:
     """Execute the full migration pipeline."""
     # Validate source DB exists
-    if not Path(args.agent42_db).exists():
-        logger.error(f"Source database not found: {args.agent42_db}")
+    if not Path(args.frood_db).exists():
+        logger.error(f"Source database not found: {args.frood_db}")
         sys.exit(1)
 
     if not QDRANT_AVAILABLE:
@@ -271,7 +271,7 @@ async def run_migration(args) -> None:
         sys.exit(1)
 
     # Target DB path
-    target_db = args.target_db or f"{args.agent42_db}.migrated"
+    target_db = args.target_db or f"{args.frood_db}.migrated"
 
     # Create Qdrant clients
     src_client = QdrantClient(url=args.qdrant_url)
@@ -298,7 +298,7 @@ async def run_migration(args) -> None:
 
     # Migrate effectiveness DB (unless dry_run)
     if not args.dry_run:
-        counts = await migrate_effectiveness(args.agent42_db, target_db)
+        counts = await migrate_effectiveness(args.frood_db, target_db)
         logger.info(
             f"Migration complete: {total_points} Qdrant points, effectiveness rows: {counts}"
         )

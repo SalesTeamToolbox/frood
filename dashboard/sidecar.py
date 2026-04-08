@@ -79,7 +79,7 @@ from core.sidecar_orchestrator import (
 from core.tiered_routing_bridge import TieredRoutingBridge
 from dashboard.auth import get_current_user
 
-logger = logging.getLogger("agent42.sidecar")
+logger = logging.getLogger("frood.sidecar")
 
 
 def create_sidecar_app(

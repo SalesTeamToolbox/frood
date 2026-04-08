@@ -33,7 +33,7 @@ from pathlib import Path
 
 import aiofiles
 
-logger = logging.getLogger("agent42.app_manager")
+logger = logging.getLogger("frood.app_manager")
 
 
 class AppStatus(str, Enum):
