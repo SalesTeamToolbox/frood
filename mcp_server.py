@@ -14,10 +14,10 @@ Usage:
 Claude Code integration (.mcp.json):
     {
       "mcpServers": {
-        "agent42": {
+        "frood": {
           "command": "python",
           "args": ["path/to/agent42/mcp_server.py"],
-          "env": { "AGENT42_WORKSPACE": "${workspaceFolder}" }
+          "env": { "FROOD_WORKSPACE": "${workspaceFolder}" }
         }
       }
     }
@@ -35,10 +35,10 @@ import mcp.types as types
 from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 
-# Ensure the agent42 package root is importable
-_AGENT42_ROOT = Path(__file__).resolve().parent
-if str(_AGENT42_ROOT) not in sys.path:
-    sys.path.insert(0, str(_AGENT42_ROOT))
+# Ensure the frood package root is importable
+_FROOD_ROOT = Path(__file__).resolve().parent
+if str(_FROOD_ROOT) not in sys.path:
+    sys.path.insert(0, str(_FROOD_ROOT))
 
 from core.command_filter import CommandFilter
 from core.rate_limiter import ToolRateLimiter
@@ -51,7 +51,7 @@ logger = logging.getLogger("frood.mcp.server")
 # ---------------------------------------------------------------------------
 # Server version — used in MCP initialize handshake
 # ---------------------------------------------------------------------------
-SERVER_NAME = "agent42"
+SERVER_NAME = "frood"
 SERVER_VERSION = "2.0.0-alpha"
 
 
@@ -59,10 +59,10 @@ def _resolve_workspace() -> Path:
     """Determine the workspace directory.
 
     Priority:
-    1. AGENT42_WORKSPACE env var
+    1. FROOD_WORKSPACE env var
     2. Current working directory
     """
-    ws = os.environ.get("AGENT42_WORKSPACE", "")
+    ws = os.environ.get("FROOD_WORKSPACE", "")
     if ws:
         return Path(ws).resolve()
     return Path.cwd().resolve()
@@ -158,7 +158,7 @@ def _build_registry() -> ToolRegistry:
     _register(KnowledgeTool(sandbox) if KnowledgeTool else None)
 
     # ── Memory Backend (Phase 3A) ────────────────────────────────────────
-    memory_dir = workspace / ".agent42" / "memory"
+    memory_dir = workspace / ".frood" / "memory"
     memory_dir.mkdir(parents=True, exist_ok=True)
 
     # Detect embedding vector dimension (probe without Qdrant to avoid lock)
@@ -184,7 +184,7 @@ def _build_registry() -> ToolRegistry:
         if qdrant_url:
             qdrant_store = QdrantStore(QdrantConfig(url=qdrant_url, vector_dim=vector_dim))
         else:
-            qdrant_path = str(workspace / ".agent42" / "qdrant")
+            qdrant_path = str(workspace / ".frood" / "qdrant")
             qdrant_store = QdrantStore(QdrantConfig(local_path=qdrant_path, vector_dim=vector_dim))
 
         if not qdrant_store.is_available:
@@ -230,7 +230,7 @@ def _build_registry() -> ToolRegistry:
 
                 _project_store_cache[project_id] = ProjectMemoryStore(
                     project_id=project_id,
-                    base_dir=workspace / ".agent42",
+                    base_dir=workspace / ".frood",
                     global_store=memory_store,
                     qdrant_store=qdrant_store,
                     redis_backend=redis_backend,
@@ -240,9 +240,7 @@ def _build_registry() -> ToolRegistry:
                 return memory_store  # Fallback to global
         return _project_store_cache[project_id]
 
-    _register(
-        BehaviourTool(memory_dir=workspace / ".agent42" / "memory") if BehaviourTool else None
-    )
+    _register(BehaviourTool(memory_dir=workspace / ".frood" / "memory") if BehaviourTool else None)
     _register(
         MemoryTool(
             memory_store=memory_store,
@@ -273,7 +271,7 @@ def _build_registry() -> ToolRegistry:
     try:
         from memory.effectiveness import EffectivenessStore
 
-        _eff_db = workspace / ".agent42" / "effectiveness.db"
+        _eff_db = workspace / ".frood" / "effectiveness.db"
         effectiveness_store = EffectivenessStore(_eff_db)
     except Exception as e:
         logger.info(f"EffectivenessStore not available: {e}")
@@ -323,8 +321,8 @@ def _load_skills() -> "SkillLoader":
 
     workspace = _resolve_workspace()
     skill_dirs = [
-        _AGENT42_ROOT / "skills" / "builtins",
-        _AGENT42_ROOT / "skills" / "workspace",
+        _FROOD_ROOT / "skills" / "builtins",
+        _FROOD_ROOT / "skills" / "workspace",
         workspace / ".claude" / "skills",
         workspace / "custom_skills",
     ]
@@ -606,7 +604,7 @@ def main():
             results["memory_pipeline"]["qdrant"] = f"unavailable: {str(e)[:80]}"
 
         # -- Memory Pipeline: Search service --
-        search_url = os.environ.get("AGENT42_SEARCH_URL", "http://127.0.0.1:6380")
+        search_url = os.environ.get("FROOD_SEARCH_URL", "http://127.0.0.1:6380")
         try:
             req = urllib.request.Request(f"{search_url}/health", method="GET")
             with urllib.request.urlopen(req, timeout=2) as resp:
@@ -616,8 +614,8 @@ def main():
             results["memory_pipeline"]["search_service"] = "unavailable"
 
         # -- Memory Pipeline: MEMORY.md --
-        project_dir = os.environ.get("AGENT42_WORKSPACE", os.getcwd())
-        memory_md = os.path.join(project_dir, ".agent42", "memory", "MEMORY.md")
+        project_dir = os.environ.get("FROOD_WORKSPACE", os.getcwd())
+        memory_md = os.path.join(project_dir, ".frood", "memory", "MEMORY.md")
         if os.path.exists(memory_md):
             size = os.path.getsize(memory_md)
             results["memory_pipeline"]["memory_md"] = f"ok ({size} bytes)"
@@ -625,7 +623,7 @@ def main():
             results["memory_pipeline"]["memory_md"] = "missing"
 
         # -- Memory Pipeline: HISTORY.md --
-        history_md = os.path.join(project_dir, ".agent42", "memory", "HISTORY.md")
+        history_md = os.path.join(project_dir, ".frood", "memory", "HISTORY.md")
         if os.path.exists(history_md):
             size = os.path.getsize(history_md)
             try:
@@ -664,7 +662,7 @@ def main():
         )
 
         # -- Memory Pipeline: 24h stats (from dashboard API) --
-        api_url = os.environ.get("AGENT42_API_URL", "http://127.0.0.1:8000")
+        api_url = os.environ.get("FROOD_API_URL", "http://127.0.0.1:8000")
         try:
             req = urllib.request.Request(f"{api_url}/api/memory/stats", method="GET")
             with urllib.request.urlopen(req, timeout=2) as resp:
