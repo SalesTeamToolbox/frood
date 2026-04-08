@@ -26,7 +26,7 @@ project_dir = script_dir.parent.parent  # project root (agent42/)
 sys.path.insert(0, str(project_dir))
 
 # ── Status file ──────────────────────────────────────────────────────────────
-STATUS_FILE = project_dir / ".agent42" / "knowledge-learn-status.json"
+STATUS_FILE = project_dir / ".frood" / "knowledge-learn-status.json"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 NAMESPACE = uuid.UUID("a42a42a4-2a42-4a42-a42a-42a42a42a42a")
@@ -89,7 +89,7 @@ def call_extraction_api(extract_data: dict) -> list:
     """
     import urllib.request
 
-    dashboard_url = os.environ.get("AGENT42_DASHBOARD_URL", "http://127.0.0.1:8000")
+    dashboard_url = os.environ.get("FROOD_DASHBOARD_URL", "http://127.0.0.1:8000")
 
     try:
         data = json.dumps(extract_data).encode("utf-8")
@@ -233,7 +233,7 @@ def process_learnings(extract_file: str) -> None:
         qdrant_url = os.getenv("QDRANT_URL", "")
         qdrant_local = os.getenv(
             "QDRANT_LOCAL_PATH",
-            str(project_dir / ".agent42" / "qdrant"),
+            str(project_dir / ".frood" / "qdrant"),
         )
         config = QdrantConfig(url=qdrant_url, local_path=qdrant_local, vector_dim=384)
         store = QdrantStore(config)

@@ -25,7 +25,7 @@ project_dir = script_dir.parent.parent  # project root (agent42/)
 sys.path.insert(0, str(project_dir))
 
 # ── Status file ──────────────────────────────────────────────────────────────
-STATUS_FILE = project_dir / ".agent42" / "cc-sync-status.json"
+STATUS_FILE = project_dir / ".frood" / "cc-sync-status.json"
 
 # ── Deferred imports (after sys.path bootstrap) ──────────────────────────────
 # Imported at module level so tests can patch them via patch.object()
@@ -146,7 +146,7 @@ def sync_memory_file(file_path: str) -> None:
             return
 
         qdrant_url = os.getenv("QDRANT_URL", "")
-        qdrant_local = os.getenv("QDRANT_LOCAL_PATH", str(project_dir / ".agent42" / "qdrant"))
+        qdrant_local = os.getenv("QDRANT_LOCAL_PATH", str(project_dir / ".frood" / "qdrant"))
         config = QdrantConfig(url=qdrant_url, local_path=qdrant_local, vector_dim=384)
         store = QdrantStore(config)
 

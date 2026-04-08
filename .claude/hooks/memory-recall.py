@@ -297,7 +297,7 @@ def search_history_entries(content, keywords):
     return results
 
 
-def try_semantic_search(memory_dir, prompt, agent42_root):
+def try_semantic_search(memory_dir, prompt, frood_root):
     """Semantic search via the Agent42 search service (HTTP).
 
     The search service keeps the embedding model loaded in memory,
@@ -306,7 +306,7 @@ def try_semantic_search(memory_dir, prompt, agent42_root):
     import urllib.error
     import urllib.request
 
-    search_url = os.environ.get("AGENT42_SEARCH_URL", "http://127.0.0.1:6380")
+    search_url = os.environ.get("FROOD_SEARCH_URL", "http://127.0.0.1:6380")
 
     try:
         data = json.dumps(
@@ -347,7 +347,7 @@ def try_semantic_search(memory_dir, prompt, agent42_root):
         return []
 
 
-def try_agent42_api_search(prompt):
+def try_frood_api_search(prompt):
     """Fallback: query Agent42's memory via its HTTP API.
 
     The Agent42 server exposes a memory search endpoint that queries Qdrant
@@ -357,7 +357,7 @@ def try_agent42_api_search(prompt):
     import urllib.error
     import urllib.request
 
-    api_url = os.environ.get("AGENT42_API_URL", "http://127.0.0.1:8000")
+    api_url = os.environ.get("FROOD_API_URL", "http://127.0.0.1:8000")
 
     try:
         # Try the MCP-exposed memory search via the API
@@ -467,7 +467,7 @@ def try_qdrant_local_search(keywords, project_dir):
 
     When the Qdrant HTTP server isn't running, this uses qdrant_client's
     path-based mode to read directly from the storage files at
-    .agent42/qdrant/. This gives us always-on vector search without
+    .frood/qdrant/. This gives us always-on vector search without
     requiring a separate server process.
 
     Falls back silently if qdrant_client isn't installed.
@@ -477,7 +477,7 @@ def try_qdrant_local_search(keywords, project_dir):
     except ImportError:
         return []
 
-    qdrant_path = os.path.join(project_dir, ".agent42", "qdrant")
+    qdrant_path = os.path.join(project_dir, ".frood", "qdrant")
     if not os.path.isdir(qdrant_path):
         return []
 
@@ -559,7 +559,7 @@ SESSION_CONTEXT_GUARD = "context-surfaced.json"
 
 def _context_guard_path(project_dir):
     """Return path to the context-surfaced guard file."""
-    return os.path.join(project_dir, ".agent42", SESSION_CONTEXT_GUARD)
+    return os.path.join(project_dir, ".frood", SESSION_CONTEXT_GUARD)
 
 
 def is_context_already_surfaced(project_dir, session_id):
@@ -634,7 +634,7 @@ def format_session_context(context):
         return ""
 
     lines = [
-        "[agent42-session-context] Previous session conversation (for continuity):",
+        "[frood-session-context] Previous session conversation (for continuity):",
         "---",
     ]
 
@@ -744,17 +744,17 @@ def main():
             mark_context_surfaced(project_dir, session_id)
 
     # ── Locate memory directory ──────────────────────────────────────────
-    memory_dir = Path(project_dir) / ".agent42" / "memory"
+    memory_dir = Path(project_dir) / ".frood" / "memory"
     if not memory_dir.exists():
         sys.exit(0)
 
     # ── Locate agent42 root (for imports) ────────────────────────────────
-    agent42_root = os.environ.get("AGENT42_ROOT", "")
-    if not agent42_root:
+    frood_root = os.environ.get("FROOD_ROOT", "")
+    if not frood_root:
         hook_dir = Path(__file__).resolve().parent
         possible_root = hook_dir.parent.parent  # .claude/hooks/../../
         if (possible_root / "memory" / "store.py").exists():
-            agent42_root = str(possible_root)
+            frood_root = str(possible_root)
 
     # ── Search memories ──────────────────────────────────────────────────
     keywords = extract_keywords(prompt)
@@ -773,11 +773,11 @@ def main():
 
         # Layer 1: Semantic search (best quality, requires embedding API + Qdrant)
         # Try dedicated search service first, then fall back to Agent42 API
-        semantic_results = try_semantic_search(memory_dir, prompt, agent42_root)
+        semantic_results = try_semantic_search(memory_dir, prompt, frood_root)
         if semantic_results:
             search_source = "semantic"
         else:
-            semantic_results = try_agent42_api_search(prompt)
+            semantic_results = try_frood_api_search(prompt)
             if semantic_results:
                 search_source = "agent42-api"
         memories.extend(semantic_results)
@@ -799,7 +799,7 @@ def main():
 
         # Layer 2: MEMORY.md keyword search (always-available, file I/O only)
         # This is the reliable fallback that works without any external services.
-        # Agent42's .agent42/memory/MEMORY.md contains consolidated learnings
+        # Agent42's .frood/memory/MEMORY.md contains consolidated learnings
         # from previous sessions — distinct from Claude Code's own memory files.
         if not memories:
             memory_file = memory_dir / "MEMORY.md"
@@ -839,7 +839,7 @@ def main():
         sys.exit(0)
 
     source_label = f" via {search_source}" if search_source else ""
-    lines = [f"[agent42-memory] Recall: {len(memories)} memories surfaced{source_label}"]
+    lines = [f"[frood-memory] Recall: {len(memories)} memories surfaced{source_label}"]
     for m in memories:
         score = m.get("score", 0)
         text = m.get("text", "").strip()

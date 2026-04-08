@@ -224,7 +224,7 @@ def read_conversation_buffer(project_dir):
     Returns list of prompt entries and deletes the buffer file.
     """
 
-    buffer_path = os.path.join(project_dir, ".agent42", "conversation-buffer.jsonl")
+    buffer_path = os.path.join(project_dir, ".frood", "conversation-buffer.jsonl")
     if not os.path.exists(buffer_path):
         return []
 

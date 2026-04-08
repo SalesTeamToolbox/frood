@@ -144,7 +144,7 @@ def main():
     }
 
     try:
-        extract_dir = Path(project_dir) / ".agent42"
+        extract_dir = Path(project_dir) / ".frood"
         extract_dir.mkdir(parents=True, exist_ok=True)
         temp_file = extract_dir / f"knowledge-extract-{os.getpid()}.json"
         temp_file.write_text(json.dumps(extract_data), encoding="utf-8")

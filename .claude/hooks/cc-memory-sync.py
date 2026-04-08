@@ -107,10 +107,10 @@ def main():
             creationflags=creation_flags,
         )
         print(
-            f"[agent42-memory] Sync: embedding {filename} to Qdrant (background)", file=sys.stderr
+            f"[frood-memory] Sync: embedding {filename} to Qdrant (background)", file=sys.stderr
         )
     except Exception:
-        print(f"[agent42-memory] Sync: failed to spawn worker for {filename}", file=sys.stderr)
+        print(f"[frood-memory] Sync: failed to spawn worker for {filename}", file=sys.stderr)
 
     sys.exit(0)
 

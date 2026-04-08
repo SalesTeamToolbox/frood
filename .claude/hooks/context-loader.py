@@ -512,7 +512,7 @@ def _emit_memory_nudge(prompt):
     print(
         "[context-loader] Memory reminder: If you discover something non-obvious "
         "during this task (a fix, a gotcha, a config detail), store it using the "
-        "agent42_memory MCP tool with action=store so it's available in future sessions.",
+        "frood_memory MCP tool with action=store so it's available in future sessions.",
         file=sys.stderr,
     )
 
@@ -536,7 +536,7 @@ def _emit_gsd_nudge(prompt, project_dir):
         except OSError:
             pass
     print(
-        "[agent42] Tip: This looks like a multi-step task \u2014 "
+        "[frood] Tip: This looks like a multi-step task \u2014 "
         "/gsd:new-project or /gsd:quick available",
         file=sys.stderr,
     )

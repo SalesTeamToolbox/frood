@@ -33,8 +33,8 @@ from pathlib import Path
 # ── Configuration ────────────────────────────────────────────────────────────
 MIN_PROMPT_LEN = 15
 MAX_OUTPUT_CHARS = 2000
-DASHBOARD_URL = os.environ.get("AGENT42_DASHBOARD_URL", "http://127.0.0.1:8000")
-INJECTION_GUARD_DIR = os.environ.get("AGENT42_DATA_DIR", ".agent42")
+DASHBOARD_URL = os.environ.get("FROOD_DASHBOARD_URL", "http://127.0.0.1:8000")
+INJECTION_GUARD_DIR = os.environ.get("FROOD_DATA_DIR", ".frood")
 
 # Task type keyword mappings for prompt-based inference (no LLM needed)
 # app_create uses multi-word phrases and must be checked first for priority
@@ -269,7 +269,7 @@ def format_injection_output(results: list, task_type: str) -> str:
         Formatted string truncated to MAX_OUTPUT_CHARS.
     """
     header = (
-        f"[agent42-learnings] Injecting {len(results)} past learnings for task_type={task_type}"
+        f"[frood-learnings] Injecting {len(results)} past learnings for task_type={task_type}"
     )
     lines = [header]
 
@@ -319,7 +319,7 @@ def format_recommendations_output(recs: list, task_type: str) -> str:
     """
     if not recs:
         return ""
-    lines = [f"[agent42-recommendations] Top tools for {task_type}:"]
+    lines = [f"[frood-recommendations] Top tools for {task_type}:"]
     for i, r in enumerate(recs, 1):
         name = r.get("tool_name", "?")
         rate = r.get("success_rate", 0.0)

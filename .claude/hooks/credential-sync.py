@@ -7,7 +7,7 @@ Checks if the remote node has stale or missing CC credentials and
 syncs the local ~/.claude/.credentials.json if needed. Runs silently
 in the background — only outputs to stderr on actual sync or errors.
 
-Requires SSH alias configured (reads from .env AGENT42_SSH_ALIAS or
+Requires SSH alias configured (reads from .env FROOD_SSH_ALIAS or
 defaults to 'agent42-prod').
 
 Hook protocol:
@@ -32,14 +32,14 @@ def main():
     project_dir = hook_data.get("project_dir", os.getcwd())
 
     # Load SSH alias from .env or default
-    ssh_alias = os.environ.get("AGENT42_SSH_ALIAS", "")
+    ssh_alias = os.environ.get("FROOD_SSH_ALIAS", "")
     if not ssh_alias:
         env_path = os.path.join(project_dir, ".env")
         if os.path.isfile(env_path):
             with open(env_path) as f:
                 for line in f:
                     line = line.strip()
-                    if line.startswith("AGENT42_SSH_ALIAS="):
+                    if line.startswith("FROOD_SSH_ALIAS="):
                         ssh_alias = line.split("=", 1)[1].strip().strip("\"'")
                         break
     if not ssh_alias:

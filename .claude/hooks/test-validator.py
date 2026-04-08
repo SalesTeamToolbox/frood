@@ -41,6 +41,7 @@ GLOBAL_IMPACT_FILES = {
     "tools/base.py",
     "providers/__init__.py",
     "agent42.py",
+    "frood.py",
 }
 
 # Max test files to run in targeted mode before falling back to full suite

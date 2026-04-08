@@ -315,7 +315,7 @@ def main():
         sys.exit(0)
 
     # ── Append to HISTORY.md ─────────────────────────────────────────────
-    memory_dir = Path(project_dir) / ".agent42" / "memory"
+    memory_dir = Path(project_dir) / ".frood" / "memory"
     memory_dir.mkdir(parents=True, exist_ok=True)
 
     history_path = memory_dir / "HISTORY.md"
@@ -331,12 +331,12 @@ def main():
         with open(history_path, "a", encoding="utf-8") as f:
             f.write(entry)
     except Exception as e:
-        print(f"[agent42-memory] Learn: failed to write history — {e}", file=sys.stderr)
+        print(f"[frood-memory] Learn: failed to write history — {e}", file=sys.stderr)
         sys.exit(0)
 
     # ── Index via search service HTTP API (avoids loading model in hook) ──
     indexed = False
-    search_url = os.environ.get("AGENT42_SEARCH_URL", "http://127.0.0.1:6380")
+    search_url = os.environ.get("FROOD_SEARCH_URL", "http://127.0.0.1:6380")
     try:
         import urllib.request
 
@@ -354,7 +354,7 @@ def main():
         pass  # Search service not running — file-based history still works
 
     store_label = "HISTORY.md + Qdrant" if indexed else "HISTORY.md"
-    print(f"[agent42-memory] Learn: captured to {store_label} — {summary[:120]}", file=sys.stderr)
+    print(f"[frood-memory] Learn: captured to {store_label} — {summary[:120]}", file=sys.stderr)
     sys.exit(0)
 
 

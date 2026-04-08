@@ -101,7 +101,7 @@ def read_task_context(project_dir):
     """
     import uuid
 
-    task_file = Path(project_dir) / ".agent42" / "current-task.json"
+    task_file = Path(project_dir) / ".frood" / "current-task.json"
     try:
         if task_file.exists():
             data = json.loads(task_file.read_text(encoding="utf-8"))
@@ -189,7 +189,7 @@ def persist_learning(learning_data, task_id, task_type, tools_used, files_modifi
     """Call Agent42's HTTP API to persist the learning entry."""
     import urllib.request
 
-    dashboard_url = os.environ.get("AGENT42_DASHBOARD_URL", "http://127.0.0.1:8000")
+    dashboard_url = os.environ.get("FROOD_DASHBOARD_URL", "http://127.0.0.1:8000")
 
     payload = {
         "task_type": task_type,

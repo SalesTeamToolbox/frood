@@ -29,7 +29,7 @@ MIN_PROMPT_LEN = 5  # Skip trivially short prompts
 
 def get_buffer_path(project_dir):
     """Return path to the conversation buffer file."""
-    return os.path.join(project_dir, ".agent42", BUFFER_FILENAME)
+    return os.path.join(project_dir, ".frood", BUFFER_FILENAME)
 
 
 def append_prompt(buffer_path, prompt, session_id):
