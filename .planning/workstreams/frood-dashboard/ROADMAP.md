@@ -66,7 +66,7 @@ Plans:
 
 ### Phases
 
-- [ ] **Phase 52: Core Identity Rename** — Rename entry point, data directory, env vars, and all Python internal references (frood.py, .frood/, FROOD_* vars, logger names)
+- [x] **Phase 52: Core Identity Rename** — Rename entry point, data directory, env vars, and all Python internal references (frood.py, .frood/, FROOD_* vars, logger names)
 - [ ] **Phase 53: Frontend Identity + Sidecar Auth** — Migrate frontend storage keys and BroadcastChannel names; add /sidecar/token provisioning endpoint
 - [ ] **Phase 54: Infrastructure + Packages** — Rename Docker services, volumes, compose env vars; rename NPM adapter and plugin packages
 - [ ] **Phase 55: Qdrant Migration + Test Suite** — Migrate collection names with aliases for backward compat; update all tests and docs; full suite validation
@@ -88,8 +88,8 @@ Plans:
 
 Plans:
 - [x] 52-01-PLAN.md — Create frood.py entry point, agent42.py shim, config.py defaults, data dir migration
-- [ ] 52-02-PLAN.md — Rename AGENT42_* env vars, mcp_server.py internals, CLAUDE.md markers, .agent42/ paths
-- [ ] 52-03-PLAN.md — Batch logger rename, hook files, test file updates
+- [x] 52-02-PLAN.md — Rename AGENT42_* env vars, mcp_server.py internals, CLAUDE.md markers, .agent42/ paths
+- [x] 52-03-PLAN.md — Batch logger rename, hook files, test file updates
 
 ### Phase 53: Frontend Identity + Sidecar Auth
 
