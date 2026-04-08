@@ -954,7 +954,7 @@ class TestApprovalGateAudit:
         req._event = asyncio.Event()
         gate._pending["task1:git_push"] = req
 
-        with caplog.at_level(logging.INFO, logger="agent42.approval"):
+        with caplog.at_level(logging.INFO, logger="frood.approval"):
             gate.approve("task1", "git_push", user="alice@example.com")
 
         assert req.approved is True
@@ -971,7 +971,7 @@ class TestApprovalGateAudit:
         req._event = asyncio.Event()
         gate._pending["task2:file_delete"] = req
 
-        with caplog.at_level(logging.INFO, logger="agent42.approval"):
+        with caplog.at_level(logging.INFO, logger="frood.approval"):
             gate.deny("task2", "file_delete", user="bob@example.com")
 
         assert req.approved is False
@@ -988,7 +988,7 @@ class TestApprovalGateAudit:
         req._event = asyncio.Event()
         gate._pending["task3:external_api"] = req
 
-        with caplog.at_level(logging.INFO, logger="agent42.approval"):
+        with caplog.at_level(logging.INFO, logger="frood.approval"):
             gate.approve("task3", "external_api")
 
         assert any("unknown" in record.message for record in caplog.records)
