@@ -168,7 +168,7 @@ def setup_windows_service(project_dir: str, action: str = "install") -> None:
         print("  sc query agent42      - Status")
         print("")
         print("To uninstall:")
-        print(f"  python scripts/setup_helpers.py windows-service uninstall")
+        print("  python scripts/setup_helpers.py windows-service uninstall")
     else:
         print(f"Warning: Service installed but may not have started: {start_result.stdout}")
         print("Check logs in the project directory for details.")
@@ -277,7 +277,7 @@ def setup_n8n_service(project_dir: str, action: str = "install") -> None:
         print("  sc query n8n-agent42      - Status")
         print("")
         print("To uninstall:")
-        print(f"  python scripts/setup_helpers.py n8n-service uninstall")
+        print("  python scripts/setup_helpers.py n8n-service uninstall")
     else:
         print(f"Warning: Service installed but may not have started: {start_result.stdout}")
         print("Check logs in the project directory for details.")
@@ -325,7 +325,7 @@ def run_windows_setup(project_dir: str) -> None:
     else:
         print("Docker not found - skipping n8n service installation.")
         print("You can install Docker Desktop later and run:")
-        print(f"  python scripts/setup_helpers.py n8n-service install")
+        print("  python scripts/setup_helpers.py n8n-service install")
 
     print()
 
@@ -373,24 +373,24 @@ def run_windows_setup(project_dir: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_agent42_entry(project_dir: str, venv_python: str) -> dict:
+def _make_frood_entry(project_dir: str, venv_python: str) -> dict:
     return {
         "command": venv_python,
         "args": [os.path.join(project_dir, "mcp_server.py")],
         "env": {
-            "AGENT42_WORKSPACE": project_dir,
+            "FROOD_WORKSPACE": project_dir,
             "REDIS_URL": "redis://localhost:6379/0",
             "QDRANT_URL": "http://localhost:6333",
         },
     }
 
 
-def _make_agent42_remote_entry(ssh_alias: str) -> dict:
+def _make_frood_remote_entry(ssh_alias: str) -> dict:
     return {
         "command": "ssh",
         "args": [
             ssh_alias,
-            "cd ~/agent42 && AGENT42_WORKSPACE=~/agent42 .venv/bin/python mcp_server.py",
+            "cd ~/agent42 && FROOD_WORKSPACE=~/agent42 .venv/bin/python mcp_server.py",
         ],
         "env": {},
     }
@@ -424,46 +424,50 @@ _STATIC_SERVERS = {
 # CLAUDE.md memory section template
 # ---------------------------------------------------------------------------
 
-_CLAUDE_MD_BEGIN = "<!-- BEGIN AGENT42 MEMORY -->"
-_CLAUDE_MD_END = "<!-- END AGENT42 MEMORY -->"
+_CLAUDE_MD_BEGIN = "<!-- BEGIN FROOD MEMORY -->"
+_CLAUDE_MD_END = "<!-- END FROOD MEMORY -->"
+
+# Old markers for migration (one-time upgrade from AGENT42 → FROOD)
+_CLAUDE_MD_BEGIN_LEGACY = "<!-- BEGIN AGENT42 MEMORY -->"
+_CLAUDE_MD_END_LEGACY = "<!-- END AGENT42 MEMORY -->"
 
 CLAUDE_MD_TEMPLATE = """\
-<!-- BEGIN AGENT42 MEMORY -->
-## Agent42 Memory
+<!-- BEGIN FROOD MEMORY -->
+## Frood Memory
 
-Agent42 provides a persistent, semantically-searchable memory layer via the `agent42_memory`
-MCP tool. These instructions configure Claude Code to use Agent42 as its primary memory system.
+Frood provides a persistent, semantically-searchable memory layer via the `frood_memory`
+MCP tool. These instructions configure Claude Code to use Frood as its primary memory system.
 
 ### When to search memory
 
-ALWAYS call `agent42_memory` with action `search` before answering any question that
+ALWAYS call `frood_memory` with action `search` before answering any question that
 could draw on past project decisions, user preferences, debugging history, or architectural
 choices. Do not rely solely on your context window or built-in memory files.
 
 ```
-agent42_memory(action="search", content="<your query>")
+frood_memory(action="search", content="<your query>")
 ```
 
 ### When to store
 
 After learning something important -- a user preference, a project decision, a fix for
-a recurring bug -- call `agent42_memory` with action `store` IN ADDITION to any
+a recurring bug -- call `frood_memory` with action `store` IN ADDITION to any
 built-in memory write. This ensures the information is searchable by semantic meaning,
 not just file name.
 
 ```
-agent42_memory(action="store", section="<Category>", content="<what to remember>")
+frood_memory(action="store", section="<Category>", content="<what to remember>")
 ```
 
 ### When to log
 
 After completing a significant task or resolving a non-obvious problem, call
-`agent42_memory` with action `log` to record the event in the project timeline.
+`frood_memory` with action `log` to record the event in the project timeline.
 
 ```
-agent42_memory(action="log", event_type="task_completed", content="<summary>")
+frood_memory(action="log", event_type="task_completed", content="<summary>")
 ```
-<!-- END AGENT42 MEMORY -->
+<!-- END FROOD MEMORY -->
 """
 
 
@@ -578,39 +582,39 @@ No manual activation required — hooks are registered by `bash setup.sh`.
 
 ---
 
-## Agent42 Memory
+## Frood Memory
 
-Agent42 provides a persistent, semantically-searchable memory layer via the `agent42_memory`
-MCP tool. These instructions configure Claude Code to use Agent42 as its primary memory system.
+Frood provides a persistent, semantically-searchable memory layer via the `frood_memory`
+MCP tool. These instructions configure Claude Code to use Frood as its primary memory system.
 
 ### When to search memory
 
-ALWAYS call `agent42_memory` with action `search` before answering any question that
+ALWAYS call `frood_memory` with action `search` before answering any question that
 could draw on past project decisions, user preferences, debugging history, or architectural
 choices. Do not rely solely on your context window or built-in memory files.
 
 ```
-agent42_memory(action="search", content="<your query>")
+frood_memory(action="search", content="<your query>")
 ```
 
 ### When to store
 
 After learning something important — a user preference, a project decision, a fix for
-a recurring bug — call `agent42_memory` with action `store` IN ADDITION to any
+a recurring bug — call `frood_memory` with action `store` IN ADDITION to any
 built-in memory write. This ensures the information is searchable by semantic meaning,
 not just file name.
 
 ```
-agent42_memory(action="store", section="<Category>", content="<what to remember>")
+frood_memory(action="store", section="<Category>", content="<what to remember>")
 ```
 
 ### When to log
 
 After completing a significant task or resolving a non-obvious problem, call
-`agent42_memory` with action `log` to record the event in the project timeline.
+`frood_memory` with action `log` to record the event in the project timeline.
 
 ```
-agent42_memory(action="log", event_type="task_completed", content="<summary>")
+frood_memory(action="log", event_type="task_completed", content="<summary>")
 ```
 
 ---
@@ -649,7 +653,7 @@ python -m pytest tests/ -k "test_name"      # Filter by name
 | 7 | Security | Path traversal via `../` in user-supplied file paths | Validate all file paths with `os.path.abspath()` and check they're inside allowed root |
 | 8 | Windows | `python3` command not found on Windows | Use `python` on Windows; detect with `sys.platform == 'win32'` |
 | 9 | Windows | CRLF line endings in bash scripts cause `$'\\r': command not found` | Set `.gitattributes` with `*.sh text eol=lf`; strip CRLF with `sed -i 's/\\r$//'` before running |
-| 10 | Memory | Agent claims to remember things not in context | Use `agent42_memory(action="search", ...)` before answering; only reference actual retrieved content |
+| 10 | Memory | Agent claims to remember things not in context | Use `frood_memory(action="search", ...)` before answering; only reference actual retrieved content |
 | 11 | Memory | Storing memories without semantic search defeats the purpose | Always use `action="store"` with a descriptive `section` so memories are retrievable by topic |
 | 12 | Imports | Circular imports cause `ImportError` at startup | Move shared utilities to a separate module; avoid importing from `__init__.py` that imports from submodules |
 | 13 | Errors | Bare `except:` swallows all exceptions including `KeyboardInterrupt` | Use `except Exception:` minimum; prefer specific exception types; always log the error |
@@ -706,6 +710,12 @@ def generate_full_claude_md(project_dir: str) -> None:
     else:
         original = ""
 
+    # Migration: replace legacy AGENT42 MEMORY markers with FROOD MEMORY markers
+    if _CLAUDE_MD_BEGIN_LEGACY in original:
+        original = original.replace(_CLAUDE_MD_BEGIN_LEGACY, _CLAUDE_MD_BEGIN)
+    if _CLAUDE_MD_END_LEGACY in original:
+        original = original.replace(_CLAUDE_MD_END_LEGACY, _CLAUDE_MD_END)
+
     if _CLAUDE_MD_BEGIN in original and _CLAUDE_MD_END in original:
         # Replace content between markers
         before = original[: original.index(_CLAUDE_MD_BEGIN)]
@@ -755,6 +765,13 @@ def generate_claude_md_section(project_dir: str) -> None:
             original = f.read()
     else:
         original = "# CLAUDE.md\n\n"
+
+    # Migration: replace legacy AGENT42 MEMORY markers with FROOD MEMORY markers
+    # (one-time upgrade — prevents duplicate blocks when old markers exist)
+    if _CLAUDE_MD_BEGIN_LEGACY in original:
+        original = original.replace(_CLAUDE_MD_BEGIN_LEGACY, _CLAUDE_MD_BEGIN)
+    if _CLAUDE_MD_END_LEGACY in original:
+        original = original.replace(_CLAUDE_MD_END_LEGACY, _CLAUDE_MD_END)
 
     if _CLAUDE_MD_BEGIN in original and _CLAUDE_MD_END in original:
         before = original[: original.index(_CLAUDE_MD_BEGIN)]
@@ -849,20 +866,20 @@ def generate_mcp_config(project_dir: str, ssh_alias: str | None = None) -> None:
 
     servers = config.setdefault("mcpServers", {})
 
-    # -- agent42 (replace if command path is stale) -------------------------
-    if "agent42" in servers:
-        existing_cmd = servers["agent42"].get("command", "")
+    # -- frood (replace if command path is stale) ---------------------------
+    if "frood" in servers:
+        existing_cmd = servers["frood"].get("command", "")
         if not os.path.isfile(existing_cmd):
             # Stale path (e.g., from another machine) — replace it
-            servers["agent42"] = _make_agent42_entry(project_dir, venv_python)
+            servers["frood"] = _make_frood_entry(project_dir, venv_python)
         # else: valid path exists — skip (never overwrite)
     else:
-        servers["agent42"] = _make_agent42_entry(project_dir, venv_python)
+        servers["frood"] = _make_frood_entry(project_dir, venv_python)
 
-    # -- agent42-remote (only when ssh_alias is provided) ------------------
+    # -- frood-remote (only when ssh_alias is provided) --------------------
     if ssh_alias:
-        if "agent42-remote" not in servers:
-            servers["agent42-remote"] = _make_agent42_remote_entry(ssh_alias)
+        if "frood-remote" not in servers:
+            servers["frood-remote"] = _make_frood_remote_entry(ssh_alias)
 
     # -- Static servers (never overwrite) -----------------------------------
     for name, entry in _STATIC_SERVERS.items():

@@ -1,0 +1,48 @@
+{
+  "_comment": "Full MCP server catalog. Use /mcp-activate <name> to enable a server.",
+  "mcpServers": {
+    "frood": {
+      "command": "c:\\Users\\rickw\\projects\\agent42\\.venv\\Scripts\\python.exe",
+      "args": ["c:\\Users\\rickw\\projects\\agent42\\mcp_server.py"],
+      "env": {
+        "FROOD_WORKSPACE": "c:\\Users\\rickw\\projects\\agent42",
+        "REDIS_URL": "redis://localhost:6379/0",
+        "QDRANT_URL": "http://localhost:6333"
+      }
+    },
+    "frood-remote": {
+      "command": "ssh",
+      "args": ["agent42-prod", "cd ~/agent42 && FROOD_WORKSPACE=~/agent42 .venv/bin/python mcp_server.py"],
+      "env": {}
+    },
+    "jcodemunch": {
+      "command": "uvx",
+      "args": ["jcodemunch-mcp"],
+      "env": {}
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"],
+      "env": {}
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-playwright"],
+      "env": {}
+    },
+    "firecrawl": {
+      "command": "npx",
+      "args": ["-y", "firecrawl-mcp"],
+      "env": {
+        "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}"
+      }
+    }
+  }
+}

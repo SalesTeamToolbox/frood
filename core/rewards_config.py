@@ -1,6 +1,6 @@
 """Mutable runtime configuration for the performance-based rewards system.
 
-Backed by .agent42/rewards_config.json with mtime-based lazy loading and
+Backed by .frood/rewards_config.json with mtime-based lazy loading and
 atomic writes via os.replace(). This handles the runtime on/off toggle and
 threshold overrides without a server restart.
 
