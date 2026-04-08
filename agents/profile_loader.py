@@ -28,7 +28,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-logger = logging.getLogger("agent42.profile_loader")
+logger = logging.getLogger("frood.profile_loader")
 
 # Built-in profiles directory (alongside this module)
 _BUILTIN_PROFILES_DIR = Path(__file__).parent / "profiles"

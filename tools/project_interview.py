@@ -16,7 +16,6 @@ import uuid
 from pathlib import Path
 
 import aiofiles
-
 from core.interview_questions import (
     ANSWER_EXTRACTION_PROMPT,
     ROUND_DISPLAY_NAMES,
@@ -26,9 +25,10 @@ from core.interview_questions import (
 )
 from core.project_spec import ProjectSpecGenerator
 from core.task_queue import Task, TaskType
+
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.project_interview")
+logger = logging.getLogger("frood.tools.project_interview")
 
 
 class ProjectInterviewTool(Tool):
@@ -49,7 +49,7 @@ class ProjectInterviewTool(Tool):
     ):
         self._workspace = workspace_path
         self._router = router
-        self._outputs_dir = outputs_dir or ".agent42/outputs"
+        self._outputs_dir = outputs_dir or ".frood/outputs"
         self._spec_generator = ProjectSpecGenerator(router=router)
         self._task_queue = task_queue
 

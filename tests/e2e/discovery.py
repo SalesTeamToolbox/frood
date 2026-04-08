@@ -13,12 +13,8 @@ tools, or features are added, tests automatically cover them.
 """
 
 import ast
-import os
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
-
-from .config import AGENT42_ROOT
 
 
 @dataclass
@@ -50,7 +46,7 @@ class CodebaseManifest:
 
 def discover_endpoints() -> list[Endpoint]:
     """Parse server.py for all @app.{method}(...) decorated routes."""
-    server_py = AGENT42_ROOT / "dashboard" / "server.py"
+    server_py = FROOD_ROOT / "dashboard" / "server.py"
     if not server_py.exists():
         return []
 
@@ -76,7 +72,7 @@ def discover_endpoints() -> list[Endpoint]:
 
 def discover_tools() -> list[ToolInfo]:
     """Scan tools/ directory for tool classes."""
-    tools_dir = AGENT42_ROOT / "tools"
+    tools_dir = FROOD_ROOT / "tools"
     if not tools_dir.exists():
         return []
 
@@ -92,18 +88,18 @@ def discover_tools() -> list[ToolInfo]:
                     tools.append(
                         ToolInfo(
                             name=py_file.stem,
-                            file=str(py_file.relative_to(AGENT42_ROOT)),
+                            file=str(py_file.relative_to(FROOD_ROOT)),
                             class_name=node.name,
                         )
                     )
         except (SyntaxError, UnicodeDecodeError):
-            tools.append(ToolInfo(name=py_file.stem, file=str(py_file.relative_to(AGENT42_ROOT))))
+            tools.append(ToolInfo(name=py_file.stem, file=str(py_file.relative_to(FROOD_ROOT))))
     return tools
 
 
 def discover_task_types() -> list[str]:
     """Extract TaskType enum members from task_queue.py."""
-    task_queue = AGENT42_ROOT / "core" / "task_queue.py"
+    task_queue = FROOD_ROOT / "core" / "task_queue.py"
     if not task_queue.exists():
         return []
 
@@ -128,9 +124,9 @@ def discover_skills() -> list[str]:
     """Find all skills (built-in + workspace)."""
     skills = []
     for skills_dir in [
-        AGENT42_ROOT / "skills" / "builtins",
-        AGENT42_ROOT / "skills" / "workspace",
-        AGENT42_ROOT / "skills",
+        FROOD_ROOT / "skills" / "builtins",
+        FROOD_ROOT / "skills" / "workspace",
+        FROOD_ROOT / "skills",
     ]:
         if not skills_dir.exists():
             continue
@@ -144,7 +140,7 @@ def discover_skills() -> list[str]:
 
 def discover_frontend_views() -> list[str]:
     """Detect view/page identifiers from app.js."""
-    app_js = AGENT42_ROOT / "dashboard" / "frontend" / "dist" / "app.js"
+    app_js = FROOD_ROOT / "dashboard" / "frontend" / "dist" / "app.js"
     if not app_js.exists():
         return []
 
@@ -162,7 +158,7 @@ def discover_frontend_views() -> list[str]:
 
 def discover_channels() -> list[str]:
     """Find channel implementations."""
-    channels_dir = AGENT42_ROOT / "channels"
+    channels_dir = FROOD_ROOT / "channels"
     if not channels_dir.exists():
         return []
 

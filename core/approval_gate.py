@@ -19,7 +19,7 @@ from pathlib import Path
 
 import aiofiles
 
-logger = logging.getLogger("agent42.approval")
+logger = logging.getLogger("frood.approval")
 
 
 class ProtectedAction(str, Enum):
@@ -56,7 +56,7 @@ class ApprovalGate:
         self,
         task_queue,
         timeout: int = DEFAULT_TIMEOUT,
-        log_path: str = ".agent42/approvals.jsonl",
+        log_path: str = ".frood/approvals.jsonl",
     ):
         self.task_queue = task_queue
         self.timeout = timeout

@@ -21,7 +21,7 @@ import aiofiles
 if TYPE_CHECKING:
     from core.task_queue import TaskQueue
 
-logger = logging.getLogger("agent42.project_manager")
+logger = logging.getLogger("frood.project_manager")
 
 
 class ProjectStatus(str, Enum):

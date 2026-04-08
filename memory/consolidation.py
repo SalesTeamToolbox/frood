@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 import httpx
 
-logger = logging.getLogger("agent42.memory.consolidation")
+logger = logging.getLogger("frood.memory.consolidation")
 
 
 class ConsolidationRouter:

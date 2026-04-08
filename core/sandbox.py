@@ -8,7 +8,7 @@ All file paths are resolved and checked against the allowed directory before any
 import logging
 from pathlib import Path
 
-logger = logging.getLogger("agent42.sandbox")
+logger = logging.getLogger("frood.sandbox")
 
 
 class SandboxViolation(PermissionError):

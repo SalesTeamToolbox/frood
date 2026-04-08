@@ -19,7 +19,7 @@ import logging
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.memory")
+logger = logging.getLogger("frood.tools.memory")
 
 # Semantic similarity thresholds for deduplication
 DEDUP_THRESHOLD = 0.90  # >= this = near-duplicate, skip or merge

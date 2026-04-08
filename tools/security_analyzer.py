@@ -12,7 +12,7 @@ import re
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.security_analyzer")
+logger = logging.getLogger("frood.tools.security_analyzer")
 
 # Directories excluded from OWASP/secrets scanning to reduce false positives.
 # These contain legitimate uses of dangerous patterns (tests, security tooling).

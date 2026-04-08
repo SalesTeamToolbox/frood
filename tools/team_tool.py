@@ -34,7 +34,7 @@ from tools.base import Tool, ToolResult
 if TYPE_CHECKING:
     from core.plan_spec import PlanSpecification, PlanTask
 
-logger = logging.getLogger("agent42.tools.team")
+logger = logging.getLogger("frood.tools.team")
 
 # Max time to wait for a single role to complete (seconds)
 ROLE_TIMEOUT = 600  # 10 minutes

@@ -20,7 +20,7 @@ from core.config import settings
 from core.sandbox import WorkspaceSandbox
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.vision")
+logger = logging.getLogger("frood.tools.vision")
 
 # Max pixel count for compression (768K pixels = ~876x876)
 MAX_PIXELS = 768_000

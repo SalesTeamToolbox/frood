@@ -13,7 +13,7 @@ from pathlib import Path
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.diff")
+logger = logging.getLogger("frood.tools.diff")
 
 
 class DiffTool(Tool):

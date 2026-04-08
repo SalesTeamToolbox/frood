@@ -12,7 +12,7 @@ from collections import Counter
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.content_analyzer")
+logger = logging.getLogger("frood.tools.content_analyzer")
 
 # Tone indicators — word lists for simple tone classification
 _FORMAL_INDICATORS = {

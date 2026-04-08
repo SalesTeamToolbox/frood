@@ -16,7 +16,7 @@ import os
 import time
 from pathlib import Path
 
-logger = logging.getLogger("agent42.memory.consolidation_worker")
+logger = logging.getLogger("frood.memory.consolidation_worker")
 
 # Env-configurable thresholds (defaults from CONTEXT.md decisions)
 AUTO_THRESHOLD = float(os.getenv("CONSOLIDATION_AUTO_THRESHOLD", "0.95"))
@@ -33,7 +33,7 @@ WINDOW_SIZE = int(os.getenv("CONSOLIDATION_WINDOW_SIZE", "200"))
 
 def _status_file_path(workspace: "str | Path" = ".") -> Path:
     """Return the path to the consolidation status JSON file."""
-    return Path(workspace) / ".agent42" / "consolidation-status.json"
+    return Path(workspace) / ".frood" / "consolidation-status.json"
 
 
 def load_consolidation_status(workspace: "str | Path" = ".") -> dict:

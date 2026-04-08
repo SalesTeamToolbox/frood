@@ -21,7 +21,7 @@ import httpx
 from core.config import settings
 from core.rate_limiter import PerModelRateLimiter
 
-logger = logging.getLogger("agent42.providers.zen")
+logger = logging.getLogger("frood.providers.zen")
 
 # Default free model mappings — updated dynamically via refresh
 _DEFAULT_FREE_MODELS = [

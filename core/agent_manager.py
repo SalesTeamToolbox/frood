@@ -16,7 +16,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-logger = logging.getLogger("agent42.agent_manager")
+logger = logging.getLogger("frood.agent_manager")
 
 # Module-level settings reference — used by _get_tier_semaphore() and get_effective_limits().
 # Monkeypatched in tests via monkeypatch.setattr("core.agent_manager.settings", ...).

@@ -12,7 +12,7 @@ import re
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.summarizer")
+logger = logging.getLogger("frood.tools.summarizer")
 
 
 class SummarizerTool(Tool):

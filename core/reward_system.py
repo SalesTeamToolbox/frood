@@ -28,13 +28,13 @@ from core.rewards_config import RewardsConfig
 if TYPE_CHECKING:
     from memory.effectiveness import EffectivenessStore
 
-logger = logging.getLogger("agent42.reward_system")
+logger = logging.getLogger("frood.reward_system")
 
 # TTL for in-memory tier cache (seconds). Matches background recalculation interval.
 _CACHE_TTL_SECONDS = 900  # 15 minutes
 
 # Path for tier persistence file
-_TIER_FILE = Path(".agent42/tier_assignments.json")
+_TIER_FILE = Path(".frood/tier_assignments.json")
 
 
 # ---------------------------------------------------------------------------

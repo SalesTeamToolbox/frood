@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-logger = logging.getLogger("agent42.skills")
+logger = logging.getLogger("frood.skills")
 
 # YAML frontmatter regex: content between --- delimiters at the start of the file
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)

@@ -12,7 +12,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-logger = logging.getLogger("agent42.rate_limiter")
+logger = logging.getLogger("frood.rate_limiter")
 
 
 def _get_multiplier(tier: str) -> float:

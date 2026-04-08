@@ -20,9 +20,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
-logger = logging.getLogger("agent42.rewards_config")
+logger = logging.getLogger("frood.rewards_config")
 
-_DEFAULT_PATH = ".agent42/rewards_config.json"
+_DEFAULT_PATH = ".frood/rewards_config.json"
 
 
 @dataclass

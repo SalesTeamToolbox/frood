@@ -9,7 +9,7 @@ import tempfile
 from core.sandbox import SandboxViolation, WorkspaceSandbox
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.filesystem")
+logger = logging.getLogger("frood.tools.filesystem")
 
 
 class ReadFileTool(Tool):

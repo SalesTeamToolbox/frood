@@ -14,7 +14,7 @@ import httpx
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.web_search")
+logger = logging.getLogger("frood.tools.web_search")
 
 BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
 DDG_HTML_URL = "https://html.duckduckgo.com/html/"

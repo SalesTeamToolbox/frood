@@ -16,7 +16,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 from urllib.parse import urlparse
 
-logger = logging.getLogger("agent42.url_policy")
+logger = logging.getLogger("frood.url_policy")
 
 # SSRF protection: blocked IP ranges (moved from web_search.py)
 _BLOCKED_IP_RANGES = [
@@ -60,7 +60,7 @@ class UrlPolicy:
         allowlist: list[str] | None = None,
         denylist: list[str] | None = None,
         max_requests_per_agent: int = 0,
-        audit_log_path: str = ".agent42/url_audit.jsonl",
+        audit_log_path: str = ".frood/url_audit.jsonl",
     ):
         self._allowlist = allowlist or []
         self._denylist = denylist or []

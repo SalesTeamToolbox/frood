@@ -10,7 +10,7 @@ import logging
 
 from channels.base import BaseChannel, InboundMessage, OutboundMessage
 
-logger = logging.getLogger("agent42.channels.discord")
+logger = logging.getLogger("frood.channels.discord")
 
 try:
     import discord

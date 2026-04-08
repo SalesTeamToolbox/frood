@@ -20,7 +20,7 @@ from pathlib import Path
 
 from memory.store import MemoryStore
 
-logger = logging.getLogger("agent42.memory.project")
+logger = logging.getLogger("frood.memory.project")
 
 
 class ProjectMemoryStore:

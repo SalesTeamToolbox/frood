@@ -14,7 +14,7 @@ import re
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.browser")
+logger = logging.getLogger("frood.tools.browser")
 
 
 class BrowserTool(Tool):
@@ -116,7 +116,7 @@ class BrowserTool(Tool):
             args=["--remote-debugging-address=127.0.0.1"],
         )
         # Set gateway token as environment context for the browser session
-        os.environ["_AGENT42_BROWSER_TOKEN"] = self._gateway_token
+        os.environ["_FROOD_BROWSER_TOKEN"] = self._gateway_token
         self._page = await self._browser.new_page()
 
     async def execute(

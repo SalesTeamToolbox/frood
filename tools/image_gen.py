@@ -16,7 +16,7 @@ from pathlib import Path
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.image_gen")
+logger = logging.getLogger("frood.tools.image_gen")
 
 
 # Image model catalog — free-first, same pattern as text LLM routing
@@ -76,7 +76,7 @@ IMAGE_MODELS: dict[str, dict] = {
 
 # Default routing: free model first, then premium if admin overrides
 DEFAULT_IMAGE_MODEL = "or-free-flux-schnell"
-ADMIN_OVERRIDE_ENV = "AGENT42_IMAGE_MODEL"
+ADMIN_OVERRIDE_ENV = "FROOD_IMAGE_MODEL"
 
 # Prompt review model — a fast free text LLM reviews the prompt before submission
 PROMPT_REVIEWER_MODEL = "or-free-mistral-small"

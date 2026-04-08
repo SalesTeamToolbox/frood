@@ -11,7 +11,7 @@ import time
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.registry")
+logger = logging.getLogger("frood.tools.registry")
 
 # Tools that are only relevant for code/technical task types.
 # Non-code tasks (content, marketing, email, strategy, etc.) should not

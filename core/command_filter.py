@@ -20,7 +20,7 @@ pass for a command to execute.
 import logging
 import re
 
-logger = logging.getLogger("agent42.command_filter")
+logger = logging.getLogger("frood.command_filter")
 
 # Patterns that are always blocked
 DENY_PATTERNS: list[re.Pattern] = [

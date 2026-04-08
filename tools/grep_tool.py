@@ -11,7 +11,7 @@ import shutil
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.grep")
+logger = logging.getLogger("frood.tools.grep")
 
 # Detect ripgrep availability
 _RG_PATH = shutil.which("rg")

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import httpx
 
-logger = logging.getLogger("agent42.github_oauth")
+logger = logging.getLogger("frood.github_oauth")
 
 GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code"
 GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"

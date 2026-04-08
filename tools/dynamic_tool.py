@@ -18,7 +18,7 @@ import tempfile
 from tools.base import Tool, ToolResult
 from tools.python_exec import PythonExecTool
 
-logger = logging.getLogger("agent42.tools.dynamic_tool")
+logger = logging.getLogger("frood.tools.dynamic_tool")
 
 # Prefix for all dynamically created tools
 DYNAMIC_TOOL_PREFIX = "dynamic_"

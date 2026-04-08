@@ -23,7 +23,7 @@ from pathlib import Path
 
 import aiofiles
 
-logger = logging.getLogger("agent42.workspace_registry")
+logger = logging.getLogger("frood.workspace_registry")
 
 
 @dataclass

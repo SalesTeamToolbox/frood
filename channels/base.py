@@ -11,7 +11,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-logger = logging.getLogger("agent42.channels")
+logger = logging.getLogger("frood.channels")
 
 
 @dataclass

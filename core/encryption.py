@@ -14,7 +14,7 @@ import base64
 import logging
 from functools import lru_cache
 
-logger = logging.getLogger("agent42.encryption")
+logger = logging.getLogger("frood.encryption")
 
 _PREFIX = "fernet:1:"
 

@@ -15,7 +15,7 @@ import re
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.code_intel")
+logger = logging.getLogger("frood.tools.code_intel")
 
 # File extensions we know how to parse
 _PYTHON_EXTS = {".py"}

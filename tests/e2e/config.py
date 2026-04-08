@@ -8,10 +8,10 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-AGENT42_ROOT = Path(__file__).resolve().parents[2]
+FROOD_ROOT = Path(__file__).resolve().parents[2]
 
 # Load .env from agent42 root if present
-_env_file = AGENT42_ROOT / ".env"
+_env_file = FROOD_ROOT / ".env"
 if _env_file.exists():
     try:
         from dotenv import load_dotenv
@@ -40,7 +40,7 @@ class E2EConfig:
     headed: bool = False
     output_dir: str = ""
     # Auto-discovery paths
-    agent42_root: Path = field(default_factory=lambda: AGENT42_ROOT)
+    frood_root: Path = field(default_factory=lambda: FROOD_ROOT)
 
     def __post_init__(self):
         self.host = self.host or os.getenv("DASHBOARD_HOST", "127.0.0.1")
@@ -50,7 +50,7 @@ class E2EConfig:
         self.password = (
             self.password or os.getenv("E2E_PASSWORD", "") or os.getenv("DASHBOARD_PASSWORD", "")
         )
-        self.output_dir = self.output_dir or str(AGENT42_ROOT / ".agent42" / "e2e-results")
+        self.output_dir = self.output_dir or str(FROOD_ROOT / ".frood" / "e2e-results")
         os.makedirs(self.output_dir, exist_ok=True)
 
 

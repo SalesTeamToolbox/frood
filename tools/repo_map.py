@@ -13,7 +13,7 @@ import os
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.repo_map")
+logger = logging.getLogger("frood.tools.repo_map")
 
 _SKIP_DIRS = {
     ".git",

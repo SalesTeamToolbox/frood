@@ -28,7 +28,7 @@ from core.config import settings
 from core.sandbox import WorkspaceSandbox
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.knowledge")
+logger = logging.getLogger("frood.tools.knowledge")
 
 # Supported file extensions
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".json", ".csv", ".html", ".htm", ".pdf"}

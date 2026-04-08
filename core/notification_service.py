@@ -17,7 +17,7 @@ from email.mime.text import MIMEText
 
 import httpx
 
-logger = logging.getLogger("agent42.notifications")
+logger = logging.getLogger("frood.notifications")
 
 # Severity levels for notification routing
 SEVERITY_INFO = "info"

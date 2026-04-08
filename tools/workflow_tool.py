@@ -11,7 +11,7 @@ import time
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.workflow")
+logger = logging.getLogger("frood.tools.workflow")
 
 
 class WorkflowTool(Tool):

@@ -50,7 +50,7 @@ def _init_model():
         model_dir = _find_onnx_model_dir()
         if model_dir is None:
             logger.error(
-                "ONNX model directory not found (expected .agent42/models/all-MiniLM-L6-v2/)"
+                "ONNX model directory not found (expected .frood/models/all-MiniLM-L6-v2/)"
             )
             _model = None
             return
@@ -275,7 +275,7 @@ def main():
     _init_qdrant(args.qdrant_url)
 
     if not _model:
-        logger.error("No ONNX embedding model — exiting (check .agent42/models/all-MiniLM-L6-v2/)")
+        logger.error("No ONNX embedding model — exiting (check .frood/models/all-MiniLM-L6-v2/)")
         sys.exit(1)
 
     server = HTTPServer(("127.0.0.1", args.port), SearchHandler)

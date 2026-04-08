@@ -11,7 +11,7 @@ import logging
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.dependency_audit")
+logger = logging.getLogger("frood.tools.dependency_audit")
 
 
 class DependencyAuditTool(Tool):

@@ -10,7 +10,7 @@ import logging
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.pr_generator")
+logger = logging.getLogger("frood.tools.pr_generator")
 
 
 class PRGeneratorTool(Tool):

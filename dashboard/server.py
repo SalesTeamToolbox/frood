@@ -44,7 +44,7 @@ from dashboard.auth import (
 )
 from dashboard.websocket_manager import WebSocketManager
 
-logger = logging.getLogger("agent42.server")
+logger = logging.getLogger("frood.server")
 
 
 async def _pip_install(packages: list[str]) -> tuple[list[str], list[str]]:
@@ -357,7 +357,7 @@ def create_app(
             skill_loader.set_enabled(name, False)
 
     # Key store for API key management
-    _key_store = key_store  # passed from agent42.py when available
+    _key_store = key_store  # passed from frood.py when available
 
     # -- Health ----------------------------------------------------------------
 
@@ -452,7 +452,7 @@ def create_app(
                 env_path,
                 {
                     "QDRANT_ENABLED": "true",
-                    "QDRANT_LOCAL_PATH": ".agent42/qdrant",
+                    "QDRANT_LOCAL_PATH": ".frood/qdrant",
                 },
             )
             await _pip_install(["qdrant-client"])
@@ -914,7 +914,7 @@ def create_app(
             if not results:
                 mem_path = workspace / "memory" / "MEMORY.md"
                 if not mem_path.exists():
-                    mem_path = workspace / ".agent42" / "MEMORY.md"
+                    mem_path = workspace / ".frood" / "MEMORY.md"
                 if mem_path.exists():
                     content = mem_path.read_text(encoding="utf-8", errors="replace")
                     keywords = [w.lower() for w in query.split() if len(w) > 3]
@@ -2062,11 +2062,11 @@ Focus on learnings that would help in future similar sessions."""
         return {"enabled": False, "note": "RLM provider removed in v2.0 MCP pivot"}
 
     def _load_cc_sync_status() -> dict:
-        """Load CC memory sync status from .agent42/cc-sync-status.json."""
+        """Load CC memory sync status from .frood/cc-sync-status.json."""
         try:
             import json as _json
 
-            status_path = Path(settings.workspace or ".") / ".agent42" / "cc-sync-status.json"
+            status_path = Path(settings.workspace or ".") / ".frood" / "cc-sync-status.json"
             if status_path.exists():
                 return _json.loads(status_path.read_text())
         except Exception:
@@ -2074,11 +2074,11 @@ Focus on learnings that would help in future similar sessions."""
         return {"last_sync": None, "total_synced": 0, "last_error": None}
 
     def _load_consolidation_status() -> dict:
-        """Load memory consolidation status from .agent42/consolidation-status.json."""
+        """Load memory consolidation status from .frood/consolidation-status.json."""
         try:
             import json as _json
 
-            status_path = Path(settings.workspace or ".") / ".agent42" / "consolidation-status.json"
+            status_path = Path(settings.workspace or ".") / ".frood" / "consolidation-status.json"
             if status_path.exists():
                 return _json.loads(status_path.read_text())
         except Exception:

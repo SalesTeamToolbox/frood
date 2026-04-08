@@ -1,7 +1,7 @@
 """
 Admin-configured API key storage.
 
-Keys set via the dashboard admin UI are persisted in .agent42/settings.json
+Keys set via the dashboard admin UI are persisted in .frood/settings.json
 and injected into os.environ so they override .env values at runtime.
 Provider clients are rebuilt automatically when keys change.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 
 from core.encryption import decrypt_value, encrypt_value
 
-logger = logging.getLogger("agent42.key_store")
+logger = logging.getLogger("frood.key_store")
 
 # API key env var names that can be set via the admin UI
 ADMIN_CONFIGURABLE_KEYS = frozenset(
@@ -33,7 +33,7 @@ ADMIN_CONFIGURABLE_KEYS = frozenset(
     }
 )
 
-_DEFAULT_PATH = Path(".agent42") / "settings.json"
+_DEFAULT_PATH = Path(".frood") / "settings.json"
 
 
 class KeyStore:

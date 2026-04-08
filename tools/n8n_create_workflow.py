@@ -22,7 +22,7 @@ import httpx
 
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.n8n_create_workflow")
+logger = logging.getLogger("frood.tools.n8n_create_workflow")
 
 # ---------------------------------------------------------------------------
 # Safety constants

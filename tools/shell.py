@@ -17,7 +17,7 @@ from core.command_filter import CommandFilter, CommandFilterError
 from core.sandbox import SandboxViolation, WorkspaceSandbox
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.shell")
+logger = logging.getLogger("frood.tools.shell")
 
 MAX_OUTPUT_LENGTH = 10000
 DEFAULT_TIMEOUT = 60

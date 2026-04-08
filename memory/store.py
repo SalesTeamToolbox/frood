@@ -24,7 +24,7 @@ from pathlib import Path
 
 from memory.embeddings import EmbeddingStore
 
-logger = logging.getLogger("agent42.memory")
+logger = logging.getLogger("frood.memory")
 
 # ── UUID entry format constants ──────────────────────────────────────────────
 # Matches: [2026-03-24T14:22:10Z a4f7b2c1] at start of bullet content

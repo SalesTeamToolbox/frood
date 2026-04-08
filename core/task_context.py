@@ -18,7 +18,7 @@ from core.task_types import TaskType
 
 # Cross-process bridge: Stop hooks (separate Python processes) read this file
 # to discover the current task_id and task_type.
-_TASK_FILE_DIR = os.environ.get("AGENT42_DATA_DIR", ".agent42")
+_TASK_FILE_DIR = os.environ.get("FROOD_DATA_DIR", ".frood")
 
 _task_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("task_id", default=None)
 _task_type_var: contextvars.ContextVar[TaskType | None] = contextvars.ContextVar(

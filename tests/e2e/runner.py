@@ -23,13 +23,11 @@ import json
 import sys
 import time
 import traceback
-from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from .config import config, AGENT42_ROOT
+from .config import config
 from .discovery import build_manifest
-
 
 # ---------------------------------------------------------------------------
 # Test result types
@@ -214,10 +212,12 @@ def main():
         return
 
     # Import suites to trigger registration
-    from . import suite_ui  # noqa: F401
-    from . import suite_api  # noqa: F401
-    from . import suite_harness  # noqa: F401
-    from . import suite_coding  # noqa: F401
+    from . import (
+        suite_api,  # noqa: F401
+        suite_coding,  # noqa: F401
+        suite_harness,  # noqa: F401
+        suite_ui,  # noqa: F401
+    )
 
     # Select suites
     if args.suite:
@@ -231,7 +231,7 @@ def main():
     # Run
     all_results: list[TestResult] = []
     print(f"{'=' * 60}")
-    print(f"Agent42 E2E Tests — {datetime.now(timezone.utc).isoformat()}")
+    print(f"Agent42 E2E Tests — {datetime.now(UTC).isoformat()}")
     print(f"Target: {config.base_url}")
     print(f"Suites: {', '.join(suites_to_run)}")
     print(
@@ -279,7 +279,7 @@ def main():
 
     # Save results
     report = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "base_url": config.base_url,
         "summary": {"total": total, "passed": passed, "failed": failed, "skipped": skipped},
         "coverage": coverage,

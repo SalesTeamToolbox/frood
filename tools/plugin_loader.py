@@ -84,7 +84,7 @@ from pathlib import Path
 from tools.base import ExtendedTool, Tool, ToolExtension
 from tools.context import ToolContext
 
-logger = logging.getLogger("agent42.tools.plugin_loader")
+logger = logging.getLogger("frood.tools.plugin_loader")
 
 _VALID_TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]{1,48}$")
 

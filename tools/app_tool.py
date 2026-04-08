@@ -16,7 +16,7 @@ import logging
 from core.app_manager import AppManager, AppRuntime
 from tools.base import Tool, ToolResult
 
-logger = logging.getLogger("agent42.tools.app")
+logger = logging.getLogger("frood.tools.app")
 
 
 class AppTool(Tool):

@@ -2,7 +2,7 @@
 Multi-account GitHub credential store.
 
 Stores multiple GitHub Personal Access Tokens (PATs) under user-defined
-labels in .agent42/github_accounts.json.  Each account has a stable UUID,
+labels in .frood/github_accounts.json.  Each account has a stable UUID,
 a human-readable label, the GitHub username (fetched at add time), and the
 token itself.  Tokens are encrypted at rest via Fernet when JWT_SECRET is set;
 legacy plaintext values are auto-migrated on next persist.
@@ -16,9 +16,9 @@ import threading
 import uuid
 from pathlib import Path
 
-logger = logging.getLogger("agent42.github_accounts")
+logger = logging.getLogger("frood.github_accounts")
 
-_DEFAULT_PATH = Path(".agent42") / "github_accounts.json"
+_DEFAULT_PATH = Path(".frood") / "github_accounts.json"
 
 
 class GitHubAccountStore:
