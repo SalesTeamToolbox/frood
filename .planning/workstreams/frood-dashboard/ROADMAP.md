@@ -87,7 +87,7 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 52-01-PLAN.md — Create frood.py entry point, agent42.py shim, config.py defaults, data dir migration
+- [x] 52-01-PLAN.md — Create frood.py entry point, agent42.py shim, config.py defaults, data dir migration
 - [ ] 52-02-PLAN.md — Rename AGENT42_* env vars, mcp_server.py internals, CLAUDE.md markers, .agent42/ paths
 - [ ] 52-03-PLAN.md — Batch logger rename, hook files, test file updates
 
@@ -137,7 +137,7 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 50. Strip Harness Features | v6.0 | 4/4 | Complete | 2026-04-07 |
 | 51. Rebrand & Repurpose | v6.0 | 4/4 | Complete | 2026-04-08 |
-| 52. Core Identity Rename | v7.0 | 0/3 | Planned | - |
+| 52. Core Identity Rename | v7.0 | 1/3 | Executing | - |
 | 53. Frontend Identity + Sidecar Auth | v7.0 | 0/TBD | Not started | - |
 | 54. Infrastructure + Packages | v7.0 | 0/TBD | Not started | - |
 | 55. Qdrant Migration + Test Suite | v7.0 | 0/TBD | Not started | - |

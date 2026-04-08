@@ -65,16 +65,16 @@
 
 ### Entry Point & Config
 
-- [ ] **ENTRY-01**: Main entry point renamed from `agent42.py` to `frood.py`
-- [ ] **ENTRY-02**: `agent42.py` backward-compat shim exists that imports and runs `frood.py`
+- [x] **ENTRY-01**: Main entry point renamed from `agent42.py` to `frood.py`
+- [x] **ENTRY-02**: `agent42.py` backward-compat shim exists that imports and runs `frood.py`
 - [ ] **ENTRY-03**: All `AGENT42_*` environment variables renamed to `FROOD_*` with fallback to old names
-- [ ] **ENTRY-04**: `core/config.py` Settings reads `FROOD_*` vars (falling back to `AGENT42_*`)
-- [ ] **ENTRY-05**: `.env.example` updated with `FROOD_*` variable names
+- [x] **ENTRY-04**: `core/config.py` Settings reads `FROOD_*` vars (falling back to `AGENT42_*`)
+- [x] **ENTRY-05**: `.env.example` updated with `FROOD_*` variable names
 
 ### Data Directory Migration
 
-- [ ] **DATA-01**: Default data directory changed from `.agent42/` to `.frood/`
-- [ ] **DATA-02**: On startup, if `.agent42/` exists and `.frood/` does not, auto-migrate (rename) with log message
+- [x] **DATA-01**: Default data directory changed from `.agent42/` to `.frood/`
+- [x] **DATA-02**: On startup, if `.agent42/` exists and `.frood/` does not, auto-migrate (rename) with log message
 - [ ] **DATA-03**: All hardcoded `.agent42/` path references in code updated to `.frood/`
 
 ### Python Internals
@@ -131,13 +131,13 @@
 | AUTH-01 | Phase 53 | Pending |
 | AUTH-02 | Phase 53 | Pending |
 | AUTH-03 | Phase 53 | Pending |
-| ENTRY-01 | Phase 52 | Pending |
-| ENTRY-02 | Phase 52 | Pending |
+| ENTRY-01 | Phase 52 | Complete |
+| ENTRY-02 | Phase 52 | Complete |
 | ENTRY-03 | Phase 52 | Pending |
-| ENTRY-04 | Phase 52 | Pending |
-| ENTRY-05 | Phase 52 | Pending |
-| DATA-01 | Phase 52 | Pending |
-| DATA-02 | Phase 52 | Pending |
+| ENTRY-04 | Phase 52 | Complete |
+| ENTRY-05 | Phase 52 | Complete |
+| DATA-01 | Phase 52 | Complete |
+| DATA-02 | Phase 52 | Complete |
 | DATA-03 | Phase 52 | Pending |
 | PY-01 | Phase 52 | Pending |
 | PY-02 | Phase 52 | Pending |
