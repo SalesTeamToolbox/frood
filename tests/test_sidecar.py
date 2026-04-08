@@ -734,7 +734,7 @@ class TestAutoMemoryInjection:
         orch, _ = self._make_orchestrator(memories=[])
         ctx = self._make_ctx()  # No strategy in context
 
-        with caplog.at_level(logging.WARNING, logger="agent42.sidecar.orchestrator"):
+        with caplog.at_level(logging.WARNING, logger="frood.sidecar.orchestrator"):
             with patch.object(orch, "_post_callback", AsyncMock(return_value=None)):
                 await orch.execute_async("run-test-1", ctx)
 
@@ -746,7 +746,7 @@ class TestAutoMemoryInjection:
         orch, _ = self._make_orchestrator(memories=[])
         ctx = self._make_ctx(context={"strategy": "unknown"})
 
-        with caplog.at_level(logging.WARNING, logger="agent42.sidecar.orchestrator"):
+        with caplog.at_level(logging.WARNING, logger="frood.sidecar.orchestrator"):
             with patch.object(orch, "_post_callback", AsyncMock(return_value=None)):
                 await orch.execute_async("run-test-1", ctx)
 
@@ -758,7 +758,7 @@ class TestAutoMemoryInjection:
         orch, _ = self._make_orchestrator(memories=[])
         ctx = self._make_ctx(context={"strategy": "fan-out"})
 
-        with caplog.at_level(logging.INFO, logger="agent42.sidecar.orchestrator"):
+        with caplog.at_level(logging.INFO, logger="frood.sidecar.orchestrator"):
             with patch.object(orch, "_post_callback", AsyncMock(return_value=None)):
                 await orch.execute_async("run-test-1", ctx)
 
