@@ -338,7 +338,7 @@ function renderSetupWizard() {
       <div class="login-logo">
         <img src="/assets/frood-logo-light.svg" alt="Frood" onerror="this.outerHTML='<h1>Frood<span style=&quot;color:var(--accent)&quot;>42</span></h1>'">
       </div>
-      <p class="setup-subtitle">The answer to life, the universe, and all your tasks.</p>
+      <p class="setup-subtitle">The answer to life, the universe, and intelligent tools.</p>
       <p class="setup-desc">Welcome, hoopy frood. Let\u2019s secure the Guide with a passphrase.</p>
       ${steps}
       <div id="setup-error" style="color:var(--danger);font-size:0.85rem;min-height:1.2em;margin-bottom:0.25rem"></div>
@@ -417,7 +417,7 @@ function renderSetupWizard() {
       <div style="text-align:center;padding:2rem 0">
         <div style="font-size:3rem;margin-bottom:0.75rem">&#9989;</div>
         <h2>Don\u2019t Panic \u2014 You\u2019re All Set!</h2>
-        <p class="setup-desc" style="margin-bottom:0">You are now a hoopy frood who really knows where their towel is. Loading Mission Control\u2026</p>
+        <p class="setup-desc" style="margin-bottom:0">You are now a hoopy frood who really knows where their towel is. Launching Frood Dashboard\u2026</p>
         ${extraMsg}
       </div>`;
   }
