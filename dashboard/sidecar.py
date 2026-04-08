@@ -22,7 +22,7 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -82,6 +82,21 @@ from dashboard.auth import get_current_user
 logger = logging.getLogger("frood.sidecar")
 
 
+class SidecarTokenRequest(BaseModel):
+    """Request body for POST /sidecar/token. D-05: dispatch on field presence."""
+
+    username: str = ""
+    password: str = ""
+    api_key: str = ""
+
+
+class SidecarTokenResponse(BaseModel):
+    """Response for POST /sidecar/token. D-07: 24h token."""
+
+    token: str
+    expires_in: int = 86400
+
+
 def create_sidecar_app(
     memory_store: Any = None,
     agent_manager: Any = None,
@@ -93,6 +108,7 @@ def create_sidecar_app(
     skill_loader: Any = None,  # Phase 36: skills listing
     app_manager: Any = None,  # Phase 36: apps listing / start / stop
     key_store: Any = None,  # Phase 36: settings management
+    device_store: Any = None,  # Phase 53: DeviceStore for /sidecar/token api_key path (D-09)
 ) -> FastAPI:
     """Create a lightweight FastAPI application for sidecar mode.
 
@@ -237,6 +253,42 @@ def create_sidecar_app(
         if "synthetic" not in provider_names:
             provider_names.append("synthetic")
         return ModelsResponse(models=items, providers=sorted(provider_names))
+
+    # -- Token endpoint (public — issues JWTs for external consumers, Phase 53) --
+
+    @app.post("/sidecar/token", response_model=SidecarTokenResponse)
+    async def sidecar_token(req: SidecarTokenRequest, request: Request) -> SidecarTokenResponse:
+        """Issue a JWT for external consumers (Paperclip adapters, automation).
+
+        Accepts either username+password OR api_key (ak_... device key).
+        Rate limited on both paths. DeviceStore is optional — omitted means
+        password-only mode. AUTH-01, D-05 through D-09.
+        """
+        from dashboard.auth import check_rate_limit, create_token, verify_password
+
+        client_ip = request.client.host if request.client else "unknown"
+
+        if not check_rate_limit(client_ip):
+            raise HTTPException(status_code=429, detail="Too many attempts.")
+
+        if req.api_key:
+            # Device key path (D-06)
+            if device_store is None:
+                raise HTTPException(status_code=503, detail="Device auth not available")
+            device = device_store.validate_api_key(req.api_key)
+            if not device:
+                raise HTTPException(status_code=401, detail="Invalid API key")
+            username = f"device:{device.device_id}"
+        else:
+            # Password path (D-06)
+            if not req.username or not req.password:
+                raise HTTPException(status_code=401, detail="Invalid credentials")
+            if req.username != settings.dashboard_username or not verify_password(req.password):
+                raise HTTPException(status_code=401, detail="Invalid credentials")
+            username = req.username
+
+        token = create_token(username)
+        return SidecarTokenResponse(token=token, expires_in=86400)
 
     # -- Execute endpoint (Bearer auth required per D-04) --
 

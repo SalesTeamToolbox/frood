@@ -763,3 +763,154 @@ class TestAutoMemoryInjection:
                 await orch.execute_async("run-test-1", ctx)
 
         assert "strategy 'fan-out'" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Phase 53: POST /sidecar/token tests (AUTH-01, AUTH-02, AUTH-03)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def sidecar_client_with_devices(tmp_path):
+    """Sidecar TestClient with a DeviceStore injected for api_key tests."""
+    from core.device_auth import DeviceStore
+
+    ds = DeviceStore(tmp_path / "devices.jsonl")
+    app = create_sidecar_app(device_store=ds)
+    return TestClient(app), ds
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def _patch_settings(**kwargs):
+    """Temporarily patch frozen Settings fields via object.__setattr__."""
+    from core.config import settings
+
+    originals = {k: getattr(settings, k) for k in kwargs}
+    for key, val in kwargs.items():
+        object.__setattr__(settings, key, val)
+    try:
+        yield
+    finally:
+        for key, val in originals.items():
+            object.__setattr__(settings, key, val)
+
+
+class TestSidecarToken:
+    """Tests for POST /sidecar/token endpoint (Phase 53)."""
+
+    def test_password_path_success(self):
+        """POST /sidecar/token with valid username+password returns JWT."""
+        from dashboard.auth import _login_attempts, pwd_context
+
+        _login_attempts.clear()
+        pw_hash = pwd_context.hash("testpass123")
+        with _patch_settings(
+            dashboard_username="admin",
+            dashboard_password_hash=pw_hash,
+            dashboard_password="",
+        ):
+            app = create_sidecar_app()
+            client = TestClient(app)
+            resp = client.post(
+                "/sidecar/token",
+                json={"username": "admin", "password": "testpass123"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "token" in data
+            assert data["expires_in"] == 86400
+            assert data["token"].startswith("eyJ")
+
+    def test_api_key_path_success(self, tmp_path, monkeypatch):
+        """POST /sidecar/token with valid api_key returns JWT."""
+        from core.device_auth import DeviceStore
+        from dashboard.auth import _login_attempts
+
+        monkeypatch.setenv("JWT_SECRET", "test-secret-for-device-auth")
+        _login_attempts.clear()
+        ds = DeviceStore(tmp_path / "devices.jsonl")
+        device, raw_key = ds.register("test-laptop", "laptop")
+
+        app = create_sidecar_app(device_store=ds)
+        client = TestClient(app)
+        resp = client.post("/sidecar/token", json={"api_key": raw_key})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "token" in data
+        assert data["token"].startswith("eyJ")
+
+    def test_no_device_store_returns_503(self):
+        """POST /sidecar/token with api_key but no DeviceStore returns 503."""
+        from dashboard.auth import _login_attempts
+
+        _login_attempts.clear()
+        app = create_sidecar_app()  # No device_store
+        client = TestClient(app)
+        resp = client.post("/sidecar/token", json={"api_key": "ak_fakekey123"})
+        assert resp.status_code == 503
+
+    def test_bad_password_returns_401(self):
+        """POST /sidecar/token with wrong password returns 401."""
+        from dashboard.auth import _login_attempts, pwd_context
+
+        _login_attempts.clear()
+        pw_hash = pwd_context.hash("correctpass")
+        with _patch_settings(
+            dashboard_username="admin",
+            dashboard_password_hash=pw_hash,
+            dashboard_password="",
+        ):
+            app = create_sidecar_app()
+            client = TestClient(app)
+            resp = client.post(
+                "/sidecar/token",
+                json={"username": "admin", "password": "wrongpass"},
+            )
+            assert resp.status_code == 401
+
+    def test_bad_api_key_returns_401(self, tmp_path, monkeypatch):
+        """POST /sidecar/token with invalid api_key returns 401."""
+        from core.device_auth import DeviceStore
+        from dashboard.auth import _login_attempts
+
+        monkeypatch.setenv("JWT_SECRET", "test-secret-for-device-auth")
+        _login_attempts.clear()
+        ds = DeviceStore(tmp_path / "devices.jsonl")
+        app = create_sidecar_app(device_store=ds)
+        client = TestClient(app)
+        resp = client.post("/sidecar/token", json={"api_key": "ak_invalidkey"})
+        assert resp.status_code == 401
+
+    def test_rate_limit_returns_429(self):
+        """POST /sidecar/token exceeding rate limit returns 429."""
+        from dashboard.auth import _login_attempts
+
+        _login_attempts.clear()
+        with _patch_settings(
+            login_rate_limit=2,
+            dashboard_username="admin",
+            dashboard_password_hash="",
+            dashboard_password="",
+        ):
+            app = create_sidecar_app()
+            client = TestClient(app)
+            # Exhaust rate limit with bad requests
+            for _ in range(3):
+                client.post(
+                    "/sidecar/token",
+                    json={"username": "admin", "password": "wrong"},
+                )
+            resp = client.post(
+                "/sidecar/token",
+                json={"username": "admin", "password": "wrong"},
+            )
+            assert resp.status_code == 429
+
+    def test_health_still_unauthenticated(self, sidecar_client):
+        """GET /sidecar/health returns 200 without any auth header (AUTH-03 regression)."""
+        resp = sidecar_client.get("/sidecar/health")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
