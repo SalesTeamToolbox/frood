@@ -2,8 +2,11 @@
 
 import sys
 
-print("[frood] agent42.py is deprecated -- use frood.py", file=sys.stderr)
+from frood import Frood, main
 
-from frood import main
+# Backward-compat alias for tests that import Agent42
+Agent42 = Frood
 
-main()
+if __name__ == "__main__":
+    print("[frood] agent42.py is deprecated -- use frood.py", file=sys.stderr)
+    main()

@@ -356,7 +356,7 @@ class TestOrchestratorIntegration:
         """Successful routing emits a structured log line with routing fields."""
         import logging
 
-        with caplog.at_level(logging.INFO, logger="agent42.sidecar.orchestrator"):
+        with caplog.at_level(logging.INFO, logger="frood.sidecar.orchestrator"):
             await orchestrator.execute_async("test-run-004", sample_ctx)
 
         # Find the routing log line
