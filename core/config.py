@@ -11,7 +11,7 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
-logger = logging.getLogger("agent42.config")
+logger = logging.getLogger("frood.config")
 
 
 def _resolve_repo_path(raw: str) -> str | None:
@@ -90,7 +90,7 @@ class Settings:
     command_filter_allowlist: str = ""  # Comma-separated regex patterns (allowlist mode)
 
     # Approval gate
-    approval_log_path: str = ".agent42/approvals.jsonl"
+    approval_log_path: str = ".frood/approvals.jsonl"
 
     # Rate limiting
     login_rate_limit: int = 5  # Max login attempts per minute per IP
@@ -155,8 +155,8 @@ class Settings:
     openrouter_balance_check_hours: float = 1.0  # How often to re-check OR account balance
 
     # Memory (Phase 6)
-    memory_dir: str = ".agent42/memory"
-    sessions_dir: str = ".agent42/sessions"
+    memory_dir: str = ".frood/memory"
+    sessions_dir: str = ".frood/sessions"
 
     # Scope change detection
     scope_detection_enabled: bool = True
@@ -167,7 +167,7 @@ class Settings:
     qdrant_api_key: str = ""  # API key for Qdrant Cloud or authenticated instances
     qdrant_collection_prefix: str = "agent42"  # Prefix for collection names
     qdrant_enabled: bool = False  # Set true to enable Qdrant (auto-enabled if qdrant_url is set)
-    qdrant_local_path: str = ".agent42/qdrant"  # Path for embedded Qdrant storage
+    qdrant_local_path: str = ".frood/qdrant"  # Path for embedded Qdrant storage
 
     # Learning extraction toggle (Phase 40)
     learning_enabled: bool = True
@@ -179,16 +179,16 @@ class Settings:
     embedding_cache_ttl_hours: int = 24  # TTL for cached embeddings in Redis
 
     # Non-code outputs (Phase 8)
-    outputs_dir: str = ".agent42/outputs"
-    templates_dir: str = ".agent42/templates"
+    outputs_dir: str = ".frood/outputs"
+    templates_dir: str = ".frood/templates"
 
     # Media generation (Phase 9)
     replicate_api_token: str = ""
     luma_api_key: str = ""
-    images_dir: str = ".agent42/images"
+    images_dir: str = ".frood/images"
 
     # Device gateway auth (Phase 10)
-    devices_file: str = ".agent42/devices.jsonl"
+    devices_file: str = ".frood/devices.jsonl"
 
     # SSH remote shell
     ssh_enabled: bool = False
@@ -207,7 +207,7 @@ class Settings:
     tunnel_ttl_minutes: int = 60  # Auto-shutdown tunnels after this duration
 
     # Knowledge base / RAG
-    knowledge_dir: str = ".agent42/knowledge"
+    knowledge_dir: str = ".frood/knowledge"
     knowledge_chunk_size: int = 500  # Tokens per chunk
     knowledge_chunk_overlap: int = 50  # Overlap tokens between chunks
     knowledge_max_results: int = 10  # Max results per query
@@ -217,10 +217,10 @@ class Settings:
     vision_model: str = ""  # Override model for vision tasks (empty = auto-detect)
 
     # Chat sessions
-    chat_sessions_dir: str = ".agent42/chat_sessions"
+    chat_sessions_dir: str = ".frood/chat_sessions"
 
     # Projects
-    projects_dir: str = ".agent42/projects"
+    projects_dir: str = ".frood/projects"
 
     # GitHub OAuth (device flow)
     github_client_id: str = ""
@@ -247,8 +247,8 @@ class Settings:
     project_interview_min_complexity: str = "moderate"  # moderate or complex
     # Multi-repository management
     github_token: str = ""  # GitHub PAT for repo operations (fallback: APPS_GITHUB_TOKEN)
-    repos_json_path: str = ".agent42/repos.json"
-    repos_clone_dir: str = ".agent42/repos"  # Base directory for cloned repos
+    repos_json_path: str = ".frood/repos.json"
+    repos_clone_dir: str = ".frood/repos"  # Base directory for cloned repos
 
     # Security scanning (scheduled)
     security_scan_enabled: bool = True
@@ -292,7 +292,7 @@ class Settings:
     rlm_max_iterations: int = 20
     rlm_root_model: str = ""  # Override root model (empty = auto)
     rlm_sub_model: str = ""  # Override sub-call model (empty = auto)
-    rlm_log_dir: str = ".agent42/rlm_logs"
+    rlm_log_dir: str = ".frood/rlm_logs"
     rlm_verbose: bool = False
     rlm_cost_limit: float = 1.00  # USD per query
     rlm_timeout_seconds: int = 300
@@ -417,7 +417,7 @@ class Settings:
             in ("true", "1", "yes"),
             command_filter_mode=os.getenv("COMMAND_FILTER_MODE", "deny"),
             command_filter_allowlist=os.getenv("COMMAND_FILTER_ALLOWLIST", ""),
-            approval_log_path=os.getenv("APPROVAL_LOG_PATH", ".agent42/approvals.jsonl"),
+            approval_log_path=os.getenv("APPROVAL_LOG_PATH", ".frood/approvals.jsonl"),
             login_rate_limit=int(os.getenv("LOGIN_RATE_LIMIT", "5")),
             max_websocket_connections=int(os.getenv("MAX_WEBSOCKET_CONNECTIONS", "50")),
             tool_rate_limiting_enabled=os.getenv("TOOL_RATE_LIMITING_ENABLED", "true").lower()
@@ -476,8 +476,8 @@ class Settings:
             openrouter_free_only=os.getenv("OPENROUTER_FREE_ONLY", "false").lower()
             in ("true", "1", "yes"),
             # Memory
-            memory_dir=os.getenv("MEMORY_DIR", ".agent42/memory"),
-            sessions_dir=os.getenv("SESSIONS_DIR", ".agent42/sessions"),
+            memory_dir=os.getenv("MEMORY_DIR", ".frood/memory"),
+            sessions_dir=os.getenv("SESSIONS_DIR", ".frood/sessions"),
             # Scope change detection
             scope_detection_enabled=os.getenv("SCOPE_DETECTION_ENABLED", "true").lower()
             in ("true", "1", "yes"),
@@ -490,21 +490,21 @@ class Settings:
             qdrant_collection_prefix=os.getenv("QDRANT_COLLECTION_PREFIX", "agent42"),
             qdrant_enabled=os.getenv("QDRANT_ENABLED", "").lower() in ("true", "1", "yes")
             or bool(os.getenv("QDRANT_URL", "")),
-            qdrant_local_path=os.getenv("QDRANT_LOCAL_PATH", ".agent42/qdrant"),
+            qdrant_local_path=os.getenv("QDRANT_LOCAL_PATH", ".frood/qdrant"),
             # Redis
             redis_url=os.getenv("REDIS_URL", ""),
             redis_password=os.getenv("REDIS_PASSWORD", ""),
             session_ttl_days=int(os.getenv("SESSION_TTL_DAYS", "7")),
             embedding_cache_ttl_hours=int(os.getenv("EMBEDDING_CACHE_TTL_HOURS", "24")),
             # Non-code outputs
-            outputs_dir=os.getenv("OUTPUTS_DIR", ".agent42/outputs"),
-            templates_dir=os.getenv("TEMPLATES_DIR", ".agent42/templates"),
+            outputs_dir=os.getenv("OUTPUTS_DIR", ".frood/outputs"),
+            templates_dir=os.getenv("TEMPLATES_DIR", ".frood/templates"),
             # Media generation
             replicate_api_token=os.getenv("REPLICATE_API_TOKEN", ""),
             luma_api_key=os.getenv("LUMA_API_KEY", ""),
-            images_dir=os.getenv("IMAGES_DIR", ".agent42/images"),
+            images_dir=os.getenv("IMAGES_DIR", ".frood/images"),
             # Device gateway auth
-            devices_file=os.getenv("DEVICES_FILE", ".agent42/devices.jsonl"),
+            devices_file=os.getenv("DEVICES_FILE", ".frood/devices.jsonl"),
             # Project interview
             project_interview_enabled=os.getenv("PROJECT_INTERVIEW_ENABLED", "true").lower()
             in ("true", "1", "yes"),
@@ -515,8 +515,8 @@ class Settings:
             ),
             # Multi-repository management
             github_token=os.getenv("GITHUB_TOKEN", os.getenv("APPS_GITHUB_TOKEN", "")),
-            repos_json_path=os.getenv("REPOS_JSON_PATH", ".agent42/repos.json"),
-            repos_clone_dir=os.getenv("REPOS_CLONE_DIR", ".agent42/repos"),
+            repos_json_path=os.getenv("REPOS_JSON_PATH", ".frood/repos.json"),
+            repos_clone_dir=os.getenv("REPOS_CLONE_DIR", ".frood/repos"),
             # Security scanning
             security_scan_enabled=os.getenv("SECURITY_SCAN_ENABLED", "true").lower()
             in ("true", "1", "yes"),
@@ -554,7 +554,7 @@ class Settings:
             rlm_max_iterations=int(os.getenv("RLM_MAX_ITERATIONS", "20")),
             rlm_root_model=os.getenv("RLM_ROOT_MODEL", ""),
             rlm_sub_model=os.getenv("RLM_SUB_MODEL", ""),
-            rlm_log_dir=os.getenv("RLM_LOG_DIR", ".agent42/rlm_logs"),
+            rlm_log_dir=os.getenv("RLM_LOG_DIR", ".frood/rlm_logs"),
             rlm_verbose=os.getenv("RLM_VERBOSE", "false").lower() in ("true", "1", "yes"),
             rlm_cost_limit=float(os.getenv("RLM_COST_LIMIT", "1.00")),
             rlm_timeout_seconds=int(os.getenv("RLM_TIMEOUT_SECONDS", "300")),
@@ -573,7 +573,7 @@ class Settings:
             tunnel_allowed_ports=os.getenv("TUNNEL_ALLOWED_PORTS", ""),
             tunnel_ttl_minutes=int(os.getenv("TUNNEL_TTL_MINUTES", "60")),
             # Knowledge base / RAG
-            knowledge_dir=os.getenv("KNOWLEDGE_DIR", ".agent42/knowledge"),
+            knowledge_dir=os.getenv("KNOWLEDGE_DIR", ".frood/knowledge"),
             knowledge_chunk_size=int(os.getenv("KNOWLEDGE_CHUNK_SIZE", "500")),
             knowledge_chunk_overlap=int(os.getenv("KNOWLEDGE_CHUNK_OVERLAP", "50")),
             knowledge_max_results=int(os.getenv("KNOWLEDGE_MAX_RESULTS", "10")),
@@ -581,9 +581,9 @@ class Settings:
             vision_max_image_mb=int(os.getenv("VISION_MAX_IMAGE_MB", "10")),
             vision_model=os.getenv("VISION_MODEL", ""),
             # Chat sessions
-            chat_sessions_dir=os.getenv("CHAT_SESSIONS_DIR", ".agent42/chat_sessions"),
+            chat_sessions_dir=os.getenv("CHAT_SESSIONS_DIR", ".frood/chat_sessions"),
             # Projects
-            projects_dir=os.getenv("PROJECTS_DIR", ".agent42/projects"),
+            projects_dir=os.getenv("PROJECTS_DIR", ".frood/projects"),
             # GitHub OAuth
             github_client_id=os.getenv("GITHUB_CLIENT_ID", ""),
             github_oauth_token=os.getenv("GITHUB_OAUTH_TOKEN", ""),
@@ -771,7 +771,7 @@ class Settings:
         new values without needing to re-import.
 
         After loading the .env file, admin-configured keys from
-        .agent42/settings.json are re-applied so they are never overwritten
+        .frood/settings.json are re-applied so they are never overwritten
         by placeholder values that may exist in .env (e.g. the setup wizard
         writes ``OPENROUTER_API_KEY=sk-or-xxxxx`` as a placeholder, and any
         call to reload_from_env would restore that placeholder, discarding the
@@ -783,7 +783,7 @@ class Settings:
 
         # Re-apply admin-configured keys after load_dotenv so .env placeholders
         # cannot silently overwrite them.
-        _key_store_path = Path(__file__).parent.parent / ".agent42" / "settings.json"
+        _key_store_path = Path(__file__).parent.parent / ".frood" / "settings.json"
         if _key_store_path.exists():
             try:
                 _admin_keys = json.loads(_key_store_path.read_text()).get("api_keys", {})
