@@ -134,6 +134,11 @@ class Frood:
         self.key_store = KeyStore(data_dir / "settings.json")
         # Inject admin-configured keys into environment at startup
         self.key_store.inject_into_environ()
+
+        # ── Device store for multi-device API key auth (Phase 53) ────────
+        from core.device_auth import DeviceStore
+
+        self.device_store = DeviceStore(data_dir / "devices.jsonl")
         skill_dirs = [
             Path(__file__).parent / "skills" / "builtins",
             Path(__file__).parent / "skills" / "workspace",
@@ -275,6 +280,7 @@ class Frood:
                 skill_loader=self.skill_loader,
                 app_manager=None,  # Phase 36: AppManager only in non-sidecar mode currently
                 key_store=self.key_store,
+                device_store=self.device_store,  # Phase 53: AUTH-01
             )
             config = uvicorn.Config(
                 app,
