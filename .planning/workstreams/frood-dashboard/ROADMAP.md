@@ -102,7 +102,11 @@ Plans:
   3. POST `/sidecar/token` with valid credentials returns a signed JWT that subsequent API calls accept
   4. Adapter config with an `apiKey` field auto-provisions a token on first connect without manual JWT management
   5. GET `/sidecar/health` returns 200 without authentication (safe for container liveness probes)
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 53-01-PLAN.md — Frontend identity rename: localStorage migration IIFE, BroadcastChannel rename, settings paths, test updates
+- [ ] 53-02-PLAN.md — Sidecar auth: POST /sidecar/token endpoint, DeviceStore injection, adapter auto-provisioning
 
 ### Phase 54: Infrastructure + Packages
 
@@ -137,7 +141,7 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 50. Strip Harness Features | v6.0 | 4/4 | Complete | 2026-04-07 |
 | 51. Rebrand & Repurpose | v6.0 | 4/4 | Complete | 2026-04-08 |
-| 52. Core Identity Rename | v7.0 | 1/3 | Complete    | 2026-04-08 |
-| 53. Frontend Identity + Sidecar Auth | v7.0 | 0/TBD | Not started | - |
+| 52. Core Identity Rename | v7.0 | 3/3 | Complete | 2026-04-08 |
+| 53. Frontend Identity + Sidecar Auth | v7.0 | 0/2 | Planned | - |
 | 54. Infrastructure + Packages | v7.0 | 0/TBD | Not started | - |
 | 55. Qdrant Migration + Test Suite | v7.0 | 0/TBD | Not started | - |
