@@ -1,7 +1,7 @@
 """
 App lifecycle manager — build, run, and serve user-created applications.
 
-Apps are self-contained projects that Agent42 builds from natural language
+Apps are self-contained projects that Frood builds from natural language
 descriptions. Each app lives in its own directory under APPS_DIR, has a
 manifest (APP.json), and can be started/stopped as a subprocess or mounted
 as static files.
@@ -14,7 +14,7 @@ Supported runtimes:
 
 Security:
 - Each app runs in its own directory (no cross-app access)
-- App processes inherit a sanitized environment (no Agent42 secrets)
+- App processes inherit a sanitized environment (no Frood secrets)
 - Port allocation from a restricted range
 - Process supervision with graceful shutdown
 """
@@ -68,7 +68,7 @@ def _make_slug(name: str) -> str:
 
 
 def _sanitize_env() -> dict[str, str]:
-    """Return a sanitized copy of os.environ without Agent42 secrets."""
+    """Return a sanitized copy of os.environ without Frood secrets."""
     import os
 
     blocked = {
@@ -126,7 +126,7 @@ class App:
     github_repo: str = ""  # e.g. "owner/repo-name"
     github_push_on_build: bool = False  # Auto-push on mark_ready
     # App mode and access control
-    app_mode: str = "internal"  # "internal" (Agent42 system) or "external" (public release)
+    app_mode: str = "internal"  # "internal" (Frood system) or "external" (public release)
     require_auth: bool = False  # Require dashboard login to access /apps/{slug}/
     visibility: str = "private"  # "private", "unlisted" (anyone with URL), "public"
 
@@ -804,7 +804,7 @@ class AppManager:
         env["GIT_CONFIG_KEY_0"] = "commit.gpgsign"
         env["GIT_CONFIG_VALUE_0"] = "false"
         env["GIT_CONFIG_KEY_1"] = "user.name"
-        env["GIT_CONFIG_VALUE_1"] = env.get("GIT_AUTHOR_NAME", "Agent42")
+        env["GIT_CONFIG_VALUE_1"] = env.get("GIT_AUTHOR_NAME", "Frood")
         env["GIT_CONFIG_KEY_2"] = "user.email"
         env["GIT_CONFIG_VALUE_2"] = env.get("GIT_AUTHOR_EMAIL", "agent42@localhost")
 

@@ -151,7 +151,7 @@ class WorktreeManager:
 
         if added_patterns:
             async with aiofiles.open(gitignore_path, "a") as f:
-                await f.write("\n# Agent42 safety rules\n")
+                await f.write("\n# Frood safety rules\n")
                 for p in added_patterns:
                     await f.write(f"{p}\n")
 

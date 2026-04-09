@@ -272,7 +272,7 @@ class ScheduledSecurityScanner:
             lines.append("")
 
         lines.append("---")
-        lines.append("*Automated scan by Agent42 security scanner*")
+        lines.append("*Automated scan by Frood security scanner*")
         return "\n".join(lines)
 
     async def _get_existing_issue(self) -> int | None:

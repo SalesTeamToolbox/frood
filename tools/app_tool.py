@@ -173,7 +173,7 @@ class AppTool(Tool):
                 "app_mode": {
                     "type": "string",
                     "enum": ["internal", "external"],
-                    "description": "App mode: 'internal' (Agent42 system app) or 'external' (public release). For create/set_mode.",
+                    "description": "App mode: 'internal' (Frood system app) or 'external' (public release). For create/set_mode.",
                     "default": "",
                 },
                 "visibility": {

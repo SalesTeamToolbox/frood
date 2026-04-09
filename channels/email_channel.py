@@ -2,7 +2,7 @@
 Email channel — IMAP/SMTP integration for receiving and sending emails.
 
 Polls an IMAP inbox for new messages and sends replies via SMTP.
-Essential for the existing EMAIL task type in Agent42.
+Essential for the existing EMAIL task type in Frood.
 """
 
 import asyncio
@@ -76,7 +76,7 @@ class EmailChannel(BaseChannel):
         msg = email.mime.text.MIMEText(message.content, "plain", "utf-8")
         msg["To"] = recipient
         msg["From"] = self.smtp_user
-        msg["Subject"] = message.metadata.get("subject", "Agent42 Response")
+        msg["Subject"] = message.metadata.get("subject", "Frood Response")
 
         # Reply threading
         in_reply_to = message.metadata.get("message_id")

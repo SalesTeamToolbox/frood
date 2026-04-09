@@ -129,7 +129,7 @@ def _rebuild_memory(local_content: str, merged_entries: dict) -> str:
 
 
 class NodeSyncTool(Tool):
-    """Sync memory between Agent42 nodes."""
+    """Sync memory between Frood nodes."""
 
     requires = ["memory_store", "workspace"]
 
@@ -144,7 +144,7 @@ class NodeSyncTool(Tool):
     @property
     def description(self):
         return (
-            "Sync memory between Agent42 nodes (laptop and VPS). "
+            "Sync memory between Frood nodes (laptop and VPS). "
             "Push sends local memories to remote. Pull fetches remote memories. "
             "Merge combines both, keeping all unique content."
         )
