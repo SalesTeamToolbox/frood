@@ -73,7 +73,7 @@ class MemoryStore:
 
         if not self.memory_path.exists():
             self.memory_path.write_text(
-                "# Agent42 Memory\n\n"
+                "# Frood Memory\n\n"
                 "Consolidated knowledge and learnings from agent interactions.\n\n"
                 "## User Preferences\n\n"
                 "## Project Conventions\n\n"
@@ -82,7 +82,7 @@ class MemoryStore:
 
         if not self.history_path.exists():
             self.history_path.write_text(
-                "# Agent42 History\n\nChronological log of significant events.\n\n"
+                "# Frood History\n\nChronological log of significant events.\n\n"
             )
 
     # -- UUID identity helpers --
@@ -289,7 +289,7 @@ class MemoryStore:
                 archive_path = self.history_path.parent / archive_name
                 archive_path.write_text(archived, encoding="utf-8")
                 self.history_path.write_text(
-                    "# Agent42 History (rotated)\n\n" + kept,
+                    "# Frood History (rotated)\n\n" + kept,
                     encoding="utf-8",
                 )
                 logger.info(

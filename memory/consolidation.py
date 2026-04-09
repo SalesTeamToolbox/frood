@@ -8,7 +8,7 @@ Flow:
 3. Summaries are embedded and stored in Qdrant for cross-session search
 4. Original messages remain in JSONL for audit/replay
 
-This enables Agent42 to answer "what did we discuss last week about X?"
+This enables Frood to answer "what did we discuss last week about X?"
 across any channel, without keeping thousands of raw messages in context.
 """
 
