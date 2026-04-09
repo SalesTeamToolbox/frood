@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<service>
+  <id>agent42</id>
+  <name>Agent42</name>
+  <description>Agent42 AI Agent Platform - Dashboard, MCP Server, and LLM Proxy</description>
+  <executable>C:\Users\rickw\AppData\Local\Python\pythoncore-3.14-64\python.exe</executable>
+  <arguments>agent42.py</arguments>
+  <workingdirectory>C:\Users\rickw\projects\agent42</workingdirectory>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="20 sec"/>
+  <onfailure action="none"/>
+  <startmode>Automatic</startmode>
+  <stoptimeout>30sec</stoptimeout>
+  <env name="PYTHONUNBUFFERED" value="1"/>
+  <env name="PATH" value="C:\Users\rickw\AppData\Local\Python\pythoncore-3.14-64;C:\Users\rickw\AppData\Local\Python\pythoncore-3.14-64\Scripts;C:\Windows\system32;C:\Windows"/>
+</service>

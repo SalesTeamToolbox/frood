@@ -279,11 +279,11 @@ last_updated: "2026-03-25T10:00:00Z"
     # Test 9: MCP name uses prefix
     # ------------------------------------------------------------------
     def test_mcp_schema_name_uses_prefix(self):
-        """to_mcp_schema() produces 'agent42_unified_context' per D-15/D-16."""
+        """to_mcp_schema() produces 'frood_unified_context' per D-15/D-16."""
 
         tool = UnifiedContextTool()
         schema = tool.to_mcp_schema()
-        assert schema["name"] == "agent42_unified_context"
+        assert schema["name"] == "frood_unified_context"
 
     # ------------------------------------------------------------------
     # Test 10: Parameters schema has required 'topic' and optional fields
@@ -392,10 +392,10 @@ class TestMCPRegistration:
     """Verify UnifiedContextTool MCP wiring."""
 
     def test_mcp_tool_name(self):
-        """Tool name with agent42 prefix produces agent42_unified_context."""
+        """Tool name with frood prefix produces frood_unified_context."""
         tool = UnifiedContextTool()
-        schema = tool.to_mcp_schema(prefix="agent42")
-        assert schema["name"] == "agent42_unified_context"
+        schema = tool.to_mcp_schema(prefix="frood")
+        assert schema["name"] == "frood_unified_context"
 
     def test_mcp_tool_name_no_collision_with_context(self):
         """UnifiedContextTool and ContextAssemblerTool have different MCP names."""
@@ -404,8 +404,8 @@ class TestMCPRegistration:
         unified = UnifiedContextTool()
         assembler = ContextAssemblerTool()
         assert unified.to_mcp_schema()["name"] != assembler.to_mcp_schema()["name"]
-        assert assembler.to_mcp_schema()["name"] == "agent42_context"
-        assert unified.to_mcp_schema()["name"] == "agent42_unified_context"
+        assert assembler.to_mcp_schema()["name"] == "frood_context"
+        assert unified.to_mcp_schema()["name"] == "frood_unified_context"
 
     def test_parameters_include_task_type(self):
         """D-17: parameters include optional task_type field."""

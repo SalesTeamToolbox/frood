@@ -14,15 +14,15 @@ from tools.registry import ToolRegistry
 
 logger = logging.getLogger("frood.mcp.registry")
 
-# Prefix for all Agent42 tools exposed via MCP
-TOOL_PREFIX = "agent42"
+# Prefix for all Frood tools exposed via MCP
+TOOL_PREFIX = "frood"
 
 
 class MCPRegistryAdapter:
     """Adapts ToolRegistry for MCP server protocol.
 
     Handles:
-    - Tool name prefixing (``agent42_shell``, ``agent42_read_file``, etc.)
+    - Tool name prefixing (``frood_shell``, ``frood_read_file``, etc.)
     - Converting Tool schemas to ``mcp.types.Tool`` definitions
     - Routing MCP ``tools/call`` to ``ToolRegistry.execute()``
     - Converting ``ToolResult`` to MCP content blocks

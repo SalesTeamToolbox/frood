@@ -61,8 +61,8 @@ def extract_session_summary(event):
                     if fp and tool_name in (
                         "Write",
                         "Edit",
-                        "agent42_write_file",
-                        "agent42_edit_file",
+                        "frood_write_file",
+                        "frood_edit_file",
                     ):
                         files_modified.add(os.path.basename(fp))
 
@@ -193,7 +193,7 @@ def is_trivial_session(event):
             tool_input = tr.get("tool_input", {})
             if isinstance(tool_input, dict):
                 fp = tool_input.get("file_path", "") or tool_input.get("path", "")
-                if fp and tool_name in ("Write", "Edit", "agent42_write_file", "agent42_edit_file"):
+                if fp and tool_name in ("Write", "Edit", "frood_write_file", "frood_edit_file"):
                     files_modified.add(fp)
 
     # If transcript present and files were modified via tool_results, not trivial

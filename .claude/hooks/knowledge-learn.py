@@ -34,7 +34,7 @@ def count_tool_calls(event: dict) -> int:
 
 
 def count_file_modifications(event: dict) -> int:
-    """Count file-modifying tool calls (Write, Edit, agent42_write_file, agent42_edit_file)."""
+    """Count file-modifying tool calls (Write, Edit, frood_write_file, frood_edit_file)."""
     tool_results = event.get("tool_results", [])
     if not isinstance(tool_results, list):
         return 0
@@ -43,7 +43,7 @@ def count_file_modifications(event: dict) -> int:
         if not isinstance(tr, dict):
             continue
         tool_name = tr.get("tool_name", "")
-        if tool_name in ("Write", "Edit", "agent42_write_file", "agent42_edit_file"):
+        if tool_name in ("Write", "Edit", "frood_write_file", "frood_edit_file"):
             count += 1
     return count
 
@@ -75,7 +75,7 @@ def get_modified_files(event: dict) -> list:
         if not isinstance(tr, dict):
             continue
         tool_name = tr.get("tool_name", "")
-        if tool_name not in ("Write", "Edit", "agent42_write_file", "agent42_edit_file"):
+        if tool_name not in ("Write", "Edit", "frood_write_file", "frood_edit_file"):
             continue
         tool_input = tr.get("tool_input", {})
         if isinstance(tool_input, dict):

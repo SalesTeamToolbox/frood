@@ -47,7 +47,7 @@ class TestToMcpSchema:
 
     def test_mcp_schema_has_prefix(self):
         schema = self.tool.to_mcp_schema()
-        assert schema["name"] == "agent42_test_tool"
+        assert schema["name"] == "frood_test_tool"
 
     def test_mcp_schema_custom_prefix(self):
         schema = self.tool.to_mcp_schema(prefix="custom")
@@ -121,17 +121,17 @@ class TestMCPRegistryAdapter:
         tools = self.adapter.list_tools()
         assert len(tools) == 2
         names = {t.name for t in tools}
-        assert "agent42_echo" in names
-        assert "agent42_fail" in names
+        assert "frood_echo" in names
+        assert "frood_fail" in names
 
     def test_list_tools_has_descriptions(self):
         tools = self.adapter.list_tools()
-        echo = next(t for t in tools if t.name == "agent42_echo")
+        echo = next(t for t in tools if t.name == "frood_echo")
         assert echo.description == "Echo input"
 
     def test_list_tools_has_input_schema(self):
         tools = self.adapter.list_tools()
-        echo = next(t for t in tools if t.name == "agent42_echo")
+        echo = next(t for t in tools if t.name == "frood_echo")
         assert echo.inputSchema["type"] == "object"
         assert "message" in echo.inputSchema["properties"]
 
@@ -139,29 +139,29 @@ class TestMCPRegistryAdapter:
         self.registry.set_enabled("fail", False)
         tools = self.adapter.list_tools()
         assert len(tools) == 1
-        assert tools[0].name == "agent42_echo"
+        assert tools[0].name == "frood_echo"
 
     @pytest.mark.asyncio
     async def test_call_tool_success(self):
-        result = await self.adapter.call_tool("agent42_echo", {"message": "hello"})
+        result = await self.adapter.call_tool("frood_echo", {"message": "hello"})
         assert len(result) == 1
         assert result[0].text == "Echo: hello"
 
     @pytest.mark.asyncio
     async def test_call_tool_failure_returns_error_text(self):
-        result = await self.adapter.call_tool("agent42_fail", {})
+        result = await self.adapter.call_tool("frood_fail", {})
         assert len(result) == 1
         assert "Intentional failure" in result[0].text
 
     @pytest.mark.asyncio
     async def test_call_tool_unknown_returns_error(self):
-        result = await self.adapter.call_tool("agent42_nonexistent", {})
+        result = await self.adapter.call_tool("frood_nonexistent", {})
         assert len(result) == 1
         assert "Unknown tool" in result[0].text
 
     def test_strip_prefix(self):
-        assert self.adapter._strip_prefix("agent42_echo") == "echo"
-        assert self.adapter._strip_prefix("agent42_read_file") == "read_file"
+        assert self.adapter._strip_prefix("frood_echo") == "echo"
+        assert self.adapter._strip_prefix("frood_read_file") == "read_file"
         assert self.adapter._strip_prefix("other_echo") == "other_echo"
 
 
@@ -184,7 +184,7 @@ class TestMCPSecurityIntegration:
         registry.register(ReadFileTool(sandbox))
         adapter = MCPRegistryAdapter(registry)
 
-        result = await adapter.call_tool("agent42_read_file", {"path": "hello.txt"})
+        result = await adapter.call_tool("frood_read_file", {"path": "hello.txt"})
         assert result[0].text == "Hello from Agent42"
 
     @pytest.mark.asyncio
@@ -194,7 +194,7 @@ class TestMCPSecurityIntegration:
         registry.register(ReadFileTool(sandbox))
         adapter = MCPRegistryAdapter(registry)
 
-        result = await adapter.call_tool("agent42_read_file", {"path": "../../etc/passwd"})
+        result = await adapter.call_tool("frood_read_file", {"path": "../../etc/passwd"})
         assert "Error" in result[0].text
 
     @pytest.mark.asyncio
@@ -205,7 +205,7 @@ class TestMCPSecurityIntegration:
         adapter = MCPRegistryAdapter(registry)
 
         result = await adapter.call_tool(
-            "agent42_write_file",
+            "frood_write_file",
             {"path": "output.txt", "content": "written via MCP"},
         )
         assert "Written" in result[0].text
@@ -219,7 +219,7 @@ class TestMCPSecurityIntegration:
         registry.register(ShellTool(sandbox, command_filter))
         adapter = MCPRegistryAdapter(registry)
 
-        result = await adapter.call_tool("agent42_shell", {"command": "rm -rf /"})
+        result = await adapter.call_tool("frood_shell", {"command": "rm -rf /"})
         # Should be blocked by command filter
         assert "Error" in result[0].text
 
@@ -231,7 +231,7 @@ class TestMCPSecurityIntegration:
         registry.register(ShellTool(sandbox, command_filter))
         adapter = MCPRegistryAdapter(registry)
 
-        result = await adapter.call_tool("agent42_shell", {"command": "echo hello"})
+        result = await adapter.call_tool("frood_shell", {"command": "echo hello"})
         assert "hello" in result[0].text
 
 
@@ -253,9 +253,9 @@ class TestMCPServerCreation:
         tools = adapter.list_tools()
         names = {t.name for t in tools}
         # Core tools must be present
-        assert "agent42_context" in names
-        assert "agent42_memory" in names
-        assert "agent42_git" in names
+        assert "frood_context" in names
+        assert "frood_memory" in names
+        assert "frood_git" in names
         # 25+ tools registered
         assert len(tools) >= 25
 

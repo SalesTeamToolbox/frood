@@ -42,7 +42,7 @@ def count_file_modifications(event):
         if not isinstance(tr, dict):
             continue
         tool_name = tr.get("tool_name", "")
-        if tool_name in ("Write", "Edit", "agent42_write_file", "agent42_edit_file"):
+        if tool_name in ("Write", "Edit", "frood_write_file", "frood_edit_file"):
             count += 1
     return count
 
@@ -71,7 +71,7 @@ def get_modified_files(event):
         if not isinstance(tr, dict):
             continue
         tool_name = tr.get("tool_name", "")
-        if tool_name not in ("Write", "Edit", "agent42_write_file", "agent42_edit_file"):
+        if tool_name not in ("Write", "Edit", "frood_write_file", "frood_edit_file"):
             continue
         tool_input = tr.get("tool_input", {})
         if isinstance(tool_input, dict):

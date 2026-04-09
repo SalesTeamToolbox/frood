@@ -357,8 +357,8 @@ def _skill_to_prompt(skill) -> types.Prompt:
     )
 
     return types.Prompt(
-        name=f"agent42_{skill.name}",
-        description=skill.description or f"Agent42 skill: {skill.name}",
+        name=f"frood_{skill.name}",
+        description=skill.description or f"Frood skill: {skill.name}",
         arguments=arguments if arguments else None,
     )
 
@@ -403,8 +403,8 @@ def _create_server() -> tuple[Server, MCPRegistryAdapter]:
         """Execute a skill and return its instructions as prompt messages."""
         args = arguments or {}
 
-        # Strip agent42_ prefix if present
-        skill_name = name.removeprefix("agent42_")
+        # Strip frood_ prefix if present
+        skill_name = name.removeprefix("frood_")
         skill = skill_loader.get(skill_name)
 
         if skill is None:

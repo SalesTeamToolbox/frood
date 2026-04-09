@@ -2,13 +2,14 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: Dashboard Unification
-status: Milestone v6.0 complete — all phases delivered
-last_updated: "2026-04-05T20:08:17.286Z"
+status: Ready to execute
+last_updated: "2026-04-08T22:02:08.448Z"
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 7
   completed_plans: 7
+  percent: 100
 ---
 
 # Workstream State
@@ -54,6 +55,10 @@ Plan: All plans complete. Workstream milestone v6.0 achieved.
 - [Phase 40-03]: Learning toggle in MemoryTab calls update-agent42-settings with LEARNING_ENABLED key (not a dedicated toggle action)
 - [Phase 42-n8n-workflow-integration]: Templates use {PLACEHOLDER} syntax in JSON string values for simple replacement without regex
 - [Phase 42-n8n-workflow-integration]: validate_workflow_nodes is module-level so tests can import it without tool instantiation
+- [Phase 50-strip-harness-features]: Tasks 1+2 executed atomically via multi-pass Python script on single-file SPA (af13ea3)
+- [Phase 50-strip-harness-features]: Plan 50-04 complete: deleted 14 test files for removed harness features, cleaned 4 mixed test files, full test suite green (2025 passed)
+- [Phase 52]: agent42.py replaced with deprecation shim delegating to frood.main(); _migrate_data_dir() runs in main() before Frood() constructor
+- [Phase 52]: D-01 clean break: no AGENT42_* fallback, straight rename to FROOD_* across all Python source files
 
 ## Plan 36-01 Metrics
 

@@ -1,0 +1,3 @@
+{"timestamp": 1775621853.844463, "url": "http://127.0.0.1/secret", "agent_id": "default", "reason": "Blocked: 127.0.0.1 resolves to private/internal IP 127.0.0.1"}
+{"timestamp": 1775622131.4690082, "url": "http://127.0.0.1/secret", "agent_id": "default", "reason": "Blocked: 127.0.0.1 resolves to private/internal IP 127.0.0.1"}
+{"timestamp": 1775622445.617279, "url": "http://127.0.0.1/secret", "agent_id": "default", "reason": "Blocked: 127.0.0.1 resolves to private/internal IP 127.0.0.1"}

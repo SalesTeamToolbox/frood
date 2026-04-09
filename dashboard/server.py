@@ -14,6 +14,7 @@ reports, settings, Agent Apps, WebSocket broadcast.
 
 import asyncio
 import logging
+import os
 import time as _time
 from pathlib import Path
 
@@ -45,6 +46,91 @@ from dashboard.auth import (
 from dashboard.websocket_manager import WebSocketManager
 
 logger = logging.getLogger("frood.server")
+
+_ZEN_MODELS_CACHE: list[dict] | None = None
+_ZEN_MODELS_CACHE_TIME: float = 0.0
+_ZEN_MODELS_CACHE_TTL: float = 300.0
+
+
+async def _fetch_zen_models() -> list[dict]:
+    """Fetch Zen models from API with 5-minute caching.
+
+    Returns list of model dicts with id, provider, category.
+    Falls back to cached/default models on API failure.
+    """
+    global _ZEN_MODELS_CACHE, _ZEN_MODELS_CACHE_TIME
+    import httpx
+
+    now = _time.time()
+    if _ZEN_MODELS_CACHE and (now - _ZEN_MODELS_CACHE_TIME) < _ZEN_MODELS_CACHE_TTL:
+        return _ZEN_MODELS_CACHE
+
+    api_key = os.environ.get("ZEN_API_KEY", "")
+    if not api_key:
+        return _get_default_zen_models()
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            headers = {"Authorization": f"Bearer {api_key}"}
+            resp = await client.get("https://opencode.ai/zen/v1/models", headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+        models = data.get("data", data) if isinstance(data, dict) else data
+        if not isinstance(models, list):
+            return _get_default_zen_models()
+
+        zen_models = []
+        for m in models:
+            model_id = m.get("id", "") if isinstance(m, dict) else str(m)
+            if not model_id:
+                continue
+            category = _infer_model_category(model_id)
+            zen_models.append(
+                {
+                    "id": model_id,
+                    "provider": "zen",
+                    "category": category,
+                }
+            )
+
+        if zen_models:
+            _ZEN_MODELS_CACHE = zen_models
+            _ZEN_MODELS_CACHE_TIME = now
+            return zen_models
+
+    except Exception as e:
+        logger.warning(f"Failed to fetch Zen models: {e}")
+
+    return _get_default_zen_models()
+
+
+def _infer_model_category(model_id: str) -> str:
+    """Infer category from model ID patterns."""
+    lower = model_id.lower()
+    if "reasoning" in lower or "nemotron" in lower:
+        return "reasoning"
+    if "vision" in lower or "image" in lower:
+        return "vision"
+    if "fast" in lower or "haiku" in lower:
+        return "fast"
+    if "mini" in lower or "sonnet" in lower:
+        return "general"
+    if "opus" in lower or "pro" in lower:
+        return "premium"
+    if "content" in lower or "big-pickle" in lower:
+        return "content"
+    return "general"
+
+
+def _get_default_zen_models() -> list[dict]:
+    """Return hardcoded fallback Zen models."""
+    return [
+        {"id": "qwen3.6-plus-free", "provider": "zen", "category": "fast"},
+        {"id": "minimax-m2.5-free", "provider": "zen", "category": "general"},
+        {"id": "nemotron-3-super-free", "provider": "zen", "category": "reasoning"},
+        {"id": "big-pickle", "provider": "zen", "category": "content"},
+    ]
 
 
 async def _pip_install(packages: list[str]) -> tuple[list[str], list[str]]:
@@ -864,8 +950,6 @@ def create_app(
 
     # -- Memory Search API (used by hooks + frontend) -------------------------
 
-    import os as _os
-
     @app.post("/api/memory/search")
     async def memory_search(request: Request):
         """Search Agent42's memory system (Qdrant + MEMORY.md).
@@ -1008,7 +1092,7 @@ def create_app(
         model = (
             body.get("model")
             or request.headers.get("X-Model")
-            or _os.environ.get("LLM_PROXY_MODEL", "qwen3.6-plus-free")
+            or os.environ.get("LLM_PROXY_MODEL", "qwen3.6-plus-free")
         )
         messages = body.get("messages", [])
 
@@ -1018,7 +1102,7 @@ def create_app(
         if model.startswith("zen:"):
             actual_model = model.split(":", 1)[1]
             chat_model = actual_model
-            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            zen_key = os.environ.get("ZEN_API_KEY", "")
             if zen_key:
                 providers.append(("zen", zen_key))
         elif model in (
@@ -1027,16 +1111,16 @@ def create_app(
             "nemotron-3-super-free",
             "big-pickle",
         ):
-            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            zen_key = os.environ.get("ZEN_API_KEY", "")
             if zen_key:
                 providers.append(("zen", zen_key))
         else:
-            if _os.environ.get("ANTHROPIC_API_KEY", ""):
-                providers.append(("anthropic", _os.environ.get("ANTHROPIC_API_KEY", "")))
-            if _os.environ.get("OPENROUTER_API_KEY", ""):
-                providers.append(("openrouter", _os.environ.get("OPENROUTER_API_KEY", "")))
-            if _os.environ.get("OPENAI_API_KEY", ""):
-                providers.append(("openai", _os.environ.get("OPENAI_API_KEY", "")))
+            if os.environ.get("ANTHROPIC_API_KEY", ""):
+                providers.append(("anthropic", os.environ.get("ANTHROPIC_API_KEY", "")))
+            if os.environ.get("OPENROUTER_API_KEY", ""):
+                providers.append(("openrouter", os.environ.get("OPENROUTER_API_KEY", "")))
+            if os.environ.get("OPENAI_API_KEY", ""):
+                providers.append(("openai", os.environ.get("OPENAI_API_KEY", "")))
 
         if not providers:
             return {"error": {"message": "No API keys configured", "type": "invalid_request_error"}}
@@ -1133,7 +1217,7 @@ def create_app(
         model = (
             body.get("model")
             or request.headers.get("X-Model")
-            or _os.environ.get("LLM_PROXY_MODEL", "qwen3.6-plus-free")
+            or os.environ.get("LLM_PROXY_MODEL", "qwen3.6-plus-free")
         )
         system_prompt = body.get("system", "")
         messages = body.get("messages", [])
@@ -1145,7 +1229,7 @@ def create_app(
         if model.startswith("zen:"):
             actual_model = model.split(":", 1)[1]
             chat_model = actual_model
-            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            zen_key = os.environ.get("ZEN_API_KEY", "")
             if zen_key:
                 providers.append(("zen", zen_key))
         elif model in (
@@ -1154,16 +1238,16 @@ def create_app(
             "nemotron-3-super-free",
             "big-pickle",
         ):
-            zen_key = _os.environ.get("ZEN_API_KEY", "")
+            zen_key = os.environ.get("ZEN_API_KEY", "")
             if zen_key:
                 providers.append(("zen", zen_key))
         else:
-            if _os.environ.get("ANTHROPIC_API_KEY", ""):
-                providers.append(("anthropic", _os.environ.get("ANTHROPIC_API_KEY", "")))
-            if _os.environ.get("OPENROUTER_API_KEY", ""):
-                providers.append(("openrouter", _os.environ.get("OPENROUTER_API_KEY", "")))
-            if _os.environ.get("OPENAI_API_KEY", ""):
-                providers.append(("openai", _os.environ.get("OPENAI_API_KEY", "")))
+            if os.environ.get("ANTHROPIC_API_KEY", ""):
+                providers.append(("anthropic", os.environ.get("ANTHROPIC_API_KEY", "")))
+            if os.environ.get("OPENROUTER_API_KEY", ""):
+                providers.append(("openrouter", os.environ.get("OPENROUTER_API_KEY", "")))
+            if os.environ.get("OPENAI_API_KEY", ""):
+                providers.append(("openai", os.environ.get("OPENAI_API_KEY", "")))
 
         if not providers:
             return JSONResponse(
@@ -1296,18 +1380,15 @@ def create_app(
 
         Claude Code can use this to discover the endpoint and available models.
         """
-        base_url = _os.environ.get("LLM_PROXY_BASE_URL", "http://localhost:8000")
+        zen_models = await _fetch_zen_models()
+        base_url = os.environ.get("LLM_PROXY_BASE_URL", "http://localhost:8000")
+
         return {
             "endpoint": f"{base_url}/llm/v1/chat/completions",
             "auth_type": "none",
             "model_header": "X-Model",
-            "default_model": _os.environ.get("LLM_PROXY_MODEL", "qwen3.6-plus-free"),
-            "available_models": [
-                {"id": "qwen3.6-plus-free", "provider": "zen", "category": "fast"},
-                {"id": "minimax-m2.5-free", "provider": "zen", "category": "general"},
-                {"id": "nemotron-3-super-free", "provider": "zen", "category": "reasoning"},
-                {"id": "big-pickle", "provider": "zen", "category": "content"},
-            ],
+            "default_model": os.environ.get("LLM_PROXY_MODEL", "qwen3.6-plus-free"),
+            "available_models": zen_models,
         }
 
     # -- Effectiveness Tracking API (EFFT-03: MCP tool tracking) ---------------
@@ -1732,14 +1813,12 @@ Focus on learnings that would help in future similar sessions."""
                 except ImportError:
                     return {"learnings": []}
 
-                import os as _os
-
                 # Use Agent42's own provider routing
-                api_key = _os.environ.get("OPENROUTER_API_KEY", "") or _os.environ.get(
+                api_key = os.environ.get("OPENROUTER_API_KEY", "") or os.environ.get(
                     "GEMINI_API_KEY", ""
                 )
                 if not api_key:
-                    api_key = _os.environ.get("OPENAI_API_KEY", "")
+                    api_key = os.environ.get("OPENAI_API_KEY", "")
                     base_url = None
                 else:
                     base_url = "https://openrouter.ai/api/v1"

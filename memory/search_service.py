@@ -170,7 +170,7 @@ def search(query, top_k=5, threshold=0.15):
                 payload = hit.payload or {}
                 text = payload.get("text", payload.get("content", ""))
                 section = payload.get("section", "")
-                source = collection_name.replace("agent42_", "")
+                source = collection_name.replace(f"{_qdr_config.collection_prefix}_", "")
 
                 if text:
                     results.append(
