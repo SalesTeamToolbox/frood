@@ -39,6 +39,13 @@ import time
 from datetime import UTC
 from pathlib import Path
 
+# Frood memory config for dynamic collection prefix
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from memory.qdrant_store import QdrantConfig as _QdrConfig
+
+_qdr_config = _QdrConfig()
+_MEM_PREFIX = _qdr_config.collection_prefix
+
 # Module-level TTL-based search result cache: cache_key -> (timestamp, results)
 _search_cache: dict[str, tuple[float, list]] = {}
 _SEARCH_CACHE_TTL = 60  # seconds
@@ -403,7 +410,7 @@ def try_qdrant_direct_search(keywords):
     import urllib.request
 
     qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
-    collections = ["agent42_memory", "agent42_history"]
+    collections = [f"{_MEM_PREFIX}_memory", f"{_MEM_PREFIX}_history"]
     memories = []
 
     for collection in collections:
@@ -428,7 +435,7 @@ def try_qdrant_direct_search(keywords):
                 result = json.loads(resp.read())
 
             points = result.get("result", {}).get("points", [])
-            source = collection.replace("agent42_", "")
+            source = collection.replace(f"{_MEM_PREFIX}_", "")
 
             for point in points:
                 payload = point.get("payload", {})
@@ -482,7 +489,7 @@ def try_qdrant_local_search(keywords, project_dir):
         return []
 
     memories = []
-    collections = ["agent42_memory", "agent42_history"]
+    collections = [f"{_MEM_PREFIX}_memory", f"{_MEM_PREFIX}_history"]
 
     try:
         client = QdrantClient(path=qdrant_path)
@@ -499,7 +506,7 @@ def try_qdrant_local_search(keywords, project_dir):
                     with_vectors=False,
                 )[0]
 
-                source = collection.replace("agent42_", "")
+                source = collection.replace(f"{_MEM_PREFIX}_", "")
                 for point in points:
                     payload = point.payload or {}
                     text = payload.get("text", payload.get("content", ""))
