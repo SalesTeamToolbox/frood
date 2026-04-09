@@ -67,9 +67,9 @@ Plans:
 ### Phases
 
 - [x] **Phase 52: Core Identity Rename** — Rename entry point, data directory, env vars, and all Python internal references (frood.py, .frood/, FROOD_* vars, logger names)
-- [ ] **Phase 53: Frontend Identity + Sidecar Auth** — Migrate frontend storage keys and BroadcastChannel names; add /sidecar/token provisioning endpoint
-- [ ] **Phase 54: Infrastructure + Packages** — Rename Docker services, volumes, compose env vars; rename NPM adapter and plugin packages
-- [ ] **Phase 55: Qdrant Migration + Test Suite** — Migrate collection names with aliases for backward compat; update all tests and docs; full suite validation
+- [x] **Phase 53: Frontend Identity + Sidecar Auth** — Migrate frontend storage keys and BroadcastChannel names; add /sidecar/token provisioning endpoint (completed 2026-04-08)
+- [x] **Phase 54: Infrastructure + Packages** — Rename Docker services, volumes, compose env vars; rename NPM adapter and plugin packages (completed 2026-04-08)
+- [x] **Phase 55: Qdrant Migration + Test Suite** — Migrate collection names with aliases for backward compat; update all tests and docs; full suite validation (completed 2026-04-09)
 
 ## Phase Details
 
@@ -102,11 +102,11 @@ Plans:
   3. POST `/sidecar/token` with valid credentials returns a signed JWT that subsequent API calls accept
   4. Adapter config with an `apiKey` field auto-provisions a token on first connect without manual JWT management
   5. GET `/sidecar/health` returns 200 without authentication (safe for container liveness probes)
-**Plans**: 2 plans
+**Plans**: 2/2 plans complete
 
 Plans:
-- [ ] 53-01-PLAN.md — Frontend identity rename: localStorage migration IIFE, BroadcastChannel rename, settings paths, test updates
-- [ ] 53-02-PLAN.md — Sidecar auth: POST /sidecar/token endpoint, DeviceStore injection, adapter auto-provisioning
+- [x] 53-01-PLAN.md — Frontend identity rename: localStorage migration IIFE, BroadcastChannel rename, settings paths, test updates
+- [x] 53-02-PLAN.md — Sidecar auth: POST /sidecar/token endpoint, DeviceStore injection, adapter auto-provisioning
 
 ### Phase 54: Infrastructure + Packages
 
@@ -119,9 +119,11 @@ Plans:
   3. Dockerfile user and CMD references use `frood`
   4. Adapter package is published/installable as `@frood/paperclip-adapter`; plugin as `@frood/paperclip-plugin`
   5. Package directories renamed from `agent42-paperclip` to `frood-paperclip`
-**Plans**: TBD
+**Plans**: 2 plans
 
-### Phase 55: Qdrant Migration + Test Suite
+Plans:
+- [x] 54-01-PLAN.md — Docker: Rename service, volume, env vars, Dockerfile user/CMD
+- [x] 54-02-PLAN.md — NPM: Rename adapter and plugin package names and directories Qdrant Migration + Test Suite
 
 **Goal**: Qdrant collections use Frood names with aliases preserving backward compat; all tests and docs reflect the rename; full suite green
 **Depends on**: Phase 52, Phase 53, Phase 54
@@ -133,7 +135,15 @@ Plans:
   4. All test files reference `frood` (no `agent42` assertions, fixture names, or collection names)
   5. CLAUDE.md, `.env.example`, and planning docs all reflect Frood naming
   6. Full test suite passes with zero failures after all v7.0 renames
-**Plans**: TBD
+**Plans:** 6 plans
+
+Plans:
+- [x] 55-01-PLAN.md — Config defaults + QdrantStore alias creation
+- [x] 55-02-PLAN.md — Dynamic collection prefix in hooks, MCP, search service
+- [x] 55-03-PLAN.md — Test file updates (migrate, cc_memory_sync, mcp_server, task_context)
+- [x] 55-04-PLAN.md — .env.example documentation
+- [x] 55-05-PLAN.md — test_knowledge_learn.py updates
+- [x] 55-06-PLAN.md — Full test suite validation + human checkpoint
 
 ## Progress
 
@@ -142,6 +152,6 @@ Plans:
 | 50. Strip Harness Features | v6.0 | 4/4 | Complete | 2026-04-07 |
 | 51. Rebrand & Repurpose | v6.0 | 4/4 | Complete | 2026-04-08 |
 | 52. Core Identity Rename | v7.0 | 3/3 | Complete | 2026-04-08 |
-| 53. Frontend Identity + Sidecar Auth | v7.0 | 0/2 | Planned | - |
-| 54. Infrastructure + Packages | v7.0 | 0/TBD | Not started | - |
-| 55. Qdrant Migration + Test Suite | v7.0 | 0/TBD | Not started | - |
+| 53. Frontend Identity + Sidecar Auth | v7.0 | 2/2 | Complete | 2026-04-08 |
+| 54. Infrastructure + Packages | v7.0 | 2/2 | Complete | 2026-04-08 |
+| 55. Qdrant Migration + Test Suite | v7.0 | 6/6 | Complete    | 2026-04-09 |
