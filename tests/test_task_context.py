@@ -331,8 +331,8 @@ class TestPayloadIndexes:
         store._initialized_collections = set()
 
         # Call twice — should not raise
-        store._ensure_task_indexes("agent42_memory")
-        store._ensure_task_indexes("agent42_memory")
+        store._ensure_task_indexes("frood_memory")
+        store._ensure_task_indexes("frood_memory")
 
 
 class TestBackwardCompat:
