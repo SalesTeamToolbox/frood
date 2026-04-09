@@ -487,7 +487,7 @@ class Settings:
             # Qdrant
             qdrant_url=os.getenv("QDRANT_URL", ""),
             qdrant_api_key=os.getenv("QDRANT_API_KEY", ""),
-            qdrant_collection_prefix=os.getenv("QDRANT_COLLECTION_PREFIX", "agent42"),
+            qdrant_collection_prefix=os.getenv("QDRANT_COLLECTION_PREFIX", "frood"),
             qdrant_enabled=os.getenv("QDRANT_ENABLED", "").lower() in ("true", "1", "yes")
             or bool(os.getenv("QDRANT_URL", "")),
             qdrant_local_path=os.getenv("QDRANT_LOCAL_PATH", ".frood/qdrant"),
