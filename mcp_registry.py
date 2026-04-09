@@ -1,7 +1,7 @@
 """
-MCP registry adapter — bridges Agent42 ToolRegistry with MCP protocol.
+MCP registry adapter — bridges Frood ToolRegistry with MCP protocol.
 
-Converts Agent42 Tool instances to MCP tool definitions and routes
+Converts Frood Tool instances to MCP tool definitions and routes
 MCP tool calls through the existing ToolRegistry with security layers.
 """
 

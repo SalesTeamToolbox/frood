@@ -272,7 +272,7 @@ class SearchHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Agent42 Memory Search Service")
+    parser = argparse.ArgumentParser(description="Frood Memory Search Service")
     parser.add_argument("--port", type=int, default=6380, help="HTTP port (default: 6380)")
     parser.add_argument("--qdrant-url", default="http://localhost:6333", help="Qdrant server URL")
     args = parser.parse_args()
