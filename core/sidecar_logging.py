@@ -1,4 +1,4 @@
-"""Structured JSON logging for Agent42 sidecar mode.
+"""Structured JSON logging for Frood sidecar mode.
 
 When --sidecar is active, all log output is JSON lines (one JSON object per line)
 suitable for log aggregation tools. ANSI escape codes are stripped per D-10.
@@ -36,7 +36,7 @@ class SidecarJsonFormatter(logging.Formatter):
 def configure_sidecar_logging() -> None:
     """Replace root logger handlers with a single JSON-emitting StreamHandler.
 
-    Call this once at startup when --sidecar is active, BEFORE constructing Agent42.
+    Call this once at startup when --sidecar is active, BEFORE constructing Frood.
     Per pitfall 5 in RESEARCH.md: only install JSON formatter in sidecar mode to
     avoid breaking dashboard's human-readable log format.
     """
