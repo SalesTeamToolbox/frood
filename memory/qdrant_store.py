@@ -45,7 +45,7 @@ class QdrantConfig:
 
     url: str = ""  # Empty = use embedded/local mode
     api_key: str = ""
-    collection_prefix: str = "agent42"
+    collection_prefix: str = "frood"
     local_path: str = ".frood/qdrant"  # Path for embedded storage
     vector_dim: int = VECTOR_DIM
 
@@ -98,6 +98,34 @@ class QdrantStore:
         except Exception as e:
             logger.warning(f"Qdrant backend: failed to connect — {e}")
             self._client = None
+
+        # Create backward-compatible aliases from agent42_ to frood_ collections
+        self._ensure_aliases()
+
+    def _ensure_aliases(self):
+        """Create backward-compatible aliases from agent42_ to frood_ collections."""
+        if not self._client:
+            return
+
+        suffixes = [self.MEMORY, self.HISTORY, self.CONVERSATIONS, self.KNOWLEDGE]
+        old_prefix = "agent42"
+        new_prefix = self.config.collection_prefix
+
+        for suffix in suffixes:
+            old_name = f"{old_prefix}_{suffix}"
+            new_name = self._collection_name(suffix)
+            try:
+                # Only create alias if old collection exists AND new collection exists
+                all_collections = self._client.get_collections().collections
+                names = {c.name for c in all_collections}
+                if old_name in names and new_name in names:
+                    self._client.create_alias(
+                        collection_name=new_name,
+                        alias_name=old_name,
+                    )
+                    logger.info(f"Qdrant: created alias '{old_name}' -> '{new_name}'")
+            except Exception as e:
+                logger.debug(f"Qdrant: alias creation skipped ({e})")
 
     def _check_health(self) -> bool:
         """Probe the Qdrant server for actual connectivity.
