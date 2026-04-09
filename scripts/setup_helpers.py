@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Setup helper library for Agent42 + Claude Code environment configuration.
+"""Setup helper library for Frood + Claude Code environment configuration.
 
 Provides Python helpers for MCP config generation, hook registration, and health
 probes. All JSON config manipulation happens here — never in bash.

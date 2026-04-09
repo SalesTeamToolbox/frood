@@ -440,7 +440,7 @@ def startup_audit():
 
 
 class SecurityAuditTool(Tool):
-    """Run security audit on the Agent42 installation."""
+    """Run security audit on the Frood installation."""
 
     @property
     def name(self) -> str:
@@ -449,7 +449,7 @@ class SecurityAuditTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Run a comprehensive security audit on this Agent42 installation. "
+            "Run a comprehensive security audit on this Frood installation. "
             "Checks authentication, network, sandbox, secrets, rate limiting, "
             "approval gates, and notification configuration."
         )

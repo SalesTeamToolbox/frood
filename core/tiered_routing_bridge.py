@@ -1,4 +1,4 @@
-"""TieredRoutingBridge — maps Paperclip roles to Agent42 provider/model selection.
+"""TieredRoutingBridge — maps Paperclip roles to Frood provider/model selection.
 
 Composes RewardSystem + TierDeterminator + resolve_model() into a single
 resolve() method. Follows the MemoryBridge pattern: dedicated core/*.py class,
@@ -27,7 +27,7 @@ logger = logging.getLogger("frood.sidecar.routing")
 # ---------------------------------------------------------------------------
 # Role → Task Category Mapping (ROUTE-01, D-01, D-02, D-03)
 # ---------------------------------------------------------------------------
-# Maps Paperclip agent roles to Agent42 task categories.
+# Maps Paperclip agent roles to Frood task categories.
 # Unknown or empty roles fall back to "general" (D-02).
 # No prefix-tolerant matching — roles are a known enum (D-03).
 

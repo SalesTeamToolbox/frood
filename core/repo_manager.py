@@ -9,7 +9,7 @@ Each repo gets a ``WorktreeManager`` so agents can work in isolated branches.
 
 Security:
 - GitHub tokens are never logged or persisted in the registry
-- Git commands run in a sanitised environment (no Agent42 secrets)
+- Git commands run in a sanitised environment (no Frood secrets)
 - Paths are resolved and validated before registration
 """
 
@@ -38,7 +38,7 @@ def _make_slug(name: str) -> str:
 
 
 def _sanitize_env() -> dict[str, str]:
-    """Return a copy of os.environ without Agent42 secrets."""
+    """Return a copy of os.environ without Frood secrets."""
     blocked = {
         "OPENROUTER_API_KEY",
         "OPENAI_API_KEY",
@@ -90,7 +90,7 @@ class Repository:
 
 
 class RepositoryManager:
-    """Manages multiple project repositories for Agent42."""
+    """Manages multiple project repositories for Frood."""
 
     def __init__(
         self,
@@ -413,9 +413,9 @@ class RepositoryManager:
         env["GIT_CONFIG_KEY_0"] = "commit.gpgsign"
         env["GIT_CONFIG_VALUE_0"] = "false"
         env["GIT_CONFIG_KEY_1"] = "user.name"
-        env["GIT_CONFIG_VALUE_1"] = env.get("GIT_AUTHOR_NAME", "Agent42")
+        env["GIT_CONFIG_VALUE_1"] = env.get("GIT_AUTHOR_NAME", "Frood")
         env["GIT_CONFIG_KEY_2"] = "user.email"
-        env["GIT_CONFIG_VALUE_2"] = env.get("GIT_AUTHOR_EMAIL", "agent42@localhost")
+        env["GIT_CONFIG_VALUE_2"] = env.get("GIT_AUTHOR_EMAIL", "frood@localhost")
 
         with git_askpass_env(self._github_token, env) as auth_env:
             proc = await asyncio.create_subprocess_exec(

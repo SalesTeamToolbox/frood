@@ -152,7 +152,7 @@ class NotificationService:
                     "blocks": [
                         {
                             "type": "header",
-                            "text": {"type": "plain_text", "text": f"Agent42: {payload.event}"},
+                            "text": {"type": "plain_text", "text": f"Frood: {payload.event}"},
                         },
                         {
                             "type": "section",
@@ -182,7 +182,7 @@ class NotificationService:
         return {
             "embeds": [
                 {
-                    "title": f"Agent42: {payload.event}",
+                    "title": f"Frood: {payload.event}",
                     "color": color,
                     "fields": [
                         {"name": "Event", "value": payload.event, "inline": True},
@@ -217,7 +217,7 @@ class NotificationService:
             return
 
         subject = (
-            f"[Agent42 {payload.severity.upper()}] {payload.event}: {payload.title or 'Alert'}"
+            f"[Frood {payload.severity.upper()}] {payload.event}: {payload.title or 'Alert'}"
         )
         body = (
             f"Event: {payload.event}\n"

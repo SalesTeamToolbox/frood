@@ -78,7 +78,7 @@ class AgentRuntime:
 
         tools = agent_config.get("tools", [])
         if tools:
-            parts.append(f"\nYou have access to these Agent42 MCP tools: {', '.join(tools)}")
+            parts.append(f"\nYou have access to these Frood MCP tools: {', '.join(tools)}")
             parts.append("Use them as needed to complete your task.")
 
         skills = agent_config.get("skills", [])

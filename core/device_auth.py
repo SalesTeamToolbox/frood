@@ -1,7 +1,7 @@
 """
 Device authentication for multi-device gateway access.
 
-Devices (Apple Watch, laptop, phone, tablet) register with Agent42 and receive
+Devices (Apple Watch, laptop, phone, tablet) register with Frood and receive
 persistent API keys. Keys are stored as SHA-256 hashes in a JSONL file;
 the raw key is returned only once at registration.
 

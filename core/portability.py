@@ -1,13 +1,13 @@
 """
-Agent42 portability — backup, restore, and clone operations.
+Frood portability — backup, restore, and clone operations.
 
 Provides archive-based data portability for migration between hosts,
 disaster recovery, and multi-node deployment.
 
 Usage (via CLI):
-    python agent42.py backup -o /tmp
-    python agent42.py restore /tmp/agent42-backup-20260222-143000.tar.gz --target /new/path
-    python agent42.py clone -o /tmp
+    python frood.py backup -o /tmp
+    python frood.py restore /tmp/frood-backup-20260222-143000.tar.gz --target /new/path
+    python frood.py clone -o /tmp
 """
 
 import json
@@ -31,7 +31,7 @@ ARCHIVE_VERSION = 1
 # Env var keys whose values should be redacted in clone templates
 _SECRET_KEY_PATTERN = re.compile(r"_(KEY|TOKEN|PASSWORD|SECRET|HASH)$", re.IGNORECASE)
 
-# Data categories and their relative paths (from the Agent42 installation root)
+# Data categories and their relative paths (from the Frood installation root)
 _BACKUP_CATEGORIES: dict[str, list[str]] = {
     "config": [".env.example", "requirements.txt", "setup.sh"],
     "state": ["tasks.json", "cron_jobs.json"],
@@ -150,10 +150,10 @@ def create_backup(
     include_worktrees: bool = False,
     exclude_secrets: bool = False,
 ) -> str:
-    """Create a full backup archive of Agent42 data.
+    """Create a full backup archive of Frood data.
 
     Args:
-        base_path: The Agent42 installation root directory.
+        base_path: The Frood installation root directory.
         output_path: Directory where the archive will be written.
         include_worktrees: Whether to include git worktrees.
 
@@ -230,7 +230,7 @@ def restore_backup(
     target_path: str,
     skip_secrets: bool = False,
 ) -> ArchiveManifest:
-    """Restore Agent42 data from a backup archive.
+    """Restore Frood data from a backup archive.
 
     Args:
         archive_path: Path to the .tar.gz backup archive.
@@ -311,13 +311,13 @@ def create_clone(
     output_path: str,
     include_skills: bool = False,
 ) -> str:
-    """Create a clone package for deploying Agent42 to a new node.
+    """Create a clone package for deploying Frood to a new node.
 
     Includes source code and config templates but excludes state, memory,
     and secrets. Secrets in .env are replaced with CHANGE_ME placeholders.
 
     Args:
-        base_path: The Agent42 installation root directory.
+        base_path: The Frood installation root directory.
         output_path: Directory where the archive will be written.
         include_skills: Whether to include user-installed skills.
 
