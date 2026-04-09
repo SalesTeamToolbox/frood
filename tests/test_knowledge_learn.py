@@ -89,11 +89,11 @@ class TestNoiseFilter:
         }
         assert self.hook.count_file_modifications(event) == 1
 
-    def test_counts_agent42_write_file_as_file_modification(self):
-        """agent42_write_file also counts as file modification."""
+    def test_counts_frood_write_file_as_file_modification(self):
+        """frood_write_file also counts as file modification."""
         event = {
             "tool_results": [
-                {"tool_name": "agent42_write_file", "tool_input": {"file_path": "out.py"}},
+                {"tool_name": "frood_write_file", "tool_input": {"file_path": "out.py"}},
             ]
         }
         assert self.hook.count_file_modifications(event) == 1

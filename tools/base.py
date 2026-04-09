@@ -65,7 +65,7 @@ class Tool(ABC):
             },
         }
 
-    def to_mcp_schema(self, prefix: str = "agent42") -> dict:
+    def to_mcp_schema(self, prefix: str = "frood") -> dict:
         """Serialize to MCP tool definition format.
 
         Returns a dict compatible with ``mcp.types.Tool`` construction:

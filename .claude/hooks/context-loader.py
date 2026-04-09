@@ -482,7 +482,7 @@ def main():
 
 
 def _emit_memory_nudge(prompt):
-    """Remind Claude to store important discoveries via agent42_memory."""
+    """Remind Claude to store important discoveries via frood_memory."""
     if not prompt or len(prompt.strip()) < 20:
         return
     if prompt.strip().startswith("/"):
