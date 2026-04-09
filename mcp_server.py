@@ -1,5 +1,5 @@
 """
-Agent42 MCP Server — exposes Agent42 tools and skills to Claude Code via MCP.
+Frood MCP Server — exposes Frood tools and skills to Claude Code via MCP.
 
 Phase 4: Skills as MCP Prompts — all tools + 43 skills exposed via MCP protocol.
 
@@ -16,7 +16,7 @@ Claude Code integration (.mcp.json):
       "mcpServers": {
         "frood": {
           "command": "python",
-          "args": ["path/to/agent42/mcp_server.py"],
+          "args": ["path/to/frood/mcp_server.py"],
           "env": { "FROOD_WORKSPACE": "${workspaceFolder}" }
         }
       }
@@ -446,7 +446,7 @@ def _create_server() -> tuple[Server, MCPRegistryAdapter]:
         content = "\n\n".join(parts)
 
         return types.GetPromptResult(
-            description=skill.description or f"Agent42 skill: {skill.name}",
+            description=skill.description or f"Frood skill: {skill.name}",
             messages=[
                 types.PromptMessage(
                     role="user",
@@ -501,7 +501,7 @@ async def run_sse(port: int = 8100):
     """Run the MCP server with SSE transport (for remote access).
 
     Starts an HTTP server that Claude Code (or any MCP client) can connect
-    to via Server-Sent Events. Use this on the VPS to expose Agent42 tools
+    to via Server-Sent Events. Use this on the VPS to expose Frood tools
     over the network.
 
     Usage:

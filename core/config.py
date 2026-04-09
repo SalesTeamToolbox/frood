@@ -165,7 +165,7 @@ class Settings:
     # Qdrant vector database (optional — enhances semantic search)
     qdrant_url: str = ""  # e.g. "http://localhost:6333" for Docker, or empty for embedded
     qdrant_api_key: str = ""  # API key for Qdrant Cloud or authenticated instances
-    qdrant_collection_prefix: str = "agent42"  # Prefix for collection names
+    qdrant_collection_prefix: str = "frood"  # Prefix for collection names
     qdrant_enabled: bool = False  # Set true to enable Qdrant (auto-enabled if qdrant_url is set)
     qdrant_local_path: str = ".frood/qdrant"  # Path for embedded Qdrant storage
 
