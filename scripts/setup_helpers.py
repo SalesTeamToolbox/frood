@@ -81,11 +81,11 @@ def _create_service_xml(project_dir: str) -> str:
 
     xml_content = f'''<?xml version="1.0" encoding="utf-8"?>
 <service>
-  <id>agent42</id>
-  <name>Agent42</name>
-  <description>Agent42 AI Agent Platform - Dashboard, MCP Server, and LLM Proxy</description>
+  <id>frood</id>
+  <name>Frood</name>
+  <description>Frood AI Agent Platform - Dashboard, MCP Server, and LLM Proxy</description>
   <executable>{python_exe}</executable>
-  <arguments>agent42.py</arguments>
+  <arguments>frood.py</arguments>
   <workingdirectory>{project_dir}</workingdirectory>
   <log mode="roll-by-size">
     <sizeThreshold>10240</sizeThreshold>
@@ -108,10 +108,10 @@ def _create_service_xml(project_dir: str) -> str:
 
 
 def setup_windows_service(project_dir: str, action: str = "install") -> None:
-    """Install or uninstall Agent42 as a Windows service.
+    """Install or uninstall Frood as a Windows service.
 
     Args:
-        project_dir: Path to the Agent42 project directory.
+        project_dir: Path to the Frood project directory.
         action: 'install' or 'uninstall'
     """
     if sys.platform != "win32":
@@ -122,21 +122,21 @@ def setup_windows_service(project_dir: str, action: str = "install") -> None:
     xml_path = _create_service_xml(project_dir)
 
     if action == "uninstall":
-        print("Uninstalling Agent42 Windows service...")
+        print("Uninstalling Frood Windows service...")
         result = subprocess.run([winsw_path, "uninstall", xml_path], capture_output=True, text=True)
         if result.returncode == 0:
-            print("Agent42 service uninstalled successfully.")
+            print("Frood service uninstalled successfully.")
         else:
             print(f"Error uninstalling service: {result.stderr}")
         return
 
     # Install
-    print("Installing Agent42 as a Windows service...")
+    print("Installing Frood as a Windows service...")
 
     # Check if service already exists
     check_result = subprocess.run(["sc", "query", "agent42"], capture_output=True, text=True)
     if "agent42" in check_result.stdout:
-        print("Agent42 service already exists. Removing old installation...")
+        print("Frood service already exists. Removing old installation...")
         subprocess.run([winsw_path, "uninstall", xml_path], capture_output=True)
         import time
 
@@ -148,15 +148,15 @@ def setup_windows_service(project_dir: str, action: str = "install") -> None:
         print(f"Error installing service: {result.stderr}")
         return
 
-    print("Agent42 service installed successfully!")
+    print("Frood service installed successfully!")
     print("")
-    print("Starting Agent42 service...")
+    print("Starting Frood service...")
     start_result = subprocess.run(["net", "start", "agent42"], capture_output=True, text=True)
     if start_result.returncode == 0:
-        print("Agent42 service started successfully!")
+        print("Frood service started successfully!")
         print("")
         print("========================================")
-        print(" Agent42 is now running as a Windows service!")
+        print(" Frood is now running as a Windows service!")
         print("========================================")
         print("")
         print("Dashboard: http://localhost:8000")
@@ -182,9 +182,9 @@ def _create_n8n_service_xml(project_dir: str) -> str:
 
     xml_content = f'''<?xml version="1.0" encoding="utf-8"?>
 <service>
-  <id>n8n-agent42</id>
-  <name>n8n (Agent42)</name>
-  <description>n8n Workflow Automation Engine for Agent42</description>
+  <id>n8n-frood</id>
+  <name>n8n (Frood)</name>
+  <description>n8n Workflow Automation Engine for Frood</description>
   <executable>{docker_exe}</executable>
   <arguments>compose -f "{compose_file}" up</arguments>
   <workingdirectory>{project_dir}</workingdirectory>
@@ -197,7 +197,7 @@ def _create_n8n_service_xml(project_dir: str) -> str:
   <onfailure action="none"/>
   <startmode>Automatic</startmode>
   <stoptimeout>60sec</stoptimeout>
-  <env name="COMPOSE_PROJECT_NAME" value="agent42-n8n"/>
+  <env name="COMPOSE_PROJECT_NAME" value="frood-n8n"/>
   <env name="PATH" value="C:\\Program Files\\Docker\\Docker\\resources\\bin;C:\\Windows\\system32;C:\\Windows"/>
 </service>'''
 
@@ -212,7 +212,7 @@ def setup_n8n_service(project_dir: str, action: str = "install") -> None:
     """Install or uninstall n8n as a Windows service via Docker.
 
     Args:
-        project_dir: Path to the Agent42 project directory.
+        project_dir: Path to the Frood project directory.
         action: 'install' or 'uninstall'
     """
     if sys.platform != "win32":
@@ -284,74 +284,17 @@ def setup_n8n_service(project_dir: str, action: str = "install") -> None:
 
 
 def run_windows_setup(project_dir: str) -> None:
-    """Run complete Windows setup: Agent42 service + n8n service + env vars."""
+    """Run complete Windows setup: Frood service + n8n service + env vars."""
     if sys.platform != "win32":
         print("Windows setup is only supported on Windows.")
         return
 
     print("=" * 60)
-    print(" Agent42 Windows Setup")
-    print("=" * 60)
-    print()
-
-    # Step 1: Install Agent42 service
-    print("Step 1: Installing Agent42 Windows service...")
-    print("-" * 40)
-    try:
-        setup_windows_service(project_dir, "install")
-    except Exception as e:
-        print(f"Warning: Agent42 service installation failed: {e}")
-
-    print()
-
-    # Step 2: Install n8n service (optional)
-    print("Step 2: Installing n8n Windows service (optional)...")
-    print("-" * 40)
-    print("This requires Docker Desktop to be installed.")
-    print("If Docker is not installed, n8n will be skipped.")
-    print()
-
-    try:
-        docker_check = subprocess.run(["docker", "--version"], capture_output=True, text=True)
-        has_docker = docker_check.returncode == 0
-    except FileNotFoundError:
-        has_docker = False
-
-    if has_docker:
-        try:
-            setup_n8n_service(project_dir, "install")
-        except Exception as e:
-            print(f"Warning: n8n service installation failed: {e}")
-    else:
-        print("Docker not found - skipping n8n service installation.")
-        print("You can install Docker Desktop later and run:")
-        print("  python scripts/setup_helpers.py n8n-service install")
-
-    print()
-
-    # Step 3: Set environment variables
-    print("Step 3: Setting environment variables for Claude Code proxy...")
-    print("-" * 40)
-
-    env_vars = [
-        ("ANTHROPIC_BASE_URL", "http://localhost:8000/llm/v1"),
-        ("ANTHROPIC_API_KEY", "dummy"),
-        ("ANTHROPIC_MODEL", "qwen3.6-plus-free"),
-    ]
-
-    for var_name, var_value in env_vars:
-        result = subprocess.run(["setx", var_name, var_value], capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"  {var_name} = {var_value} [OK]")
-        else:
-            print(f"  {var_name} = {var_value} [FAILED]")
-
-    print()
-    print("=" * 60)
-    print(" Windows Setup Complete!")
-    print("=" * 60)
-    print()
-    print("Agent42 will start automatically on next boot.")
+    print(" Frood Windows Setup")
+    # Step 1: Install Frood service
+    print("Step 1: Installing Frood Windows service...")
+        print(f"Warning: Frood service installation failed: {e}")
+    print("Frood will start automatically on next boot.")
     print("To start now: net start agent42")
     print()
     print("Access points:")
@@ -530,7 +473,7 @@ def _detect_project_context(project_dir: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Full CLAUDE.md template for consumer projects using Agent42 as MCP server
+# Full CLAUDE.md template for consumer projects using Frood as MCP server
 # ---------------------------------------------------------------------------
 
 _FULL_CLAUDE_MD_TEMPLATE = """\
@@ -561,9 +504,9 @@ This project is indexed by jcodemunch MCP server (`{jcodemunch_repo}`).
 
 ---
 
-## Agent42 Hook Protocol
+## Frood Hook Protocol
 
-Agent42 registers Claude Code hooks that run automatically during development sessions.
+Frood registers Claude Code hooks that run automatically during development sessions.
 No manual activation required — hooks are registered by `bash setup.sh`.
 
 | Hook Trigger | What It Does For You |
@@ -676,10 +619,10 @@ python -m pytest tests/ -k "test_name"      # Filter by name
 
 
 def generate_full_claude_md(project_dir: str) -> None:
-    """Generate or merge a full CLAUDE.md template with Agent42 conventions.
+    """Generate or merge a full CLAUDE.md template with Frood conventions.
 
     If CLAUDE.md does not exist, creates it from template.
-    If CLAUDE.md exists, merges Agent42 sections using marker boundaries.
+    If CLAUDE.md exists, merges Frood sections using marker boundaries.
     Prints a summary of what changed.
 
     Args:
@@ -749,7 +692,7 @@ def generate_full_claude_md(project_dir: str) -> None:
 
 
 def generate_claude_md_section(project_dir: str) -> None:
-    """Append or replace the Agent42 memory section in CLAUDE.md.
+    """Append or replace the Frood memory section in CLAUDE.md.
 
     If CLAUDE.md does not exist, creates it with a minimal header and the
     managed section. If it exists, finds the marker pair and replaces

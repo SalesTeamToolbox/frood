@@ -1,11 +1,11 @@
 """
-Diagnostic: check which OpenRouter API key Agent42 will use, then test it.
+Diagnostic: check which OpenRouter API key Frood will use, then test it.
 
-Run from the agent42 directory:
+Run from the frood directory:
     python scripts/check_openrouter_key.py
 
 Or on the production server as the deploy user:
-    cd ~/agent42
+    cd ~/frood
     python scripts/check_openrouter_key.py
 """
 
