@@ -34,6 +34,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("search-service")
 
+# Frood memory config for dynamic collection prefix
+from memory.qdrant_store import QdrantConfig as _QdrConfig
+
+_qdr_config = _QdrConfig()
+_HISTORY_COLLECTION = f"{_qdr_config.collection_prefix}_history"
+
 # Globals set during startup
 _model = None
 _qdrant_client = None
@@ -89,7 +95,7 @@ def _refresh_collections():
 
 
 def index_entry(text, section="session"):
-    """Vectorize a text entry and upsert into agent42_history collection.
+    """Vectorize a text entry and upsert into _HISTORY_COLLECTION collection.
 
     Uses UUID5 deterministic IDs (from text content) to avoid duplicates on retry.
     Returns True on success, False on failure.
@@ -109,16 +115,16 @@ def index_entry(text, section="session"):
 
         # Ensure collection exists
         existing = [c.name for c in _qdrant_client.get_collections().collections]
-        if "agent42_history" not in existing:
+        if _HISTORY_COLLECTION not in existing:
             _qdrant_client.create_collection(
-                collection_name="agent42_history",
+                collection_name=_HISTORY_COLLECTION,
                 vectors_config=qdrant_models.VectorParams(
                     size=384, distance=qdrant_models.Distance.COSINE
                 ),
             )
 
         _qdrant_client.upsert(
-            collection_name="agent42_history",
+            collection_name=_HISTORY_COLLECTION,
             points=[
                 qdrant_models.PointStruct(
                     id=point_id,
