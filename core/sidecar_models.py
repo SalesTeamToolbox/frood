@@ -1,4 +1,4 @@
-"""Pydantic v2 models for the Agent42 sidecar API (Paperclip integration)."""
+"""Pydantic v2 models for the Frood sidecar API (Paperclip integration)."""
 
 from __future__ import annotations
 
