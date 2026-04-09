@@ -163,7 +163,7 @@ class TestMigrateCollection:
         dst = MagicMock()
 
         total = asyncio.run(
-            migrate_collection(src, dst, "agent42_memory", "target-comp", 100, False)
+            migrate_collection(src, dst, "frood_memory", "target-comp", 100, False)
         )
 
         assert total == 3
@@ -184,7 +184,7 @@ class TestMigrateCollection:
         dst = MagicMock()
 
         total = asyncio.run(
-            migrate_collection(src, dst, "agent42_memory", "target-comp", 100, True)
+            migrate_collection(src, dst, "frood_memory", "target-comp", 100, True)
         )
 
         assert total == 1

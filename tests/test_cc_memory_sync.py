@@ -213,7 +213,7 @@ class TestSyncWorker:
         mock_store.is_available = True
         mock_store._client = mock_client
         mock_store._ensure_collection = MagicMock()
-        mock_store._collection_name = MagicMock(return_value="agent42_memory")
+        mock_store._collection_name = MagicMock(return_value="frood_memory")
 
         mock_qdrant_cls = MagicMock(return_value=mock_store)
 
@@ -248,7 +248,7 @@ class TestSyncWorker:
         mock_store.is_available = True
         mock_store._client = mock_client
         mock_store._ensure_collection = MagicMock()
-        mock_store._collection_name = MagicMock(return_value="agent42_memory")
+        mock_store._collection_name = MagicMock(return_value="frood_memory")
 
         mock_qdrant_cls = MagicMock(return_value=mock_store)
         status_file = tmp_path / "cc-sync-status.json"
