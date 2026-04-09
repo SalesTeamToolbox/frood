@@ -22,7 +22,7 @@ from typing import Any
 
 @dataclass
 class ToolContext:
-    """Container holding references to core Agent42 subsystems.
+    """Container holding references to core Frood subsystems.
 
     The PluginLoader reads a tool's ``requires`` list and passes only
     the requested attributes as keyword arguments to the tool constructor.

@@ -1,7 +1,7 @@
 """Work order management for the cowork system.
 
 Work orders define tasks that can be executed autonomously on a remote
-VPS running Claude Code with Agent42 MCP. Stored as JSON files in
+VPS running Claude Code with Frood MCP. Stored as JSON files in
 .planning/work-orders/.
 
 Usage (CLI):

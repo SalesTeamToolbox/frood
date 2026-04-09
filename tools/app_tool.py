@@ -329,7 +329,7 @@ class AppTool(Tool):
                 "- Use Tailwind CSS via CDN for styling\n"
                 "- Use Alpine.js or vanilla JS for interactivity\n"
                 "- Data can be stored in localStorage\n"
-                "- No server needed — served directly by Agent42"
+                "- No server needed — served directly by Frood"
             ),
             "python": (
                 "Recommended structure for a Python web app:\n\n"
