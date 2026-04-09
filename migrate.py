@@ -1,9 +1,9 @@
 """
-migrate.py — Migration CLI for Agent42 -> Paperclip company structure.
+migrate.py — Migration CLI for Frood -> Paperclip company structure.
 
 Copies Qdrant vectors (with company_id remapping and UUID5 regeneration)
 and effectiveness SQLite rows (with agent_id preserved) from a standalone
-Agent42 installation into a Paperclip-connected deployment.
+Frood installation into a Paperclip-connected deployment.
 
 Usage:
     python migrate.py \
@@ -56,7 +56,7 @@ EFFECTIVENESS_TABLES = [
 def build_parser() -> argparse.ArgumentParser:
     """Build CLI argument parser with all required and optional flags."""
     parser = argparse.ArgumentParser(
-        description="Migrate Agent42 agents into Paperclip company structure",
+        description="Migrate Frood agents into Paperclip company structure",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
