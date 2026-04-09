@@ -43,6 +43,7 @@ if str(_FROOD_ROOT) not in sys.path:
 from core.command_filter import CommandFilter
 from core.rate_limiter import ToolRateLimiter
 from core.sandbox import WorkspaceSandbox
+from memory.qdrant_store import QdrantConfig
 from mcp_registry import MCPRegistryAdapter
 from tools.registry import ToolRegistry
 
@@ -596,7 +597,9 @@ def main():
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read())
             collections = [c["name"] for c in data.get("result", {}).get("collections", [])]
-            has_memory = "agent42_memory" in collections
+            qdrant_config = QdrantConfig()
+            prefix = qdrant_config.collection_prefix
+            has_memory = f"{prefix}_memory" in collections
             results["memory_pipeline"]["qdrant"] = (
                 f"ok ({len(collections)} collections, memory={'yes' if has_memory else 'no'})"
             )
