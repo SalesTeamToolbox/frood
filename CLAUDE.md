@@ -1,14 +1,71 @@
-# CLAUDE.md — Agent42 Development Guide
+# CLAUDE.md — Frood Development Guide
 
 ## Quick Reference
 
 ```bash
 source .venv/bin/activate        # Activate virtual environment
-python agent42.py                # Start Agent42 (dashboard at http://localhost:8000)
+python frood.py                # Start Frood (dashboard at http://localhost:8000)
 python -m pytest tests/ -x -q    # Run tests (stop on first failure)
 make lint                        # Run linter (ruff)
 make format                      # Auto-format code (ruff)
 make check                       # Run lint + tests together
+```
+
+## Claude Code Provider Switching
+
+Agent42 provides easy switching between Claude Code subscription and Zen API (free models).
+
+### Prerequisites
+- Frood must be running: `python frood.py`
+- Zen API key configured in `.env` as `ZEN_API_KEY`
+
+### Usage
+
+```bash
+# Interactive menu (auto-detects Frood)
+python frood-cc-launcher.py
+
+# Direct launch
+python frood-cc-launcher.py zen    # Zen API (free models)
+python frood-cc-launcher.py cc     # Claude Code subscription (default)
+
+# Check status
+python frood-cc-launcher.py status
+```
+
+### Available Models
+
+**Zen API (free):**
+- `qwen3.6-plus-free` - Fast/coding
+- `minimax-m2.5-free` - General/marketing
+- `nemotron-3-super-free` - Reasoning/analysis
+- `big-pickle` - Content
+
+**Claude Code (subscription):**
+- `claude-haiku-4-5-20251001` - Fast
+- `claude-sonnet-4-6-20260217` - General
+- `claude-opus-4-6-20260205` - Reasoning
+- `claude-sonnet-4-6-20260217` - Coding/content
+
+### Switching Models
+
+In Claude Code, use `/model <name>` to switch:
+```
+/model qwen3.6-plus-free
+/model claude-sonnet-4-6-20260217
+```
+
+### Quick Commands
+
+```bash
+# Launcher with menu (shows all available models)
+cc
+
+# Direct launch
+cc cc           # Claude Code subscription (default)
+cc zen          # Zen API (free models)
+cc or           # OpenRouter (paid)
+cc status       # Show current configuration
 ```
 
 ## Key Rules
