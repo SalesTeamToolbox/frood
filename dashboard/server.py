@@ -952,7 +952,7 @@ def create_app(
 
     @app.post("/api/memory/search")
     async def memory_search(request: Request):
-        """Search Agent42's memory system (Qdrant + MEMORY.md).
+        """Search Frood's memory system (Qdrant + MEMORY.md).
 
         Used by the memory-recall hook as a fallback when the dedicated
         search service isn't running. No auth required for local hook access.
@@ -1069,7 +1069,7 @@ def create_app(
     async def llm_chat_completions(request: Request):
         """OpenAI-compatible LLM proxy for Claude Code.
         
-        Use this endpoint as the API base for Claude Code to route through Agent42.
+        Use this endpoint as the API base for Claude Code to route through Frood.
         Claude Code can switch models via the model query param or X-Model header.
         
         Examples:
@@ -1813,7 +1813,7 @@ Focus on learnings that would help in future similar sessions."""
                 except ImportError:
                     return {"learnings": []}
 
-                # Use Agent42's own provider routing
+                # Use Frood's own provider routing
                 api_key = os.environ.get("OPENROUTER_API_KEY", "") or os.environ.get(
                     "GEMINI_API_KEY", ""
                 )

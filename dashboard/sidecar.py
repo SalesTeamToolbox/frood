@@ -1,4 +1,4 @@
-"""Agent42 sidecar — lightweight FastAPI server for Paperclip integration.
+"""Frood sidecar — lightweight FastAPI server for Paperclip integration.
 
 create_sidecar_app() returns a FastAPI instance with only sidecar routes:
 - GET  /sidecar/health                    — public, no auth (D-05)
@@ -129,7 +129,7 @@ def create_sidecar_app(
         key_store: KeyStore instance or None (Phase 36: GET/POST /settings)
     """
     app = FastAPI(
-        title="Agent42 Sidecar",
+        title="Frood Sidecar",
         description="Paperclip integration sidecar — adapter-friendly execution backend",
         docs_url=None,  # No Swagger UI in sidecar
         redoc_url=None,  # No ReDoc in sidecar

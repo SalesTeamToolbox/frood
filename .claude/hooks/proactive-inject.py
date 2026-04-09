@@ -4,7 +4,7 @@
 """Proactive learning injection hook — surfaces relevant past learnings at task start.
 
 Triggered on UserPromptSubmit. Infers the task type from prompt keywords, then
-fetches relevant past learnings from the Agent42 API and injects them into
+fetches relevant past learnings from the Frood API and injects them into
 Claude's context via stderr.
 
 Behavior:
@@ -231,7 +231,7 @@ def mark_injection_done(project_dir: str, session_id: str) -> None:
 
 
 def fetch_learnings(query: str, task_type: str) -> list:
-    """Fetch relevant past learnings from the Agent42 API.
+    """Fetch relevant past learnings from the Frood API.
 
     Args:
         query: The user prompt text to use as semantic query (first 500 chars).
@@ -288,7 +288,7 @@ def format_injection_output(results: list, task_type: str) -> str:
 
 
 def fetch_recommendations(task_type: str) -> list:
-    """Fetch tool recommendations from the Agent42 API.
+    """Fetch tool recommendations from the Frood API.
 
     Args:
         task_type: The inferred task type string.

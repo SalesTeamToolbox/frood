@@ -98,7 +98,7 @@ class WebSearchTool(Tool):
                 response = await client.post(
                     DDG_HTML_URL,
                     data={"q": query},
-                    headers={"User-Agent": "Agent42/1.0"},
+                    headers={"User-Agent": "Frood/1.0"},
                     timeout=15.0,
                 )
                 response.raise_for_status()

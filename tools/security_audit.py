@@ -1,5 +1,5 @@
 """
-Security audit tool — automated security posture assessment for Agent42.
+Security audit tool — automated security posture assessment for Frood.
 
 Inspired by OpenClaw's SecureClaw plugin. Runs 36 checks across 8 categories
 to identify misconfigurations, weak settings, and security risks.

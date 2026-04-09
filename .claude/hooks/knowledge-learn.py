@@ -5,10 +5,9 @@
 
 Triggered on Stop. Pre-extracts session data (last 20 messages, tool names,
 modified files) and writes to a temp file, then spawns a detached background
-worker to call Agent42's /api/knowledge/learn endpoint for LLM extraction and
-Qdrant upsert.
+worker to call Frood's /api/knowledge/learn endpoint for LLM extraction and
 
-This file uses ONLY Python stdlib — zero Agent42 imports — so startup is < 5ms.
+This file uses ONLY Python stdlib — zero Frood imports — so startup is < 5ms.
 
 Hook protocol:
 - Receives JSON on stdin: {hook_event_name, project_dir, stop_reason, tool_results, messages, ...}
