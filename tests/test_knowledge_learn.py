@@ -207,7 +207,7 @@ class TestExtraction:
         mock_store.is_available = True
         mock_store._client = mock_client
         mock_store._ensure_collection = MagicMock()
-        mock_store._collection_name = MagicMock(return_value="agent42_knowledge")
+        mock_store._collection_name = MagicMock(return_value="frood_knowledge")
         mock_store.search_with_lifecycle = MagicMock(return_value=search_results or [])
         mock_store.strengthen_point = MagicMock(return_value=True)
         return mock_store
@@ -362,7 +362,7 @@ class TestDedup:
         mock_store.strengthen_point = MagicMock(return_value=True)
         mock_store._client = MagicMock()
         mock_store._ensure_collection = MagicMock()
-        mock_store._collection_name = MagicMock(return_value="agent42_knowledge")
+        mock_store._collection_name = MagicMock(return_value="frood_knowledge")
 
         mock_embedder = self._make_embedder()
         session_id = str(uuid.uuid4())
@@ -397,7 +397,7 @@ class TestDedup:
         mock_store.strengthen_point = MagicMock(return_value=True)
         mock_store._client = MagicMock()
         mock_store._ensure_collection = MagicMock()
-        mock_store._collection_name = MagicMock(return_value="agent42_knowledge")
+        mock_store._collection_name = MagicMock(return_value="frood_knowledge")
 
         mock_embedder = self._make_embedder()
         session_id = str(uuid.uuid4())
@@ -465,7 +465,7 @@ class TestCategories:
         mock_store.search_with_lifecycle = MagicMock(return_value=[])
         mock_store._client = mock_client
         mock_store._ensure_collection = MagicMock()
-        mock_store._collection_name = MagicMock(return_value="agent42_knowledge")
+        mock_store._collection_name = MagicMock(return_value="frood_knowledge")
 
         mock_embedder = MagicMock()
         mock_embedder.encode.return_value = [0.1] * 384
@@ -506,7 +506,7 @@ class TestCategories:
             mock_store.search_with_lifecycle = MagicMock(return_value=[])
             mock_store._client = MagicMock()
             mock_store._ensure_collection = MagicMock()
-            mock_store._collection_name = MagicMock(return_value="agent42_knowledge")
+            mock_store._collection_name = MagicMock(return_value="frood_knowledge")
 
             mock_embedder = MagicMock()
             mock_embedder.encode.return_value = [0.1] * 384
@@ -531,7 +531,7 @@ class TestCategories:
         mock_store.search_with_lifecycle = MagicMock(return_value=[])
         mock_store._client = MagicMock()
         mock_store._ensure_collection = MagicMock()
-        mock_store._collection_name = MagicMock(return_value="agent42_knowledge")
+        mock_store._collection_name = MagicMock(return_value="frood_knowledge")
 
         mock_embedder = MagicMock()
         mock_embedder.encode.return_value = [0.1] * 384
@@ -815,7 +815,7 @@ class TestKnowledgeIndexes:
         store._client = mock_client
 
         # PayloadSchemaType is imported locally inside the method — no need to patch it
-        store._ensure_knowledge_indexes("agent42_knowledge")
+        store._ensure_knowledge_indexes("frood_knowledge")
 
         # Verify create_payload_index was called for both fields
         calls = mock_client.create_payload_index.call_args_list
@@ -876,4 +876,4 @@ class TestKnowledgeIndexes:
         store._client = mock_client
 
         # Must NOT raise
-        store._ensure_knowledge_indexes("agent42_knowledge")
+        store._ensure_knowledge_indexes("frood_knowledge")
