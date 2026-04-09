@@ -1,5 +1,5 @@
 """
-Node Sync — bidirectional memory sync between Agent42 nodes.
+Node Sync — bidirectional memory sync between Frood nodes.
 
 Syncs MEMORY.md and HISTORY.md between local and remote nodes via SSH/rsync.
 After sync, re-indexes vectors on the target so semantic search reflects

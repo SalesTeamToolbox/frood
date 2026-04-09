@@ -3,10 +3,9 @@
 # hook_timeout: 10
 """Associative memory recall hook — surfaces relevant memories automatically.
 
-Triggered on UserPromptSubmit. Searches Agent42's memory for content relevant
-to the user's current prompt and injects it into Claude's context via stderr.
+Triggered on UserPromptSubmit. Searches Frood's memory for content relevant
 
-This is the core of Agent42's "human-like memory" — relevant past experiences
+This is the core of Frood's "human-like memory" — relevant past experiences
 surface automatically when context triggers them, without being asked.
 
 Also surfaces previous session's conversation context from handoff.json
@@ -305,7 +304,7 @@ def search_history_entries(content, keywords):
 
 
 def try_semantic_search(memory_dir, prompt, frood_root):
-    """Semantic search via the Agent42 search service (HTTP).
+    """Semantic search via the Frood search service (HTTP).
 
     The search service keeps the embedding model loaded in memory,
     so this call is fast (~50ms) instead of 10s for model loading.
@@ -355,11 +354,11 @@ def try_semantic_search(memory_dir, prompt, frood_root):
 
 
 def try_frood_api_search(prompt):
-    """Fallback: query Agent42's memory via its HTTP API.
+    """Fallback: query Frood's memory via its HTTP API.
 
-    The Agent42 server exposes a memory search endpoint that queries Qdrant
+    The Frood server exposes a memory search endpoint that queries Qdrant
     directly. This works when the dedicated search service isn't running but
-    the Agent42 dashboard server is.
+    the Frood dashboard server is.
     """
     import urllib.error
     import urllib.request
@@ -779,7 +778,7 @@ def main():
         search_source = None  # Track which layer provided results
 
         # Layer 1: Semantic search (best quality, requires embedding API + Qdrant)
-        # Try dedicated search service first, then fall back to Agent42 API
+        # Try dedicated search service first, then fall back to Frood API
         semantic_results = try_semantic_search(memory_dir, prompt, frood_root)
         if semantic_results:
             search_source = "semantic"
@@ -806,7 +805,7 @@ def main():
 
         # Layer 2: MEMORY.md keyword search (always-available, file I/O only)
         # This is the reliable fallback that works without any external services.
-        # Agent42's .frood/memory/MEMORY.md contains consolidated learnings
+        # Frood's .frood/memory/MEMORY.md contains consolidated learnings
         # from previous sessions — distinct from Claude Code's own memory files.
         if not memories:
             memory_file = memory_dir / "MEMORY.md"

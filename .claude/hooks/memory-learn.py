@@ -4,7 +4,7 @@
 """Associative memory learning hook — captures learnings from each session.
 
 Triggered on Stop. Analyzes what happened in the conversation and stores
-new knowledge in Agent42's memory system for future recall.
+new knowledge in Frood's memory system for future recall.
 
 Completes the associative memory cycle:
 - memory-recall.py (UserPromptSubmit) → surfaces relevant past knowledge
@@ -33,7 +33,7 @@ def extract_session_summary(event):
 
     Strategy:
     1. Use transcript_summary if CC provides it (best quality)
-    2. Use tool_results/messages if present (Agent42 standalone mode)
+    2. Use tool_results/messages if present (Frood standalone mode)
     3. Fall back to recent git changes (always available)
     """
     parts = []
@@ -43,7 +43,7 @@ def extract_session_summary(event):
     if isinstance(transcript, str) and len(transcript.strip()) > 10:
         parts.append(f"Summary: {transcript.strip()[:300]}")
 
-    # ── Strategy 2: Agent42 standalone event fields (legacy) ──────────
+    # ── Strategy 2: Frood standalone event fields (legacy) ──────────
     if not parts:
         tool_results = event.get("tool_results", [])
         if isinstance(tool_results, list) and tool_results:
@@ -179,7 +179,7 @@ def is_trivial_session(event):
     if has_transcript and has_git_changes:
         return False
 
-    # Agent42 standalone mode: check tool_results
+    # Frood standalone mode: check tool_results
     tool_results = event.get("tool_results", [])
     tool_count = len(tool_results) if isinstance(tool_results, list) else 0
 

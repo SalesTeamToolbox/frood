@@ -8,7 +8,7 @@ Triggered on PostToolUse for Write/Edit operations. When a CC memory file
 (~/.claude/projects/*/memory/*.md) is written, spawns a detached background
 worker to embed the content with ONNX and upsert it to Qdrant.
 
-This file uses ONLY Python stdlib — zero Agent42 imports — so startup is < 5ms.
+This file uses ONLY Python stdlib — zero Frood imports — so startup is < 5ms.
 
 Hook protocol:
 - Receives JSON on stdin with hook_event_name, tool_name, tool_input

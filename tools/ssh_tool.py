@@ -475,7 +475,7 @@ class SSHTool(Tool):
         return ToolResult(output="\n".join(lines))
 
     async def cleanup(self):
-        """Close all connections. Called on Agent42 shutdown."""
+        """Close all connections. Called on Frood shutdown."""
         for key, conn_info in list(self._connections.items()):
             if conn_info.conn is not None:
                 try:

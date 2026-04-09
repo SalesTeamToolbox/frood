@@ -383,7 +383,7 @@ class TunnelTool(Tool):
             await asyncio.sleep(30)
 
     async def cleanup(self):
-        """Close all tunnels. Called on Agent42 shutdown."""
+        """Close all tunnels. Called on Frood shutdown."""
         if self._expiry_task and not self._expiry_task.done():
             self._expiry_task.cancel()
         for tunnel in list(self._tunnels.values()):

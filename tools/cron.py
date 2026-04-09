@@ -1,5 +1,5 @@
 """
-Cron scheduling tool — persistent task scheduling for Agent42.
+Cron scheduling tool — persistent task scheduling for Frood.
 
 Supports cron expressions, intervals, one-shot schedules, and planned
 multi-step task sequences. Schedules persist to a JSON file and survive

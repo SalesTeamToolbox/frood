@@ -2,7 +2,7 @@
 """Knowledge learning worker — calls /api/knowledge/learn, embeds, upserts to KNOWLEDGE collection.
 
 Spawned as a detached background process by knowledge-learn.py (the hook entry
-point). Reads the pre-extracted session data temp file, calls Agent42's API
+point). Reads the pre-extracted session data temp file, calls Frood's API
 for LLM extraction of structured learnings, then embeds locally with ONNX and
 upserts to Qdrant's KNOWLEDGE collection with dedup-by-similarity logic.
 
@@ -38,7 +38,7 @@ try:
     from memory.embeddings import _find_onnx_model_dir, _OnnxEmbedder
     from memory.qdrant_store import QdrantConfig, QdrantStore
 except ImportError:
-    # If Agent42 isn't importable, we'll fail gracefully in process_learnings()
+    # If Frood isn't importable, we'll fail gracefully in process_learnings()
     _OnnxEmbedder = None  # type: ignore[assignment,misc]
     _find_onnx_model_dir = None  # type: ignore[assignment]
     QdrantConfig = None  # type: ignore[assignment,misc]
@@ -81,7 +81,7 @@ def make_point_id(content: str) -> str:
 
 
 def call_extraction_api(extract_data: dict) -> list:
-    """POST session data to Agent42 /api/knowledge/learn and return learnings list.
+    """POST session data to Frood /api/knowledge/learn and return learnings list.
 
     Returns:
         List of learning dicts with keys: content, learning_type, category, title, confidence
@@ -196,7 +196,7 @@ def process_learnings(extract_file: str) -> None:
         except Exception:
             pass
 
-        # Call Agent42 API for LLM extraction
+        # Call Frood API for LLM extraction
         learnings = call_extraction_api(extract_data)
 
         if not learnings:
@@ -206,7 +206,7 @@ def process_learnings(extract_file: str) -> None:
 
         # Check ONNX model availability
         if _find_onnx_model_dir is None:
-            status["last_error"] = "Agent42 memory module not importable"
+            status["last_error"] = "Frood memory module not importable"
             save_status(status)
             return
 

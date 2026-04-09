@@ -4,7 +4,7 @@
 """Effectiveness learning hook — extracts structured learnings from sessions.
 
 Triggered on Stop. Uses instructor + Pydantic to extract structured learnings
-from the session, then calls Agent42's HTTP API to persist them.
+from the session, then calls Frood's HTTP API to persist them.
 
 Complements (does NOT replace) existing hooks:
 - learning-engine.py: file co-occurrences, task type frequency, skill candidates
@@ -186,7 +186,7 @@ Be specific and actionable. If the session was trivial, say so briefly."""
 
 
 def persist_learning(learning_data, task_id, task_type, tools_used, files_modified):
-    """Call Agent42's HTTP API to persist the learning entry."""
+    """Call Frood's HTTP API to persist the learning entry."""
     import urllib.request
 
     dashboard_url = os.environ.get("FROOD_DASHBOARD_URL", "http://127.0.0.1:8000")
@@ -258,7 +258,7 @@ def main():
         print("[effectiveness-learn] Extraction returned nothing, skipping", file=sys.stderr)
         sys.exit(0)
 
-    # ── Persist to Agent42 ───────────────────────────────────────────────
+    # ── Persist to Frood ───────────────────────────────────────────────
     persist_learning(learning, task_id, task_type, tools_used, files_modified)
 
     print(

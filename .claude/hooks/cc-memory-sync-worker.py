@@ -33,7 +33,7 @@ try:
     from memory.embeddings import _find_onnx_model_dir, _OnnxEmbedder
     from memory.qdrant_store import QdrantConfig, QdrantStore
 except ImportError:
-    # If Agent42 isn't importable, we'll fail gracefully in sync_memory_file()
+    # If Frood isn't importable, we'll fail gracefully in sync_memory_file()
     _OnnxEmbedder = None  # type: ignore[assignment,misc]
     _find_onnx_model_dir = None  # type: ignore[assignment]
     QdrantConfig = None  # type: ignore[assignment,misc]
@@ -120,7 +120,7 @@ def sync_memory_file(file_path: str) -> None:
 
         # --- Find ONNX model -------------------------------------------------
         if _find_onnx_model_dir is None:
-            status["last_error"] = "Agent42 memory module not importable"
+            status["last_error"] = "Frood memory module not importable"
             save_status(status)
             return
 
