@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Start Qdrant server for Agent42 local development
+# Start Qdrant server for Frood local development
 # Usage: bash scripts/start-qdrant.sh
 
-QDRANT_DIR="$(dirname "$0")/../.agent42/qdrant-server"
+QDRANT_DIR="$(dirname "$0")/../.frood/qdrant-server"
 QDRANT_BIN="$QDRANT_DIR/qdrant.exe"
 QDRANT_CONFIG="$QDRANT_DIR/config.yaml"
 QDRANT_PID="$QDRANT_DIR/qdrant.pid"

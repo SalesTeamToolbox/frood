@@ -177,7 +177,7 @@ class TestMCPSecurityIntegration:
     async def test_read_file_within_sandbox(self, tmp_workspace):
         # Create a file in the workspace
         test_file = tmp_workspace / "hello.txt"
-        test_file.write_text("Hello from Agent42")
+        test_file.write_text("Hello from Frood")
 
         sandbox = WorkspaceSandbox(str(tmp_workspace), enabled=True)
         registry = ToolRegistry()
@@ -185,7 +185,7 @@ class TestMCPSecurityIntegration:
         adapter = MCPRegistryAdapter(registry)
 
         result = await adapter.call_tool("frood_read_file", {"path": "hello.txt"})
-        assert result[0].text == "Hello from Agent42"
+        assert result[0].text == "Hello from Frood"
 
     @pytest.mark.asyncio
     async def test_read_file_blocks_traversal(self, tmp_workspace):

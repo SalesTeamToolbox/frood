@@ -1,4 +1,4 @@
-"""Tests for Agent42 portability — backup, restore, and clone operations."""
+"""Tests for Frood portability — backup, restore, and clone operations."""
 
 import json
 import os
@@ -21,8 +21,8 @@ from core.portability import (
 )
 
 
-def _create_agent42_tree(root: str) -> None:
-    """Create a representative Agent42 directory structure for testing."""
+def _create_frood_tree(root: str) -> None:
+    """Create a representative Frood directory structure for testing."""
     base = os.path.join(root, ".frood")
     os.makedirs(os.path.join(base, "memory"), exist_ok=True)
     os.makedirs(os.path.join(base, "sessions"), exist_ok=True)
@@ -101,7 +101,7 @@ class TestArchiveManifest:
             created_at="2026-02-22T00:00:00",
             archive_type="backup",
             categories=["config", "state"],
-            source_path="/home/user/agent42",
+            source_path="/home/user/frood",
             file_count=42,
         )
         d = m.to_dict()
@@ -137,7 +137,7 @@ class TestArchiveManifest:
             created_at="2026-02-22T12:00:00",
             archive_type="backup",
             categories=["config", "state", "memory"],
-            source_path="/home/user/agent42",
+            source_path="/home/user/frood",
             file_count=100,
             notes="Full backup",
         )
@@ -184,7 +184,7 @@ class TestBackup:
     def setup_method(self):
         self.source = tempfile.mkdtemp()
         self.output = tempfile.mkdtemp()
-        _create_agent42_tree(self.source)
+        _create_frood_tree(self.source)
 
     def teardown_method(self):
         shutil.rmtree(self.source, ignore_errors=True)
@@ -194,7 +194,7 @@ class TestBackup:
         path = create_backup(self.source, self.output)
         assert os.path.exists(path)
         assert path.endswith(".tar.gz")
-        assert "agent42-backup-" in os.path.basename(path)
+        assert "frood-backup-" in os.path.basename(path)
 
     def test_backup_includes_manifest(self):
         path = create_backup(self.source, self.output)
@@ -277,7 +277,7 @@ class TestRestore:
         self.source = tempfile.mkdtemp()
         self.output = tempfile.mkdtemp()
         self.restore_dir = tempfile.mkdtemp()
-        _create_agent42_tree(self.source)
+        _create_frood_tree(self.source)
 
     def teardown_method(self):
         shutil.rmtree(self.source, ignore_errors=True)
@@ -387,7 +387,7 @@ class TestClone:
     def setup_method(self):
         self.source = tempfile.mkdtemp()
         self.output = tempfile.mkdtemp()
-        _create_agent42_tree(self.source)
+        _create_frood_tree(self.source)
 
     def teardown_method(self):
         shutil.rmtree(self.source, ignore_errors=True)
@@ -397,7 +397,7 @@ class TestClone:
         path = create_clone(self.source, self.output)
         assert os.path.exists(path)
         assert path.endswith(".tar.gz")
-        assert "agent42-clone-" in os.path.basename(path)
+        assert "frood-clone-" in os.path.basename(path)
 
     def test_clone_includes_manifest(self):
         path = create_clone(self.source, self.output)
@@ -479,7 +479,7 @@ class TestRoundTrip:
         self.source = tempfile.mkdtemp()
         self.output = tempfile.mkdtemp()
         self.restore_dir = tempfile.mkdtemp()
-        _create_agent42_tree(self.source)
+        _create_frood_tree(self.source)
 
     def teardown_method(self):
         shutil.rmtree(self.source, ignore_errors=True)

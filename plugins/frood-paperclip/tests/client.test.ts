@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { Agent42Client } from "../src/client.js";
+import { FroodClient } from "../src/client.js";
 import type {
   MemoryRecallRequest,
   MemoryStoreRequest,
@@ -25,11 +25,11 @@ function makeMockResponse(status: number, body: unknown): Response {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("Agent42Client", () => {
-  let client: Agent42Client;
+describe("FroodClient", () => {
+  let client: FroodClient;
 
   beforeEach(() => {
-    client = new Agent42Client("http://localhost:8001", "test-token", 5000);
+    client = new FroodClient("http://localhost:8001", "test-token", 5000);
     vi.stubGlobal("fetch", vi.fn());
   });
 

@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Review code changes for security implications specific to the Agent42 platform.
+Review code changes for security implications specific to the Frood platform.
 
 ## Context
 
-Agent42 runs AI agents that execute shell commands, access filesystems, make HTTP
+Frood runs AI agents that execute shell commands, access filesystems, make HTTP
 requests, and interact with LLM APIs on behalf of users. Security is not optional —
-a vulnerability in Agent42 can compromise the user's entire server.
+a vulnerability in Frood can compromise the user's entire server.
 
 ## Security Layers to Verify
 

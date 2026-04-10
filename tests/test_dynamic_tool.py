@@ -55,9 +55,9 @@ class TestDynamicTool:
         tool = self._make_tool(
             "def run(**kwargs):\n    return f\"Hello {kwargs.get('input', 'world')}\""
         )
-        result = await tool.execute(input="Agent42")
+        result = await tool.execute(input="Frood")
         assert result.success is True
-        assert "Hello Agent42" in result.output
+        assert "Hello Frood" in result.output
 
     @pytest.mark.asyncio
     async def test_execute_no_args(self):

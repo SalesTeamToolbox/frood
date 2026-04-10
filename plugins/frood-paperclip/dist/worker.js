@@ -6,7 +6,7 @@
  * CRITICAL: Lifecycle hook is onHealth() not health() (Pitfall 2).
  */
 import { definePlugin, runWorker } from "@paperclipai/plugin-sdk";
-import { Agent42Client } from "./client.js";
+import { FroodClient } from "./client.js";
 import { registerTools } from "./tools.js";
 let client = null;
 // Terminal session tracking (Phase 36) — maps sessionId to WebSocket
@@ -15,13 +15,13 @@ const plugin = definePlugin({
     async setup(ctx) {
         const config = await ctx.config.get();
         // Validate required fields (D-19)
-        const baseUrl = config.agent42BaseUrl;
+        const baseUrl = config.froodBaseUrl;
         const apiKey = config.apiKey;
         if (!baseUrl || !apiKey) {
-            throw new Error("agent42BaseUrl and apiKey are required in plugin config");
+            throw new Error("froodBaseUrl and apiKey are required in plugin config");
         }
         const timeoutMs = config.timeoutMs ?? 10_000;
-        client = new Agent42Client(baseUrl, apiKey, timeoutMs);
+        client = new FroodClient(baseUrl, apiKey, timeoutMs);
         // Register all tools synchronously before setup() resolves (Pitfall 6)
         registerTools(ctx, client);
         // Register agent.run.started event for auto-memory observability (ADV-01, D-13)
@@ -52,6 +52,17 @@ const plugin = definePlugin({
             }
             catch (e) {
                 ctx.logger.warn("provider-health data handler failed", { error: String(e) });
+                return null;
+            }
+        });
+        ctx.data.register("available-models", async (_params) => {
+            if (!client)
+                return null;
+            try {
+                return await client.getModels();
+            }
+            catch (e) {
+                ctx.logger.warn("available-models data handler failed", { error: String(e) });
                 return null;
             }
         });
@@ -119,14 +130,36 @@ const plugin = definePlugin({
                 return null;
             }
         });
-        ctx.data.register("agent42-settings", async (_params) => {
+        ctx.data.register("frood-settings", async (_params) => {
             if (!client)
                 return null;
             try {
                 return await client.getSettings();
             }
             catch (e) {
-                ctx.logger.warn("agent42-settings data handler failed", { error: String(e) });
+                ctx.logger.warn("frood-settings data handler failed", { error: String(e) });
+                return null;
+            }
+        });
+        ctx.data.register("memory-stats", async (_params) => {
+            if (!client)
+                return null;
+            try {
+                return await client.getMemoryStats();
+            }
+            catch (e) {
+                ctx.logger.warn("memory-stats data handler failed", { error: String(e) });
+                return null;
+            }
+        });
+        ctx.data.register("storage-status", async (_params) => {
+            if (!client)
+                return null;
+            try {
+                return await client.getStorageStatus();
+            }
+            catch (e) {
+                ctx.logger.warn("storage-status data handler failed", { error: String(e) });
                 return null;
             }
         });
@@ -155,7 +188,7 @@ const plugin = definePlugin({
                 return { ok: false, message: String(e) };
             }
         });
-        ctx.actions.register("update-agent42-settings", async (params) => {
+        ctx.actions.register("update-frood-settings", async (params) => {
             const keyName = params?.key_name;
             const value = params?.value;
             if (!keyName || !client)
@@ -164,12 +197,50 @@ const plugin = definePlugin({
                 return await client.updateSettings({ key_name: keyName, value: value ?? "" });
             }
             catch (e) {
-                ctx.logger.warn("update-agent42-settings action failed", { error: String(e) });
+                ctx.logger.warn("update-frood-settings action failed", { error: String(e) });
+                return { ok: false, message: String(e) };
+            }
+        });
+        ctx.actions.register("toggle-tool", async (params) => {
+            const name = params?.name;
+            const enabled = params?.enabled;
+            if (!name || enabled === undefined || !client)
+                return { ok: false, message: "Missing name/enabled or client" };
+            try {
+                return await client.toggleTool(name, enabled);
+            }
+            catch (e) {
+                ctx.logger.warn("toggle-tool action failed", { error: String(e) });
+                return { ok: false, message: String(e) };
+            }
+        });
+        ctx.actions.register("toggle-skill", async (params) => {
+            const name = params?.name;
+            const enabled = params?.enabled;
+            if (!name || enabled === undefined || !client)
+                return { ok: false, message: "Missing name/enabled or client" };
+            try {
+                return await client.toggleSkill(name, enabled);
+            }
+            catch (e) {
+                ctx.logger.warn("toggle-skill action failed", { error: String(e) });
+                return { ok: false, message: String(e) };
+            }
+        });
+        ctx.actions.register("purge-memory", async (params) => {
+            const collection = params?.collection;
+            if (!collection || !client)
+                return { ok: false, message: "Missing collection or client" };
+            try {
+                return await client.purgeMemory(collection);
+            }
+            catch (e) {
+                ctx.logger.warn("purge-memory action failed", { error: String(e) });
                 return { ok: false, message: String(e) };
             }
         });
         // -- Phase 36: Terminal stream and action handlers (PAPERCLIP-01) --
-        // Per D-01: Terminal communicates with Agent42 sidecar via WebSocket for real-time interaction
+        // Per D-01: Terminal communicates with Frood sidecar via WebSocket for real-time interaction
         // Per D-12: Real-time updates via WebSocket connections
         ctx.actions.register("terminal-start", async (params) => {
             const sessionId = params?.sessionId ?? crypto.randomUUID();
@@ -177,7 +248,7 @@ const plugin = definePlugin({
                 return { ok: false, sessionId, message: "Client not initialized" };
             try {
                 const config = await ctx.config.get();
-                const httpBaseUrl = config.agent42BaseUrl;
+                const httpBaseUrl = config.froodBaseUrl;
                 const apiKey = config.apiKey;
                 // Per CLAUDE.md rule 6: NEVER log/expose API keys in URLs or server logs.
                 // Request a short-lived session token via authenticated REST endpoint,
@@ -246,6 +317,61 @@ const plugin = definePlugin({
             }
             return { ok: true };
         });
+        // -- Phase 41: Frood Adapter actions (ABACUS-04, ABACUS-05) --
+        // These replace claude_local for Paperclip autonomous execution.
+        // All agent tasks route through Frood -> Abacus RouteLLM API.
+        // Zero Claude CLI processes spawned. TOS compliant.
+        ctx.actions.register("adapter-run", async (params) => {
+            const task = params?.task;
+            const agentId = params?.agentId;
+            if (!task || !agentId || !client) {
+                return { ok: false, message: "Missing task, agentId, or client not initialized" };
+            }
+            try {
+                const result = await client.adapterRun({
+                    task,
+                    agentId,
+                    role: params?.role,
+                    provider: params?.provider,
+                    model: params?.model,
+                    tools: params?.tools,
+                    maxIterations: params?.maxIterations,
+                });
+                return { ok: true, ...result };
+            }
+            catch (e) {
+                ctx.logger.warn("adapter-run failed", { error: String(e) });
+                return { ok: false, message: String(e) };
+            }
+        });
+        ctx.actions.register("adapter-status", async (params) => {
+            const runId = params?.runId;
+            if (!runId || !client) {
+                return { ok: false, message: "Missing runId or client not initialized" };
+            }
+            try {
+                const result = await client.adapterStatus(runId);
+                return { ok: true, ...result };
+            }
+            catch (e) {
+                ctx.logger.warn("adapter-status failed", { error: String(e) });
+                return { ok: false, message: String(e) };
+            }
+        });
+        ctx.actions.register("adapter-cancel", async (params) => {
+            const runId = params?.runId;
+            if (!runId || !client) {
+                return { ok: false, message: "Missing runId or client not initialized" };
+            }
+            try {
+                const result = await client.adapterCancel(runId);
+                return { ok: true, ...result };
+            }
+            catch (e) {
+                ctx.logger.warn("adapter-cancel failed", { error: String(e) });
+                return { ok: false, message: String(e) };
+            }
+        });
         // Register learning extraction job handler (D-17, D-19, D-20)
         ctx.jobs.register("extract-learnings", async (_job) => {
             if (!client) {
@@ -286,7 +412,7 @@ const plugin = definePlugin({
                 ctx.logger.warn("Failed to update learn watermark", { error: String(e) });
             }
         });
-        ctx.logger.info("Agent42 plugin ready", { baseUrl });
+        ctx.logger.info("Frood plugin ready", { baseUrl });
     },
     async onHealth() {
         if (!client) {

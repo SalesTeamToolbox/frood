@@ -1,5 +1,5 @@
 /**
- * types.ts -- TypeScript interfaces mirroring Agent42 sidecar Pydantic models.
+ * types.ts -- TypeScript interfaces mirroring Frood sidecar Pydantic models.
  *
  * CRITICAL: top_k and score_threshold are snake_case (no camelCase alias on Python side).
  * All other fields use camelCase per sidecar Pydantic aliases.
@@ -355,17 +355,17 @@ export interface TerminalOutputEvent {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 41 -- Agent42 Adapter types (ABACUS-04)
+// Phase 41 -- Frood Adapter types (ABACUS-04)
 // ---------------------------------------------------------------------------
 
-/** POST /adapter/run -- route task through Agent42 instead of spawning Claude CLI */
+/** POST /adapter/run -- route task through Frood instead of spawning Claude CLI */
 export interface AdapterRunRequest {
   task: string;
   agentId: string;
   role?: string;          // Paperclip role (engineer, researcher, writer, analyst)
   provider?: string;      // Override provider (default: use tiered routing)
   model?: string;         // Override model (default: use tiered routing)
-  tools?: string[];       // Agent42 tools to enable
+  tools?: string[];       // Frood tools to enable
   maxIterations?: number; // Max iterations (default: 10)
 }
 

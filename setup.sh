@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# setup.sh — Agent42 setup script
+# setup.sh — Frood setup script
 # Run once after cloning: bash setup.sh
 # Use --quiet when called from install-server.sh (suppresses banners/prompts)
 #
 # Subcommands:
 #   bash setup.sh              Full local setup (default)
 #   bash setup.sh sync-auth    Sync CC credentials to remote VPS
-#   bash setup.sh create-shortcut  Create desktop shortcut for Agent42
-#   bash setup.sh generate-claude-md  Generate CLAUDE.md with Agent42 conventions
+#   bash setup.sh create-shortcut  Create desktop shortcut for Frood
+#   bash setup.sh generate-claude-md  Generate CLAUDE.md with Frood conventions
 #   bash setup.sh --quiet      Quiet mode (for install-server.sh)
 
 set -e
@@ -37,7 +37,7 @@ esac
 
 # ── Subcommand: sync-auth ──────────────────────────────────────────────────
 if [ "$1" = "sync-auth" ]; then
-    SSH_ALIAS="${2:-agent42-prod}"
+    SSH_ALIAS="${2:-frood-prod}"
     LOCAL_CREDS="$HOME/.claude/.credentials.json"
 
     if [ ! -f "$LOCAL_CREDS" ]; then
@@ -95,7 +95,7 @@ if [ "$1" = "create-shortcut" ]; then
             info "Using browser: $BROWSER_NAME"
 
             # Generate .ico if missing (Windows shortcuts require .ico, not .png)
-            ICO_FILE="$PROJECT_DIR/dashboard/frontend/dist/assets/icons/agent42.ico"
+            ICO_FILE="$PROJECT_DIR/dashboard/frontend/dist/assets/icons/frood.ico"
             if [ ! -f "$ICO_FILE" ]; then
                 info "Generating .ico icon file..."
                 $PYTHON_CMD "$PROJECT_DIR/scripts/generate-icons.py" --ico-only 2>/dev/null || \
@@ -119,7 +119,7 @@ for s, png in entries:
 open('$ICO_FILE', 'wb').write(header + dir_entries + image_data)
 " 2>/dev/null
                 if [ -f "$ICO_FILE" ]; then
-                    info "Generated agent42.ico"
+                    info "Generated frood.ico"
                 else
                     warn "Could not generate .ico — shortcut will use default browser icon"
                 fi
@@ -131,19 +131,19 @@ open('$ICO_FILE', 'wb').write(header + dir_entries + image_data)
 
             powershell.exe -NoProfile -Command "
   \$desktop = [Environment]::GetFolderPath('Desktop');
-  \$lnkPath = Join-Path \$desktop 'Agent42.lnk';
+  \$lnkPath = Join-Path \$desktop 'Frood.lnk';
   if (Test-Path \$lnkPath) { Remove-Item \$lnkPath -Force };
   \$ws = New-Object -ComObject WScript.Shell;
   \$sc = \$ws.CreateShortcut(\$lnkPath);
   \$sc.TargetPath = '$BROWSER_WIN';
   \$sc.Arguments = '--app=http://localhost:8000';
   \$sc.IconLocation = '$ICON_PATH,0';
-  \$sc.Description = 'Agent42 - AI Agent Platform';
+  \$sc.Description = 'Frood - AI Agent Platform';
   \$sc.WorkingDirectory = '$WORKDIR_WIN';
   \$sc.Save();
   attrib -U +P \$lnkPath 2>\$null
 "
-            info "Shortcut created! Find Agent42 on your Desktop."
+            info "Shortcut created! Find Frood on your Desktop."
             ;;
 
         Darwin)
@@ -157,32 +157,32 @@ open('$ICO_FILE', 'wb').write(header + dir_entries + image_data)
             fi
 
             info "Using browser: $BROWSER_NAME"
-            APP_DIR="$HOME/Applications/Agent42.app/Contents/MacOS"
+            APP_DIR="$HOME/Applications/Frood.app/Contents/MacOS"
             mkdir -p "$APP_DIR"
-            mkdir -p "$HOME/Applications/Agent42.app/Contents/Resources"
+            mkdir -p "$HOME/Applications/Frood.app/Contents/Resources"
 
             cp "$PROJECT_DIR/dashboard/frontend/dist/assets/icons/icon-512.png" \
-               "$HOME/Applications/Agent42.app/Contents/Resources/agent42.png"
+               "$HOME/Applications/Frood.app/Contents/Resources/frood.png"
 
-            cat > "$APP_DIR/Agent42" << 'LAUNCHER'
+            cat > "$APP_DIR/Frood" << 'LAUNCHER'
 #!/bin/bash
 open -a "Google Chrome" --args --app=http://localhost:8000
 LAUNCHER
-            chmod +x "$APP_DIR/Agent42"
+            chmod +x "$APP_DIR/Frood"
 
-            cat > "$HOME/Applications/Agent42.app/Contents/Info.plist" << 'PLIST'
+            cat > "$HOME/Applications/Frood.app/Contents/Info.plist" << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key>
-  <string>Agent42</string>
+  <string>Frood</string>
   <key>CFBundleDisplayName</key>
-  <string>Agent42</string>
+  <string>Frood</string>
   <key>CFBundleIdentifier</key>
-  <string>com.agent42.app</string>
+  <string>com.frood.app</string>
   <key>CFBundleExecutable</key>
-  <string>Agent42</string>
+  <string>Frood</string>
   <key>CFBundleVersion</key>
   <string>1.0</string>
   <key>CFBundlePackageType</key>
@@ -190,7 +190,7 @@ LAUNCHER
 </dict>
 </plist>
 PLIST
-            info "Shortcut created! Find Agent42 in ~/Applications/."
+            info "Shortcut created! Find Frood in ~/Applications/."
             ;;
 
         Linux)
@@ -212,18 +212,18 @@ PLIST
             mkdir -p "$DESKTOP_DIR"
             ICON_PATH="$PROJECT_DIR/dashboard/frontend/dist/assets/icons/icon-512.png"
 
-            cat > "$DESKTOP_DIR/agent42.desktop" << DESKTOP
+            cat > "$DESKTOP_DIR/frood.desktop" << DESKTOP
 [Desktop Entry]
-Name=Agent42
+Name=Frood
 Comment=AI Agent Platform — Don't Panic
 Exec=$BROWSER_CMD --app=http://localhost:8000
 Icon=$ICON_PATH
 Type=Application
 Categories=Development;
-StartupWMClass=agent42
+StartupWMClass=frood
 DESKTOP
-            chmod +x "$DESKTOP_DIR/agent42.desktop"
-            info "Shortcut created! Find Agent42 in your application launcher."
+            chmod +x "$DESKTOP_DIR/frood.desktop"
+            info "Shortcut created! Find Frood in your application launcher."
             ;;
 
         *)
@@ -236,7 +236,7 @@ fi
 
 # ── Subcommand: generate-claude-md ───────────────────────────────────────────
 if [ "$1" = "generate-claude-md" ]; then
-    info "Generating CLAUDE.md with Agent42 conventions..."
+    info "Generating CLAUDE.md with Frood conventions..."
     $PYTHON_CMD scripts/setup_helpers.py generate-claude-md "$PROJECT_DIR"
     info "Done! Review CLAUDE.md for your project."
     exit 0
@@ -366,7 +366,7 @@ if ! $QUIET; then
     echo ""
     info "Setup complete!"
     echo ""
-    echo "  1. Start Agent42:  source $VENV_ACTIVATE && python agent42.py"
+    echo "  1. Start Frood:    source $VENV_ACTIVATE && python frood.py"
     echo "  2. Open http://localhost:8000 to complete setup in your browser"
     echo "  3. MCP config:     .mcp.json (configured for Claude Code)"
     echo "  4. Hooks:          .claude/settings.json (auto-registered)"

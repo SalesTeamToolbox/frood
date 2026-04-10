@@ -1,9 +1,9 @@
-# Agent42 LLM Proxy PowerShell Functions
+# Frood LLM Proxy PowerShell Functions
 # Add this to your PowerShell profile: $PROFILE
-# Then run: Set-Agent42Model qwen3.6-plus-free
-# Or: Set-Agent42Model subscription
+# Then run: Set-FroodModel qwen3.6-plus-free
+# Or: Set-FroodModel subscription
 
-function Set-Agent42Model {
+function Set-FroodModel {
     param(
         [string]$Model = "qwen3.6-plus-free"
     )
@@ -12,19 +12,19 @@ function Set-Agent42Model {
     $env:ANTHROPIC_API_KEY = "dummy"
     $env:ANTHROPIC_MODEL = $Model
     
-    Write-Host "Agent42 LLM Proxy: Using model '$Model'" -ForegroundColor Cyan
+    Write-Host "Frood LLM Proxy: Using model '$Model'" -ForegroundColor Cyan
     Write-Host "  Base URL: $env:ANTHROPIC_BASE_URL" -ForegroundColor Gray
     Write-Host "  Model: $env:ANTHROPIC_MODEL" -ForegroundColor Gray
     Write-Host ""
     Write-Host "Start Claude Code with: claude ." -ForegroundColor Yellow
 }
 
-function Set-Agent42Subscription {
-    Set-Agent42Model "subscription"
+function Set-FroodSubscription {
+    Set-FroodModel "subscription"
 }
 
-function Get-Agent42Models {
-    Write-Host "Available Agent42 LLM Proxy Models:" -ForegroundColor Cyan
+function Get-FroodModels {
+    Write-Host "Available Frood LLM Proxy Models:" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Zen Free Models:" -ForegroundColor Green
     Write-Host "  - qwen3.6-plus-free       (fast/coding)" -ForegroundColor White
@@ -38,9 +38,9 @@ function Get-Agent42Models {
     Write-Host "  - subscription           (Claude Code subscription)" -ForegroundColor White
 }
 
-function Start-Agent42Proxy {
-    Write-Host "Starting Agent42 dashboard..." -ForegroundColor Cyan
-    Start-Process -FilePath "python" -ArgumentList "agent42.py" -WindowStyle Hidden
+function Start-FroodProxy {
+    Write-Host "Starting Frood dashboard..." -ForegroundColor Cyan
+    Start-Process -FilePath "python" -ArgumentList "frood.py" -WindowStyle Hidden
     Start-Sleep -Seconds 3
-    Write-Host "Agent42 dashboard started. Use Set-Agent42Model to configure." -ForegroundColor Green
+    Write-Host "Frood dashboard started. Use Set-FroodModel to configure." -ForegroundColor Green
 }

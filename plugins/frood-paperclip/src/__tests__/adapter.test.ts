@@ -26,7 +26,7 @@ describe("manifest", () => {
 });
 
 // Test client adapter methods construct correct requests
-describe("Agent42Client adapter methods", () => {
+describe("FroodClient adapter methods", () => {
   const mockFetch = vi.fn();
 
   beforeEach(() => {
@@ -35,14 +35,14 @@ describe("Agent42Client adapter methods", () => {
   });
 
   it("adapterRun sends POST to /adapter/run", async () => {
-    const { Agent42Client } = await import("../client.js");
+    const { FroodClient } = await import("../client.js");
     mockFetch.mockResolvedValue({
       ok: true,
       status: 200,
       json: () => Promise.resolve({ runId: "run-1", status: "started", provider: "abacus", model: "gemini-3-flash" }),
     });
 
-    const client = new Agent42Client("http://localhost:8001", "test-token");
+    const client = new FroodClient("http://localhost:8001", "test-token");
     const result = await client.adapterRun({
       task: "analyze data",
       agentId: "agent-1",
@@ -58,14 +58,14 @@ describe("Agent42Client adapter methods", () => {
   });
 
   it("adapterStatus sends GET to /adapter/status/{runId}", async () => {
-    const { Agent42Client } = await import("../client.js");
+    const { FroodClient } = await import("../client.js");
     mockFetch.mockResolvedValue({
       ok: true,
       status: 200,
       json: () => Promise.resolve({ runId: "run-1", status: "completed", output: "done" }),
     });
 
-    const client = new Agent42Client("http://localhost:8001", "test-token");
+    const client = new FroodClient("http://localhost:8001", "test-token");
     const result = await client.adapterStatus("run-1");
 
     expect(mockFetch).toHaveBeenCalledWith(
@@ -76,14 +76,14 @@ describe("Agent42Client adapter methods", () => {
   });
 
   it("adapterCancel sends POST to /adapter/cancel/{runId}", async () => {
-    const { Agent42Client } = await import("../client.js");
+    const { FroodClient } = await import("../client.js");
     mockFetch.mockResolvedValue({
       ok: true,
       status: 200,
       json: () => Promise.resolve({ runId: "run-1", cancelled: true }),
     });
 
-    const client = new Agent42Client("http://localhost:8001", "test-token");
+    const client = new FroodClient("http://localhost:8001", "test-token");
     const result = await client.adapterCancel("run-1");
 
     expect(mockFetch).toHaveBeenCalledWith(
@@ -94,26 +94,26 @@ describe("Agent42Client adapter methods", () => {
   });
 
   it("adapterRun throws on non-ok response", async () => {
-    const { Agent42Client } = await import("../client.js");
+    const { FroodClient } = await import("../client.js");
     mockFetch.mockResolvedValue({ ok: false, status: 500 });
 
-    const client = new Agent42Client("http://localhost:8001", "test-token");
+    const client = new FroodClient("http://localhost:8001", "test-token");
     await expect(client.adapterRun({ task: "test", agentId: "a1" })).rejects.toThrow("HTTP 500");
   });
 
   it("adapterStatus throws on non-ok response", async () => {
-    const { Agent42Client } = await import("../client.js");
+    const { FroodClient } = await import("../client.js");
     mockFetch.mockResolvedValue({ ok: false, status: 404 });
 
-    const client = new Agent42Client("http://localhost:8001", "test-token");
+    const client = new FroodClient("http://localhost:8001", "test-token");
     await expect(client.adapterStatus("missing-run")).rejects.toThrow("HTTP 404");
   });
 
   it("adapterCancel throws on non-ok response", async () => {
-    const { Agent42Client } = await import("../client.js");
+    const { FroodClient } = await import("../client.js");
     mockFetch.mockResolvedValue({ ok: false, status: 403 });
 
-    const client = new Agent42Client("http://localhost:8001", "test-token");
+    const client = new FroodClient("http://localhost:8001", "test-token");
     await expect(client.adapterCancel("run-2")).rejects.toThrow("HTTP 403");
   });
 });

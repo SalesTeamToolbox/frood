@@ -1,4 +1,4 @@
-"""Tests for Agent42 sidecar mode (Phase 24, SIDE-01 through SIDE-09; Phase 29 UI endpoints)."""
+"""Tests for Frood sidecar mode (Phase 24, SIDE-01 through SIDE-09; Phase 29 UI endpoints)."""
 
 import json
 import logging
@@ -286,8 +286,8 @@ class TestSidecarAppStructure:
 class TestCoreServicesInit:
     """SIDE-08: Core services start identically in sidecar and dashboard modes."""
 
-    def test_agent42_accepts_sidecar_param(self):
-        """Agent42.__init__ should accept sidecar=True without error.
+    def test_frood_accepts_sidecar_param(self):
+        """Frood.__init__ should accept sidecar=True without error.
 
         Note: Full init requires filesystem access (data dirs, etc).
         We verify the parameter is accepted by checking the class signature.
@@ -485,7 +485,7 @@ class TestMemoryRunTraceEndpoint:
         mock_qdrant.MEMORY = "memory"
         mock_qdrant.HISTORY = "history"
         mock_qdrant.KNOWLEDGE = "knowledge"
-        mock_qdrant._collection_name = MagicMock(side_effect=lambda s: f"agent42_{s}")
+        mock_qdrant._collection_name = MagicMock(side_effect=lambda s: f"frood_{s}")
 
         # Mock scroll to return a point with run_id tagged
         mock_point = MagicMock()

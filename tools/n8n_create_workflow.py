@@ -210,10 +210,10 @@ class N8nCreateWorkflowTool(Tool):
             template = self._load_template("webhook_to_http")
 
         # Generate unique webhook path
-        webhook_path = f"agent42-{uuid.uuid4().hex[:12]}"
+        webhook_path = f"frood-{uuid.uuid4().hex[:12]}"
 
         # Determine workflow name
-        workflow_name = name if name else f"Agent42: {description[:50]}"
+        workflow_name = name if name else f"Frood: {description[:50]}"
 
         # Build placeholder replacements
         replacements = {

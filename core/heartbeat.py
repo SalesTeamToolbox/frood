@@ -322,8 +322,8 @@ class HeartbeatService:
                 if ws_name:
                     # Truncate long workstream names (per D-04)
                     display_name = ws_name
-                    # Strip common prefixes like "agent42-"
-                    for prefix in ("agent42-", "a42-"):
+                    # Strip common prefixes like "frood-" or legacy "agent42-"
+                    for prefix in ("frood-", "agent42-", "a42-"):
                         if display_name.startswith(prefix):
                             display_name = display_name[len(prefix) :]
                             break

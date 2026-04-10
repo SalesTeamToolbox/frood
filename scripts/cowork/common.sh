@@ -2,15 +2,15 @@
 # common.sh — Shared configuration and helpers for cowork scripts.
 
 # ── VPS Connection ──────────────────────────────────────────────────
-COWORK_VPS_HOST="${COWORK_VPS_HOST:-agent42-prod}"
-COWORK_REPO_DIR="${COWORK_REPO_DIR:-~/agent42}"
+COWORK_VPS_HOST="${COWORK_VPS_HOST:-frood-prod}"
+COWORK_REPO_DIR="${COWORK_REPO_DIR:-~/frood}"
 
 # ── Paths (VPS-side) ───────────────────────────────────────────────
 COWORK_WORK_ORDERS_DIR=".planning/work-orders"
-COWORK_PID_FILE="/tmp/agent42-coworker.pid"
-COWORK_CLAUDE_PID_FILE="/tmp/agent42-coworker-claude.pid"
-COWORK_LOG_FILE="/tmp/agent42-coworker.log"
-COWORK_STATUS_FILE="/tmp/agent42-coworker-status.json"
+COWORK_PID_FILE="/tmp/frood-coworker.pid"
+COWORK_CLAUDE_PID_FILE="/tmp/frood-coworker-claude.pid"
+COWORK_LOG_FILE="/tmp/frood-coworker.log"
+COWORK_STATUS_FILE="/tmp/frood-coworker-status.json"
 
 # ── Paths (local) ──────────────────────────────────────────────────
 LOCAL_WORK_ORDERS_DIR=".planning/work-orders"

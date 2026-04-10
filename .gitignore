@@ -26,11 +26,11 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-# Agent42
+# Frood
 tasks.json
 cron_jobs.json
-/tmp/agent42/
-.agent42/
+/tmp/frood/
+.frood/
 data/
 apps/*
 

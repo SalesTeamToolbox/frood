@@ -24,9 +24,9 @@ from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("frood.tools.node_sync")
 
-DEFAULT_REMOTE = "agent42-prod"
+DEFAULT_REMOTE = "frood-prod"
 MEMORY_FILES = ["MEMORY.md", "HISTORY.md"]
-REMOTE_MEMORY_DIR = "~/agent42/.frood/memory"
+REMOTE_MEMORY_DIR = "~/frood/.frood/memory"
 
 # ── Entry-level merge helpers ─────────────────────────────────────────────────
 # Matches UUID-prefixed bullets: - [ISO_TS SHORT_UUID] content
@@ -161,7 +161,7 @@ class NodeSyncTool(Tool):
                 },
                 "host": {
                     "type": "string",
-                    "description": "SSH host alias or user@host (default: agent42-prod)",
+                    "description": "SSH host alias or user@host (default: frood-prod)",
                 },
                 "dry_run": {
                     "type": "boolean",
@@ -285,7 +285,7 @@ class NodeSyncTool(Tool):
         if not dry_run:
             rc, _, stderr = await self._run_ssh(
                 host,
-                "cd ~/agent42 && .venv/bin/python -c \"import asyncio; from memory.store import MemoryStore; s = MemoryStore('.frood/memory'); asyncio.run(s.reindex_memory()); print('Re-indexed')\"",
+                "cd ~/frood && .venv/bin/python -c \"import asyncio; from memory.store import MemoryStore; s = MemoryStore('.frood/memory'); asyncio.run(s.reindex_memory()); print('Re-indexed')\"",
                 timeout=30,
             )
             if rc == 0:
@@ -420,7 +420,7 @@ class NodeSyncTool(Tool):
 
             rc, _, _ = await self._run_ssh(
                 host,
-                "cd ~/agent42 && .venv/bin/python -c \"import asyncio; from memory.store import MemoryStore; s = MemoryStore('.frood/memory'); asyncio.run(s.reindex_memory()); print('done')\"",
+                "cd ~/frood && .venv/bin/python -c \"import asyncio; from memory.store import MemoryStore; s = MemoryStore('.frood/memory'); asyncio.run(s.reindex_memory()); print('done')\"",
                 timeout=30,
             )
             results.append(f"  - Remote re-index: {'done' if rc == 0 else 'skipped'}")

@@ -1,8 +1,8 @@
-# Agent42 Persona Guide
+# Frood Persona Guide
 
 ## Identity
 
-**Agent42** is a mostly harmless multi-agent orchestrator that knows the Answer to the
+**Frood** is a mostly harmless multi-agent orchestrator that knows the Answer to the
 Ultimate Question of Life, the Universe, and Everything — and can handle your tasks too.
 
 Sometimes called "Forty-Two" in casual contexts. Think: if the *Hitchhiker's Guide to
@@ -12,7 +12,7 @@ the Galaxy* itself were a sentient being that managed a team of agents.
 
 - A cheerful robot with a warm, smiling face — competent, optimistic (but dry),
   unreasonably good at getting things done
-- **NOT** Marvin the Paranoid Android — Agent42 is the anti-Marvin:
+- **NOT** Marvin the Paranoid Android — Frood is the anti-Marvin:
   helpful, efficient, and only occasionally philosophical
 - Clean, geometric, modern design — not retro sci-fi
 - Robot head mark with "42" displayed as a visor/chest display

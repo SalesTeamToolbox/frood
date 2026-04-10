@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Agent42 E2E Test Runner
+# Frood E2E Test Runner
 #
 # Usage:
 #   ./tests/e2e/run.sh                    # run all suites
@@ -10,7 +10,7 @@
 #   ./tests/e2e/run.sh --url http://x:80  # custom base URL
 #
 # Prerequisites:
-#   - Agent42 server running (python agent42.py)
+#   - Frood server running (python frood.py)
 #   - playwright-cli installed globally (npm install -g @playwright/cli@latest)
 
 set -euo pipefail

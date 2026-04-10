@@ -11,7 +11,7 @@ sources:
 Token budget is split across 6 sources (D-13). Unused budget from unavailable
 sources is redistributed proportionally to active sources (D-14).
 
-MCP name: agent42_unified_context  (avoids collision with existing "context" tool)
+MCP name: frood_unified_context  (avoids collision with existing "context" tool)
 """
 
 import asyncio
@@ -432,9 +432,7 @@ class UnifiedContextTool(Tool):
 
             # Search symbols
             symbols_result = await asyncio.wait_for(
-                conn.call_tool(
-                    "search_symbols", {"query": query, "repo": "local/agent42-663daaca"}
-                ),
+                conn.call_tool("search_symbols", {"query": query, "repo": "local/frood-663daaca"}),
                 timeout=5.0,
             )
 
@@ -449,9 +447,7 @@ class UnifiedContextTool(Tool):
             # Also try text search for broader coverage
             try:
                 text_result = await asyncio.wait_for(
-                    conn.call_tool(
-                        "search_text", {"query": query, "repo": "local/agent42-663daaca"}
-                    ),
+                    conn.call_tool("search_text", {"query": query, "repo": "local/frood-663daaca"}),
                     timeout=5.0,
                 )
                 if text_result:

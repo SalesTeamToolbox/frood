@@ -15,9 +15,9 @@ Display a table:
 
 | Server | Status | Tools | Notes |
 |--------|--------|-------|-------|
-| agent42 | Active (essential) | 29 | Core platform |
+| frood | Active (essential) | 29 | Core platform |
 | jcodemunch | Active (essential) | 30 | Codebase nav |
-| agent42-remote | Inactive | 29 | Deploy only |
+| frood-remote | Inactive | 29 | Deploy only |
 | context7 | Inactive | 2 | Plugin covers this |
 | playwright | Inactive | ~20 | Plugin covers this |
 | github | Inactive | ~20 | Plugin covers this |

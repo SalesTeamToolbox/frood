@@ -806,7 +806,7 @@ class AppManager:
         env["GIT_CONFIG_KEY_1"] = "user.name"
         env["GIT_CONFIG_VALUE_1"] = env.get("GIT_AUTHOR_NAME", "Frood")
         env["GIT_CONFIG_KEY_2"] = "user.email"
-        env["GIT_CONFIG_VALUE_2"] = env.get("GIT_AUTHOR_EMAIL", "agent42@localhost")
+        env["GIT_CONFIG_VALUE_2"] = env.get("GIT_AUTHOR_EMAIL", "frood@localhost")
 
         with git_askpass_env(self._github_token, env) as auth_env:
             proc = await asyncio.create_subprocess_exec(

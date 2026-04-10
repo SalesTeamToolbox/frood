@@ -69,7 +69,7 @@ def index_project(project_dir: str, timeout: int = 120) -> bool:
         "params": {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": {"name": "agent42-setup", "version": "1.0"},
+            "clientInfo": {"name": "frood-setup", "version": "1.0"},
         },
     }
     # Notification: initialized (no id — no response expected)

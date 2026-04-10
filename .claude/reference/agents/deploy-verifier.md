@@ -6,12 +6,12 @@ Run pre-deployment validation checks to catch configuration errors, missing file
 
 ## Context
 
-Agent42 deployment architecture:
+Frood deployment architecture:
 
-- **Entry point:** `agent42.py` imports from all major modules (`core/`, `tools/`, `providers/`, `agents/`, `memory/`, `dashboard/`)
+- **Entry point:** `frood.py` imports from all major modules (`core/`, `tools/`, `providers/`, `agents/`, `memory/`, `dashboard/`)
 - **Configuration:** `core/config.py` Settings frozen dataclass with `from_env()` loading via `os.getenv()`
 - **Env template:** `.env.example` documents all expected environment variables
-- **Production:** systemd service on Contabo VPS at `~/agent42/`, branch `main`
+- **Production:** systemd service on Contabo VPS at `~/frood/`, branch `main`
 - **Deploy flow:** commit on dev -> push dev -> merge to main -> push main -> ssh deploy (`git pull && systemctl restart`)
 
 ### Known Production Pitfalls
@@ -25,10 +25,10 @@ Agent42 deployment architecture:
 ## Pre-Deploy Checks
 
 1. **Import verification:**
-   Run `python -c "import agent42"` to verify the main entry point imports successfully. If this fails, report the `ImportError` with the missing module name. Then check if that module file exists locally but is untracked in git — this is the Pitfall 94 scenario where a required file won't exist after `git pull` on production.
+   Run `python -c "import frood"` to verify the main entry point imports successfully. If this fails, report the `ImportError` with the missing module name. Then check if that module file exists locally but is untracked in git — this is the Pitfall 94 scenario where a required file won't exist after `git pull` on production.
 
    ```bash
-   python -c "import agent42" 2>&1
+   python -c "import frood" 2>&1
    ```
 
    If import fails, also run:

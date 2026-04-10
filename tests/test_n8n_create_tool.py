@@ -192,7 +192,7 @@ def test_build_workflow_replaces_placeholders():
     # Webhook path should be replaced
     webhook_node = next(n for n in workflow["nodes"] if "webhook" in n["type"])
     assert "{WEBHOOK_PATH}" not in webhook_node["parameters"]["path"]
-    assert "agent42-" in webhook_node["parameters"]["path"]
+    assert "frood-" in webhook_node["parameters"]["path"]
 
 
 def test_build_workflow_auto_generates_name():
@@ -205,7 +205,7 @@ def test_build_workflow_auto_generates_name():
         target_url="https://example.com/api",
         http_method="POST",
     )
-    assert "Agent42:" in workflow["name"]
+    assert "Frood:" in workflow["name"]
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +275,7 @@ async def test_deployment_blocks_dangerous_node():
                 "name": "Webhook",
                 "type": "n8n-nodes-base.webhook",
                 "parameters": {
-                    "path": "agent42-test",
+                    "path": "frood-test",
                     "responseMode": "lastNode",
                     "responseData": "allEntries",
                     "httpMethod": "POST",

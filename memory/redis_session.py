@@ -36,7 +36,7 @@ class RedisConfig:
     password: str = ""
     session_ttl_days: int = 7
     embedding_cache_ttl_hours: int = 24
-    key_prefix: str = "agent42"
+    key_prefix: str = "frood"
 
 
 class RedisSessionBackend:

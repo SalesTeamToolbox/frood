@@ -308,7 +308,7 @@ def _make_factory(tmp_path: Path, global_store: MemoryStore):
         if project_id not in cache:
             cache[project_id] = ProjectMemoryStore(
                 project_id=project_id,
-                base_dir=tmp_path / "agent42",
+                base_dir=tmp_path / "frood",
                 global_store=global_store,
                 qdrant_store=None,
                 redis_backend=None,
@@ -334,7 +334,7 @@ class TestProjectRouting:
         assert result.success, f"Expected success, got: {result.output}"
 
         # Content should be in the project store, not global
-        project_memory_path = tmp_path / "agent42" / "projects" / "myproject" / "MEMORY.md"
+        project_memory_path = tmp_path / "frood" / "projects" / "myproject" / "MEMORY.md"
         assert project_memory_path.exists(), "Project MEMORY.md should be created"
         project_content = project_memory_path.read_text(encoding="utf-8")
         assert "project-specific fact" in project_content
@@ -440,7 +440,7 @@ class TestFactoryFallback:
         global_store = MemoryStore(tmp_path / "global", qdrant_store=None, redis_backend=None)
         tool = MemoryTool(memory_store=global_store, project_memory_factory=None)
 
-        with caplog.at_level(logging.WARNING, logger="agent42.tools.memory"):
+        with caplog.at_level(logging.WARNING, logger="frood.tools.memory"):
             result = await tool.execute(
                 action="store",
                 section="Test",
@@ -611,7 +611,7 @@ class TestUnionMerge:
         tool._run_ssh = AsyncMock(return_value=(1, "", "No such file"))
         tool._run_rsync = AsyncMock(return_value=(0, "", ""))
 
-        result = asyncio.run(tool._merge("agent42-prod", tmp_path, dry_run=True))
+        result = asyncio.run(tool._merge("frood-prod", tmp_path, dry_run=True))
         assert result.success
         # Local content should be unchanged
         assert local_memory.read_text(encoding="utf-8") == (

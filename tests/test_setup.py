@@ -70,10 +70,10 @@ def _make_hook_file(directory, filename, events, matcher=None, timeout=None):
 
 
 class TestMcpConfigGeneration:
-    """SETUP-01: .mcp.json generated with Agent42 MCP server entry."""
+    """SETUP-01: .mcp.json generated with Frood MCP server entry."""
 
-    def test_generates_mcp_json_with_agent42_entry(self, tmp_path):
-        """Fresh generation creates .mcp.json with agent42 server pointing to venv python."""
+    def test_generates_mcp_json_with_frood_entry(self, tmp_path):
+        """Fresh generation creates .mcp.json with frood server pointing to venv python."""
         venv_python = _make_fake_venv(tmp_path)
         generate_mcp_config(str(tmp_path))
 
@@ -93,8 +93,8 @@ class TestMcpConfigGeneration:
         assert len(servers) == 6, f"Expected 6 servers, got {len(servers)}: {list(servers)}"
         assert "frood-remote" in servers
 
-    def test_omits_agent42_remote_when_no_ssh_alias(self, tmp_path):
-        """Without SSH alias, agent42-remote is not in generated config."""
+    def test_omits_frood_remote_when_no_ssh_alias(self, tmp_path):
+        """Without SSH alias, frood-remote is not in generated config."""
         _make_fake_venv(tmp_path)
         generate_mcp_config(str(tmp_path))
 
@@ -103,8 +103,8 @@ class TestMcpConfigGeneration:
         assert "frood-remote" not in servers
         assert len(servers) == 5
 
-    def test_agent42_env_vars_set_correctly(self, tmp_path):
-        """agent42 entry has FROOD_WORKSPACE, REDIS_URL, QDRANT_URL."""
+    def test_frood_env_vars_set_correctly(self, tmp_path):
+        """frood entry has FROOD_WORKSPACE, REDIS_URL, QDRANT_URL."""
         _make_fake_venv(tmp_path)
         generate_mcp_config(str(tmp_path))
 
@@ -123,7 +123,7 @@ class TestMcpConfigGeneration:
 class TestMcpConfigMerge:
     """SETUP-01 + SETUP-04: Merge leaves existing entries untouched."""
 
-    def test_preserves_existing_non_agent42_servers(self, tmp_path):
+    def test_preserves_existing_non_frood_servers(self, tmp_path):
         """Pre-existing servers not in our set are left untouched."""
         _make_fake_venv(tmp_path)
         existing = {"mcpServers": {"my-custom-server": {"command": "node", "args": ["server.js"]}}}
@@ -138,8 +138,8 @@ class TestMcpConfigMerge:
             "args": ["server.js"],
         }
 
-    def test_does_not_overwrite_existing_agent42_entry_with_valid_path(self, tmp_path):
-        """If agent42 already exists with valid command path, skip it."""
+    def test_does_not_overwrite_existing_frood_entry_with_valid_path(self, tmp_path):
+        """If frood already exists with valid command path, skip it."""
         venv_python = _make_fake_venv(tmp_path)
         existing_entry = {
             "command": venv_python,
@@ -155,12 +155,12 @@ class TestMcpConfigMerge:
         # Custom env var should still be present since entry was not replaced
         assert config["mcpServers"]["frood"]["env"].get("CUSTOM_VAR") == "kept"
 
-    def test_replaces_agent42_entry_with_invalid_path(self, tmp_path):
-        """If agent42 exists but command path is non-existent, replace it."""
+    def test_replaces_frood_entry_with_invalid_path(self, tmp_path):
+        """If frood entry exists but command path is non-existent, replace it."""
         _make_fake_venv(tmp_path)
         existing = {
             "mcpServers": {
-                "agent42": {
+                "frood": {
                     "command": "/nonexistent/path/to/python",
                     "args": ["mcp_server.py"],
                     "env": {},
@@ -261,7 +261,7 @@ class TestHookFrontmatter:
 
 
 class TestHookRegistration:
-    """SETUP-02: .claude/settings.json patched with all Agent42 hooks."""
+    """SETUP-02: .claude/settings.json patched with all Frood hooks."""
 
     def test_registers_all_hooks_from_frontmatter(self, tmp_path):
         """All hooks with # hook_event: lines get registered under correct event keys."""
@@ -356,7 +356,7 @@ class TestHookMerge:
     """SETUP-02 + SETUP-04: Hook merge leaves existing entries untouched."""
 
     def test_preserves_existing_hook_entries(self, tmp_path):
-        """Pre-existing hooks not from Agent42 are left untouched."""
+        """Pre-existing hooks not from Frood are left untouched."""
         hooks_dir = tmp_path / ".claude" / "hooks"
         _make_hook_file(str(hooks_dir), "agent_hook.py", ["Stop"])
 
@@ -926,10 +926,10 @@ class TestClaudeMdFull:
             generate_full_claude_md(str(tmp_path))
 
     def test_full_claude_md_creates_file_with_hook_protocol(self, tmp_path):
-        """generate_full_claude_md() creates CLAUDE.md with Agent42 Hook Protocol section."""
+        """generate_full_claude_md() creates CLAUDE.md with Frood Hook Protocol section."""
         self._run_generate(tmp_path)
         content = (tmp_path / "CLAUDE.md").read_text()
-        assert "## Agent42 Hook Protocol" in content
+        assert "## Frood Hook Protocol" in content
 
     def test_full_claude_md_contains_memory_instructions(self, tmp_path):
         """Generated CLAUDE.md contains frood_memory tool instructions."""
@@ -956,7 +956,7 @@ class TestClaudeMdFull:
         content = (tmp_path / "CLAUDE.md").read_text()
         assert "My Existing Project" in content
         assert "User content here." in content
-        assert "## Agent42 Hook Protocol" in content
+        assert "## Frood Hook Protocol" in content
 
     def test_full_claude_md_idempotent(self, tmp_path):
         """Running generate_full_claude_md() twice produces identical file content."""

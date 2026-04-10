@@ -80,7 +80,7 @@ class TestMemoryRecallHook:
             [
                 (
                     "Deployment Configuration",
-                    "SSH config agent42-prod set up with deploy user Contabo VPS server",
+                    "SSH config frood-prod set up with deploy user Contabo VPS server",
                 ),
                 (
                     "Architecture Decisions",
@@ -149,7 +149,7 @@ class TestMemoryRecallHook:
             [
                 (
                     "Server Config",
-                    "deploy production server SSH config agent42 VPS Contabo setup environment",
+                    "deploy production server SSH config frood VPS Contabo setup environment",
                 ),
             ],
         )
@@ -172,7 +172,7 @@ class TestMemoryRecallHook:
             [
                 (
                     "Server Config",
-                    "deploy production server SSH config agent42 VPS Contabo setup environment variables",
+                    "deploy production server SSH config frood VPS Contabo setup environment variables",
                 ),
             ],
         )
@@ -352,7 +352,7 @@ class TestMemoryDegradation:
         memory_dir = tmp_path / ".frood" / "memory"
         memory_dir.mkdir(parents=True, exist_ok=True)
         (memory_dir / "MEMORY.md").write_text(
-            "## Deployment\nSSH config agent42-prod deploy server production VPS Contabo environment setup\n",
+            "## Deployment\nSSH config frood-prod deploy server production VPS Contabo environment setup\n",
             encoding="utf-8",
         )
         rc, stdout, stderr = run_hook(

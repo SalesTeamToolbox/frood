@@ -1,13 +1,13 @@
 ---
 name: skill-creator
-description: Create new Agent42 skills with proper SKILL.md structure.
+description: Create new Frood skills with proper SKILL.md structure.
 always: false
 task_types: [coding, documentation]
 ---
 
 # Skill Creator
 
-Create new skills for Agent42 following the SKILL.md convention.
+Create new skills for Frood following the SKILL.md convention.
 
 ## Skill Structure
 

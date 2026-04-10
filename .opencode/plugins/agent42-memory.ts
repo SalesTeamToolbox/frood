@@ -1,11 +1,11 @@
 /**
- * Agent42 Memory Plugin for OpenCode
+ * Frood Memory Plugin for OpenCode
  *
- * Automatically surfaces relevant memories from Agent42's memory system
+ * Automatically surfaces relevant memories from Frood's memory system
  * when the user submits a prompt. Works the same way as the Claude Code
  * memory-recall.py hook — associative recall triggered by prompt content.
  *
- * Uses the Agent42 MCP server's memory tool for search, falling back to
+ * Uses the Frood MCP server's memory tool for search, falling back to
  * direct MEMORY.md/HISTORY.md keyword search when MCP is unavailable.
  */
 
@@ -118,7 +118,7 @@ function searchHistoryEntries(content: string, keywords: string[]): Array<{text:
 }
 
 export default async (ctx: any) => {
-  const memoryDir = join(ctx.directory, ".agent42", "memory");
+  const memoryDir = join(ctx.directory, ".frood", "memory");
 
   return {
     "message.updated": async (input: any, output: any) => {
@@ -142,9 +142,9 @@ export default async (ctx: any) => {
       const keywords = extractKeywords(prompt);
       if (!keywords.length) return;
 
-      // Try MCP search first via the Agent42 MCP server
+      // Try MCP search first via the Frood MCP server
       try {
-        const result = await ctx.client.mcp.call("agent42", "agent42_memory", {
+        const result = await ctx.client.mcp.call("frood", "frood_memory", {
           action: "search",
           content: prompt,
         });
@@ -156,7 +156,7 @@ export default async (ctx: any) => {
             output.parts = output.parts || [];
             output.parts.push({
               type: "text",
-              text: `\n[agent42-memory] Recalled via MCP:\n${text.slice(0, 2000)}\n`,
+              text: `\n[frood-memory] Recalled via MCP:\n${text.slice(0, 2000)}\n`,
             });
             return;
           }
@@ -200,7 +200,7 @@ export default async (ctx: any) => {
 
       if (memories.length === 0) return;
 
-      const lines = [`[agent42-memory] Recall: ${memories.length} memories surfaced via keyword`];
+      const lines = [`[frood-memory] Recall: ${memories.length} memories surfaced via keyword`];
       for (const m of memories) {
         lines.push(`  - [${Math.round(m.score * 100)}%] ${m.text}`);
       }

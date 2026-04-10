@@ -1,5 +1,5 @@
 [project]
-name = "agent42"
+name = "frood"
 version = "0.1.0"
 requires-python = ">=3.11"
 description = "Frood — the essential enhancement layer for AI coding agents. Don't Panic."
@@ -76,7 +76,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S106", "S108", "T20", "E741", "F841", "RUF059", "B007"]
-"agent42.py" = ["T20"]  # Main entry point uses print for startup banner
+"frood.py" = ["T20"]  # Main entry point uses print for startup banner
 "core/config.py" = ["N802"]
 "dashboard/server.py" = ["T20"]
 "deploy/*" = ["T20"]

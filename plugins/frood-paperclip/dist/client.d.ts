@@ -1,5 +1,5 @@
 /**
- * client.ts -- Agent42Client: HTTP client wrapping all 6 sidecar endpoints.
+ * client.ts -- FroodClient: HTTP client wrapping all 6 sidecar endpoints.
  *
  * Endpoints:
  *   GET  /sidecar/health                    -- NO auth, 5s timeout, 1 retry on 5xx
@@ -15,8 +15,8 @@
  *   - Per-endpoint timeouts (health 5s, all POST endpoints use constructor timeoutMs)
  *   - All POST endpoints retry once on 5xx with 1s backoff
  */
-import type { SidecarHealthResponse, MemoryRecallRequest, MemoryRecallResponse, MemoryStoreRequest, MemoryStoreResponse, RoutingResolveRequest, RoutingResolveResponse, EffectivenessRequest, EffectivenessResponse, MCPToolRequest, MCPToolResponse, AgentProfileResponse, AgentEffectivenessResponse, RoutingHistoryResponse, MemoryRunTraceResponse, AgentSpendResponse, ExtractLearningsRequest, ExtractLearningsResponse, ToolsListResponse, SkillsListResponse, AppsListResponse, AppActionResponse, SettingsResponse, SettingsUpdateRequest, SettingsUpdateResponse } from "./types.js";
-export declare class Agent42Client {
+import type { SidecarHealthResponse, MemoryRecallRequest, MemoryRecallResponse, MemoryStoreRequest, MemoryStoreResponse, RoutingResolveRequest, RoutingResolveResponse, EffectivenessRequest, EffectivenessResponse, MCPToolRequest, MCPToolResponse, AgentProfileResponse, AgentEffectivenessResponse, RoutingHistoryResponse, MemoryRunTraceResponse, AgentSpendResponse, ExtractLearningsRequest, ExtractLearningsResponse, ToolsListResponse, SkillsListResponse, AppsListResponse, AppActionResponse, SettingsResponse, SettingsUpdateRequest, SettingsUpdateResponse, AdapterRunRequest, AdapterRunResponse, AdapterStatusResponse, AdapterCancelResponse, MemoryStatsResponse, StorageStatusResponse, ToggleResponse, PurgeMemoryResponse, ModelsResponse } from "./types.js";
+export declare class FroodClient {
     private readonly baseUrl;
     private readonly bearerToken;
     private readonly timeoutMs;
@@ -87,10 +87,27 @@ export declare class Agent42Client {
      * Bearer auth required. Retries once on 5xx.
      */
     extractLearnings(body: ExtractLearningsRequest): Promise<ExtractLearningsResponse>;
+    /**
+     * GET /sidecar/models
+     * Public endpoint -- no Authorization header (per D-05).
+     * Returns available models grouped by provider.
+     * Retries once on 5xx with 1s delay.
+     */
+    getModels(): Promise<ModelsResponse>;
     /** GET /tools — list all registered tools */
     getTools(): Promise<ToolsListResponse>;
     /** GET /skills — list all loaded skills */
     getSkills(): Promise<SkillsListResponse>;
+    /** PATCH /tools/{name} — toggle tool enabled/disabled (Phase 40 D-18) */
+    toggleTool(name: string, enabled: boolean): Promise<ToggleResponse>;
+    /** PATCH /skills/{name} — toggle skill enabled/disabled (Phase 40 D-18) */
+    toggleSkill(name: string, enabled: boolean): Promise<ToggleResponse>;
+    /** GET /memory-stats — 24h memory operation counters (Phase 40 D-13) */
+    getMemoryStats(): Promise<MemoryStatsResponse>;
+    /** GET /storage-status — storage backend configuration (Phase 40 D-12) */
+    getStorageStatus(): Promise<StorageStatusResponse>;
+    /** DELETE /memory/{collection} — purge a memory collection (Phase 40 D-15) */
+    purgeMemory(collection: string): Promise<PurgeMemoryResponse>;
     /** GET /apps — list all sandboxed apps */
     getApps(): Promise<AppsListResponse>;
     /** POST /apps/{appId}/start — start a sandboxed app */
@@ -101,6 +118,24 @@ export declare class Agent42Client {
     getSettings(): Promise<SettingsResponse>;
     /** POST /settings — update a single API key */
     updateSettings(body: SettingsUpdateRequest): Promise<SettingsUpdateResponse>;
+    /**
+     * POST /adapter/run
+     * Start an agent task routed through Frood (Abacus RouteLLM, NOT Claude CLI).
+     * Bearer auth required. Retries once on 5xx.
+     */
+    adapterRun(body: AdapterRunRequest): Promise<AdapterRunResponse>;
+    /**
+     * GET /adapter/status/{runId}
+     * Check status of an adapter-launched agent run.
+     * Bearer auth required. Retries once on 5xx.
+     */
+    adapterStatus(runId: string): Promise<AdapterStatusResponse>;
+    /**
+     * POST /adapter/cancel/{runId}
+     * Cancel a running adapter-launched agent.
+     * Bearer auth required. Retries once on 5xx.
+     */
+    adapterCancel(runId: string): Promise<AdapterCancelResponse>;
     /**
      * destroy() -- no-op for clean shutdown.
      * Native fetch has no persistent connections to close, but provided for

@@ -2,7 +2,7 @@
 # install-daemon.sh — Install the coworker daemon as a systemd service on the VPS.
 #
 # Run this ON the VPS (or via SSH):
-#   ssh agent42-prod "cd ~/agent42 && scripts/cowork/install-daemon.sh"
+#   ssh frood-prod "cd ~/frood && scripts/cowork/install-daemon.sh"
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEPLOY_USER="${DEPLOY_USER:-$(whoami)}"
 
-SERVICE_NAME="agent42-coworker"
+SERVICE_NAME="frood-coworker"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
 echo "Installing $SERVICE_NAME systemd service..."
@@ -20,9 +20,9 @@ echo "  User: $DEPLOY_USER"
 # Create systemd unit
 sudo tee "$SERVICE_FILE" > /dev/null <<UNITEOF
 [Unit]
-Description=Agent42 Coworker Daemon — autonomous Claude Code execution
-After=network.target agent42.service
-Wants=agent42.service
+Description=Frood Coworker Daemon — autonomous Claude Code execution
+After=network.target frood.service
+Wants=frood.service
 
 [Service]
 Type=simple
@@ -37,8 +37,8 @@ Environment=HOME=/home/$DEPLOY_USER
 Environment=PATH=/home/$DEPLOY_USER/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 # Logging
-StandardOutput=append:/var/log/agent42-coworker.log
-StandardError=append:/var/log/agent42-coworker.log
+StandardOutput=append:/var/log/frood-coworker.log
+StandardError=append:/var/log/frood-coworker.log
 
 # Resource limits
 LimitNOFILE=4096
@@ -48,8 +48,8 @@ WantedBy=multi-user.target
 UNITEOF
 
 # Set up log rotation
-sudo tee /etc/logrotate.d/agent42-coworker > /dev/null <<LOGEOF
-/var/log/agent42-coworker.log {
+sudo tee /etc/logrotate.d/frood-coworker > /dev/null <<LOGEOF
+/var/log/frood-coworker.log {
     daily
     rotate 7
     compress
@@ -76,4 +76,4 @@ echo "Commands:"
 echo "  sudo systemctl status $SERVICE_NAME   # Check status"
 echo "  sudo systemctl stop $SERVICE_NAME     # Stop daemon"
 echo "  sudo systemctl restart $SERVICE_NAME  # Restart daemon"
-echo "  tail -f /var/log/agent42-coworker.log # Watch logs"
+echo "  tail -f /var/log/frood-coworker.log # Watch logs"

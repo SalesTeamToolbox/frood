@@ -1,7 +1,7 @@
 """
 Auto-discovery engine for self-improving tests.
 
-Scans the Agent42 codebase to find:
+Scans the Frood codebase to find:
   - API endpoints (from server.py decorators)
   - Frontend routes/views (from app.js)
   - Tools (from tools/ directory)
@@ -34,7 +34,7 @@ class ToolInfo:
 
 @dataclass
 class CodebaseManifest:
-    """Snapshot of what exists in the Agent42 codebase."""
+    """Snapshot of what exists in the Frood codebase."""
 
     endpoints: list[Endpoint] = field(default_factory=list)
     tools: list[ToolInfo] = field(default_factory=list)

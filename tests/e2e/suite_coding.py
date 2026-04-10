@@ -1,7 +1,7 @@
 """
 Coding & Code Execution Test Suite
 
-Tests Agent42's coding capabilities:
+Tests Frood's coding capabilities:
   - Chat sessions: CRUD, send messages
   - Code sessions: create, setup
   - Tool/skill toggle via API

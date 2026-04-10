@@ -1,7 +1,7 @@
 """
 UI / Dashboard Test Suite
 
-Tests the Agent42 dashboard frontend:
+Tests the Frood dashboard frontend:
   - Login flow & setup wizard
   - Sidebar navigation to all views
   - Page rendering & key elements
@@ -23,7 +23,6 @@ from .runner import (
     BaseSuite,
     SkipTest,
     assert_contains,
-    assert_not_contains,
     register_suite,
 )
 
@@ -312,7 +311,7 @@ class UISuite(BaseSuite):
                 result.covers.append(f"VIEW:{view}")
 
     def test_20_page_title(self, result):
-        """Page title contains Agent42."""
+        """Page title contains Frood."""
         self._login()
         title = self.cli.eval_js("document.title")
-        assert_contains(title, "Agent42", "Page title should contain Agent42")
+        assert_contains(title, "Frood", "Page title should contain Frood")

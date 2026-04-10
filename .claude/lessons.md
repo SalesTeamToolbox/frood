@@ -1,4 +1,4 @@
-# Agent42 Development Lessons
+# Frood Development Lessons
 
 Accumulated patterns, fixes, and vocabulary learned during development.
 Updated automatically by the learning engine and manually by developers.
@@ -11,7 +11,7 @@ Updated automatically by the learning engine and manually by developers.
 - `CommandFilter` has 6 layers — bypassing one layer does NOT bypass others (structural, deny, interpreter, metachar, indirect, allowlist)
 - `JWT_SECRET=""` triggers auto-generation, which breaks sessions across restarts — always set explicitly in `.env`
 - `BROWSER_GATEWAY_TOKEN` is auto-generated per-run if not configured — set in `.env` for persistent browser sessions
-- The `ApprovalGate` writes to a JSONL audit log — check `.agent42/approvals.jsonl` for approval history
+- The `ApprovalGate` writes to a JSONL audit log — check `.frood/approvals.jsonl` for approval history
 - `url_policy.py` blocks internal network ranges by default — verify `URL_DENYLIST` includes `169.254.x.x`, `10.x.x.x`, `172.16.x.x`
 - Login rate limiting is per-IP via `LOGIN_RATE_LIMIT` (default: 5/min) — stored in-memory, resets on restart
 - `dashboard_password_hash` (bcrypt) takes precedence over plaintext `dashboard_password` if both are set
@@ -66,7 +66,7 @@ Updated automatically by the learning engine and manually by developers.
 - Tools inherit from `tools.base.Tool` ABC — must implement `name`, `description`, `parameters`, `execute()`
 - `parameters` returns a JSON Schema dict (OpenAI function-calling format)
 - `execute()` returns `ToolResult(output=..., error=..., success=True/False)`
-- New tools must be registered in `agent42.py` `_register_tools()` method
+- New tools must be registered in `frood.py` `_register_tools()` method
 - `to_schema()` serializes the tool for LLM function-calling — don't override unless needed
 - Always accept `**kwargs` in `execute()` for forward compatibility
 - Use `self._sandbox.resolve_path()` for any file path arguments
@@ -77,7 +77,7 @@ Updated automatically by the learning engine and manually by developers.
 - Frontmatter fields: `name`, `description`, `always`, `task_types`, `requirements_bins`
 - `always: true` skills load for every task — use sparingly
 - `task_types` matches against `TaskType` enum values in `core/task_queue.py`
-- Skills in `builtins/` ship with Agent42; `workspace/` skills are user-created
+- Skills in `builtins/` ship with Frood; `workspace/` skills are user-created
 - The loader parses YAML without PyYAML — uses a simple regex-based parser
 
 ## Dashboard Patterns

@@ -8,7 +8,7 @@ working on areas covered by these entries.
 | 1 | Config | Adding env var but not to `Settings` dataclass | Add to `Settings` + `from_env()` + `.env.example` |
 | 2 | Async | Using blocking I/O (`open()`) in tools | Use `aiofiles.open()` for all file operations |
 | 3 | Security | Disabling sandbox for convenience | Keep `SANDBOX_ENABLED=true`; use `resolve_path()` |
-| 4 | Tools | Forgetting to register new tool | Add to `_register_tools()` in `agent42.py` |
+| 4 | Tools | Forgetting to register new tool | Add to `_register_tools()` in `frood.py` |
 | 5 | Tests | Hardcoding `/tmp` paths in tests | Use `tmp_path` fixture for test isolation |
 | 6 | Providers | Hardcoding premium model as default | Use `FREE_ROUTING` dict, allow admin override via env |
 | 7 | Memory | Not handling missing Qdrant/Redis | Check availability before use; fallback to files |
@@ -22,16 +22,16 @@ working on areas covered by these entries.
 | 15 | Tasks | Using wrong `TaskType` enum value | Check `core/task_queue.py` for valid values |
 | 16 | Catalog | `CatalogEntry.to_dict()` format mismatch with `__init__` | `to_dict()` must output `{"id": ..., "pricing": {"prompt": ..., "completion": ...}}` matching constructor format |
 | 17 | Tests | Floating-point equality in composite scores | Use `pytest.approx()` for float comparisons, not `==` |
-| 18 | Init Order | `ModelEvaluator` must init before `Learner` | Learner takes `model_evaluator` param — ensure correct order in `agent42.py` |
+| 18 | Init Order | `ModelEvaluator` must init before `Learner` | Learner takes `model_evaluator` param — ensure correct order in `frood.py` |
 | 19 | Extensions | `ToolExtension.extends` must match an already-registered tool name | Extensions for nonexistent tools are silently skipped with a warning |
 | 20 | Tests | `cryptography` panics with `_cffi_backend` error | Install `cffi` (`pip install cffi`) before running dashboard/auth tests |
 | 21 | Apps | App entry point missing PORT/HOST env var reading | Always read `os.environ.get("PORT", "8080")` — AppManager sets these |
 | 22 | Apps | New `TaskType` not in `FREE_ROUTING` dict | Add routing entry to `agents/model_router.py` `FREE_ROUTING` for every new TaskType |
 | 23 | Formatting | CI fails with `ruff format --check` after merge | Always run `make format` (or `ruff format .`) before committing — especially after merges that touch multiple files |
-| 24 | Deploy | Hardcoded domain/port in install scripts and nginx config | Use `__DOMAIN__`/`__PORT__` placeholders in `nginx-agent42.conf`; `install-server.sh` prompts for values and sed-replaces |
+| 24 | Deploy | Hardcoded domain/port in install scripts and nginx config | Use `__DOMAIN__`/`__PORT__` placeholders in `nginx-frood.conf`; `install-server.sh` prompts for values and sed-replaces |
 | 25 | Deploy | Install scripts leak interactive output when composed | Use `--quiet` flag when calling `setup.sh` from `install-server.sh` to suppress banners and prompts |
 | 26 | Dashboard | CSP `script-src 'self'` blocks all inline event handlers (`onclick`, `onsubmit`) | CSP must include `'unsafe-inline'` in `script-src` because `app.js` uses innerHTML with 55+ inline handlers |
-| 27 | Startup | `agent42.log` owned by root (from systemd) blocks `deploy` user startup | Catch `PermissionError` on `FileHandler`; fall back to stdout-only logging |
+| 27 | Startup | `frood.log` owned by root (from systemd) blocks `deploy` user startup | Catch `PermissionError` on `FileHandler`; fall back to stdout-only logging |
 | 28 | Auth | `passlib 1.7.4` crashes with `bcrypt >= 4.1` (wrap-bug detection hashes >72-byte secret) | Use `bcrypt` directly via `_BcryptContext` wrapper in `dashboard/auth.py`; do not use `passlib` |
 | 29 | Tokens | `router.complete()` returns `(str, dict\|None)` tuple, not plain `str` | Always unpack: `text, usage = await router.complete(...)` or `text, _ = ...` if usage not needed |
 | 30 | Session | `SessionManager.get_messages()` does not exist — use `get_history()` | Call `get_history(channel_type, channel_id, max_messages=N)` instead |
@@ -44,8 +44,8 @@ working on areas covered by these entries.
 | 37 | Tokens | CLAUDE.md loaded on every API call wastes ~5K tokens of rarely-needed reference content | Reference docs extracted to `.claude/reference/` and loaded on-demand by `context-loader.py` hook |
 | 38 | Providers | `_build_client()` reading `settings.xxx_api_key` misses admin-configured keys — `settings` is frozen at import time, before `KeyStore.inject_into_environ()` runs | Use `os.getenv(spec.api_key_env, "")` in `_build_client()` and related methods so runtime admin keys are picked up |
 | 39 | Fallback | `_complete_with_retry` retried 401 auth errors 3x, wasting quota; fallback chain only tried OpenRouter models even when Gemini/OpenAI keys were set | `_is_auth_error()` skips retries like 404 does; `_get_fallback_models()` appends native provider models (Gemini, OpenAI, etc.) when their `api_key_env` is set; fallback loop continues on all errors instead of breaking early |
-| 40 | Debugging | Spending hours tracing production failures through code before checking server logs | **Always run `tail -100 ~/agent42/agent42.log` and `journalctl -u agent42 -n 100 --no-pager` first** — the log nearly always pinpoints the exact failure in seconds |
-| 41 | Init | `Agent42.__init__()` calls `self.task_queue.on_update(self._on_task_update)` but `_on_task_update` was stripped from `origin/main` — service crashes with `AttributeError` and exits code 0 | Restore `agent42.py` from the branch: `git fetch origin && git checkout origin/dev -- agent42.py && sudo systemctl restart agent42` |
+| 40 | Debugging | Spending hours tracing production failures through code before checking server logs | **Always run `tail -100 ~/frood/frood.log` and `journalctl -u frood -n 100 --no-pager` first** — the log nearly always pinpoints the exact failure in seconds |
+| 41 | Init | `Frood.__init__()` calls `self.task_queue.on_update(self._on_task_update)` but `_on_task_update` was stripped from `origin/main` — service crashes with `AttributeError` and exits code 0 | Restore `frood.py` from the branch: `git fetch origin && git checkout origin/dev -- frood.py && sudo systemctl restart frood` |
 | 42 | Routing | `limit_remaining: null` in OR API misread as "no credits" | `null` = no per-key limit (uses account balance); only `0.0` = exhausted; always check `is_free_tier` first |
 | 43 | Routing | Policy routing overrides dynamic routing results | Policy only runs when `dynamic` is None; dynamic routing takes precedence |
 | 44 | Catalog | OR pricing is per-token not per-million | Multiply by 1,000,000 before comparing to $/M thresholds |
@@ -98,7 +98,7 @@ working on areas covered by these entries.
 | 91 | Routing | Critics tried dead OR free models first, then fell back to Gemini — wasted 5-7s per iteration on 429 retries | Validate critic health/API key in `get_routing()` and pre-upgrade to `gemini-2-flash` before task execution begins |
 | 92 | RLM | RLM threshold at 50K tokens triggered for most tasks, causing 3-5x token amplification and API rate-limit spikes | Raise `RLM_THRESHOLD_TOKENS` to 200K — RLM should only activate for genuinely massive contexts, not routine tasks |
 | 93 | Dispatch | Multiple agents dispatched simultaneously cause Gemini 1M TPM rate-limit spikes | Add `AGENT_DISPATCH_DELAY` (default 2.0s) to stagger agent launches in `_process_queue()` |
-| 94 | Deploy | `agent42.py` refactored command handlers into `commands.py` but file wasn't committed — `ModuleNotFoundError` on production startup | Always verify new module files are staged before pushing; `git status` shows untracked files that may be required imports |
+| 94 | Deploy | `frood.py` refactored command handlers into `commands.py` but file wasn't committed — `ModuleNotFoundError` on production startup | Always verify new module files are staged before pushing; `git status` shows untracked files that may be required imports |
 | 95 | Auth | Bcrypt password hash in `.env` doesn't match intended password after manual edits — login silently fails with 401 | Regenerate hash on server: `python3 -c "import bcrypt; print(bcrypt.hashpw(b'password', bcrypt.gensalt()).decode())"` and update `.env`; restart service |
 | 96 | Dashboard | `project_manager.all_projects()` renamed to `list_projects()` — `/api/reports` crashes with AttributeError | Check method names against current API when refactoring; `server.py` calls must match `project_manager` interface |
 | 97 | Dashboard | `skill.enabled` attribute doesn't exist — use `skill_loader.is_enabled(s.name)` instead | Skills don't have an `enabled` field; enablement is managed by the SkillLoader, not the Skill object |
@@ -117,7 +117,7 @@ working on areas covered by these entries.
 | 110 | Memory | `EmbeddingStore.search()` took Qdrant path when `is_available=True` but never fell through to JSON on Qdrant failure | Refactored to try/except around Qdrant search; falls through to `_search_json()` on any exception |
 | 111 | Memory | Agent claims "stored in MEMORY.md" but has no tool to actually write — memory skill described the system but no corresponding tool existed | Created `tools/memory_tool.py` with store/recall/log/search actions; registered in `_register_tools()` |
 | 112 | Dashboard | Storage status showed configured mode ("Qdrant + Redis") even when Qdrant was unreachable | Endpoint now returns `effective_mode` based on actual connectivity; frontend shows degradation warning when `configured_mode != mode` |
-| 113 | Init | `_register_tools()` called before `memory_store` initialized — AttributeError on startup | Move `_register_tools()` call to after MemoryStore initialization in `agent42.py` |
+| 113 | Init | `_register_tools()` called before `memory_store` initialized — AttributeError on startup | Move `_register_tools()` call to after MemoryStore initialization in `frood.py` |
 | 114 | Deploy | `install-server.sh` used `--storage-path` CLI arg removed in Qdrant v1.14+; service crash-looped 37K+ times | Use `--config-path /etc/qdrant/config.yaml` + `WorkingDirectory=/var/lib/qdrant` in systemd unit; create config file with `storage.storage_path` |
 | 115 | Deploy | `.env` had `QDRANT_URL=http://qdrant:6333` (Docker hostname) on bare-metal server — Qdrant unreachable | Bare-metal deployments must use `http://localhost:6333`; Docker Compose uses `http://qdrant:6333` (service name resolves inside Docker network only) |
 | 116 | Server | `from starlette.responses import Response` at `create_app()` scope shadows `fastapi.Response` — causes `UnboundLocalError` on startup, crash-loops the service | Never import at `create_app` scope; use module-level FastAPI imports or import inside nested functions. FastAPI re-exports starlette's `Response` already. |
@@ -125,7 +125,7 @@ working on areas covered by these entries.
 | 118 | Tests | Tests referencing `/api/tasks` endpoint broke silently after v2.0 removed it — returned 404 instead of expected 401 | After removing API endpoints, grep `tests/` for the route path and update or remove affected tests |
 | 119 | Deploy | Unstaged local changes block `git checkout main` during deploy, forcing stash/pop which causes merge conflicts | Always check `git status` before deploy. Commit or explicitly stash WIP first — don't let deploy workflow hit stash conflicts mid-flight |
 | 120 | CC Chat | On session resume/page reload, `sessionStorage` restores the session ID so CC retains conversation context via `--resume`, but the chat DOM is empty — messages were never persisted | Save user and assistant messages to `localStorage` keyed by `cc_hist_<sessionId>`; restore via `ccRestoreHistory()` in `ws.onopen` when `sessionResumed === true` |
-| 121 | Startup | `agent42.py` called `PluginLoader(self.tool_registry)` (old instance-based API) — but `PluginLoader` has no constructor; only a static `load_all(directory, context, registry)` method | Use `PluginLoader.load_all(custom_tools_dir, ctx, self.tool_registry)` and only call it when `CUSTOM_TOOLS_DIR` is configured |
-| 122 | GSD | `gsd-tools.cjs` resolves `project_root` to parent repo (agent42) when working in nested repos with their own `.git/` (e.g. `apps/meatheadgear/`) | GSD planning for nested app repos must be done manually or with `cd` to the app directory first. GSD needs a fix to detect and respect nested git roots |
+| 121 | Startup | `frood.py` called `PluginLoader(self.tool_registry)` (old instance-based API) — but `PluginLoader` has no constructor; only a static `load_all(directory, context, registry)` method | Use `PluginLoader.load_all(custom_tools_dir, ctx, self.tool_registry)` and only call it when `CUSTOM_TOOLS_DIR` is configured |
+| 122 | GSD | `gsd-tools.cjs` resolves `project_root` to parent repo (frood) when working in nested repos with their own `.git/` (e.g. `apps/meatheadgear/`) | GSD planning for nested app repos must be done manually or with `cd` to the app directory first. GSD needs a fix to detect and respect nested git roots |
 | 123 | Status | System RAM showed `0 / 0 MB` on Windows — `memory_total_mb` and `memory_available_mb` were hardcoded to 0 in heartbeat | Use `GlobalMemoryStatusEx` on Windows, `/proc/meminfo` on Linux to populate system memory fields |
 | 124 | Frontend | `/api/tasks` endpoint removed in v2.0 but frontend `loadTasks()` still called it — caused 404 on every page load | Replace `await api("/tasks")` with `state.tasks = []` (tasks are project-scoped now) |

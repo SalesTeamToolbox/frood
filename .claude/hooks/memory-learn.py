@@ -29,7 +29,7 @@ def extract_session_summary(event):
 
     Claude Code Stop events provide: hook_event_name, project_dir, stop_reason,
     and optionally transcript_summary. They do NOT include tool_results or
-    messages (those were from the old Agent42 standalone pipeline).
+    messages (those were from the old Frood standalone pipeline).
 
     Strategy:
     1. Use transcript_summary if CC provides it (best quality)

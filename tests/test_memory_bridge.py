@@ -36,7 +36,7 @@ def mock_qdrant():
     qdrant.MEMORY = "memory"
     qdrant.HISTORY = "history"
     qdrant.KNOWLEDGE = "knowledge"
-    qdrant._collection_name = MagicMock(side_effect=lambda s: f"agent42_{s}")
+    qdrant._collection_name = MagicMock(side_effect=lambda s: f"frood_{s}")
     qdrant._ensure_collection = MagicMock()
 
     # Mock query_points to return empty by default
@@ -256,7 +256,7 @@ class TestMemoryBridgeLearn:
         mock_memory_store._qdrant.is_available = True
         bridge = MemoryBridge(memory_store=mock_memory_store)
 
-        with caplog.at_level(logging.WARNING, logger="agent42.sidecar.memory"):
+        with caplog.at_level(logging.WARNING, logger="frood.sidecar.memory"):
             # Patch instructor to simulate it being available but extraction produces results
             with patch.dict("sys.modules", {"instructor": MagicMock()}):
                 asyncio.run(bridge.learn_async("summary text to test", "agent-1"))
@@ -554,10 +554,8 @@ class TestMemoryBridgeRunId:
         fake_extraction = {"learnings": [{"content": "a key learning", "tags": ["test"]}]}
 
         async def fake_to_thread(func, *args, **kwargs):
-            if (
-                "upsert_single" in str(func)
-                or (hasattr(func, "__name__")
-                and func.__name__ == "upsert_single")
+            if "upsert_single" in str(func) or (
+                hasattr(func, "__name__") and func.__name__ == "upsert_single"
             ):
                 return True
             return fake_extraction

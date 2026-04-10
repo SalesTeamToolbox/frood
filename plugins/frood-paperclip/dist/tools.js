@@ -133,7 +133,7 @@ export function registerTools(ctx, client) {
     // -- mcp_tool_proxy (PLUG-06, D-08) --
     ctx.tools.register("mcp_tool_proxy", {
         displayName: "MCP Tool Proxy",
-        description: "Invoke an Agent42 MCP tool through the sidecar proxy",
+        description: "Invoke a Frood MCP tool through the sidecar proxy",
         parametersSchema: {
             type: "object",
             properties: {

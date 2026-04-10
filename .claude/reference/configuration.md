@@ -68,7 +68,7 @@
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `KNOWLEDGE_DIR` | Document storage directory | `.agent42/knowledge` |
+| `KNOWLEDGE_DIR` | Document storage directory | `.frood/knowledge` |
 | `KNOWLEDGE_CHUNK_SIZE` | Chunk size in tokens | `500` |
 | `KNOWLEDGE_CHUNK_OVERLAP` | Overlap between chunks | `50` |
 | `KNOWLEDGE_MAX_RESULTS` | Max results per query | `10` |
@@ -96,13 +96,13 @@
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `CHAT_SESSIONS_DIR` | Directory for session JSONL storage | `.agent42/chat_sessions` |
+| `CHAT_SESSIONS_DIR` | Directory for session JSONL storage | `.frood/chat_sessions` |
 
 ### Project Settings
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `PROJECTS_DIR` | Directory for project data | `.agent42/projects` |
+| `PROJECTS_DIR` | Directory for project data | `.frood/projects` |
 
 ### GitHub OAuth Settings
 

@@ -6,7 +6,7 @@ Analyze all source modules for test coverage gaps and produce a prioritized list
 
 ## Context
 
-Agent42 is a Python-based AI agent orchestrator with the following source layout:
+Frood is a Python-based AI agent orchestrator with the following source layout:
 
 - **Source directories:** `core/` (32+ modules), `tools/`, `providers/` (2 files), `agents/`, `memory/`, `dashboard/`
 - **Test directory:** `tests/` with `test_<module>.py` naming convention (77+ test files)

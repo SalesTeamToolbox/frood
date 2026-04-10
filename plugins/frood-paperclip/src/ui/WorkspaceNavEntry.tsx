@@ -7,10 +7,10 @@ export function WorkspaceNavEntry({ context }: PluginSidebarProps) {
         Frood
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-        <a href={`/plugins/agent42.paperclip-plugin/workspace-terminal`} style={{ padding: "6px 12px", fontSize: "13px", color: "#374151", textDecoration: "none", borderRadius: "4px", display: "block" }}>
+        <a href={`/plugins/frood.paperclip-plugin/workspace-terminal`} style={{ padding: "6px 12px", fontSize: "13px", color: "#374151", textDecoration: "none", borderRadius: "4px", display: "block" }}>
           Terminal
         </a>
-        <a href={`/plugins/agent42.paperclip-plugin/sandboxed-apps`} style={{ padding: "6px 12px", fontSize: "13px", color: "#374151", textDecoration: "none", borderRadius: "4px", display: "block" }}>
+        <a href={`/plugins/frood.paperclip-plugin/sandboxed-apps`} style={{ padding: "6px 12px", fontSize: "13px", color: "#374151", textDecoration: "none", borderRadius: "4px", display: "block" }}>
           Apps
         </a>
       </div>

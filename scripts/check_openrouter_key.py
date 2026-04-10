@@ -15,7 +15,7 @@ import os
 import sys
 from pathlib import Path
 
-# --- 1. Load .env (same as agent42.py does at startup) ----------------------
+# --- 1. Load .env (same as frood.py does at startup) ----------------------
 try:
     from dotenv import load_dotenv
 

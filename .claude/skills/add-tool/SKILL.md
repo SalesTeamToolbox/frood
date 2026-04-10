@@ -7,7 +7,7 @@ task_types: [coding]
 
 # /add-tool
 
-Scaffold a new built-in tool for Agent42, including the tool implementation, registration, and test file.
+Scaffold a new built-in tool for Frood, including the tool implementation, registration, and test file.
 
 ## Usage
 
@@ -39,14 +39,14 @@ Before generating code, read these files:
 
 2. **An existing simple tool** (e.g., `tools/grep.py` or `tools/git.py`) -- Use as a style exemplar for imports, docstrings, error handling patterns, and how `ToolResult` is returned.
 
-3. **`agent42.py`** -- Locate the `_register_tools()` method to understand the registration pattern and where to add the new tool.
+3. **`frood.py`** -- Locate the `_register_tools()` method to understand the registration pattern and where to add the new tool.
 
 ## Step 3: Generate the Tool File
 
 Create `tools/<tool_name>.py` using this template:
 
 ```python
-"""<Description> tool for Agent42."""
+"""<Description> tool for Frood."""
 
 from tools.base import Tool, ToolResult
 
@@ -106,7 +106,7 @@ class <ClassName>Tool(Tool):
 
 ### Template Rules
 
-1. **Module docstring**: `"""<Description> tool for Agent42."""`
+1. **Module docstring**: `"""<Description> tool for Frood."""`
 2. **Class name**: PascalCase with `Tool` suffix (e.g., `MyTool`, `CodeSearchTool`)
 3. **Constructor**: Accept injected context via keyword arguments with defaults. Always include `**kwargs` to handle extra ToolContext fields.
 4. **`requires` class variable**: Only add if the tool needs ToolContext injection. List needed keys (e.g., `["workspace", "sandbox"]`).
@@ -118,7 +118,7 @@ class <ClassName>Tool(Tool):
 
 ## Step 4: Register the Tool
 
-Add the tool to `agent42.py`:
+Add the tool to `frood.py`:
 
 1. **Import** at the top of the file with other tool imports:
    ```python
@@ -227,7 +227,7 @@ Review results:
 - Do NOT use blocking I/O in `execute()` -- all I/O must be async per CLAUDE.md
 - Do NOT forget `**kwargs` in the `execute()` signature -- the Tool ABC requires it
 - Do NOT place plugin/custom tools in `tools/` directly -- only built-in tools go in `tools/`. Plugins go in `CUSTOM_TOOLS_DIR` and are auto-discovered by `tools/plugin_loader.py`
-- Do NOT forget to import and register the tool in `agent42.py`
+- Do NOT forget to import and register the tool in `frood.py`
 - Do NOT use `ToolResult(output=...)` for errors -- use `ToolResult(error=..., success=False)`
 - Do NOT hardcode file paths -- use the workspace parameter from ToolContext
 - Do NOT create tools that duplicate existing tool functionality -- check `tool_registry` first

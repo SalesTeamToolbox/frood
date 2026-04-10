@@ -1,10 +1,10 @@
 import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
 
-// Phase 41: The adapters field and adapters.register capability are Agent42 extensions
+// Phase 41: The adapters field and adapters.register capability are Frood extensions
 // not yet in the upstream SDK type. We use a cast to preserve type safety for all
 // standard fields while allowing the extension fields.
 const manifest = {
-  id: "agent42.paperclip-plugin",
+  id: "frood.paperclip-plugin",
   apiVersion: 1,
   version: "1.2.0",
   displayName: "Frood",
@@ -79,7 +79,7 @@ const manifest = {
       },
       {
         type: "settingsPage",
-        id: "agent42-settings",
+        id: "frood-settings",
         displayName: "Frood Settings",
         exportName: "SettingsPage",
       },

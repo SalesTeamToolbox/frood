@@ -6,10 +6,10 @@ Trace all usages of a specified package or API across the codebase and flag brea
 
 ## Context
 
-Agent42 is a Python codebase with cross-module dependencies:
+Frood is a Python codebase with cross-module dependencies:
 
 - **Source directories:** `core/`, `tools/`, `providers/`, `agents/`, `memory/`, `dashboard/`, `tests/`
-- **Entry point:** `agent42.py` imports from all major modules
+- **Entry point:** `frood.py` imports from all major modules
 - **Internal API patterns:** modules in `core/` are imported by `tools/`, `agents/`, `dashboard/`, and `server.py`
 - **Common external dependencies:** `openai`, `httpx`, `fastapi`, `pydantic`, `qdrant-client`, `redis`, `bcrypt`, `python-jose`, `aiofiles`
 - **Known pitfalls from API changes:** Pitfall 96 (method rename broke /api/reports), Pitfall 97 (nonexistent attribute access)

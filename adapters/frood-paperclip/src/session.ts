@@ -37,7 +37,7 @@ export const sessionCodec: AdapterSessionCodec = {
   /**
    * getDisplayId — returns a human-readable session identifier.
    *
-   * Returns "agent42:{agentId}" when agentId is a string, null otherwise.
+   * Returns "frood:{agentId}" when agentId is a string, null otherwise.
    */
   getDisplayId(params: Record<string, unknown> | null): string | null {
     if (!params?.agentId || typeof params.agentId !== "string") return null;

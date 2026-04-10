@@ -1,4 +1,4 @@
-"""Tests for Agent42 sidecar Phase 35: Provider Model Discovery endpoints.
+"""Tests for Frood sidecar Phase 35: Provider Model Discovery endpoints.
 
 Coverage:
 - GET /sidecar/models (D-05, UI-02)

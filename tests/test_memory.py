@@ -23,7 +23,7 @@ class TestMemoryStore:
 
     def test_read_memory(self):
         content = self.store.read_memory()
-        assert "Agent42 Memory" in content
+        assert "Frood Memory" in content
 
     def test_update_memory(self):
         self.store.update_memory("# Custom Memory\n\nNew content")

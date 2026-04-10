@@ -2,7 +2,7 @@
 Local Zen API proxy with adaptive per-model rate limiting.
 
 Runs as a lightweight HTTP server that intercepts ALL Zen API traffic
-(from OpenCode CLI, Agent42 agents, etc.) and applies TCP-style congestion
+(from OpenCode CLI, Frood agents, etc.) and applies TCP-style congestion
 control before forwarding to the real Zen API.
 
 This ensures a single rate-limit budget across all consumers, preventing
@@ -308,7 +308,7 @@ def _translate_auth_headers(headers: dict) -> dict:
     Zen/OpenRouter expect: Authorization: Bearer <key>
 
     If the key is empty/dummy, auto-resolve from ZEN_API_KEY in os.environ
-    (injected by KeyStore at Agent42 startup).
+    (injected by KeyStore at Frood startup).
     """
     import os as _os
 

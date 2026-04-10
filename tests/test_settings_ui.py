@@ -9,7 +9,7 @@ import pathlib
 
 _APP_JS = pathlib.Path("dashboard/frontend/dist/app.js").read_text(encoding="utf-8")
 _STYLE_CSS = pathlib.Path("dashboard/frontend/dist/style.css").read_text(encoding="utf-8")
-_SETTINGS_TSX = pathlib.Path("plugins/agent42-paperclip/src/ui/SettingsPage.tsx").read_text(
+_SETTINGS_TSX = pathlib.Path("plugins/frood-paperclip/src/ui/SettingsPage.tsx").read_text(
     encoding="utf-8"
 )
 

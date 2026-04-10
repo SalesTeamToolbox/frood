@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Generate PNG icons for Agent42 PWA from the SVG favicon.
+Generate PNG icons for Frood PWA from the SVG favicon.
 
 Usage:
     python scripts/generate-icons.py [--svg PATH] [--output-dir PATH]
 
 Defaults:
-    --svg        dashboard/frontend/dist/assets/agent42-favicon.svg
+    --svg        dashboard/frontend/dist/assets/frood-favicon.svg
     --output-dir dashboard/frontend/dist/assets/icons/
 """
 
@@ -15,9 +15,9 @@ import os
 import sys
 
 
-def _draw_agent42_icon(size: int, output_path: str) -> None:
+def _draw_frood_icon(size: int, output_path: str) -> None:
     """
-    Render the Agent42 robot-face icon at any pixel size using Pillow.
+    Render the Frood robot-face icon at any pixel size using Pillow.
 
     Bold, app-icon style matching the SVG favicon (32x32 viewBox):
       - Gold rounded-rect background (#E8A838) with subtle border
@@ -172,7 +172,7 @@ def _generate_ico(source_png: str, output_dir: str) -> None:
         )
         image_data += png_data
 
-    ico_path = os.path.join(output_dir, "agent42.ico")
+    ico_path = os.path.join(output_dir, "frood.ico")
     with open(ico_path, "wb") as f:
         f.write(header + dir_entries + image_data)
     file_size = os.path.getsize(ico_path)
@@ -180,7 +180,7 @@ def _generate_ico(source_png: str, output_dir: str) -> None:
 
 
 def generate_with_pillow(svg_path: str, output_dir: str) -> None:
-    """Generate icons by directly drawing the Agent42 robot face with Pillow."""
+    """Generate icons by directly drawing the Frood robot face with Pillow."""
     from PIL import Image  # noqa: F401 — ensure Pillow is available
 
     icons = [
@@ -191,7 +191,7 @@ def generate_with_pillow(svg_path: str, output_dir: str) -> None:
 
     for filename, size in icons:
         out_path = os.path.join(output_dir, filename)
-        _draw_agent42_icon(size, out_path)
+        _draw_frood_icon(size, out_path)
         file_size = os.path.getsize(out_path)
         print(f"Generated: {out_path} ({file_size} bytes)")
 
@@ -291,7 +291,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate PWA icons from SVG favicon")
     parser.add_argument(
         "--svg",
-        default="dashboard/frontend/dist/assets/agent42-favicon.svg",
+        default="dashboard/frontend/dist/assets/frood-favicon.svg",
         help="Path to source SVG file",
     )
     parser.add_argument(

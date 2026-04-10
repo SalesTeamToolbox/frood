@@ -13,7 +13,7 @@ system. When users ask what you remember, ask about past conversations, or
 reference previous work, you MUST query this memory system using the `memory`
 MCP tool. Do not rely solely on Claude Code's file-based memory.
 
-**Always check Agent42 memory when:**
+**Always check Frood memory when:**
 - The user asks what you remember or know
 - The user references past conversations or decisions
 - Starting a new task (check for relevant prior context)
@@ -62,7 +62,7 @@ You have a `memory` MCP tool with these actions:
    with action='store' to actually persist it. Simply acknowledging is not enough.
 
 2. **When a user asks what you remember**, you MUST use the memory tool with
-   action='search' or action='recall' to check Agent42's memory system FIRST,
+   action='search' or action='recall' to check Frood's memory system FIRST,
    before relying on any other context.
 
 3. **After completing a task**, record key learnings using the memory tool.
@@ -77,4 +77,4 @@ You have a `memory` MCP tool with these actions:
    knowledge is preserved.
 
 7. **Memory is local**: Memory is strictly local to this installation. You have
-   no access to conversations or data from other Agent42 instances.
+   no access to conversations or data from other Frood instances.

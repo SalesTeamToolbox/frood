@@ -1,5 +1,5 @@
 /**
- * client.ts -- Agent42Client: HTTP client wrapping all 6 sidecar endpoints.
+ * client.ts -- FroodClient: HTTP client wrapping all 6 sidecar endpoints.
  *
  * Endpoints:
  *   GET  /sidecar/health                    -- NO auth, 5s timeout, 1 retry on 5xx
@@ -53,7 +53,7 @@ import type {
   ModelsResponse,
 } from "./types.js";
 
-export class Agent42Client {
+export class FroodClient {
   private readonly timeoutMs: number;
 
   constructor(
@@ -84,7 +84,7 @@ export class Agent42Client {
     );
 
     if (!resp.ok) {
-      throw new Error(`Agent42Client.health failed: HTTP ${resp.status}`);
+      throw new Error(`FroodClient.health failed: HTTP ${resp.status}`);
     }
 
     return resp.json() as Promise<SidecarHealthResponse>;
@@ -107,7 +107,7 @@ export class Agent42Client {
     );
 
     if (!resp.ok) {
-      throw new Error(`Agent42Client.memoryRecall failed: HTTP ${resp.status}`);
+      throw new Error(`FroodClient.memoryRecall failed: HTTP ${resp.status}`);
     }
 
     return resp.json() as Promise<MemoryRecallResponse>;
@@ -130,7 +130,7 @@ export class Agent42Client {
     );
 
     if (!resp.ok) {
-      throw new Error(`Agent42Client.memoryStore failed: HTTP ${resp.status}`);
+      throw new Error(`FroodClient.memoryStore failed: HTTP ${resp.status}`);
     }
 
     return resp.json() as Promise<MemoryStoreResponse>;
@@ -153,7 +153,7 @@ export class Agent42Client {
     );
 
     if (!resp.ok) {
-      throw new Error(`Agent42Client.routeTask failed: HTTP ${resp.status}`);
+      throw new Error(`FroodClient.routeTask failed: HTTP ${resp.status}`);
     }
 
     return resp.json() as Promise<RoutingResolveResponse>;
@@ -176,7 +176,7 @@ export class Agent42Client {
     );
 
     if (!resp.ok) {
-      throw new Error(`Agent42Client.toolEffectiveness failed: HTTP ${resp.status}`);
+      throw new Error(`FroodClient.toolEffectiveness failed: HTTP ${resp.status}`);
     }
 
     return resp.json() as Promise<EffectivenessResponse>;
@@ -199,7 +199,7 @@ export class Agent42Client {
     );
 
     if (!resp.ok) {
-      throw new Error(`Agent42Client.mcpTool failed: HTTP ${resp.status}`);
+      throw new Error(`FroodClient.mcpTool failed: HTTP ${resp.status}`);
     }
 
     return resp.json() as Promise<MCPToolResponse>;
@@ -212,7 +212,7 @@ export class Agent42Client {
   async getAgentProfile(agentId: string): Promise<AgentProfileResponse> {
     const url = `${this.baseUrl}/agent/${encodeURIComponent(agentId)}/profile`;
     const resp = await this.fetchWithRetry(url, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
-    if (!resp.ok) throw new Error(`Agent42Client.getAgentProfile failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.getAgentProfile failed: HTTP ${resp.status}`);
     return resp.json() as Promise<AgentProfileResponse>;
   }
 
@@ -223,7 +223,7 @@ export class Agent42Client {
   async getAgentEffectiveness(agentId: string): Promise<AgentEffectivenessResponse> {
     const url = `${this.baseUrl}/agent/${encodeURIComponent(agentId)}/effectiveness`;
     const resp = await this.fetchWithRetry(url, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
-    if (!resp.ok) throw new Error(`Agent42Client.getAgentEffectiveness failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.getAgentEffectiveness failed: HTTP ${resp.status}`);
     return resp.json() as Promise<AgentEffectivenessResponse>;
   }
 
@@ -234,7 +234,7 @@ export class Agent42Client {
   async getRoutingHistory(agentId: string, limit = 20): Promise<RoutingHistoryResponse> {
     const url = `${this.baseUrl}/agent/${encodeURIComponent(agentId)}/routing-history?limit=${limit}`;
     const resp = await this.fetchWithRetry(url, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
-    if (!resp.ok) throw new Error(`Agent42Client.getRoutingHistory failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.getRoutingHistory failed: HTTP ${resp.status}`);
     return resp.json() as Promise<RoutingHistoryResponse>;
   }
 
@@ -245,7 +245,7 @@ export class Agent42Client {
   async getMemoryRunTrace(runId: string): Promise<MemoryRunTraceResponse> {
     const url = `${this.baseUrl}/memory/run-trace/${encodeURIComponent(runId)}`;
     const resp = await this.fetchWithRetry(url, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
-    if (!resp.ok) throw new Error(`Agent42Client.getMemoryRunTrace failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.getMemoryRunTrace failed: HTTP ${resp.status}`);
     return resp.json() as Promise<MemoryRunTraceResponse>;
   }
 
@@ -256,7 +256,7 @@ export class Agent42Client {
   async getAgentSpend(agentId: string, hours = 24): Promise<AgentSpendResponse> {
     const url = `${this.baseUrl}/agent/${encodeURIComponent(agentId)}/spend?hours=${hours}`;
     const resp = await this.fetchWithRetry(url, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
-    if (!resp.ok) throw new Error(`Agent42Client.getAgentSpend failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.getAgentSpend failed: HTTP ${resp.status}`);
     return resp.json() as Promise<AgentSpendResponse>;
   }
 
@@ -270,7 +270,7 @@ export class Agent42Client {
       { method: "POST", headers: this.authHeaders(), body: JSON.stringify(body) },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.extractLearnings failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.extractLearnings failed: HTTP ${resp.status}`);
     return resp.json() as Promise<ExtractLearningsResponse>;
   }
 
@@ -295,7 +295,7 @@ export class Agent42Client {
     );
 
     if (!resp.ok) {
-      throw new Error(`Agent42Client.getModels failed: HTTP ${resp.status}`);
+      throw new Error(`FroodClient.getModels failed: HTTP ${resp.status}`);
     }
 
     return resp.json() as Promise<ModelsResponse>;
@@ -312,7 +312,7 @@ export class Agent42Client {
       { method: "GET", headers: this.authHeaders() },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.getTools failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.getTools failed: HTTP ${resp.status}`);
     return resp.json() as Promise<ToolsListResponse>;
   }
 
@@ -323,7 +323,7 @@ export class Agent42Client {
       { method: "GET", headers: this.authHeaders() },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.getSkills failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.getSkills failed: HTTP ${resp.status}`);
     return resp.json() as Promise<SkillsListResponse>;
   }
 
@@ -334,7 +334,7 @@ export class Agent42Client {
       { method: "PATCH", headers: this.authHeaders(), body: JSON.stringify({ enabled }) },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.toggleTool failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.toggleTool failed: HTTP ${resp.status}`);
     return resp.json() as Promise<ToggleResponse>;
   }
 
@@ -345,7 +345,7 @@ export class Agent42Client {
       { method: "PATCH", headers: this.authHeaders(), body: JSON.stringify({ enabled }) },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.toggleSkill failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.toggleSkill failed: HTTP ${resp.status}`);
     return resp.json() as Promise<ToggleResponse>;
   }
 
@@ -356,7 +356,7 @@ export class Agent42Client {
       { method: "GET", headers: this.authHeaders() },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.getMemoryStats failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.getMemoryStats failed: HTTP ${resp.status}`);
     return resp.json() as Promise<MemoryStatsResponse>;
   }
 
@@ -367,7 +367,7 @@ export class Agent42Client {
       { method: "GET", headers: this.authHeaders() },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.getStorageStatus failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.getStorageStatus failed: HTTP ${resp.status}`);
     return resp.json() as Promise<StorageStatusResponse>;
   }
 
@@ -378,7 +378,7 @@ export class Agent42Client {
       { method: "DELETE", headers: this.authHeaders() },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.purgeMemory failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.purgeMemory failed: HTTP ${resp.status}`);
     return resp.json() as Promise<PurgeMemoryResponse>;
   }
 
@@ -389,7 +389,7 @@ export class Agent42Client {
       { method: "GET", headers: this.authHeaders() },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.getApps failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.getApps failed: HTTP ${resp.status}`);
     return resp.json() as Promise<AppsListResponse>;
   }
 
@@ -400,7 +400,7 @@ export class Agent42Client {
       { method: "POST", headers: this.authHeaders() },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.startApp failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.startApp failed: HTTP ${resp.status}`);
     return resp.json() as Promise<AppActionResponse>;
   }
 
@@ -411,7 +411,7 @@ export class Agent42Client {
       { method: "POST", headers: this.authHeaders() },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.stopApp failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.stopApp failed: HTTP ${resp.status}`);
     return resp.json() as Promise<AppActionResponse>;
   }
 
@@ -422,7 +422,7 @@ export class Agent42Client {
       { method: "GET", headers: this.authHeaders() },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.getSettings failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.getSettings failed: HTTP ${resp.status}`);
     return resp.json() as Promise<SettingsResponse>;
   }
 
@@ -433,19 +433,19 @@ export class Agent42Client {
       { method: "POST", headers: this.authHeaders(), body: JSON.stringify(body) },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.updateSettings failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.updateSettings failed: HTTP ${resp.status}`);
     return resp.json() as Promise<SettingsUpdateResponse>;
   }
 
   // -------------------------------------------------------------------------
-  // Phase 41 -- Agent42 Adapter methods (ABACUS-04)
-  // Replaces claude_local: routes Paperclip agent tasks through Agent42 HTTP API
+  // Phase 41 -- Frood Adapter methods (ABACUS-04)
+  // Replaces claude_local: routes Paperclip agent tasks through Frood HTTP API
   // which uses tiered routing (Abacus RouteLLM) instead of spawning Claude CLI.
   // -------------------------------------------------------------------------
 
   /**
    * POST /adapter/run
-   * Start an agent task routed through Agent42 (Abacus RouteLLM, NOT Claude CLI).
+   * Start an agent task routed through Frood (Abacus RouteLLM, NOT Claude CLI).
    * Bearer auth required. Retries once on 5xx.
    */
   async adapterRun(body: AdapterRunRequest): Promise<AdapterRunResponse> {
@@ -454,7 +454,7 @@ export class Agent42Client {
       { method: "POST", headers: this.authHeaders(), body: JSON.stringify(body) },
       this.timeoutMs,
     );
-    if (!resp.ok) throw new Error(`Agent42Client.adapterRun failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.adapterRun failed: HTTP ${resp.status}`);
     return resp.json() as Promise<AdapterRunResponse>;
   }
 
@@ -466,7 +466,7 @@ export class Agent42Client {
   async adapterStatus(runId: string): Promise<AdapterStatusResponse> {
     const url = `${this.baseUrl}/adapter/status/${encodeURIComponent(runId)}`;
     const resp = await this.fetchWithRetry(url, { method: "GET", headers: this.authHeaders() }, this.timeoutMs);
-    if (!resp.ok) throw new Error(`Agent42Client.adapterStatus failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.adapterStatus failed: HTTP ${resp.status}`);
     return resp.json() as Promise<AdapterStatusResponse>;
   }
 
@@ -478,7 +478,7 @@ export class Agent42Client {
   async adapterCancel(runId: string): Promise<AdapterCancelResponse> {
     const url = `${this.baseUrl}/adapter/cancel/${encodeURIComponent(runId)}`;
     const resp = await this.fetchWithRetry(url, { method: "POST", headers: this.authHeaders() }, this.timeoutMs);
-    if (!resp.ok) throw new Error(`Agent42Client.adapterCancel failed: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`FroodClient.adapterCancel failed: HTTP ${resp.status}`);
     return resp.json() as Promise<AdapterCancelResponse>;
   }
 

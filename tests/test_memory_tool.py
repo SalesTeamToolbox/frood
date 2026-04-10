@@ -80,7 +80,7 @@ class TestMemoryToolRecall:
         result = await self.tool.execute(action="recall")
         assert result.success
         # Should still return the default template
-        assert "Agent42 Memory" in result.output
+        assert "Frood Memory" in result.output
 
 
 class TestMemoryToolLog:

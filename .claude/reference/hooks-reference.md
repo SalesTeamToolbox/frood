@@ -46,7 +46,7 @@ captured by hooks — only tool calls are.
    but plain text options in assistant responses are invisible to hooks
 
 **On session resume:** `memory-recall.py` automatically surfaces the previous session's
-conversation context from `handoff.json`. Check `[agent42-session-context]` in the hook
+conversation context from `handoff.json`. Check `[frood-session-context]` in the hook
 output for previous session state.
 
 ## How It Works

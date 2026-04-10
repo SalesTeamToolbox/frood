@@ -1,5 +1,5 @@
 """
-E2E test configuration for Agent42 playwright-cli tests.
+E2E test configuration for Frood playwright-cli tests.
 
 Reads from environment or .env file, with sensible defaults.
 """
@@ -10,7 +10,7 @@ from pathlib import Path
 
 FROOD_ROOT = Path(__file__).resolve().parents[2]
 
-# Load .env from agent42 root if present
+# Load .env from frood root if present
 _env_file = FROOD_ROOT / ".env"
 if _env_file.exists():
     try:
@@ -36,7 +36,7 @@ class E2EConfig:
     port: int = 0
     username: str = ""
     password: str = ""
-    session_name: str = "agent42-e2e"
+    session_name: str = "frood-e2e"
     headed: bool = False
     output_dir: str = ""
     # Auto-discovery paths

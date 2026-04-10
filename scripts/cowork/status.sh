@@ -110,13 +110,13 @@ show_status() {
 # ── Main ────────────────────────────────────────────────────────────
 
 echo ""
-echo -e "${BOLD}═══ Agent42 VPS Coworker Status ═══${RESET}"
+echo -e "${BOLD}═══ Frood VPS Coworker Status ═══${RESET}"
 echo ""
 
 if [[ "$WATCH" == true ]]; then
     while true; do
         clear
-        echo -e "${BOLD}═══ Agent42 VPS Coworker Status ═══${RESET} (refreshing every ${WATCH_INTERVAL}s, Ctrl+C to stop)"
+        echo -e "${BOLD}═══ Frood VPS Coworker Status ═══${RESET} (refreshing every ${WATCH_INTERVAL}s, Ctrl+C to stop)"
         echo ""
         show_status || true
         sleep "$WATCH_INTERVAL"

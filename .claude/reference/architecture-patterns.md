@@ -34,7 +34,7 @@ def get_discord_guild_ids(self) -> list[int]: ...
 ## Plugin Architecture
 
 **Tools (built-in):** Subclass `tools.base.Tool`, implement `name`/`description`/`parameters`/`execute()`,
-register in `agent42.py` `_register_tools()`.
+register in `frood.py` `_register_tools()`.
 
 ```python
 class MyTool(Tool):
@@ -144,13 +144,13 @@ from memory.redis_session import RedisSessionStore
 
 ## MCP Architecture (v2.0)
 
-Claude Code provides the intelligence layer (LLM, orchestration). Agent42 provides
+Claude Code provides the intelligence layer (LLM, orchestration). Frood provides
 the tooling layer via MCP:
 
 - **MCP Server** (`mcp_server.py`) — 36+ tools exposed via stdio transport
 - **Memory** — ONNX embeddings + Qdrant for semantic search (~25 MB RAM)
 - **Associative Recall** — Hook auto-surfaces relevant memories on every prompt
-- **Context Assembler** — `agent42_context` tool pulls from memory, docs, git, skills
+- **Context Assembler** — `frood_context` tool pulls from memory, docs, git, skills
 - **Dashboard** — FastAPI web UI for monitoring and configuration
 
 ## Security Layers (Defense in Depth)

@@ -15,5 +15,5 @@
     "jsxImportSource": "react"
   },
   "include": ["src"],
-  "exclude": ["dist", "tests", "node_modules", "src/ui"]
+  "exclude": ["dist", "tests", "node_modules", "src/ui", "src/__tests__"]
 }

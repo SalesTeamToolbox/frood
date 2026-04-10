@@ -54,10 +54,10 @@ function SourceBadge({ source }: { source: "admin" | "env" | "none" }) {
 
 // -- ApiKeysTab --
 function ApiKeysTab({ context }: { context: any }) {
-  const { data, loading, error, refresh } = usePluginData<{ keys: SettingsKeyEntry[] }>("agent42-settings", {
+  const { data, loading, error, refresh } = usePluginData<{ keys: SettingsKeyEntry[] }>("frood-settings", {
     companyId: context.companyId ?? undefined,
   });
-  const updateSettings = usePluginAction("update-agent42-settings");
+  const updateSettings = usePluginAction("update-frood-settings");
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -233,7 +233,7 @@ function MemoryTab({ context: _context }: { context: any }) {
   const { data: memStats, loading: memLoading, refresh: refreshStats } = usePluginData<MemoryStatsResponse>("memory-stats", {});
   const { data: storageStatus, loading: storageLoading } = usePluginData<StorageStatusResponse>("storage-status", {});
   const purgeMemory = usePluginAction("purge-memory");
-  const updateSettings = usePluginAction("update-agent42-settings");
+  const updateSettings = usePluginAction("update-frood-settings");
   const [confirmPurge, setConfirmPurge] = useState<string | null>(null);
   const [purgeInput, setPurgeInput] = useState("");
   const [purging, setPurging] = useState(false);

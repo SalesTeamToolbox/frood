@@ -118,8 +118,8 @@ describe("sessionCodec", () => {
       expect(sessionCodec.getDisplayId!({ agentId: 123 })).toBeNull();
     });
 
-    it("returns 'agent42:{agentId}' when agentId is present", () => {
-      expect(sessionCodec.getDisplayId!({ agentId: "agent-123" })).toBe("agent42:agent-123");
+    it("returns 'frood:{agentId}' when agentId is present", () => {
+      expect(sessionCodec.getDisplayId!({ agentId: "agent-123" })).toBe("frood:agent-123");
     });
   });
 });

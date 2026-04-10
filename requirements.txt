@@ -1,4 +1,4 @@
-# Agent42 — Python dependencies
+# Frood — Python dependencies
 
 # Web framework + real-time
 fastapi>=0.115.0

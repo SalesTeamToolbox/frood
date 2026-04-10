@@ -1,5 +1,5 @@
 /**
- * types.ts — Contract definitions for Agent42 sidecar communication.
+ * types.ts — Contract definitions for Frood sidecar communication.
  *
  * All interfaces mirror the Python Pydantic models in core/sidecar_models.py.
  * Field naming follows the camelCase aliases in the Python models (per the sidecar endpoint contracts).
@@ -22,7 +22,7 @@ export interface SidecarConfig {
   sidecarUrl: string;
   bearerToken: string;
   apiKey: string;          // D-10: optional device API key for auto-provisioning
-  agentId: string;         // Agent42 agent UUID for memory/effectiveness
+  agentId: string;         // Frood agent UUID for memory/effectiveness
   preferredProvider: string;
   memoryScope: string;     // "agent" | "company"
 }

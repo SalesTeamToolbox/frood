@@ -182,6 +182,6 @@ fi
 
 echo ""
 log "Recent VPS commits:"
-git log --oneline -5 --author="Agent42 Coworker" 2>/dev/null || git log --oneline -5
+git log --oneline -5 --author="Frood Coworker" 2>/dev/null || git log --oneline -5
 echo ""
 log "You can now continue working locally with Claude Code."

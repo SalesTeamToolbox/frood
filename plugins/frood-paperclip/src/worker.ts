@@ -7,10 +7,10 @@
  */
 import { definePlugin, runWorker } from "@paperclipai/plugin-sdk";
 import type { PluginContext } from "@paperclipai/plugin-sdk";
-import { Agent42Client } from "./client.js";
+import { FroodClient } from "./client.js";
 import { registerTools } from "./tools.js";
 
-let client: Agent42Client | null = null;
+let client: FroodClient | null = null;
 
 // Terminal session tracking (Phase 36) — maps sessionId to WebSocket
 const terminalSessions = new Map<string, WebSocket>();
@@ -27,7 +27,7 @@ const plugin = definePlugin({
     }
     const timeoutMs = (config.timeoutMs as number) ?? 10_000;
 
-    client = new Agent42Client(baseUrl, apiKey, timeoutMs);
+    client = new FroodClient(baseUrl, apiKey, timeoutMs);
 
     // Register all tools synchronously before setup() resolves (Pitfall 6)
     registerTools(ctx, client);
@@ -132,12 +132,12 @@ const plugin = definePlugin({
       }
     });
 
-    ctx.data.register("agent42-settings", async (_params) => {
+    ctx.data.register("frood-settings", async (_params) => {
       if (!client) return null;
       try {
         return await client.getSettings();
       } catch (e) {
-        ctx.logger.warn("agent42-settings data handler failed", { error: String(e) });
+        ctx.logger.warn("frood-settings data handler failed", { error: String(e) });
         return null;
       }
     });
@@ -186,14 +186,14 @@ const plugin = definePlugin({
       }
     });
 
-    ctx.actions.register("update-agent42-settings", async (params) => {
+    ctx.actions.register("update-frood-settings", async (params) => {
       const keyName = params?.key_name as string;
       const value = params?.value as string;
       if (!keyName || !client) return { ok: false, message: "Missing key_name or client" };
       try {
         return await client.updateSettings({ key_name: keyName, value: value ?? "" });
       } catch (e) {
-        ctx.logger.warn("update-agent42-settings action failed", { error: String(e) });
+        ctx.logger.warn("update-frood-settings action failed", { error: String(e) });
         return { ok: false, message: String(e) };
       }
     });
@@ -234,7 +234,7 @@ const plugin = definePlugin({
     });
 
     // -- Phase 36: Terminal stream and action handlers (PAPERCLIP-01) --
-    // Per D-01: Terminal communicates with Agent42 sidecar via WebSocket for real-time interaction
+    // Per D-01: Terminal communicates with Frood sidecar via WebSocket for real-time interaction
     // Per D-12: Real-time updates via WebSocket connections
 
     ctx.actions.register("terminal-start", async (params) => {
@@ -317,9 +317,9 @@ const plugin = definePlugin({
       return { ok: true };
     });
 
-    // -- Phase 41: Agent42 Adapter actions (ABACUS-04, ABACUS-05) --
+    // -- Phase 41: Frood Adapter actions (ABACUS-04, ABACUS-05) --
     // These replace claude_local for Paperclip autonomous execution.
-    // All agent tasks route through Agent42 -> Abacus RouteLLM API.
+    // All agent tasks route through Frood -> Abacus RouteLLM API.
     // Zero Claude CLI processes spawned. TOS compliant.
 
     ctx.actions.register("adapter-run", async (params) => {
@@ -417,7 +417,7 @@ const plugin = definePlugin({
       }
     });
 
-    ctx.logger.info("Agent42 plugin ready", { baseUrl });
+    ctx.logger.info("Frood plugin ready", { baseUrl });
   },
 
   async onHealth() {

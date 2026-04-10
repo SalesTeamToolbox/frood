@@ -5,7 +5,7 @@
 1. Create `tools/my_tool.py` with class inheriting from `Tool` ABC
 2. Implement required properties: `name`, `description`, `parameters`
 3. Implement `async execute(**kwargs) -> ToolResult`
-4. Register in `agent42.py` `_register_tools()`:
+4. Register in `frood.py` `_register_tools()`:
    ```python
    from tools.my_tool import MyTool
    registry.register(MyTool(sandbox=self._sandbox))

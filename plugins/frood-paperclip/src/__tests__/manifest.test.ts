@@ -30,8 +30,8 @@ describe("Phase 36: Manifest slot declarations", () => {
     expect((slot as any).entityTypes).toContain("project");
   });
 
-  it("has agent42-settings settingsPage slot (PAPERCLIP-04)", () => {
-    const slot = slots.find((s) => s.id === "agent42-settings");
+  it("has frood-settings settingsPage slot (PAPERCLIP-04)", () => {
+    const slot = slots.find((s) => s.id === "frood-settings");
     expect(slot).toBeDefined();
     expect(slot!.type).toBe("settingsPage");
     expect(slot!.exportName).toBe("SettingsPage");

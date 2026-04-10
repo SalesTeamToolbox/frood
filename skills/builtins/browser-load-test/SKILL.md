@@ -1,13 +1,13 @@
 ---
 name: browser-load-test
-description: Run Playwright-based load test against the Agent42 dashboard to find concurrent agent limits.
+description: Run Playwright-based load test against the Frood dashboard to find concurrent agent limits.
 always: false
 task_types: [debugging]
 ---
 
 # Browser Load Test
 
-You are running a Playwright-based load test against the Agent42 dashboard. This skill stress-tests the system to find the real concurrent agent limit by submitting tasks through the browser UI and API, monitoring status, and capturing screenshots.
+You are running a Playwright-based load test against the Frood dashboard. This skill stress-tests the system to find the real concurrent agent limit by submitting tasks through the browser UI and API, monitoring status, and capturing screenshots.
 
 ## Prerequisites
 
@@ -39,16 +39,16 @@ python load_test.py --no-headless
 python load_test.py --url http://myserver:8000 --password "mypass"
 
 # Monitor a remote log file
-python load_test_monitor.py --log-file /path/to/agent42.log --all
+python load_test_monitor.py --log-file /path/to/frood.log --all
 ```
 
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENT42_URL` | `http://localhost:8000` | Dashboard URL |
-| `AGENT42_USER` | `admin` | Login username |
-| `AGENT42_PASS` | (configured) | Login password |
+| `FROOD_URL` | `http://localhost:8000` | Dashboard URL |
+| `FROOD_USER` | `admin` | Login username |
+| `FROOD_PASS` | (configured) | Login password |
 
 ## Test Phases
 
@@ -71,7 +71,7 @@ The test automatically detects saturation: 3 consecutive polls where pending tas
 - **Rate limit errors** — check the log monitor for 429s from Gemini/OpenRouter
 
 ### Screenshots
-Screenshots are saved to `.agent42/screenshots/load_test/` at key moments:
+Screenshots are saved to `.frood/screenshots/load_test/` at key moments:
 - After login
 - After each phase completes
 - At peak stress

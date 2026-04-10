@@ -2,7 +2,7 @@
  * adapter.ts — execute() and testEnvironment() implementing the Paperclip ServerAdapterModule.
  *
  * These are the core business logic functions that bridge Paperclip's AdapterExecutionContext
- * to Agent42's sidecar POST format.
+ * to Frood's sidecar POST format.
  *
  * Key mappings:
  *   - ctx.agent.adapterConfig (unknown) → SidecarConfig via parseSidecarConfig()
@@ -20,7 +20,7 @@ import type {
   AdapterEnvironmentTestContext,
   AdapterEnvironmentTestResult,
 } from "@paperclipai/adapter-utils";
-import { Agent42Client } from "./client.js";
+import { FroodClient } from "./client.js";
 import { parseSidecarConfig } from "./types.js";
 import { sessionCodec } from "./session.js";
 import type { SidecarExecuteRequest } from "./types.js";
@@ -33,7 +33,7 @@ const KNOWN_WAKE_REASONS = new Set(["heartbeat", "task_assigned", "manual"]);
 // ---------------------------------------------------------------------------
 
 /**
- * execute — maps a Paperclip AdapterExecutionContext to an Agent42 sidecar call.
+ * execute — maps a Paperclip AdapterExecutionContext to an Frood sidecar call.
  *
  * Returns an AdapterExecutionResult with:
  *   - exitCode: 0 on success, 1 on any error
@@ -66,10 +66,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   }
 
   // 3. Create HTTP client
-  const client = new Agent42Client(config.sidecarUrl, bearerToken);
+  const client = new FroodClient(config.sidecarUrl, bearerToken);
 
   // 4. Resolve agentId (ADAPT-04, D-13, D-14)
-  //    Prefer the Agent42 agent UUID from adapterConfig; fall back to Paperclip agent ID
+  //    Prefer the Frood agent UUID from adapterConfig; fall back to Paperclip agent ID
   const agentId = config.agentId || ctx.agent.id;
 
   // 5. Extract and validate wakeReason (ADAPT-03, D-11, D-12)
@@ -153,7 +153,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 // ---------------------------------------------------------------------------
 
 /**
- * testEnvironment — probes the Agent42 sidecar /health endpoint.
+ * testEnvironment — probes the Frood sidecar /health endpoint.
  *
  * Returns a structured AdapterEnvironmentTestResult with:
  *   - status: "pass" | "warn" | "fail"
@@ -176,7 +176,7 @@ export async function testEnvironment(
     });
     status = "fail";
   } else {
-    const client = new Agent42Client(config.sidecarUrl, config.bearerToken);
+    const client = new FroodClient(config.sidecarUrl, config.bearerToken);
     try {
       const health = await client.health();
 

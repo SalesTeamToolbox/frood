@@ -7,7 +7,7 @@ inspired by Nanobot's skills system for maximum extensibility.
 
 Directory structure:
     skills/
-    ├── builtins/           # Ships with Agent42
+    ├── builtins/           # Ships with Frood
     │   ├── github/
     │   │   └── SKILL.md
     │   └── weather/
@@ -266,8 +266,8 @@ class SkillLoader:
         frontmatter = _parse_yaml_simple(match.group(1))
         instructions = content[match.end() :].strip()
 
-        # Parse nested 'agent42' or 'nanobot' config block
-        agent_config = frontmatter.get("agent42", {})
+        # Parse nested 'frood' or 'nanobot' config block (legacy 'agent42' also supported)
+        agent_config = frontmatter.get("frood", frontmatter.get("agent42", {}))
         if isinstance(agent_config, str):
             agent_config = {}
 

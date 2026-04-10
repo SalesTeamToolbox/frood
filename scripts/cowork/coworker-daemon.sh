@@ -7,7 +7,7 @@
 #   ./coworker-daemon.sh
 #
 # Recall (take back control):
-#   kill -USR1 $(cat /tmp/agent42-coworker.pid)
+#   kill -USR1 $(cat /tmp/frood-coworker.pid)
 #   — or use recall.sh from your laptop
 
 set -euo pipefail
@@ -91,7 +91,7 @@ commit_progress() {
     if [[ -n "$changed" ]]; then
         git add -A
         git commit -m "cowork($wo_id): $reason — auto-commit by coworker daemon" \
-            --author="Agent42 Coworker <coworker@agent42.local>" 2>/dev/null || true
+            --author="Frood Coworker <coworker@frood.local>" 2>/dev/null || true
 
         # Record the commit
         local sha
@@ -215,7 +215,7 @@ execute_work_order() {
     # Also push work order status updates
     git add "$WO_DIR/$wo_id.json" 2>/dev/null || true
     git commit -m "cowork($wo_id): update status to $(get_wo_field "$wo_id" "status")" \
-        --author="Agent42 Coworker <coworker@agent42.local>" 2>/dev/null || true
+        --author="Frood Coworker <coworker@frood.local>" 2>/dev/null || true
     push_results "$push_branch"
 
     CURRENT_WO_ID=""

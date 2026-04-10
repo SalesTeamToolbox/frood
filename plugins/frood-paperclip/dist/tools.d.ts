@@ -6,5 +6,5 @@
  * Response shapes are simplified for agent consumption (D-16).
  */
 import type { PluginContext } from "@paperclipai/plugin-sdk";
-import type { Agent42Client } from "./client.js";
-export declare function registerTools(ctx: PluginContext, client: Agent42Client): void;
+import type { FroodClient } from "./client.js";
+export declare function registerTools(ctx: PluginContext, client: FroodClient): void;

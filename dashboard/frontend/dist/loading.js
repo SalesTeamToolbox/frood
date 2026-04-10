@@ -1,4 +1,4 @@
-/* Agent42 Dashboard — Loading Indicators and Error Feedback
+/* Frood Dashboard — Loading Indicators and Error Feedback
  *
  * All DOM manipulation uses safe APIs (createElement, textContent).
  * No innerHTML usage anywhere in this module.

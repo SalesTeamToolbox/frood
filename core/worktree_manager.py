@@ -82,7 +82,7 @@ class WorktreeManager:
     async def create(self, task_id: str, base_branch: str = "dev") -> Path:
         """Create a worktree for a task, branching from base_branch."""
         worktree_path = self._worktree_path(task_id)
-        branch_name = f"agent42/{task_id}"
+        branch_name = f"frood/{task_id}"
 
         if worktree_path.exists():
             logger.warning(f"Worktree already exists: {worktree_path}")
@@ -202,7 +202,7 @@ class WorktreeManager:
     async def push(self, task_id: str) -> str:
         """Push the task's branch to origin."""
         worktree_path = self._worktree_path(task_id)
-        branch_name = f"agent42/{task_id}"
+        branch_name = f"frood/{task_id}"
 
         proc = await asyncio.create_subprocess_exec(
             "git",
@@ -224,7 +224,7 @@ class WorktreeManager:
 
     async def merge_to_base(self, task_id: str, base_branch: str = "dev") -> bool:
         """Merge a task's branch into the base branch (in the main repo)."""
-        branch_name = f"agent42/{task_id}"
+        branch_name = f"frood/{task_id}"
 
         # Checkout base branch
         checkout = await asyncio.create_subprocess_exec(
@@ -246,7 +246,7 @@ class WorktreeManager:
             "--no-ff",
             branch_name,
             "-m",
-            f"Merge agent42/{task_id}: task complete",
+            f"Merge frood/{task_id}: task complete",
             cwd=str(self.repo_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

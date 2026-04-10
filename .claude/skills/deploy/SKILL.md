@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # /deploy
 
-Safe, repeatable deployment pipeline for Agent42. Handles the full workflow:
+Safe, repeatable deployment pipeline for Frood. Handles the full workflow:
 dev push → main merge → production deploy → health verification.
 
 ## Pre-flight Checks (MANDATORY)
@@ -83,13 +83,13 @@ git checkout dev
 ### Step 3: Deploy to production
 
 ```bash
-ssh agent42-prod "cd ~/agent42 && git pull origin main && sudo systemctl restart agent42"
+ssh frood-prod "cd ~/frood && git pull origin main && sudo systemctl restart frood"
 ```
 
 ### Step 4: Verify (wait 5 seconds for service startup)
 
 ```bash
-ssh agent42-prod "sleep 5 && sudo systemctl is-active agent42 && curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/health"
+ssh frood-prod "sleep 5 && sudo systemctl is-active frood && curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/health"
 ```
 
 **Expected:** `active` + `200`

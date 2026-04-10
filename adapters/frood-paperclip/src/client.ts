@@ -1,5 +1,5 @@
 /**
- * client.ts — Agent42Client: HTTP client wrapping all 4 sidecar endpoints.
+ * client.ts — FroodClient: HTTP client wrapping all 4 sidecar endpoints.
  *
  * Endpoints:
  *   POST /sidecar/execute  — Bearer auth, 30s timeout, NO retry
@@ -25,7 +25,7 @@ import type {
   MemoryStoreResponse,
 } from "./types.js";
 
-export class Agent42Client {
+export class FroodClient {
   constructor(
     private readonly baseUrl: string,
     private bearerToken: string,  // Mutable for token refresh (D-12)
@@ -57,7 +57,7 @@ export class Agent42Client {
     );
 
     if (!resp.ok) {
-      throw new Error(`Agent42Client.execute failed: HTTP ${resp.status}`);
+      throw new Error(`FroodClient.execute failed: HTTP ${resp.status}`);
     }
 
     return resp.json() as Promise<SidecarExecuteResponse>;
@@ -79,7 +79,7 @@ export class Agent42Client {
     );
 
     if (!resp.ok) {
-      throw new Error(`Agent42Client.health failed: HTTP ${resp.status}`);
+      throw new Error(`FroodClient.health failed: HTTP ${resp.status}`);
     }
 
     return resp.json() as Promise<SidecarHealthResponse>;
@@ -102,7 +102,7 @@ export class Agent42Client {
     );
 
     if (!resp.ok) {
-      throw new Error(`Agent42Client.memoryRecall failed: HTTP ${resp.status}`);
+      throw new Error(`FroodClient.memoryRecall failed: HTTP ${resp.status}`);
     }
 
     return resp.json() as Promise<MemoryRecallResponse>;
@@ -125,7 +125,7 @@ export class Agent42Client {
     );
 
     if (!resp.ok) {
-      throw new Error(`Agent42Client.memoryStore failed: HTTP ${resp.status}`);
+      throw new Error(`FroodClient.memoryStore failed: HTTP ${resp.status}`);
     }
 
     return resp.json() as Promise<MemoryStoreResponse>;

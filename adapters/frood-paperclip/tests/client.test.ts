@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { Agent42Client } from "../src/client.js";
+import { FroodClient } from "../src/client.js";
 import type {
   SidecarExecuteRequest,
   MemoryRecallRequest,
@@ -22,11 +22,11 @@ function makeMockResponse(status: number, body: unknown): Response {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("Agent42Client", () => {
-  let client: Agent42Client;
+describe("FroodClient", () => {
+  let client: FroodClient;
 
   beforeEach(() => {
-    client = new Agent42Client("http://localhost:8001", "test-token");
+    client = new FroodClient("http://localhost:8001", "test-token");
     vi.stubGlobal("fetch", vi.fn());
   });
 
@@ -270,7 +270,7 @@ describe("Agent42Client", () => {
       );
       vi.stubGlobal("fetch", mockFetch);
 
-      const clientShort = new Agent42Client("http://localhost:8001", "test-token");
+      const clientShort = new FroodClient("http://localhost:8001", "test-token");
       // Catch to prevent unhandled rejection — we'll inspect the signal separately
       const promise = clientShort.health().catch(() => null);
 

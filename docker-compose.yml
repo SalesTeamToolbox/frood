@@ -1,10 +1,10 @@
 version: "3.8"
 
-# Agent42 development stack with optional backends
+# Frood development stack with optional backends
 # Usage: cp .env.example .env && nano .env && docker compose up -d
 
 services:
-  agent42:
+  frood:
     build: .
     ports:
       - "8000:8000"
@@ -16,7 +16,7 @@ services:
       - QDRANT_URL=http://qdrant:6333
       - QDRANT_ENABLED=true
     volumes:
-      - agent42-data:/app/.agent42
+      - frood-data:/app/.frood
     depends_on:
       redis:
         condition: service_started
@@ -51,6 +51,6 @@ services:
       retries: 3
 
 volumes:
-  agent42-data:
+  frood-data:
   redis-data:
   qdrant-data:

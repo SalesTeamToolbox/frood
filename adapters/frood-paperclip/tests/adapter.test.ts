@@ -55,11 +55,11 @@ function makePaperclipCtx(
       id: overrides.agentId ?? "paperclip-agent-uuid",
       companyId: overrides.companyId ?? "company-001",
       name: "Test Agent",
-      adapterType: "agent42_local",
+      adapterType: "frood_local",
       adapterConfig: overrides.adapterConfig ?? {
         sidecarUrl: "http://localhost:8000",
         bearerToken: "test-token",
-        agentId: "agent42-uuid",
+        agentId: "frood-uuid",
         preferredProvider: "cerebras",
         memoryScope: "agent",
       },
@@ -119,7 +119,7 @@ describe("execute", () => {
       adapterConfig: {
         sidecarUrl: "http://localhost:8000",
         bearerToken: "tok",
-        agentId: "agent42-configured-uuid",
+        agentId: "frood-configured-uuid",
       },
       agentId: "paperclip-agent-uuid",
     });
@@ -127,7 +127,7 @@ describe("execute", () => {
 
     const call = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     const body = JSON.parse(call[1].body);
-    expect(body.agentId).toBe("agent42-configured-uuid");
+    expect(body.agentId).toBe("frood-configured-uuid");
   });
 
   it("falls back to ctx.agent.id when adapterConfig.agentId is absent (ADAPT-04)", async () => {
@@ -167,15 +167,15 @@ describe("execute", () => {
       adapterConfig: {
         sidecarUrl: "http://localhost:8000",
         bearerToken: "tok",
-        agentId: "agent42-uuid",
+        agentId: "frood-uuid",
       },
     });
     await execute(ctx);
 
     const call = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     const body = JSON.parse(call[1].body);
-    expect(body.agentId).toBe("agent42-uuid");
-    expect(body.adapterConfig.agentId).toBe("agent42-uuid");
+    expect(body.agentId).toBe("frood-uuid");
+    expect(body.adapterConfig.agentId).toBe("frood-uuid");
   });
 
   it("extracts wakeReason from ctx.context.wakeReason (ADAPT-03)", async () => {
@@ -329,11 +329,11 @@ describe("testEnvironment", () => {
   function makeTestCtx(config: Record<string, unknown> = {}): AdapterEnvironmentTestContext {
     return {
       companyId: "company-001",
-      adapterType: "agent42_local",
+      adapterType: "frood_local",
       config: {
         sidecarUrl: "http://localhost:8000",
         bearerToken: "test-token",
-        agentId: "agent42-uuid",
+        agentId: "frood-uuid",
         ...config,
       },
     } as unknown as AdapterEnvironmentTestContext;
@@ -347,7 +347,7 @@ describe("testEnvironment", () => {
     const result = await testEnvironment(ctx);
 
     expect(result.status).toBe("pass");
-    expect(result.adapterType).toBe("agent42_local");
+    expect(result.adapterType).toBe("frood_local");
     expect(typeof result.testedAt).toBe("string");
   });
 
@@ -366,7 +366,7 @@ describe("testEnvironment", () => {
   it("returns status:'fail' with error check when sidecarUrl is missing", async () => {
     const ctx: AdapterEnvironmentTestContext = {
       companyId: "company-001",
-      adapterType: "agent42_local",
+      adapterType: "frood_local",
       config: {},  // no sidecarUrl
     } as unknown as AdapterEnvironmentTestContext;
 
@@ -415,8 +415,8 @@ describe("testEnvironment", () => {
 // ---------------------------------------------------------------------------
 
 describe("default export", () => {
-  it("has type 'agent42_local'", () => {
-    expect(adapter.type).toBe("agent42_local");
+  it("has type 'frood_local'", () => {
+    expect(adapter.type).toBe("frood_local");
   });
 
   it("has execute as a function", () => {

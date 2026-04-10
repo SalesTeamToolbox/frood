@@ -6,10 +6,10 @@
  * Response shapes are simplified for agent consumption (D-16).
  */
 import type { PluginContext } from "@paperclipai/plugin-sdk";
-import type { Agent42Client } from "./client.js";
+import type { FroodClient } from "./client.js";
 import type { SubAgentResult, WaveOutput, WaveDefinition } from "./types.js";
 
-export function registerTools(ctx: PluginContext, client: Agent42Client): void {
+export function registerTools(ctx: PluginContext, client: FroodClient): void {
   // -- memory_recall (PLUG-02, D-12) --
   ctx.tools.register(
     "memory_recall",
@@ -162,7 +162,7 @@ export function registerTools(ctx: PluginContext, client: Agent42Client): void {
     "mcp_tool_proxy",
     {
       displayName: "MCP Tool Proxy",
-      description: "Invoke an Agent42 MCP tool through the sidecar proxy",
+      description: "Invoke a Frood MCP tool through the sidecar proxy",
       parametersSchema: {
         type: "object",
         properties: {

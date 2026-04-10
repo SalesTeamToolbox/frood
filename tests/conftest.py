@@ -1,4 +1,4 @@
-"""Shared test fixtures for Agent42 test suite.
+"""Shared test fixtures for Frood test suite.
 
 Provides reusable fixtures for sandbox, command filter, tool registry,
 and mock tools — eliminating duplication across test files.

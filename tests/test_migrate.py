@@ -1,4 +1,4 @@
-"""Tests for migrate.py — Migration CLI for Agent42 -> Paperclip."""
+"""Tests for migrate.py — Migration CLI for Frood -> Paperclip."""
 
 import asyncio
 import uuid
@@ -84,7 +84,7 @@ class TestBuildParser:
                 "c",
             ]
         )
-        assert args.collection_prefix == "agent42"
+        assert args.collection_prefix == "frood"
 
         # Custom collection prefix
         args2 = parser.parse_args(
@@ -162,9 +162,7 @@ class TestMigrateCollection:
 
         dst = MagicMock()
 
-        total = asyncio.run(
-            migrate_collection(src, dst, "frood_memory", "target-comp", 100, False)
-        )
+        total = asyncio.run(migrate_collection(src, dst, "frood_memory", "target-comp", 100, False))
 
         assert total == 3
         dst.upsert.assert_called_once()
@@ -183,9 +181,7 @@ class TestMigrateCollection:
 
         dst = MagicMock()
 
-        total = asyncio.run(
-            migrate_collection(src, dst, "frood_memory", "target-comp", 100, True)
-        )
+        total = asyncio.run(migrate_collection(src, dst, "frood_memory", "target-comp", 100, True))
 
         assert total == 1
         src.scroll.assert_called_once()

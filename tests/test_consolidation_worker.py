@@ -240,7 +240,7 @@ class TestRunConsolidation:
         """Build a mock QdrantStore for testing run_consolidation."""
         store = MagicMock()
         store.is_available = True
-        store._collection_name = MagicMock(side_effect=lambda s: f"agent42_{s}")
+        store._collection_name = MagicMock(side_effect=lambda s: f"frood_{s}")
         store.collection_count = MagicMock(side_effect=lambda s: 5)  # > 1 always
 
         # Mock _client with scroll (one page, empty points for simplicity)
@@ -302,7 +302,7 @@ class TestRunConsolidation:
         with tempfile.TemporaryDirectory() as tmpdir:
             store = MagicMock()
             store.is_available = True
-            store._collection_name = MagicMock(side_effect=lambda s: f"agent42_{s}")
+            store._collection_name = MagicMock(side_effect=lambda s: f"frood_{s}")
             store.collection_count = MagicMock(return_value=1)  # Only 1 point
             store._client = MagicMock()
 

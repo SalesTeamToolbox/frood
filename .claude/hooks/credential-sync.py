@@ -8,7 +8,7 @@ syncs the local ~/.claude/.credentials.json if needed. Runs silently
 in the background — only outputs to stderr on actual sync or errors.
 
 Requires SSH alias configured (reads from .env FROOD_SSH_ALIAS or
-defaults to 'agent42-prod').
+defaults to 'frood-prod').
 
 Hook protocol:
 - Receives JSON on stdin with hook_event_name, project_dir
@@ -43,7 +43,7 @@ def main():
                         ssh_alias = line.split("=", 1)[1].strip().strip("\"'")
                         break
     if not ssh_alias:
-        ssh_alias = "agent42-prod"
+        ssh_alias = "frood-prod"
 
     # Check if local credentials exist
     local_creds = os.path.expanduser("~/.claude/.credentials.json")

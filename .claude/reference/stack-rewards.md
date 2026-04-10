@@ -17,7 +17,7 @@ or modifying the rewards engine (`core/rewards_engine.py`).
 ### Supporting Libraries (Existing Dependencies — Already Installed)
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
-| `aiofiles` (existing) | >=23.0.0 | Persist tier overrides to `.agent42/rewards/overrides.json` | Admin override JSONL for human-readable backup alongside the SQLite audit log. Matches existing file-persistence patterns. |
+| `aiofiles` (existing) | >=23.0.0 | Persist tier overrides to `.frood/rewards/overrides.json` | Admin override JSONL for human-readable backup alongside the SQLite audit log. Matches existing file-persistence patterns. |
 | FastAPI (existing) | >=0.115.0 | REST endpoints for tier management dashboard | `/api/rewards/tiers`, `/api/rewards/agents/{id}/override`, `/api/rewards/status`. No new framework needed. |
 | WebSocket (existing) | >=12.0 | Push tier-change events to dashboard | When an agent promotes from Bronze to Silver, push a `tier_changed` event over the existing WS bus. Dashboard already subscribes to agent status events. |
 ### New Optional Dependency (Add Only If TTL Cache Complexity Warrants It)
@@ -51,13 +51,13 @@ or modifying the rewards engine (`core/rewards_engine.py`).
 | Append to aiosqlite `tier_history` | Separate JSONL audit file | JSONL is fine for human inspection; SQLite is better if you need to query "all agents that were Gold last week". Since aiosqlite is already a dep, prefer it. |
 | `asyncio.Semaphore` per-agent | Token bucket rate limiter library (e.g., `aiometer`) | Use a library only if you need continuous rate (requests-per-second) rather than concurrency (in-flight task count). Tier system needs concurrency caps, not rate caps. |
 | Pure Python weighted average | scikit-learn metrics | scikit-learn is a 300 MB ML library for a 2-float weighted sum. Never appropriate here. |
-| FastAPI endpoints on existing server | Separate microservice | Never. This is an additive feature on Agent42, not a separate service. |
+| FastAPI endpoints on existing server | Separate microservice | Never. This is an additive feature on Frood, not a separate service. |
 ## What NOT to Use
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
 | `asyncache` 0.3.1 | Unmaintained since November 2022; requires cachetools <=5.x, incompatible with cachetools 7.x | `cachetools-async` 0.0.5 (June 2025) or a Lock-guarded dict |
-| Redis Streams or Kafka for tier-change events | Enormous operational overhead for an in-process state change; Redis is optional in Agent42 | `asyncio.Queue` or direct WebSocket push via existing heartbeat/WS infrastructure |
-| Celery or task queue for score recomputation | Brings sync worker overhead and hard Redis dependency; Agent42 is async-native | `asyncio.create_task()` scheduled background recompute in the existing event loop |
+| Redis Streams or Kafka for tier-change events | Enormous operational overhead for an in-process state change; Redis is optional in Frood | `asyncio.Queue` or direct WebSocket push via existing heartbeat/WS infrastructure |
+| Celery or task queue for score recomputation | Brings sync worker overhead and hard Redis dependency; Frood is async-native | `asyncio.create_task()` scheduled background recompute in the existing event loop |
 | scikit-learn | 300 MB dependency for a weighted average of floats | Pure Python arithmetic |
 | Separate database for tier state | Tier is a derived view of effectiveness data; a separate DB creates drift risk | Compute from existing effectiveness store; cache in-memory; audit log in the existing aiosqlite DB |
 ## Stack Patterns by Variant
@@ -67,7 +67,7 @@ or modifying the rewards engine (`core/rewards_engine.py`).
 - No degradation — Redis is not required for this feature
 - Return `RewardTier.BRONZE` regardless of score
 - Surface a reason string: "Needs N more task completions to qualify for Silver"
-- Store override in `.agent42/rewards/overrides.json` (keyed by agent_id), persisted via `aiofiles`
+- Store override in `.frood/rewards/overrides.json` (keyed by agent_id), persisted via `aiofiles`
 - `get_agent_tier()` checks overrides first, bypasses score computation entirely
 - Dashboard displays "Admin Override: Gold" with a clear visual indicator
 ## Version Compatibility
@@ -78,7 +78,7 @@ or modifying the rewards engine (`core/rewards_engine.py`).
 | `asyncio.Semaphore` | Python 3.11+ stdlib | Cannot be resized — design semaphore lifecycle carefully (see Pattern 3). |
 | `enum.IntEnum` | Python 3.11+ stdlib | Supports `>=` and `<` comparisons directly, which plain `enum.Enum` does not. |
 ## Sources
-- Agent42 codebase — `core/rate_limiter.py` (sliding-window per-agent pattern), `core/config.py` (frozen dataclass settings pattern), `core/agent_manager.py` (AgentConfig dataclass), `requirements.txt` (existing deps) — HIGH confidence
+- Frood codebase — `core/rate_limiter.py` (sliding-window per-agent pattern), `core/config.py` (frozen dataclass settings pattern), `core/agent_manager.py` (AgentConfig dataclass), `requirements.txt` (existing deps) — HIGH confidence
 - [cachetools 7.0.5 on PyPI](https://pypi.org/project/cachetools/) — latest version verified 2026-03-22 — HIGH confidence
 - [asyncache 0.3.1 on PyPI](https://pypi.org/project/asyncache/) — confirmed unmaintained (last release November 2022), incompatible with cachetools 7.x — HIGH confidence
 - [cachetools-async 0.0.5 on PyPI](https://pypi.org/project/cachetools-async/) — confirmed active (released June 2025) — HIGH confidence

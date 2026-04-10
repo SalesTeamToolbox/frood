@@ -107,7 +107,7 @@ function ProviderHealthWidget({ context }) {
         display: "inline-block"
       } }),
       /* @__PURE__ */ jsxs2("span", { style: { fontWeight: 600 }, children: [
-        "Agent42 Sidecar: ",
+        "Frood Sidecar: ",
         data.status
       ] })
     ] }),
@@ -131,7 +131,42 @@ function ProviderHealthWidget({ context }) {
         /* @__PURE__ */ jsx2("div", { style: { fontSize: "14px" }, children: data.qdrant?.available ? "Available" : "Unavailable" })
       ] })
     ] }),
-    Object.keys(configured).length > 0 && /* @__PURE__ */ jsxs2("div", { style: { marginTop: "12px" }, children: [
+    data.providers_detail && data.providers_detail.length > 0 ? /* @__PURE__ */ jsxs2("div", { style: { marginTop: "12px" }, children: [
+      /* @__PURE__ */ jsx2("div", { style: { fontSize: "12px", fontWeight: 500, marginBottom: "4px", color: "#6b7280" }, children: "Providers" }),
+      /* @__PURE__ */ jsx2("div", { style: { display: "flex", flexDirection: "column", gap: "6px" }, children: data.providers_detail.map((p) => /* @__PURE__ */ jsxs2("div", { style: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "6px 10px",
+        borderRadius: "6px",
+        backgroundColor: p.configured ? "#f0fdf4" : "#fef2f2",
+        border: `1px solid ${p.configured ? "#bbf7d0" : "#fecaca"}`
+      }, children: [
+        /* @__PURE__ */ jsxs2("div", { style: { display: "flex", alignItems: "center", gap: "6px" }, children: [
+          /* @__PURE__ */ jsx2("span", { style: {
+            width: "8px",
+            height: "8px",
+            borderRadius: "50%",
+            display: "inline-block",
+            backgroundColor: p.connected ? "#22c55e" : p.configured ? "#f59e0b" : "#ef4444"
+          } }),
+          /* @__PURE__ */ jsx2("span", { style: { fontSize: "13px", fontWeight: 500 }, children: p.name })
+        ] }),
+        /* @__PURE__ */ jsxs2("div", { style: { display: "flex", alignItems: "center", gap: "8px" }, children: [
+          p.model_count > 0 && /* @__PURE__ */ jsxs2("span", { style: { fontSize: "11px", color: "#6b7280" }, children: [
+            p.model_count,
+            " models"
+          ] }),
+          /* @__PURE__ */ jsx2("span", { style: {
+            fontSize: "11px",
+            padding: "1px 6px",
+            borderRadius: "3px",
+            backgroundColor: p.configured ? "#dcfce7" : "#fee2e2",
+            color: p.configured ? "#166534" : "#991b1b"
+          }, children: p.connected ? "connected" : p.configured ? "configured" : "not configured" })
+        ] })
+      ] }, p.name)) })
+    ] }) : Object.keys(configured).length > 0 ? /* @__PURE__ */ jsxs2("div", { style: { marginTop: "12px" }, children: [
       /* @__PURE__ */ jsx2("div", { style: { fontSize: "12px", fontWeight: 500, marginBottom: "4px", color: "#6b7280" }, children: "Providers" }),
       /* @__PURE__ */ jsx2("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" }, children: Object.entries(configured).map(([name, active]) => /* @__PURE__ */ jsx2("span", { style: {
         padding: "2px 8px",
@@ -140,7 +175,7 @@ function ProviderHealthWidget({ context }) {
         backgroundColor: active ? "#dcfce7" : "#fee2e2",
         color: active ? "#166534" : "#991b1b"
       }, children: name }, name)) })
-    ] })
+    ] }) : null
   ] });
 }
 
@@ -342,7 +377,7 @@ function WorkspacePage({ context }) {
   );
   return /* @__PURE__ */ jsxs5("div", { style: { display: "flex", flexDirection: "column", height: "100%", fontFamily: "monospace", backgroundColor: "#1e1e1e", color: "#d4d4d4" }, children: [
     /* @__PURE__ */ jsxs5("div", { style: { padding: "8px 12px", borderBottom: "1px solid #333", display: "flex", justifyContent: "space-between", alignItems: "center" }, children: [
-      /* @__PURE__ */ jsx5("span", { style: { fontWeight: 600, fontSize: "14px" }, children: "Agent42 Terminal" }),
+      /* @__PURE__ */ jsx5("span", { style: { fontWeight: 600, fontSize: "14px" }, children: "Frood Terminal" }),
       /* @__PURE__ */ jsx5("span", { style: { fontSize: "12px", color: connected ? "#22c55e" : "#ef4444" }, children: connected ? "Connected" : "Disconnected" })
     ] }),
     /* @__PURE__ */ jsxs5("div", { ref: outputRef, style: { flex: 1, overflow: "auto", padding: "8px 12px", fontSize: "13px", lineHeight: "1.5", whiteSpace: "pre-wrap" }, children: [
@@ -405,7 +440,7 @@ function AppsPage({ context }) {
       /* @__PURE__ */ jsx6("h2", { style: { margin: 0, fontSize: "18px", fontWeight: 600 }, children: "Sandboxed Apps" }),
       /* @__PURE__ */ jsx6("button", { onClick: refresh, style: { padding: "4px 12px", borderRadius: "4px", border: "1px solid #d1d5db", background: "white", cursor: "pointer", fontSize: "12px" }, children: "Refresh" })
     ] }),
-    apps.length === 0 && /* @__PURE__ */ jsx6("p", { style: { color: "#6b7280" }, children: "No apps found. Create apps through the Agent42 workspace." }),
+    apps.length === 0 && /* @__PURE__ */ jsx6("p", { style: { color: "#6b7280" }, children: "No apps found. Create apps through the Frood workspace." }),
     /* @__PURE__ */ jsx6("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "12px" }, children: apps.map((app) => /* @__PURE__ */ jsxs6("div", { style: { padding: "12px", borderRadius: "8px", border: "1px solid #e5e7eb", backgroundColor: "#fafafa" }, children: [
       /* @__PURE__ */ jsxs6("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }, children: [
         /* @__PURE__ */ jsx6("span", { style: { fontWeight: 600, fontSize: "14px" }, children: app.name || app.id }),
@@ -492,14 +527,56 @@ function ToolsSkillsTab({ context }) {
 import { usePluginData as usePluginData7, usePluginAction as usePluginAction3 } from "@paperclipai/plugin-sdk/ui";
 import { useState as useState3, useCallback as useCallback2 } from "react";
 import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
-function SettingsPage({ context }) {
-  const { data, loading, error, refresh } = usePluginData7("agent42-settings", {
+var KEY_HELP = {
+  OPENROUTER_API_KEY: "OpenRouter aggregates 100+ models. Get key at openrouter.ai/keys",
+  OPENAI_API_KEY: "OpenAI GPT models. Get key at platform.openai.com/api-keys",
+  ANTHROPIC_API_KEY: "Anthropic Claude models. Get key at console.anthropic.com/settings/keys",
+  SYNTHETIC_API_KEY: "Synthetic.new Anthropic-compatible API. Get key at synthetic.new/dashboard",
+  DEEPSEEK_API_KEY: "DeepSeek models. Get key at platform.deepseek.com",
+  GEMINI_API_KEY: "Google Gemini models. Get key at aistudio.google.com/apikey",
+  CEREBRAS_API_KEY: "Cerebras fast inference. Get key at cloud.cerebras.ai",
+  REPLICATE_API_TOKEN: "Replicate media generation. Get token at replicate.com/account/api-tokens",
+  LUMA_API_KEY: "Luma AI video generation. Get key at lumalabs.ai",
+  BRAVE_API_KEY: "Brave Search API. Get key at api.search.brave.com",
+  GITHUB_TOKEN: "GitHub API access. Create at github.com/settings/tokens"
+};
+var TABS = [
+  { id: "apikeys", label: "API Keys" },
+  { id: "security", label: "Security" },
+  { id: "orchestrator", label: "Orchestrator" },
+  { id: "storage", label: "Storage & Paths" },
+  { id: "memory", label: "Memory & Learning" },
+  { id: "rewards", label: "Rewards" }
+];
+var cardStyle = {
+  padding: "10px 12px",
+  borderRadius: "6px",
+  border: "1px solid #e5e7eb"
+};
+function SourceBadge({ source }) {
+  if (source === "none") return null;
+  const bg = source === "admin" ? "#dbeafe" : "#f3f4f6";
+  const color = source === "admin" ? "#1e40af" : "#374151";
+  return /* @__PURE__ */ jsx8("span", { style: {
+    display: "inline-block",
+    padding: "1px 6px",
+    borderRadius: "4px",
+    fontSize: "11px",
+    fontWeight: 500,
+    background: bg,
+    color,
+    marginLeft: "6px"
+  }, children: source });
+}
+function ApiKeysTab({ context }) {
+  const { data, loading, error, refresh } = usePluginData7("frood-settings", {
     companyId: context.companyId ?? void 0
   });
-  const updateSettings = usePluginAction3("update-agent42-settings");
+  const updateSettings = usePluginAction3("update-frood-settings");
   const [editingKey, setEditingKey] = useState3(null);
   const [editValue, setEditValue] = useState3("");
   const [saving, setSaving] = useState3(false);
+  const [visibleKeys, setVisibleKeys] = useState3(/* @__PURE__ */ new Set());
   const handleSave = useCallback2(async () => {
     if (!editingKey) return;
     setSaving(true);
@@ -512,68 +589,340 @@ function SettingsPage({ context }) {
     }
     setSaving(false);
   }, [editingKey, editValue, updateSettings, refresh]);
-  if (loading) return /* @__PURE__ */ jsx8("div", { style: { padding: "16px", fontFamily: "system-ui, sans-serif" }, children: "Loading settings..." });
-  if (error) return /* @__PURE__ */ jsxs8("div", { style: { padding: "16px", color: "#ef4444", fontFamily: "system-ui, sans-serif" }, children: [
+  const handleClear = useCallback2(async (name) => {
+    setSaving(true);
+    try {
+      await updateSettings({ key_name: name, value: "" });
+      refresh();
+    } catch {
+    }
+    setSaving(false);
+  }, [updateSettings, refresh]);
+  const toggleVisibility = useCallback2((name) => {
+    setVisibleKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }, []);
+  if (loading) return /* @__PURE__ */ jsx8("div", { style: { padding: "8px", color: "#6b7280", fontSize: "13px" }, children: "Loading settings..." });
+  if (error) return /* @__PURE__ */ jsxs8("div", { style: { padding: "8px", color: "#ef4444", fontSize: "13px" }, children: [
     "Error: ",
     error.message
   ] });
   const keys = data?.keys ?? [];
-  return /* @__PURE__ */ jsxs8("div", { style: { padding: "16px", fontFamily: "system-ui, sans-serif", maxWidth: "600px" }, children: [
-    /* @__PURE__ */ jsx8("h2", { style: { margin: "0 0 8px", fontSize: "18px", fontWeight: 600 }, children: "Agent42 Settings" }),
-    /* @__PURE__ */ jsx8("p", { style: { margin: "0 0 16px", fontSize: "13px", color: "#6b7280" }, children: "Manage API keys and configuration for the Agent42 sidecar. Changes take effect immediately." }),
-    /* @__PURE__ */ jsx8("div", { style: { display: "flex", flexDirection: "column", gap: "8px" }, children: keys.map((k) => /* @__PURE__ */ jsxs8("div", { style: { padding: "10px 12px", borderRadius: "6px", border: "1px solid #e5e7eb" }, children: [
-      /* @__PURE__ */ jsxs8("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" }, children: [
-        /* @__PURE__ */ jsxs8("div", { children: [
-          /* @__PURE__ */ jsx8("span", { style: { fontWeight: 500, fontSize: "13px", fontFamily: "monospace" }, children: k.name }),
-          /* @__PURE__ */ jsx8("span", { style: { marginLeft: "8px", fontSize: "12px", color: k.is_set ? "#22c55e" : "#d1d5db" }, children: k.is_set ? "Set" : "Not set" })
+  return /* @__PURE__ */ jsxs8("div", { children: [
+    /* @__PURE__ */ jsx8("h3", { style: { fontSize: "15px", fontWeight: 600, margin: "0 0 12px" }, children: "API Keys" }),
+    /* @__PURE__ */ jsx8("p", { style: { fontSize: "13px", color: "#6b7280", margin: "0 0 12px" }, children: "Manage API keys for LLM providers and services. Keys are stored securely on the Frood sidecar." }),
+    /* @__PURE__ */ jsxs8("div", { style: { display: "flex", flexDirection: "column", gap: "8px" }, children: [
+      keys.map((k) => /* @__PURE__ */ jsxs8("div", { style: cardStyle, children: [
+        /* @__PURE__ */ jsxs8("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" }, children: [
+          /* @__PURE__ */ jsxs8("div", { children: [
+            /* @__PURE__ */ jsx8("span", { style: { fontWeight: 500, fontSize: "13px", fontFamily: "monospace" }, children: k.name }),
+            /* @__PURE__ */ jsx8(SourceBadge, { source: k.source }),
+            /* @__PURE__ */ jsx8("span", { style: { marginLeft: "8px", fontSize: "12px", color: k.is_set ? "#22c55e" : "#d1d5db" }, children: k.is_set ? "Set" : "Not set" }),
+            KEY_HELP[k.name] && /* @__PURE__ */ jsx8("div", { style: { fontSize: "12px", color: "#9ca3af", marginTop: "2px" }, children: KEY_HELP[k.name] })
+          ] }),
+          editingKey !== k.name && /* @__PURE__ */ jsxs8("div", { style: { display: "flex", gap: "4px", flexShrink: 0 }, children: [
+            k.is_set && /* @__PURE__ */ jsx8(
+              "button",
+              {
+                onClick: () => toggleVisibility(k.name),
+                style: { padding: "2px 8px", borderRadius: "4px", border: "1px solid #d1d5db", background: "white", cursor: "pointer", fontSize: "12px" },
+                children: visibleKeys.has(k.name) ? "Hide" : "Show"
+              }
+            ),
+            /* @__PURE__ */ jsx8(
+              "button",
+              {
+                onClick: () => {
+                  setEditingKey(k.name);
+                  setEditValue("");
+                },
+                style: { padding: "2px 8px", borderRadius: "4px", border: "1px solid #d1d5db", background: "white", cursor: "pointer", fontSize: "12px" },
+                children: "Edit"
+              }
+            ),
+            k.is_set && k.source === "admin" && /* @__PURE__ */ jsx8(
+              "button",
+              {
+                onClick: () => handleClear(k.name),
+                disabled: saving,
+                style: { padding: "2px 8px", borderRadius: "4px", border: "1px solid #fca5a5", background: "#fef2f2", color: "#dc2626", cursor: "pointer", fontSize: "12px", opacity: saving ? 0.5 : 1 },
+                children: "Clear"
+              }
+            )
+          ] })
         ] }),
-        editingKey !== k.name && /* @__PURE__ */ jsx8(
-          "button",
-          {
-            onClick: () => {
-              setEditingKey(k.name);
-              setEditValue("");
-            },
-            style: { padding: "2px 8px", borderRadius: "4px", border: "1px solid #d1d5db", background: "white", cursor: "pointer", fontSize: "12px" },
-            children: "Edit"
-          }
-        )
+        k.masked_value && editingKey !== k.name && visibleKeys.has(k.name) && /* @__PURE__ */ jsx8("div", { style: { fontSize: "12px", color: "#9ca3af", fontFamily: "monospace", marginTop: "4px" }, children: k.masked_value }),
+        editingKey === k.name && /* @__PURE__ */ jsxs8("div", { style: { marginTop: "8px", display: "flex", gap: "6px" }, children: [
+          /* @__PURE__ */ jsx8(
+            "input",
+            {
+              type: "password",
+              value: editValue,
+              onChange: (e) => setEditValue(e.target.value),
+              placeholder: "Enter new value...",
+              style: { flex: 1, padding: "4px 8px", borderRadius: "4px", border: "1px solid #d1d5db", fontSize: "13px", fontFamily: "monospace" }
+            }
+          ),
+          /* @__PURE__ */ jsx8(
+            "button",
+            {
+              onClick: handleSave,
+              disabled: saving,
+              style: { padding: "4px 10px", borderRadius: "4px", border: "none", background: "#3b82f6", color: "white", cursor: "pointer", fontSize: "12px", opacity: saving ? 0.5 : 1 },
+              children: "Save"
+            }
+          ),
+          /* @__PURE__ */ jsx8(
+            "button",
+            {
+              onClick: () => {
+                setEditingKey(null);
+                setEditValue("");
+              },
+              style: { padding: "4px 10px", borderRadius: "4px", border: "1px solid #d1d5db", background: "white", cursor: "pointer", fontSize: "12px" },
+              children: "Cancel"
+            }
+          )
+        ] })
+      ] }, k.name)),
+      keys.length === 0 && /* @__PURE__ */ jsx8("p", { style: { color: "#6b7280", fontSize: "13px" }, children: "No configurable settings available." })
+    ] })
+  ] });
+}
+function SecurityTab() {
+  return /* @__PURE__ */ jsxs8("div", { children: [
+    /* @__PURE__ */ jsx8("h3", { style: { fontSize: "15px", fontWeight: 600, margin: "0 0 12px" }, children: "Security" }),
+    /* @__PURE__ */ jsx8("div", { style: { padding: "12px", borderRadius: "6px", background: "#f0f9ff", border: "1px solid #bae6fd", marginBottom: "16px" }, children: /* @__PURE__ */ jsx8("p", { style: { margin: 0, fontSize: "13px", color: "#0369a1" }, children: "Authentication is managed by Paperclip. Password and JWT settings are not applicable in this mode." }) }),
+    /* @__PURE__ */ jsx8("p", { style: { fontSize: "13px", color: "#6b7280" }, children: "Sandbox, CORS, and rate limit settings are controlled via environment variables on the Frood sidecar. Contact your Frood administrator to adjust these settings." })
+  ] });
+}
+function OrchestratorTab() {
+  return /* @__PURE__ */ jsxs8("div", { children: [
+    /* @__PURE__ */ jsx8("h3", { style: { fontSize: "15px", fontWeight: 600, margin: "0 0 12px" }, children: "Orchestrator" }),
+    /* @__PURE__ */ jsx8("div", { style: { padding: "12px", borderRadius: "6px", background: "#f9fafb", border: "1px solid #e5e7eb", marginBottom: "16px" }, children: /* @__PURE__ */ jsx8("p", { style: { margin: 0, fontSize: "13px", color: "#6b7280" }, children: "Orchestrator settings are managed via Frood environment configuration. These include MAX_CONCURRENT_AGENTS, MAX_DAILY_API_SPEND_USD, and MODEL_ROUTING_POLICY." }) }),
+    /* @__PURE__ */ jsxs8("p", { style: { fontSize: "13px", color: "#6b7280" }, children: [
+      "To adjust orchestrator settings, update the ",
+      /* @__PURE__ */ jsx8("code", { style: { fontFamily: "monospace", background: "#f3f4f6", padding: "1px 4px", borderRadius: "3px" }, children: ".env" }),
+      " file on the Frood sidecar and restart the service."
+    ] })
+  ] });
+}
+function StorageTab() {
+  return /* @__PURE__ */ jsxs8("div", { children: [
+    /* @__PURE__ */ jsx8("h3", { style: { fontSize: "15px", fontWeight: 600, margin: "0 0 12px" }, children: "Storage & Paths" }),
+    /* @__PURE__ */ jsx8("div", { style: { padding: "12px", borderRadius: "6px", background: "#f9fafb", border: "1px solid #e5e7eb", marginBottom: "16px" }, children: /* @__PURE__ */ jsx8("p", { style: { margin: 0, fontSize: "13px", color: "#6b7280" }, children: "Storage paths are configured via Frood environment variables. These include MEMORY_DIR, SESSIONS_DIR, OUTPUTS_DIR, and TEMPLATES_DIR." }) }),
+    /* @__PURE__ */ jsx8("p", { style: { fontSize: "13px", color: "#6b7280" }, children: "To view detailed storage backend status (Qdrant, Redis, CC sync), use the standalone Frood dashboard." })
+  ] });
+}
+function MemoryTab({ context: _context }) {
+  const { data: memStats, loading: memLoading, refresh: refreshStats } = usePluginData7("memory-stats", {});
+  const { data: storageStatus, loading: storageLoading } = usePluginData7("storage-status", {});
+  const purgeMemory = usePluginAction3("purge-memory");
+  const updateSettings = usePluginAction3("update-frood-settings");
+  const [confirmPurge, setConfirmPurge] = useState3(null);
+  const [purgeInput, setPurgeInput] = useState3("");
+  const [purging, setPurging] = useState3(false);
+  const [togglingLearning, setTogglingLearning] = useState3(false);
+  const handlePurge = useCallback2(async () => {
+    if (!confirmPurge || purgeInput !== "PURGE") return;
+    setPurging(true);
+    try {
+      await purgeMemory({ collection: confirmPurge });
+      setConfirmPurge(null);
+      setPurgeInput("");
+      refreshStats();
+    } catch {
+    }
+    setPurging(false);
+  }, [confirmPurge, purgeInput, purgeMemory, refreshStats]);
+  const handleToggleLearning = useCallback2(async (enabled) => {
+    setTogglingLearning(true);
+    try {
+      await updateSettings({ key_name: "LEARNING_ENABLED", value: enabled ? "true" : "false" });
+    } catch {
+    }
+    setTogglingLearning(false);
+  }, [updateSettings]);
+  const statCardStyle = {
+    padding: "16px",
+    borderRadius: "8px",
+    border: "1px solid #e5e7eb",
+    textAlign: "center"
+  };
+  return /* @__PURE__ */ jsxs8("div", { children: [
+    /* @__PURE__ */ jsx8("h3", { style: { fontSize: "15px", fontWeight: 600, margin: "0 0 12px" }, children: "Memory & Learning" }),
+    /* @__PURE__ */ jsx8("h4", { style: { fontSize: "13px", fontWeight: 600, margin: "0 0 8px", color: "#374151" }, children: "Memory Statistics (24h)" }),
+    memLoading ? /* @__PURE__ */ jsx8("p", { style: { fontSize: "13px", color: "#9ca3af", marginBottom: "16px" }, children: "Loading memory stats..." }) : memStats ? /* @__PURE__ */ jsxs8("div", { style: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "20px" }, children: [
+      /* @__PURE__ */ jsxs8("div", { style: statCardStyle, children: [
+        /* @__PURE__ */ jsx8("div", { style: { fontSize: "1.5rem", fontWeight: 700, color: "#111827" }, children: memStats.recall_count }),
+        /* @__PURE__ */ jsx8("div", { style: { fontSize: "12px", color: "#6b7280", marginTop: "4px" }, children: "Recalls (24h)" })
       ] }),
-      k.masked_value && editingKey !== k.name && /* @__PURE__ */ jsx8("div", { style: { fontSize: "12px", color: "#9ca3af", fontFamily: "monospace", marginTop: "4px" }, children: k.masked_value }),
-      editingKey === k.name && /* @__PURE__ */ jsxs8("div", { style: { marginTop: "8px", display: "flex", gap: "6px" }, children: [
-        /* @__PURE__ */ jsx8(
-          "input",
-          {
-            type: "password",
-            value: editValue,
-            onChange: (e) => setEditValue(e.target.value),
-            placeholder: "Enter new value...",
-            style: { flex: 1, padding: "4px 8px", borderRadius: "4px", border: "1px solid #d1d5db", fontSize: "13px", fontFamily: "monospace" }
-          }
-        ),
-        /* @__PURE__ */ jsx8(
-          "button",
-          {
-            onClick: handleSave,
-            disabled: saving,
-            style: { padding: "4px 10px", borderRadius: "4px", border: "none", background: "#3b82f6", color: "white", cursor: "pointer", fontSize: "12px", opacity: saving ? 0.5 : 1 },
-            children: "Save"
-          }
-        ),
-        /* @__PURE__ */ jsx8(
-          "button",
-          {
-            onClick: () => {
-              setEditingKey(null);
-              setEditValue("");
-            },
-            style: { padding: "4px 10px", borderRadius: "4px", border: "1px solid #d1d5db", background: "white", cursor: "pointer", fontSize: "12px" },
-            children: "Cancel"
-          }
-        )
+      /* @__PURE__ */ jsxs8("div", { style: statCardStyle, children: [
+        /* @__PURE__ */ jsx8("div", { style: { fontSize: "1.5rem", fontWeight: 700, color: "#111827" }, children: memStats.learn_count }),
+        /* @__PURE__ */ jsx8("div", { style: { fontSize: "12px", color: "#6b7280", marginTop: "4px" }, children: "Learnings (24h)" })
+      ] }),
+      /* @__PURE__ */ jsxs8("div", { style: statCardStyle, children: [
+        /* @__PURE__ */ jsx8("div", { style: { fontSize: "1.5rem", fontWeight: 700, color: "#111827" }, children: memStats.error_count }),
+        /* @__PURE__ */ jsx8("div", { style: { fontSize: "12px", color: "#6b7280", marginTop: "4px" }, children: "Errors (24h)" })
+      ] }),
+      /* @__PURE__ */ jsxs8("div", { style: statCardStyle, children: [
+        /* @__PURE__ */ jsxs8("div", { style: { fontSize: "1.5rem", fontWeight: 700, color: "#111827" }, children: [
+          Math.round(memStats.avg_latency_ms),
+          " ms"
+        ] }),
+        /* @__PURE__ */ jsx8("div", { style: { fontSize: "12px", color: "#6b7280", marginTop: "4px" }, children: "Avg Latency" })
       ] })
-    ] }, k.name)) }),
-    keys.length === 0 && /* @__PURE__ */ jsx8("p", { style: { color: "#6b7280", fontSize: "13px" }, children: "No configurable settings available." })
+    ] }) : /* @__PURE__ */ jsx8("p", { style: { fontSize: "13px", color: "#9ca3af", marginBottom: "16px" }, children: "Memory stats unavailable." }),
+    /* @__PURE__ */ jsxs8("div", { style: { marginBottom: "20px" }, children: [
+      /* @__PURE__ */ jsx8("h4", { style: { fontSize: "13px", fontWeight: 600, margin: "0 0 8px", color: "#374151" }, children: "Learning Extraction" }),
+      /* @__PURE__ */ jsxs8("div", { style: cardStyle, children: [
+        /* @__PURE__ */ jsxs8("label", { style: { display: "flex", alignItems: "center", gap: "8px", cursor: togglingLearning ? "not-allowed" : "pointer" }, children: [
+          /* @__PURE__ */ jsx8(
+            "input",
+            {
+              type: "checkbox",
+              checked: storageStatus?.learning_enabled ?? true,
+              onChange: (e) => handleToggleLearning(e.target.checked),
+              disabled: togglingLearning || storageLoading,
+              style: { width: "16px", height: "16px" }
+            }
+          ),
+          /* @__PURE__ */ jsx8("span", { style: { fontSize: "13px" }, children: "Enable automatic learning extraction from agent runs" })
+        ] }),
+        /* @__PURE__ */ jsx8("p", { style: { fontSize: "12px", color: "#9ca3af", margin: "6px 0 0" }, children: "When enabled, Frood extracts learnings from completed agent runs and stores them in the knowledge base for future recall." })
+      ] })
+    ] }),
+    storageStatus && /* @__PURE__ */ jsxs8("div", { style: { marginBottom: "20px" }, children: [
+      /* @__PURE__ */ jsx8("h4", { style: { fontSize: "13px", fontWeight: 600, margin: "0 0 8px", color: "#374151" }, children: "Storage Backend" }),
+      /* @__PURE__ */ jsx8("div", { style: cardStyle, children: /* @__PURE__ */ jsxs8("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" }, children: [
+        /* @__PURE__ */ jsxs8("span", { style: { padding: "4px 8px", borderRadius: "4px", fontSize: "12px", background: "#dbeafe", color: "#1e40af" }, children: [
+          "Mode: ",
+          storageStatus.mode
+        ] }),
+        /* @__PURE__ */ jsxs8("span", { style: {
+          padding: "4px 8px",
+          borderRadius: "4px",
+          fontSize: "12px",
+          background: storageStatus.qdrant_available ? "#dcfce7" : "#fef2f2",
+          color: storageStatus.qdrant_available ? "#166534" : "#991b1b"
+        }, children: [
+          "Qdrant: ",
+          storageStatus.qdrant_available ? "available" : "unavailable"
+        ] })
+      ] }) })
+    ] }),
+    /* @__PURE__ */ jsxs8("div", { style: { marginBottom: "20px" }, children: [
+      /* @__PURE__ */ jsx8("h4", { style: { fontSize: "13px", fontWeight: 600, margin: "0 0 4px", color: "#dc2626" }, children: "Danger Zone" }),
+      /* @__PURE__ */ jsx8("p", { style: { fontSize: "12px", color: "#9ca3af", margin: "0 0 8px" }, children: "Purge operations are irreversible. All entries in the selected collection will be permanently deleted." }),
+      confirmPurge ? /* @__PURE__ */ jsxs8("div", { style: { ...cardStyle, border: "1px solid #fca5a5", background: "#fef2f2" }, children: [
+        /* @__PURE__ */ jsxs8("p", { style: { fontSize: "13px", color: "#dc2626", margin: "0 0 8px" }, children: [
+          "This will permanently delete ALL entries in the ",
+          /* @__PURE__ */ jsx8("strong", { children: confirmPurge }),
+          " collection. This action is irreversible."
+        ] }),
+        /* @__PURE__ */ jsxs8("p", { style: { fontSize: "13px", margin: "0 0 8px" }, children: [
+          "Type ",
+          /* @__PURE__ */ jsx8("strong", { children: "PURGE" }),
+          " to confirm:"
+        ] }),
+        /* @__PURE__ */ jsxs8("div", { style: { display: "flex", gap: "6px" }, children: [
+          /* @__PURE__ */ jsx8(
+            "input",
+            {
+              type: "text",
+              value: purgeInput,
+              onChange: (e) => setPurgeInput(e.target.value),
+              placeholder: "Type PURGE to confirm",
+              style: { flex: 1, padding: "4px 8px", borderRadius: "4px", border: "1px solid #fca5a5", fontSize: "13px" }
+            }
+          ),
+          /* @__PURE__ */ jsx8(
+            "button",
+            {
+              onClick: handlePurge,
+              disabled: purgeInput !== "PURGE" || purging,
+              style: {
+                padding: "4px 10px",
+                borderRadius: "4px",
+                border: "none",
+                background: purgeInput === "PURGE" ? "#dc2626" : "#d1d5db",
+                color: "white",
+                cursor: purgeInput === "PURGE" ? "pointer" : "not-allowed",
+                fontSize: "12px",
+                opacity: purging ? 0.5 : 1
+              },
+              children: purging ? "Purging..." : "Confirm Purge"
+            }
+          ),
+          /* @__PURE__ */ jsx8(
+            "button",
+            {
+              onClick: () => {
+                setConfirmPurge(null);
+                setPurgeInput("");
+              },
+              style: { padding: "4px 10px", borderRadius: "4px", border: "1px solid #d1d5db", background: "white", cursor: "pointer", fontSize: "12px" },
+              children: "Cancel"
+            }
+          )
+        ] })
+      ] }) : /* @__PURE__ */ jsx8("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" }, children: ["memory", "knowledge", "history"].map((col) => /* @__PURE__ */ jsxs8(
+        "button",
+        {
+          onClick: () => {
+            setConfirmPurge(col);
+            setPurgeInput("");
+          },
+          style: { padding: "6px 12px", borderRadius: "4px", border: "1px solid #fca5a5", background: "#fef2f2", color: "#dc2626", cursor: "pointer", fontSize: "13px" },
+          children: [
+            "Purge ",
+            col.charAt(0).toUpperCase() + col.slice(1)
+          ]
+        },
+        col
+      )) })
+    ] })
+  ] });
+}
+function RewardsTab() {
+  return /* @__PURE__ */ jsxs8("div", { children: [
+    /* @__PURE__ */ jsx8("h3", { style: { fontSize: "15px", fontWeight: 600, margin: "0 0 12px" }, children: "Rewards" }),
+    /* @__PURE__ */ jsx8("div", { style: { padding: "12px", borderRadius: "6px", background: "#f9fafb", border: "1px solid #e5e7eb", marginBottom: "16px" }, children: /* @__PURE__ */ jsx8("p", { style: { margin: 0, fontSize: "13px", color: "#6b7280" }, children: "Rewards and tier configuration is managed via the Frood platform. Use the standalone Frood dashboard to view tier distribution and enable or disable the rewards system." }) })
+  ] });
+}
+function SettingsPage({ context }) {
+  const [activeTab, setActiveTab] = useState3("apikeys");
+  return /* @__PURE__ */ jsxs8("div", { style: { padding: "16px", fontFamily: "system-ui, sans-serif", maxWidth: "800px" }, children: [
+    /* @__PURE__ */ jsx8("h2", { style: { margin: "0 0 8px", fontSize: "18px", fontWeight: 600 }, children: "Frood Settings" }),
+    /* @__PURE__ */ jsx8("p", { style: { margin: "0 0 16px", fontSize: "13px", color: "#6b7280" }, children: "Manage Frood sidecar configuration. Changes take effect immediately." }),
+    /* @__PURE__ */ jsx8("div", { style: { display: "flex", gap: "4px", borderBottom: "1px solid #e5e7eb", marginBottom: "16px", flexWrap: "wrap" }, children: TABS.map((tab) => /* @__PURE__ */ jsx8(
+      "button",
+      {
+        onClick: () => setActiveTab(tab.id),
+        style: {
+          padding: "8px 16px",
+          border: "none",
+          background: "none",
+          cursor: "pointer",
+          fontSize: "13px",
+          fontWeight: activeTab === tab.id ? 600 : 400,
+          color: activeTab === tab.id ? "#3b82f6" : "#6b7280",
+          borderBottom: activeTab === tab.id ? "2px solid #3b82f6" : "2px solid transparent"
+        },
+        children: tab.label
+      },
+      tab.id
+    )) }),
+    activeTab === "apikeys" && /* @__PURE__ */ jsx8(ApiKeysTab, { context }),
+    activeTab === "security" && /* @__PURE__ */ jsx8(SecurityTab, {}),
+    activeTab === "orchestrator" && /* @__PURE__ */ jsx8(OrchestratorTab, {}),
+    activeTab === "storage" && /* @__PURE__ */ jsx8(StorageTab, {}),
+    activeTab === "memory" && /* @__PURE__ */ jsx8(MemoryTab, { context }),
+    activeTab === "rewards" && /* @__PURE__ */ jsx8(RewardsTab, {})
   ] });
 }
 
@@ -581,10 +930,10 @@ function SettingsPage({ context }) {
 import { jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
 function WorkspaceNavEntry({ context }) {
   return /* @__PURE__ */ jsxs9("div", { style: { padding: "8px 0", fontFamily: "system-ui, sans-serif" }, children: [
-    /* @__PURE__ */ jsx9("div", { style: { fontSize: "11px", fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", padding: "4px 12px" }, children: "Agent42" }),
+    /* @__PURE__ */ jsx9("div", { style: { fontSize: "11px", fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", padding: "4px 12px" }, children: "Frood" }),
     /* @__PURE__ */ jsxs9("div", { style: { display: "flex", flexDirection: "column", gap: "2px" }, children: [
-      /* @__PURE__ */ jsx9("a", { href: `/plugins/agent42.paperclip-plugin/workspace-terminal`, style: { padding: "6px 12px", fontSize: "13px", color: "#374151", textDecoration: "none", borderRadius: "4px", display: "block" }, children: "Terminal" }),
-      /* @__PURE__ */ jsx9("a", { href: `/plugins/agent42.paperclip-plugin/sandboxed-apps`, style: { padding: "6px 12px", fontSize: "13px", color: "#374151", textDecoration: "none", borderRadius: "4px", display: "block" }, children: "Apps" })
+      /* @__PURE__ */ jsx9("a", { href: `/plugins/frood.paperclip-plugin/workspace-terminal`, style: { padding: "6px 12px", fontSize: "13px", color: "#374151", textDecoration: "none", borderRadius: "4px", display: "block" }, children: "Terminal" }),
+      /* @__PURE__ */ jsx9("a", { href: `/plugins/frood.paperclip-plugin/sandboxed-apps`, style: { padding: "6px 12px", fontSize: "13px", color: "#374151", textDecoration: "none", borderRadius: "4px", display: "block" }, children: "Apps" })
     ] })
   ] });
 }

@@ -49,7 +49,7 @@ describe("Plugin Worker Lifecycle", () => {
     const harness = createTestHarness({
       manifest: manifest as any,
       config: {
-        agent42BaseUrl: "http://localhost:8001",
+        froodBaseUrl: "http://localhost:8001",
         apiKey: "test-token",
         timeoutMs: 5000,
       },
@@ -58,25 +58,25 @@ describe("Plugin Worker Lifecycle", () => {
     await expect(plugin.definition.setup(harness.ctx)).resolves.not.toThrow();
   });
 
-  it("setup() throws when agent42BaseUrl missing", async () => {
+  it("setup() throws when froodBaseUrl missing", async () => {
     const harness = createTestHarness({
       manifest: manifest as any,
-      config: { agent42BaseUrl: "", apiKey: "test-token" },
+      config: { froodBaseUrl: "", apiKey: "test-token" },
     });
 
     await expect(plugin.definition.setup(harness.ctx)).rejects.toThrow(
-      "agent42BaseUrl and apiKey are required"
+      "froodBaseUrl and apiKey are required"
     );
   });
 
   it("setup() throws when apiKey missing", async () => {
     const harness = createTestHarness({
       manifest: manifest as any,
-      config: { agent42BaseUrl: "http://localhost:8001", apiKey: "" },
+      config: { froodBaseUrl: "http://localhost:8001", apiKey: "" },
     });
 
     await expect(plugin.definition.setup(harness.ctx)).rejects.toThrow(
-      "agent42BaseUrl and apiKey are required"
+      "froodBaseUrl and apiKey are required"
     );
   });
 
@@ -84,7 +84,7 @@ describe("Plugin Worker Lifecycle", () => {
     const harness = createTestHarness({
       manifest: manifest as any,
       config: {
-        agent42BaseUrl: "http://localhost:8001",
+        froodBaseUrl: "http://localhost:8001",
         apiKey: "test-token",
       },
     });
@@ -96,7 +96,7 @@ describe("Plugin Worker Lifecycle", () => {
     const harness = createTestHarness({
       manifest: manifest as any,
       config: {
-        agent42BaseUrl: "http://localhost:8001",
+        froodBaseUrl: "http://localhost:8001",
         apiKey: "test-token",
       },
     });
@@ -110,7 +110,7 @@ describe("Plugin Worker Lifecycle", () => {
     const harness = createTestHarness({
       manifest: manifest as any,
       config: {
-        agent42BaseUrl: "http://localhost:8001",
+        froodBaseUrl: "http://localhost:8001",
         apiKey: "test-token",
       },
     });
@@ -136,7 +136,7 @@ describe("Plugin Worker Lifecycle", () => {
     const harness = createTestHarness({
       manifest: manifest as any,
       config: {
-        agent42BaseUrl: "http://localhost:8001",
+        froodBaseUrl: "http://localhost:8001",
         apiKey: "test-token",
       },
     });
@@ -153,7 +153,7 @@ describe("Plugin Worker Lifecycle", () => {
     const harness = createTestHarness({
       manifest: manifest as any,
       config: {
-        agent42BaseUrl: "http://localhost:8001",
+        froodBaseUrl: "http://localhost:8001",
         apiKey: "test-token",
       },
     });
@@ -169,7 +169,7 @@ describe("Plugin Worker Lifecycle", () => {
     const harness = createTestHarness({
       manifest: manifest as any,
       config: {
-        agent42BaseUrl: "http://localhost:8001",
+        froodBaseUrl: "http://localhost:8001",
         apiKey: "test-token",
       },
     });

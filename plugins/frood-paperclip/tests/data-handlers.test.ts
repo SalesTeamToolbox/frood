@@ -3,7 +3,7 @@ import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
 import manifest from "../dist/manifest.js";
 import plugin from "../src/worker.js";
 
-// Mock fetch globally for Agent42Client
+// Mock fetch globally for FroodClient
 const mockFetch = vi.fn();
 
 // Helper: create Response-like mock
@@ -30,7 +30,7 @@ describe("Data handlers", () => {
   async function setupHarness() {
     const harness = createTestHarness({
       manifest: manifest as any,
-      config: { agent42BaseUrl: "http://localhost:8001", apiKey: "test-key", timeoutMs: 5000 },
+      config: { froodBaseUrl: "http://localhost:8001", apiKey: "test-key", timeoutMs: 5000 },
     });
     // No fetch calls happen during setup (only when handlers are invoked)
     await plugin.definition.setup(harness.ctx);
@@ -117,7 +117,7 @@ describe("extract-learnings job", () => {
   it("calls extractLearnings and updates watermark", async () => {
     const harness = createTestHarness({
       manifest: manifest as any,
-      config: { agent42BaseUrl: "http://localhost:8001", apiKey: "test-key" },
+      config: { froodBaseUrl: "http://localhost:8001", apiKey: "test-key" },
     });
     await plugin.definition.setup(harness.ctx);
 
@@ -134,7 +134,7 @@ describe("extract-learnings job", () => {
   it("does not update watermark on failure", async () => {
     const harness = createTestHarness({
       manifest: manifest as any,
-      config: { agent42BaseUrl: "http://localhost:8001", apiKey: "test-key" },
+      config: { froodBaseUrl: "http://localhost:8001", apiKey: "test-key" },
     });
     await plugin.definition.setup(harness.ctx);
 

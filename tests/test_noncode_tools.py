@@ -197,7 +197,7 @@ class TestTemplateTool:
             variables={
                 "title": "Q3 Report",
                 "date": "2026-01-15",
-                "author": "Agent42",
+                "author": "Frood",
                 "objective": "Review Q3 performance",
                 "key_finding_1": "Revenue up 15%",
                 "key_finding_2": "Churn down 3%",

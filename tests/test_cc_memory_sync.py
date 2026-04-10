@@ -55,7 +55,7 @@ class TestPathDetection:
 
     def test_matches_user_memory_file(self):
         """MEMORY.md inside a projects/*/memory/ dir should match."""
-        path = "C:/Users/user/.claude/projects/c--Users-user-projects-agent42/memory/MEMORY.md"
+        path = "C:/Users/user/.claude/projects/c--Users-user-projects-frood/memory/MEMORY.md"
         assert self.is_cc_memory_file(path) is True
 
     def test_matches_feedback_file(self):
@@ -75,7 +75,7 @@ class TestPathDetection:
 
     def test_rejects_non_memory_path(self):
         """A .py file in the project tools/ dir should NOT match."""
-        path = "C:/Users/user/projects/agent42/tools/memory_tool.py"
+        path = "C:/Users/user/projects/frood/tools/memory_tool.py"
         assert self.is_cc_memory_file(path) is False
 
     def test_rejects_global_memory(self):
@@ -99,7 +99,7 @@ class TestPathDetection:
 
     def test_rejects_regular_project_file(self):
         """A regular .py file should NOT match."""
-        path = "C:/Users/user/projects/agent42/core/config.py"
+        path = "C:/Users/user/projects/frood/core/config.py"
         assert self.is_cc_memory_file(path) is False
 
 
@@ -346,7 +346,7 @@ class TestReindexCc:
         mock_client = MagicMock()
         mock_qdrant = MagicMock()
         mock_qdrant._client = mock_client
-        mock_qdrant.config.collection_prefix = "agent42"
+        mock_qdrant.config.collection_prefix = "frood"
         # retrieve returns empty list by default (no existing points)
         mock_client.retrieve.return_value = []
 

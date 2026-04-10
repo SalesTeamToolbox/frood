@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# install-server.sh — Deploy Agent42 on a production server
+# install-server.sh — Deploy Frood on a production server
 #
 # Usage:
-#   scp -r agent42/ user@server:~/agent42
+#   scp -r frood/ user@server:~/frood
 #   ssh user@server
-#   cd ~/agent42
+#   cd ~/frood
 #   bash deploy/install-server.sh
 #
 # What this script does:
@@ -12,7 +12,7 @@
 #   2. Installs Redis and Qdrant as system services
 #   3. Auto-configures .env for production
 #   4. Sets up nginx reverse proxy + SSL
-#   5. Installs Agent42 as a systemd service
+#   5. Installs Frood as a systemd service
 #   6. Configures firewall
 #
 # After installation, open your browser to complete setup (password, API key).
@@ -28,24 +28,24 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
-AGENT42_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+FROOD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo ""
 echo "  ╔══════════════════════════════════════════╗"
-echo "  ║   Agent42 Server Deployment              ║"
+echo "  ║   Frood Server Deployment                 ║"
 echo "  ╚══════════════════════════════════════════╝"
 echo ""
 
 # ── Prompt for domain and port ────────────────────────────────────────────────
-read -rp "  Enter your domain name (e.g., agent42.example.com): " DOMAIN
+read -rp "  Enter your domain name (e.g., frood.example.com): " DOMAIN
 [ -z "$DOMAIN" ] && error "Domain name is required."
 
-read -rp "  Enter the backend port [8002]: " AGENT42_PORT
-AGENT42_PORT=${AGENT42_PORT:-8002}
+read -rp "  Enter the backend port [8002]: " FROOD_PORT
+FROOD_PORT=${FROOD_PORT:-8002}
 
 echo ""
 info "Domain:  ${DOMAIN}"
-info "Port:    ${AGENT42_PORT}"
+info "Port:    ${FROOD_PORT}"
 echo ""
 
 # ── Pre-flight checks ────────────────────────────────────────────────────────
@@ -67,8 +67,8 @@ if ! command -v nginx &>/dev/null; then
 fi
 
 # Check if port is free
-if ss -tlnp 2>/dev/null | grep -q ":${AGENT42_PORT} "; then
-    warn "Port ${AGENT42_PORT} is already in use."
+if ss -tlnp 2>/dev/null | grep -q ":${FROOD_PORT} "; then
+    warn "Port ${FROOD_PORT} is already in use."
     echo ""
     read -rp "Continue anyway? [y/N] " reply
     [ "$reply" = "y" ] || [ "$reply" = "Y" ] || exit 1
@@ -77,36 +77,36 @@ fi
 info "Pre-flight checks passed"
 
 # ── Step 1: Run the standard setup (quiet mode) ─────────────────────────────
-info "Step 1/7: Running Agent42 setup..."
-cd "$AGENT42_DIR"
+info "Step 1/7: Running Frood setup..."
+cd "$FROOD_DIR"
 bash setup.sh --quiet
 
 # ── Step 2: Configure .env for production ────────────────────────────────────
 info "Step 2/7: Configuring .env for production..."
 
-if [ ! -f "$AGENT42_DIR/.env" ]; then
-    cp "$AGENT42_DIR/.env.example" "$AGENT42_DIR/.env"
+if [ ! -f "$FROOD_DIR/.env" ]; then
+    cp "$FROOD_DIR/.env.example" "$FROOD_DIR/.env"
 fi
 
 # Generate a JWT secret if not already set
 JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-if grep -q "^JWT_SECRET=$" "$AGENT42_DIR/.env" 2>/dev/null; then
-    sed -i "s/^JWT_SECRET=$/JWT_SECRET=${JWT_SECRET}/" "$AGENT42_DIR/.env"
+if grep -q "^JWT_SECRET=$" "$FROOD_DIR/.env" 2>/dev/null; then
+    sed -i "s/^JWT_SECRET=$/JWT_SECRET=${JWT_SECRET}/" "$FROOD_DIR/.env"
     info "Generated JWT_SECRET"
 fi
 
 # Ensure DASHBOARD_HOST is 127.0.0.1 (nginx handles external access)
-sed -i "s/^DASHBOARD_HOST=0.0.0.0/DASHBOARD_HOST=127.0.0.1/" "$AGENT42_DIR/.env"
+sed -i "s/^DASHBOARD_HOST=0.0.0.0/DASHBOARD_HOST=127.0.0.1/" "$FROOD_DIR/.env"
 
 # Set CORS for the domain
-if grep -q "^CORS_ALLOWED_ORIGINS=$" "$AGENT42_DIR/.env" 2>/dev/null; then
-    sed -i "s|^CORS_ALLOWED_ORIGINS=$|CORS_ALLOWED_ORIGINS=https://${DOMAIN}|" "$AGENT42_DIR/.env"
+if grep -q "^CORS_ALLOWED_ORIGINS=$" "$FROOD_DIR/.env" 2>/dev/null; then
+    sed -i "s|^CORS_ALLOWED_ORIGINS=$|CORS_ALLOWED_ORIGINS=https://${DOMAIN}|" "$FROOD_DIR/.env"
     info "Set CORS_ALLOWED_ORIGINS=https://${DOMAIN}"
 fi
 
 # Pre-configure Redis and Qdrant URLs (services installed in next steps)
 _set_env() {
-    local key="$1" value="$2" file="$AGENT42_DIR/.env"
+    local key="$1" value="$2" file="$FROOD_DIR/.env"
     if grep -q "^#\?\s*${key}=" "$file" 2>/dev/null; then
         sed -i "s|^#\?\s*${key}=.*|${key}=${value}|" "$file"
     else
@@ -133,7 +133,7 @@ fi
 
 sudo systemctl enable redis-server 2>/dev/null || true
 sudo systemctl start redis-server 2>/dev/null || true
-touch "$AGENT42_DIR/.agent42-installed-redis"
+touch "$FROOD_DIR/.frood-installed-redis"
 info "Redis is running"
 
 # ── Step 4: Install Qdrant ───────────────────────────────────────────────────
@@ -195,19 +195,19 @@ else
     info "Qdrant is already running"
 fi
 
-touch "$AGENT42_DIR/.agent42-installed-qdrant"
+touch "$FROOD_DIR/.frood-installed-qdrant"
 
 # ── Step 5: Install Nginx config ─────────────────────────────────────────────
 info "Step 5/7: Installing Nginx reverse proxy config..."
 
 # Create symlink if it doesn't exist
-if [ ! -L /etc/nginx/sites-enabled/agent42 ]; then
-    sudo ln -sf /etc/nginx/sites-available/agent42 /etc/nginx/sites-enabled/agent42
+if [ ! -L /etc/nginx/sites-enabled/frood ]; then
+    sudo ln -sf /etc/nginx/sites-available/frood /etc/nginx/sites-enabled/frood
 fi
 
 # SSL certs don't exist yet — start with HTTP-only config so certbot can run
 info "Installing temporary HTTP-only config (certbot will add SSL next)..."
-sudo tee /etc/nginx/sites-available/agent42 > /dev/null << NGINX_TEMP
+sudo tee /etc/nginx/sites-available/frood > /dev/null << NGINX_TEMP
 server {
     listen 80;
     listen [::]:80;
@@ -218,7 +218,7 @@ server {
     }
 
     location / {
-        proxy_pass http://127.0.0.1:${AGENT42_PORT};
+        proxy_pass http://127.0.0.1:${FROOD_PORT};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -226,7 +226,7 @@ server {
     }
 
     location /ws {
-        proxy_pass http://127.0.0.1:${AGENT42_PORT};
+        proxy_pass http://127.0.0.1:${FROOD_PORT};
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -242,7 +242,7 @@ if sudo nginx -t 2>&1; then
     sudo systemctl reload nginx
     info "Nginx configured (HTTP only for now)"
 else
-    error "Nginx config test failed — check /etc/nginx/sites-available/agent42"
+    error "Nginx config test failed — check /etc/nginx/sites-available/frood"
 fi
 
 # ── Step 6: SSL with Let's Encrypt ───────────────────────────────────────────
@@ -269,52 +269,52 @@ if [ "$dns_ready" = "y" ] || [ "$dns_ready" = "Y" ]; then
     # certbot succeeded — install the full nginx config with rate limiting,
     # security headers, and WebSocket tuning
     info "Installing full Nginx config with SSL..."
-    sed -e "s/__DOMAIN__/${DOMAIN}/g" -e "s/__PORT__/${AGENT42_PORT}/g" \
-        "$AGENT42_DIR/deploy/nginx-agent42.conf" | sudo tee /etc/nginx/sites-available/agent42 > /dev/null
+    sed -e "s/__DOMAIN__/${DOMAIN}/g" -e "s/__PORT__/${FROOD_PORT}/g" \
+        "$FROOD_DIR/deploy/nginx-frood.conf" | sudo tee /etc/nginx/sites-available/frood > /dev/null
     if sudo nginx -t 2>&1; then
         sudo systemctl reload nginx
         info "Full Nginx config installed"
     else
         warn "Full config failed nginx -t — certbot's auto-generated config is still active"
-        warn "Check /etc/nginx/sites-available/agent42 and fix manually"
+        warn "Check /etc/nginx/sites-available/frood and fix manually"
     fi
 else
     warn "Skipping certbot. Run it manually when DNS is ready:"
     warn "  sudo certbot --nginx -d ${DOMAIN}"
     warn "Then install the full config:"
-    warn "  sed -e 's/__DOMAIN__/${DOMAIN}/g' -e 's/__PORT__/${AGENT42_PORT}/g' \\"
-    warn "      ${AGENT42_DIR}/deploy/nginx-agent42.conf | sudo tee /etc/nginx/sites-available/agent42"
+    warn "  sed -e 's/__DOMAIN__/${DOMAIN}/g' -e 's/__PORT__/${FROOD_PORT}/g' \\"
+    warn "      ${FROOD_DIR}/deploy/nginx-frood.conf | sudo tee /etc/nginx/sites-available/frood"
     warn "  sudo nginx -t && sudo systemctl reload nginx"
 fi
 
 # ── Step 7: Install systemd service + firewall ───────────────────────────────
 info "Step 7/7: Installing systemd service and firewall rules..."
 
-VENV_PYTHON="$AGENT42_DIR/.venv/bin/python"
+VENV_PYTHON="$FROOD_DIR/.venv/bin/python"
 CURRENT_USER=$(whoami)
 
-sudo tee /etc/systemd/system/agent42.service > /dev/null << EOF
+sudo tee /etc/systemd/system/frood.service > /dev/null << EOF
 [Unit]
-Description=Agent42 Multi-Agent Orchestrator
+Description=Frood Multi-Agent Orchestrator
 After=network.target redis-server.service qdrant.service
 
 [Service]
 Type=simple
 User=${CURRENT_USER}
-WorkingDirectory=${AGENT42_DIR}
-ExecStart=${VENV_PYTHON} agent42.py --port ${AGENT42_PORT}
+WorkingDirectory=${FROOD_DIR}
+ExecStart=${VENV_PYTHON} frood.py --port ${FROOD_PORT}
 Restart=always
 RestartSec=5
-StandardOutput=append:${AGENT42_DIR}/agent42.log
-StandardError=append:${AGENT42_DIR}/agent42.log
-EnvironmentFile=${AGENT42_DIR}/.env
+StandardOutput=append:${FROOD_DIR}/frood.log
+StandardError=append:${FROOD_DIR}/frood.log
+EnvironmentFile=${FROOD_DIR}/.env
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable agent42
+sudo systemctl enable frood
 info "Systemd service installed and enabled"
 
 # Configure firewall
@@ -323,11 +323,11 @@ if command -v ufw &>/dev/null; then
         sudo ufw allow 80/tcp
         sudo ufw allow 443/tcp
     }
-    # Block direct access to Agent42 port from outside (nginx proxies it)
-    sudo ufw deny "${AGENT42_PORT}/tcp" 2>/dev/null || true
+    # Block direct access to Frood port from outside (nginx proxies it)
+    sudo ufw deny "${FROOD_PORT}/tcp" 2>/dev/null || true
     info "UFW firewall configured"
 else
-    warn "UFW not found — make sure ports 80/443 are open and port ${AGENT42_PORT} is blocked externally"
+    warn "UFW not found — make sure ports 80/443 are open and port ${FROOD_PORT} is blocked externally"
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────
@@ -336,8 +336,8 @@ echo "  ╔═══════════════════════
 echo "  ║   Installation complete!                             ║"
 echo "  ╚══════════════════════════════════════════════════════╝"
 echo ""
-info "Start Agent42:"
-echo "    sudo systemctl start agent42"
+info "Start Frood:"
+echo "    sudo systemctl start frood"
 echo ""
 info "Then open your browser to complete setup:"
 echo ""
@@ -349,9 +349,9 @@ echo "    - Adding your API key (free at https://openrouter.ai/keys)"
 echo "    - Configuring memory backend"
 echo ""
 info "Useful commands:"
-echo "    sudo systemctl restart agent42    # Restart"
-echo "    sudo systemctl stop agent42       # Stop"
-echo "    sudo systemctl status agent42     # Status"
-echo "    sudo journalctl -u agent42 -f     # Live logs"
+echo "    sudo systemctl restart frood    # Restart"
+echo "    sudo systemctl stop frood       # Stop"
+echo "    sudo systemctl status frood     # Status"
+echo "    sudo journalctl -u frood -f     # Live logs"
 echo "    sudo certbot renew --dry-run      # Test cert renewal"
 echo ""

@@ -77,7 +77,7 @@ def _download_winsw(project_dir: str) -> str:
 def _create_service_xml(project_dir: str) -> str:
     """Create the Windows service XML configuration."""
     python_exe = _get_python_executable()
-    agent42_py = os.path.join(project_dir, "agent42.py")
+    frood_py = os.path.join(project_dir, "frood.py")
 
     xml_content = f'''<?xml version="1.0" encoding="utf-8"?>
 <service>
@@ -100,7 +100,7 @@ def _create_service_xml(project_dir: str) -> str:
   <env name="PATH" value="{os.path.dirname(python_exe)};{os.path.dirname(python_exe)}\\Scripts;C:\\Windows\\system32;C:\\Windows"/>
 </service>'''
 
-    xml_path = os.path.join(project_dir, "agent42-service.xml")
+    xml_path = os.path.join(project_dir, "frood-service.xml")
     with open(xml_path, "w") as f:
         f.write(xml_content)
 
@@ -134,8 +134,8 @@ def setup_windows_service(project_dir: str, action: str = "install") -> None:
     print("Installing Frood as a Windows service...")
 
     # Check if service already exists
-    check_result = subprocess.run(["sc", "query", "agent42"], capture_output=True, text=True)
-    if "agent42" in check_result.stdout:
+    check_result = subprocess.run(["sc", "query", "frood"], capture_output=True, text=True)
+    if "frood" in check_result.stdout:
         print("Frood service already exists. Removing old installation...")
         subprocess.run([winsw_path, "uninstall", xml_path], capture_output=True)
         import time
@@ -151,7 +151,7 @@ def setup_windows_service(project_dir: str, action: str = "install") -> None:
     print("Frood service installed successfully!")
     print("")
     print("Starting Frood service...")
-    start_result = subprocess.run(["net", "start", "agent42"], capture_output=True, text=True)
+    start_result = subprocess.run(["net", "start", "frood"], capture_output=True, text=True)
     if start_result.returncode == 0:
         print("Frood service started successfully!")
         print("")
@@ -163,9 +163,9 @@ def setup_windows_service(project_dir: str, action: str = "install") -> None:
         print("LLM Proxy: http://localhost:8000/llm/v1")
         print("")
         print("Commands:")
-        print("  net start agent42     - Start")
-        print("  net stop agent42      - Stop")
-        print("  sc query agent42      - Status")
+        print("  net start frood     - Start")
+        print("  net stop frood      - Stop")
+        print("  sc query frood      - Status")
         print("")
         print("To uninstall:")
         print("  python scripts/setup_helpers.py windows-service uninstall")
@@ -244,8 +244,8 @@ def setup_n8n_service(project_dir: str, action: str = "install") -> None:
     print("Installing n8n as a Windows service...")
 
     # Check if service already exists
-    check_result = subprocess.run(["sc", "query", "n8n-agent42"], capture_output=True, text=True)
-    if "n8n-agent42" in check_result.stdout:
+    check_result = subprocess.run(["sc", "query", "n8n-frood"], capture_output=True, text=True)
+    if "n8n-frood" in check_result.stdout:
         print("n8n service already exists. Removing old installation...")
         subprocess.run([winsw_path, "uninstall", xml_path], capture_output=True)
         import time
@@ -261,7 +261,7 @@ def setup_n8n_service(project_dir: str, action: str = "install") -> None:
     print("n8n service installed successfully!")
     print("")
     print("Starting n8n service...")
-    start_result = subprocess.run(["net", "start", "n8n-agent42"], capture_output=True, text=True)
+    start_result = subprocess.run(["net", "start", "n8n-frood"], capture_output=True, text=True)
     if start_result.returncode == 0:
         print("n8n service started successfully!")
         print("")
@@ -272,9 +272,9 @@ def setup_n8n_service(project_dir: str, action: str = "install") -> None:
         print("n8n Dashboard: http://localhost:5678")
         print("")
         print("Commands:")
-        print("  net start n8n-agent42     - Start")
-        print("  net stop n8n-agent42      - Stop")
-        print("  sc query n8n-agent42      - Status")
+        print("  net start n8n-frood     - Start")
+        print("  net stop n8n-frood      - Stop")
+        print("  sc query n8n-frood      - Status")
         print("")
         print("To uninstall:")
         print("  python scripts/setup_helpers.py n8n-service uninstall")
@@ -291,11 +291,68 @@ def run_windows_setup(project_dir: str) -> None:
 
     print("=" * 60)
     print(" Frood Windows Setup")
+    print("=" * 60)
+    print()
+
     # Step 1: Install Frood service
     print("Step 1: Installing Frood Windows service...")
+    print("-" * 40)
+    try:
+        setup_windows_service(project_dir, "install")
+    except Exception as e:
         print(f"Warning: Frood service installation failed: {e}")
+
+    print()
+
+    # Step 2: Install n8n service (optional)
+    print("Step 2: Installing n8n Windows service (optional)...")
+    print("-" * 40)
+    print("This requires Docker Desktop to be installed.")
+    print("If Docker is not installed, n8n will be skipped.")
+    print()
+
+    try:
+        docker_check = subprocess.run(["docker", "--version"], capture_output=True, text=True)
+        has_docker = docker_check.returncode == 0
+    except FileNotFoundError:
+        has_docker = False
+
+    if has_docker:
+        try:
+            setup_n8n_service(project_dir, "install")
+        except Exception as e:
+            print(f"Warning: n8n service installation failed: {e}")
+    else:
+        print("Docker not found - skipping n8n service installation.")
+        print("You can install Docker Desktop later and run:")
+        print("  python scripts/setup_helpers.py n8n-service install")
+
+    print()
+
+    # Step 3: Set environment variables
+    print("Step 3: Setting environment variables for Claude Code proxy...")
+    print("-" * 40)
+
+    env_vars = [
+        ("ANTHROPIC_BASE_URL", "http://localhost:8000/llm/v1"),
+        ("ANTHROPIC_API_KEY", "dummy"),
+        ("ANTHROPIC_MODEL", "qwen3.6-plus-free"),
+    ]
+
+    for var_name, var_value in env_vars:
+        result = subprocess.run(["setx", var_name, var_value], capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"  {var_name} = {var_value} [OK]")
+        else:
+            print(f"  {var_name} = {var_value} [FAILED]")
+
+    print()
+    print("=" * 60)
+    print(" Windows Setup Complete!")
+    print("=" * 60)
+    print()
     print("Frood will start automatically on next boot.")
-    print("To start now: net start agent42")
+    print("To start now: net start frood")
     print()
     print("Access points:")
     print("  Dashboard:   http://localhost:8000")
@@ -333,7 +390,7 @@ def _make_frood_remote_entry(ssh_alias: str) -> dict:
         "command": "ssh",
         "args": [
             ssh_alias,
-            "cd ~/agent42 && FROOD_WORKSPACE=~/agent42 .venv/bin/python mcp_server.py",
+            "cd ~/frood && FROOD_WORKSPACE=~/frood .venv/bin/python mcp_server.py",
         ],
         "env": {},
     }
@@ -785,9 +842,9 @@ def generate_mcp_config(project_dir: str, ssh_alias: str | None = None) -> None:
     Merge strategy:
     - Load existing .mcp.json if present and valid JSON; otherwise start fresh.
     - For each of the 6 servers, add if missing.
-    - For agent42 specifically: replace if the command path no longer exists on disk.
+    - For frood specifically: replace if the command path no longer exists on disk.
     - For all other servers: never overwrite an existing entry.
-    - agent42-remote is only added when ssh_alias is non-empty.
+    - frood-remote is only added when ssh_alias is non-empty.
 
     Args:
         project_dir: Absolute path to the project root.

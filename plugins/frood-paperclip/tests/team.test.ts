@@ -48,7 +48,7 @@ async function setupHarness(mockFetch: ReturnType<typeof vi.fn>) {
   const harness = createTestHarness({
     manifest: manifest as any,
     config: {
-      agent42BaseUrl: "http://localhost:8001",
+      froodBaseUrl: "http://localhost:8001",
       apiKey: "test-token",
       timeoutMs: 5000,
     },

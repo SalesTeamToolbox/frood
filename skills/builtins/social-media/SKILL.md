@@ -49,7 +49,7 @@ Create platform-optimized social media content that drives engagement and suppor
 
 ## Hashtag Strategy
 
-- **Branded:** Your unique hashtag (e.g., #Agent42).
+- **Branded:** Your unique hashtag (e.g., #Frood).
 - **Industry:** Common in your field (e.g., #AI, #DevTools).
 - **Trending:** Relevant current trends (use sparingly, only when genuine).
 - **Community:** Niche community tags (e.g., #BuildInPublic).

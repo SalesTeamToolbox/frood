@@ -24,7 +24,7 @@ const defaultRunCtx: Partial<ToolRunContext> = {
 };
 
 const defaultConfig = {
-  agent42BaseUrl: "http://localhost:8001",
+  froodBaseUrl: "http://localhost:8001",
   apiKey: "test-token",
   timeoutMs: 5000,
 };

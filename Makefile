@@ -45,11 +45,11 @@ security:  ## Run security scanning (bandit + safety)
 	$(VENV)/bin/bandit -r . -x tests,.venv,venv -ll
 	$(VENV)/bin/safety check -r requirements.txt 2>/dev/null || true
 
-run:  ## Start Agent42 (dashboard at http://localhost:8000)
-	$(VENV)/bin/python agent42.py
+run:  ## Start Frood (dashboard at http://localhost:8000)
+	$(VENV)/bin/python frood.py
 
-run-headless:  ## Start Agent42 without dashboard
-	$(VENV)/bin/python agent42.py --no-dashboard
+run-headless:  ## Start Frood without dashboard
+	$(VENV)/bin/python frood.py --no-dashboard
 
 clean:  ## Remove generated files and caches
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

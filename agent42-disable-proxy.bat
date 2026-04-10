@@ -1,5 +1,5 @@
 @echo off
-echo Disabling Agent42 LLM Proxy...
+echo Disabling Frood LLM Proxy...
 setx ANTHROPIC_BASE_URL ""
 setx ANTHROPIC_API_KEY ""
 setx ANTHROPIC_MODEL ""

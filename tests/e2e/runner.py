@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Agent42 E2E Test Runner
+Frood E2E Test Runner
 
 Self-improving test runner that:
   1. Discovers current codebase state (endpoints, tools, views, etc.)
-  2. Runs all test suites against a live Agent42 instance
+  2. Runs all test suites against a live Frood instance
   3. Reports coverage gaps (untested endpoints, tools, views)
   4. Generates a coverage manifest for tracking growth over time
 
@@ -171,7 +171,7 @@ def compute_coverage(results: list[TestResult], manifest):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Agent42 E2E Test Runner")
+    parser = argparse.ArgumentParser(description="Frood E2E test runner")
     parser.add_argument("--suite", help="Run a specific suite (ui, api, harness, coding)")
     parser.add_argument("--discover", action="store_true", help="Show codebase manifest")
     parser.add_argument("--coverage", action="store_true", help="Show coverage gaps")
@@ -189,7 +189,7 @@ def main():
     manifest = build_manifest()
 
     if args.discover:
-        print("=== Agent42 Codebase Manifest ===\n")
+        print("=== Frood Codebase Manifest ===\n")
         print(f"Endpoints:  {len(manifest.endpoints)}")
         for e in manifest.endpoints:
             auth = " [auth]" if e.auth_required else " [public]"
@@ -231,7 +231,7 @@ def main():
     # Run
     all_results: list[TestResult] = []
     print(f"{'=' * 60}")
-    print(f"Agent42 E2E Tests — {datetime.now(UTC).isoformat()}")
+    print(f"Frood E2E Tests — {datetime.now(UTC).isoformat()}")
     print(f"Target: {config.base_url}")
     print(f"Suites: {', '.join(suites_to_run)}")
     print(

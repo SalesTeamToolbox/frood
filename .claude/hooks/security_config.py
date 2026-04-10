@@ -2,7 +2,7 @@
 """Shared security file registry -- single source of truth.
 
 This module defines the canonical list of security-sensitive files in the
-Agent42 codebase.  Both the PreToolUse gate (security-gate.py) and the
+Frood codebase.  Both the PreToolUse gate (security-gate.py) and the
 PostToolUse monitor (security-monitor.py) import from here so there is
 exactly one place to add, remove, or rename a protected path.
 

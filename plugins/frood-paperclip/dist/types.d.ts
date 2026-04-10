@@ -1,9 +1,30 @@
 /**
- * types.ts -- TypeScript interfaces mirroring Agent42 sidecar Pydantic models.
+ * types.ts -- TypeScript interfaces mirroring Frood sidecar Pydantic models.
  *
  * CRITICAL: top_k and score_threshold are snake_case (no camelCase alias on Python side).
  * All other fields use camelCase per sidecar Pydantic aliases.
  */
+/** Single model entry from GET /sidecar/models (D-05) */
+export interface ProviderModelItem {
+    model_id: string;
+    display_name: string;
+    provider: string;
+    categories: string[];
+    available: boolean;
+}
+/** Response body for GET /sidecar/models (D-05) */
+export interface ModelsResponse {
+    models: ProviderModelItem[];
+    providers: string[];
+}
+/** Per-provider status detail in enhanced health response (D-07) */
+export interface ProviderStatusDetail {
+    name: string;
+    configured: boolean;
+    connected: boolean;
+    model_count: number;
+    last_check: number;
+}
 export interface SidecarHealthResponse {
     status: string;
     memory: {
@@ -12,8 +33,10 @@ export interface SidecarHealthResponse {
     };
     providers: {
         available: boolean;
+        configured?: Record<string, boolean>;
         [key: string]: unknown;
     };
+    providers_detail?: ProviderStatusDetail[];
     qdrant: {
         available: boolean;
         [key: string]: unknown;
@@ -217,6 +240,7 @@ export interface SettingsKeyEntry {
     name: string;
     masked_value: string;
     is_set: boolean;
+    source: "admin" | "env" | "none";
 }
 export interface SettingsResponse {
     keys: SettingsKeyEntry[];
@@ -229,6 +253,26 @@ export interface SettingsUpdateResponse {
     ok: boolean;
     key_name: string;
 }
+export interface MemoryStatsResponse {
+    recall_count: number;
+    learn_count: number;
+    error_count: number;
+    avg_latency_ms: number;
+    period_start: number;
+}
+export interface StorageStatusResponse {
+    mode: string;
+    qdrant_available: boolean;
+    learning_enabled: boolean;
+}
+export interface ToggleResponse {
+    name: string;
+    enabled: boolean;
+}
+export interface PurgeMemoryResponse {
+    ok: boolean;
+    collection: string;
+}
 export interface TerminalSessionInfo {
     session_id: string;
     status: string;
@@ -236,4 +280,35 @@ export interface TerminalSessionInfo {
 export interface TerminalOutputEvent {
     text: string;
     ts: number;
+}
+/** POST /adapter/run -- route task through Frood instead of spawning Claude CLI */
+export interface AdapterRunRequest {
+    task: string;
+    agentId: string;
+    role?: string;
+    provider?: string;
+    model?: string;
+    tools?: string[];
+    maxIterations?: number;
+}
+export interface AdapterRunResponse {
+    runId: string;
+    status: "started" | "queued" | "failed";
+    provider: string;
+    model: string;
+    message?: string;
+}
+/** GET /adapter/status/{runId} */
+export interface AdapterStatusResponse {
+    runId: string;
+    status: "running" | "completed" | "failed" | "cancelled" | "unknown";
+    output?: string;
+    costUsd?: number;
+    durationMs?: number;
+}
+/** POST /adapter/cancel/{runId} */
+export interface AdapterCancelResponse {
+    runId: string;
+    cancelled: boolean;
+    message?: string;
 }

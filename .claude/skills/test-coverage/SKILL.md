@@ -7,7 +7,7 @@ task_types: [testing]
 
 # /test-coverage
 
-Generate a comprehensive test file for a given module, following Agent42 project conventions.
+Generate a comprehensive test file for a given module, following Frood project conventions.
 
 ## Usage
 

@@ -1,4 +1,4 @@
-"""Tests for all OpenClaw-inspired features in Agent42.
+"""Tests for all OpenClaw-inspired features in Frood.
 
 Covers:
   - URL Policy (allowlist, denylist, SSRF, per-agent limits, audit log)
@@ -295,7 +295,7 @@ class TestNotificationServiceFormats:
         )
         body = svc._format_webhook("https://discord.com/api/webhooks/123/abc", payload)
         assert "embeds" in body
-        assert body["embeds"][0]["title"].startswith("Agent42:")
+        assert body["embeds"][0]["title"].startswith("Frood:")
 
     def test_generic_format_for_unknown_url(self):
         svc = NotificationService()
@@ -308,7 +308,7 @@ class TestNotificationServiceFormats:
         )
         body = svc._format_webhook("https://webhook.example.com/hook", payload)
         assert body["event"] == "task_review"
-        assert body["source"] == "agent42"
+        assert body["source"] == "frood"
         assert body["task_id"] == "t3"
 
 

@@ -208,7 +208,7 @@ class NotificationService:
             "title": payload.title,
             "details": payload.details,
             "severity": payload.severity,
-            "source": "agent42",
+            "source": "frood",
         }
 
     async def _send_email(self, payload: NotificationPayload):
@@ -216,9 +216,7 @@ class NotificationService:
         if not self._smtp_host or not self._email_recipients:
             return
 
-        subject = (
-            f"[Frood {payload.severity.upper()}] {payload.event}: {payload.title or 'Alert'}"
-        )
+        subject = f"[Frood {payload.severity.upper()}] {payload.event}: {payload.title or 'Alert'}"
         body = (
             f"Event: {payload.event}\n"
             f"Severity: {payload.severity}\n"

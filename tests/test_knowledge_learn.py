@@ -7,7 +7,7 @@ Covers:
 - LEARN-04: Dedup via raw_score — boost existing (>=0.85) or store new
 - LEARN-05: Trivial session filtering (noise guard)
 
-All external services are mocked — no real Qdrant, ONNX, or Agent42 API.
+All external services are mocked — no real Qdrant, ONNX, or Frood API.
 """
 
 import importlib.util

@@ -34,7 +34,7 @@ services:
       # Auto-prune old execution data (14 days = 336 hours)
       EXECUTIONS_DATA_PRUNE: "true"
       EXECUTIONS_DATA_MAX_AGE: "336"
-      # Block dangerous node types at the N8N level (belt-and-suspenders with Agent42 validation)
+      # Block dangerous node types at the N8N level (belt-and-suspenders with Frood validation)
       NODES_EXCLUDE: '["n8n-nodes-base.executeCommand","n8n-nodes-base.ssh","n8n-nodes-base.localFileTrigger"]'
     volumes:
       - n8n_data:/home/node/.n8n

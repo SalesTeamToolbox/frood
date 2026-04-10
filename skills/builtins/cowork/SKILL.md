@@ -13,12 +13,12 @@ autonomous Claude Code execution, monitoring progress, and recalling control.
 ## Architecture
 
 ```
-Laptop (you)                         VPS (agent42-prod)
+Laptop (you)                         VPS (frood-prod)
 ─────────────                        ──────────────────
 Claude Code                          coworker-daemon.sh
-  + Agent42 MCP (local)                + auto-resume.sh
+  + Frood MCP (local)                + auto-resume.sh
   │                                      + Claude Code (headless)
-  │  1. /cowork handoff                  + Agent42 MCP (prod)
+  │  1. /cowork handoff                  + Frood MCP (prod)
   │     → creates work order             │
   │     → git push                       │  picks up work order
   │     → SSH signal                     │  runs claude -p sessions
@@ -55,8 +55,8 @@ scripts/cowork/handoff.sh \
 
 Before running handoff:
 1. Ensure all current changes are committed
-2. Verify the VPS is reachable: `ssh agent42-prod "echo ok"`
-3. Verify Claude Code is authenticated on VPS: `ssh agent42-prod "claude --version"`
+2. Verify the VPS is reachable: `ssh frood-prod "echo ok"`
+3. Verify Claude Code is authenticated on VPS: `ssh frood-prod "claude --version"`
 
 ### Status (check VPS progress)
 

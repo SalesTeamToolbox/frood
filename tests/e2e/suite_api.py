@@ -1,7 +1,7 @@
 """
 API / Backend Test Suite
 
-Tests Agent42 API endpoints via browser fetch():
+Tests Frood API endpoints via browser fetch():
   - Auth: login, logout, JWT persistence
   - Tasks CRUD: create, list, detail, status transitions
   - Profiles, Settings, Approvals, Chat
@@ -11,8 +11,6 @@ Self-improving: uses discovery.discover_endpoints() to detect new endpoints
 and auto-tests any new GET routes not explicitly covered.
 """
 
-import json
-import re
 import time
 
 from .cli import PlaywrightCLI

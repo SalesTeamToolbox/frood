@@ -1,6 +1,6 @@
 # Synthetic.new Dynamic Model Discovery
 
-Agent42 now supports dynamic model discovery for Synthetic.new, automatically fetching and updating available models from the Synthetic.new API.
+Frood now supports dynamic model discovery for Synthetic.new, automatically fetching and updating available models from the Synthetic.new API.
 
 ## How It Works
 

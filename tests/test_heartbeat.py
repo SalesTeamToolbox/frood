@@ -206,7 +206,7 @@ class TestGsdStateReading:
         assert health.gsd_phase is None
 
     def test_get_health_truncates_long_workstream_name(self, tmp_path):
-        long_name = "agent42-ux-and-workflow-automation"
+        long_name = "frood-ux-and-workflow-automation"
         ws_file = tmp_path / ".planning" / "active-workstream"
         ws_file.parent.mkdir(parents=True)
         ws_file.write_text(long_name + "\n")

@@ -562,7 +562,7 @@ async def test_create_workflow_records_mapping(tmp_path):
         agent_id="test-agent",
         fingerprint="fp-wiring-test",
         workflow_id="wf-123",
-        webhook_url="http://n8n:5678/webhook/agent42-fp-wiring",
+        webhook_url="http://n8n:5678/webhook/frood-fp-wiring",
         template="webhook_to_http",
     )
 
@@ -575,7 +575,7 @@ async def test_create_workflow_records_mapping(tmp_path):
             row = await cursor.fetchone()
             assert row is not None
             assert dict(row)["workflow_id"] == "wf-123"
-            assert dict(row)["webhook_url"] == "http://n8n:5678/webhook/agent42-fp-wiring"
+            assert dict(row)["webhook_url"] == "http://n8n:5678/webhook/frood-fp-wiring"
             assert dict(row)["status"] == "active"
 
     set_shared_store(None)

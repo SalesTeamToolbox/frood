@@ -15,7 +15,7 @@ You are building a complete, working web application that the user can access im
 
 1. **Understand the request.** What does the user want? What are the core features?
 2. **Determine the app mode:**
-   - `internal` — A system tool that extends Agent42 (monitoring dashboard, trading bot, analytics panel). Lives inside Agent42, no separate auth needed. Agent42 can operate it via `app_api`.
+   - `internal` — A system tool that extends Frood (monitoring dashboard, trading bot, analytics panel). Lives inside Frood, no separate auth needed. Frood can operate it via `app_api`.
    - `external` — An app being developed for public release. Will eventually be deployed independently. May need its own auth, designed for end users.
 3. **Choose the runtime.** Pick the simplest runtime that meets the requirements:
    - `static` — Pure HTML/CSS/JS. Best for: calculators, timers, dashboards, trackers, games, forms, single-page tools. No backend needed.
@@ -30,7 +30,7 @@ You are building a complete, working web application that the user can access im
    ```
    app create --name "App Name" --runtime python --app_description "What it does" --tags "tag1,tag2" --git_enabled true --app_mode internal
    ```
-   Set `--app_mode internal` for Agent42 system apps, or `--app_mode external` for apps being developed for public release.
+   Set `--app_mode internal` for Frood system apps, or `--app_mode external` for apps being developed for public release.
 2. Note the **app ID** and **path** from the response. All files go into that path.
 
 ### Phase 3: Build
@@ -256,37 +256,37 @@ When updating an existing app:
 
 ## Designing Internal Apps for Agent Interaction
 
-Internal apps are not just dashboards for humans — they can be **operated by Agent42 autonomously**. When building an internal app that Agent42 will interact with, design it as an API-first application.
+Internal apps are not just dashboards for humans — they can be **operated by Frood autonomously**. When building an internal app that Frood will interact with, design it as an API-first application.
 
 ### API Design Pattern
 
-Every internal app that Agent42 will operate should expose a JSON API alongside its UI:
+Every internal app that Frood will operate should expose a JSON API alongside its UI:
 
 ```python
 # Example: Crypto trading app with agent-operable API
 
 @app.route("/api/portfolio")
 def get_portfolio():
-    """Agent42 calls this to check current holdings."""
+    """Frood calls this to check current holdings."""
     holdings = get_all_holdings()
     return jsonify({"holdings": holdings, "total_value_usd": sum(h["value"] for h in holdings)})
 
 @app.route("/api/trade", methods=["POST"])
 def execute_trade():
-    """Agent42 calls this to execute a trade."""
+    """Frood calls this to execute a trade."""
     data = request.get_json()
     result = process_trade(data["action"], data["symbol"], data["amount"])
     return jsonify(result)
 
 @app.route("/api/signals")
 def get_signals():
-    """Agent42 calls this to read current trading signals."""
+    """Frood calls this to read current trading signals."""
     return jsonify({"signals": compute_signals()})
 ```
 
-### How Agent42 Interacts with Apps
+### How Frood Interacts with Apps
 
-Agent42 uses the `app_api` action to call a running app's HTTP endpoints directly:
+Frood uses the `app_api` action to call a running app's HTTP endpoints directly:
 
 ```
 app app_api --app_id <id> --method GET --endpoint "/api/portfolio"
@@ -297,20 +297,20 @@ This bypasses the dashboard proxy — it calls the app on localhost directly, so
 
 ### Best Practices for Agent-Operable Apps
 
-1. **Return JSON from all API endpoints.** Agent42 parses JSON responses to understand results.
+1. **Return JSON from all API endpoints.** Frood parses JSON responses to understand results.
 2. **Use clear, descriptive endpoint names.** `/api/portfolio`, `/api/trade`, `/api/signals` — not `/api/do`.
 3. **Include status and error messages in responses.** Return `{"success": true, "message": "..."}` or `{"error": "..."}`.
 4. **Keep endpoints idempotent where possible.** GET requests should never change state.
-5. **Validate inputs server-side.** Even though Agent42 is the caller, protect against malformed requests.
+5. **Validate inputs server-side.** Even though Frood is the caller, protect against malformed requests.
 6. **Return pagination for large datasets.** Use `?page=1&per_page=50` to avoid oversized responses.
-7. **Include a health/status endpoint.** `GET /api/status` lets Agent42 check if the app is responsive.
+7. **Include a health/status endpoint.** `GET /api/status` lets Frood check if the app is responsive.
 
 ### Access Control Settings
 
 Use these commands to manage app access:
 
 ```
-app set_mode --app_id <id> --app_mode internal      # System tool (Agent42 operated)
+app set_mode --app_id <id> --app_mode internal      # System tool (Frood operated)
 app set_mode --app_id <id> --app_mode external       # For public release
 app set_visibility --app_id <id> --visibility private  # Dashboard-only access
 app set_visibility --app_id <id> --visibility unlisted # Anyone with URL can access

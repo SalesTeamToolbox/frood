@@ -16,8 +16,8 @@ describe("Phase 36: Worker data handlers", () => {
     expect(workerSource).toContain('ctx.data.register("apps-list"');
   });
 
-  it("registers agent42-settings data handler", () => {
-    expect(workerSource).toContain('ctx.data.register("agent42-settings"');
+  it("registers frood-settings data handler", () => {
+    expect(workerSource).toContain('ctx.data.register("frood-settings"');
   });
 
   it("calls client.getTools() in tools-skills handler", () => {
@@ -32,7 +32,7 @@ describe("Phase 36: Worker data handlers", () => {
     expect(workerSource).toContain("client.getApps()");
   });
 
-  it("calls client.getSettings() in agent42-settings handler", () => {
+  it("calls client.getSettings() in frood-settings handler", () => {
     expect(workerSource).toContain("client.getSettings()");
   });
 });
@@ -46,8 +46,8 @@ describe("Phase 36: Worker action handlers", () => {
     expect(workerSource).toContain('ctx.actions.register("app-stop"');
   });
 
-  it("registers update-agent42-settings action handler", () => {
-    expect(workerSource).toContain('ctx.actions.register("update-agent42-settings"');
+  it("registers update-frood-settings action handler", () => {
+    expect(workerSource).toContain('ctx.actions.register("update-frood-settings"');
   });
 
   it("registers terminal-start action handler", () => {

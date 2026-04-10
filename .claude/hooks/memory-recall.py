@@ -389,7 +389,7 @@ def try_frood_api_search(prompt):
                     {
                         "text": f"[{source}] {text}",
                         "score": float(score),
-                        "source": "agent42-api",
+                        "source": "frood-api",
                     }
                 )
         return memories
@@ -754,7 +754,7 @@ def main():
     if not memory_dir.exists():
         sys.exit(0)
 
-    # ── Locate agent42 root (for imports) ────────────────────────────────
+    # ── Locate frood root (for imports) ─────────────────────────────────
     frood_root = os.environ.get("FROOD_ROOT", "")
     if not frood_root:
         hook_dir = Path(__file__).resolve().parent
@@ -785,7 +785,7 @@ def main():
         else:
             semantic_results = try_frood_api_search(prompt)
             if semantic_results:
-                search_source = "agent42-api"
+                search_source = "frood-api"
         memories.extend(semantic_results)
 
         # Layer 1.5: Qdrant direct scroll + keyword match (when search service is down)

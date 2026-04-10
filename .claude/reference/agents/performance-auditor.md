@@ -3,7 +3,7 @@
 ## Purpose
 
 Review code changes for performance implications in the async orchestrator.
-Agent42 manages multiple concurrent agents, each running iteration loops with
+Frood manages multiple concurrent agents, each running iteration loops with
 LLM calls, tool execution, and file I/O — performance matters.
 
 ## Focus Areas

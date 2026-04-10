@@ -13,7 +13,7 @@ make check                       # Run lint + tests together
 
 ## Claude Code Provider Switching
 
-Agent42 provides easy switching between Claude Code subscription and Zen API (free models).
+Frood provides easy switching between Claude Code subscription and Zen API (free models).
 
 ### Prerequisites
 - Frood must be running: `python frood.py`
@@ -78,7 +78,7 @@ cc status       # Show current configuration
 
 ## Codebase Navigation (jcodemunch)
 
-Repo: `local/agent42-663daaca` (267 files, 5298 symbols). **Use jcodemunch before reading files:**
+Repo: `local/frood` (267 files, 5298 symbols). **Use jcodemunch before reading files:**
 
 | Need | Tool |
 |------|------|
@@ -142,8 +142,8 @@ After task completes: `claude plugins disable "<name>@claude-plugins-official"`
 
 | Server | Use when |
 |--------|----------|
-| agent42 | Working on Agent42 code that needs MCP tools |
-| agent42-remote | Production server operations |
+| frood | Working on Frood code that needs MCP tools |
+| frood-remote | Production server operations |
 | jcodemunch | Codebase navigation (symbols, outlines, trees) |
 | context7 | Library documentation lookup |
 | playwright | Browser automation |
@@ -166,17 +166,17 @@ After task completes: `claude plugins disable "<name>@claude-plugins-official"`
 <!-- GSD:project-start source:PROJECT.md -->
 ## Project
 
-**Agent42**
+**Frood**
 
 An AI agent platform that operates across 9 LLM providers with tiered routing (L1 workhorse, L2 premium, free fallback), per-agent model configuration, and graceful degradation. Features intelligent memory (ONNX + Qdrant with auto-sync from Claude Code), task-aware learning (effectiveness tracking + proactive injection), and native desktop app experience (PWA + GSD auto-activation).
 
-**Core Value:** Agent42 must always be able to run agents reliably, with tiered provider routing (L1 workhorse -> free fallback -> L2 premium) ensuring no single provider outage stops the platform.
+**Core Value:** Frood must always be able to run agents reliably, with tiered provider routing (L1 workhorse -> free fallback -> L2 premium) ensuring no single provider outage stops the platform.
 
 ### Constraints
 
 - **API compatibility**: All providers use OpenAI Chat Completions compatible APIs
 - **Tiered defaults**: L1 (StrongWall) when configured, free tier fallback, L2 premium opt-in
-- **Graceful degradation**: Missing API keys never crash Agent42
+- **Graceful degradation**: Missing API keys never crash Frood
 - **Backward compatible**: Users without new API keys keep existing routing
 <!-- GSD:project-end -->
 

@@ -47,7 +47,7 @@ def bridge(mock_reward_system):
 
 
 class TestRoleMapping:
-    """ROUTE-01: Paperclip role → Agent42 task category mapping."""
+    """ROUTE-01: Paperclip role → Frood task category mapping."""
 
     @pytest.mark.asyncio
     async def test_engineer_routes_to_coding(self, bridge):

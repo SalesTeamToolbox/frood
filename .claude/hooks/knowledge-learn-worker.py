@@ -22,7 +22,7 @@ from pathlib import Path
 
 # ── Bootstrap: add project root to sys.path ─────────────────────────────────
 script_dir = Path(__file__).resolve().parent  # .claude/hooks/
-project_dir = script_dir.parent.parent  # project root (agent42/)
+project_dir = script_dir.parent.parent  # project root (frood/)
 sys.path.insert(0, str(project_dir))
 
 # ── Status file ──────────────────────────────────────────────────────────────

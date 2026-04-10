@@ -1,8 +1,8 @@
 # Project Structure
 
 ```
-agent42/
-├── agent42.py              # Main orchestrator entry point (Agent42 class)
+frood/
+├── frood.py                # Main orchestrator entry point (Frood class)
 ├── CLAUDE.md               # This file — development guide
 ├── README.md               # User-facing docs, quick start, architecture
 ├── setup.sh                # Local setup script (venv, deps, .env, systemd template)
@@ -12,7 +12,7 @@ agent42/
 ├── pyproject.toml          # Tool configuration (ruff, pytest, mypy)
 ├── Makefile                # Common dev commands
 ├── Dockerfile              # Container build
-├── docker-compose.yml      # Dev stack (Agent42 + Redis + Qdrant)
+├── docker-compose.yml      # Dev stack (Frood + Redis + Qdrant)
 ├── .env.example            # Configuration template (70+ settings)
 ├── .gitignore              # Git exclusions
 ├── .pre-commit-config.yaml # Pre-commit hooks (ruff, bandit, file checks)
@@ -141,7 +141,7 @@ agent42/
 │
 ├── deploy/                 # Production deployment
 │   ├── install-server.sh   # Full server setup (Redis, Qdrant, nginx, SSL, systemd, firewall)
-│   └── nginx-agent42.conf  # Reverse proxy template (__DOMAIN__/__PORT__ placeholders)
+│   └── nginx-frood.conf    # Reverse proxy template (__DOMAIN__/__PORT__ placeholders)
 │
 ├── apps/                   # User-created applications (auto-created)
 │   ├── <app-id>/           # Each app in its own directory

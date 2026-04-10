@@ -17,7 +17,7 @@ class SidecarJsonFormatter(logging.Formatter):
     """Emit log records as single-line JSON objects.
 
     Output format:
-        {"timestamp": "2026-03-28T12:00:00Z", "level": "INFO", "logger": "agent42", "message": "..."}
+        {"timestamp": "2026-03-28T12:00:00Z", "level": "INFO", "logger": "frood", "message": "..."}
     """
 
     def format(self, record: logging.LogRecord) -> str:

@@ -2,7 +2,7 @@
 
 | Term | Meaning |
 |------|---------|
-| Orchestrator | The `Agent42` class in `agent42.py` — manages all subsystems |
+| Orchestrator | The `Frood` class in `frood.py` — manages all subsystems |
 | Agent | A per-task worker (`agents/agent.py`) that gets a worktree and runs iterations |
 | Iteration Engine | Primary model → tool execution → critic review → revise loop |
 | Model Router | Free-first strategy selecting models per task type, with 4-layer resolution |
@@ -29,14 +29,14 @@
 | Tunnel Manager | Expose local ports via cloudflared/serveo/localhost.run with TTL auto-expiry |
 | Knowledge Base | RAG tool for importing documents, chunking, and semantic query via embeddings |
 | Vision Tool | Image analysis using LLM vision APIs with Pillow compression |
-| App | A self-contained user application built by Agent42, managed via `AppManager` |
+| App | A self-contained user application built by Frood, managed via `AppManager` |
 | App Manager | `core/app_manager.py` — creates, builds, runs, stops, and serves user apps |
 | App Tool | `tools/app_tool.py` — agent-facing interface for app lifecycle management |
 | App Builder | Skill (`skills/builtins/app-builder/`) guiding agents through full app creation |
 | App Runtime | How an app runs: `static`, `python`, `node`, or `docker` |
-| App Mode | `internal` (Agent42 system tool) or `external` (app being developed for public release) |
+| App Mode | `internal` (Frood system tool) or `external` (app being developed for public release) |
 | App Visibility | `private` (dashboard-only), `unlisted` (anyone with URL), `public` (listed openly) |
-| App API | Agent-to-app HTTP interaction — lets Agent42 call a running app's endpoints via `app_api` |
+| App API | Agent-to-app HTTP interaction — lets Frood call a running app's endpoints via `app_api` |
 | Scope Detection | Detects when a user's message changes topic from the active conversation scope, triggering a new branch/task |
 | Active Scope | `ScopeInfo` in `core/intent_classifier.py` — tracks the current conversation topic per channel session |
 | Scope Analysis | `ScopeAnalysis` in `core/intent_classifier.py` — result of scope change detection (continuation vs change) |

@@ -6,7 +6,7 @@ Verify OpenRouter model availability against the MODELS dict, check pip package 
 
 ## Context
 
-Agent42 uses a dynamic model routing system with multiple LLM providers:
+Frood uses a dynamic model routing system with multiple LLM providers:
 
 - **Model registry:** `providers/registry.py` contains the `MODELS` dict (model ID -> ModelSpec) and `PROVIDERS` dict (provider name -> ProviderSpec)
 - **Routing config:** `model_router.py` contains the `FREE_ROUTING` dict with fallback model lists per task type

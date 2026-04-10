@@ -81,8 +81,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--collection-prefix",
-        default="agent42",
-        help="Qdrant collection prefix (default: agent42)",
+        default="frood",
+        help="Qdrant collection prefix (default: frood)",
     )
     parser.add_argument(
         "--batch-size",

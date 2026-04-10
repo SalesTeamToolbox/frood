@@ -1,14 +1,14 @@
 @echo off
-REM Agent42 LLM Proxy Launcher for Claude Code
-REM This allows Claude Code to use Zen free models via Agent42 while
+REM Frood LLM Proxy Launcher for Claude Code
+REM This allows Claude Code to use Zen free models via Frood while
 REM still having access to your Claude Code subscription as fallback.
 REM
-REM Usage: run-agent42-proxy.bat [model]
+REM Usage: run-frood-proxy.bat [model]
 REM
 REM Examples:
-REM   run-agent42-proxy.bat              - Uses default (qwen3.6-plus-free)
-REM   run-agent42-proxy.bat claude-sonnet-4-6 - Uses Anthropic API if configured
-REM   run-agent42-proxy.bat subscription - Uses your Claude Code subscription
+REM   run-frood-proxy.bat              - Uses default (qwen3.6-plus-free)
+REM   run-frood-proxy.bat claude-sonnet-4-6 - Uses Anthropic API if configured
+REM   run-frood-proxy.bat subscription - Uses your Claude Code subscription
 REM
 REM To switch between models:
 REM   1. Edit this script and change the MODEL variable
@@ -18,7 +18,7 @@ set MODEL=%1
 if "%MODEL%"=="" set MODEL=qwen3.6-plus-free
 
 echo ================================================================================
-echo Agent42 LLM Proxy - Claude Code Launcher
+echo Frood LLM Proxy - Claude Code Launcher
 echo ================================================================================
 echo.
 echo Your Claude Code subscription is always available as the default.
@@ -38,16 +38,16 @@ echo   - big-pickle         : Zen free model (content)
 echo   - claude-sonnet-4-6  : Anthropic API (if configured)
 echo   - gpt-4o-mini        : OpenAI API (if configured)
 echo.
-echo Starting Agent42 dashboard (required for proxy)...
+echo Starting Frood dashboard (required for proxy)...
 echo.
 
-REM Start Agent42 in background
-start /b python agent42.py > nul 2>&1
+REM Start Frood in background
+start /b python frood.py > nul 2>&1
 
-REM Wait for Agent42 to start
+REM Wait for Frood to start
 timeout /t 3 /nobreak > nul
 
-REM Set environment variables for Claude Code to use Agent42 proxy
+REM Set environment variables for Claude Code to use Frood proxy
 set ANTHROPIC_BASE_URL=http://localhost:8000/llm/v1
 set ANTHROPIC_API_KEY=dummy
 set ANTHROPIC_MODEL=%MODEL%

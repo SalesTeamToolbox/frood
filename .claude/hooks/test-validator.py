@@ -40,7 +40,6 @@ GLOBAL_IMPACT_FILES = {
     "tools/__init__.py",
     "tools/base.py",
     "providers/__init__.py",
-    "agent42.py",
     "frood.py",
 }
 

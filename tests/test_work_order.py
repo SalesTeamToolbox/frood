@@ -161,10 +161,10 @@ class TestWorkOrderPrompt:
         wo = WorkOrder(
             id="test-203",
             prompt="Do work",
-            constraints=WorkOrderConstraints(no_touch=["agent42.py", "config.py"]),
+            constraints=WorkOrderConstraints(no_touch=["frood.py", "config.py"]),
         )
         prompt = wo.build_prompt()
-        assert "agent42.py" in prompt
+        assert "frood.py" in prompt
         assert "Do NOT modify" in prompt
 
     def test_prompt_includes_must_run(self):

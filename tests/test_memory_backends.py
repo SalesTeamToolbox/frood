@@ -22,7 +22,7 @@ class TestQdrantConfig:
     def test_default_config(self):
         config = QdrantConfig()
         assert config.url == ""
-        assert config.collection_prefix == "agent42"
+        assert config.collection_prefix == "frood"
         assert config.vector_dim == 1536
 
     def test_custom_config(self):
@@ -439,7 +439,7 @@ class TestMemoryStoreWithBackends:
     def test_memory_store_without_backends(self):
         """MemoryStore works normally without Qdrant/Redis."""
         store = MemoryStore(self.tmpdir)
-        assert "Agent42 Memory" in store.read_memory()
+        assert "Frood Memory" in store.read_memory()
         store.log_event("test", "Test event")
         assert "test" in store.read_history()
 
@@ -616,7 +616,7 @@ class TestEmbeddingCacheHashLength:
         call_args = backend._client.setex.call_args
         key = call_args[0][0]  # First positional arg is the key
 
-        # Extract the hash portion (after "agent42:embed_cache:")
+        # Extract the hash portion (after "frood:embed_cache:")
         hash_part = key.split(":")[-1]
         # Full SHA-256 is 64 hex chars
         assert len(hash_part) == 64

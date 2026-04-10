@@ -49,7 +49,7 @@ _CLONE_CATEGORIES = {"config"}
 
 # Source code paths to include in clone packages
 _CLONE_SOURCE_PATTERNS: list[str] = [
-    "agent42.py",
+    "frood.py",
     "core",
     "tools",
     "agents",
@@ -165,9 +165,9 @@ def create_backup(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    archive_name = f"agent42-backup-{timestamp}.tar.gz"
+    archive_name = f"frood-backup-{timestamp}.tar.gz"
 
-    staging = Path(tempfile.mkdtemp(prefix="agent42-backup-"))
+    staging = Path(tempfile.mkdtemp(prefix="frood-backup-"))
     try:
         file_count = 0
         categories_included = []
@@ -251,7 +251,7 @@ def restore_backup(
     target = Path(target_path).resolve()
     target.mkdir(parents=True, exist_ok=True)
 
-    extract_dir = Path(tempfile.mkdtemp(prefix="agent42-restore-"))
+    extract_dir = Path(tempfile.mkdtemp(prefix="frood-restore-"))
     try:
         # Extract archive
         with tarfile.open(str(archive), "r:gz") as tar:
@@ -329,9 +329,9 @@ def create_clone(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    archive_name = f"agent42-clone-{timestamp}.tar.gz"
+    archive_name = f"frood-clone-{timestamp}.tar.gz"
 
-    staging = Path(tempfile.mkdtemp(prefix="agent42-clone-"))
+    staging = Path(tempfile.mkdtemp(prefix="frood-clone-"))
     try:
         file_count = 0
         categories_included = []

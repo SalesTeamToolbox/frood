@@ -19,8 +19,8 @@ Frood is the intelligence layer for AI workflows — an admin and observability 
 
 ```bash
 # Clone and set up
-git clone https://github.com/SalesTeamToolbox/agent42.git
-cd agent42
+git clone https://github.com/SalesTeamToolbox/frood.git
+cd frood
 python -m venv .venv
 source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
@@ -30,7 +30,7 @@ cp .env.example .env
 # Edit .env with your API keys and settings
 
 # Run
-python agent42.py
+python frood.py
 # Dashboard at http://localhost:8000
 ```
 

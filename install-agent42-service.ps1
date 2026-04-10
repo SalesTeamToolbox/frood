@@ -1,28 +1,28 @@
-# Agent42 Windows Service Installation Script
-# Installs Agent42 as a Windows service using NSSM (Non-Sucking Service Manager)
+# Frood Windows Service Installation Script
+# Installs Frood as a Windows service using NSSM (Non-Sucking Service Manager)
 #
 # Requirements:
 #   - PowerShell (run as Administrator)
 #   - NSSM (downloaded automatically if not present)
 #
 # Usage:
-#   .\install-agent42-service.ps1
+#   .\install-frood-service.ps1
 #
 # After installation:
-#   - Agent42 starts automatically on boot
+#   - Frood starts automatically on boot
 #   - Dashboard: http://localhost:8000
 #   - LLM Proxy: http://localhost:8000/llm/v1
 #
 # Management:
-#   Start-Service agent42
-#   Stop-Service agent42
-#   Get-Service agent42
-#   sc.exe delete agent42  (to uninstall)
+#   Start-Service frood
+#   Stop-Service frood
+#   Get-Service frood
+#   sc.exe delete frood  (to uninstall)
 
 $ErrorActionPreference = "Stop"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host " Agent42 Windows Service Installer" -ForegroundColor Cyan
+Write-Host " Frood Windows Service Installer" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -34,20 +34,20 @@ if (-not $isAdmin) {
     exit 1
 }
 
-# Get the Agent42 directory (parent of this script)
-$Agent42Dir = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Get the Frood directory (parent of this script)
+$FroodDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $PythonExe) {
     Write-Host "ERROR: Python not found in PATH. Install Python 3.11+ first." -ForegroundColor Red
     exit 1
 }
 
-Write-Host "Agent42 Directory: $Agent42Dir" -ForegroundColor White
+Write-Host "Frood Directory: $FroodDir" -ForegroundColor White
 Write-Host "Python: $PythonExe" -ForegroundColor White
 Write-Host ""
 
 # Download NSSM if not present
-$NssmDir = Join-Path $Agent42Dir "nssm"
+$NssmDir = Join-Path $FroodDir "nssm"
 $NssmExe = Join-Path $NssmDir "nssm.exe"
 
 if (-not (Test-Path $NssmExe)) {
@@ -87,70 +87,70 @@ if (-not (Test-Path $NssmExe)) {
 }
 
 # Check if service already exists
-$ExistingService = Get-Service -Name "agent42" -ErrorAction SilentlyContinue
+$ExistingService = Get-Service -Name "frood" -ErrorAction SilentlyContinue
 if ($ExistingService) {
-    Write-Host "Agent42 service already exists. Removing..." -ForegroundColor Yellow
-    & $NssmExe stop agent42 2>$null
+    Write-Host "Frood service already exists. Removing..." -ForegroundColor Yellow
+    & $NssmExe stop frood 2>$null
     Start-Sleep -Seconds 2
-    & $NssmExe remove agent42 confirm 2>$null
+    & $NssmExe remove frood confirm 2>$null
     Start-Sleep -Seconds 1
 }
 
 # Install the service
-Write-Host "Installing Agent42 service..." -ForegroundColor Yellow
+Write-Host "Installing Frood service..." -ForegroundColor Yellow
 
-$Agent42Py = Join-Path $Agent42Dir "agent42.py"
-$LogDir = Join-Path $Agent42Dir "logs"
+$FroodPy = Join-Path $FroodDir "frood.py"
+$LogDir = Join-Path $FroodDir "logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 # Install service
-& $NssmExe install agent42 $PythonExe $Agent42Py
+& $NssmExe install frood $PythonExe $FroodPy
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Failed to install service." -ForegroundColor Red
     exit 1
 }
 
 # Configure service
-& $NssmExe set agent42 AppDirectory $Agent42Dir
-& $NssmExe set agent42 AppStdout (Join-Path $LogDir "agent42-service.log")
-& $NssmExe set agent42 AppStderr (Join-Path $LogDir "agent42-service-error.log")
-& $NssmExe set agent42 AppRotateFiles 1
-& $NssmExe set agent42 AppRotateBytes 1048576
-& $NssmExe set agent42 AppRotateOnline 1
-& $NssmExe set agent42 Description "Agent42 AI Agent Platform - Dashboard, MCP Server, and LLM Proxy"
-& $NssmExe set agent42 DisplayName "Agent42"
-& $NssmExe set agent42 Start SERVICE_AUTO_START
+& $NssmExe set frood AppDirectory $FroodDir
+& $NssmExe set frood AppStdout (Join-Path $LogDir "frood-service.log")
+& $NssmExe set frood AppStderr (Join-Path $LogDir "frood-service-error.log")
+& $NssmExe set frood AppRotateFiles 1
+& $NssmExe set frood AppRotateBytes 1048576
+& $NssmExe set frood AppRotateOnline 1
+& $NssmExe set frood Description "Frood AI Agent Platform - Dashboard, MCP Server, and LLM Proxy"
+& $NssmExe set frood DisplayName "Frood"
+& $NssmExe set frood Start SERVICE_AUTO_START
 
 Write-Host ""
 Write-Host "Service installed successfully!" -ForegroundColor Green
 Write-Host ""
-Write-Host "Starting Agent42 service..." -ForegroundColor Yellow
+Write-Host "Starting Frood service..." -ForegroundColor Yellow
 
-Start-Service agent42
+Start-Service frood
 Start-Sleep -Seconds 3
 
-$Status = Get-Service agent42
+$Status = Get-Service frood
 if ($Status.Status -eq "Running") {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host " Agent42 is now running as a Windows service!" -ForegroundColor Green
+    Write-Host " Frood is now running as a Windows service!" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "Dashboard: http://localhost:8000" -ForegroundColor Cyan
     Write-Host "LLM Proxy: http://localhost:8000/llm/v1" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Commands:" -ForegroundColor Yellow
-    Write-Host "  Start-Service agent42    # Start" -ForegroundColor White
-    Write-Host "  Stop-Service agent42     # Stop" -ForegroundColor White
-    Write-Host "  Get-Service agent42      # Status" -ForegroundColor White
-    Write-Host "  Get-Content logs\agent42-service.log -Tail 20  # View logs" -ForegroundColor White
+    Write-Host "  Start-Service frood    # Start" -ForegroundColor White
+    Write-Host "  Stop-Service frood     # Stop" -ForegroundColor White
+    Write-Host "  Get-Service frood      # Status" -ForegroundColor White
+    Write-Host "  Get-Content logs\frood-service.log -Tail 20  # View logs" -ForegroundColor White
     Write-Host ""
-    Write-Host "To uninstall: sc.exe delete agent42" -ForegroundColor Yellow
+    Write-Host "To uninstall: sc.exe delete frood" -ForegroundColor Yellow
 } else {
     Write-Host ""
     Write-Host "WARNING: Service may not have started correctly." -ForegroundColor Yellow
-    Write-Host "Check logs: Get-Content logs\agent42-service-error.log" -ForegroundColor Yellow
+    Write-Host "Check logs: Get-Content logs\frood-service-error.log" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "Service status:" -ForegroundColor Yellow
-    Get-Service agent42 | Format-List
+    Get-Service frood | Format-List
 }

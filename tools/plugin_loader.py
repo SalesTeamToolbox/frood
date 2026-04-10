@@ -3,7 +3,7 @@ Plugin loader — auto-discovers custom Tool and ToolExtension subclasses.
 
 Drop a ``.py`` file containing a Tool subclass into the configured
 ``CUSTOM_TOOLS_DIR`` and it will be discovered, validated, and registered
-at startup without modifying ``agent42.py``.
+at startup without modifying ``frood.py``.
 
 Extension mechanism:
   A file may also contain ``ToolExtension`` subclasses that augment existing
@@ -175,7 +175,7 @@ class PluginLoader:
 
 def _import_from_file(py_file: Path) -> tuple[list[type], list[type]]:
     """Import a .py file and return (tool_classes, extension_classes)."""
-    module_name = f"_agent42_custom_tool_{py_file.stem}"
+    module_name = f"_frood_custom_tool_{py_file.stem}"
 
     try:
         spec = importlib.util.spec_from_file_location(module_name, py_file)

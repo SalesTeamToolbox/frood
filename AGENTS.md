@@ -1,10 +1,10 @@
-# AGENTS.md — Agent42 Intelligence Layer
+# AGENTS.md — Frood Intelligence Layer
 
-This file is read by both OpenCode and Claude Code to provide Agent42 memory and context integration.
+This file is read by both OpenCode and Claude Code to provide Frood memory and context integration.
 
 ## Memory System
 
-Agent42 provides persistent memory via the `agent42_memory` MCP tool. Use it to recall past context and store new learnings.
+Frood provides persistent memory via the `frood_memory` MCP tool. Use it to recall past context and store new learnings.
 
 ### Automatic Recall
 
@@ -24,14 +24,14 @@ On complex or continuation prompts, search memory BEFORE answering. This is crit
 
 **How to recall:**
 ```
-agent42_memory(action="search", content="<relevant keywords from the prompt>")
+frood_memory(action="search", content="<relevant keywords from the prompt>")
 ```
 
 ### Storing Memories
 
 When you discover something the user would want remembered across sessions, store it:
 ```
-agent42_memory(action="store", content="## Section Name\n- Key fact or decision")
+frood_memory(action="store", content="## Section Name\n- Key fact or decision")
 ```
 
 Store: deployment procedures, architecture decisions, user preferences, server details, recurring issues and their fixes, project conventions.

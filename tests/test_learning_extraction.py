@@ -37,9 +37,9 @@ class TestTaskContextBridge:
     def test_read_task_context_from_file(self, tmp_path):
         """effectiveness-learn.py read_task_context() reads from file."""
         # Create the bridge file manually
-        agent42_dir = tmp_path / ".frood"
-        agent42_dir.mkdir()
-        task_file = agent42_dir / "current-task.json"
+        frood_dir = tmp_path / ".frood"
+        frood_dir.mkdir()
+        task_file = frood_dir / "current-task.json"
         task_file.write_text(
             json.dumps(
                 {

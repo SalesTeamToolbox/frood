@@ -10,7 +10,7 @@
 | Skills | `kebab-case` directories | `code-review/`, `security-audit/` |
 | Tests | `test_{module}.py` / `class TestClassName` | `test_sandbox.py` / `TestWorkspaceSandbox` |
 | Config env vars | `UPPER_SNAKE_CASE` | `MAX_CONCURRENT_AGENTS` |
-| Loggers | `"agent42.{module}"` namespace | `logging.getLogger("agent42.tools.shell")` |
+| Loggers | `"frood.{module}"` namespace | `logging.getLogger("frood.tools.shell")` |
 
 ## Commit Guidelines
 

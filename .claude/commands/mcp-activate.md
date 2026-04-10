@@ -1,5 +1,5 @@
 ---
-description: "Enable an on-demand MCP server (agent42-remote, context7, github, playwright, firecrawl)"
+description: "Enable an on-demand MCP server (frood-remote, context7, github, playwright, firecrawl)"
 allowed-tools: Read, Edit, Write
 ---
 
@@ -21,11 +21,11 @@ If an argument is provided:
 - Tell the user: "Server `<name>` activated. **Restart your CC session** (Ctrl+Shift+P > Claude Code: Restart) for the change to take effect."
 
 ## Always-on servers (do not remove)
-- `agent42` — core platform
+- `frood` — core platform
 - `jcodemunch` — codebase navigation
 
 ## On-demand servers
-- `agent42-remote` — production server management & deployment
+- `frood-remote` — production server management & deployment
 - `context7` — library docs (also available via context7 plugin, only activate if plugin not installed)
 - `github` — GitHub API (also available via github plugin, `gh` CLI works too)
 - `playwright` — browser automation (also available via playwright plugin)
