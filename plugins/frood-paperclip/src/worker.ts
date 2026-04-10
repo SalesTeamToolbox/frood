@@ -20,10 +20,10 @@ const plugin = definePlugin({
     const config = await ctx.config.get();
 
     // Validate required fields (D-19)
-    const baseUrl = config.agent42BaseUrl as string;
+    const baseUrl = config.froodBaseUrl as string;
     const apiKey = config.apiKey as string;
     if (!baseUrl || !apiKey) {
-      throw new Error("agent42BaseUrl and apiKey are required in plugin config");
+      throw new Error("froodBaseUrl and apiKey are required in plugin config");
     }
     const timeoutMs = (config.timeoutMs as number) ?? 10_000;
 
@@ -243,7 +243,7 @@ const plugin = definePlugin({
 
       try {
         const config = await ctx.config.get();
-        const httpBaseUrl = config.agent42BaseUrl as string;
+        const httpBaseUrl = config.froodBaseUrl as string;
         const apiKey = config.apiKey as string;
 
         // Per CLAUDE.md rule 6: NEVER log/expose API keys in URLs or server logs.

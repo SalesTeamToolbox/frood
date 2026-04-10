@@ -102,7 +102,7 @@ function ApiKeysTab({ context }: { context: any }) {
     <div>
       <h3 style={{ fontSize: "15px", fontWeight: 600, margin: "0 0 12px" }}>API Keys</h3>
       <p style={{ fontSize: "13px", color: "#6b7280", margin: "0 0 12px" }}>
-        Manage API keys for LLM providers and services. Keys are stored securely on the Agent42 sidecar.
+        Manage API keys for LLM providers and services. Keys are stored securely on the Frood sidecar.
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
         {keys.map((k) => (
@@ -184,8 +184,8 @@ function SecurityTab() {
         </p>
       </div>
       <p style={{ fontSize: "13px", color: "#6b7280" }}>
-        Sandbox, CORS, and rate limit settings are controlled via environment variables on the Agent42 sidecar.
-        Contact your Agent42 administrator to adjust these settings.
+        Sandbox, CORS, and rate limit settings are controlled via environment variables on the Frood sidecar.
+        Contact your Frood administrator to adjust these settings.
       </p>
     </div>
   );
@@ -198,13 +198,13 @@ function OrchestratorTab() {
       <h3 style={{ fontSize: "15px", fontWeight: 600, margin: "0 0 12px" }}>Orchestrator</h3>
       <div style={{ padding: "12px", borderRadius: "6px", background: "#f9fafb", border: "1px solid #e5e7eb", marginBottom: "16px" }}>
         <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
-          Orchestrator settings are managed via Agent42 environment configuration.
+          Orchestrator settings are managed via Frood environment configuration.
           These include MAX_CONCURRENT_AGENTS, MAX_DAILY_API_SPEND_USD, and MODEL_ROUTING_POLICY.
         </p>
       </div>
       <p style={{ fontSize: "13px", color: "#6b7280" }}>
         To adjust orchestrator settings, update the <code style={{ fontFamily: "monospace", background: "#f3f4f6", padding: "1px 4px", borderRadius: "3px" }}>.env</code> file
-        on the Agent42 sidecar and restart the service.
+        on the Frood sidecar and restart the service.
       </p>
     </div>
   );
@@ -217,12 +217,12 @@ function StorageTab() {
       <h3 style={{ fontSize: "15px", fontWeight: 600, margin: "0 0 12px" }}>Storage & Paths</h3>
       <div style={{ padding: "12px", borderRadius: "6px", background: "#f9fafb", border: "1px solid #e5e7eb", marginBottom: "16px" }}>
         <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
-          Storage paths are configured via Agent42 environment variables.
+          Storage paths are configured via Frood environment variables.
           These include MEMORY_DIR, SESSIONS_DIR, OUTPUTS_DIR, and TEMPLATES_DIR.
         </p>
       </div>
       <p style={{ fontSize: "13px", color: "#6b7280" }}>
-        To view detailed storage backend status (Qdrant, Redis, CC sync), use the standalone Agent42 dashboard.
+        To view detailed storage backend status (Qdrant, Redis, CC sync), use the standalone Frood dashboard.
       </p>
     </div>
   );
@@ -312,7 +312,7 @@ function MemoryTab({ context: _context }: { context: any }) {
             <span style={{ fontSize: "13px" }}>Enable automatic learning extraction from agent runs</span>
           </label>
           <p style={{ fontSize: "12px", color: "#9ca3af", margin: "6px 0 0" }}>
-            When enabled, Agent42 extracts learnings from completed agent runs and stores them in the knowledge base for future recall.
+            When enabled, Frood extracts learnings from completed agent runs and stores them in the knowledge base for future recall.
           </p>
         </div>
       </div>
@@ -397,7 +397,7 @@ function RewardsTab() {
       <h3 style={{ fontSize: "15px", fontWeight: 600, margin: "0 0 12px" }}>Rewards</h3>
       <div style={{ padding: "12px", borderRadius: "6px", background: "#f9fafb", border: "1px solid #e5e7eb", marginBottom: "16px" }}>
         <p style={{ margin: 0, fontSize: "13px", color: "#6b7280" }}>
-          Rewards and tier configuration is managed via the Agent42 platform. Use the standalone Agent42 dashboard
+          Rewards and tier configuration is managed via the Frood platform. Use the standalone Frood dashboard
           to view tier distribution and enable or disable the rewards system.
         </p>
       </div>
@@ -411,9 +411,9 @@ export function SettingsPage({ context }: PluginSettingsPageProps) {
 
   return (
     <div style={{ padding: "16px", fontFamily: "system-ui, sans-serif", maxWidth: "800px" }}>
-      <h2 style={{ margin: "0 0 8px", fontSize: "18px", fontWeight: 600 }}>Agent42 Settings</h2>
+      <h2 style={{ margin: "0 0 8px", fontSize: "18px", fontWeight: 600 }}>Frood Settings</h2>
       <p style={{ margin: "0 0 16px", fontSize: "13px", color: "#6b7280" }}>
-        Manage Agent42 sidecar configuration. Changes take effect immediately.
+        Manage Frood sidecar configuration. Changes take effect immediately.
       </p>
 
       {/* Tab navigation */}

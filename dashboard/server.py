@@ -1953,29 +1953,40 @@ Focus on learnings that would help in future similar sessions."""
             )
         )
 
-        # OpenAI -- ping https://api.openai.com/v1/models
-        results.append(
-            await _ping_provider(
-                "openai",
-                "OpenAI",
-                "OPENAI_API_KEY",
-                "https://api.openai.com/v1",
-                lambda k: {"Authorization": f"Bearer {k}"},
-            )
-        )
+# OpenAI -- ping https://api.openai.com/v1/models
+results.append(
+    await _ping_provider(
+        "openai",
+        "OpenAI",
+        "OPENAI_API_KEY",
+        "https://api.openai.com/v1",
+        lambda k: {"Authorization": f"Bearer {k}"},
+    )
+)
 
-        return {"providers": results, "checked_at": _time.time()}
+# NVIDIA -- ping https://integrate.api.nvidia.com/v1/models
+results.append(
+    await _ping_provider(
+        "nvidia",
+        "NVIDIA",
+        "NVIDIA_API_KEY",
+        "https://integrate.api.nvidia.com/v1",
+        lambda k: {"Authorization": f"Bearer {k}"},
+    )
+)
 
-    # -- Tools (Phase 4) ------------------------------------------------------
+return {"providers": results, "checked_at": _time.time()}
 
-    @app.get("/api/tools")
-    async def list_tools(_user: str = Depends(get_current_user)):
+# -- Tools (Phase 4) ------------------------------------------------------
+
+@app.get("/api/tools")
+async def list_tools(_user: str = Depends(get_current_user)):
         if tool_registry:
             return tool_registry.list_tools()
         return []
 
-    @app.patch("/api/tools/{name}")
-    async def toggle_tool(
+@app.patch("/api/tools/{name}")
+async def toggle_tool(
         name: str, req: ToggleRequest, _admin: AuthContext = Depends(require_admin)
     ):
         """Enable or disable a tool by name (admin only)."""
@@ -1993,10 +2004,10 @@ Focus on learnings that would help in future similar sessions."""
         _save_toggle_state(disabled, disabled_skills)
         return {"name": name, "enabled": req.enabled}
 
-    # -- Skills (Phase 3) -----------------------------------------------------
+# -- Skills (Phase 3) -----------------------------------------------------
 
-    @app.get("/api/skills")
-    async def list_skills(_user: str = Depends(get_current_user)):
+@app.get("/api/skills")
+async def list_skills(_user: str = Depends(get_current_user)):
         if skill_loader:
             return [
                 {
@@ -2010,8 +2021,8 @@ Focus on learnings that would help in future similar sessions."""
             ]
         return []
 
-    @app.patch("/api/skills/{name}")
-    async def toggle_skill(
+@app.patch("/api/skills/{name}")
+async def toggle_skill(
         name: str, req: ToggleRequest, _admin: AuthContext = Depends(require_admin)
     ):
         """Enable or disable a skill by name (admin only)."""
@@ -2029,58 +2040,58 @@ Focus on learnings that would help in future similar sessions."""
         _save_toggle_state(disabled_tools, disabled_skills)
         return {"name": name, "enabled": req.enabled}
 
-    # -- Settings (API Keys) --------------------------------------------------
+# -- Settings (API Keys) --------------------------------------------------
 
-    @app.get("/api/settings/keys")
-    async def get_api_keys(_admin: AuthContext = Depends(require_admin)):
-        """Get all configurable API keys with masked values (admin only)."""
-        if not _key_store:
-            raise HTTPException(status_code=503, detail="Key store not configured")
-        return _key_store.get_masked_keys()
+@app.get("/api/settings/keys")
+async def get_api_keys(_admin: AuthContext = Depends(require_admin)):
+    """Get all configurable API keys with masked values (admin only)."""
+    if not _key_store:
+        raise HTTPException(status_code=503, detail="Key store not configured")
+    return _key_store.get_masked_keys()
 
-    @app.put("/api/settings/keys")
-    async def update_api_keys(req: KeyUpdateRequest, _admin: AuthContext = Depends(require_admin)):
-        """Update one or more API keys (admin only)."""
-        if not _key_store:
-            raise HTTPException(status_code=503, detail="Key store not configured")
+@app.put("/api/settings/keys")
+async def update_api_keys(req: KeyUpdateRequest, _admin: AuthContext = Depends(require_admin)):
+    """Update one or more API keys (admin only)."""
+    if not _key_store:
+        raise HTTPException(status_code=503, detail="Key store not configured")
 
-        from core.key_store import ADMIN_CONFIGURABLE_KEYS
+    from core.key_store import ADMIN_CONFIGURABLE_KEYS
 
-        errors = []
-        updated = []
-        for env_var, value in req.keys.items():
-            if env_var not in ADMIN_CONFIGURABLE_KEYS:
-                errors.append(f"{env_var} is not a configurable key")
-                continue
-            value = value.strip()
-            if not value:
-                _key_store.delete_key(env_var)
-            else:
-                _key_store.set_key(env_var, value)
-            updated.append(env_var)
+    errors = []
+    updated = []
+    for env_var, value in req.keys.items():
+        if env_var not in ADMIN_CONFIGURABLE_KEYS:
+            errors.append(f"{env_var} is not a configurable key")
+            continue
+        value = value.strip()
+        if not value:
+            _key_store.delete_key(env_var)
+        else:
+            _key_store.set_key(env_var, value)
+        updated.append(env_var)
 
-        # Keys are injected into os.environ by set_key/delete_key.
-        # _build_client() reads from os.getenv(spec.api_key_env) so new
-        # ProviderRegistry instances (created per-agent-run) pick up the
-        # change immediately. Reload settings so that any code reading
-        # settings.xxx_api_key directly also sees the new value.
-        Settings.reload_from_env()
-        return {"status": "ok", "updated": updated, "errors": errors}
+    # Keys are injected into os.environ by set_key/delete_key.
+    # _build_client() reads from os.getenv(spec.api_key_env) so new
+    # ProviderRegistry instances (created per-agent-run) pick up the
+    # change immediately. Reload settings so that any code reading
+    # settings.xxx_api_key directly also sees the new value.
+    Settings.reload_from_env()
+    return {"status": "ok", "updated": updated, "errors": errors}
 
-    # -- Settings (Editable .env) ----------------------------------------------
+# -- Settings (Editable .env) ----------------------------------------------
 
-    @app.get("/api/settings/env")
-    async def get_env_settings(_admin: AuthContext = Depends(require_admin)):
-        """Get current values for dashboard-editable settings."""
-        import os
+@app.get("/api/settings/env")
+async def get_env_settings(_admin: AuthContext = Depends(require_admin)):
+    """Get current values for dashboard-editable settings."""
+    import os
 
-        result: dict[str, str] = {}
-        for key in _DASHBOARD_EDITABLE_SETTINGS:
-            result[key] = os.getenv(key, "")
-        return result
+    result: dict[str, str] = {}
+    for key in _DASHBOARD_EDITABLE_SETTINGS:
+        result[key] = os.getenv(key, "")
+    return result
 
-    @app.put("/api/settings/env")
-    async def update_env_settings(
+@app.put("/api/settings/env")
+async def update_env_settings(
         req: SettingsUpdateRequest, _admin: AuthContext = Depends(require_admin)
     ):
         """Update .env settings and hot-reload the config."""
@@ -2114,9 +2125,9 @@ Focus on learnings that would help in future similar sessions."""
                 os.environ[key] = value
             Settings.reload_from_env()
 
-        return {"status": "ok", "updated": updated, "errors": errors}
+         return {"status": "ok", "updated": updated, "errors": errors}
 
-    @app.get("/api/settings/openrouter-status")
+@app.get("/api/settings/openrouter-status")
     async def get_openrouter_status(_: AuthContext = Depends(require_admin)):
         """Return OpenRouter account status and routing policy info."""
         import os

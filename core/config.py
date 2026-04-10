@@ -56,6 +56,7 @@ class Settings:
     anthropic_api_key: str = ""  # Anthropic API (direct Claude access)
     openai_api_key: str = ""  # OpenAI API (direct GPT access)
     gemini_api_key: str = ""
+    nvidia_api_key: str = ""  # NVIDIA API (build.nvidia.com — free/paid models)
     synthetic_api_key: str = ""  # Synthetic.new (Anthropic-compatible, autonomous agents)
     # Dead providers — keys kept for backward compat but no routing logic exists
     deepseek_api_key: str = ""
@@ -389,6 +390,7 @@ class Settings:
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+            nvidia_api_key=os.getenv("NVIDIA_API_KEY", ""),
             synthetic_api_key=os.getenv("SYNTHETIC_API_KEY", ""),
             # Dead providers (kept for backward compat)
             deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
@@ -789,7 +791,11 @@ class Settings:
                 _admin_keys = json.loads(_key_store_path.read_text()).get("api_keys", {})
                 for _k, _v in _admin_keys.items():
                     if _k and _v:
-                        os.environ[_k] = _v
+                        # Decrypt the value before setting in environment
+                        from core.encryption import decrypt_value
+                        secret = os.getenv("JWT_SECRET", "")
+                        decrypted_value = decrypt_value(_v, secret) if secret else _v
+                        os.environ[_k] = decrypted_value
             except Exception:
                 pass  # Non-fatal — .env values are used as fallback
 

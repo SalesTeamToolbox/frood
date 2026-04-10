@@ -12,7 +12,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/security-gate.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/security-gate.py",
             "timeout": 10
           }
         ]
@@ -23,17 +23,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/conversation-accumulator.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/conversation-accumulator.py",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/memory-recall.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/memory-recall.py",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/context-loader.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/context-loader.py",
             "timeout": 15
           }
         ]
@@ -45,17 +45,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/security-monitor.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/security-monitor.py",
             "timeout": 30
           },
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/format-on-write.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/format-on-write.py",
             "timeout": 30
           },
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/cc-memory-sync.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/cc-memory-sync.py",
             "timeout": 5
           }
         ]
@@ -65,12 +65,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/jcodemunch-token-tracker.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/jcodemunch-token-tracker.py",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/jcodemunch-reindex.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/jcodemunch-reindex.py",
             "timeout": 10
           }
         ]
@@ -81,32 +81,32 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/test-validator.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/test-validator.py",
             "timeout": 45
           },
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/learning-engine.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/learning-engine.py",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/memory-learn.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/memory-learn.py",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/jcodemunch-reindex.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/jcodemunch-reindex.py",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/knowledge-learn.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/knowledge-learn.py",
             "timeout": 30
           },
           {
             "type": "command",
-            "command": "cd c:/Users/user/projects/agent42 && python .claude/hooks/cleanup-orphans.py",
+            "command": "cd c:/Users/user/projects/frood && python .claude/hooks/cleanup-orphans.py",
             "timeout": 10
           }
         ]
@@ -117,7 +117,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd C:/Users/user/projects/agent42 && python .claude/hooks/credential-sync.py",
+            "command": "cd C:/Users/user/projects/frood && python .claude/hooks/credential-sync.py",
             "timeout": 15
           }
         ]

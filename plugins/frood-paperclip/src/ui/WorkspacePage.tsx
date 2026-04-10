@@ -81,7 +81,7 @@ export function WorkspacePage({ context }: PluginPageProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: "monospace", backgroundColor: "#1e1e1e", color: "#d4d4d4" }}>
       <div style={{ padding: "8px 12px", borderBottom: "1px solid #333", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontWeight: 600, fontSize: "14px" }}>Agent42 Terminal</span>
+        <span style={{ fontWeight: 600, fontSize: "14px" }}>Frood Terminal</span>
         <span style={{ fontSize: "12px", color: connected ? "#22c55e" : "#ef4444" }}>
           {connected ? "Connected" : "Disconnected"}
         </span>

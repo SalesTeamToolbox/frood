@@ -1,5 +1,5 @@
 /**
- * session.ts — AdapterSessionCodec implementation for the Agent42 Paperclip adapter.
+ * session.ts — AdapterSessionCodec implementation for the Frood Paperclip adapter.
  *
  * Design notes (per Research Pattern 4, correcting D-08):
  *   - The AdapterSessionCodec interface uses serialize/deserialize (NOT encode/decode)
@@ -41,6 +41,6 @@ export const sessionCodec: AdapterSessionCodec = {
    */
   getDisplayId(params: Record<string, unknown> | null): string | null {
     if (!params?.agentId || typeof params.agentId !== "string") return null;
-    return `agent42:${params.agentId}`;
+    return `frood:${params.agentId}`;
   },
 };

@@ -1,8 +1,8 @@
 /**
- * index.ts — Default export: ServerAdapterModule for the Agent42 Paperclip adapter.
+ * index.ts — Default export: ServerAdapterModule for the Frood Paperclip adapter.
  *
  * This is the entry point that Paperclip discovers and loads.
- * The type "agent42_local" identifies this adapter in Paperclip's adapter registry.
+ * The type "frood_local" identifies this adapter in Paperclip's adapter registry.
  *
  * Usage:
  *   Paperclip loads this module, reads `type` to match configured adapters,
@@ -16,7 +16,7 @@ import { execute, testEnvironment } from "./adapter.js";
 import { sessionCodec } from "./session.js";
 
 const adapter: ServerAdapterModule = {
-  type: "agent42_local",
+  type: "frood_local",
   execute,
   testEnvironment,
   sessionCodec,

@@ -1408,9 +1408,10 @@ function renderSettingsPanel() {
       html += settingSecret("OPENROUTER_API_KEY", "OpenRouter API Key", "200+ models via one key. Paid fallback. Get one at openrouter.ai/keys.");
       html += settingSecret("ANTHROPIC_API_KEY", "Anthropic API Key", "Direct Claude access (Opus/Sonnet). Get one at console.anthropic.com.");
       html += settingSecret("OPENAI_API_KEY", "OpenAI API Key", "Direct GPT access (GPT-4o, o3). Get one at platform.openai.com/api-keys.");
-      html += settingSecret("GEMINI_API_KEY", "Gemini API Key", "Google AI models and embeddings. Get one at aistudio.google.com.");
+       html += settingSecret("GEMINI_API_KEY", "Gemini API Key", "Google AI models and embeddings. Get one at aistudio.google.com.");
+       html += settingSecret("NVIDIA_API_KEY", "NVIDIA API Key", "NVIDIA models via build.nvidia.com. Get one at build.nvidia.com.");
 
-      // Section 4: Provider Connectivity (D-12, D-13, D-14)
+       // Section 4: Provider Connectivity (D-12, D-13, D-14)
       html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Provider Connectivity</h4>';
       var ps = state.providerStatus;
       if (ps && ps.providers && ps.providers.length > 0) {
@@ -1712,9 +1713,20 @@ function confirmPurgeCollection(collection) {
 }
 
 function settingSecret(envVar, label, help, highlight = false) {
-  // Only keys returned by GET /api/settings/keys are admin-configurable.
-  // Other secret fields (channel tokens, password hash) render as read-only.
-  const isAdminConfigurable = envVar in state.apiKeys;
+   // API keys and service tokens are editable regardless of source (admin or env).
+   // Other secret fields (channel tokens, password hash) render as read-only.
+   const isAdminConfigurable = [
+     "ZEN_API_KEY",
+     "OPENROUTER_API_KEY",
+     "ANTHROPIC_API_KEY",
+     "OPENAI_API_KEY",
+     "GEMINI_API_KEY",
+     "NVIDIA_API_KEY",
+     "REPLICATE_API_TOKEN",
+     "LUMA_API_KEY",
+     "BRAVE_API_KEY",
+     "GITHUB_TOKEN"
+   ].includes(envVar);
 
   if (!isAdminConfigurable) {
     return `

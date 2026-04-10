@@ -51,7 +51,7 @@ export function AppsPage({ context }: PluginPageProps) {
         <button onClick={refresh} style={{ padding: "4px 12px", borderRadius: "4px", border: "1px solid #d1d5db", background: "white", cursor: "pointer", fontSize: "12px" }}>Refresh</button>
       </div>
       {apps.length === 0 && (
-        <p style={{ color: "#6b7280" }}>No apps found. Create apps through the Agent42 workspace.</p>
+        <p style={{ color: "#6b7280" }}>No apps found. Create apps through the Frood workspace.</p>
       )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "12px" }}>
         {apps.map((app) => (

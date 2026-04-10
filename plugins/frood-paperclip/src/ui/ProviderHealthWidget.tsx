@@ -36,7 +36,7 @@ export function ProviderHealthWidget({ context }: PluginWidgetProps) {
           width: "10px", height: "10px", borderRadius: "50%",
           backgroundColor: statusColor, display: "inline-block",
         }} />
-        <span style={{ fontWeight: 600 }}>Agent42 Sidecar: {data.status}</span>
+        <span style={{ fontWeight: 600 }}>Frood Sidecar: {data.status}</span>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>

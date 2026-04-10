@@ -7,10 +7,10 @@ const manifest = {
   id: "agent42.paperclip-plugin",
   apiVersion: 1,
   version: "1.2.0",
-  displayName: "Agent42",
+  displayName: "Frood",
   description:
-    "Gives Paperclip agents access to Agent42 memory recall, memory store, routing recommendations, effectiveness data, and MCP tool proxying",
-  author: "Agent42",
+    "Gives Paperclip agents access to Frood memory recall, memory store, routing recommendations, effectiveness data, and MCP tool proxying",
+  author: "Frood",
   categories: ["automation"],
   capabilities: [
     "http.outbound",
@@ -42,7 +42,7 @@ const manifest = {
       {
         type: "dashboardWidget",
         id: "provider-health",
-        displayName: "Agent42 Provider Health",
+        displayName: "Frood Provider Health",
         exportName: "ProviderHealthWidget",
       },
       {
@@ -55,7 +55,7 @@ const manifest = {
       {
         type: "dashboardWidget",
         id: "routing-decisions",
-        displayName: "Agent42 Routing",
+        displayName: "Frood Routing",
         exportName: "RoutingDecisionsWidget",
       },
       {
@@ -80,13 +80,13 @@ const manifest = {
       {
         type: "settingsPage",
         id: "agent42-settings",
-        displayName: "Agent42 Settings",
+        displayName: "Frood Settings",
         exportName: "SettingsPage",
       },
       {
         type: "sidebar",
         id: "workspace-nav",
-        displayName: "Agent42 Workspace",
+        displayName: "Frood Workspace",
         exportName: "WorkspaceNavEntry",
       },
     ],
@@ -100,14 +100,14 @@ const manifest = {
       schedule: "0 * * * *",
     },
   ],
-  // Phase 41: Agent42 Sidecar adapter (ABACUS-04, ABACUS-05)
+  // Phase 41: Frood Sidecar adapter (ABACUS-04, ABACUS-05)
   // Replaces claude_local for Paperclip autonomous execution.
   adapters: [
     {
-      id: "agent42_sidecar",
-      displayName: "Agent42 Sidecar",
+      id: "frood_sidecar",
+      displayName: "Frood",
       description:
-        "Routes agent tasks through Agent42 HTTP API with tiered Abacus RouteLLM routing. " +
+        "Routes agent tasks through Frood HTTP API with tiered Abacus RouteLLM routing. " +
         "Replaces claude_local — zero Claude CLI processes spawned. TOS compliant.",
       actions: {
         run: "adapter-run",
@@ -119,9 +119,9 @@ const manifest = {
   instanceConfigSchema: {
     type: "object",
     properties: {
-      agent42BaseUrl: {
+      froodBaseUrl: {
         type: "string",
-        description: "Agent42 sidecar base URL (e.g. http://localhost:8001)",
+        description: "Frood sidecar base URL (e.g. http://localhost:8001)",
       },
       apiKey: {
         type: "string",
@@ -134,7 +134,7 @@ const manifest = {
         default: 10000,
       },
     },
-    required: ["agent42BaseUrl", "apiKey"],
+    required: ["froodBaseUrl", "apiKey"],
   },
   tools: [
     {
@@ -194,7 +194,7 @@ const manifest = {
     {
       name: "mcp_tool_proxy",
       displayName: "MCP Tool Proxy",
-      description: "Invoke an Agent42 MCP tool through the sidecar proxy",
+      description: "Invoke a Frood MCP tool through the sidecar proxy",
       parametersSchema: {
         type: "object",
         properties: {

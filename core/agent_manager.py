@@ -41,6 +41,18 @@ PROVIDER_MODELS = {
         "analysis": "nemotron-3-super-free",
         "lightweight": "qwen3.6-plus-free",
     },
+    "nvidia": {
+        "fast": "nvidia/nemotron-3-nano-9b-v2:free",
+        "general": "nvidia/nemotron-3-nano-12b-v2-vl:free",
+        "reasoning": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+        "coding": "nvidia/nemotron-3-super:free",
+        "content": "nvidia/nemotron-3-super:free",
+        "research": "nvidia/nemotron-3-super:free",
+        "monitoring": "nvidia/nemotron-3-nano-9b-v2:free",
+        "marketing": "nvidia/nemotron-3-nano-12b-v2-vl:free",
+        "analysis": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+        "lightweight": "nvidia/nemotron-3-nano-9b-v2:free",
+    },
     "openrouter": {
         "fast": "google/gemini-2.0-flash-001",
         "general": "anthropic/claude-sonnet-4-6",
@@ -75,6 +87,14 @@ try:
 except ImportError:
     _zen_client = None
 
+# Optional import for NVIDIA API client
+try:
+    from providers.nvidia_api import get_nvidia_client
+
+    _nvidia_client = get_nvidia_client()
+except ImportError:
+    _nvidia_client = None
+
 _ZEN_FREE_MODEL_CATEGORIES = {
     "fast": "qwen3.6-plus-free",
     "general": "minimax-m2.5-free",
@@ -86,6 +106,19 @@ _ZEN_FREE_MODEL_CATEGORIES = {
     "marketing": "minimax-m2.5-free",
     "analysis": "nemotron-3-super-free",
     "lightweight": "qwen3.6-plus-free",
+}
+
+_NVIDIA_FREE_MODEL_CATEGORIES = {
+    "fast": "nvidia/nemotron-3-nano-9b-v2:free",
+    "general": "nvidia/nemotron-3-nano-12b-v2-vl:free",
+    "reasoning": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+    "coding": "nvidia/nemotron-3-super:free",
+    "content": "nvidia/nemotron-3-super:free",
+    "research": "nvidia/nemotron-3-super:free",
+    "monitoring": "nvidia/nemotron-3-nano-9b-v2:free",
+    "marketing": "nvidia/nemotron-3-nano-12b-v2-vl:free",
+    "analysis": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+    "lightweight": "nvidia/nemotron-3-nano-9b-v2:free",
 }
 
 
@@ -131,6 +164,48 @@ def refresh_zen_models(force: bool = False) -> bool:
         return False
 
 
+def refresh_nvidia_models(force: bool = False) -> bool:
+    """Refresh NVIDIA free model mappings from API.
+
+    Args:
+        force: If True, bypass cache and fetch from API regardless
+
+    Returns:
+        True if models were successfully refreshed, False otherwise
+    """
+    global PROVIDER_MODELS
+
+    if _nvidia_client is None:
+        logger.warning("NVIDIA API client not available")
+        return False
+
+    try:
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+            models = asyncio.run(_nvidia_client.list_models())
+        except RuntimeError:
+            models = asyncio.run(_nvidia_client.list_models())
+
+        if models:
+            dynamic_mapping = dict(_NVIDIA_FREE_MODEL_CATEGORIES)
+            for model_id in models:
+                if model_id not in dynamic_mapping.values():
+                    dynamic_mapping["general"] = model_id
+                    break
+
+            PROVIDER_MODELS["nvidia"] = dynamic_mapping
+            logger.info(f"Updated NVIDIA model mappings: {len(dynamic_mapping)} categories")
+            return True
+        else:
+            logger.warning("No free models fetched from NVIDIA API")
+            return False
+    except Exception as e:
+        logger.error(f"Error refreshing NVIDIA models: {e}")
+        return False
+
+
 async def start_zen_model_refresh_task() -> None:
     """Start a background task to periodically refresh Zen free models weekly."""
     global PROVIDER_MODELS
@@ -158,6 +233,35 @@ async def start_zen_model_refresh_task() -> None:
             break
         except Exception as e:
             logger.error(f"Error in Zen model refresh task: {e}")
+
+
+async def start_nvidia_model_refresh_task() -> None:
+    """Start a background task to periodically refresh NVIDIA free models weekly."""
+    global PROVIDER_MODELS
+
+    if _nvidia_client is None:
+        logger.info("NVIDIA API client not available, skipping background refresh")
+        return
+
+    refresh_interval_hours = 168.0  # Weekly
+    refresh_interval_seconds = refresh_interval_hours * 3600
+
+    logger.info(f"Starting NVIDIA model refresh task (every {refresh_interval_hours} hours)")
+
+    while True:
+        try:
+            await asyncio.sleep(refresh_interval_seconds)
+            logger.info("Refreshing NVIDIA free models...")
+            success = refresh_nvidia_models()
+            if success:
+                logger.info("Successfully refreshed NVIDIA free models")
+            else:
+                logger.warning("Failed to refresh NVIDIA free models — using cached defaults")
+        except asyncio.CancelledError:
+            logger.info("NVIDIA model refresh task cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Error in NVIDIA model refresh task: {e}")
 
 
 # ── Tier-to-model-category upgrade map (Phase 3: Resource Enforcement) ───────
@@ -194,17 +298,17 @@ def get_fallback_models(provider: str, task_category: str, failed_model: str) ->
     """Get ordered list of fallback models when a model is exhausted.
 
     Args:
-        provider: Provider key (e.g. "zen", "openrouter")
+        provider: Provider key (e.g. "zen", "nvidia", "openrouter")
         task_category: Task category (e.g. "fast", "general", "reasoning")
         failed_model: The model that failed (to skip it)
 
     Returns:
         Ordered list of model IDs to try as fallback, excluding failed_model.
     """
-    if provider != "zen":
+    if provider not in ["zen", "nvidia"]:
         return []
 
-    current_models = PROVIDER_MODELS.get("zen", {})
+    current_models = PROVIDER_MODELS.get(provider, {})
     fallback_candidates = list(current_models.values())
     fallback_candidates = [m for m in fallback_candidates if m != failed_model]
     unique_fallbacks = list(dict.fromkeys(fallback_candidates))

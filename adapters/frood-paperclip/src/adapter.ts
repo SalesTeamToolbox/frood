@@ -184,7 +184,7 @@ export async function testEnvironment(
       checks.push({
         code: "sidecar_reachable",
         level: "info",
-        message: `Agent42 sidecar reachable at ${config.sidecarUrl}`,
+        message: `Frood sidecar reachable at ${config.sidecarUrl}`,
       });
 
       // Warn if subsystems are unavailable
@@ -212,8 +212,8 @@ export async function testEnvironment(
       checks.push({
         code: "sidecar_unreachable",
         level: "error",
-        message: `Cannot reach Agent42 sidecar: ${message}`,
-        hint: `Verify Agent42 is running at ${config.sidecarUrl}`,
+        message: `Cannot reach Frood sidecar: ${message}`,
+        hint: `Verify Frood is running at ${config.sidecarUrl}`,
       });
       status = "fail";
     }

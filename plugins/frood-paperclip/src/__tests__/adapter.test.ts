@@ -1,18 +1,18 @@
 /**
- * Tests for Agent42 adapter (Phase 41 — ABACUS-04, ABACUS-05).
+ * Tests for Frood adapter (Phase 41 — ABACUS-04, ABACUS-05).
  * Verifies adapter-run, adapter-status, adapter-cancel action handlers
  * and client methods work correctly.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Test the manifest declares agent42_sidecar adapter
+// Test the manifest declares frood_sidecar adapter
 describe("manifest", () => {
-  it("declares agent42_sidecar adapter", async () => {
+  it("declares frood_sidecar adapter", async () => {
     const { default: manifest } = await import("../manifest.js");
     const adapters = (manifest as any).adapters;
     expect(adapters).toBeDefined();
     expect(adapters.length).toBeGreaterThanOrEqual(1);
-    const sidecar = adapters.find((a: any) => a.id === "agent42_sidecar");
+    const sidecar = adapters.find((a: any) => a.id === "frood_sidecar");
     expect(sidecar).toBeDefined();
     expect(sidecar.actions.run).toBe("adapter-run");
     expect(sidecar.actions.status).toBe("adapter-status");
@@ -179,7 +179,7 @@ describe("Phase 41: Worker adapter action handlers", () => {
 describe("TOS compliance (ABACUS-05)", () => {
   it("adapter description states zero Claude CLI processes", async () => {
     const { default: manifest } = await import("../manifest.js");
-    const sidecar = (manifest as any).adapters.find((a: any) => a.id === "agent42_sidecar");
+    const sidecar = (manifest as any).adapters.find((a: any) => a.id === "frood_sidecar");
     expect(sidecar.description).toContain("zero Claude CLI");
     expect(sidecar.description).toContain("TOS compliant");
   });
