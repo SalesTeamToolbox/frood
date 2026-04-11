@@ -28,6 +28,8 @@ class AdapterExecutionContext(BaseModel):
     agent_id: str = Field(..., alias="agentId")
     company_id: str = Field(default="", alias="companyId")
     task_id: str = Field(default="", alias="taskId")
+    task: str = Field(default="", alias="task")
+    task_type: str = Field(default="general", alias="taskType")
     wake_reason: str = Field(default="heartbeat", alias="wakeReason")
     context: dict[str, Any] = Field(default_factory=dict)
     adapter_config: AdapterConfig = Field(default_factory=AdapterConfig, alias="adapterConfig")

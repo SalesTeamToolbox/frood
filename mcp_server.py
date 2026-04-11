@@ -112,12 +112,15 @@ def _build_registry() -> ToolRegistry:
     # ── Redundant tools NOT registered (Claude Code provides natively):
     # ReadFileTool, WriteFileTool, EditFileTool, ListDirTool → CC Read/Write/Edit/Glob
     # ShellTool → CC Bash tool
-    # WebSearchTool, WebFetchTool → CC WebSearch/WebFetch
     # GrepTool → CC Grep tool
-    # HttpClientTool → CC Bash + curl
+    # NOTE: WebSearchTool, WebFetchTool, HttpClientTool ARE registered below
+    # because the sidecar has no native web search/fetch (unlike Claude Code).
 
     # ── Group A: No dependencies ──────────────────────────────────────────
     for mod, cls in [
+        ("tools.web_search", "WebSearchTool"),
+        ("tools.web_search", "WebFetchTool"),
+        ("tools.http_client", "HttpClientTool"),
         ("tools.content_analyzer", "ContentAnalyzerTool"),
         ("tools.data_tool", "DataTool"),
         ("tools.template_tool", "TemplateTool"),

@@ -122,14 +122,14 @@ _NVIDIA_FREE_MODEL_CATEGORIES = {
 }
 
 
-def refresh_zen_models(force: bool = False) -> bool:
-    """Refresh Zen free model mappings from API.
+async def refresh_zen_models_async() -> bool:
+    """Refresh Zen free model mappings from the live API.
 
-    Args:
-        force: If True, bypass cache and fetch from API regardless
+    Fetches the current model list, identifies free models (suffix '-free'),
+    and remaps categories based on known model capabilities. New free models
+    not in the default mapping are added to the 'general' category.
 
-    Returns:
-        True if models were successfully refreshed, False otherwise
+    Returns True if the mapping was updated.
     """
     global PROVIDER_MODELS
 
@@ -138,41 +138,63 @@ def refresh_zen_models(force: bool = False) -> bool:
         return False
 
     try:
-        import asyncio
-
-        try:
-            loop = asyncio.get_running_loop()
-            models = asyncio.run(_zen_client.list_models())
-        except RuntimeError:
-            models = asyncio.run(_zen_client.list_models())
-
-        if models:
-            dynamic_mapping = dict(_ZEN_FREE_MODEL_CATEGORIES)
-            for model_id in models:
-                if model_id not in dynamic_mapping.values():
-                    dynamic_mapping["general"] = model_id
-                    break
-
-            PROVIDER_MODELS["zen"] = dynamic_mapping
-            logger.info(f"Updated Zen model mappings: {len(dynamic_mapping)} categories")
-            return True
-        else:
-            logger.warning("No free models fetched from Zen API")
+        models = await _zen_client.list_models()
+        if not models:
+            logger.warning("No models returned from Zen API")
             return False
+
+        free_models = [m for m in models if m.endswith("-free")]
+        logger.info("Zen API returned %d models (%d free): %s", len(models), len(free_models), free_models)
+
+        # Start with the defaults, then override with what's actually available
+        new_mapping = dict(_ZEN_FREE_MODEL_CATEGORIES)
+
+        # Remove any default models that are no longer in the API
+        available_set = set(models)
+        for cat, model_id in list(new_mapping.items()):
+            if model_id not in available_set:
+                logger.info("Zen model %s no longer available — removing from %s category", model_id, cat)
+                del new_mapping[cat]
+
+        # Add any new free models not yet mapped
+        mapped_models = set(new_mapping.values())
+        for model_id in free_models:
+            if model_id not in mapped_models:
+                logger.info("New Zen free model discovered: %s", model_id)
+                # Assign to first empty category slot, or add as 'general' fallback
+                if "general" not in new_mapping:
+                    new_mapping["general"] = model_id
+                else:
+                    # Store under its own name as a discoverable category
+                    new_mapping[model_id] = model_id
+
+        # Ensure 'general' always has a mapping
+        if "general" not in new_mapping and free_models:
+            new_mapping["general"] = free_models[0]
+
+        PROVIDER_MODELS["zen"] = new_mapping
+        logger.info("Updated Zen model mappings: %s", new_mapping)
+        return True
+
     except Exception as e:
-        logger.error(f"Error refreshing Zen models: {e}")
+        logger.error("Error refreshing Zen models: %s", e)
         return False
 
 
-def refresh_nvidia_models(force: bool = False) -> bool:
-    """Refresh NVIDIA free model mappings from API.
+def refresh_zen_models(force: bool = False) -> bool:
+    """Sync wrapper for refresh_zen_models_async (for non-async callers)."""
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+        # Already in async context — can't use asyncio.run, schedule as task
+        logger.warning("refresh_zen_models called from async context — use refresh_zen_models_async instead")
+        return False
+    except RuntimeError:
+        return asyncio.run(refresh_zen_models_async())
 
-    Args:
-        force: If True, bypass cache and fetch from API regardless
 
-    Returns:
-        True if models were successfully refreshed, False otherwise
-    """
+async def refresh_nvidia_models_async() -> bool:
+    """Refresh NVIDIA model mappings from the live API."""
     global PROVIDER_MODELS
 
     if _nvidia_client is None:
@@ -180,88 +202,107 @@ def refresh_nvidia_models(force: bool = False) -> bool:
         return False
 
     try:
-        import asyncio
-
-        try:
-            loop = asyncio.get_running_loop()
-            models = asyncio.run(_nvidia_client.list_models())
-        except RuntimeError:
-            models = asyncio.run(_nvidia_client.list_models())
-
-        if models:
-            dynamic_mapping = dict(_NVIDIA_FREE_MODEL_CATEGORIES)
-            for model_id in models:
-                if model_id not in dynamic_mapping.values():
-                    dynamic_mapping["general"] = model_id
-                    break
-
-            PROVIDER_MODELS["nvidia"] = dynamic_mapping
-            logger.info(f"Updated NVIDIA model mappings: {len(dynamic_mapping)} categories")
-            return True
-        else:
-            logger.warning("No free models fetched from NVIDIA API")
+        models = await _nvidia_client.list_models()
+        if not models:
+            logger.warning("No models returned from NVIDIA API")
             return False
+
+        free_models = [m for m in models if ":free" in m]
+        logger.info("NVIDIA API returned %d models (%d free): %s", len(models), len(free_models), free_models)
+
+        new_mapping = dict(_NVIDIA_FREE_MODEL_CATEGORIES)
+        available_set = set(models)
+        for cat, model_id in list(new_mapping.items()):
+            if model_id not in available_set:
+                logger.info("NVIDIA model %s no longer available — removing from %s", model_id, cat)
+                del new_mapping[cat]
+
+        if "general" not in new_mapping and free_models:
+            new_mapping["general"] = free_models[0]
+
+        PROVIDER_MODELS["nvidia"] = new_mapping
+        logger.info("Updated NVIDIA model mappings: %s", new_mapping)
+        return True
+
     except Exception as e:
-        logger.error(f"Error refreshing NVIDIA models: {e}")
+        logger.error("Error refreshing NVIDIA models: %s", e)
         return False
 
 
-async def start_zen_model_refresh_task() -> None:
-    """Start a background task to periodically refresh Zen free models weekly."""
-    global PROVIDER_MODELS
+def refresh_nvidia_models(force: bool = False) -> bool:
+    """Sync wrapper for refresh_nvidia_models_async."""
+    import asyncio
+    try:
+        asyncio.get_running_loop()
+        logger.warning("refresh_nvidia_models called from async context")
+        return False
+    except RuntimeError:
+        return asyncio.run(refresh_nvidia_models_async())
 
+
+async def start_zen_model_refresh_task() -> None:
+    """Start a background task to refresh Zen free models at startup and every 6 hours."""
     if _zen_client is None:
         logger.info("Zen API client not available, skipping background refresh")
         return
 
-    refresh_interval_hours = 168.0  # Weekly
+    refresh_interval_hours = 6.0
     refresh_interval_seconds = refresh_interval_hours * 3600
 
-    logger.info(f"Starting Zen model refresh task (every {refresh_interval_hours} hours)")
+    # Refresh immediately at startup
+    logger.info("Refreshing Zen free models at startup...")
+    try:
+        success = await refresh_zen_models_async()
+        if success:
+            logger.info("Startup Zen model refresh succeeded")
+        else:
+            logger.warning("Startup Zen model refresh failed — using defaults")
+    except Exception as e:
+        logger.error("Startup Zen model refresh error: %s", e)
 
+    # Then refresh periodically
+    logger.info("Starting Zen model refresh loop (every %.0f hours)", refresh_interval_hours)
     while True:
         try:
             await asyncio.sleep(refresh_interval_seconds)
-            logger.info("Refreshing Zen free models...")
-            success = refresh_zen_models()
-            if success:
-                logger.info("Successfully refreshed Zen free models")
-            else:
-                logger.warning("Failed to refresh Zen free models — using cached defaults")
+            await refresh_zen_models_async()
         except asyncio.CancelledError:
             logger.info("Zen model refresh task cancelled")
             break
         except Exception as e:
-            logger.error(f"Error in Zen model refresh task: {e}")
+            logger.error("Error in Zen model refresh task: %s", e)
 
 
 async def start_nvidia_model_refresh_task() -> None:
-    """Start a background task to periodically refresh NVIDIA free models weekly."""
-    global PROVIDER_MODELS
-
+    """Start a background task to refresh NVIDIA models at startup and every 6 hours."""
     if _nvidia_client is None:
         logger.info("NVIDIA API client not available, skipping background refresh")
         return
 
-    refresh_interval_hours = 168.0  # Weekly
+    refresh_interval_hours = 6.0
     refresh_interval_seconds = refresh_interval_hours * 3600
 
-    logger.info(f"Starting NVIDIA model refresh task (every {refresh_interval_hours} hours)")
+    # Refresh immediately at startup
+    logger.info("Refreshing NVIDIA models at startup...")
+    try:
+        success = await refresh_nvidia_models_async()
+        if success:
+            logger.info("Startup NVIDIA model refresh succeeded")
+        else:
+            logger.warning("Startup NVIDIA model refresh failed — using defaults")
+    except Exception as e:
+        logger.error("Startup NVIDIA model refresh error: %s", e)
 
+    logger.info("Starting NVIDIA model refresh loop (every %.0f hours)", refresh_interval_hours)
     while True:
         try:
             await asyncio.sleep(refresh_interval_seconds)
-            logger.info("Refreshing NVIDIA free models...")
-            success = refresh_nvidia_models()
-            if success:
-                logger.info("Successfully refreshed NVIDIA free models")
-            else:
-                logger.warning("Failed to refresh NVIDIA free models — using cached defaults")
+            await refresh_nvidia_models_async()
         except asyncio.CancelledError:
             logger.info("NVIDIA model refresh task cancelled")
             break
         except Exception as e:
-            logger.error(f"Error in NVIDIA model refresh task: {e}")
+            logger.error("Error in NVIDIA model refresh task: %s", e)
 
 
 # ── Tier-to-model-category upgrade map (Phase 3: Resource Enforcement) ───────

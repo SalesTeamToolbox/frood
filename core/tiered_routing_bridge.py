@@ -33,12 +33,31 @@ logger = logging.getLogger("frood.sidecar.routing")
 
 _ROLE_CATEGORY_MAP: dict[str, str] = {
     "engineer": "coding",
+    "cto": "coding",
     "researcher": "research",
     "writer": "content",
-    "analyst": "strategy",
-    # Note: "analyst" → "strategy" resolves via general-fallback on synthetic provider
-    # because PROVIDER_MODELS["synthetic"] has no "strategy" key. This is D-07
-    # intended behavior: resolve_model() falls back to "general" on unmapped categories.
+    "cmo": "marketing",
+    "pm": "general",
+    "analyst": "analysis",
+    "designer": "content",
+    "qa": "coding",
+    "devops": "coding",
+    "ceo": "reasoning",
+    "cfo": "analysis",
+    "general": "general",
+}
+
+# Direct task-type-to-category mapping (takes priority over role mapping)
+_TASK_TYPE_CATEGORY_MAP: dict[str, str] = {
+    "research": "research",
+    "coding": "coding",
+    "content": "content",
+    "marketing": "marketing",
+    "analysis": "analysis",
+    "reasoning": "reasoning",
+    "monitoring": "monitoring",
+    "fast": "fast",
+    "general": "general",
 }
 
 # ---------------------------------------------------------------------------
@@ -135,71 +154,70 @@ class TieredRoutingBridge:
         role: str | None,
         agent_id: str,
         preferred_provider: str = "",
+        preferred_model: str = "",
+        task_type: str = "",
     ) -> RoutingDecision:
-        """Resolve provider + model for a Paperclip agent role.
+        """Resolve provider + model for a Paperclip agent.
 
         Args:
             role:               Paperclip agent role ("engineer", "researcher",
-                                "writer", "analyst", or any string). Unknown/None
-                                roles fall back to "general" category (D-02).
+                                "cmo", etc.). Unknown/None roles fall back to
+                                "general" category.
             agent_id:           Agent identifier for tier lookup.
-            preferred_provider: Optional provider override (D-06). When set,
+            preferred_provider: Optional provider override. When set,
                                 this provider is used regardless of other config.
+            preferred_model:    Optional model override. When set, skip all
+                                category/tier resolution and use this model directly.
+            task_type:          Optional task type hint from the execution context
+                                (e.g. "research", "coding"). Takes priority over
+                                role-based category mapping when present.
 
         Returns:
-            RoutingDecision with resolved provider, model, tier, categories,
-            and cost_estimate=0.0 (populated in Phase 27+ when AgentRuntime
-            wires real token counts, per D-09).
+            RoutingDecision with resolved provider, model, tier, and categories.
         """
         from core.agent_manager import _TIER_CATEGORY_UPGRADE, resolve_model
 
-        # 1. Tier determination (ROUTE-02, D-04)
-        #    Graceful degradation: when reward_system is None, skip tier lookup
-        #    and return tier="" (no upgrade applied).
+        # 1. Tier determination
         if self._reward_system is None:
             tier = ""
         else:
-            # obs_count=0 is the safe default (Pitfall 1 from RESEARCH.md).
-            # TierDeterminator returns "provisional" when obs_count < min_observations (default 10).
-            # This prevents premature Bronze assignment for new sidecar agents.
-            # TODO (Phase 27): wire real obs_count from EffectivenessStore.get_agent_stats()
             score = await self._reward_system.score(agent_id)
             tier = self._tier_determinator.determine(score, observation_count=0)
 
-        # 2. Role → base category (ROUTE-01, D-01, D-02)
-        base_category = _ROLE_CATEGORY_MAP.get(role or "", "general")
-
-        # 3. Provider selection chain (ROUTE-03, D-06, D-07, D-08)
-        if preferred_provider:
-            provider = preferred_provider  # (1) explicit override
-        elif os.environ.get("ZEN_API_KEY"):
-            provider = "zen"  # (2) OpenCode Zen (primary free/paid)
-        elif os.environ.get("OPENROUTER_API_KEY"):
-            provider = "openrouter"  # (3) OpenRouter (200+ models)
-        elif os.environ.get("ANTHROPIC_API_KEY"):
-            provider = "anthropic"  # (4) Anthropic API
-        elif os.environ.get("OPENAI_API_KEY"):
-            provider = "openai"  # (5) OpenAI API
+        # 2. Category resolution: task_type > role mapping > "general"
+        if task_type and task_type in _TASK_TYPE_CATEGORY_MAP:
+            base_category = _TASK_TYPE_CATEGORY_MAP[task_type]
         else:
-            provider = "zen"  # (6) fallback to Zen (free models work without key)
+            base_category = _ROLE_CATEGORY_MAP.get(role or "", "general")
 
-        # 4. resolve_model() handles: tier upgrade + category→model + unknown-category fallback
-        #    (D-05, D-07): gold→reasoning, silver→general, bronze→fast, provisional→unchanged
-        model = resolve_model(provider, base_category, tier)
+        # 3. Provider selection chain
+        if preferred_provider:
+            provider = preferred_provider
+        elif os.environ.get("ZEN_API_KEY"):
+            provider = "zen"
+        elif os.environ.get("OPENROUTER_API_KEY"):
+            provider = "openrouter"
+        elif os.environ.get("ANTHROPIC_API_KEY"):
+            provider = "anthropic"
+        elif os.environ.get("OPENAI_API_KEY"):
+            provider = "openai"
+        else:
+            provider = "zen"
 
-        # 5. Compute effective task_category for log observability (success criterion 2)
-        #    This captures whether the tier upgrade changed the category.
+        # 4. Model resolution: preferred_model > resolve_model(category+tier)
+        if preferred_model:
+            model = preferred_model
+        else:
+            model = resolve_model(provider, base_category, tier)
+
+        # 5. Effective task_category for observability
         task_category = _TIER_CATEGORY_UPGRADE.get(tier, base_category)
 
         logger.debug(
-            "Routing: agent=%s role=%r tier=%s base_cat=%s task_cat=%s provider=%s model=%s",
-            agent_id,
-            role,
-            tier,
-            base_category,
-            task_category,
-            provider,
-            model,
+            "Routing: agent=%s role=%r task_type=%r tier=%s base_cat=%s "
+            "task_cat=%s provider=%s model=%s preferred_model=%r",
+            agent_id, role, task_type, tier, base_category,
+            task_category, provider, model, preferred_model,
         )
 
         return RoutingDecision(
@@ -208,7 +226,7 @@ class TieredRoutingBridge:
             tier=tier,
             task_category=task_category,
             base_category=base_category,
-            cost_estimate=0.0,  # D-09: populated in Phase 27+ when AgentRuntime provides tokens
+            cost_estimate=0.0,
         )
 
     def estimate_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
