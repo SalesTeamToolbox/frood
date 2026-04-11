@@ -1,0 +1,75 @@
+{
+  "last_run": "2026-04-11T23:19:27.284957Z",
+  "agent": "Arianna Dar",
+  "emails_checked": 17,
+  "unread_at_start": 0,
+  "processed": {
+    "skipped_system": [
+      {
+        "uid": "9",
+        "from": "support@reddit.zendesk.com",
+        "reason": "zendesk system"
+      }
+    ],
+    "skipped_internal": [
+      {
+        "uid": "12",
+        "from": "james@synergicsolar.com",
+        "reason": "internal colleague"
+      },
+      {
+        "uid": "14",
+        "from": "alexander@solup.com",
+        "reason": "quote-forward, not original"
+      }
+    ],
+    "replies_sent": [
+      {
+        "uid": "16",
+        "prospect_id": 804,
+        "crm_lead_id": 355,
+        "prospect": "Luis Vigo / Solar Professionals of Illinois",
+        "subject": "Re: Solar dealers in Richton Park",
+        "issue": "signup link showing 'Invitation Required'",
+        "dealer": "Third Coast Solar",
+        "referral_code": "8e3d58e3e1"
+      },
+      {
+        "uid": "10",
+        "prospect_id": 464,
+        "crm_lead_id": 356,
+        "prospect": "Ty Whittaker / Cobalt Power Systems",
+        "subject": "Re: Partnership opportunity for Cobalt Power Systems",
+        "issue": "wants to schedule a leadership call",
+        "dealer": "Blue Dreamz Consulting LLC",
+        "referral_code": "b51f51cdb3"
+      },
+      {
+        "uid": "15",
+        "prospect_id": 805,
+        "crm_lead_id": 328,
+        "prospect": "Michael Alexander / Sol-Up",
+        "subject": "Re: Program",
+        "issue": "hasn't heard from James, form issues",
+        "dealer": "James Skyberg",
+        "referral_code": "z45d600361d"
+      },
+      {
+        "uid": "17",
+        "prospect_id": 793,
+        "crm_lead_id": 354,
+        "prospect": "Philip McCarron / Beacon Solar",
+        "subject": "Re: Solar dealers in East Taunton",
+        "issue": "interested, available Monday",
+        "dealer": "Brad Pereira",
+        "referral_code": "890304f0d4"
+      }
+    ]
+  },
+  "notes": [
+    "Luis Vigo signup link broken - flagged to team, provided correct referral link",
+    "Michael Alexander hasn't heard from James - escalated to James Skyberg",
+    "Ty Whittaker wants leadership call - redirected to Blue Dreamz with Teams advice",
+    "Philip McCarron interested/Monday - assigned to Brad Pereira"
+  ]
+}
