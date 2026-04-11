@@ -20,6 +20,7 @@ This is a SEPARATE app factory from dashboard/server.py:create_app() per D-01.
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
@@ -75,6 +76,7 @@ from core.sidecar_orchestrator import (
     SidecarOrchestrator,
     is_duplicate_run,
     register_run,
+    unregister_run,
 )
 from core.tiered_routing_bridge import TieredRoutingBridge
 from dashboard.auth import get_current_user
@@ -151,6 +153,7 @@ def create_sidecar_app(
         reward_system=reward_system,
         memory_bridge=memory_bridge,
         tiered_routing_bridge=tiered_routing_bridge,
+        tool_registry=tool_registry,
     )
 
     @app.on_event("shutdown")
@@ -195,14 +198,15 @@ def create_sidecar_app(
         # Build providers_detail list (D-07)
         providers_detail_list: list[ProviderStatusDetail] = []
         _provider_key_map = {
-            "zen": "zen_api_key",
-            "openrouter": "openrouter_api_key",
-            "anthropic": "anthropic_api_key",
-            "openai": "openai_api_key",
-            "synthetic": "synthetic_api_key",
+            "zen": ("zen_api_key", "ZEN_API_KEY"),
+            "openrouter": ("openrouter_api_key", "OPENROUTER_API_KEY"),
+            "anthropic": ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+            "openai": ("openai_api_key", "OPENAI_API_KEY"),
+            "synthetic": ("synthetic_api_key", "SYNTHETIC_API_KEY"),
         }
-        for pname, attr_name in _provider_key_map.items():
-            is_configured = bool(getattr(settings, attr_name, ""))
+        for pname, (attr_name, env_name) in _provider_key_map.items():
+            # Check both settings (init-time) and os.environ (key store injects after init)
+            is_configured = bool(getattr(settings, attr_name, "")) or bool(os.environ.get(env_name, ""))
             model_count = len(set(PROVIDER_MODELS.get(pname, {}).values()))
             providers_detail_list.append(
                 ProviderStatusDetail(
@@ -290,50 +294,82 @@ def create_sidecar_app(
         token = create_token(username)
         return SidecarTokenResponse(token=token, expires_in=86400)
 
+    # -- Token refresh endpoint (Bearer auth — issues a fresh token) --
+
+    @app.post("/sidecar/token/refresh", response_model=SidecarTokenResponse)
+    async def sidecar_token_refresh(
+        _user: str = Depends(get_current_user),
+    ) -> SidecarTokenResponse:
+        """Refresh an existing valid JWT — returns a fresh 24h token.
+
+        The caller must present a valid (non-expired) Bearer token.
+        This avoids re-authenticating with username/password on every cycle.
+        """
+        from dashboard.auth import create_token
+
+        new_token = create_token(_user)
+        return SidecarTokenResponse(token=new_token, expires_in=86400)
+
     # -- Execute endpoint (Bearer auth required per D-04) --
 
     @app.post(
         "/sidecar/execute",
-        response_model=ExecuteResponse,
-        status_code=202,
+        status_code=200,
     )
     async def sidecar_execute(
         ctx: AdapterExecutionContext,
-        background_tasks: BackgroundTasks,
         _user: str = Depends(get_current_user),
-    ) -> ExecuteResponse:
-        """Accept a Paperclip heartbeat execution request.
+    ) -> dict:
+        """Execute a Paperclip heartbeat request synchronously.
 
-        Returns 202 Accepted immediately and executes the task in the background.
-        When execution completes, results are POSTed to Paperclip's callback URL.
+        Runs the LLM call inline and returns the result directly so the
+        adapter can report real output, provider, model, and token usage
+        back to Paperclip without needing a callback endpoint.
 
         Idempotency: if ctx.run_id is already active, returns without re-executing (D-08).
         """
         # Idempotency guard (D-08)
         if is_duplicate_run(ctx.run_id):
             logger.info("Duplicate run %s — returning cached acceptance", ctx.run_id)
-            return ExecuteResponse(
-                status="accepted",
-                external_run_id=ctx.run_id,
-                deduplicated=True,
-            )
+            return {
+                "status": "accepted",
+                "externalRunId": ctx.run_id,
+                "deduplicated": True,
+            }
 
-        # Register and launch background execution
         register_run(ctx.run_id)
-        background_tasks.add_task(orchestrator.execute_async, ctx.run_id, ctx)
 
         logger.info(
-            "Accepted run %s for agent %s (wake_reason=%s)",
+            "Executing run %s for agent %s (wake_reason=%s)",
             ctx.run_id,
             ctx.agent_id,
             ctx.wake_reason,
         )
 
-        return ExecuteResponse(
-            status="accepted",
-            external_run_id=ctx.run_id,
-            deduplicated=False,
-        )
+        try:
+            result = await orchestrator.execute_sync(ctx.run_id, ctx)
+            return {
+                "status": "completed",
+                "externalRunId": ctx.run_id,
+                "deduplicated": False,
+                "output": result.get("summary", ""),
+                "result": result.get("summary", ""),
+                "summary": result.get("summary", ""),
+                "provider": result.get("provider", ""),
+                "model": result.get("model", ""),
+                "cost_usd": result.get("cost_usd", 0.0),
+                "input_tokens": result.get("input_tokens", 0),
+                "output_tokens": result.get("output_tokens", 0),
+            }
+        except Exception as exc:
+            logger.error("Run %s failed: %s", ctx.run_id, exc, exc_info=True)
+            return {
+                "status": "failed",
+                "externalRunId": ctx.run_id,
+                "error": str(exc),
+            }
+        finally:
+            unregister_run(ctx.run_id)
 
     # -- Memory recall endpoint (Bearer auth required per D-15) --
 
@@ -430,9 +466,10 @@ def create_sidecar_app(
         """Resolve optimal provider+model for a task type (PLUG-04)."""
         try:
             decision = await tiered_routing_bridge.resolve(
-                role=req.task_type,
+                role="",
                 agent_id=req.agent_id,
                 preferred_provider="",
+                task_type=req.task_type,
             )
             return RoutingResolveResponse(
                 provider=decision.provider,

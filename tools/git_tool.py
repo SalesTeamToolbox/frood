@@ -41,7 +41,7 @@ class GitTool(Tool):
     def description(self) -> str:
         return (
             "Perform git operations. Actions: status, diff, log, branch, "
-            "commit, add, checkout, show. Safer than shell for git work."
+            "commit, add, checkout, show, push, stash, blame. Safer than shell for git work."
         )
 
     @property
@@ -62,6 +62,7 @@ class GitTool(Tool):
                         "show",
                         "stash",
                         "blame",
+                        "push",
                     ],
                     "description": "Git action to perform",
                 },
@@ -103,6 +104,7 @@ class GitTool(Tool):
             "show": self._show,
             "stash": self._stash,
             "blame": self._blame,
+            "push": self._push,
         }
 
         handler = handlers.get(action)
@@ -255,3 +257,12 @@ class GitTool(Tool):
         if len(out) > 30000:
             out = out[:30000] + "\n... (truncated)"
         return ToolResult(output=out)
+
+    async def _push(self, args: str) -> ToolResult:
+        parts = ["push"]
+        if args:
+            parts.extend(args.split())
+        code, out, err = await self._run_git(*parts, timeout=60.0)
+        if code != 0:
+            return ToolResult(error=f"git push failed: {err}", success=False)
+        return ToolResult(output=out or "Push successful")

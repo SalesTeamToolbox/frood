@@ -10,6 +10,7 @@ silently log a warning and return without raising.
 
 import logging
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger("frood.memory.effectiveness")
