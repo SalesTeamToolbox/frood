@@ -1,0 +1,42 @@
+{
+  "last_checked": "2026-04-11T14:04:13.258552",
+  "emails_processed": [
+    {
+      "from": "info@beaconsolarma.com",
+      "prospect_id": 793,
+      "prospect_name": "Beacon Solar",
+      "assigned_dealer": "Brad Pereira",
+      "dealer_referral_code": "890304f0d4",
+      "action": "replied_with_followup",
+      "sent": true
+    },
+    {
+      "from": "luis@solarprofessionalsofillinois.com",
+      "prospect_id": 804,
+      "prospect_name": "Solar Professionals of Illinois",
+      "assigned_dealer": "Third Coast Solar",
+      "dealer_referral_code": "8e3d58e3e1",
+      "action": "replied_addressing_signup_issue",
+      "sent": true,
+      "notes": "User reported signup link not working - provided correct link"
+    },
+    {
+      "from": "alexander@solup.com",
+      "prospect_id": 805,
+      "prospect_name": "Sol-Up",
+      "assigned_dealer": "James Skyberg",
+      "dealer_referral_code": "z45d600361d",
+      "action": "replied_helping_with_application",
+      "sent": true,
+      "notes": "User couldn't fill out application - provided correct signup link"
+    }
+  ],
+  "nurture_prospects_checked": 0,
+  "nurture_emails_sent": 0,
+  "stats": {
+    "total_prospects": 794,
+    "active_prospects": 778,
+    "responded_count": 30,
+    "interested_count": 4
+  }
+}
