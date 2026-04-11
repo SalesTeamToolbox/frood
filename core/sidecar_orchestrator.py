@@ -206,12 +206,63 @@ Step 3: Report what was imported vs skipped."""
             "cost_usd": 0.0,
         }
 
+    # Business hours configuration (US Eastern)
+    # Email tasks only run Mon-Sat, 7 AM - 9 PM ET
+    _BUSINESS_HOURS = {
+        "email": {"days": (0, 1, 2, 3, 4, 5), "start_hour": 7, "end_hour": 21, "tz": "US/Eastern"},
+    }
+
+    def _is_within_business_hours(self, task_type: str) -> tuple[bool, str]:
+        """Check if the current time is within business hours for the task type.
+
+        Returns (allowed, reason). Tasks without business hour config are always allowed.
+        """
+        config = self._BUSINESS_HOURS.get(task_type)
+        if not config:
+            return True, ""
+
+        from datetime import datetime, timezone
+        try:
+            import zoneinfo
+            tz = zoneinfo.ZoneInfo(config["tz"])
+        except Exception:
+            return True, ""  # If timezone unavailable, allow
+
+        now = datetime.now(tz)
+        day_of_week = now.weekday()  # 0=Monday, 6=Sunday
+        hour = now.hour
+
+        if day_of_week not in config["days"]:
+            day_name = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day_of_week]
+            return False, f"Outside business days ({day_name}). Email runs Mon-Sat only."
+
+        if hour < config["start_hour"] or hour >= config["end_hour"]:
+            return False, f"Outside business hours ({hour}:00 ET). Email runs {config['start_hour']}AM-{config['end_hour'] - 12}PM ET."
+
+        return True, ""
+
     async def execute_sync(self, run_id: str, ctx: AdapterExecutionContext) -> dict[str, Any]:
         """Execute an agent task synchronously and return the result.
 
         Called directly from the route handler. Returns a dict with
         summary, provider, model, input_tokens, output_tokens, cost_usd.
         """
+        task_type = ctx.task_type or ctx.context.get("taskType", "")
+
+        # Business hours guard — skip email tasks outside Mon-Sat 7AM-9PM ET
+        allowed, reason = self._is_within_business_hours(task_type)
+        if not allowed:
+            logger.info("Skipping run %s: %s", run_id, reason)
+            return {
+                "summary": f"Skipped: {reason}",
+                "output": f"Skipped: {reason}",
+                "provider": "",
+                "model": "",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost_usd": 0.0,
+            }
+
         logger.info(
             "Executing run %s for agent %s (wake_reason=%s)",
             run_id, ctx.agent_id, ctx.wake_reason,
