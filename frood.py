@@ -287,6 +287,7 @@ class Frood:
                 host=settings.dashboard_host,
                 port=self.sidecar_port,
                 log_level="warning",
+                timeout_keep_alive=600,
             )
             server = uvicorn.Server(config)
             logger.info(f"  Sidecar: http://{settings.dashboard_host}:{self.sidecar_port}")
