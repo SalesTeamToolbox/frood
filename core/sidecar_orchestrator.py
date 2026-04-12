@@ -96,9 +96,11 @@ class SidecarOrchestrator:
         total_output = 0
         all_results: list[str] = []
 
-        # Use nemotron for research — better tool calling than minimax
-        if provider == "zen":
-            model = "nemotron-3-super-free"
+        # Force research onto free tool-use models. Router can land on premium
+        # models like anthropic/claude-sonnet-4-6 which our OpenRouter key can't
+        # afford; override to zen/nemotron and let the fallback chain handle it.
+        provider = "zen"
+        model = "nemotron-3-super-free"
 
         # Extract API config from the task prompt
         api_token = "3399cb9b2df4c5bfb7d1204d326cb64d04ffaf5314f7115a98a1ca9a7f7bd80f"
@@ -725,7 +727,9 @@ Step 3: Report what was imported vs skipped."""
         for zm in zen_models_to_try:
             if (provider, model) != ("zen", zm):
                 attempts.append(("zen", zm))
-        attempts.append(("nvidia", "nvidia/nemotron-3-super:free"))
+        # NVIDIA fallback — meta/llama-3.1-70b-instruct has strong tool-calling on free tier
+        attempts.append(("nvidia", "meta/llama-3.1-70b-instruct"))
+        attempts.append(("nvidia", "nvidia/llama-3.1-nemotron-70b-instruct"))
         attempts.append(("openrouter", "google/gemini-2.0-flash-001"))
 
         # Deduplicate while preserving order
@@ -762,6 +766,7 @@ Step 3: Report what was imported vs skipped."""
             # Copy messages for this provider attempt
             conv = list(messages)
             max_iterations = self._TASK_MAX_ITERATIONS.get(task_type, 25)
+            provider_failed = False  # True if loop exited due to HTTP error
 
             try:
                 # Per-call timeout 90s — nemotron-3-super-free can be slow with growing context
@@ -787,6 +792,7 @@ Step 3: Report what was imported vs skipped."""
                                 # Long rate limit (model quota exhausted) — fall through to next provider/model
                                 last_error = f"HTTP 429: rate limited for {retry_after:.0f}s, giving up on {prov}/{use_model}"
                                 logger.warning("%s for run %s", last_error, run_id)
+                                provider_failed = True
                                 break
                             logger.warning("Rate limited on %s, sleeping %.1fs", prov, retry_after)
                             await asyncio.sleep(retry_after)
@@ -794,6 +800,7 @@ Step 3: Report what was imported vs skipped."""
                         if resp.status_code >= 400:
                             last_error = f"HTTP {resp.status_code}: {resp.text[:300]}"
                             logger.warning("Provider %s failed for run %s: %s", prov, run_id, last_error)
+                            provider_failed = True
                             break
 
                         data = resp.json()
@@ -857,7 +864,12 @@ Step 3: Report what was imported vs skipped."""
                             "cost_usd": 0.0,
                         }
 
-                    # Loop ended (either max iterations OR HTTP error) — try to salvage.
+                    # If the loop exited due to HTTP error, skip salvage (this provider is broken)
+                    # and fall through to the outer loop for the next (provider, model) attempt.
+                    if provider_failed:
+                        continue
+
+                    # Loop ended at max iterations with successful API calls — try to salvage.
                     # First, ask model for a final summary without tools.
                     conv.append({
                         "role": "user",
