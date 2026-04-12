@@ -308,17 +308,339 @@ Output ALL companies from the search phase. Leave unknown fields as empty string
             "cost_usd": 0.0,
         }
 
+    async def _execute_form_submit_workflow(
+        self, run_id: str, ctx: AdapterExecutionContext,
+        provider: str, model: str,
+    ) -> dict[str, Any]:
+        """Arianna-FormSubmit workflow: submit contact forms on prospects
+        without a deliverable email address.
+
+        Architecture follows the lesson from the research workflow refactor:
+        mechanical work in code, creative work in the LLM, seam at the data
+        boundary.
+
+        Mechanical (pure Python, no LLM):
+          - Query Odoo for eligible prospects (/form-candidates)
+          - Navigate to each contact form via Playwright
+          - Detect fields, fill, submit (or dry-run fill)
+          - Log outcome back to Odoo (/mark-form-submitted)
+
+        Creative (one narrow LLM call per prospect):
+          - Generate a 2-3 sentence personalized message using the prospect's
+            ai_personalization_context + city + company name
+
+        DRY_RUN is controlled by the ARIANNA_FORM_SUBMIT_DRY_RUN env var.
+        Defaults to TRUE so a fresh deploy can never accidentally submit
+        real forms — you have to flip it off explicitly.
+        """
+        import os
+
+        api_token = "3399cb9b2df4c5bfb7d1204d326cb64d04ffaf5314f7115a98a1ca9a7f7bd80f"
+        api_base = "https://synergicsolar.com/api/v1/prospects"
+        limit = int(os.environ.get("ARIANNA_FORM_SUBMIT_LIMIT", "5"))
+        dry_run = os.environ.get(
+            "ARIANNA_FORM_SUBMIT_DRY_RUN", "true",
+        ).lower() not in ("false", "0", "no", "off")
+
+        # Business-hours guard: reuse the email agent's Mon-Sat 7-9 ET window.
+        # Form submissions are outbound contact and should follow the same
+        # "don't contact people at 3 AM on Sunday" rule as emails.
+        allowed, reason = self._is_within_business_hours("form_submit")
+        if not allowed:
+            logger.info("Skipping form-submit run %s: %s", run_id, reason)
+            return {
+                "summary": f"Skipped: {reason}",
+                "provider": provider,
+                "model": model,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost_usd": 0.0,
+            }
+
+        logger.info(
+            "Form-submit run %s: limit=%d dry_run=%s", run_id, limit, dry_run,
+        )
+
+        # --- Phase 1: Fetch eligible candidates from Odoo ---
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    f"{api_base}/form-candidates?limit={limit}",
+                    headers={"Authorization": f"Bearer {api_token}"},
+                )
+                if resp.status_code >= 400:
+                    return self._form_submit_abort(
+                        run_id, provider, model,
+                        f"form-candidates fetch failed: HTTP {resp.status_code} — {resp.text[:200]}",
+                    )
+                candidates = resp.json().get("prospects", [])
+        except Exception as exc:
+            return self._form_submit_abort(
+                run_id, provider, model,
+                f"form-candidates fetch threw: {exc}",
+            )
+
+        if not candidates:
+            logger.info("Form-submit run %s: no eligible prospects, exiting cleanly", run_id)
+            return {
+                "summary": "No eligible prospects for form submission.",
+                "provider": provider,
+                "model": model,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost_usd": 0.0,
+            }
+
+        logger.info(
+            "Form-submit run %s: %d candidates to process", run_id, len(candidates),
+        )
+
+        # --- Phase 2: For each candidate, personalize message + submit form ---
+        from core.form_submitter import submit_contact_form
+
+        # Import playwright lazily — the module may not be installed in every
+        # frood deployment, and we don't want to break the orchestrator just
+        # because form-submit isn't wired up yet.
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError as exc:
+            return self._form_submit_abort(
+                run_id, provider, model,
+                f"playwright not installed: {exc}",
+            )
+
+        total_input = 0
+        total_output = 0
+        outcomes: dict[str, int] = {
+            "success": 0,
+            "submitted_unconfirmed": 0,
+            "dry_run": 0,
+            "captcha_blocked": 0,
+            "no_form_detected": 0,
+            "errored": 0,
+        }
+        details: list[str] = []
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            try:
+                for idx, prospect in enumerate(candidates):
+                    prospect_id = prospect.get("id")
+                    prospect_name = prospect.get("name", "?")
+                    logger.info(
+                        "Form-submit run %s: processing [%d/%d] %s (id=%s)",
+                        run_id, idx + 1, len(candidates), prospect_name, prospect_id,
+                    )
+
+                    # 2a. LLM call — narrow creative task, no tool use
+                    message_result = await self._generate_form_message(
+                        provider, model, prospect, run_id,
+                    )
+                    total_input += message_result.get("input_tokens", 0)
+                    total_output += message_result.get("output_tokens", 0)
+                    message = (message_result.get("summary") or "").strip()
+
+                    if not message:
+                        logger.warning(
+                            "Form-submit run %s: empty message for prospect %s — skipping",
+                            run_id, prospect_id,
+                        )
+                        outcomes["errored"] += 1
+                        await self._log_form_submission(
+                            api_base, api_token, prospect_id,
+                            {
+                                "status": "errored",
+                                "message_sent": "",
+                                "evidence": "LLM produced empty message",
+                            },
+                            dry_run,
+                        )
+                        continue
+
+                    # 2b. Playwright fill + submit (or dry-run)
+                    prospect_with_message = {**prospect, "message": message}
+                    try:
+                        outcome = await submit_contact_form(
+                            browser, prospect_with_message, dry_run=dry_run,
+                        )
+                    except Exception as exc:
+                        logger.exception(
+                            "Form-submit run %s: submit_contact_form threw for %s",
+                            run_id, prospect_id,
+                        )
+                        outcome = {
+                            "status": "errored",
+                            "evidence": f"submit_contact_form exception: {exc}",
+                            "message_sent": message,
+                        }
+
+                    outcomes[outcome.get("status", "errored")] = (
+                        outcomes.get(outcome.get("status", "errored"), 0) + 1
+                    )
+                    details.append(
+                        f"[{idx + 1}] {prospect_name}: {outcome.get('status')} "
+                        f"— {outcome.get('evidence', '')[:120]}"
+                    )
+
+                    # 2c. Writeback to Odoo
+                    await self._log_form_submission(
+                        api_base, api_token, prospect_id, outcome, dry_run,
+                    )
+            finally:
+                await browser.close()
+
+        summary_lines = [
+            f"Form-submit run complete. dry_run={dry_run}. Processed {len(candidates)} prospects.",
+            "",
+            "Outcomes: "
+            + ", ".join(f"{k}={v}" for k, v in outcomes.items() if v > 0),
+            "",
+            *details,
+        ]
+        summary = "\n".join(summary_lines)
+
+        logger.info(
+            "Form-submit run %s complete: %s",
+            run_id,
+            ", ".join(f"{k}={v}" for k, v in outcomes.items() if v > 0),
+        )
+
+        return {
+            "summary": summary,
+            "provider": provider,
+            "model": model,
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "cost_usd": 0.0,
+        }
+
+    def _form_submit_abort(
+        self, run_id: str, provider: str, model: str, reason: str,
+    ) -> dict[str, Any]:
+        """Shared abort-with-log path for _execute_form_submit_workflow."""
+        logger.warning("Form-submit run %s aborted: %s", run_id, reason)
+        return {
+            "summary": f"Form-submit aborted: {reason}",
+            "provider": provider,
+            "model": model,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0.0,
+            "error": reason,
+        }
+
+    async def _generate_form_message(
+        self,
+        provider: str,
+        model: str,
+        prospect: dict,
+        run_id: str,
+    ) -> dict[str, Any]:
+        """Generate a 2-3 sentence personalized contact-form message for one
+        prospect. Narrow creative task, one LLM call, no tools.
+        """
+        prospect_name = prospect.get("name", "")
+        city = prospect.get("city", "")
+        state = prospect.get("state_code", "")
+        context_hint = (prospect.get("ai_personalization_context") or "").strip()
+        research_notes = (prospect.get("ai_research_notes") or "").strip()
+
+        prompt = f"""You are Arianna Dar, Synergic Solar's dealer outreach specialist.
+Write a short, friendly message to paste into {prospect_name}'s website contact form.
+
+Company: {prospect_name}
+Location: {city}, {state}
+What we know about them: {research_notes or "(no research notes available)"}
+Personalization hints: {context_hint or "(no hints — keep it generic but warm)"}
+
+Rules:
+- 2 to 3 sentences, 50 to 90 words total.
+- Friendly and confident, not salesy. No emojis. No buzzwords.
+- Mention Synergic Solar's dealer program and that independent dealers keep their own brand.
+- End with: "Reply to arianna@synergicsolar.com if you'd like to learn more."
+- Do NOT include a subject line, greeting, or signature — the form has separate fields for those. Just the message body.
+
+Output the message text only. No preamble, no quotes, no markdown."""
+
+        result = await self._call_provider(
+            provider, model,
+            [{"role": "user", "content": prompt}],
+            f"{run_id}-formsubmit-msg-{prospect.get('id', 'x')}",
+            agent_id="form_submit",
+            task_type="form_submit",
+            phase="generate_message",
+        )
+        return result
+
+    async def _log_form_submission(
+        self,
+        api_base: str,
+        api_token: str,
+        prospect_id: Any,
+        outcome: dict,
+        dry_run: bool,
+    ) -> None:
+        """POST the form-submit outcome to Odoo so it's captured in the
+        prospect interaction table. Errors here are logged and swallowed —
+        a failed writeback must not break the run loop.
+        """
+        payload = {
+            "status": outcome.get("status", "errored"),
+            "message_sent": outcome.get("message_sent", ""),
+            "response_text": outcome.get("evidence", ""),
+            "screenshot_path": (
+                outcome.get("screenshot_post") or outcome.get("screenshot_pre") or ""
+            ),
+            "dry_run": dry_run,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{api_base}/{prospect_id}/mark-form-submitted",
+                    headers={
+                        "Authorization": f"Bearer {api_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+                if resp.status_code >= 400:
+                    logger.warning(
+                        "mark-form-submitted returned HTTP %d for prospect %s: %s",
+                        resp.status_code, prospect_id, resp.text[:200],
+                    )
+        except Exception as exc:
+            logger.warning(
+                "mark-form-submitted request threw for prospect %s: %s",
+                prospect_id, exc,
+            )
+
     # Business hours configuration (US Eastern)
-    # Email tasks only run Mon-Sat, 7 AM - 9 PM ET
+    # Email + form-submit tasks only run Mon-Sat, 7 AM - 9 PM ET.
+    # Same rationale: these are outbound contact to real people, and it's
+    # inappropriate to contact a prospect at 3 AM on Sunday regardless of
+    # whether the channel is email or a website contact form.
     _BUSINESS_HOURS = {
         "email": {"days": (0, 1, 2, 3, 4, 5), "start_hour": 7, "end_hour": 21, "tz": "US/Eastern"},
+        "form_submit": {"days": (0, 1, 2, 3, 4, 5), "start_hour": 7, "end_hour": 21, "tz": "US/Eastern"},
     }
 
     def _is_within_business_hours(self, task_type: str) -> tuple[bool, str]:
         """Check if the current time is within business hours for the task type.
 
         Returns (allowed, reason). Tasks without business hour config are always allowed.
+
+        Per-task override env var: set
+        `FROOD_IGNORE_BUSINESS_HOURS_<TASK_TYPE_UPPER>=true` to bypass the
+        check for one task type. Targeted at smoke-testing new agents
+        outside their normal window — a global override would be too easy
+        to leave on and accidentally fire email runs at 3 AM Sunday.
         """
+        import os
+
+        override_var = f"FROOD_IGNORE_BUSINESS_HOURS_{task_type.upper()}"
+        if os.environ.get(override_var, "").lower() in ("true", "1", "yes", "on"):
+            return True, ""
+
         config = self._BUSINESS_HOURS.get(task_type)
         if not config:
             return True, ""
@@ -336,10 +658,10 @@ Output ALL companies from the search phase. Leave unknown fields as empty string
 
         if day_of_week not in config["days"]:
             day_name = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day_of_week]
-            return False, f"Outside business days ({day_name}). Email runs Mon-Sat only."
+            return False, f"Outside business days ({day_name}). {task_type} runs Mon-Sat only."
 
         if hour < config["start_hour"] or hour >= config["end_hour"]:
-            return False, f"Outside business hours ({hour}:00 ET). Email runs {config['start_hour']}AM-{config['end_hour'] - 12}PM ET."
+            return False, f"Outside business hours ({hour}:00 ET). {task_type} runs {config['start_hour']}AM-{config['end_hour'] - 12}PM ET."
 
         return True, ""
 
@@ -432,9 +754,23 @@ Output ALL companies from the search phase. Leave unknown fields as empty string
             or "research agent" in (ctx.task or "").lower()[:200]
         )
 
+        # Detect form-submit tasks (Arianna-FormSubmit) — deterministic
+        # Playwright-based form filler with one LLM call per prospect for
+        # message personalization.
+        is_form_submit = (
+            effective_task_type == "form_submit"
+            or ctx.context.get("agentRole") == "form_submitter"
+            or "form submit" in (ctx.task or "").lower()[:200]
+        )
+
         if is_research:
             logger.info("Run %s: using multi-phase research workflow", run_id)
             result = await self._execute_research_workflow(
+                run_id, ctx, provider_name, model_name,
+            )
+        elif is_form_submit:
+            logger.info("Run %s: using form-submit workflow", run_id)
+            result = await self._execute_form_submit_workflow(
                 run_id, ctx, provider_name, model_name,
             )
         else:
