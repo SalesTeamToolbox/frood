@@ -199,20 +199,31 @@ TOOLS AVAILABLE:
 - http_request(url, method="GET") — returns raw HTML. Use to find mailto: hrefs that web_fetch strips.
 
 YOUR GOAL: Include EVERY company in the output — maximum QUANTITY, not quality.
-We have a form-submitter agent that will handle companies without emails.
+Companies without any contact channel still get stored for manual review.
 
 STRATEGY FOR EACH COMPANY (max 2 tool calls per company, move on fast):
 1. Try web_fetch on `<website>/contact` (use http_request if web_fetch fails or returns empty).
 2. Extract whatever you can: email, phone, contact form URL.
 
-INCLUSION RULES — keep the company in the output ALWAYS if:
-- You found a real email → set `email`
-- You found a phone number → set `phone`
-- You fetched a /contact page that had a form → set `contact_form_url` to that /contact URL
-- Even if the site returned 403/500/blocked → still include with just `website` and `contact_form_url` = "{{website}}/contact" (the form submitter will try it)
-- Even if you couldn't reach the site at all → still include with just `website`
+INCLUSION RULES — always keep the company in the output, but ONLY fill
+fields you actually verified via a successful fetch. Empty strings for
+fields you couldn't confirm.
 
-NEVER skip a company. The form submitter handles the edge cases.
+- You found a real email address in the page text → set `email`
+- You found a phone number in the page text → set `phone`
+- IMPORTANT: Only set `contact_form_url` when BOTH are true:
+    (a) The fetch returned a real contact page — NOT a 404 page,
+        NOT a redirect to the homepage, NOT a directory/listing site
+        like yelp.com or bbb.org
+    (b) The fetched page contains visible form fields (a message
+        textarea and at least a name or email input)
+  If the fetch failed (403/500/timeout) or returned a 404 "page not
+  found" or redirected away, leave `contact_form_url` as empty string.
+  DO NOT guess `{{website}}/contact` as a fallback — a downstream agent
+  tries to submit forms at these URLs, and fake URLs waste its time
+  and produce misleading audit logs.
+- Site completely unreachable → include with just `website` set, all
+  other contact fields empty string
 
 SKIP a company ONLY if the search phase flagged it as a known duplicate (in the exclusion list from search).
 
