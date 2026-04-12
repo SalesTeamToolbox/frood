@@ -791,20 +791,28 @@ Step 3: Report what was imported vs skipped."""
         phase = kwargs.get("phase", "")
 
         # Build ordered (provider, model) attempts for this task type.
-        # First try the requested provider/model, then fall back through Zen models and other providers.
         if task_type == "research":
-            zen_models_to_try = ["nemotron-3-super-free", "minimax-m2.5-free"]
+            # Research needs reliable tool-calling. Zen's nemotron-3-super-free
+            # is chronically rate-limited (shared free quota), and its fallback
+            # minimax-m2.5-free drops the required `url` arg on http_request
+            # calls, causing 0-import runs. NVIDIA-hosted llama-3.1-70b has
+            # its own quota and much stronger tool-use, so try it first.
+            attempts: list[tuple[str, str]] = [
+                ("nvidia", "meta/llama-3.1-70b-instruct"),
+                ("nvidia", "nvidia/llama-3.1-nemotron-70b-instruct"),
+                (provider, model),  # whatever routing resolved (usually zen/nemotron-3-super-free)
+                ("zen", "minimax-m2.5-free"),
+                ("openrouter", "google/gemini-2.0-flash-001"),
+            ]
         else:
             zen_models_to_try = ["minimax-m2.5-free", "nemotron-3-super-free"]
-
-        attempts: list[tuple[str, str]] = [(provider, model)]
-        for zm in zen_models_to_try:
-            if (provider, model) != ("zen", zm):
-                attempts.append(("zen", zm))
-        # NVIDIA fallback — meta/llama-3.1-70b-instruct has strong tool-calling on free tier
-        attempts.append(("nvidia", "meta/llama-3.1-70b-instruct"))
-        attempts.append(("nvidia", "nvidia/llama-3.1-nemotron-70b-instruct"))
-        attempts.append(("openrouter", "google/gemini-2.0-flash-001"))
+            attempts = [(provider, model)]
+            for zm in zen_models_to_try:
+                if (provider, model) != ("zen", zm):
+                    attempts.append(("zen", zm))
+            attempts.append(("nvidia", "meta/llama-3.1-70b-instruct"))
+            attempts.append(("nvidia", "nvidia/llama-3.1-nemotron-70b-instruct"))
+            attempts.append(("openrouter", "google/gemini-2.0-flash-001"))
 
         # Deduplicate while preserving order
         seen = set()
@@ -907,11 +915,19 @@ Step 3: Report what was imported vs skipped."""
                                 logger.info(
                                     "Run %s tool call [%d]: %s(%s)",
                                     run_id, iteration, tool_name,
-                                    str(tool_args)[:100],
+                                    str(tool_args)[:400],
                                 )
 
                                 tool_result = await self._execute_tool_call(
                                     tool_name, tool_args, agent_id,
+                                )
+
+                                # DEBUG-level — enable on demand when diagnosing
+                                # LLMs that generate malformed tool_call arguments.
+                                logger.debug(
+                                    "Run %s tool result [%d]: %s",
+                                    run_id, iteration,
+                                    str(tool_result)[:400],
                                 )
 
                                 # Truncate tool results aggressively for research to keep context small
