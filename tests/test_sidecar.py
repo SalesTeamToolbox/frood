@@ -914,3 +914,55 @@ class TestSidecarToken:
         resp = sidecar_client.get("/sidecar/health")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
+
+
+class TestExtractMessageContent:
+    """_extract_message_content handles both standard and reasoning-model responses.
+
+    Regression: NVIDIA llama-3.3-nemotron-super-49b-v1.5 (and other reasoning
+    models) return chat completions with `content: null` and the actual output
+    in `reasoning_content`. The orchestrator used to call `msg.get("content", "")`
+    which returned empty string for these responses, causing research runs
+    to produce empty summaries and downstream phases to fail with "I don't
+    have enough information to provide a function call."
+    """
+
+    def test_standard_message_uses_content(self):
+        msg = {"role": "assistant", "content": "hello world"}
+        assert SidecarOrchestrator._extract_message_content(msg) == "hello world"
+
+    def test_reasoning_model_falls_back_to_reasoning_content(self):
+        msg = {
+            "role": "assistant",
+            "content": None,
+            "reasoning_content": "final answer here",
+            "tool_calls": [],
+        }
+        assert SidecarOrchestrator._extract_message_content(msg) == "final answer here"
+
+    def test_content_preferred_when_both_present(self):
+        """Content wins even if reasoning_content is also set — we want the
+        model's deliberate answer, not its scratchpad."""
+        msg = {
+            "role": "assistant",
+            "content": "the answer is 4",
+            "reasoning_content": "let me think... 2+2... hmm... the answer is 4",
+        }
+        assert SidecarOrchestrator._extract_message_content(msg) == "the answer is 4"
+
+    def test_legacy_reasoning_field_fallback(self):
+        """Some NVIDIA responses use `reasoning` instead of `reasoning_content`."""
+        msg = {"role": "assistant", "content": None, "reasoning": "via legacy field"}
+        assert SidecarOrchestrator._extract_message_content(msg) == "via legacy field"
+
+    def test_empty_string_content_falls_through(self):
+        """content='' should fall back to reasoning_content, not be returned as-is."""
+        msg = {"role": "assistant", "content": "", "reasoning_content": "fallback"}
+        assert SidecarOrchestrator._extract_message_content(msg) == "fallback"
+
+    def test_all_missing_returns_empty_string(self):
+        assert SidecarOrchestrator._extract_message_content({"role": "assistant"}) == ""
+
+    def test_all_none_returns_empty_string(self):
+        msg = {"role": "assistant", "content": None, "reasoning_content": None}
+        assert SidecarOrchestrator._extract_message_content(msg) == ""
