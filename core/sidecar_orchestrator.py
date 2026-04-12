@@ -15,6 +15,7 @@ import httpx
 
 from core.config import settings
 from core.sidecar_models import AdapterExecutionContext, CallbackPayload
+from core.url_policy import set_current_run_id
 
 logger = logging.getLogger("frood.sidecar.orchestrator")
 
@@ -323,6 +324,10 @@ Step 3: Report what was imported vs skipped."""
         Called directly from the route handler. Returns a dict with
         summary, provider, model, input_tokens, output_tokens, cost_usd.
         """
+        # Scope URL-policy request counting to this run so each heartbeat
+        # gets its own budget instead of sharing one process-wide counter.
+        set_current_run_id(run_id)
+
         task_type = ctx.task_type or ctx.context.get("taskType", "")
 
         # Business hours guard — skip email tasks outside Mon-Sat 7AM-9PM ET
@@ -464,6 +469,10 @@ Step 3: Report what was imported vs skipped."""
 
         This method runs as a background task (not awaited in the route handler).
         """
+        # Scope URL-policy request counting to this run so each heartbeat
+        # gets its own budget instead of sharing one process-wide counter.
+        set_current_run_id(run_id)
+
         result: dict[str, Any] = {}
         usage: dict[str, Any] = {}
         status = "completed"
