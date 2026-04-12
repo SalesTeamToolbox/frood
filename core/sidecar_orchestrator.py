@@ -804,7 +804,36 @@ Step 3: Report what was imported vs skipped."""
                             "cost_usd": 0.0,
                         }
 
-                    # Hit max iterations
+                    # Hit max iterations — ask model for a final summary
+                    conv.append({
+                        "role": "user",
+                        "content": "You've used all available tool calls. Based on everything you've found so far, provide your final output now. Do NOT call any more tools — just output your results as text.",
+                    })
+                    try:
+                        final_payload: dict[str, Any] = {
+                            "model": use_model,
+                            "messages": conv,
+                            "max_tokens": 4096,
+                        }
+                        final_resp = await client.post(config["url"], headers=headers, json=final_payload)
+                        if final_resp.status_code < 400:
+                            final_data = final_resp.json()
+                            final_usage = final_data.get("usage", {})
+                            total_input += final_usage.get("prompt_tokens", 0)
+                            total_output += final_usage.get("completion_tokens", 0)
+                            final_choices = final_data.get("choices", [])
+                            if final_choices:
+                                final_content = final_choices[0].get("message", {}).get("content", "")
+                                if final_content:
+                                    return {
+                                        "summary": final_content,
+                                        "input_tokens": total_input,
+                                        "output_tokens": total_output,
+                                        "cost_usd": 0.0,
+                                    }
+                    except Exception:
+                        pass  # Fall through to generic message
+
                     return {
                         "summary": f"Reached {max_iterations} tool-call iterations",
                         "input_tokens": total_input,
