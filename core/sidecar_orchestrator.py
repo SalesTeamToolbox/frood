@@ -182,7 +182,7 @@ CRITICAL: Exclude any company name that appears in the "already in our database"
         total_input += search_result.get("input_tokens", 0)
         total_output += search_result.get("output_tokens", 0)
         search_output = search_result.get("summary", "")
-        all_results.append(f"SEARCH: {search_output[:500]}")
+        all_results.append(f"SEARCH: {search_output[:3000]}")
 
         if search_result.get("error"):
             return {**search_result, "summary": f"Search phase failed: {search_result['error']}"}
@@ -197,26 +197,28 @@ TOOLS AVAILABLE:
 - web_fetch(url) — returns clean text of a page. Use first to find visible emails/phones.
 - http_request(url, method="GET") — returns raw HTML. Use to find mailto: hrefs that web_fetch strips.
 
-STRATEGY FOR EACH COMPANY (max 3 tool calls per company):
-1. First try web_fetch on `<website>/contact` or `<website>/contact-us`.
-2. If no email found, http_request the same URL — search raw HTML for `mailto:` hrefs and `<form action=` contact form URLs.
-3. If still no email, try web_fetch on `<website>/about` or the root URL.
-4. Extract whatever you find: email, phone, contact form URL, contact name.
+YOUR GOAL: Include EVERY company in the output — maximum QUANTITY, not quality.
+We have a form-submitter agent that will handle companies without emails.
 
-ACCEPTANCE RULES (keep the company in the output if ANY of these are true):
-- Has a real email (not placeholder like info@example.com or noreply@)
-- Has a phone number (format: matches \\d{{3}}[- ]?\\d{{3}}[- ]?\\d{{4}} or similar)
-- Has a contact form URL (a page with a form that POSTs contact info)
+STRATEGY FOR EACH COMPANY (max 2 tool calls per company, move on fast):
+1. Try web_fetch on `<website>/contact` (use http_request if web_fetch fails or returns empty).
+2. Extract whatever you can: email, phone, contact form URL.
 
-For email-only companies: set `email`, leave `contact_form_url` empty.
-For phone-only companies: set `phone`, leave `email` empty.
-For form-only companies: set `contact_form_url` to the page URL with the form, leave `email` empty.
-Any combination is fine. SKIP a company only if you find NONE of these.
+INCLUSION RULES — keep the company in the output ALWAYS if:
+- You found a real email → set `email`
+- You found a phone number → set `phone`
+- You fetched a /contact page that had a form → set `contact_form_url` to that /contact URL
+- Even if the site returned 403/500/blocked → still include with just `website` and `contact_form_url` = "{{website}}/contact" (the form submitter will try it)
+- Even if you couldn't reach the site at all → still include with just `website`
 
-After fetching all companies, output the final JSON array as your text response:
+NEVER skip a company. The form submitter handles the edge cases.
+
+SKIP a company ONLY if the search phase flagged it as a known duplicate (in the exclusion list from search).
+
+After fetching, output the final JSON array as your text response:
 [{{"name": "...", "contact_name": "...", "email": "...", "phone": "...", "contact_form_url": "...", "website": "...", "city": "...", "state_code": "...", "company_size": "1-10"}}, ...]
 
-Omit any fields you couldn't find — the API fills in defaults."""
+Output ALL companies from the search phase. Leave unknown fields as empty strings."""
 
         logger.info("Research phase 2: FETCH (run %s)", run_id)
         fetch_result = await self._call_provider(
@@ -228,7 +230,7 @@ Omit any fields you couldn't find — the API fills in defaults."""
         total_input += fetch_result.get("input_tokens", 0)
         total_output += fetch_result.get("output_tokens", 0)
         fetch_output = fetch_result.get("summary", "")
-        all_results.append(f"FETCH: {fetch_output[:500]}")
+        all_results.append(f"FETCH: {fetch_output[:3000]}")
 
         if fetch_result.get("error"):
             return {**fetch_result, "input_tokens": total_input, "output_tokens": total_output}
