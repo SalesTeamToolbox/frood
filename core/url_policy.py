@@ -6,6 +6,7 @@ and browser tools. Inspired by OpenClaw v2026.2.12 hostname allowlist security f
 """
 
 import asyncio
+import contextvars
 import ipaddress
 import json
 import logging
@@ -17,6 +18,22 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 logger = logging.getLogger("frood.url_policy")
+
+# Set by the sidecar orchestrator at the start of each heartbeat run. When set,
+# UrlPolicy.check() keys the request counter by run_id instead of the shared
+# "default" bucket, so every run gets its own independent URL budget.
+_current_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "frood_url_policy_run_id", default=None
+)
+
+
+def set_current_run_id(run_id: str | None) -> None:
+    """Scope subsequent UrlPolicy.check() calls to a specific run_id bucket.
+
+    Called by the sidecar orchestrator at the top of each run. ContextVars are
+    task-local under asyncio, so concurrent runs each see their own value.
+    """
+    _current_run_id.set(run_id)
 
 # SSRF protection: blocked IP ranges (moved from web_search.py)
 _BLOCKED_IP_RANGES = [
@@ -74,27 +91,35 @@ class UrlPolicy:
 
         Returns (True, "") if allowed, (False, reason) if blocked.
         """
-        # Per-agent request limit
-        if self._max_requests > 0 and self._agent_counts[agent_id] >= self._max_requests:
+        # Prefer the current-run contextvar as the counter bucket so each
+        # heartbeat run gets an independent URL budget. Falls back to the
+        # explicit agent_id argument for callers outside a run (tests,
+        # direct tool use).
+        bucket_key = _current_run_id.get() or agent_id
+        is_run_bucket = _current_run_id.get() is not None
+
+        if self._max_requests > 0 and self._agent_counts[bucket_key] >= self._max_requests:
+            scope = "Per-run" if is_run_bucket else "Per-agent"
+            label = "Run" if is_run_bucket else "Agent"
             reason = (
-                f"Per-agent URL request limit reached ({self._max_requests}). "
-                f"Agent '{agent_id}' has made {self._agent_counts[agent_id]} requests."
+                f"{scope} URL request limit reached ({self._max_requests}). "
+                f"{label} '{bucket_key}' has made {self._agent_counts[bucket_key]} requests."
             )
-            self._audit_log(url, agent_id, reason)
+            self._audit_log(url, bucket_key, reason)
             return False, reason
 
         parsed = urlparse(url)
         hostname = parsed.hostname
         if not hostname:
             reason = "Invalid URL: no hostname"
-            self._audit_log(url, agent_id, reason)
+            self._audit_log(url, bucket_key, reason)
             return False, reason
 
         # Denylist check (always takes precedence)
         for pattern in self._denylist:
             if fnmatch(hostname.lower(), pattern.lower()):
                 reason = f"Blocked by denylist: {hostname} matches pattern '{pattern}'"
-                self._audit_log(url, agent_id, reason)
+                self._audit_log(url, bucket_key, reason)
                 return False, reason
 
         # Allowlist check (only when allowlist is configured)
@@ -102,17 +127,17 @@ class UrlPolicy:
             matched = any(fnmatch(hostname.lower(), p.lower()) for p in self._allowlist)
             if not matched:
                 reason = f"Blocked by allowlist: {hostname} not in allowed patterns"
-                self._audit_log(url, agent_id, reason)
+                self._audit_log(url, bucket_key, reason)
                 return False, reason
 
         # SSRF protection
         ssrf_reason = self._check_ssrf(url)
         if ssrf_reason:
-            self._audit_log(url, agent_id, ssrf_reason)
+            self._audit_log(url, bucket_key, ssrf_reason)
             return False, ssrf_reason
 
         # Record successful request
-        self._agent_counts[agent_id] += 1
+        self._agent_counts[bucket_key] += 1
         return True, ""
 
     @staticmethod

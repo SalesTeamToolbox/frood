@@ -116,6 +116,42 @@ class TestUrlPolicyPerAgentLimits:
         allowed, _ = policy.check("https://example.com/3", agent_id="agent-1")
         assert allowed is True
 
+    def test_current_run_id_scopes_counter_per_run(self):
+        """When set_current_run_id is active, each run_id gets its own budget.
+
+        Regression: before this fix, all tool callers passed agent_id="default"
+        so one in-memory counter was shared across all heartbeat runs in the
+        frood process lifetime. A single heavy research run could exhaust the
+        budget and block every subsequent run's import calls until restart.
+        """
+        from core.url_policy import set_current_run_id
+
+        policy = UrlPolicy(
+            max_requests_per_agent=1,
+            audit_log_path=os.path.join(tempfile.mkdtemp(), "audit.jsonl"),
+        )
+        try:
+            set_current_run_id("run-A")
+            allowed, _ = policy.check("https://example.com/1", agent_id="default")
+            assert allowed is True
+            allowed, reason = policy.check("https://example.com/2", agent_id="default")
+            assert allowed is False
+            assert "Per-run" in reason
+            assert "run-A" in reason
+
+            # Switching to a different run gives a fresh budget even though
+            # the fallback agent_id ("default") is identical.
+            set_current_run_id("run-B")
+            allowed, _ = policy.check("https://example.com/3", agent_id="default")
+            assert allowed is True
+
+            # Clearing the contextvar falls back to per-agent_id bucketing.
+            set_current_run_id(None)
+            allowed, _ = policy.check("https://example.com/4", agent_id="fresh-agent")
+            assert allowed is True
+        finally:
+            set_current_run_id(None)
+
 
 class TestUrlPolicySsrf:
     """SSRF protection for private IPs and localhost."""
