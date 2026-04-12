@@ -966,3 +966,76 @@ class TestExtractMessageContent:
     def test_all_none_returns_empty_string(self):
         msg = {"role": "assistant", "content": None, "reasoning_content": None}
         assert SidecarOrchestrator._extract_message_content(msg) == ""
+
+
+class TestParseJsonArray:
+    """_parse_json_array tolerates common LLM output shapes for research phase 2.
+
+    Phase 3 is now a deterministic Python import step (no LLM), so it parses
+    the FETCH phase's JSON output directly. Models rarely produce perfectly
+    clean JSON: they wrap it in markdown code fences, prefix it with prose,
+    or append a trailing comment. The helper must handle all three cases
+    without tripping the import phase.
+    """
+
+    def test_plain_json_array(self):
+        text = '[{"name": "A", "city": "X"}, {"name": "B", "city": "Y"}]'
+        result = SidecarOrchestrator._parse_json_array(text)
+        assert result == [{"name": "A", "city": "X"}, {"name": "B", "city": "Y"}]
+
+    def test_markdown_fenced_json(self):
+        text = '```json\n[{"name": "A"}, {"name": "B"}]\n```'
+        result = SidecarOrchestrator._parse_json_array(text)
+        assert result == [{"name": "A"}, {"name": "B"}]
+
+    def test_markdown_fenced_without_language(self):
+        text = '```\n[{"name": "A"}]\n```'
+        result = SidecarOrchestrator._parse_json_array(text)
+        assert result == [{"name": "A"}]
+
+    def test_json_with_preamble(self):
+        """Models often say 'Here is the JSON:' before the array."""
+        text = 'Here are the companies I found:\n\n[{"name": "A"}, {"name": "B"}]'
+        result = SidecarOrchestrator._parse_json_array(text)
+        assert result == [{"name": "A"}, {"name": "B"}]
+
+    def test_json_with_trailing_commentary(self):
+        text = '[{"name": "A"}]\n\nLet me know if you need more details.'
+        result = SidecarOrchestrator._parse_json_array(text)
+        assert result == [{"name": "A"}]
+
+    def test_empty_string_returns_empty_list(self):
+        assert SidecarOrchestrator._parse_json_array("") == []
+
+    def test_none_safe(self):
+        assert SidecarOrchestrator._parse_json_array(None) == []
+
+    def test_no_array_present_returns_empty_list(self):
+        assert SidecarOrchestrator._parse_json_array("no brackets here") == []
+
+    def test_malformed_json_returns_empty_list(self):
+        """Truncated or invalid JSON should not raise, just return []."""
+        text = '[{"name": "A", "city": "X"'  # Missing closing brackets
+        assert SidecarOrchestrator._parse_json_array(text) == []
+
+    def test_strips_non_dict_entries(self):
+        """A stray string/number in the array should be filtered, not crash."""
+        text = '[{"name": "A"}, "stray", 42, {"name": "B"}]'
+        result = SidecarOrchestrator._parse_json_array(text)
+        assert result == [{"name": "A"}, {"name": "B"}]
+
+    def test_empty_array_returns_empty_list(self):
+        assert SidecarOrchestrator._parse_json_array("[]") == []
+
+    def test_prospect_fields_preserved(self):
+        """Real fetch-phase output includes nested fields — all must round-trip."""
+        text = '''[
+          {"name": "SunState Solar", "contact_name": "", "email": "info@sun.com",
+           "phone": "505-225-8502", "website": "https://sunstatesolar.com",
+           "city": "Albuquerque", "state_code": "NM", "company_size": "1-10"}
+        ]'''
+        result = SidecarOrchestrator._parse_json_array(text)
+        assert len(result) == 1
+        assert result[0]["name"] == "SunState Solar"
+        assert result[0]["state_code"] == "NM"
+        assert result[0]["phone"] == "505-225-8502"

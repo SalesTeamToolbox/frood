@@ -52,6 +52,7 @@ class HttpClientTool(Tool):
     def description(self) -> str:
         return (
             "Make HTTP requests (GET, POST, PUT, PATCH, DELETE) to APIs. "
+            "ALWAYS include the `url` parameter — it is required on every call. "
             "Returns status code, headers, and body. Blocks requests to private IPs."
         )
 
@@ -62,7 +63,11 @@ class HttpClientTool(Tool):
             "properties": {
                 "url": {
                     "type": "string",
-                    "description": "The URL to request",
+                    "description": (
+                        "REQUIRED. The absolute URL (including https://) to "
+                        "send the request to. Must be provided on every call "
+                        "— the tool cannot infer the URL from the prompt."
+                    ),
                 },
                 "method": {
                     "type": "string",
