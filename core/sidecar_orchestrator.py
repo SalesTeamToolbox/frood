@@ -90,6 +90,7 @@ class SidecarOrchestrator:
         only the tools it needs and a clear, short instruction.
         """
         import json as _json
+        import random
 
         task_prompt = ctx.task or ""
         total_input = 0
@@ -106,21 +107,70 @@ class SidecarOrchestrator:
         api_token = "3399cb9b2df4c5bfb7d1204d326cb64d04ffaf5314f7115a98a1ca9a7f7bd80f"
         api_base = "https://synergicsolar.com/api/v1/prospects"
 
+        # Pre-fetch known prospect names from Odoo so we can tell the model to skip them.
+        # Without this, the model keeps rediscovering the same popular companies.
+        known_companies: list[str] = []
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                stats_resp = await client.get(
+                    f"{api_base}/recent-names?limit=200",
+                    headers={"Authorization": f"Bearer {api_token}"},
+                )
+                if stats_resp.status_code == 200:
+                    data = stats_resp.json()
+                    known_companies = data.get("names", [])[:200]
+        except Exception as exc:
+            logger.warning("Failed to fetch known prospect names: %s", exc)
+
+        # Rotate target region per run to force breadth
+        target_regions = [
+            "California", "Texas", "Florida", "Arizona", "Nevada", "Colorado",
+            "North Carolina", "New York", "New Jersey", "Massachusetts",
+            "Illinois", "Georgia", "Virginia", "Washington", "Oregon",
+            "Pennsylvania", "Ohio", "Michigan", "Utah", "New Mexico",
+        ]
+        target_region = random.choice(target_regions)
+        logger.info("Research run %s targeting region: %s (known prospects: %d)",
+                    run_id, target_region, len(known_companies))
+
+        # Build exclusion list for the prompt (cap at 100 for context size)
+        exclusion_hint = ""
+        if known_companies:
+            sample = known_companies[:100]
+            exclusion_hint = (
+                f"\n\nIMPORTANT: These {len(sample)} companies are ALREADY in our database. "
+                f"DO NOT include them in your output (we already have them):\n"
+                + ", ".join(sample[:50])
+                + (f"\n... and {len(sample) - 50} more" if len(sample) > 50 else "")
+            )
+
         # --- Phase 1: Search (web_search only) ---
         search_prompt = f"""You are a solar dealer research agent. Phase 1: SEARCH ONLY.
 
 {task_prompt}
 
+TARGET REGION FOR THIS RUN: {target_region}
+Focus searches on cities/regions in {target_region}. Different cities per query.
+
 RULES:
 - Use ONLY web_search. DO NOT use python_exec, web_fetch, or http_request.
-- Run 8-12 varied search queries with different keywords/regions.
-- Extract every company you can find from the search results — aim for 15+ companies.
-- After your last search, output the final JSON array as your response text.
+- Run 10-15 varied search queries — use DIFFERENT cities, DIFFERENT keywords, DIFFERENT source types.
+- Query variety suggestions:
+  * "solar installer [city] [state]"
+  * "independent solar dealer [city]"
+  * "site:yelp.com solar {target_region}"
+  * "site:bbb.org solar {target_region}"
+  * "best rated solar companies [city]"
+  * "[city] solar reviews"
+  * Small/medium businesses, NOT national chains (skip SunPower, Sunrun, Tesla, Vivint)
+- Aim for 20+ UNIQUE companies across all queries.
+- After your last search, output the final JSON array as your response text.{exclusion_hint}
 
 Output format (after searches are done):
 [{{"name": "...", "city": "...", "state": "...", "website": "...", "source_query": "..."}}, ...]
 
-DO NOT fetch websites. DO NOT import. DO NOT format with python — just output the JSON directly in your text response."""
+DO NOT fetch websites. DO NOT import. DO NOT format with python — just output the JSON directly in your text response.
+CRITICAL: Exclude any company name that appears in the "already in our database" list above."""
 
         logger.info("Research phase 1: SEARCH (run %s)", run_id)
         search_result = await self._call_provider(
