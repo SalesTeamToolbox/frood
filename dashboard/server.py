@@ -1064,6 +1064,105 @@ def create_app(
         """Return recent intelligence events (last 200, newest first)."""
         return {"events": list(reversed(_intelligence_events))}
 
+    async def _chat_complete(
+        system_prompt: str,
+        messages: list[dict],
+        user_query: str = "",
+        mem_store=None,
+        model: str | None = None,
+        providers: list[tuple[str, str]] | None = None,
+    ) -> tuple[str, str]:
+        """Route a chat request through available API providers. Returns (text, provider_name)."""
+        import httpx as _httpx
+
+        chat_model = model or os.environ.get("CHAT_MODEL", "qwen3.6-plus-free")
+
+        if providers is None:
+            active_providers: list[tuple[str, str]] = []
+            if os.environ.get("ANTHROPIC_API_KEY"):
+                active_providers.append(("anthropic", os.environ["ANTHROPIC_API_KEY"]))
+            if os.environ.get("ZEN_API_KEY"):
+                active_providers.append(("zen", os.environ["ZEN_API_KEY"]))
+            if os.environ.get("OPENROUTER_API_KEY"):
+                active_providers.append(("openrouter", os.environ["OPENROUTER_API_KEY"]))
+            if os.environ.get("OPENAI_API_KEY"):
+                active_providers.append(("openai", os.environ["OPENAI_API_KEY"]))
+        else:
+            active_providers = list(providers)
+
+        if not active_providers:
+            return "No API keys configured.", "none"
+
+        last_error = ""
+        for provider_name, api_key in active_providers:
+            try:
+                client_timeout = _httpx.Timeout(connect=15.0, read=120.0, write=30.0, pool=10.0)
+                async with _httpx.AsyncClient(timeout=client_timeout, http2=True) as client:
+                    if provider_name == "anthropic":
+                        base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+                        m = chat_model or "claude-sonnet-4-5-20250514"
+                        resp = await client.post(
+                            base.rstrip("/") + "/v1/messages",
+                            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                            json={"model": m, "max_tokens": 4096, "system": system_prompt, "messages": messages},
+                        )
+                        if resp.status_code == 200:
+                            text = "".join(
+                                b.get("text", "") for b in resp.json().get("content", []) if b.get("type") == "text"
+                            )
+                            return text, "anthropic"
+                        last_error = f"Anthropic {resp.status_code}: {resp.text[:200]}"
+
+                    elif provider_name == "zen":
+                        try:
+                            from providers.zen_api import get_zen_client
+                            zen_client = get_zen_client()
+                        except Exception as e:
+                            last_error = f"Zen client unavailable: {e}"
+                            continue
+                        try:
+                            from core.agent_manager import get_fallback_models
+                            fallbacks = get_fallback_models("zen", "general", chat_model)
+                        except Exception:
+                            fallbacks = []
+                        for model_to_try in [chat_model] + fallbacks:
+                            try:
+                                result = await zen_client.chat_completion(model_to_try, messages, max_tokens=4096)
+                                if "error" not in result:
+                                    return (
+                                        result.get("choices", [{}])[0].get("message", {}).get("content", ""),
+                                        f"zen:{model_to_try}",
+                                    )
+                                last_error = f"Zen {model_to_try}: {result.get('error')}"
+                            except Exception as e:
+                                last_error = f"Zen {model_to_try} error: {e}"
+                                continue
+
+                    elif provider_name in ("openrouter", "openai"):
+                        if provider_name == "openrouter":
+                            base = "https://openrouter.ai/api"
+                            m = chat_model or "google/gemini-2.0-flash-exp:free"
+                        else:
+                            base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
+                            m = chat_model or "gpt-4o-mini"
+                        resp = await client.post(
+                            base.rstrip("/") + "/v1/chat/completions",
+                            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                            json={"model": m, "messages": [{"role": "system", "content": system_prompt}] + messages, "max_tokens": 4096},
+                        )
+                        if resp.status_code == 200:
+                            choices = resp.json().get("choices", [])
+                            if choices:
+                                return choices[0].get("message", {}).get("content", ""), provider_name
+                        last_error = f"{provider_name} {resp.status_code}: {resp.text[:200]}"
+
+            except _httpx.TimeoutException:
+                last_error = f"{provider_name} timed out"
+            except Exception as e:
+                last_error = f"{provider_name} error: {e}"
+
+        return f"All providers failed. Last error: {last_error}", "none"
+
     @app.post("/llm/chat/completions")
     @app.post("/llm/v1/chat/completions")
     async def llm_chat_completions(request: Request):
