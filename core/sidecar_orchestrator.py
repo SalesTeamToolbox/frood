@@ -485,11 +485,41 @@ Output ALL companies from the search phase. Leave unknown fields as empty string
                             "message_sent": message,
                         }
 
-                    outcomes[outcome.get("status", "errored")] = (
-                        outcomes.get(outcome.get("status", "errored"), 0) + 1
-                    )
+                    outcome_status = outcome.get("status", "errored")
+
+                    # Captcha-blocked = permanently queued for VA manual submission.
+                    # Generate a proper outreach email so the VA can act immediately,
+                    # then mark the prospect with human_follow_up (removes from queue).
+                    if outcome_status == "captcha_blocked":
+                        email_result = await self._generate_human_followup_email(
+                            provider, model, prospect, run_id,
+                        )
+                        total_input += email_result.get("input_tokens", 0)
+                        total_output += email_result.get("output_tokens", 0)
+                        email_draft = (email_result.get("summary") or "").strip()
+                        # Parse subject from first line if the model followed the format
+                        lines = email_draft.splitlines()
+                        draft_subject = ""
+                        draft_body = email_draft
+                        if lines and lines[0].lower().startswith("subject:"):
+                            draft_subject = lines[0][8:].strip()
+                            draft_body = "\n".join(lines[1:]).lstrip()
+                        outcome = {
+                            **outcome,
+                            "status": "human_follow_up",
+                            "draft_subject": draft_subject,
+                            "draft_email": draft_body,
+                        }
+                        outcome_status = "human_follow_up"
+                        logger.info(
+                            "Form-submit run %s: prospect %s captcha-blocked → "
+                            "queued for VA, email drafted",
+                            run_id, prospect_id,
+                        )
+
+                    outcomes[outcome_status] = outcomes.get(outcome_status, 0) + 1
                     details.append(
-                        f"[{idx + 1}] {prospect_name}: {outcome.get('status')} "
+                        f"[{idx + 1}] {prospect_name}: {outcome_status} "
                         f"— {outcome.get('evidence', '')[:120]}"
                     )
 
@@ -583,6 +613,52 @@ Output the message text only. No preamble, no quotes, no markdown."""
         )
         return result
 
+    async def _generate_human_followup_email(
+        self,
+        provider: str,
+        model: str,
+        prospect: dict,
+        run_id: str,
+    ) -> dict[str, Any]:
+        """Generate a full outreach email for a VA to paste into a captcha-protected
+        contact form. Returns subject + body so the VA can act immediately.
+        """
+        prospect_name = prospect.get("name", "")
+        contact_name = prospect.get("contact_name", "") or "there"
+        city = prospect.get("city", "")
+        state = prospect.get("state_code", "")
+        context_hint = (prospect.get("ai_personalization_context") or "").strip()
+        research_notes = (prospect.get("ai_research_notes") or "").strip()
+
+        prompt = f"""You are Arianna Dar, Synergic Solar's dealer outreach specialist.
+Write a complete outreach email for a VA to paste into {prospect_name}'s contact form.
+The form has captcha so our automation cannot submit it — a human will do it.
+
+Company: {prospect_name}
+Contact: {contact_name}
+Location: {city}, {state}
+Research notes: {research_notes or "(none)"}
+Personalization hints: {context_hint or "(none)"}
+
+Rules:
+- Start with a subject line on the very first line, formatted as: Subject: <subject text>
+- Then a blank line, then the email body.
+- Body: 3-4 short paragraphs, professional but warm tone. No emojis. No buzzwords.
+- Mention that independent solar dealers keep their own brand under Synergic's program.
+- Include a call to action: reply to arianna@synergicsolar.com or visit synergicsolar.com/dealer
+- Sign off as: Arianna Dar | Synergic Solar | arianna@synergicsolar.com
+
+Output ONLY the subject line + email body. No preamble, no markdown, no quotes."""
+
+        return await self._call_provider(
+            provider, model,
+            [{"role": "user", "content": prompt}],
+            f"{run_id}-humanfollowup-{prospect.get('id', 'x')}",
+            agent_id="form_submit",
+            task_type="form_submit",
+            phase="generate_message",
+        )
+
     async def _log_form_submission(
         self,
         api_base: str,
@@ -604,6 +680,11 @@ Output the message text only. No preamble, no quotes, no markdown."""
             ),
             "dry_run": dry_run,
         }
+        # Pass through human_follow_up email draft if present
+        if outcome.get("draft_subject"):
+            payload["draft_subject"] = outcome["draft_subject"]
+        if outcome.get("draft_email"):
+            payload["draft_email"] = outcome["draft_email"]
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(
@@ -1245,12 +1326,18 @@ Output the message text only. No preamble, no quotes, no markdown."""
         for zm in zen_models_to_try:
             if (provider, model) != ("zen", zm):
                 attempts.append(("zen", zm))
-        # NVIDIA fallbacks — meta/llama-3.1-70b-instruct handles simple tool
-        # use but gives up early on multi-phase research salvage.
+        # NVIDIA fallbacks — ordered best-to-worst for agentic/tool-use tasks.
+        # minimaxai/minimax-m2.7 is the primary NVIDIA fallback: strong tool-use,
+        # self-learning architecture, confirmed available on NVIDIA NIM.
+        # minimaxai/minimax-m2.5 is the same family, also on NIM, as secondary.
+        # meta/llama-3.1-70b-instruct handles simple tool use but gives up
+        # early on multi-phase research salvage.
         # llama-3.3-nemotron-super-49b-v1.5 is reasoning-mode (content=null,
         # output in reasoning_content) — the _extract_message_content helper
         # handles that shape, but the model hallucinates when it should call
-        # tools mid-workflow, so keep it as a last-resort backup.
+        # tools mid-workflow, so keep it as last-resort backup.
+        attempts.append(("nvidia", "minimaxai/minimax-m2.7"))
+        attempts.append(("nvidia", "minimaxai/minimax-m2.5"))
         attempts.append(("nvidia", "meta/llama-3.1-70b-instruct"))
         attempts.append(("nvidia", "nvidia/llama-3.3-nemotron-super-49b-v1.5"))
         attempts.append(("openrouter", "google/gemini-2.0-flash-001"))

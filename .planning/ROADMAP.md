@@ -19,6 +19,8 @@
 - ✅ **v8.0 N8N Workflow Integration** — Phase 42 (complete 2026-04-05)
 - 🚧 **v9.0 Intelligent Workflow Offloading** — Phase 43 complete, Phase 44 remaining
 
+- 🔲 **v10.0 Interactive Agent-Human Form Submission** — Phases TBD (not started)
+
 ## Active Workstreams
 
 Each workstream has its own ROADMAP.md, REQUIREMENTS.md, and phase directories.

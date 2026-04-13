@@ -322,13 +322,45 @@ class Frood:
         await asyncio.gather(*tasks_to_run)
 
     async def shutdown(self):
-        """Graceful shutdown."""
+        """Graceful shutdown.
+
+        Previously broken in two ways that compounded into a 90-second
+        SIGKILL on every restart:
+
+        1. `await self.heartbeat.stop()` raised TypeError — stop() is
+           synchronous, returns None, can't be awaited. Fixed by dropping
+           the `await`.
+
+        2. Even with the first fix, the signal handler did
+           `loop.create_task(frood.shutdown())` as a fire-and-forget task
+           running in PARALLEL with `frood.start()`, which was blocked on
+           `asyncio.gather(*tasks_to_run)` — tasks_to_run contains
+           `uvicorn.Server.serve()` which runs forever. shutdown() would
+           return cleanly, but the gather kept waiting on uvicorn, so the
+           event loop never exited. systemd hit TimeoutStopSec (90s) and
+           SIGKILLed. Every restart held the process alive for ~90s of
+           zombie state, during which any in-flight sidecar request died
+           with `fetch failed` on the paperclip adapter side.
+
+        Fix: after stopping the internal services, cancel every remaining
+        asyncio task so `asyncio.gather` in start() raises CancelledError
+        and the event loop can exit. This lets frood honor SIGTERM in
+        under a second.
+        """
         logger.info("Frood shutting down...")
-        await self.heartbeat.stop()
+        self.heartbeat.stop()
         if self.tier_recalc:
             self.tier_recalc.stop()
         self.cron_scheduler.stop()
-        logger.info("Frood stopped")
+
+        # Cancel remaining tasks so asyncio.gather in start() unblocks.
+        # Explicitly skip the current task (this shutdown coroutine) so
+        # we finish our own cleanup before the event loop tears down.
+        current = asyncio.current_task()
+        pending = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+        for task in pending:
+            task.cancel()
+        logger.info("Frood stopped (cancelled %d pending tasks)", len(pending))
 
 
 def main():

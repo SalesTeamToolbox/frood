@@ -90,7 +90,11 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 ### Pending Todos
 
-None.
+- **v10.0 Interactive Agent-Human Form Submission** (backlog milestone): Arianna opens a real browser (Playwright/Chromium headless=False), navigates to each captcha-protected contact form URL, auto-fills all fields using the pre-drafted email from Odoo, then pauses and surfaces the filled form to a human (VA) in a visible browser window. Human solves captcha + clicks submit. Agent monitors for confirmation, logs result back to Odoo. Requires: Frood running with display/VNC on server OR local Frood instance that the VA can screen-share. Phase plan: (1) local Frood mode with display passthrough, (2) headful Playwright form-fill + pause-for-human handoff protocol, (3) Odoo "VA Session" view showing queue + status.
+
+- **Intelligent LLM fallback routing** (backlog milestone): The `_call_provider` fallback chain in `sidecar_orchestrator.py` is hardcoded and separate from the `PROVIDER_MODELS` table updated by the availability refresh loop. Two gaps: (1) wire sidecar fallback chain to `PROVIDER_MODELS` so availability refresh automatically flows through; (2) build benchmark harness — standardized test prompts per task type (tool-call accuracy, JSON validity, latency), run weekly, auto-rank fallback order. Providers to cover: Zen, NVIDIA NIM (including `minimaxai/minimax-m2.7`), OpenRouter.
+
+- **Qdrant startup warning**: On every Frood restart, `QdrantStore` logs "Storage folder /opt/frood/.frood/qdrant is already accessed by another instance of Qdrant client." The memory backend falls back gracefully but vector memory is not persisted between restarts. Core platform feature — should be fixed. Options: migrate to Qdrant server container (docker-compose), or ensure clean client teardown before restart (release lock on shutdown). Low urgency but should not be ignored indefinitely.
 
 ### Blockers/Concerns
 
