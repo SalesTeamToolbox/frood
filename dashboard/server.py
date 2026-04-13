@@ -1064,6 +1064,55 @@ def create_app(
         """Return recent intelligence events (last 200, newest first)."""
         return {"events": list(reversed(_intelligence_events))}
 
+    # ── Cross-provider capability routing helpers ─────────────────────────
+
+    # Quality-ranked provider order for capability routing.
+    # Providers are tried in this order when no explicit list is given.
+    # Free providers (zen, nvidia) sit last so paid quality wins by default.
+    _PROVIDER_QUALITY_ORDER = ["anthropic", "openrouter", "nvidia", "zen", "openai"]
+
+    _PROVIDER_KEY_ENVVARS: dict[str, str] = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "nvidia": "NVIDIA_API_KEY",
+        "zen": "ZEN_API_KEY",
+        "openai": "OPENAI_API_KEY",
+    }
+
+    def _is_credit_error(status_code: int, response_text: str) -> bool:
+        """Return True when the error means credit/quota is exhausted."""
+        if status_code == 402:
+            return True
+        if status_code in (429, 403):
+            lower = response_text.lower()
+            return any(kw in lower for kw in ("credit", "quota", "insufficient", "billing", "payment", "balance", "limit exceeded"))
+        return False
+
+    def _build_capability_chain(task_category: str = "general") -> list[tuple[str, str, str]]:
+        """Return ordered [(provider, model, api_key)] using live PROVIDER_MODELS.
+
+        Uses the model lists kept fresh by background 6-hour refresh tasks
+        (refresh_zen_models_async / refresh_nvidia_models_async in agent_manager).
+        Skips providers whose API keys are not configured.
+        Falls back to the 'general' category when task_category is unmapped.
+        """
+        try:
+            from core.agent_manager import PROVIDER_MODELS
+        except ImportError:
+            PROVIDER_MODELS = {}
+
+        chain: list[tuple[str, str, str]] = []
+        for provider in _PROVIDER_QUALITY_ORDER:
+            env_var = _PROVIDER_KEY_ENVVARS.get(provider, "")
+            api_key = os.environ.get(env_var, "")
+            if not api_key:
+                continue
+            provider_map = PROVIDER_MODELS.get(provider, {})
+            model = provider_map.get(task_category) or provider_map.get("general")
+            if model:
+                chain.append((provider, model, api_key))
+        return chain
+
     async def _chat_complete(
         system_prompt: str,
         messages: list[dict],
@@ -1071,46 +1120,81 @@ def create_app(
         mem_store=None,
         model: str | None = None,
         providers: list[tuple[str, str]] | None = None,
+        task_category: str = "general",
     ) -> tuple[str, str]:
-        """Route a chat request through available API providers. Returns (text, provider_name)."""
+        """Route a chat request through available providers with capability-ranked fallback.
+
+        When providers=None, picks the best available model across ALL configured
+        providers (anthropic > openrouter > nvidia > zen) using live model lists
+        polled every 6 hours. Skips any provider that returns a credit/quota error
+        and falls through to the next best option automatically.
+
+        Returns (text, "provider:model_used").
+        """
         import httpx as _httpx
 
-        chat_model = model or os.environ.get("CHAT_MODEL", "qwen3.6-plus-free")
-
-        if providers is None:
-            active_providers: list[tuple[str, str]] = []
-            if os.environ.get("ANTHROPIC_API_KEY"):
-                active_providers.append(("anthropic", os.environ["ANTHROPIC_API_KEY"]))
-            if os.environ.get("ZEN_API_KEY"):
-                active_providers.append(("zen", os.environ["ZEN_API_KEY"]))
-            if os.environ.get("OPENROUTER_API_KEY"):
-                active_providers.append(("openrouter", os.environ["OPENROUTER_API_KEY"]))
-            if os.environ.get("OPENAI_API_KEY"):
-                active_providers.append(("openai", os.environ["OPENAI_API_KEY"]))
+        # Build the provider+model chain to try in order
+        if providers is not None:
+            # Explicit override — caller controls the list
+            try:
+                from core.agent_manager import PROVIDER_MODELS
+            except ImportError:
+                PROVIDER_MODELS = {}
+            active_chain: list[tuple[str, str, str]] = []
+            for provider_name, api_key in providers:
+                m = model or PROVIDER_MODELS.get(provider_name, {}).get(task_category) or \
+                    PROVIDER_MODELS.get(provider_name, {}).get("general", "")
+                if m:
+                    active_chain.append((provider_name, m, api_key))
         else:
-            active_providers = list(providers)
+            # Smart routing — capability-ranked across all configured providers
+            active_chain = _build_capability_chain(task_category)
+            # If a specific model was requested, put its owning provider first
+            if model:
+                if model.startswith("claude"):
+                    hint = "anthropic"
+                elif model.startswith("nvidia/") or ":free" in model and not model.endswith("-free"):
+                    hint = "nvidia"
+                elif "/" in model and not model.startswith("nvidia/"):
+                    hint = "openrouter"
+                elif model.endswith("-free") or model.startswith(("qwen", "minimax", "nemotron", "big-")):
+                    hint = "zen"
+                else:
+                    hint = None
+                if hint:
+                    api_key = os.environ.get(_PROVIDER_KEY_ENVVARS.get(hint, ""), "")
+                    if api_key:
+                        # Put the hinted provider+specific model at the front
+                        active_chain = [(hint, model, api_key)] + [
+                            (p, m, k) for p, m, k in active_chain if p != hint
+                        ]
 
-        if not active_providers:
+        if not active_chain:
             return "No API keys configured.", "none"
 
         last_error = ""
-        for provider_name, api_key in active_providers:
+        client_timeout = _httpx.Timeout(connect=15.0, read=120.0, write=30.0, pool=10.0)
+
+        for provider_name, model_to_use, api_key in active_chain:
             try:
-                client_timeout = _httpx.Timeout(connect=15.0, read=120.0, write=30.0, pool=10.0)
                 async with _httpx.AsyncClient(timeout=client_timeout, http2=True) as client:
                     if provider_name == "anthropic":
-                        base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-                        m = chat_model or "claude-sonnet-4-5-20250514"
+                        # Always hit real Anthropic API — never use ANTHROPIC_BASE_URL here
+                        # to avoid proxy loops when BlackKnight points its SDK at Frood.
                         resp = await client.post(
-                            base.rstrip("/") + "/v1/messages",
+                            "https://api.anthropic.com/v1/messages",
                             headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                            json={"model": m, "max_tokens": 4096, "system": system_prompt, "messages": messages},
+                            json={"model": model_to_use, "max_tokens": 4096, "system": system_prompt, "messages": messages},
                         )
                         if resp.status_code == 200:
                             text = "".join(
                                 b.get("text", "") for b in resp.json().get("content", []) if b.get("type") == "text"
                             )
-                            return text, "anthropic"
+                            return text, f"anthropic:{model_to_use}"
+                        if _is_credit_error(resp.status_code, resp.text):
+                            logger.warning("Anthropic credit/quota exhausted (%d) — falling through to next provider", resp.status_code)
+                            last_error = f"Anthropic {resp.status_code}: credit/quota exhausted"
+                            continue
                         last_error = f"Anthropic {resp.status_code}: {resp.text[:200]}"
 
                     elif provider_name == "zen":
@@ -1122,38 +1206,66 @@ def create_app(
                             continue
                         try:
                             from core.agent_manager import get_fallback_models
-                            fallbacks = get_fallback_models("zen", "general", chat_model)
+                            fallbacks = get_fallback_models("zen", task_category, model_to_use)
                         except Exception:
                             fallbacks = []
-                        for model_to_try in [chat_model] + fallbacks:
+                        for m in [model_to_use] + fallbacks:
                             try:
-                                result = await zen_client.chat_completion(model_to_try, messages, max_tokens=4096)
+                                result = await zen_client.chat_completion(m, messages, max_tokens=4096)
                                 if "error" not in result:
                                     return (
                                         result.get("choices", [{}])[0].get("message", {}).get("content", ""),
-                                        f"zen:{model_to_try}",
+                                        f"zen:{m}",
                                     )
-                                last_error = f"Zen {model_to_try}: {result.get('error')}"
+                                last_error = f"Zen {m}: {result.get('error')}"
                             except Exception as e:
-                                last_error = f"Zen {model_to_try} error: {e}"
-                                continue
+                                last_error = f"Zen {m} error: {e}"
+
+                    elif provider_name == "nvidia":
+                        try:
+                            from providers.nvidia_api import get_nvidia_client
+                            nvidia_client = get_nvidia_client()
+                        except Exception as e:
+                            last_error = f"Nvidia client unavailable: {e}"
+                            continue
+                        try:
+                            from core.agent_manager import get_fallback_models
+                            fallbacks = get_fallback_models("nvidia", task_category, model_to_use)
+                        except Exception:
+                            fallbacks = []
+                        for m in [model_to_use] + fallbacks:
+                            try:
+                                nvidia_msgs = [{"role": "system", "content": system_prompt}] + messages if system_prompt else messages
+                                result = await nvidia_client.chat_completion(m, nvidia_msgs, max_tokens=4096)
+                                if "error" not in result:
+                                    return (
+                                        result.get("choices", [{}])[0].get("message", {}).get("content", ""),
+                                        f"nvidia:{m}",
+                                    )
+                                err_str = str(result.get("error", ""))
+                                if "Invalid NVIDIA API key" in err_str or "Unauthorized" in err_str:
+                                    last_error = "Nvidia: invalid API key"
+                                    break  # No point trying other Nvidia models
+                                last_error = f"Nvidia {m}: {err_str}"
+                            except Exception as e:
+                                last_error = f"Nvidia {m} error: {e}"
 
                     elif provider_name in ("openrouter", "openai"):
-                        if provider_name == "openrouter":
-                            base = "https://openrouter.ai/api"
-                            m = chat_model or "google/gemini-2.0-flash-exp:free"
-                        else:
-                            base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
-                            m = chat_model or "gpt-4o-mini"
+                        base = "https://openrouter.ai/api" if provider_name == "openrouter" else \
+                               os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
                         resp = await client.post(
                             base.rstrip("/") + "/v1/chat/completions",
                             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                            json={"model": m, "messages": [{"role": "system", "content": system_prompt}] + messages, "max_tokens": 4096},
+                            json={"model": model_to_use, "messages": [{"role": "system", "content": system_prompt}] + messages, "max_tokens": 4096},
                         )
                         if resp.status_code == 200:
                             choices = resp.json().get("choices", [])
                             if choices:
-                                return choices[0].get("message", {}).get("content", ""), provider_name
+                                return choices[0].get("message", {}).get("content", ""), f"{provider_name}:{model_to_use}"
+                        if _is_credit_error(resp.status_code, resp.text):
+                            logger.warning("%s credit/quota exhausted (%d) — falling through to next provider", provider_name, resp.status_code)
+                            last_error = f"{provider_name} {resp.status_code}: credit/quota exhausted"
+                            continue
                         last_error = f"{provider_name} {resp.status_code}: {resp.text[:200]}"
 
             except _httpx.TimeoutException:
@@ -1195,34 +1307,8 @@ def create_app(
         )
         messages = body.get("messages", [])
 
-        chat_model = model
-        providers = []
-
-        if model.startswith("zen:"):
-            actual_model = model.split(":", 1)[1]
-            chat_model = actual_model
-            zen_key = os.environ.get("ZEN_API_KEY", "")
-            if zen_key:
-                providers.append(("zen", zen_key))
-        elif model in (
-            "qwen3.6-plus-free",
-            "minimax-m2.5-free",
-            "nemotron-3-super-free",
-            "big-pickle",
-        ):
-            zen_key = os.environ.get("ZEN_API_KEY", "")
-            if zen_key:
-                providers.append(("zen", zen_key))
-        else:
-            if os.environ.get("ANTHROPIC_API_KEY", ""):
-                providers.append(("anthropic", os.environ.get("ANTHROPIC_API_KEY", "")))
-            if os.environ.get("OPENROUTER_API_KEY", ""):
-                providers.append(("openrouter", os.environ.get("OPENROUTER_API_KEY", "")))
-            if os.environ.get("OPENAI_API_KEY", ""):
-                providers.append(("openai", os.environ.get("OPENAI_API_KEY", "")))
-
-        if not providers:
-            return {"error": {"message": "No API keys configured", "type": "invalid_request_error"}}
+        # Strip provider prefix (e.g. "zen:qwen3.6-plus-free" → "qwen3.6-plus-free")
+        chat_model = model.split(":", 1)[1] if ":" in model and model.split(":")[0] in _PROVIDER_KEY_ENVVARS else model
 
         system_msg = ""
         filtered_messages = []
@@ -1233,12 +1319,12 @@ def create_app(
                 filtered_messages.append(msg)
 
         try:
+            # Smart routing: best available provider+model, fallback on credit errors
             text, provider_used = await _chat_complete(
                 system_prompt=system_msg,
                 messages=filtered_messages,
                 user_query=filtered_messages[-1].get("content", "") if filtered_messages else "",
                 model=chat_model,
-                providers=providers,
             )
         except Exception as e:
             return {"error": {"message": str(e), "type": "internal_error"}}
@@ -1320,45 +1406,7 @@ def create_app(
         )
         system_prompt = body.get("system", "")
         messages = body.get("messages", [])
-
-        # Route to internal provider logic
-        chat_model = model
-        providers = []
-
-        if model.startswith("zen:"):
-            actual_model = model.split(":", 1)[1]
-            chat_model = actual_model
-            zen_key = os.environ.get("ZEN_API_KEY", "")
-            if zen_key:
-                providers.append(("zen", zen_key))
-        elif model in (
-            "qwen3.6-plus-free",
-            "minimax-m2.5-free",
-            "nemotron-3-super-free",
-            "big-pickle",
-        ):
-            zen_key = os.environ.get("ZEN_API_KEY", "")
-            if zen_key:
-                providers.append(("zen", zen_key))
-        else:
-            if os.environ.get("ANTHROPIC_API_KEY", ""):
-                providers.append(("anthropic", os.environ.get("ANTHROPIC_API_KEY", "")))
-            if os.environ.get("OPENROUTER_API_KEY", ""):
-                providers.append(("openrouter", os.environ.get("OPENROUTER_API_KEY", "")))
-            if os.environ.get("OPENAI_API_KEY", ""):
-                providers.append(("openai", os.environ.get("OPENAI_API_KEY", "")))
-
-        if not providers:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "type": "error",
-                    "error": {
-                        "type": "invalid_request_error",
-                        "message": "No API keys configured",
-                    },
-                },
-            )
+        chat_model = model.split(":", 1)[1] if ":" in model and model.split(":")[0] in _PROVIDER_KEY_ENVVARS else model
 
         try:
             text, provider_used = await _chat_complete(
@@ -1366,46 +1414,22 @@ def create_app(
                 messages=messages,
                 user_query=messages[-1].get("content", "") if messages else "",
                 model=chat_model,
-                providers=providers,
             )
         except Exception as e:
             return JSONResponse(
                 status_code=500,
-                content={
-                    "type": "error",
-                    "error": {"type": "api_error", "message": str(e)},
-                },
+                content={"type": "error", "error": {"type": "api_error", "message": str(e)}},
             )
 
         if not text or text.startswith("All providers failed"):
             return JSONResponse(
                 status_code=500,
-                content={
-                    "type": "error",
-                    "error": {"type": "api_error", "message": text or "No response"},
-                },
+                content={"type": "error", "error": {"type": "api_error", "message": text or "No response"}},
             )
 
-        # Determine routing tier and increment counter
-        _free_models = {"qwen3.6-plus-free", "minimax-m2.5-free", "nemotron-3-super-free"}
-        if model in _free_models:
-            _tier = "free"
-        elif model.startswith("zen:"):
-            _tier = "L1"
-        else:
-            _tier = "L2"
+        _tier = "free" if provider_used.startswith(("zen:", "nvidia:")) else "L2"
         _routing_stats[_tier] = _routing_stats.get(_tier, 0) + 1
-        await _record_intelligence_event(
-            "routing",
-            {
-                "model": chat_model,
-                "tier": _tier,
-                "provider": provider_used,
-                "reason": "free-model"
-                if _tier == "free"
-                else ("zen-prefix" if _tier == "L1" else "premium-fallback"),
-            },
-        )
+        await _record_intelligence_event("routing", {"model": chat_model, "tier": _tier, "provider": provider_used})
 
         import uuid as _uuid
 
@@ -1417,10 +1441,67 @@ def create_app(
             "model": chat_model,
             "stop_reason": "end_turn",
             "stop_sequence": None,
-            "usage": {
-                "input_tokens": 0,
-                "output_tokens": 0,
-            },
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        }
+
+    @app.post("/v1/messages")
+    async def anthropic_sdk_proxy(request: Request):
+        """Anthropic SDK-compatible proxy at the root /v1/messages path.
+
+        Wire any Anthropic SDK client (e.g. BlackKnight) by setting:
+            ANTHROPIC_BASE_URL=http://localhost:8002
+
+        The SDK posts to /v1/messages with x-api-key header (ignored here —
+        Frood uses its own configured API keys). Routes through the same
+        capability-ranked provider chain as all other LLM endpoints, with
+        automatic fallback when Anthropic credits run out.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={"type": "error", "error": {"type": "invalid_request_error", "message": "Invalid JSON body"}},
+            )
+
+        model = body.get("model") or os.environ.get("LLM_PROXY_MODEL", "claude-sonnet-4-6-20260217")
+        system_prompt = body.get("system", "")
+        messages = body.get("messages", [])
+
+        try:
+            text, provider_used = await _chat_complete(
+                system_prompt=system_prompt,
+                messages=messages,
+                user_query=messages[-1].get("content", "") if messages else "",
+                model=model,
+                task_category="general",
+            )
+        except Exception as e:
+            return JSONResponse(
+                status_code=500,
+                content={"type": "error", "error": {"type": "api_error", "message": str(e)}},
+            )
+
+        if not text or text.startswith("All providers failed"):
+            return JSONResponse(
+                status_code=503,
+                content={"type": "error", "error": {"type": "api_error", "message": text or "No response from any provider"}},
+            )
+
+        _routing_stats["L2"] = _routing_stats.get("L2", 0) + 1
+        await _record_intelligence_event("routing", {"model": model, "provider": provider_used, "via": "anthropic-sdk-proxy"})
+
+        import uuid as _uuid
+
+        return {
+            "id": f"msg_{_uuid.uuid4().hex[:12]}",
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "text", "text": text}],
+            "model": provider_used.split(":", 1)[1] if ":" in provider_used else model,
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
         }
 
     @app.get("/llm/models")
