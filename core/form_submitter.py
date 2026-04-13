@@ -48,6 +48,25 @@ from typing import Any
 
 logger = logging.getLogger("frood.form_submitter")
 
+# playwright-stealth patches navigator/webgl/chrome fingerprints so the
+# Chromium instance looks like a regular browser instead of an obvious
+# automation tool. Many sites only trigger reCAPTCHA/hCaptcha/Turnstile
+# when they detect bot-like fingerprints, so applying stealth up front
+# means we get challenged less often and reach more forms. Module-level
+# singleton: Stealth() is just configuration, the scripts are injected
+# per-context in apply_stealth_async.
+try:
+    from playwright_stealth import Stealth
+    _stealth = Stealth()
+    _stealth_available = True
+except ImportError:
+    _stealth_available = False
+    logger.warning(
+        "playwright-stealth not installed — browser will look obviously "
+        "automated and will trigger CAPTCHAs more often. pip install "
+        "playwright-stealth to enable."
+    )
+
 
 # Fields we try to fill. Ordered from most-likely-required to optional.
 # Each entry: (field_key, list_of_selectors_to_try).
@@ -463,13 +482,31 @@ async def submit_contact_form(
     page = None
     try:
         context = await browser.new_context(
+            # Generic Chrome UA, no obvious bot marker. Earlier we tagged
+            # the UA with "Arianna-FormSubmit/1.0" which was transparent
+            # but guaranteed-to-be-detected-as-automation. Drop it in
+            # favor of a real Chrome string; playwright-stealth patches
+            # the fingerprints too so both signal vectors stay clean.
             user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/128.0 Safari/537.36 "
-                "Arianna-FormSubmit/1.0 (+https://synergicsolar.com)"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
             ),
             viewport={"width": 1280, "height": 900},
+            locale="en-US",
+            timezone_id="America/New_York",
         )
+
+        # Apply playwright-stealth evasions to the context. This patches
+        # navigator.webdriver, chrome.runtime, webgl vendor/renderer,
+        # user agent data, plugin list, and ~20 other fingerprint surfaces
+        # that sites use to detect automation. Significantly reduces the
+        # CAPTCHA challenge rate without "solving" anything.
+        if _stealth_available:
+            try:
+                await _stealth.apply_stealth_async(context)
+            except Exception as exc:
+                logger.warning("Stealth apply failed for %s: %s", prospect_id, exc)
+
         page = await context.new_page()
         page.set_default_timeout(timeout_ms)
 
