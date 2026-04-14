@@ -706,6 +706,284 @@ Output ONLY the subject line + email body. No preamble, no markdown, no quotes."
                 prospect_id, exc,
             )
 
+    # =====================================================================
+    # Arianna-Email deterministic workflow
+    # =====================================================================
+
+    async def _execute_email_monitor_workflow(
+        self, run_id: str, ctx: AdapterExecutionContext,
+        provider: str, model: str,
+    ) -> dict[str, Any]:
+        """Arianna-Email workflow: inbox triage + nurture follow-ups.
+
+        Replaces the previous LLM-driven tool loop which had two fatal
+        failure modes (spam loop from iteration cap starving log-email
+        calls, and the LLM silently dropping prospect_type on installer
+        replies). All control flow is now Python; the LLM is used only
+        for narrow body-generation tasks (1 call per outbound email).
+
+        Phase 1: Fetch unread emails from IMAP (mark read immediately).
+        Phase 2: For each reply — classify intent + prospect_type,
+                 look up or create the prospect, draft a reply body
+                 (1 LLM call), send, mark-responded, log both directions.
+        Phase 3: Fetch nurture candidates.
+        Phase 4: For each nurture — draft a personalized body (1 LLM call),
+                 send, log the outbound interaction so the cooldown kicks in.
+        """
+        import os
+
+        from core import email_monitor as em
+
+        allowed, reason = self._is_within_business_hours("email")
+        if not allowed:
+            logger.info("Skipping email run %s: %s", run_id, reason)
+            return {
+                "summary": f"Skipped: {reason}",
+                "provider": provider, "model": model,
+                "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
+            }
+
+        imap_password = os.environ.get("ARIANNA_IMAP_AUTH", "")
+        max_replies = int(os.environ.get("ARIANNA_EMAIL_REPLY_LIMIT", "10"))
+        max_nurture = int(os.environ.get("ARIANNA_EMAIL_NURTURE_LIMIT", "5"))
+
+        total_input = 0
+        total_output = 0
+        reply_stats: dict[str, int] = {
+            "opt_out": 0, "negative": 0, "positive": 0, "neutral": 0,
+            "new_senders": 0, "send_failures": 0,
+        }
+        nurture_stats = {"sent": 0, "failed": 0}
+        reply_details: list[str] = []
+        nurture_details: list[str] = []
+
+        # ---------- Phase 1: Fetch unread emails ----------
+        logger.info("Email run %s: fetching unread emails", run_id)
+        unread = em.fetch_unread_emails(imap_password, max_count=max_replies)
+        logger.info(
+            "Email run %s: %d unread emails fetched (marked read)",
+            run_id, len(unread),
+        )
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # ---------- Phase 2: Handle each reply ----------
+            for email_data in unread:
+                sender_email = email_data["sender_email"]
+                sender_name = email_data["sender_name"]
+                subject = email_data["subject"]
+                body_text = email_data["body_text"]
+
+                if em._is_system_sender(sender_email):
+                    logger.info(
+                        "Email run %s: skipping system sender %s",
+                        run_id, sender_email,
+                    )
+                    continue
+
+                intent = em.classify_intent(subject, body_text)
+                prospect_type = em.classify_prospect_type(subject, body_text)
+                reply_stats[intent] = reply_stats.get(intent, 0) + 1
+
+                # Look up or create the prospect
+                match = await em.check_duplicate(client, sender_email, sender_name)
+                if match and match.get("prospect_id"):
+                    prospect_id = match["prospect_id"]
+                else:
+                    prospect_id = await em.import_new_prospect(
+                        client, sender_email, sender_name,
+                    )
+                    if prospect_id:
+                        reply_stats["new_senders"] += 1
+
+                if not prospect_id:
+                    reply_details.append(
+                        f"[reply] {sender_email}: failed to resolve prospect — skipped"
+                    )
+                    continue
+
+                # mark-responded only for actionable (non opt-out / non negative) intents
+                assigned_dealer = None
+                dealer_referral_code = None
+                if intent in ("positive", "neutral"):
+                    mark_resp = await em.mark_responded(
+                        client, prospect_id,
+                        {
+                            "email_subject": subject,
+                            "email_body": body_text[:4000],
+                            "sentiment": "positive" if intent == "positive" else "neutral",
+                            "contact_name": sender_name or "",
+                            "prospect_type": prospect_type,
+                            "source_tag": "Arianna Business Development",
+                        },
+                    )
+                    if mark_resp:
+                        assigned_dealer = mark_resp.get("assigned_dealer") or mark_resp.get("assigned_to")
+                        dealer_referral_code = mark_resp.get("dealer_referral_code") or ""
+
+                # Draft the reply body (1 LLM call)
+                reply_prompt = em.build_reply_prompt(
+                    email_data, intent, prospect_type,
+                    assigned_dealer=assigned_dealer,
+                    dealer_referral_code=dealer_referral_code,
+                )
+                llm_resp = await self._call_provider(
+                    provider, model,
+                    [{"role": "user", "content": reply_prompt}],
+                    f"{run_id}-emailreply-{prospect_id}",
+                    agent_id="email", task_type="email",
+                    phase="generate_reply",
+                )
+                total_input += llm_resp.get("input_tokens", 0)
+                total_output += llm_resp.get("output_tokens", 0)
+                body_plain = (llm_resp.get("summary") or "").strip()
+
+                if not body_plain:
+                    reply_details.append(
+                        f"[reply] {sender_email}: LLM returned empty body — skipped send"
+                    )
+                    reply_stats["send_failures"] += 1
+                    continue
+
+                reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+                body_html = em.wrap_body_with_signature(em.plain_text_to_html(body_plain))
+
+                ok, detail = await em.send_outbound_email(
+                    sender_email, reply_subject, body_html,
+                )
+                if not ok:
+                    reply_details.append(
+                        f"[reply] {sender_email}: send_email failed — {detail[:120]}"
+                    )
+                    reply_stats["send_failures"] += 1
+                    continue
+
+                # Log inbound (original reply) + outbound (our response)
+                await em.log_email_to_crm(
+                    client, prospect_id, {
+                        "direction": "inbound",
+                        "sender_name": sender_name or sender_email,
+                        "sender_email": sender_email,
+                        "subject": subject,
+                        "body_text": body_text[:4000],
+                    },
+                )
+                await em.log_email_to_crm(
+                    client, prospect_id, {
+                        "direction": "outbound",
+                        "sender_name": "Arianna Dar",
+                        "sender_email": "arianna@synergicsolar.com",
+                        "recipient_email": sender_email,
+                        "subject": reply_subject,
+                        "body_html": body_html,
+                    },
+                )
+
+                reply_details.append(
+                    f"[reply] {sender_email} ({intent}/{prospect_type}) → sent"
+                )
+
+            # ---------- Phase 3+4: Nurture candidates ----------
+            logger.info("Email run %s: fetching nurture candidates", run_id)
+            candidates = await em.fetch_nurture_candidates(client, max_nurture)
+            logger.info(
+                "Email run %s: %d nurture candidates", run_id, len(candidates),
+            )
+
+            for candidate in candidates:
+                prospect_id = candidate.get("id")
+                recipient = (candidate.get("email") or "").strip()
+                if not prospect_id or not recipient:
+                    continue
+
+                prompt = em.build_nurture_prompt(candidate)
+                llm_resp = await self._call_provider(
+                    provider, model,
+                    [{"role": "user", "content": prompt}],
+                    f"{run_id}-nurture-{prospect_id}",
+                    agent_id="email", task_type="email",
+                    phase="generate_nurture",
+                )
+                total_input += llm_resp.get("input_tokens", 0)
+                total_output += llm_resp.get("output_tokens", 0)
+                body_plain = (llm_resp.get("summary") or "").strip()
+
+                if not body_plain:
+                    nurture_stats["failed"] += 1
+                    nurture_details.append(
+                        f"[nurture] {recipient}: LLM returned empty body"
+                    )
+                    continue
+
+                last_subject = (candidate.get("last_outbound_subject") or "").strip()
+                subject = f"Re: {last_subject}" if last_subject else "Following up on the Synergic dealer program"
+                body_html = em.wrap_body_with_signature(em.plain_text_to_html(body_plain))
+
+                ok, detail = await em.send_outbound_email(
+                    recipient, subject, body_html,
+                )
+                if not ok:
+                    nurture_stats["failed"] += 1
+                    nurture_details.append(
+                        f"[nurture] {recipient}: send_email failed — {detail[:120]}"
+                    )
+                    continue
+
+                # Log outbound — bumps outreach_step on the prospect so the
+                # cooldown filter excludes them from the next batch.
+                logged = await em.log_email_to_crm(
+                    client, prospect_id, {
+                        "direction": "outbound",
+                        "sender_name": "Arianna Dar",
+                        "sender_email": "arianna@synergicsolar.com",
+                        "recipient_email": recipient,
+                        "subject": subject,
+                        "body_html": body_html,
+                    },
+                )
+                nurture_stats["sent"] += 1
+                nurture_details.append(
+                    f"[nurture] {recipient}: sent"
+                    + ("" if logged else " (WARNING: log-email failed)")
+                )
+
+        # ---------- Phase 5: Build summary ----------
+        summary_parts = [
+            "## Arianna Email Monitor — Deterministic Workflow",
+            "",
+            f"**Inbox:** {len(unread)} unread emails fetched",
+        ]
+        if unread:
+            summary_parts.append(
+                "- Intent breakdown: "
+                + ", ".join(
+                    f"{k}={v}" for k, v in reply_stats.items() if v > 0
+                )
+            )
+        summary_parts.extend([
+            "",
+            f"**Nurture:** {nurture_stats['sent']} sent, {nurture_stats['failed']} failed",
+        ])
+        if reply_details:
+            summary_parts.extend(["", "### Reply handling"] + reply_details)
+        if nurture_details:
+            summary_parts.extend(["", "### Nurture follow-ups"] + nurture_details)
+
+        summary = "\n".join(summary_parts)
+
+        logger.info(
+            "Email run %s complete: replies=%d nurture_sent=%d nurture_failed=%d",
+            run_id, len(unread), nurture_stats["sent"], nurture_stats["failed"],
+        )
+
+        return {
+            "summary": summary,
+            "provider": provider,
+            "model": model,
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "cost_usd": 0.0,
+        }
+
     # Business hours configuration (US Eastern)
     # Email + form-submit tasks only run Mon-Sat, 7 AM - 9 PM ET.
     # Same rationale: these are outbound contact to real people, and it's
@@ -855,6 +1133,20 @@ Output ONLY the subject line + email body. No preamble, no markdown, no quotes."
             or "form submit" in (ctx.task or "").lower()[:200]
         )
 
+        # Detect email monitor tasks (Arianna-Email) — deterministic
+        # IMAP + Odoo API workflow with narrow LLM calls for body drafting.
+        # Matches on explicit task_type OR agent role OR task prompt wording.
+        task_text = (ctx.task or "").lower()[:300]
+        is_email_monitor = (
+            effective_task_type == "email"
+            or ctx.context.get("agentRole") == "email_monitor"
+            or "email monitor" in task_text
+            or "arianna-email" in task_text
+            or "arianna email" in task_text
+            or "inbox triage" in task_text
+            or "nurture follow" in task_text
+        )
+
         if is_research:
             logger.info("Run %s: using multi-phase research workflow", run_id)
             result = await self._execute_research_workflow(
@@ -863,6 +1155,11 @@ Output ONLY the subject line + email body. No preamble, no markdown, no quotes."
         elif is_form_submit:
             logger.info("Run %s: using form-submit workflow", run_id)
             result = await self._execute_form_submit_workflow(
+                run_id, ctx, provider_name, model_name,
+            )
+        elif is_email_monitor:
+            logger.info("Run %s: using email-monitor workflow", run_id)
+            result = await self._execute_email_monitor_workflow(
                 run_id, ctx, provider_name, model_name,
             )
         else:
