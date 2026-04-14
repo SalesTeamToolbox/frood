@@ -31,7 +31,21 @@ tasks.json
 cron_jobs.json
 /tmp/frood/
 .frood/
+.agent42/
 data/
+# Scratch experiments & ephemeral outputs
+tmp*.py
+alexander_email.txt
+classified_emails.json
+email_agent_summary.json
+email_analysis.txt
+email_details.txt
+emails.json
+emails_to_process.json
+latest_email.txt
+luis_reply.json
+mark_responded_results.json
+arianna_state.json
 apps/*
 
 # Linting & formatting
