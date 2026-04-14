@@ -1787,6 +1787,118 @@ def create_app(
             "data": models,
         }
 
+    @app.post("/llm/embeddings")
+    @app.post("/llm/v1/embeddings")
+    async def llm_embeddings(request: Request):
+        """OpenAI-compatible embeddings passthrough.
+
+        Routes to the upstream provider implied by the model ID prefix, mirroring
+        the logic in /llm/v1/chat/completions. Supports:
+          - NVIDIA build.nvidia.com (meta/*, nvidia/*, baai/*, snowflake/*, etc.)
+          - OpenAI direct (text-embedding-*)
+
+        Frood's capability-ranked router doesn't need to touch this path — every
+        embedding call is a direct proxy to the named model on the implied
+        upstream. If the model is unroutable we return a 400 with the list of
+        supported prefixes.
+
+        Request body: {"model": "<id>", "input": "<text>" | ["text1", "text2"]}
+        Response: OpenAI-compatible embeddings response with `data[].embedding`.
+        """
+        import httpx as _httpx
+        import json as _json
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"message": "Invalid JSON body", "type": "invalid_request_error"}},
+            )
+
+        model = body.get("model") or os.environ.get("LLM_EMBED_MODEL", "nvidia/nv-embedqa-mistral-7b-v2")
+        if not body.get("input"):
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"message": "input is required", "type": "invalid_request_error"}},
+            )
+
+        # Route by model-ID prefix (same logic as chat completions passthrough).
+        def _route(model_id: str) -> tuple[str, str] | None:
+            # "text-embedding-*" → OpenAI direct
+            if model_id.startswith("text-embedding-"):
+                key = os.environ.get("OPENAI_API_KEY", "")
+                return ("https://api.openai.com", key) if key else None
+            # Anything else with "/" → NVIDIA
+            if "/" in model_id:
+                key = os.environ.get("NVIDIA_API_KEY", "")
+                return ("https://integrate.api.nvidia.com", key) if key else None
+            return None
+
+        routed = _route(model)
+        if routed is None:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": (
+                            f"Embeddings not supported for model '{model}' — "
+                            "provider key missing or model prefix unrecognised. "
+                            "Use an nvidia/*, meta/*, baai/*, snowflake/*, or text-embedding-* model."
+                        ),
+                        "type": "invalid_request_error",
+                    }
+                },
+            )
+
+        base_url, upstream_key = routed
+        forwarded_body = {k: v for k, v in body.items()}
+        forwarded_body["model"] = model
+        endpoint = f"{base_url.rstrip('/')}/v1/embeddings"
+
+        await _record_intelligence_event(
+            "routing",
+            {
+                "model": model,
+                "tier": "embeddings-passthrough",
+                "provider": base_url.split("//")[-1].split(".")[0],
+                "reason": "embeddings-passthrough",
+            },
+        )
+
+        timeout = _httpx.Timeout(connect=15.0, read=120.0, write=30.0, pool=10.0)
+        try:
+            async with _httpx.AsyncClient(timeout=timeout, http2=True) as client:
+                resp = await client.post(
+                    endpoint,
+                    headers={
+                        "Authorization": f"Bearer {upstream_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=forwarded_body,
+                )
+                if resp.status_code != 200:
+                    return JSONResponse(
+                        status_code=resp.status_code,
+                        content={
+                            "error": {
+                                "message": f"Upstream {resp.status_code}: {resp.text[:500]}",
+                                "type": "upstream_error",
+                            }
+                        },
+                    )
+                return JSONResponse(content=resp.json())
+        except _httpx.TimeoutException:
+            return JSONResponse(
+                status_code=504,
+                content={"error": {"message": "Upstream timed out", "type": "upstream_timeout"}},
+            )
+        except Exception as e:
+            return JSONResponse(
+                status_code=500,
+                content={"error": {"message": f"Passthrough error: {e}", "type": "internal_error"}},
+            )
+
     @app.get("/llm/config")
     async def llm_config():
         """Return LLM proxy configuration for Claude Code.
