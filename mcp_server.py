@@ -130,6 +130,7 @@ def _build_registry() -> ToolRegistry:
         ("tools.security_audit", "SecurityAuditTool"),
         ("tools.n8n_workflow", "N8nWorkflowTool"),
         ("tools.n8n_create_workflow", "N8nCreateWorkflowTool"),
+        ("tools.email_send_tool", "EmailSendTool"),
     ]:
         ToolClass = _safe_import(mod, cls)
         _register(ToolClass() if ToolClass else None)
