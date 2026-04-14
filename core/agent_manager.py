@@ -42,24 +42,30 @@ PROVIDER_MODELS = {
         "lightweight": "qwen3.6-plus-free",
     },
     "nvidia": {
-        "fast": "nvidia/nemotron-3-nano-9b-v2:free",
-        "general": "nvidia/nemotron-3-nano-12b-v2-vl:free",
-        "reasoning": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-        "coding": "nvidia/nemotron-3-super:free",
-        "content": "nvidia/nemotron-3-super:free",
-        "research": "nvidia/nemotron-3-super:free",
-        "monitoring": "nvidia/nemotron-3-nano-9b-v2:free",
-        "marketing": "nvidia/nemotron-3-nano-12b-v2-vl:free",
+        # Real NVIDIA build.nvidia.com catalog IDs — verified via /v1/models 2026-04-14.
+        # The previous `:free` suffixes were fabricated and returned 404; the fake entries
+        # are gone. All IDs below exist in NVIDIA's live catalog.
+        "fast": "meta/llama-3.2-3b-instruct",
+        "general": "qwen/qwen3.5-397b-a17b",
+        "reasoning": "qwen/qwq-32b",
+        "coding": "qwen/qwen3-coder-480b-a35b-instruct",
+        "content": "writer/palmyra-creative-122b",
+        "research": "deepseek-ai/deepseek-v3.2",
+        "monitoring": "meta/llama-3.2-1b-instruct",
+        "marketing": "mistralai/mistral-large-3-675b-instruct-2512",
         "analysis": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-        "lightweight": "nvidia/nemotron-3-nano-9b-v2:free",
+        "lightweight": "meta/llama-3.2-3b-instruct",
     },
-    "openrouter": {
-        "fast": "google/gemini-2.0-flash-001",
-        "general": "anthropic/claude-sonnet-4-6",
-        "reasoning": "anthropic/claude-opus-4-6",
-        "coding": "anthropic/claude-sonnet-4-6",
-        "content": "anthropic/claude-sonnet-4-6",
-    },
+    # OpenRouter disabled 2026-04-14 — key rotation pending. Key was returning 401
+    # on /chat/completions (credits exhausted or stale). Re-enable by restoring this
+    # block and ensuring OPENROUTER_API_KEY is set.
+    # "openrouter": {
+    #     "fast": "google/gemini-2.0-flash-001",
+    #     "general": "anthropic/claude-sonnet-4-6",
+    #     "reasoning": "anthropic/claude-opus-4-6",
+    #     "coding": "anthropic/claude-sonnet-4-6",
+    #     "content": "anthropic/claude-sonnet-4-6",
+    # },
     "anthropic": {
         "fast": "claude-haiku-4-5-20251001",
         "general": "claude-sonnet-4-6-20260217",
@@ -109,16 +115,17 @@ _ZEN_FREE_MODEL_CATEGORIES = {
 }
 
 _NVIDIA_FREE_MODEL_CATEGORIES = {
-    "fast": "nvidia/nemotron-3-nano-9b-v2:free",
-    "general": "nvidia/nemotron-3-nano-12b-v2-vl:free",
-    "reasoning": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-    "coding": "nvidia/nemotron-3-super:free",
-    "content": "nvidia/nemotron-3-super:free",
-    "research": "nvidia/nemotron-3-super:free",
-    "monitoring": "nvidia/nemotron-3-nano-9b-v2:free",
-    "marketing": "nvidia/nemotron-3-nano-12b-v2-vl:free",
+    # Real NVIDIA catalog IDs only — verified 2026-04-14.
+    "fast": "meta/llama-3.2-3b-instruct",
+    "general": "qwen/qwen3.5-397b-a17b",
+    "reasoning": "qwen/qwq-32b",
+    "coding": "qwen/qwen3-coder-480b-a35b-instruct",
+    "content": "writer/palmyra-creative-122b",
+    "research": "deepseek-ai/deepseek-v3.2",
+    "monitoring": "meta/llama-3.2-1b-instruct",
+    "marketing": "mistralai/mistral-large-3-675b-instruct-2512",
     "analysis": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-    "lightweight": "nvidia/nemotron-3-nano-9b-v2:free",
+    "lightweight": "meta/llama-3.2-3b-instruct",
 }
 
 

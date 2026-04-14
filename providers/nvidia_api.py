@@ -22,14 +22,20 @@ from core.rate_limiter import PerModelRateLimiter
 
 logger = logging.getLogger("frood.providers.nvidia")
 
-# Default free model mappings from NVIDIA catalog
-# Based on testing, these models work with the NVIDIA API
+# Default model list — verified against NVIDIA's /v1/models catalog 2026-04-14.
+# Previous list had fabricated `:free` suffixes that returned 404. These IDs are
+# confirmed to exist in the live build.nvidia.com catalog.
 _DEFAULT_FREE_MODELS = [
     "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-    "nvidia/nemotron-3-super:free",
-    "nvidia/nemotron-3-nano-9b-v2:free",
-    "nvidia/nemotron-3-nano-12b-v2-vl:free",
-    "nvidia/nemotron-nano-9b-v2:free",
+    "meta/llama-3.3-70b-instruct",
+    "meta/llama-3.2-3b-instruct",
+    "meta/llama-3.2-1b-instruct",
+    "qwen/qwen3.5-397b-a17b",
+    "qwen/qwen3-coder-480b-a35b-instruct",
+    "qwen/qwq-32b",
+    "deepseek-ai/deepseek-v3.2",
+    "writer/palmyra-creative-122b",
+    "mistralai/mistral-large-3-675b-instruct-2512",
 ]
 
 

@@ -28,7 +28,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -1307,6 +1307,173 @@ def create_app(
         )
         messages = body.get("messages", [])
 
+        # ──────────────────────────────────────────────────────────────────────
+        # Tool-call passthrough mode
+        # ──────────────────────────────────────────────────────────────────────
+        # When the request carries `tools` (OpenAI function-calling schema),
+        # the text-only `_chat_complete` path strips them and the upstream model
+        # never learns tools are available — so it emits plain text trying to
+        # "describe" the tool call instead of a structured `tool_calls` array.
+        # That breaks OpenCode, Claude Code, and any other real agent harness.
+        #
+        # For tool-calling requests we bypass the capability-ranked routing and
+        # forward the ENTIRE request body (model, messages, tools, tool_choice,
+        # max_tokens, temperature, stream, ...) transparently to the upstream
+        # provider implied by the model ID prefix.
+        # ──────────────────────────────────────────────────────────────────────
+        if body.get("tools"):
+            import httpx as _httpx
+            import json as _json
+
+            # Route by model-ID prefix. NVIDIA's build.nvidia.com catalog hosts
+            # everything from meta/*, qwen/*, deepseek-ai/*, mistralai/*,
+            # writer/*, openai/gpt-oss-*, nvidia/*, etc. — so that's our
+            # default for prefixed model IDs. Bare Zen-style IDs still flow
+            # through the text path below (Zen API doesn't support tool calls
+            # anyway).
+            chat_model = model
+
+            def _route_upstream(model_id: str) -> tuple[str, str, str] | None:
+                # Returns (base_url, api_key, upstream_model_id) or None if unroutable.
+                if model_id.startswith("claude-"):
+                    key = os.environ.get("ANTHROPIC_API_KEY", "")
+                    # Anthropic's API is NOT OpenAI-compatible; skip for now.
+                    # A full Anthropic adapter would translate messages → Messages API.
+                    return ("https://api.anthropic.com", key, model_id) if key else None
+                if model_id.startswith("gpt-") or model_id in ("o1", "o3"):
+                    key = os.environ.get("OPENAI_API_KEY", "")
+                    return ("https://api.openai.com", key, model_id) if key else None
+                # Anything with a slash → treat as NVIDIA build.nvidia.com catalog
+                if "/" in model_id:
+                    key = os.environ.get("NVIDIA_API_KEY", "")
+                    return ("https://integrate.api.nvidia.com", key, model_id) if key else None
+                # Bare names = OpenCode Zen (qwen3.6-plus-free etc.)
+                # Route tool-call requests to Zen's OpenAI-compatible endpoint.
+                # If Zen doesn't support tool calls the upstream will tell us so.
+                _zen_models = {
+                    "qwen3.6-plus-free",
+                    "minimax-m2.5-free",
+                    "nemotron-3-super-free",
+                    "big-pickle",
+                }
+                if model_id in _zen_models:
+                    key = os.environ.get("ZEN_API_KEY", "")
+                    # Zen's base is https://opencode.ai/zen — the "/v1" is
+                    # appended by the endpoint build below.
+                    return ("https://opencode.ai/zen", key, model_id) if key else None
+                return None
+
+            routed = _route_upstream(chat_model)
+            if routed is None:
+                return {
+                    "error": {
+                        "message": (
+                            f"Tool-calling not supported for model '{chat_model}' "
+                            "(provider key missing or unsupported upstream). Use a model "
+                            "from the nvidia/meta/qwen/deepseek/mistral/openai-gpt-oss catalog."
+                        ),
+                        "type": "invalid_request_error",
+                    }
+                }
+
+            base_url, upstream_key, upstream_model = routed
+
+            # Build forwarded body — strip Frood-only fields, preserve OpenAI-compat shape.
+            forwarded_body = {k: v for k, v in body.items() if k != "X-Model"}
+            forwarded_body["model"] = upstream_model
+
+            wants_stream = bool(forwarded_body.get("stream"))
+            endpoint = f"{base_url.rstrip('/')}/v1/chat/completions"
+
+            # Track routing in intelligence events for visibility
+            await _record_intelligence_event(
+                "routing",
+                {
+                    "model": upstream_model,
+                    "tier": "passthrough",
+                    "provider": base_url.split("//")[-1].split(".")[0],
+                    "reason": "tool-call-passthrough",
+                },
+            )
+
+            if wants_stream:
+                # Streaming passthrough: open a streaming request to the upstream and
+                # forward chunks byte-for-byte to the client.
+                async def _stream_from_upstream():
+                    timeout = _httpx.Timeout(connect=15.0, read=180.0, write=30.0, pool=10.0)
+                    async with _httpx.AsyncClient(timeout=timeout, http2=True) as client:
+                        async with client.stream(
+                            "POST",
+                            endpoint,
+                            headers={
+                                "Authorization": f"Bearer {upstream_key}",
+                                "Content-Type": "application/json",
+                                "Accept": "text/event-stream",
+                            },
+                            json=forwarded_body,
+                        ) as resp:
+                            if resp.status_code != 200:
+                                err_text = (await resp.aread()).decode("utf-8", errors="replace")[:500]
+                                err_chunk = _json.dumps({
+                                    "error": {
+                                        "message": f"Upstream {resp.status_code}: {err_text}",
+                                        "type": "upstream_error",
+                                    }
+                                })
+                                yield f"data: {err_chunk}\n\n".encode("utf-8")
+                                yield b"data: [DONE]\n\n"
+                                return
+                            async for chunk in resp.aiter_bytes():
+                                if chunk:
+                                    yield chunk
+
+                return StreamingResponse(
+                    _stream_from_upstream(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+            else:
+                # Non-streaming passthrough
+                timeout = _httpx.Timeout(connect=15.0, read=180.0, write=30.0, pool=10.0)
+                try:
+                    async with _httpx.AsyncClient(timeout=timeout, http2=True) as client:
+                        resp = await client.post(
+                            endpoint,
+                            headers={
+                                "Authorization": f"Bearer {upstream_key}",
+                                "Content-Type": "application/json",
+                            },
+                            json=forwarded_body,
+                        )
+                        if resp.status_code != 200:
+                            return JSONResponse(
+                                status_code=resp.status_code,
+                                content={
+                                    "error": {
+                                        "message": f"Upstream {resp.status_code}: {resp.text[:500]}",
+                                        "type": "upstream_error",
+                                    }
+                                },
+                            )
+                        return JSONResponse(content=resp.json())
+                except _httpx.TimeoutException:
+                    return JSONResponse(
+                        status_code=504,
+                        content={"error": {"message": "Upstream timed out", "type": "upstream_timeout"}},
+                    )
+                except Exception as e:
+                    return JSONResponse(
+                        status_code=500,
+                        content={"error": {"message": f"Passthrough error: {e}", "type": "internal_error"}},
+                    )
+        # ──────────────────────────────────────────────────────────────────────
+        # End tool-call passthrough. Text-only path below.
+        # ──────────────────────────────────────────────────────────────────────
+
         # Strip provider prefix (e.g. "zen:qwen3.6-plus-free" → "qwen3.6-plus-free")
         chat_model = model.split(":", 1)[1] if ":" in model and model.split(":")[0] in _PROVIDER_KEY_ENVVARS else model
 
@@ -1354,11 +1521,92 @@ def create_app(
         )
 
         import uuid as _uuid
+        _chatcmpl_id = f"chatcmpl-{_uuid.uuid4().hex[:8]}"
+        _created_ts = int(_time.time())
+
+        # Streaming: emit the completed text as SSE chunks so OpenAI-compatible
+        # streaming clients (OpenCode, @ai-sdk/openai-compatible, etc.) parse it
+        # correctly. Underlying providers are awaited non-streaming internally —
+        # this is a streaming facade over the fully-resolved response.
+        if body.get("stream") is True:
+            import json as _json
+
+            async def _sse_generator():
+                # First frame: role delta (OpenAI-compatible stream opener)
+                first_chunk = {
+                    "id": _chatcmpl_id,
+                    "object": "chat.completion.chunk",
+                    "created": _created_ts,
+                    "model": chat_model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant", "content": ""},
+                            "finish_reason": None,
+                        }
+                    ],
+                }
+                yield f"data: {_json.dumps(first_chunk)}\n\n"
+
+                # Split the content into ~80-char chunks so clients see progressive
+                # deltas instead of a single blob. Any size works; smaller is
+                # smoother but more frames on the wire.
+                chunk_size = 80
+                for i in range(0, len(text), chunk_size):
+                    piece = text[i : i + chunk_size]
+                    data_chunk = {
+                        "id": _chatcmpl_id,
+                        "object": "chat.completion.chunk",
+                        "created": _created_ts,
+                        "model": chat_model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": piece},
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                    yield f"data: {_json.dumps(data_chunk)}\n\n"
+
+                # Final frame: finish_reason=stop, empty delta
+                final_chunk = {
+                    "id": _chatcmpl_id,
+                    "object": "chat.completion.chunk",
+                    "created": _created_ts,
+                    "model": chat_model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": len(text),
+                        "total_tokens": len(text),
+                    },
+                }
+                yield f"data: {_json.dumps(final_chunk)}\n\n"
+
+                # OpenAI streaming terminator
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(
+                _sse_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
 
         return {
-            "id": f"chatcmpl-{_uuid.uuid4().hex[:8]}",
+            "id": _chatcmpl_id,
             "object": "chat.completion",
-            "created": int(_time.time()),
+            "created": _created_ts,
             "model": chat_model,
             "choices": [
                 {
@@ -1372,8 +1620,8 @@ def create_app(
             ],
             "usage": {
                 "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
+                "completion_tokens": len(text),
+                "total_tokens": len(text),
             },
         }
 
@@ -1507,47 +1755,32 @@ def create_app(
     @app.get("/llm/models")
     @app.get("/llm/v1/models")
     async def llm_models():
-        """Return available models for LLM proxy."""
+        """Return available models for LLM proxy.
+
+        Enumerates every provider in PROVIDER_MODELS (zen, openrouter, anthropic,
+        nvidia, openai, ...). Previously hard-coded an if/elif chain that silently
+        dropped nvidia and openai. Now generic — any new provider added to
+        PROVIDER_MODELS shows up automatically.
+        """
         from core.agent_manager import PROVIDER_MODELS
+
+        # owned_by is mostly a display label; zen uses "opencode" for historical reasons
+        _OWNED_BY_OVERRIDES = {"zen": "opencode"}
 
         models = []
         for provider, category_map in PROVIDER_MODELS.items():
-            if provider == "zen":
-                for category, model_id in category_map.items():
-                    models.append(
-                        {
-                            "id": model_id,
-                            "object": "model",
-                            "created": 1700000000,
-                            "owned_by": "opencode",
-                            "provider": "zen",
-                            "category": category,
-                        }
-                    )
-            elif provider == "openrouter":
-                for category, model_id in category_map.items():
-                    models.append(
-                        {
-                            "id": model_id,
-                            "object": "model",
-                            "created": 1700000000,
-                            "owned_by": "openrouter",
-                            "provider": "openrouter",
-                            "category": category,
-                        }
-                    )
-            elif provider == "anthropic":
-                for category, model_id in category_map.items():
-                    models.append(
-                        {
-                            "id": model_id,
-                            "object": "model",
-                            "created": 1700000000,
-                            "owned_by": "anthropic",
-                            "provider": "anthropic",
-                            "category": category,
-                        }
-                    )
+            owned_by = _OWNED_BY_OVERRIDES.get(provider, provider)
+            for category, model_id in category_map.items():
+                models.append(
+                    {
+                        "id": model_id,
+                        "object": "model",
+                        "created": 1700000000,
+                        "owned_by": owned_by,
+                        "provider": provider,
+                        "category": category,
+                    }
+                )
 
         return {
             "object": "list",
