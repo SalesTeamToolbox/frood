@@ -138,6 +138,46 @@ _FIELD_SELECTORS: list[tuple[str, list[str]]] = [
         ],
     ),
     (
+        "address",
+        [
+            'input[name*="address" i]:not([name*="email" i])',
+            'input[name*="street" i]',
+            'input[id*="address" i]:not([id*="email" i])',
+            'input[id*="street" i]',
+            'input[placeholder*="street" i]',
+            'input[placeholder*="address" i]:not([placeholder*="email" i])',
+        ],
+    ),
+    (
+        "city",
+        [
+            'input[name*="city" i]',
+            'input[id*="city" i]',
+            'input[placeholder*="city" i]',
+        ],
+    ),
+    (
+        "state",
+        [
+            'input[name*="state" i]:not([name*="statement" i])',
+            'select[name*="state" i]',
+            'input[id*="state" i]',
+            'select[id*="state" i]',
+            'input[placeholder*="state" i]',
+        ],
+    ),
+    (
+        "zip",
+        [
+            'input[name*="zip" i]',
+            'input[name*="postal" i]',
+            'input[id*="zip" i]',
+            'input[id*="postal" i]',
+            'input[placeholder*="zip" i]',
+            'input[placeholder*="postal" i]',
+        ],
+    ),
+    (
         "subject",
         [
             'input[name*="subject" i]',
@@ -257,6 +297,10 @@ FILLER_LAST_NAME = os.environ.get("ARIANNA_FORM_FILLER_LAST", "Dar")
 FILLER_EMAIL = os.environ.get("ARIANNA_FORM_FILLER_EMAIL", "arianna@synergicsolar.com")
 FILLER_COMPANY = os.environ.get("ARIANNA_FORM_FILLER_COMPANY", "Synergic Solar")
 FILLER_PHONE = os.environ.get("ARIANNA_FORM_FILLER_PHONE", "")
+FILLER_ADDRESS = os.environ.get("ARIANNA_FORM_FILLER_ADDRESS", "")
+FILLER_CITY = os.environ.get("ARIANNA_FORM_FILLER_CITY", "")
+FILLER_STATE = os.environ.get("ARIANNA_FORM_FILLER_STATE", "")
+FILLER_ZIP = os.environ.get("ARIANNA_FORM_FILLER_ZIP", "")
 FILLER_SUBJECT = os.environ.get(
     "ARIANNA_FORM_FILLER_SUBJECT",
     "Solar dealer partnership opportunity",
@@ -287,6 +331,10 @@ def _fill_values_for(prospect: dict) -> dict[str, str]:
         "email": FILLER_EMAIL,
         "company": FILLER_COMPANY,
         "phone": FILLER_PHONE,
+        "address": FILLER_ADDRESS,
+        "city": FILLER_CITY,
+        "state": FILLER_STATE,
+        "zip": FILLER_ZIP,
         "subject": FILLER_SUBJECT,
         "message": prospect.get("message", ""),
     }
@@ -323,7 +371,11 @@ async def _first_visible(page, selectors: list[str]):
 
 
 async def _fill_field(page, field_key: str, value: str) -> bool:
-    """Try to fill one semantic field. Returns True if successful."""
+    """Try to fill one semantic field. Returns True if successful.
+
+    Handles both text inputs (via .fill) and <select> elements (via
+    .select_option), since state/country fields are commonly dropdowns.
+    """
     if not value:
         return False
     selectors = dict(_FIELD_SELECTORS).get(field_key, [])
@@ -331,6 +383,21 @@ async def _fill_field(page, field_key: str, value: str) -> bool:
     if locator is None:
         return False
     try:
+        tag = (await locator.evaluate("e => e.tagName")).lower()
+    except Exception:
+        tag = "input"
+    try:
+        if tag == "select":
+            try:
+                await locator.select_option(value=value)
+                return True
+            except Exception:
+                try:
+                    await locator.select_option(label=value)
+                    return True
+                except Exception as exc:
+                    logger.debug("Select fill failed for %s: %s", field_key, exc)
+                    return False
         await locator.fill(value)
         return True
     except Exception as exc:

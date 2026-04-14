@@ -1152,7 +1152,7 @@ Output ONLY the subject line + email body. No preamble, no markdown, no quotes."
     # NOTE: research phases use more specific whitelists, see _execute_research_workflow.
     _TASK_TOOL_WHITELIST: dict[str, set[str]] = {
         "research": {"web_search", "web_fetch", "http_request"},  # NO python_exec — model wastes iterations
-        "email": {"python_exec", "http_request"},
+        "email": {"send_email", "python_exec", "http_request"},
         "coding": {"python_exec", "git", "run_tests", "run_linter", "code_intel"},
         "monitoring": {"python_exec", "http_request"},
         # form_submit's only LLM call is _generate_form_message which
