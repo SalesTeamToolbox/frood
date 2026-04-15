@@ -734,14 +734,19 @@ Output ONLY the subject line + email body. No preamble, no markdown, no quotes."
 
         from core import email_monitor as em
 
-        allowed, reason = self._is_within_business_hours("email")
-        if not allowed:
-            logger.info("Skipping email run %s: %s", run_id, reason)
-            return {
-                "summary": f"Skipped: {reason}",
-                "provider": provider, "model": model,
-                "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
-            }
+        _bypass_biz_hours_email = os.environ.get(
+            "ARIANNA_BYPASS_BUSINESS_HOURS", ""
+        ).lower() in ("true", "1", "yes", "on")
+
+        if ctx.wake_reason == "heartbeat" and not _bypass_biz_hours_email:
+            allowed, reason = self._is_within_business_hours("email")
+            if not allowed:
+                logger.info("Skipping email run %s: %s", run_id, reason)
+                return {
+                    "summary": f"Skipped: {reason}",
+                    "provider": provider, "model": model,
+                    "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
+                }
 
         imap_password = os.environ.get("ARIANNA_IMAP_AUTH", "")
         max_replies = int(os.environ.get("ARIANNA_EMAIL_REPLY_LIMIT", "10"))
@@ -1047,19 +1052,47 @@ Output ONLY the subject line + email body. No preamble, no markdown, no quotes."
 
         task_type = ctx.task_type or ctx.context.get("taskType", "")
 
-        # Business hours guard — skip email tasks outside Mon-Sat 7AM-9PM ET
-        allowed, reason = self._is_within_business_hours(task_type)
-        if not allowed:
-            logger.info("Skipping run %s: %s", run_id, reason)
-            return {
-                "summary": f"Skipped: {reason}",
-                "output": f"Skipped: {reason}",
-                "provider": "",
-                "model": "",
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "cost_usd": 0.0,
-            }
+        # Business hours guard — skip email tasks outside Mon-Sat 7AM-9PM ET.
+        # Bypassed for non-heartbeat wake reasons (manual triggers,
+        # task_assigned dispatches) — if someone is explicitly running the
+        # agent, they want it to run now regardless of the clock.
+        # Also bypassable globally via ARIANNA_BYPASS_BUSINESS_HOURS=true
+        # for operator testing / debugging (Paperclip's "Run Heartbeat"
+        # button sends wakeReason=heartbeat, so the wake-reason check
+        # doesn't help for UI-initiated manual runs).
+        import os as _os_bh
+        _bypass_biz_hours = _os_bh.environ.get(
+            "ARIANNA_BYPASS_BUSINESS_HOURS", ""
+        ).lower() in ("true", "1", "yes", "on")
+
+        if ctx.wake_reason == "heartbeat" and not _bypass_biz_hours:
+            allowed, reason = self._is_within_business_hours(task_type)
+            if not allowed:
+                logger.info(
+                    "Skipping run %s (heartbeat outside hours): %s",
+                    run_id, reason,
+                )
+                # Surface the configured provider/model so the caller can
+                # see the config even on skipped cycles.
+                configured_provider = (
+                    ctx.adapter_config.preferred_provider
+                    or ctx.context.get("provider", "")
+                    or ""
+                )
+                configured_model = (
+                    ctx.context.get("model", "")
+                    or ctx.context.get("modelOverride", "")
+                    or ""
+                )
+                return {
+                    "summary": f"Skipped: {reason}",
+                    "output": f"Skipped: {reason}",
+                    "provider": configured_provider,
+                    "model": configured_model,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cost_usd": 0.0,
+                }
 
         logger.info(
             "Executing run %s for agent %s (wake_reason=%s)",
@@ -1084,19 +1117,36 @@ Output ONLY the subject line + email body. No preamble, no markdown, no quotes."
                 pass  # Non-critical
 
         # Routing
+        # Paperclip's live adapter (dist/server/execute.js) does NOT send an
+        # adapterConfig block — it forwards adapter fields via the context
+        # dict instead. Read provider from context.provider as a fallback
+        # (the canonical adapter_config.preferred_provider path is kept for
+        # the TS reference adapter in adapters/frood-paperclip/).
         routing = None
         if self.tiered_routing_bridge and ctx.agent_id:
             try:
+                route_preferred_provider = (
+                    ctx.adapter_config.preferred_provider
+                    or ctx.context.get("provider", "")
+                    or ""
+                )
+                route_preferred_model = (
+                    ctx.context.get("model", "")
+                    or ctx.context.get("modelOverride", "")
+                    or ""
+                )
                 routing = await self.tiered_routing_bridge.resolve(
                     role=ctx.context.get("agentRole", ""),
                     agent_id=ctx.agent_id,
-                    preferred_provider=ctx.adapter_config.preferred_provider,
-                    preferred_model=ctx.context.get("model", ""),
+                    preferred_provider=route_preferred_provider,
+                    preferred_model=route_preferred_model,
                     task_type=ctx.task_type or ctx.context.get("taskType", ""),
                 )
                 logger.info(
-                    "Routing run %s: provider=%s model=%s",
+                    "Routing run %s: provider=%s model=%s "
+                    "(preferred_provider=%r preferred_model=%r)",
                     run_id, routing.provider, routing.model,
+                    route_preferred_provider, route_preferred_model,
                 )
             except Exception as exc:
                 logger.warning("Routing failed for run %s: %s", run_id, exc)
