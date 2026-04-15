@@ -98,11 +98,26 @@ class SidecarOrchestrator:
         total_output = 0
         all_results: list[str] = []
 
-        # Force research onto free tool-use models. Router can land on premium
-        # models like anthropic/claude-sonnet-4-6 which our OpenRouter key can't
-        # afford; override to zen/nemotron and let the fallback chain handle it.
-        provider = "zen"
-        model = "nemotron-3-super-free"
+        # Safety override: the tiered router can land on paid premium models
+        # (e.g. anthropic/claude-sonnet-4-6, openai/gpt-4) which burn OpenRouter
+        # credits fast for a long-running research task. Fall back to
+        # zen/nemotron-free in that case. EXPLICIT operator overrides set in
+        # the agent's adapter_config (nvidia/*, moonshotai/*, etc.) are trusted
+        # — only the expensive-model detection triggers the fallback.
+        _paid_model_prefixes = ("anthropic/", "openai/", "gpt-4", "claude-")
+        _model_lower = (model or "").lower()
+        if any(p in _model_lower for p in _paid_model_prefixes):
+            logger.warning(
+                "Research run %s: routed model %s looks paid — "
+                "overriding to zen/nemotron-3-super-free",
+                run_id, model,
+            )
+            provider = "zen"
+            model = "nemotron-3-super-free"
+        elif not model:
+            # No routing decision at all — default to the free research model.
+            provider = "zen"
+            model = "nemotron-3-super-free"
 
         # Extract API config from the task prompt
         api_token = "3399cb9b2df4c5bfb7d1204d326cb64d04ffaf5314f7115a98a1ca9a7f7bd80f"
