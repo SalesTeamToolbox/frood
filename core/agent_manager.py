@@ -101,6 +101,14 @@ try:
 except ImportError:
     _nvidia_client = None
 
+# Optional import for OpenRouter API client
+try:
+    from providers.openrouter_api import get_openrouter_client
+
+    _openrouter_client = get_openrouter_client()
+except ImportError:
+    _openrouter_client = None
+
 # Free/paid tier split per provider — populated by refresh_*_models_async via
 # probe classification. Kept parallel to PROVIDER_MODELS (which is the static
 # category→model map used by agent templates). Readers that need to know
@@ -195,6 +203,47 @@ def refresh_nvidia_models(force: bool = False) -> bool:
         return False
     except RuntimeError:
         return asyncio.run(refresh_nvidia_models_async())
+
+
+async def refresh_openrouter_models_async() -> bool:
+    """Classify OpenRouter's catalog into free/paid tiers by probe.
+
+    OpenRouter lists 200+ models behind one key. Most are paid; the free
+    ones traditionally carry a ``:free`` suffix, but like Zen/NVIDIA we
+    don't trust name heuristics — the classifier probes each model and
+    caches the outcome.
+    """
+    if _openrouter_client is None:
+        logger.warning("OpenRouter API client not available")
+        return False
+
+    try:
+        from core.model_classifier import classify_models
+        classifications = await classify_models("openrouter", _openrouter_client)
+        if not classifications:
+            logger.warning("OpenRouter classification produced no results")
+            return False
+
+        free = sorted(m for m, c in classifications.items() if c == "free")
+        paid = sorted(m for m, c in classifications.items() if c == "paid")
+        PROVIDER_TIERS["openrouter"] = {"free": free, "paid": paid}
+        logger.info("OpenRouter tiers refreshed: %d free, %d paid", len(free), len(paid))
+        return True
+
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error refreshing OpenRouter models: %s", e)
+        return False
+
+
+def refresh_openrouter_models(force: bool = False) -> bool:
+    """Sync wrapper for refresh_openrouter_models_async."""
+    import asyncio
+    try:
+        asyncio.get_running_loop()
+        logger.warning("refresh_openrouter_models called from async context")
+        return False
+    except RuntimeError:
+        return asyncio.run(refresh_openrouter_models_async())
 
 
 async def start_zen_model_refresh_task() -> None:

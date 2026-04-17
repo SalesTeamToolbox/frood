@@ -1140,6 +1140,13 @@ def create_app(
             )
         return False
 
+    # Providers that have a genuine free tier. For these, the static
+    # PROVIDER_MODELS category map is safe to treat as "free" in the
+    # pre-classifier startup window. For paid-only providers (anthropic,
+    # openai) the static map is all paid models, so it must be gated on
+    # ``is_paid_allowed``.
+    _PROVIDERS_WITH_FREE_TIER = frozenset({"zen", "nvidia", "openrouter"})
+
     def _build_capability_chain(task_category: str = "general") -> list[tuple[str, str, str]]:
         """Return ordered [(provider, model, api_key)] for smart routing.
 
@@ -1166,12 +1173,17 @@ def create_app(
             paid_models = list(tiers.get("paid", []))
 
             # If refresh hasn't populated tiers yet, fall back to the static
-            # category map (treat it as effectively "free" — it's the hint the
-            # operator configured when they set up the agent templates).
+            # category map. For providers with a real free tier this is safe
+            # (the hints are free models); for paid-only providers (anthropic,
+            # openai) the hints are all paid so gate on is_paid_allowed.
             if not free_models and not paid_models:
                 provider_map = PROVIDER_MODELS.get(provider, {})
                 hinted = provider_map.get(task_category) or provider_map.get("general")
-                if hinted:
+                if not hinted:
+                    continue
+                if provider in _PROVIDERS_WITH_FREE_TIER:
+                    chain.append((provider, hinted, api_key))
+                elif settings.is_paid_allowed(provider):
                     chain.append((provider, hinted, api_key))
                 continue
 
@@ -2919,6 +2931,7 @@ Focus on learnings that would help in future similar sessions."""
         from core.agent_manager import (
             PROVIDER_TIERS,
             refresh_nvidia_models_async,
+            refresh_openrouter_models_async,
             refresh_zen_models_async,
         )
 
@@ -2937,6 +2950,12 @@ Focus on learnings that would help in future similar sessions."""
                 ran.append("nvidia")
             except Exception as e:  # noqa: BLE001
                 summary["nvidia"] = {"error": str(e)[:200]}
+        if os.environ.get("OPENROUTER_API_KEY"):
+            try:
+                await refresh_openrouter_models_async()
+                ran.append("openrouter")
+            except Exception as e:  # noqa: BLE001
+                summary["openrouter"] = {"error": str(e)[:200]}
 
         for provider, tiers in PROVIDER_TIERS.items():
             if provider in summary:

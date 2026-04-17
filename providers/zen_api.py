@@ -54,6 +54,8 @@ class ZenApiClient:
         self,
         model: str,
         messages: list[dict],
+        *,
+        retries: int = 3,
         **kwargs: Any,
     ) -> dict:
         """Send a chat completion request to Zen API.
@@ -61,6 +63,9 @@ class ZenApiClient:
         Args:
             model:    Zen model ID (e.g. "qwen3.6-plus-free")
             messages: OpenAI-compatible message list
+            retries:  Max retry attempts on transient failures (default 3).
+                      Set to 0 for fast-fail probing — the caller then treats
+                      any non-success as terminal.
             **kwargs: Additional parameters (temperature, max_tokens, etc.)
 
         Returns:
@@ -78,7 +83,7 @@ class ZenApiClient:
         payload = {"model": model, "messages": messages, **kwargs}
         url = f"{self._base_url}/chat/completions"
 
-        max_retries = 3
+        max_retries = max(0, retries)
         for attempt in range(max_retries + 1):
             if self._rate_limiting_enabled:
                 await self._rate_limiter.wait(model)

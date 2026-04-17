@@ -56,6 +56,8 @@ class NvidiaApiClient:
         self,
         model: str,
         messages: list[dict],
+        *,
+        retries: int = 3,
         **kwargs: Any,
     ) -> dict:
         """Send a chat completion request to NVIDIA API.
@@ -63,6 +65,8 @@ class NvidiaApiClient:
         Args:
             model:    NVIDIA model ID (e.g. "nvidia/nemotron-3-super:free")
             messages: OpenAI-compatible message list
+            retries:  Max retry attempts on transient failures (default 3).
+                      Set to 0 for fast-fail probing.
             **kwargs: Additional parameters (temperature, max_tokens, etc.)
 
         Returns:
@@ -81,7 +85,7 @@ class NvidiaApiClient:
         payload = {"model": model, "messages": messages, **kwargs}
         url = f"{self._base_url}/chat/completions"
 
-        max_retries = 3
+        max_retries = max(0, retries)
         for attempt in range(max_retries + 1):
             if self._rate_limiting_enabled:
                 await self._rate_limiter.wait(model)

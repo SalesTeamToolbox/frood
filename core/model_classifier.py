@@ -170,13 +170,30 @@ def _looks_like_paid(err_text: str) -> bool:
 
 
 async def _probe_one(client: _ClientLike, model_id: str) -> Classification:
-    """Send one tiny probe and classify the response."""
+    """Send one tiny probe and classify the response.
+
+    Uses ``retries=0`` on the underlying client so a failed probe fails fast
+    (the classifier calls this hundreds of times; production retry behavior
+    would turn a single refresh cycle into a multi-hour operation).
+    """
     try:
         result = await client.chat_completion(
             model_id,
             [{"role": "user", "content": _PROBE_PROMPT}],
             max_tokens=_PROBE_MAX_TOKENS,
+            retries=0,
         )
+    except TypeError:
+        # Client predates the ``retries`` kwarg — fall back to default.
+        try:
+            result = await client.chat_completion(
+                model_id,
+                [{"role": "user", "content": _PROBE_PROMPT}],
+                max_tokens=_PROBE_MAX_TOKENS,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("probe %s threw: %s", model_id, e)
+            return "unknown"
     except Exception as e:  # noqa: BLE001
         logger.debug("probe %s threw: %s", model_id, e)
         return "unknown"
