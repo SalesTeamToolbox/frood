@@ -87,7 +87,7 @@ class NvidiaApiClient:
                 await self._rate_limiter.wait(model)
 
             try:
-                async with httpx.AsyncClient(timeout=120.0) as client:
+                async with httpx.AsyncClient(timeout=300.0) as client:
                     resp = await client.post(url, headers=headers, json=payload)
 
                     if resp.status_code == 429:

@@ -1173,7 +1173,7 @@ def create_app(
             return "No API keys configured.", "none"
 
         last_error = ""
-        client_timeout = _httpx.Timeout(connect=15.0, read=120.0, write=30.0, pool=10.0)
+        client_timeout = _httpx.Timeout(connect=15.0, read=300.0, write=30.0, pool=10.0)
 
         for provider_name, model_to_use, api_key in active_chain:
             try:
@@ -1400,7 +1400,7 @@ def create_app(
                 # Streaming passthrough: open a streaming request to the upstream and
                 # forward chunks byte-for-byte to the client.
                 async def _stream_from_upstream():
-                    timeout = _httpx.Timeout(connect=15.0, read=180.0, write=30.0, pool=10.0)
+                    timeout = _httpx.Timeout(connect=15.0, read=300.0, write=30.0, pool=10.0)
                     async with _httpx.AsyncClient(timeout=timeout, http2=True) as client:
                         async with client.stream(
                             "POST",
