@@ -236,6 +236,13 @@ class ToggleRequest(BaseModel):
     enabled: bool
 
 
+class CliSetupWireRequest(BaseModel):
+    """Request body for POST /api/cli-setup/wire (DASH-02)."""
+
+    cli: str
+    enabled: bool
+
+
 # Settings that can be changed from the dashboard (non-secret, non-security).
 # Security-critical settings (sandbox, password, JWT) are deliberately excluded.
 _DASHBOARD_EDITABLE_SETTINGS = {
@@ -341,6 +348,35 @@ def _save_toggle_state(disabled_tools: list[str], disabled_skills: list[str]) ->
             {"disabled_tools": sorted(disabled_tools), "disabled_skills": sorted(disabled_skills)},
             indent=2,
         )
+    )
+
+
+# ---------------------------------------------------------------------------
+# CLI setup toggle state persistence (DASH-04)
+# ---------------------------------------------------------------------------
+
+_CLI_SETUP_STATE_FILE = Path(__file__).parent.parent / ".frood" / "cli-setup-state.json"
+
+
+def _load_cli_setup_state() -> dict:
+    """Load persisted enabled/disabled state for cross-CLI setup."""
+    import json
+
+    if _CLI_SETUP_STATE_FILE.exists():
+        try:
+            return json.loads(_CLI_SETUP_STATE_FILE.read_text())
+        except Exception:
+            pass
+    return {"enabled_clis": []}
+
+
+def _save_cli_setup_state(enabled_clis: list[str]) -> None:
+    """Persist CLI setup enabled list to disk."""
+    import json
+
+    _CLI_SETUP_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _CLI_SETUP_STATE_FILE.write_text(
+        json.dumps({"enabled_clis": sorted(set(enabled_clis))}, indent=2)
     )
 
 
@@ -1085,7 +1121,18 @@ def create_app(
             return True
         if status_code in (429, 403):
             lower = response_text.lower()
-            return any(kw in lower for kw in ("credit", "quota", "insufficient", "billing", "payment", "balance", "limit exceeded"))
+            return any(
+                kw in lower
+                for kw in (
+                    "credit",
+                    "quota",
+                    "insufficient",
+                    "billing",
+                    "payment",
+                    "balance",
+                    "limit exceeded",
+                )
+            )
         return False
 
     def _build_capability_chain(task_category: str = "general") -> list[tuple[str, str, str]]:
@@ -1142,8 +1189,11 @@ def create_app(
                 PROVIDER_MODELS = {}
             active_chain: list[tuple[str, str, str]] = []
             for provider_name, api_key in providers:
-                m = model or PROVIDER_MODELS.get(provider_name, {}).get(task_category) or \
-                    PROVIDER_MODELS.get(provider_name, {}).get("general", "")
+                m = (
+                    model
+                    or PROVIDER_MODELS.get(provider_name, {}).get(task_category)
+                    or PROVIDER_MODELS.get(provider_name, {}).get("general", "")
+                )
                 if m:
                     active_chain.append((provider_name, m, api_key))
         else:
@@ -1153,11 +1203,15 @@ def create_app(
             if model:
                 if model.startswith("claude"):
                     hint = "anthropic"
-                elif model.startswith("nvidia/") or ":free" in model and not model.endswith("-free"):
+                elif model.startswith("nvidia/") or (
+                    ":free" in model and not model.endswith("-free")
+                ):
                     hint = "nvidia"
                 elif "/" in model and not model.startswith("nvidia/"):
                     hint = "openrouter"
-                elif model.endswith("-free") or model.startswith(("qwen", "minimax", "nemotron", "big-")):
+                elif model.endswith("-free") or model.startswith(
+                    ("qwen", "minimax", "nemotron", "big-")
+                ):
                     hint = "zen"
                 else:
                     hint = None
@@ -1183,16 +1237,30 @@ def create_app(
                         # to avoid proxy loops when BlackKnight points its SDK at Frood.
                         resp = await client.post(
                             "https://api.anthropic.com/v1/messages",
-                            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                            json={"model": model_to_use, "max_tokens": 4096, "system": system_prompt, "messages": messages},
+                            headers={
+                                "x-api-key": api_key,
+                                "anthropic-version": "2023-06-01",
+                                "content-type": "application/json",
+                            },
+                            json={
+                                "model": model_to_use,
+                                "max_tokens": 4096,
+                                "system": system_prompt,
+                                "messages": messages,
+                            },
                         )
                         if resp.status_code == 200:
                             text = "".join(
-                                b.get("text", "") for b in resp.json().get("content", []) if b.get("type") == "text"
+                                b.get("text", "")
+                                for b in resp.json().get("content", [])
+                                if b.get("type") == "text"
                             )
                             return text, f"anthropic:{model_to_use}"
                         if _is_credit_error(resp.status_code, resp.text):
-                            logger.warning("Anthropic credit/quota exhausted (%d) — falling through to next provider", resp.status_code)
+                            logger.warning(
+                                "Anthropic credit/quota exhausted (%d) — falling through to next provider",
+                                resp.status_code,
+                            )
                             last_error = f"Anthropic {resp.status_code}: credit/quota exhausted"
                             continue
                         last_error = f"Anthropic {resp.status_code}: {resp.text[:200]}"
@@ -1200,21 +1268,27 @@ def create_app(
                     elif provider_name == "zen":
                         try:
                             from providers.zen_api import get_zen_client
+
                             zen_client = get_zen_client()
                         except Exception as e:
                             last_error = f"Zen client unavailable: {e}"
                             continue
                         try:
                             from core.agent_manager import get_fallback_models
+
                             fallbacks = get_fallback_models("zen", task_category, model_to_use)
                         except Exception:
                             fallbacks = []
                         for m in [model_to_use] + fallbacks:
                             try:
-                                result = await zen_client.chat_completion(m, messages, max_tokens=4096)
+                                result = await zen_client.chat_completion(
+                                    m, messages, max_tokens=4096
+                                )
                                 if "error" not in result:
                                     return (
-                                        result.get("choices", [{}])[0].get("message", {}).get("content", ""),
+                                        result.get("choices", [{}])[0]
+                                        .get("message", {})
+                                        .get("content", ""),
                                         f"zen:{m}",
                                     )
                                 last_error = f"Zen {m}: {result.get('error')}"
@@ -1224,22 +1298,32 @@ def create_app(
                     elif provider_name == "nvidia":
                         try:
                             from providers.nvidia_api import get_nvidia_client
+
                             nvidia_client = get_nvidia_client()
                         except Exception as e:
                             last_error = f"Nvidia client unavailable: {e}"
                             continue
                         try:
                             from core.agent_manager import get_fallback_models
+
                             fallbacks = get_fallback_models("nvidia", task_category, model_to_use)
                         except Exception:
                             fallbacks = []
                         for m in [model_to_use] + fallbacks:
                             try:
-                                nvidia_msgs = [{"role": "system", "content": system_prompt}] + messages if system_prompt else messages
-                                result = await nvidia_client.chat_completion(m, nvidia_msgs, max_tokens=4096)
+                                nvidia_msgs = (
+                                    [{"role": "system", "content": system_prompt}] + messages
+                                    if system_prompt
+                                    else messages
+                                )
+                                result = await nvidia_client.chat_completion(
+                                    m, nvidia_msgs, max_tokens=4096
+                                )
                                 if "error" not in result:
                                     return (
-                                        result.get("choices", [{}])[0].get("message", {}).get("content", ""),
+                                        result.get("choices", [{}])[0]
+                                        .get("message", {})
+                                        .get("content", ""),
                                         f"nvidia:{m}",
                                     )
                                 err_str = str(result.get("error", ""))
@@ -1251,20 +1335,39 @@ def create_app(
                                 last_error = f"Nvidia {m} error: {e}"
 
                     elif provider_name in ("openrouter", "openai"):
-                        base = "https://openrouter.ai/api" if provider_name == "openrouter" else \
-                               os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
+                        base = (
+                            "https://openrouter.ai/api"
+                            if provider_name == "openrouter"
+                            else os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
+                        )
                         resp = await client.post(
                             base.rstrip("/") + "/v1/chat/completions",
-                            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                            json={"model": model_to_use, "messages": [{"role": "system", "content": system_prompt}] + messages, "max_tokens": 4096},
+                            headers={
+                                "Authorization": f"Bearer {api_key}",
+                                "Content-Type": "application/json",
+                            },
+                            json={
+                                "model": model_to_use,
+                                "messages": [{"role": "system", "content": system_prompt}]
+                                + messages,
+                                "max_tokens": 4096,
+                            },
                         )
                         if resp.status_code == 200:
                             choices = resp.json().get("choices", [])
                             if choices:
-                                return choices[0].get("message", {}).get("content", ""), f"{provider_name}:{model_to_use}"
+                                return choices[0].get("message", {}).get(
+                                    "content", ""
+                                ), f"{provider_name}:{model_to_use}"
                         if _is_credit_error(resp.status_code, resp.text):
-                            logger.warning("%s credit/quota exhausted (%d) — falling through to next provider", provider_name, resp.status_code)
-                            last_error = f"{provider_name} {resp.status_code}: credit/quota exhausted"
+                            logger.warning(
+                                "%s credit/quota exhausted (%d) — falling through to next provider",
+                                provider_name,
+                                resp.status_code,
+                            )
+                            last_error = (
+                                f"{provider_name} {resp.status_code}: credit/quota exhausted"
+                            )
                             continue
                         last_error = f"{provider_name} {resp.status_code}: {resp.text[:200]}"
 
@@ -1322,8 +1425,9 @@ def create_app(
         # provider implied by the model ID prefix.
         # ──────────────────────────────────────────────────────────────────────
         if body.get("tools"):
-            import httpx as _httpx
             import json as _json
+
+            import httpx as _httpx
 
             # Route by model-ID prefix. NVIDIA's build.nvidia.com catalog hosts
             # everything from meta/*, qwen/*, deepseek-ai/*, mistralai/*,
@@ -1354,6 +1458,7 @@ def create_app(
                 # BEFORE the first refresh lands.
                 try:
                     from core.agent_manager import PROVIDER_MODELS as _PM
+
                     _live_zen = set(_PM.get("zen", {}).values())
                 except ImportError:
                     _live_zen = set()
@@ -1421,14 +1526,18 @@ def create_app(
                             json=forwarded_body,
                         ) as resp:
                             if resp.status_code != 200:
-                                err_text = (await resp.aread()).decode("utf-8", errors="replace")[:500]
-                                err_chunk = _json.dumps({
-                                    "error": {
-                                        "message": f"Upstream {resp.status_code}: {err_text}",
-                                        "type": "upstream_error",
+                                err_text = (await resp.aread()).decode("utf-8", errors="replace")[
+                                    :500
+                                ]
+                                err_chunk = _json.dumps(
+                                    {
+                                        "error": {
+                                            "message": f"Upstream {resp.status_code}: {err_text}",
+                                            "type": "upstream_error",
+                                        }
                                     }
-                                })
-                                yield f"data: {err_chunk}\n\n".encode("utf-8")
+                                )
+                                yield f"data: {err_chunk}\n\n".encode()
                                 yield b"data: [DONE]\n\n"
                                 return
                             async for chunk in resp.aiter_bytes():
@@ -1471,19 +1580,30 @@ def create_app(
                 except _httpx.TimeoutException:
                     return JSONResponse(
                         status_code=504,
-                        content={"error": {"message": "Upstream timed out", "type": "upstream_timeout"}},
+                        content={
+                            "error": {"message": "Upstream timed out", "type": "upstream_timeout"}
+                        },
                     )
                 except Exception as e:
                     return JSONResponse(
                         status_code=500,
-                        content={"error": {"message": f"Passthrough error: {e}", "type": "internal_error"}},
+                        content={
+                            "error": {
+                                "message": f"Passthrough error: {e}",
+                                "type": "internal_error",
+                            }
+                        },
                     )
         # ──────────────────────────────────────────────────────────────────────
         # End tool-call passthrough. Text-only path below.
         # ──────────────────────────────────────────────────────────────────────
 
         # Strip provider prefix (e.g. "zen:qwen3.6-plus-free" → "qwen3.6-plus-free")
-        chat_model = model.split(":", 1)[1] if ":" in model and model.split(":")[0] in _PROVIDER_KEY_ENVVARS else model
+        chat_model = (
+            model.split(":", 1)[1]
+            if ":" in model and model.split(":")[0] in _PROVIDER_KEY_ENVVARS
+            else model
+        )
 
         system_msg = ""
         filtered_messages = []
@@ -1529,6 +1649,7 @@ def create_app(
         )
 
         import uuid as _uuid
+
         _chatcmpl_id = f"chatcmpl-{_uuid.uuid4().hex[:8]}"
         _created_ts = int(_time.time())
 
@@ -1662,7 +1783,11 @@ def create_app(
         )
         system_prompt = body.get("system", "")
         messages = body.get("messages", [])
-        chat_model = model.split(":", 1)[1] if ":" in model and model.split(":")[0] in _PROVIDER_KEY_ENVVARS else model
+        chat_model = (
+            model.split(":", 1)[1]
+            if ":" in model and model.split(":")[0] in _PROVIDER_KEY_ENVVARS
+            else model
+        )
 
         try:
             text, provider_used = await _chat_complete(
@@ -1680,12 +1805,17 @@ def create_app(
         if not text or text.startswith("All providers failed"):
             return JSONResponse(
                 status_code=500,
-                content={"type": "error", "error": {"type": "api_error", "message": text or "No response"}},
+                content={
+                    "type": "error",
+                    "error": {"type": "api_error", "message": text or "No response"},
+                },
             )
 
         _tier = "free" if provider_used.startswith(("zen:", "nvidia:")) else "L2"
         _routing_stats[_tier] = _routing_stats.get(_tier, 0) + 1
-        await _record_intelligence_event("routing", {"model": chat_model, "tier": _tier, "provider": provider_used})
+        await _record_intelligence_event(
+            "routing", {"model": chat_model, "tier": _tier, "provider": provider_used}
+        )
 
         import uuid as _uuid
 
@@ -1717,7 +1847,10 @@ def create_app(
         except Exception:
             return JSONResponse(
                 status_code=400,
-                content={"type": "error", "error": {"type": "invalid_request_error", "message": "Invalid JSON body"}},
+                content={
+                    "type": "error",
+                    "error": {"type": "invalid_request_error", "message": "Invalid JSON body"},
+                },
             )
 
         model = body.get("model") or os.environ.get("LLM_PROXY_MODEL", "claude-sonnet-4-6-20260217")
@@ -1741,11 +1874,19 @@ def create_app(
         if not text or text.startswith("All providers failed"):
             return JSONResponse(
                 status_code=503,
-                content={"type": "error", "error": {"type": "api_error", "message": text or "No response from any provider"}},
+                content={
+                    "type": "error",
+                    "error": {
+                        "type": "api_error",
+                        "message": text or "No response from any provider",
+                    },
+                },
             )
 
         _routing_stats["L2"] = _routing_stats.get("L2", 0) + 1
-        await _record_intelligence_event("routing", {"model": model, "provider": provider_used, "via": "anthropic-sdk-proxy"})
+        await _record_intelligence_event(
+            "routing", {"model": model, "provider": provider_used, "via": "anthropic-sdk-proxy"}
+        )
 
         import uuid as _uuid
 
@@ -1813,22 +1954,28 @@ def create_app(
         Request body: {"model": "<id>", "input": "<text>" | ["text1", "text2"]}
         Response: OpenAI-compatible embeddings response with `data[].embedding`.
         """
+
         import httpx as _httpx
-        import json as _json
 
         try:
             body = await request.json()
         except Exception:
             return JSONResponse(
                 status_code=400,
-                content={"error": {"message": "Invalid JSON body", "type": "invalid_request_error"}},
+                content={
+                    "error": {"message": "Invalid JSON body", "type": "invalid_request_error"}
+                },
             )
 
-        model = body.get("model") or os.environ.get("LLM_EMBED_MODEL", "nvidia/nv-embedqa-mistral-7b-v2")
+        model = body.get("model") or os.environ.get(
+            "LLM_EMBED_MODEL", "nvidia/nv-embedqa-mistral-7b-v2"
+        )
         if not body.get("input"):
             return JSONResponse(
                 status_code=400,
-                content={"error": {"message": "input is required", "type": "invalid_request_error"}},
+                content={
+                    "error": {"message": "input is required", "type": "invalid_request_error"}
+                },
             )
 
         # Route by model-ID prefix (same logic as chat completions passthrough).
@@ -2525,6 +2672,50 @@ Focus on learnings that would help in future similar sessions."""
             ]
         _save_toggle_state(disabled, disabled_skills)
         return {"name": name, "enabled": req.enabled}
+
+    # -- CLI Setup (Phase 01: cross-cli-setup-core) ---------------------------
+
+    @app.get("/api/cli-setup/detect")
+    async def cli_setup_detect(_admin: AuthContext = Depends(require_admin)):
+        """Report installed CLIs + current wiring state (DASH-01)."""
+        from core.cli_setup import detect_all
+
+        try:
+            return detect_all()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"detect failed: {e}")
+
+    @app.post("/api/cli-setup/wire")
+    async def cli_setup_wire(
+        req: CliSetupWireRequest,
+        _admin: AuthContext = Depends(require_admin),
+    ):
+        """Wire or unwire the named CLI (DASH-02)."""
+        from core.cli_setup import unwire_cli, wire_cli
+
+        if req.cli not in ("claude-code", "opencode"):
+            raise HTTPException(status_code=400, detail=f"unknown cli: {req.cli}")
+        try:
+            if req.enabled:
+                result = wire_cli(req.cli)
+                action = "wire"
+            else:
+                result = unwire_cli(req.cli)
+                action = "unwire"
+        except Exception as e:
+            verb = "wire" if req.enabled else "unwire"
+            raise HTTPException(status_code=500, detail=f"{verb} failed: {e}")
+
+        # Persist toggle state (DASH-04)
+        state = _load_cli_setup_state()
+        enabled = set(state.get("enabled_clis", []))
+        if req.enabled:
+            enabled.add(req.cli)
+        else:
+            enabled.discard(req.cli)
+        _save_cli_setup_state(sorted(enabled))
+
+        return {"cli": req.cli, "enabled": req.enabled, "action": action, "result": result}
 
     # -- Skills (Phase 3) -----------------------------------------------------
 
