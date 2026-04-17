@@ -48,6 +48,8 @@ const state = {
   // OpenRouter account status
   orStatus: null,
   orStatusLoading: false,
+  // Provider tier counts (populated by /api/settings/probe-models or initial load)
+  providerTiers: {},
   // Reports
   reportsData: null,
   memoryStats: null,
@@ -688,34 +690,37 @@ async function saveEnvSettings() {
   renderSettingsPanel();
 }
 
-async function saveZenDefaultModel() {
-  var sel = document.getElementById('zen-default-model');
-  if (!sel) return;
-  var model = sel.value;
+async function toggleAllowPaid(envKey, enabled) {
+  var val = enabled ? 'true' : 'false';
+  var payload = {};
+  payload[envKey] = val;
   try {
     await api('/settings/env', {
       method: 'PUT',
-      body: JSON.stringify({ settings: { ZEN_DEFAULT_MODEL: model } }),
+      body: JSON.stringify({ settings: payload }),
     });
-    if (state.envSettings) state.envSettings['ZEN_DEFAULT_MODEL'] = model;
-    toast('Zen default model set to ' + model, 'success');
+    if (state.envSettings) state.envSettings[envKey] = val;
+    toast(enabled ? (envKey + ' enabled — paid models eligible') : (envKey + ' disabled — free-only'), 'success');
+    renderSettingsPanel();
   } catch (e) {
     toast('Failed to save: ' + e.message, 'error');
   }
 }
 
-async function toggleZenAllowPaid(enabled) {
-  var val = enabled ? 'true' : 'false';
+async function reprobeModels() {
+  toast('Probing providers...', 'info');
   try {
-    await api('/settings/env', {
-      method: 'PUT',
-      body: JSON.stringify({ settings: { ZEN_ALLOW_PAID: val } }),
-    });
-    if (state.envSettings) state.envSettings['ZEN_ALLOW_PAID'] = val;
-    toast(enabled ? 'Paid Zen models enabled' : 'Paid models disabled (free only)', 'success');
-    renderSettingsPanel();
+    var result = await api('/settings/probe-models', { method: 'POST' });
+    if (result && result.providers) {
+      state.providerTiers = result.providers;
+      var ran = (result.ran || []).join(', ') || 'none';
+      toast('Probe complete (ran: ' + ran + ')', 'success');
+      renderSettingsPanel();
+    } else {
+      toast('Probe returned unexpected response', 'error');
+    }
   } catch (e) {
-    toast('Failed to save: ' + e.message, 'error');
+    toast('Probe failed: ' + e.message, 'error');
   }
 }
 
@@ -1501,54 +1506,57 @@ function renderSettingsPanel() {
         html += '<div class="help">' + (state.providerStatusLoading ? 'Checking connectivity...' : 'Status unavailable.') + '</div>';
       }
 
-      // Section 4b: Zen Proxy Model picker + paid toggle
-      html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Zen Proxy Model</h4>';
-      html += '<div style="margin-bottom:0.75rem;font-size:0.85rem;color:var(--text-muted)">Default model for Claude Code CLI / VS Code through the Zen proxy. On rate limit, falls back through other free models automatically.</div>';
-      var zenFreeModels = [
-        { id: 'qwen3.6-plus-free', label: 'Qwen 3.6 Plus', desc: 'Fast, general purpose' },
-        { id: 'minimax-m2.5-free', label: 'MiniMax M2.5', desc: 'Creative, marketing' },
-        { id: 'nemotron-3-super-free', label: 'Nemotron 3 Super', desc: 'Reasoning, analysis' },
-        { id: 'big-pickle', label: 'Big Pickle', desc: 'Content generation' },
-        { id: 'trinity-large-preview-free', label: 'Trinity Large', desc: 'Preview model' },
-      ];
-      var zenPaidModels = [
-        { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-        { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
-        { id: 'gpt-5.4', label: 'GPT-5.4' },
-        { id: 'gpt-5.4-pro', label: 'GPT-5.4 Pro' },
-        { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro' },
-        { id: 'kimi-k2.5', label: 'Kimi K2.5' },
-        { id: 'minimax-m2.5', label: 'MiniMax M2.5 (Paid)' },
-        { id: 'glm-5', label: 'GLM-5' },
-      ];
-      var currentZenModel = state.envSettings && state.envSettings['ZEN_DEFAULT_MODEL'] || 'qwen3.6-plus-free';
-      var allowPaid = state.envSettings && state.envSettings['ZEN_ALLOW_PAID'] === 'true';
-      html += '<select id="zen-default-model" style="width:100%;padding:0.5rem;background:var(--card-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:0.9rem">';
-      html += '<optgroup label="Free Models (no credits needed)">';
-      zenFreeModels.forEach(function(m) {
-        var sel = m.id === currentZenModel ? ' selected' : '';
-        html += '<option value="' + esc(m.id) + '"' + sel + '>' + esc(m.label) + ' \u2014 ' + esc(m.desc) + '</option>';
+      // Section 4b: Per-provider paid-model authorization + re-probe control
+      html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Paid Model Authorization</h4>';
+      html += '<div style="margin-bottom:0.75rem;font-size:0.85rem;color:var(--text-muted)">Routing is free-first. Enable paid models only for providers where you have credit. Frood classifies each model by probe (not filename), so the list stays accurate as catalogs change.</div>';
+      var _providerLabel = {
+        zen: 'OpenCode Zen',
+        openrouter: 'OpenRouter',
+        nvidia: 'NVIDIA',
+        anthropic: 'Anthropic',
+        openai: 'OpenAI',
+      };
+      var _providerKey = {
+        zen: 'ZEN_API_KEY',
+        openrouter: 'OPENROUTER_API_KEY',
+        nvidia: 'NVIDIA_API_KEY',
+        anthropic: 'ANTHROPIC_API_KEY',
+        openai: 'OPENAI_API_KEY',
+      };
+      var _allowPaidEnv = {
+        zen: 'ALLOW_PAID_ZEN',
+        openrouter: 'ALLOW_PAID_OPENROUTER',
+        nvidia: 'ALLOW_PAID_NVIDIA',
+        anthropic: 'ALLOW_PAID_ANTHROPIC',
+        openai: 'ALLOW_PAID_OPENAI',
+      };
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;margin-bottom:0.6rem"><thead><tr style="border-bottom:1px solid var(--border)">';
+      html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:var(--text-muted)">Provider</th>';
+      html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:var(--text-muted)">Free / Paid</th>';
+      html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:var(--text-muted)">Allow paid</th>';
+      html += '</tr></thead><tbody>';
+      Object.keys(_providerLabel).forEach(function(prov) {
+        var hasKey = state.apiKeys && state.apiKeys[_providerKey[prov]] && state.apiKeys[_providerKey[prov]].configured;
+        var tierInfo = (state.providerTiers && state.providerTiers[prov]) || {};
+        var freeN = tierInfo.free || 0;
+        var paidN = tierInfo.paid || 0;
+        var envKey = _allowPaidEnv[prov];
+        var checked = state.envSettings && state.envSettings[envKey] === 'true';
+        html += '<tr style="border-bottom:1px solid var(--border);opacity:' + (hasKey ? '1' : '0.5') + '">';
+        html += '<td style="padding:0.35rem 0.5rem">' + _providerLabel[prov] + '</td>';
+        html += '<td style="padding:0.35rem 0.5rem;color:var(--text-muted)">' + freeN + ' free / ' + paidN + ' paid</td>';
+        if (hasKey) {
+          html += '<td style="padding:0.35rem 0.5rem"><label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.8rem"><input type="checkbox"' + (checked ? ' checked' : '') + ' onchange="toggleAllowPaid(\'' + envKey + '\', this.checked)" style="cursor:pointer"><span>Enabled</span></label></td>';
+        } else {
+          html += '<td style="padding:0.35rem 0.5rem;color:var(--text-muted);font-size:0.8rem">\u2014 no key</td>';
+        }
+        html += '</tr>';
       });
-      html += '</optgroup>';
-      if (allowPaid) {
-        html += '<optgroup label="Paid Models (requires Zen credits)">';
-        zenPaidModels.forEach(function(m) {
-          var sel = m.id === currentZenModel ? ' selected' : '';
-          html += '<option value="' + esc(m.id) + '"' + sel + '>\ud83d\udcb3 ' + esc(m.label) + '</option>';
-        });
-        html += '</optgroup>';
-      }
-      html += '</select>';
-      html += '<div style="margin-top:0.6rem;display:flex;align-items:center;gap:0.75rem">';
-      html += '<button onclick="saveZenDefaultModel()" style="padding:0.4rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem">Save</button>';
-      html += '<label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer">';
-      html += '<input type="checkbox" id="zen-allow-paid" ' + (allowPaid ? 'checked' : '') + ' onchange="toggleZenAllowPaid(this.checked)" style="cursor:pointer">';
-      html += '<span>Allow paid models</span></label>';
+      html += '</tbody></table>';
+      html += '<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.5rem">';
+      html += '<button onclick="reprobeModels()" style="padding:0.4rem 0.9rem;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem">Re-probe models</button>';
+      html += '<div style="font-size:0.78rem;color:var(--text-muted)">Forces an immediate probe of every configured provider (normally every 6h).</div>';
       html += '</div>';
-      if (allowPaid) {
-        html += '<div style="margin-top:0.5rem;padding:0.5rem;background:rgba(255,170,0,0.1);border:1px solid rgba(255,170,0,0.3);border-radius:4px;font-size:0.8rem;color:#ffa500">\u26a0\ufe0f Paid models consume Zen wallet credits. Make sure your account has funds at opencode.ai/billing.</div>';
-      }
-      html += '<div style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)"><strong>Tip:</strong> In Claude Code CLI, use <code>zen:model-name</code> as the model to bypass the default (e.g. <code>--model zen:nemotron-3-super-free</code>).</div>';
 
       // Section 5: Media & Search (D-02, D-03)
       html += '<h4 style="margin:1.5rem 0 0.75rem;font-size:0.95rem">Media &amp; Search</h4>';
