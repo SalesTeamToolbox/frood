@@ -33,10 +33,10 @@
 
 ### Dashboard
 
-- [ ] **DASH-01**: `GET /api/cli-setup/detect` mirroring existing admin-guarded endpoint pattern
-- [ ] **DASH-02**: `POST /api/cli-setup/wire` with `{cli, enabled}` calls the same core functions as the CLI command
-- [ ] **DASH-03**: Dashboard panel in `dashboard/frontend/dist/app.js` showing detected CLIs, per-CLI toggle, "What this does" blurb, link to docs
-- [ ] **DASH-04**: Toggle state persisted to `.frood/cli-setup-state.json` (mirrors existing `.frood/toggles.json` pattern)
+- [x] **DASH-01**: `GET /api/cli-setup/detect` mirroring existing admin-guarded endpoint pattern
+- [x] **DASH-02**: `POST /api/cli-setup/wire` with `{cli, enabled}` calls the same core functions as the CLI command
+- [x] **DASH-03**: Dashboard panel in `dashboard/frontend/dist/app.js` showing detected CLIs, per-CLI toggle, "What this does" blurb, link to docs
+- [x] **DASH-04**: Toggle state persisted to `.frood/cli-setup-state.json` (mirrors existing `.frood/toggles.json` pattern)
 
 ### Safety & Reversibility
 
