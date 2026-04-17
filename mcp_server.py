@@ -43,8 +43,8 @@ if str(_FROOD_ROOT) not in sys.path:
 from core.command_filter import CommandFilter
 from core.rate_limiter import ToolRateLimiter
 from core.sandbox import WorkspaceSandbox
-from memory.qdrant_store import QdrantConfig
 from mcp_registry import MCPRegistryAdapter
+from memory.qdrant_store import QdrantConfig
 from tools.registry import ToolRegistry
 
 logger = logging.getLogger("frood.mcp.server")
@@ -127,6 +127,7 @@ def _build_registry() -> ToolRegistry:
         ("tools.outline_tool", "OutlineTool"),
         ("tools.scoring_tool", "ScoringTool"),
         ("tools.persona_tool", "PersonaTool"),
+        ("tools.skill_bridge", "SkillBridgeTool"),
         ("tools.security_audit", "SecurityAuditTool"),
         ("tools.n8n_workflow", "N8nWorkflowTool"),
         ("tools.n8n_create_workflow", "N8nCreateWorkflowTool"),
