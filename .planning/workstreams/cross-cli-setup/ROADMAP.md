@@ -16,7 +16,7 @@
 
 **Requirements:** CLI-01 through CLI-03, MCP-01 through MCP-05, CMD-01 through CMD-09, DASH-01 through DASH-04, SAFE-01 through SAFE-03, TEST-01 through TEST-04
 
-**Plans:** 6 plans
+**Plans:** 3/6 plans executed
 
 - [ ] `01-01-PLAN.md` — User manifest + `~/.frood/` bootstrap (CLI-01..03)
 - [ ] `01-02-PLAN.md` — `frood_skill` MCP bridge tool + registration (MCP-01..05)

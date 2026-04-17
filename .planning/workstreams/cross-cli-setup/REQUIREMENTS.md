@@ -40,9 +40,9 @@
 
 ### Safety & Reversibility
 
-- [ ] **SAFE-01**: Every CLI config write creates a timestamped backup beside the target (e.g., `opencode.json.bak-20260417T120000`) before first modification
-- [ ] **SAFE-02**: `unwire` is tested in the suite for byte-identical round-trip against realistic fixtures
-- [ ] **SAFE-03**: Setup never disables or removes user's existing MCP servers, plugins, or providers
+- [x] **SAFE-01**: Every CLI config write creates a timestamped backup beside the target (e.g., `opencode.json.bak-20260417T120000`) before first modification
+- [x] **SAFE-02**: `unwire` is tested in the suite for byte-identical round-trip against realistic fixtures
+- [x] **SAFE-03**: Setup never disables or removes user's existing MCP servers, plugins, or providers
 
 ### Tests
 
