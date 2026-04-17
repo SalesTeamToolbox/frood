@@ -40,6 +40,8 @@ try:
 except ImportError:
     _url_policy = None
 
+from tools.domain_cooldown import cooldown_error, is_cooling, record_429
+
 
 class HttpClientTool(Tool):
     """Make HTTP API requests with structured response handling."""
@@ -147,6 +149,10 @@ class HttpClientTool(Tool):
             if not allowed:
                 return ToolResult(error=f"Blocked: {reason}", success=False)
 
+        cooling, remaining = is_cooling(url)
+        if cooling:
+            return ToolResult(error=cooldown_error(url, remaining), success=False)
+
         # Validate URL
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
@@ -189,6 +195,8 @@ class HttpClientTool(Tool):
             async with aiohttp.ClientSession() as session:
                 async with session.request(method, url, **req_kwargs) as resp:
                     elapsed = time.monotonic() - start
+                    if resp.status == 429:
+                        record_429(url)
                     resp_body = await resp.text()
 
                     # Truncate large responses
@@ -285,6 +293,8 @@ class HttpClientTool(Tool):
 
         except urllib.error.HTTPError as e:
             elapsed = time.monotonic() - start
+            if e.code == 429:
+                record_429(url)
             resp_body = e.read().decode("utf-8", errors="replace")
             if len(resp_body) > 50000:
                 resp_body = resp_body[:50000] + "\n... (response truncated)"
