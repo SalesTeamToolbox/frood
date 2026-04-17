@@ -13,6 +13,7 @@ import re
 import httpx
 
 from tools.base import Tool, ToolResult
+from tools.domain_cooldown import cooldown_error, is_cooling, record_429
 
 logger = logging.getLogger("frood.tools.web_search")
 
@@ -203,6 +204,10 @@ class WebFetchTool(Tool):
             logger.warning(f"URL blocked: {url} — {reason}")
             return ToolResult(error=reason, success=False)
 
+        cooling, remaining = is_cooling(url)
+        if cooling:
+            return ToolResult(error=cooldown_error(url, remaining), success=False)
+
         try:
             # Disable auto-redirects to validate each redirect destination for SSRF
             async with httpx.AsyncClient(follow_redirects=False) as client:
@@ -221,6 +226,12 @@ class WebFetchTool(Tool):
                         return ToolResult(error=f"Redirect blocked: {redirect_ssrf}", success=False)
                     response = await client.get(next_url, timeout=15.0)
 
+                if response.status_code == 429:
+                    record_429(url)
+                    return ToolResult(
+                        error=cooldown_error(url, 600.0),
+                        success=False,
+                    )
                 response.raise_for_status()
 
             text = response.text
