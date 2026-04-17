@@ -6,7 +6,7 @@
 
 ### Phases
 
-- [ ] **Phase 01: Cross-CLI Setup Core** — Everything in v1: manifest, MCP bridge tool, CLI subcommand, dashboard panel, tests
+- [x] **Phase 01: Cross-CLI Setup Core** — Everything in v1: manifest, MCP bridge tool, CLI subcommand, dashboard panel, tests (completed 2026-04-17)
 
 ### Phase 01: Cross-CLI Setup Core
 
@@ -16,14 +16,14 @@
 
 **Requirements:** CLI-01 through CLI-03, MCP-01 through MCP-05, CMD-01 through CMD-09, DASH-01 through DASH-04, SAFE-01 through SAFE-03, TEST-01 through TEST-04
 
-**Plans:** 5/6 plans executed
+**Plans:** 6/6 plans complete
 
 - [x] `01-01-PLAN.md` — User manifest + `~/.frood/` bootstrap (CLI-01..03)
 - [x] `01-02-PLAN.md` — `frood_skill` MCP bridge tool + registration (MCP-01..05)
 - [x] `01-03-PLAN.md` — `core/cli_setup.py` adapters: backup, wire, unwire, safety (SAFE-01..03)
 - [x] `01-04-PLAN.md` — `frood cli-setup` CLI subcommand + handler (CMD-01..09)
 - [x] `01-05-PLAN.md` — Dashboard panel + `/api/cli-setup/*` endpoints (DASH-01..04)
-- [ ] `01-06-PLAN.md` — Named phase test suite `tests/test_cli_setup.py` (TEST-01..04)
+- [x] `01-06-PLAN.md` — Named phase test suite `tests/test_cli_setup.py` (TEST-01..04)
 
 **Success Criteria** (what must be TRUE):
 

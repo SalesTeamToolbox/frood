@@ -46,10 +46,10 @@
 
 ### Tests
 
-- [ ] **TEST-01**: `tests/test_cli_setup.py` covers merge idempotency for both Claude Code and OpenCode config shapes
-- [ ] **TEST-02**: Wire → unwire round-trip byte-identical
-- [ ] **TEST-03**: Manifest parser with missing keys → defaults
-- [ ] **TEST-04**: `frood_skill list` and `load` return expected inventory against fixture warehouse
+- [x] **TEST-01**: `tests/test_cli_setup.py` covers merge idempotency for both Claude Code and OpenCode config shapes
+- [x] **TEST-02**: Wire → unwire round-trip byte-identical
+- [x] **TEST-03**: Manifest parser with missing keys → defaults
+- [x] **TEST-04**: `frood_skill list` and `load` return expected inventory against fixture warehouse
 
 ## Explicitly Out of Scope (v1)
 
