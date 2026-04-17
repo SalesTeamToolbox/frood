@@ -32,7 +32,12 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
-from commands import BackupCommandHandler, CloneCommandHandler, RestoreCommandHandler
+from commands import (
+    BackupCommandHandler,
+    CliSetupCommandHandler,
+    CloneCommandHandler,
+    RestoreCommandHandler,
+)
 from core.agent_manager import AgentManager
 from core.app_manager import AppManager
 from core.config import settings
@@ -64,7 +69,7 @@ except PermissionError:
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, handlers=_log_handlers)
 logger = logging.getLogger("frood")
 
-atexit.register(lambda: print("Frood process exiting (atexit)", flush=True))
+atexit.register(lambda: print("Frood process exiting (atexit)", file=sys.stderr, flush=True))
 
 
 def _migrate_data_dir() -> None:
@@ -409,12 +414,51 @@ def main():
         "--include-skills", action="store_true", help="Include user-installed skills"
     )
 
+    # cli-setup subcommand (Phase 01: cross-cli-setup-core, CMD-01)
+    cli_setup_parser = subparsers.add_parser(
+        "cli-setup",
+        help="Wire Frood MCP into detected CLIs (Claude Code, OpenCode)",
+    )
+    cli_setup_sub = cli_setup_parser.add_subparsers(dest="cli_setup_action")
+
+    cli_setup_sub.add_parser(
+        "detect",
+        help="JSON report of installed CLIs + current wiring state",
+    )
+    cli_setup_sub.add_parser(
+        "claude-code",
+        help="Merge Frood MCP entry into ~/.claude/settings.json",
+    )
+    opencode_action = cli_setup_sub.add_parser(
+        "opencode",
+        help="Merge Frood MCP entry into opencode.json (auto-detect or explicit path)",
+    )
+    opencode_action.add_argument(
+        "path",
+        nargs="?",
+        default=None,
+        help="Optional explicit path to an OpenCode project (overrides manifest auto-detect)",
+    )
+    cli_setup_sub.add_parser(
+        "all",
+        help="Wire every CLI flagged enabled in ~/.frood/cli.yaml",
+    )
+    unwire_action = cli_setup_sub.add_parser(
+        "unwire",
+        help="Reverse the wire operation for one CLI (byte-identical round-trip)",
+    )
+    unwire_action.add_argument(
+        "cli",
+        help="Which CLI to unwire (claude-code | opencode)",
+    )
+
     args = parser.parse_args()
 
     command_handlers = {
         "backup": BackupCommandHandler(),
         "restore": RestoreCommandHandler(),
         "clone": CloneCommandHandler(),
+        "cli-setup": CliSetupCommandHandler(),
     }
 
     handler = command_handlers.get(args.command)
