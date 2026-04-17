@@ -13,11 +13,11 @@
 
 ### MCP Warehouse Bridge
 
-- [ ] **MCP-01**: New MCP tool `frood_skill` registered in `mcp_server.py:_build_registry`
-- [ ] **MCP-02**: `frood_skill(action="list")` returns inventory across `~/.claude/skills-warehouse/`, `commands-warehouse/`, `agents-warehouse/`, Frood built-in personas, and Frood built-in skills
-- [ ] **MCP-03**: `frood_skill(action="load", name=...)` returns the full markdown body of the named item
-- [ ] **MCP-04**: Indexing respects manifest flags (include_claude_warehouse, include_frood_builtins)
-- [ ] **MCP-05**: Missing warehouse paths degrade gracefully (no crash, empty slice in inventory)
+- [x] **MCP-01**: New MCP tool `frood_skill` registered in `mcp_server.py:_build_registry`
+- [x] **MCP-02**: `frood_skill(action="list")` returns inventory across `~/.claude/skills-warehouse/`, `commands-warehouse/`, `agents-warehouse/`, Frood built-in personas, and Frood built-in skills
+- [x] **MCP-03**: `frood_skill(action="load", name=...)` returns the full markdown body of the named item
+- [x] **MCP-04**: Indexing respects manifest flags (include_claude_warehouse, include_frood_builtins)
+- [x] **MCP-05**: Missing warehouse paths degrade gracefully (no crash, empty slice in inventory)
 
 ### `frood cli-setup` Subcommand
 
