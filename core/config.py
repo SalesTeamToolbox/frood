@@ -48,10 +48,7 @@ class Settings:
     zen_rate_min_delay: float = 0.5  # Minimum delay (max throughput floor)
     zen_rate_max_delay: float = 10.0  # Maximum delay on repeated rate limits
     zen_exhaustion_reset_hours: float = 1.0  # Reset exhaustion state after this many hours
-    zen_proxy_enabled: bool = False  # Local proxy for OpenCode CLI traffic
-    zen_proxy_port: int = 8765  # Port for the local Zen proxy
     zen_default_model: str = "qwen3.6-plus-free"  # Default free model for proxy remapping
-    zen_allow_paid: bool = False  # Allow paid Zen models (pass through without remapping)
     openrouter_api_key: str = ""  # OpenRouter (200+ models, paid fallback)
     anthropic_api_key: str = ""  # Anthropic API (direct Claude access)
     openai_api_key: str = ""  # OpenAI API (direct GPT access)
@@ -271,9 +268,16 @@ class Settings:
     conversational_enabled: bool = True  # Enable direct chat for simple messages
     conversational_model: str = ""  # Model for direct responses (empty = primary free model)
 
-    # Provider routing flags (Phase 6)
-    gemini_free_tier: bool = True  # When false, Gemini excluded from free-tier fallback routing
-    openrouter_free_only: bool = False  # When true, only OR :free suffix models are routed
+    # Per-provider paid-model authorization. Defaults: False for providers that
+    # have a genuine free tier (Zen, OpenRouter, NVIDIA — only "free-first"
+    # unless the operator explicitly opts in). True for providers with no free
+    # tier (Anthropic, OpenAI — if you set a key for these, you already
+    # understand paid usage follows).
+    allow_paid_zen: bool = False         # ALLOW_PAID_ZEN
+    allow_paid_openrouter: bool = False  # ALLOW_PAID_OPENROUTER
+    allow_paid_nvidia: bool = False      # ALLOW_PAID_NVIDIA
+    allow_paid_anthropic: bool = True    # ALLOW_PAID_ANTHROPIC
+    allow_paid_openai: bool = True       # ALLOW_PAID_OPENAI
 
     # Memory consolidation (QUAL-01)
     consolidation_auto_threshold: float = 0.95
@@ -381,11 +385,7 @@ class Settings:
             zen_rate_min_delay=float(os.getenv("ZEN_RATE_MIN_DELAY", "0.5")),
             zen_rate_max_delay=float(os.getenv("ZEN_RATE_MAX_DELAY", "10.0")),
             zen_exhaustion_reset_hours=float(os.getenv("ZEN_EXHAUSTION_RESET_HOURS", "1.0")),
-            zen_proxy_enabled=os.getenv("ZEN_PROXY_ENABLED", "false").lower()
-            in ("true", "1", "yes"),
-            zen_proxy_port=int(os.getenv("ZEN_PROXY_PORT", "8765")),
             zen_default_model=os.getenv("ZEN_DEFAULT_MODEL", "qwen3.6-plus-free"),
-            zen_allow_paid=os.getenv("ZEN_ALLOW_PAID", "false").lower() in ("true", "1", "yes"),
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
@@ -474,8 +474,15 @@ class Settings:
             openrouter_balance_check_hours=float(
                 os.getenv("OPENROUTER_BALANCE_CHECK_HOURS", "1.0")
             ),
-            gemini_free_tier=os.getenv("GEMINI_FREE_TIER", "true").lower() in ("true", "1", "yes"),
-            openrouter_free_only=os.getenv("OPENROUTER_FREE_ONLY", "false").lower()
+            # Per-provider paid-model authorization (probe-classifier plan).
+            allow_paid_zen=os.getenv("ALLOW_PAID_ZEN", "false").lower() in ("true", "1", "yes"),
+            allow_paid_openrouter=os.getenv("ALLOW_PAID_OPENROUTER", "false").lower()
+            in ("true", "1", "yes"),
+            allow_paid_nvidia=os.getenv("ALLOW_PAID_NVIDIA", "false").lower()
+            in ("true", "1", "yes"),
+            allow_paid_anthropic=os.getenv("ALLOW_PAID_ANTHROPIC", "true").lower()
+            in ("true", "1", "yes"),
+            allow_paid_openai=os.getenv("ALLOW_PAID_OPENAI", "true").lower()
             in ("true", "1", "yes"),
             # Memory
             memory_dir=os.getenv("MEMORY_DIR", ".frood/memory"),
@@ -646,6 +653,21 @@ class Settings:
             n8n_auto_create_workflows=os.getenv("N8N_AUTO_CREATE_WORKFLOWS", "false").lower()
             in ("true", "1", "yes"),
         )
+
+    def is_paid_allowed(self, provider: str) -> bool:
+        """Return True if paid-tier models for a provider are authorized.
+
+        Honors ``model_routing_policy`` as a global override:
+          - ``free_only``: paid always blocked (returns False)
+          - ``performance``: paid always allowed (returns True if key configured)
+          - ``balanced`` (default): per-provider ``allow_paid_<name>`` flag wins
+        """
+        policy = (self.model_routing_policy or "balanced").lower()
+        if policy == "free_only":
+            return False
+        if policy == "performance":
+            return True
+        return bool(getattr(self, f"allow_paid_{provider}", False))
 
     def get_discord_guild_ids(self) -> list[int]:
         """Parse comma-separated guild IDs."""

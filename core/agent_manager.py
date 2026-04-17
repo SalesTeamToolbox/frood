@@ -101,89 +101,46 @@ try:
 except ImportError:
     _nvidia_client = None
 
-_ZEN_FREE_MODEL_CATEGORIES = {
-    "fast": "qwen3.6-plus-free",
-    "general": "minimax-m2.5-free",
-    "reasoning": "nemotron-3-super-free",
-    "coding": "qwen3.6-plus-free",
-    "content": "big-pickle",
-    "research": "nemotron-3-super-free",
-    "monitoring": "qwen3.6-plus-free",
-    "marketing": "minimax-m2.5-free",
-    "analysis": "nemotron-3-super-free",
-    "lightweight": "qwen3.6-plus-free",
-}
-
-_NVIDIA_FREE_MODEL_CATEGORIES = {
-    # Real NVIDIA catalog IDs only — verified 2026-04-14.
-    "fast": "meta/llama-3.2-3b-instruct",
-    "general": "qwen/qwen3.5-397b-a17b",
-    "reasoning": "qwen/qwq-32b",
-    "coding": "qwen/qwen3-coder-480b-a35b-instruct",
-    "content": "writer/palmyra-creative-122b",
-    "research": "deepseek-ai/deepseek-v3.2",
-    "monitoring": "meta/llama-3.2-1b-instruct",
-    "marketing": "mistralai/mistral-large-3-675b-instruct-2512",
-    "analysis": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-    "lightweight": "meta/llama-3.2-3b-instruct",
+# Free/paid tier split per provider — populated by refresh_*_models_async via
+# probe classification. Kept parallel to PROVIDER_MODELS (which is the static
+# category→model map used by agent templates). Readers that need to know
+# "is this model free or paid" look here.
+PROVIDER_TIERS: dict[str, dict[str, list[str]]] = {
+    "zen":      {"free": [], "paid": []},
+    "nvidia":   {"free": [], "paid": []},
+    "openrouter": {"free": [], "paid": []},
+    "anthropic": {"free": [], "paid": []},
+    "openai":   {"free": [], "paid": []},
 }
 
 
 async def refresh_zen_models_async() -> bool:
-    """Refresh Zen free model mappings from the live API.
+    """Classify Zen's live catalog into free/paid tiers by probe.
 
-    Fetches the current model list, identifies free models (suffix '-free'),
-    and remaps categories based on known model capabilities. New free models
-    not in the default mapping are added to the 'general' category.
+    Replaces the previous ``endswith('-free')`` suffix filter which broke when
+    Zen switched its catalog to Claude-branded names. See
+    core.model_classifier for probe mechanics and cache semantics.
 
-    Returns True if the mapping was updated.
+    Returns True if the tier split was updated.
     """
-    global PROVIDER_MODELS
-
     if _zen_client is None:
         logger.warning("Zen API client not available")
         return False
 
     try:
-        models = await _zen_client.list_models()
-        if not models:
-            logger.warning("No models returned from Zen API")
+        from core.model_classifier import classify_models
+        classifications = await classify_models("zen", _zen_client)
+        if not classifications:
+            logger.warning("Zen classification produced no results")
             return False
 
-        free_models = [m for m in models if m.endswith("-free")]
-        logger.info("Zen API returned %d models (%d free): %s", len(models), len(free_models), free_models)
-
-        # Start with the defaults, then override with what's actually available
-        new_mapping = dict(_ZEN_FREE_MODEL_CATEGORIES)
-
-        # Remove any default models that are no longer in the API
-        available_set = set(models)
-        for cat, model_id in list(new_mapping.items()):
-            if model_id not in available_set:
-                logger.info("Zen model %s no longer available — removing from %s category", model_id, cat)
-                del new_mapping[cat]
-
-        # Add any new free models not yet mapped
-        mapped_models = set(new_mapping.values())
-        for model_id in free_models:
-            if model_id not in mapped_models:
-                logger.info("New Zen free model discovered: %s", model_id)
-                # Assign to first empty category slot, or add as 'general' fallback
-                if "general" not in new_mapping:
-                    new_mapping["general"] = model_id
-                else:
-                    # Store under its own name as a discoverable category
-                    new_mapping[model_id] = model_id
-
-        # Ensure 'general' always has a mapping
-        if "general" not in new_mapping and free_models:
-            new_mapping["general"] = free_models[0]
-
-        PROVIDER_MODELS["zen"] = new_mapping
-        logger.info("Updated Zen model mappings: %s", new_mapping)
+        free = sorted(m for m, c in classifications.items() if c == "free")
+        paid = sorted(m for m, c in classifications.items() if c == "paid")
+        PROVIDER_TIERS["zen"] = {"free": free, "paid": paid}
+        logger.info("Zen tiers refreshed: %d free, %d paid", len(free), len(paid))
         return True
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("Error refreshing Zen models: %s", e)
         return False
 
@@ -201,37 +158,30 @@ def refresh_zen_models(force: bool = False) -> bool:
 
 
 async def refresh_nvidia_models_async() -> bool:
-    """Refresh NVIDIA model mappings from the live API."""
-    global PROVIDER_MODELS
+    """Classify NVIDIA's live catalog into free/paid tiers by probe.
 
+    Replaces the previous ``':free' in model_id`` substring filter which was
+    stale (NVIDIA dropped the ``:free`` suffix from its IDs). See
+    core.model_classifier for probe mechanics and cache semantics.
+    """
     if _nvidia_client is None:
         logger.warning("NVIDIA API client not available")
         return False
 
     try:
-        models = await _nvidia_client.list_models()
-        if not models:
-            logger.warning("No models returned from NVIDIA API")
+        from core.model_classifier import classify_models
+        classifications = await classify_models("nvidia", _nvidia_client)
+        if not classifications:
+            logger.warning("NVIDIA classification produced no results")
             return False
 
-        free_models = [m for m in models if ":free" in m]
-        logger.info("NVIDIA API returned %d models (%d free): %s", len(models), len(free_models), free_models)
-
-        new_mapping = dict(_NVIDIA_FREE_MODEL_CATEGORIES)
-        available_set = set(models)
-        for cat, model_id in list(new_mapping.items()):
-            if model_id not in available_set:
-                logger.info("NVIDIA model %s no longer available — removing from %s", model_id, cat)
-                del new_mapping[cat]
-
-        if "general" not in new_mapping and free_models:
-            new_mapping["general"] = free_models[0]
-
-        PROVIDER_MODELS["nvidia"] = new_mapping
-        logger.info("Updated NVIDIA model mappings: %s", new_mapping)
+        free = sorted(m for m, c in classifications.items() if c == "free")
+        paid = sorted(m for m, c in classifications.items() if c == "paid")
+        PROVIDER_TIERS["nvidia"] = {"free": free, "paid": paid}
+        logger.info("NVIDIA tiers refreshed: %d free, %d paid", len(free), len(paid))
         return True
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error("Error refreshing NVIDIA models: %s", e)
         return False
 

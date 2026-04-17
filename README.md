@@ -337,6 +337,13 @@ pattern as `claude_local`, `cursor`, `pi_local`, and other adapters.
 Frood acts as a local LLM proxy for Claude Code, letting you switch between free and
 paid models without changing your workflow.
 
+> **Migration note (April 2026):** the separate Anthropic-facade Zen Proxy on
+> port 8765 (`providers/zen_proxy.py`) has been removed. Point Claude Code /
+> OpenCode CLI at Frood's main OpenAI-compatible endpoint instead:
+> `http://<host>:8002/llm/v1/chat/completions`. Free-vs-paid model eligibility
+> is now determined per-provider (see Settings → Paid Model Authorization)
+> using live probe-classification rather than filename heuristics.
+
 ### Provider Switching
 
 ```bash

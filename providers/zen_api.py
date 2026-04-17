@@ -230,14 +230,14 @@ class ZenApiClient:
         text_lower = text.lower()
         return any(re.search(p, text_lower) for p in patterns)
 
-    async def list_models(self) -> list[str]:
-        """Fetch available free model IDs from Zen API.
+    async def list_all_models(self) -> list[str]:
+        """Fetch ALL model IDs Zen advertises (no free/paid filtering).
 
-        Calls GET /v1/models and filters to free models only.
+        Classification happens in ``core.model_classifier`` now, not here.
         Falls back to hardcoded defaults if the endpoint is unavailable.
 
         Returns:
-            List of free model ID strings.
+            List of every model ID from Zen's /v1/models endpoint.
         """
         api_key = self._get_api_key()
         if not api_key:
@@ -256,40 +256,33 @@ class ZenApiClient:
                 resp.raise_for_status()
                 data = resp.json()
 
-            free_models = []
+            all_models: list[str] = []
             models = data.get("data", data) if isinstance(data, dict) else data
             if isinstance(models, list):
                 for m in models:
                     model_id = m.get("id", "") if isinstance(m, dict) else str(m)
-                    if not model_id:
-                        continue
-                    # Check if model is free by looking at pricing metadata
-                    pricing = m.get("pricing", {}) if isinstance(m, dict) else {}
-                    is_free = (
-                        pricing.get("input") == "Free"
-                        or pricing.get("input") == 0
-                        or pricing.get("input") == 0.0
-                        or model_id.endswith("-free")
-                        or model_id == "big-pickle"
-                    )
-                    if is_free:
-                        free_models.append(model_id)
+                    if model_id:
+                        all_models.append(model_id)
 
-            if free_models:
-                self._known_free_models = free_models
-                logger.info(f"Zen: discovered {len(free_models)} free models: {free_models}")
-                return free_models
+            if all_models:
+                logger.info("Zen: advertised %d models", len(all_models))
+                return all_models
 
-            # No free models found in response — fall back to defaults
-            logger.warning("Zen: no free models found in API response, using defaults")
+            logger.warning("Zen: /models returned nothing, using defaults")
             return list(self._known_free_models)
 
         except httpx.RequestError as e:
-            logger.error("Zen API list_models error: %s", e)
+            logger.error("Zen API list_all_models error: %s", e)
             return list(self._known_free_models)
-        except Exception as e:
-            logger.error("Zen API list_models unexpected error: %s", e)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Zen API list_all_models unexpected error: %s", e)
             return list(self._known_free_models)
+
+    # Backwards-compat alias. Older callers still use ``list_models``; they
+    # will simply get the unfiltered list now and should migrate to
+    # list_all_models + core.model_classifier for proper free/paid buckets.
+    async def list_models(self) -> list[str]:
+        return await self.list_all_models()
 
     def get_known_free_models(self) -> list[str]:
         """Return the currently known free model IDs (cached)."""

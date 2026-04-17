@@ -187,14 +187,14 @@ class NvidiaApiClient:
                 pass
         return None
 
-    async def list_models(self) -> list[str]:
-        """Fetch available free model IDs from NVIDIA API.
+    async def list_all_models(self) -> list[str]:
+        """Fetch ALL NVIDIA model IDs (no free/paid filtering).
 
-        Calls GET /models and filters to free models only.
-        Falls back to hardcoded defaults if the endpoint is unavailable.
+        Classification happens in ``core.model_classifier`` now. Falls back to
+        hardcoded defaults if the endpoint is unavailable.
 
         Returns:
-            List of free model ID strings.
+            List of every model ID from NVIDIA's /v1/models endpoint.
         """
         api_key = self._get_api_key()
         if not api_key:
@@ -213,41 +213,33 @@ class NvidiaApiClient:
                 resp.raise_for_status()
                 data = resp.json()
 
-            free_models = []
+            all_models: list[str] = []
             models = data.get("data", data) if isinstance(data, dict) else data
             if isinstance(models, list):
                 for m in models:
                     model_id = m.get("id", "") if isinstance(m, dict) else str(m)
-                    if not model_id:
-                        continue
-                    # Check if model is free by looking at pricing metadata
-                    pricing = m.get("pricing", {}) if isinstance(m, dict) else {}
-                    is_free = (
-                        pricing.get("price") == 0
-                        or pricing.get("price") == 0.0
-                        or pricing.get("input") == 0
-                        or pricing.get("input") == 0.0
-                        or ":free" in model_id
-                        or model_id.endswith("-free")
-                    )
-                    if is_free:
-                        free_models.append(model_id)
+                    if model_id:
+                        all_models.append(model_id)
 
-            if free_models:
-                self._known_free_models = free_models
-                logger.info(f"NVIDIA: discovered {len(free_models)} free models: {free_models}")
-                return free_models
+            if all_models:
+                logger.info("NVIDIA: advertised %d models", len(all_models))
+                return all_models
 
-            # No free models found in response — fall back to defaults
-            logger.warning("NVIDIA: no free models found in API response, using defaults")
+            logger.warning("NVIDIA: /models returned nothing, using defaults")
             return list(self._known_free_models)
 
         except httpx.RequestError as e:
-            logger.error("NVIDIA API list_models error: %s", e)
+            logger.error("NVIDIA API list_all_models error: %s", e)
             return list(self._known_free_models)
-        except Exception as e:
-            logger.error("NVIDIA API list_models unexpected error: %s", e)
+        except Exception as e:  # noqa: BLE001
+            logger.error("NVIDIA API list_all_models unexpected error: %s", e)
             return list(self._known_free_models)
+
+    # Backwards-compat alias. Older callers using ``list_models`` will now
+    # receive the unfiltered catalog; they should migrate to list_all_models
+    # + core.model_classifier.
+    async def list_models(self) -> list[str]:
+        return await self.list_all_models()
 
     def get_known_free_models(self) -> list[str]:
         """Return the currently known free model IDs (cached)."""
