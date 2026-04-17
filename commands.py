@@ -1,10 +1,10 @@
 import argparse
-import sys
 import logging
-from pathlib import Path
+import sys
 from abc import ABC, abstractmethod
+from pathlib import Path
 
-from core.portability import create_backup, restore_backup, create_clone
+from core.portability import create_backup, create_clone, restore_backup
 
 logger = logging.getLogger("frood")
 
@@ -74,4 +74,85 @@ class CloneCommandHandler(CommandHandler):
         except Exception as e:
             logger.error("Clone failed: %s", e)
             print(f"Error: {e}")
+            sys.exit(1)
+
+
+class CliSetupCommandHandler(CommandHandler):
+    """Handles the 'cli-setup' subcommand and its sub-actions.
+
+    Sub-actions (per CMD-01..CMD-09 locked in 01-CONTEXT.md):
+      detect          — JSON report of installed CLIs + current wiring state
+      claude-code     — wire Frood MCP into ~/.claude/settings.json
+      opencode [path] — wire Frood MCP into project opencode.json + AGENTS.md
+                        (path optional; overrides manifest auto-detect)
+      all             — wire every CLI flagged enabled in manifest
+      unwire <cli>    — reverse the wire operation on one CLI
+
+    Idempotency, backup semantics, and byte-identical round-trip guarantees
+    live in ``core/cli_setup.py`` (Plan 03). This handler is a thin forwarder
+    that dispatches to those functions and renders their return dicts as JSON
+    to stdout. Core exceptions bubble up as exit-code 1; missing sub-action or
+    missing required args exit 2.
+    """
+
+    def run(self, args: argparse.Namespace):
+        import json
+
+        from core.cli_setup import (
+            OpenCodeSetup,
+            detect_all,
+            unwire_cli,
+            wire_cli,
+        )
+        from core.user_frood_dir import load_manifest
+
+        action = getattr(args, "cli_setup_action", None)
+        if action is None:
+            print(
+                "Error: sub-action required (detect | claude-code | opencode | all | unwire)",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+        try:
+            if action == "detect":
+                result = detect_all()
+                print(json.dumps(result, indent=2, default=str))
+            elif action == "claude-code":
+                result = wire_cli("claude-code")
+                print(json.dumps(result, indent=2, default=str))
+            elif action == "opencode":
+                manifest = load_manifest()
+                project_paths = None
+                path_arg = getattr(args, "path", None)
+                if path_arg:
+                    project_paths = [Path(path_arg)]
+                adapter = OpenCodeSetup(project_paths=project_paths, manifest=manifest)
+                result = adapter.wire()
+                print(json.dumps(result, indent=2, default=str))
+            elif action == "all":
+                manifest = load_manifest()
+                results: dict = {}
+                for cli_name, cli_cfg in manifest.get("clis", {}).items():
+                    if cli_cfg.get("enabled", False):
+                        results[cli_name] = wire_cli(cli_name, manifest=manifest)
+                print(json.dumps(results, indent=2, default=str))
+            elif action == "unwire":
+                cli_name = getattr(args, "cli", None)
+                if not cli_name:
+                    print(
+                        "Error: unwire requires a CLI name (claude-code | opencode)",
+                        file=sys.stderr,
+                    )
+                    sys.exit(2)
+                result = unwire_cli(cli_name)
+                print(json.dumps(result, indent=2, default=str))
+            else:
+                print(f"Error: unknown sub-action '{action}'", file=sys.stderr)
+                sys.exit(2)
+        except SystemExit:
+            raise
+        except Exception as e:
+            logger.error("cli-setup %s failed: %s", action, e)
+            print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
