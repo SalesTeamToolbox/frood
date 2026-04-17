@@ -21,15 +21,15 @@
 
 ### `frood cli-setup` Subcommand
 
-- [ ] **CMD-01**: Register `cli-setup` argparse subparser in `frood.py` following existing `backup`/`restore`/`clone` pattern
-- [ ] **CMD-02**: Implement `CliSetupCommandHandler` in `commands.py` extending `CommandHandler` ABC
-- [ ] **CMD-03**: `frood cli-setup detect` reports installed CLIs + current wiring state as JSON
-- [ ] **CMD-04**: `frood cli-setup claude-code` merges a `frood` entry into `~/.claude/settings.json` `mcpServers` block; preserves all other keys byte-for-byte
-- [ ] **CMD-05**: `frood cli-setup opencode [<path>]` auto-detects or accepts explicit project paths; merges a `frood` entry into each `opencode.json` `mcp` object; preserves providers/instructions/server settings
-- [ ] **CMD-06**: `frood cli-setup opencode` writes/updates a one-line note in `AGENTS.md` pointing users to `frood_skill list` / `load`
-- [ ] **CMD-07**: `frood cli-setup all` wires every CLI flagged enabled in the manifest
-- [ ] **CMD-08**: `frood cli-setup unwire <cli>` removes the `frood` entry from that CLI's config reversibly (round-trip must be byte-identical to original)
-- [ ] **CMD-09**: All writes idempotent: re-running the same command produces no diff
+- [x] **CMD-01**: Register `cli-setup` argparse subparser in `frood.py` following existing `backup`/`restore`/`clone` pattern
+- [x] **CMD-02**: Implement `CliSetupCommandHandler` in `commands.py` extending `CommandHandler` ABC
+- [x] **CMD-03**: `frood cli-setup detect` reports installed CLIs + current wiring state as JSON
+- [x] **CMD-04**: `frood cli-setup claude-code` merges a `frood` entry into `~/.claude/settings.json` `mcpServers` block; preserves all other keys byte-for-byte
+- [x] **CMD-05**: `frood cli-setup opencode [<path>]` auto-detects or accepts explicit project paths; merges a `frood` entry into each `opencode.json` `mcp` object; preserves providers/instructions/server settings
+- [x] **CMD-06**: `frood cli-setup opencode` writes/updates a one-line note in `AGENTS.md` pointing users to `frood_skill list` / `load`
+- [x] **CMD-07**: `frood cli-setup all` wires every CLI flagged enabled in the manifest
+- [x] **CMD-08**: `frood cli-setup unwire <cli>` removes the `frood` entry from that CLI's config reversibly (round-trip must be byte-identical to original)
+- [x] **CMD-09**: All writes idempotent: re-running the same command produces no diff
 
 ### Dashboard
 
