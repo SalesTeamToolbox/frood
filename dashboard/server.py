@@ -276,7 +276,12 @@ _DASHBOARD_EDITABLE_SETTINGS = {
     "LEARNING_ENABLED",
     # Zen proxy model selection
     "ZEN_DEFAULT_MODEL",
-    "ZEN_ALLOW_PAID",
+    # Per-provider paid authorization (probe-classifier plan).
+    "ALLOW_PAID_ZEN",
+    "ALLOW_PAID_OPENROUTER",
+    "ALLOW_PAID_NVIDIA",
+    "ALLOW_PAID_ANTHROPIC",
+    "ALLOW_PAID_OPENAI",
 }
 
 
@@ -1136,17 +1141,18 @@ def create_app(
         return False
 
     def _build_capability_chain(task_category: str = "general") -> list[tuple[str, str, str]]:
-        """Return ordered [(provider, model, api_key)] using live PROVIDER_MODELS.
+        """Return ordered [(provider, model, api_key)] for smart routing.
 
-        Uses the model lists kept fresh by background 6-hour refresh tasks
-        (refresh_zen_models_async / refresh_nvidia_models_async in agent_manager).
-        Skips providers whose API keys are not configured.
-        Falls back to the 'general' category when task_category is unmapped.
+        Free-first within each configured provider, then paid-tier models for
+        providers the operator has authorized (``settings.is_paid_allowed``).
+        Falls back to the static category map in PROVIDER_MODELS for providers
+        whose tier data hasn't been populated by refresh yet.
         """
         try:
-            from core.agent_manager import PROVIDER_MODELS
+            from core.agent_manager import PROVIDER_MODELS, PROVIDER_TIERS
         except ImportError:
             PROVIDER_MODELS = {}
+            PROVIDER_TIERS = {}
 
         chain: list[tuple[str, str, str]] = []
         for provider in _PROVIDER_QUALITY_ORDER:
@@ -1154,10 +1160,40 @@ def create_app(
             api_key = os.environ.get(env_var, "")
             if not api_key:
                 continue
+
+            tiers = PROVIDER_TIERS.get(provider, {})
+            free_models = list(tiers.get("free", []))
+            paid_models = list(tiers.get("paid", []))
+
+            # If refresh hasn't populated tiers yet, fall back to the static
+            # category map (treat it as effectively "free" — it's the hint the
+            # operator configured when they set up the agent templates).
+            if not free_models and not paid_models:
+                provider_map = PROVIDER_MODELS.get(provider, {})
+                hinted = provider_map.get(task_category) or provider_map.get("general")
+                if hinted:
+                    chain.append((provider, hinted, api_key))
+                continue
+
+            # Category-preferred model first if the classifier placed it in the
+            # right bucket for this provider.
             provider_map = PROVIDER_MODELS.get(provider, {})
-            model = provider_map.get(task_category) or provider_map.get("general")
-            if model:
-                chain.append((provider, model, api_key))
+            preferred = provider_map.get(task_category) or provider_map.get("general")
+            ordered_free = ([preferred] if preferred and preferred in free_models else []) + [
+                m for m in free_models if m != preferred
+            ]
+            for m in ordered_free:
+                chain.append((provider, m, api_key))
+
+            if not settings.is_paid_allowed(provider):
+                continue
+
+            ordered_paid = ([preferred] if preferred and preferred in paid_models else []) + [
+                m for m in paid_models if m != preferred
+            ]
+            for m in ordered_paid:
+                chain.append((provider, m, api_key))
+
         return chain
 
     async def _chat_complete(
@@ -1262,6 +1298,11 @@ def create_app(
                                 resp.status_code,
                             )
                             last_error = f"Anthropic {resp.status_code}: credit/quota exhausted"
+                            try:
+                                from core.model_classifier import mark_paid as _mp
+                                await _mp("anthropic", model_to_use)
+                            except Exception:  # noqa: BLE001
+                                pass
                             continue
                         last_error = f"Anthropic {resp.status_code}: {resp.text[:200]}"
 
@@ -1368,6 +1409,11 @@ def create_app(
                             last_error = (
                                 f"{provider_name} {resp.status_code}: credit/quota exhausted"
                             )
+                            try:
+                                from core.model_classifier import mark_paid as _mp
+                                await _mp(provider_name, model_to_use)
+                            except Exception:  # noqa: BLE001
+                                pass
                             continue
                         last_error = f"{provider_name} {resp.status_code}: {resp.text[:200]}"
 
@@ -1452,24 +1498,32 @@ def create_app(
                     key = os.environ.get("NVIDIA_API_KEY", "")
                     return ("https://integrate.api.nvidia.com", key, model_id) if key else None
                 # Bare names = OpenCode Zen. Route to Zen's OpenAI-compatible endpoint.
-                # Use the LIVE model list maintained by refresh_zen_models_async (every
-                # 6h) so changes to Zen's catalog take effect without redeploying Frood.
-                # Fall back to a conservative hardcoded set for the startup window
-                # BEFORE the first refresh lands.
+                # Uses PROVIDER_TIERS populated by refresh_zen_models_async (probe
+                # classification). Paid Zen models are only eligible when
+                # ALLOW_PAID_ZEN is set. Falls back to a conservative hardcoded
+                # free-model set for the startup window before the first refresh.
                 try:
-                    from core.agent_manager import PROVIDER_MODELS as _PM
+                    from core.agent_manager import PROVIDER_TIERS as _PT
 
-                    _live_zen = set(_PM.get("zen", {}).values())
+                    _zen_free = set(_PT.get("zen", {}).get("free", []))
+                    _zen_paid = set(_PT.get("zen", {}).get("paid", []))
                 except ImportError:
-                    _live_zen = set()
-                _zen_fallback = {
+                    _zen_free = set()
+                    _zen_paid = set()
+
+                _zen_fallback_free = {
                     "qwen3.6-plus-free",
                     "minimax-m2.5-free",
                     "nemotron-3-super-free",
                     "big-pickle",
                 }
-                _zen_catalog = _live_zen if _live_zen else _zen_fallback
-                if model_id in _zen_catalog:
+                if not _zen_free and not _zen_paid:
+                    _zen_free = _zen_fallback_free
+
+                allow_paid_zen = settings.is_paid_allowed("zen")
+                eligible = _zen_free | (_zen_paid if allow_paid_zen else set())
+
+                if model_id in eligible:
                     key = os.environ.get("ZEN_API_KEY", "")
                     # Zen's base is https://opencode.ai/zen — the "/v1" is
                     # appended by the endpoint build below.
@@ -1627,10 +1681,23 @@ def create_app(
         if not text or text.startswith("All providers failed"):
             return {"error": {"message": text or "No response", "type": "server_error"}}
 
-        # Determine routing tier and increment counter
-        _free_models = {"qwen3.6-plus-free", "minimax-m2.5-free", "nemotron-3-super-free"}
-        if model in _free_models:
+        # Determine routing tier for telemetry. Uses the live classifier buckets
+        # (PROVIDER_TIERS) so tier labels stay accurate as catalogs change.
+        try:
+            from core.agent_manager import PROVIDER_TIERS as _PT
+            _all_free = set()
+            _all_paid = set()
+            for _prov_data in _PT.values():
+                _all_free.update(_prov_data.get("free", []))
+                _all_paid.update(_prov_data.get("paid", []))
+        except ImportError:
+            _all_free, _all_paid = set(), set()
+
+        _raw_model = chat_model
+        if _raw_model in _all_free:
             _tier = "free"
+        elif _raw_model in _all_paid:
+            _tier = "paid"
         elif model.startswith("zen:"):
             _tier = "L1"
         else:
@@ -2839,6 +2906,47 @@ Focus on learnings that would help in future similar sessions."""
             Settings.reload_from_env()
 
         return {"status": "ok", "updated": updated, "errors": errors}
+
+    @app.post("/api/settings/probe-models")
+    async def probe_models_endpoint(_: AuthContext = Depends(require_admin)):
+        """Force a fresh probe-classification of every configured provider's catalog.
+
+        Normally the classifier runs on a 6-hour refresh cycle. This endpoint
+        lets an operator re-run it immediately (e.g. after rotating a key or
+        when a provider's free-tier list changes). Returns the counts per
+        provider for display in the UI.
+        """
+        from core.agent_manager import (
+            PROVIDER_TIERS,
+            refresh_nvidia_models_async,
+            refresh_zen_models_async,
+        )
+
+        summary: dict[str, dict] = {}
+        ran: list[str] = []
+
+        if os.environ.get("ZEN_API_KEY"):
+            try:
+                await refresh_zen_models_async()
+                ran.append("zen")
+            except Exception as e:  # noqa: BLE001
+                summary["zen"] = {"error": str(e)[:200]}
+        if os.environ.get("NVIDIA_API_KEY"):
+            try:
+                await refresh_nvidia_models_async()
+                ran.append("nvidia")
+            except Exception as e:  # noqa: BLE001
+                summary["nvidia"] = {"error": str(e)[:200]}
+
+        for provider, tiers in PROVIDER_TIERS.items():
+            if provider in summary:
+                continue
+            summary[provider] = {
+                "free": len(tiers.get("free", [])),
+                "paid": len(tiers.get("paid", [])),
+                "refreshed": provider in ran,
+            }
+        return {"status": "ok", "providers": summary, "ran": ran}
 
     @app.get("/api/settings/openrouter-status")
     async def get_openrouter_status(_: AuthContext = Depends(require_admin)):
