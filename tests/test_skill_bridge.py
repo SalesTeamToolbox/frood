@@ -90,9 +90,8 @@ async def test_missing_warehouse_returns_empty_slices(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_manifest_disables_claude_warehouse(monkeypatch, tmp_path):
     """warehouse.include_claude_warehouse=False → skills/commands/agents empty even with dirs present."""
-    from tools.skill_bridge import SkillBridgeTool
-
     from core.user_frood_dir import save_manifest
+    from tools.skill_bridge import SkillBridgeTool
 
     home = _redirect_home(monkeypatch, tmp_path)
     _make_warehouse_fixtures(home)
@@ -120,9 +119,8 @@ async def test_manifest_disables_claude_warehouse(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_manifest_disables_builtins(monkeypatch, tmp_path):
     """warehouse.include_frood_builtins=False → personas and frood_skills empty."""
-    from tools.skill_bridge import SkillBridgeTool
-
     from core.user_frood_dir import save_manifest
+    from tools.skill_bridge import SkillBridgeTool
 
     _redirect_home(monkeypatch, tmp_path)
 
