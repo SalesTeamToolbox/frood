@@ -2,14 +2,13 @@
 
 This file is the locked acceptance suite named in the requirements doc (TEST-01
 through TEST-04) and is graded by file name + test content. It exercises the
-full feature end-to-end against realistic fixtures.
+full feature end-to-end against realistic fixtures, covering:
 
-Task 1 coverage (this commit):
 - TEST-01: merge idempotency for both Claude Code and OpenCode config shapes
 - TEST-02: wire → unwire round-trip byte-identical
-
-Task 2 (added in the next commit) extends this file with TEST-03 (manifest
-defaults) + TEST-04 (``frood_skill`` list/load) plus a circular-import guard.
+- TEST-03: manifest parser with missing keys → defaults fill gaps
+- TEST-04: ``frood_skill list`` and ``load`` return expected inventory against
+  a fixture warehouse
 
 The file complements the per-module unit suites created in plans 01-01..01-05
 (``test_user_frood_dir.py``, ``test_skill_bridge.py``, ``test_cli_setup_core.py``,
@@ -20,6 +19,7 @@ cross-module scenarios through the public APIs the feature exports.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -123,6 +123,39 @@ def opencode_fixture_no_agents(tmp_path):
         encoding="utf-8",
     )
     return proj
+
+
+# ---------- Fake warehouse fixture (TEST-04) ----------
+@pytest.fixture
+def fake_warehouse(tmp_path, monkeypatch):
+    """Set up a realistic warehouse + ~/.frood/ dir inside ``tmp_path``.
+
+    Layout (per plan interfaces block):
+
+    - ``<home>/.claude/skills-warehouse/demo-skill/SKILL.md``
+    - ``<home>/.claude/commands-warehouse/demo-cmd.md``
+    - ``<home>/.claude/agents-warehouse/demo-agent.md``
+    - ``<home>/.frood/`` (empty — manifest auto-created by load_manifest)
+    """
+    _redirect_home(monkeypatch, tmp_path)
+    cc = tmp_path / ".claude"
+    (cc / "skills-warehouse" / "demo-skill").mkdir(parents=True)
+    (cc / "skills-warehouse" / "demo-skill" / "SKILL.md").write_text(
+        "---\nname: demo-skill\n---\nHello from demo.\n",
+        encoding="utf-8",
+    )
+    (cc / "commands-warehouse").mkdir()
+    (cc / "commands-warehouse" / "demo-cmd.md").write_text(
+        "# demo-cmd\nDo the thing.\n",
+        encoding="utf-8",
+    )
+    (cc / "agents-warehouse").mkdir()
+    (cc / "agents-warehouse" / "demo-agent.md").write_text(
+        "# demo-agent\nAgent persona.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".frood").mkdir()
+    return tmp_path
 
 
 # ===========================================================================
@@ -269,3 +302,184 @@ def test_opencode_wire_without_agents_md_creates_and_removes(opencode_fixture_no
 
     adapter.unwire()
     assert not am.exists(), "unwire must delete AGENTS.md when wire created it"
+
+
+# ===========================================================================
+# TEST-03 — manifest parser: missing keys → defaults (regression pin for CLI-03)
+# ===========================================================================
+def test_manifest_missing_file_fills_defaults(tmp_path, monkeypatch):
+    """CLI-03: absent ~/.frood/cli.yaml → load_manifest returns DEFAULT_MANIFEST
+    and writes the file to disk so subsequent reads see the same shape."""
+    from core.user_frood_dir import DEFAULT_MANIFEST, load_manifest
+
+    _redirect_home(monkeypatch, tmp_path)
+
+    result = load_manifest()
+    assert result == DEFAULT_MANIFEST, "missing file must produce defaults"
+
+    # load_manifest writes the defaults so users can discover + edit them.
+    manifest_file = tmp_path / ".frood" / "cli.yaml"
+    assert manifest_file.exists(), "first load must persist defaults to disk"
+
+
+def test_manifest_partial_keys_fill_defaults(tmp_path, monkeypatch):
+    """CLI-03: partial manifest on disk → missing keys backfilled from defaults.
+
+    Writes the minimum useful manifest (claude-code disabled only) and asserts
+    every other key — opencode.enabled, warehouse.include_claude_warehouse,
+    warehouse.include_frood_builtins — is populated by the parser, not absent.
+    """
+    from core.user_frood_dir import load_manifest
+
+    _redirect_home(monkeypatch, tmp_path)
+    frood_dir = tmp_path / ".frood"
+    frood_dir.mkdir()
+
+    # Write a partial manifest directly — single top-level toggle, nothing else.
+    # PyYAML is already installed in the venv, so this is a valid YAML file.
+    partial_yaml = "clis:\n  claude-code:\n    enabled: false\n"
+    (frood_dir / "cli.yaml").write_text(partial_yaml, encoding="utf-8")
+
+    result = load_manifest()
+
+    # User override wins for the key they set
+    assert result["clis"]["claude-code"]["enabled"] is False
+
+    # Every other key was filled from DEFAULT_MANIFEST
+    assert result["clis"]["opencode"]["enabled"] is True
+    assert result["clis"]["opencode"]["projects"] == "auto"
+    assert result["warehouse"]["include_claude_warehouse"] is True
+    assert result["warehouse"]["include_frood_builtins"] is True
+
+
+def test_manifest_malformed_falls_back_to_defaults(tmp_path, monkeypatch):
+    """CLI-03 edge: garbage on disk → parser logs a warning and returns defaults.
+
+    Pins the "malformed file must never crash" invariant — the module's
+    contract is graceful-degradation, and this suite is the last line of
+    defense if a future refactor breaks that.
+    """
+    from core.user_frood_dir import DEFAULT_MANIFEST, load_manifest
+
+    _redirect_home(monkeypatch, tmp_path)
+    frood_dir = tmp_path / ".frood"
+    frood_dir.mkdir()
+    # Invalid YAML + invalid JSON — parser must fail cleanly.
+    (frood_dir / "cli.yaml").write_text(
+        "!! this is {unbalanced\nnonsense: [1, 2,\n",
+        encoding="utf-8",
+    )
+
+    result = load_manifest()
+    assert result == DEFAULT_MANIFEST, "malformed file must yield defaults"
+
+
+# ===========================================================================
+# TEST-04 — frood_skill list / load against a fixture warehouse
+# ===========================================================================
+def test_frood_skill_list_against_fixture_warehouse(fake_warehouse):
+    """`SkillBridgeTool(action='list')` discovers the fixture warehouse entries.
+
+    Asserts the three warehouse slices each contain the expected name from the
+    fixture layout — this is the canonical TEST-04 shape.
+    """
+    from tools.skill_bridge import SkillBridgeTool
+
+    tool = SkillBridgeTool()
+    result = asyncio.run(tool.execute(action="list"))
+
+    assert result.success, f"execute failed: {result.error}"
+    inventory = json.loads(result.output)
+
+    assert any(s["name"] == "demo-skill" for s in inventory["skills"]), (
+        f"demo-skill missing from skills slice: {inventory['skills']}"
+    )
+    assert any(c["name"] == "demo-cmd" for c in inventory["commands"]), (
+        f"demo-cmd missing from commands slice: {inventory['commands']}"
+    )
+    assert any(a["name"] == "demo-agent" for a in inventory["agents"]), (
+        f"demo-agent missing from agents slice: {inventory['agents']}"
+    )
+
+
+def test_frood_skill_load_against_fixture_warehouse(fake_warehouse):
+    """`SkillBridgeTool(action='load', name='demo-skill')` returns the SKILL.md body."""
+    from tools.skill_bridge import SkillBridgeTool
+
+    tool = SkillBridgeTool()
+    result = asyncio.run(tool.execute(action="load", name="demo-skill"))
+
+    assert result.success, f"load failed: {result.error}"
+    loaded = json.loads(result.output)
+    assert loaded["name"] == "demo-skill"
+    assert "Hello from demo." in loaded["body"]
+    # Source label identifies the slice — warehouse skills, not persona/builtin.
+    assert "claude-warehouse" in loaded["source"]
+
+
+def test_frood_skill_respects_manifest_flags(fake_warehouse):
+    """warehouse.include_claude_warehouse=False hides skills/commands/agents
+    even when the fixture dirs are present.
+
+    Pins the manifest-gating contract (MCP-04) at the integration layer —
+    lets us catch a regression where cli_setup silently forgets the flag.
+    """
+    from core.user_frood_dir import save_manifest
+    from tools.skill_bridge import SkillBridgeTool
+
+    save_manifest(
+        {
+            "clis": {
+                "claude-code": {"enabled": True},
+                "opencode": {"enabled": True, "projects": "auto"},
+            },
+            "warehouse": {
+                "include_claude_warehouse": False,
+                "include_frood_builtins": False,
+            },
+        }
+    )
+
+    tool = SkillBridgeTool()
+    result = asyncio.run(tool.execute(action="list"))
+
+    assert result.success, f"execute failed: {result.error}"
+    inventory = json.loads(result.output)
+    # All five slices empty when both flags are False
+    assert inventory["skills"] == []
+    assert inventory["commands"] == []
+    assert inventory["agents"] == []
+    assert inventory["personas"] == []
+    assert inventory["frood_skills"] == []
+
+
+# ===========================================================================
+# Circular-import regression guard — all four public modules import cleanly
+# ===========================================================================
+def test_full_suite_imports_cleanly():
+    """Importing every module this phase ships must not trigger circular imports.
+
+    Each previous plan added a new public module; this test imports them all
+    in one shot so any future reorg that introduces a cycle (e.g. a new
+    ``tools/skill_bridge`` import from ``core/cli_setup``) fails loudly here.
+    """
+    # Core bootstrap modules
+    # CLI command handler (Plan 04)
+    from commands import CliSetupCommandHandler
+    from core import cli_setup, user_frood_dir
+
+    # MCP bridge tool
+    from tools import skill_bridge
+
+    # Sanity — these symbols are the downstream contract surface.
+    assert hasattr(user_frood_dir, "load_manifest")
+    assert hasattr(user_frood_dir, "save_manifest")
+    assert hasattr(user_frood_dir, "DEFAULT_MANIFEST")
+    assert hasattr(cli_setup, "ClaudeCodeSetup")
+    assert hasattr(cli_setup, "OpenCodeSetup")
+    assert hasattr(cli_setup, "detect_all")
+    assert hasattr(cli_setup, "wire_cli")
+    assert hasattr(cli_setup, "unwire_cli")
+    assert hasattr(skill_bridge, "SkillBridgeTool")
+    # CliSetupCommandHandler is an entry-point class, not a symbol on a module
+    assert CliSetupCommandHandler.__name__ == "CliSetupCommandHandler"
