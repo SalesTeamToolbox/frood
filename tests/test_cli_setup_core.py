@@ -47,9 +47,15 @@ def cc_root_with_settings(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def cc_root_bare(tmp_path: Path) -> Path:
-    """A Claude Code home root with the .claude dir but no settings.json yet."""
-    (tmp_path / ".claude").mkdir()
-    return tmp_path
+    """A Claude Code home root with the .claude dir but no settings.json yet.
+
+    Uses a subdirectory so tests that request both ``cc_root_with_settings``
+    and ``cc_root_bare`` don't collide on ``tmp_path/.claude``.
+    """
+    bare = tmp_path / "bare-home"
+    bare.mkdir()
+    (bare / ".claude").mkdir()
+    return bare
 
 
 @pytest.fixture
