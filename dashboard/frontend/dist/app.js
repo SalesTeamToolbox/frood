@@ -569,6 +569,30 @@ async function toggleSkill(name, enabled) {
   }
 }
 
+// ---- CLI Setup loader + toggle (Phase 01: cross-cli-setup-core, DASH-03) ----
+async function loadCliSetup() {
+  try {
+    state.cliSetup = (await api("/cli-setup/detect")) || {};
+  } catch (e) {
+    state.cliSetup = { _error: e.message || "Failed to detect CLIs" };
+  }
+}
+
+async function toggleCliSetup(cli, enabled) {
+  try {
+    await api(`/cli-setup/wire`, {
+      method: "POST",
+      body: JSON.stringify({ cli, enabled }),
+    });
+    toast(`CLI '${cli}' ${enabled ? "wired" : "unwired"}`, "success");
+  } catch (e) {
+    toast("Failed to toggle CLI: " + e.message, "error");
+  } finally {
+    await loadCliSetup();
+    renderCliSetup();
+  }
+}
+
 async function loadProviders() {
   try {
     state.providers = (await api("/providers")) || {};
@@ -1037,6 +1061,50 @@ function renderSkills() {
       '<td style="text-align:center"><label class="toggle-switch" title="' + (enabled ? 'Disable' : 'Enable') + ' ' + esc(s.name) + '" onclick="event.stopPropagation()"><input type="checkbox" id="' + toggleId + '" ' + (enabled ? 'checked' : '') + ' onchange="toggleSkill(\'' + esc(s.name) + '\', this.checked)"><span class="toggle-slider"></span></label></td></tr>' + detail;
   }).join('');
   el.innerHTML = '<div class="card"><div class="card-header"><h3>Loaded Skills (' + filtered.length + '/' + state.skills.length + ')</h3></div><div class="tool-search-wrap"><input type="text" class="tool-search-input" placeholder="Search skills by name or description..." value="' + esc(state._skillSearch || '') + '" oninput="state._skillSearch=this.value;renderSkills()"></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Description</th><th>Task Types</th><th>Auto-load</th><th style="text-align:center;width:80px">Enabled</th></tr></thead><tbody>' + (rows || '<tr><td colspan="5"><div class="empty-state">No skills match filter</div></td></tr>') + '</tbody></table></div></div>';
+}
+
+function renderCliSetup() {
+  // CLI Setup panel (Phase 01: cross-cli-setup-core, DASH-03)
+  var el = document.getElementById("page-content");
+  if (!el || state.page !== "cli-setup") return;
+  var data = state.cliSetup || {};
+  if (data._error) {
+    el.innerHTML = '<div class="card"><div class="card-header"><h3>CLI Setup</h3></div><div class="empty-state" style="color:var(--error)">Failed to detect CLIs: ' + esc(data._error) + '</div></div>';
+    return;
+  }
+  var entries = Object.entries(data).filter(function(kv) { return !kv[0].startsWith("_"); });
+  if (!entries.length) {
+    el.innerHTML = '<div class="card"><div class="card-header"><h3>CLI Setup</h3></div><div class="empty-state">Detecting CLIs...</div></div>';
+    return;
+  }
+  var rows = entries.map(function(kv) {
+    var cli = kv[0];
+    var info = kv[1] || {};
+    var installed = info.installed ? 'installed' : 'not installed';
+    var wired = info.wired ? 'wired' : 'not wired';
+    var checked = info.wired ? 'checked' : '';
+    var toggleId = "cli-setup-toggle-" + esc(cli);
+    return '<tr>' +
+      '<td style="font-weight:600">' + esc(cli) + '</td>' +
+      '<td><span class="badge-source">' + esc(installed) + '</span> <span class="badge-category">' + esc(wired) + '</span></td>' +
+      '<td style="text-align:center"><label class="toggle-switch" title="' + (info.wired ? 'Unwire' : 'Wire') + ' ' + esc(cli) + '"><input type="checkbox" id="' + toggleId + '" ' + checked + ' onchange="toggleCliSetup(\'' + esc(cli) + '\', this.checked)"><span class="toggle-slider"></span></label></td>' +
+      '</tr>';
+  }).join('');
+  el.innerHTML =
+    '<div class="card">' +
+      '<div class="card-header"><h3>CLI Setup</h3></div>' +
+      '<div style="padding:0.5rem 1rem;color:var(--text-secondary)">' +
+        '<p>Frood can wire itself into other MCP-capable CLIs so they can call ' +
+        '<code>frood_skill</code> to load warehoused skills/commands/agents on demand. ' +
+        'Toggling here produces the same config mutations as running ' +
+        '<code>frood cli-setup &lt;cli&gt;</code> / <code>frood cli-setup unwire &lt;cli&gt;</code> ' +
+        'from the command line.</p>' +
+        '<p><a href="https://github.com/anthropics/claude-code" target="_blank" rel="noopener">Docs</a></p>' +
+      '</div>' +
+      '<div class="table-wrap"><table><thead><tr><th>CLI</th><th>State</th><th style="text-align:center;width:80px">Wired</th></tr></thead><tbody>' +
+        rows +
+      '</tbody></table></div>' +
+    '</div>';
 }
 
 function renderApps() {
@@ -1972,6 +2040,7 @@ async function loadAll() {
     loadTools(), loadSkills(), loadProviders(),
     loadHealth(), loadApiKeys(), loadEnvSettings(), loadStorageStatus(), loadTokenStats(),
     loadApps(), loadReports(), loadActivity(),
+    loadCliSetup(),
   ]);
 }
 
@@ -2017,6 +2086,7 @@ function render() {
           <a href="#" data-page="apps" class="${state.page === "apps" ? "active" : ""}" onclick="event.preventDefault();navigate('apps');closeMobileSidebar()">&#128640; Agent Apps</a>
           <a href="#" data-page="tools" class="${state.page === "tools" ? "active" : ""}" onclick="event.preventDefault();navigate('tools');closeMobileSidebar()">&#128295; Tools</a>
           <a href="#" data-page="skills" class="${state.page === "skills" ? "active" : ""}" onclick="event.preventDefault();navigate('skills');closeMobileSidebar()">&#9889; Skills</a>
+          <a href="#" data-page="cli-setup" class="${state.page === "cli-setup" ? "active" : ""}" onclick="event.preventDefault();navigate('cli-setup');closeMobileSidebar()">&#128279; CLI Setup</a>
           <a href="#" data-page="reports" class="${state.page === "reports" ? "active" : ""}" onclick="event.preventDefault();navigate('reports');closeMobileSidebar()">&#128202; Reports</a>
           <a href="#" data-page="activity" class="${state.page === "activity" ? "active" : ""}" onclick="event.preventDefault();navigate('activity');closeMobileSidebar()">&#128200; Activity</a>
           <a href="#" data-page="settings" class="${state.page === "settings" ? "active" : ""}" onclick="event.preventDefault();navigate('settings');closeMobileSidebar()">&#9881; Settings</a>
@@ -2034,7 +2104,7 @@ function render() {
           <button class="hamburger-btn" onclick="toggleMobileSidebar()" aria-label="Open menu">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
-          <h2>${{ apps: "Agent Apps", tools: "Tools", skills: "Skills", reports: "Reports", activity: "Activity", settings: "Settings" }[state.page] || "Dashboard"}</h2>
+          <h2>${{ apps: "Agent Apps", tools: "Tools", skills: "Skills", "cli-setup": "CLI Setup", reports: "Reports", activity: "Activity", settings: "Settings" }[state.page] || "Dashboard"}</h2>
           <div class="topbar-actions">
             ${state.page === "apps" ? '<button class="btn btn-primary btn-sm" onclick="showCreateAppModal()">+ New App</button>' : ""}
           </div>
@@ -2049,6 +2119,7 @@ function render() {
     apps: renderApps,
     tools: renderTools,
     skills: renderSkills,
+    "cli-setup": renderCliSetup,
     reports: renderReports,
     activity: renderActivity,
     settings: renderSettings,
