@@ -1347,16 +1347,24 @@ def create_app(
                 if "/" in model_id:
                     key = os.environ.get("NVIDIA_API_KEY", "")
                     return ("https://integrate.api.nvidia.com", key, model_id) if key else None
-                # Bare names = OpenCode Zen (qwen3.6-plus-free etc.)
-                # Route tool-call requests to Zen's OpenAI-compatible endpoint.
-                # If Zen doesn't support tool calls the upstream will tell us so.
-                _zen_models = {
+                # Bare names = OpenCode Zen. Route to Zen's OpenAI-compatible endpoint.
+                # Use the LIVE model list maintained by refresh_zen_models_async (every
+                # 6h) so changes to Zen's catalog take effect without redeploying Frood.
+                # Fall back to a conservative hardcoded set for the startup window
+                # BEFORE the first refresh lands.
+                try:
+                    from core.agent_manager import PROVIDER_MODELS as _PM
+                    _live_zen = set(_PM.get("zen", {}).values())
+                except ImportError:
+                    _live_zen = set()
+                _zen_fallback = {
                     "qwen3.6-plus-free",
                     "minimax-m2.5-free",
                     "nemotron-3-super-free",
                     "big-pickle",
                 }
-                if model_id in _zen_models:
+                _zen_catalog = _live_zen if _live_zen else _zen_fallback
+                if model_id in _zen_catalog:
                     key = os.environ.get("ZEN_API_KEY", "")
                     # Zen's base is https://opencode.ai/zen — the "/v1" is
                     # appended by the endpoint build below.
