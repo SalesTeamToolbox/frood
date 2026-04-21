@@ -273,16 +273,26 @@ class Settings:
     # unless the operator explicitly opts in). True for providers with no free
     # tier (Anthropic, OpenAI — if you set a key for these, you already
     # understand paid usage follows).
-    allow_paid_zen: bool = False         # ALLOW_PAID_ZEN
+    allow_paid_zen: bool = False  # ALLOW_PAID_ZEN
     allow_paid_openrouter: bool = False  # ALLOW_PAID_OPENROUTER
-    allow_paid_nvidia: bool = False      # ALLOW_PAID_NVIDIA
-    allow_paid_anthropic: bool = True    # ALLOW_PAID_ANTHROPIC
-    allow_paid_openai: bool = True       # ALLOW_PAID_OPENAI
+    allow_paid_nvidia: bool = False  # ALLOW_PAID_NVIDIA
+    allow_paid_anthropic: bool = True  # ALLOW_PAID_ANTHROPIC
+    allow_paid_openai: bool = True  # ALLOW_PAID_OPENAI
 
     # Memory consolidation (QUAL-01)
     consolidation_auto_threshold: float = 0.95
     consolidation_flag_threshold: float = 0.85
     consolidation_trigger_count: int = 100
+
+    # Memory repair (Phase 1: deterministic CC flat-file checks)
+    memory_repair_enabled: bool = True
+    memory_repair_apply: bool = False  # dry-run default; must opt in to mutate
+    memory_repair_auto_threshold: float = 0.95
+    memory_repair_flag_threshold: float = 0.85
+    memory_repair_stop_trigger_count: int = 5
+    memory_repair_snapshot_dir: str = ".frood/memory-repair-snapshots"
+    memory_repair_audit_log: str = ".frood/memory-repair-log.jsonl"
+    memory_repair_harnesses: str = "claude_code"  # csv: claude_code[,codex,opencode]
 
     # Learning extraction (Phase 21)
     learning_min_evidence: int = 3
@@ -616,6 +626,23 @@ class Settings:
             consolidation_auto_threshold=float(os.getenv("CONSOLIDATION_AUTO_THRESHOLD", "0.95")),
             consolidation_flag_threshold=float(os.getenv("CONSOLIDATION_FLAG_THRESHOLD", "0.85")),
             consolidation_trigger_count=int(os.getenv("CONSOLIDATION_TRIGGER_COUNT", "100")),
+            # Memory repair (Phase 1)
+            memory_repair_enabled=os.getenv("MEMORY_REPAIR_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
+            memory_repair_apply=os.getenv("MEMORY_REPAIR_APPLY", "false").lower()
+            in ("true", "1", "yes"),
+            memory_repair_auto_threshold=float(os.getenv("MEMORY_REPAIR_AUTO_THRESHOLD", "0.95")),
+            memory_repair_flag_threshold=float(os.getenv("MEMORY_REPAIR_FLAG_THRESHOLD", "0.85")),
+            memory_repair_stop_trigger_count=int(
+                os.getenv("MEMORY_REPAIR_STOP_TRIGGER_COUNT", "5")
+            ),
+            memory_repair_snapshot_dir=os.getenv(
+                "MEMORY_REPAIR_SNAPSHOT_DIR", ".frood/memory-repair-snapshots"
+            ),
+            memory_repair_audit_log=os.getenv(
+                "MEMORY_REPAIR_AUDIT_LOG", ".frood/memory-repair-log.jsonl"
+            ),
+            memory_repair_harnesses=os.getenv("MEMORY_REPAIR_HARNESSES", "claude_code"),
             # Performance-based rewards
             rewards_enabled=os.getenv("REWARDS_ENABLED", "false").lower() in ("true", "1", "yes"),
             rewards_silver_threshold=float(os.getenv("REWARDS_SILVER_THRESHOLD", "0.65")),
@@ -815,6 +842,7 @@ class Settings:
                     if _k and _v:
                         # Decrypt the value before setting in environment
                         from core.encryption import decrypt_value
+
                         secret = os.getenv("JWT_SECRET", "")
                         decrypted_value = decrypt_value(_v, secret) if secret else _v
                         os.environ[_k] = decrypted_value
