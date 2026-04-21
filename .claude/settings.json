@@ -108,6 +108,22 @@
             "type": "command",
             "command": "cd c:/Users/rickw/projects/frood && python .claude/hooks/cleanup-orphans.py",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "cd c:/Users/rickw/projects/frood && python .claude/hooks/memory-repair.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd c:/Users/rickw/projects/frood && python .claude/hooks/memory-repair.py",
+            "timeout": 5
           }
         ]
       }
