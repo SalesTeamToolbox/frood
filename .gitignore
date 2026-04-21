@@ -9,6 +9,10 @@ venv/
 
 # Environment
 .env
+.env.paperclip
+.env.paperclip.vps
+!.env.example
+!.env.paperclip.example
 
 # Logs
 *.log
