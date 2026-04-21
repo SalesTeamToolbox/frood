@@ -124,6 +124,7 @@ class MemoryTool(Tool):
                         "strengthen",
                         "reindex_cc",
                         "consolidate",
+                        "repair",
                     ],
                     "description": (
                         "store: save information to MEMORY.md under a section; "
@@ -134,7 +135,8 @@ class MemoryTool(Tool):
                         "correct: replace content in a memory section; "
                         "strengthen: confirm a recalled memory was useful (boosts confidence); "
                         "reindex_cc: scan all Claude Code memory files and sync missing ones to Qdrant; "
-                        "consolidate: run dedup consolidation on Qdrant memory (removes duplicates, flags near-matches)"
+                        "consolidate: run dedup consolidation on Qdrant memory (removes duplicates, flags near-matches); "
+                        "repair: scan a harness's flat-file memory for dangling index links, orphan files, and exact duplicates (dry-run default)"
                     ),
                 },
                 "section": {
@@ -167,6 +169,20 @@ class MemoryTool(Tool):
                         "Defaults to 'global'."
                     ),
                 },
+                "harness": {
+                    "type": "string",
+                    "description": (
+                        "Harness whose flat-file memory to repair (for 'repair' action). "
+                        "Phase 1 supports 'claude_code' only. Defaults to 'claude_code'."
+                    ),
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": (
+                        "For 'repair' action: when true (default) nothing is mutated, "
+                        "only the audit log is written. Set false to apply changes."
+                    ),
+                },
             },
             "required": ["action"],
         }
@@ -178,8 +194,13 @@ class MemoryTool(Tool):
         content: str = "",
         event_type: str = "note",
         project: str = "global",
+        harness: str = "claude_code",
+        dry_run: bool = True,
         **kwargs,
     ) -> ToolResult:
+        if action == "repair":
+            return await self._handle_repair(harness=harness, dry_run=dry_run)
+
         if not self._store:
             return ToolResult(
                 output="Memory system is not initialized.",
@@ -207,9 +228,42 @@ class MemoryTool(Tool):
             return await self._handle_consolidate()
         else:
             return ToolResult(
-                output=f"Unknown action: {action}. Use store, recall, log, search, forget, correct, strengthen, reindex_cc, or consolidate.",
+                output=f"Unknown action: {action}. Use store, recall, log, search, forget, correct, strengthen, reindex_cc, consolidate, or repair.",
                 success=False,
             )
+
+    async def _handle_repair(self, harness: str, dry_run: bool) -> ToolResult:
+        from core.config import settings
+        from memory.repair import build_adapter, run_repair
+
+        if not settings.memory_repair_enabled:
+            return ToolResult(
+                output="Memory repair is disabled (MEMORY_REPAIR_ENABLED=false).",
+                success=False,
+            )
+
+        try:
+            adapter = build_adapter(harness)
+        except ValueError as exc:
+            return ToolResult(output=str(exc), success=False)
+
+        effective_dry_run = dry_run or not settings.memory_repair_apply
+        result = await run_repair(
+            adapter=adapter,
+            harness=harness,
+            dry_run=effective_dry_run,
+            snapshot_dir=settings.memory_repair_snapshot_dir,
+            audit_log=settings.memory_repair_audit_log,
+        )
+        summary = (
+            f"memory-repair [{harness}] mode={'dry-run' if result.dry_run else 'apply'} "
+            f"scanned={result.plans_scanned} proposed={result.ops_proposed} "
+            f"applied={result.ops_applied} flagged={result.ops_flagged} "
+            f"skipped={result.ops_skipped}"
+        )
+        if result.error:
+            summary += f" last_error={result.error}"
+        return ToolResult(output=summary, success=result.error is None)
 
     async def _handle_store(
         self, section: str, content: str, project: str = "global"
