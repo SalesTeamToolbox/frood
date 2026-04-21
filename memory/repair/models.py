@@ -73,9 +73,7 @@ class IndexModel(BaseModel):
         self.lines.append(IndexLine(text=text, entry=entry))
 
     @classmethod
-    def from_entries(
-        cls, path: Path, entries: list[IndexEntry], preamble: str = ""
-    ) -> IndexModel:
+    def from_entries(cls, path: Path, entries: list[IndexEntry], preamble: str = "") -> IndexModel:
         """Build a minimal IndexModel from a flat list of entries (test helper)."""
         lines: list[IndexLine] = []
         if preamble:
@@ -110,6 +108,20 @@ class RepairPlan(BaseModel):
     ops: list[RepairOp] = Field(default_factory=list)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class LLMJudgment(BaseModel):
+    """Structured output from an LLM-judged repair decision.
+
+    Produced by memory.repair.llm_judge. Always treated as flag-for-review —
+    the executor never auto-applies LLM-originated ops in Phase 1-3.
+    """
+
+    verdict: Literal["supersede", "merge", "none"] = "none"
+    rationale: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    keeper_target: str = ""  # filename of the survivor (for supersede/merge)
+    provider: str = ""  # which LLM provider returned the judgment
 
 
 class RepairAuditRecord(BaseModel):

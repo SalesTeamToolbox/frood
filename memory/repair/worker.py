@@ -69,6 +69,10 @@ async def run_repair(
     workspace: str | Path = ".",
     snapshot_dir: str | Path = ".frood/memory-repair-snapshots",
     audit_log: str | Path = ".frood/memory-repair-log.jsonl",
+    enable_semantic: bool = False,
+    enable_llm: bool = False,
+    auto_threshold: float = 0.95,
+    flag_threshold: float = 0.85,
 ) -> RepairResult:
     """Run the deterministic repair pipeline against one harness."""
 
@@ -110,7 +114,16 @@ async def run_repair(
         try:
             index = await adapter.read_index(project)
             files = await adapter.list_memory_files(project)
-            ops = await run_checks(adapter, project, index, files)
+            ops = await run_checks(
+                adapter,
+                project,
+                index,
+                files,
+                enable_semantic=enable_semantic,
+                enable_llm=enable_llm,
+                auto_threshold=auto_threshold,
+                flag_threshold=flag_threshold,
+            )
         except Exception as exc:
             logger.warning("memory-repair: scan failed for %s: %s", project, exc)
             last_error = f"scan {project}: {exc}"

@@ -61,13 +61,42 @@ async def run_checks(
     project: Path,
     index: IndexModel | None,
     files: list[Path],
+    *,
+    enable_semantic: bool = False,
+    enable_llm: bool = False,
+    auto_threshold: float = 0.95,
+    flag_threshold: float = 0.85,
 ) -> list[RepairOp]:
-    """Run all Phase 1 checks against one project and return proposed ops."""
+    """Run repair checks against one project and return proposed ops.
+
+    ``enable_semantic`` gates the Phase 2 cosine-based `semantic_duplicate_check`.
+    ``enable_llm`` gates the LLM-judged `conflict_supersede_check` and
+    `merge_candidate_check` — both always emit flag-for-review ops.
+    """
 
     ops: list[RepairOp] = []
     ops.extend(dangling_link_check(adapter.harness_name, project, index))
     ops.extend(await orphan_file_check(adapter.harness_name, project, index, files))
     ops.extend(await exact_duplicate_check(adapter.harness_name, files))
+
+    if enable_semantic or enable_llm:
+        from memory.repair.semantic import find_similar_pairs
+
+        pairs = await find_similar_pairs(files, min_similarity=flag_threshold)
+        if enable_semantic:
+            ops.extend(
+                semantic_duplicate_check(adapter.harness_name, pairs, auto_threshold=auto_threshold)
+            )
+        if enable_llm:
+            ops.extend(
+                await conflict_supersede_check(
+                    adapter.harness_name,
+                    pairs,
+                    auto_threshold=auto_threshold,
+                    flag_threshold=flag_threshold,
+                )
+            )
+
     return ops
 
 
@@ -147,6 +176,92 @@ async def orphan_file_check(
                     "entry_target": f.name,
                     "entry_title": title,
                     "entry_description": description,
+                },
+            )
+        )
+    return ops
+
+
+def semantic_duplicate_check(
+    harness: str,
+    pairs: list,
+    auto_threshold: float = 0.95,
+) -> list[RepairOp]:
+    """Emit delete_file for pairs whose cosine similarity exceeds auto_threshold.
+
+    "Keeper" = older file (older mtime wins, same tie-break as exact_duplicate_check).
+    Deterministic (pure cosine math); the executor may auto-apply these.
+    """
+    ops: list[RepairOp] = []
+    for pair in pairs:
+        if pair.similarity < auto_threshold:
+            continue
+        a_mtime = pair.a.stat().st_mtime
+        b_mtime = pair.b.stat().st_mtime
+        keeper, dup = (pair.a, pair.b) if a_mtime <= b_mtime else (pair.b, pair.a)
+        ops.append(
+            RepairOp(
+                kind="delete_file",
+                target=dup,
+                rationale=(
+                    f"Semantic duplicate: cosine {pair.similarity:.3f} vs "
+                    f"{keeper.name!r}. Keeping older file."
+                ),
+                confidence=float(pair.similarity),
+                harness=harness,
+                extra={"keeper": str(keeper), "similarity": pair.similarity},
+            )
+        )
+    return ops
+
+
+async def conflict_supersede_check(
+    harness: str,
+    pairs: list,
+    auto_threshold: float = 0.95,
+    flag_threshold: float = 0.85,
+) -> list[RepairOp]:
+    """LLM-judged: for pairs in [flag_threshold, auto_threshold), ask the LLM
+    whether one entry supersedes the other. Always emits flag-for-review ops
+    (``decided_by="llm"``) — the executor never auto-applies these.
+    """
+    from memory.repair.llm_judge import judge
+
+    ops: list[RepairOp] = []
+    for pair in pairs:
+        if not (flag_threshold <= pair.similarity < auto_threshold):
+            continue
+        a_mtime = pair.a.stat().st_mtime
+        b_mtime = pair.b.stat().st_mtime
+        newer, older = (pair.a, pair.b) if a_mtime >= b_mtime else (pair.b, pair.a)
+        newer_text, older_text = (
+            (pair.a_text, pair.b_text) if newer is pair.a else (pair.b_text, pair.a_text)
+        )
+
+        verdict = await judge(
+            "supersede",
+            a_target=newer.name,
+            a_text=newer_text,
+            b_target=older.name,
+            b_text=older_text,
+        )
+        if verdict.verdict != "supersede":
+            continue
+        ops.append(
+            RepairOp(
+                kind="mark_superseded",
+                target=older,
+                rationale=(
+                    f"LLM-judged supersede (cosine {pair.similarity:.3f}): "
+                    f"{newer.name!r} supersedes {older.name!r}. {verdict.rationale[:200]}"
+                ),
+                confidence=float(verdict.confidence),
+                decided_by="llm",
+                harness=harness,
+                extra={
+                    "keeper": str(newer),
+                    "similarity": pair.similarity,
+                    "llm_provider": verdict.provider,
                 },
             )
         )
