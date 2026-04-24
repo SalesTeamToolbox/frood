@@ -371,6 +371,92 @@ def create_sidecar_app(
         finally:
             unregister_run(ctx.run_id)
 
+    # -- Phase 2 learning loop: lesson extraction (Arianna API key auth) --
+
+    def _verify_arianna_key(request: Request) -> str:
+        """Bearer auth that validates against ARIANNA_API_KEY env (the same
+        shared-secret the Odoo support API uses). Distinct from get_current_user
+        which expects a JWT — this endpoint is called by the Odoo cron, which
+        only knows the Arianna shared secret.
+        """
+        import hmac as _hmac
+        auth = request.headers.get("Authorization", "") or ""
+        if not auth.lower().startswith("bearer "):
+            raise HTTPException(status_code=401, detail="missing_bearer")
+        token = auth.split(" ", 1)[1].strip()
+        expected = (os.environ.get("ARIANNA_API_KEY", "") or "").strip()
+        if not expected or not token:
+            raise HTTPException(status_code=401, detail="invalid_token")
+        if not _hmac.compare_digest(expected, token):
+            raise HTTPException(status_code=401, detail="invalid_token")
+        return "arianna-api"
+
+    class _LessonExtractRequest(BaseModel):
+        ticket_id: int
+        ticket_number: str = ""
+        subject: str = ""
+        description: str = ""
+        department_code: str = ""
+        department_name: str = ""
+        dealer_name: str = ""
+        ai_draft: str = ""
+        human_reply: str = ""
+        agent_partner_xmlid: str = ""
+
+    @app.post("/sidecar/extract-lesson", status_code=202)
+    async def sidecar_extract_lesson(
+        req: _LessonExtractRequest,
+        background_tasks: BackgroundTasks,
+        _user: str = Depends(_verify_arianna_key),
+    ) -> dict:
+        """Extract a lesson from an escalated ticket and store it in Odoo.
+
+        Called by the Odoo cron once per eligible ticket. We schedule the
+        LLM extraction in the background and return 202 immediately so the
+        cron can keep moving through its batch — the result is POSTed back
+        to Odoo asynchronously.
+        """
+        if req.ticket_id <= 0:
+            raise HTTPException(status_code=400, detail="ticket_id required")
+        if not req.ai_draft or not req.human_reply:
+            raise HTTPException(
+                status_code=400,
+                detail="ai_draft and human_reply required",
+            )
+
+        ticket_context = {
+            "subject": req.subject,
+            "description": req.description,
+            "department_code": req.department_code,
+            "department_name": req.department_name,
+            "dealer_name": req.dealer_name,
+        }
+
+        async def _run_extraction() -> None:
+            try:
+                result = await orchestrator.extract_lesson(
+                    ticket_id=req.ticket_id,
+                    ticket_context=ticket_context,
+                    ai_draft=req.ai_draft,
+                    human_reply=req.human_reply,
+                    agent_partner_xmlid=req.agent_partner_xmlid,
+                )
+                logger.info(
+                    "Lesson extraction for ticket %s: %s",
+                    req.ticket_id, result,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Lesson extraction crashed for ticket %s: %s",
+                    req.ticket_id, exc,
+                )
+
+        background_tasks.add_task(_run_extraction)
+        return {
+            "status": "accepted",
+            "ticket_id": req.ticket_id,
+        }
+
     # -- Memory recall endpoint (Bearer auth required per D-15) --
 
     @app.post("/memory/recall", response_model=MemoryRecallResponse)
