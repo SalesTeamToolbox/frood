@@ -1757,6 +1757,25 @@ Output ONLY the subject line + email body. No preamble, no markdown, no quotes."
                             headers=headers, json=flag_payload,
                         )
                         r.raise_for_status()
+                        # Copy the Odoo gate decision (ready / needs_info /
+                        # feature_escalated) into the decision dict so the
+                        # Paperclip issue creator can route correctly —
+                        # assign bugs-with-screenshots to Bug-Fixer-CC
+                        # (wakes it), leave features in backlog for humans,
+                        # and skip the Paperclip post entirely on needs_info.
+                        try:
+                            flag_response = r.json() or {}
+                            decision = {
+                                **decision,
+                                "coding_agent_status": flag_response.get(
+                                    "coding_agent_status", ""
+                                ),
+                                "has_screenshot": flag_response.get(
+                                    "has_screenshot", False
+                                ),
+                            }
+                        except Exception:
+                            pass
                         # Also surface on the Paperclip board so humans + the
                         # coding agent see it where they work. Failures here
                         # are logged but don't undo the Odoo flag.
@@ -1934,11 +1953,57 @@ Output ONLY the subject line + email body. No preamble, no markdown, no quotes."
         summary = (decision.get("summary") or ticket.get("subject", "") or "").strip()
         title = f"[{ticket_num}] {summary}"[:200] or f"[{ticket_num}] Coding review needed"
 
+        # Routing decision — Odoo's flag_for_coding_review endpoint returns
+        # coding_agent_status in {ready, needs_info, feature_escalated}.
+        # - ready              -> assign to Bug-Fixer-CC + status=todo
+        #                         (Paperclip auto-wakes the agent on any
+        #                          non-backlog assignment via
+        #                          queueIssueAssignmentWakeup)
+        # - needs_info         -> skip Paperclip entirely; the Odoo chatter
+        #                         note already asked the dealer for a
+        #                         screenshot. Nothing for a human to do yet.
+        # - feature_escalated  -> create issue unassigned + backlog so a
+        #                         human picks it up (the whole point: no CC
+        #                         burn on feature work).
+        coding_status = (decision.get("coding_agent_status") or "").strip()
+        if coding_status == "needs_info":
+            logger.info(
+                "Skipping Paperclip post for %s — needs_info (no screenshot); "
+                "dealer was asked to attach one on the Odoo ticket.",
+                ticket_num,
+            )
+            return None
+
+        bug_fixer_agent_id = os.getenv(
+            "PAPERCLIP_BUG_FIXER_AGENT_ID",
+            "8454db4d-08e8-470a-a5f3-4a5e75f9c8a3",
+        )
+        if coding_status == "ready":
+            routing_line = (
+                f"_Flagged by {flagged_by} (AI support team). "
+                f"Bug-Fixer-CC is picking this up automatically — a PR link "
+                f"will appear on the Odoo ticket when a fix is opened._"
+            )
+            issue_status = "todo"
+            assignee_agent_id = bug_fixer_agent_id
+        else:
+            # feature_escalated or unknown -> human triage
+            routing_line = (
+                f"_Flagged by {flagged_by} as **{decision.get('category') or 'feature'}** "
+                f"— escalated to human review (the Bug-Fixer-CC agent only "
+                f"handles bugs with a reproducing screenshot). Please triage "
+                f"and merge into a product roadmap ticket if the request has "
+                f"merit._"
+            )
+            issue_status = "backlog"
+            assignee_agent_id = None
+
         description_lines = [
             f"**Source:** Odoo support ticket [{ticket_num}](https://synergicsolar.com/odoo/action-1302/{ticket.get('id')})",
             f"**Dealer:** {ticket.get('dealer_org', '(unknown)')}",
             f"**Category:** {decision.get('category') or 'bug'}",
             f"**Ticket priority:** {ticket.get('priority', '1')}",
+            f"**Coding-agent status:** {coding_status or '(unset)'}",
             "",
             "## Summary",
             summary or "(none)",
@@ -1952,9 +2017,7 @@ Output ONLY the subject line + email body. No preamble, no markdown, no quotes."
             "```",
             "",
             "---",
-            f"_Flagged by {flagged_by} (AI support team). Automated replies on "
-            "this ticket are paused until an admin clears the flag. Coding "
-            "agent: manual dispatch._",
+            routing_line,
         ]
 
         payload = {
@@ -1962,8 +2025,10 @@ Output ONLY the subject line + email body. No preamble, no markdown, no quotes."
             "title": title,
             "description": "\n".join(description_lines),
             "priority": priority,
-            "status": "backlog",
+            "status": issue_status,
         }
+        if assignee_agent_id:
+            payload["assigneeAgentId"] = assignee_agent_id
 
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
