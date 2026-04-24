@@ -1468,6 +1468,125 @@ Output ONLY the subject line + email body. No preamble, no markdown, no quotes."
         },
     }
 
+    async def _execute_prospecting_review_workflow(
+        self, run_id: str, ctx: AdapterExecutionContext,
+    ) -> dict[str, Any]:
+        """Weekly prospecting review: fetch stats from Odoo, post to Paperclip.
+
+        Deterministic — no LLM call. Pulls the pre-formatted Markdown from
+        Odoo's /api/v1/prospecting/weekly-report, creates a Paperclip issue
+        with that content, and returns the report as the run summary so it
+        also shows up in the heartbeat_run result_json for inspection.
+
+        Expected env:
+          ODOO_PROSPECT_API_URL   e.g. https://synergicsolar.com
+          ODOO_PROSPECT_API_KEY   Bearer token for /api/v1/prospects/*
+          PAPERCLIP_API_URL       e.g. https://paperclip.synergicsolar.com
+          PAPERCLIP_API_KEY       Bearer token for issue creation
+          PAPERCLIP_REVIEW_PROJECT_ID  UUID of the Dealer Outreach project
+
+        Config override via ctx.context.config / ctx.adapterConfig when the
+        env vars are absent — matches the convention of other Frood
+        workflows (support, research) that pull from agent.adapter_config.
+        """
+        import os
+
+        def _cfg(name: str, default: str = "") -> str:
+            # Prefer adapter_config passed by Paperclip, fall back to env.
+            adapter_cfg = ctx.context.get("config") or {}
+            return (
+                str(adapter_cfg.get(name) or "")
+                or os.environ.get(name, default)
+            ).strip()
+
+        odoo_url = _cfg("ODOO_PROSPECT_API_URL", "https://synergicsolar.com").rstrip("/")
+        odoo_key = _cfg("ODOO_PROSPECT_API_KEY")
+        paperclip_url = _cfg(
+            "PAPERCLIP_API_URL", "https://paperclip.synergicsolar.com"
+        ).rstrip("/")
+        paperclip_key = _cfg("PAPERCLIP_API_KEY")
+        project_id = _cfg("PAPERCLIP_REVIEW_PROJECT_ID")
+
+        if not odoo_key:
+            return {
+                "summary": "prospecting review skipped: ODOO_PROSPECT_API_KEY not set",
+                "model": "deterministic",
+                "provider": "none",
+            }
+
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            # 1. Fetch the report from Odoo.
+            try:
+                resp = await client.get(
+                    f"{odoo_url}/api/v1/prospecting/weekly-report",
+                    headers={"Authorization": f"Bearer {odoo_key}"},
+                    params={"days": 7},
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+            except Exception as exc:
+                logger.exception(
+                    "prospecting-review: failed to fetch report: %s", exc
+                )
+                return {
+                    "summary": f"failed to fetch weekly report: {exc}",
+                    "model": "deterministic",
+                    "provider": "none",
+                }
+
+            markdown = payload.get("markdown") or "(no markdown returned)"
+            delivery = payload.get("delivery", {})
+            opportunities = payload.get("opportunities", {})
+
+            # Short title summarizes the key numbers for the issue list view.
+            delivery_pct = delivery.get("delivery_rate_pct", 0)
+            new_leads = opportunities.get("new_prospect_leads", 0)
+            title = (
+                f"Weekly Prospecting Review — "
+                f"{delivery_pct:.0f}% delivery, {new_leads} new opportunities"
+            )
+
+            # 2. Post as a Paperclip issue for review (if configured).
+            issue_url = ""
+            if paperclip_key and project_id:
+                try:
+                    create_resp = await client.post(
+                        f"{paperclip_url}/api/projects/{project_id}/issues",
+                        headers={
+                            "Authorization": f"Bearer {paperclip_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "title": title,
+                            "description": markdown,
+                            "priority": "medium",
+                        },
+                    )
+                    if create_resp.status_code < 300:
+                        issue_url = create_resp.json().get("url") or str(
+                            create_resp.json().get("id") or ""
+                        )
+                    else:
+                        logger.warning(
+                            "prospecting-review: Paperclip issue create failed "
+                            "status=%s body=%s",
+                            create_resp.status_code, create_resp.text[:300],
+                        )
+                except Exception as exc:
+                    logger.exception(
+                        "prospecting-review: Paperclip issue create crashed: %s", exc
+                    )
+
+        summary_prefix = (
+            f"Posted issue: {issue_url}\n\n" if issue_url else
+            "Issue not posted (missing PAPERCLIP_API_KEY / project_id).\n\n"
+        )
+        return {
+            "summary": summary_prefix + markdown,
+            "model": "deterministic",
+            "provider": "none",
+        }
+
     async def _execute_support_workflow(
         self, run_id: str, ctx: AdapterExecutionContext,
         provider_name: str, model_name: str,
@@ -2257,6 +2376,16 @@ Schema depends on the chosen action:
             or "support ticket" in task_text
         )
 
+        # Detect prospecting review tasks (Prospecting-Review) — deterministic
+        # weekly report: fetch stats from Odoo, post as a Paperclip issue.
+        # No LLM call needed — the Odoo endpoint returns a ready-made Markdown
+        # summary, the workflow just wraps it as an issue.
+        is_prospecting_review = (
+            effective_task_type == "prospecting_review"
+            or ctx.context.get("agentRole") == "prospecting_reviewer"
+            or "weekly prospecting review" in task_text
+        )
+
         if is_research:
             logger.info("Run %s: using multi-phase research workflow", run_id)
             result = await self._execute_research_workflow(
@@ -2277,6 +2406,9 @@ Schema depends on the chosen action:
             result = await self._execute_support_workflow(
                 run_id, ctx, provider_name, model_name,
             )
+        elif is_prospecting_review:
+            logger.info("Run %s: using prospecting-review workflow", run_id)
+            result = await self._execute_prospecting_review_workflow(run_id, ctx)
         else:
             task_prompt = ctx.task or ctx.context.get("task", "") or f"Execute task for agent {ctx.agent_id}"
             messages: list[dict[str, str]] = []
