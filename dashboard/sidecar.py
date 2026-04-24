@@ -457,6 +457,39 @@ def create_sidecar_app(
             "ticket_id": req.ticket_id,
         }
 
+    # -- Prospect enrichment endpoint (Arianna API key auth) --
+    # Re-scrapes a single company website with the enhanced extractor to
+    # recover contact info for prospects that came in email-less from the
+    # original research pass. Used by the Odoo
+    # _cron_enrich_emailless_prospects cron — takes a website URL, runs
+    # _scan_contact_from_html over homepage + contact/about/team paths with
+    # Cloudflare email-protection decoding, and returns whatever was
+    # recovered. Intentionally synchronous (no BackgroundTasks) — the Odoo
+    # cron wants the result inline so it can write back immediately.
+    class _EnrichRequest(BaseModel):
+        prospect_id: int = 0   # echoed back for the caller's bookkeeping
+        name: str = ""
+        website: str = ""
+
+    @app.post("/sidecar/prospect-enrich")
+    async def sidecar_prospect_enrich(
+        req: _EnrichRequest,
+        _user: str = Depends(_verify_arianna_key),
+    ) -> dict:
+        if not req.website:
+            raise HTTPException(status_code=400, detail="website required")
+        try:
+            result = await orchestrator.enrich_single_prospect(
+                name=req.name, website=req.website,
+            )
+        except Exception as exc:
+            logger.exception(
+                "prospect-enrich failed for %s: %s", req.website, exc,
+            )
+            raise HTTPException(status_code=502, detail=f"enrichment_failed: {exc}")
+        result["prospect_id"] = req.prospect_id
+        return result
+
     # -- Memory recall endpoint (Bearer auth required per D-15) --
 
     @app.post("/memory/recall", response_model=MemoryRecallResponse)

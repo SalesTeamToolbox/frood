@@ -42,6 +42,13 @@ _RESERVED_AREA_CODES = frozenset({
     "700", "710", "776", "977",  # special / reserved
 })
 _MAILTO_RE = re.compile(r"mailto:([^\"'>\s?]+)", re.IGNORECASE)
+# Cloudflare email protection: <a class="__cf_email__" data-cfemail="HEX">
+# OR inline <span data-cfemail="HEX">. The hex payload is the email XOR'd
+# with a 1-byte key (first 2 hex chars). Decoding recovers the address
+# that a browser would render after Cloudflare's JS runs.
+_CF_EMAIL_RE = re.compile(
+    r"data-cfemail=[\"']([0-9a-fA-F]+)[\"']"
+)
 _FORM_ACTION_RE = re.compile(r"<form[^>]*action=[\"']([^\"']+)[\"']", re.IGNORECASE)
 _CONTACT_HREF_RE = re.compile(
     r"<a[^>]*href=[\"']([^\"']*(?:contact|get-quote|get-in-touch)[^\"']*)[\"']",
@@ -91,6 +98,28 @@ _PLACEHOLDER_CONTACT_NAMES = frozenset({
     "info", "admin", "administrator", "team", "operations", "hr",
     "contact", "webmaster", "office", "reception", "general manager",
 })
+
+
+def _decode_cfemail(hex_payload: str) -> str:
+    """Decode a Cloudflare email-protection data-cfemail hex payload.
+
+    Cloudflare XORs the email against a 1-byte key (the first 2 hex chars
+    of the payload) and encodes the result as hex. Reversing it gives the
+    plaintext address that the browser would render after the CF JS runs.
+    Returns "" on any malformed input.
+    """
+    try:
+        raw = bytes.fromhex(hex_payload)
+    except ValueError:
+        return ""
+    if len(raw) < 2:
+        return ""
+    key = raw[0]
+    decoded = bytes(b ^ key for b in raw[1:]).decode("utf-8", errors="ignore")
+    decoded = decoded.strip().lower()
+    if "@" not in decoded or "." not in decoded.split("@", 1)[1]:
+        return ""
+    return decoded
 
 
 def _sanitize_email(raw):
@@ -506,29 +535,46 @@ CRITICAL OUTPUT RULES (non-negotiable — malformed JSON causes the run to abort
                     website = "https://" + website
 
                 homepage_html = ""
-                contact_html = ""
+                extra_html = ""
                 if website:
                     homepage_html = await self._fetch_html(client, website)
-                    contact_url = urljoin(website.rstrip("/") + "/", "contact")
-                    if contact_url != website:
-                        contact_html = await self._fetch_html(client, contact_url)
+                    # Scan multiple likely contact pages. Many small solar
+                    # sites expose info@ on /about or /about-us rather than
+                    # /contact — the homepage-only pre-scan was missing those.
+                    # Stop early once we have both an email and a phone to
+                    # keep request volume bounded per company.
+                    base = website.rstrip("/") + "/"
+                    for slug in ("contact", "contact-us", "about", "about-us", "team"):
+                        sub_url = urljoin(base, slug)
+                        if sub_url == website:
+                            continue
+                        sub_html = await self._fetch_html(client, sub_url)
+                        if sub_html:
+                            extra_html += "\n" + sub_html
+                        # Quick heuristic: if combined HTML already contains
+                        # an @-sign outside <script>/<style>, we likely have
+                        # an email candidate — skip remaining paths.
+                        if _MAILTO_RE.search(
+                            _SCRIPT_STYLE_RE.sub(" ", homepage_html + extra_html)
+                        ):
+                            break
 
                 scan = self._scan_contact_from_html(
-                    homepage_html + "\n" + contact_html,
+                    homepage_html + "\n" + extra_html,
                     website or "https://example.com",
                 )
 
                 ai_notes = ""
                 ai_context = ""
 
-                if not scan["email"] and (homepage_html or contact_html) and llm_calls < llm_budget:
+                if not scan["email"] and (homepage_html or extra_html) and llm_calls < llm_budget:
                     # LLM fallback for this one company only. Extract contact
                     # fields AND generate the personalization bullets used by
                     # the cold-email template (ai_personalization_context —
                     # see synergic_solar/models/dealer_prospect.py:1092 where
                     # leading-dash bullets become per-prospect talking points).
                     llm_calls += 1
-                    html_for_llm = (contact_html or homepage_html)[:6000]
+                    html_for_llm = (extra_html or homepage_html)[:6000]
                     extract_prompt = (
                         "Extract contact info AND personalization context for this one "
                         "solar company. Return ONLY a JSON object with keys:\n"
@@ -596,6 +642,51 @@ CRITICAL OUTPUT RULES (non-negotiable — malformed JSON causes the run to abort
             sum(1 for p in prospects if p.get("contact_form_url")),
         )
         return prospects
+
+    async def enrich_single_prospect(self, name: str, website: str) -> dict:
+        """Re-scrape a single company website with the enhanced extractor.
+
+        Runs the same multi-path + Cloudflare-decode scan used by the
+        research FETCH phase, but against one URL. Used by the Odoo
+        enrichment cron to recover contacts for prospects that came in
+        email-less from the original research pass.
+
+        Returns {email, phone, contact_form_url} — strings, empty when not
+        found. Does NOT invoke the LLM fallback (we want bounded cost per
+        call when sweeping 1,000+ historical records).
+        """
+        website = (website or "").strip()
+        if website and not website.startswith(("http://", "https://")):
+            website = "https://" + website
+        if not website:
+            return {"email": "", "phone": "", "contact_form_url": ""}
+
+        homepage_html = ""
+        extra_html = ""
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+            homepage_html = await self._fetch_html(client, website)
+            base = website.rstrip("/") + "/"
+            for slug in ("contact", "contact-us", "about", "about-us", "team"):
+                sub_url = urljoin(base, slug)
+                if sub_url == website:
+                    continue
+                sub_html = await self._fetch_html(client, sub_url)
+                if sub_html:
+                    extra_html += "\n" + sub_html
+                if _MAILTO_RE.search(
+                    _SCRIPT_STYLE_RE.sub(" ", homepage_html + extra_html)
+                ):
+                    break
+
+        scan = self._scan_contact_from_html(
+            homepage_html + "\n" + extra_html,
+            website,
+        )
+        return {
+            "email": _sanitize_email(scan.get("email", "")),
+            "phone": scan.get("phone", ""),
+            "contact_form_url": scan.get("contact_form_url", ""),
+        }
 
     async def _execute_form_submit_workflow(
         self, run_id: str, ctx: AdapterExecutionContext,
@@ -2648,6 +2739,17 @@ Schema depends on the chosen action:
             if candidate and not any(bad in candidate for bad in _EMAIL_BLOCKLIST_SUBSTRINGS):
                 email = candidate
                 break
+        # Cloudflare email protection: browsers see a real address, but the
+        # raw HTML only has a data-cfemail hex payload. Decoding recovers
+        # the address without having to run JavaScript.
+        if not email:
+            for hex_payload in _CF_EMAIL_RE.findall(scannable):
+                decoded = _decode_cfemail(hex_payload)
+                if decoded and not any(
+                    bad in decoded for bad in _EMAIL_BLOCKLIST_SUBSTRINGS
+                ):
+                    email = decoded
+                    break
         if not email:
             for candidate in _EMAIL_RE.findall(scannable):
                 candidate = candidate.strip().lower()
