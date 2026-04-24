@@ -64,13 +64,22 @@ _ARIANNA_SIGNATURE_HTML = (
     '<br><p style="color: #666; font-size: 13px;">&mdash;<br>'
     '<strong>Arianna Dar</strong><br>'
     "Synergic Solar<br>"
-    '<a href="https://synergicsolar.com/dealers/signup" style="color: #0066cc;">'
+    # /dealers/start auto-assigns a mentor dealer on landing — safe to
+    # use without a ?ref= code. Using /dealers/signup here would trigger
+    # the "Invitation Required" blocked-access page (see Luis's 2026-04-11
+    # report). Never link to /dealers/signup without a valid ?ref=.
+    '<a href="https://synergicsolar.com/dealers/start" style="color: #0066cc;">'
     "Become a Dealer</a> | "
     '<a href="https://synergicsolar.com" style="color: #0066cc;">'
     "synergicsolar.com</a></p>"
 )
 
-# Skip these senders entirely — bounces, system messages, self-replies.
+# Skip these senders entirely — bounces, system messages, self-replies,
+# and reserved test / documentation domains (RFC 2606). Anything matching
+# these patterns short-circuits at intake: no prospect create, no CRM lead,
+# no dealer assignment, no reply drafted. Test traffic hitting Arianna's
+# inbox caused a real dealer (James Skyberg) to be assigned a fake lead
+# on 2026-04-17, so these domains MUST never trigger real business flow.
 _SYSTEM_SENDER_PATTERNS = [
     r"arianna@synergicsolar\.com",
     r"noreply@",
@@ -82,6 +91,18 @@ _SYSTEM_SENDER_PATTERNS = [
     r"reddit\.com",
     r"openai\.com",
     r"zendesk",
+    # RFC 2606 reserved domains — these are NEVER real addresses.
+    r"@example\.(?:com|net|org)\b",
+    r"@(?:test|invalid|localhost)\b",
+    # Common local-part patterns for test fixtures / QA runs.
+    r"^test[-_.]?(?:unsub|unsubscribe|user|\d+)",
+    # Email deliverability / authentication testers (port25, mail-tester,
+    # isnotspam, etc.) send automated response reports — never a prospect.
+    r"auth-results@",
+    r"@verifier\.port25\.com\b",
+    r"@mail-tester\.com\b",
+    r"@isnotspam\.com\b",
+    r"@verifalia\.com\b",
 ]
 
 
@@ -113,10 +134,12 @@ _NEGATIVE_PATTERNS = [
     r"\bdecline\b",
 ]
 
-# Positive/interested sentiment.
+# Positive/interested sentiment. Patterns are applied to a normalized
+# blob — smart apostrophes (U+2019) and primes are downgraded to ASCII
+# before matching so "We'd like to..." matches "we'?d like to".
 _POSITIVE_PATTERNS = [
     r"\bwhen\s+can\s+we\s+(talk|chat|meet|connect)\b",
-    r"\blet'?s\s+(talk|chat|set\s+up)\b",
+    r"\blet'?s\s+(talk|chat|set\s+up|meet|connect|schedule)\b",
     r"\bi'?m\s+interested\b",
     r"\byes[,.!\s]",
     r"\btell\s+me\s+more\b",
@@ -125,6 +148,24 @@ _POSITIVE_PATTERNS = [
     r"\bsounds\s+(good|great|interesting)\b",
     r"\bwould\s+love\s+to\b",
     r"\bwe'?d\s+like\s+to\b",
+    # Phrasings that came up in real prospect replies but were missed
+    # by the original pattern list (2026-04-20 review):
+    r"\b(would|i'?d|we'?d)\s+like\s+to\s+(learn\s+more|hear\s+more|know\s+more|explore|discuss)\b",
+    r"\b(i'?m|we'?re|are)\s+available\s+for\s+(a\s+)?(call|chat|meeting|conversation)\b",
+    r"\b(set\s+up|schedule|book)\s+(a\s+)?(time|call|meeting|chat|demo|conversation)\b",
+    r"\b(30|15|20|60)[-\s]?(min|minute)\s+(chat|call|meeting|demo|conversation)\b",
+    r"\b(speak|talk|chat|meet)\s+(with|to)\s+(your|our)\s+(team|leadership|group)\b",
+    r"\b(would|i|we)\s+(would|d|ll)\s+be\s+(happy|glad|willing)\s+to\b",
+    r"\blooking\s+forward\s+to\s+(speaking|chatting|meeting|talking|hearing)\b",
+    r"\b(open|happy)\s+to\s+(a\s+)?(call|chat|discussion|conversation|meeting)\b",
+    r"\bcircle\s+back\b",
+    r"\bcall\s+(me|us)\s+(at|on|back)\b",
+    r"\b(my|our)\s+(cell|number|phone)\s+is\b",
+    r"\b(send|share)\s+(me|us)\s+(more\s+)?(info|information|details)\b",
+    r"\bwhat\s+(are\s+the|do\s+you\s+need)\s+(next\s+step|requirement)",
+    r"\bpartnership\s+(opportunit|program|discussion)",
+    r"\bready\s+to\s+(move|proceed|start|sign)",
+    r"\b(please|pls)\s+(send|share|provide)\s+(more|the|a)\b",
 ]
 
 # Prospect-type classification — mirrors the Odoo-side classifier.
@@ -174,8 +215,25 @@ def _any_match(patterns: list[str], text: str) -> bool:
 
 
 def classify_intent(subject: str, body: str) -> str:
-    """Return one of: 'opt_out', 'negative', 'positive', 'neutral'."""
+    """Return one of: 'opt_out', 'negative', 'positive', 'neutral'.
+
+    Normalizes smart apostrophes / quotes before pattern matching — real
+    email clients love U+2019 (RIGHT SINGLE QUOTATION MARK) in "we'd",
+    "I'm", etc., and the old regexes only matched ASCII `'`. That bug
+    silently missed explicit "We'd like to set up a time..." replies
+    throughout early April 2026.
+    """
     blob = f"{subject or ''}\n{body or ''}".lower()
+    # Canonicalize fancy quotes and primes to ASCII so pattern `'?`
+    # matches regardless of email-client smart-punctuation autocorrect.
+    blob = (
+        blob.replace("\u2019", "'")  # RIGHT SINGLE QUOTATION MARK
+            .replace("\u2018", "'")  # LEFT SINGLE QUOTATION MARK
+            .replace("\u2032", "'")  # PRIME
+            .replace("\u02bc", "'")  # MODIFIER LETTER APOSTROPHE
+            .replace("\u201c", '"')  # LEFT DOUBLE QUOTATION MARK
+            .replace("\u201d", '"')  # RIGHT DOUBLE QUOTATION MARK
+    )
     if _any_match(_OPT_OUT_PATTERNS, blob):
         return "opt_out"
     if _any_match(_NEGATIVE_PATTERNS, blob):
@@ -334,12 +392,38 @@ def fetch_unread_emails(
             except Exception as exc:
                 logger.warning("Failed to parse email uid=%s: %s", uid, exc)
         # Mark them all as read BEFORE returning. If processing later
-        # throws, we still don't re-read them.
+        # throws, we still don't re-read them. Log any STORE failures —
+        # silently swallowing them caused the same email to reappear as
+        # UNSEEN across cycles and get re-processed (Alexander's reply
+        # was logged 7× on 2026-04-12 because of this).
+        store_failures = 0
         for uid in uids:
             try:
-                imap.store(uid, "+FLAGS", "\\Seen")
-            except Exception:
-                pass
+                status, _resp = imap.store(uid, "+FLAGS", "\\Seen")
+                if status != "OK":
+                    store_failures += 1
+                    logger.warning(
+                        "IMAP STORE \\Seen non-OK status for uid=%s: %s",
+                        uid.decode(errors="replace"), status,
+                    )
+            except Exception as exc:
+                store_failures += 1
+                logger.warning(
+                    "IMAP STORE \\Seen failed for uid=%s: %s",
+                    uid.decode(errors="replace"), exc,
+                )
+        # Force server-side flag persistence before disconnecting. Some
+        # IMAP servers only commit flag changes on EXPUNGE / CLOSE —
+        # without this, logout() could abort the pending STOREs.
+        try:
+            imap.expunge()
+        except Exception as exc:
+            logger.warning("IMAP expunge failed (flags may not persist): %s", exc)
+        if store_failures:
+            logger.warning(
+                "IMAP fetch: %d/%d \\Seen flags may not have stuck — expect re-reads next cycle",
+                store_failures, len(uids),
+            )
         imap.logout()
     except Exception as exc:
         logger.exception("IMAP fetch failed: %s", exc)
@@ -578,46 +662,55 @@ def build_reply_prompt(
             "acknowledgment. Thank them for the response, leave the door "
             "open for the future, no pitch, no signup link. 2-3 sentences."
         )
-    elif prospect_type == "installer":
-        directive = (
-            "This prospect is an INSTALLER (not a sales org). Write a SHORT "
-            "warm reply that (a) acknowledges their install capabilities, "
-            "(b) introduces our EPC partnership program — installation "
-            "referrals from our national sales network, expanded product "
-            "access with better pricing, and a FREE Pro Dealer membership "
-            "bundled into installer onboarding, (c) tells them our CRO "
-            "Brad Pereira personally reviews every EPC application and "
-            "will reach out within one business day, (d) points them at "
-            "https://synergicsolar.com/epc/signup to apply. Do NOT include "
-            "a /dealers/signup link — the EPC track is separate."
-        )
-    elif prospect_type == "hybrid":
-        directive = (
-            "This prospect both sells AND installs. Write a SHORT warm "
-            "reply that (a) leads with our dealer program (commissions, "
-            "brand retention, national install network), (b) includes the "
-            f"signup link https://synergicsolar.com/dealers/signup"
-            f"{f'?ref={dealer_referral_code}' if dealer_referral_code else ''}, "
-            "(c) also mentions we have a separate EPC partnership track "
-            "since they run install crews, and our CRO Brad Pereira will "
-            "reach out about that side in parallel."
-        )
     else:
-        # Positive or neutral sales-org reply
-        directive = (
-            "This prospect is interested. Write a SHORT warm reply that "
-            f"introduces our dealer program"
-            + (
-                f" and mentions their assigned Synergic Mentor Dealer, "
-                f"{assigned_dealer}, who will help them get onboarded"
-                if assigned_dealer else ""
-            )
-            + ". Include the signup link "
-            f"https://synergicsolar.com/dealers/signup"
-            f"{f'?ref={dealer_referral_code}' if dealer_referral_code else ''}. "
-            "Mention they can schedule a 20-minute intro call if they prefer. "
-            "3-4 short paragraphs."
+        # Build a signup URL that will actually work end-to-end. When we
+        # know the assigned dealer's ref code, route to /dealers/signup?ref=
+        # (fast, dealer-attributed). Otherwise fall back to /dealers/start
+        # which auto-assigns a mentor dealer on landing. Never send a bare
+        # /dealers/signup link — that hits the "Invitation Required" wall.
+        signup_link = (
+            f"https://synergicsolar.com/dealers/signup?ref={dealer_referral_code}"
+            if dealer_referral_code
+            else "https://synergicsolar.com/dealers/start"
         )
+
+        if prospect_type == "installer":
+            directive = (
+                "This prospect is an INSTALLER (not a sales org). Write a SHORT "
+                "warm reply that (a) acknowledges their install capabilities, "
+                "(b) introduces our EPC partnership program — installation "
+                "referrals from our national sales network, expanded product "
+                "access with better pricing, and a FREE Pro Dealer membership "
+                "bundled into installer onboarding, (c) tells them our CRO "
+                "Brad Pereira personally reviews every EPC application and "
+                "will reach out within one business day, (d) points them at "
+                "https://synergicsolar.com/epc/signup to apply. Do NOT include "
+                "a /dealers/signup link — the EPC track is separate."
+            )
+        elif prospect_type == "hybrid":
+            directive = (
+                "This prospect both sells AND installs. Write a SHORT warm "
+                "reply that (a) leads with our dealer program (commissions, "
+                "brand retention, national install network), (b) includes the "
+                f"signup link {signup_link}, "
+                "(c) also mentions we have a separate EPC partnership track "
+                "since they run install crews, and our CRO Brad Pereira will "
+                "reach out about that side in parallel."
+            )
+        else:
+            # Positive or neutral sales-org reply
+            directive = (
+                "This prospect is interested. Write a SHORT warm reply that "
+                f"introduces our dealer program"
+                + (
+                    f" and mentions their assigned Synergic Mentor Dealer, "
+                    f"{assigned_dealer}, who will help them get onboarded"
+                    if assigned_dealer else ""
+                )
+                + f". Include the signup link {signup_link}. "
+                "Mention they can schedule a 20-minute intro call if they prefer. "
+                "3-4 short paragraphs."
+            )
 
     return (
         "You are Arianna Dar, Synergic Solar's dealer partnerships rep. "
