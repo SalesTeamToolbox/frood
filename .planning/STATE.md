@@ -39,6 +39,12 @@ Last activity: 2026-04-08 — Milestone v7.0 started
 - **gsd-and-jcodemunch-integration** — Phases 1-3 complete, Phase 4 (Context Engine) next — PAUSED for v4.0
 - **custom-claude-code-ui** — Phases 1-4 complete, Phases 5-6 remaining — PAUSED for v4.0
 
+## Shipped Off-Roadmap (2026-04-24)
+
+- **Support agent workflow for Paperclip** — `_execute_support_workflow` + `_SUPPORT_TEAM_PERSONAS` + `_is_in_agent_shift` + `_classify_support_ticket` + `_recall_support_lessons` + `_create_paperclip_issue_for_flag` in `core/sidecar_orchestrator.py`; POST `/sidecar/extract-lesson` in `dashboard/sidecar.py`. Arianna/Jordan/Sam-Support agents in Paperclip now actually process tickets (previously fell through to generic LLM handler, stored useless memory notes). Commit `ca1373b`. Deployed to prod `vps3254499` same day.
+- **Research phase-2 contact extraction refactor** — deterministic regex pre-scan + per-company LLM fallback replaces single-call JSON parsing. Same commit.
+- **Email monitor fixes** — signup link switch to `/dealers/start`, RFC 2606 intake filter, intent-pattern broadening with smart-quote handling, IMAP expunge persistence. Commit `066e77b`.
+
 ## Accumulated Context
 
 ### Decisions
