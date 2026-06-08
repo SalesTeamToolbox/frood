@@ -12,12 +12,22 @@ Environment variables (configured in /opt/frood/.env):
     MAILBABY_SMTP_USER      — username (default: mb44866)
     MAILBABY_FROM_EMAIL     — sender address (default: redacted@example.com)
     MAILBABY_FROM_NAME      — sender display name (default: Arianna Dar)
+
+    ARIANNA_IMAP_AUTH       — Arianna's IMAP password (optional; if set, every
+                              outbound is APPEND'd to the Sent folder so the
+                              webmail thread view shows both sides)
+    ARIANNA_IMAP_HOST       — IMAP host (default: webmail.example-client.com)
+    ARIANNA_IMAP_PORT       — IMAP port (default: 993)
+    ARIANNA_IMAP_USER       — IMAP login (default: redacted@example.com)
+    ARIANNA_IMAP_SENT_FOLDER — Sent folder name (default: Sent)
 """
 
 import asyncio
+import imaplib
 import logging
 import os
 import smtplib
+import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr, formatdate, make_msgid
@@ -155,6 +165,9 @@ class EmailSendTool(Tool):
 
             msg_id = msg["Message-ID"]
             logger.info("send_email: sent to %s subject=%r msg_id=%s", to, subject, msg_id)
+
+            self._append_to_sent_folder(msg, to)
+
             return ToolResult(success=True, output=f"sent (message-id: {msg_id})")
 
         except smtplib.SMTPAuthenticationError as exc:
@@ -169,3 +182,51 @@ class EmailSendTool(Tool):
         except OSError as exc:
             logger.error("send_email connection error to %s:%d: %s", host, port, exc)
             return ToolResult(success=False, error=f"Connection error: {exc}")
+
+    def _append_to_sent_folder(self, msg, to: str) -> None:
+        """Copy a successfully-sent message to Arianna's IMAP Sent folder.
+
+        Failure is logged but not raised — the SMTP send already succeeded
+        and the recipient already has the email; missing the Sent-folder
+        copy is a visibility issue, not a delivery failure.
+        """
+        imap_pass = os.environ.get("ARIANNA_IMAP_AUTH", "").strip()
+        if not imap_pass:
+            return
+
+        host = os.environ.get("ARIANNA_IMAP_HOST", "webmail.example-client.com")
+        port = int(os.environ.get("ARIANNA_IMAP_PORT", "993"))
+        user = os.environ.get("ARIANNA_IMAP_USER", "redacted@example.com")
+        folder = os.environ.get("ARIANNA_IMAP_SENT_FOLDER", "Sent")
+
+        try:
+            raw = msg.as_bytes()
+            imap = imaplib.IMAP4_SSL(host, port)
+            try:
+                imap.login(user, imap_pass)
+                typ, _ = imap.append(
+                    folder,
+                    "(\\Seen)",
+                    imaplib.Time2Internaldate(time.time()),
+                    raw,
+                )
+                if typ == "OK":
+                    logger.info(
+                        "send_email: APPEND'd to %s for to=%s msg_id=%s",
+                        folder, to, msg["Message-ID"],
+                    )
+                else:
+                    logger.warning(
+                        "send_email: APPEND non-OK status %r for to=%s",
+                        typ, to,
+                    )
+            finally:
+                try:
+                    imap.logout()
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.warning(
+                "send_email: failed to APPEND to Sent folder for to=%s: %s",
+                to, exc,
+            )
