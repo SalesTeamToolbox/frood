@@ -16,7 +16,7 @@ Environment variables (configured in /opt/frood/.env):
     ARIANNA_IMAP_AUTH       — Arianna's IMAP password (optional; if set, every
                               outbound is APPEND'd to the Sent folder so the
                               webmail thread view shows both sides)
-    ARIANNA_IMAP_HOST       — IMAP host (default: webmail.example-client.com)
+    ARIANNA_IMAP_HOST       — IMAP host (default: mail.example-client.com)
     ARIANNA_IMAP_PORT       — IMAP port (default: 993)
     ARIANNA_IMAP_USER       — IMAP login (default: redacted@example.com)
     ARIANNA_IMAP_SENT_FOLDER — Sent folder name (default: Sent)
@@ -194,14 +194,19 @@ class EmailSendTool(Tool):
         if not imap_pass:
             return
 
-        host = os.environ.get("ARIANNA_IMAP_HOST", "webmail.example-client.com")
+        # mail.* (MX host, grey-clouded) NOT webmail.* — webmail is proxied
+        # through Cloudflare, which drops IMAP/993. A wrong host here blocks
+        # the executor thread (and stalls the orchestrator coroutine awaiting
+        # the send) until the OS TCP timeout, so we ALSO pass an explicit
+        # socket timeout below to fail fast instead of freezing.
+        host = os.environ.get("ARIANNA_IMAP_HOST", "mail.example-client.com")
         port = int(os.environ.get("ARIANNA_IMAP_PORT", "993"))
         user = os.environ.get("ARIANNA_IMAP_USER", "redacted@example.com")
         folder = os.environ.get("ARIANNA_IMAP_SENT_FOLDER", "Sent")
 
         try:
             raw = msg.as_bytes()
-            imap = imaplib.IMAP4_SSL(host, port)
+            imap = imaplib.IMAP4_SSL(host, port, timeout=20)
             try:
                 imap.login(user, imap_pass)
                 typ, _ = imap.append(
