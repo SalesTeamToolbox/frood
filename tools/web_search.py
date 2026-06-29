@@ -51,6 +51,12 @@ class WebSearchTool(Tool):
         if not query:
             return ToolResult(error="No search query provided", success=False)
 
+        # Some models (e.g. llama-3.3) pass numeric args as strings — coerce
+        # so `min/max` don't crash with "'<' not supported between str and int".
+        try:
+            count = int(count)
+        except (TypeError, ValueError):
+            count = 5
         count = max(1, min(10, count))
 
         # Try Brave Search first (if API key available)
