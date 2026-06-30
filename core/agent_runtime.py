@@ -150,7 +150,7 @@ class AgentRuntime:
     async def _start_openai_agent(self, agent_config):
         """Run agent using OpenAI Chat Completions protocol (Zen, OpenRouter, OpenAI)."""
         agent_id = agent_config.get("id", "unknown")
-        provider = agent_config.get("provider", "zen")
+        provider = agent_config.get("provider", "nvidia")  # zen deprecated 2026-06-30
         model = agent_config.get("model", "")
         prompt = await self._build_prompt(agent_config)
 

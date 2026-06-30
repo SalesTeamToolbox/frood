@@ -190,11 +190,15 @@ class TieredRoutingBridge:
         else:
             base_category = _ROLE_CATEGORY_MAP.get(role or "", "general")
 
-        # 3. Provider selection chain
+        # 3. Provider selection chain. NVIDIA first: zen's research/reasoning/
+        # analysis models point at the dead nemotron-3-super-free (zen 401s on
+        # it), so defaulting unspecified calls to zen burned a failed attempt
+        # every time before falling back. NVIDIA's catalog covers every category
+        # and is the house default per directive ("use Nvidia LLMs").
         if preferred_provider:
             provider = preferred_provider
-        elif os.environ.get("ZEN_API_KEY"):
-            provider = "zen"
+        elif os.environ.get("NVIDIA_API_KEY"):
+            provider = "nvidia"
         elif os.environ.get("OPENROUTER_API_KEY"):
             provider = "openrouter"
         elif os.environ.get("ANTHROPIC_API_KEY"):
@@ -202,7 +206,7 @@ class TieredRoutingBridge:
         elif os.environ.get("OPENAI_API_KEY"):
             provider = "openai"
         else:
-            provider = "zen"
+            provider = "nvidia"
 
         # 4. Model resolution: preferred_model > resolve_model(category+tier)
         if preferred_model:

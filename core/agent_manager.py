@@ -247,8 +247,11 @@ def refresh_openrouter_models(force: bool = False) -> bool:
 
 
 async def start_zen_model_refresh_task() -> None:
-    """Start a background task to refresh Zen free models at startup and every 6 hours."""
-    if _zen_client is None:
+    """Zen DEPRECATED 2026-06-30 — no-op. Frood no longer routes to zen, so the
+    6-hourly refresh (which only re-probed the dead zen catalog) is disabled."""
+    logger.info("Zen deprecated — skipping model refresh task")
+    return
+    if _zen_client is None:  # noqa: unreachable — kept for history
         logger.info("Zen API client not available, skipping background refresh")
         return
 
