@@ -113,54 +113,27 @@ def _build_registry() -> ToolRegistry:
     # ReadFileTool, WriteFileTool, EditFileTool, ListDirTool → CC Read/Write/Edit/Glob
     # ShellTool → CC Bash tool
     # GrepTool → CC Grep tool
-    # NOTE: WebSearchTool, WebFetchTool, HttpClientTool ARE registered below
-    # because the sidecar has no native web search/fetch (unlike Claude Code).
+    #
+    # ── Retired 2026-11-11 (option B: Frood is a memory tool) ──────────────
+    # Measured over 2026-09-11..11-11: web_search/fetch/http, browser, vision,
+    # git/diff/tests/linter/code_intel/repo_map/pr/docker/summarize/file_watcher,
+    # security audits, content/marketing tools, n8n, workflow, skill_bridge,
+    # unified_context and send_email were redundant with harness built-ins or
+    # unused. Their files stay on disk — re-register by adding the class back
+    # below. Kept: memory, knowledge, context, behaviour, node_sync, python_exec.
 
     # ── Group A: No dependencies ──────────────────────────────────────────
-    for mod, cls in [
-        ("tools.web_search", "WebSearchTool"),
-        ("tools.web_search", "WebFetchTool"),
-        ("tools.http_client", "HttpClientTool"),
-        ("tools.content_analyzer", "ContentAnalyzerTool"),
-        ("tools.data_tool", "DataTool"),
-        ("tools.template_tool", "TemplateTool"),
-        ("tools.outline_tool", "OutlineTool"),
-        ("tools.scoring_tool", "ScoringTool"),
-        ("tools.persona_tool", "PersonaTool"),
-        ("tools.skill_bridge", "SkillBridgeTool"),
-        ("tools.security_audit", "SecurityAuditTool"),
-        ("tools.n8n_workflow", "N8nWorkflowTool"),
-        ("tools.n8n_create_workflow", "N8nCreateWorkflowTool"),
-        ("tools.email_send_tool", "EmailSendTool"),
-    ]:
-        ToolClass = _safe_import(mod, cls)
-        _register(ToolClass() if ToolClass else None)
+    # (all retired — see note above)
 
     # ── Group B: workspace_path only ──────────────────────────────────────
     for mod, cls in [
-        ("tools.git_tool", "GitTool"),
-        ("tools.diff_tool", "DiffTool"),
-        ("tools.test_runner", "TestRunnerTool"),
-        ("tools.linter_tool", "LinterTool"),
-        ("tools.code_intel", "CodeIntelTool"),
-        ("tools.dependency_audit", "DependencyAuditTool"),
-        ("tools.docker_tool", "DockerTool"),
         ("tools.python_exec", "PythonExecTool"),
-        ("tools.repo_map", "RepoMapTool"),
-        ("tools.pr_generator", "PRGeneratorTool"),
-        ("tools.security_analyzer", "SecurityAnalyzerTool"),
-        ("tools.summarizer_tool", "SummarizerTool"),
-        ("tools.file_watcher", "FileWatcherTool"),
-        ("tools.browser_tool", "BrowserTool"),
     ]:
         ToolClass = _safe_import(mod, cls)
         _register(ToolClass(workspace_str) if ToolClass else None)
 
     # ── Group C: sandbox-based ────────────────────────────────────────────
-    VisionTool = _safe_import("tools.vision_tool", "VisionTool")
     KnowledgeTool = _safe_import("tools.knowledge_tool", "KnowledgeTool")
-
-    _register(VisionTool(sandbox) if VisionTool else None)
     _register(KnowledgeTool(sandbox) if KnowledgeTool else None)
 
     # ── Memory Backend (Phase 3A) ────────────────────────────────────────
@@ -224,7 +197,6 @@ def _build_registry() -> ToolRegistry:
     # ── Group E: lightweight deps ─────────────────────────────────────────
     BehaviourTool = _safe_import("tools.behaviour_tool", "BehaviourTool")
     MemoryTool = _safe_import("tools.memory_tool", "MemoryTool")
-    WorkflowTool = _safe_import("tools.workflow_tool", "WorkflowTool")
 
     # Project memory factory for MemoryTool project namespace routing (MEM-03)
     _project_store_cache: dict = {}
@@ -255,7 +227,6 @@ def _build_registry() -> ToolRegistry:
         if MemoryTool
         else None
     )
-    _register(WorkflowTool(workspace_str, registry) if WorkflowTool else None)
 
     # ── Context Assembler (Phase 7 — smart project context retrieval) ────
     # Note: skill_loader is created later in _create_server(); pass None here.
@@ -271,26 +242,8 @@ def _build_registry() -> ToolRegistry:
         else None
     )
 
-    # ── Unified Context (Phase 4 — context engine with code symbols + GSD + effectiveness) ──
-    UnifiedContextTool = _safe_import("tools.unified_context", "UnifiedContextTool")
-    effectiveness_store = None
-    try:
-        from memory.effectiveness import EffectivenessStore
-
-        _eff_db = workspace / ".frood" / "effectiveness.db"
-        effectiveness_store = EffectivenessStore(_eff_db)
-    except Exception as e:
-        logger.info(f"EffectivenessStore not available: {e}")
-    _register(
-        UnifiedContextTool(
-            memory_store=memory_store,
-            skill_loader=None,
-            workspace=workspace_str,
-            effectiveness_store=effectiveness_store,
-        )
-        if UnifiedContextTool
-        else None
-    )
+    # ── Unified Context — retired 2026-11-11 (option B); its GSD workstream
+    # and effectiveness sources were retired the same day. Use `context`.
 
     # ── Node Sync (Phase 9 — memory sync between nodes) ────────────────
     NodeSyncTool = _safe_import("tools.node_sync", "NodeSyncTool")
