@@ -7,6 +7,12 @@ import "./no-window.mjs"; // hide console windows of every child process (Window
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Repo root of this vendored copy (bin/ -> ..). Falls back to the repo-vendored
+// .claude/agents/ agent files when OpenCode's agent dirs hold nothing (clean clone,
+// no operator setup).
+export const REPO_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const HOUR = 3600_000;
 
@@ -97,18 +103,51 @@ export function isDown(model, now = Date.now()) {
   return null;
 }
 
-/** Model pinned by an installed OpenCode agent (frontmatter `model:`), or null. */
+/** Model pinned by an installed OpenCode agent (frontmatter `model:`), or null. Falls back to the
+ * repo-vendored `.claude/agents/` files so a clean clone (no operator setup) still resolves pins. */
 export function agentModel(agent) {
-  const dirs = [path.join(process.env.ORCH_HOME || os.homedir(), ".config", "opencode", "agents"),
-    path.join(process.env.ORCH_HOME || os.homedir(), ".config", "opencode", "agent")];
+  const dirs = [
+    path.join(process.env.ORCH_HOME || os.homedir(), ".config", "opencode", "agents"),
+    path.join(process.env.ORCH_HOME || os.homedir(), ".config", "opencode", "agent"),
+    path.join(REPO_DIR, ".claude", "agents"),
+  ];
   for (const d of dirs) {
     try {
-      const fm = fs.readFileSync(path.join(d, `${agent}.md`), "utf8").split(/\r?\n---/)[0];
-      const m = fm.match(/^model:\s*(\S+)/m);
+      const text = fs.readFileSync(path.join(d, `${agent}.md`), "utf8");
+      const fm = text.split(/\r?\n---/)[0];
+      // Vendored agent frontmatter carries a Claude Code `model:` (cc-only) and an OpenCode
+      // `model:` (oc-only). Prefer the oc-only one so router-health resolves a real OpenCode model id.
+      let m = fm.match(/^model:\s*(\S+)[^\n]*#\s*oc-only/m);
+      if (!m) m = fm.match(/^model:\s*(\S+)/m);
       if (m) return m[1];
     } catch {}
   }
-  return null;
+  // Final fallback: the routing rules table (`.claude/rules/01-orchestrator-models.md`) pins every
+  // agent's OpenCode model, so a clean clone still resolves roles that have no vendored agent file.
+  return agentModelFromRules(agent);
+}
+
+/** Last-resort model pin: parse `agent (model)` pairs from the OpenCode column of the routing rules
+ * table, keyed by agent name. Returns null when the rules file is absent or the agent isn't listed. */
+export function agentModelFromRules(agent) {
+  const rulesPath = path.join(REPO_DIR, ".claude", "rules", "01-orchestrator-models.md");
+  let text;
+  try {
+    text = fs.readFileSync(rulesPath, "utf8");
+  } catch {
+    return null;
+  }
+  const byAgent = new Map();
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*\|\s*[^|]*\|\s*[^|]*\|\s*([^|]*)\s*\|/);
+    if (!m) continue;
+    const oc = m[1];
+    // OpenCode column cells look like: `agent` (`model`) [→ `agent2` (`model2`)]
+    for (const pair of oc.matchAll(/`([A-Za-z0-9_-]+)`\s*\(`([^`]+)`/g)) {
+      byAgent.set(pair[1], pair[2]);
+    }
+  }
+  return byAgent.get(agent) || null;
 }
 
 // ── provider policy (owner decisions in ~/.config/orchestrator/providers.json) ───────────────────────
