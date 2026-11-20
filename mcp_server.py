@@ -95,7 +95,7 @@ def _build_registry() -> ToolRegistry:
     logger.info(f"Workspace: {workspace}")
 
     sandbox = WorkspaceSandbox(workspace, enabled=True)
-    command_filter = CommandFilter()
+    CommandFilter()
     rate_limiter = ToolRateLimiter()
 
     registry = ToolRegistry(rate_limiter=rate_limiter)
@@ -271,7 +271,7 @@ def _build_registry() -> ToolRegistry:
     return registry
 
 
-def _load_skills() -> "SkillLoader":
+def _load_skills():
     """Load all skills from builtin and workspace directories.
 
     Returns a SkillLoader with all skills parsed and extensions resolved.
@@ -510,7 +510,7 @@ def main():
         try:
             from core.config import Settings
 
-            settings = Settings.from_env()
+            Settings.from_env()
             results["checks"]["config"] = "ok"
         except Exception as e:
             results["status"] = "unhealthy"

@@ -77,7 +77,7 @@ def _download_winsw(project_dir: str) -> str:
 def _create_service_xml(project_dir: str) -> str:
     """Create the Windows service XML configuration."""
     python_exe = _get_python_executable()
-    frood_py = os.path.join(project_dir, "frood.py")
+    os.path.join(project_dir, "frood.py")
 
     xml_content = f'''<?xml version="1.0" encoding="utf-8"?>
 <service>
@@ -494,10 +494,7 @@ def _detect_project_context(project_dir: str) -> dict:
             url = result.stdout.strip()
             # Handle SSH: git@github.com:org/repo.git
             # Handle HTTPS: https://github.com/org/repo.git
-            if ":" in url and not url.startswith("http"):
-                repo_part = url.split(":")[-1]
-            else:
-                repo_part = url
+            repo_part = url.split(":")[-1] if ":" in url and not url.startswith("http") else url
             name = repo_part.split("/")[-1].removesuffix(".git")
             if name:
                 project_name = name

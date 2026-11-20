@@ -109,7 +109,6 @@ class QdrantStore:
 
         suffixes = [self.MEMORY, self.HISTORY, self.CONVERSATIONS, self.KNOWLEDGE]
         old_prefix = "agent42"
-        new_prefix = self.config.collection_prefix
 
         for suffix in suffixes:
             old_name = f"{old_prefix}_{suffix}"

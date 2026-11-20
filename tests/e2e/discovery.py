@@ -16,6 +16,8 @@ import ast
 import re
 from dataclasses import dataclass, field
 
+from tests.e2e.config import FROOD_ROOT
+
 
 @dataclass
 class Endpoint:

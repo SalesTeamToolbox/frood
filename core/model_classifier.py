@@ -191,10 +191,10 @@ async def _probe_one(client: _ClientLike, model_id: str) -> Classification:
                 [{"role": "user", "content": _PROBE_PROMPT}],
                 max_tokens=_PROBE_MAX_TOKENS,
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.debug("probe %s threw: %s", model_id, e)
             return "unknown"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.debug("probe %s threw: %s", model_id, e)
         return "unknown"
 

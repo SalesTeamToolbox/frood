@@ -163,6 +163,4 @@ class AgentRoutingStore:
         data = self._load()
         if data.get(profile_name):
             return True
-        if data.get("_default"):
-            return True
-        return False
+        return bool(data.get("_default"))

@@ -38,7 +38,6 @@ from core.sidecar_models import (
     AgentSpendResponse,
     EffectivenessRequest,
     EffectivenessResponse,
-    ExecuteResponse,
     ExtractLearningsRequest,
     ExtractLearningsResponse,
     HealthResponse,

@@ -209,10 +209,7 @@ class TieredRoutingBridge:
             provider = "nvidia"
 
         # 4. Model resolution: preferred_model > resolve_model(category+tier)
-        if preferred_model:
-            model = preferred_model
-        else:
-            model = resolve_model(provider, base_category, tier)
+        model = preferred_model or resolve_model(provider, base_category, tier)
 
         # 5. Effective task_category for observability
         task_category = _TIER_CATEGORY_UPGRADE.get(tier, base_category)

@@ -22,7 +22,6 @@ from .discovery import build_manifest
 from .runner import (
     BaseSuite,
     SkipTest,
-    assert_contains,
     register_suite,
 )
 
@@ -327,7 +326,7 @@ class HarnessSuite(BaseSuite):
             self._fetch("POST", f"/api/tasks/{tid}/cancel")
             self._fetch("POST", f"/api/tasks/{tid}/archive")
 
-        assert len(created_ids) > 0, f"Should create at least 1 task"
+        assert len(created_ids) > 0, "Should create at least 1 task"
 
     def test_17_tool_count_matches(self, result):
         """Tools in API vs codebase count."""

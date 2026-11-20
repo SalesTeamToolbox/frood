@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger("frood.rate_limiter")
 
@@ -474,8 +474,9 @@ class PerModelRateLimiter:
         """Return seconds until exhaustion resets, or None if not exhausted."""
         if model not in self._exhausted:
             return None
-        from core.config import settings
         import time
+
+        from core.config import settings
 
         exhausted_at = self._exhausted[model]
         reset_seconds = settings.zen_exhaustion_reset_hours * 3600

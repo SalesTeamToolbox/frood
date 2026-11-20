@@ -1037,9 +1037,9 @@ def create_app(
 
             # Fallback: keyword search on MEMORY.md
             if not results:
-                mem_path = workspace / "memory" / "MEMORY.md"
+                mem_path = Path("memory") / "MEMORY.md"
                 if not mem_path.exists():
-                    mem_path = workspace / ".frood" / "MEMORY.md"
+                    mem_path = Path(".frood") / "MEMORY.md"
                 if mem_path.exists():
                     content = mem_path.read_text(encoding="utf-8", errors="replace")
                     keywords = [w.lower() for w in query.split() if len(w) > 3]
@@ -1312,8 +1312,9 @@ def create_app(
                             last_error = f"Anthropic {resp.status_code}: credit/quota exhausted"
                             try:
                                 from core.model_classifier import mark_paid as _mp
+
                                 await _mp("anthropic", model_to_use)
-                            except Exception:  # noqa: BLE001
+                            except Exception:
                                 pass
                             continue
                         last_error = f"Anthropic {resp.status_code}: {resp.text[:200]}"
@@ -1423,8 +1424,9 @@ def create_app(
                             )
                             try:
                                 from core.model_classifier import mark_paid as _mp
+
                                 await _mp(provider_name, model_to_use)
-                            except Exception:  # noqa: BLE001
+                            except Exception:
                                 pass
                             continue
                         last_error = f"{provider_name} {resp.status_code}: {resp.text[:200]}"
@@ -1440,16 +1442,16 @@ def create_app(
     @app.post("/llm/v1/chat/completions")
     async def llm_chat_completions(request: Request):
         """OpenAI-compatible LLM proxy for Claude Code.
-        
+
         Use this endpoint as the API base for Claude Code to route through Frood.
         Claude Code can switch models via the model query param or X-Model header.
-        
+
         Examples:
           curl -X POST http://localhost:8000/llm/v1/chat/completions \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer dummy" \
             -d '{"model": "qwen3.6-plus-free", "messages": [{"role": "user", "content": "hi"}]}'
-          
+
           # Switch model via header:
           curl -X POST http://localhost:8000/llm/v1/chat/completions \
             -H "Content-Type: application/json" \
@@ -1697,6 +1699,7 @@ def create_app(
         # (PROVIDER_TIERS) so tier labels stay accurate as catalogs change.
         try:
             from core.agent_manager import PROVIDER_TIERS as _PT
+
             _all_free = set()
             _all_paid = set()
             for _prov_data in _PT.values():
@@ -2942,19 +2945,19 @@ Focus on learnings that would help in future similar sessions."""
             try:
                 await refresh_zen_models_async()
                 ran.append("zen")
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 summary["zen"] = {"error": str(e)[:200]}
         if os.environ.get("NVIDIA_API_KEY"):
             try:
                 await refresh_nvidia_models_async()
                 ran.append("nvidia")
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 summary["nvidia"] = {"error": str(e)[:200]}
         if os.environ.get("OPENROUTER_API_KEY"):
             try:
                 await refresh_openrouter_models_async()
                 ran.append("openrouter")
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 summary["openrouter"] = {"error": str(e)[:200]}
 
         for provider, tiers in PROVIDER_TIERS.items():

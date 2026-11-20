@@ -148,7 +148,7 @@ async def refresh_zen_models_async() -> bool:
         logger.info("Zen tiers refreshed: %d free, %d paid", len(free), len(paid))
         return True
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error("Error refreshing Zen models: %s", e)
         return False
 
@@ -157,7 +157,7 @@ def refresh_zen_models(force: bool = False) -> bool:
     """Sync wrapper for refresh_zen_models_async (for non-async callers)."""
     import asyncio
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
         # Already in async context — can't use asyncio.run, schedule as task
         logger.warning("refresh_zen_models called from async context — use refresh_zen_models_async instead")
         return False
@@ -189,7 +189,7 @@ async def refresh_nvidia_models_async() -> bool:
         logger.info("NVIDIA tiers refreshed: %d free, %d paid", len(free), len(paid))
         return True
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error("Error refreshing NVIDIA models: %s", e)
         return False
 
@@ -230,7 +230,7 @@ async def refresh_openrouter_models_async() -> bool:
         logger.info("OpenRouter tiers refreshed: %d free, %d paid", len(free), len(paid))
         return True
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error("Error refreshing OpenRouter models: %s", e)
         return False
 

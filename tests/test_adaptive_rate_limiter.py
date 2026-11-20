@@ -9,14 +9,11 @@ import time
 import pytest
 
 from core.rate_limiter import (
-    AdaptiveRateLimiter,
-    ModelRateConfig,
-    PerModelRateLimiter,
     ZEN_DEFAULT_RATE_CONFIG,
-    ZEN_VENDOR_RATE_LIMITS,
+    AdaptiveRateLimiter,
+    PerModelRateLimiter,
     resolve_model_rate_config,
 )
-
 
 # ── resolve_model_rate_config ────────────────────────────────────────────────
 

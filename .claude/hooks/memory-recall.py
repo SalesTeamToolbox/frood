@@ -274,10 +274,7 @@ def search_history_entries(content, keywords):
 
     results = []
     # Split on --- separators or double newlines
-    if "\n---\n" in content:
-        entries = content.split("\n---\n")
-    else:
-        entries = content.split("\n\n")
+    entries = content.split("\n---\n") if "\n---\n" in content else content.split("\n\n")
 
     # Only search recent entries (last 100)
     for entry in entries[-100:]:

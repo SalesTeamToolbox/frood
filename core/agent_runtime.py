@@ -321,14 +321,14 @@ class AgentRuntime:
         )
 
         try:
-            log_file = open(log_path, "w", encoding="utf-8")
-            log_file.write(f"Agent: {agent_config.get('name', agent_id)}\n")
-            log_file.write(f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            log_file.write(f"Provider: {agent_config.get('provider', 'anthropic')}\n")
-            log_file.write(f"Model: {agent_config.get('model', 'default')}\n")
-            log_file.write("Runner: Claude Code CLI\n")
-            log_file.write("=" * 60 + "\n\n")
-            log_file.flush()
+            with open(log_path, "w", encoding="utf-8") as log_file:
+                log_file.write(f"Agent: {agent_config.get('name', agent_id)}\n")
+                log_file.write(f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                log_file.write(f"Provider: {agent_config.get('provider', 'anthropic')}\n")
+                log_file.write(f"Model: {agent_config.get('model', 'default')}\n")
+                log_file.write("Runner: Claude Code CLI\n")
+                log_file.write("=" * 60 + "\n\n")
+                log_file.flush()
 
             cmd_args = [
                 claude_bin,

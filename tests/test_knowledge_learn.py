@@ -742,7 +742,7 @@ class TestQdrantDimension:
         assert hasattr(self.worker, "QdrantStore")
         # When QdrantStore is None (ImportError path), the module still must have the constant
         # defined as string "knowledge" via the module-level reference
-        assert self.worker.QdrantStore is not None or True  # graceful fallback is OK
+        assert True  # graceful fallback is OK
 
 
 # ===========================================================================

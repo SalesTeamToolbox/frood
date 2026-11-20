@@ -205,10 +205,7 @@ def is_trivial_session(event):
 
     # Session duration check (if start_time in event)
     start_time = event.get("session_start_time", 0)
-    if start_time and (time.time() - start_time) < 30:
-        return True
-
-    return False
+    return bool(start_time and time.time() - start_time < 30)
 
 
 def is_noise_entry(summary: str) -> bool:
@@ -252,10 +249,7 @@ def is_noise_entry(summary: str) -> bool:
         )
 
     only_planning = all(is_planning_only_file(f) for f in modified_files)
-    if only_planning:
-        return True
-
-    return False
+    return bool(only_planning)
 
 
 def check_dedup(history_path, summary):

@@ -63,10 +63,7 @@ def is_cc_memory_file(file_path: str) -> bool:
     if parts[idx + 1] != "projects":
         return False
     # parts[idx + 2] is the project name (any)
-    if parts[idx + 3] != "memory":
-        return False
-
-    return True
+    return parts[idx + 3] == "memory"
 
 
 def main():

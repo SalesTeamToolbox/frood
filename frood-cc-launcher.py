@@ -13,13 +13,13 @@ Providers:
     cc   - Anthropic Claude Code subscription (default)
 """
 
-import os
-import sys
-import subprocess
 import json
+import os
 import shutil
-import urllib.request
+import subprocess
+import sys
 import urllib.error
+import urllib.request
 from pathlib import Path
 
 # Configuration
@@ -70,7 +70,7 @@ def get_env_for_provider(provider):
     zen_reasoning = get_model(
         [m for m in zen_models if "nemotron" in m.lower()], "nemotron-3-super-free"
     )
-    zen_content = get_model([m for m in zen_models if "pickle" in m.lower()], "big-pickle")
+    get_model([m for m in zen_models if "pickle" in m.lower()], "big-pickle")
 
     cc_fast = get_model([m for m in cc_models if "haiku" in m.lower()], "claude-haiku-4-5-20251001")
     cc_general = get_model(

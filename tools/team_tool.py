@@ -900,7 +900,7 @@ class TeamTool(Tool):
 
         for run_file in runs_dir.glob("*.json"):
             try:
-                async with aiofiles.open(str(run_file), "r") as f:
+                async with aiofiles.open(str(run_file)) as f:
                     data = json.loads(await f.read())
                     runs[data["run_id"]] = data
             except Exception as e:

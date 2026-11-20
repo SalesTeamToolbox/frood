@@ -107,7 +107,7 @@ class _OnnxEmbedder:
 
         self._np = np
         self._tokenizer = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
-        self._tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
+        self._tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")  # noqa: S106
         self._tokenizer.enable_truncation(max_length=256)
         self._session = ort.InferenceSession(
             str(model_dir / "onnx" / "model.onnx"),

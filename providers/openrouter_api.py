@@ -24,8 +24,6 @@ from typing import Any
 
 import httpx
 
-from core.config import settings
-
 logger = logging.getLogger("frood.providers.openrouter")
 
 _DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
@@ -98,7 +96,7 @@ class OpenRouterApiClient:
                     await asyncio.sleep(2.0 * (attempt + 1))
                     continue
                 return {"error": last_error}
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return {"error": f"Unexpected error: {e}"}
 
         return {"error": last_error or "Max retries exceeded"}
@@ -141,7 +139,7 @@ class OpenRouterApiClient:
         except httpx.RequestError as e:
             logger.error("OpenRouter list_all_models error: %s", e)
             return list(self._known_models)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error("OpenRouter list_all_models unexpected error: %s", e)
             return list(self._known_models)
 

@@ -12,12 +12,10 @@ Models: https://integrate.api.nvidia.com/v1/models
 import asyncio
 import logging
 import os
-import re
 from typing import Any
 
 import httpx
 
-from core.config import settings
 from core.rate_limiter import PerModelRateLimiter
 
 logger = logging.getLogger("frood.providers.nvidia")
@@ -118,7 +116,7 @@ class NvidiaApiClient:
                         # Check for NVIDIA-specific error patterns
                         if "401" in str(resp.status_code) or "Unauthorized" in error_text:
                             return {"error": "Invalid NVIDIA API key"}
-                        
+
                         if self._rate_limiting_enabled:
                             self._rate_limiter.record_rate_limit(model)
                         logger.warning(
@@ -235,7 +233,7 @@ class NvidiaApiClient:
         except httpx.RequestError as e:
             logger.error("NVIDIA API list_all_models error: %s", e)
             return list(self._known_free_models)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error("NVIDIA API list_all_models unexpected error: %s", e)
             return list(self._known_free_models)
 

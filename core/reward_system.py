@@ -108,10 +108,7 @@ class ScoreCalculator:
         w = (weights or ScoreWeights()).normalized()
 
         # Volume: higher is better, normalized against fleet max
-        if fleet_max_volume > 0:
-            vol_norm = min(1.0, task_volume / fleet_max_volume)
-        else:
-            vol_norm = 0.0
+        vol_norm = min(1.0, task_volume / fleet_max_volume) if fleet_max_volume > 0 else 0.0
 
         # Speed: lower ms is better. Best agent in fleet = 1.0.
         if speed_ms <= 0:

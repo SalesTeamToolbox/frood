@@ -273,7 +273,7 @@ class HeartbeatService:
                 import ctypes.wintypes
 
                 # Use GetProcessMemoryInfo via Windows psapi
-                class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+                class ProcessMemoryCounters(ctypes.Structure):
                     _fields_ = [
                         ("cb", ctypes.wintypes.DWORD),
                         ("PageFaultCount", ctypes.wintypes.DWORD),
@@ -287,12 +287,12 @@ class HeartbeatService:
                         ("PeakPagefileUsage", ctypes.c_size_t),
                     ]
 
-                counters = PROCESS_MEMORY_COUNTERS()
+                counters = ProcessMemoryCounters()
                 counters.cb = ctypes.sizeof(counters)
                 psapi = ctypes.WinDLL("psapi")
                 psapi.GetProcessMemoryInfo.argtypes = [
                     ctypes.wintypes.HANDLE,
-                    ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
+                    ctypes.POINTER(ProcessMemoryCounters),
                     ctypes.wintypes.DWORD,
                 ]
                 psapi.GetProcessMemoryInfo.restype = ctypes.wintypes.BOOL

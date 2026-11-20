@@ -55,7 +55,7 @@ class MemoryBridge:
             agent_id:        Required. Scopes results to this agent only.
             company_id:      Optional. Further scopes to company when provided.
             top_k:           Maximum number of results to return.
-            score_threshold: Minimum cosine similarity score (0.0–1.0).
+            score_threshold: Minimum cosine similarity score (0.0-1.0).
             run_id:          Optional. Tags returned results with which run consumed them (D-22).
 
         Returns:

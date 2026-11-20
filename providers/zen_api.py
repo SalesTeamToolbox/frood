@@ -279,7 +279,7 @@ class ZenApiClient:
         except httpx.RequestError as e:
             logger.error("Zen API list_all_models error: %s", e)
             return list(self._known_free_models)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error("Zen API list_all_models unexpected error: %s", e)
             return list(self._known_free_models)
 
