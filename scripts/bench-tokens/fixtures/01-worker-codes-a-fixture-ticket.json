@@ -1,0 +1,7 @@
+{
+  "task": "worker-codes-a-fixture-ticket",
+  "risky": true,
+  "egm_trigger": "new-top-level-directory",
+  "expected_pass": false,
+  "diff": "diff --git a/tasks/fixture-worker-ticket.md b/tasks/fixture-worker-ticket.md\\nnew file mode 100644\\nindex 0000000..e69de29\\n--- /dev/null\\n+++ b/tasks/fixture-worker-ticket.md\\n@@ -0,0 +1 @@\\n+# Fixture ticket: worker codes a small ticket file\\n+\\n+This fixture represents the worker role writing a small ticket file during\\n+a `/gauntlet` run. The diff creates `tasks/` \u2014 a new top-level directory \u2014\\n+which trips the EGM trigger for new top-level directories. The EGM gate\\n+therefore blocks worker start until this ticket is EGM-approved; it pends.\\n+\\n+Router instrumentation counts the tokens for the diff text under both the\\n+routed path (workhorse model) and the direct-premium path.\\n"
+}

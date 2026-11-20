@@ -1,0 +1,7 @@
+{
+  "task": "senior-signs-off-a-fixture",
+  "risky": false,
+  "egm_trigger": null,
+  "expected_pass": true,
+  "diff": "diff --git a/tasks/fixture-senior-signoff.md b/tasks/fixture-senior-signoff.md\\nnew file mode 100644\\nindex 0000000..e69de29\\n--- /dev/null\\n+++ b/tasks/fixture-senior-signoff.md\\n@@ -0,0 +1 @@\\n+# Fixture ticket: senior signs off a fixture\\n+\\n+This fixture represents the senior role signing off a fixture during a\\n+`/gauntlet` run. The scope stays within an existing top-level directory\\n+(`tasks/`), so it does not trip any EGM trigger and sign-off can proceed\\n+once critic review is approved.\\n+\\n+Router instrumentation counts the tokens for the diff text under both the\\n+routed path (workhorse model) and the direct-premium path.\\n"
+}
