@@ -110,8 +110,13 @@ class SkillLoader:
         self._skills: dict[str, Skill] = {}
         self._disabled: set[str] = set()
 
-    def load_all(self) -> dict[str, Skill]:
-        """Scan all skill directories and load SKILL.md files."""
+    def load_all(self, include_archived: bool = False) -> dict[str, Skill]:
+        """Scan all skill directories and load SKILL.md files.
+
+        Args:
+            include_archived: If True, also load skills from 'archive/' subdirectories.
+                             Defaults to False to avoid loading deprecated skills.
+        """
         self._skills.clear()
 
         for skill_dir in self.skill_dirs:
@@ -119,8 +124,18 @@ class SkillLoader:
                 logger.debug(f"Skill directory not found: {skill_dir}")
                 continue
 
+            # Skip archive directories unless explicitly included
+            if not include_archived and skill_dir.name == "archive":
+                logger.debug(f"Skipping archive directory: {skill_dir}")
+                continue
+
             for skill_path in sorted(skill_dir.iterdir()):
                 if not skill_path.is_dir():
+                    continue
+
+                # Skip archive subdirectories within skill dirs
+                if not include_archived and skill_path.name == "archive":
+                    logger.debug(f"Skipping archive subdirectory: {skill_path}")
                     continue
 
                 skill_md = skill_path / "SKILL.md"

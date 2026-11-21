@@ -59,21 +59,6 @@
             "timeout": 5
           }
         ]
-      },
-      {
-        "matcher": "mcp__jcodemunch",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python .claude/hooks/jcodemunch-token-tracker.py",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "python .claude/hooks/jcodemunch-reindex.py",
-            "timeout": 10
-          }
-        ]
       }
     ],
     "Stop": [
@@ -92,11 +77,6 @@
           {
             "type": "command",
             "command": "python .claude/hooks/memory-learn.py",
-            "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "python .claude/hooks/jcodemunch-reindex.py",
             "timeout": 15
           },
           {

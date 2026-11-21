@@ -275,6 +275,7 @@ def _load_skills():
     """Load all skills from builtin and workspace directories.
 
     Returns a SkillLoader with all skills parsed and extensions resolved.
+    Archive skills are excluded by default.
     """
     from skills.loader import SkillLoader
 
@@ -287,7 +288,7 @@ def _load_skills():
     ]
 
     loader = SkillLoader(skill_dirs)
-    loader.load_all()
+    loader.load_all(include_archived=False)  # Explicitly exclude archived skills
     return loader
 
 

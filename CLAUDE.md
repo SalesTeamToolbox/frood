@@ -76,24 +76,24 @@ cc status       # Show current configuration
 - **Sandbox always on** — validate paths via `sandbox.resolve_path()`. Never disable in prod.
 - **New pitfalls** — add to `.claude/reference/pitfalls-archive.md` when you discover non-obvious issues.
 
-## Codebase Navigation (jcodemunch)
+## Codebase Navigation
 
-Repo: `local/frood` (267 files, 5298 symbols). **Use jcodemunch before reading files:**
+Repo: `local/frood` (267 files, 5298 symbols). Use standard tools:
 
 | Need | Tool |
 |------|------|
-| Module overview | `get_file_outline` |
-| Find definitions | `search_symbols` |
-| Directory structure | `get_file_tree` with `path_prefix` |
-| Symbol source | `get_symbol` |
-| Text search | `search_text` |
+| Module overview | `get_file_outline` / `read` |
+| Find definitions | `grep` / `search_symbols` |
+| Directory structure | `glob` / `ls` |
+| Symbol source | `grep` / `read` |
+| Text search | `grep` |
 
 ## Hooks
 
 Automated hooks run in `.claude/`. Key behaviors:
 - **UserPromptSubmit**: memory recall, learning injection, prompt accumulation
 - **PreToolUse**: security gate blocks edits to sensitive files
-- **PostToolUse**: auto-format (ruff), security monitoring, Qdrant sync, jcodemunch reindex
+- **PostToolUse**: auto-format (ruff), security monitoring, Qdrant sync
 - **Stop**: session handoff, test validation, learning capture
 
 Full details: `.claude/reference/hooks-reference.md`
@@ -144,7 +144,6 @@ After task completes: `claude plugins disable "<name>@claude-plugins-official"`
 |--------|----------|
 | frood | Working on Frood code that needs MCP tools |
 | frood-remote | Production server operations |
-| jcodemunch | Codebase navigation (symbols, outlines, trees) |
 | context7 | Library documentation lookup |
 | playwright | Browser automation |
 | firecrawl | Web scraping |
@@ -163,12 +162,11 @@ After task completes: `claude plugins disable "<name>@claude-plugins-official"`
 - `terminology.md` — Full glossary of 50 terms
 - `stack-rewards.md` — Rewards/tier system stack research
 
-<!-- GSD:project-start source:PROJECT.md -->
 ## Project
 
 **Frood**
 
-An AI agent platform that operates across 9 LLM providers with tiered routing (L1 workhorse, L2 premium, free fallback), per-agent model configuration, and graceful degradation. Features intelligent memory (ONNX + Qdrant with auto-sync from Claude Code), task-aware learning (effectiveness tracking + proactive injection), and native desktop app experience (PWA + GSD auto-activation).
+An AI agent platform that operates across 9 LLM providers with tiered routing (L1 workhorse, L2 premium, free fallback), per-agent model configuration, and graceful degradation. Features intelligent memory (ONNX + Qdrant with auto-sync from Claude Code), task-aware learning (effectiveness tracking + proactive injection), and native desktop app experience (PWA).
 
 **Core Value:** Frood must always be able to run agents reliably, with tiered provider routing (L1 workhorse -> free fallback -> L2 premium) ensuring no single provider outage stops the platform.
 
@@ -178,42 +176,15 @@ An AI agent platform that operates across 9 LLM providers with tiered routing (L
 - **Tiered defaults**: L1 (StrongWall) when configured, free tier fallback, L2 premium opt-in
 - **Graceful degradation**: Missing API keys never crash Frood
 - **Backward compatible**: Users without new API keys keep existing routing
-<!-- GSD:project-end -->
 
-<!-- GSD:stack-start source:research/STACK.md -->
 ## Technology Stack
 
 Core stack: Python 3.11+, stdlib (`IntEnum`, `asyncio.Semaphore`, `dataclasses`), existing deps (`aiosqlite`, `aiofiles`, FastAPI).
-<!-- GSD:stack-end -->
 
-<!-- GSD:conventions-start source:CONVENTIONS.md -->
 ## Conventions
 
 Conventions not yet established. Will populate as patterns emerge during development.
-<!-- GSD:conventions-end -->
 
-<!-- GSD:architecture-start source:ARCHITECTURE.md -->
 ## Architecture
 
 Architecture not yet mapped. Follow existing patterns found in the codebase.
-<!-- GSD:architecture-end -->
-
-<!-- GSD:workflow-start source:GSD defaults -->
-## GSD Workflow Enforcement
-
-Before using Edit, Write, or other file-changing tools, start work through a GSD command so planning artifacts and execution context stay in sync.
-
-Use these entry points:
-- `/gsd:quick` for small fixes, doc updates, and ad-hoc tasks
-- `/gsd:debug` for investigation and bug fixing
-- `/gsd:execute-phase` for planned phase work
-
-Do not make direct repo edits outside a GSD workflow unless the user explicitly asks to bypass it.
-<!-- GSD:workflow-end -->
-
-<!-- GSD:profile-start -->
-## Developer Profile
-
-> Profile not yet configured. Run `/gsd:profile-user` to generate your developer profile.
-> This section is managed by `generate-claude-profile` -- do not edit manually.
-<!-- GSD:profile-end -->
