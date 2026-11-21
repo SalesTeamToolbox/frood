@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Installation | DON'T PANIC</title>
+  <link rel="icon" type="image/svg+xml" href="/frood/assets/frood-favicon.svg">
+  <link rel="apple-touch-icon" href="/frood/assets/icons/apple-touch-icon-180.png">
+  <link rel="stylesheet" href="/frood/assets/css/style.css">
+  <style>
+    :root {
+      --towel-gold: #E8A838;
+      --towel-gold-dark: #D4922A;
+      --space-dark: #1a1d27;
+      --space-medium: #2a2f3a;
+      --space-light: #e8eaf0;
+      --panic-red: #d63031;
+      --improbability-blue: #0984e3;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; background: var(--space-dark); color: var(--space-light); line-height: 1.6; }
+    .container { max-width: 900px; margin: 0 auto; padding: 0 24px; }
+    .site-header { padding: 24px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .nav { display: flex; justify-content: space-between; align-items: center; }
+    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--space-light); font-weight: 700; font-size: 1.5rem; }
+    .brand svg { width: 40px; height: 40px; }
+    .brand .tagline { font-size: 0.65rem; color: var(--towel-gold); font-weight: 600; letter-spacing: 0.5px; margin-top: -4px; display: block; }
+    .nav-cta { background: var(--towel-gold); color: var(--space-dark); padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600; transition: background 0.2s; }
+    .nav-cta:hover { background: var(--towel-gold-dark); }
+    .content { padding: 40px 0 60px; }
+    h1, h2, h3 { color: var(--space-light); }
+    h1 { font-size: 2.5rem; margin-bottom: 1rem; }
+    h2 { font-size: 1.75rem; margin: 2rem 0 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    h3 { font-size: 1.25rem; margin: 1.5rem 0 0.75rem; }
+    a { color: var(--towel-gold); text-decoration: none; }
+    a:hover { color: var(--towel-gold-dark); text-decoration: underline; }
+    code { background: var(--space-medium); padding: 0.2em 0.4em; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
+    pre { background: var(--space-medium); padding: 1rem; border-radius: 8px; overflow-x: auto; }
+    pre code { background: transparent; padding: 0; }
+    table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; }
+    th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    th { color: var(--towel-gold); font-weight: 600; }
+    tr:hover td { background: rgba(255,255,255,0.03); }
+    .site-footer { padding: 40px 0; border-top: 1px solid rgba(255,255,255,0.1); text-align: center; color: rgba(255,255,255,0.5); font-size: 0.9rem; }
+    .site-footer a { color: var(--towel-gold); }
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px; border-radius: 8px; font-weight: 600; text-decoration: none; transition: transform 0.2s, box-shadow 0.2s; margin: 0 8px 8px 0; }
+    .btn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+    .btn-primary { background: var(--towel-gold); color: var(--space-dark); border: none; }
+    .btn-primary:hover { background: var(--towel-gold-dark); }
+    .btn-outline { background: transparent; color: var(--towel-gold); border: 2px solid var(--towel-gold); }
+    .btn-outline:hover { background: var(--towel-gold); color: var(--space-dark); }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav container">
+      <a class="brand" href="/frood/">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#E8A838"/><rect x="7" y="8" width="18" height="16" rx="3" fill="#fff" fill-opacity="0.25" stroke="#fff" stroke-width="1.8"/><line x1="16" y1="8" x2="16" y2="24" stroke="#fff" stroke-width="1.5" stroke-dasharray="2.5,1.5"/><line x1="9" y1="13" x2="14" y2="13" stroke="#fff" stroke-width="1.2" opacity="0.6"/><line x1="9" y1="17" x2="14" y2="17" stroke="#fff" stroke-width="1.2" opacity="0.6"/><line x1="18" y1="13" x2="23" y2="13" stroke="#fff" stroke-width="1.2" opacity="0.6"/><line x1="18" y1="17" x2="23" y2="17" stroke="#fff" stroke-width="1.2" opacity="0.6"/><path d="M13 8 Q13 3.5 16 3.5 Q19 3.5 19 8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>Frood<span class="tagline">DON'T PANIC</span></span>
+      </a>
+      <a class="nav-cta" href="https://salesteamtoolbox.com/?utm_source=github&utm_medium=frood&utm_campaign=oss">Try Frood on Sales Team Toolbox</a>
+    </nav>
+  </header>
+
+  <main class="content container">
+    <h1 id="installation-frood">Installation — Frood</h1>
+<p>Install Frood from zero on a clean machine or container. These steps take you from a fresh clone to a running dashboard at <code>http://localhost:8000</code>.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>Python 3.11+</li>
+<li><code>git</code></li>
+<li><code>docker</code> (optional, for the container install)</li>
+</ul>
+<h2 id="1-clone-the-repo">1. Clone the repo</h2>
+<pre><code class="language-bash">git clone https://github.com/SalesTeamToolbox/frood.git
+cd frood
+</code></pre>
+<h2 id="2-create-and-activate-a-virtual-environment">2. Create and activate a virtual environment</h2>
+<pre><code class="language-bash">python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+</code></pre>
+<h2 id="3-install-dependencies">3. Install dependencies</h2>
+<p>Production dependencies:</p>
+<pre><code class="language-bash">make install
+</code></pre>
+<p>Development dependencies (linting, testing, security):</p>
+<pre><code class="language-bash">make install-dev
+</code></pre>
+<h2 id="4-configure">4. Configure</h2>
+<pre><code class="language-bash">cp .env.example .env
+</code></pre>
+<p>Open <code>.env</code> and replace the placeholder values with your own. At minimum set <code>JWT_SECRET</code> (for persistent dashboard sessions). All provider API keys are optional — Frood degrades gracefully when a key is missing.</p>
+<p>Never commit real API keys, passwords, or tokens to the repository.</p>
+<h2 id="5-verify-lint-test">5. Verify (lint + test)</h2>
+<pre><code class="language-bash">make lint
+make test
+make check
+</code></pre>
+<p>Note: the base tree may carry a small number of pre-existing ruff findings (documented in <code>ops/install-from-zero.md</code>). These are not introduced by these docs, and ruff does not lint markdown files.</p>
+<h2 id="6-run">6. Run</h2>
+<pre><code class="language-bash">python frood.py                  # Dashboard at http://localhost:8000
+python frood.py --no-dashboard   # Headless (services only)
+python frood.py --port 8080      # Custom dashboard port
+</code></pre>
+<p>Open http://localhost:8000 in your browser. First run opens a setup wizard to set a dashboard password and (optionally) an OpenRouter API key.</p>
+<h2 id="optional-build-and-run-the-container">Optional: build and run the container</h2>
+<pre><code class="language-bash">docker build -t frood .
+docker run -p 8000:8000 frood
+</code></pre>
+<p>Then open http://localhost:8000.</p>
+<h2 id="next-steps">Next steps</h2>
+<ul>
+<li><code>docs/frood-st/docs/usage.md</code> — dashboard, router, memory, peer-mail basics</li>
+<li><code>docs/frood-st/docs/api-reference.md</code> — HTTP API endpoints and MCP tools overview</li>
+<li><code>ops/install-from-zero.md</code> — full install-from-zero procedure (incl. docker build)</li>
+</ul>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2026 Sales Team Toolbox. MIT License.</p>
+      <p><a href="/frood/docs/installation/">📖 Docs → Installation</a> · <a href="https://github.com/SalesTeamToolbox/frood">🐙 GitHub</a> · <a href="https://salesteamtoolbox.com/docs/frood">🌐 Full Documentation</a></p>
+      <p class="easter-egg">🛸 42 • DON'T PANIC • 🛸</p>
+    </div>
+  </footer>
+</body>
+</html>
