@@ -380,7 +380,7 @@ def main():
     parser.add_argument(
         "--sidecar",
         action="store_true",
-        help="Run as Paperclip sidecar (adapter-friendly endpoints, no dashboard)",
+        help="Run as Paperclip sidecar (STT internal: Odoo/Paperclip/Arianna integration, no dashboard)",
     )
     parser.add_argument(
         "--sidecar-port",

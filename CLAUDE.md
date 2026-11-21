@@ -188,3 +188,40 @@ Conventions not yet established. Will populate as patterns emerge during develop
 ## Architecture
 
 Architecture not yet mapped. Follow existing patterns found in the codebase.
+
+<!-- BEGIN FROOD MEMORY -->
+## Frood Memory
+
+Frood provides a persistent, semantically-searchable memory layer via the `frood_memory`
+MCP tool. These instructions configure Claude Code to use Frood as its primary memory system.
+
+### When to search memory
+
+ALWAYS call `frood_memory` with action `search` before answering any question that
+could draw on past project decisions, user preferences, debugging history, or architectural
+choices. Do not rely solely on your context window or built-in memory files.
+
+```
+frood_memory(action="search", content="<your query>")
+```
+
+### When to store
+
+After learning something important -- a user preference, a project decision, a fix for
+a recurring bug -- call `frood_memory` with action `store` IN ADDITION to any
+built-in memory write. This ensures the information is searchable by semantic meaning,
+not just file name.
+
+```
+frood_memory(action="store", section="<Category>", content="<what to remember>")
+```
+
+### When to log
+
+After completing a significant task or resolving a non-obvious problem, call
+`frood_memory` with action `log` to record the event in the project timeline.
+
+```
+frood_memory(action="log", event_type="task_completed", content="<summary>")
+```
+<!-- END FROOD MEMORY -->

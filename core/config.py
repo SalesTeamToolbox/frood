@@ -329,11 +329,14 @@ class Settings:
     rewards_silver_max_concurrent: int = 5
     rewards_gold_max_concurrent: int = 10
 
-    # Paperclip sidecar mode (Phase 24)
-    paperclip_sidecar_port: int = 8001
-    paperclip_api_url: str = ""  # e.g. "http://paperclip:3000"
-    paperclip_agents_path: str = "/api/agents"  # Path to Paperclip agents endpoint
+    # Paperclip sidecar (STT/Client enterprise integration — Phase 24)
+    # ONLY for STT internal use: routes agent tasks via Paperclip control plane
+    # with Odoo ticket sync, Arianna support AI, Bug-Fixer-CC agent routing.
+    # General Frood users should leave sidecar_enabled=false and use MCP instead.
     sidecar_enabled: bool = False
+    paperclip_sidecar_port: int = 8001
+    paperclip_api_url: str = ""  # e.g. "http://paperclip:3000" (STT internal)
+    paperclip_agents_path: str = "/api/agents"  # Paperclip agents endpoint
     standalone_mode: bool = False  # Simplified dashboard mode (Claude Code only)
     mcp_tool_allowlist: str = ""  # Comma-separated tool names for /mcp/tool proxy (Phase 28)
 

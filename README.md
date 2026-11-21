@@ -243,6 +243,160 @@ Frood comes with **46 skills** across categories. Load them via the dashboard or
 
 ---
 
+## 🌉 Cross-Harness Orchestration — *The Babel Fish for AI Agents*
+
+**Frood includes the Orchestrator system** — a cross-harness framework that lets you run **Claude Code as the orchestrator with OpenCode subagents**, or **OpenCode as the orchestrator with OpenCode subagents**. The orchestrator plans, delegates, and judges; workers write code; critics review.
+
+### Architecture
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                    ORCHESTRATOR SESSION                              │
+│  (Claude Code Opus 5.5  OR  OpenCode Go Muse)                     │
+│  Plans, writes Mandates, judges, merges — NEVER writes code       │
+└──────────────────────────┬─────────────────────────────────────────┘
+                           │
+           ┌───────────────┼───────────────┐
+           ▼               ▼               ▼
+    ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+    │   Worker    │ │   Worker    │ │   Worker    │
+    │ (OpenCode)  │ │ (OpenCode)  │ │ (OpenCode)  │
+    │  MiMo/Deep  │ │  Nemotron   │ │    GLM      │
+    └──────┬──────┘ └──────┬──────┘ └──────┬──────┘
+           │               │               │
+           └───────────────┼───────────────┘
+                           ▼
+                  ┌─────────────────┐
+                  │    Critic       │
+                  │ (CmdC Haiku /   │
+                  │  Nvidia Nemotron)│
+                  └────────┬────────┘
+                           ▼
+                  ┌─────────────────┐
+                  │   Senior (opt)  │
+                  │ (CmdC Sonnet /  │
+                  │  Nvidia Nemotron)│
+                  └────────┬────────┘
+                           ▼
+                  ┌─────────────────┐
+                  │   Board/Train   │
+                  │  (Deploy/Verify)│
+                  └─────────────────┘
+```
+
+### Quick Start: Cross-Harness Orchestration
+
+#### Option A: Claude Code as Orchestrator (Recommended for cost play)
+```bash
+# 1. Install orchestrator (adds commands to both Claude Code & OpenCode)
+cd ~/projects/orchestrator && node bin/install.mjs
+
+# 2. In Claude Code, start orchestration
+/orchestrator "Build a REST API with auth, rate limiting, and tests"
+
+# 3. Orchestrator spawns OpenCode workers headless (cheap pools, not your Claude sub)
+#    You review critic findings, approve, merge
+```
+
+#### Option B: OpenCode as Orchestrator (Fully OpenCode)
+```bash
+# 1. Install orchestrator
+cd ~/projects/orchestrator && node bin/install.mjs
+
+# 2. In OpenCode, start orchestration
+/orchestrator "Build a REST API with auth, rate limiting, and tests"
+
+# 3. OpenCode Go Muse orchestrates, OpenCode workers execute
+#    All on OpenCode Go/CmdC pools — zero Anthropic subscription cost
+```
+
+### Key Components (from `~/projects/orchestrator`)
+
+| Component | Purpose |
+|-----------|---------|
+| **`/orchestrator`** | Slash command — full lifecycle: discuss → plan → execute via `/gauntlet` |
+| **`/gauntlet`** | Runs one module: worker → critic loop → senior → board ready → train |
+| **`bin/oc-worker.mjs`** | Launches headless OpenCode agent (worker, critic, scout, senior) |
+| **`bin/board.mjs`** | Ticket board: create, claim, EGM, rounds, signoff, gates, ready, verify, shipped |
+| **`bin/router-health.mjs`** | Self-correcting routing: probes models, prints healthy agent per role |
+| **`peer-mail`** | Cross-harness messaging (session wake-ups, handoff links) |
+
+### Model Routing (The "Infinite Improbability Drive")
+
+| Role | Primary | Fallback Chain | Free-First Chain |
+|------|---------|----------------|------------------|
+| **Orchestrator** | Go Muse | CmdC Muse → **Nvidia Nemotron 3.5 Super** → Zen | — |
+| **Worker** | Go MiMo | **CmdC DeepSeek** → **Nvidia Nemotron 3.5 Super** → CmdC GLM → Zen | **Nvidia Nemotron 3 Ultra** → Zen → paid tail |
+| **Critic** | CmdC Haiku | **Go Haiku** → CmdC Luna → **Nvidia Nemotron 3.5 Super** → Zen | — |
+| **Senior** | CmdC Sonnet | CmdC DeepSeek Pro → **Nvidia Nemotron 3.5 Super** → Zen | — |
+| **Scout** | Zen MiMo | **Nvidia Nemotron 3.5 Super** → CmdC GLM | — |
+
+> **Nvidia rate-limit handling**: 429 = `rate-limit` (1-30 min), not `quota`. Auto-resume same session after cooldown.
+
+### Cross-Harness Handoff
+
+```bash
+# In Claude Code: take over an OpenCode stream
+/next <stream-number>    # Asks owner, takes over on yes
+
+# In OpenCode: take over a Claude Code stream
+/next <stream-number>
+
+# Hand back to other harness
+/handback <stream-number>
+```
+
+Streams are harness-agnostic — a stream started in one harness finishes in the other. One desk daemon at a time across both.
+
+### EGM (Elephant-Goldfish) Gate
+
+Before any worker starts, the orchestrator checks triggers:
+
+| Trigger | EGM Required? |
+|---------|---------------|
+| New module/service/package | ✅ Yes |
+| Data model change (schema, migration, persisted key) | ✅ Yes |
+| Public interface change (API, CLI, config format) | ✅ Yes |
+| >3 modules touched | ✅ Yes |
+| Security/tenancy/money (auth, billing, wallet) | ✅ Yes |
+
+No trigger → **waived with reason** (never silently skipped). Runs via `/egm:egm-review` (Claude Code) or `/egm-review` (OpenCode).
+
+### Frood + Orchestrator Integration
+
+Frood provides the **runtime** (LLM routing, memory, tools, skills, dashboard).
+The Orchestrator provides the **process** (planning, delegation, review, deploy).
+
+```bash
+# Recommended setup
+~/projects/
+├── frood/              # LLM backbone (this repo)
+├── orchestrator/       # Cross-harness process (separate repo)
+└── your-project/       # Where work happens (worktrees created here)
+```
+
+1. **Frood runs** on port 8000 — provides LLM endpoint, MCP tools, memory, skills
+2. **Orchestrator runs** in Claude Code or OpenCode — plans work, spawns workers
+4. **Workers** (headless OpenCode) call Frood's LLM endpoint via MCP
+5. **Critic** reviews, **Senior** signs off, **Board** deploys via train
+
+### Install Both (Frood now includes Orchestrator)
+
+```bash
+# Frood (LLM backbone + cross-harness orchestrator)
+git clone https://github.com/SalesTeamToolbox/frood.git
+cd frood && bash setup.sh
+
+# The orchestrator is now integrated at ~/frood/orchestrator/
+# Install slash commands for both Claude Code & OpenCode:
+cd ~/frood/orchestrator && node bin/install.mjs
+
+# In Claude Code or OpenCode, start orchestration:
+/orchestrator "Build a REST API with auth, rate limiting, and tests"
+```
+
+---
+
 ## ⚙️ Configuration — *The Ship's Controls*
 
 All config via `.env` (copy from `.env.example`):
@@ -274,6 +428,8 @@ ALLOWED_COMMANDS=git,python,pip,ruff,pytest,make
 
 # Features
 ENABLE_MCP=true
+# Paperclip sidecar: STT/Client enterprise only (Odoo/Paperclip/Arianna integration)
+# General users: leave false, use MCP instead
 ENABLE_PAPERCLIP=false
 ```
 
