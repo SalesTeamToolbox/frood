@@ -1,3 +1,9 @@
+---
+layout: default
+title: Usage Guide
+permalink: /docs/usage/
+---
+
 # Usage — Frood
 
 Frood is an AI agent platform with tiered LLM routing, semantic memory, tool effectiveness learning, and a web dashboard. This page covers the day-to-day basics: the dashboard, the LLM router, memory, and peer-mail.

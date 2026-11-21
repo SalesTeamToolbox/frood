@@ -1,3 +1,9 @@
+---
+layout: default
+title: API Reference
+permalink: /docs/api-reference/
+---
+
 # API Reference — Frood
 
 Frood exposes an HTTP dashboard API (FastAPI + WebSocket) and an MCP server for Claude Code. The route → handler → outcome map is maintained in `docs/ATLAS.md` (checked by `tests/test_atlas.py`).

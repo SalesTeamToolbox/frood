@@ -1,0 +1,55 @@
+# GitHub Pages Jekyll configuration
+title: Frood
+description: "The AI agent platform that always knows where its towel is"
+baseurl: "/frood"
+url: "https://salesteamtoolbox.github.io"
+
+# Build settings
+markdown: kramdown
+highlighter: rouge
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+# Exclude files from processing
+exclude:
+  - .nojekyll
+  - frood-st/
+  - assets/
+  - atlas/
+  - "*.md"
+  - "*.txt"
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor
+
+# Include specific files
+include:
+  - index.html
+  - docs/
+
+# Collections
+collections:
+  docs:
+    output: true
+    permalink: /:path/
+
+# Defaults
+defaults:
+  - scope:
+      path: "docs"
+      type: "docs"
+    values:
+      layout: "default"
+
+# Plugins
+plugins:
+  - jekyll-relative-links
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+# Relative links
+relative_links:
+  enabled: true
+  collections: true

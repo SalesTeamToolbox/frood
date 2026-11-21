@@ -1,3 +1,9 @@
+---
+layout: default
+title: Installation
+permalink: /docs/installation/
+---
+
 # Installation — Frood
 
 Install Frood from zero on a clean machine or container. These steps take you from a fresh clone to a running dashboard at `http://localhost:8000`.
