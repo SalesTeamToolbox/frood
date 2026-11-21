@@ -1,9 +1,9 @@
 # process/IN-OUT.md — Frood public release candidate classification (M1)
 
-**Ticket:** m1-classify (classify + EGM review)  
-**Base:** origin/main @ `3de8e5c` (fresh-tree check passed before any work)  
-**Branch:** `feat/m1-classify`  
-**Worktree:** /home/user/projects/frood-wt-m1-classify  
+**Ticket:** m1-classify (classify + EGM review)
+**Base:** origin/main @ `3de8e5c` (fresh-tree check passed before any work)
+**Branch:** `feat/m1-classify`
+**Worktree:** /home/user/projects/frood-wt-m1-classify
 **EGM status:** `approved` — recorded in the plan's EGM record (plan-frood-public.md); all original Blockers and Majors resolved in the plan revision; no worker starts on M2+ without this file committed.
 
 ## Classification convention
@@ -60,6 +60,30 @@ A `—` in the private-path column means no machine-private path applies.
 | Ticket dumps | OUT | Proprietary diffs from private tickets | machine-local ticket dump dir |
 | Platform deploy scripts | OUT | STT/Volnova deploy half is not publishable; public train has no deploy target | `/opt/stt-platform/BUILD`, `/opt/stt-platform/deployed-sha`, `/opt/volnova/deployed-sha` |
 | Customer data | OUT | Never publishes any customer data | — |
+
+---
+
+## Website release assets (m1-website)
+
+Assets considered for the public website at frood.salesteamtoolbox.com (ticket `m1-website`, branch `feat/m1-website-structure`). The website ships only `index.html`, `docs/`, and `assets/`; peer-mail, board/train/progress, token-proof, and atlas material are out of scope for this website release.
+
+### IN — publishes in the public website release
+
+| asset | IN/OUT | reason | private path |
+|---|---|---|---|
+| `docs/frood-st/index.html` | IN | Public landing page: hero, value proposition, STT CTA with UTM tag, built-by attribution, docs footer link; no private data | — |
+| `docs/frood-st/docs/` (`installation.md`, `usage.md`, `api-reference.md`) | IN | Public user-facing docs; generic steps, no machine paths or secrets | — |
+| `docs/frood-st/assets/css/style.css` | IN | Public stylesheet for hero, nav, cards, footer; no private references | — |
+| `docs/frood-st/assets/images/.gitkeep` | IN | Empty placeholder for future public website images | — |
+
+### OUT — not part of the public website release
+
+| asset | IN/OUT | reason | private path |
+|---|---|---|---|
+| `process/peer-mail/` | OUT | Peer-mail session ids, inbox/outbox history never publish | `~/.config/opencode/` peer-mail state |
+| Board/train/progress (`ops/train.sh`, `ops/progress.sh`, `.opencode/board/`) | OUT | Machine-local deploy/train state and ledger readback; not website assets | `~/.config/orchestrator/` state + `.git/release-train/` |
+| Token-proof (`scripts/bench-tokens/`, `docs/token-proof.md`) | OUT | Offline fixture replay references private allowance patterns; not website content | machine-local ledger |
+| Atlas (`docs/ATLAS.md`, `docs/atlas/`, `tests/test_atlas.py`) | OUT | Internal screen → route → handler map; not published with the website | — |
 
 ---
 
