@@ -16,7 +16,7 @@
   <a href="https://pypi.org/project/frood/">
     <img src="https://img.shields.io/pypi/v/frood?style=for-the-badge&logo=pypi" alt="PyPI Version">
   </a>
-  <a href="https://salesteamtoolbox.com/docs/frood">
+  <a href="https://salesteamtoolbox.github.io/frood/">
     <img src="https://img.shields.io/badge/docs-frood.st-42b883?style=for-the-badge&logo=readthedocs" alt="Documentation">
   </a>
   <br>
@@ -146,11 +146,11 @@ bash setup.sh  # venv, deps, frontend, MCP config, hooks — the full Zaphod Bee
 
 | Section | Link | Description |
 |---------|------|-------------|
-| **Getting Started** | [Installation](https://salesteamtoolbox.com/docs/frood/installation) | From zero to dashboard in 5 minutes |
-| **Usage Guide** | [Usage](https://salesteamtoolbox.com/docs/frood/usage) | Routing, memory, skills, dashboard |
-| **API Reference** | [API](https://salesteamtoolbox.com/docs/frood/api-reference) | Endpoints, models, WebSocket events |
-| **Configuration** | [Config](https://salesteamtoolbox.com/docs/frood/configuration) | All 80+ environment variables |
-| **Architecture** | [Architecture](https://salesteamtoolbox.com/docs/frood/architecture) | Plugin system, security layers, MCP |
+| **Getting Started** | [Installation](https://salesteamtoolbox.github.io/frood/docs/installation) | From zero to dashboard in 5 minutes |
+| **Usage Guide** | [Usage](https://salesteamtoolbox.github.io/frood/docs/usage) | Routing, memory, skills, dashboard |
+| **API Reference** | [API](https://salesteamtoolbox.github.io/frood/docs/api-reference) | Endpoints, models, WebSocket events |
+| **Configuration** | [Config](https://salesteamtoolbox.github.io/frood/docs/configuration) | All 80+ environment variables |
+| **Architecture** | [Architecture](https://salesteamtoolbox.github.io/frood/docs/architecture) | Plugin system, security layers, MCP |
 | **Development** | [CLAUDE.md](CLAUDE.md) | Contributing, testing, hooks, conventions |
 
 ---
@@ -433,7 +433,7 @@ ENABLE_MCP=true
 ENABLE_PAPERCLIP=false
 ```
 
-> **See [Configuration Docs](https://salesteamtoolbox.com/docs/frood/configuration) for all 80+ variables.**
+> **See [Configuration Docs](https://salesteamtoolbox.github.io/frood/docs/configuration) for all 80+ variables.**
 
 ---
 
@@ -592,7 +592,7 @@ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
 ## 🔗 Links — *The Guide's Index*
 
 <p align="center">
-  <a href="https://salesteamtoolbox.com/docs/frood">📖 Documentation</a> ·
+  <a href="https://salesteamtoolbox.github.io/frood/">📖 Documentation</a> ·
   <a href="https://salesteamtoolbox.com">🌐 Sales Team Toolbox</a> ·
   <a href="https://github.com/SalesTeamToolbox/frood/issues">🐛 Issues</a> ·
   <a href="https://github.com/SalesTeamToolbox/frood/discussions">💬 Discussions</a> ·
