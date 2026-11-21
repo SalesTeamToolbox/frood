@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Validate pyproject.toml ruff config for common issues."""
 
-import tomllib
 import sys
+import tomllib
 
 
 def main():
