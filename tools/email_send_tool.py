@@ -1,25 +1,23 @@
 """
-Email sending tool — sends outbound email via Mailbaby SMTP relay.
+Email sending tool — sends outbound email via SMTP relay.
 
 Credentials are read from environment variables only — never passed as
 tool parameters. This keeps the password out of LLM-generated code,
 agent instructions, and tool call logs.
 
-Environment variables (configured in /opt/frood/.env):
-    MAILBABY_SMTP_PASSWORD  — Mailbaby SMTP password (required)
-    MAILBABY_SMTP_HOST      — relay host (default: relay.mailbaby.net)
-    MAILBABY_SMTP_PORT      — port (default: 587)
-    MAILBABY_SMTP_USER      — username (default: mb44866)
-    MAILBABY_FROM_EMAIL     — sender address (default: redacted@example.com)
-    MAILBABY_FROM_NAME      — sender display name (default: Arianna Dar)
+Environment variables:
+    SMTP_PASSWORD  — SMTP password (required)
+    SMTP_HOST      — relay host (default: localhost)
+    SMTP_PORT      — port (default: 587)
+    SMTP_USER      — username
+    FROM_EMAIL     — sender address
+    FROM_NAME      — sender display name
 
-    ARIANNA_IMAP_AUTH       — Arianna's IMAP password (optional; if set, every
-                              outbound is APPEND'd to the Sent folder so the
-                              webmail thread view shows both sides)
-    ARIANNA_IMAP_HOST       — IMAP host (default: mail.example-client.com)
-    ARIANNA_IMAP_PORT       — IMAP port (default: 993)
-    ARIANNA_IMAP_USER       — IMAP login (default: redacted@example.com)
-    ARIANNA_IMAP_SENT_FOLDER — Sent folder name (default: Sent)
+    IMAP_PASSWORD  — IMAP password (optional; if set, outbound is APPEND'd to Sent folder)
+    IMAP_HOST      — IMAP host
+    IMAP_PORT      — IMAP port (default: 993)
+    IMAP_USER      — IMAP login
+    IMAP_SENT_FOLDER — Sent folder name (default: Sent)
 """
 
 import asyncio
@@ -40,8 +38,7 @@ logger = logging.getLogger("frood.tools.email_send")
 class EmailSendTool(Tool):
     """Send an outbound email via Mailbaby SMTP relay.
 
-    Uses fixed sender identity (redacted@example.com) and Mailbaby
-    relay credentials from environment. Supports HTML + plain-text multipart.
+    Send an outbound email via SMTP relay. Supports HTML + plain-text multipart.
     """
 
     @property
@@ -51,8 +48,8 @@ class EmailSendTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Send an outbound email via Mailbaby SMTP relay. "
-            "Always sends from redacted@example.com. "
+            "Send an outbound email via SMTP relay. "
+            "Uses FROM_EMAIL/FROM_NAME from environment. "
             "Provide body_html for rich email, body_text for plain fallback "
             "(at least one required). "
             "Returns 'sent' on success or an error message."
@@ -107,17 +104,22 @@ class EmailSendTool(Tool):
                 success=False, error="At least one of body_html or body_text is required"
             )
 
-        smtp_host = os.environ.get("MAILBABY_SMTP_HOST", "relay.mailbaby.net")
-        smtp_port = int(os.environ.get("MAILBABY_SMTP_PORT", "587"))
-        smtp_user = os.environ.get("MAILBABY_SMTP_USER", "mb44866")
-        smtp_pass = os.environ.get("MAILBABY_SMTP_PASSWORD", "")
-        from_email = os.environ.get("MAILBABY_FROM_EMAIL", "redacted@example.com")
-        from_name = os.environ.get("MAILBABY_FROM_NAME", "Arianna Dar")
+        smtp_host = os.environ.get("SMTP_HOST", "localhost")
+        smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+        smtp_user = os.environ.get("SMTP_USER", "")
+        smtp_pass = os.environ.get("SMTP_PASSWORD", "")
+        from_email = os.environ.get("FROM_EMAIL", "")
+        from_name = os.environ.get("FROM_NAME", "Frood")
 
         if not smtp_pass:
             return ToolResult(
                 success=False,
-                error="MAILBABY_SMTP_PASSWORD not set in environment — cannot send email",
+                error="SMTP_PASSWORD not set in environment — cannot send email",
+            )
+        if not from_email:
+            return ToolResult(
+                success=False,
+                error="FROM_EMAIL not set in environment — cannot send email",
             )
 
         try:
@@ -167,7 +169,7 @@ class EmailSendTool(Tool):
             msg["To"] = to
             msg["Subject"] = subject
             msg["Date"] = formatdate(localtime=False)
-            msg["Message-ID"] = make_msgid(domain="example-client.com")
+            msg["Message-ID"] = make_msgid()
             msg["Reply-To"] = reply_to or from_addr
 
             if body_html:
@@ -203,25 +205,22 @@ class EmailSendTool(Tool):
             return ToolResult(success=False, error=f"Connection error: {exc}")
 
     def _append_to_sent_folder(self, msg, to: str) -> None:
-        """Copy a successfully-sent message to Arianna's IMAP Sent folder.
+        """Copy a successfully-sent message to IMAP Sent folder.
 
         Failure is logged but not raised — the SMTP send already succeeded
         and the recipient already has the email; missing the Sent-folder
         copy is a visibility issue, not a delivery failure.
         """
-        imap_pass = os.environ.get("ARIANNA_IMAP_AUTH", "").strip()
+        imap_pass = os.environ.get("IMAP_PASSWORD", "").strip()
         if not imap_pass:
             return
 
-        # mail.* (MX host, grey-clouded) NOT webmail.* — webmail is proxied
-        # through Cloudflare, which drops IMAP/993. A wrong host here blocks
-        # the executor thread (and stalls the orchestrator coroutine awaiting
-        # the send) until the OS TCP timeout, so we ALSO pass an explicit
-        # socket timeout below to fail fast instead of freezing.
-        host = os.environ.get("ARIANNA_IMAP_HOST", "mail.example-client.com")
-        port = int(os.environ.get("ARIANNA_IMAP_PORT", "993"))
-        user = os.environ.get("ARIANNA_IMAP_USER", "redacted@example.com")
-        folder = os.environ.get("ARIANNA_IMAP_SENT_FOLDER", "Sent")
+        host = os.environ.get("IMAP_HOST", "")
+        if not host:
+            return
+        port = int(os.environ.get("IMAP_PORT", "993"))
+        user = os.environ.get("IMAP_USER", "")
+        folder = os.environ.get("IMAP_SENT_FOLDER", "Sent")
 
         try:
             raw = msg.as_bytes()

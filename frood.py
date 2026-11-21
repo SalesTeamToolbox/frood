@@ -11,8 +11,7 @@ Usage:
     python frood.py                     # Start dashboard (http://localhost:8000)
     python frood.py --port 8080         # Custom dashboard port
     python frood.py --no-dashboard      # Headless mode (services only)
-    python frood.py --sidecar           # Sidecar mode (Paperclip adapter, port 8001)
-    python frood.py --sidecar --sidecar-port 9001  # Sidecar on custom port
+    python frood.py --standalone        # Standalone mode (simplified dashboard)
     python frood.py backup -o ./        # Create backup archive
     python frood.py restore backup.tar  # Restore from backup
     python frood.py clone -o ./         # Create clone package
@@ -112,14 +111,10 @@ class Frood:
         self,
         dashboard_port: int = 8000,
         headless: bool = False,
-        sidecar: bool = False,
-        sidecar_port: int | None = None,
         standalone: bool = False,
     ):
         self.dashboard_port = dashboard_port
         self.headless = headless
-        self.sidecar = sidecar
-        self.sidecar_port = sidecar_port or settings.paperclip_sidecar_port
         self.standalone = standalone
 
         # ── Core infrastructure ──────────────────────────────────────────
@@ -272,32 +267,7 @@ class Frood:
             tasks_to_run.append(self.security_scanner.start())
             logger.info(f"  Security scanning: enabled (every {settings.security_scan_interval})")
 
-        if self.sidecar:
-            from dashboard.sidecar import create_sidecar_app
-
-            app = create_sidecar_app(
-                memory_store=self.memory_store,
-                agent_manager=self.agent_manager,
-                effectiveness_store=self.effectiveness_store,
-                reward_system=self.reward_system,
-                qdrant_store=self.memory_store._qdrant,
-                tool_registry=self.tool_registry,
-                skill_loader=self.skill_loader,
-                app_manager=None,  # Phase 36: AppManager only in non-sidecar mode currently
-                key_store=self.key_store,
-                device_store=self.device_store,  # Phase 53: AUTH-01
-            )
-            config = uvicorn.Config(
-                app,
-                host=settings.dashboard_host,
-                port=self.sidecar_port,
-                log_level="warning",
-                timeout_keep_alive=600,
-            )
-            server = uvicorn.Server(config)
-            logger.info(f"  Sidecar: http://{settings.dashboard_host}:{self.sidecar_port}")
-            tasks_to_run.append(server.serve())
-        elif not self.headless:
+        if not self.headless:
             app_manager = AppManager(
                 apps_dir=str(settings.apps_dir) if hasattr(settings, "apps_dir") else "apps",
                 dashboard_port=self.dashboard_port,
@@ -378,17 +348,6 @@ def main():
         "--no-dashboard", action="store_true", help="Run headless without the web dashboard"
     )
     parser.add_argument(
-        "--sidecar",
-        action="store_true",
-        help="Run as Paperclip sidecar (STT internal: Odoo/Paperclip/Arianna integration, no dashboard)",
-    )
-    parser.add_argument(
-        "--sidecar-port",
-        type=int,
-        default=None,
-        help="Sidecar HTTP port (default: PAPERCLIP_SIDECAR_PORT or 8001)",
-    )
-    parser.add_argument(
         "--standalone",
         action="store_true",
         help="Run in standalone mode (simplified dashboard for Claude Code only)",
@@ -467,19 +426,12 @@ def main():
     else:
         # Default: start dashboard + services
         print("Frood v2.0 initializing (MCP architecture)...", flush=True)
-        is_sidecar = args.sidecar or settings.sidecar_enabled
         is_standalone = args.standalone or settings.standalone_mode
-        if is_sidecar:
-            from core.sidecar_logging import configure_sidecar_logging
-
-            configure_sidecar_logging()
         _migrate_data_dir()
         try:
             frood = Frood(
                 dashboard_port=args.port,
                 headless=args.no_dashboard,
-                sidecar=is_sidecar,
-                sidecar_port=args.sidecar_port,
                 standalone=is_standalone,
             )
         except Exception as exc:

@@ -10,13 +10,13 @@ Usage:
         --frood-db .frood/effectiveness.db \
         --qdrant-url http://localhost:6333 \
         --target-qdrant-url http://localhost:6334 \
-        --paperclip-company-id <uuid>
+        --target-company-id <uuid>
 
     python migrate.py --dry-run \
         --frood-db .frood/effectiveness.db \
         --qdrant-url http://localhost:6333 \
         --target-qdrant-url http://localhost:6334 \
-        --paperclip-company-id <uuid>
+        --target-company-id <uuid>
 """
 
 import argparse
@@ -75,9 +75,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Target Qdrant server URL",
     )
     parser.add_argument(
-        "--paperclip-company-id",
+        "--target-company-id",
         required=True,
-        help="Target Paperclip company UUID",
+        help="Target company/organization UUID for remapping",
     )
     parser.add_argument(
         "--collection-prefix",
@@ -288,7 +288,7 @@ async def run_migration(args) -> None:
             src_client,
             dst_client,
             collection_name,
-            args.paperclip_company_id,
+            args.target_company_id,
             args.batch_size,
             args.dry_run,
         )

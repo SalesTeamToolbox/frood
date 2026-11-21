@@ -423,24 +423,6 @@ def create_app(
         body = {"error": True, "message": detail, "status": exc.status_code}
         return JSONResponse(status_code=exc.status_code, content=body)
 
-    # -- Phase 36: PAPERCLIP-05 — gate standalone dashboard in sidecar mode ----
-    if settings.sidecar_enabled:
-
-        @app.get("/")
-        async def dashboard_paperclip_redirect():
-            """Return status page when dashboard is disabled in Paperclip mode."""
-            return JSONResponse(
-                content={
-                    "status": "paperclip_mode",
-                    "message": (
-                        "Frood dashboard UI is disabled in Paperclip mode. "
-                        "Access workspace features through the Paperclip dashboard."
-                    ),
-                    "sidecar_port": settings.paperclip_sidecar_port,
-                },
-                status_code=503,
-            )
-
     # Shared imports used by multiple handlers within create_app scope
     import time as _time_mem
 
@@ -494,10 +476,7 @@ def create_app(
 
         Does NOT expose task counts or connection info to unauthenticated users.
         """
-        response_data: dict = {"status": "ok"}
-        if settings.sidecar_enabled:
-            response_data["mode"] = "paperclip_sidecar"
-        return response_data
+        return {"status": "ok"}
 
     @app.get("/api/health")
     async def health_detail(_user: str = Depends(get_current_user)):

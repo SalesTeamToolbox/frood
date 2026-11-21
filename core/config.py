@@ -329,14 +329,7 @@ class Settings:
     rewards_silver_max_concurrent: int = 5
     rewards_gold_max_concurrent: int = 10
 
-    # Paperclip sidecar (STT/Client enterprise integration — Phase 24)
-    # ONLY for STT internal use: routes agent tasks via Paperclip control plane
-    # with Odoo ticket sync, Arianna support AI, Bug-Fixer-CC agent routing.
-    # General Frood users should leave sidecar_enabled=false and use MCP instead.
-    sidecar_enabled: bool = False
-    paperclip_sidecar_port: int = 8001
-    paperclip_api_url: str = ""  # e.g. "http://paperclip:3000" (STT internal)
-    paperclip_agents_path: str = "/api/agents"  # Paperclip agents endpoint
+    # Dashboard modes
     standalone_mode: bool = False  # Simplified dashboard mode (Claude Code only)
     mcp_tool_allowlist: str = ""  # Comma-separated tool names for /mcp/tool proxy (Phase 28)
 
@@ -666,11 +659,6 @@ class Settings:
             rewards_bronze_max_concurrent=int(os.getenv("REWARDS_BRONZE_MAX_CONCURRENT", "2")),
             rewards_silver_max_concurrent=int(os.getenv("REWARDS_SILVER_MAX_CONCURRENT", "5")),
             rewards_gold_max_concurrent=int(os.getenv("REWARDS_GOLD_MAX_CONCURRENT", "10")),
-            # Paperclip sidecar
-            paperclip_sidecar_port=int(os.getenv("PAPERCLIP_SIDECAR_PORT", "8001")),
-            paperclip_api_url=os.getenv("PAPERCLIP_API_URL", ""),
-            paperclip_agents_path=os.getenv("PAPERCLIP_AGENTS_PATH", "/api/agents"),
-            sidecar_enabled=os.getenv("SIDECAR_ENABLED", "false").lower() in ("true", "1", "yes"),
             standalone_mode=os.getenv("STANDALONE_MODE", "false").lower() in ("true", "1", "yes"),
             mcp_tool_allowlist=os.getenv("MCP_TOOL_ALLOWLIST", ""),
             # N8N Workflow Integration (Phase 42)
