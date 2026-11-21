@@ -323,15 +323,36 @@ cd ~/projects/orchestrator && node bin/install.mjs
 
 ### Model Routing (The "Infinite Improbability Drive")
 
-| Role | Primary | Fallback Chain | Free-First Chain |
-|------|---------|----------------|------------------|
-| **Orchestrator** | Go Muse | CmdC Muse → **Nvidia Nemotron 3.5 Super** → Zen | — |
-| **Worker** | Go MiMo | **CmdC DeepSeek** → **Nvidia Nemotron 3.5 Super** → CmdC GLM → Zen | **Nvidia Nemotron 3 Ultra** → Zen → paid tail |
-| **Critic** | CmdC Haiku | **Go Haiku** → CmdC Luna → **Nvidia Nemotron 3.5 Super** → Zen | — |
-| **Senior** | CmdC Sonnet | CmdC DeepSeek Pro → **Nvidia Nemotron 3.5 Super** → Zen | — |
-| **Scout** | Zen MiMo | **Nvidia Nemotron 3.5 Super** → CmdC GLM | — |
+| Role | Primary | Fallback Chain | Free-First Chain | Vision |
+|------|---------|----------------|------------------|--------|
+| **Orchestrator** | Go Muse | CmdC Muse → **Nvidia Nemotron 3.5 Super** → Zen | — | Via subagent |
+| **Worker** | Go MiMo | **CmdC DeepSeek** → **Nvidia Nemotron 3.5 Super** → CmdC GLM → Zen | **Nvidia Nemotron 3 Ultra** → Zen → paid tail | ✅ Nemotron 3.5 Super |
+| **Critic** | CmdC Haiku | **Go Haiku** → CmdC Luna → **Nvidia Nemotron 3.5 Super** → Zen | — | ✅ Nemotron 3.5 Super |
+| **Senior** | CmdC Sonnet | CmdC DeepSeek Pro → **Nvidia Nemotron 3.5 Super** → Zen | — | ✅ Nemotron 3.5 Super |
+| **Scout** | Zen MiMo | **Nvidia Nemotron 3.5 Super** → CmdC GLM | — | ✅ Nemotron 3.5 Super |
 
 > **Nvidia rate-limit handling**: 429 = `rate-limit` (1-30 min), not `quota`. Auto-resume same session after cooldown.
+
+### 🎨 Vision Delegation — *The Babel Fish for Images*
+
+**Non-vision orchestrators get vision by spawning vision-capable subagents.** The orchestrator (Opus 5.5, Go Muse, etc.) may not have native vision, but when images are detected:
+
+1. **Auto-detection** — Orchestrator scans Mandate/task for images (file paths, base64, URLs)
+2. **Auto-spawn** — Adds `--vision` flag to `oc-worker` dispatches for worker/critic/senior
+3. **Vision-capable models** — `worker-nvidia`, `critic-nvidia`, `senior-nvidia`, `orchestrator-nvidia` all pin **Nemotron 3.5 Super VL** (vision-enabled)
+4. **Fallback chain** — If primary vision model is rate-limited, router-health selects next vision-capable model
+
+```bash
+# Example: Orchestrator (no vision) dispatches Worker with vision
+node {{ORCH_REPO}}/bin/oc-worker.mjs --agent worker-nvidia --vision \
+  --dir <worktree> --prompt <mandate.md> --report <run dir>/report.md
+
+# Example: Critic with vision reviews UI changes
+node {{ORCH_REPO}}/bin/oc-worker.mjs --agent critic-nvidia --vision \
+  --dir <worktree> --prompt <critic-prompt.md> --out <findings.md>
+```
+
+> **Key insight**: The orchestrator stays on its optimal model (Opus, Go Muse) for planning/reasoning, while vision work delegates to Nemotron 3.5 Super VL — the best free vision model available.
 
 ### Cross-Harness Handoff
 
@@ -344,6 +365,14 @@ cd ~/projects/orchestrator && node bin/install.mjs
 
 # Hand back to other harness
 /handback <stream-number>
+```
+
+**Cross-harness subagent spawning**: OpenCode sessions **CAN** launch Claude Code subagents (and vice versa) through the orchestrator's unified interface. When running the orchestrator in OpenCode, you can spawn `subagent({ agent: "worker" })` which launches a Claude Code `worker` agent (Sonnet) — the harness doesn't limit subagent type, only the orchestrator's model routing rules.
+
+```bash
+# In OpenCode orchestrator session, spawn a Claude Code worker
+> subagent({ agent: "worker", prompt: "Fix the login bug in auth.ts" })
+# Launches Claude Code `worker` agent (Sonnet) — works because orchestrator knows how to bridge harnesses
 ```
 
 Streams are harness-agnostic — a stream started in one harness finishes in the other. One desk daemon at a time across both.
