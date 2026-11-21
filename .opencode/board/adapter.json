@@ -1,0 +1,12 @@
+{
+  "ticket": "m5-board-train",
+  "worktree": "/home/user/projects/frood-wt-m5-board-train",
+  "branch": "feat/m5-board-train",
+  "base": "origin/main",
+  "mandate": "/home/user/.opencode/reports/frood-public/m5-board-train/mandate.md",
+  "report": "/home/user/.opencode/reports/frood-public/m5-board-train/report.md",
+  "max_rounds": 3,
+  "senior_trigger": null,
+  "repo": "/home/user/projects/frood",
+  "merge": "ff"
+}
