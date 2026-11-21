@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 56" fill="none">
+  <!-- Frood Logo — Dark text variant -->
+  <!-- "Frood" wordmark + towel icon -->
+
+  <!-- "Frood" wordmark -->
+  <text x="8" y="36" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="30" font-weight="700" fill="#1a1d27" letter-spacing="-0.5">Frood</text>
+
+  <!-- Subtle tagline -->
+  <text x="8" y="51" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9" fill="#8f98aa" letter-spacing="0.5">DON'T PANIC</text>
+
+  <!-- Towel icon — folded towel in circle -->
+  <g transform="translate(148, 2)">
+    <circle cx="26" cy="26" r="25" fill="#E8A838" fill-opacity="0.08" stroke="#E8A838" stroke-width="1.5"/>
+
+    <!-- Folded towel shape -->
+    <rect x="12" y="12" width="28" height="20" rx="3" fill="none" stroke="#E8A838" stroke-width="1.8"/>
+    <!-- Fold line -->
+    <line x1="26" y1="12" x2="26" y2="32" stroke="#E8A838" stroke-width="1.2" stroke-dasharray="3,2"/>
+    <!-- Towel texture lines -->
+    <line x1="15" y1="18" x2="23" y2="18" stroke="#E8A838" stroke-width="1" opacity="0.5"/>
+    <line x1="15" y1="22" x2="23" y2="22" stroke="#E8A838" stroke-width="1" opacity="0.5"/>
+    <line x1="15" y1="26" x2="23" y2="26" stroke="#E8A838" stroke-width="1" opacity="0.5"/>
+    <line x1="29" y1="18" x2="37" y2="18" stroke="#E8A838" stroke-width="1" opacity="0.5"/>
+    <line x1="29" y1="22" x2="37" y2="22" stroke="#E8A838" stroke-width="1" opacity="0.5"/>
+    <line x1="29" y1="26" x2="37" y2="26" stroke="#E8A838" stroke-width="1" opacity="0.5"/>
+
+    <!-- Hanging loop at top -->
+    <path d="M22 12 Q22 7 26 7 Q30 7 30 12" fill="none" stroke="#E8A838" stroke-width="1.5"/>
+    <!-- Small "42" easter egg -->
+    <text x="17" y="30" font-family="monospace" font-size="5" fill="#E8A838" opacity="0.4">42</text>
+  </g>
+</svg>
