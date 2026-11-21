@@ -2,11 +2,13 @@
   "mcpServers": {
     "frood": {
       "command": "python",
-      "args": ["/path/to/frood/mcp_server.py"],
+      "args": ["mcp_server.py"],
+      "cwd": "${workspaceFolder}",
       "env": {
         "FROOD_WORKSPACE": "${workspaceFolder}",
         "QDRANT_URL": "http://localhost:6333",
-        "REDIS_URL": "redis://localhost:6379/0"
+        "REDIS_URL": "redis://localhost:6379/0",
+        "PYTHONPATH": "${workspaceFolder}"
       }
     },
     "_comment_remote_ssh": "Remote node via SSH stdio (simplest — uses SSH config):",
@@ -15,7 +17,7 @@
       "args": ["frood-prod", "cd ~/frood && .venv/bin/python mcp_server.py"],
       "env": {}
     },
-    "_comment_remote_sse": "Remote node via SSE (requires mcp_server.py --transport sse on VPS):",
+    "_comment_remote_sse": "Remote node via SSE (requires frood.py --mcp-http on VPS):",
     "frood-remote-sse": {
       "type": "sse",
       "url": "http://localhost:8100/sse",

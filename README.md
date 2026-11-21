@@ -77,11 +77,61 @@ docker compose up -d
 # Frood: http://localhost:8000
 ```
 
-### Connect to Claude Code
+### Connect to Your AI Assistant (MCP)
 
+Frood exposes **48 MCP tools** via stdio or HTTP. Connect any MCP-compatible client:
+
+#### 🤖 Claude Code (Anthropic)
 ```bash
 cp .mcp.json.example .mcp.json
-# Restart Claude Code — Frood's MCP tools appear alongside the built-in ones
+# Restart Claude Code — Frood's MCP tools appear alongside built-in ones
+# Settings: ~/.claude/settings.local.json → "enabledMcpjsonServers": ["frood"]
+```
+The MCP server runs `python mcp_server.py` (stdio transport) — 48 tools + 43 skill prompts exposed.
+
+#### 🛸 OpenCode (OpenCode.ai)
+```bash
+# Option 1: Project-level (recommended)
+cp .mcp.json.example .opencode/mcp.json
+# .opencode/mcp.json uses same format as .mcp.json
+
+# Option 2: Global
+mkdir -p ~/.config/opencode/mcp
+cp .mcp.json.example ~/.config/opencode/mcp/frood.json
+```
+OpenCode uses the same `.mcp.json` format — `python mcp_server.py` for stdio transport.
+
+#### 💻 VS Code / Cursor (with MCP Extension)
+```json
+// .vscode/mcp.json or Settings → Extensions → MCP → Servers
+{
+  "servers": {
+    "frood": {
+      "command": "python",
+      "args": ["mcp_server.py"],
+      "cwd": "${workspaceFolder}",
+      "env": { "FROOD_WORKSPACE": "${workspaceFolder}", "PYTHONPATH": "${workspaceFolder}" }
+    }
+  }
+}
+```
+
+#### 🌐 Generic HTTP/SSE (Any Client)
+```bash
+# Start Frood with MCP HTTP/SSE endpoint (Phase 7)
+python frood.py --mcp-http --mcp-port 8001
+# Connect to: http://localhost:8001/mcp/sse
+
+# Or run MCP server directly with SSE transport
+python mcp_server.py --transport sse --port 8001
+```
+
+#### 🔧 Manual stdio (Any LLM CLI)
+```bash
+# Direct stdio pipe (run from repo root)
+python mcp_server.py
+# Or with custom workspace
+FROOD_WORKSPACE=/path/to/workspace python mcp_server.py
 ```
 
 ### Full Setup (The Works)
