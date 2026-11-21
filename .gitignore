@@ -94,9 +94,9 @@ SECURITY_REVIEW.md
 plan.md
 
 # Agent-generated app artifacts in repo root
-index.html
-script.js
-style.css
+/index.html
+/script.js
+/style.css
 
 solar_dashboard/
 
