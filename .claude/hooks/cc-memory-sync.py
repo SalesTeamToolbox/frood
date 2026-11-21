@@ -103,9 +103,7 @@ def main():
             close_fds=(sys.platform != "win32"),
             creationflags=creation_flags,
         )
-        print(
-            f"[frood-memory] Sync: embedding {filename} to Qdrant (background)", file=sys.stderr
-        )
+        print(f"[frood-memory] Sync: embedding {filename} to Qdrant (background)", file=sys.stderr)
     except Exception:
         print(f"[frood-memory] Sync: failed to spawn worker for {filename}", file=sys.stderr)
 

@@ -103,7 +103,9 @@ class EmailSendTool(Tool):
         if not subject:
             return ToolResult(success=False, error="'subject' is required")
         if not body_html and not body_text:
-            return ToolResult(success=False, error="At least one of body_html or body_text is required")
+            return ToolResult(
+                success=False, error="At least one of body_html or body_text is required"
+            )
 
         smtp_host = os.environ.get("MAILBABY_SMTP_HOST", "relay.mailbaby.net")
         smtp_port = int(os.environ.get("MAILBABY_SMTP_PORT", "587"))
@@ -122,9 +124,17 @@ class EmailSendTool(Tool):
             result = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: self._send_smtp(
-                    smtp_host, smtp_port, smtp_user, smtp_pass,
-                    from_email, from_name, to, subject,
-                    body_html, body_text, reply_to,
+                    smtp_host,
+                    smtp_port,
+                    smtp_user,
+                    smtp_pass,
+                    from_email,
+                    from_name,
+                    to,
+                    subject,
+                    body_html,
+                    body_text,
+                    reply_to,
                 ),
             )
             return result
@@ -134,14 +144,23 @@ class EmailSendTool(Tool):
 
     def _send_smtp(
         self,
-        host: str, port: int, user: str, password: str,
-        from_email: str, from_name: str,
-        to: str, subject: str,
-        body_html: str, body_text: str, reply_to: str,
+        host: str,
+        port: int,
+        user: str,
+        password: str,
+        from_email: str,
+        from_name: str,
+        to: str,
+        subject: str,
+        body_html: str,
+        body_text: str,
+        reply_to: str,
     ) -> ToolResult:
         """Blocking SMTP send — run in executor to avoid blocking the event loop."""
         try:
-            msg = MIMEMultipart("alternative") if body_html else MIMEText(body_text, "plain", "utf-8")
+            msg = (
+                MIMEMultipart("alternative") if body_html else MIMEText(body_text, "plain", "utf-8")
+            )
 
             from_addr = formataddr((from_name, from_email))
             msg["From"] = from_addr
@@ -218,12 +237,15 @@ class EmailSendTool(Tool):
                 if typ == "OK":
                     logger.info(
                         "send_email: APPEND'd to %s for to=%s msg_id=%s",
-                        folder, to, msg["Message-ID"],
+                        folder,
+                        to,
+                        msg["Message-ID"],
                     )
                 else:
                     logger.warning(
                         "send_email: APPEND non-OK status %r for to=%s",
-                        typ, to,
+                        typ,
+                        to,
                     )
             finally:
                 try:
@@ -233,5 +255,6 @@ class EmailSendTool(Tool):
         except Exception as exc:
             logger.warning(
                 "send_email: failed to APPEND to Sent folder for to=%s: %s",
-                to, exc,
+                to,
+                exc,
             )

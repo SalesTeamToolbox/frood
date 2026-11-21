@@ -1,8 +1,6 @@
 """Tests for sidecar config fields in Settings (Phase 24, Plan 01)."""
 
 
-
-
 class TestSidecarConfigDefaults:
     """Test that Settings() has correct sidecar defaults."""
 

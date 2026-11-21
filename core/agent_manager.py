@@ -114,11 +114,11 @@ except ImportError:
 # category→model map used by agent templates). Readers that need to know
 # "is this model free or paid" look here.
 PROVIDER_TIERS: dict[str, dict[str, list[str]]] = {
-    "zen":      {"free": [], "paid": []},
-    "nvidia":   {"free": [], "paid": []},
+    "zen": {"free": [], "paid": []},
+    "nvidia": {"free": [], "paid": []},
     "openrouter": {"free": [], "paid": []},
     "anthropic": {"free": [], "paid": []},
-    "openai":   {"free": [], "paid": []},
+    "openai": {"free": [], "paid": []},
 }
 
 
@@ -137,6 +137,7 @@ async def refresh_zen_models_async() -> bool:
 
     try:
         from core.model_classifier import classify_models
+
         classifications = await classify_models("zen", _zen_client)
         if not classifications:
             logger.warning("Zen classification produced no results")
@@ -156,10 +157,13 @@ async def refresh_zen_models_async() -> bool:
 def refresh_zen_models(force: bool = False) -> bool:
     """Sync wrapper for refresh_zen_models_async (for non-async callers)."""
     import asyncio
+
     try:
         asyncio.get_running_loop()
         # Already in async context — can't use asyncio.run, schedule as task
-        logger.warning("refresh_zen_models called from async context — use refresh_zen_models_async instead")
+        logger.warning(
+            "refresh_zen_models called from async context — use refresh_zen_models_async instead"
+        )
         return False
     except RuntimeError:
         return asyncio.run(refresh_zen_models_async())
@@ -178,6 +182,7 @@ async def refresh_nvidia_models_async() -> bool:
 
     try:
         from core.model_classifier import classify_models
+
         classifications = await classify_models("nvidia", _nvidia_client)
         if not classifications:
             logger.warning("NVIDIA classification produced no results")
@@ -197,6 +202,7 @@ async def refresh_nvidia_models_async() -> bool:
 def refresh_nvidia_models(force: bool = False) -> bool:
     """Sync wrapper for refresh_nvidia_models_async."""
     import asyncio
+
     try:
         asyncio.get_running_loop()
         logger.warning("refresh_nvidia_models called from async context")
@@ -219,6 +225,7 @@ async def refresh_openrouter_models_async() -> bool:
 
     try:
         from core.model_classifier import classify_models
+
         classifications = await classify_models("openrouter", _openrouter_client)
         if not classifications:
             logger.warning("OpenRouter classification produced no results")
@@ -238,6 +245,7 @@ async def refresh_openrouter_models_async() -> bool:
 def refresh_openrouter_models(force: bool = False) -> bool:
     """Sync wrapper for refresh_openrouter_models_async."""
     import asyncio
+
     try:
         asyncio.get_running_loop()
         logger.warning("refresh_openrouter_models called from async context")

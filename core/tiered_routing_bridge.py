@@ -217,8 +217,15 @@ class TieredRoutingBridge:
         logger.debug(
             "Routing: agent=%s role=%r task_type=%r tier=%s base_cat=%s "
             "task_cat=%s provider=%s model=%s preferred_model=%r",
-            agent_id, role, task_type, tier, base_category,
-            task_category, provider, model, preferred_model,
+            agent_id,
+            role,
+            task_type,
+            tier,
+            base_category,
+            task_category,
+            provider,
+            model,
+            preferred_model,
         )
 
         return RoutingDecision(

@@ -135,7 +135,6 @@ class TestDoHealthCheck:
 
     @pytest.mark.asyncio
     async def test_do_health_check_success(self):
-
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.content = b"OK"
@@ -154,7 +153,6 @@ class TestDoHealthCheck:
 
     @pytest.mark.asyncio
     async def test_do_health_check_server_error(self):
-
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_response.content = b"error"

@@ -21,8 +21,6 @@ import sys
 import uuid
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SERVER = REPO_ROOT / "process" / "peer-mail" / "peer_mail_server.py"
 

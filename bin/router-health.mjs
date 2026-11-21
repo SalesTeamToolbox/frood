@@ -263,12 +263,12 @@ export async function check({ probeModels = false, probeAll = false, models = un
       const isConnected = connectedProviderIds.has(prov);
       // Skip catalog-only providers (no decision, no auth) — SEED_PROVIDERS exempt
       if (!hasDecision && !isConnected && !SEED_PROVIDERS.has(prov)) continue;
-      
+
       const isFreeSuffix = rest.endsWith("-free");
       const isFreeColon = rest.endsWith(":free");
       const isZeroCost = isZeroCostCatalog(id, catalog);
       const isFreeOnlyProvider = providerPolicy(id)?.decision === "free-only";
-      
+
       if (isFreeSuffix || isFreeColon || isZeroCost || isFreeOnlyProvider) {
         candidates.push(id);
       }

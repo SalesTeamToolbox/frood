@@ -205,7 +205,9 @@ def create_sidecar_app(
         }
         for pname, (attr_name, env_name) in _provider_key_map.items():
             # Check both settings (init-time) and os.environ (key store injects after init)
-            is_configured = bool(getattr(settings, attr_name, "")) or bool(os.environ.get(env_name, ""))
+            is_configured = bool(getattr(settings, attr_name, "")) or bool(
+                os.environ.get(env_name, "")
+            )
             model_count = len(set(PROVIDER_MODELS.get(pname, {}).values()))
             providers_detail_list.append(
                 ProviderStatusDetail(
@@ -379,6 +381,7 @@ def create_sidecar_app(
         only knows the Arianna shared secret.
         """
         import hmac as _hmac
+
         auth = request.headers.get("Authorization", "") or ""
         if not auth.lower().startswith("bearer "):
             raise HTTPException(status_code=401, detail="missing_bearer")
@@ -442,12 +445,14 @@ def create_sidecar_app(
                 )
                 logger.info(
                     "Lesson extraction for ticket %s: %s",
-                    req.ticket_id, result,
+                    req.ticket_id,
+                    result,
                 )
             except Exception as exc:
                 logger.exception(
                     "Lesson extraction crashed for ticket %s: %s",
-                    req.ticket_id, exc,
+                    req.ticket_id,
+                    exc,
                 )
 
         background_tasks.add_task(_run_extraction)
@@ -466,7 +471,7 @@ def create_sidecar_app(
     # recovered. Intentionally synchronous (no BackgroundTasks) — the Odoo
     # cron wants the result inline so it can write back immediately.
     class _EnrichRequest(BaseModel):
-        prospect_id: int = 0   # echoed back for the caller's bookkeeping
+        prospect_id: int = 0  # echoed back for the caller's bookkeeping
         name: str = ""
         website: str = ""
 
@@ -479,11 +484,14 @@ def create_sidecar_app(
             raise HTTPException(status_code=400, detail="website required")
         try:
             result = await orchestrator.enrich_single_prospect(
-                name=req.name, website=req.website,
+                name=req.name,
+                website=req.website,
             )
         except Exception as exc:
             logger.exception(
-                "prospect-enrich failed for %s: %s", req.website, exc,
+                "prospect-enrich failed for %s: %s",
+                req.website,
+                exc,
             )
             raise HTTPException(status_code=502, detail=f"enrichment_failed: {exc}")
         result["prospect_id"] = req.prospect_id

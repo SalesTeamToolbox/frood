@@ -1,6 +1,6 @@
 # Frood LLM Proxy Configuration
 # This file sets up Claude Code to use Frood's LLM proxy
-# 
+#
 # Usage:
 #   1. Run Frood: python frood.py
 #   2. In any terminal: .\frood-env.bat

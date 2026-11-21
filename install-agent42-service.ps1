@@ -52,18 +52,18 @@ $NssmExe = Join-Path $NssmDir "nssm.exe"
 
 if (-not (Test-Path $NssmExe)) {
     Write-Host "Downloading NSSM..." -ForegroundColor Yellow
-    
+
     # Create directory
     New-Item -ItemType Directory -Force -Path $NssmDir | Out-Null
-    
+
     # Download NSSM (64-bit)
     $NssmZip = Join-Path $env:TEMP "nssm-2.24.zip"
     $NssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
-    
+
     try {
         Invoke-WebRequest -Uri $NssmUrl -OutFile $NssmZip -UseBasicParsing
         Expand-Archive -Path $NssmZip -DestinationPath (Join-Path $env:TEMP "nssm-extract") -Force
-        
+
         # Copy the 64-bit executable
         $ExtractedNssm = Join-Path $env:TEMP "nssm-extract\nssm-2.24\win64\nssm.exe"
         if (Test-Path $ExtractedNssm) {
@@ -73,7 +73,7 @@ if (-not (Test-Path $NssmExe)) {
             Write-Host "ERROR: Could not find nssm.exe in downloaded archive." -ForegroundColor Red
             exit 1
         }
-        
+
         # Cleanup
         Remove-Item $NssmZip -Force -ErrorAction SilentlyContinue
         Remove-Item (Join-Path $env:TEMP "nssm-extract") -Recurse -Force -ErrorAction SilentlyContinue

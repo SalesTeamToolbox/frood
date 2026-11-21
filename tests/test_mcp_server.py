@@ -260,7 +260,6 @@ class TestMCPServerCreation:
         assert len(tools) >= 25
 
     def test_resolve_workspace_defaults_to_cwd(self):
-
         from mcp_server import _resolve_workspace
 
         ws = _resolve_workspace()

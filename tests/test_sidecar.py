@@ -1029,11 +1029,11 @@ class TestParseJsonArray:
 
     def test_prospect_fields_preserved(self):
         """Real fetch-phase output includes nested fields — all must round-trip."""
-        text = '''[
+        text = """[
           {"name": "SunState Solar", "contact_name": "", "email": "info@sun.com",
            "phone": "505-225-8502", "website": "https://sunstatesolar.com",
            "city": "Albuquerque", "state_code": "NM", "company_size": "1-10"}
-        ]'''
+        ]"""
         result = SidecarOrchestrator._parse_json_array(text)
         assert len(result) == 1
         assert result[0]["name"] == "SunState Solar"

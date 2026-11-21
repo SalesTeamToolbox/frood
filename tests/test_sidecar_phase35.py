@@ -75,9 +75,9 @@ class TestSidecarModelsEndpoint:
         assert response.status_code == 200
         models = response.json()["models"]
         models_with_categories = [m for m in models if m["categories"]]
-        assert len(models_with_categories) > 0, (
-            "Expected at least one model with non-empty categories"
-        )
+        assert (
+            len(models_with_categories) > 0
+        ), "Expected at least one model with non-empty categories"
 
     def test_get_models_synthetic_stub_in_providers(self, sidecar_client):
         """Response providers list includes synthetic stub entry."""
@@ -128,9 +128,9 @@ class TestSidecarHealthEnhanced:
         assert isinstance(configured, dict), "providers.configured must be a dict"
         # All values must be booleans
         for key, val in configured.items():
-            assert isinstance(val, bool), (
-                f"providers.configured[{key!r}] must be bool, got {type(val)}"
-            )
+            assert isinstance(
+                val, bool
+            ), f"providers.configured[{key!r}] must be bool, got {type(val)}"
 
 
 # ---------------------------------------------------------------------------

@@ -728,9 +728,9 @@ class TestQdrantDimension:
             self.worker.process_learnings(str(extract_file))
 
         assert len(captured_configs) > 0, "QdrantConfig was never called"
-        assert captured_configs[0].get("vector_dim") == 384, (
-            f"Expected vector_dim=384, got {captured_configs[0].get('vector_dim')}"
-        )
+        assert (
+            captured_configs[0].get("vector_dim") == 384
+        ), f"Expected vector_dim=384, got {captured_configs[0].get('vector_dim')}"
 
     def test_similarity_threshold_is_085(self):
         """SIMILARITY_THRESHOLD constant is 0.85."""
@@ -770,9 +770,9 @@ class TestHookRegistration:
         settings = self._load_settings()
         hooks = self._get_stop_hooks(settings)
         commands = [h.get("command", "") for h in hooks]
-        assert any("knowledge-learn.py" in cmd for cmd in commands), (
-            f"knowledge-learn.py not found in Stop hooks. Commands found: {commands}"
-        )
+        assert any(
+            "knowledge-learn.py" in cmd for cmd in commands
+        ), f"knowledge-learn.py not found in Stop hooks. Commands found: {commands}"
 
     def test_knowledge_learn_hook_has_timeout(self):
         """knowledge-learn hook has a timeout value set."""
@@ -799,9 +799,9 @@ class TestKnowledgeIndexes:
         """QdrantStore has _ensure_knowledge_indexes method."""
         from memory.qdrant_store import QdrantStore
 
-        assert hasattr(QdrantStore, "_ensure_knowledge_indexes"), (
-            "QdrantStore missing _ensure_knowledge_indexes method"
-        )
+        assert hasattr(
+            QdrantStore, "_ensure_knowledge_indexes"
+        ), "QdrantStore missing _ensure_knowledge_indexes method"
 
     def test_ensure_knowledge_indexes_creates_learning_type_index(self):
         """_ensure_knowledge_indexes creates learning_type KEYWORD index."""

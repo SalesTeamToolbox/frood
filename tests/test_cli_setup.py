@@ -391,15 +391,15 @@ def test_frood_skill_list_against_fixture_warehouse(fake_warehouse):
     assert result.success, f"execute failed: {result.error}"
     inventory = json.loads(result.output)
 
-    assert any(s["name"] == "demo-skill" for s in inventory["skills"]), (
-        f"demo-skill missing from skills slice: {inventory['skills']}"
-    )
-    assert any(c["name"] == "demo-cmd" for c in inventory["commands"]), (
-        f"demo-cmd missing from commands slice: {inventory['commands']}"
-    )
-    assert any(a["name"] == "demo-agent" for a in inventory["agents"]), (
-        f"demo-agent missing from agents slice: {inventory['agents']}"
-    )
+    assert any(
+        s["name"] == "demo-skill" for s in inventory["skills"]
+    ), f"demo-skill missing from skills slice: {inventory['skills']}"
+    assert any(
+        c["name"] == "demo-cmd" for c in inventory["commands"]
+    ), f"demo-cmd missing from commands slice: {inventory['commands']}"
+    assert any(
+        a["name"] == "demo-agent" for a in inventory["agents"]
+    ), f"demo-agent missing from agents slice: {inventory['agents']}"
 
 
 def test_frood_skill_load_against_fixture_warehouse(fake_warehouse):

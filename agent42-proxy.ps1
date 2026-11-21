@@ -7,11 +7,11 @@ function Set-FroodModel {
     param(
         [string]$Model = "qwen3.6-plus-free"
     )
-    
+
     $env:ANTHROPIC_BASE_URL = "http://localhost:8000/llm/v1"
     $env:ANTHROPIC_API_KEY = "dummy"
     $env:ANTHROPIC_MODEL = $Model
-    
+
     Write-Host "Frood LLM Proxy: Using model '$Model'" -ForegroundColor Cyan
     Write-Host "  Base URL: $env:ANTHROPIC_BASE_URL" -ForegroundColor Gray
     Write-Host "  Model: $env:ANTHROPIC_MODEL" -ForegroundColor Gray

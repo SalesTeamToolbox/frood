@@ -127,9 +127,7 @@ class NvidiaApiClient:
                             error_text[:200],
                         )
                         if attempt < max_retries:
-                            delay = self._rate_limiter.get_stats(model).get(
-                                "current_delay", 3.0
-                            )
+                            delay = self._rate_limiter.get_stats(model).get("current_delay", 3.0)
                             await asyncio.sleep(delay)
                             continue
                         return {"error": f"HTTP {resp.status_code}: {error_text}"}

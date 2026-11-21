@@ -436,9 +436,9 @@ class TestMemoryScopeIsolation:
         assert query_filter is not None
         # FieldCondition must list has at least one condition with key="agent_id"
         conditions = query_filter.must
-        assert any(getattr(c, "key", None) == "agent_id" for c in conditions), (
-            f"Expected agent_id FieldCondition in {conditions}"
-        )
+        assert any(
+            getattr(c, "key", None) == "agent_id" for c in conditions
+        ), f"Expected agent_id FieldCondition in {conditions}"
 
     def test_recall_different_agents_different_filters(self, mock_memory_store, mock_qdrant):
         """Two different agent_ids produce different FieldCondition filters."""
@@ -624,6 +624,6 @@ class TestMemoryBridgeRunId:
         # If extraction ran and upsert was called, verify run_id in payload
         if upsert_calls:
             for call in upsert_calls:
-                assert call["payload"].get("run_id") == "run-456", (
-                    "Qdrant payload must contain run_id for run-trace queries"
-                )
+                assert (
+                    call["payload"].get("run_id") == "run-456"
+                ), "Qdrant payload must contain run_id for run-trace queries"

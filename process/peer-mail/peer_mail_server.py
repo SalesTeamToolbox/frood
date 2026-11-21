@@ -56,7 +56,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 DEFAULT_DB = Path(os.path.expanduser("~/.local/share/frood-peer-mail/mailbox.db"))
 
@@ -117,10 +117,10 @@ class Mailbox:
         to_session: str,
         subject: str,
         body: str = "",
-        from_title: Optional[str] = None,
-        from_branch: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        ttl_ms: Optional[int] = None,
+        from_title: str | None = None,
+        from_branch: str | None = None,
+        reply_to: str | None = None,
+        ttl_ms: int | None = None,
     ) -> str:
         mid = _new_id()
         ts = _now()
@@ -191,7 +191,7 @@ class Mailbox:
         result["status"] = STATUS_READ
         return result
 
-    def ack(self, msg_id: str, reply_body: Optional[str] = None):
+    def ack(self, msg_id: str, reply_body: str | None = None):
         row = self.conn.execute("SELECT * FROM messages WHERE id = ?", (msg_id,)).fetchone()
         if row is None:
             return None

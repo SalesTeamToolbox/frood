@@ -70,9 +70,11 @@ class TestImageGenTool:
         for key, spec in IMAGE_MODELS.items():
             for field in required_fields:
                 assert field in spec, f"Model '{key}' missing field '{field}'"
-            assert spec["tier"] in ("free", "cheap", "premium"), (
-                f"Model '{key}' has invalid tier: {spec['tier']}"
-            )
+            assert spec["tier"] in (
+                "free",
+                "cheap",
+                "premium",
+            ), f"Model '{key}' has invalid tier: {spec['tier']}"
 
     def test_default_model_exists(self):
         assert DEFAULT_IMAGE_MODEL in IMAGE_MODELS
@@ -152,9 +154,10 @@ class TestVideoGenTool:
         for key, spec in VIDEO_MODELS.items():
             for field in required_fields:
                 assert field in spec, f"Model '{key}' missing field '{field}'"
-            assert spec["tier"] in ("cheap", "premium"), (
-                f"Model '{key}' has invalid tier: {spec['tier']}"
-            )
+            assert spec["tier"] in (
+                "cheap",
+                "premium",
+            ), f"Model '{key}' has invalid tier: {spec['tier']}"
 
     def test_default_model_exists(self):
         assert DEFAULT_VIDEO_MODEL in VIDEO_MODELS
@@ -289,9 +292,9 @@ class TestPersonaTool:
             for field in required_fields:
                 assert field in persona, f"Persona '{name}' missing field '{field}'"
             assert len(persona["goals"]) >= 2, f"Persona '{name}' needs at least 2 goals"
-            assert len(persona["pain_points"]) >= 2, (
-                f"Persona '{name}' needs at least 2 pain points"
-            )
+            assert (
+                len(persona["pain_points"]) >= 2
+            ), f"Persona '{name}' needs at least 2 pain points"
 
 
 # =============================================================================

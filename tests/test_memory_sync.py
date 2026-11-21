@@ -45,9 +45,9 @@ class TestUuidInjection:
         # Find bullet lines containing our text
         bullet_lines = [l for l in content.splitlines() if "hello" in l]
         assert len(bullet_lines) >= 1, "Expected a bullet line containing 'hello'"
-        assert BULLET_UUID_RE.match(bullet_lines[0].strip()), (
-            f"Bullet did not match UUID pattern: {bullet_lines[0]!r}"
-        )
+        assert BULLET_UUID_RE.match(
+            bullet_lines[0].strip()
+        ), f"Bullet did not match UUID pattern: {bullet_lines[0]!r}"
 
     def test_append_unique_uuids(self, tmp_path):
         """Two sequential appends produce bullets with different 8-char UUIDs."""
@@ -81,9 +81,9 @@ class TestUuidInjection:
         for line in bullet_lines:
             line = line.strip()
             # Should be the plain bullet — update_memory doesn't inject
-            assert not re.match(r"^- \[\d{4}.*\].*plain bullet", line), (
-                f"update_memory() should NOT inject UUID prefix, but got: {line!r}"
-            )
+            assert not re.match(
+                r"^- \[\d{4}.*\].*plain bullet", line
+            ), f"update_memory() should NOT inject UUID prefix, but got: {line!r}"
 
 
 class TestFrontmatter:
@@ -96,9 +96,9 @@ class TestFrontmatter:
         content = store.memory_path.read_text(encoding="utf-8")
         assert content.startswith("---\n"), f"Expected frontmatter, got: {content[:80]!r}"
         m = FRONTMATTER_RE.match(content)
-        assert m is not None, (
-            f"Frontmatter did not match expected pattern. Content: {content[:200]!r}"
-        )
+        assert (
+            m is not None
+        ), f"Frontmatter did not match expected pattern. Content: {content[:200]!r}"
         assert len(m.group(1)) == 32, "file_id should be 32 hex chars"
         assert "T" in m.group(2), "last_modified should be ISO timestamp"
 
@@ -120,9 +120,9 @@ class TestFrontmatter:
         file_id_2 = m2.group(1)
         last_mod_2 = m2.group(2)
 
-        assert file_id_1 == file_id_2, (
-            f"file_id should be preserved: {file_id_1!r} != {file_id_2!r}"
-        )
+        assert (
+            file_id_1 == file_id_2
+        ), f"file_id should be preserved: {file_id_1!r} != {file_id_2!r}"
         assert last_mod_1 != last_mod_2, "last_modified should change on each update"
 
     def test_frontmatter_on_fresh_file(self, tmp_path):
@@ -132,9 +132,9 @@ class TestFrontmatter:
         store = MemoryStore(new_dir, qdrant_store=None, redis_backend=None)
         store.update_memory("# Fresh Start\n")
         content = store.memory_path.read_text(encoding="utf-8")
-        assert content.startswith("---\n"), (
-            "Fresh file should have frontmatter after update_memory()"
-        )
+        assert content.startswith(
+            "---\n"
+        ), "Fresh file should have frontmatter after update_memory()"
         assert "file_id:" in content
         assert "last_modified:" in content
 
@@ -155,9 +155,9 @@ class TestMigration:
         # After migration, old bullets should have UUID prefix
         bullet_lines = [l for l in content.splitlines() if "old content" in l]
         assert len(bullet_lines) >= 1, "Bullet with 'old content' should be present after migration"
-        assert BULLET_UUID_RE.match(bullet_lines[0].strip()), (
-            f"Migrated bullet should have UUID prefix: {bullet_lines[0]!r}"
-        )
+        assert BULLET_UUID_RE.match(
+            bullet_lines[0].strip()
+        ), f"Migrated bullet should have UUID prefix: {bullet_lines[0]!r}"
 
     def test_migrate_deterministic_ids(self, tmp_path):
         """Two MemoryStores reading the same old-format content produce identical UUIDs."""
@@ -188,9 +188,9 @@ class TestMigration:
         assert len(uuid_a) >= 1, f"Expected UUID in content_a: {content_a}"
         assert len(uuid_b) >= 1, f"Expected UUID in content_b: {content_b}"
         # The short UUID (8 hex chars) should be identical (content-hash based)
-        assert uuid_a[0][1] == uuid_b[0][1], (
-            f"UUID5 should be deterministic: {uuid_a[0][1]!r} != {uuid_b[0][1]!r}"
-        )
+        assert (
+            uuid_a[0][1] == uuid_b[0][1]
+        ), f"UUID5 should be deterministic: {uuid_a[0][1]!r} != {uuid_b[0][1]!r}"
 
     def test_migrate_preserves_existing_uuid_bullets(self, tmp_path):
         """Bullets already in [ts uuid] format are not re-migrated."""
@@ -217,9 +217,9 @@ class TestMigration:
         # Heading should NOT have UUID prefix
         heading_lines = [l for l in content.splitlines() if "My Section" in l]
         for line in heading_lines:
-            assert not re.match(r".*\[\d{4}.*\].*My Section", line), (
-                f"Section headings should NOT have UUID: {line!r}"
-            )
+            assert not re.match(
+                r".*\[\d{4}.*\].*My Section", line
+            ), f"Section headings should NOT have UUID: {line!r}"
 
 
 class TestMigrationSentinel:
@@ -245,15 +245,15 @@ class TestMigrationSentinel:
         store = MemoryStore(tmp_path, qdrant_store=None, redis_backend=None)
         content = store.read_memory()
         # Content should remain as-is (not migrated)
-        assert "- bullet without uuid" in content, (
-            "Sentinel should prevent migration, content should be unchanged"
-        )
+        assert (
+            "- bullet without uuid" in content
+        ), "Sentinel should prevent migration, content should be unchanged"
         # Should NOT have UUID prefix added
         bullet_lines = [l for l in content.splitlines() if "bullet without uuid" in l]
         for line in bullet_lines:
-            assert not BULLET_UUID_RE.match(line.strip()), (
-                f"With sentinel present, bullet should not be migrated: {line!r}"
-            )
+            assert not BULLET_UUID_RE.match(
+                line.strip()
+            ), f"With sentinel present, bullet should not be migrated: {line!r}"
 
 
 class TestEmbeddingTagStripping:
@@ -273,9 +273,9 @@ class TestEmbeddingTagStripping:
         assert len(pref_chunks) >= 1, f"Expected chunk with 'some text', chunks: {chunks}"
         for chunk in pref_chunks:
             # The [timestamp uuid] tag should be stripped from the chunk text
-            assert "[2026-03-24T14:22:10Z a4f7b2c1]" not in chunk["text"], (
-                f"Tag should be stripped from chunk: {chunk['text']!r}"
-            )
+            assert (
+                "[2026-03-24T14:22:10Z a4f7b2c1]" not in chunk["text"]
+            ), f"Tag should be stripped from chunk: {chunk['text']!r}"
             # The actual content should still be there
             assert "some text about preferences" in chunk["text"]
 
@@ -475,9 +475,9 @@ class TestFactoryCache:
         store_a = factory("myproject")
         store_b = factory("myproject")
 
-        assert id(store_a) == id(store_b), (
-            "Factory should cache and return the same instance for the same project_id"
-        )
+        assert id(store_a) == id(
+            store_b
+        ), "Factory should cache and return the same instance for the same project_id"
 
     def test_factory_different_projects_different_instances(self, tmp_path):
         """Different project IDs return different ProjectMemoryStore instances."""
@@ -487,9 +487,9 @@ class TestFactoryCache:
         store_proj_a = factory("project-a")
         store_proj_b = factory("project-b")
 
-        assert id(store_proj_a) != id(store_proj_b), (
-            "Different project IDs should produce different instances"
-        )
+        assert id(store_proj_a) != id(
+            store_proj_b
+        ), "Different project IDs should produce different instances"
         assert store_proj_a.project_id == "project-a"
         assert store_proj_b.project_id == "project-b"
 
@@ -535,9 +535,9 @@ class TestEntryParsing:
         content_crlf = content_lf.replace("\n", "\r\n")
         result_lf = _parse_memory_entries(content_lf)
         result_crlf = _parse_memory_entries(content_crlf)
-        assert result_lf == result_crlf, (
-            f"CRLF should parse same as LF.\nLF: {result_lf}\nCRLF: {result_crlf}"
-        )
+        assert (
+            result_lf == result_crlf
+        ), f"CRLF should parse same as LF.\nLF: {result_lf}\nCRLF: {result_crlf}"
 
 
 class TestUnionMerge:
@@ -635,15 +635,15 @@ class TestConflictResolution:
             "section": "",
         }
         winner = _resolve_entry_conflict(local, remote)
-        assert "remote version (newer)" in winner["content"], (
-            f"Newer (remote) content should be in winner: {winner['content']!r}"
-        )
-        assert "local version" in winner["content"], (
-            f"Older (local) content should appear in history note: {winner['content']!r}"
-        )
-        assert "2026-03-24T10:00:00Z" in winner["content"], (
-            f"Older timestamp should appear in history note: {winner['content']!r}"
-        )
+        assert (
+            "remote version (newer)" in winner["content"]
+        ), f"Newer (remote) content should be in winner: {winner['content']!r}"
+        assert (
+            "local version" in winner["content"]
+        ), f"Older (local) content should appear in history note: {winner['content']!r}"
+        assert (
+            "2026-03-24T10:00:00Z" in winner["content"]
+        ), f"Older timestamp should appear in history note: {winner['content']!r}"
 
     def test_conflict_preserves_history(self):
         """Both winner content and loser content appear in merged entry."""
@@ -702,9 +702,9 @@ class TestSectionOrderPreservation:
         assert pos_b != -1, "SectionB should be in merged output"
         assert pos_c != -1, "SectionC should be in merged output"
         assert pos_d != -1, "SectionD should be in merged output"
-        assert pos_a < pos_b < pos_c < pos_d, (
-            f"Sections should be in order A<B<C<D, got positions {pos_a},{pos_b},{pos_c},{pos_d}"
-        )
+        assert (
+            pos_a < pos_b < pos_c < pos_d
+        ), f"Sections should be in order A<B<C<D, got positions {pos_a},{pos_b},{pos_c},{pos_d}"
 
 
 class TestMigrateAction:
@@ -724,12 +724,12 @@ class TestMigrateAction:
         result = asyncio.run(tool._migrate_action(tmp_path, dry_run=True))
 
         assert result.success, f"migrate --dry-run should succeed: {result}"
-        assert "dry run" in result.output.lower() or "would migrate" in result.output.lower(), (
-            f"Output should mention dry run: {result.output!r}"
-        )
+        assert (
+            "dry run" in result.output.lower() or "would migrate" in result.output.lower()
+        ), f"Output should mention dry run: {result.output!r}"
         # File should be unchanged
-        assert memory_file.read_text(encoding="utf-8") == old_content, (
-            "Dry run should not modify MEMORY.md"
-        )
+        assert (
+            memory_file.read_text(encoding="utf-8") == old_content
+        ), "Dry run should not modify MEMORY.md"
         # Sentinel should NOT be created
         assert not (tmp_path / ".migration_v1").exists(), "Dry run should not create sentinel"

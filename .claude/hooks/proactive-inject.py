@@ -268,9 +268,7 @@ def format_injection_output(results: list, task_type: str) -> str:
     Returns:
         Formatted string truncated to MAX_OUTPUT_CHARS.
     """
-    header = (
-        f"[frood-learnings] Injecting {len(results)} past learnings for task_type={task_type}"
-    )
+    header = f"[frood-learnings] Injecting {len(results)} past learnings for task_type={task_type}"
     lines = [header]
 
     for r in results:

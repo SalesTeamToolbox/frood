@@ -63,7 +63,6 @@ class TestUnifiedContext:
     """Tests for UnifiedContextTool.execute() covering all 6 sources."""
 
     def _make_tool(self, effectiveness_recs=None, workspace=""):
-
         memory_store = MockMemoryStore()
         skill_loader = MockSkillLoader()
         effectiveness_store = MockEffectivenessStore(effectiveness_recs or [])

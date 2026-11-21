@@ -43,19 +43,19 @@ function Get-ClaudeExe {
         "$env:USERPROFILE\.local\bin\claude.exe",
         "$env:APPDATA\Claude\claude-code\2.1.92\claude.exe"
     )
-    
+
     foreach ($candidate in $candidates) {
         if (Test-Path $candidate) {
             return $candidate
         }
     }
-    
+
     # Try PATH
     $path = Get-Command claude -ErrorAction SilentlyContinue
     if ($path) {
         return $path.Source
     }
-    
+
     return "claude"
 }
 
@@ -63,12 +63,12 @@ function Get-DynamicModels {
     $models = Get-FroodModels
     $zenModels = @{}
     $ccModels = @{}
-    
+
     foreach ($m in $models) {
         $provider = $m.provider
         $modelId = $m.id
         $category = $m.category
-        
+
         if ($provider -eq "zen") {
             if ($modelId -match "qwen") { $zenModels["fast"] = $modelId }
             elseif ($modelId -match "minimax") { $zenModels["general"] = $modelId }
@@ -81,17 +81,17 @@ function Get-DynamicModels {
             elseif ($modelId -match "opus") { $ccModels["reasoning"] = $modelId }
         }
     }
-    
+
     # Fallbacks if not all categories found
     $zenModels["fast"] = if ($zenModels["fast"]) { $zenModels["fast"] } else { "qwen3.6-plus-free" }
     $zenModels["general"] = if ($zenModels["general"]) { $zenModels["general"] } else { "minimax-m2.5-free" }
     $zenModels["reasoning"] = if ($zenModels["reasoning"]) { $zenModels["reasoning"] } else { "nemotron-3-super-free" }
     $zenModels["content"] = if ($zenModels["content"]) { $zenModels["content"] } else { "big-pickle" }
-    
+
     $ccModels["fast"] = if ($ccModels["fast"]) { $ccModels["fast"] } else { "claude-haiku-4-5-20251001" }
     $ccModels["general"] = if ($ccModels["general"]) { $ccModels["general"] } else { "claude-sonnet-4-6-20260217" }
     $ccModels["reasoning"] = if ($ccModels["reasoning"]) { $ccModels["reasoning"] } else { "claude-opus-4-6-20260205" }
-    
+
     return @{
         Zen = $zenModels
         CC = $ccModels
@@ -100,9 +100,9 @@ function Get-DynamicModels {
 
 function Set-ProviderEnv {
     param([string]$Provider)
-    
+
     $models = Get-DynamicModels
-    
+
     if ($Provider -eq "zen") {
         $env:ANTHROPIC_BASE_URL = "$FROOD_URL/llm/v1"
         $env:ANTHROPIC_API_KEY = $env:ZEN_API_KEY
@@ -125,7 +125,7 @@ function Set-ProviderEnv {
 
 function Show-Status {
     $froodRunning = Test-FroodRunning
-    
+
     Write-Host ""
     Write-Host "=" -NoNewline -ForegroundColor Cyan
     Write-Host (" " * 58) -NoNewline
@@ -134,7 +134,7 @@ function Show-Status {
     Write-Host "=" -NoNewline -ForegroundColor Cyan
     Write-Host (" " * 58) -NoNewline
     Write-Host "=" -ForegroundColor Cyan
-    
+
     Write-Host "`n📦 Frood (Frood Proxy):" -ForegroundColor White
     if ($froodRunning) {
         Write-Host "   ✅ Running at http://localhost:8000" -ForegroundColor Green
@@ -149,21 +149,21 @@ function Show-Status {
         Write-Host "   ❌ Not running" -ForegroundColor Red
         Write-Host "   💡 Start with: python frood.py" -ForegroundColor Gray
     }
-    
+
     Write-Host "`n🔑 Environment:" -ForegroundColor White
     $baseUrl = if ($env:ANTHROPIC_BASE_URL) { $env:ANTHROPIC_BASE_URL } else { "(not set)" }
     Write-Host "   ANTHROPIC_BASE_URL: $baseUrl" -ForegroundColor Gray
-    
+
     $defaultModel = if ($env:ANTHROPIC_DEFAULT_SONNET_MODEL) { $env:ANTHROPIC_DEFAULT_SONNET_MODEL } else { "(default)" }
     Write-Host "   Default Model: $defaultModel" -ForegroundColor Gray
-    
+
     Write-Host ""
     Write-Host ("=" * 60) -ForegroundColor Cyan
 }
 
 function Show-Menu {
     $froodRunning = Test-FroodRunning
-    
+
     Write-Host ""
     Write-Host ("=" * 60) -ForegroundColor Cyan
     Write-Host "🎯 Claude Code Launcher" -ForegroundColor Yellow
@@ -174,7 +174,7 @@ function Show-Menu {
     Write-Host "  [2] CC Sub      - Anthropic Claude Code subscription (default)" -ForegroundColor Blue
     Write-Host "  [3] Status      - Show current configuration" -ForegroundColor Gray
     Write-Host "  [4] Exit        - Quit" -ForegroundColor Gray
-    
+
     if ($froodRunning) {
         Write-Host ""
         Write-Host "✅ Frood is running and ready" -ForegroundColor Green
@@ -182,11 +182,11 @@ function Show-Menu {
         Write-Host ""
         Write-Host "⚠️  Frood not running - Zen mode will not work" -ForegroundColor Yellow
     }
-    
+
     Write-Host ("=" * 60) -ForegroundColor Cyan
-    
+
     $choice = Read-Host "`n> "
-    
+
     switch ($choice) {
         "1" {
             if ($froodRunning) {
@@ -223,12 +223,12 @@ function Launch-Claude {
         [string]$Provider,
         [string[]]$Args = @()
     )
-    
+
     Set-ProviderEnv -Provider $Provider
-    
+
     $providerLabel = if ($Provider -eq "zen") { "Zen API" } else { "CC Subscription" }
     Write-Host "`n🚀 Launching Claude Code with $providerLabel..." -ForegroundColor Yellow
-    
+
     $claudeExe = Get-ClaudeExe
     & $claudeExe @Args
 }

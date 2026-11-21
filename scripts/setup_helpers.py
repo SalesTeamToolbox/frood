@@ -79,7 +79,7 @@ def _create_service_xml(project_dir: str) -> str:
     python_exe = _get_python_executable()
     os.path.join(project_dir, "frood.py")
 
-    xml_content = f'''<?xml version="1.0" encoding="utf-8"?>
+    xml_content = f"""<?xml version="1.0" encoding="utf-8"?>
 <service>
   <id>frood</id>
   <name>Frood</name>
@@ -98,7 +98,7 @@ def _create_service_xml(project_dir: str) -> str:
   <stoptimeout>30sec</stoptimeout>
   <env name="PYTHONUNBUFFERED" value="1"/>
   <env name="PATH" value="{os.path.dirname(python_exe)};{os.path.dirname(python_exe)}\\Scripts;C:\\Windows\\system32;C:\\Windows"/>
-</service>'''
+</service>"""
 
     xml_path = os.path.join(project_dir, "frood-service.xml")
     with open(xml_path, "w") as f:
@@ -180,7 +180,7 @@ def _create_n8n_service_xml(project_dir: str) -> str:
     docker_exe = "docker.exe"
     compose_file = os.path.join(project_dir, "docker-compose.n8n.yml")
 
-    xml_content = f'''<?xml version="1.0" encoding="utf-8"?>
+    xml_content = f"""<?xml version="1.0" encoding="utf-8"?>
 <service>
   <id>n8n-frood</id>
   <name>n8n (Frood)</name>
@@ -199,7 +199,7 @@ def _create_n8n_service_xml(project_dir: str) -> str:
   <stoptimeout>60sec</stoptimeout>
   <env name="COMPOSE_PROJECT_NAME" value="frood-n8n"/>
   <env name="PATH" value="C:\\Program Files\\Docker\\Docker\\resources\\bin;C:\\Windows\\system32;C:\\Windows"/>
-</service>'''
+</service>"""
 
     xml_path = os.path.join(project_dir, "n8n-service.xml")
     with open(xml_path, "w") as f:

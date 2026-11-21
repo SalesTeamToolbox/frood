@@ -297,9 +297,9 @@ class TestHookRegistration:
             for h in block.get("hooks", []):
                 all_commands.append(h["command"])
 
-        assert any(str(tmp_path) in cmd for cmd in all_commands), (
-            f"Absolute path not in any command: {all_commands}"
-        )
+        assert any(
+            str(tmp_path) in cmd for cmd in all_commands
+        ), f"Absolute path not in any command: {all_commands}"
 
     def test_hook_timeout_from_frontmatter(self, tmp_path):
         """Timeout value matches # hook_timeout: from hook file."""
@@ -489,9 +489,9 @@ class TestJcodemunchIndex:
         tool_calls = [m for m in messages if m.get("method") == "tools/call"]
         assert len(tool_calls) >= 1
         path_arg = tool_calls[0]["params"]["arguments"]["path"]
-        assert os.path.basename(path_arg) == os.path.basename(str(tmp_path)), (
-            f"path_arg={path_arg!r} does not match tmp_path={tmp_path!s}"
-        )
+        assert os.path.basename(path_arg) == os.path.basename(
+            str(tmp_path)
+        ), f"path_arg={path_arg!r} does not match tmp_path={tmp_path!s}"
 
 
 # ---------------------------------------------------------------------------
@@ -793,9 +793,9 @@ class TestWindowsCompat:
 
         config = json.loads((tmp_path / ".mcp.json").read_text())
         command = config["mcpServers"]["frood"]["command"]
-        assert "Scripts" in command and "python.exe" in command, (
-            f"Expected Scripts/python.exe in command, got: {command}"
-        )
+        assert (
+            "Scripts" in command and "python.exe" in command
+        ), f"Expected Scripts/python.exe in command, got: {command}"
 
     def test_mcp_config_uses_venv_python_linux(self, tmp_path):
         """On linux, generate_mcp_config writes .mcp.json with .venv/bin/python path."""
@@ -812,9 +812,9 @@ class TestWindowsCompat:
         command = config["mcpServers"]["frood"]["command"]
         # Normalize to forward slashes for cross-platform comparison
         command_normalized = command.replace("\\", "/")
-        assert ".venv/bin/python" in command_normalized, (
-            f"Expected .venv/bin/python in command, got: {command}"
-        )
+        assert (
+            ".venv/bin/python" in command_normalized
+        ), f"Expected .venv/bin/python in command, got: {command}"
 
     def test_health_check_uses_platform_venv_path(self, tmp_path):
         """check_health calls subprocess with platform-correct venv python path."""
@@ -839,9 +839,9 @@ class TestWindowsCompat:
         mcp_calls = [c for c in captured_calls if len(c) >= 1 and "mcp_server" in str(c)]
         assert len(mcp_calls) >= 1, f"No MCP server call found in: {captured_calls}"
         mcp_cmd = mcp_calls[0]
-        assert "Scripts" in str(mcp_cmd) and "python.exe" in str(mcp_cmd), (
-            f"Expected Scripts/python.exe in MCP call, got: {mcp_cmd}"
-        )
+        assert "Scripts" in str(mcp_cmd) and "python.exe" in str(
+            mcp_cmd
+        ), f"Expected Scripts/python.exe in MCP call, got: {mcp_cmd}"
 
 
 # ---------------------------------------------------------------------------

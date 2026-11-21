@@ -466,9 +466,9 @@ class TestHookRegistration:
         settings = self._load_settings()
         hooks = self._get_write_edit_hooks(settings)
         commands = [h.get("command", "") for h in hooks]
-        assert any("cc-memory-sync.py" in cmd for cmd in commands), (
-            f"cc-memory-sync.py not found in PostToolUse Write|Edit hooks: {commands}"
-        )
+        assert any(
+            "cc-memory-sync.py" in cmd for cmd in commands
+        ), f"cc-memory-sync.py not found in PostToolUse Write|Edit hooks: {commands}"
 
     def test_cc_sync_hook_timeout_is_short(self):
         """cc-memory-sync hook has timeout <= 10 (fire-and-forget, not blocking)."""
@@ -479,9 +479,9 @@ class TestHookRegistration:
             None,
         )
         assert cc_hook is not None, "cc-memory-sync hook not found"
-        assert cc_hook.get("timeout", 999) <= 10, (
-            f"Expected timeout <= 10, got {cc_hook.get('timeout')}"
-        )
+        assert (
+            cc_hook.get("timeout", 999) <= 10
+        ), f"Expected timeout <= 10, got {cc_hook.get('timeout')}"
 
 
 # ===========================================================================

@@ -22,7 +22,12 @@ select = [
     "A",     # flake8-builtins (shadowed builtins)
     "T20",   # flake8-print (catch debug prints)
     "SIM",   # flake8-simplify
-    "RUF",   # ruff-specific rules
+    "RUF001", # ambiguous-unicode-character
+    "RUF005", # collection-literal-concatenation
+    "RUF006", # asyncio-dangling-task
+    "RUF012", # mutable-class-default
+    "RUF013", # implicit-optional
+    "RUF015", # unnecessary-iterable-allocation-for-first-element
 ]
 ignore = [
     # --- Pycodestyle ---
@@ -62,20 +67,12 @@ ignore = [
     "SIM114", # if-with-same-arms: intentional duplicate branches for clarity
     "SIM117", # multiple-with-statements: separate with-statements preferred
     "SIM118", # in-dict-keys: explicit .keys() preferred for clarity
-    # --- Ruff ---
-    "RUF001", # ambiguous-unicode-character: false positive on intentional chars
-    "RUF005", # collection-literal-concatenation: existing pattern
-    "RUF006", # asyncio-dangling-task: tasks stored in instance vars for lifecycle
-    "RUF012", # mutable-class-default: used intentionally in dataclasses
-    "RUF013", # implicit-optional: existing code pattern (None defaults)
-    "RUF015", # unnecessary-iterable-allocation-for-first-element: clarity preferred
-    "RUF059", # unused-unpacked-variable: common pattern (_, value = ...)
     # --- Pyupgrade ---
     "UP042", # replace-str-enum: existing StrEnum pattern
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S106", "S108", "T20", "E741", "F841", "RUF059", "B007"]
+"tests/**" = ["S101", "S106", "S108", "T20", "E741", "F841", "B007"]
 "frood.py" = ["T20"]  # Main entry point uses print for startup banner
 "core/config.py" = ["N802"]
 "dashboard/server.py" = ["T20"]

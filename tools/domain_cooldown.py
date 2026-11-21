@@ -8,6 +8,7 @@ guaranteed failure.
 Process-local state: a shared dict keyed by host. One dict across all
 tools (web_fetch, http_request) so a 429 on /contact blocks /about too.
 """
+
 from __future__ import annotations
 
 import logging

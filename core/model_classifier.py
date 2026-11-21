@@ -70,9 +70,7 @@ class _ClientLike(Protocol):
 
     async def list_all_models(self) -> list[str]: ...
 
-    async def chat_completion(
-        self, model: str, messages: list[dict], **kwargs: Any
-    ) -> dict: ...
+    async def chat_completion(self, model: str, messages: list[dict], **kwargs: Any) -> dict: ...
 
 
 # ---------------------------------------------------------------------------

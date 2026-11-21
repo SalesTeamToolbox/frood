@@ -35,6 +35,7 @@ def set_current_run_id(run_id: str | None) -> None:
     """
     _current_run_id.set(run_id)
 
+
 # SSRF protection: blocked IP ranges (moved from web_search.py)
 _BLOCKED_IP_RANGES = [
     ipaddress.ip_network("127.0.0.0/8"),

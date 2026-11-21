@@ -18,6 +18,23 @@ repos:
       - id: detect-private-key
       - id: check-merge-conflict
 
+  - repo: local
+    hooks:
+      - id: validate-pyproject-toml
+        name: Validate pyproject.toml ruff config
+        entry: python .pre-commit-hooks/validate-pyproject-toml.py
+        language: system
+        types: [toml]
+        files: pyproject.toml
+        verbose: true
+      - id: validate-config-paths
+        name: Validate config files for platform-correct paths
+        entry: python .pre-commit-hooks/validate-config-paths.py
+        language: system
+        types: [json]
+        files: '(\.mcp\.json|opencode\.json)$'
+        verbose: true
+
   - repo: https://github.com/PyCQA/bandit
     rev: "1.8.0"
     hooks:

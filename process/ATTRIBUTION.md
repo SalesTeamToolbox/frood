@@ -1,8 +1,8 @@
 # IP / Provenance Audit — Frood
 
-**Repository:** `SalesTeamToolbox/frood`  
-**Commit audited:** `3de8e5c` (origin/main)  
-**Audited:** 2026-11-20  
+**Repository:** `SalesTeamToolbox/frood`
+**Commit audited:** `3de8e5c` (origin/main)
+**Audited:** 2026-11-20
 **Scope:** Every imported / vendored asset in the public tree, with source repo and commit sha.
 
 ## Purpose

@@ -70,9 +70,10 @@ def test_detect_requires_admin():
     """Anonymous GET /api/cli-setup/detect is rejected by require_admin."""
     client = _make_anonymous_client()
     resp = client.get("/api/cli-setup/detect")
-    assert resp.status_code in (401, 403), (
-        f"Expected auth rejection, got {resp.status_code}: {resp.text}"
-    )
+    assert resp.status_code in (
+        401,
+        403,
+    ), f"Expected auth rejection, got {resp.status_code}: {resp.text}"
 
 
 def test_detect_returns_state(monkeypatch):
@@ -115,9 +116,10 @@ def test_wire_requires_admin():
     """Anonymous POST /api/cli-setup/wire is rejected by require_admin."""
     client = _make_anonymous_client()
     resp = client.post("/api/cli-setup/wire", json={"cli": "claude-code", "enabled": True})
-    assert resp.status_code in (401, 403), (
-        f"Expected auth rejection, got {resp.status_code}: {resp.text}"
-    )
+    assert resp.status_code in (
+        401,
+        403,
+    ), f"Expected auth rejection, got {resp.status_code}: {resp.text}"
 
 
 def test_wire_enabled_calls_wire_cli(monkeypatch, tmp_path):
