@@ -323,15 +323,61 @@ cd ~/projects/orchestrator && node bin/install.mjs
 
 ### Model Routing (The "Infinite Improbability Drive")
 
-| Role | Primary | Fallback Chain | Free-First Chain | Vision |
-|------|---------|----------------|------------------|--------|
-| **Orchestrator** | Go Muse | CmdC Muse → **Nvidia Nemotron 3.5 Super** → Zen | — | Via subagent |
-| **Worker** | Go MiMo | **CmdC DeepSeek** → **Nvidia Nemotron 3.5 Super** → CmdC GLM → Zen | **Nvidia Nemotron 3 Ultra** → Zen → paid tail | ✅ Nemotron 3.5 Super |
-| **Critic** | CmdC Haiku | **Go Haiku** → CmdC Luna → **Nvidia Nemotron 3.5 Super** → Zen | — | ✅ Nemotron 3.5 Super |
-| **Senior** | CmdC Sonnet | CmdC DeepSeek Pro → **Nvidia Nemotron 3.5 Super** → Zen | — | ✅ Nemotron 3.5 Super |
-| **Scout** | Zen MiMo | **Nvidia Nemotron 3.5 Super** → CmdC GLM | — | ✅ Nemotron 3.5 Super |
+**Optimal Cross-Harness Setup** — All providers configured, both harnesses active:
+
+| Role | Primary (Cost Play) | Fallback Chain (Cross-Provider) | Free-First Chain | Vision Capable |
+|------|---------------------|----------------------------------|------------------|----------------|
+| **Orchestrator** | **CC Opus 5.5** (subscription) | Go Muse → CmdC Muse → **Nvidia Nemotron 3.5 Super** → Zen | — | Via subagent |
+| **Worker** | Go MiMo (OpenCode) | **CC Sonnet** → CmdC DeepSeek → **Nvidia Nemotron 3.5 Super** → CmdC GLM → Zen | **Nvidia Nemotron 3 Ultra** → Zen → paid tail | ✅ Nemotron 3.5 Super |
+| **Critic** | **CC Sonnet** (subscription) | CmdC Haiku → **Go Haiku** → CmdC Luna → **Nvidia Nemotron 3.5 Super** → Zen | — | ✅ Nemotron 3.5 Super |
+| **Senior** | **CC Opus 5.5** (subscription) | CmdC Sonnet → CmdC DeepSeek Pro → **Nvidia Nemotron 3.5 Super** → Zen | — | ✅ Nemotron 3.5 Super |
+| **Scout** | Zen MiMo (free) | **Nvidia Nemotron 3.5 Super** → CmdC GLM → Go MiMo | — | ✅ Nemotron 3.5 Super |
+
+**Provider Requirements for Optimal Setup:**
+| Provider | Purpose | Cost |
+|----------|---------|------|
+| **Claude Code** (subscription) | Orchestrator (Opus 5.5), Critic (Sonnet), Senior (Opus), Worker fallback | $20–100/mo |
+| **OpenCode Go** ($60/mo) | Worker (MiMo), Orchestrator fallback (Muse) | $60/mo |
+| **CommandCode GOAT** ($10/mo) | Critic (Haiku), Senior (Sonnet), Worker burst (DeepSeek) | $10/mo |
+| **NVIDIA** (free) | Free-first Worker/Critic/Senior/Scout (Nemotron 3 Ultra/3.5 Super) | $0 |
+| **Zen** (free) | Scout (MiMo), Free fallbacks | $0 |
 
 > **Nvidia rate-limit handling**: 429 = `rate-limit` (1-30 min), not `quota`. Auto-resume same session after cooldown.
+
+### 🔧 Optimal .env for Cross-Harness
+
+```bash
+# ── Core (Required) ──────────────────────────────────────────────
+DASHBOARD_PASSWORD_HASH=$2b$12$...        # bcrypt hash
+JWT_SECRET=$(openssl rand -hex 32)        # persistent secret
+
+# ── Providers (Optimal: All Configured) ──────────────────────────
+# Claude Code (subscription) — Orchestrator, Critic, Senior, Worker fallback
+ANTHROPIC_API_KEY=sk-ant-...              # Used by CC subagents
+
+# OpenCode Go ($60/mo) — Worker (MiMo), Orchestrator fallback (Muse)
+OPENCODE_GO_API_KEY=...                   # Go models
+
+# CommandCode GOAT ($10/mo) — Critic (Haiku), Senior (Sonnet), Burst (DeepSeek)
+COMMANDCODE_API_KEY=...                   # CmdC models
+
+# NVIDIA (free) — Free-first Worker/Critic/Senior/Scout (Nemotron)
+NVIDIA_API_KEY=...                        # Nemotron 3 Ultra / 3.5 Super
+
+# Zen (free) — Scout (MiMo), Free fallbacks
+ZEN_API_KEY=...                           # qwen3.6-plus, minimax, nemotron-3-super
+
+# ── Memory (Recommended) ─────────────────────────────────────────
+QDRANT_URL=http://localhost:6333          # Vector DB (Docker: qdrant/qdrant)
+REDIS_URL=redis://localhost:6379          # Caching, rate limits
+
+# ── Security ────────────────────────────────────────────────────
+COMMAND_FILTER_MODE=deny
+SANDBOX_ENABLED=true
+ALLOWED_COMMANDS=git,python,pip,ruff,pytest,make
+```
+
+> **Pro tip**: The orchestrator's `router-health --probe` auto-detects which providers are healthy and selects the optimal model per role. Missing keys = graceful skip (no crash).
 
 ### 🎨 Vision Delegation — *The Babel Fish for Images*
 
