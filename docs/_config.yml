@@ -13,7 +13,6 @@ kramdown:
 
 # Exclude files from processing
 exclude:
-  - .nojekyll
   - frood-st/
   - assets/
   - atlas/
@@ -24,16 +23,11 @@ exclude:
   - node_modules
   - vendor
 
-# Include specific files
-include:
-  - index.html
-  - docs/
-
 # Collections
 collections:
   docs:
     output: true
-    permalink: /:path/
+    permalink: /docs/:name/
 
 # Defaults
 defaults:

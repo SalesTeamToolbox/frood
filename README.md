@@ -146,11 +146,11 @@ bash setup.sh  # venv, deps, frontend, MCP config, hooks — the full Zaphod Bee
 
 | Section | Link | Description |
 |---------|------|-------------|
-| **Getting Started** | [Installation](https://salesteamtoolbox.github.io/frood/docs/installation) | From zero to dashboard in 5 minutes |
-| **Usage Guide** | [Usage](https://salesteamtoolbox.github.io/frood/docs/usage) | Routing, memory, skills, dashboard |
-| **API Reference** | [API](https://salesteamtoolbox.github.io/frood/docs/api-reference) | Endpoints, models, WebSocket events |
-| **Configuration** | [Config](https://salesteamtoolbox.github.io/frood/docs/configuration) | All 80+ environment variables |
-| **Architecture** | [Architecture](https://salesteamtoolbox.github.io/frood/docs/architecture) | Plugin system, security layers, MCP |
+| **Getting Started** | [Installation](https://salesteamtoolbox.github.io/frood/docs/installation.html) | From zero to dashboard in 5 minutes |
+| **Usage Guide** | [Usage](https://salesteamtoolbox.github.io/frood/docs/usage.html) | Routing, memory, skills, dashboard |
+| **API Reference** | [API](https://salesteamtoolbox.github.io/frood/docs/api-reference.html) | Endpoints, models, WebSocket events |
+| **Configuration** | [Config](https://salesteamtoolbox.github.io/frood/docs/configuration.html) | All 80+ environment variables |
+| **Architecture** | [Architecture](https://salesteamtoolbox.github.io/frood/docs/architecture.html) | Plugin system, security layers, MCP |
 | **Development** | [CLAUDE.md](CLAUDE.md) | Contributing, testing, hooks, conventions |
 
 ---
@@ -508,7 +508,7 @@ ENABLE_MCP=true
 ENABLE_PAPERCLIP=false
 ```
 
-> **See [Configuration Docs](https://salesteamtoolbox.github.io/frood/docs/configuration) for all 80+ variables.**
+> **See [Configuration Docs](https://salesteamtoolbox.github.io/frood/docs/configuration.html) for all 80+ variables.**
 
 ---
 
