@@ -42,8 +42,8 @@
 | **🚀 Tiered Provider Routing** | L1 Workhorse → Free Fallback (Zen/NVIDIA) → L2 Premium (Claude/GPT). Graceful degradation — missing API keys never crash Frood. | ⭐⭐⭐⭐⭐ |
 | **🧠 Semantic Memory** | ONNX embeddings + Qdrant vector search (falls back to local JSON). Memories surface *before* the model thinks. | ⭐⭐⭐⭐⭐ |
 | **📚 Tool Effectiveness & Learning** | Every invocation tracked; structured learnings extracted, quarantined, validated, then proactively injected into future sessions. | ⭐⭐⭐⭐ |
-| **🔧 48 MCP Tools** | Memory, context, code intel, security, browser automation, n8n, vision, content, orchestration. | ⭐⭐⭐⭐⭐ |
-| **🎓 46 Built-in Skills** | Development, DevOps, content, analysis, marketing, meta — ready to `frood_skill load`. | ⭐⭐⭐⭐ |
+| **🔧 59 MCP Tools** | Memory, context, code intel, security, browser automation, n8n, vision, content, orchestration. | ⭐⭐⭐⭐⭐ |
+| **🎓 27 Built-in Skills** | Development, DevOps, content, analysis, marketing, meta — ready to `frood_skill load`. | ⭐⭐⭐⭐ |
 | **📦 HTTP API / Sidecar** | Route agent tasks through Frood's HTTP API instead of spawning local CLI processes. Run headless on any server. | ⭐⭐⭐ |
 | **🛡️ 8-Layer Security** | Sandbox, command filter, approval gate, rate limiter, URL policy, browser-gateway token, spending tracker, login rate limiting. | ⭐⭐⭐⭐⭐ |
 
@@ -224,7 +224,7 @@ Frood comes with **46 skills** across categories. Load them via the dashboard or
 
 ---
 
-## 🔌 MCP Tools — *48 Ways to Say "Hello, Computer"*
+## 🔌 MCP Tools — *59 Ways to Say "Hello, Computer"*
 
 | Category | Tools |
 |----------|-------|

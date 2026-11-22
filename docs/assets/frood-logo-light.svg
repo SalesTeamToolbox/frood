@@ -8,25 +8,57 @@
   <!-- Subtle tagline -->
   <text x="8" y="51" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9" fill="#8f98aa" letter-spacing="0.5">DON'T PANIC</text>
 
-  <!-- Towel icon — folded towel in circle -->
+  <!-- Towel icon — towel draped over a bar with hanging loop -->
   <g transform="translate(148, 2)">
-    <circle cx="26" cy="26" r="25" fill="#E8A838" fill-opacity="0.1" stroke="#E8A838" stroke-width="1.5"/>
+    <!-- Towel bar (subtle) -->
+    <line x1="6" y1="6" x2="46" y2="6" stroke="#E8A838" stroke-width="1.5" opacity="0.3"/>
 
-    <!-- Folded towel shape -->
-    <rect x="12" y="12" width="28" height="20" rx="3" fill="none" stroke="#E8A838" stroke-width="1.8"/>
-    <!-- Fold line -->
-    <line x1="26" y1="12" x2="26" y2="32" stroke="#E8A838" stroke-width="1.2" stroke-dasharray="3,2"/>
-    <!-- Towel texture lines -->
-    <line x1="15" y1="18" x2="23" y2="18" stroke="#E8A838" stroke-width="1" opacity="0.5"/>
-    <line x1="15" y1="22" x2="23" y2="22" stroke="#E8A838" stroke-width="1" opacity="0.5"/>
-    <line x1="15" y1="26" x2="23" y2="26" stroke="#E8A838" stroke-width="1" opacity="0.5"/>
-    <line x1="29" y1="18" x2="37" y2="18" stroke="#E8A838" stroke-width="1" opacity="0.5"/>
-    <line x1="29" y1="22" x2="37" y2="22" stroke="#E8A838" stroke-width="1" opacity="0.5"/>
-    <line x1="29" y1="26" x2="37" y2="26" stroke="#E8A838" stroke-width="1" opacity="0.5"/>
+    <!-- Towel draped over bar -->
+    <!-- Main towel body -->
+    <path d="M8 6 
+             Q10 6 10 10
+             L10 36
+             Q10 40 14 40
+             L38 40
+             Q42 40 42 36
+             L42 10
+             Q42 6 40 6
+             Z" 
+          fill="#1a1d27" 
+          stroke="#E8A838" 
+          stroke-width="1.5"/>
 
-    <!-- Hanging loop at top -->
-    <path d="M22 12 Q22 7 26 7 Q30 7 30 12" fill="none" stroke="#E8A838" stroke-width="1.5"/>
-    <!-- Small "42" easter egg on towel -->
-    <text x="17" y="30" font-family="monospace" font-size="5" fill="#E8A838" opacity="0.4">42</text>
+    <!-- Fold line (towel folded over bar) -->
+    <path d="M8 10 L42 10" 
+          stroke="#E8A838" 
+          stroke-width="1" 
+          stroke-dasharray="4,3" 
+          opacity="0.6"/>
+
+    <!-- Towel texture/weave lines -->
+    <g stroke="#E8A838" stroke-width="0.5" opacity="0.5">
+      <!-- Horizontal weave lines -->
+      <line x1="12" y1="16" x2="38" y2="16"/>
+      <line x1="12" y1="20" x2="38" y2="20"/>
+      <line x1="12" y1="24" x2="38" y2="24"/>
+      <line x1="12" y1="28" x2="38" y2="28"/>
+      <line x1="12" y1="32" x2="38" y2="32"/>
+      <line x1="12" y1="36" x2="38" y2="36"/>
+      <!-- Vertical weave lines -->
+      <line x1="16" y1="12" x2="16" y2="36"/>
+      <line x1="22" y1="12" x2="22" y2="36"/>
+      <line x1="28" y1="12" x2="28" y2="36"/>
+      <line x1="34" y1="12" x2="34" y2="36"/>
+    </g>
+
+    <!-- Hanging loop at top center -->
+    <path d="M23 6 Q23 1 26 1 Q29 1 29 6" 
+          fill="none" 
+          stroke="#E8A838" 
+          stroke-width="2" 
+          stroke-linecap="round"/>
+
+    <!-- Small "42" easter egg on towel corner -->
+    <text x="38" y="38" font-family="monospace" font-size="5" fill="#E8A838" opacity="0.3">42</text>
   </g>
 </svg>
