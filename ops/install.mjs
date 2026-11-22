@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Frood-vendored orchestrator installer (sanitized copy of the orchestrator's bin/install.mjs).
 //
-//   node ops/install.mjs        verify the vendored orchestrator tooling is in place (exit 0)
+//   node ops/install.mjs        verify the vendored orchestrator tooling + Frood commands is in place (exit 0)
 //   node ops/install.mjs --check  same verification, exit 1 if anything is missing
 //
 // All targets are repo-local: the vendored tooling lives under .claude/, bin/ and ops/
@@ -11,6 +11,9 @@
 // the orchestrator repo but is intentionally not performed by this vendored copy.
 //
 // oc-worker.mjs imports { diff, homeDir } from this module so it can run from bin/.
+//
+// Installs: Frood /frood dispatcher + subcommands (frood-orchestrator, frood-gauntlet, etc.)
+// plus orchestrator tooling (board.mjs, oc-worker.mjs, desk.mjs, etc.)
 //
 import fs from "node:fs";
 import os from "node:os";
@@ -27,8 +30,18 @@ export function homeDir() {
 // M3 file manifest: the orchestrator tooling vendored into Frood as clean copies.
 // Every entry is a path relative to the repo root that must exist after import.
 export const VENDORED = [
-  ".claude/commands/orchestrator.md",
-  ".claude/commands/gauntlet.md",
+  ".claude/commands/frood-orchestrator.md",
+  ".claude/commands/frood-gauntlet.md",
+  ".claude/commands/frood-board.md",
+  ".claude/commands/frood-desk.md",
+  ".claude/commands/frood-train.md",
+  ".claude/commands/frood-peer-mail.md",
+  ".claude/commands/frood-egm.md",
+  ".claude/commands/frood-deploy.md",
+  ".claude/commands/frood-setup.md",
+  ".claude/commands/frood-health.md",
+  ".claude/commands/frood-cc.md",
+  "bin/frood.js",
   "bin/board.mjs",
   "bin/oc-worker.mjs",
   "bin/desk.mjs",
