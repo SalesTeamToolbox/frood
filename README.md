@@ -171,6 +171,17 @@ python frood-cc-launcher.py cc
 # Or interactive menu > option 1
 ```
 
+**Slash command (in Claude Code):**
+```
+/frood-cc zen           # Zen API (free)
+/frood-cc opencode      # OpenCode Go ($10-40/mo)
+/frood-cc cmdcode       # CommandCode GOAT ($10/mo)
+/frood-cc nvidia        # Nvidia (free)
+/frood-cc openrouter    # OpenRouter (200+ models)
+/frood-cc cc            # Switch back to CC subscription
+/frood-cc status        # Show current configuration
+```
+
 This clears the custom `ANTHROPIC_BASE_URL` and uses your native Claude Code subscription.
 
 ### Full Setup (The Works)
