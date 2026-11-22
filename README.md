@@ -335,7 +335,7 @@ cd ~/projects/orchestrator && node bin/install.mjs
 | Provider | Purpose | Cost |
 |----------|---------|------|
 | **Claude Code** (subscription) | Orchestrator (Opus 5.5), Critic (Sonnet), Senior (Opus), Worker fallback | $20–100/mo |
-| **OpenCode Go** ($60/mo) | Worker (MiMo), Orchestrator fallback (Muse) | $60/mo |
+| **OpenCode Go** ($10/mo Pro, $40/mo Max) | Worker (MiMo), Orchestrator fallback (Muse) | $10–40/mo |
 | **CommandCode GOAT** ($10/mo) | Critic (Haiku), Senior (Sonnet), Worker burst (DeepSeek) | $10/mo |
 | **NVIDIA** (free) | Free-first Worker/Critic/Senior/Scout (Nemotron 3 Ultra/3.5 Super) | $0 |
 | **Zen** (free) | Scout (MiMo), Free fallbacks | $0 |
@@ -353,7 +353,7 @@ JWT_SECRET=$(openssl rand -hex 32)        # persistent secret
 # Claude Code (subscription) — Orchestrator, Critic, Senior, Worker fallback
 ANTHROPIC_API_KEY=sk-ant-...              # Used by CC subagents
 
-# OpenCode Go ($60/mo) — Worker (MiMo), Orchestrator fallback (Muse)
+# OpenCode Go ($10/mo Pro, $40/mo Max) — Worker (MiMo), Orchestrator fallback (Muse)
 OPENCODE_GO_API_KEY=...                   # Go models
 
 # CommandCode GOAT ($10/mo) — Critic (Haiku), Senior (Sonnet), Burst (DeepSeek)
