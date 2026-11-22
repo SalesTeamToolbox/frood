@@ -320,7 +320,7 @@ JCODEMUNCH_GUIDANCE = {
 }
 
 
-def emit_jcodemunch_guidance(work_types, repo_id="local/agent42-663daaca"):
+def emit_jcodemunch_guidance(work_types, repo_id="local/frood"):
     """Generate jcodemunch MCP tool call recommendations for detected work types."""
     if not work_types:
         return []
