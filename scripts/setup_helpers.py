@@ -558,6 +558,26 @@ This project is indexed by jcodemunch MCP server (`{jcodemunch_repo}`).
 
 ---
 
+## Atlas — Checked Route Map
+
+**Orient before you read: `docs/ATLAS.md`.** It maps each screen/route to its handler
+function and the outcome it decides, plus sibling traps and topic files.
+`tests/test_atlas.py` resolves every reference in it — a renamed handler without a
+same-commit map update is a critic major.
+
+| File | Purpose |
+|------|---------|
+| `docs/ATLAS.md` | Screen → route → handler → outcome map |
+| `docs/atlas/` | Topic files referenced by ATLAS.md sections |
+| `tests/test_atlas.py` | Validates every handler, sibling-trap, and topic reference |
+
+Run the atlas checker:
+```bash
+python -m pytest tests/test_atlas.py -q
+```
+
+---
+
 ## Frood Hook Protocol
 
 Frood registers Claude Code hooks that run automatically during development sessions.
@@ -743,6 +763,63 @@ def generate_full_claude_md(project_dir: str) -> None:
 
     with open(claude_md_path, "w", encoding="utf-8") as f:
         f.write(new_content)
+
+
+def install_atlas_pattern(project_dir: str) -> None:
+    """Copy the Atlas pattern (ATLAS.md, atlas/ directory, test_atlas.py) from the
+    Frood repo to the consumer project directory.
+
+    This enables the checked map pattern in any repo that runs `bash setup.sh`.
+
+    Args:
+        project_dir: Absolute path to the consumer project root.
+    """
+    import shutil
+
+    # Source is the Frood repo (where this script lives)
+    frood_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    # Files/dirs to copy
+    atlas_md_src = os.path.join(frood_root, "docs", "ATLAS.md")
+    atlas_dir_src = os.path.join(frood_root, "docs", "atlas")
+    test_atlas_src = os.path.join(frood_root, "tests", "test_atlas.py")
+
+    # Destinations in consumer project
+    docs_dir = os.path.join(project_dir, "docs")
+    atlas_dir_dst = os.path.join(docs_dir, "atlas")
+    tests_dir = os.path.join(project_dir, "tests")
+
+    os.makedirs(docs_dir, exist_ok=True)
+    os.makedirs(atlas_dir_dst, exist_ok=True)
+    os.makedirs(tests_dir, exist_ok=True)
+
+    copied = []
+
+    # Copy ATLAS.md
+    if os.path.isfile(atlas_md_src):
+        atlas_md_dst = os.path.join(docs_dir, "ATLAS.md")
+        shutil.copy2(atlas_md_src, atlas_md_dst)
+        copied.append("docs/ATLAS.md")
+
+    # Copy atlas/ directory (topic files)
+    if os.path.isdir(atlas_dir_src):
+        for item in os.listdir(atlas_dir_src):
+            src_item = os.path.join(atlas_dir_src, item)
+            dst_item = os.path.join(atlas_dir_dst, item)
+            if os.path.isfile(src_item):
+                shutil.copy2(src_item, dst_item)
+                copied.append(f"docs/atlas/{item}")
+
+    # Copy test_atlas.py
+    if os.path.isfile(test_atlas_src):
+        test_atlas_dst = os.path.join(tests_dir, "test_atlas.py")
+        shutil.copy2(test_atlas_src, test_atlas_dst)
+        copied.append("tests/test_atlas.py")
+
+    if copied:
+        print(f"  Atlas pattern installed: {', '.join(copied)}")
+    else:
+        print("  Warning: No Atlas source files found in Frood repo")
 
 
 def generate_claude_md_section(project_dir: str) -> None:
@@ -1304,6 +1381,13 @@ if __name__ == "__main__":
         for var in ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"]:
             subprocess.run(["setx", var, ""], capture_output=True)
         print("Windows services uninstalled and proxy env vars cleared.")
+
+    elif cmd == "install-atlas":
+        if len(sys.argv) < 3:
+            print(f"Usage: {sys.argv[0]} install-atlas <project_dir>")
+            sys.exit(1)
+        project_dir = sys.argv[2]
+        install_atlas_pattern(project_dir)
 
     else:
         print(

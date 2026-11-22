@@ -348,6 +348,11 @@ info "Generating CLAUDE.md memory section..."
 $PYTHON_CMD scripts/setup_helpers.py claude-md "$PROJECT_DIR"
 info "CLAUDE.md memory section updated"
 
+# ── Atlas pattern (checked map) ───────────────────────────────────────────────
+info "Installing Atlas pattern (checked map)..."
+$PYTHON_CMD scripts/setup_helpers.py install-atlas "$PROJECT_DIR"
+info "Atlas pattern installed"
+
 # ── jcodemunch indexing ───────────────────────────────────────────────────────
 info "Indexing project with jcodemunch..."
 if ! $PYTHON_CMD scripts/jcodemunch_index.py "$PROJECT_DIR" --timeout=120; then
