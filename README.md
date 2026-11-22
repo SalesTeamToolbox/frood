@@ -134,6 +134,45 @@ python mcp_server.py
 FROOD_WORKSPACE=/path/to/workspace python mcp_server.py
 ```
 
+#### 🎯 Claude Code Provider Switching (frood-cc-launcher.py)
+
+The `frood-cc-launcher.py` script lets you seamlessly switch between LLM providers **from within Claude Code** without restarting your session or manually editing config files.
+
+```bash
+# Interactive menu (shows all available models per provider)
+python frood-cc-launcher.py
+
+# Direct launch with specific provider
+python frood-cc-launcher.py zen         # Zen API (free: Qwen, MiniMax, Nemotron)
+python frood-cc-launcher.py opencode    # OpenCode Go ($10-40/mo)
+python frood-cc-launcher.py cmdcode     # CommandCode GOAT ($10/mo)
+python frood-cc-launcher.py nvidia      # Nvidia (free: Nemotron, Qwen, DeepSeek)
+python frood-cc-launcher.py openrouter  # OpenRouter (200+ models)
+python frood-cc-launcher.py cc          # Claude Code subscription (default)
+python frood-cc-launcher.py status      # Show current configuration
+```
+
+**How it works:** The launcher sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` environment variables before launching Claude Code, routing requests through Frood's unified proxy. Switching providers is instant — just re-run with a different flag.
+
+**Available providers:**
+
+| Provider | Command | Cost | Models |
+|----------|---------|------|--------|
+| **Zen** | `zen` / `z` | Free | Qwen, MiniMax, Nemotron-3-Super |
+| **OpenCode Go** | `opencode` / `oc` | $10-40/mo | MiMo, Muse |
+| **CommandCode** | `cmdcode` / `cmd` | $10/mo | Haiku, Sonnet, Opus |
+| **Nvidia** | `nvidia` / `nv` | Free | Nemotron, Qwen, DeepSeek |
+| **OpenRouter** | `openrouter` / `or` | Pay | 200+ models |
+| **CC Subscription** | `cc` / `c` | Your plan | Opus 5.5, Sonnet 4.5, Haiku 4.5 |
+
+**Switch back to CC subscription anytime:**
+```bash
+python frood-cc-launcher.py cc
+# Or interactive menu > option 1
+```
+
+This clears the custom `ANTHROPIC_BASE_URL` and uses your native Claude Code subscription.
+
 ### Full Setup (The Works)
 
 ```bash
