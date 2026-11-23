@@ -60,7 +60,6 @@ export const VENDORED = [
   "orchestrator/agents/worker.md",
   "orchestrator/agents/critic.md",
   "orchestrator/agents/senior.md",
-  ".claude/rules/01-orchestrator-models.md",
   "ops/install.mjs",
 ];
 
