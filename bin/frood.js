@@ -79,6 +79,12 @@ const SUBCOMMANDS = [
     impl: ['python', path.join(WORKTREE_ROOT, 'scripts', 'setup_helpers.py'), 'health'],
   },
   {
+    name: 'learn',
+    description: 'Phase-aware learning review — 5 phases, 23 lenses, session analysis, --apply for interactive fixes/PRs',
+    usage: 'node bin/frood-learn.mjs <stream|session-id> [--phase <1|2|3|4|5>] [--lens <name>] [--no-mcp] [--apply] [--report <path>] [--session <id>]',
+    impl: [process.execPath, path.join(WORKTREE_ROOT, 'bin', 'frood-learn.mjs')],
+  },
+  {
     name: 'cc',
     description: 'Switch Claude Code LLM provider via Frood proxy (see frood-cc.md)',
     usage: '/frood-cc <provider>', // zen, opencode, cmdcode, nvidia, openrouter, cc, status
