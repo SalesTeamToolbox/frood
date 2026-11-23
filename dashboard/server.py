@@ -13,8 +13,10 @@ reports, settings, Agent Apps, WebSocket broadcast.
 """
 
 import asyncio
+import json
 import logging
 import os
+import re
 import time as _time
 from pathlib import Path
 
@@ -30,7 +32,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from core.config import Settings, settings
@@ -44,6 +46,27 @@ from dashboard.auth import (
     verify_password,
 )
 from dashboard.websocket_manager import WebSocketManager
+
+# GitHub App utilities (community PR + webhook). Loaded via importlib fallback
+# because scripts/ is a namespace package (no __init__.py).
+try:  # pragma: no cover - normal package layout
+    from scripts.github_app import (  # type: ignore[attr-defined]
+        VAULT_WEBHOOK_SECRET_ENV,
+        GitHubApp,
+        GitHubAppCredentialsError,
+        GitHubAppError,
+    )
+except Exception:  # pragma: no cover - fallback when scripts/ is on sys.path only
+    import importlib.util
+
+    _gh_path = Path(__file__).resolve().parents[1] / "scripts" / "github_app.py"
+    _gh_spec = importlib.util.spec_from_file_location("github_app", _gh_path)
+    _gh_mod = importlib.util.module_from_spec(_gh_spec)
+    _gh_spec.loader.exec_module(_gh_mod)  # type: ignore[union-attr]
+    GitHubApp = _gh_mod.GitHubApp  # type: ignore[attr-defined]
+    GitHubAppCredentialsError = _gh_mod.GitHubAppCredentialsError  # type: ignore[attr-defined]
+    GitHubAppError = _gh_mod.GitHubAppError  # type: ignore[attr-defined]
+    VAULT_WEBHOOK_SECRET_ENV = _gh_mod.VAULT_WEBHOOK_SECRET_ENV  # type: ignore[attr-defined]
 
 logger = logging.getLogger("frood.server")
 
@@ -217,6 +240,138 @@ class SetupRequest(BaseModel):
 
 # Passwords treated as unconfigured — trigger the setup wizard
 _INSECURE_PASSWORDS = {"", "changeme-right-now", "password", "123456", "admin"}
+
+# ---------------------------------------------------------------------------
+# Community PR API (M3c) — configuration, rate limiting and audit logging
+# ---------------------------------------------------------------------------
+
+# Rate limits (requests per minute), configurable via environment.
+COMMUNITY_PR_INSTALLATION_RATE_LIMIT = int(os.getenv("COMMUNITY_PR_INSTALLATION_RATE_LIMIT", "10"))
+COMMUNITY_PR_IP_RATE_LIMIT = int(os.getenv("COMMUNITY_PR_IP_RATE_LIMIT", "5"))
+_RATE_LIMIT_WINDOW_SECONDS = 60.0
+
+# Per-installation and per-IP attempt timestamps for the community PR endpoint.
+_pr_rate_limit_installation: dict[str, list[float]] = {}
+_pr_rate_limit_ip: dict[str, list[float]] = {}
+
+# Append-only audit log for community PR submissions and webhook events.
+_AUDIT_LOG_PATH = Path(__file__).resolve().parents[1] / ".frood" / "community-pr-audit.jsonl"
+
+# GitHub usernames/logins that are treated as core team (not "community").
+# A pull request whose author is not a bot and not in this list is considered
+# a community contribution and is auto-labeled ``community-contribution``.
+_COMMUNITY_PR_CORE_TEAM = frozenset(
+    {name.strip() for name in os.getenv("COMMUNITY_PR_CORE_TEAM", "").split(",") if name.strip()}
+)
+
+
+def _check_community_pr_rate_limit(store: dict, key: str, limit: int) -> bool:
+    """Token-bucket style rate check over a fixed 1-minute window.
+
+    Returns ``True`` when the request is allowed, ``False`` when rate limited.
+    """
+    now = _time.time()
+    window_start = now - _RATE_LIMIT_WINDOW_SECONDS
+    recent = [t for t in store.get(key, []) if t > window_start]
+    if len(recent) >= limit:
+        store[key] = recent
+        return False
+    recent.append(now)
+    store[key] = recent
+    return True
+
+
+def _community_pr_audit_log(
+    action: str,
+    installation_id: str | int,
+    repo: str,
+    *,
+    pr_number: int | None = None,
+    event: str | None = None,
+    signature_valid: bool | None = None,
+    ip: str = "unknown",
+    **extra,
+) -> None:
+    """Append one JSON line to the community PR audit log (append-only)."""
+    entry: dict = {
+        "ts": _time.time(),
+        "action": action,
+        "installation_id": str(installation_id),
+        "repo": repo,
+        "ip": ip,
+    }
+    if pr_number is not None:
+        entry["pr_number"] = pr_number
+    if event is not None:
+        entry["event"] = event
+    if signature_valid is not None:
+        entry["signature_valid"] = signature_valid
+    entry.update(extra)
+    try:
+        _AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_AUDIT_LOG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry) + "\n")
+    except OSError as exc:
+        logger.warning("Failed to write community PR audit log: %s", exc)
+
+
+def _sanitize_text(value, max_chars: int, field_name: str) -> str:
+    """Strip and sanitize a free-text field.
+
+    Removes NUL bytes and control characters (except common whitespace) and
+    enforces a maximum length. Raises ``ValueError`` on invalid input.
+    """
+    if value is None:
+        raise ValueError(f"{field_name} is required")
+    text = str(value).strip()
+    text = "".join(ch for ch in text if ch != "\x00" and (ord(ch) >= 32 or ch in "\t\n\r"))
+    if not text:
+        raise ValueError(f"{field_name} must not be empty")
+    if len(text) > max_chars:
+        raise ValueError(f"{field_name} exceeds {max_chars} characters")
+    return text
+
+
+_BRANCH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+
+
+def _validate_branch_name(value, field_name: str) -> str:
+    """Validate and return a sanitized branch name."""
+    name = _sanitize_text(value, 255, field_name)
+    if ".." in name or name.startswith(".") or name.endswith(".lock"):
+        raise ValueError(f"Invalid {field_name}")
+    if not _BRANCH_NAME_RE.match(name):
+        raise ValueError(f"Invalid {field_name}")
+    return name
+
+
+_REPO_FULL_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
+
+def _validate_repo_full_name(value) -> str:
+    """Validate an ``owner/repo`` repository full name."""
+    repo = _sanitize_text(value, 200, "repo_full_name")
+    parts = repo.split("/")
+    if ".." in parts[0] or ".." in parts[-1]:
+        raise ValueError("repo_full_name must be 'owner/repo'")
+    if not _REPO_FULL_NAME_RE.match(repo):
+        raise ValueError("repo_full_name must be 'owner/repo'")
+    return repo
+
+
+class CodeContextItem(BaseModel):
+    file_path: str = Field(max_length=200)
+    snippet: str = Field(max_length=2000)
+
+
+class CommunityPRRequest(BaseModel):
+    installation_id: int
+    title: str
+    body: str
+    repo_full_name: str
+    head_branch: str
+    base_branch: str = "main"
+    code_context: list[CodeContextItem] = []
 
 
 class KeyUpdateRequest(BaseModel):
@@ -3493,6 +3648,299 @@ Focus on learnings that would help in future similar sessions."""
                 )
             except httpx.TimeoutException:
                 raise HTTPException(status_code=504, detail=f"App '{slug}' timed out")
+
+    # -- Community PR API (M3c) -------------------------------------------------
+
+    @app.post("/api/community/pr")
+    async def community_create_pr(request: Request):
+        """Create a pull request on behalf of a GitHub App installation.
+
+        Authentication is a GitHub App installation token sent as
+        ``Authorization: Bearer <token>``. Personal access tokens (PATs) are
+        rejected. All mutating work is delegated to ``scripts.github_app.GitHubApp``.
+        """
+        client_ip = request.client.host if request.client else "unknown"
+
+        # Per-IP rate limit (checked before parsing the body).
+        if not _check_community_pr_rate_limit(
+            _pr_rate_limit_ip, client_ip, COMMUNITY_PR_IP_RATE_LIMIT
+        ):
+            _community_pr_audit_log("rate_limited", "unknown", "", ip=client_ip, scope="ip")
+            raise HTTPException(
+                status_code=429,
+                detail="Too many requests per IP. Try again in 1 minute.",
+            )
+
+        try:
+            body = await request.json()
+        except Exception:
+            _community_pr_audit_log("invalid_body", "unknown", "", ip=client_ip)
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+        installation_id = body.get("installation_id")
+        if installation_id is None:
+            _community_pr_audit_log("missing_installation_id", "unknown", "", ip=client_ip)
+            raise HTTPException(status_code=400, detail="installation_id is required")
+
+        # Per-installation rate limit.
+        if not _check_community_pr_rate_limit(
+            _pr_rate_limit_installation,
+            str(installation_id),
+            COMMUNITY_PR_INSTALLATION_RATE_LIMIT,
+        ):
+            _community_pr_audit_log(
+                "rate_limited", installation_id, "", ip=client_ip, scope="installation"
+            )
+            raise HTTPException(
+                status_code=429,
+                detail="Too many requests per installation. Try again in 1 minute.",
+            )
+
+        # Auth: bearer installation token required; PATs are rejected.
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            _community_pr_audit_log("missing_token", installation_id, "", ip=client_ip)
+            raise HTTPException(
+                status_code=401,
+                detail="GitHub App installation token required (Authorization: Bearer)",
+            )
+        token = auth_header[len("Bearer ") :].strip()
+        if token.startswith(("ghp_", "github_pat_", "pat_", "glpat-")):
+            _community_pr_audit_log("pat_rejected", installation_id, "", ip=client_ip)
+            raise HTTPException(
+                status_code=401,
+                detail="PATs are not accepted; use a GitHub App installation token",
+            )
+
+        # Validate and sanitize input fields.
+        repo_value = body.get("repo_full_name")
+        head_value = body.get("head_branch")
+        base_value = body.get("base_branch") or "main"
+        try:
+            title = _sanitize_text(body.get("title"), 255, "title")
+            body_text = _sanitize_text(body.get("body"), 65535, "body")
+            repo_full_name = _validate_repo_full_name(repo_value)
+            head_branch = _validate_branch_name(head_value, "head_branch")
+            base_branch = _validate_branch_name(base_value, "base_branch")
+        except ValueError as exc:
+            _community_pr_audit_log(
+                "validation_error",
+                installation_id,
+                str(repo_value or ""),
+                ip=client_ip,
+                detail=str(exc),
+            )
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        code_context: list[dict] = []
+        raw_context = body.get("code_context")
+        if raw_context is not None:
+            if not isinstance(raw_context, list) or len(raw_context) > 5:
+                raise HTTPException(
+                    status_code=400,
+                    detail="code_context must be an array of at most 5 items",
+                )
+            for item in raw_context:
+                if not isinstance(item, dict):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Each code_context item must be an object",
+                    )
+                file_path = str(item.get("file_path", "")).strip()
+                snippet = str(item.get("snippet", "")).strip()
+                if not file_path or "\x00" in file_path or ".." in file_path.split("/"):
+                    raise HTTPException(status_code=400, detail="Invalid code_context file_path")
+                if len(snippet) > 2000:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="code_context snippet exceeds 2000 characters",
+                    )
+                code_context.append({"file_path": file_path, "snippet": snippet})
+
+        # Create the PR via GitHub App (no PAT ever used).
+        try:
+            app = GitHubApp()
+        except GitHubAppCredentialsError as exc:
+            _community_pr_audit_log(
+                "misconfigured", installation_id, repo_full_name, ip=client_ip, detail=str(exc)
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="GitHub App is not configured on this server",
+            )
+
+        try:
+            result = app.create_pr(
+                installation_id=installation_id,
+                repo_full_name=repo_full_name,
+                title=title,
+                body=body_text,
+                head_branch=head_branch,
+                base_branch=base_branch,
+            )
+        except GitHubAppError as exc:
+            _community_pr_audit_log(
+                "create_pr_failed",
+                installation_id,
+                repo_full_name,
+                ip=client_ip,
+                detail=str(exc)[:200],
+            )
+            raise HTTPException(status_code=502, detail=f"GitHub API error: {exc}")
+
+        pr_number = result.get("number")
+        html_url = result.get("html_url")
+        pr_url = result.get("url")
+
+        # Best-effort: tag community PRs so the CI workflow picks them up.
+        try:
+            app.add_labels(installation_id, repo_full_name, pr_number, ["community-contribution"])
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.warning(
+                "Failed to add community-contribution label to PR %s: %s", pr_number, exc
+            )
+
+        _community_pr_audit_log(
+            "create_pr",
+            installation_id,
+            repo_full_name,
+            pr_number=pr_number,
+            user=str(installation_id),
+            ip=client_ip,
+            head_branch=head_branch,
+            base_branch=base_branch,
+        )
+
+        return {
+            "pr_number": pr_number,
+            "pr_url": pr_url,
+            "html_url": html_url,
+        }
+
+    @app.post("/webhooks/github")
+    async def github_webhook(request: Request):
+        """GitHub App webhook endpoint.
+
+        Verifies the mandatory ``X-Hub-Signature-256`` HMAC-SHA256 signature
+        (constant-time), then handles ``pull_request`` events. Every event is
+        written to the append-only audit log.
+        """
+        client_ip = request.client.host if request.client else "unknown"
+        signature = request.headers.get("X-Hub-Signature-256")
+        event = request.headers.get("X-GitHub-Event", "")
+        installation_id = request.headers.get("X-GitHub-Installation-ID", "")
+        webhook_secret = os.environ.get(VAULT_WEBHOOK_SECRET_ENV, "")
+
+        payload = await request.body()
+
+        # Mandatory constant-time signature verification.
+        signature_valid = GitHubApp.verify_webhook_signature(payload, signature, webhook_secret)
+
+        # Audit every webhook event (even rejected ones).
+        _community_pr_audit_log(
+            "webhook",
+            installation_id or "unknown",
+            "",
+            event=event,
+            signature_valid=signature_valid,
+            ip=client_ip,
+        )
+
+        if not signature_valid:
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+        if event != "pull_request":
+            return {"status": "ignored", "event": event}
+
+        try:
+            data = json.loads(payload.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            _community_pr_audit_log(
+                "webhook_invalid_json",
+                installation_id or "unknown",
+                "",
+                event=event,
+                ip=client_ip,
+            )
+            raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+        action = data.get("action")
+        pull_request = data.get("pull_request", {}) or {}
+        repository = data.get("repository", {}) or {}
+        repo_full_name = repository.get("full_name", "")
+
+        # Re-log with repo context now that we know it.
+        _community_pr_audit_log(
+            "webhook",
+            installation_id or "unknown",
+            repo_full_name,
+            event=event,
+            signature_valid=True,
+            ip=client_ip,
+            pr_action=action,
+            pr_number=pull_request.get("number"),
+        )
+
+        if action == "opened":
+            # Auto-add community-contribution label for PRs from community users.
+            # A PR whose head repo is a fork is treated as a community contribution.
+            head_repo = pull_request.get("head", {}) or {}
+            head_repo_dict = head_repo.get("repo", {}) or {}
+            is_community = bool(head_repo_dict.get("fork"))
+            pr_number = pull_request.get("number")
+            if is_community and pr_number is not None and installation_id:
+                try:
+                    app = GitHubApp()
+                    app.add_labels(
+                        installation_id, repo_full_name, pr_number, ["community-contribution"]
+                    )
+                    logger.info(
+                        "Labeled community PR %s/%s#%s with community-contribution",
+                        repo_full_name,
+                        repo_full_name,
+                        pr_number,
+                    )
+                except GitHubAppCredentialsError:
+                    logger.warning(
+                        "GitHub App not configured; skipping community label for PR %s",
+                        pr_number,
+                    )
+                except Exception as exc:  # pragma: no cover - best effort
+                    logger.warning("Failed to label community PR %s: %s", pr_number, exc)
+
+        elif action == "synchronize":
+            # Trigger a CI re-run via workflow dispatch (best-effort).
+            pr_number = pull_request.get("number")
+            if installation_id and repo_full_name:
+                try:
+                    app = GitHubApp()
+                    head_branch = pull_request.get("head", {}).get("ref", "main")
+                    app.workflow_dispatch(
+                        installation_id,
+                        repo_full_name,
+                        workflow_id="community-pr.yml",
+                        ref=head_branch,
+                        inputs={"trigger": "webhook", "pull_request": str(pr_number)},
+                    )
+                    logger.info(
+                        "Dispatched CI re-run for PR %s/%s#%s",
+                        repo_full_name,
+                        repo_full_name,
+                        pr_number,
+                    )
+                except GitHubAppCredentialsError:
+                    logger.warning(
+                        "GitHub App not configured; skipping CI dispatch for PR %s",
+                        pr_number,
+                    )
+                except Exception as exc:  # pragma: no cover - best effort
+                    logger.warning("Failed to dispatch CI re-run for PR %s: %s", pr_number, exc)
+
+        elif action in ("labeled", "unlabeled"):
+            # Label changes are already audited; nothing further to do.
+            pass
+
+        return {"status": "ok", "event": event, "action": action}
 
     # -- Static files (React frontend) ----------------------------------------
 

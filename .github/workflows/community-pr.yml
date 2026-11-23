@@ -1,0 +1,159 @@
+name: Community PR
+
+# Runs on pull requests that carry the `community-contribution` label.
+# Labeling is done by the dashboard webhook (POST /webhooks/github) and by
+# the /api/community/pr endpoint.
+on:
+  pull_request:
+    types: [opened, synchronize, labeled, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull_requests: write
+  checks: write
+
+concurrency:
+  group: community-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------
+  # Lint (ruff)
+  # ------------------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: contains(github.event.pull_request.labels.*.name, 'community-contribution')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff
+
+      - name: Run ruff check
+        run: ruff check .
+
+      - name: Run ruff format check
+        run: ruff format --check .
+
+  # ------------------------------------------------------------------
+  # Test (pytest)
+  # ------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: contains(github.event.pull_request.labels.*.name, 'community-contribution')
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run test suite
+        run: python -m pytest tests/ -x -q --tb=short
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: community-pr-test-results
+          path: |
+            .pytest_cache
+            test-results.xml
+          retention-days: 7
+
+  # ------------------------------------------------------------------
+  # Security scan (bandit + safety)
+  # ------------------------------------------------------------------
+  security-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: contains(github.event.pull_request.labels.*.name, 'community-contribution')
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit safety
+
+      - name: Run bandit security scan
+        run: bandit -r dashboard scripts core -q -f txt -o bandit-report.txt || true
+
+      - name: Run safety dependency check
+        run: safety check --full-report --save-json safety-report.json || true
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: community-pr-security-reports
+          path: |
+            bandit-report.txt
+            safety-report.json
+          retention-days: 7
+
+  # ------------------------------------------------------------------
+  # Build
+  # ------------------------------------------------------------------
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: contains(github.event.pull_request.labels.*.name, 'community-contribution')
+    needs: [lint, test, security-scan]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify package imports
+        run: |
+          python -c "import fastapi; import pydantic; import httpx"
+          python -m py_compile dashboard/server.py scripts/github_app.py
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: community-pr-coverage
+          path: |
+            coverage.xml
+            .coverage
+          retention-days: 7
