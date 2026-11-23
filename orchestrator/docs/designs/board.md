@@ -26,7 +26,7 @@ not enforce them. Nothing binds an approval to the commit that ships.
 Create `bin/board.mjs` (imports only Node built-ins, `./verdict-gate.mjs`, `./pool-health.mjs`),
 `tests/board.test.mjs`, `tests/fixtures/board/` (adapter, Mandates, findings files, receipts).
 Modify `bin/oc-worker.mjs` (`--ticket`, resolved model in receipts — Phase 3), `bin/verdict-gate.mjs`
-(header comment only), `commands/orchestrator.md` (board is the path — Phase 3). Repo side (M5, not here):
+(header comment only), `commands/frood-orchestrator.md` (board is the path — Phase 3). Repo side (M5, not here):
 `.gitignore` entries, `adapter.json`, train calls `board verify`/`board shipped`.
 
 ## Locations
@@ -185,7 +185,7 @@ Mandate stays the record, `create` only proves the question was answered. (atlas
 - `oc-worker --ticket <id> --owner <s>`: refuses (exit 7) unless the ticket is `working`, owned by `<s>`, egm not
   pending; calls `board attach` with its pid and `--out`; resolves `(agent default)` to the pinned model in
   receipts.
-- `commands/orchestrator.md`: tickets go through the board when the repo has `.opencode/board/adapter.json`.
+- `commands/frood-orchestrator.md`: tickets go through the board when the repo has `.opencode/board/adapter.json`.
 - Train (M5, repo side): `train.sh board <branch>` first runs `board verify <id> --sha <branch head>` and
   refuses on non-zero; after a verified deploy it calls `board shipped <id> --sha`.
 
@@ -212,7 +212,7 @@ the wake-up line; the orchestrator sends it), per-repo `WORKER_SLOTS` (machine-w
    `quarantine`, `--help`.
 2. `round` (outcomes, re-gate, free rule, reviewed_sha, invalidation, senior recompute, cap), `signoff`, `gates`,
    `ready`, `verify`, `shipped`.
-3. `attach`, `watch`, `oc-worker --ticket` + resolved model, `orchestrator.md` text.
+3. `attach`, `watch`, `oc-worker --ticket` + resolved model, `frood-orchestrator.md` text.
 
 ## Test cases (fixtures: temp git repo with a bare origin; `ORCH_HOME` temp; cleanup in `after`)
 

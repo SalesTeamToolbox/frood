@@ -16,7 +16,7 @@ constraints (e.g. "Go is capped").
 **Loop**
 1. Read the Mandate and the repo's CLAUDE.md / AGENTS.md. Verify the worktree with
    `git rev-parse --show-toplevel`. Run the Mandate's test command once for a baseline and note it.
-   **EGM gate:** check the triggers in the `/orchestrator` command's EGM section (new module/service,
+   **EGM gate:** check the triggers in the `/frood-orchestrator` command's EGM section (new module/service,
    data model or persisted key/format, public interface, >3 modules, security/tenancy/money). Any
    trigger without an approved EGM review in the Mandate ⇒ stop with `RESULT: BLOCKED: egm review
    required — <trigger>`. None ⇒ record `egm: waived (<triggers checked, why none apply>)`. If a trigger

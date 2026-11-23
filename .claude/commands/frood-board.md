@@ -1,9 +1,9 @@
 ---
-description: Ticket board — records and verifies evidence; delegates to node {{ORCH_REPO}}/bin/board.mjs
+description: Ticket board — records and verifies evidence; delegates to node orchestrator/bin/board.mjs
 argument-hint: "<command> [args]"  # create, egm, claim, status, round, signoff, gates, ready, verify, shipped, ...
 ---
 
-The Frood ticket board. Delegates to `node {{ORCH_REPO}}/bin/board.mjs`, which
+The Frood ticket board. Delegates to `node orchestrator/bin/board.mjs`, which
 records and verifies evidence for a ticket (worktrees, gates and the train stay
 outside the board itself).
 
@@ -21,7 +21,7 @@ outside the board itself).
 /frood-board --help
 ```
 
-This runs `node {{ORCH_REPO}}/bin/board.mjs <command> [args]` in the ticket
+This runs `node orchestrator/bin/board.mjs <command> [args]` in the ticket
 worktree. `--help` (or `-h`) prints the board's full usage and exits 0; nothing
 is written.
 

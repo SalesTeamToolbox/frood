@@ -11,7 +11,7 @@
  *                            HTML dashboard, Ctrl/Cmd+click)
  *   --html        rebuild ~/.claude/harness-dashboard.html (the click-through "popup";
  *                 spawned detached from default mode whenever the file is >60s stale)
- *   --text        print the same dashboard as plain text (used by /harness)
+ *   --text        print the same dashboard as plain text (used by /frood-harness)
  *   --json        one JSON line for the claude-session-sidebar VS Code extension:
  *                 OC latest, global peer-mail unread + newest rows, remote-instance
  *                 probes, train/verify state, and CC's quota from the sidecar (the

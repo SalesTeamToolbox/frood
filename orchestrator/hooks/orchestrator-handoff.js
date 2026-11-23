@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
  * Orchestrator stream handoff hook (Claude Code SessionStart + UserPromptSubmit).
- * UserPromptSubmit: on `/next [stream]` or `/gauntlet <plan> <module>`, names the session tab after the work.
- * Managed by the orchestrator repo ({{ORCH_REPO}}/hooks) — edit there, then install.
+ * UserPromptSubmit: on `/frood-next [stream]` or `/frood-gauntlet <plan> <module>`, names the session tab after the work.
+ * Managed in the Frood repo's orchestrator/ directory ({{ORCH_REPO}}/hooks) — edit there, then install.
  *
  * After `/clear` (or a fresh start), tell the new session which orchestrator streams are still waiting and how many
- * desk events nobody has handled yet, so the owner only has to type `/next <stream>` or `/desk`.
+ * desk events nobody has handled yet, so the owner only has to type `/frood-next <stream>` or `/frood-desk`.
  * Lease lines: on every prompt and on every session start (resume and compact included) the hook reads the stream pointers
- * and says "held by OpenCode, stand down" for a stream OpenCode took over, or "handed back, run /next" once it returns it.
+ * and says "held by OpenCode, stand down" for a stream OpenCode took over, or "handed back, run /frood-next" once it returns it.
  * Only active pointers with a lease produce a line, so streams without lease fields keep the output empty.
  * Never breaks session start: any failure exits 0 with no output.
  */
@@ -16,7 +16,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-// The orchestrator repo this hook ships with. The installer bakes the real path in ({{ORCH_REPO}});
+// The Frood repo's orchestrator/ directory this hook ships with. The installer bakes the real path in ({{ORCH_REPO}});
 // running the hook straight from a checkout sets ORCH_REPO, and an un-rendered token falls back to
 // the pointer reader below instead of importing anything.
 const REPO = process.env.ORCH_REPO || "{{ORCH_REPO}}";
@@ -78,7 +78,7 @@ function leaseLines() {
       if (s.held_by === "oc") {
         found.push({ at, line: `orchestrator stream ${m[1]} is held by OpenCode (session ${s.held_session || "-"}) since ${s.held_at} — do not act on it here (no dispatch, merge or handoff write); it comes back with a handback.` });
       } else if (!s.held_by && s.handback_to === "cc") {
-        found.push({ at, line: `orchestrator stream ${m[1]} was handed back to Claude Code — run /next ${m[1]} (and /desk if you run the desk).` });
+        found.push({ at, line: `orchestrator stream ${m[1]} was handed back to Claude Code — run /frood-next ${m[1]} (and /frood-desk if you run the desk).` });
       }
     } catch {}
   }
@@ -92,16 +92,16 @@ function context(streams, eventCount, eventStreams) {
     .sort((a, b) => Date.parse(b.written_at) - Date.parse(a.written_at))
     .slice(0, 6);
   for (const s of pending) lines.push(`orchestrator stream ${s.name}: next = ${cut(String(s.next || ""), 120)}`);
-  if (eventCount > 0) lines.push(`${eventCount} unhandled desk events across ${eventStreams} streams — run /desk`);
+  if (eventCount > 0) lines.push(`${eventCount} unhandled desk events across ${eventStreams} streams — run /frood-desk`);
   if (lines.length) {
-    lines.push("When the owner types /next (or asks to continue), run /next <stream> for the named stream — do not start other work first.");
+    lines.push("When the owner types /frood-next (or asks to continue), run /frood-next <stream> for the named stream — do not start other work first.");
   }
   return lines.join("\n");
 }
 
 // ---------------------------------------------------------------- session title (UserPromptSubmit)
-// `/next` and `/gauntlet` would otherwise leave the tab named after the bare command. Name it after the work instead:
-// "<repo>: <module> — <what>" from the stream's `next` line, or from /gauntlet's own arguments.
+// `/frood-next` and `/frood-gauntlet` would otherwise leave the tab named after the bare command. Name it after the work instead:
+// "<repo>: <module> — <what>" from the stream's `next` line, or from /frood-gauntlet's own arguments.
 const TITLE_MAX = 60;
 const base = (p) => String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
 const planSlug = (p) => base(p).replace(/\.md$/i, "").replace(/^plan-/, "");
@@ -116,7 +116,7 @@ function titleFromGauntlet(repo, args) {
 function titleFromStream(s) {
   const repo = base(s.repo);
   const next = String(s.next || "").trim();
-  const g = /^\/gauntlet\s+(.*)$/.exec(next);
+  const g = /^\/frood-gauntlet\s+(.*)$/.exec(next);
   const fromG = g ? titleFromGauntlet(repo, g[1]) : "";
   const streamPrefix = `[${s.name}] `;
   let title;
@@ -132,9 +132,9 @@ function titleFromStream(s) {
 
 async function sessionTitle(input) {
   const prompt = String(input.prompt || "").trim();
-  const g = /^\/gauntlet\s+(.+)$/s.exec(prompt);
+  const g = /^\/frood-gauntlet\s+(.+)$/s.exec(prompt);
   if (g) return titleFromGauntlet(base(input.cwd), g[1].split("\n")[0]);
-  const n = /^\/next(?:\s+(\S+))?\s*$/.exec(prompt.split("\n")[0]);
+  const n = /^\/frood-next(?:\s+(\S+))?\s*$/.exec(prompt.split("\n")[0]);
   if (!n) return "";
   const mod = await loadHandoff();
   let streams = [];

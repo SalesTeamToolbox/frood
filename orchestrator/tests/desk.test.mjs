@@ -955,21 +955,21 @@ test("status survives a throwing migrate: stderr names it and the command still 
   assert.equal(r.stdout, "watch none — no desk watcher holds the lock\n");
 });
 
-test("manifest: commands/desk.md installs to both harnesses, and install --check sees it", () => {
+test("manifest: commands/frood-desk.md installs to both harnesses, and install --check sees it", () => {
   const h = home();
   const items = inHome(h, undefined, () => plan());
-  const desk = items.filter((i) => i.src.replace(/\\/g, "/").endsWith("commands/desk.md"));
+  const desk = items.filter((i) => i.src.replace(/\\/g, "/").endsWith("commands/frood-desk.md"));
   assert.equal(desk.length, 2, "two targets: cc + oc");
   const cc = desk.find((d) => d.harness === "cc");
   const oc = desk.find((d) => d.harness === "oc");
   assert.ok(cc, "cc target exists");
   assert.ok(oc, "oc target exists");
-  assert.ok(cc.target.endsWith(path.join(".claude", "commands", "desk.md")), cc.target);
-  assert.ok(oc.target.endsWith(path.join(".config", "opencode", "commands", "desk.md")), oc.target);
+  assert.ok(cc.target.endsWith(path.join(".claude", "commands", "frood-desk.md")), cc.target);
+  assert.ok(oc.target.endsWith(path.join(".config", "opencode", "commands", "frood-desk.md")), oc.target);
 
   // CC content: unchanged
   assert.match(cc.content, /^---\ndescription: Follow every orchestrator stream from one flat session/m);
-  assert.match(cc.content, /managed by the orchestrator repo/);
+  assert.match(cc.content, /managed by Frood/);
   assert.match(cc.content, /desk: idle — no unhandled events, ending session/);
   assert.match(cc.content, /Start \*\*one\*\* `Monitor`/);
   assert.match(cc.content, /Agent\(subagent_type: "critic"\)/);
@@ -979,11 +979,13 @@ test("manifest: commands/desk.md installs to both harnesses, and install --check
   assert.doesNotMatch(oc.content, /Start \*\*one\*\* `Monitor`/);
   assert.doesNotMatch(oc.content, /Agent\(subagent_type/);
   assert.doesNotMatch(oc.content, /run_in_background/);
-  assert.doesNotMatch(oc.content, /\.claude\//);
+  // The managed header records where the source lives, and in a worktree that path itself contains
+  // `.claude/`; the rule is about Claude Code config references, so name those paths explicitly.
+  assert.doesNotMatch(oc.content, /\.claude\/(hooks|commands|agents)\//);
   assert.match(oc.content, /watch --events --by oc --until-event/);
   assert.match(oc.content, /desk: idle — no unhandled events, ending session/);
   assert.match(oc.content, /oc-worker\.mjs --agent critic/);
-  // 1f5aa26 removed the agent pin so /desk never forces a switch to a down pool model:
+  // 1f5aa26 removed the agent pin so /frood-desk never forces a switch to a down pool model:
   // no `agent: <desk-agent>` pin remains, and the models report is the availability path.
   assert.doesNotMatch(oc.content, /agent: orchestrator/);
   assert.match(oc.content, /desk\.mjs models/);
@@ -995,8 +997,8 @@ test("manifest: commands/desk.md installs to both harnesses, and install --check
     });
   const installed = run([]);
   assert.equal(installed.status, 0, installed.stderr);
-  assert.ok(fs.existsSync(path.join(h, ".claude", "commands", "desk.md")));
-  assert.ok(fs.existsSync(path.join(h, ".config", "opencode", "commands", "desk.md")));
+  assert.ok(fs.existsSync(path.join(h, ".claude", "commands", "frood-desk.md")));
+  assert.ok(fs.existsSync(path.join(h, ".config", "opencode", "commands", "frood-desk.md")));
   const check = run(["--check"]);
   assert.equal(check.status, 0, check.stdout);
   assert.match(check.stdout, /check: OK/);

@@ -63,7 +63,7 @@ RESULT: DONE | BLOCKED: <reason>
 ```
 ── HANDOFF <stream> · <STATUS> ──
 You:   1. <one-line action or question>  2. …
-Next:  <plain next step> — /next <stream> [<ticket or module>]
+Next:  <plain next step> — /frood-next <stream> [<ticket or module>]
 Done:  <plain what landed> (<ticket> <short-sha> · …)   (≤3 items)
 Desk:  <live run> (pid <P>) → desk daemon → peer-mail to this session → I report to you | none
 Plan:  <plan file path>#handoff

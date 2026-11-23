@@ -1,10 +1,10 @@
 ---
 description: EGM (Elephant-Goldfish) review — pre-gauntlet plan review, in-gauntlet loop, post-ship drift report; delegates to EGM plugin commands
-argument-hint: "<egm-review|review-loop|drift-report> <plan>"  # /egm-review, /egm:egm-review
+argument-hint: "<egm-review|review-loop|drift-report> <plan>"  # /frood-egm-review, /egm:egm-review
 ---
 
 EGM (Elephant-Goldfish) review for Frood. Delegates to the EGM plugin commands
-(`/egm-review` in OpenCode, `/egm:egm-review` in Claude Code).
+(`/frood-egm-review` in OpenCode, `/egm:egm-review` in Claude Code).
 
 **Usage:**
 ```
@@ -19,7 +19,7 @@ The EGM gate is mechanical: before any worker starts, check the triggers
 tenancy). Any trigger ⇒ EGM review **required**; no trigger ⇒ waivable (record
 `egm_review: { status: "waived", waive_reason: "..." }`).
 
-- Pre-gauntlet (required tickets): `/egm-review <plan>` → resolve → approve before `/gauntlet`.
+- Pre-gauntlet (required tickets): `/frood-egm-review <plan>` → resolve → approve before `/frood-gauntlet`.
 - Inside gauntlet (after build, before adversarial): targeted review loop on the changed files.
 - Post-ship: drift report on `docs/designs/` when specs and code may have diverged.
 

@@ -2,8 +2,8 @@
 
 One versioned source for the cross-harness orchestrator (Claude Code + OpenCode) on this machine: slash
 commands, the routing rule, role agents, board and worker scripts, session hooks, and the installer that
-renders them into each harness's config directory. Edit here, run the installer; never hand-edit the
-installed copies (they are overwritten).
+renders them into each harness's config directory. It lives at `orchestrator/` in the Frood repo; edit there,
+run the installer; never hand-edit the installed copies (they are overwritten).
 
 Requires Node >= 22 (`package.json` `engines`). No runtime dependencies.
 
@@ -11,7 +11,7 @@ Requires Node >= 22 (`package.json` `engines`). No runtime dependencies.
 
 ```
  orchestrator session            plans, writes Mandates, judges, signs off
-        |                        (commands/orchestrator.md, agents/orchestrator*.md)
+        |                        (commands/frood-orchestrator.md, agents/orchestrator*.md)
         v
  board  bin/board.mjs            tickets + locks in <repo>/.opencode/board/; records and
         |                        verifies evidence, never runs work
@@ -59,13 +59,13 @@ Where files go (`manifest.json`, `targets`; `~` is `ORCH_HOME` when set, else th
 | skills | (none) | `~/.config/opencode/skills` |
 
 Each entry in `manifest.json` `entries` names a source, a kind and the harnesses it installs to; a source
-that is a directory (`skills/model-router-refresh`) is copied recursively. Two sources may not map to the
+that is a directory (`skills/frood-model-router-refresh`) is copied recursively. Two sources may not map to the
 same target (install errors out).
 
 - **Per-harness rendering.** Markdown sources can carry `cc-only` / `oc-only` tags: a trailing
   `# oc-only` / `<!-- cc-only -->` on a line, or a `<!-- oc-only -->` ... `<!-- /oc-only -->` block. Lines
   tagged for the other harness are dropped, tags are stripped. CRLF is normalized to LF.
-- **Managed header.** Every installed `.md` gets a `<!-- managed by the orchestrator repo ... Edit it there,
+- **Managed header.** Every installed `.md` gets a `<!-- managed by Frood ... Edit it there,
   then run install. Local edits are overwritten. -->` line, inserted right after YAML frontmatter (or at the
   top if there is none). Hooks (`.js`) are copied unchanged.
 - **Backups.** An overwritten file, or an orphan (installed earlier, no longer in the manifest, which install
@@ -79,9 +79,9 @@ same target (install errors out).
 | Path | What |
 |---|---|
 | `agents/` | Role agent definitions (see Routing pools). |
-| `commands/` | Slash commands: `orchestrator`, `gauntlet`, `next`, `handback`, `desk`, `harness`, `model-router-refresh`, `egm-*`. `desk`, `orchestrator`, `next`, `handback` and `harness` install to both harnesses; the rest follow `manifest.json`. |
+| `commands/` | Slash commands, all under the `frood-` prefix: `frood-orchestrator`, `frood-gauntlet`, `frood-next`, `frood-ticket`, `frood-handback`, `frood-desk`, `frood-harness`, `frood-model-router-refresh`, `frood-egm-*`. `frood-desk`, `frood-orchestrator`, `frood-next`, `frood-ticket`, `frood-handback` and `frood-harness` install to both harnesses; the rest follow `manifest.json`. |
 | `rules/` | `01-orchestrator-models.md`, the routing rule. |
-| `skills/` | `model-router-refresh/` (OpenCode skill). |
+| `skills/` | `frood-model-router-refresh/` (OpenCode skill). |
 | `hooks/` | Claude Code hooks (below). |
 | `bin/` | Scripts (below). |
 | `docs/designs/` | `board.md`, the board design (schema, stage machine, commands). |
@@ -101,7 +101,7 @@ same target (install errors out).
 | `verdict-gate.mjs` | Mechanical verdict for critic findings: needs a VERDICT line and a BLAST RADIUS section; any `UNREQUESTED` entry or `[blocker]`/`[major]` forces CHANGES_REQUESTED; `--free` turns APPROVED into APPROVED_FREE. Exit 0 approved, 1 changes, 2 invalid. |
 | `pool-health.mjs` | Library: which models are down (quota, unavailable), stored in `~/.config/orchestrator/pool-health.json`; also reads the provider policy in `~/.config/orchestrator/providers.json`. Shared by `oc-worker` and `router-health`. |
 | `router-health.mjs` | Self-correcting routing check: per role chain, which agent to dispatch first and why others were skipped; `--probe` / `--probe-all` live probes; `--if-stale <hours>`; `--decide <provider> routed\|ignored\|free-only --allow "<glob>,..."` records an owner provider decision. Never promotes a model outside its chains. |
-| `handoff.mjs` | Module-boundary handoff for `/clear` then `/next`: `write`, `show`, `consume`, `claim`, `release`. Pointer in `~/.config/orchestrator/handoff.json`, stale after 72 h; the prose lives in the plan file's `## Handoff` section. |
+| `handoff.mjs` | Module-boundary handoff for `/clear` then `/frood-next`: `write`, `show`, `consume`, `claim`, `release`. Pointer in `~/.config/orchestrator/handoff.json`, stale after 72 h; the prose lives in the plan file's `## Handoff` section. |
 | `wt-finish.mjs` | Remove a merged worktree: `node bin/wt-finish.mjs <worktree> [--base <ref>] [--delete-branch] [--dry-run] [--json]`. Kills only MCP servers whose cwd is inside it (`mcp_server.py`, `opencode-peer-mail`; decided from the program and its script argument, `ORCH_WT_MCP_PATTERNS` replaces the patterns), refuses (exit 4) when any other process holds it, refuses (exit 5) a nested worktree, an unreadable process listing, or a link it could not unlink, and unlinks every untracked symlink/junction in the tree before `git worktree remove` can follow one. |
 | `no-window.mjs` | Preloaded side-effect module: makes child processes hide their console window on Windows. |
 
@@ -110,7 +110,7 @@ same target (install errors out).
 | Hook | Purpose |
 |---|---|
 | `peer-mail-session-id.js` | SessionStart: injects this session's peer-mail id and lists unread subjects (read-only). |
-| `orchestrator-handoff.js` | SessionStart: announces a pending handoff so the owner only types `/next`. UserPromptSubmit: names the session tab after the work on `/next` and `/gauntlet` (wire it under both events). |
+| `orchestrator-handoff.js` | SessionStart: announces a pending handoff so the owner only types `/frood-next`. UserPromptSubmit: names the session tab after the work on `/frood-next` and `/frood-gauntlet` (wire it under both events). |
 | `cross-harness-statusline.js` | Two-line statusline plus HTML/text/JSON dashboard (`--html`, `--text`, `--json`). |
 | `package.json` | Marks the directory CommonJS (`{ "type": "commonjs" }`); not installed. |
 
@@ -171,7 +171,7 @@ own model so a spawn cannot inherit the orchestrator's):
 `scout`, `worker` and `critic` install to both harnesses; the rest are OpenCode only (`manifest.json`).
 Availability: `bin/router-health.mjs` (per-role first healthy agent, `--probe`, `--decide <provider> ...`
 for provider policy) on top of `bin/pool-health.mjs`. Session continuity across `/clear`: `bin/handoff.mjs`
-with the `/next` command. Refreshing the table: `/model-router-refresh`.
+with the `/frood-next` command. Refreshing the table: `/frood-model-router-refresh`.
 
 ## Tests
 
@@ -187,14 +187,14 @@ every agent and was hard-restarted once by parallel suites). Never raise priorit
 
 ## Harness parity
 
-`desk`, `orchestrator`, `next`, `handback`, `harness` install to both harnesses; the others are harness-specific (see `manifest.json`).
+`frood-desk`, `frood-orchestrator`, `frood-next`, `frood-ticket`, `frood-handback` and `frood-harness` install to both harnesses; the others are harness-specific (see `manifest.json`).
 
 ### Taking a stream over and handing it back
 
-A stream is leased to a harness (`cc` or `oc`), not to a session: `/next <n>` claims it with `handoff.mjs claim`. If
-the other harness holds it, `/next` asks the owner and takes it over only on a yes; the other side's `write`, `note`
-and the `/orchestrator` lease guard then refuse it. `/handback <n>` writes the handoff, stops this harness's desk
-watcher and releases the stream to the other harness, which picks it up with `/next <n>`.
+A stream is leased to a harness (`cc` or `oc`), not to a session: `/frood-next <n>` claims it with `handoff.mjs claim`. If
+the other harness holds it, `/frood-next` asks the owner and takes it over only on a yes; the other side's `write`, `note`
+and the `/frood-orchestrator` lease guard then refuse it. `/frood-handback <n>` writes the handoff, stops this harness's desk
+watcher and releases the stream to the other harness, which picks it up with `/frood-next <n>`.
 
 The two harnesses legitimately differ in three places:
 

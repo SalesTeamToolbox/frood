@@ -10,7 +10,7 @@
 // Usage: ops/systemd/install.mjs [--by cc|oc] [--uninstall]
 // When the service is enabled, stop/start it with systemctl, not `desk.mjs daemon stop`
 // (the supervisor restarts a SIGTERMed daemon). The service owns the desk whenever no
-// interactive /desk holds the lock; an interactive watch with --takeover fences it and
+// interactive /frood-desk holds the lock; an interactive watch with --takeover fences it and
 // the service yields until that session ends.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";

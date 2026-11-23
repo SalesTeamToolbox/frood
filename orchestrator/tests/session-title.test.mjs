@@ -91,7 +91,7 @@ test("--for-stream renames the holder to the stream's current work", async (t) =
   fs.mkdirSync(sdir, { recursive: true });
   fs.writeFileSync(path.join(sdir, "video-studio.json"), JSON.stringify({
     name: "video-studio", status: "active", held_session: "ses_holder", claim: null,
-    next: "/gauntlet plan-a.md m3 -- pipeline stages", repo: "/r/sales-team-toolbox",
+    next: "/frood-gauntlet plan-a.md m3 -- pipeline stages", repo: "/r/sales-team-toolbox",
   }));
   const { syncStreamTitle, readService } = await import("../bin/session-title.mjs");
   const savedHome = process.env.ORCH_HOME;

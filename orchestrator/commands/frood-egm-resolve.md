@@ -2,7 +2,7 @@
 description: EGM resolve — work through review findings and agree on changes
 ---
 
-Resolve findings from a prior `/egm-review` or `/egm-review-loop`. Read `~/.config/opencode/skills/egm-resolve/SKILL.md` first.
+Resolve findings from a prior `/frood-egm-review` or `/frood-egm-review-loop`. Read `~/.config/opencode/skills/egm-resolve/SKILL.md` first.
 
 Input: $ARGUMENTS (path to review report)
 

@@ -13,4 +13,4 @@ Steps (read `~/.config/opencode/skills/egm-brainstorm/SKILL.md` first):
 3. Artifact-first: write/update `concepts_brief.md` in workdir or `EGM artifact directory`, link path in chat, never dump large brief in chat.
 4. Plain-English, critique-first, no glazing.
 
-Version: `~/.config/opencode/egm/.egm-version`. Next: `/egm-draft`.
+Version: `~/.config/opencode/egm/.egm-version`. Next: `/frood-egm-draft`.

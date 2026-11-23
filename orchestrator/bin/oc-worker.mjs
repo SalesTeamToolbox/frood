@@ -557,7 +557,7 @@ export class StreamRefused extends Error {
   }
 }
 
-// The ticket a run belongs to: the `ticket` string of dirname(--out)/ticket.json (written once by /orchestrator before
+// The ticket a run belongs to: the `ticket` string of dirname(--out)/ticket.json (written once by /frood-orchestrator before
 // the first dispatch), else the run directory's basename when that file is missing, unreadable or has no string ticket.
 function ticketIdOf(out) {
   const dir = path.dirname(path.resolve(out));

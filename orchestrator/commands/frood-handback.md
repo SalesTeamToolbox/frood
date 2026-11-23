@@ -21,10 +21,10 @@ This run's arguments: $ARGUMENTS
    Claude Code: stop the `Monitor` task.
    <!-- /cc-only -->
    <!-- oc-only -->
-   OpenCode: a `/handback` cannot run while this session is blocked in `desk.mjs watch --until-event`, so the owner
+   OpenCode: a `/frood-handback` cannot run while this session is blocked in `desk.mjs watch --until-event`, so the owner
    interrupts that wait first.
    <!-- /oc-only -->
-   A dead watcher's lock is taken over by the other harness's `/desk` without `--takeover`.
+   A dead watcher's lock is taken over by the other harness's `/frood-desk` without `--takeover`.
 4. Release the lease to the other harness:
    `node {{ORCH_REPO}}/bin/handoff.mjs release --stream <n> --by cc --to oc`  # cc-only
    `node {{ORCH_REPO}}/bin/handoff.mjs release --stream <n> --by oc --to cc`  # oc-only
@@ -32,9 +32,9 @@ This run's arguments: $ARGUMENTS
 5. Peer-mail: take the last `kind:"takeover"` line in `~/.config/orchestrator/streams/<n>.lease.jsonl` whose `to` is
    THIS harness; its `from_session` is the session that lost the stream. If there is no such line, skip the
    `peer_send`. If that id is listed by `peer_sessions`, `peer_send` it:
-   `stream <n> handed back to oc: run /next <n> (and /desk if you run the desk); add --takeover if a live session still holds it. New tab, first message: /next <n>.`  # cc-only
-   `stream <n> handed back to cc: run /next <n> (and /desk if you run the desk); add --takeover if a live session still holds it. New tab, first message: /next <n>.`  # oc-only
+   `stream <n> handed back to oc: run /frood-next <n> (and /frood-desk if you run the desk); add --takeover if a live session still holds it. New tab, first message: /frood-next <n>.`  # cc-only
+   `stream <n> handed back to cc: run /frood-next <n> (and /frood-desk if you run the desk); add --takeover if a live session still holds it. New tab, first message: /frood-next <n>.`  # oc-only
    No broadcast.
-6. End with the handoff card from `/orchestrator` ("At every module boundary"), status **READY**, with
-   `You:   nothing — new tab, first message: /next <n>`  # cc-only
-   `You:   nothing — new tab, first message: /next <n>`  # oc-only
+6. End with the handoff card from `/frood-orchestrator` ("At every module boundary"), status **READY**, with
+   `You:   nothing — new tab, first message: /frood-next <n>`  # cc-only
+   `You:   nothing — new tab, first message: /frood-next <n>`  # oc-only

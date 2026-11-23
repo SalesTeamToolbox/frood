@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The desk: a flat-context /desk session watches its streams (bin/handoff.mjs) through this CLI.
+// The desk: a flat-context /frood-desk session watches its streams (bin/handoff.mjs) through this CLI.
 //
 //   node desk.mjs status [--json]
 //   node desk.mjs models
@@ -14,12 +14,12 @@
 // (`worker-r1`) already written in a stream still step, verdict and merge-check.
 //
 // status: first a `watch <live|stale|none> ...` line naming the desk-watch lock owner (harness, session, pid,
-//   heartbeat age, liveness) so any /desk session can tell a live owner (talk to them) from a stale one (safe to
+//   heartbeat age, liveness) so any /frood-desk session can tell a live owner (talk to them) from a stale one (safe to
 //   take over) — then per active or parked stream `<name>  <state>  next: <80>  unhandled=<n>[ held=<h>]`, then one
 //   row per run `  <run>  <agent>  queued|running|done <outcome>|dead|verdict <effective>  <age>m` — with a
 //   `dead` row that carries `  dead wrapper, live tree?` appended when the run's worktree has writes NEWER than
 //   its run-dead event (restart reconciliation: the wrapper died but the agent may have lived on — never
-//   relaunch on an unverified run-dead; see the checklist in commands/orchestrator.md). --json gives a run row
+//   relaunch on an unverified run-dead; see the checklist in commands/frood-orchestrator.md). --json gives a run row
 //   `live_tree: true|false` (present on dead rows only).
 //   --json prints `{streams: [...], watch: {...}|null}` (stream rows carry `held_by`, null when free).
 //   ` held=<h>` is the stream lease (bin/handoff.mjs): the harness that holds the stream.
@@ -63,7 +63,7 @@
 //   `ACTION resume-worker <command>` or `ESCALATE <reason> <path>`. Never runs git, never spawns anything.
 //   An event of a **closed ticket** — its worktree has no `.git` entry (the worktree was removed after the merge, even
 //   if an orphan directory remains) — is stale: step acks it with `STALE ticket-closed` plus a resolved ack for the key
-//   and prints `DONE <key>`, so a fresh /desk never replays a merged ticket's old run-done as `ACTION critic`.
+//   and prints `DONE <key>`, so a fresh /frood-desk never replays a merged ticket's old run-done as `ACTION critic`.
 //   The round is derived: 1 + the acks whose action starts `ACTION resume-worker` for the same ticket.
 //   Every path it prints carries forward slashes (the stored ack line is the printed line).
 //   --by <h>: a stream held by the other harness prints `HELD <stream> <holder>` and exits 0, acking nothing.
@@ -276,7 +276,7 @@ function readOwner() {
 }
 
 const SELF_START = { v: undefined };
-// The session holding the watch lock, for the exit-3 message and `status`: a contending /desk session reads this
+// The session holding the watch lock, for the exit-3 message and `status`: a contending /frood-desk session reads this
 // (not a pid alone) to tell its own dead session from someone else's live one. Harness id comes from --by, not env.
 function ownerSession() {
   return process.env.OPENCODE_SESSION_ID || process.env.ORCH_SESSION || null;
@@ -290,7 +290,7 @@ function writeOwner(token, at, by, extra) {
 }
 
 // Who holds the lock, for the exit-3 message: pid, heartbeat time, harness and session when recorded (older
-// records predate the identity fields and print without them). A new /desk session reads this plus the `watch`
+// records predate the identity fields and print without them). A new /frood-desk session reads this plus the `watch`
 // status line to decide: message the live owner, or --takeover a stale or confirmed-closed one — never silently.
 function lockHeldMsg(owner) {
   const who = [owner.by ? `by ${owner.by}` : null, owner.session ? `session ${owner.session}` : null].filter(Boolean).join(", ");
@@ -494,7 +494,7 @@ const fmtAge = (ms) => {
   return `${Math.floor(m / 60)}h`;
 };
 
-// The watch lock as one value: `status` prints it and takeLock's exit-3 points at it, so any /desk session can
+// The watch lock as one value: `status` prints it and takeLock's exit-3 points at it, so any /frood-desk session can
 // tell whether the lock is held live (message the owner) or stale (safe to take over) without guessing from a
 // pid. Stale covers: owner gone, owner a zombie (dead, awaiting reap), pid recycled under a new process (start
 // mismatch), or a live owner whose heartbeat expired (crashed between heartbeats, clock jumped).
@@ -675,7 +675,7 @@ function dpage(stream, key, reason) {
   } catch (e) {
     console.error(`daemon: cannot record escalation: ${e.message}`);
   }
-  const text = `desk daemon: ${reason} (${stream} ${key}) — open a /desk`;
+  const text = `desk daemon: ${reason} (${stream} ${key}) — open a /frood-desk`;
   console.log(text);
   // Notify the responsible orchestration session (stream holder) via peer-mail.
   // That session's agent resolves the escalation and brings questions to the user.
@@ -721,7 +721,7 @@ const runOfKey = (key) => {
   return m ? m[1] ?? m[2] : null;
 };
 
-// ticket.json = dirname(out)/ticket.json, written once by /orchestrator before the first dispatch.
+// ticket.json = dirname(out)/ticket.json, written once by /frood-orchestrator before the first dispatch.
 function readTicket(file) {
   try {
     const t = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -994,7 +994,7 @@ function cmdStep(opts) {
     return 0;
   }
   // A stale event of a merged ticket is DONE, never replayed: a stream that still holds T3's `run:worker-r1:done` must
-  // not make a fresh /desk print `ACTION critic` for a ticket merged long ago. The acks are written once (appendAck
+  // not make a fresh /frood-desk print `ACTION critic` for a ticket merged long ago. The acks are written once (appendAck
   // dedupes), so a replay takes this same branch and prints DONE again.
   if (run && (kind === "run-done" || kind === "run-dead" || kind === "verdict")) {
     const closed = closedTicket(events, run);
@@ -1421,7 +1421,7 @@ async function doResume(stream, key, events, cmd) {
   return { stream, key, line: cmd, outcome: "resume" };
 }
 
-// The merge path from desk.md, executed: ff-only into the orchestrator repo, then install + check + wt-finish.
+// The merge path from frood-desk.md, executed: ff-only into the Frood repo, then install + check + wt-finish.
 // Anything else (train repos, non-ff, a FAIL) pages the owner — the daemon never merges what a session would not.
 function doMerge(stream, key, ticketPath, sha) {
   const run = runOfKey(key);

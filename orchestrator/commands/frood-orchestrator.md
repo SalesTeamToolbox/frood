@@ -1,10 +1,10 @@
 ---
-description: Full orchestrator lifecycle — discuss, plan file, then execute modules via /gauntlet with cheap workers, a critic loop, and the train (any repo, either harness)
+description: Full orchestrator lifecycle — discuss, plan file, then execute modules via /frood-gauntlet with cheap workers, a critic loop, and the train (any repo, either harness)
 argument-hint: "[task or plan-path]"  # cc-only
 ---
 
 Explicit entry to the full discipline. Plan once, then run one module per
-`/gauntlet`, passing the plan path through: `/gauntlet [plan-path] [module]`.
+`/frood-gauntlet`, passing the plan path through: `/frood-gauntlet [plan-path] [module]`.
 
 This run's arguments: $ARGUMENTS
 
@@ -24,7 +24,7 @@ first (below). Present the plan, then build.
 
 ## 3. Execute
 
-One module at a time with `/gauntlet [plan-path] [module]`. Each run closes with:
+One module at a time with `/frood-gauntlet [plan-path] [module]`. Each run closes with:
 `[Module] -> [Tests run] -> [Failures / fixes] -> [Metrics]`, gates re-run and
 quoted, deploy truth (verified sha or stated gap). Multi-repo task: one worktree and
 one receipt per repo, landed separately. Modules run continuously — stop only on a
@@ -76,7 +76,7 @@ question the owner must decide.
    ```
    ── HANDOFF <stream> · <STATUS> ──
    You:   nothing | 1. <one-line action or question>  2. …
-   Next:  <plain next step> — /next <stream> [<ticket or module>]
+   Next:  <plain next step> — /frood-next <stream> [<ticket or module>]
    Done:  <plain what landed> (<ticket> <short-sha> · …)   (≤3 items)
    Desk:  <live run> (pid <P>) → desk daemon → peer-mail to this session → I report to you | none
    Plan:  <plan file path>#handoff
@@ -85,17 +85,21 @@ question the owner must decide.
    `<STATUS>` is exactly one of: **READY** (`You:` is `nothing`; clear and continue), **WAITING** (`You:` is
    `nothing`; the next step depends on a running worker or the desk. `Next:` names the report the owner is
    waiting for, never a desk command — `orchestrator reports merge of <run>; you do nothing until then`.
-   **`/desk` and `desk.mjs status` are never given to the owner as an action item**: the desk daemon wakes
+   **`/frood-desk` and `desk.mjs status` are never given to the owner as an action item**: the desk daemon wakes
    this session by peer-mail on a merge, senior review or sign-off, and this session reports it), **NEEDS YOU**
-   (answer `You:` before `/next`), **BLOCKED** (cannot continue; `You:` says what unblocks it), **DONE**
+   (answer `You:` before `/frood-next`), **BLOCKED** (cannot continue; `You:` says what unblocks it), **DONE**
    (stream finished; `Next:` is `—`). Never READY with items under `You:`. Every line fits in 100 characters.
    Omit a line only when it would be `none` (`You:` and `Next:` are always shown).
 4. Then ask the owner with these options (Claude Code: AskUserQuestion; OpenCode: a numbered list):
    - **Continue in this session (Recommended for a streamed ticket)** — its context is Mandates, verdicts and
      receipts, not dumps, and this session is the one the desk wakes, so it reports the merge itself.
-   - **Fresh tab** — new tab, first message `next <stream>`; the old tab keeps its history. The escape hatch
+   - **Fresh tab** — new tab, first message `/frood-next <stream>`; the old tab keeps its history. The escape hatch
      when the context is genuinely heavy; the handoff waits 72 h for it either way.
-   - **Stop here** — the handoff waits (72 h) for a later `/next`.
+   - **Stop here** — the handoff waits (72 h) for a later `/frood-next`.
+
+   Handing work to a session that does not exist yet is `/frood-ticket <repo-path> <one-line task>`: it writes the
+   Mandate, the board ticket, the plan file and the stream, so the next session's `/frood-next <stream>` finds it.
+   Never hand-write a ticket JSON under `.opencode/board/tickets/` — that is the case `/frood-next` cannot see.
 
 ## 4. Delegate: worker → critic loop
 
@@ -109,7 +113,7 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    `report_path` and `findings_path` under `.opencode/reports/<ticket>/`.
    **One run dir = `dirname(mandate)`** (today `~/.opencode/reports/<effort>/<ticket>/`): `mandate.md`,
    `ticket.json`, `report.md`, `worker-r<N>.md` and `findings-r<N>.md` all live there. Write `ticket.json`
-   once, before the first dispatch, and never change it, so `/desk` can act on the run:
+   once, before the first dispatch, and never change it, so `/frood-desk` can act on the run:
    `{"ticket":"<slug>","worktree":"<abs>","branch":"<name>","base":"<ref>","mandate":"<abs>","report":"<abs>","max_rounds":3,"senior_trigger":null,"repo":"<abs main checkout>","merge":"ff|train"}`.
    **Blast radius (required):** for every function/route/key/format the ticket changes, list its
    callers (`git grep`, send a `scout`) and the expected behaviour at each after the change —
@@ -142,7 +146,7 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    <!-- /cc-only -->
    <!-- oc-only -->
    From OpenCode, launch the same headless run in the background — the identical command Claude Code runs, so a desk
-   in either harness follows it and a Claude Code `/desk` can pick up work started here (paid-first by default):
+   in either harness follows it and a Claude Code `/frood-desk` can pick up work started here (paid-first by default):
    Free-first for small, waived, non-money tickets: same command with `--agent worker-nvidia --fallback worker-free,worker-burst,worker-alt,worker` (routing rule).
    `node {{ORCH_REPO}}/bin/oc-worker.mjs --agent worker --fallback worker-burst,worker-alt,worker-free --dir <worktree> --prompt <mandate.md> --report <run dir>/report.md --out <run dir>/worker-r1.md --stream <name>`
    (`--agent worker-strong` for hard tickets; add `--session <id from the last receipt>` on revision rounds so the
@@ -158,7 +162,7 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    todo `in_progress` and go on to the next ticket — the desk daemon is the default driver (the driver-check
    rule above already guarantees one is live), so there is nothing for the owner to start and nothing for
    them to watch: the daemon peer-mails this session on a merge, senior review or sign-off, and this session
-   reports it. An interactive `/desk` is the fallback *you* open when the daemon cannot run — never an owner
+   reports it. An interactive `/frood-desk` is the fallback *you* open when the daemon cannot run — never an owner
    action item. Run the critic loop yourself only for a Claude Code `worker` agent (no stream events) or when
    the owner tells you to.
    <!-- oc-only -->
@@ -244,7 +248,7 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   streamed work stalls. Run both commands and read each for what it prints:
   - `node {{ORCH_REPO}}/bin/desk.mjs daemon status` — the driver's identity: its `watch` line names the live
     owner and its `by <harness>` token says which harness it was started for (the `daemon` token in that line
-    means a headless driver; no `daemon` token means an interactive `/desk` session holds the lock);
+    means a headless driver; no `daemon` token means an interactive `/frood-desk` session holds the lock);
   - `node {{ORCH_REPO}}/bin/desk.mjs status` — one line per stream carrying `held=<harness>` and
     `unhandled=<n>`: the switch condition below is read from this output, never from `daemon status`.
   Then, from what those two show:
@@ -259,7 +263,7 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
     <!-- oc-only -->
     `node {{ORCH_REPO}}/bin/desk.mjs daemon stop` then `node {{ORCH_REPO}}/bin/desk.mjs daemon start --by oc`
     <!-- /oc-only -->
-  - a live `/desk` session holds the lock instead of a daemon (`watch` line without the `daemon` token): its desk
+  - a live `/frood-desk` session holds the lock instead of a daemon (`watch` line without the `daemon` token): its desk
     is the driver — when its `by` matches this harness, done; when its `by` is the other harness's, stop with
     **NEEDS YOU** naming that session — an interactive desk is never stopped or taken over from here
     (`daemon stop` refuses a session owner anyway);
@@ -277,7 +281,7 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
     Exit 3 from any `daemon start` above → a live owner holds the lock: **NEEDS YOU** naming it (the message
     says who); never `--takeover`.
   - a small ticket (an in-session worker, no `--stream`) needs no driver of its own — but still run this check:
-    `unhandled>0` with no live driver is left-over work nobody drives, so start the driver (or open a `/desk`)
+    `unhandled>0` with no live driver is left-over work nobody drives, so start the driver (or open a `/frood-desk`)
     rather than walking past it. Say so when there is truly nothing pending and skip the rest.
 - Isolated branch per the repo convention; verify the tree (`git rev-parse
   --show-toplevel`) and use absolute paths — `cd` does not hold between calls.
@@ -315,7 +319,7 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   6. **Receipt**: records `model_optimization: { current, recommended, decision: "kept"|"switched-next"|"switched-now"|"skipped", reason, timestamp }`.
 - **Router freshness (pricing):** if `**Last audited:**` in the routing rule is >14 days old, or
   `opencode models` shows a `commandcode/*` model the rule does not name, run
-  `/model-router-refresh` (OpenCode). New models enter a chain only through that refresh + a probe +
+  `/frood-model-router-refresh` (OpenCode). New models enter a chain only through that refresh + a probe +
   owner approval — health checks never promote a model on their own.
 - **Restart reconciliation (after router health, before any dispatch in a session that starts after a host
   restart):** a restart can kill the `oc-worker` wrapper while the agent lives on, and the watcher's `run-dead`
@@ -384,9 +388,9 @@ worker starts, check these triggers and record the result:
   agents are `model: inherit` and would otherwise run on Opus)
   <!-- /cc-only -->
   <!-- oc-only -->
-  (`/egm-review <plan>`)
+  (`/frood-egm-review <plan>`)
   <!-- /oc-only -->
-  → resolve → approve before `/gauntlet`. Ticket field `egm_review.status` must be
+  → resolve → approve before `/frood-gauntlet`. Ticket field `egm_review.status` must be
   `approved` or `waived` (with reason) before work starts.
 - **Inside gauntlet (after build, before adversarial):** targeted review loop on the
   changed files (design_critic + implementation_readiness).
@@ -403,7 +407,7 @@ long-lived session (e.g. "ticket X ready for review", with the report link — n
 the dump). Address sessions only by exact id from `peer_sessions`. Headless workers
 launched by `oc-worker` need no peer-mail: the orchestrator reads their report file.
 
-Taking a stream from the other harness is `/next <n>` plus the owner's yes; giving it back is `/handback <n>`.
+Taking a stream from the other harness is `/frood-next <n>` plus the owner's yes; giving it back is `/frood-handback <n>`.
 
 If Claude Code is unavailable, run this same command from OpenCode: Go Muse
 orchestrates, OpenCode `worker`/`critic`/`senior` agents fill every role.

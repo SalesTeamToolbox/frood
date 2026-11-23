@@ -73,7 +73,7 @@ test("old CLI form: write --plan --next, show, consume keep their exit codes and
   assert.equal(consumed.status, 0);
   assert.ok(JSON.parse(consumed.stdout).consumed_at, "consume returns the stream with consumed_at set");
   assert.equal(run(e, "show").status, 1);
-  assert.equal(run(e, "consume").status, 1, "a second /next does not replay it");
+  assert.equal(run(e, "consume").status, 1, "a second /frood-next does not replay it");
 });
 
 test("write refuses a missing plan, a missing --next, a bad stream name and a bad status", () => {
@@ -207,13 +207,52 @@ test("a stale stream is listed with the hint, is not pending, and only an explic
   const shown = run(e, "show");
   assert.equal(shown.status, 1, "a stale stream is never pending");
   assert.match(shown.stdout, /old\s+stale\s+73h\s+finish it/);
-  assert.match(shown.stdout, /stale \(written 73h ago\): not auto-resumed; \/next old to resume/);
+  assert.match(shown.stdout, /stale \(written 73h ago\): not auto-resumed; \/frood-next old to resume/);
   assert.equal(run(e, "consume").status, 1, "nothing pending, so the unnamed consume refuses");
   const named = run(e, "show", "--stream", "old");
   assert.equal(named.status, 1);
   assert.equal(JSON.parse(named.stdout).state, "stale");
   assert.equal(run(e, "consume", "--stream", "old").status, 0, "M4: an explicitly named stale stream resumes");
   assert.ok(stream(h, "old").consumed_at);
+});
+
+test("show (no single pending stream) appends the unstreamed tickets in cwd: queued, and hand-written", () => {
+  const { h, plan, e } = env();
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "orch-repo-"));
+  const tickets = path.join(repo, ".opencode", "board", "tickets");
+  fs.mkdirSync(tickets, { recursive: true });
+  const ticket = (id, extra) => fs.writeFileSync(path.join(tickets, `${id}.json`), JSON.stringify({ schema: 1, id, stage: "queued", ...extra }));
+  ticket("queued-one"); // on the board, nobody streamed it
+  ticket("streamed"); // on the board, a stream's next line names it
+  ticket("already-shipped", { stage: "shipped" }); // no longer waiting for a session
+  fs.writeFileSync(path.join(tickets, "handwritten.json"), JSON.stringify({ stream: "handwritten", task: "open a ticket by hand" }));
+  // The one stream that names "streamed" is stale, so show still exits 1 (no single pending stream).
+  assert.equal(run(e, "write", "--stream", "streamed", "--plan", plan, "--next", "frood-gauntlet plan-streamed.md M1").status, 0);
+  const s = stream(h, "streamed");
+  s.written_at = new Date(Date.now() - 73 * HOUR).toISOString();
+  fs.writeFileSync(jpath(h, "streamed"), JSON.stringify(s));
+
+  const show = (cwd) => spawnSync(process.execPath, [BIN, "show"], { env: e, cwd, encoding: "utf8" });
+  const shown = show(repo);
+  assert.equal(shown.status, 1);
+  assert.ok(shown.stdout.includes(`unstreamed tickets in ${repo}:`), shown.stdout);
+  assert.match(shown.stdout, /queued-one — queued, not in any stream/);
+  assert.match(shown.stdout, /handwritten — hand-written, not on the board/);
+  assert.doesNotMatch(shown.stdout, /streamed —/, "a ticket a stream names is not unstreamed");
+  assert.doesNotMatch(shown.stdout, /already-shipped/, "a shipped ticket is not waiting for a session");
+
+  // Nothing left unstreamed: no section at all.
+  fs.rmSync(path.join(tickets, "queued-one.json"));
+  fs.rmSync(path.join(tickets, "handwritten.json"));
+  const clean = show(repo);
+  assert.equal(clean.status, 1);
+  assert.doesNotMatch(clean.stdout, /unstreamed tickets/);
+
+  // No board in this directory: no crash, no section (exit code unchanged).
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), "orch-bare-"));
+  const none = show(bare);
+  assert.equal(none.status, 1, none.stderr);
+  assert.doesNotMatch(none.stdout, /unstreamed tickets/);
 });
 
 test("parked and done streams are listed, never pending, and refuse consume", () => {
@@ -378,12 +417,12 @@ test("SessionStart hook: pending streams and the unhandled count; silent on resu
   const lines = first.additionalContext.split("\n");
   assert.match(lines[0], /^orchestrator stream m6a: next = T6 named streams /);
   assert.equal(lines[0].length, "orchestrator stream m6a: next = ".length + 120, "next is cut to 120 chars");
-  assert.match(first.additionalContext, /When the owner types \/next \(or asks to continue\), run \/next <stream> for the named stream/);
+  assert.match(first.additionalContext, /When the owner types \/frood-next \(or asks to continue\), run \/frood-next <stream> for the named stream/);
   assert.equal(hook(e, "resume").stdout, "");
   assert.equal(hook(e, "compact").stdout, "");
 
   withHome(h, () => appendEvent("m6a", { key: "run:worker-r1:done", kind: "run-done", run: "worker-r1", out: "o", agent: "worker" }));
-  assert.match(hook(e, "clear").stdout, /1 unhandled desk events across 1 streams — run \/desk/);
+  assert.match(hook(e, "clear").stdout, /1 unhandled desk events across 1 streams — run \/frood-desk/);
   withHome(h, () => appendAck("m6a", "run:worker-r1:done", "ESCALATE none o"));
   assert.doesNotMatch(hook(e, "clear").stdout, /unhandled/);
   assert.equal(run(e, "consume", "--stream", "m6a").status, 0);
@@ -435,40 +474,40 @@ const titleHook = (e, prompt, cwd = "C:/x/acme-app") =>
   spawnSync(process.execPath, [HOOK], { env: e, input: JSON.stringify({ session_id: "x", hook_event_name: "UserPromptSubmit", prompt, cwd }), encoding: "utf8" });
 const titleOf = (r) => (r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.sessionTitle : "");
 
-test("UserPromptSubmit: /next names the tab after the stream's module, not the command", () => {
+test("UserPromptSubmit: /frood-next names the tab after the stream's module, not the command", () => {
   const { h, plan, e } = env();
   const repo = path.join(h, "acme-app");
   fs.mkdirSync(repo, { recursive: true });
-  const next = "/gauntlet .opencode/plans/plan-widgets.md R4 — UI on the thread view; worktree worktree/w-r4";
+  const next = "/frood-gauntlet .opencode/plans/plan-widgets.md R4 — UI on the thread view; worktree worktree/w-r4";
   assert.equal(run(e, "write", "--stream", "default", "--plan", plan, "--next", next, "--repo", repo).status, 0);
-  const r = titleHook(e, "/next");
+  const r = titleHook(e, "/frood-next");
   assert.equal(r.status, 0);
   const out = JSON.parse(r.stdout).hookSpecificOutput;
   assert.equal(out.hookEventName, "UserPromptSubmit");
   assert.equal(out.sessionTitle, "[default] acme-app: R4 — UI on the thread view");
-  assert.equal(titleOf(titleHook(e, "/next default")), "[default] acme-app: R4 — UI on the thread view");
-  assert.ok(titleOf(titleHook(e, "/next default")).length <= 60);
+  assert.equal(titleOf(titleHook(e, "/frood-next default")), "[default] acme-app: R4 — UI on the thread view");
+  assert.ok(titleOf(titleHook(e, "/frood-next default")).length <= 60);
 });
 
-test("UserPromptSubmit: /gauntlet titles from its args; other prompts and unknown streams print nothing", () => {
+test("UserPromptSubmit: /frood-gauntlet titles from its args; other prompts and unknown streams print nothing", () => {
   const { e } = env();
   // gauntlet path has no stream, so no prefix
-  assert.equal(titleOf(titleHook(e, "/gauntlet .opencode/plans/plan-widgets.md R4")), "acme-app: R4 — widgets");
-  for (const p of ["resume", "/next nosuch", "/next", "fix the /next bug"]) {
+  assert.equal(titleOf(titleHook(e, "/frood-gauntlet .opencode/plans/plan-widgets.md R4")), "acme-app: R4 — widgets");
+  for (const p of ["resume", "/frood-next nosuch", "/frood-next", "fix the /frood-next bug"]) {
     const r = titleHook(e, p);
     assert.equal(r.status, 0);
     assert.equal(r.stdout, "", p);
   }
 });
 
-test("UserPromptSubmit: two pending streams and a bare /next set no title (never guess)", () => {
+test("UserPromptSubmit: two pending streams and a bare /frood-next set no title (never guess)", () => {
   const { h, plan, e } = env();
   const repo = path.join(h, "test-repo");
   fs.mkdirSync(repo, { recursive: true });
-  assert.equal(run(e, "write", "--stream", "a", "--plan", plan, "--next", "/gauntlet p.md M1", "--repo", repo).status, 0);
-  assert.equal(run(e, "write", "--stream", "b", "--plan", plan, "--next", "/gauntlet p.md M2", "--repo", repo).status, 0);
-  assert.equal(titleHook(e, "/next").stdout, "");
-  assert.match(titleOf(titleHook(e, "/next b")), /^\[b\] test-repo: M2 — p$/);
+  assert.equal(run(e, "write", "--stream", "a", "--plan", plan, "--next", "/frood-gauntlet p.md M1", "--repo", repo).status, 0);
+  assert.equal(run(e, "write", "--stream", "b", "--plan", plan, "--next", "/frood-gauntlet p.md M2", "--repo", repo).status, 0);
+  assert.equal(titleHook(e, "/frood-next").stdout, "");
+  assert.match(titleOf(titleHook(e, "/frood-next b")), /^\[b\] test-repo: M2 — p$/);
 });
 
 test("UserPromptSubmit: title respects TITLE_MAX on composed string with stream prefix", () => {
@@ -476,9 +515,9 @@ test("UserPromptSubmit: title respects TITLE_MAX on composed string with stream 
   const repo = path.join(h, "acme-app");
   fs.mkdirSync(repo, { recursive: true });
   // Long title that will exceed 60 chars when prefixed with "[default] "
-  const longNext = "/gauntlet .opencode/plans/plan.md R1 — " + "x".repeat(60);
+  const longNext = "/frood-gauntlet .opencode/plans/plan.md R1 — " + "x".repeat(60);
   assert.equal(run(e, "write", "--stream", "default", "--plan", plan, "--next", longNext, "--repo", repo).status, 0);
-  const title = titleOf(titleHook(e, "/next default"));
+  const title = titleOf(titleHook(e, "/frood-next default"));
   assert.ok(title.length <= 60, `title length ${title.length} exceeds TITLE_MAX`);
   assert.match(title, /^\[default\] acme-app: R1 — x+$/);
 });
@@ -489,9 +528,9 @@ test("UserPromptSubmit: long stream name eats title body but still truncates at 
   fs.mkdirSync(repo, { recursive: true });
   // Long stream name (40 chars max per NAME_RE) - the prefix "[...] " takes most of TITLE_MAX
   const longStream = "very-long-stream-name-that-is-valid"; // 39 chars
-  const next = "/gauntlet .opencode/plans/plan.md R1 — some work";
+  const next = "/frood-gauntlet .opencode/plans/plan.md R1 — some work";
   assert.equal(run(e, "write", "--stream", longStream, "--plan", plan, "--next", next, "--repo", repo).status, 0);
-  const title = titleOf(titleHook(e, "/next " + longStream));
+  const title = titleOf(titleHook(e, "/frood-next " + longStream));
   assert.ok(title.length <= 60, `title length ${title.length} exceeds TITLE_MAX`);
   assert.match(title, /^\[very-long-stream-name-that-is-valid\] /);
   // The stream prefix should be present even if it leaves little room for the body
@@ -939,12 +978,12 @@ test("readStream exposes claim as additive field (unknown-field readers keep wor
   });
 });
 test("streamTitle names the tab after the work: [stream] repo: module — what", () => {
-  assert.equal(streamTitle({ name: "m6a", repo: "/r/sales-team-toolbox", next: "/gauntlet plan-a.md m3 -- pipeline stages" }), "[m6a] sales-team-toolbox: m3 — pipeline stages");
-  assert.equal(streamTitle({ name: "m6a", repo: "", next: "after /desk merges: fresh tab → /next m6a" }), "[m6a] after /desk merges: fresh tab → /next m6a");
+  assert.equal(streamTitle({ name: "m6a", repo: "/r/sales-team-toolbox", next: "/frood-gauntlet plan-a.md m3 -- pipeline stages" }), "[m6a] sales-team-toolbox: m3 — pipeline stages");
+  assert.equal(streamTitle({ name: "m6a", repo: "", next: "after /frood-desk merges: fresh tab → /frood-next m6a" }), "[m6a] after /frood-desk merges: fresh tab → /frood-next m6a");
   assert.equal(streamTitle({ name: "m6a", repo: "/r/x", next: "" }), "[m6a] x: m6a");
   assert.equal(streamTitle(null), "");
   assert.equal(streamTitle("nope"), "");
-  const long = streamTitle({ name: "video-studio", repo: "r", next: "/gauntlet plan-video-studio.md m3-pipeline-service -- " + "x".repeat(200) });
+  const long = streamTitle({ name: "video-studio", repo: "r", next: "/frood-gauntlet plan-video-studio.md m3-pipeline-service -- " + "x".repeat(200) });
   assert.ok(long.length <= 60, long);
   assert.ok(long.startsWith("[video-studio] "), long);
 });

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 // Orchestrator installer: renders repo sources into Claude Code + OpenCode config dirs.
+// The source of truth is the Frood repo's `orchestrator/` directory (this tree). Edit here, run
+// install; never hand-edit the installed copies (they are overwritten).
 //
 //   node bin/install.mjs            install (backs up anything it overwrites or removes)
 //   node bin/install.mjs --check    report drift; exit 1 if any installed file differs/missing/orphaned
@@ -18,7 +20,7 @@ const HARNESSES = ["cc", "oc"];
 const fwd = (p) => p.replace(/\\/g, "/");
 // Paths are baked into installed copies at install time (nothing personal is tracked in this repo).
 export const REPO_FWD = fwd(REPO);
-export const MANAGED = `<!-- managed by the orchestrator repo (${REPO_FWD}). Edit it there, then run install. Local edits are overwritten. -->`;
+export const MANAGED = `<!-- managed by Frood (${REPO_FWD}). Edit it there, then run install. Local edits are overwritten. -->`;
 
 export function homeDir() {
   return process.env.ORCH_HOME || os.homedir();

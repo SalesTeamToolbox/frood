@@ -5,7 +5,7 @@
 //                     (oc-worker reads the agent file it dispatches; the body is the prompt).
 //   2. critic check — every `agents/critic*.md` body carries the atlas-freshness check under BLAST RADIUS
 //                     (desk.mjs spawns `--agent critic`; verdict-gate.mjs keys off that document's shape).
-//   3. Mandate line — `commands/orchestrator.md` step 1 requires "Atlas refs consulted / updated?" and
+//   3. Mandate line — `commands/frood-orchestrator.md` step 1 requires "Atlas refs consulted / updated?" and
 //                     `tests/fixtures/board/mandate.md` carries it (board.test/oc-worker.test copy that
 //                     fixture into a temp repo and run the real `board create` on it).
 //
@@ -78,8 +78,8 @@ test("critic check: every critic variant carries the same atlas-freshness wordin
 });
 
 // ---------------------------------------------------------------- 3. Mandate line: where Mandates are born
-test("Mandate line: commands/orchestrator.md step 1 requires an 'Atlas refs consulted / updated?' line in every Mandate", () => {
-  const cmd = flat(read("commands/orchestrator.md"));
+test("Mandate line: commands/frood-orchestrator.md step 1 requires an 'Atlas refs consulted / updated?' line in every Mandate", () => {
+  const cmd = flat(read("commands/frood-orchestrator.md"));
   assert.match(cmd, /Atlas refs consulted \/ updated\?/, "the command names the line verbatim");
   assert.match(cmd, /every Mandate carries the line/i, "the line is required, not suggested");
   assert.match(cmd, /say `no map` plainly when the repo has none/, "a repo without a map still answers the line");

@@ -20,7 +20,7 @@ never the dump).
 ```
 
 This delegates to the orchestrator's peer-mail tooling
-(`node {{ORCH_REPO}}/bin/peer-mail` where available, otherwise the peer-mail
+(`node orchestrator/bin/peer-mail` where available, otherwise the peer-mail
 MCP tools). Address sessions only by exact id from `peer_sessions`.
 
 Headless workers launched by `oc-worker` need no peer-mail: the orchestrator

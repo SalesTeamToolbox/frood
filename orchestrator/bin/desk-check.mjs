@@ -7,7 +7,7 @@
 // Exit: 0 nothing pending, or a live watcher is already driving; 1 paged (pending work with no
 //   live owner); 2 usage or IO failure. Paging = stdout page text + `notify-send` (best effort;
 //   skipped when ORCH_NO_NOTIFY=1, which tests set). The trigger never takes the lock and never
-//   decides anything: opening a /desk (or starting the daemon) is the human's job.
+//   decides anything: opening a /frood-desk (or starting the daemon) is the human's job.
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -43,7 +43,7 @@ export function check(now = Date.now()) {
   if (pending.length) parts.push(`${pending.reduce((n, s) => n + s.unhandled, 0)} unhandled event(s) on ${pending.map((s) => `${s.name}(${s.unhandled})`).join(", ")}`);
   if (escalations.length) parts.push(`${escalations.length} unresolved escalation(s) on ${[...new Set(escalations.map((e) => e.stream))].join(", ")}`);
   const owner = watch.state === "none" ? "no watcher" : `stale watcher (pid ${watch.pid}, ${watch.reason})`;
-  const text = `desk-check: ${parts.join(" + ")}; ${owner} — open a /desk`;
+  const text = `desk-check: ${parts.join(" + ")}; ${owner} — open a /frood-desk`;
   return { code: 1, text };
 }
 

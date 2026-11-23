@@ -3,7 +3,7 @@ description: Execute one plan module under the realistic gauntlet with receipts 
 argument-hint: "[plan-path] [module]"  # cc-only
 ---
 
-Run one module from the plan file: `/gauntlet [plan-path] [module]`. One module
+Run one module from the plan file: `/frood-gauntlet [plan-path] [module]`. One module
 per run. Repo-specific conventions (base branch, gates, deploy) come from that
 repo's instructions (`CLAUDE.md` / `AGENTS.md` / `.opencode/*-notes.md`) and its
 board adapter (`.opencode/board/adapter.json`, when present), which override this file.
@@ -17,7 +17,7 @@ This run's arguments: $ARGUMENTS
   plan (`~/.claude/plans/<slug>.md` or `~/.opencode/plan/<slug>.md`).
   Module: the second argument.
   If either is omitted, ask which plan and which module — never guess.
-- If the command is unknown in this session (no `/gauntlet` resolves), stop and ask
+- If the command is unknown in this session (no `/frood-gauntlet` resolves), stop and ask
   the user — do not improvise a workflow under its name.
 
 ## Preconditions (refuse if unmet)
@@ -84,7 +84,7 @@ any of them.
   deferred work, done at the NEXT session start (or on a desk/peer-mail event),
   never by waiting in this one. A session that boards + departs and then idles
   on the train has stalled — the rule above is what restarts it.
-- End the message with the handoff card (`/orchestrator`, "At every module boundary"): status first, then `You:`
+- End the message with the handoff card (`/frood-orchestrator`, "At every module boundary"): status first, then `You:`
   and `Next:`. Put an unverified deploy under `You:`. Nothing goes after the card.
 - Token hygiene: clear before the next module; orchestrator on the strong model,
   workers on the routed cheap agents (`rules/01-orchestrator-models.md`); noisy

@@ -4,7 +4,7 @@ description: Follow every orchestrator stream from one flat session  # oc-only
 ---
 
 Follow the workstreams another session planned, one EVENT line at a time. All state is on disk
-(`~/.config/orchestrator/streams/`), so `/clear` then `/desk` resumes anywhere: the desk spends its context on
+(`~/.config/orchestrator/streams/`), so `/clear` then `/frood-desk` resumes anywhere: the desk spends its context on
 actions, never on stream history. Every command below is absolute so it works from any directory.
 
 The desk does **not** switch your model: no `agent:` is set, so whatever model you have selected stays selected.
@@ -83,7 +83,7 @@ Wherever a command below takes `<run>`, it is the part of the EVENT key between 
 likewise) — a run id carries its ticket: `m6a-desk-minors/worker-r1`.
 
 - **`HELD <stream> <holder>`** — the other harness holds this stream; do nothing with it (no ack, no critic), it
-  returns after a `/handback`.
+  returns after a `/frood-handback`.
 - **`ACTION critic <ticket.json> <out> <findings-r<N>.md> <N>`**
   <!-- cc-only -->
   - Read `<ticket.json>` (it is small).
@@ -137,7 +137,7 @@ todos (Claude Code: `TodoWrite`, OpenCode: `todowrite`), one todo per active run
 event just started, with its pid/model in the todo content so the spinner row is the live one.
 `ACTION critic` → critic todo `in_progress`, worker todo `completed`; verdict `APPROVED` → critic `completed`, senior/merge todo `in_progress`;
 `DONE <key>` → its todo `completed`. A `run-dead` under restart reconciliation
-(`/orchestrator` standing rules) keeps its todo `in_progress` until the tree check
+(`/frood-orchestrator` standing rules) keeps its todo `in_progress` until the tree check
 decides adopt vs relaunch — never complete a run you have not verified dead. At every `note` also include one `live — <run> <elapsed> <outAge>` line from `oc-worker active` so the conversation window's last 5-line block always shows what's spinning.
 
 ## 4. Context rule
@@ -146,4 +146,4 @@ The desk never pastes worker output into its reasoning. Worker output, reports a
 ESCALATE that needs them. After 12 handled events, or after any event where you read more than `ticket.json`, the
 findings and the plan's `## Handoff` section, finish the current event and then say exactly:
 
-`desk: /clear then /desk`
+`desk: /clear then /frood-desk`

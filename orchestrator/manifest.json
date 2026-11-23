@@ -15,7 +15,7 @@
   },
   "entries": [
     {
-      "src": "commands/orchestrator.md",
+      "src": "commands/frood-orchestrator.md",
       "kind": "commands",
       "harness": [
         "cc",
@@ -23,7 +23,7 @@
       ]
     },
     {
-      "src": "commands/gauntlet.md",
+      "src": "commands/frood-gauntlet.md",
       "kind": "commands",
       "harness": [
         "cc",
@@ -31,7 +31,7 @@
       ]
     },
     {
-      "src": "commands/harness.md",
+      "src": "commands/frood-harness.md",
       "kind": "commands",
       "harness": [
         "cc",
@@ -39,56 +39,56 @@
       ]
     },
     {
-      "src": "commands/model-router-refresh.md",
+      "src": "commands/frood-model-router-refresh.md",
       "kind": "commands",
       "harness": [
         "oc"
       ]
     },
     {
-      "src": "commands/egm-bootstrap.md",
+      "src": "commands/frood-egm-bootstrap.md",
       "kind": "commands",
       "harness": [
         "oc"
       ]
     },
     {
-      "src": "commands/egm-brainstorm.md",
+      "src": "commands/frood-egm-brainstorm.md",
       "kind": "commands",
       "harness": [
         "oc"
       ]
     },
     {
-      "src": "commands/egm-draft.md",
+      "src": "commands/frood-egm-draft.md",
       "kind": "commands",
       "harness": [
         "oc"
       ]
     },
     {
-      "src": "commands/egm-drift-report.md",
+      "src": "commands/frood-egm-drift-report.md",
       "kind": "commands",
       "harness": [
         "oc"
       ]
     },
     {
-      "src": "commands/egm-resolve.md",
+      "src": "commands/frood-egm-resolve.md",
       "kind": "commands",
       "harness": [
         "oc"
       ]
     },
     {
-      "src": "commands/egm-review-loop.md",
+      "src": "commands/frood-egm-review-loop.md",
       "kind": "commands",
       "harness": [
         "oc"
       ]
     },
     {
-      "src": "commands/egm-review.md",
+      "src": "commands/frood-egm-review.md",
       "kind": "commands",
       "harness": [
         "oc"
@@ -102,7 +102,7 @@
       ]
     },
     {
-      "src": "skills/model-router-refresh",
+      "src": "skills/frood-model-router-refresh",
       "kind": "skills",
       "harness": [
         "oc"
@@ -260,7 +260,7 @@
       ]
     },
     {
-      "src": "commands/next.md",
+      "src": "commands/frood-next.md",
       "kind": "commands",
       "harness": [
         "cc",
@@ -268,7 +268,7 @@
       ]
     },
     {
-      "src": "commands/handback.md",
+      "src": "commands/frood-handback.md",
       "kind": "commands",
       "harness": [
         "cc",
@@ -290,15 +290,7 @@
       ]
     },
     {
-      "src": "commands/desk.md",
-      "kind": "commands",
-      "harness": [
-        "cc",
-        "oc"
-      ]
-    },
-    {
-      "src": "commands/orchestrator-learn.md",
+      "src": "commands/frood-desk.md",
       "kind": "commands",
       "harness": [
         "cc",
@@ -324,6 +316,14 @@
     {
       "src": "agents/learn-tool-usage-reviewer.md",
       "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/frood-ticket.md",
+      "kind": "commands",
       "harness": [
         "cc",
         "oc"

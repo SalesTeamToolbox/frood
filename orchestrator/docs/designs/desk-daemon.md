@@ -7,13 +7,13 @@
 The pipeline stalls when every session closes. Workers survive (detached process groups,
 `oc-worker.mjs:541`), reports and run-done events land on disk — but nothing converts them into
 critic runs, verdicts, and merges, because the watch→step→act loop is hosted inside an
-interactive session (`/desk` foreground `watch`, or a CC `Monitor`). The owner wants:
-open `/orchestrator`, dispatch, close it, and keep only the app open — with `/desk` as the
+interactive session (`/frood-desk` foreground `watch`, or a CC `Monitor`). The owner wants:
+open `/frood-orchestrator`, dispatch, close it, and keep only the app open — with `/frood-desk` as the
 single control-plane interface to every stream. Three approved pieces form one lifecycle:
 
-1. **Idle gate** (`commands/desk.md`): no stream with `unhandled>0` ⇒ end the session, don't watch.
+1. **Idle gate** (`commands/frood-desk.md`): no stream with `unhandled>0` ⇒ end the session, don't watch.
 2. **Trigger** (systemd user timer): every 5 min runs `watch --events --once`; non-empty output
-   with no live lock owner ⇒ page the owner to open a `/desk`.
+   with no live lock owner ⇒ page the owner to open a `/frood-desk`.
 3. **Daemon** (this spec): a persistent headless driver that runs the loop unattended, so there
    is nothing to page about unless judgment is needed. The trigger stays as the daemon's
    watchdog (daemon down + pending work ⇒ page).
@@ -22,9 +22,9 @@ single control-plane interface to every stream. Three approved pieces form one l
 
 - **In:** detached poll→step→act loop; lock holding with heartbeat; executing the three
   mechanical actions (critic via `oc-worker`, resume-worker via detached spawn, merge path
-  exactly as `desk.md` prescribes); paging on `ESCALATE` without blocking other streams;
+  exactly as `frood-desk.md` prescribes); paging on `ESCALATE` without blocking other streams;
   `daemon start|stop|status` lifecycle; systemd user service for boot persistence and crash
-  restart; `status` surfacing daemon + pending escalations to any interactive `/desk`.
+  restart; `status` surfacing daemon + pending escalations to any interactive `/frood-desk`.
 - **Out:** judgment (merge FAIL, `blocked_question`, exhausted rounds, senior sign-off — all
   page the owner); opening interactive sessions (a daemon cannot open one for the human —
   see "Launching orchestrator sessions"); retraining routing/pools; anything the mechanical
@@ -32,7 +32,7 @@ single control-plane interface to every stream. Three approved pieces form one l
 - **Size budget (actual: +469 in `desk.mjs`):** `daemon` lives in `bin/desk.mjs` as a subcommand
   (no new top-level bin); the driver core is `driveOnce` (one poll+act iteration, no lock,
   no sleep — the unit-test seam); `ORCH_DAEMON_DRY_RUN=1` logs every spawn instead of
-  running it. The 300-line estimate was wrong: each desk.md action needs its own executor
+  running it. The 300-line estimate was wrong: each frood-desk.md action needs its own executor
   (critic prompt, resume tokenize, merge path, verdict sweep, lifecycle), and splitting
   modules would have grown the exported surface (~8 new exports) instead. Overrun recorded,
   not repeated: future daemon work (systemd unit per D2, headless-orc per D3) gets its own
@@ -45,7 +45,7 @@ single control-plane interface to every stream. Three approved pieces form one l
 Modify `bin/desk.mjs` (subcommand `daemon start|stop|status`, `kind: "daemon"` in the lock
 owner record, `verdict` resolved-acks the critic run-done so processed streams converge to
 `unhandled=0`, `ESCALATE` paging path), `bin/desk-check.mjs` (also pages on unresolved
-`ESCALATE` acks), `commands/desk.md` (control-plane section: seize/hand back, reading
+`ESCALATE` acks), `commands/frood-desk.md` (control-plane section: seize/hand back, reading
 escalations via `status`), `bin/install.mjs` + `manifest.json` (install the systemd user
 unit — deferred per D2). Create `docs/designs/desk-daemon.md` (this file). State under the
 existing `~/.config/orchestrator/`: `desk-watch.lock/` (unchanged shape + `kind`/`log`
@@ -63,7 +63,7 @@ record with `{pid, pid_start, at, token, by, session: null, kind: "daemon", log}
 - `ACTION resume-worker <command>` → spawn the command detached with stdio to the daemon
   log (never the session-bound background tool — there is no session) and continue.
 - `ESCALATE merge …` → run `merge-check`; on `OK` perform the merge path exactly as
-  `desk.md` step 3 prescribes (ff-only, orchestrator repo only, then install + check +
+  `frood-desk.md` step 3 prescribes (ff-only, Frood repo only, then install + check +
   `wt-finish --delete-branch`); on `FAIL` page (below), do not merge.
 - Any other `ESCALATE …` (senior, question, exhausted rounds) → page (below), do not act.
 
@@ -84,7 +84,7 @@ are keyed by that same `wakeId`, so one stream's step failures never push anothe
 counter or consume its critic retry; entries a pre-upgrade file wrote bare match no stream and
 restart at zero. A key already in `pagedIds` is skipped silently — the ack stays unresolved,
 other streams keep moving, the owner is never spammed. `status` prints pending escalations
-(unpaged-by-resolution: keys still unresolved) so any interactive `/desk` sees them. Resolution
+(unpaged-by-resolution: keys still unresolved) so any interactive `/frood-desk` sees them. Resolution
 is the existing `handoff.mjs ack --resolved` once the owner deals with it.
 
 ## Lock contention (daemon vs interactive desk, never silent)
@@ -105,7 +105,7 @@ is the existing `handoff.mjs ack --resolved` once the owner deals with it.
 Neither daemon nor interactive desk can open an interactive session for the human. Two paths:
 
 - **Default (a): ready-to-launch.** The desk prepares ticket + Mandate + worktree, then pages
-  with the exact `/orchestrator` launch line (stream, ticket, resume point). Human pastes it
+  with the exact `/frood-orchestrator` launch line (stream, ticket, resume point). Human pastes it
   into a fresh session. No autonomous spend, no surprises.
 - **Opt-in (b): headless orchestrator.** `oc-worker.mjs --agent orchestrator --dir
   <worktree> --prompt <mandate>` is technically supported (any `--agent` passes through to
@@ -124,7 +124,7 @@ disabled: it pages instead of driving.
 
 ## Control-plane UX (the owner's one-session interface)
 
-With the daemon running, an interactive `/desk` is the control plane, not a second driver:
+With the daemon running, an interactive `/frood-desk` is the control plane, not a second driver:
 
 - `status` shows everything: `watch` line (daemon pid + log), streams, pending escalations.
 - `daemon stop` seizes control (interactive watch takes over); `daemon start` hands back.
@@ -141,7 +141,7 @@ run-done (`unhandled` drops); `ESCALATE` pages exactly once (`pagedIds`, the
 stream-scoped ledger, suppresses the second; the legacy `paged` field still gets its
 historical entry); `daemon stop` on a dead pid exits 0 and clears the lock; `status` shows the daemon
 owner plus pending escalations; `desk-check` pages on unresolved `ESCALATE` acks with zero
-unhandled events. The full merge path (ff into the orchestrator repo + install + wt-finish)
+unhandled events. The full merge path (ff into the Frood repo + install + wt-finish)
 is dry-run only in tests — it would touch the real checkout. Manual verification: dry run
 against a live board before the first armed run.
 
@@ -149,7 +149,7 @@ against a live board before the first armed run.
 
 - **D1 (paging channel): peer-mail as secondary.** Primary stays `notify-send` +
   `escalations.jsonl` surfaced in `status`. The secondary is implemented as a relay, not a
-  daemon call: the daemon has no MCP channel, so the next interactive `/desk` that sees
+  daemon call: the daemon has no MCP channel, so the next interactive `/frood-desk` that sees
   pending escalations in `status` forwards them with `peer_send` to the responsible session.
   Peer-mail tracked zero sessions on 2026-11-16, so it can never be the only channel.
 - **D2 (systemd now or later): CLI first.** Ship `daemon start|stop|status` and run it
@@ -157,7 +157,7 @@ against a live board before the first armed run.
   independent and still ships now.
   **2026-11-17 reversal (owner: do both):** the unit ships now —
   `ops/systemd/orchestrator-desk-daemon.service` supervises `desk.mjs daemon _run`
-  (`Restart=always`, 120s), and the `/orchestrator` driver check starts the driver for
+  (`Restart=always`, 120s), and the `/frood-orchestrator` driver check starts the driver for
   any `unhandled>0` with no live driver, not just stream-launching sessions. Rationale:
   the daemon had never run (empty log), every driver was an interactive session, and the
   pager fired every 5 min with nobody answering.

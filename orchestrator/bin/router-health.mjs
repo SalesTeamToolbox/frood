@@ -14,7 +14,7 @@
 //      from the result (quota/unavailable errors only — anything else is reported, not marked);
 //   4. prints, per role, the first healthy agent to dispatch and why earlier ones were skipped.
 // It never edits agents or rules and never promotes a model outside the chains below: choosing a NEW
-// model stays a human decision via /model-router-refresh (bake-off evidence first).
+// model stays a human decision via /frood-model-router-refresh (bake-off evidence first).
 // --if-stale N: exit 0 immediately when the last check is younger than N hours.
 // --free: prints a FREE INVENTORY section after the role lines (also included in default output)
 // --probe-free: probes every unused, allowed free model (max 12, serial), writes free-inventory.json, never marks down/up
@@ -144,7 +144,7 @@ function hasTrainsOnData(model) {
 }
 
 // Static list of known vision-capable models (fallback when catalog lacks vision field)
-// Updated via /model-router-refresh; sources: provider docs, bake-off results
+// Updated via /frood-model-router-refresh; sources: provider docs, bake-off results
 const VISION_CAPABLE_MODELS = new Set([
   // Nvidia Nemotron 3.5 Super VL - vision capable, rate-limited (free pool)
   "nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b",
@@ -526,7 +526,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
             console.log(line);
           }
           if (report.free_inventory.models.some((m) => m.state === "unused" && m.probe?.ok)) {
-            console.log("promote: /model-router-refresh + owner approval");
+            console.log("promote: /frood-model-router-refresh + owner approval");
           }
         }
       }

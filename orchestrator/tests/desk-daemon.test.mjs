@@ -238,7 +238,7 @@ test("desk-check pages on an unresolved ESCALATE even with zero unhandled events
   inHome(h, () => appendAck("m6a", "run:t1/worker-r1:done", "ESCALATE worker-blocked /x/out.md", { ticket: "t1" }));
   const r = await inHome(h, async () => (await import("../bin/desk-check.mjs")).check());
   assert.equal(r.code, 1);
-  assert.match(r.text, /1 unresolved escalation\(s\) on m6a; no watcher — open a \/desk/);
+  assert.match(r.text, /1 unresolved escalation\(s\) on m6a; no watcher — open a \/frood-desk/);
 });
 
 test("driveOnce: a verdict that cannot run pages exactly once, naming the fix", async () => {
@@ -443,7 +443,7 @@ test("desk-check pages on an unresolved ESCALATE even with zero unhandled events
   inHome(h, () => appendAck("m6a", "run:t1/worker-r1:done", "ESCALATE worker-blocked /x/out.md", { ticket: "t1" }));
   const r = await inHome(h, async () => (await import("../bin/desk-check.mjs")).check());
   assert.equal(r.code, 1);
-  assert.match(r.text, /1 unresolved escalation\(s\) on m6a; no watcher — open a \/desk/);
+  assert.match(r.text, /1 unresolved escalation\(s\) on m6a; no watcher — open a \/frood-desk/);
 });
 
 test("driveOnce: a verdict that cannot run pages exactly once, naming the fix", async () => {

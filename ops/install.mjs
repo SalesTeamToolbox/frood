@@ -15,8 +15,10 @@
 //
 // oc-worker.mjs imports { diff, homeDir } from this module so it can run from bin/.
 //
-// Installs: Frood /frood dispatcher + subcommands (frood-orchestrator, frood-gauntlet, etc.)
-// plus orchestrator tooling (board.mjs, oc-worker.mjs, desk.mjs, etc.)
+// Installs: orchestrator tooling (board.mjs, oc-worker.mjs, desk.mjs, etc.) plus the repo-local
+// Frood feature commands (frood-board, frood-train, frood-egm, …). The global lifecycle commands
+// (`/frood-orchestrator`, `/frood-gauntlet`, `/frood-desk`, …) come from `orchestrator/` via its
+// own installer (`node orchestrator/bin/install.mjs`) — they are not copied into this repo.
 //
 import fs from "node:fs";
 import os from "node:os";
@@ -33,10 +35,7 @@ export function homeDir() {
 // M3 file manifest: the orchestrator tooling vendored into Frood as clean copies.
 // Every entry is a path relative to the repo root that must exist after import.
 export const VENDORED = [
-  ".claude/commands/frood-orchestrator.md",
-  ".claude/commands/frood-gauntlet.md",
   ".claude/commands/frood-board.md",
-  ".claude/commands/frood-desk.md",
   ".claude/commands/frood-train.md",
   ".claude/commands/frood-peer-mail.md",
   ".claude/commands/frood-egm.md",

@@ -67,7 +67,7 @@ test("install-time tokens render the repo and the install home, in .md and .js a
     const md = render(src, "cc");
     assert.ok(md.includes(`repo ${REPO_FWD} home ${home.replace(/\\/g, "/")}`), md);
     assert.doesNotMatch(md, /\{\{ORCH_REPO\}\}|\{\{HOME\}\}/);
-    assert.match(md, /managed by the orchestrator repo \(/);
+    assert.match(md, /managed by Frood \(/);
 
     // Hooks (.js) get the same treatment, and no managed header is added to them.
     const hook = path.join(freshHome(), "hook.js");
@@ -87,13 +87,13 @@ test("install is idempotent and --check detects drift, missing and orphans", () 
   assert.equal(first.status, 0, first.stderr);
   assert.match(first.stdout, /create .*orchestrator\.md/);
 
-  const cmd = path.join(home, ".claude", "commands", "gauntlet.md");
-  const ocCmd = path.join(home, ".config", "opencode", "commands", "gauntlet.md");
+  const cmd = path.join(home, ".claude", "commands", "frood-gauntlet.md");
+  const ocCmd = path.join(home, ".config", "opencode", "commands", "frood-gauntlet.md");
   assert.ok(fs.existsSync(cmd) && fs.existsSync(ocCmd));
   assert.match(fs.readFileSync(cmd, "utf8"), /argument-hint/);
   assert.doesNotMatch(fs.readFileSync(ocCmd, "utf8"), /argument-hint|cc-only/);
   // OpenCode-only entries never land in Claude Code
-  assert.ok(!fs.existsSync(path.join(home, ".claude", "commands", "egm-review.md")));
+  assert.ok(!fs.existsSync(path.join(home, ".claude", "commands", "frood-egm-review.md")));
 
   const second = run(home);
   assert.equal(second.status, 0);
@@ -127,6 +127,55 @@ test("install is idempotent and --check detects drift, missing and orphans", () 
   assert.ok(!fs.existsSync(orphan), "install removes orphans (after backup)");
 });
 
+// A rename in the manifest is an install-time event, not a drift to remember: the state file still names
+// the old target, so install removes (and backs up) it, exactly as it does for any other orphan.
+test("a renamed source removes the previously installed target (renamed command), backed up", () => {
+  const home = freshHome();
+  assert.equal(run(home).status, 0);
+
+  const cmdDir = path.join(home, ".claude", "commands");
+  const ocDir = path.join(home, ".config", "opencode", "commands");
+  const statePath = path.join(home, ".config", "orchestrator", "installed.json");
+  const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+
+  // Put the home back into its pre-rename shape: the old names on disk and in installed.json,
+  // the new ones absent — what an install from the parent commit left behind.
+  const oldTargets = [
+    path.join(cmdDir, "next.md"),
+    path.join(ocDir, "next.md"),
+    path.join(cmdDir, "orchestrator-learn.md"),
+  ];
+  const newTargets = [path.join(cmdDir, "frood-next.md"), path.join(ocDir, "frood-next.md")];
+  state.files = state.files.filter((f) => !newTargets.includes(f));
+  for (const t of oldTargets) {
+    fs.writeFileSync(t, "old command\n");
+    state.files.push(t);
+  }
+  for (const t of newTargets) fs.rmSync(t);
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+  const drift = run(home, "--check");
+  assert.equal(drift.status, 1, "a stale target is drift, not a silent survivor");
+  assert.match(drift.stdout, /orphan.*next\.md/);
+  assert.match(drift.stdout, /missing: .*frood-next\.md/);
+
+  const reinstall = run(home);
+  assert.equal(reinstall.status, 0, reinstall.stderr + reinstall.stdout);
+  assert.match(reinstall.stdout, /remove orphan .*next\.md/);
+  for (const t of oldTargets) assert.ok(!fs.existsSync(t), `${path.basename(t)} is gone after the rename`);
+  assert.ok(fs.existsSync(path.join(cmdDir, "frood-next.md")), "the new name is installed for cc");
+  assert.ok(fs.existsSync(path.join(ocDir, "frood-next.md")), "both harnesses follow the rename");
+  assert.equal(run(home, "--check").status, 0, "the re-install is clean");
+
+  // backed up first, like every other removal
+  const backups = path.join(home, ".config", "orchestrator", "backups");
+  const stamps = fs.readdirSync(backups);
+  const backedUp = stamps.some((s) => fs.existsSync(path.join(backups, s, ".claude", "commands", "next.md")));
+  assert.ok(backedUp, "the removed old command was backed up");
+  // and the state file no longer names it, so a later install does not look for it again
+  const after = JSON.parse(fs.readFileSync(statePath, "utf8"));
+  assert.ok(!after.files.includes(path.join(cmdDir, "next.md")));
+});
+
 test("--dry-run writes nothing", () => {
   const home = freshHome();
   const r = run(home, "--dry-run");
@@ -146,13 +195,13 @@ test("never touches files it does not own", () => {
   assert.equal(run(home, "--check").status, 0);
 });
 
-test("lease commands render the right holder token per harness; harness.md installs to OpenCode", () => {
+test("lease commands render the right holder token per harness; frood-harness.md installs to OpenCode", () => {
   const home = freshHome();
   const r = run(home);
   assert.equal(r.status, 0, r.stderr + r.stdout);
   const ccDir = path.join(home, ".claude", "commands");
   const ocDir = path.join(home, ".config", "opencode", "commands");
-  for (const f of ["next.md", "orchestrator.md", "handback.md"]) {
+  for (const f of ["frood-next.md", "frood-orchestrator.md", "frood-handback.md"]) {
     const cc = fs.readFileSync(path.join(ccDir, f), "utf8");
     const oc = fs.readFileSync(path.join(ocDir, f), "utf8");
     assert.match(cc, /--by cc\b/, `${f} cc has --by cc`);
@@ -160,10 +209,10 @@ test("lease commands render the right holder token per harness; harness.md insta
     assert.match(oc, /--by oc\b/, `${f} oc has --by oc`);
     assert.doesNotMatch(oc, /--by cc\b/, `${f} oc has no --by cc`);
   }
-  const ocHarness = fs.readFileSync(path.join(ocDir, "harness.md"), "utf8");
+  const ocHarness = fs.readFileSync(path.join(ocDir, "frood-harness.md"), "utf8");
   assert.ok(ocHarness.includes(`${REPO_FWD}/hooks/cross-harness-statusline.js`), ocHarness);
   assert.doesNotMatch(ocHarness, /\.claude\/hooks|allowed-tools/);
-  const ccHarness = fs.readFileSync(path.join(ccDir, "harness.md"), "utf8");
+  const ccHarness = fs.readFileSync(path.join(ccDir, "frood-harness.md"), "utf8");
   assert.match(ccHarness, /allowed-tools: Bash\(node:\*\)\n/);
   assert.match(ccHarness, /\.claude\/hooks\/cross-harness-statusline\.js" --text`\n/);
   assert.ok(!ccHarness.includes(`${REPO_FWD}/hooks/cross`), ccHarness);

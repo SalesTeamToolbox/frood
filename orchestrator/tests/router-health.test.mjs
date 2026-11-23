@@ -546,7 +546,7 @@ test("promote line appears when unused model probes ok", () => {
     env: { ...process.env, ORCH_HOME: h, OPENCODE_BIN: fakeProbe, FAKE_PROBE_OK: "opencode/probe-ok-free" },
     encoding: "utf8"
   });
-  assert.match(r.stdout, /promote: \/model-router-refresh \+ owner approval/);
+  assert.match(r.stdout, /promote: \/frood-model-router-refresh \+ owner approval/);
 });
 
 test("probeModel argv recorded via FAKE_PROBE_ARGS_FILE (title before model)", () => {

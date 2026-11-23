@@ -60,7 +60,7 @@ test("check: pending events with no watcher pages (code 1)", () => {
   inHome(h, () => appendEvent("m6a", done("worker-r1")));
   const r = inHome(h, () => check());
   assert.equal(r.code, 1);
-  assert.match(r.text, /1 unhandled event\(s\) on m6a\(1\); no watcher — open a \/desk/);
+  assert.match(r.text, /1 unhandled event\(s\) on m6a\(1\); no watcher — open a \/frood-desk/);
 });
 
 test("check: pending events with a live watcher is code 0", () => {
@@ -98,7 +98,7 @@ test("check CLI: exits 0/1/2 with ORCH_NO_NOTIFY=1", () => {
   fs.appendFileSync(path.join(sdir(h), "m6a.events.jsonl"), JSON.stringify(done("worker-r1")) + "\n");
   const paged = cli([]);
   assert.equal(paged.status, 1, paged.stderr);
-  assert.match(paged.stdout, /open a \/desk/);
+  assert.match(paged.stdout, /open a \/frood-desk/);
   assert.equal(cli(["--nope"]).status, 2);
 });
 
@@ -148,7 +148,7 @@ test("desk-check syncs a holder tab to its stream's work (best effort, exit code
   fs.writeFileSync(svc, JSON.stringify({ url: `http://127.0.0.1:${port}`, password: "pw" }));
   fs.writeFileSync(
     path.join(sdir(h), "m6a.json"),
-    JSON.stringify({ name: "m6a", repo: "sales-team-toolbox", plan: "", status: "active", held_by: "oc", held_session: "ses_holder", next: "/gauntlet plan-a.md m3 -- pipeline", done: "", waiting: "", written_at: new Date().toISOString(), written_by: "", consumed_at: new Date().toISOString(), done_at: null }),
+    JSON.stringify({ name: "m6a", repo: "sales-team-toolbox", plan: "", status: "active", held_by: "oc", held_session: "ses_holder", next: "/frood-gauntlet plan-a.md m3 -- pipeline", done: "", waiting: "", written_at: new Date().toISOString(), written_by: "", consumed_at: new Date().toISOString(), done_at: null }),
   );
   const env = { ...process.env, ORCH_HOME: h, ORCH_NO_NOTIFY: "1", SERVICE_JSON: svc };
   const r = spawnSync(process.execPath, [BIN], { env, encoding: "utf8", timeout: 60_000 });

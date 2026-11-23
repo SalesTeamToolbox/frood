@@ -13,4 +13,4 @@ Workflow:
 4. Artifact-first, Plain-English, critique-first, one question at a time. Design-only scope — no production code files, only markdown draft blocks or scratchpad outside project via `mktemp -d`.
 5. Author decides architecture when multiple defensible answers exist — present ≤3 options with trade-offs, ask to choose (no default).
 
-Version: `~/.config/opencode/egm/.egm-version`. Next: `/egm-review design_draft.md`.
+Version: `~/.config/opencode/egm/.egm-version`. Next: `/frood-egm-review design_draft.md`.

@@ -6,7 +6,7 @@ The paths below are illustrative (`~`, `~/projects/...`, `example.internal`).
 
 ## `harness-config.json` → `~/.claude/harness-config.json`
 
-Read by `hooks/cross-harness-statusline.js` (the CC statusline, `/harness` and the HTML dashboard).
+Read by `hooks/cross-harness-statusline.js` (the CC statusline, `/frood-harness` and the HTML dashboard).
 
 | Key | Type | Meaning |
 |---|---|---|

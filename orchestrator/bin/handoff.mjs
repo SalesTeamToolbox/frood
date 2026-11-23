@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Module-boundary handoffs, one named stream per workstream: lets a fresh session (after /clear or a fresh tab)
-// continue exactly where the last one stopped, and lets one /desk session follow several workstreams at once.
+// continue exactly where the last one stopped, and lets one /frood-desk session follow several workstreams at once.
 //
 //   node handoff.mjs write --stream <n> --plan <plan.md> --next "<next module / step>" [--done "<summary>"]
 //                          [--waiting "<owner items>"] [--repo <dir>] [--status active|parked|done]
@@ -8,7 +8,7 @@
 //   node handoff.mjs note  --stream <n> [--next <t>] [--done <t>] [--waiting <t>]   (the desk's update)
 //   node handoff.mjs show  [--stream <n>]    one stream as JSON, or the table of every stream
 //   node handoff.mjs consume [--stream <n>] [--session <id>] [--takeover]
-//                                            mark it consumed (called by /next once the plan is loaded)
+//                                            mark it consumed (called by /frood-next once the plan is loaded)
 //   node handoff.mjs list  [--json]          prune finished streams, then print the table
 //   node handoff.mjs ack   --stream <n> --key <k> [--action <line>] [--ticket <slug>] [--resolved]
 //   node handoff.mjs done  --stream <n>      status done, done_at = now
@@ -27,7 +27,7 @@
 // The lease (held_by, held_session, held_at, taken_from, handback_to) lives on the pointer; the holder is the
 // HARNESS (cc | oc), not a session id, because /clear gives a new session id every module.
 // The session claim (claim: { session, at, taken_from }) also lives on the pointer, written only when `--session` is
-// passed: /next records it at step 3 and refreshes it at step 5, so two /next runs the same day cannot both load the
+// passed: /frood-next records it at step 3 and refreshes it at step 5, so two /frood-next runs the same day cannot both load the
 // same stream. There is no pid and no heartbeat; the TTL is the liveness proxy (10 min, ORCH_CLAIM_TTL_MIN overrides,
 // 0 = no enforcement). A claim older than the TTL is presumed dead and replaced (the expired session lands in
 // `taken_from`, with a one-line note on stderr). Only a claim/consume re-run refreshes it — `note` (the desk) never
@@ -252,7 +252,7 @@ export function streamTitle(s) {
   if (!s || typeof s !== "object") return "";
   const repo = baseName(s.repo);
   const next = String(s.next || "").trim();
-  const g = /^\/gauntlet\s+(.*)$/.exec(next);
+  const g = /^\/frood-gauntlet\s+(.*)$/.exec(next);
   let title;
   if (g) {
     const args = g[1].split(/\s+/);
@@ -369,7 +369,7 @@ function formatTable(streams, now = Date.now()) {
     if (extra[i]) lines.push(extra[i]);
   });
   for (const s of streams) {
-    if (s.state === "stale") lines.push(`stale (written ${ageHours(s.written_at, now)}h ago): not auto-resumed; /next ${s.name} to resume`);
+    if (s.state === "stale") lines.push(`stale (written ${ageHours(s.written_at, now)}h ago): not auto-resumed; /frood-next ${s.name} to resume`);
   }
   return lines.join("\n");
 }
@@ -548,7 +548,7 @@ export function noteStream(name, fields = {}) {
 }
 
 // Mark consumed. Accepted for pending, consumed and stale streams (M4); parked and done are refused. With `session`
-// the claim is enforced first, in the same lock acquisition (step 5 of /next): a refused consume writes nothing at all.
+// the claim is enforced first, in the same lock acquisition (step 5 of /frood-next): a refused consume writes nothing at all.
 export function consumeStream(name, { session, takeover = false } = {}) {
   checkName(name);
   return withStreamLock(name, () => {
@@ -629,7 +629,7 @@ export function claimStream(name, by, { session, takeover = false } = {}) {
 }
 
 // Give the lease up (only lease fields change). `to` records who should pick it up next. The holder's release also
-// clears the session claim: the session is handing the stream over, so the next /next must not meet its own ghost.
+// clears the session claim: the session is handing the stream over, so the next /frood-next must not meet its own ghost.
 // A release by a harness that does not hold the lease leaves a live claim alone (it is not giving anything up).
 export function releaseStream(name, by, { to } = {}) {
   checkName(name);
@@ -788,6 +788,39 @@ function cmdNote(a, name) {
   return 0;
 }
 
+// Tickets sitting in this repo's board that no stream points at: work somebody created and forgot
+// to hand off. A board ticket is recognised by its `schema` field; a file without one was
+// hand-written and was never on the board at all (that is the failure `/frood-ticket` prevents).
+export function unstreamedTickets(dir = process.cwd(), streams = listStreams()) {
+  const ticketsDir = path.join(dir, ".opencode", "board", "tickets");
+  let files;
+  try {
+    files = fs.readdirSync(ticketsDir, { withFileTypes: true });
+  } catch {
+    return []; // no board in this directory: nothing to report
+  }
+  const refs = streams.flatMap((s) => [s?.plan, s?.next].map((v) => String(v ?? "")));
+  const out = [];
+  for (const ent of files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    if (!ent.isFile() || !ent.name.endsWith(".json")) continue;
+    let t;
+    try {
+      t = JSON.parse(fs.readFileSync(path.join(ticketsDir, ent.name), "utf8"));
+    } catch {
+      continue; // unreadable is the board's quarantine case, not a silent work item
+    }
+    const id = typeof t?.id === "string" && t.id ? t.id : ent.name.replace(/\.json$/, "");
+    if (!t || typeof t !== "object" || t.schema === undefined) {
+      out.push({ id, kind: "hand-written, not on the board" });
+      continue;
+    }
+    if (t.schema !== 1 || t.stage !== "queued") continue; // only queued tickets are waiting for a session
+    if (refs.some((r) => r.includes(id))) continue; // a stream already names it
+    out.push({ id, kind: `queued, not in any stream` });
+  }
+  return out;
+}
+
 function cmdShow(a) {
   const named = a.get("stream");
   if (named !== undefined) {
@@ -807,6 +840,13 @@ function cmdShow(a) {
     return 0;
   }
   console.log(formatTable(all));
+  // Exit 1 means no single pending stream, so nothing here is resumed for the owner: list the tickets
+  // that no stream names, in case the work exists only on the board (or only as a hand-written file).
+  const stray = unstreamedTickets(process.cwd(), all);
+  if (stray.length) {
+    console.log(`\nunstreamed tickets in ${process.cwd()}:`);
+    for (const t of stray) console.log(`  ${t.id} — ${t.kind}`);
+  }
   return 1;
 }
 

@@ -1,5 +1,5 @@
 ---
-name: model-router-refresh
+name: frood-model-router-refresh
 description: "Refresh the model routing table when it goes stale: re-fetch Go + CommandCode usage allowances, re-run probe parity, re-write 01-orchestrator-models.md with today's date. Use when Last audited is >14 days old or a new commandcode/* model appears."
 version: 1.0.0
 user-invocable: true

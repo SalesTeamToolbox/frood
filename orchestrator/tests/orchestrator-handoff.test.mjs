@@ -38,7 +38,7 @@ test("prompt: stream held by oc -> held line, no title", () => {
 test("prompt: handed back to cc -> handed-back line", () => {
   const { h, e } = env();
   put(h, "m1", { held_by: null, handback_to: "cc" });
-  assert.match(out(prompt(e, "hello")).additionalContext, /^orchestrator stream m1 was handed back to Claude Code — run \/next m1 \(and \/desk/);
+  assert.match(out(prompt(e, "hello")).additionalContext, /^orchestrator stream m1 was handed back to Claude Code — run \/frood-next m1 \(and \/frood-desk/);
 });
 
 test("prompt: no lease, legacy pointers, parked/done, unreadable -> empty stdout", () => {
@@ -52,11 +52,23 @@ test("prompt: no lease, legacy pointers, parked/done, unreadable -> empty stdout
   assert.equal(r.stdout, "");
 });
 
-test("prompt: /next with a held stream -> title and held line together", () => {
+test("prompt: /frood-next with a held stream -> title and held line together", () => {
   const { h, e } = env();
   put(h, "m1", HELD);
-  const o = out(prompt(e, "/next m1"));
+  const o = out(prompt(e, "/frood-next m1"));
   assert.equal(o.sessionTitle, "[m1] do it");
+  assert.match(o.additionalContext, /stream m1 is held by OpenCode/);
+});
+
+test("prompt: the retired names /next and /gauntlet no longer set a title", () => {
+  const { h, e } = env();
+  put(h, "free", { next: "free work" });
+  for (const p of ["/next free", "/gauntlet plan.md M1"]) {
+    assert.equal(prompt(e, p).stdout, "", `${p} is not a recognised command any more`);
+  }
+  put(h, "m1", HELD);
+  const o = out(prompt(e, "/next m1"));
+  assert.equal(o.sessionTitle, undefined, "/next is not the command any more, so it never titles the tab");
   assert.match(o.additionalContext, /stream m1 is held by OpenCode/);
 });
 
@@ -82,7 +94,7 @@ test("SessionStart resume/compact: only lease lines", () => {
   }
 });
 
-test("SessionStart startup: held stream not listed with run /next, held line added; junk never breaks it", () => {
+test("SessionStart startup: held stream not listed with run /frood-next, held line added; junk never breaks it", () => {
   for (const broken of [false, true]) {
     const { h, e } = env();
     put(h, "m1", { ...HELD, next: "held work" });

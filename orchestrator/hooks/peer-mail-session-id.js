@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * peer-mail identity + inbox hook (Claude Code SessionStart).
- * Managed by the orchestrator repo ({{ORCH_REPO}}/hooks) — edit there, then install.
+ * Managed in the Frood repo's orchestrator/ directory ({{ORCH_REPO}}/hooks) — edit there, then install.
  *
  * A Claude Code session has no env var with its id, so this hook reads the hook payload's
  * session_id (== the transcript filename, which is how peer-mail addresses this session) and
