@@ -224,6 +224,7 @@ test("show (no single pending stream) appends the unstreamed tickets in cwd: que
   const ticket = (id, extra) => fs.writeFileSync(path.join(tickets, `${id}.json`), JSON.stringify({ schema: 1, id, stage: "queued", ...extra }));
   ticket("queued-one"); // on the board, nobody streamed it
   ticket("streamed"); // on the board, a stream's next line names it
+  ticket("stream"); // its id is only a substring of "streamed": still unstreamed (whole-token match)
   ticket("already-shipped", { stage: "shipped" }); // no longer waiting for a session
   fs.writeFileSync(path.join(tickets, "handwritten.json"), JSON.stringify({ stream: "handwritten", task: "open a ticket by hand" }));
   // The one stream that names "streamed" is stale, so show still exits 1 (no single pending stream).
@@ -239,11 +240,13 @@ test("show (no single pending stream) appends the unstreamed tickets in cwd: que
   assert.match(shown.stdout, /queued-one — queued, not in any stream/);
   assert.match(shown.stdout, /handwritten — hand-written, not on the board/);
   assert.doesNotMatch(shown.stdout, /streamed —/, "a ticket a stream names is not unstreamed");
+  assert.match(shown.stdout, /\n  stream — queued, not in any stream/, "a substring of a streamed id does not hide it");
   assert.doesNotMatch(shown.stdout, /already-shipped/, "a shipped ticket is not waiting for a session");
 
   // Nothing left unstreamed: no section at all.
   fs.rmSync(path.join(tickets, "queued-one.json"));
   fs.rmSync(path.join(tickets, "handwritten.json"));
+  fs.rmSync(path.join(tickets, "stream.json"));
   const clean = show(repo);
   assert.equal(clean.status, 1);
   assert.doesNotMatch(clean.stdout, /unstreamed tickets/);

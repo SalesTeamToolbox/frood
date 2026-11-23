@@ -1,6 +1,6 @@
 ---
 description: Open a ticket for another session to pick up — Mandate, board ticket, plan file and stream, in one go
-argument-hint: "<repo-path> <one-line task>"  # cc-only
+argument-hint: "<repo-path> <one-line task>"
 ---
 
 Open work for a session that does not exist yet. The point is that the next session can find it: a ticket alone

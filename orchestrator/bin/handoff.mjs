@@ -815,7 +815,9 @@ export function unstreamedTickets(dir = process.cwd(), streams = listStreams()) 
       continue;
     }
     if (t.schema !== 1 || t.stage !== "queued") continue; // only queued tickets are waiting for a session
-    if (refs.some((r) => r.includes(id))) continue; // a stream already names it
+    // a stream already names it (whole-token match: "m1" is named by "plan-m1.md" but not hidden by "plan-m10.md")
+    const tok = new RegExp(`(^|[^A-Za-z0-9_])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^A-Za-z0-9_])`);
+    if (refs.some((r) => tok.test(r))) continue;
     out.push({ id, kind: `queued, not in any stream` });
   }
   return out;
