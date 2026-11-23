@@ -1,8 +1,7 @@
 ---
 name: learn-peer-mail-analyzer  # cc-only
 description: Peer-mail lens analyzer — read-only review of the peer-mail MCP.
-model: sonnet  # cc-only
-effort: high  # cc-only
+model: haiku  # cc-only
 tools: Read, Grep, Glob  # cc-only
 mode: subagent  # oc-only
 permission:  # oc-only

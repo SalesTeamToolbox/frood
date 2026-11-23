@@ -13,6 +13,16 @@ Run a structured learning review of a stream by analyzing **real session artifac
 - Critic rounds efficiency
 - Board gate failures
 
+## Run
+
+```bash
+node {{ORCH_REPO}}/../bin/frood-learn.mjs $ARGUMENTS
+```
+
+Run the command above with the user's arguments and relay the summary. Findings
+tagged `source: "session-data"` are computed from the artifacts actually read;
+`source: "heuristic"` findings are pattern advice with no measured numbers.
+
 ## Arguments
 
 - `<stream|session-id>` — the stream/ticket slug or OpenCode session ID to review (required unless `--help`)
@@ -25,6 +35,7 @@ Run a structured learning review of a stream by analyzing **real session artifac
 - `--lens <name>` — lens within the phase (defaults to the phase's first lens)
 - `--no-mcp` — disable MCP skill invocation; use built-in prompts only
 - `--report <path>` — write the JSON findings report here
+- `--propose` — send the findings as a community PR proposal (needs the community PR API; exits non-zero when it is not deployed)
 - `--apply` — **interactive mode**: categorize findings and apply fixes or create PRs
 - `--session <id>` — explicit OpenCode session ID (for phase 5)
 - `--help` / `-h` — show usage

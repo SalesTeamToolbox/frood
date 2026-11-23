@@ -1,8 +1,7 @@
 ---
 name: learn-atlas-reviewer  # cc-only
 description: Atlas lens reviewer — read-only review of the atlas system.
-model: sonnet  # cc-only
-effort: high  # cc-only
+model: haiku  # cc-only
 tools: Read, Grep, Glob  # cc-only
 mode: subagent  # oc-only
 permission:  # oc-only

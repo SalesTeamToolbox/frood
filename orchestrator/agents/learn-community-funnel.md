@@ -1,10 +1,13 @@
 ---
+name: learn-community-funnel  # cc-only
 description: Learn community-funnel subagent — reviews the community PR pathway through the community-funnel lens and emits structured JSON findings
-mode: subagent
-model: opencode-go/mimo-v2.6-flash
+model: haiku  # cc-only
+tools: Read, Grep, Glob  # cc-only
+mode: subagent  # oc-only
+model: opencode-go/mimo-v2.6-flash  # oc-only
 permission:  # oc-only
-  edit: deny  # oc-only — read-only agent
-  bash: deny  # oc-only — read-only agent
+  edit: deny  # oc-only
+  bash: deny  # oc-only
   question: deny  # oc-only
 ---
 

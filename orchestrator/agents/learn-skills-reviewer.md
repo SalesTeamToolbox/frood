@@ -1,8 +1,7 @@
 ---
 name: learn-skills-reviewer  # cc-only
 description: Skills lens reviewer — read-only review of Frood's builtin skills.
-model: sonnet  # cc-only
-effort: high  # cc-only
+model: haiku  # cc-only
 tools: Read, Grep, Glob  # cc-only
 mode: subagent  # oc-only
 permission:  # oc-only

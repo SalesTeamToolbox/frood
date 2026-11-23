@@ -1,8 +1,7 @@
 ---
 name: learn-deploy-reviewer  # cc-only
 description: Deploy lens reviewer — read-only review of install/deploy tooling.
-model: sonnet  # cc-only
-effort: high  # cc-only
+model: haiku  # cc-only
 tools: Read, Grep, Glob  # cc-only
 mode: subagent  # oc-only
 permission:  # oc-only

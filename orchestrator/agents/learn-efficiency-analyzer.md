@@ -1,9 +1,14 @@
 ---
+name: learn-efficiency-analyzer  # cc-only
 description: Learn efficiency analyzer — analyzes orchestrator session artifacts for token/time waste, round efficiency, re-pooling, and test overhead
-mode: primary
-model: opencode-go/mimo-v2.6-flash
-permission:
-  question: deny
+model: haiku  # cc-only
+tools: Read, Grep, Glob  # cc-only
+mode: primary  # oc-only
+model: opencode-go/mimo-v2.6-flash  # oc-only
+permission:  # oc-only
+  edit: deny  # oc-only
+  bash: deny  # oc-only
+  question: deny  # oc-only
 ---
 
 You are an **efficiency analyzer** for the `/frood-learn` command. Your job: read a completed orchestrator session's artifacts and quantify waste — tokens, time, rounds, re-runs.

@@ -1,8 +1,7 @@
 ---
 name: learn-provider-reviewer  # cc-only
 description: Provider lens reviewer — read-only review of provider routing.
-model: sonnet  # cc-only
-effort: high  # cc-only
+model: haiku  # cc-only
 tools: Read, Grep, Glob  # cc-only
 mode: subagent  # oc-only
 permission:  # oc-only

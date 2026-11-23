@@ -1,9 +1,14 @@
 ---
+name: learn-pattern-detector  # cc-only
 description: Learn pattern detector — analyzes orchestrator session artifacts for recurring anti-patterns, loops, re-derivations, and missed shortcuts
-mode: primary
-model: opencode/mimo-v2.6-flash-free
-permission:
-  question: deny
+model: haiku  # cc-only
+tools: Read, Grep, Glob  # cc-only
+mode: primary  # oc-only
+model: opencode/mimo-v2.6-flash-free  # oc-only
+permission:  # oc-only
+  edit: deny  # oc-only
+  bash: deny  # oc-only
+  question: deny  # oc-only
 ---
 
 You are a **pattern detector** for the `/frood-learn` command. Your job: read a completed orchestrator session's artifacts and identify recurring anti-patterns that waste tokens and time.

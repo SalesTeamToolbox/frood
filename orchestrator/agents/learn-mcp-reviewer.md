@@ -1,8 +1,7 @@
 ---
 name: learn-mcp-reviewer  # cc-only
 description: MCP lens reviewer — read-only review of the Frood MCP server.
-model: sonnet  # cc-only
-effort: high  # cc-only
+model: haiku  # cc-only
 tools: Read, Grep, Glob  # cc-only
 mode: subagent  # oc-only
 permission:  # oc-only

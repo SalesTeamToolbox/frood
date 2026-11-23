@@ -534,7 +534,8 @@ function readStreamEvents(streamName) {
   if (!fs.existsSync(eventsPath)) return [];
   return fs.readFileSync(eventsPath, "utf8").split("\n")
     .filter(l => l.trim())
-    .map(l => JSON.parse(l));
+    .map(l => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(Boolean);
 }
 
 function readWorkerReceipts(reportDir) {
@@ -583,6 +584,24 @@ function readCriticFindings(reportDir) {
   return null;
 }
 
+// Count the critic-rN.md round files really present for a stream's report dir.
+function countCriticRounds(reportDir) {
+  let max = 0;
+  const reportPaths = [
+    path.join(process.cwd(), ".opencode", "reports"),
+    path.join(process.env.HOME || process.env.USERPROFILE, ".opencode", "reports"),
+  ];
+  for (const reportPath of reportPaths) {
+    const dir = path.join(reportPath, reportDir);
+    if (!reportDir || !fs.existsSync(dir)) continue;
+    for (const f of fs.readdirSync(dir)) {
+      const m = f.match(/^critic-r(\d+)\.md$/);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+  }
+  return max;
+}
+
 function readStreamHandoffs(streamName) {
   const streamPath = path.join(ORCH_ROOT, "streams", `${streamName}.json`);
   if (!fs.existsSync(streamPath)) return null;
@@ -598,7 +617,8 @@ function readPeerMailEvents() {
     if (file.endsWith(".jsonl")) {
       const content = fs.readFileSync(path.join(peerMailDir, file), "utf8");
       for (const line of content.split("\n")) {
-        if (line.trim()) events.push(JSON.parse(line));
+        if (!line.trim()) continue;
+        try { events.push(JSON.parse(line)); } catch {}
       }
     }
   }
@@ -745,7 +765,7 @@ function analyzeCommunicationPatterns(stream, args) {
       focus: "desk daemon stability",
       lens: "desk-operations",
       status: "analyzed",
-      detail: `Desk daemon restarted ${restarts} times in log period; streams marked stale during gap.`,
+      detail: `${restarts} desk daemon log line(s) mention a restart or PID recycle (of ${deskLogs.length} log lines read).`,
       recommendation: "Add systemd watchdog for desk-daemon; implement heartbeat health check in desk.mjs.",
       evidence: [".config/orchestrator/desk-daemon/daemon.log", "bin/desk.mjs"],
       source: "session-data",
@@ -755,13 +775,13 @@ function analyzeCommunicationPatterns(stream, args) {
   // Subagent coordination - worker-critic rounds -> subagent-coordination lens
   const criticFindings = readCriticFindings(args.stream);
   if (criticFindings) {
-    const roundMatches = criticFindings.match(/critic rounds?/gi)?.length || 0;
+    const rounds = countCriticRounds(args.stream);
     findings.push({
       area: "subagent-coordination",
       focus: "worker-critic round efficiency",
       lens: "subagent-coordination",
       status: "analyzed",
-      detail: `Critic round references found in findings; average rounds per ticket indicates iteration overhead.`,
+      detail: `${rounds} critic round file(s) (critic-r1..r${rounds}.md) found for "${args.stream}".`,
       recommendation: "Add pre-flight test checklist to worker prompt; enforce 'test-first' in mandate template.",
       evidence: [".opencode/reports/*/worker-r*.md", ".opencode/reports/*/critic-r*.md"],
       source: "session-data",
@@ -793,11 +813,11 @@ function analyzeCommunicationPatterns(stream, args) {
       area: "cross-harness-sync",
       focus: "Claude Code ↔ OpenCode handoff",
       lens: "subagent-coordination", // Map to closest phase 1 lens
-      status: "analyzed",
-      detail: "Session ID drift observed in cross-harness handovers; peer-mail ack timeout defaults to 5m.",
-      recommendation: "Add explicit session-id correlation in handoff.mjs; reduce peer-mail ack timeout to 60s.",
+      status: "heuristic",
+      detail: `A peer-mail directory exists (${peerMailEvents.length} event(s) read); this review does not measure session-id correlation across handoffs.`,
+      recommendation: "Check that handoffs carry an explicit session-id correlation and that ack timeouts suit your workflow.",
       evidence: [".config/orchestrator/peer-mail/", "bin/handoff.mjs"],
-      source: "session-data",
+      source: "heuristic",
     });
   }
 
@@ -859,13 +879,13 @@ function analyzeErrorHandlingPatterns(stream, args) {
   // Critic round analysis -> circuit-breakers lens
   const criticFindings = readCriticFindings(args.stream);
   if (criticFindings) {
-    const roundMatches = criticFindings.match(/critic rounds?/gi)?.length || 0;
+    const rounds = countCriticRounds(args.stream);
     findings.push({
       area: "subagent-coordination",
       focus: "worker-critic round efficiency",
       lens: "circuit-breakers",
       status: "analyzed",
-      detail: `Critic round references found in findings; round-trip overhead observed.`,
+      detail: `${rounds} critic round file(s) found for "${args.stream}".`,
       recommendation: "Add pre-flight test checklist to worker prompt; enforce 'test-first' in mandate template.",
       evidence: [".opencode/reports/*/worker-r*.md", ".opencode/reports/*/critic-r*.md"],
       source: "session-data",
@@ -900,11 +920,11 @@ function analyzeCoordinationPatterns(stream, args) {
     area: "process-coordination",
     focus: "subagent orchestration depth",
     lens: "process-coordination",
-    status: "analyzed",
-    detail: "Average 2.3 subagent levels per ticket; max 5 levels causes context dilution and token bloat.",
-    recommendation: "Cap orchestration depth at 3; flatten reviewer hierarchy via synthesizer pattern.",
+    status: "heuristic",
+    detail: "Orchestration depth is not measured from receipts. Deep subagent hierarchies tend to dilute context and inflate token use.",
+    recommendation: "Keep orchestration depth shallow; flatten reviewer hierarchies via a synthesizer pattern.",
     evidence: [".opencode/reports/*/worker-r*.md", "bin/oc-worker.mjs"],
-    source: "session-data",
+    source: "heuristic",
   });
 
   // Cross-harness sync -> cross-harness-sync lens
@@ -915,8 +935,8 @@ function analyzeCoordinationPatterns(stream, args) {
       focus: "Claude Code ↔ OpenCode state sync",
       lens: "cross-harness-sync",
       status: "analyzed",
-      detail: `Session ID drift in ${peerMailEvents.length} peer-mail events; ${sessionDrifts} cross-harness handovers detected.`,
-      recommendation: "Reduce peer-mail ack timeout to 90s; add session-id correlation to handoff.mjs claim.",
+      detail: `${peerMailEvents.length} peer-mail event(s) read; ${sessionDrifts} carry a session_id with from_session different from to_session.`,
+      recommendation: "Add session-id correlation to the handoff.mjs claim; review the peer-mail ack timeout.",
       evidence: [".config/orchestrator/peer-mail/", "bin/handoff.mjs", "bin/peer-mail"],
       source: "session-data",
     });
@@ -958,16 +978,19 @@ function analyzeCoordinationPatterns(stream, args) {
       source: "session-data",
     });
 
-    findings.push({
-      area: "process-metrics",
-      focus: "critic round efficiency",
-      lens: "process-metrics",
-      status: "analyzed",
-      detail: "Critic round efficiency analyzed from worker/critic receipt pairs.",
-      recommendation: "Add 'critic readiness' pre-check to worker prompt; fail fast on common patterns.",
-      evidence: [".opencode/reports/*/critic-r*.md", "bin/oc-worker.mjs"],
-      source: "session-data",
-    });
+    const criticRounds = countCriticRounds(args.stream);
+    if (criticRounds > 0) {
+      findings.push({
+        area: "process-metrics",
+        focus: "critic round efficiency",
+        lens: "process-metrics",
+        status: "analyzed",
+        detail: `${criticRounds} critic round file(s) vs ${receipts.length} worker receipt(s) for "${args.stream}".`,
+        recommendation: "Add 'critic readiness' pre-check to worker prompt; fail fast on common patterns.",
+        evidence: [".opencode/reports/*/critic-r*.md", "bin/oc-worker.mjs"],
+        source: "session-data",
+      });
+    }
   }
 
   return findings;
@@ -1642,28 +1665,56 @@ async function createCommunityPRs(findings, args) {
       phase: args.phase,
     };
 
-    try {
-      // Call community PR API
-      const result = await fetch("http://localhost:8000/api/community/pr", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(proposal),
-      });
-
-      if (result.ok) {
-        const response = await result.json();
-        console.log(`  ✅ PR created: ${response.pr_url || response.id}`);
-      } else {
-        const err = await result.text();
-        console.log(`  ❌ Failed: ${err}`);
-        // Fall back to template
-        await generatePRTemplates(areaFindings, args);
-      }
-    } catch (e) {
-      console.log(`  ⚠️  API unavailable (${e.message}), generating local template instead`);
+    const r = await postCommunityPR(proposal);
+    if (r.ok) {
+      console.log(`  ✅ PR created: ${r.response?.pr_url || r.response?.id}`);
+    } else {
+      console.log(`  ${r.message}`);
+      // Fall back to a local template
       await generatePRTemplates(areaFindings, args);
     }
   }
+}
+
+const COMMUNITY_API_MISSING = "community PR API is not deployed in this Frood; proposal not sent";
+
+// POST one proposal to the community PR API. Never throws; never fakes success.
+async function postCommunityPR(proposal) {
+  const base = (process.env.FROOD_API_URL || "http://localhost:8000").replace(/\/+$/, "");
+  try {
+    const res = await fetch(`${base}/api/community/pr`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(proposal),
+    });
+    if (res.status === 404 || res.status === 405) return { ok: false, message: COMMUNITY_API_MISSING };
+    if (!res.ok) return { ok: false, message: `community PR API rejected the proposal (HTTP ${res.status}); proposal not sent` };
+    let response = null;
+    try { response = await res.json(); } catch {}
+    return { ok: true, response };
+  } catch {
+    return { ok: false, message: COMMUNITY_API_MISSING };
+  }
+}
+
+// --propose: send the Frood-code findings as community PR proposals; exit non-zero on failure.
+async function proposeFindings(findings, args) {
+  const eligible = findings.filter(f => f.category === "frood-code" && f.source !== "heuristic");
+  const pool = eligible.length ? eligible : findings.filter(f => f.source !== "heuristic");
+  const proposal = {
+    title: `learn: ${args.stream} phase ${args.phase}`,
+    body: generatePRBody(args.stream, pool.map(f => ({ ...f, stream: args.stream, phase: args.phase }))),
+    affected_files: pool.flatMap(f => f.evidence).filter(Boolean),
+    source: "frood-learn",
+    stream: args.stream,
+    phase: args.phase,
+  };
+  const r = await postCommunityPR(proposal);
+  if (!r.ok) {
+    console.error(r.message);
+    process.exit(1);
+  }
+  console.log(`PR proposal sent: ${r.response?.pr_url || r.response?.id || "ok"}`);
 }
 
 function generatePRBody(area, findings) {
@@ -1845,6 +1896,7 @@ function printUsage() {
   console.log(`  --lens <name>         Lens within phase (defaults to phase's default)`);
   console.log(`  --no-mcp              Disable MCP skill; use built-in prompts only`);
   console.log(`  --report <path>       Write JSON findings report to path`);
+  console.log(`  --propose             Send findings to the community PR API (exits non-zero if it is not deployed)`);
   console.log(`  --apply, -a           Interactive mode: apply fixes or create PRs`);
   console.log(`  --auto, -A            QUICK: phase 5 + apply + no-mcp (current session)`);
   console.log(`  --auto-detect         Auto-detect stream from current context (default when <stream> omitted)`);
@@ -2024,6 +2076,10 @@ async function main() {
   writeReport(report, reportPath);
 
   printSummary(args, mcpResult, categorizedFindings);
+
+  if (args.propose) {
+    await proposeFindings(categorizedFindings, args);
+  }
 
   // Interactive apply mode
   if (args.apply) {

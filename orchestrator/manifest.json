@@ -328,6 +328,94 @@
         "cc",
         "oc"
       ]
+    },
+    {
+      "src": "agents/learn-atlas-reviewer.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/learn-community-funnel.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/learn-dashboard-reviewer.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/learn-deploy-reviewer.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/learn-mcp-reviewer.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/learn-memory-reviewer.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/learn-peer-mail-analyzer.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/learn-provider-reviewer.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/learn-skills-reviewer.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/learn-train-reviewer.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/frood-learn.md",
+      "kind": "commands",
+      "harness": [
+        "cc",
+        "oc"
+      ]
     }
   ]
 }

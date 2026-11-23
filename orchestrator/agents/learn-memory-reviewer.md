@@ -1,8 +1,7 @@
 ---
 name: learn-memory-reviewer  # cc-only
 description: Memory lens reviewer — read-only review of Frood's memory system.
-model: sonnet  # cc-only
-effort: high  # cc-only
+model: haiku  # cc-only
 tools: Read, Grep, Glob  # cc-only
 mode: subagent  # oc-only
 permission:  # oc-only

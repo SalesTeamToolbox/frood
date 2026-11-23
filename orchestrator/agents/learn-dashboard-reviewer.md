@@ -1,8 +1,7 @@
 ---
 name: learn-dashboard-reviewer  # cc-only
 description: Dashboard lens reviewer — read-only review of the dashboard/API.
-model: sonnet  # cc-only
-effort: high  # cc-only
+model: haiku  # cc-only
 tools: Read, Grep, Glob  # cc-only
 mode: subagent  # oc-only
 permission:  # oc-only
