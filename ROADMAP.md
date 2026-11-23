@@ -171,8 +171,8 @@ Goal: any business of any size can deploy a BlackKnight-style autonomous agent t
 
 Components:
 
-- Docker compose template (BlackKnight + Paperclip + Frood + postgres)
-- Onboarding wizard that provisions the three services + fetches initial free-tier keys
+- Docker compose template (BlackKnight + Frood + postgres)
+- Onboarding wizard that provisions the services + fetches initial free-tier keys
 - Billing only kicks in when the user opts into paid-tier models (e.g., "I want Claude Opus for my CEO agent")
 - Preset role templates: CEO, TradingAgent, ResearchAgent, RiskAgent, EnchanterAgent, MarketplaceAgent — the pattern generalises beyond trading to any domain
 

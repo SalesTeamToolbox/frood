@@ -16,7 +16,7 @@ Most mutating endpoints require a dashboard session (JWT cookie) or an admin tok
 
 | Endpoint | Method | Decides |
 |----------|--------|---------|
-| `/health` | GET | Liveness status (ok / paperclip_sidecar) |
+| `/health` | GET | Liveness status (ok) |
 | `/api/health` | GET | Detailed metrics (task/websocket counts), authenticated |
 
 ### Auth & setup

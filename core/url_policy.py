@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger("frood.url_policy")
 
-# Set by the sidecar orchestrator at the start of each heartbeat run. When set,
+# Set by the agent runtime at the start of each heartbeat run. When set,
 # UrlPolicy.check() keys the request counter by run_id instead of the shared
 # "default" bucket, so every run gets its own independent URL budget.
 _current_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -30,7 +30,7 @@ _current_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 def set_current_run_id(run_id: str | None) -> None:
     """Scope subsequent UrlPolicy.check() calls to a specific run_id bucket.
 
-    Called by the sidecar orchestrator at the top of each run. ContextVars are
+    Called by the agent runtime at the top of each run. ContextVars are
     task-local under asyncio, so concurrent runs each see their own value.
     """
     _current_run_id.set(run_id)

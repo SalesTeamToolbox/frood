@@ -40,7 +40,6 @@ Frood v1.0.0 is the first public release of the Frood intelligence layer — an 
 - **Tool effectiveness & learning** — Every invocation tracked; structured learnings extracted, quarantined, validated, then proactively injected into future sessions.
 - **48 MCP tools** — memory, context, code intel, security, browser automation, n8n, vision, content, orchestration.
 - **46 built-in skills** — development, DevOps, content, analysis, marketing, meta.
-- **Paperclip sidecar** — route agent tasks through Frood's HTTP API instead of spawning local CLI processes.
 - **8-layer security** — sandbox, command filter, approval gate, rate limiter, URL policy, browser-gateway token, spending tracker, login rate limiting.
 - **Web dashboard** (FastAPI + WebSocket) — auth, setup wizard, settings, API keys, provider status, tools/skills, reports, activity, agent apps.
 - **HTTP API + MCP server** — OpenAI/Anthropic-compatible LLM proxy, health, memory, effectiveness, settings, agent apps platform.

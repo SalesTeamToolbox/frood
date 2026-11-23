@@ -44,7 +44,6 @@
 | **📚 Tool Effectiveness & Learning** | Every invocation tracked; structured learnings extracted, quarantined, validated, then proactively injected into future sessions. | ⭐⭐⭐⭐ |
 | **🔧 59 MCP Tools** | Memory, context, code intel, security, browser automation, n8n, vision, content, orchestration. | ⭐⭐⭐⭐⭐ |
 | **🎓 27 Built-in Skills** | Development, DevOps, content, analysis, marketing, meta — ready to `frood_skill load`. | ⭐⭐⭐⭐ |
-| **📦 HTTP API / Sidecar** | Route agent tasks through Frood's HTTP API instead of spawning local CLI processes. Run headless on any server. | ⭐⭐⭐ |
 | **🛡️ 8-Layer Security** | Sandbox, command filter, approval gate, rate limiter, URL policy, browser-gateway token, spending tracker, login rate limiting. | ⭐⭐⭐⭐⭐ |
 
 ---
@@ -227,8 +226,8 @@ bash setup.sh  # venv, deps, frontend, MCP config, hooks — the full Zaphod Bee
           ┌───────────────────┼───────────────────┐
           ▼                   ▼                   ▼
    ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-   │  Dashboard  │     │   MCP Tools │     │  Sidecar    │
-   │  (PWA)      │     │  (48 tools) │     │  (HTTP API) │
+   │  Dashboard  │     │   MCP Tools │     │  HTTP API   │
+   │  (PWA)      │     │  (48 tools) │     │             │
    └─────────────┘     └─────────────┘     └─────────────┘
 ```
 
@@ -551,9 +550,6 @@ ALLOWED_COMMANDS=git,python,pip,ruff,pytest,make
 
 # Features
 ENABLE_MCP=true
-# HTTP API sidecar mode (run headless on any server)
-# General users: leave false, use MCP instead
-ENABLE_PAPERCLIP=false
 ```
 
 > **See [Configuration](https://salesteamtoolbox.github.io/frood/docs/usage.html#configuration) for all 80+ variables.**

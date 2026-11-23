@@ -1,5 +1,5 @@
 """
-MemoryBridge — scoped memory recall and learning extraction for sidecar agents.
+MemoryBridge — scoped memory recall and learning extraction for agents.
 
 Provides:
 - recall():       Scope-filtered semantic search over MEMORY + HISTORY collections,
@@ -17,11 +17,11 @@ import logging
 import time
 from typing import Any
 
-logger = logging.getLogger("frood.sidecar.memory")
+logger = logging.getLogger("frood.memory_bridge")
 
 
 class MemoryBridge:
-    """Orchestrator-owned memory interface for sidecar agents.
+    """Orchestrator-owned memory interface for agents.
 
     Owns all memory read/write operations for an agent session. The
     orchestrator instantiates one MemoryBridge per execution context,

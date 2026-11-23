@@ -9,7 +9,6 @@ source .venv/bin/activate
 python frood.py                  # Dashboard at http://localhost:8000
 python frood.py --no-dashboard   # Headless (services only)
 python frood.py --port 8080      # Custom dashboard port
-python frood.py --sidecar        # Paperclip sidecar (port 8001 by default)
 ```
 
 On first run a setup wizard opens in the browser to set a dashboard password and (optionally) an OpenRouter API key.

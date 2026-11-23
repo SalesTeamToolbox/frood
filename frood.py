@@ -314,8 +314,8 @@ class Frood:
            return cleanly, but the gather kept waiting on uvicorn, so the
            event loop never exited. systemd hit TimeoutStopSec (90s) and
            SIGKILLed. Every restart held the process alive for ~90s of
-           zombie state, during which any in-flight sidecar request died
-           with `fetch failed` on the paperclip adapter side.
+           zombie state, during which any in-flight client request died
+           with `fetch failed` on the caller side.
 
         Fix: after stopping the internal services, cancel every remaining
         asyncio task so `asyncio.gather` in start() raises CancelledError

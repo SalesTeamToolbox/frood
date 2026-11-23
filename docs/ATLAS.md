@@ -56,7 +56,7 @@ topic: docs/atlas/routes.md
 
 ### /health
 handler: dashboard.server.create_app.health_check
-decides: liveness status (ok / paperclip_sidecar)
+decides: liveness status (ok)
 sibling traps: /api/health, /api/setup/status
 topic: docs/atlas/routes.md
 

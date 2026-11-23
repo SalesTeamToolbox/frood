@@ -1,48 +1,13 @@
 """Phase 40 — Settings Consolidation backend tests.
 
 Tests:
-- SidecarSettingsKeyEntry source field passthrough
-- Empty value triggers delete_key
 - LEARNING_ENABLED config + guards
 - Memory purge endpoint validation
-- Sidecar memory-stats proxy
 - Editable settings includes LEARNING_ENABLED
 """
 
 import asyncio
 from unittest.mock import MagicMock, patch
-
-
-class TestSettingsSourceField:
-    """D-07: source field on SidecarSettingsKeyEntry."""
-
-    def test_source_field_exists(self):
-        from core.sidecar_models import SidecarSettingsKeyEntry
-
-        entry = SidecarSettingsKeyEntry(name="X", masked_value="", is_set=False, source="admin")
-        assert entry.source == "admin"
-
-    def test_source_field_default_none(self):
-        from core.sidecar_models import SidecarSettingsKeyEntry
-
-        entry = SidecarSettingsKeyEntry(name="X", masked_value="", is_set=False)
-        assert entry.source == "none"
-
-    def test_source_field_env(self):
-        from core.sidecar_models import SidecarSettingsKeyEntry
-
-        entry = SidecarSettingsKeyEntry(name="Y", masked_value="sk-***", is_set=True, source="env")
-        assert entry.source == "env"
-
-
-class TestDeleteOnEmpty:
-    """D-08: value='' triggers delete_key in sidecar."""
-
-    def test_empty_value_model(self):
-        from core.sidecar_models import SidecarSettingsUpdateRequest
-
-        req = SidecarSettingsUpdateRequest(key_name="OPENAI_API_KEY", value="")
-        assert req.value == ""
 
 
 class TestLearningEnabled:

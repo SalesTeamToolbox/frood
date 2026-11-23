@@ -39,7 +39,6 @@
 - **📚 Tool Effectiveness & Learning** — Every invocation tracked; structured learnings extracted, quarantined, validated, then proactively injected into future sessions.
 - **🔧 48 MCP Tools** — Memory, context, code intel, security, browser automation, n8n, vision, content, orchestration.
 - **🎓 46 Built-in Skills** — Development, DevOps, content, analysis, marketing, meta — ready to `frood_skill load`.
-- **📦 Paperclip Sidecar** — Route agent tasks through Frood's HTTP API instead of spawning local CLI processes.
 - **🛡️ 8-Layer Security** — Sandbox, command filter, approval gate, rate limiter, URL policy, browser-gateway token, spending tracker, login rate limiting.
 
 ## 🎯 Quick Links
@@ -65,7 +64,7 @@ frood/
 ├── providers/           # LLM provider adapters (9 providers)
 ├── skills/              # 46 built-in skills + archive
 ├── tools/               # 48 MCP tools
-├── channels/            # WebSocket, Paperclip, CLI
+├── channels/            # WebSocket, CLI
 ├── tests/               # 200+ tests (pytest, asyncio)
 ├── docs/                # Documentation source
 ├── frood.py             # Main entry point
