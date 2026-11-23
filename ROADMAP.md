@@ -152,8 +152,8 @@ Goal: each project gets its own Frood subdomain with its own API key scope, so A
 
 Plan:
 
-- `frood.example-client.com` — Client's Frood (exists)
-- `frood.salesteamtoolbox.com` or similar — STT's Frood
+- `frood.<tenant-a>.example` — one tenant's Frood
+- `frood.<tenant-b>.example` — another tenant's Frood
 - Per-tenant nginx site + per-tenant systemd service + per-tenant `.frood/settings.json` key store
 - Shared underlying Python code, separate runtime states
 - Optionally: a single Frood instance with tenant scoping via header / subdomain routing

@@ -77,7 +77,7 @@ class TestOrphanFileCheck:
     async def test_skips_inline_prose_mention(self):
         """File mentioned in MEMORY.md prose (not as a link) must not be flagged.
 
-        Reproduces the clientdealerportal false positive: MEMORY.md said
+        Reproduces the example-dealer-portal false positive: MEMORY.md said
         ``See `feedback_ssh_skill.md` `` in prose but our link-only regex
         flagged the file as orphan every run.
         """
@@ -90,7 +90,7 @@ class TestOrphanFileCheck:
             raw = (
                 "# Project memory\n\n"
                 "## Access\n\n"
-                "- All agents MUST use the `client-ssh` skill. "
+                "- All agents MUST use the `acme-ssh` skill. "
                 "See `feedback_ssh_skill.md` for details.\n"
             )
             index = _parse_index(project / "MEMORY.md", raw)
