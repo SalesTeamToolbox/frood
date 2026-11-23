@@ -22,4 +22,4 @@ Example:
 
 This runs `bash ops/train.sh <ticket>` from the Frood repo root. Exit codes:
 0 = pass, 1 = test failure, 2 = lint failure. Reports live under
-`/home/user/.opencode/reports/frood-public/<ticket>/`.
+`~/.opencode/reports/frood-public/<ticket>/`.

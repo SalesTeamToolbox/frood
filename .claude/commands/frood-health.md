@@ -15,7 +15,7 @@ installation's health (venv, config, MCP, hooks, indexes, etc.).
 
 Example:
 ```
-/frood-health /home/user/projects/frood
+/frood-health ~/projects/frood
 ```
 
 This runs `python scripts/setup_helpers.py health <project-dir>` from the
