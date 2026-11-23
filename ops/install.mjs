@@ -101,7 +101,7 @@ export function globalCommandsDir() {
 }
 export function renderGlobal(text) {
   const body = text.replaceAll("{{ORCH_REPO}}", REPO);
-  const note = `${GLOBAL_MARK}\n> Frood repo root: \`${REPO}\` — run any relative \`bin/\`, \`ops/\` or \`scripts/\` path from there.\n\n`;
+  const note = `${GLOBAL_MARK}\n> Frood repo root: \`${REPO}\` — run any relative \`bin/\`, \`ops/\`, \`orchestrator/\` or \`scripts/\` path from there.\n\n`;
   const m = body.match(/^---\n[\s\S]*?\n---\n/);
   return m ? m[0] + note + body.slice(m[0].length) : note + body;
 }
