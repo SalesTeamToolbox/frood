@@ -929,16 +929,16 @@ function analyzeCoordinationPatterns(stream, args) {
 
   // Cross-harness sync -> cross-harness-sync lens
   if (peerMailEvents.length > 0) {
-    const sessionDrifts = peerMailEvents.filter(e => e.session_id && e.from_session !== e.to_session).length;
+    const crossSession = peerMailEvents.filter(e => e.session_id && e.from_session !== e.to_session).length;
     findings.push({
       area: "cross-harness-sync",
       focus: "Claude Code ↔ OpenCode state sync",
       lens: "cross-harness-sync",
-      status: "analyzed",
-      detail: `${peerMailEvents.length} peer-mail event(s) read; ${sessionDrifts} carry a session_id with from_session different from to_session.`,
-      recommendation: "Add session-id correlation to the handoff.mjs claim; review the peer-mail ack timeout.",
+      status: "heuristic",
+      detail: `${peerMailEvents.length} peer-mail event(s) read; ${crossSession} cross-session message(s) (from_session differs from to_session). Normal traffic looks like this; real session-id drift is not measured.`,
+      recommendation: "If handoffs lose context, check that session ids are correlated across the handoff.mjs claim.",
       evidence: [".config/orchestrator/peer-mail/", "bin/handoff.mjs", "bin/peer-mail"],
-      source: "session-data",
+      source: "heuristic",
     });
   }
 
@@ -1701,6 +1701,10 @@ async function postCommunityPR(proposal) {
 async function proposeFindings(findings, args) {
   const eligible = findings.filter(f => f.category === "frood-code" && f.source !== "heuristic");
   const pool = eligible.length ? eligible : findings.filter(f => f.source !== "heuristic");
+  if (pool.length === 0) {
+    console.error("no findings eligible to propose; nothing sent");
+    process.exit(1);
+  }
   const proposal = {
     title: `learn: ${args.stream} phase ${args.phase}`,
     body: generatePRBody(args.stream, pool.map(f => ({ ...f, stream: args.stream, phase: args.phase }))),

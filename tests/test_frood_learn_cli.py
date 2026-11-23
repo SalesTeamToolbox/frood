@@ -144,6 +144,18 @@ def test_propose_without_api_fails_cleanly(fixture_home):
     assert "at " not in r.stderr.replace("at least", "")  # no stack trace
 
 
+def test_propose_with_no_findings_sends_nothing(tmp_path):
+    port = _free_port()
+    r = run(
+        ["s1", "--phase", "1", "--no-mcp", "--propose", "--report", str(tmp_path / "e.json")],
+        tmp_path,
+        extra_env={"FROOD_API_URL": f"http://127.0.0.1:{port}"},
+    )
+    assert r.returncode != 0
+    assert "no findings eligible to propose; nothing sent" in r.stderr
+    assert "frood-learn failed" not in r.stderr
+
+
 def test_wrapper_works_through_symlink(tmp_path):
     link = tmp_path / "frood-learn-link"
     link.symlink_to(WRAPPER)

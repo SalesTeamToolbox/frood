@@ -81,7 +81,7 @@ const SUBCOMMANDS = [
   {
     name: 'learn',
     description: 'Phase-aware learning review — 5 phases, 23 lenses, session analysis, --apply for interactive fixes/PRs',
-    usage: 'node bin/frood-learn.mjs <stream|session-id> [--phase <1|2|3|4|5>] [--lens <name>] [--no-mcp] [--apply] [--report <path>] [--session <id>]',
+    usage: 'node bin/frood-learn.mjs <stream|session-id> [--phase <1|2|3|4|5>] [--lens <name>] [--no-mcp] [--propose] [--apply] [--report <path>] [--session <id>]',
     impl: [process.execPath, path.join(WORKTREE_ROOT, 'bin', 'frood-learn.mjs')],
   },
   {
