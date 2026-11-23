@@ -17,7 +17,7 @@ ticket="${1:?usage: train.sh <ticket>}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-REPORTS_ROOT="${FROOD_REPORTS_ROOT:-/home/user/.opencode/reports/frood-public}"
+REPORTS_ROOT="${FROOD_REPORTS_ROOT:-$HOME/.opencode/reports/frood-public}"
 report_dir="$REPORTS_ROOT/$ticket"
 receipt="$report_dir/receipt.md"
 lint_log="$report_dir/lint.log"

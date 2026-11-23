@@ -30,7 +30,7 @@ YELLOW="\033[33m"
 GREEN="\033[32m"
 RED="\033[31m"
 
-REPORTS_ROOT="/home/user/.opencode/reports/frood-public"
+REPORTS_ROOT="${FROOD_REPORTS_ROOT:-$HOME/.opencode/reports/frood-public}"
 
 # ── status sources ──────────────────────────────────────────────
 # 1. latest verify log (board verify, e.g. STT/Volnova verify-*/verify.log)

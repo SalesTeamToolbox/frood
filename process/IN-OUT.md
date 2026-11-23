@@ -3,7 +3,7 @@
 **Ticket:** m1-classify (classify + EGM review)
 **Base:** origin/main @ `3de8e5c` (fresh-tree check passed before any work)
 **Branch:** `feat/m1-classify`
-**Worktree:** /home/user/projects/frood-wt-m1-classify
+**Worktree:** ~/projects/frood-wt-m1-classify
 **EGM status:** `approved` — recorded in the plan's EGM record (plan-frood-public.md); all original Blockers and Majors resolved in the plan revision; no worker starts on M2+ without this file committed.
 
 ## Classification convention

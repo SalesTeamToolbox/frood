@@ -1,0 +1,36 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "frood": {
+        "type": "local",
+        "command": [
+          "<FROOD_DIR>/.venv/bin/python",
+          "<FROOD_DIR>/mcp_server.py"
+        ],
+        "environment": {
+          "FROOD_WORKSPACE": "<FROOD_DIR>",
+          "REDIS_URL": "redis://localhost:6379/0",
+          "QDRANT_URL": "http://localhost:6333"
+        },
+        "disabled": false
+      },
+      "frood-remote": {
+        "type": "local",
+        "command": ["ssh", "prod-server", "cd", "/opt/frood", "&&", "python", "mcp_server.py"],
+        "disabled": true
+      }
+    }
+  },
+  "providers": {
+    "frood": {
+      "name": "Frood LLM proxy (OpenAI-compatible)",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "http://127.0.0.1:8002/llm/v1",
+        "apiKey": "frood-local"
+      }
+    }
+  },
+  "instructions": ["AGENTS.md", "CLAUDE.md"]
+}

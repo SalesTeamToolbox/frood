@@ -198,7 +198,6 @@ def find_claude_exe():
         Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Claude" / "claude.exe",
         Path.home() / ".local" / "bin" / "claude.exe",
         Path.home() / "AppData" / "Roaming" / "Claude" / "claude-code" / "2.1.92" / "claude.exe",
-        Path("C:/Users/user/AppData/Roaming/Claude/claude-code/2.1.92/claude.exe"),
     ]
 
     for candidate in candidates:
@@ -235,7 +234,7 @@ def launch_claude(provider, args=None):
     cmd_args = args if args else []
 
     try:
-        subprocess.run([claude_exe] + cmd_args, env=env, check=False)
+        subprocess.run([claude_exe, *cmd_args], env=env, check=False)
     except FileNotFoundError:
         print(f"\n❌ Claude Code not found at: {claude_exe}")
         print("   Please ensure Claude Code is installed.")

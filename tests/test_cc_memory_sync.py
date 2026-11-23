@@ -55,32 +55,32 @@ class TestPathDetection:
 
     def test_matches_user_memory_file(self):
         """MEMORY.md inside a projects/*/memory/ dir should match."""
-        path = "C:/Users/user/.claude/projects/c--Users-user-projects-frood/memory/MEMORY.md"
+        path = "C:/Users/alice/.claude/projects/c--Users-alice-projects-frood/memory/MEMORY.md"
         assert self.is_cc_memory_file(path) is True
 
     def test_matches_feedback_file(self):
         """feedback_*.md files in memory/ dir should match."""
-        path = "C:/Users/user/.claude/projects/some-project/memory/feedback_something.md"
+        path = "C:/Users/alice/.claude/projects/some-project/memory/feedback_something.md"
         assert self.is_cc_memory_file(path) is True
 
     def test_matches_project_file(self):
         """project_*.md files in memory/ dir should match."""
-        path = "C:/Users/user/.claude/projects/myproj/memory/project_context.md"
+        path = "C:/Users/alice/.claude/projects/myproj/memory/project_context.md"
         assert self.is_cc_memory_file(path) is True
 
     def test_matches_reference_file(self):
         """reference_*.md files in memory/ dir should match."""
-        path = "C:/Users/user/.claude/projects/myproj/memory/reference_docs.md"
+        path = "C:/Users/alice/.claude/projects/myproj/memory/reference_docs.md"
         assert self.is_cc_memory_file(path) is True
 
     def test_rejects_non_memory_path(self):
         """A .py file in the project tools/ dir should NOT match."""
-        path = "C:/Users/user/projects/frood/tools/memory_tool.py"
+        path = "C:/Users/alice/projects/frood/tools/memory_tool.py"
         assert self.is_cc_memory_file(path) is False
 
     def test_rejects_global_memory(self):
         """A .md file directly in ~/.claude/memory/ (no 'projects' segment) should NOT match."""
-        path = "C:/Users/user/.claude/memory/MEMORY.md"
+        path = "C:/Users/alice/.claude/memory/MEMORY.md"
         assert self.is_cc_memory_file(path) is False
 
     def test_handles_unix_paths(self):
@@ -94,12 +94,12 @@ class TestPathDetection:
 
     def test_rejects_path_without_md_extension(self):
         """A file without .md extension in the right location should NOT match."""
-        path = "C:/Users/user/.claude/projects/myproj/memory/MEMORY.txt"
+        path = "C:/Users/alice/.claude/projects/myproj/memory/MEMORY.txt"
         assert self.is_cc_memory_file(path) is False
 
     def test_rejects_regular_project_file(self):
         """A regular .py file should NOT match."""
-        path = "C:/Users/user/projects/frood/core/config.py"
+        path = "C:/Users/alice/projects/frood/core/config.py"
         assert self.is_cc_memory_file(path) is False
 
 
@@ -120,7 +120,7 @@ class TestDedup:
 
     def test_same_path_same_point_id(self):
         """Calling make_point_id with the same path twice returns identical UUIDs."""
-        path = "C:/Users/user/.claude/projects/proj/memory/MEMORY.md"
+        path = "C:/Users/alice/.claude/projects/proj/memory/MEMORY.md"
         id1 = self.make_point_id(path)
         id2 = self.make_point_id(path)
         assert id1 == id2
@@ -138,7 +138,7 @@ class TestDedup:
         (so re-syncing updated files overwrites the same Qdrant point).
         This test verifies the ID is independent of content.
         """
-        path = "C:/Users/user/.claude/projects/proj/memory/MEMORY.md"
+        path = "C:/Users/alice/.claude/projects/proj/memory/MEMORY.md"
         # make_point_id takes only file_path — content is not an argument
         id1 = self.make_point_id(path)
         # Same path, even if conceptually different content would be synced
