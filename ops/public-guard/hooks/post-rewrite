@@ -1,0 +1,10 @@
+#!/bin/sh
+# public-guard pass-through: only chains to the repo's own hook of the same name,
+# passing argv and stdin through unchanged and preserving the exit code.
+name=$(basename "$0")
+common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || exit 0
+hook="$common/hooks/$name"
+if [ -x "$hook" ] && ! [ "$hook" -ef "$0" ]; then
+  exec "$hook" "$@"
+fi
+exit 0

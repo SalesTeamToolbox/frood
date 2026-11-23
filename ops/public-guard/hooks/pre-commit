@@ -1,0 +1,10 @@
+#!/bin/sh
+# public-guard global pre-commit: scan the staged diff, then chain to the repo's own hook.
+here=$(cd "$(dirname "$0")" && pwd) || exit 1
+python3 "$here/../guard.py" pre-commit "$@" || exit $?
+common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || exit 0
+hook="$common/hooks/pre-commit"
+if [ -x "$hook" ] && ! [ "$hook" -ef "$0" ]; then
+  exec "$hook" "$@"
+fi
+exit 0

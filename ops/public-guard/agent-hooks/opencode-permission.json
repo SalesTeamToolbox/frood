@@ -1,0 +1,24 @@
+{
+  "permission": {
+    "bash": {
+      "*--no-verify*": "deny",
+      "git commit* -n*": "deny",
+      "git commit -n*": "deny",
+      "*core.hooksPath*": "deny",
+      "*core.hookspath*": "deny",
+      "*-c core.hooks*": "deny",
+      "*HUSKY=0*": "deny",
+      "*SKIP=*": "deny",
+      "*.config/public-guard*": "deny",
+      "*.cache/public-guard*": "deny",
+      "*.git/hooks*": "deny",
+      "*GIT_CONFIG_GLOBAL=*": "deny",
+      "*GIT_CONFIG_COUNT=*": "deny",
+      "HOME=* git *": "deny",
+      "git push* --force*": "deny",
+      "git push* -f*": "deny",
+      "git push* +*": "deny",
+      "git push* --force-with-lease*": "allow"
+    }
+  }
+}

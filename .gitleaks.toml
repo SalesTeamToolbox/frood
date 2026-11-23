@@ -1,0 +1,30 @@
+# Frood gitleaks config: defaults plus narrow allowlists for deliberate test fixtures.
+# Any change to this file, or to .public-guard-allow, needs a human to approve the push
+# (see ops/public-guard/README.md). Keep each entry justified below.
+title = "frood"
+
+[extend]
+useDefault = true
+
+# generic-api-key matches obviously fake literals in tests ("test-key-abc123",
+# "test-secret-32-chars-long-ok-yep", ...). Scoped to that ONE rule and to tests/ only, so
+# a real provider-shaped key (sk-or-v1-..., ghp_..., AKIA..., private key blocks) planted
+# in tests/ is still caught.
+[[allowlists]]
+description = "fake generic-api-key literals in unit tests"
+targetRules = ["generic-api-key"]
+paths = ['''^tests/''']
+
+# Historical commit a67c0fa3: placeholder NVIDIA key "nvapi-final-test-key-12345" in a
+# settings fixture (file no longer in the tree). Pinned to that one rule and path.
+[[allowlists]]
+description = "fake nvapi test key in historical .frood/settings.json"
+targetRules = ["generic-api-key"]
+paths = ['''^\.frood/settings\.json$''']
+
+# Minified third-party bundles (xterm, monaco) trip generic-api-key on identifiers like
+# "KeybindingResolver=" and "g.token,N=". They hold no secrets.
+[[allowlists]]
+description = "minified vendor bundles in dashboard/frontend/dist"
+targetRules = ["generic-api-key"]
+paths = ['''^dashboard/frontend/dist/''']
