@@ -1,0 +1,21 @@
+{
+  "agent": "critic-free",
+  "model": "(agent default)",
+  "session": "ses_fixture_critic_free",
+  "exit": 0,
+  "seconds": 200,
+  "tokens": {
+    "input": 24,
+    "output": 2500,
+    "reasoning": 1500,
+    "cache_read": 60000
+  },
+  "cost": 0,
+  "first_line": "VERDICT: APPROVED",
+  "verdict": "VERDICT: APPROVED",
+  "out": "/tmp/orch-board/findings-r1-free.md",
+  "partial": false,
+  "errors": [],
+  "tree": null,
+  "gate": null
+}

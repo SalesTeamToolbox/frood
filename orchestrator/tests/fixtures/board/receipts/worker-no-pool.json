@@ -1,0 +1,18 @@
+{
+  "agent": "worker",
+  "model": "(agent default)",
+  "session": null,
+  "exit": "no-healthy-pool",
+  "seconds": 0,
+  "tokens": null,
+  "cost": 0,
+  "first_line": "",
+  "verdict": null,
+  "out": null,
+  "partial": false,
+  "errors": [
+    "every agent in the chain is known-down (pool-health); run router-health or wait"
+  ],
+  "tree": null,
+  "gate": null
+}

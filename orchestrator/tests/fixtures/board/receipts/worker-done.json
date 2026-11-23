@@ -1,0 +1,24 @@
+{
+  "agent": "worker",
+  "model": "opencode-go/mimo-v2.6-flash",
+  "session": "ses_fixture_worker_done",
+  "exit": 0,
+  "seconds": 120,
+  "tokens": {
+    "input": 1000,
+    "output": 500,
+    "reasoning": 0,
+    "cache_read": 0
+  },
+  "cost": 0.0012,
+  "first_line": "RESULT: DONE",
+  "verdict": "RESULT: DONE",
+  "out": "/tmp/orch-board/worker-r1.md",
+  "partial": false,
+  "errors": [],
+  "tree": {
+    "total_cost": 0.0042,
+    "sessions": []
+  },
+  "gate": null
+}

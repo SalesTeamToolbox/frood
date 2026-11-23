@@ -1,0 +1,45 @@
+# Pre-commit hooks for orchestrator repo
+# Install: pip install pre-commit && pre-commit install
+
+repos:
+  - repo: local
+    hooks:
+      - id: validate-config
+        name: Validate config platform paths
+        entry: node bin/validate-config.mjs
+        language: system
+        types: [json, toml, yaml, yml]
+        pass_filenames: false
+        always_run: true
+        description: Check config files for platform-incorrect paths (Windows paths on Linux, etc.)
+
+      - id: check-routing
+        name: Check routing rules
+        entry: node bin/check-routing.mjs
+        language: system
+        pass_filenames: false
+        always_run: true
+        description: Verify routing rules are valid
+
+      - id: node-tests
+        name: Run Node.js tests
+        entry: node --test tests/
+        language: system
+        pass_filenames: false
+        always_run: false  # Run manually or in CI
+        description: Run full test suite
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+# CI should also run: node bin/check-routing.mjs && node --test tests/

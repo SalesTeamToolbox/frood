@@ -1,0 +1,9 @@
+[Unit]
+Description=Orchestrator desk trigger: page when streams have unhandled events
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+ExecStart=@NODE@ @REPO@/bin/desk-check.mjs

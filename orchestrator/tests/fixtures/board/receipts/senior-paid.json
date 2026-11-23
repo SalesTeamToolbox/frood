@@ -1,0 +1,21 @@
+{
+  "agent": "senior",
+  "model": "commandcode/claude-sonnet-5-5",
+  "session": "ses_fixture_senior_paid",
+  "exit": 0,
+  "seconds": 150,
+  "tokens": {
+    "input": 30,
+    "output": 900,
+    "reasoning": 400,
+    "cache_read": 20000
+  },
+  "cost": 0.07,
+  "first_line": "VERDICT: APPROVED",
+  "verdict": "VERDICT: APPROVED",
+  "out": "/tmp/orch-board/senior.md",
+  "partial": false,
+  "errors": [],
+  "tree": null,
+  "gate": null
+}

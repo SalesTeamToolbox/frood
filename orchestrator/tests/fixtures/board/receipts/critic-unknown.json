@@ -1,0 +1,21 @@
+{
+  "agent": "critic",
+  "model": "(agent default)",
+  "session": "ses_fixture_critic_unknown",
+  "exit": 0,
+  "seconds": 100,
+  "tokens": {
+    "input": 24,
+    "output": 1800,
+    "reasoning": 900,
+    "cache_read": 40000
+  },
+  "cost": 0,
+  "first_line": "VERDICT: APPROVED",
+  "verdict": "VERDICT: APPROVED",
+  "out": "/tmp/orch-board/findings-r1-unknown.md",
+  "partial": false,
+  "errors": [],
+  "tree": null,
+  "gate": null
+}

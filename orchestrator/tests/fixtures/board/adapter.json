@@ -1,0 +1,8 @@
+{
+  "base": "main",
+  "branch_prefix": "feat/",
+  "gates": [["node", "-e", "0"]],
+  "egm_paths": ["**/migrations/**", "prisma/**"],
+  "guarded_paths": ["**/auth*", "ops/**"],
+  "stale_minutes": 45
+}

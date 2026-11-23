@@ -1,0 +1,33 @@
+{
+  "agent": "critic",
+  "model": "commandcode/claude-haiku-5-5",
+  "session": "ses_fixture_critic_paid",
+  "exit": 0,
+  "seconds": 90,
+  "tokens": {
+    "input": 24,
+    "output": 2000,
+    "reasoning": 1000,
+    "cache_read": 50000
+  },
+  "cost": 0.011,
+  "first_line": "VERDICT: APPROVED",
+  "verdict": "VERDICT: APPROVED",
+  "out": "/tmp/orch-board/findings-r1.md",
+  "partial": false,
+  "errors": [],
+  "tree": {
+    "total_cost": 0.011,
+    "sessions": []
+  },
+  "gate": {
+    "effective": "INVALID",
+    "critic": "APPROVED",
+    "overridden": true,
+    "reasons": [
+      "a receipt's gate is never trusted: the board re-gates the findings file itself"
+    ],
+    "unrequested": [],
+    "majors": []
+  }
+}

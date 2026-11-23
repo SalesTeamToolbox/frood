@@ -111,6 +111,85 @@ function agentHasVision(agent) {
   return false;
 }
 
+// Image detection for auto-vision mode
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".tiff", ".ico"]);
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB per image
+const MAX_TOTAL_SIZE = 50 * 1024 * 1024; // 50MB total
+
+// Check if a file path is an image (by extension)
+function isImagePath(p) {
+  const ext = path.extname(p).toLowerCase();
+  return IMAGE_EXTENSIONS.has(ext);
+}
+
+// Check if a string looks like a base64 data URL with image MIME type
+function isImageDataUrl(s) {
+  return /^data:image\/(png|jpeg|jpg|gif|webp|bmp|svg\+xml);base64,/.test(s.trim());
+}
+
+// Check if a URL has an image MIME type via HEAD request (with timeout)
+async function isImageUrl(urlStr) {
+  try {
+    const url = new URL(urlStr);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    // Quick extension check first
+    if (isImagePath(url.pathname)) return true;
+    // HEAD request to verify content-type
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(urlStr, { method: "HEAD", signal: controller.signal });
+    clearTimeout(timeout);
+    const ct = res.headers.get("content-type") || "";
+    return ct.startsWith("image/");
+  } catch {
+    return false;
+  }
+}
+
+// Scan text for image references (file paths, data URLs, HTTP URLs)
+async function detectImagesInText(text, workDir) {
+  const images = [];
+  let totalSize = 0;
+
+  // Pattern 1: File paths with image extensions (relative to workDir or absolute)
+  const filePathRegex = /(?:^|\s)([~\/][\w\-\.\/]*?(?:\.png|\.jpg|\.jpeg|\.gif|\.webp|\.bmp|\.svg|\.tiff|\.ico))\b/gim;
+  let match;
+  while ((match = filePathRegex.exec(text)) !== null) {
+    const p = match[1].replace(/^~/, os.homedir());
+    const absPath = path.isAbsolute(p) ? p : path.resolve(workDir, p);
+    try {
+      const stat = fs.statSync(absPath);
+      if (stat.isFile() && stat.size <= MAX_IMAGE_SIZE) {
+        images.push({ type: "file", path: absPath, size: stat.size });
+        totalSize += stat.size;
+      }
+    } catch {}
+  }
+
+  // Pattern 2: Base64 data URLs
+  const dataUrlRegex = /data:image\/(png|jpeg|jpg|gif|webp|bmp|svg\+xml);base64,/g;
+  while ((match = dataUrlRegex.exec(text)) !== null) {
+    // Estimate size from base64 length (roughly 3/4 of base64 string)
+    const base64Part = text.slice(match.index + match[0].length, match.index + match[0].length + 200);
+    const estimatedSize = Math.floor(base64Part.length * 0.75);
+    if (estimatedSize <= MAX_IMAGE_SIZE) {
+      images.push({ type: "data-url", mime: `image/${match[1]}`, estimatedSize });
+      totalSize += estimatedSize;
+    }
+  }
+
+  // Pattern 3: HTTP/HTTPS URLs (we'll verify async)
+  const urlRegex = /https?:\/\/[^\s\)\]\}]+/g;
+  while ((match = urlRegex.exec(text)) !== null) {
+    const url = match[0].replace(/[.,;:]+$/, ""); // strip trailing punctuation
+    if (await isImageUrl(url)) {
+      images.push({ type: "url", url });
+    }
+  }
+
+  return { images, totalSize, overLimit: totalSize > MAX_TOTAL_SIZE };
+}
+
 // Usage is the header comment block of this file, so it cannot drift out of date.
 export function usage() {
   const src = fs.readFileSync(fileURLToPath(import.meta.url), "utf8").split(/\r?\n/);
@@ -141,14 +220,91 @@ function args(argv) {
     else if (k === "--idle-min") a.idleMin = Number(v());
     else if (k === "--resume") a.resume = Number(v());
     else if (k === "--slots") a.slots = Number(v());
-    else if (k === "--fallback") a.fallback = v().split(",").map((x) => x.trim()).filter(Boolean).slice(0, 8); // skips are free; real calls stay capped at 3
+    else if (k === "--fallback") a.fallback = v().split(",").map((x) => x.trim()).filter(Boolean).slice(0, 8);
     else if (k === "--vision") a.vision = true;
+    else if (k === "--no-vision") a.vision = false; // explicit opt-out
     else throw new Error(`unknown flag ${k}`);
   }
   for (const req of ["agent", "dir", "prompt"]) if (!a[req]) throw new Error(`--${req} is required`);
   if (a.ticket && !a.owner) throw new Error("--ticket needs --owner");
   a.out ||= path.join(path.dirname(path.resolve(a.prompt)), `${a.agent}-out.md`);
+
+  // Auto-detect images in prompt/mandate and enable vision if found (unless --no-vision was explicit)
+  // We do this after parsing so --no-vision can override
+  const visionExplicitlySet = argv.includes("--vision") || argv.includes("--no-vision");
+  if (!visionExplicitlySet && a.prompt) {
+    const promptText = fs.readFileSync(a.prompt, "utf8");
+    // Run detection synchronously for file paths and data URLs; URL check is async but we can defer
+    const fileAndDataImages = detectImagesInTextSync(promptText, a.dir);
+    if (fileAndDataImages.images.length > 0) {
+      a.vision = true;
+      a.autoVision = true;
+      a.autoVisionImages = fileAndDataImages.images;
+      a.autoVisionTotalSize = fileAndDataImages.totalSize;
+    }
+  }
   return a;
+}
+
+// Synchronous version for file paths and data URLs (URL HEAD requests are async, skip for auto-detection)
+function detectImagesInTextSync(text, workDir) {
+  const images = [];
+  let totalSize = 0;
+
+  // Match: absolute paths (/path), home paths (~/path), and relative paths (path/to/file.png)
+  // Relative paths must contain at least one / and end with image extension
+  // Allow preceding: whitespace, backtick, (, [, { (common in markdown/code)
+  const filePathRegex = /(?:^|[\s`\(\[\{])((?:~\/|\/)?[\w\-\.\/]*\/[\w\-\.]*?(?:\.png|\.jpg|\.jpeg|\.gif|\.webp|\.bmp|\.svg|\.tiff|\.ico))\b/gim;
+  let match;
+  while ((match = filePathRegex.exec(text)) !== null) {
+    const p = match[1].replace(/^~/, os.homedir());
+    const absPath = path.isAbsolute(p) ? p : path.resolve(workDir, p);
+    try {
+      const stat = fs.statSync(absPath);
+      if (stat.isFile() && stat.size <= MAX_IMAGE_SIZE) {
+        images.push({ type: "file", path: absPath, size: stat.size });
+        totalSize += stat.size;
+      }
+    } catch {}
+  }
+
+  const dataUrlRegex = /data:image\/(png|jpeg|jpg|gif|webp|bmp|svg\+xml);base64,/g;
+  while ((match = dataUrlRegex.exec(text)) !== null) {
+    const base64Part = text.slice(match.index + match[0].length, match.index + match[0].length + 200);
+    const estimatedSize = Math.floor(base64Part.length * 0.75);
+    if (estimatedSize <= MAX_IMAGE_SIZE) {
+      images.push({ type: "data-url", mime: `image/${match[1]}`, estimatedSize });
+      totalSize += estimatedSize;
+    }
+  }
+
+  // Heuristic: HTTP/HTTPS/www URLs — treat as potential images (no HEAD request in sync mode)
+  // Matches http://, https://, or www. URLs
+  const urlRegex = /(?:https?:\/\/|www\.)[^\s\)\]\}]+/gim;
+  while ((match = urlRegex.exec(text)) !== null) {
+    let url = match[0].replace(/[.,;:]+$/, "");
+    // Normalize www. to https:// for consistency
+    if (url.startsWith("www.")) url = "https://" + url;
+    // Skip obvious API/non-image endpoints
+    if (/^https?:\/\/(?:api\.|graphql|webhook|webhooks|callback|oauth|auth|token|health|metrics|status|version|ping)\b/i.test(url)) {
+      continue;
+    }
+    // Flag as potential image if:
+    // - Has image extension, OR
+    // - Known image host patterns, OR
+    // - Generic web URL (user may want visual evaluation)
+    // Only skip if it's clearly an API endpoint
+    const isLikelyImage = /\.(?:png|jpg|jpeg|gif|webp|bmp|svg|tiff|ico)(?:\?|$)/i.test(url) ||
+                          /(?:cdn|images|img|assets|media|static|photos|pictures|avatars|thumbnails)\./i.test(url);
+    // Be permissive: flag generic URLs too (user asked for visual eval)
+    // Only exclude obvious API patterns
+    const isApi = /\/api\/|\/v\d+\/|\/graphql|\.json$/i.test(url);
+    if (isLikelyImage || !isApi) {
+      images.push({ type: "url", url, estimatedSize: 0 });
+    }
+  }
+
+  return { images, totalSize, overLimit: totalSize > MAX_TOTAL_SIZE };
 }
 
 export function opencodeBin() {
@@ -518,6 +674,17 @@ async function runChain(a) {
   }
   if (hops.length) r.repooled_from = hops;
   if (visionFallbackWarning) r.vision_fallback = "no vision-capable agent available, using first healthy agent";
+  // Record auto-vision detection info
+  if (a.autoVision) {
+    r.vision = {
+      auto_detected: true,
+      images_detected: a.autoVisionImages.length,
+      total_bytes: a.autoVisionTotalSize,
+      images: a.autoVisionImages.map(img => ({ type: img.type, path: img.path || img.url || img.mime, size: img.size || img.estimatedSize }))
+    };
+  } else if (a.vision) {
+    r.vision = { auto_detected: false, explicit: true };
+  }
   if (hops.length || r.status === 6 || r.status === 8) {
     fs.mkdirSync(path.dirname(path.resolve(a.out)), { recursive: true });
     atomicWrite(path.resolve(a.out) + ".receipt.json", JSON.stringify({ ...r, status: undefined }, null, 2) + "\n");
@@ -801,6 +968,12 @@ export async function runWorker(a) {
       ...(readonlyViolation ? { readonly_violation: true } : {}),
       // Critics: the mechanical decision, not the critic's own claim (free critics find, then approve).
       gate: gateResult,
+      // Vision metadata
+      vision: a.autoVision
+        ? { auto_detected: true, images_detected: a.autoVisionImages.length, total_bytes: a.autoVisionTotalSize, images: a.autoVisionImages.map(img => ({ type: img.type, path: img.path || img.url || img.mime, size: img.size || img.estimatedSize })) }
+        : a.vision
+          ? { auto_detected: false, explicit: true }
+          : undefined,
     };
     atomicWrite(out + ".receipt.json", JSON.stringify(receipt, null, 2) + "\n");
     Object.defineProperty(receipt, "classifyErrors", { value: classifyErrors, enumerable: false }); // for runWithFallback; not serialized

@@ -1,0 +1,333 @@
+{
+  "$comment": "Source -> install targets. Paths under ~ resolve against ORCH_HOME (tests) or the user's home. Edit here, then run install.",
+  "targets": {
+    "cc": {
+      "commands": "~/.claude/commands",
+      "agents": "~/.claude/agents",
+      "hooks": "~/.claude/hooks"
+    },
+    "oc": {
+      "commands": "~/.config/opencode/commands",
+      "rules": "~/.config/opencode/rules",
+      "skills": "~/.config/opencode/skills",
+      "agents": "~/.config/opencode/agents"
+    }
+  },
+  "entries": [
+    {
+      "src": "commands/orchestrator.md",
+      "kind": "commands",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/gauntlet.md",
+      "kind": "commands",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/harness.md",
+      "kind": "commands",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/model-router-refresh.md",
+      "kind": "commands",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/egm-bootstrap.md",
+      "kind": "commands",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/egm-brainstorm.md",
+      "kind": "commands",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/egm-draft.md",
+      "kind": "commands",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/egm-drift-report.md",
+      "kind": "commands",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/egm-resolve.md",
+      "kind": "commands",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/egm-review-loop.md",
+      "kind": "commands",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/egm-review.md",
+      "kind": "commands",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "rules/01-orchestrator-models.md",
+      "kind": "rules",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "skills/model-router-refresh",
+      "kind": "skills",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/scout.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/worker.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/critic.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/worker-burst.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/worker-strong.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/senior.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/worker-alt.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/critic-alt.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/critic-go.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "hooks/peer-mail-session-id.js",
+      "kind": "hooks",
+      "harness": [
+        "cc"
+      ]
+    },
+    {
+      "src": "agents/orchestrator.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/worker-free.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/critic-free.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/critic-nvidia.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/senior-alt.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/senior-nvidia.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/senior-free.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/orchestrator-alt.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/orchestrator-free.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/orchestrator-nvidia.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "hooks/cross-harness-statusline.js",
+      "kind": "hooks",
+      "harness": [
+        "cc"
+      ]
+    },
+    {
+      "src": "commands/next.md",
+      "kind": "commands",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/handback.md",
+      "kind": "commands",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "hooks/orchestrator-handoff.js",
+      "kind": "hooks",
+      "harness": [
+        "cc"
+      ]
+    },
+    {
+      "src": "agents/worker-nvidia.md",
+      "kind": "agents",
+      "harness": [
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/desk.md",
+      "kind": "commands",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "commands/orchestrator-learn.md",
+      "kind": "commands",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/learn-pattern-detector.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/learn-efficiency-analyzer.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    },
+    {
+      "src": "agents/learn-tool-usage-reviewer.md",
+      "kind": "agents",
+      "harness": [
+        "cc",
+        "oc"
+      ]
+    }
+  ]
+}

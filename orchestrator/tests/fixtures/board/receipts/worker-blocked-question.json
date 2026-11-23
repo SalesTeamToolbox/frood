@@ -1,0 +1,21 @@
+{
+  "agent": "worker",
+  "model": "opencode-go/mimo-v2.6-flash",
+  "session": "ses_fixture_worker_question",
+  "exit": 0,
+  "seconds": 30,
+  "tokens": {
+    "input": 500,
+    "output": 40,
+    "reasoning": 0,
+    "cache_read": 0
+  },
+  "cost": 0.0003,
+  "first_line": "RESULT: BLOCKED: question — which adapter should the train call?",
+  "verdict": "RESULT: BLOCKED: question — which adapter should the train call?",
+  "out": "/tmp/orch-board/worker-question.md",
+  "partial": false,
+  "errors": [],
+  "tree": null,
+  "gate": null
+}

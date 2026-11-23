@@ -1,0 +1,6 @@
+node_modules/
+*.orch-tmp
+__pycache__/
+.pytest_cache/
+.opencode/
+.claude/

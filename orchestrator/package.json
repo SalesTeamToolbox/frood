@@ -1,0 +1,14 @@
+{
+  "name": "orchestrator",
+  "private": true,
+  "type": "module",
+  "description": "Cross-harness orchestrator (Claude Code + OpenCode): commands, routing rules, agents, board scripts, installer.",
+  "scripts": {
+    "test": "node --import ./bin/no-window.mjs --test --test-isolation=none \"tests/**/*.test.mjs\"",
+    "install-harness": "node bin/install.mjs",
+    "check": "node bin/install.mjs --check"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

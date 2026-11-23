@@ -132,42 +132,53 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    `board ready` prints the wake-up line `READY <id> <branch> <sha> — board verify then train`, and
    that line — with the report link — is what peer-mail carries.
 2. **Worker** codes in the ticket worktree and writes `report_path`.
-    **Vision auto-detection:** Before dispatch, the orchestrator reads the Mandate and scans for images (file paths `.png/.jpg/.webp/.svg`, base64 `data:image/`, HTTP image URLs). If images found AND `--no-vision` not set, auto-add `--vision` to the dispatch.
-    <!-- cc-only -->
-    From Claude Code, workers run on **OpenCode** (cheap pools, not the Claude
-    subscription), as a background job — paid-first by default:
-    Free-first for small, waived, non-money tickets: same command with `--agent worker-nvidia --fallback worker-free,worker-burst,worker-alt,worker` (routing rule).
-    `node {{ORCH_REPO}}/bin/oc-worker.mjs --agent worker --fallback worker-burst,worker-alt,worker-nvidia,worker-free --dir <worktree> --prompt <mandate.md> --report <run dir>/report.md --out <run dir>/worker-r1.md --stream <name> [--vision if images detected]`
-    (`--agent worker-strong` for hard tickets; add `--session <id from the last receipt>` on
-    revision rounds so the worker keeps its context — round 2+ of a free-first run switches to agent worker with the paid-first fallback). Quota errors re-pool automatically. Use the Claude Code `worker` agent (Sonnet) only when OpenCode is unavailable. For a ticket touching >3 files or expected to run >15 min, leave `worker-nvidia` out of `--fallback` (long Nvidia runs drop); if every paid OpenCode pool is out, use the Claude Code `worker` agent (Sonnet) instead of the Nvidia/free tail. Dropped or stalled runs are resumed once automatically (`--resume`, `--idle-min`).
-    <!-- /cc-only -->
-    <!-- oc-only -->
-    From OpenCode, launch the same headless run in the background — the identical command Claude Code runs, so a desk
-    in either harness follows it and a Claude Code `/desk` can pick up work started here (paid-first by default):
-    Free-first for small, waived, non-money tickets: same command with `--agent worker-nvidia --fallback worker-free,worker-burst,worker-alt,worker` (routing rule).
-    `node {{ORCH_REPO}}/bin/oc-worker.mjs --agent worker --fallback worker-burst,worker-alt,worker-free --dir <worktree> --prompt <mandate.md> --report <run dir>/report.md --out <run dir>/worker-r1.md --stream <name> [--vision if images detected]`
-    (`--agent worker-strong` for hard tickets; add `--session <id from the last receipt>` on revision rounds so the
-    worker keeps its context — round 2+ of a free-first run switches to agent worker with the paid-first fallback). Quota errors re-pool automatically; leave `worker-nvidia` out of `--fallback` for a
-    ticket over 3 files or 15 minutes. The machine-wide `WORKER_SLOTS` cap is 2 — a third launch waits, never fails.
-    In-session `subagent({ agent: "worker" })` is the escape hatch for a quick ticket the owner does not want a desk
-    to follow: no stream, no desk events.
-    <!-- /oc-only -->
+   <!-- cc-only -->
+   From Claude Code, workers run on **OpenCode** (cheap pools, not the Claude
+   subscription), as a background job — paid-first by default:
+   Free-first for small, waived, non-money tickets: same command with `--agent worker-nvidia --fallback worker-free,worker-burst,worker-alt,worker` (routing rule).
+   `node {{ORCH_REPO}}/bin/oc-worker.mjs --agent worker --fallback worker-burst,worker-alt,worker-nvidia,worker-free --dir <worktree> --prompt <mandate.md> --report <run dir>/report.md --out <run dir>/worker-r1.md --stream <name>`
+   (`--agent worker-strong` for hard tickets; add `--session <id from the last receipt>` on
+   revision rounds so the worker keeps its context — round 2+ of a free-first run switches to agent worker with the paid-first fallback). Quota errors re-pool automatically. Use the Claude Code `worker` agent (Sonnet) only when OpenCode is unavailable. For a ticket touching >3 files or expected to run >15 min, leave `worker-nvidia` out of `--fallback` (long Nvidia runs drop); if every paid OpenCode pool is out, use the Claude Code `worker` (Sonnet) instead of the Nvidia/free tail. Dropped or stalled runs are resumed once automatically (`--resume`, `--idle-min`).
+   <!-- /cc-only -->
+   <!-- oc-only -->
+   From OpenCode, launch the same headless run in the background — the identical command Claude Code runs, so a desk
+   in either harness follows it and a Claude Code `/desk` can pick up work started here (paid-first by default):
+   Free-first for small, waived, non-money tickets: same command with `--agent worker-nvidia --fallback worker-free,worker-burst,worker-alt,worker` (routing rule).
+   `node {{ORCH_REPO}}/bin/oc-worker.mjs --agent worker --fallback worker-burst,worker-alt,worker-free --dir <worktree> --prompt <mandate.md> --report <run dir>/report.md --out <run dir>/worker-r1.md --stream <name>`
+   (`--agent worker-strong` for hard tickets; add `--session <id from the last receipt>` on revision rounds so the
+   worker keeps its context — round 2+ of a free-first run switches to agent worker with the paid-first fallback). Quota errors re-pool automatically; leave `worker-nvidia` out of `--fallback` for a
+   ticket over 3 files or 15 minutes. The machine-wide `WORKER_SLOTS` cap is 2 — a third launch waits, never fails.
+   In-session `subagent({ agent: "worker" })` is the escape hatch for a quick ticket the owner does not want a desk
+   to follow: no stream, no desk events.
+   <!-- /oc-only -->
+   **A run launched with `--stream` belongs to the desk from then on.** Steps 3–5 (critic, verdict, revision
+   rounds, merge-check, ff-merge/install) are the desk's job, not yours: do not wait on the worker, review it or merge
+   it in this session. If you do, the desk receives a `run-done` for work that is already merged, and the
+   two sessions collide. Record the stream's next step with `handoff.mjs note`, then keep the ticket's worker
+   todo `in_progress` and go on to the next ticket — the desk daemon is the default driver (the driver-check
+   rule above already guarantees one is live), so there is nothing for the owner to start and nothing for
+   them to watch: the daemon peer-mails this session on a merge, senior review or sign-off, and this session
+   reports it. An interactive `/desk` is the fallback *you* open when the daemon cannot run — never an owner
+   action item. Run the critic loop yourself only for a Claude Code `worker` agent (no stream events) or when
+   the owner tells you to.
+   <!-- oc-only -->
+   In OpenCode, "a Claude Code `worker` agent" in that rule means an in-session `subagent` worker: no stream, so you
+   run its critic loop yourself.
+   <!-- /oc-only -->
 3. **Critic** (read-only) reviews the diff, re-runs the tests, and replies with a
-    findings document starting `VERDICT: APPROVED | CHANGES_REQUESTED`. Save that reply
-    verbatim to `findings_path` (round-numbered: `findings-r<N>.md`). A receipt with
-    `readonly_violation` voids that review — rerun it.
-    **Vision auto-detection:** If the Mandate or worker report references images, auto-add `--vision` to critic dispatch.
-    <!-- cc-only -->
-    Claude Code: `Agent(subagent_type: "critic")` (Sonnet).
-    <!-- /cc-only -->
-    <!-- oc-only -->
-    OpenCode: `node {{ORCH_REPO}}/bin/oc-worker.mjs --agent critic --fallback critic-alt,critic-free --dir <worktree> --prompt <critic-prompt.md> --out <findings-r<N>.md> [--vision if images referenced]` (CmdC Haiku) — or `subagent({ agent: "critic" })` when no desk is involved.
-    <!-- /oc-only -->
+   findings document starting `VERDICT: APPROVED | CHANGES_REQUESTED`. Save that reply
+   verbatim to `findings_path` (round-numbered: `findings-r<N>.md`). A receipt with
+   `readonly_violation` voids that review — rerun it.
+   <!-- cc-only -->
+   Claude Code: `Agent(subagent_type: "critic")` (Sonnet).
+   <!-- /cc-only -->
+   <!-- oc-only -->
+   OpenCode: `node {{ORCH_REPO}}/bin/oc-worker.mjs --agent critic --fallback critic-alt,critic-free --dir <worktree> --prompt <critic-prompt.md> --out <findings-r<N>.md>` (CmdC Haiku) — or `subagent({ agent: "critic" })` when no desk is involved.
+   <!-- /oc-only -->
 4. `CHANGES_REQUESTED` → send the same worker the findings file (round N+1). Max 3
    rounds; then stop for a person with all findings quoted. Never loop silently.
 5. `APPROVED` → **senior** review only if the critic says `SENIOR_REVIEW: needed`, the
    diff touches a guarded path, or it took >2 rounds.
-   **Vision auto-detection:** If the Mandate, worker report, or critic findings reference images, auto-add `--vision` to senior dispatch.
    <!-- cc-only -->
    Senior = you (Opus), one pass, blockers only.
    <!-- /cc-only -->

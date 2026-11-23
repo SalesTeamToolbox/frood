@@ -1,0 +1,14 @@
+[Unit]
+Description=Orchestrator desk driver: act on stream events headlessly
+
+[Service]
+Type=simple
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+ExecStart=@NODE@ @REPO@/bin/desk.mjs daemon _run --by @BY@ --interval 30
+Restart=always
+RestartSec=120
+
+[Install]
+WantedBy=default.target

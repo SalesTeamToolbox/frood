@@ -1,0 +1,21 @@
+{
+  "agent": "worker",
+  "model": "opencode-go/mimo-v2.6-flash",
+  "session": null,
+  "exit": 0,
+  "seconds": 12,
+  "tokens": {
+    "input": 100,
+    "output": 0,
+    "reasoning": 0,
+    "cache_read": 0
+  },
+  "cost": 0.0001,
+  "first_line": "",
+  "verdict": null,
+  "out": null,
+  "partial": false,
+  "errors": [],
+  "tree": null,
+  "gate": null
+}

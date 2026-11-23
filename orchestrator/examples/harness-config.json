@@ -1,0 +1,11 @@
+{
+  "remotes": [
+    { "name": "example", "alias": "example-prod", "enabled": false }
+  ],
+  "repos": [
+    { "label": "APP-A", "dir": "~/projects/app-a" },
+    { "label": "APP-B", "dir": "~/projects/app-b" }
+  ],
+  "peerMailDist": "~/projects/peer-mail/dist/sessions.js",
+  "probeFallbacks": { "example-prod": { "host": "example.internal", "port": 22 } }
+}
