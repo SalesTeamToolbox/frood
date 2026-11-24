@@ -11,6 +11,7 @@ CI scan are the real enforcement.
 
 from __future__ import annotations
 
+import glob
 import importlib.util
 import json
 import os
@@ -26,8 +27,13 @@ PROTECTED = (
     ".config/public-guard",
     ".cache/public-guard",
     "/etc/public-guard",
+    "/usr/local/lib/public-guard",
     ".git/hooks",
 )
+# A find rooted at one of these can reach protected locations without naming them.
+BROAD_ROOTS = ("/", "~", "/etc", "/usr", "/usr/local", "/usr/local/lib", "~/.config", "~/.cache")
+PRIV_ESCALATION = {"sudo", "doas", "pkexec"}
+WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 WRITE_VERBS = {
     "rm",
     "mv",
@@ -59,6 +65,46 @@ BLOCKED_MCP = {
     "mcp__github__fork_repository",
 }
 HOOK_SUBCOMMANDS = {"commit", "push", "merge", "rebase", "am"}
+
+
+def protected_locations() -> list[str]:
+    h = os.path.expanduser("~")
+    raw = [
+        os.path.join(h, ".config", "public-guard"),
+        os.path.join(h, ".cache", "public-guard"),
+        os.path.join(h, ".config", "git"),
+        os.path.join(h, ".gitconfig"),
+        "/etc/public-guard",
+        "/etc/gitconfig",
+        "/usr/local/lib/public-guard",
+    ]
+    return [os.path.realpath(x) for x in raw]
+
+
+def resolves_protected(path: str, base: str | None) -> bool:
+    """True if `path` (~ expanded, relative to base, symlinks followed, globs expanded) is protected."""
+    exp = os.path.expanduser(path)
+    if not os.path.isabs(exp):
+        exp = os.path.join(base or os.getcwd(), exp)
+    cands = glob.glob(exp) if any(c in exp for c in "*?[") else []
+    cands = cands or [exp]
+    prot = protected_locations()
+    for c in cands:
+        real = os.path.realpath(c)
+        if re.search(r"(^|/)\.git/hooks(/|$)", real):
+            return True
+        for q in prot:
+            if real == q or real.startswith(q + "/"):
+                return True
+    return False
+
+
+def is_ancestor_of_protected(path: str, base: str | None) -> bool:
+    exp = os.path.expanduser(path)
+    if not os.path.isabs(exp):
+        exp = os.path.join(base or os.getcwd(), exp)
+    real = os.path.realpath(exp)
+    return any(q == real or q.startswith(real.rstrip("/") + "/") for q in protected_locations())
 
 
 def deny(reason: str) -> None:
@@ -226,24 +272,56 @@ def check_segment(
                     deny("env -u / env -i before git strips the environment the hooks rely on")
                 if not t.startswith("-") and "=" not in t:
                     break
+    base = os.path.expanduser(cwd_hint) if cwd_hint else cwd
+    if base and not os.path.isabs(base):
+        base = os.path.join(cwd or os.getcwd(), base)
+    verbs = set(names)
+    args = [t for t in toks[1:] if not t.startswith("-")]
+    redirects = re.findall(r">>?\s*([^\s;&|<>]+)", flat(seg))
     mentions = [p for p in PROTECTED if p in fseg]
-    # a bare `cd <dir>` earlier in the command can hide the protected path
-    if cwd_hint:
-        joined = flat(
-            cwd_hint + "/" + " ".join(t for t in toks[1:] if not t.startswith(("-", "/", "~")))
+    if verbs & PRIV_ESCALATION:
+        if (
+            mentions
+            or "gitconfig" in fseg
+            or "public-guard" in fseg
+            or re.search(r"git\s+config\s+.*--system", fseg)
+        ):
+            deny("sudo/doas/pkexec touching public-guard, git config or git hooks")
+        if any(resolves_protected(a, base) for a in args):
+            deny("sudo/doas/pkexec touching a protected public-guard or git config path")
+    if "find" in verbs and ("-delete" in toks or "-exec" in toks or "-execdir" in toks):
+        roots = []
+        for t in toks[toks.index("find") + 1 :]:
+            if t.startswith("-") or t in ("(", "!"):
+                break
+            roots.append(t)
+        danger_exec = "-delete" in toks or any(
+            os.path.basename(t) in WRITE_VERBS for t in toks[toks.index("find") :]
         )
-        mentions += [p for p in PROTECTED if p in joined and p not in mentions]
-        for t in toks[1:]:
-            if t.startswith("-"):
-                continue
-            cand = flat(cwd_hint.rstrip("/") + "/" + t)
-            mentions += [p for p in PROTECTED if p in cand and p not in mentions]
-    if mentions:
-        verbs = set(names)
-        interp_code = bool(verbs & INTERPRETERS) and any(t in ("-c", "-e", "-") for t in toks)
-        sed_inplace = "sed" in verbs and any(t.startswith("-i") or t == "--in-place" for t in toks)
-        redirect = ">" in seg
-        if verbs & WRITE_VERBS or redirect or interp_code or sed_inplace:
+        if danger_exec and (
+            mentions
+            or "public-guard" in fseg
+            or any(resolves_protected(r, base) for r in roots)
+            or any(
+                r in BROAD_ROOTS or is_ancestor_of_protected(r, base) and r not in (".", "./")
+                for r in roots
+            )
+        ):
+            deny(
+                "find -delete/-exec on a path that can reach public-guard config, git config or hooks"
+            )
+    if "ln" in verbs and any(resolves_protected(a, base) for a in args):
+        deny("ln involving a protected public-guard / git config location")
+    interp_code = bool(verbs & INTERPRETERS) and any(t in ("-c", "-e", "-") for t in toks)
+    sed_inplace = "sed" in verbs and any(t.startswith("-i") or t == "--in-place" for t in toks)
+    writing = (
+        bool(verbs & WRITE_VERBS) or bool(redirects) or ">" in seg or interp_code or sed_inplace
+    )
+    if writing:
+        hit = [a for a in args + redirects if resolves_protected(a, base)]
+        if hit:
+            deny(f"modifying {hit[0]} (public-guard config, cache, git config or git hooks)")
+        if mentions:
             deny(f"modifying {mentions[0]} (public-guard config, cache, git config or git hooks)")
 
 
@@ -263,6 +341,16 @@ def check(cmd: str, cwd: str | None) -> None:
     ):
         deny("GIT_CONFIG_* / GIT_EXEC_PATH can disable the hooks")
     segs = split_segments(cmd)
+    # interpreter fed code via -c / - / heredoc: any protected path anywhere in the command is suspect
+    word_set = {os.path.basename(t) for sg in segs for t in tokens(sg)}
+    if word_set & INTERPRETERS and (
+        "<<" in cmd or {"-c", "-e", "-"} & {t for sg in segs for t in tokens(sg)}
+    ):
+        hit = [q for q in PROTECTED if q in fall]
+        if hit:
+            deny(
+                f"script/interpreter code that mentions {hit[0]} (public-guard config, git config or hooks)"
+            )
     all_toks = [tokens(s) for s in segs]
     runs_git = any("git" in [os.path.basename(t) for t in toks] for toks in all_toks) or bool(
         re.search(r"\bgit\b", fall)
@@ -272,7 +360,8 @@ def check(cmd: str, cwd: str | None) -> None:
         check_segment(seg, toks, runs_git, cwd_hint, cwd)
         names = [os.path.basename(t) for t in toks]
         if names[:1] == ["cd"] and len(toks) > 1:
-            cwd_hint = toks[1]
+            nxt = os.path.expanduser(toks[1])
+            cwd_hint = nxt if os.path.isabs(nxt) or not cwd_hint else os.path.join(cwd_hint, nxt)
         # shell -c / interpreter payloads are checked recursively
         if set(names) & {"bash", "sh", "zsh", "eval"}:
             for t in toks:
@@ -288,6 +377,12 @@ def main() -> int:
     tool = data.get("tool_name")
     if tool in BLOCKED_MCP:
         deny("public-guard: use git push so the scan runs")
+    if tool in WRITE_TOOLS:
+        ti = data.get("tool_input") or {}
+        path = ti.get("file_path") or ti.get("notebook_path") or ti.get("path")
+        if isinstance(path, str) and resolves_protected(path, data.get("cwd")):
+            deny(f"{tool} into a protected public-guard / git config / git hooks location")
+        return 0
     if tool not in (None, "Bash"):
         return 0
     cmd = (data.get("tool_input") or {}).get("command")

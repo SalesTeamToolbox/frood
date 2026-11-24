@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install public-guard for the current user (idempotent).
-#   install.sh           copy guard.py + hooks to ~/.config/public-guard, set core.hooksPath
+#   install.sh           USER-level dev/test install: guard.py + hooks in ~/.config/public-guard, core.hooksPath
 #   install.sh --check   report drift only; exit 1 if anything is out of date
 #   install.sh --system  PRINT (do not run) the sudo commands that make the setup root-owned
 # Never overwrites an existing denylist.txt.
@@ -11,18 +11,43 @@ dest="$HOME/.config/public-guard"
 mode="install"
 [ "${1:-}" = "--check" ] && mode="check"
 if [ "${1:-}" = "--system" ]; then
+  # Canonical, root-owned layout. Prints the exact sudo commands; runs nothing.
+  grp="$(id -gn)"
+  usr="${USER:-$(id -un)}"
+  sys_tool() { for c in "/usr/bin/$1" "/usr/local/bin/$1"; do if [ -x "$c" ]; then echo "$c"; return 0; fi; done; }
+  gl="$(sys_tool gitleaks)"
+  ghp="$(sys_tool gh)"
+  gl_json="null"; [ -n "$gl" ] && gl_json="\"$gl\""
+  gh_json="null"; [ -n "$ghp" ] && gh_json="\"$ghp\""
   cat <<SYS
-# Run these yourself (public-guard never runs sudo). They put the hooks, the git config and the
-# private-remotes list where an agent running as your user cannot edit them.
-sudo install -d -o root -g root -m 755 /usr/local/lib/public-guard/hooks
+# Run these yourself; public-guard never runs sudo. They put the code, the config and the trust anchors
+# where an agent running as your user cannot edit them (root-owned, never group/world-writable).
+sudo install -d -o root -g root -m 755 /usr/local/lib/public-guard /usr/local/lib/public-guard/hooks
 sudo install -o root -g root -m 755 "$src/guard.py" /usr/local/lib/public-guard/guard.py
 sudo install -o root -g root -m 755 "$src"/hooks/* /usr/local/lib/public-guard/hooks/
 sudo git config --system core.hooksPath /usr/local/lib/public-guard/hooks     # writes /etc/gitconfig
 sudo install -d -o root -g root -m 755 /etc/public-guard
+SYS
+  if [ -z "$gl" ]; then echo "# WARNING: gitleaks not found in /usr/bin or /usr/local/bin; install it with your package manager first (pushes block without it)"; fi
+  if [ -z "$ghp" ]; then echo "# NOTE: gh not found in /usr/bin or /usr/local/bin; visibility will be 'unknown' (= guarded) until it is"; fi
+  cat <<SYS
+printf '{"gitleaks": $gl_json, "gh": $gh_json}\n' | sudo tee /etc/public-guard/tools.json >/dev/null
+sudo chown root:root /etc/public-guard/tools.json && sudo chmod 644 /etc/public-guard/tools.json
+SYS
+  if [ -f "$dest/denylist.txt" ]; then
+    echo "sudo install -o root -g $grp -m 0640 \"$dest/denylist.txt\" /etc/public-guard/denylist.txt   # copies your existing denylist"
+  else
+    cat <<SYS
+printf '# public-guard denylist (root-owned; edit with sudoedit)\n$HOME\nre:\\\\b$usr\\\\b\n' | sudo tee /etc/public-guard/denylist.txt >/dev/null
+sudo chown root:$grp /etc/public-guard/denylist.txt && sudo chmod 0640 /etc/public-guard/denylist.txt
+SYS
+  fi
+  cat <<SYS
 sudo sh -c 'test -e /etc/public-guard/private-remotes.txt || printf "# Non-GitHub remote URLs that are PRIVATE, one per line\n" > /etc/public-guard/private-remotes.txt'
 sudo chown root:root /etc/public-guard/private-remotes.txt && sudo chmod 644 /etc/public-guard/private-remotes.txt
-# Per-user data stays in ~/.config/public-guard (denylist.txt, tools.json); run install.sh (no flag) first.
-# Unset the per-user setting so only the system one applies:  git config --global --unset core.hooksPath
+# Afterwards drop the per-user setting so only the system one applies, and turn passwordless sudo off:
+git config --global --unset core.hooksPath
+# Verify:  python3 /usr/local/lib/public-guard/guard.py is-public https://git.example.com/x/y   (no USER-mode warning)
 SYS
   exit 0
 fi

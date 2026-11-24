@@ -348,6 +348,9 @@ def inproc(env, monkeypatch):
         if k.startswith("PUBLIC_GUARD_"):
             monkeypatch.delenv(k)
     monkeypatch.setattr(g, "UNTRUSTED_PREFIXES", ())
+    # stubs live in the test user's temp dir: make "the user" the trust anchor, rooted at tmp_path
+    monkeypatch.setattr(g, "TRUSTED_UID", os.getuid())
+    monkeypatch.setattr(g, "TRUST_ROOT", str(env.home.parent))
     monkeypatch.chdir(env.work)
     return g
 
@@ -411,6 +414,7 @@ def test_private_remotes_only_from_root_owned_system_file(env, inproc, monkeypat
     listing.write_text("# x\nhttps://git.example.com/x/y.git\n")
     monkeypatch.setattr(inproc, "PRIVATE_REMOTES_FILE", str(listing))
     # the file is owned by the test user, not root => ignored
+    monkeypatch.setattr(inproc, "TRUSTED_UID", os.getuid() + 1)
     assert inproc.classify("https://git.example.com/x/y")[0] == "public"
     monkeypatch.setattr(inproc, "TRUSTED_UID", os.getuid())
     assert inproc.classify("https://git.example.com/x/y")[0] == "private"
@@ -518,14 +522,13 @@ def test_missing_tools_json_blocks(env):
     assert res.returncode != 0 and "install.sh" in res.stderr
 
 
-def test_recorded_gh_under_tmp_is_refused(env, tmp_path):
-    stub_gh(env, "echo private")  # recorded gh sits under /tmp, which the real guard refuses
+def test_untrusted_recorded_gh_means_unknown_not_private(env, tmp_path):
+    stub_gh(env, "echo private")  # user-owned gh: fails the root-ownership check
     res = env.run(
         [PYTHON, str(GUARD), "is-public", "https://github.com/acme/w"],
         drop=("PUBLIC_GUARD_FORCE_PUBLIC",),
     )
-    assert res.returncode != 0 and "refusing gh" in res.stderr
-    assert res.stdout.strip() != "private"
+    assert res.stdout.strip() == "unknown"
 
 
 # ------------------------------------------------------------------------------ install
@@ -961,3 +964,289 @@ def test_install_system_prints_commands_and_changes_nothing(tmp_path):
     assert "/etc/public-guard" in out and "root" in out
     assert not e.guard_dir.exists()
     assert e.git("config", "--global", "--get", "core.hooksPath").stdout.strip() == ""
+
+
+# ------------------------------------------------------------------------------ round 3: root-owned trust anchor
+
+
+def make_tool(base: Path, name="gitleaks", body="#!/bin/sh\nexit 0\n", mode=0o755, dirmode=0o755):
+    d = base / "bin"
+    d.mkdir(parents=True, exist_ok=True)
+    d.chmod(dirmode)
+    f = d / name
+    f.write_text(body)
+    f.chmod(mode)
+    return f
+
+
+def test_user_owned_gitleaks_is_refused_outside_tmp_rules(env, inproc, monkeypatch):
+    """The critic's bypass: tools.json -> a user-owned fake outside /tmp (here the /tmp ban is off)."""
+    fake = make_tool(
+        env.home.parent / "mybin",
+        body='#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = "-r" ] && echo "[]" > "$2"; shift; done\n',
+    )
+    write_tools(env, gitleaks=str(fake))
+    monkeypatch.setattr(inproc, "TRUSTED_UID", 0)  # real policy: only root-owned binaries
+    with pytest.raises(inproc.GuardError, match="refusing gitleaks"):
+        inproc.run_gitleaks(["git"], ".", None, cwd=str(env.work))
+
+
+def test_tool_trust_checks_owner_and_every_parent_directory(env, inproc, monkeypatch):
+    root = env.home.parent
+    good = make_tool(root / "t1")
+    write_tools(env, gitleaks=str(good))
+    assert inproc.tool_path("gitleaks") == str(good.resolve())
+    group_w = make_tool(root / "t2", mode=0o775)
+    write_tools(env, gitleaks=str(group_w))
+    with pytest.raises(inproc.GuardError, match="group- or world-writable"):
+        inproc.tool_path("gitleaks")
+    world_dir = make_tool(root / "t3", dirmode=0o757)
+    write_tools(env, gitleaks=str(world_dir))
+    with pytest.raises(inproc.GuardError, match="group- or world-writable"):
+        inproc.tool_path("gitleaks")
+    # a writable ancestor between the file and the trust root also fails
+    deep = make_tool(root / "t4" / "a" / "b")
+    (root / "t4" / "a").chmod(0o777)
+    write_tools(env, gitleaks=str(deep))
+    with pytest.raises(inproc.GuardError, match="group- or world-writable"):
+        inproc.tool_path("gitleaks")
+    # owner mismatch
+    write_tools(env, gitleaks=str(good))
+    monkeypatch.setattr(inproc, "TRUSTED_UID", os.getuid() + 1)
+    with pytest.raises(inproc.GuardError, match="not owned"):
+        inproc.tool_path("gitleaks")
+
+
+def test_symlink_into_untrusted_dir_is_followed_and_refused(env, inproc):
+    root = env.home.parent
+    evil = make_tool(root / "evil", mode=0o777)
+    link_dir = root / "trusted"
+    link_dir.mkdir()
+    link = link_dir / "gitleaks"
+    link.symlink_to(evil)
+    write_tools(env, gitleaks=str(link))
+    with pytest.raises(inproc.GuardError, match="refusing gitleaks"):
+        inproc.tool_path("gitleaks")
+
+
+def test_failing_gh_is_unknown_and_failing_gitleaks_blocks(env, inproc):
+    stub_gh(env, "echo private")
+    assert inproc.classify("https://github.com/acme/w")[0] == "private"
+    (env.stub / "gh").chmod(0o777)  # now group/world-writable => fails the check
+    assert inproc.classify("https://github.com/acme/w")[0] == "unknown"
+    assert inproc.is_guarded("https://github.com/acme/w")
+    gl = make_tool(env.home.parent / "gl", mode=0o666)
+    write_tools(env, gitleaks=str(gl))
+    with pytest.raises(inproc.GuardError):
+        inproc.run_gitleaks(["git"], ".", None, cwd=str(env.work))
+
+
+def test_real_usr_bin_binaries_pass_the_real_policy(env):
+    """No monkeypatching: root-owned /usr/bin/gitleaks is accepted by the shipped policy."""
+    g = load_guard()
+    if not os.path.exists("/usr/bin/gitleaks"):
+        pytest.skip("no /usr/bin/gitleaks")
+    old = os.environ["HOME"]
+    os.environ["HOME"] = str(env.home)
+    try:
+        assert g.tool_path("gitleaks") == os.path.realpath("/usr/bin/gitleaks")
+    finally:
+        os.environ["HOME"] = old
+
+
+@pytest.fixture
+def sysmode(env, inproc, monkeypatch):
+    sysdir = env.home.parent / "etc-public-guard"
+    sysdir.mkdir()
+    sysdir.chmod(0o755)
+    monkeypatch.setattr(inproc, "SYSTEM_DIR", str(sysdir))
+    monkeypatch.setattr(inproc, "PRIVATE_REMOTES_FILE", str(sysdir / "private-remotes.txt"))
+    tool = make_tool(env.home.parent / "sysbin")
+    (sysdir / "tools.json").write_text(json.dumps({"gitleaks": str(tool), "gh": None}))
+    (sysdir / "tools.json").chmod(0o644)
+    (sysdir / "denylist.txt").write_text(f"{DENY_EMAIL}\n")
+    (sysdir / "denylist.txt").chmod(0o640)
+    (sysdir / "private-remotes.txt").write_text("https://git.example.com/a/b\n")
+    (sysdir / "private-remotes.txt").chmod(0o644)
+    return inproc, sysdir
+
+
+def test_system_mode_reads_config_from_system_dir(sysmode, env):
+    g, sysdir = sysmode
+    assert g.system_mode() and g.conf_dir() == str(sysdir)
+    assert g.tool_path("gitleaks")
+    assert [rx.pattern for rx in g.load_denylist()] == [g.re.escape(DENY_EMAIL)]
+    assert g.classify("https://git.example.com/a/b")[0] == "private"
+
+
+def test_system_mode_rejects_writable_or_foreign_config(sysmode, env, monkeypatch):
+    g, sysdir = sysmode
+    (sysdir / "tools.json").chmod(0o664)
+    with pytest.raises(g.GuardError, match="untrusted config"):
+        g.tool_path("gitleaks")
+    assert g.tool_path("gh", required=False) is None
+    (sysdir / "tools.json").chmod(0o644)
+    (sysdir / "denylist.txt").chmod(0o666)
+    with pytest.raises(g.GuardError, match="untrusted config"):
+        g.load_denylist()
+    (sysdir / "denylist.txt").chmod(0o640)
+    (sysdir / "private-remotes.txt").chmod(0o666)
+    assert g.classify("https://git.example.com/a/b")[0] == "public"  # ignored when writable
+    sysdir.chmod(0o777)  # the directory itself being writable breaks trust for everything in it
+    (sysdir / "private-remotes.txt").chmod(0o644)
+    assert g.classify("https://git.example.com/a/b")[0] == "public"
+    with pytest.raises(g.GuardError, match="untrusted config"):
+        g.load_denylist()
+    sysdir.chmod(0o755)
+    monkeypatch.setattr(g, "TRUSTED_UID", os.getuid() + 1)  # nobody we trust owns the dir
+    assert not g.system_mode()
+    assert g.conf_dir() == str(env.guard_dir)
+
+
+def test_user_mode_warns_on_every_run_and_system_mode_does_not(env, inproc, monkeypatch, capsys):
+    monkeypatch.setattr(inproc, "SYSTEM_DIR", str(env.home.parent / "does-not-exist"))
+    assert inproc.main(["pre-push", "origin", "/srv/local.git"]) == 0
+    assert "public-guard running in USER mode — install --system" in capsys.readouterr().err
+    res = env.git("push", "origin", "main", cwd=env.make_repo()[0])
+    assert "USER mode" in res.stderr
+    sysdir = env.home.parent / "sysd"
+    sysdir.mkdir()
+    sysdir.chmod(0o755)
+    monkeypatch.setattr(inproc, "SYSTEM_DIR", str(sysdir))
+    assert inproc.main(["pre-push", "origin", "/srv/local.git"]) == 0
+    assert "USER mode" not in capsys.readouterr().err
+
+
+def test_install_system_prints_full_root_owned_layout(tmp_path):
+    e = Env(tmp_path)
+    (e.guard_dir).mkdir(parents=True)
+    (e.guard_dir / "denylist.txt").write_text("mine\n")
+    out = e.run(["bash", str(INSTALL), "--system"]).stdout
+    for needle in (
+        "/usr/local/lib/public-guard/guard.py",
+        "/usr/local/lib/public-guard/hooks/",
+        "sudo git config --system core.hooksPath /usr/local/lib/public-guard/hooks",
+        "/etc/public-guard/tools.json",
+        "/etc/public-guard/private-remotes.txt",
+        "-m 0640",
+        "/etc/public-guard/denylist.txt",
+        "chown root:",
+    ):
+        assert needle in out, needle
+    assert f'"{e.guard_dir}/denylist.txt"' in out  # copies the existing user denylist
+    assert "sudo" in out and "turn passwordless sudo off" in out
+    assert (e.guard_dir / "denylist.txt").read_text() == "mine\n"  # nothing was changed
+    assert not (e.guard_dir / "tools.json").exists()
+
+
+# --- block-bypass: write tools, sudo, find, ln, globs ---------------------------------
+
+
+def bypass_tool(env, tool, path_key="file_path", path=None, cwd=None):
+    payload = json.dumps(
+        {"tool_name": tool, "tool_input": {path_key: path}, "cwd": str(cwd or env.work)}
+    )
+    return env.run([PYTHON, str(BYPASS)], input_=payload)
+
+
+@pytest.mark.parametrize(
+    "tool,key",
+    [
+        ("Write", "file_path"),
+        ("Edit", "file_path"),
+        ("MultiEdit", "file_path"),
+        ("NotebookEdit", "notebook_path"),
+    ],
+)
+def test_bypass_blocks_write_tools_into_protected_locations(env, tool, key):
+    h = env.home
+    (h / ".config" / "public-guard").mkdir(parents=True, exist_ok=True)
+    alias = env.work / "alias"
+    alias.symlink_to(h / ".config" / "public-guard")
+    repo, _ = env.make_repo()
+    for path in (
+        "~/.config/public-guard/tools.json",
+        str(h / ".config" / "public-guard" / "denylist.txt"),
+        str(h / ".cache" / "public-guard" / "visibility.json"),
+        "~/.gitconfig",
+        "~/.config/git/config",
+        "/etc/gitconfig",
+        "/etc/public-guard/tools.json",
+        "/usr/local/lib/public-guard/guard.py",
+        str(repo / ".git" / "hooks" / "pre-push"),
+        str(alias / "tools.json"),  # symlink alias
+        "alias/tools.json",  # relative through the symlink
+    ):
+        res = bypass_tool(env, tool, key, path)
+        assert res.returncode == 2, (tool, path, res.stderr)
+        assert "protected" in res.stderr
+
+
+def test_bypass_allows_write_tools_on_normal_files(env):
+    repo, _ = env.make_repo()
+    for path in (
+        str(repo / "src" / "a.py"),
+        str(ROOT / "ops" / "public-guard" / "guard.py"),
+        "notes.md",
+    ):
+        assert bypass_tool(env, "Write", "file_path", path, cwd=repo).returncode == 0, path
+    assert bypass_tool(env, "Edit", "file_path", str(repo / ".gitignore")).returncode == 0
+
+
+BYPASS_R3_DENIED = [
+    "sudo rm -rf /etc/public-guard",
+    "sudo git config --system --unset core.hooksPath",
+    "sudo sh -c 'echo x > /etc/gitconfig'",
+    "doas rm ~/.config/public-guard/denylist.txt",
+    "pkexec chmod 666 /usr/local/lib/public-guard/guard.py",
+    "sudo cp /tmp/x /etc/public-guard/tools.json",
+    "find ~/.config -name 'public-guard*' -delete",
+    "find ~/.config/public-guard -exec rm {} +",
+    "find / -name tools.json -delete",
+    "find ~ -name '.gitconfig' -exec rm {} ;",
+    "ln -s /tmp/x ~/.config/public-guard/tools.json",
+    "ln -sf ~/.config/public-guard /tmp/alias",
+    "ln -sfn /dev/null ~/.gitconfig",
+    "rm -rf ~/.config/pub*",
+    "rm ~/.config/public-g*/tools.json",
+    "cd ~/.config && cd public-g* && printf x > tools.json",
+    "cd ~/.config; rm -r public-guard",
+    "cat x > ~/.config/pub*/denylist.txt",
+    "mv /tmp/new.json /etc/public-guard/tools.json",
+    "python3 - <<EOF\nopen('/HOME_X/.config/public-guard/tools.json','w')\nEOF",
+]
+BYPASS_R3_ALLOWED = [
+    "sudo -n true",
+    "sudo pacman -S gitleaks",
+    "find . -name '*.pyc' -delete",
+    "find src -type f -exec grep -l foo {} +",
+    "ln -s ../README.md docs/readme",
+    "rm -rf build/ dist/",
+    "ls ~/.config/public-guard",
+    "cat /etc/public-guard/private-remotes.txt",
+    "git -C ops/public-guard status",
+]
+
+
+BYPASS_R3_DENIED = [c.replace("/HOME_X", "/ho" + "me/x") for c in BYPASS_R3_DENIED]
+
+
+@pytest.mark.parametrize("cmd", BYPASS_R3_DENIED)
+def test_bypass_round3_denied(env, pushrepo, cmd):
+    (env.home / ".config" / "public-guard").mkdir(parents=True, exist_ok=True)
+    res = bypass(env, cmd, cwd=pushrepo)
+    assert res.returncode == 2, (cmd, res.stderr)
+
+
+@pytest.mark.parametrize("cmd", BYPASS_R3_ALLOWED)
+def test_bypass_round3_allowed(env, pushrepo, cmd):
+    (env.home / ".config" / "public-guard").mkdir(parents=True, exist_ok=True)
+    res = bypass(env, cmd, cwd=pushrepo)
+    assert res.returncode == 0, (cmd, res.stderr)
+
+
+def test_readme_states_the_limits_plainly():
+    text = (GUARD_DIR / "README.md").read_text()
+    for phrase in ("string tripwire", "printf --no-ver", "passwordless sudo", "push protection"):
+        assert phrase in text, phrase
+    assert len(text.splitlines()) <= 40

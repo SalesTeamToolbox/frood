@@ -21,6 +21,7 @@ import os
 import re
 import select
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -32,8 +33,12 @@ HEX_RE = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
 # Tool binaries must never come from a world-writable or repo-local location.
 UNTRUSTED_PREFIXES = ("/tmp", "/var/tmp", "/dev/shm")
 # private remotes may only be declared by root (an agent running as the user cannot write here).
-PRIVATE_REMOTES_FILE = "/etc/public-guard/private-remotes.txt"
+SYSTEM_DIR = "/etc/public-guard"
+PRIVATE_REMOTES_FILE = SYSTEM_DIR + "/private-remotes.txt"
+# Trust anchor: files/binaries the guard relies on must be owned by this uid and neither they nor
+# any parent directory up to TRUST_ROOT may be group- or world-writable.
 TRUSTED_UID = 0
+TRUST_ROOT = "/"
 CACHE_TTL = 24 * 3600
 POLICY_FILES = (".public-guard-allow", ".gitleaks.toml")
 MAX_SHOWN = 50
@@ -77,8 +82,45 @@ def home() -> str:
     return os.path.expanduser("~")
 
 
+def untrusted_reason(path: str):
+    """None when `path` (resolved) and all its parents up to TRUST_ROOT are trusted, else why not."""
+    real = os.path.realpath(path)
+    root = os.path.realpath(TRUST_ROOT)
+    cur = real
+    while True:
+        try:
+            st = os.stat(cur)
+        except OSError as exc:
+            return f"cannot stat {cur}: {exc}"
+        if st.st_uid != TRUSTED_UID:
+            return f"{cur} is not owned by the trusted owner (uid {st.st_uid})"
+        if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            return f"{cur} is group- or world-writable"
+        if cur == root or cur == os.path.dirname(cur):
+            return None
+        cur = os.path.dirname(cur)
+
+
+def system_mode() -> bool:
+    try:
+        st = os.stat(SYSTEM_DIR)
+    except OSError:
+        return False
+    return stat.S_ISDIR(st.st_mode) and st.st_uid == TRUSTED_UID
+
+
 def conf_dir() -> str:
+    if system_mode():
+        return SYSTEM_DIR
     return os.path.join(home(), ".config", "public-guard")
+
+
+def require_trusted_config(path: str) -> None:
+    """In system mode, config files must be root-owned and not writable by group/other."""
+    if system_mode():
+        why = untrusted_reason(path)
+        if why:
+            raise GuardError(f"untrusted config {path}: {why}; fix with install.sh --system")
 
 
 def cache_file() -> str:
@@ -90,7 +132,17 @@ def tools_file() -> str:
 
 
 def tool_path(name: str, required: bool = True):
-    """Absolute path of a helper binary recorded by install.sh. Never searches PATH."""
+    """Absolute path of a helper binary recorded by install.sh. Never searches PATH.
+
+    The binary (after realpath) and every parent directory must be owned by root and not group- or
+    world-writable. A failing gitleaks blocks; a failing gh (required=False) means "unknown".
+    """
+    if not required:
+        try:
+            return tool_path(name, required=True)
+        except GuardError:
+            return None
+    require_trusted_config(tools_file())
     try:
         with open(tools_file(), encoding="utf-8") as fh:
             data = json.load(fh)
@@ -110,6 +162,9 @@ def tool_path(name: str, required: bool = True):
         raise GuardError(
             f"recorded {name} ({recorded}) is missing or not executable; run install.sh"
         )
+    why = untrusted_reason(real)
+    if why:
+        raise GuardError(f"refusing {name} at {real}: {why}")
     banned = list(UNTRUSTED_PREFIXES)
     top = git(["rev-parse", "--show-toplevel"], check=False).stdout.strip()
     if top:
@@ -224,11 +279,9 @@ def gh_visibility(owner: str, repo: str):
 
 def private_remote_list() -> set[str]:
     path = PRIVATE_REMOTES_FILE
-    try:
-        st = os.stat(path)
-    except OSError:
+    if not os.path.exists(path):
         return set()
-    if st.st_uid != TRUSTED_UID:
+    if untrusted_reason(path):
         return set()
     return {norm_url(x) for x in read_lines(path) if x and not x.startswith("#")}
 
@@ -326,6 +379,7 @@ def load_denylist():
             lines = [ln.strip() for ln in fh.read().splitlines()]
     except OSError as exc:
         raise GuardError(f"denylist {path} is missing or unreadable - run install.sh") from exc
+    require_trusted_config(path)
     entries = []
     for ln in lines:
         if not ln or ln.startswith("#"):
@@ -1011,6 +1065,8 @@ def main(argv: list[str]) -> int:
         sys.stdout.write(__doc__ or "")
         return 0
     cmd, rest = argv[0], argv[1:]
+    if cmd in ("pre-push", "pre-commit", "audit") and not system_mode():
+        sys.stderr.write("public-guard running in USER mode — install --system\n")
     try:
         if cmd == "pre-push":
             return cmd_pre_push(rest)
