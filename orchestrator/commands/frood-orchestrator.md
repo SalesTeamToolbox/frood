@@ -101,6 +101,36 @@ question the owner must decide.
    Mandate, the board ticket, the plan file and the stream, so the next session's `/frood-next <stream>` finds it.
    Never hand-write a ticket JSON under `.opencode/board/tickets/` — that is the case `/frood-next` cannot see.
 
+### Dispatch in parallel
+
+When the plan has several tickets on the board, find out which may run at once before starting any:
+`node {{ORCH_REPO}}/bin/dispatch.mjs plan <plan-file|ticket-id...>` prints ordered groups. Tickets in one group are
+independent (no shared file, no `depends:` line between them); groups run one after another: **group N+1 starts only when every ticket of group N is shipped**. Overlap means
+serial; the check never guesses. `plan` also holds a ticket that shares a file with a ticket already in flight on the
+board, or waits on an unshipped one (`held`), and lists a ticket whose `depends:` names an id not on the board
+(`unknown`; fix the typo).
+
+<!-- cc-only -->
+One desktop session per ticket of the first group, each running `/frood-next <stream>` for that ticket's stream
+(start it with the desktop app's session tool, or by hand). For every session, in this order:
+1. `node {{ORCH_REPO}}/bin/dispatch.mjs cap` — exit 1 means the build cap is reached (default 2 building; set
+   `max_parallel` in `.opencode/board/adapter.json`): start no more until a ticket reaches `ready`.
+2. Start the session, then record it: `node {{ORCH_REPO}}/bin/board.mjs session <ticket> --session <sid>`
+   (stored in `assignment.session`; the session's own `claim` keeps it).
+3. **You write this sentence into every dispatched Mandate**, before the session starts: "Stop at `board ready`;
+   never run `train depart`. The dispatcher owns the train." You own the train.
+
+`node {{ORCH_REPO}}/bin/desk.mjs status` shows each ticket's session and stage; the dispatched streams' events arrive
+through the one `watch --events`, so a single desk session handles every escalation. The train stays serial: before
+departing a ticket, `dispatch.mjs cap --kind train --exclude <that ticket>` must pass (default 1: no other ticket
+may be in the train), and never run two suites at once (box-wide lock).
+<!-- /cc-only -->
+<!-- oc-only -->
+OpenCode has no desktop session tool. Run the first group's tickets serially, or launch each as the headless
+`oc-worker` run of step 4 (the `WORKER_SLOTS` cap of 2 still applies; `dispatch.mjs cap` counts board tickets too).
+The train stays serial.
+<!-- /oc-only -->
+
 ## 4. Delegate: worker → critic loop
 
 You are the orchestrator: you plan, write Mandates, judge, and merge. Code is written
