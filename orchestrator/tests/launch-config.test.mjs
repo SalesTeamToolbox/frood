@@ -133,7 +133,11 @@ test("parseChoice / choiceConfig: numbers, words, empty, invalid, out of range",
   assert.deepEqual(choiceConfig("terminal", "ignored", "desktop"), { mode: "terminal" });
 });
 
-test("CLI --ask on a real TTY: EOF at the prompt takes the detected default, writes it, exits 0", () => {
+// The pty harness below is python3 (`pty.fork`, `os.waitstatus_to_exitcode`). A host without python3 cannot run it,
+// so the test skips there instead of failing on a `spawnSync ENOENT`.
+const HAS_PYTHON3 = spawnSync("python3", ["--version"], { stdio: "ignore" }).status === 0;
+
+test("CLI --ask on a real TTY: EOF at the prompt takes the detected default, writes it, exits 0", { skip: HAS_PYTHON3 ? false : "python3 not on PATH (needed to allocate the pty)" }, () => {
   const h = mkdtemp();
   const script = `
 import os, pty, sys, time

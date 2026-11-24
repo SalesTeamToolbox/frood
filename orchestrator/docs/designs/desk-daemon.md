@@ -98,7 +98,11 @@ its peer-mail `peers.last_seen`, its OpenCode `session` row `time_updated`, and 
 session found in no store is judged by stream activity. Detection is `orphan.mjs` (`streamOrphaned`).
 
 The daemon pages the owner once per stream per claim: ledger `orphaned` in `state.json`, key
-`orphan:<stream>:<held_at|unheld>` (separate from `pagedIds`; a new claim re-arms it). It spawns
+`orphan:<stream>:<held_at|unheld>` (separate from `pagedIds`; a new claim re-arms it). Each poll's sweep also
+prunes entries that can no longer page anything, so the ledger does not grow forever: an entry whose stream has no
+pointer file (deleted), is done or parked (nothing to resume), or whose `<held_at>` part is not the stream's current
+claim (superseded — the newer claim has its own key); plus the original rule, an entry whose stream has no open
+escalation left. A live orphaned stream's current entry is kept, which is what makes the page once-only. It spawns
 `orphan-notice.mjs <stream>` detached: `notify-send -u critical -A resolve="Resolve in new session" --wait`; on click it opens a session on `/frood-next <stream>` in the stream's repo. How is `~/.config/orchestrator/launch.json`
 (`bin/launch-config.mjs`; chosen at setup, `--set` to change): `desktop` hands `claude://code/new?q=...&folder=...` to
 `xdg-open` (the Claude desktop app); `terminal` runs `claude` via `xdg-terminal-exec`. An OpenCode holder always gets

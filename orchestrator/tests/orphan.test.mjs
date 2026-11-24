@@ -186,9 +186,10 @@ test("sweepOrphans: N escalations on one dead stream page once; a new claim re-a
     assert.equal(readDaemonState().orphaned.length, 1);
     assert.match(readDaemonState().orphaned[0], /^orphan:dead:/);
     // a new claim (new held_at) on a stream that goes quiet again re-arms the page
-    mkStream(h, "dead", { ageMin: 300, held_by: "cc", held_at: iso(299) });
+    const reheld = iso(299);
+    mkStream(h, "dead", { ageMin: 300, held_by: "cc", held_at: reheld });
     assert.deepEqual(sweepOrphans(), ["dead"], "new held_at -> new ledger key");
-    assert.equal(readDaemonState().orphaned.length, 2);
+    assert.deepEqual(readDaemonState().orphaned, [`orphan:dead:${reheld}`], "the superseded claim's entry is pruned");
   });
 });
 
@@ -204,6 +205,48 @@ test("sweepOrphans: once its escalations are resolved a later one on the same st
     assert.deepEqual(readDaemonState().orphaned, [], "ledger entry pruned");
     escalate("again", "k2");
     assert.deepEqual(sweepOrphans(), ["again"], "k2 pages");
+  });
+});
+
+// The `orphaned` ledger as earlier polls left it: some entries can no longer page anything.
+function seedLedger(h, orphaned) {
+  const f = path.join(h, ".config", "orchestrator", "desk-daemon", "state.json");
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ retries: {}, paged: [], pagedIds: [], errors: {}, orphaned }));
+}
+
+test("sweepOrphans: ledger entries for a deleted stream, a done stream and a superseded claim are pruned", () => {
+  const h = mkdtemp();
+  const heldAt = iso(300);
+  mkStream(h, "done1", { status: "done", held_by: "cc", held_at: heldAt });
+  mkStream(h, "parked1", { status: "parked", held_by: "cc", held_at: heldAt });
+  mkStream(h, "live1", { ageMin: 300, held_by: "cc", held_at: heldAt });
+  withHome(h, { ORCH_NO_NOTIFY: "1" }, () => {
+    escalate("done1");
+    escalate("parked1");
+    escalate("live1");
+    seedLedger(h, [
+      "orphan:gone:unheld", // the pointer file was deleted
+      `orphan:done1:${heldAt}`, // the stream finished after it paged
+      `orphan:parked1:${heldAt}`, // the stream was parked after it paged
+      `orphan:live1:${iso(400)}`, // an old claim, superseded by heldAt
+      `orphan:live1:${heldAt}`, // the live stream's current claim
+    ]);
+    assert.deepEqual(sweepOrphans(), [], "nothing to page: live1 was already paged for this claim");
+    assert.deepEqual(readDaemonState().orphaned, [`orphan:live1:${heldAt}`], "only the live stream's current entry survives");
+  });
+});
+
+test("sweepOrphans: a live orphaned stream keeps its current entry and is never re-paged", () => {
+  const h = mkdtemp();
+  const heldAt = iso(300);
+  mkStream(h, "still", { ageMin: 300, held_by: "cc", held_at: heldAt });
+  withHome(h, { ORCH_NO_NOTIFY: "1" }, () => {
+    escalate("still", "k1");
+    assert.deepEqual(sweepOrphans(), ["still"]);
+    assert.deepEqual(sweepOrphans(), [], "already paged for this claim");
+    assert.deepEqual(sweepOrphans(), [], "and again");
+    assert.deepEqual(readDaemonState().orphaned, [`orphan:still:${heldAt}`], "kept: current claim, escalation still open");
   });
 });
 

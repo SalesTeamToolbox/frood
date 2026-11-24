@@ -775,13 +775,22 @@ function orphanPage(stream) {
 }
 
 // A stream with no open escalation left forgets its ledger entries, so a later escalation on it pages again.
+// An entry also goes when the claim it recorded can never page again: the stream is deleted (no pointer file),
+// finished or parked (nothing to resume), or the stream's current held_at differs from the entry's (a newer claim
+// re-armed paging with its own key, and the old page must not suppress anything). A live orphaned stream's current
+// entry stays, so a second poll does not page it again.
 function pruneOrphanLedger() {
   if (DAEMON_DRY()) return;
   try {
     const state = readDaemonState();
     const keep = state.orphaned.filter((id) => {
-      const stream = /^orphan:([^:]+):/.exec(id)?.[1];
-      return !stream || openEscalations(stream).length > 0;
+      const m = /^orphan:([^:]+):(.*)$/.exec(id);
+      if (!m) return true; // unparseable: leave it alone, it can never match a stream either way
+      const [, stream, claim] = m;
+      const s = readStream(stream); // null for a deleted stream and for an unreadable one: both are gone
+      if (!s || s.status === "done" || s.status === "parked") return false;
+      if (claim !== (s.held_at ?? "unheld")) return false; // superseded claim
+      return openEscalations(stream).length > 0;
     });
     if (keep.length !== state.orphaned.length) {
       state.orphaned = keep;
