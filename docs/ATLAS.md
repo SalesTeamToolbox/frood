@@ -421,6 +421,10 @@ handler: orchestrator/bin/oc-worker.mjs --role <name> (expands to --agent/--fall
 decides: which OpenCode agent pool to dispatch first for a worker run; worker-nvidia first for routine tickets, Nvidia 429 resumes on the same session, two stalled/timeout receipts drop worker-nvidia for the ticket
 - idle session woken by peer-mail → hooks/peer-mail-wake.js (Claude Code Stop hook, asyncRewake; polls the mailbox and exits 2 to wake the idle model)
 
+### oc-worker dispatch preflight
+handler: orchestrator/bin/oc-worker.mjs (--stream ticket.json preflight, caller-cwd --out/--report resolution); orchestrator/bin/board.mjs create (blast-radius test: refusal)
+decides: refused at dispatch/create time rather than late: --stream without dirname(--out)/ticket.json exits 2 before spawning; relative --report resolves against caller cwd; board create refuses a non-"unchanged" blast-radius bullet with no test: path
+
 ## How to keep this map accurate
 
 - A handler rename is a same-commit map update: edit the `handler:` line in the

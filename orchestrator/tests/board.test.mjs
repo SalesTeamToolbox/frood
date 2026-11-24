@@ -234,6 +234,39 @@ test("5. a Mandate with no blast-radius bullets is refused", () => {
   assert.equal(missing.status, 2, missing.stderr);
 });
 
+test("5c. create refuses a changed-expectation bullet with no test: path, naming the bullet", () => {
+  const c = mk();
+  const bullets = "**Blast radius:**\n\n- `run()` in `bin/main.mjs` — unchanged; test: bin/demo.test.mjs\n- `parse()` in `bin/other.mjs` — changed\n";
+  const mandate = path.join(c.root, "mandate-changed.md");
+  fs.writeFileSync(mandate, `# Ticket\n\n**Atlas refs consulted / updated?** no map\n\n${bullets}\n`);
+  const r = board(c, "create", "changed-no-test", "--mandate", mandate, "--scope", "bin/demo.mjs");
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /changes expectations but names no test path/);
+  assert.match(r.stderr, /bin\/other\.mjs/);
+  assert.equal(fs.existsSync(ticketFile(c, "changed-no-test")), false, "nothing was written");
+
+  // Same bullet WITH a test path: create accepts it.
+  const bulletsWithTest = "**Blast radius:**\n\n- `parse()` in `bin/other.mjs` — changed; test: bin/other.test.mjs\n";
+  const mandate2 = path.join(c.root, "mandate-changed-with-test.md");
+  fs.writeFileSync(mandate2, `# Ticket\n\n**Atlas refs consulted / updated?** no map\n\n${bulletsWithTest}\n`);
+  const ok = board(c, "create", "changed-with-test", "--mandate", mandate2, "--scope", "bin/demo.mjs");
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.deepEqual(ok.ticket.blast_radius, [{ caller: "`parse()` in `bin/other.mjs`", expect: "changed", test: "bin/other.test.mjs" }]);
+});
+
+test("5d. an expect starting with 'unchanged' (e.g. 'unchanged (reason)') counts as unchanged at create", () => {
+  const c = mk();
+  const bullets = "**Blast radius:**\n\n- `run()` in `bin/main.mjs` — unchanged (reason); test: bin/demo.test.mjs\n- `parse()` in `bin/other.mjs` — expected: unchanged; must still pass\n";
+  const mandate = path.join(c.root, "mandate-unchanged-reason.md");
+  fs.writeFileSync(mandate, `# Ticket\n\n**Atlas refs consulted / updated?** no map\n\n${bullets}\n`);
+  const r = board(c, "create", "unchanged-reason", "--mandate", mandate, "--scope", "bin/demo.mjs");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.ticket.blast_radius, [
+    { caller: "`run()` in `bin/main.mjs`", expect: "unchanged (reason)", test: "bin/demo.test.mjs" },
+    { caller: "`parse()` in `bin/other.mjs`", expect: "expected: unchanged; must still pass" },
+  ]);
+});
+
 // atlas-m1: the Mandate's map answer. A repo without a map still answers ("no map"); silence is refused.
 test("5b. a Mandate with no 'Atlas refs consulted / updated?' line is refused; an empty label is not an answer", () => {
   const c = mk();

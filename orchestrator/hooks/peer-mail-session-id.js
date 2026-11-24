@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * peer-mail identity + inbox hook (Claude Code SessionStart).
+ * peer-mail identity + inbox hook (Claude Code SessionStart + UserPromptSubmit).
  * Managed in the Frood repo's orchestrator/ directory ({{ORCH_REPO}}/hooks) — edit there, then install.
  *
  * A Claude Code session has no env var with its id, so this hook reads the hook payload's
@@ -8,7 +8,13 @@
  * injects it as `peer-mail id`. It also opens the mailbox READ-ONLY and lists unread subjects,
  * so mail is seen at start without relying on the model remembering to poll.
  *
- * Never breaks session start: any failure exits 0 (with just the id line if the mailbox read fails).
+ * SessionStart keeps today's output byte-for-byte (id line, then unread mail or "no unread").
+ * UserPromptSubmit prints nothing when there is no unread mail; otherwise it emits one
+ * hookSpecificOutput notice: `peer-mail: N unread …` plus up to 6 `id from: subject` lines,
+ * so mail that arrives mid-session surfaces at the next prompt instead of waiting for the
+ * next SessionStart.
+ *
+ * Never breaks a prompt: any failure exits 0 with no output.
  */
 const os = require("node:os");
 const path = require("node:path");
@@ -32,13 +38,36 @@ function unreadFor(id) {
   }
 }
 
+function noticeFor(id) {
+  try {
+    const rows = unreadFor(id);
+    if (!rows.length) return null;
+    let ctx = `peer-mail: ${rows.length >= 6 ? "6+" : rows.length} unread message(s) — read with peer_read { for_session_id, id }:`;
+    for (const r of rows) ctx += `\n- ${r.id} from ${r.from_title || "?"}: ${r.subject}`;
+    return ctx;
+  } catch {
+    return null;
+  }
+}
+
 let raw = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => (raw += d));
 process.stdin.on("end", () => {
   try {
-    const id = JSON.parse(raw || "{}").session_id;
+    const payload = JSON.parse(raw || "{}");
+    const event = payload && typeof payload === "object" ? payload.hook_event_name : null;
+    const id = payload && typeof payload.session_id === "string" ? payload.session_id : null;
     if (typeof id !== "string" || !id) process.exit(0);
+
+    if (event === "UserPromptSubmit") {
+      const ctx = noticeFor(id);
+      if (ctx) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: ctx } }));
+      process.exit(0);
+      return;
+    }
+
+    // SessionStart (or anything else): today's output, byte-for-byte.
     let ctx =
       `peer-mail: your session id for the peer_* messaging tools is ${id}. ` +
       `Pass it as from_session_id / for_session_id; other sessions address you by it ([claude] in peer_sessions).`;
@@ -53,7 +82,7 @@ process.stdin.on("end", () => {
     }
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: ctx } }));
   } catch {
-    // never break session start
+    // never break session start or a prompt
   }
   process.exit(0);
 });

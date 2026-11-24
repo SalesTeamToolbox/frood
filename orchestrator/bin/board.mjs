@@ -625,6 +625,13 @@ function parseBlastRadius(md) {
   }
   return out;
 }
+// A blast-radius expectation is "unchanged" when it is exactly "unchanged" or starts with
+// "unchanged" (e.g. "unchanged (reason)", "unchanged; must still pass"). Strip a leading
+// "expected:" prefix first. Case-insensitive.
+function isUnchangedExpect(expect) {
+  const e = String(expect ?? "").replace(/^expected:\s*/i, "");
+  return /^unchanged\b/i.test(e);
+}
 // Atlas line: the Mandate says what the repo map (`docs/ATLAS.md`, `docs/atlas/`, or the map the repo's
 // CLAUDE.md/AGENTS.md names) said about the entry points the ticket touches, and which map lines change.
 // Written as a bold label with the answer after it ("**Atlas refs consulted / updated?** no map in this repo")
@@ -663,6 +670,13 @@ function cmdCreate(ctx) {
   const mand = fs.readFileSync(mandate, "utf8");
   const blast = parseBlastRadius(mand);
   if (!blast.length) throw new Refuse("mandate has no blast-radius bullets");
+  // A changed-expectation bullet must name a test path: create refuses it here, not at ready
+  // after critic rounds and gates, when there is no command to amend the blast radius.
+  for (const b of blast) {
+    if (!isUnchangedExpect(b.expect) && !b.test) {
+      throw new Refuse(`blast radius "${b.caller}" changes expectations but names no test path`);
+    }
+  }
   // The Atlas line is the Mandate's map answer; `no map` is an answer, silence is not (atlas-m1).
   if (!parseAtlasRefs(mand)) throw new Refuse('mandate has no Atlas line ("Atlas refs consulted / updated?" — write "no map" when the repo has none)');
   const want = one(o, "expect-epoch");
@@ -1126,7 +1140,7 @@ function cmdReady(ctx, id) {
       if (!ok) throw new Refuse(`gate ${argv.join(" ")} has no exit 0 at ${sig.reviewed_sha}`);
     }
     for (const b of t.blast_radius) {
-      if (b.expect === "unchanged") continue;
+      if (isUnchangedExpect(b.expect)) continue;
       if (!b.test) throw new Refuse(`blast radius "${b.caller}" changed expectations but names no test path`);
       const abs = path.resolve(wt, b.test);
       const rel = path.relative(wt, abs);

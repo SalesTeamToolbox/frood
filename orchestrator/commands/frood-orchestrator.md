@@ -191,12 +191,14 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    subscription), as a background job — one chain source: `oc-worker.mjs --role worker|worker-strong`.
    `node {{ORCH_REPO}}/bin/oc-worker.mjs --role worker --dir <worktree> --prompt <mandate.md> --report <run dir>/report.md --out <run dir>/worker-r1.md --stream <name>`
    (`--role worker-strong` for hard tickets; add `--session <id from the last receipt>` on revision rounds so the worker keeps its context — switch to the next stronger pool only after 2 rounds on one model). Quota/rate-limit errors re-pool automatically; Nvidia 429s are resumed on the same session, never skipped ahead (per-ticket: after 2 worker-nvidia drops in this run dir, worker-nvidia is left out). The Claude Code `worker` agent (Sonnet) is never an automatic fallback — use it only when every OpenCode pool, including Nvidia after its retry, is out, and the receipt states that reason.
+   `--stream` requires `dirname(--out)/ticket.json` to exist: oc-worker refuses with exit 2 before spawning when it is missing, and refuses a relative `--report` (exit 2, pass an absolute run-dir path). The agent is told the absolute report path (`Write your report to <abs> (absolute path; not the worktree)`) so the report lands in the run dir, not the worktree.
    <!-- /cc-only -->
    <!-- oc-only -->
    From OpenCode, launch the same headless run in the background — the identical command Claude Code runs, so a desk
    in either harness follows it and a Claude Code `/frood-desk` can pick up work started here.
    `node {{ORCH_REPO}}/bin/oc-worker.mjs --role worker --dir <worktree> --prompt <mandate.md> --report <run dir>/report.md --out <run dir>/worker-r1.md --stream <name>`
    (`--role worker-strong` for hard tickets; add `--session <id from the last receipt>` on revision rounds so the worker keeps its context — switch to the next stronger pool only after 2 rounds on one model). Quota/rate-limit errors re-pool automatically; Nvidia 429s are resumed on the same session, never skipped ahead (per-ticket: after 2 worker-nvidia drops in this run dir, worker-nvidia is left out). The Claude Code `worker` agent (Sonnet) is never an automatic fallback — only when every OpenCode pool is out, and the receipt states that reason. The machine-wide `WORKER_SLOTS` cap is 2 — a third launch waits, never fails.
+   `--stream` requires `dirname(--out)/ticket.json` to exist: oc-worker refuses with exit 2 before spawning when it is missing, and refuses a relative `--report` (exit 2, pass an absolute run-dir path). The agent is told the absolute report path (`Write your report to <abs> (absolute path; not the worktree)`) so the report lands in the run dir, not the worktree.
    In-session `subagent({ agent: "worker" })` is the escape hatch for a quick ticket the owner does not want a desk
    to follow: no stream, no desk events.
    <!-- /oc-only -->

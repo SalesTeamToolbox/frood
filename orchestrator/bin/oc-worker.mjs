@@ -621,6 +621,25 @@ function streamPreflight(a) {
   if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(stream) || !fs.existsSync(path.join(streamsDir(), `${stream}.json`))) throw new StreamRefused(`no stream ${stream}`, 2);
   const out = path.resolve(a.out);
   if (fs.existsSync(out) || fs.existsSync(out + ".receipt.json")) throw new StreamRefused("out exists — use a fresh --out per run", 2);
+  // --stream needs a ticket.json beside --out that parses and carries a non-empty string `ticket`:
+  // the run id keys off the ticket, and the desk cannot act on a run that has no ticket.
+  // Refuse before a slot is taken or anything spawns.
+  const ticketPath = path.join(path.dirname(out), "ticket.json");
+  if (!fs.existsSync(ticketPath)) throw new StreamRefused(`--stream needs ${ticketPath} beside --out`, 2);
+  let ticket;
+  try {
+    ticket = JSON.parse(fs.readFileSync(ticketPath, "utf8"));
+  } catch {
+    throw new StreamRefused(`--stream needs ${ticketPath} beside --out: not valid JSON`, 2);
+  }
+  if (typeof ticket.ticket !== "string" || !ticket.ticket) {
+    throw new StreamRefused(`--stream needs ${ticketPath} beside --out: missing non-empty string "ticket"`, 2);
+  }
+  // With --stream the agent writes the report itself (cwd = --dir), so a relative --report would
+  // land in the worktree, not the caller's run dir. Require an absolute run-dir path.
+  if (a.report && !path.isAbsolute(a.report)) {
+    throw new StreamRefused(`--report must be an absolute path with --stream (pass the run-dir path, e.g. ${path.join(path.dirname(out), "report.md")})`, 2);
+  }
   const run = runName(a);
   const ev = { key: `run:${run}:queued`, kind: "queued", run, out, pid: process.pid, pid_start: processStart(process.pid), agent: a.agent, ticket: path.join(path.dirname(out), "ticket.json") };
   let added;
@@ -797,7 +816,10 @@ export async function runWorker(a) {
     visionFooter = `\n- You may receive images. Analyze them as part of your task.`;
     visionEnv = { ORCH_VISION: "1" };
   }
-  const base = promptText + FOOTER + readonlyFooter + visionFooter;
+  // The agent writes the report itself (cwd = --dir), so point it at the absolute report path:
+  // a relative --report would land in the worktree, not the caller's run dir.
+  const reportLine = a.report ? `\nWrite your report to ${path.resolve(a.report)} (absolute path; not the worktree).` : "";
+  const base = promptText + reportLine + FOOTER + readonlyFooter + visionFooter;
   const cliFor = (session, message) => {
     const cli = ["run", "--format", "json", "--auto", "--agent", a.agent, "--title", title];
     if (a.model) cli.push("--model", a.model);
@@ -992,7 +1014,7 @@ export async function runWorker(a) {
       cost: Number(cost.toFixed(6)),
       first_line: (sum.final.split("\n").find((l) => l.trim()) || "").slice(0, 200),
       // The verdict, wherever the agent put it: final message first, then the --report file.
-      verdict: statusLine(sum.final) || (a.report ? statusLine(readText(path.resolve(dir, a.report))) : "") || null,
+      verdict: statusLine(sum.final) || (a.report ? statusLine(readText(path.resolve(a.report))) : "") || null,
       out: sum.final || (killReason && all.trim()) ? out : null,
       partial: Boolean(killReason && all.trim()),
       errors,

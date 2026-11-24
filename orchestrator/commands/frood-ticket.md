@@ -25,7 +25,9 @@ Write `<repo>/.opencode/reports/<id>/mandate.md` — the same shape `/frood-orch
 - **Scope** — the files the worker may touch, and the files it may not.
 - **Blast radius** — one bullet per function/route/key/format the ticket changes: its callers
   (`git grep`, or a `scout`) and the expected behaviour at each afterwards ("unchanged", or exactly what
-  changes). At least one bullet is required — `board.mjs create` refuses without it.
+  changes). At least one bullet is required — `board.mjs create` refuses without it. A bullet whose
+  expectation is not "unchanged" must carry a `; test: <path>` — `create` refuses it at ticket creation,
+  not after critic rounds and gates.
 - **Atlas refs consulted / updated?** — what the repo map said about these entry points and which map lines the
   diff must update. Write `no map` plainly when the repo has none; silence is refused.
 - **Pass bars** — the exact gate commands and the expected output, plus the tests the diff must add or keep green.

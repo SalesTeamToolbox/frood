@@ -728,7 +728,11 @@ function streamHome(name = "m6a") {
 function streamRun(h, extraEnv, outName, ...flags) {
   const prompt = path.join(h, "mandate.md");
   fs.writeFileSync(prompt, "Do the thing.");
-  const out = path.join(h, "run", outName);
+  const runDir = path.join(h, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  // --stream now requires ticket.json beside --out: write it so the preflight passes.
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir }));
+  const out = path.join(runDir, outName);
   const r = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", h, "--prompt", prompt, "--out", out, "--stream", "m6a", ...flags], {
     env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h, ...extraEnv },
     encoding: "utf8",
@@ -748,9 +752,9 @@ test("--stream appends queued then one run-done; no stream flag creates no strea
   const r = streamRun(h, {}, "worker-r1.md");
   assert.equal(r.status, 0, r.stderr);
   const ev = eventsOf(sd);
-  // no ticket.json in the run dir: the id's ticket part is the run dir's basename ("run")
-  assert.deepEqual(ev.map((e) => e.key), ["run:run/worker-r1:queued", "run:run/worker-r1:done"]);
-  assert.equal(ev[0].run, "run/worker-r1");
+  // ticket.json now carries ticket "m6a": the id's ticket part is "m6a", not the run dir basename
+  assert.deepEqual(ev.map((e) => e.key), ["run:m6a/worker-r1:queued", "run:m6a/worker-r1:done"]);
+  assert.equal(ev[0].run, "m6a/worker-r1");
   assert.equal(ev[0].kind, "queued");
   assert.equal(ev[0].pid > 0, true);
   assert.equal(ev[0].ticket, path.join(path.dirname(r.out), "ticket.json"));
@@ -818,10 +822,11 @@ test("--stream refusals: unknown stream, existing out or receipt (exit 2), dupli
   assert.equal(streamRun(h, {}, "worker-r2.md").status, 2, "an old receipt alone also refuses");
   assert.deepEqual(eventsOf(sd), [], "refusals append nothing");
   fs.rmSync(path.join(h, "run", "worker-r2.md.receipt.json"));
-  fs.writeFileSync(path.join(sd, "m6a.events.jsonl"), JSON.stringify({ key: "run:run/worker-r3:queued", kind: "queued", at: new Date().toISOString(), run: "run/worker-r3" }) + "\n");
+  // ticket.json carries ticket "m6a": the queued event key uses the ticket part
+  fs.writeFileSync(path.join(sd, "m6a.events.jsonl"), JSON.stringify({ key: "run:m6a/worker-r3:queued", kind: "queued", at: new Date().toISOString(), run: "m6a/worker-r3" }) + "\n");
   const dup = streamRun(h, {}, "worker-r3.md");
   assert.equal(dup.status, 9);
-  assert.match(dup.stderr, /oc-worker: run run\/worker-r3 already queued/);
+  assert.match(dup.stderr, /oc-worker: run m6a\/worker-r3 already queued/);
   assert.ok(!fs.existsSync(dup.out + ".events.jsonl"), "no slot taken, nothing launched");
 });
 
@@ -876,15 +881,79 @@ test("--stream: two tickets' worker-r1 on one stream both queue; the same run id
   assert.equal(again.status, 9, again.stdout + again.stderr);
   assert.match(again.stderr, /oc-worker: run m6a-a\/worker-r1 already queued/);
 
-  // No ticket.json: the run directory's basename is the ticket part, so two dirs still do not collide.
-  const c = dispatch("run-c", null);
-  const d = dispatch("run-d", null);
+  // No ticket.json: the run directory's basename is the ticket part — but --stream now requires
+  // ticket.json, so give each dir one. Two dirs still do not collide.
+  const c = dispatch("run-c", "run-c");
+  const d = dispatch("run-d", "run-d");
   assert.equal(c.status, 0, c.stderr);
   assert.equal(d.status, 0, d.stderr);
   assert.deepEqual(
     eventsOf(sd).filter((e) => e.kind === "queued").map((e) => e.run).sort(),
     ["m6a-a/worker-r1", "m6a-b/worker-r1", "run-c/worker-r1", "run-d/worker-r1"],
   );
+});
+
+test("--stream refuses a relative --report with exit 2, naming the flag", () => {
+  const { h, sd } = streamHome();
+  const runDir = path.join(h, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir }));
+  const out = path.join(runDir, "worker-r1.md");
+  const argsFile = path.join(h, "args.json");
+  const prompt = path.join(h, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", h, "--prompt", prompt, "--out", out, "--stream", "m6a", "--report", "report.md"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h, FAKE_OC_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /oc-worker: --report must be an absolute path with --stream/);
+  assert.ok(!fs.existsSync(argsFile), "opencode must not be spawned");
+  assert.deepEqual(eventsOf(sd), [], "no queued event appended");
+});
+
+test("--stream requires ticket.json to parse with a non-empty string ticket", () => {
+  const { h, sd } = streamHome();
+  const runDir = path.join(h, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  const out = path.join(runDir, "worker-r1.md");
+  const prompt = path.join(h, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+
+  // invalid JSON
+  fs.writeFileSync(path.join(runDir, "ticket.json"), "{ not json");
+  const badJson = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", h, "--prompt", path.join(h, "mandate.md"), "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h },
+    encoding: "utf8",
+  });
+  assert.equal(badJson.status, 2, badJson.stderr);
+  assert.match(badJson.stderr, new RegExp(`oc-worker: --stream needs ${path.join(runDir, "ticket.json")} beside --out: not valid JSON`));
+
+  // empty ticket string
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "" }));
+  const empty = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", h, "--prompt", path.join(h, "mandate.md"), "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h },
+    encoding: "utf8",
+  });
+  assert.equal(empty.status, 2, empty.stderr);
+  assert.match(empty.stderr, /missing non-empty string "ticket"/);
+
+  // missing ticket key
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ worktree: runDir }));
+  const missing = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", h, "--prompt", path.join(h, "mandate.md"), "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h },
+    encoding: "utf8",
+  });
+  assert.equal(missing.status, 2, missing.stderr);
+  assert.match(missing.stderr, /missing non-empty string "ticket"/);
+
+  // valid ticket: passes preflight
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir }));
+  const valid = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", h, "--prompt", path.join(h, "mandate.md"), "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h },
+    encoding: "utf8",
+  });
+  assert.equal(valid.status, 0, valid.stderr);
 });
 
 test("O4: both receipt writes go through atomicWrite", () => {
@@ -920,4 +989,87 @@ test("quota with --resume 0 is not nudged; a persistent quota fails after one nu
   assert.equal(receipt.attempts, 2);
   assert.equal(receipt.resumed.length, 1, "one nudge, then the failure stands");
   assert.match(receipt.errors.join("\n"), /weekly usage limit/);
+});
+
+// ── --stream: ticket.json preflight ──────────────────────────────────────
+
+test("--stream without ticket.json beside --out is refused with exit 2, no child spawned", () => {
+  const { h, sd } = streamHome();
+  const runDir = path.join(h, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  // deliberately NO ticket.json
+  const argsFile = path.join(h, "args.json");
+  const prompt = path.join(h, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const out = path.join(runDir, "worker-r1.md");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", h, "--prompt", prompt, "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h, FAKE_OC_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, new RegExp(`oc-worker: --stream needs ${path.join(runDir, "ticket.json")} beside --out`));
+  assert.ok(!fs.existsSync(argsFile), "opencode must not be spawned");
+  assert.deepEqual(eventsOf(sd), [], "no queued event appended");
+});
+
+// ── --out / --report: caller-cwd resolution ──────────────────────────────
+
+// A tiny fake opencode whose final text has NO status line, but which writes the report file
+// given by FAKE_OC_REPORT_PATH with `VERDICT: CHANGES_REQUESTED`. This makes the receipt verdict
+// depend on oc-worker reading --report (not on statusLine(sum.final) short-circuiting).
+function makeReportFake(dir) {
+  const fake = path.join(dir, "fake-report-oc.mjs");
+  fs.writeFileSync(fake, `#!/usr/bin/env node\nimport fs from "node:fs";\nconst argv = process.argv.slice(2);\nif (process.env.FAKE_OC_ARGS_FILE) fs.writeFileSync(process.env.FAKE_OC_ARGS_FILE, JSON.stringify({ argv, cwd: process.cwd() }));\nconst rp = process.env.FAKE_OC_REPORT_PATH;\nif (rp) fs.writeFileSync(rp, "VERDICT: CHANGES_REQUESTED\\nagent=critic\\n");\nprocess.stdout.write(JSON.stringify({ type: "text", sessionID: "ses_x", part: { sessionID: "ses_x", messageID: "m", type: "text", text: "findings with no status line" } }) + "\\n");\nprocess.stdout.write(JSON.stringify({ type: "step_finish", part: { type: "step-finish", cost: 0.001 } }) + "\\n");\n`);
+  return fake;
+}
+
+test("relative --report resolves against the caller's cwd, not the worktree --dir", () => {
+  const callerDir = tmp();
+  CLEAN.push(callerDir);
+  const wtDir = tmp();
+  CLEAN.push(wtDir);
+  fs.writeFileSync(path.join(wtDir, "mandate.md"), "Review the diff.");
+  const fake = makeReportFake(callerDir);
+  const reportRel = "report.md";
+  const absReport = path.resolve(callerDir, reportRel);
+  const out = path.join(callerDir, "out", "worker-r1.md");
+  const argsFile = path.join(callerDir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", wtDir, "--prompt", path.join(wtDir, "mandate.md"), "--out", out, "--report", reportRel], {
+    env: { ...process.env, OPENCODE_BIN: fake, ORCH_NO_PROCTREE: "1", ORCH_HOME: callerDir, FAKE_OC_ARGS_FILE: argsFile, FAKE_OC_REPORT_PATH: absReport },
+    cwd: callerDir,
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const receipt = JSON.parse(r.stdout.trim());
+  // statusLine(sum.final) is "" (no status line), so the verdict must come from --report at caller cwd
+  assert.equal(receipt.verdict, "VERDICT: CHANGES_REQUESTED", "verdict read from report.md at caller cwd, not from the worktree dir");
+  // the report file was written by the agent at the caller's cwd
+  assert.ok(fs.existsSync(path.join(callerDir, "report.md")), "agent wrote the report at the caller's cwd");
+  assert.equal(fs.readFileSync(path.join(callerDir, "report.md"), "utf8"), "VERDICT: CHANGES_REQUESTED\nagent=critic\n");
+  // the agent was told the absolute report path
+  const { argv } = JSON.parse(fs.readFileSync(argsFile, "utf8"));
+  assert.ok(argv.some((a) => a.includes(`Write your report to ${absReport}`) && a.includes("absolute path; not the worktree")), "prompt names the absolute report path");
+});
+
+test("absolute --report is unchanged", () => {
+  const callerDir = tmp();
+  CLEAN.push(callerDir);
+  const wtDir = tmp();
+  CLEAN.push(wtDir);
+  fs.writeFileSync(path.join(wtDir, "mandate.md"), "Review the diff.");
+  const fake = makeReportFake(callerDir);
+  const absReport = path.join(callerDir, "abs-report.md");
+  const out = path.join(callerDir, "out", "worker-r1.md");
+  const argsFile = path.join(callerDir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", wtDir, "--prompt", path.join(wtDir, "mandate.md"), "--out", out, "--report", absReport], {
+    env: { ...process.env, OPENCODE_BIN: fake, ORCH_NO_PROCTREE: "1", ORCH_HOME: callerDir, FAKE_OC_ARGS_FILE: argsFile, FAKE_OC_REPORT_PATH: absReport },
+    cwd: callerDir,
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.verdict, "VERDICT: CHANGES_REQUESTED", "absolute --report read as-is");
+  // the agent was told the absolute report path
+  const { argv } = JSON.parse(fs.readFileSync(argsFile, "utf8"));
+  assert.ok(argv.some((a) => a.includes(`Write your report to ${absReport}`) && a.includes("absolute path; not the worktree")), "prompt names the absolute report path");
 });
