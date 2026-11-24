@@ -3,10 +3,14 @@
 //   node orphan-notice.mjs <stream>
 // Launched detached by the desk daemon (desk.mjs orphanPage): `notify-send --wait` blocks THIS process until the
 // notice is clicked or dismissed, never the daemon. If the action is chosen, opens a terminal running a fresh
-// orchestrator session on the stream (`/frood-next <stream>`), cwd = the stream's repo.
-//   ORCH_LAUNCH_CMD   template run via `sh -c`, `{stream}` and `{harness}` (cc | oc) substituted. Default:
-//                     xdg-terminal-exec -- claude "/frood-next {stream}"      (held by cc, or unheld)
-//                     xdg-terminal-exec -- opencode --prompt "/frood-next {stream}"   (held by oc)
+// orchestrator session on the stream (`/frood-next <stream>`). How it opens is `launch.json` (see launch-config.mjs,
+// chosen at setup, changed with `--set`): desktop = the Claude desktop app via
+//   xdg-open "claude://code/new?q=/frood-next <stream>&folder=<repo>"      (held by cc, or unheld)
+// terminal = xdg-terminal-exec -- claude "/frood-next <stream>" (cwd = the stream's repo), or for an OpenCode holder
+// (no desktop app) always xdg-terminal-exec -- opencode --prompt "/frood-next <stream>".
+// With no launch.json the mode is detected at click time: desktop if a claude:// handler is registered, else terminal.
+//   ORCH_LAUNCH_CMD   overrides everything (= custom): template run via `sh -c`, `{stream}` and `{harness}` (cc | oc)
+//                     substituted.
 //   ORCH_NO_NOTIFY=1  do nothing. Never throws, always exits 0.
 import "./no-window.mjs";
 import fs from "node:fs";
@@ -15,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { readStream } from "./handoff.mjs";
 import { openEscalations } from "./orphan.mjs";
+import { effectiveLaunch } from "./launch-config.mjs";
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
@@ -24,13 +29,19 @@ export function noticeText(stream, escalations) {
   return `${stream}: ${escalations.length} escalation(s), no live session — ${reasons || "see desk status"}${more}`;
 }
 
-/** The argv-or-shell launch plan for a stream: { cwd, shell?, argv? }. */
+/** The argv-or-shell launch plan for a stream: { cwd, shell?, argv? }. Precedence: ORCH_LAUNCH_CMD > launch.json > detected. */
 export function launchPlan(stream, s) {
   const harness = s?.held_by === "oc" ? "oc" : "cc";
-  const cwd = s?.repo && fs.existsSync(s.repo) ? s.repo : process.cwd();
-  const tpl = (process.env.ORCH_LAUNCH_CMD ?? "").trim();
-  if (tpl) return { cwd, shell: tpl.replaceAll("{stream}", stream).replaceAll("{harness}", harness) };
+  const repo = s?.repo && fs.existsSync(s.repo) ? s.repo : "";
+  const cwd = repo || process.cwd();
+  const eff = effectiveLaunch();
+  if (eff.mode === "custom" && eff.cmd) return { cwd, shell: eff.cmd.replaceAll("{stream}", stream).replaceAll("{harness}", harness) };
   const prompt = `/frood-next ${stream}`;
+  // OpenCode has no desktop app: an oc-held stream always opens the terminal.
+  if (eff.mode === "desktop" && harness === "cc") {
+    const url = `claude://code/new?q=${encodeURIComponent(prompt)}` + (repo ? `&folder=${encodeURIComponent(repo)}` : "");
+    return { cwd, argv: ["xdg-open", url] };
+  }
   return { cwd, argv: ["xdg-terminal-exec", "--", ...(harness === "oc" ? ["opencode", "--prompt", prompt] : ["claude", prompt])] };
 }
 

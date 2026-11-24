@@ -353,6 +353,16 @@ info "Installing Atlas pattern (checked map)..."
 $PYTHON_CMD scripts/setup_helpers.py install-atlas "$PROJECT_DIR"
 info "Atlas pattern installed"
 
+# ── Orchestrator: how "Resolve in new session" opens (desktop app / terminal) ─
+# Non-fatal. Prompts only when interactive; --quiet or no TTY uses detection. Never overwrites an existing choice.
+if command -v node &>/dev/null && [ -f "$PROJECT_DIR/orchestrator/bin/launch-config.mjs" ]; then
+    if $QUIET || [ ! -t 0 ]; then
+        node "$PROJECT_DIR/orchestrator/bin/launch-config.mjs" --ask </dev/null >/dev/null 2>&1 || true
+    else
+        node "$PROJECT_DIR/orchestrator/bin/launch-config.mjs" --ask || true
+    fi
+fi
+
 # ── Health report ─────────────────────────────────────────────────────────────
 if ! $QUIET; then
     echo ""

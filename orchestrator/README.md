@@ -217,4 +217,10 @@ OC commands now install to `~/.config/opencode/commands/`; the legacy singular `
 - `ORCH_ORPHAN_MIN` (default 60): minutes of holder silence after which an escalation on a held stream counts as
   orphaned and the daemon pages the owner once (see `docs/designs/desk-daemon.md`, "Orphaned streams").
 - `ORCH_LAUNCH_CMD`: command the orphan notice's "Resolve in new session" action runs (`sh -c`, `{stream}` and
-  `{harness}` substituted). Default `xdg-terminal-exec -- claude "/frood-next {stream}"` (`opencode --prompt` for an OpenCode holder).
+  `{harness}` substituted); overrides `launch.json`. Without it the action follows
+  `~/.config/orchestrator/launch.json` (`{"mode": "desktop"|"terminal"|"custom", "cmd"?}`), written at setup by
+  `ops/systemd/install.mjs` / `setup.sh` and changed with `node bin/launch-config.mjs --set desktop|terminal|custom
+  [--cmd "<tpl>"]` (no args prints the effective mode). `desktop` opens the Claude desktop app via
+  `claude://code/new?q=/frood-next <stream>&folder=<repo>`; `terminal` runs `xdg-terminal-exec -- claude "/frood-next
+  <stream>"`. OpenCode-held streams always use `opencode --prompt` in a terminal. With no file the mode is detected
+  (desktop if `xdg-mime query default x-scheme-handler/claude` has a handler).

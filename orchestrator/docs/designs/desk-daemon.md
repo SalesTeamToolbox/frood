@@ -99,10 +99,12 @@ session found in no store is judged by stream activity. Detection is `orphan.mjs
 
 The daemon pages the owner once per stream per claim: ledger `orphaned` in `state.json`, key
 `orphan:<stream>:<held_at|unheld>` (separate from `pagedIds`; a new claim re-arms it). It spawns
-`orphan-notice.mjs <stream>` detached: `notify-send -u critical -A resolve="Resolve in new session" --wait`; on
-click it opens a terminal in the stream's repo running `/frood-next <stream>` (`claude`, or `opencode --prompt`
-for an OpenCode holder). `ORCH_LAUNCH_CMD` replaces the command (`sh -c`, `{stream}` and `{harness}`
-substituted). `ORCH_DAEMON_DRY_RUN=1` and `ORCH_NO_NOTIFY=1` log instead of spawning. This is the only desktop
+`orphan-notice.mjs <stream>` detached: `notify-send -u critical -A resolve="Resolve in new session" --wait`; on click it opens a session on `/frood-next <stream>` in the stream's repo. How is `~/.config/orchestrator/launch.json`
+(`bin/launch-config.mjs`; chosen at setup, `--set` to change): `desktop` hands `claude://code/new?q=...&folder=...` to
+`xdg-open` (the Claude desktop app); `terminal` runs `claude` via `xdg-terminal-exec`. An OpenCode holder always gets
+`opencode --prompt` in a terminal. Precedence: `ORCH_LAUNCH_CMD` (`sh -c`, `{stream}` and `{harness}` substituted) >
+`launch.json` > detected at click time (desktop if a `claude://` handler is registered, else terminal).
+`ORCH_DAEMON_DRY_RUN=1` and `ORCH_NO_NOTIFY=1` log instead of spawning. This is the only desktop
 page: an escalation on an unheld stream takes the same path; a live holder gets peer-mail only.
 
 ## Lock contention (daemon vs interactive desk, never silent)

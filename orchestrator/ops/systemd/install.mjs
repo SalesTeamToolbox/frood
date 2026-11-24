@@ -17,6 +17,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchConfigPath, writeLaunchConfig, detectDefaultMode } from "../../bin/launch-config.mjs";
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)));
 const unitDir = path.join(os.homedir(), ".config", "systemd", "user");
@@ -49,6 +50,19 @@ if (process.argv.includes("--uninstall")) {
 }
 
 const repo = path.resolve(dir, "..", "..");
+// First-time setup: how the orphan notice opens a session (desktop app / terminal / custom). Never overwrites.
+if (!fs.existsSync(launchConfigPath())) {
+  const launchCli = path.join(repo, "bin", "launch-config.mjs");
+  if (process.stdin.isTTY && process.stdout.isTTY) execFileSync(process.execPath, [launchCli, "--ask"], { stdio: "inherit" });
+  else {
+    const mode = detectDefaultMode();
+    writeLaunchConfig({ mode });
+    console.log(`launch mode: ${mode} (detected; not interactive)`);
+  }
+  console.log(`Change it with: node ${launchCli} --set desktop|terminal|custom [--cmd "<template>"]`);
+}
+// Test hook: stop before touching systemd.
+if (process.env.ORCH_INSTALL_NO_SYSTEMD === "1") process.exit(0);
 let node;
 try {
   node = execFileSync("command -v node", { shell: true, encoding: "utf8" }).trim();

@@ -279,6 +279,8 @@ test("notice helper: default launch is the terminal wrapper running claude (cc/u
   mkStream(h, "hs", { held_by: "cc", held_at: iso(300) });
   withHome(h, {}, () => escalate("hs"));
   const st = stubs("resolve");
+  fs.mkdirSync(path.join(h, ".config", "orchestrator"), { recursive: true });
+  fs.writeFileSync(path.join(h, ".config", "orchestrator", "launch.json"), '{"mode":"terminal"}');
   // a stub terminal on PATH records its argv
   fs.writeFileSync(path.join(st.bin, "xdg-terminal-exec"), `#!/bin/sh\necho "$@" >> "${st.out}"\n`, { mode: 0o755 });
   runNotice(h, st, { ORCH_LAUNCH_CMD: "" });
