@@ -93,9 +93,10 @@ export function parsePsLine(line) {
 
 // How far the ps /proc clock runs behind Date.now(), in ms (ps_clock - wall_clock).
 // procps derives `lstart` from boot time (/proc/stat btime) + /proc/uptime, which can lag the
-// wall clock by ~1 s on a box whose clock stepped since boot (NTP, suspend). On this box ps
-// lstart reads about 1.8 s behind Date.now(), so a process spawned just after `since` looks older
-// than `since` and is never swept — a real leak, not a test bug.
+// wall clock by ~1 s on a box whose clock stepped since boot (NTP, suspend). Measured 2026-11-24:
+// skew ~-0.9 s; with lstart's one-second truncation on top, a process's lstart read 1.0-1.9 s behind
+// its spawn Date.now(), so a process spawned just after `since` looked older than `since` and was
+// never swept — a real leak, not a test bug.
 // Returns 0 on macOS (no /proc) or when /proc cannot be read (falls back to today's behaviour).
 export function procClockSkewMs() {
   if (process.platform !== "linux") return 0;

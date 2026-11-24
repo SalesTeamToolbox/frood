@@ -200,13 +200,52 @@ test("smoke: a grandchild orphaned by killing its parent is swept", { skip: proc
   }
 });
 
-function clocked(samples, clock) {
+function clocked(samples, clock, opts = {}) {
   const queue = [...samples];
   const killed = [];
   const trees = [];
-  const w = watch(100, { everyMs: 5000, autoPoll: false, since: T0, now: () => clock.t, sample: async () => queue.shift() ?? [], kill: async (pid, o) => (killed.push(pid), trees.push(o?.tree), true) });
+  const w = watch(100, { everyMs: 5000, autoPoll: false, since: T0, now: () => clock.t, ...opts, sample: async () => queue.shift() ?? [], kill: async (pid, o) => (killed.push(pid), trees.push(o?.tree), true) });
   return { w, killed, trees };
 }
+
+// Rule (c)'s born-while-alive window is `seen` (wall clock, from now()) converted to the ps clock by `+ skew`,
+// plus one interval + 1 s. These two pin that conversion in both directions: drop the `+ skew` and each fails.
+test("rule (c) with ps clock behind wall (skew -3 s): the window shrinks onto the ps clock", async () => {
+  // 200 last seen alive at wall T0+10s = ps T0+7s; window ends at ps 7 + 5 + 1 = 13 s.
+  const clock = { t: T0 + 10_000 };
+  const { w, killed } = clocked(
+    [[P(100, 1, -2.5), P(200, 100, -2)], [P(500, 200, 12.5, "born in window"), P(600, 200, 14, "born after window")]],
+    clock,
+    { clockSkewMs: -3000 },
+  );
+  await w.observe();
+  clock.t = T0 + 70_000;
+  await w.sweep();
+  assert.deepEqual(killed, [500], "without the skew the window would end at ps 16 s and also take 600");
+});
+
+test("rule (c) with ps clock ahead of wall (skew +3 s): the window moves forward onto the ps clock", async () => {
+  // 200 last seen alive at wall T0+10s = ps T0+13s; window ends at ps 13 + 5 + 1 = 19 s.
+  const clock = { t: T0 + 10_000 };
+  const { w, killed } = clocked(
+    [[P(100, 1, 3.5), P(200, 100, 4)], [P(500, 200, 18.5, "born in window"), P(600, 200, 20, "born after window")]],
+    clock,
+    { clockSkewMs: 3000 },
+  );
+  await w.observe();
+  clock.t = T0 + 70_000;
+  await w.sweep();
+  assert.deepEqual(killed, [500], "without the skew the window would end at ps 16 s and miss 500");
+});
+
+test("a -1.5 s skew does not widen the kill set: a run older than the shifted `since` is never tracked or killed", async () => {
+  // Shifted since = ps T0-1.5s. Root and child started at ps -2.5 / -2 s: before the run, so not ours.
+  const { w, killed } = harness([[P(100, 1, -2.5), P(200, 100, -2)], [P(200, 100, -2)]], { clockSkewMs: -1500, now: () => T0 });
+  await w.observe();
+  assert.equal(w.tracked().length, 0);
+  assert.deepEqual(await w.sweep(), []);
+  assert.deepEqual(killed, []);
+});
 
 test("rule (c): a child born while the parent was alive is killed; one born long after it was last seen is not", async () => {
   const clock = { t: T0 + 10_000 };
@@ -228,7 +267,7 @@ test("rule (c): a tracked parent never seen alive by a later sample has no trust
 test("a sampler whose start is ~1.5 s behind `since` tracks nothing without a skew shift (the bug)", async () => {
   // Default (injected sampler → skew 0): root's ps start is older than wall `since`, so rootStart is
   // never set and nothing is tracked — the production leak this fix closes.
-  const { w, killed } = harness(
+  const { w } = harness(
     [[P(100, 1, -1.5), P(200, 100, -1.5)], [P(200, 100, -1.5)]],
     { now: () => T0 }
   );
