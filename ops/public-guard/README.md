@@ -13,6 +13,8 @@ Plain `install.sh` (and `--check`) is the USER-level dev/test path; the guard th
 Denylist lines: plain = case-insensitive literal, `re:<regex>`; a missing denylist blocks.
 Wire `agent-hooks/block-bypass.py` as a Claude Code PreToolUse hook (no matcher: it also covers
 Write/Edit and the GitHub MCP push tools) and merge `agent-hooks/opencode-permission.json`.
+Repos using the pre-commit framework: `pre-commit install` refuses while core.hooksPath is set. Owner runs
+`GIT_CONFIG_NOSYSTEM=1 .venv/bin/pre-commit install` once per clone; the guard still runs, then chains to it.
 
 ## 2. Before making ANY repo public
     python3 ops/public-guard/guard.py audit --history <repo>   # tree + every commit + messages
