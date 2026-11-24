@@ -68,6 +68,29 @@ def fixture_home(tmp_path):
     )
     (rep / "critic-r1.md").write_text("verdict: APPROVED\n")
     (rep / "critic-r2.md").write_text("verdict: APPROVED\n")
+    # The stream's own escalations, and its events pointing at its run dir (how a receipt maps to a stream).
+    esc = [("fx", "verdict-failed /x/a.md")] * 3 + [("fx", "ESCALATE worker-timeout /x/b.md")] * 2
+    esc += [("fx", "ESCALATE worker-no_pool /x/c.md")]
+    # Another stream's escalations and receipt: a review of fx must count none of them.
+    esc += [("other", "ESCALATE worker-error /y/d.md")] * 5 + [
+        ("other", "verdict-failed /y/e.md")
+    ] * 4
+    (orch / "desk-daemon" / "escalations.jsonl").write_text(
+        "\n".join(json.dumps({"stream": s, "key": "k", "reason": r}) for s, r in esc) + "\n"
+    )
+    (orch / "streams" / "fx.events.jsonl").write_text(
+        json.dumps(
+            {"key": "run:fx/worker-r1:done", "kind": "run-done", "out": str(rep / "worker-r1.md")}
+        )
+        + "\n"
+    )
+    other = proj / ".opencode" / "reports" / "other-ticket"
+    other.mkdir(parents=True)
+    (other / "worker-r1.md.receipt.json").write_text(
+        json.dumps(
+            {"tokens": {"input": 9000, "output": 9000}, "seconds": 999, "max_silence_s": 600}
+        )
+    )
     return home, proj
 
 
@@ -117,6 +140,18 @@ def test_phase2_findings_reflect_fixture(fixture_home):
         for d in all_details
     )
     assert any("2 critic round file" in d for d in all_details)
+
+
+def test_phase2_counts_only_the_reviewed_stream(fixture_home):
+    """Another stream's escalations and receipts never leak into this stream's review."""
+    home, proj = fixture_home
+    rep = _report(home, proj, 2)
+    text = {f["focus"]: f["detail"] for f in rep["findings"]}
+    assert text["verdict failed"].startswith("3 occurrences"), "the other stream's 4 are not added"
+    assert "worker error" not in text, "worker-error happened only on the other stream"
+    assert text["worker no pool"].startswith("1 occurrences"), "no_pool escalations are counted"
+    assert 'on stream "fx"' in text["verdict failed"]
+    assert all("9000" not in f["detail"] and "999s" not in f["detail"] for f in rep["findings"])
 
 
 def test_phase3_no_invented_numbers(fixture_home):

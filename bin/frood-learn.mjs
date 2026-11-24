@@ -538,32 +538,34 @@ function readStreamEvents(streamName) {
     .filter(Boolean);
 }
 
-function readWorkerReceipts(reportDir) {
+// The escalations the desk daemon recorded for ONE stream. dpage writes a row per escalation, stream
+// included, so this is the per-stream source; daemon.log interleaves every stream and is not.
+function readStreamEscalations(streamName) {
+  const p = path.join(ORCH_ROOT, "desk-daemon", "escalations.jsonl");
+  if (!fs.existsSync(p)) return [];
+  return fs.readFileSync(p, "utf8").split("\n")
+    .filter(l => l.trim())
+    .map(l => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(e => e && e.stream === streamName);
+}
+
+// The report directories a stream's runs wrote to: every event's `out` sits in its ticket's run dir,
+// wherever that repo lives. This is what ties a receipt to a stream.
+function streamRunDirs(streamName) {
+  return [...new Set(readStreamEvents(streamName).map(e => (e.out ? path.dirname(e.out) : null)).filter(Boolean))];
+}
+
+// Worker receipts of this stream's runs only (all rounds). Until 2026-11-24 this read every ticket dir
+// under both report roots, so a review of one stream reported totals for all of them.
+function readWorkerReceipts(streamName) {
   const receipts = [];
-  // Check both project and global opencode reports
-  const reportPaths = [
-    path.join(process.cwd(), ".opencode", "reports"),
-    path.join(process.env.HOME || process.env.USERPROFILE, ".opencode", "reports"),
-  ];
-  for (const reportPath of reportPaths) {
-    if (!fs.existsSync(reportPath)) continue;
-    const entries = fs.readdirSync(reportPath);
-    for (const entry of entries) {
-      const receiptPath = path.join(reportPath, entry, "worker-r1.md.receipt.json");
-      if (fs.existsSync(receiptPath)) {
-        try {
-          receipts.push(JSON.parse(fs.readFileSync(receiptPath, "utf8")));
-        } catch {}
-      }
-      // Also check for other worker receipts (worker-r2, etc.)
-      for (let i = 2; i <= 10; i++) {
-        const receiptPath2 = path.join(reportPath, entry, `worker-r${i}.md.receipt.json`);
-        if (fs.existsSync(receiptPath2)) {
-          try {
-            receipts.push(JSON.parse(fs.readFileSync(receiptPath2, "utf8")));
-          } catch {}
-        }
-      }
+  for (const dir of streamRunDirs(streamName)) {
+    if (!fs.existsSync(dir)) continue;
+    for (const f of fs.readdirSync(dir).sort()) {
+      if (!/^worker-r\d+\.md\.receipt\.json$/.test(f)) continue;
+      try {
+        receipts.push(JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
+      } catch {}
     }
   }
   return receipts;
@@ -826,31 +828,33 @@ function analyzeCommunicationPatterns(stream, args) {
 
 function analyzeErrorHandlingPatterns(stream, args) {
   const findings = [];
-  const deskLogs = readDeskDaemonLogs();
+  const escalations = readStreamEscalations(args.stream);
+  const count = (p) => escalations.filter(e => String(e.reason ?? "").includes(p)).length;
 
-  // Desk daemon error patterns
+  // Desk daemon escalations on THIS stream, by kind
   const errorPatterns = {
-    "verdict-failed": { lens: "error-propagation", count: deskLogs.filter(l => l.includes("verdict-failed")).length },
-    "worker-timeout": { lens: "retry-recovery", count: deskLogs.filter(l => l.includes("worker-timeout")).length },
-    "worker-error": { lens: "error-propagation", count: deskLogs.filter(l => l.includes("worker-error")).length },
-    "worker-blocked": { lens: "dead-letter-handling", count: deskLogs.filter(l => l.includes("worker-blocked")).length },
-    "critic-failed": { lens: "error-propagation", count: deskLogs.filter(l => l.includes("critic-failed")).length },
-    "review-unlinked": { lens: "circuit-breakers", count: deskLogs.filter(l => l.includes("review-unlinked")).length },
-    "agent-senior": { lens: "circuit-breakers", count: deskLogs.filter(l => l.includes("agent-senior")).length },
-    "run-dead": { lens: "retry-recovery", count: deskLogs.filter(l => l.includes("run-dead")).length },
-    "no-ticket": { lens: "error-propagation", count: deskLogs.filter(l => l.includes("no-ticket")).length },
+    "verdict-failed": { lens: "error-propagation", count: count("verdict-failed") },
+    "worker-timeout": { lens: "retry-recovery", count: count("worker-timeout") },
+    "worker-error": { lens: "error-propagation", count: count("worker-error") },
+    "worker-no_pool": { lens: "retry-recovery", count: count("worker-no_pool") },
+    "worker-blocked": { lens: "dead-letter-handling", count: count("worker-blocked") },
+    "critic-failed": { lens: "error-propagation", count: count("critic-failed") },
+    "review-unlinked": { lens: "circuit-breakers", count: count("review-unlinked") },
+    "agent-senior": { lens: "circuit-breakers", count: count("agent-senior") },
+    "run-dead": { lens: "retry-recovery", count: count("run-dead") },
+    "no-ticket": { lens: "error-propagation", count: count("no-ticket") },
   };
 
   for (const [pattern, data] of Object.entries(errorPatterns)) {
     if (data.count > 0) {
       findings.push({
         area: "desk-operations",
-        focus: pattern.replace(/-/g, " "),
+        focus: pattern.replace(/[-_]/g, " "),
         lens: data.lens,
         status: "analyzed",
-        detail: `${data.count} occurrences of "${pattern}" in desk daemon logs.`,
+        detail: `${data.count} occurrences of "${pattern}" escalated on stream "${args.stream}" (of ${escalations.length} escalation(s) for it).`,
         recommendation: getErrorRecommendation(pattern),
-        evidence: [".config/orchestrator/desk-daemon/daemon.log"],
+        evidence: [".config/orchestrator/desk-daemon/escalations.jsonl"],
         source: "session-data",
       });
     }
@@ -900,6 +904,7 @@ function getErrorRecommendation(pattern) {
     "verdict-failed": "Validate worktree exists before verdict; auto-create worktree on claim.",
     "worker-timeout": "Increase oc-worker timeout; add progress heartbeat to prevent false timeouts.",
     "worker-error": "Improve error context in worker receipts; add stack trace capture.",
+    "worker-no_pool": "Every worker pool was down (quota or out of credits): run router-health, then top up or drop the exhausted pool; the Claude Code worker fallback covers the run meanwhile.",
     "worker-blocked": "Add automatic unblock after timeout; escalate to desk daemon.",
     "critic-failed": "Improve critic prompt to handle edge cases; add fallback to human review.",
     "review-unlinked": "Link critic findings to worker run in board.mjs round recording.",
