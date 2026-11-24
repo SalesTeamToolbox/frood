@@ -494,6 +494,31 @@ export function statusRows(now = nowMs()) {
   return rows;
 }
 
+// Board tickets that carry a desktop session (board.mjs `session`), for the repo the desk is run from. A ticket
+// with no session, a missing board or an unreadable file contributes nothing: this only adds lines to `status`.
+export function ticketSessions(dir = process.cwd()) {
+  let root = dir;
+  try {
+    root = path.dirname(execFileSync("git", ["-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim());
+  } catch {}
+  const tdir = path.join(root, ".opencode", "board", "tickets");
+  let names = [];
+  try {
+    names = fs.readdirSync(tdir).filter((n) => n.endsWith(".json")).sort();
+  } catch {
+    return [];
+  }
+  const rows = [];
+  for (const n of names) {
+    try {
+      const t = JSON.parse(fs.readFileSync(path.join(tdir, n), "utf8"));
+      const session = t?.assignment?.session;
+      if (t?.schema === 1 && isStr(t.id) && isStr(session) && session) rows.push({ id: t.id, stage: t.stage, session, owner: t.assignment.owner ?? null });
+    } catch {}
+  }
+  return rows;
+}
+
 const fmtAge = (ms) => {
   if (ms === null) return "?";
   const s = Math.floor(ms / 1000);
@@ -539,8 +564,10 @@ function watchLine(w) {
 function cmdStatus(opts) {
   const info = watchInfo();
   const rows = statusRows();
+  const tickets = ticketSessions();
   if (opts.json) {
-    console.log(JSON.stringify({ streams: rows, watch: info.state === "none" ? null : info }));
+    // `tickets` appears only when some board ticket holds a session, so the existing shape is unchanged.
+    console.log(JSON.stringify({ streams: rows, watch: info.state === "none" ? null : info, ...(tickets.length ? { tickets } : {}) }));
     return 0;
   }
   console.log(watchLine(info));
@@ -548,6 +575,7 @@ function cmdStatus(opts) {
     console.log(`${s.name}  ${s.state}  next: ${cut(s.next, NEXT_CUT)}  unhandled=${s.unhandled}${s.held_by ? ` held=${s.held_by}` : ""}`);
     for (const r of s.runs) console.log(`  ${r.run}  ${r.agent}  ${r.detail ? `${r.state} ${r.detail}` : r.state}  ${r.age_min ?? "-"}m${r.live_tree ? "  dead wrapper, live tree?" : ""}`);
   }
+  for (const t of tickets) console.log(`ticket ${t.id}  ${t.stage}  session ${t.session}${t.owner ? `  owner ${t.owner}` : ""}`);
   return 0;
 }
 

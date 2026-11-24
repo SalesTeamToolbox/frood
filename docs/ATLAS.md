@@ -410,6 +410,12 @@ decides: authenticated real-time event broadcast (token-gated)
 sibling traps: /api/activity, /api/login
 topic: docs/atlas/routes.md
 
+## Orchestrator (CLI tools, not routes)
+
+### orchestrator parallel dispatch
+handler: orchestrator/bin/dispatch.mjs (plan: independence check, cap: concurrency limit); orchestrator/bin/board.mjs session (assignment.session); orchestrator/bin/desk.mjs status (ticketSessions)
+decides: which board tickets may run in their own sessions at once (shared file or `depends:` means serial), and whether the build/train cap leaves room
+
 ## How to keep this map accurate
 
 - A handler rename is a same-commit map update: edit the `handler:` line in the

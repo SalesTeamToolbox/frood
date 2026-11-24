@@ -1956,3 +1956,21 @@ test("dpage: stream A's critic retry neither consumes nor pages stream B's", asy
     }
   }
 });
+
+test("status: board tickets holding a session are listed after the streams; absent otherwise", () => {
+  const h = home();
+  const repo = path.join(h, "repo");
+  fs.mkdirSync(path.join(repo, ".opencode", "board", "tickets"), { recursive: true });
+  execFileSync("git", ["-C", repo, "init", "-q", "-b", "main"]);
+  const put = (id, stage, assignment) =>
+    fs.writeFileSync(path.join(repo, ".opencode", "board", "tickets", `${id}.json`), JSON.stringify({ schema: 1, id, stage, assignment }));
+  put("t-none", "queued", null);
+  const run = (args) => spawnSync(process.execPath, [BIN, ...args], { cwd: repo, env: { ...process.env, ORCH_HOME: h }, encoding: "utf8" });
+  assert.equal(run(["status"]).stdout, "watch none — no desk watcher holds the lock\n");
+  assert.deepEqual(JSON.parse(run(["status", "--json"]).stdout), { streams: [], watch: null });
+  put("t-held", "working", { owner: "s1", session: "sess-9" });
+  put("t-wait", "queued", { owner: null, session: "sess-7" });
+  const lines = run(["status"]).stdout.split("\n").filter(Boolean);
+  assert.deepEqual(lines.slice(1), ["ticket t-held  working  session sess-9  owner s1", "ticket t-wait  queued  session sess-7"]);
+  assert.deepEqual(JSON.parse(run(["status", "--json"]).stdout).tickets.map((t) => t.id), ["t-held", "t-wait"]);
+});

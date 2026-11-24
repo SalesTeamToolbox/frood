@@ -1634,3 +1634,36 @@ test("reopen: each lap gets its own round cap; the 4th round of one lap still bl
   assert.equal(fourth.ticket.stage, "blocked");
   assert.equal(fourth.ticket.blocked.reason, "rounds_exhausted");
 });
+
+// ---------------------------------------------------------------- session (parallel dispatch)
+test("session: recorded on a queued ticket, survives claim, shows in status --json only when set", () => {
+  const c = mk();
+  created(c, "ses-one");
+  created(c, "ses-two");
+  waived(c, "ses-one");
+  const s = board(c, "session", "ses-one", "--session", "sess-abc");
+  assert.equal(s.status, 0, s.stderr);
+  assert.equal(s.ticket.stage, "queued", "a label, not a transition");
+  assert.equal(s.ticket.assignment.session, "sess-abc");
+  assert.equal(s.ticket.assignment.owner, null);
+  const cl = claim(c, "ses-one");
+  assert.equal(cl.status, 0, cl.stderr);
+  assert.equal(cl.ticket.assignment.session, "sess-abc", "claim keeps the dispatched session");
+  assert.equal(cl.ticket.assignment.owner, "s1");
+  const rows = JSON.parse(board(c, "status", "--json").stdout);
+  assert.equal(rows.find((r) => r.id === "ses-one").session, "sess-abc");
+  assert.equal("session" in rows.find((r) => r.id === "ses-two"), false);
+  const again = board(c, "session", "ses-one", "--session", "sess-def");
+  assert.equal(again.ticket.assignment.session, "sess-def", "a working ticket can be re-pointed");
+});
+
+test("session: needs a token, and is refused on a failed ticket", () => {
+  const c = mk();
+  created(c, "ses-bad");
+  assert.equal(board(c, "session", "ses-bad").status, 2);
+  assert.equal(board(c, "session", "ses-bad", "--session", "two words").status, 2);
+  assert.equal(board(c, "fail", "ses-bad", "--note", "x").status, 0);
+  const r = board(c, "session", "ses-bad", "--session", "s");
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /session needs stage queued\|working/);
+});

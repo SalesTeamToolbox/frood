@@ -10,6 +10,8 @@
 //   claim <id> --owner <s> --harness claude|opencode --worktree <path>
 //   heartbeat <id> --owner <s>
 //   attach <id> --owner <s> --pid <n> --out <path>
+//   session <id> --session <sid>     (records the desktop session holding the ticket in assignment.session; queued or
+//                                     working; claim/reopen carry it over; `dispatch.mjs` and `desk.mjs status` read it)
 //   release <id> --owner <s>   |   release <id> --force --by human --note <text>
 //   fail <id> --note <text>     |   unblock <id> --by human --note <text>
 //   watch [--now <iso>]
@@ -98,6 +100,7 @@ const STAGE = {
   shipped: { from: ["ready"], to: "shipped", phase: 2 },
   reopen: { from: ["ready"], to: "working", phase: 2 },
   attach: { from: ["working"], to: "working", phase: 3 },
+  session: { from: ["queued", "working"], to: null, phase: 3 }, // stays where it is: a label, not a transition
   watch: { from: ["working"], to: "blocked", phase: 3 },
 };
 
@@ -769,6 +772,8 @@ function cmdEgm(ctx) {
 }
 
 // ---------- claim / heartbeat / release
+// A session recorded before the claim (the dispatcher knows it first) survives the claim and a reopen.
+const keepSession = (t) => (t.assignment?.session ? { session: t.assignment.session } : {});
 function cmdClaim(ctx, id) {
   const o = ctx.o;
   const owner = need(o, "owner");
@@ -792,7 +797,7 @@ function cmdClaim(ctx, id) {
     t.stage = STAGE.claim.to;
     t.worktree = wt;
     t.base_sha = base;
-    t.assignment = { owner, harness, since: now(), missed_sweeps: 0, worker: null };
+    t.assignment = { owner, harness, since: now(), missed_sweeps: 0, worker: null, ...keepSession(t) };
   });
 }
 function cmdHeartbeat(ctx, id) {
@@ -1203,7 +1208,7 @@ function cmdReopen(ctx, id) {
     t.reopens = [...reopens, { n: reopens.length + 1, at: now(), by: owner, note, after_round: after, refused_sha: refused }];
     t.stage = STAGE.reopen.to;
     t.worktree = wt;
-    t.assignment = { owner, harness, since: now(), missed_sweeps: 0, worker: null };
+    t.assignment = { owner, harness, since: now(), missed_sweeps: 0, worker: null, ...keepSession(t) };
     t.blocked = null;
   });
 }
@@ -1227,6 +1232,19 @@ function cmdAttach(ctx, id) {
     if (t.egm.status === "pending") throw new Refuse(`egm is pending on ${id}`);
     t.assignment.worker = { pid, started, out_path: outPath };
     t.assignment.missed_sweeps = 0; // a new worker starts a new liveness clock
+  });
+}
+
+// session records which desktop session holds the ticket. It works on a queued ticket (the dispatcher starts the
+// session before the session claims), so a queued ticket may carry an assignment with no owner yet.
+function cmdSession(ctx, id) {
+  const o = ctx.o;
+  const sid = String(need(o, "session")).trim();
+  if (!sid || /\s/.test(sid)) throw new Usage("--session must be one non-empty token");
+  return write(ctx, id, o, "session", (t) => {
+    assertFrom("session", t);
+    t.assignment = t.assignment ?? { owner: null, harness: null, since: null, missed_sweeps: 0, worker: null };
+    t.assignment.session = sid;
   });
 }
 
@@ -1333,6 +1351,7 @@ function statusRow(t, id) {
     cost,
     egm: t.egm.status,
     signoff: s ? `${s.by}:${String(s.reviewed_sha || "").slice(0, 8)}` : null,
+    ...(t.assignment?.session ? { session: t.assignment.session } : {}), // only when set: the row shape is pinned
   };
 }
 function cmdStatus(ctx) {
@@ -1385,6 +1404,7 @@ const COMMANDS = {
   claim: (ctx, id) => cmdClaim(ctx, id),
   heartbeat: (ctx, id) => cmdHeartbeat(ctx, id),
   attach: (ctx, id) => cmdAttach(ctx, id),
+  session: (ctx, id) => cmdSession(ctx, id),
   watch: (ctx) => cmdWatch(ctx),
   release: (ctx, id) => cmdRelease(ctx, id),
   fail: (ctx, id) => cmdFail(ctx, id),
