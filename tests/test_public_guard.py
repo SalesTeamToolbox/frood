@@ -10,6 +10,7 @@ for guard.py's private-path scan.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import pty
@@ -121,10 +122,7 @@ def env(tmp_path):
     e = Env(tmp_path)
     e.install()
     e.write_denylist("# test", DENY_EMAIL)
-    yield e
-    assert not (e.home / "gh-called").exists() or getattr(
-        e, "gh_expected", False
-    ), "gh must not be called"
+    return e
 
 
 # ------------------------------------------------------------------------------ push
@@ -182,12 +180,13 @@ def test_second_push_only_scans_new_range(env):
     assert res.returncode != 0 and "forbidden-path" in res.stderr
 
 
-def test_private_remote_not_scanned(env):
+def test_home_private_remotes_file_is_ignored(env):
+    """An agent-writable ~/.config private-remotes.txt must not switch the guard off."""
     repo, remote = env.make_repo()
     (env.guard_dir / "private-remotes.txt").write_text(f"# private\n{remote}\n")
-    env.commit_raw(repo, {".env": "A=1\n", "n.txt": DENY_EMAIL})
+    env.commit_raw(repo, {".env": "A=1\n"})
     res = env.git("push", "origin", "main", cwd=repo)
-    assert res.returncode == 0, res.stderr
+    assert res.returncode != 0 and "forbidden-path" in res.stderr
 
 
 def test_policy_file_change_needs_human(env):
@@ -333,30 +332,109 @@ def test_repo_local_pre_push_chained_with_stdin(env):
 # ------------------------------------------------------------------------------ detection
 
 
-def is_public(env, url, extra=None, drop=(), path=None):
-    e = {"PATH": path} if path else {}
-    e.update(extra or {})
-    res = env.run([PYTHON, str(GUARD), "is-public", url], env_extra=e, drop=drop)
-    return res.stdout.strip()
+def load_guard():
+    spec = importlib.util.spec_from_file_location("pg_guard_under_test", GUARD)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
-def test_no_env_var_forces_private(env):
-    nogh = {"PATH": "/usr/bin:/bin"}
+@pytest.fixture
+def inproc(env, monkeypatch):
+    """guard.py imported in-process, pointed at the temp HOME, stubs allowed under /tmp."""
+    g = load_guard()
+    monkeypatch.setenv("HOME", str(env.home))
+    for k in list(os.environ):
+        if k.startswith("PUBLIC_GUARD_"):
+            monkeypatch.delenv(k)
+    monkeypatch.setattr(g, "UNTRUSTED_PREFIXES", ())
+    monkeypatch.chdir(env.work)
+    return g
+
+
+def stub_gh(env, body: str):
+    gh = env.stub / "gh"
+    gh.write_text(f"#!/bin/sh\n{body}\n")
+    gh.chmod(0o755)
+    tools = json.loads((env.guard_dir / "tools.json").read_text())
+    tools["gh"] = str(gh)
+    (env.guard_dir / "tools.json").write_text(json.dumps(tools))
+
+
+def poison_cache(env, key, verdict):
+    cdir = env.home / ".cache" / "public-guard"
+    cdir.mkdir(parents=True, exist_ok=True)
+    (cdir / "visibility.json").write_text(json.dumps({key: {"v": verdict, "t": time.time()}}))
+
+
+def test_cached_private_verdict_is_never_trusted(env, inproc):
+    url = "git@github.com:acme/widgets.git"
+    poison_cache(env, "acme/widgets", "private")  # the bypass: agent writes the cache
+    stub_gh(env, "echo public")
+    assert inproc.classify(url)[0] == "public"
+    stub_gh(env, "exit 1")
+    poison_cache(env, "acme/other", "private")
+    assert inproc.classify("https://github.com/acme/other")[0] == "unknown"
+    assert inproc.is_guarded("https://github.com/acme/other")
+
+
+def test_private_comes_only_from_a_live_call_and_is_not_cached(env, inproc):
+    url = "git@github.com:acme/widgets.git"
+    stub_gh(env, "echo private")
+    assert inproc.classify(url)[0] == "private"
+    cache = env.home / ".cache" / "public-guard" / "visibility.json"
+    assert "private" not in (cache.read_text() if cache.exists() else "")
+    stub_gh(env, "echo public")  # repo flipped public: seen immediately
+    assert inproc.classify(url)[0] == "public"
+    cached = json.loads(cache.read_text())
+    assert cached["acme/widgets"]["v"] == "public"
+    stub_gh(env, "echo internal")
+    assert inproc.classify("https://github.com/acme/int")[0] == "private"
+
+
+def test_pre_commit_skips_only_on_fresh_live_private(env, inproc):
+    url = "https://github.com/acme/pc"
+    poison_cache(env, "acme/pc", "private")
+    stub_gh(env, "exit 1")
+    assert inproc.is_guarded(url)  # cache says private, live call fails => guarded
+    stub_gh(env, "echo private")
+    assert not inproc.is_guarded(url)
+
+
+def test_non_github_and_local_remotes(env, inproc):
+    assert inproc.classify("https://git.example.com/x/y.git")[0] == "public"
+    assert inproc.classify("/srv/git/z.git")[0] == "local"
+
+
+def test_private_remotes_only_from_root_owned_system_file(env, inproc, monkeypatch, tmp_path):
+    listing = tmp_path / "private-remotes.txt"
+    listing.write_text("# x\nhttps://git.example.com/x/y.git\n")
+    monkeypatch.setattr(inproc, "PRIVATE_REMOTES_FILE", str(listing))
+    # the file is owned by the test user, not root => ignored
+    assert inproc.classify("https://git.example.com/x/y")[0] == "public"
+    monkeypatch.setattr(inproc, "TRUSTED_UID", os.getuid())
+    assert inproc.classify("https://git.example.com/x/y")[0] == "private"
+    assert inproc.classify("https://git.example.com/other")[0] == "public"
+    # github remotes are never taken from the list
+    listing.write_text("https://github.com/acme/w\n")
+    stub_gh(env, "exit 1")
+    assert inproc.classify("https://github.com/acme/w")[0] == "unknown"
+
+
+def test_no_env_var_forces_private(env, inproc, monkeypatch):
+    stub_gh(env, "exit 1")
     url = "https://github.com/someone/somerepo.git"
-    assert shutil.which("gh", path="/usr/bin:/bin") is None or True
     for var in (
         "PUBLIC_GUARD_FORCE_PRIVATE",
         "PUBLIC_GUARD_PRIVATE",
         "PUBLIC_GUARD_SKIP",
         "PUBLIC_GUARD_DISABLE",
         "PUBLIC_GUARD_OFF",
-        "PUBLIC_GUARD_FORCE_PUBLIC_OFF",
+        "PUBLIC_GUARD_FORCE_PUBLIC",
     ):
-        out = is_public(env, url, {var: "1", **nogh}, drop=("PUBLIC_GUARD_FORCE_PUBLIC",))
-        assert out != "private", var
-    # FORCE_PUBLIC=0 and unset do not make a github remote private either
-    assert is_public(env, url, {"PUBLIC_GUARD_FORCE_PUBLIC": "0", **nogh}) != "private"
-    # and with FORCE_PUBLIC the blocks still apply even if other vars say private
+        monkeypatch.setenv(var, "0" if var.endswith("PUBLIC") else "1")
+        assert inproc.classify(url)[0] != "private", var
+        monkeypatch.delenv(var)
     repo, remote = env.make_repo()
     env.commit_raw(repo, {".env": "A=1\n"})
     res = env.git(
@@ -369,49 +447,85 @@ def test_no_env_var_forces_private(env):
     assert res.returncode != 0
 
 
-def stub_gh(env, body: str):
-    gh = env.stub / "gh"
-    gh.write_text(f"#!/bin/sh\n{body}\n")
-    gh.chmod(0o755)
+def test_is_public_command_prints_status(env):
+    res = env.run(
+        [PYTHON, str(GUARD), "is-public", "https://git.example.com/x/y"],
+        drop=("PUBLIC_GUARD_FORCE_PUBLIC",),
+    )
+    assert res.stdout.strip() == "public"
 
 
-def test_github_visibility_via_gh_cache_and_fail_closed(env):
-    env.gh_expected = True
-    url = "git@github.com:acme/widgets.git"
-    drop = ("PUBLIC_GUARD_FORCE_PUBLIC",)
-    stub_gh(env, "echo private")
-    assert is_public(env, url, drop=drop) == "private"
-    cache = json.loads((env.home / ".cache" / "public-guard" / "visibility.json").read_text())
-    assert cache["acme/widgets"]["v"] == "private"
-    # served from the 24h cache even if gh now says public
-    stub_gh(env, "echo public")
-    assert is_public(env, url, drop=drop) == "private"
-    # other repo: error from gh => unknown => guarded
-    stub_gh(env, "exit 1")
-    assert is_public(env, "https://github.com/acme/other", drop=drop) == "unknown"
-    stub_gh(env, "echo public")
-    assert is_public(env, "https://github.com/acme/third", drop=drop) == "public"
-    # non-github remote: public unless listed; local path is not guarded
-    assert is_public(env, "https://git.example.com/x/y.git", drop=drop) == "public"
-    (env.guard_dir / "private-remotes.txt").write_text("https://git.example.com/x/y.git\n")
-    assert is_public(env, "https://git.example.com/x/y", drop=drop) == "private"
-    assert is_public(env, "/srv/git/z.git", drop=drop) == "private"
+# ------------------------------------------------------------------------------ tool binaries
 
 
-def test_missing_gitleaks_blocks(env, tmp_path):
+def write_tools(env, **kw):
+    tools = json.loads((env.guard_dir / "tools.json").read_text())
+    tools.update(kw)
+    (env.guard_dir / "tools.json").write_text(json.dumps(tools))
+
+
+def fake_gitleaks(dirpath: Path) -> Path:
+    """A gitleaks that always reports 'clean' by writing [] to the -r file."""
+    dirpath.mkdir(parents=True, exist_ok=True)
+    fake = dirpath / "gitleaks"
+    fake.write_text(
+        '#!/bin/sh\nwhile [ $# -gt 0 ]; do if [ "$1" = "-r" ]; then echo "[]" > "$2"; fi; shift; done\nexit 0\n'
+    )
+    fake.chmod(0o755)
+    return fake
+
+
+def test_path_hijacked_gitleaks_cannot_blind_the_scan(env, tmp_path):
+    repo, remote = env.make_repo()
+    env.commit_raw(repo, {"settings.txt": f"OPENROUTER_API_KEY={OR_KEY}\n"})
+    fake = fake_gitleaks(tmp_path / "evil")
+    res = env.git(
+        "push",
+        "origin",
+        "main",
+        cwd=repo,
+        env_extra={"PATH": f"{fake.parent}:{os.environ['PATH']}"},
+    )
+    assert res.returncode != 0 and "gitleaks:" in res.stderr
+
+
+@pytest.mark.parametrize("where", ["tmp", "repo", "missing", "relative", "unrecorded"])
+def test_untrusted_recorded_gitleaks_blocks(env, tmp_path, where):
     repo, remote = env.make_repo()
     env.commit_raw(repo, {"a.txt": "a\n"})
-    git_path = shutil.which("git")
-    tools = tmp_path / "tools"
-    tools.mkdir()
-    for t in ("git", "python3", "sh", "mktemp", "cat", "dirname", "rm", "basename"):
-        p = shutil.which(t)
-        if p:
-            os.symlink(p, tools / t)
-    res = env.git("push", "origin", "main", cwd=repo, env_extra={"PATH": str(tools)})
-    assert git_path
+    if where == "tmp":
+        value = str(fake_gitleaks(tmp_path / "evil"))
+    elif where == "repo":
+        value = str(fake_gitleaks(repo / "bin"))
+        # the repo may live under /tmp too; either rule must refuse it
+    elif where == "missing":
+        value = "/usr/bin/gitleaks-does-not-exist"
+    elif where == "relative":
+        value = "gitleaks"
+    else:
+        value = None
+    write_tools(env, gitleaks=value)
+    res = env.git("push", "origin", "main", cwd=repo)
     assert res.returncode != 0
-    assert "install gitleaks" in res.stderr
+    assert "PUBLIC-GUARD: ERROR" in res.stderr
+    assert "run install.sh" in res.stderr or "refusing gitleaks" in res.stderr
+
+
+def test_missing_tools_json_blocks(env):
+    repo, remote = env.make_repo()
+    (env.guard_dir / "tools.json").unlink()
+    res = env.git("push", "origin", "main", cwd=repo)
+    assert res.returncode != 0 and "install.sh" in res.stderr
+
+
+def test_recorded_gh_under_tmp_is_refused(env, tmp_path):
+    stub_gh(env, "echo private")  # recorded gh sits under /tmp, which the real guard refuses
+    res = env.run(
+        [PYTHON, str(GUARD), "is-public", "https://github.com/acme/w"],
+        drop=("PUBLIC_GUARD_FORCE_PUBLIC",),
+    )
+    assert res.returncode != 0 and "refusing gh" in res.stderr
+    assert res.stdout.strip() != "private"
 
 
 # ------------------------------------------------------------------------------ install
@@ -545,9 +659,15 @@ def test_bypass_ignores_non_bash_and_garbage(env):
     assert env.run([PYTHON, str(BYPASS)], input_="not json").returncode == 0
 
 
-def test_force_push_to_private_or_local_remote_is_allowed(env, pushrepo):
-    (env.guard_dir / "private-remotes.txt").write_text(f"{pushrepo.parent / 'proj-remote.git'}\n")
-    res = bypass(env, "git push --force origin main", cwd=pushrepo)
+def test_force_push_to_local_remote_is_allowed(env, pushrepo):
+    payload = json.dumps(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push --force origin main"},
+            "cwd": str(pushrepo),
+        }
+    )
+    res = env.run([PYTHON, str(BYPASS)], input_=payload, drop=("PUBLIC_GUARD_FORCE_PUBLIC",))
     assert res.returncode == 0, res.stderr
 
 
@@ -602,3 +722,242 @@ def test_inline_gitleaks_allow_comment_is_ignored(env):
     env.commit_raw(repo, {"k.txt": f"OPENROUTER_API_KEY={OR_KEY} # gitleaks:allow\n"})
     res = env.git("push", "origin", "main", cwd=repo)
     assert res.returncode != 0 and "gitleaks:" in res.stderr
+
+
+# ------------------------------------------------------------------------------ round 2
+
+DENIED_R2 = [
+    "git push --no-verif",
+    "git push --no-v origin main",
+    "git commit --no-verif -m x",
+    'git push --no-ver""ify',
+    'git push "--no-"verify',
+    "git push '--no-ve'rify origin main",
+    "git merge --no-verify other",
+    "git rebase --no-verify main",
+    "git am --no-verify x.patch",
+    "env -u HOME git push",
+    "env -i git push",
+    "export HOME=/tmp/x; git push",
+    "export PATH=/tmp/evil:$PATH && git push",
+    "PATH=/tmp/evil:$PATH git push",
+    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=x GIT_CONFIG_VALUE_0=y git push",
+    "GIT_CONFIG_PARAMETERS=x git push",
+    "GIT_CONFIG_NOSYSTEM=1 git push",
+    "GIT_CONFIG_SYSTEM=/dev/null git push",
+    "GIT_EXEC_PATH=/tmp/x git push",
+    "git send-pack /x HEAD:main",
+    "git receive-pack /x",
+    "git config --global --remove-section core",
+    "git config --global --edit",
+    "git config -e",
+    "git config --global core.hooksPath /x",
+    'git -c "core.hook"s"Path=x" push',
+    "rm ~/.gitconfig",
+    "sed -i /hooksPath/d ~/.gitconfig",
+    "echo x >> /etc/gitconfig",
+    "tee ~/.config/git/config",
+    "rm -rf /etc/public-guard",
+    "cd ~/.config && rm -r public-guard",
+    "cd ~/.cache; rm -rf public-guard",
+    "mv ~/.gitconfig /tmp/gc",
+    "gh api -X PUT repos/o/r/contents/x.txt -f message=m",
+    "gh api --method POST repos/o/r/git/refs -f ref=x",
+    "gh api repos/o/r/contents/x -XPUT",
+    "bash -c 'git push --no-verify'",
+]
+ALLOWED_R2 = [
+    'git commit -m "tidy -n flag"',
+    "git log --no-merges --oneline",
+    "git merge --no-ff topic",
+    "git commit --no-edit --no-gpg-sign",
+    "git config user.name someone",
+    "git config --global user.email a@b.example",
+    "cat ~/.gitconfig",
+    "gh api repos/o/r --jq .visibility",
+    "gh api -X GET repos/o/r/contents/README.md",
+    "gh api -X PATCH repos/o/r -f name=x",
+    "python3 ops/public-guard/guard.py audit --history .",
+    "cd ops/public-guard && ls",
+    "git push origin feature/x",
+    "ruff check . && pytest -q",
+]
+
+
+@pytest.mark.parametrize("cmd", DENIED_R2)
+def test_bypass_denied_round2(env, pushrepo, cmd):
+    res = bypass(env, cmd, cwd=pushrepo)
+    assert res.returncode == 2, (cmd, res.stderr)
+    assert "public-guard bypass blocked" in res.stderr
+
+
+@pytest.mark.parametrize("cmd", ALLOWED_R2)
+def test_bypass_allowed_round2(env, pushrepo, cmd):
+    res = bypass(env, cmd, cwd=pushrepo)
+    assert res.returncode == 0, (cmd, res.stderr)
+
+
+def test_bypass_blocks_mcp_push_tools_but_not_reads(env):
+    for tool in (
+        "mcp__github__push_files",
+        "mcp__github__create_or_update_file",
+        "mcp__github__create_branch",
+        "mcp__github__fork_repository",
+    ):
+        res = bypass(env, "", tool=tool)
+        assert res.returncode == 2, tool
+        assert "public-guard: use git push so the scan runs" in res.stderr
+    assert bypass(env, "", tool="mcp__github__get_file_contents").returncode == 0
+
+
+def conflict_merge(env, repo, resolution):
+    env.commit_raw(repo, {"f.txt": "base\n"}, "base")
+    assert env.git("push", "origin", "main", cwd=repo).returncode == 0
+    env.git("checkout", "-q", "-b", "feat", cwd=repo, check=True)
+    env.commit_raw(repo, {"f.txt": "feat\n"}, "feat")
+    env.git("checkout", "-q", "main", cwd=repo, check=True)
+    env.commit_raw(repo, {"f.txt": "main\n"}, "main")
+    assert env.git("push", "origin", "main", "feat", cwd=repo).returncode == 0
+    assert env.git("merge", "feat", cwd=repo).returncode != 0  # conflict
+    (repo / "f.txt").write_text(resolution)
+    env.git("add", "f.txt", cwd=repo, check=True)
+    env.git("commit", "--no-verify", "-m", "merge feat", cwd=repo, check=True)
+    assert len(env.git("rev-list", "--parents", "-n1", "HEAD", cwd=repo).stdout.split()) == 3
+
+
+def test_secret_introduced_only_in_merge_resolution_is_blocked(env):
+    repo, remote = env.make_repo()
+    conflict_merge(env, repo, f"OPENROUTER_API_KEY={OR_KEY}\n")
+    res = env.git("push", "origin", "main", cwd=repo)
+    assert res.returncode != 0
+    assert "gitleaks:" in res.stderr and "f.txt" in res.stderr
+    assert OR_KEY not in res.stderr
+
+
+def test_merge_resolution_with_denylist_hit_is_blocked(env):
+    repo, remote = env.make_repo()
+    conflict_merge(env, repo, f"{DENY_EMAIL}\n")
+    res = env.git("push", "origin", "main", cwd=repo)
+    assert res.returncode != 0 and "denylist" in res.stderr
+
+
+def test_clean_merge_pushes(env):
+    repo, remote = env.make_repo()
+    conflict_merge(env, repo, "resolved\n")
+    assert env.git("push", "origin", "main", cwd=repo).returncode == 0
+
+
+TAG_PAYLOADS = [
+    ("denylist", f"release for {DENY_EMAIL}", "denylist", DENY_EMAIL),
+    ("key", f"OPENROUTER_API_KEY={OR_KEY}", "gitleaks:", OR_KEY),
+    ("path", f"built in {HOME_PATH}", "private-path", HOME_PATH),
+]
+
+
+@pytest.mark.parametrize("name,msg,rule,secret", TAG_PAYLOADS, ids=[t[0] for t in TAG_PAYLOADS])
+def test_annotated_tag_message_is_scanned(env, name, msg, rule, secret):
+    repo, remote = env.make_repo()
+    assert env.git("push", "origin", "main", cwd=repo).returncode == 0
+    env.git("tag", "-a", "v1", "-m", msg, cwd=repo, check=True)
+    res = env.git("push", "origin", "v1", cwd=repo)
+    assert res.returncode != 0
+    assert "tag-message:" in res.stderr and rule in res.stderr
+    assert secret not in res.stderr
+    assert env.git("tag", "-l", "v1", cwd=remote).stdout.strip() == ""
+    res = env.git("push", "origin", "--tags", cwd=repo)
+    assert res.returncode != 0 and "tag-message:" in res.stderr
+
+
+def test_clean_tags_still_push_and_non_commit_targets_are_refused(env):
+    repo, remote = env.make_repo()
+    assert env.git("push", "origin", "main", cwd=repo).returncode == 0
+    env.git("tag", "v0", cwd=repo, check=True)
+    env.git("tag", "-a", "v2", "-m", "clean release", cwd=repo, check=True)
+    assert env.git("push", "origin", "v0", "v2", cwd=repo).returncode == 0
+    env.git("tag", "-a", "treetag", "-m", "x", "main^{tree}", cwd=repo, check=True)
+    res = env.git("push", "origin", "treetag", cwd=repo)
+    assert res.returncode != 0 and "not a commit" in res.stderr
+
+
+PERMISSIVE_TOML = "[extend]\nuseDefault = true\n[allowlist]\npaths = ['''.*''']\n"
+
+
+def test_gitleaks_config_comes_from_remote_base_not_pushed_tip(env):
+    repo, remote = env.make_repo()
+    assert env.git("push", "origin", "main", cwd=repo).returncode == 0
+    env.commit_raw(
+        repo, {".gitleaks.toml": PERMISSIVE_TOML, "k.txt": f"OPENROUTER_API_KEY={OR_KEY}\n"}
+    )
+    res = env.git("push", "origin", "main", cwd=repo)
+    assert res.returncode != 0
+    assert "policy-file-changed" in res.stderr
+    assert "gitleaks:" in res.stderr, "the pushed tip's own allowlist must not blind the scan"
+
+
+def test_remote_base_config_is_the_one_applied(env):
+    repo, remote = env.make_repo()
+    assert env.git("push", "origin", "main", cwd=repo).returncode == 0
+    toml = "[extend]\nuseDefault = true\n[allowlist]\npaths = ['''^k\\.txt$''']\n"
+    env.commit_raw(repo, {".gitleaks.toml": toml})
+    # land the config on the remote the way a human would (hooks off), then push a hit in k.txt
+    landed = env.git("-c", "core.hooksPath=/dev/null", "push", "origin", "main", cwd=repo)
+    assert landed.returncode == 0
+    env.commit_raw(repo, {"k.txt": f"OPENROUTER_API_KEY={OR_KEY}\n"})
+    assert env.git("push", "origin", "main", cwd=repo).returncode == 0
+    env.commit_raw(repo, {"other.txt": f"OPENROUTER_API_KEY={OR_KEY}\n"})
+    assert env.git("push", "origin", "main", cwd=repo).returncode != 0
+
+
+def test_missing_denylist_blocks(env):
+    repo, remote = env.make_repo()
+    (env.guard_dir / "denylist.txt").unlink()
+    res = env.git("push", "origin", "main", cwd=repo)
+    assert res.returncode != 0 and "run install.sh" in res.stderr
+    (repo / "a.txt").write_text("a\n")
+    env.git("add", "a.txt", cwd=repo, check=True)
+    res = env.git("commit", "-m", "a", cwd=repo)
+    assert res.returncode != 0 and "run install.sh" in res.stderr
+
+
+BAD_STDIN = [
+    "garbage",
+    "refs/heads/main abc refs/heads/main def",
+    "a b c",
+    "refs/heads/main " + "1" * 40 + " refs/heads/main",
+]
+
+
+@pytest.mark.parametrize("line", BAD_STDIN)
+def test_unparseable_pre_push_stdin_blocks(env, line):
+    repo, remote = env.make_repo()
+    cmd = [PYTHON, str(GUARD), "pre-push", "origin", str(remote)]
+    res = env.run(cmd, cwd=repo, input_=line + "\n")
+    assert res.returncode != 0 and "unparseable" in res.stderr
+    assert env.run(cmd, cwd=repo, input_="").returncode == 0
+
+
+def test_install_records_tool_paths(tmp_path):
+    e = Env(tmp_path)
+    e.install()
+    tj = e.guard_dir / "tools.json"
+    assert oct(tj.stat().st_mode & 0o777) == "0o600"
+    data = json.loads(tj.read_text())
+    want = "/usr/bin/gitleaks" if os.path.exists("/usr/bin/gitleaks") else shutil.which("gitleaks")
+    assert data["gitleaks"] == want
+    assert data["gh"] is None or not data["gh"].startswith(("/tmp", "/var/tmp", "/dev/shm"))
+    tj.write_text('{"gitleaks": "/tmp/evil/gitleaks", "gh": null}')
+    assert e.run(["bash", str(INSTALL), "--check"]).returncode == 1
+    e.install()
+    assert json.loads(tj.read_text())["gitleaks"] == data["gitleaks"]
+    assert not (e.guard_dir / "private-remotes.txt").exists()
+
+
+def test_install_system_prints_commands_and_changes_nothing(tmp_path):
+    e = Env(tmp_path)
+    res = e.run(["bash", str(INSTALL), "--system"])
+    assert res.returncode == 0
+    out = res.stdout
+    assert "sudo git config --system core.hooksPath" in out
+    assert "/etc/public-guard" in out and "root" in out
+    assert not e.guard_dir.exists()
+    assert e.git("config", "--global", "--get", "core.hooksPath").stdout.strip() == ""

@@ -1,26 +1,31 @@
-# Frood gitleaks config: defaults plus narrow allowlists for deliberate test fixtures.
-# Any change to this file, or to .public-guard-allow, needs a human to approve the push
-# (see ops/public-guard/README.md). Keep each entry justified below.
+# Frood gitleaks config: defaults plus narrow allowlists for deliberate fake test literals.
+# The guard reads this file from the REMOTE base of a push (and CI from the PR base branch), so a
+# change here only takes effect after it has landed with a human's approval. Keep every entry
+# justified below; never allowlist a whole directory of tests.
 title = "frood"
 
 [extend]
 useDefault = true
 
-# generic-api-key matches obviously fake literals in tests ("test-key-abc123",
-# "test-secret-32-chars-long-ok-yep", ...). Scoped to that ONE rule and to tests/ only, so
-# a real provider-shaped key (sk-or-v1-..., ghp_..., AKIA..., private key blocks) planted
-# in tests/ is still caught.
+# Exact fake literals found in unit tests (rule generic-api-key only, matched against the secret
+# value and anchored). A real key of any provider shape, or any other generic-looking value in
+# tests/, is still reported.
+#   n8n_api_testkey123, test-key-abc123         tests/test_n8n_create_tool.py, test_n8n_tool.py
+#   test-abacus-key-12345, abacus-key-12345     tests/test_abacus_provider.py
+#   test-secret-key-at-least-32-chars-long,
+#   correct-secret-key-32-chars-long            tests/test_encryption.py
+#   test-secret-32-chars-long-ok-yep            tests/test_security.py, test_device_auth.py
+#   ghp_DUPLICATE1234567890A                    tests/test_github_accounts.py (not a real token)
+#   sk-1234567890abcdef                         tests/test_ssh_tool.py (redaction fixture)
+#   my_api_key_12345                            tests/test_advanced_tools.py
 [[allowlists]]
-description = "fake generic-api-key literals in unit tests"
+description = "specific fake literals in unit tests"
 targetRules = ["generic-api-key"]
-paths = ['''^tests/''']
-
-# Historical commit a67c0fa3: placeholder NVIDIA key "nvapi-final-test-key-12345" in a
-# settings fixture (file no longer in the tree). Pinned to that one rule and path.
-[[allowlists]]
-description = "fake nvapi test key in historical .frood/settings.json"
-targetRules = ["generic-api-key"]
-paths = ['''^\.frood/settings\.json$''']
+regexes = [
+  '''^(?:n8n_api_testkey123|test-key-abc123|test-abacus-key-12345|abacus-key-12345)$''',
+  '''^(?:test-secret-key-at-least-32-chars-long|correct-secret-key-32-chars-long)$''',
+  '''^(?:test-secret-32-chars-long-ok-yep|ghp_DUPLICATE1234567890A|sk-1234567890abcdef|my_api_key_12345)$''',
+]
 
 # Minified third-party bundles (xterm, monaco) trip generic-api-key on identifiers like
 # "KeybindingResolver=" and "g.token,N=". They hold no secrets.

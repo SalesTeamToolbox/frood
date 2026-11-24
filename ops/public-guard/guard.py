@@ -27,6 +27,13 @@ import tempfile
 import time
 
 ZERO = "0" * 40
+DEFAULT_TOML = "[extend]\nuseDefault = true\n"
+HEX_RE = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
+# Tool binaries must never come from a world-writable or repo-local location.
+UNTRUSTED_PREFIXES = ("/tmp", "/var/tmp", "/dev/shm")
+# private remotes may only be declared by root (an agent running as the user cannot write here).
+PRIVATE_REMOTES_FILE = "/etc/public-guard/private-remotes.txt"
+TRUSTED_UID = 0
 CACHE_TTL = 24 * 3600
 POLICY_FILES = (".public-guard-allow", ".gitleaks.toml")
 MAX_SHOWN = 50
@@ -76,6 +83,42 @@ def conf_dir() -> str:
 
 def cache_file() -> str:
     return os.path.join(home(), ".cache", "public-guard", "visibility.json")
+
+
+def tools_file() -> str:
+    return os.path.join(conf_dir(), "tools.json")
+
+
+def tool_path(name: str, required: bool = True):
+    """Absolute path of a helper binary recorded by install.sh. Never searches PATH."""
+    try:
+        with open(tools_file(), encoding="utf-8") as fh:
+            data = json.load(fh)
+        recorded = data.get(name) if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        recorded = None
+    if not recorded:
+        if required:
+            raise GuardError(
+                f"{name} is not recorded in {tools_file()} - install {name} and run install.sh"
+            )
+        return None
+    if not os.path.isabs(recorded):
+        raise GuardError(f"recorded path for {name} is not absolute ({recorded}); run install.sh")
+    real = os.path.realpath(recorded)
+    if not (os.path.isfile(real) and os.access(real, os.X_OK)):
+        raise GuardError(
+            f"recorded {name} ({recorded}) is missing or not executable; run install.sh"
+        )
+    banned = list(UNTRUSTED_PREFIXES)
+    top = git(["rev-parse", "--show-toplevel"], check=False).stdout.strip()
+    if top:
+        banned.append(os.path.realpath(top))
+    for pre in banned:
+        pre_real = os.path.realpath(pre)
+        if real == pre_real or real.startswith(pre_real.rstrip("/") + "/"):
+            raise GuardError(f"refusing {name} at {real}: it lives under {pre}")
+    return real
 
 
 def read_lines(path: str) -> list[str]:
@@ -138,18 +181,22 @@ def save_cache(cache: dict) -> None:
         pass
 
 
-def gh_visibility(owner: str, repo: str, allow_network: bool, ignore_ttl: bool = False):
-    """Return 'public', 'private' or None when it cannot be determined."""
+def gh_visibility(owner: str, repo: str):
+    """Return 'public', 'private' or None when it cannot be determined.
+
+    Only 'public' is ever cached (a cached 'public' can only cause extra scanning).
+    A 'private' verdict always comes from a live gh call.
+    """
     key = f"{owner}/{repo}".lower()
     cache = load_cache()
     ent = cache.get(key)
-    if isinstance(ent, dict):
-        fresh = (time.time() - float(ent.get("t", 0))) < CACHE_TTL
-        if (fresh or ignore_ttl) and ent.get("v") in ("public", "private"):
-            return ent["v"]
-    if not allow_network:
-        return None
-    gh = shutil.which("gh")
+    if isinstance(ent, dict) and ent.get("v") == "public":
+        try:
+            if (time.time() - float(ent.get("t", 0))) < CACHE_TTL:
+                return "public"
+        except (TypeError, ValueError):
+            pass
+    gh = tool_path("gh", required=False)
     if not gh:
         return None
     try:
@@ -165,44 +212,53 @@ def gh_visibility(owner: str, repo: str, allow_network: bool, ignore_ttl: bool =
         return None
     vis = res.stdout.strip().lower()
     if vis == "public":
-        v = "public"
-    elif vis in ("private", "internal"):
-        v = "private"
-    else:
-        return None
-    cache[key] = {"v": v, "t": time.time()}
-    save_cache(cache)
-    return v
+        cache[key] = {"v": "public", "t": time.time()}
+        save_cache(cache)
+        return "public"
+    if vis in ("private", "internal"):
+        cache.pop(key, None)
+        save_cache(cache)
+        return "private"
+    return None
 
 
-def classify(url: str, offline: bool = False):
+def private_remote_list() -> set[str]:
+    path = PRIVATE_REMOTES_FILE
+    try:
+        st = os.stat(path)
+    except OSError:
+        return set()
+    if st.st_uid != TRUSTED_UID:
+        return set()
+    return {norm_url(x) for x in read_lines(path) if x and not x.startswith("#")}
+
+
+def classify(url: str):
     """Return (status, why). status: 'public' | 'private' | 'local' | 'unknown'.
 
     'unknown' is guarded exactly like 'public'. Only PUBLIC_GUARD_FORCE_PUBLIC
     exists as an env override and it can only make things MORE guarded.
     """
-    listed = {
-        norm_url(x)
-        for x in read_lines(os.path.join(conf_dir(), "private-remotes.txt"))
-        if x and not x.startswith("#")
-    }
     gh = parse_github(url)
-    if gh is None and norm_url(url) in listed:
-        return "private", "listed in private-remotes.txt"
+    if gh is None and norm_url(url) in private_remote_list():
+        return "private", "listed in /etc/public-guard/private-remotes.txt"
     if os.environ.get("PUBLIC_GUARD_FORCE_PUBLIC") == "1":
         return "public", "PUBLIC_GUARD_FORCE_PUBLIC=1"
     if is_local(url):
         return "local", "local path remote"
     if gh is None:
-        return "public", "non-GitHub remote (public unless listed in private-remotes.txt)"
-    vis = gh_visibility(gh[0], gh[1], allow_network=not offline, ignore_ttl=offline)
+        return (
+            "public",
+            "non-GitHub remote (public unless listed in /etc/public-guard/private-remotes.txt)",
+        )
+    vis = gh_visibility(gh[0], gh[1])
     if vis is None:
         return "unknown", "visibility unknown (treated as public)"
     return vis, "github visibility"
 
 
-def is_guarded(url: str, offline: bool = False) -> bool:
-    return classify(url, offline)[0] in ("public", "unknown")
+def is_guarded(url: str) -> bool:
+    return classify(url)[0] in ("public", "unknown")
 
 
 def repo_label(url: str) -> str:
@@ -265,8 +321,13 @@ def git_blob(rev_path: str, cwd=None):
 
 def load_denylist():
     path = os.path.join(conf_dir(), "denylist.txt")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            lines = [ln.strip() for ln in fh.read().splitlines()]
+    except OSError as exc:
+        raise GuardError(f"denylist {path} is missing or unreadable - run install.sh") from exc
     entries = []
-    for ln in read_lines(path):
+    for ln in lines:
         if not ln or ln.startswith("#"):
             continue
         try:
@@ -466,12 +527,10 @@ def scan_events(events, scanner: Scanner, f: Findings):
 # --------------------------------------------------------------------------- gitleaks
 
 
-def run_gitleaks(kind_args: list[str], target: str, config_text, cwd=None) -> list[dict]:
-    exe = shutil.which("gitleaks")
-    if not exe:
-        raise GuardError(
-            "gitleaks is not installed - install gitleaks (https://github.com/gitleaks/gitleaks) and retry"
-        )
+def run_gitleaks(
+    kind_args: list[str], target: str | None, config_text, cwd=None, stdin_text=None
+) -> list[dict]:
+    exe = tool_path("gitleaks")
     tmp = tempfile.mkdtemp(prefix="pg-")
     try:
         os.chmod(tmp, 0o700)
@@ -494,13 +553,14 @@ def run_gitleaks(kind_args: list[str], target: str, config_text, cwd=None) -> li
             "-r",
             report,
         ]
-        if config_text:
-            cfg = os.path.join(tmp, "gitleaks.toml")
-            with open(cfg, "w", encoding="utf-8") as fh:
-                fh.write(config_text)
-            cmd += ["-c", cfg]
-        cmd += [*kind_args[1:], target]
-        res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+        # Always pass an explicit config: otherwise gitleaks would silently pick up the
+        # working tree's own .gitleaks.toml.
+        cfg = os.path.join(tmp, "gitleaks.toml")
+        with open(cfg, "w", encoding="utf-8") as fh:
+            fh.write(config_text or DEFAULT_TOML)
+        cmd += ["-c", cfg]
+        cmd += kind_args[1:] + ([target] if target else [])
+        res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, input=stdin_text)
         if res.returncode != 0 or not os.path.exists(report):
             raise GuardError(f"gitleaks failed (rc={res.returncode}): {res.stderr.strip()[:300]}")
         try:
@@ -513,9 +573,9 @@ def run_gitleaks(kind_args: list[str], target: str, config_text, cwd=None) -> li
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def add_gitleaks(f: Findings, hits: list[dict], prefix_dir: str = ""):
+def add_gitleaks(f: Findings, hits: list[dict], prefix_dir: str = "", label: str | None = None):
     for h in hits:
-        file = h.get("File", "?")
+        file = label or h.get("File", "?")
         if prefix_dir and file.startswith(prefix_dir):
             file = file[len(prefix_dir) :].lstrip("/")
         secret = h.get("Secret") or h.get("Match") or "?"
@@ -659,6 +719,61 @@ def scan_tree_paths(f: Findings, sha: str, cwd):
             f.add(p, 0, "forbidden-path", f"[{pat}]")
 
 
+def config_base(name: str, lsha: str, rsha: str, cwd):
+    """The REMOTE-side commit whose .gitleaks.toml/.public-guard-allow govern this push.
+
+    Never the pushed tip: a push must not be able to weaken the rules that judge it.
+    """
+    if (
+        rsha != ZERO
+        and git(["cat-file", "-e", rsha + "^{commit}"], cwd=cwd, check=False).returncode == 0
+    ):
+        return rsha
+    cands = []
+    head = git(["symbolic-ref", "-q", f"refs/remotes/{name}/HEAD"], cwd=cwd, check=False)
+    if head.returncode == 0 and head.stdout.strip():
+        cands.append(head.stdout.strip())
+    cands += [f"refs/remotes/{name}/main", f"refs/remotes/{name}/master"]
+    for c in cands:
+        if git(["rev-parse", "--verify", "-q", c], cwd=cwd, check=False).returncode != 0:
+            continue
+        mb = git(["merge-base", lsha, c], cwd=cwd, check=False)
+        if mb.returncode == 0 and mb.stdout.strip():
+            return mb.stdout.strip()
+    return None
+
+
+def scan_tag_objects(f: Findings, scanner: Scanner, sha: str, cwd, cfg) -> None:
+    """Scan the message of an annotated tag (and of tags it points at); target must be a commit."""
+    seen = 0
+    cur = sha
+    while True:
+        typ = git(["cat-file", "-t", cur], cwd=cwd).stdout.strip()
+        if typ == "commit":
+            return
+        if typ != "tag":
+            raise GuardError(f"pushed ref points at a {typ} object, not a commit or tag")
+        seen += 1
+        if seen > 10:
+            raise GuardError("tag chain too deep")
+        body = git(["cat-file", "tag", cur], cwd=cwd).stdout
+        head, _, msg = body.partition("\n\n")
+        label = f"tag-message:{cur[:7]}"
+        for i, ln in enumerate(msg.splitlines(), 1):
+            scanner.text(f, label, i, ln)
+        if msg.strip():
+            add_gitleaks(
+                f, run_gitleaks(["stdin"], None, cfg, cwd=cwd, stdin_text=msg), label=label
+            )
+        nxt = ""
+        for ln in head.splitlines():
+            if ln.startswith("object "):
+                nxt = ln.split()[1]
+        if not nxt:
+            raise GuardError("malformed tag object")
+        cur = nxt
+
+
 def cmd_pre_push(args: list[str]) -> int:
     if len(args) < 2:
         raise GuardError("usage: guard.py pre-push <remote-name> <remote-url>")
@@ -675,24 +790,34 @@ def cmd_pre_push(args: list[str]) -> int:
     policy_changed: list[str] = []
     refs = []
     for ln in sys.stdin.read().splitlines():
-        parts = ln.split()
-        if len(parts) < 4:
+        if not ln.strip():
             continue
-        refs.append(parts[:4])
+        parts = ln.split()
+        if len(parts) != 4 or not HEX_RE.match(parts[1]) or not HEX_RE.match(parts[3]):
+            raise GuardError(
+                "unparseable pre-push input line; refusing to guess what is being pushed"
+            )
+        refs.append(parts)
     for lref, lsha, rref, rsha in refs:
         if lsha == ZERO:
             continue
+        typ = git(["cat-file", "-t", lsha], cwd=cwd).stdout.strip()
+        if typ not in ("commit", "tag"):
+            raise GuardError(f"{lref} points at a {typ} object, not a commit or tag")
         have_remote = (
             rsha != ZERO
             and git(["cat-file", "-e", rsha + "^{commit}"], cwd=cwd, check=False).returncode == 0
         )
         rev = [f"{rsha}..{lsha}"] if have_remote else [lsha, "--not", f"--remotes={name}"]
+        base = config_base(name, lsha, rsha, cwd)
+        cfg = git_blob(f"{base}:.gitleaks.toml", cwd=cwd) if base else None
         before = len(scanner.changed)
         events = parse_diff(
             git_stream(
                 [
                     "log",
                     "-p",
+                    "-m",
                     "-U0",
                     "--no-color",
                     "--no-ext-diff",
@@ -710,9 +835,10 @@ def cmd_pre_push(args: list[str]) -> int:
             if p.rsplit("/", 1)[-1] in POLICY_FILES and p not in policy_changed:
                 policy_changed.append(p)
         scan_tree_paths(f, lsha, cwd)
-        cfg = git_blob(f"{lsha}:.gitleaks.toml", cwd=cwd)
-        add_gitleaks(f, run_gitleaks(["git", f"--log-opts={' '.join(rev)}"], cwd, cfg, cwd=cwd))
-        at = git_blob(f"{lsha}:.public-guard-allow", cwd=cwd)
+        if typ == "tag":
+            scan_tag_objects(f, scanner, lsha, cwd, cfg)
+        add_gitleaks(f, run_gitleaks(["git", f"--log-opts=-m {' '.join(rev)}"], cwd, cfg, cwd=cwd))
+        at = git_blob(f"{base}:.public-guard-allow", cwd=cwd) if base else None
         if at:
             allow_text = (allow_text or "") + "\n" + at
     for p in policy_changed:
@@ -727,7 +853,7 @@ def cmd_pre_commit(args: list[str]) -> int:
         parts = ln.split()
         if len(parts) >= 2 and parts[1] not in urls:
             urls.append(parts[1])
-    guarded = [u for u in urls if is_guarded(u, offline=True)]
+    guarded = [u for u in urls if is_guarded(u)]
     if not guarded:
         return 0
     label = repo_label(guarded[0])
@@ -846,6 +972,7 @@ def cmd_audit(args: list[str]) -> int:
                         "--no-ext-diff",
                         "--no-textconv",
                         "--no-renames",
+                        "-m",
                         "--format=%x01%H%x02%B%x03",
                     ],
                     cwd=repo,
@@ -853,7 +980,7 @@ def cmd_audit(args: list[str]) -> int:
                 in_msg_mode=True,
             )
             scan_events(events, scanner, f)
-            add_gitleaks(f, run_gitleaks(["git", "--log-opts=--all"], repo, cfg, cwd=repo))
+            add_gitleaks(f, run_gitleaks(["git", "--log-opts=-m --all"], repo, cfg, cwd=repo))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     remaining = [it for it in f.items if not Allow(allow_text).permits(it)]
