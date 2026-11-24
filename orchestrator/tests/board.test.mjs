@@ -1667,3 +1667,21 @@ test("session: needs a token, and is refused on a failed ticket", () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /session needs stage queued\|working/);
 });
+
+test("session: stays visible when the ticket reaches ready; a ticket without one still ends with assignment null", () => {
+  const c = mk();
+  atReady(c, "ses-ready");
+  assert.equal(JSON.parse(fs.readFileSync(ticketFile(c, "ses-ready"), "utf8")).assignment, null);
+  const d = mk();
+  workingTicket(d, "ses-r2");
+  assert.equal(board(d, "session", "ses-r2", "--session", "sess-keep").status, 0);
+  const sha = landBlastFile(d);
+  assert.equal(round(d, "ses-r2", { reviewed: sha }).status, 0);
+  signedCritic(d, "ses-r2");
+  gatesOk(d, "ses-r2");
+  assert.equal(board(d, "ready", "ses-r2", "--owner", "s1").status, 0);
+  const t = JSON.parse(fs.readFileSync(ticketFile(d, "ses-r2"), "utf8"));
+  assert.equal(t.stage, "ready");
+  assert.equal(t.assignment.session, "sess-keep");
+  assert.equal(t.assignment.owner, null);
+});

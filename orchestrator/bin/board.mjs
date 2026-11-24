@@ -1139,7 +1139,11 @@ function cmdReady(ctx, id) {
       }
     }
     t.stage = "ready";
-    t.assignment = null;
+    // The owner and worker are gone, but the desktop session stays visible: the dispatcher needs it while the
+    // ticket waits for the train (`desk status`). Only a recorded session survives; otherwise assignment is null.
+    t.assignment = t.assignment?.session
+      ? { owner: null, harness: null, since: null, missed_sweeps: 0, worker: null, session: t.assignment.session }
+      : null;
     return DROP; // ready releases the lock
   });
   const branch = `${ctx.adapter.branch_prefix}${id}`;

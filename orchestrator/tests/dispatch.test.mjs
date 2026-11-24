@@ -127,13 +127,16 @@ test("cap: refuses a third build when two are running; default 2 build / 1 train
   assert.deepEqual(JSON.parse(run(r, "cap", "--json").stdout), { kind: "build", running: 2, max: 2, ok: false });
 });
 
-test("cap: train kind counts ready tickets; adapter max_parallel overrides the defaults and is validated", () => {
+test("cap: train kind counts ready tickets, --exclude skips the departing one; adapter max_parallel overrides and is validated", () => {
   const r = mk();
   assert.equal(run(r, "cap", "--kind", "train").status, 0);
   ticket(r, "r-one", { stage: "ready" });
-  assert.equal(run(r, "cap", "--kind", "train").status, 1);
+  assert.equal(run(r, "cap", "--kind", "train").status, 1, "a ready ticket fills the one train slot");
+  assert.equal(run(r, "cap", "--kind", "train", "--exclude", "r-one").status, 0, "one ready ticket, departing it");
+  ticket(r, "r-two", { stage: "ready" });
+  assert.equal(run(r, "cap", "--kind", "train", "--exclude", "r-one").status, 1, "a second train in flight is refused");
   const adapter = path.join(r, ".opencode", "board", "adapter.json");
-  fs.writeFileSync(adapter, JSON.stringify({ base: "main", gates: [["true"]], max_parallel: { build: 3, train: 2 } }));
+  fs.writeFileSync(adapter, JSON.stringify({ base: "main", gates: [["true"]], max_parallel: { build: 3, train: 3 } }));
   assert.equal(run(r, "cap", "--kind", "train").status, 0);
   ticket(r, "w-one", { stage: "working" });
   ticket(r, "w-two", { stage: "working" });
@@ -141,6 +144,50 @@ test("cap: train kind counts ready tickets; adapter max_parallel overrides the d
   fs.writeFileSync(adapter, JSON.stringify({ base: "main", gates: [["true"]], max_parallel: { build: 0 } }));
   assert.equal(run(r, "cap").status, 2);
   assert.equal(run(r, "cap", "--kind", "huh").status, 2);
+});
+
+test("plan: path overlap survives a bare basename, absolute paths, .. segments and case", () => {
+  const r = mk();
+  const apart = (x, y) => plan(r, x, y).groups.length === 2;
+  ticket(r, "n-one", { scope: ["orchestrator/bin/desk.mjs"] });
+  ticket(r, "n-two", { scope: ["a.mjs"], callers: ["`cmdStatus` in `desk.mjs`"] });
+  assert.ok(apart("n-one", "n-two"), "bare basename vs full path");
+  ticket(r, "abs-one", { scope: [`${r}/src/x.mjs`] });
+  ticket(r, "abs-two", { scope: ["src/x.mjs"] });
+  assert.ok(apart("abs-one", "abs-two"), "absolute under the repo root vs relative");
+  ticket(r, "dd-one", { scope: ["src/lib/../x.mjs"] });
+  assert.ok(apart("dd-one", "abs-two"), ".. collapsed");
+  ticket(r, "cs-one", { scope: ["SRC/X.mjs"] });
+  assert.ok(apart("cs-one", "abs-two"), "case-insensitive");
+  ticket(r, "ok-one", { scope: ["other/y.mjs"] });
+  assert.deepEqual(plan(r, "abs-two", "ok-one").groups, [["abs-two", "ok-one"]], "disjoint paths still group");
+});
+
+test("plan: depends: none is no dependency; an id not on the board is reported as unknown, not grouped", () => {
+  const r = mk();
+  const f = (id, v) => {
+    ticket(r, id, { scope: [`${id}.mjs`] });
+    const m = JSON.parse(fs.readFileSync(path.join(r, ".opencode", "board", "tickets", `${id}.json`), "utf8")).mandate_path;
+    fs.writeFileSync(m, `depends: ${v}\n`);
+  };
+  f("z-none", "none");
+  f("z-na", "n/a");
+  f("z-typo", "t99-typo");
+  const p = plan(r, "z-none", "z-na", "z-typo");
+  assert.deepEqual(p.groups, [["z-none", "z-na"]]);
+  assert.deepEqual(p.unknown, [{ id: "z-typo", unknown_ids: ["t99-typo"] }]);
+  assert.deepEqual(p.held, []);
+});
+
+test("plan: a ticket sharing a file with an in-flight board ticket outside the list is held", () => {
+  const r = mk();
+  ticket(r, "fly-one", { scope: ["src/busy.mjs"], stage: "working" });
+  ticket(r, "new-one", { scope: ["src/busy.mjs"] });
+  ticket(r, "new-two", { scope: ["src/free.mjs"] });
+  const p = plan(r, "new-one", "new-two");
+  assert.deepEqual(p.groups, [["new-two"]]);
+  assert.equal(p.held[0].id, "new-one");
+  assert.deepEqual(p.held[0].waiting_on, ["fly-one"]);
 });
 
 test("--help prints the header and exits 0", () => {

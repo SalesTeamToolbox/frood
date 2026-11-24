@@ -2,7 +2,7 @@
 // Parallel dispatch: which board tickets may run in their own sessions at once, and how many may run.
 //
 //   node bin/dispatch.mjs plan <ticket-id|plan-file>... [--repo <path>] [--json]
-//   node bin/dispatch.mjs cap [--kind build|train] [--repo <path>] [--json]
+//   node bin/dispatch.mjs cap [--kind build|train] [--exclude <id>]... [--repo <path>] [--json]
 //   --help  (or -h) prints this text and exits 0
 //
 // plan: each argument is a ticket id on the board, or a plan file; a plan file contributes every board ticket id it
@@ -10,12 +10,20 @@
 //   .opencode/board/tickets/<id>.json and any `depends: <id>, <id>` line in the ticket's Mandate. Two tickets
 //   CONFLICT when their file sets overlap (the same path, a path under the other's directory, or globs whose
 //   literal prefixes nest) or when one depends on the other. It never guesses: overlap means serial.
-//   Output: ordered `groups`; every ticket in a group can run at once, groups run one after another. A ticket
-//   that depends on a board ticket outside the argument list which is not `shipped` is `held` (not grouped).
+//   Paths are compared normalised (posix, `..` collapsed, repo/worktree prefix stripped, case-insensitive); an entry
+//   without a `/` (a bare `desk.mjs`) overlaps any path with that last segment.
+//   Output: ordered `groups`; every ticket in a group can run at once, and group N+1 starts only when every ticket
+//   of group N is shipped (groups run one after another). `held` (not grouped): a ticket that depends on a board
+//   ticket outside the argument list which is not `shipped`, or whose files overlap a ticket already in flight on
+//   the board (working, ready, or queued with a session) that is not in the argument list. `unknown` (not
+//   grouped): a ticket whose `depends:` names an id that is not on the board, reported apart so a typo is seen.
+//   A `depends:` value of none / n/a / nothing / - means no dependency.
 //   Exit 0 ok, 1 a dependency cycle, 2 usage / missing ticket.
 // cap: counts board tickets by stage and refuses (exit 1) when the cap for the kind is reached.
 //   build = tickets in `working`, plus `queued` tickets that already carry a session (dispatched, not yet claimed);
-//   train = tickets in `ready` (queued for or inside the train and verify). Caps come from .opencode/board/
+//   train = tickets in `ready` (queued for or inside the train and verify), minus any `--exclude <id>`: the
+//   dispatcher passes the ticket it is about to depart, so "one ready ticket, departing it" passes while a
+//   second ticket in the train is refused. Caps come from .opencode/board/
 //   adapter.json `max_parallel` {build, train}; absent keys default to build 2, train 1. The box-wide suite lock
 //   and the train stay serial regardless: parallelism is for building and review, never for heavy gates.
 //   Exit 0 room left, 1 refused (cap reached), 2 usage / bad adapter.
@@ -61,12 +69,25 @@ function boardTickets(root) {
 
 // ---------- file sets and overlap
 const PATH_RE = /[\w.@-]+\/[\w./*@-]+|\b[\w-]+\.(?:mjs|js|cjs|ts|tsx|py|md|json|sh|css|html|yml|yaml|toml)\b/g;
-const normPath = (p) => String(p).replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
-export function filesOf(t) {
-  const set = new Set((t.scope ?? []).map(normPath));
+// Posix, `..` collapsed, an absolute path under the repo root or the ticket's worktree made relative, lower-cased.
+function normPath(p, roots = []) {
+  let x = String(p).replace(/\\/g, "/").toLowerCase();
+  for (const r of roots) {
+    const rr = String(r ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    if (rr && x.startsWith(`${rr}/`)) {
+      x = x.slice(rr.length + 1);
+      break;
+    }
+  }
+  x = path.posix.normalize(x).replace(/^\.\//, "").replace(/\/+$/, "");
+  return x === "." ? "" : x;
+}
+export function filesOf(t, root = null) {
+  const roots = [t.worktree, root];
+  const set = new Set((t.scope ?? []).map((p) => normPath(p, roots)));
   for (const b of t.blast_radius ?? []) {
-    for (const m of String(b.caller ?? "").match(PATH_RE) ?? []) set.add(normPath(m));
-    if (typeof b.test === "string" && b.test) set.add(normPath(b.test));
+    for (const m of String(b.caller ?? "").match(PATH_RE) ?? []) set.add(normPath(m, roots));
+    if (typeof b.test === "string" && b.test) set.add(normPath(b.test, roots));
   }
   return [...set].filter(Boolean);
 }
@@ -81,8 +102,15 @@ function literal(g) {
   return { segs: out, glob: false };
 }
 const nests = (a, b) => a.length <= b.length && a.every((s, i) => s === b[i]);
+const lastSeg = (p) => p.split("/").pop();
 export function pathsOverlap(a, b) {
   if (a === b) return true;
+  // A bare name (no `/`) may be any directory's file: it overlaps whatever ends in the same last segment.
+  if (!a.includes("/") !== !b.includes("/")) {
+    const [bare, other] = a.includes("/") ? [b, a] : [a, b];
+    const seg = lastSeg(other);
+    if (bare === seg || path.posix.matchesGlob(seg, bare) || path.posix.matchesGlob(bare, seg)) return true;
+  }
   const la = literal(a);
   const lb = literal(b);
   // Either side is a directory or glob when it is a strict path-prefix of the other, or carries a wildcard.
@@ -99,6 +127,7 @@ export function sharedFile(fa, fb) {
 }
 
 // `depends: a, b` (optionally bold / bulleted / `**depends:**`) anywhere in the Mandate.
+const NO_DEPENDENCY = new Set(["none", "n/a", "na", "nothing", "no", "-", "nil"]);
 export function dependsOf(mandateText) {
   const out = new Set();
   for (const line of String(mandateText).split(/\r?\n/)) {
@@ -106,6 +135,7 @@ export function dependsOf(mandateText) {
     if (!m) continue;
     for (const tok of m[1].split(/[,\s]+/)) {
       const id = tok.replace(/[`*.;]/g, "");
+      if (NO_DEPENDENCY.has(id.toLowerCase())) continue;
       if (ID_RE.test(id)) out.add(id);
     }
   }
@@ -149,16 +179,28 @@ export function buildPlan(root, args) {
   const stageOf = new Map(all.map((t) => [t.id, t.stage]));
   const info = picked.map((t) => {
     const mandate = fs.existsSync(t.mandate_path ?? "") ? fs.readFileSync(t.mandate_path, "utf8") : "";
-    return { id: t.id, files: filesOf(t), depends: dependsOf(mandate).filter((d) => d !== t.id) };
+    return { id: t.id, files: filesOf(t, root), depends: dependsOf(mandate).filter((d) => d !== t.id) };
   });
   const held = [];
+  const unknown = [];
   const live = [];
+  const inFlight = all
+    .filter((t) => !inSet.has(t.id) && (t.stage === "working" || t.stage === "ready" || (t.stage === "queued" && t.assignment?.session)))
+    .map((t) => ({ id: t.id, files: filesOf(t, root) }));
   for (const i of info) {
+    const missing = i.depends.filter((d) => !stageOf.has(d));
+    if (missing.length) {
+      unknown.push({ id: i.id, unknown_ids: missing });
+      continue;
+    }
     const ext = i.depends.filter((d) => !inSet.has(d) && stageOf.get(d) !== "shipped");
-    if (ext.length) held.push({ id: i.id, waiting_on: ext });
-    else live.push(i);
+    const busy = inFlight.map((f) => ({ id: f.id, file: sharedFile(i.files, f.files) })).filter((f) => f.file);
+    if (ext.length || busy.length) {
+      held.push({ id: i.id, waiting_on: [...ext, ...busy.map((b) => b.id)], ...(busy.length ? { in_flight: busy.map((b) => `${b.id}: ${b.file}`) } : {}) });
+    } else live.push(i);
   }
-  const heldIds = new Set(held.map((h) => h.id));
+  const unknownIds = new Set(unknown.map((u) => u.id));
+  const heldIds = new Set([...held.map((h) => h.id), ...unknownIds]);
   // A ticket depending on a held ticket cannot start either.
   for (let changed = true; changed; ) {
     changed = false;
@@ -211,7 +253,7 @@ export function buildPlan(root, args) {
     (groups[g] ??= []).push(next.id);
     placed.set(next.id, g);
   }
-  return { groups: groups.filter(Boolean), conflicts, held };
+  return { groups: groups.filter(Boolean), conflicts, held, unknown };
 }
 
 // ---------- cap
@@ -228,14 +270,14 @@ function readCaps(root) {
   }
   return caps;
 }
-export function capStatus(root, kind) {
+export function capStatus(root, kind, exclude = []) {
   if (!Object.hasOwn(DEFAULT_CAPS, kind)) throw new Usage(`--kind must be build or train, not "${kind}"`);
   const max = readCaps(root)[kind];
   const tickets = boardTickets(root);
   const running =
     kind === "build"
       ? tickets.filter((t) => t.stage === "working" || (t.stage === "queued" && t.assignment?.session)).length
-      : tickets.filter((t) => t.stage === "ready").length;
+      : tickets.filter((t) => t.stage === "ready" && !exclude.includes(t.id)).length;
   return { kind, running, max, ok: running < max };
 }
 
@@ -247,11 +289,15 @@ function usage() {
   return out.join("\n");
 }
 function parse(argv) {
-  const o = { _: [], json: false, repo: null, kind: "build" };
+  const o = { _: [], json: false, repo: null, kind: "build", exclude: [] };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === "--json") o.json = true;
-    else if (k === "--repo" || k === "--kind") {
+    else if (k === "--exclude") {
+      const v = argv[++i];
+      if (v === undefined) throw new Usage("--exclude needs a value");
+      o.exclude.push(v);
+    } else if (k === "--repo" || k === "--kind") {
       const v = argv[++i];
       if (v === undefined) throw new Usage(`${k} needs a value`);
       o[k.slice(2)] = v;
@@ -285,12 +331,13 @@ function main(argv) {
     else {
       plan.groups.forEach((g, i) => console.log(`group ${i + 1}: ${g.join(" ")}`));
       for (const c of plan.conflicts) console.log(`serial: ${c.a} / ${c.b} — ${c.why}`);
-      for (const h of plan.held) console.log(`held: ${h.id} — waiting on ${h.waiting_on.join(", ")}`);
+      for (const h of plan.held) console.log(`held: ${h.id} — waiting on ${h.waiting_on.join(", ")}${h.in_flight ? ` (in flight, shared file: ${h.in_flight.join("; ")})` : ""}`);
+      for (const u of plan.unknown) console.log(`unknown: ${u.id} — depends on ids not on the board: ${u.unknown_ids.join(", ")}`);
     }
     return 0;
   }
   if (cmd === "cap") {
-    const s = capStatus(root, o.kind);
+    const s = capStatus(root, o.kind, o.exclude);
     if (o.json) console.log(JSON.stringify(s));
     else if (s.ok) console.log(`ok ${s.kind} ${s.running}/${s.max}`);
     else console.error(`dispatch: cap reached — ${s.kind} ${s.running}/${s.max}`);
