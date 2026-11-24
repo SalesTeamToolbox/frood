@@ -33,8 +33,8 @@ This run's arguments: $ARGUMENTS
    THIS harness; its `from_session` is the session that lost the stream. If there is no such line, skip the
    `peer_send`. If that id is listed by `peer_sessions`, `peer_send` it:
    `stream <n> handed back to oc: run /frood-next <n> (and /frood-desk if you run the desk); add --takeover if a live session still holds it. New tab, first message: /frood-next <n>.`  # cc-only
-   `stream <n> handed back to cc: run /frood-next <n> (and /frood-desk if you run the desk); add --takeover if a live session still holds it. New tab, first message: /frood-next <n>.`  # oc-only
+   `stream <n> handed back to cc: run /frood-next <n> (and /frood-desk if you run the desk); add --takeover if a live session still holds it. Continue in that session, or open a new tab with first message /frood-next <n>.`  # oc-only
    No broadcast.
 6. End with the handoff card from `/frood-orchestrator` ("At every module boundary"), status **READY**, with
    `You:   nothing — new tab, first message: /frood-next <n>`  # cc-only
-   `You:   nothing — new tab, first message: /frood-next <n>`  # oc-only
+   `You:   nothing — the Claude Code session that held it continues (else new tab: /frood-next <n>)`  # oc-only
