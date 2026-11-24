@@ -10,6 +10,15 @@
 //   const killed = await w.sweep();       // one fresh sample, kills leftovers, returns [{pid, cmd}]
 //   w.stop();                             // ends the sampler (Windows: the PowerShell loop); safe to call twice
 //
+// Clock handling: `since` and the rule-(c) "born while parent was seen alive" window are compared against
+// `ps` start times, which on Linux come from the /proc boot-time clock, not Date.now(). That clock can lag
+// wall time by ~1 s (NTP/suspend steps since boot), so `since` is shifted onto the ps clock by a measured
+// skew ((btime + uptime) - Date.now()) before the one-second floor, and the same skew converts the wall-clock
+// `seen` stamp to the ps clock. A failure reading /proc, macOS, or an injected `sample` leaves skew at 0
+// (unchanged behaviour). Both sides of every `since` comparison then sit on the same clock, so the safety
+// rule "never kill anything that started before `since`" still holds — it is just interpreted on ps's clock.
+// - `clockSkewMs` (number, ms) overrides the measurement for unit tests; an injected sampler skips /proc.
+//
 // Safety (this code kills processes on a machine shared with other agent sessions):
 // - Only processes that were descendants of rootPid in a sample, or live children of such a tracked pid (or of rootPid)
 //   whose parent is gone and that started at/after `since`, are ever killed. The command line is NEVER used to match.
@@ -80,6 +89,25 @@ export function parsePsLine(line) {
   if (!m) return null;
   const d = new Date(m[3]);
   return Number.isNaN(d.getTime()) ? null : { pid: Number(m[1]), ppid: Number(m[2]), start: d.toISOString(), cmd: m[4] };
+}
+
+// How far the ps /proc clock runs behind Date.now(), in ms (ps_clock - wall_clock).
+// procps derives `lstart` from boot time (/proc/stat btime) + /proc/uptime, which can lag the
+// wall clock by ~1 s on a box whose clock stepped since boot (NTP, suspend). On this box ps
+// lstart reads about 1.8 s behind Date.now(), so a process spawned just after `since` looks older
+// than `since` and is never swept — a real leak, not a test bug.
+// Returns 0 on macOS (no /proc) or when /proc cannot be read (falls back to today's behaviour).
+export function procClockSkewMs() {
+  if (process.platform !== "linux") return 0;
+  try {
+    const stat = fs.readFileSync("/proc/stat", "utf8");
+    const btime = Number(stat.match(/^btime (\d+)/m)?.[1]);
+    const uptime = Number(fs.readFileSync("/proc/uptime", "utf8").split(" ")[0]);
+    if (!Number.isFinite(btime) || !Number.isFinite(uptime)) return 0;
+    return (btime + uptime) * 1000 - Date.now();
+  } catch {
+    return 0;
+  }
 }
 
 function posixSample() {
@@ -175,11 +203,20 @@ function inert() {
   return { stop() {}, tracked: () => [], sweep: async () => [], observe: async () => {} };
 }
 
-export function watch(rootPid, { everyMs = 5000, since = Date.now(), sample, kill = defaultKill, now = Date.now, autoPoll = true } = {}) {
+export function watch(rootPid, { everyMs = 5000, since = Date.now(), sample, kill = defaultKill, now = Date.now, autoPoll = true, clockSkewMs } = {}) {
   if (process.env.ORCH_NO_PROCTREE === "1" || !Number.isInteger(rootPid) || rootPid <= 0) return inert();
   let sinceMs = ms(since);
   if (!Number.isFinite(sinceMs)) return inert();
-  if (!sample && !WIN) sinceMs = Math.floor(sinceMs / 1000) * 1000; // ps lstart has one-second resolution
+  let skew = 0;
+  if (clockSkewMs !== undefined) {
+    // Injected skew for unit tests (an injected sampler skips /proc measurement).
+    skew = Number(clockSkewMs) || 0;
+    if (!sample) sinceMs = Math.floor((sinceMs + skew) / 1000) * 1000;
+    else sinceMs = sinceMs + skew; // injected sampler carries ms resolution: no one-second floor
+  } else if (!sample && !WIN) {
+    skew = procClockSkewMs();                                    // 0 on macOS or when /proc is unreadable
+    sinceMs = Math.floor((sinceMs + skew) / 1000) * 1000;        // ps lstart: 1 s resolution, on the /proc clock
+  }
 
   const tracked = new Map(); // "pid@start" -> {pid, ppid, start, cmd}
   // rootStart is taken from the FIRST sample that shows rootPid (it was spawned just before the watcher started, so that
@@ -326,7 +363,7 @@ export function watch(rootPid, { everyMs = 5000, since = Date.now(), sample, kil
         for (const p of rows) {
           if (p.ppid !== par.pid || !startOk(p)) continue;
           if (par.start && ms(p.start) < ms(par.start)) continue;
-          if (ms(p.start) > par.seen + everyMs + 1000) continue;
+          if (ms(p.start) > par.seen + skew + everyMs + 1000) continue;
           if (!victims.has(p.pid)) victims.set(p.pid, p);
         }
       }
