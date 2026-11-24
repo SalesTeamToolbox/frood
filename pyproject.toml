@@ -8,6 +8,8 @@ description = "Frood — the essential enhancement layer for AI coding agents. D
 target-version = "py311"
 line-length = 100
 src = [".", "agents", "core", "providers", "tools", "skills", "memory", "dashboard", "channels"]
+# Other sessions' git worktrees live here (untracked); each is linted from its own checkout, never from main.
+extend-exclude = [".claude/worktrees"]
 
 [tool.ruff.lint]
 select = [

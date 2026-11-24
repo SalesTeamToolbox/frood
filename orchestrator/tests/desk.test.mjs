@@ -78,7 +78,9 @@ function inHome(h, now, fn) {
 }
 // The lock dir this test's temp home owns (mirrors lockPath(), but built from h and never from the ambient env).
 const lockDirOf = (h) => path.join(h, ".config", "orchestrator", "desk-watch.lock");
-const cli = (h, args, extraEnv = {}) => spawnSync(process.execPath, [BIN, ...args], { env: { ...process.env, ORCH_HOME: h, ...extraEnv }, encoding: "utf8" });
+// cwd: h — `status` lists tickets from the board of the repo it runs in (ticketSessions(process.cwd())); from the real
+// checkout every live ticket on the real board leaked into the expected output.
+const cli = (h, args, extraEnv = {}) => spawnSync(process.execPath, [BIN, ...args], { cwd: h, env: { ...process.env, ORCH_HOME: h, ...extraEnv }, encoding: "utf8" });
 const queued = (run, pid, pid_start, at = new Date().toISOString()) => ({ key: `run:${run}:queued`, kind: "queued", at, run, out: `/x/${run}.md`, pid, pid_start, agent: "worker", ticket: "/x/ticket.json" });
 const eventsOf = (h, name = "m6a") =>
   fs.readFileSync(path.join(sdir(h), `${name}.events.jsonl`), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
