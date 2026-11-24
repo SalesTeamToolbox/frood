@@ -82,8 +82,7 @@ question the owner must decide.
    Plan:  <plan file path>#handoff
    ```
 
-   <!-- cc-only -->
-   `<STATUS>` is exactly one of: **READY** (`You:` is `nothing`; continue in this session), **WAITING** (`You:` is
+   `<STATUS>` is exactly one of: **READY** (`You:` is `nothing`; the work continues), **WAITING** (`You:` is
    `nothing`; the next step depends on a running worker or the desk. `Next:` names the report the owner is
    waiting for, never a desk command — `orchestrator reports merge of <run>; you do nothing until then`.
    **`/frood-desk` and `desk.mjs status` are never given to the owner as an action item**: the desk daemon wakes
@@ -91,17 +90,6 @@ question the owner must decide.
    (answer `You:` before `/frood-next`), **BLOCKED** (cannot continue; `You:` says what unblocks it), **DONE**
    (stream finished; `Next:` is `—`). Never READY with items under `You:`. Every line fits in 100 characters.
    Omit a line only when it would be `none` (`You:` and `Next:` are always shown).
-   <!-- /cc-only -->
-   <!-- oc-only -->
-   `<STATUS>` is exactly one of: **READY** (`You:` is `nothing`; clear and continue), **WAITING** (`You:` is
-   `nothing`; the next step depends on a running worker or the desk. `Next:` names the report the owner is
-   waiting for, never a desk command — `orchestrator reports merge of <run>; you do nothing until then`.
-   **`/frood-desk` and `desk.mjs status` are never given to the owner as an action item**: the desk daemon wakes
-   this session by peer-mail on a merge, senior review or sign-off, and this session reports it), **NEEDS YOU**
-   (answer `You:` before `/frood-next`), **BLOCKED** (cannot continue; `You:` says what unblocks it), **DONE**
-   (stream finished; `Next:` is `—`). Never READY with items under `You:`. Every line fits in 100 characters.
-   Omit a line only when it would be `none` (`You:` and `Next:` are always shown).
-   <!-- /oc-only -->
 4. Then ask the owner with these options (Claude Code: AskUserQuestion; OpenCode: a numbered list):
    <!-- cc-only -->
    - **Start the next module in a nested session (Recommended)** — this session calls `start_session` with
@@ -271,12 +259,12 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   without one they cannot reach this session, so `--session` is required for Claude Code. Exit 3 (another harness took the stream over) or exit 4
   (another live session holds it) → stop at once with a **NEEDS YOU** card naming the holder. Never act on it,
   never take it back silently.
-  <!-- cc-only -->
-  - **One level only** (desktop app): if `get_session self` shows `parentSessionId`, this session was started by a
-    parent and does not start the next module. At its boundary it writes the handoff, reports in one line, and
-    stops; the parent starts the next one. If the owner talks to this session directly and tells it to go on, it
-    continues in place.
-  <!-- /cc-only -->
+<!-- cc-only -->
+- **One level only** (desktop app): if `get_session self` shows `parentSessionId`, this session was started by a
+  parent and does not start the next module. At its boundary it writes the handoff, reports in one line, and
+  stops; the parent starts the next one. If the owner talks to this session directly and tells it to go on, it
+  continues in place.
+<!-- /cc-only -->
 - **Live progress — one spinner per live run (every ticket, both harnesses).** Chat
   text cannot spin; the native spinner is the todo list (Claude Code: `TodoWrite`,
   OpenCode: `todowrite`) — it must ALWAYS have exactly one `in_progress`, and that

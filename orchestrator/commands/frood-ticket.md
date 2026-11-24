@@ -76,12 +76,12 @@ harness holds that name) pick another name — say which — and write again.
 ## 6. Hand it over in one line
 
 <!-- cc-only -->
-Offer to start the work now, nested: this session calls `start_session` with `initiation: "offer"`, `context:
-"fresh"`, `title: "<Ticket>: <plain outcome>"` (under 60 chars), `name: <slug ≤24 chars, [a-z0-9-]>`,
-`prompt: /frood-next <name>` and `background` (goal, plan path, what landed). If the owner declines, end with:
-`Run /frood-next <name> in a fresh session in <repo>.`
-Nothing else is needed from the owner: the Mandate, the board ticket, the plan and the stream are all on disk.
-Do not start the work in this session unless the owner says yes.
+Offer to start the work now, nested under this session: call `start_session` with `initiation: "offer"` and
+`title: "<Ticket>: <plain outcome>"` (under 60 chars) alone. If the owner picks **New session**, send the brief with
+the returned `proposal_id`: `context: "fresh"`, `name: <slug ≤24 chars, [a-z0-9-]>`, `prompt: /frood-next <name>`
+and `background` (goal, plan path, what is on disk). If the owner picks **Do it here**, run `/frood-next <name>`'s
+steps in this session. Otherwise end with: `Run /frood-next <name> in a fresh session in <repo>.` Nothing else is
+needed from the owner: the Mandate, the board ticket, the plan and the stream are all on disk.
 <!-- /cc-only -->
 <!-- oc-only -->
 End with: `Run /frood-next <name> in a fresh session in <repo>.` Nothing else is needed from the owner: the
