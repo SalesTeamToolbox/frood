@@ -82,7 +82,7 @@ question the owner must decide.
    Plan:  <plan file path>#handoff
    ```
 
-   `<STATUS>` is exactly one of: **READY** (`You:` is `nothing`; the work continues), **WAITING** (`You:` is
+   `<STATUS>` is exactly one of: **READY** (`You:` is `nothing`; clear and continue), **WAITING** (`You:` is
    `nothing`; the next step depends on a running worker or the desk. `Next:` names the report the owner is
    waiting for, never a desk command — `orchestrator reports merge of <run>; you do nothing until then`.
    **`/frood-desk` and `desk.mjs status` are never given to the owner as an action item**: the desk daemon wakes
@@ -92,10 +92,14 @@ question the owner must decide.
    Omit a line only when it would be `none` (`You:` and `Next:` are always shown).
 4. Then ask the owner with these options (Claude Code: AskUserQuestion; OpenCode: a numbered list):
    <!-- cc-only -->
+   A nested session (`get_session self` shows `parentSessionId`) skips this question: it writes the handoff, reports
+   in one line and stops, unless the owner told it to go on (one-level rule, Standing rules). Where `start_session`
+   is not available (a terminal `claude`), the first option is instead **Fresh tab** — new tab, first message
+   `/frood-next <stream>`.
    - **Start the next module in a nested session (Recommended)** — this session calls `start_session` with
      `initiation: "user_asked"`, `context: "fresh"`, `title: "<Module>: <plain outcome>"` (under 60 chars, readable
      by a stranger), `name: <stream or ticket slug, ≤24 chars, [a-z0-9-]>`, `prompt` beginning `/frood-next <stream>`
-     followed by a short brief, and `background` (goal, plan path, what landed). This session stays the owner's
+     followed by a short brief, and `background` (≥80 chars: goal, plan path, what landed). This session stays the owner's
      thread: it reports each child's note in one line, and starts the following module when the child's work ships.
    - **Continue in this session**.
    - **Stop here** — the handoff waits (72 h) for a later `/frood-next`.
@@ -125,7 +129,7 @@ board, or waits on an unshipped one (`held`), and lists a ticket whose `depends:
 One desktop session per ticket of the first group, each running `/frood-next <stream>` for that ticket's stream.
 Start the session from THIS one with `start_session` (`initiation: "user_asked"`, `context: "fresh"`,
 `title: "<Ticket>: <plain outcome>"` under 60 chars, `name` the stream or ticket slug (≤24 chars, [a-z0-9-]),
-`prompt` `/frood-next <stream>` plus a short brief, `background` goal/plan/what landed) — never by hand and never
+`prompt` `/frood-next <stream>` plus a short brief, `background` ≥80 chars: goal/plan/what landed) — never by hand and never
 via a `claude://` link, so every ticket session nests under the dispatcher. For every session, in this order:
 1. `node {{ORCH_REPO}}/bin/dispatch.mjs cap` — exit 1 means the build cap is reached (default 2 building; set
    `max_parallel` in `.opencode/board/adapter.json`): start no more until a ticket reaches `ready`.
@@ -261,7 +265,7 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   never take it back silently.
 <!-- cc-only -->
 - **One level only** (desktop app): if `get_session self` shows `parentSessionId`, this session was started by a
-  parent and does not start the next module. At its boundary it writes the handoff, reports in one line, and
+  parent and starts no sessions: not the next module, not dispatched tickets. At its boundary it writes the handoff, reports in one line, and
   stops; the parent starts the next one. If the owner talks to this session directly and tells it to go on, it
   continues in place.
 <!-- /cc-only -->
