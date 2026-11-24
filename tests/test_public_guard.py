@@ -67,6 +67,18 @@ class Env:
             PUBLIC_GUARD_FORCE_PUBLIC="1",
         )
         self.guard_dir = self.home / ".config" / "public-guard"
+        # Run a copy of ops/public-guard whose SYSTEM_DIR does not exist, so these user-mode tests keep
+        # working on a machine that has the real root-owned system install. (Deliberately not an env
+        # var: anything that forces user mode at runtime would be a bypass.)
+        self.src = tmp / "pg-src"
+        shutil.copytree(GUARD_DIR, self.src)
+        code = GUARD.read_text()
+        marker = 'SYSTEM_DIR = "/etc/public-guard"'
+        assert code.count(marker) == 1, "guard.py SYSTEM_DIR line changed; update the test harness"
+        fake = tmp / "no-system-install"
+        (self.src / "guard.py").write_text(code.replace(marker, f'SYSTEM_DIR = "{fake}"'))
+        self.guard = self.src / "guard.py"
+        self.install_sh = self.src / "install.sh"
 
     def run(self, cmd, cwd=None, env_extra=None, drop=(), input_=None, check=False):
         env = dict(self.base)
@@ -90,7 +102,7 @@ class Env:
         return self.run(["git", *args], cwd=cwd, **kw)
 
     def install(self):
-        res = self.run(["bash", str(INSTALL)])
+        res = self.run(["bash", str(self.install_sh)])
         assert res.returncode == 0, res.stderr
         return res
 
@@ -348,6 +360,10 @@ def inproc(env, monkeypatch):
         if k.startswith("PUBLIC_GUARD_"):
             monkeypatch.delenv(k)
     monkeypatch.setattr(g, "UNTRUSTED_PREFIXES", ())
+    # user mode even when this machine has the real system install (the sysmode fixture re-points it)
+    nosys = env.home.parent / "no-system-install"
+    monkeypatch.setattr(g, "SYSTEM_DIR", str(nosys))
+    monkeypatch.setattr(g, "PRIVATE_REMOTES_FILE", str(nosys / "private-remotes.txt"))
     # stubs live in the test user's temp dir: make "the user" the trust anchor, rooted at tmp_path
     monkeypatch.setattr(g, "TRUSTED_UID", os.getuid())
     monkeypatch.setattr(g, "TRUST_ROOT", str(env.home.parent))
@@ -453,7 +469,7 @@ def test_no_env_var_forces_private(env, inproc, monkeypatch):
 
 def test_is_public_command_prints_status(env):
     res = env.run(
-        [PYTHON, str(GUARD), "is-public", "https://git.example.com/x/y"],
+        [PYTHON, str(env.guard), "is-public", "https://git.example.com/x/y"],
         drop=("PUBLIC_GUARD_FORCE_PUBLIC",),
     )
     assert res.stdout.strip() == "public"
@@ -525,7 +541,7 @@ def test_missing_tools_json_blocks(env):
 def test_untrusted_recorded_gh_means_unknown_not_private(env, tmp_path):
     stub_gh(env, "echo private")  # user-owned gh: fails the root-ownership check
     res = env.run(
-        [PYTHON, str(GUARD), "is-public", "https://github.com/acme/w"],
+        [PYTHON, str(env.guard), "is-public", "https://github.com/acme/w"],
         drop=("PUBLIC_GUARD_FORCE_PUBLIC",),
     )
     assert res.stdout.strip() == "unknown"
@@ -562,11 +578,11 @@ def test_install_sets_hookspath_seeds_denylist_and_is_idempotent(tmp_path):
     deny.write_text("# mine\nonly-me\n")
     e.install()
     assert deny.read_text() == "# mine\nonly-me\n"
-    assert e.run(["bash", str(INSTALL), "--check"]).returncode == 0
+    assert e.run(["bash", str(e.install_sh), "--check"]).returncode == 0
     (e.guard_dir / "hooks" / "pre-push").write_text("#!/bin/sh\nexit 0\n")
-    assert e.run(["bash", str(INSTALL), "--check"]).returncode == 1
+    assert e.run(["bash", str(e.install_sh), "--check"]).returncode == 1
     e.install()
-    assert e.run(["bash", str(INSTALL), "--check"]).returncode == 0
+    assert e.run(["bash", str(e.install_sh), "--check"]).returncode == 0
 
 
 def test_passthrough_hook_preserves_argv_stdin_and_exit(env):
@@ -690,9 +706,9 @@ def test_audit_history_finds_secret_only_in_old_commit(env):
     env.commit_raw(repo, {"old.txt": f"OPENROUTER_API_KEY={OR_KEY}\n"}, "add key")
     env.git("rm", "-q", "old.txt", cwd=repo, check=True)
     env.git("commit", "--no-verify", "-m", "remove key", cwd=repo, check=True)
-    tree = env.run([PYTHON, str(GUARD), "audit", str(repo)])
+    tree = env.run([PYTHON, str(env.guard), "audit", str(repo)])
     assert tree.returncode == 0, tree.stderr
-    hist = env.run([PYTHON, str(GUARD), "audit", "--history", str(repo)])
+    hist = env.run([PYTHON, str(env.guard), "audit", "--history", str(repo)])
     assert hist.returncode == 1
     assert "gitleaks:" in hist.stderr and "old.txt" in hist.stderr
     assert OR_KEY not in hist.stderr
@@ -703,21 +719,21 @@ def test_audit_finds_tree_issues_and_commit_messages(env):
     env.commit_raw(
         repo, {"docs/n.md": f"see {HOME_PATH}\n", "creds.pem": "x\n"}, f"for {DENY_EMAIL}"
     )
-    res = env.run([PYTHON, str(GUARD), "audit", "--history", str(repo)])
+    res = env.run([PYTHON, str(env.guard), "audit", "--history", str(repo)])
     assert res.returncode == 1
     for needle in ("private-path", "forbidden-path", "commit-message:", "denylist"):
         assert needle in res.stderr, needle
     clean_repo, _ = env.make_repo("clean")
-    ok = env.run([PYTHON, str(GUARD), "audit", "--history", str(clean_repo)])
+    ok = env.run([PYTHON, str(env.guard), "audit", "--history", str(clean_repo)])
     assert ok.returncode == 0, ok.stderr
 
 
 def test_audit_honours_committed_allow_file_for_paths_but_not_denylist(env):
     repo, remote = env.make_repo()
     env.commit_raw(repo, {"fixtures/a.pem": "x\n", ".public-guard-allow": "fixtures/*\n"}, "fx")
-    assert env.run([PYTHON, str(GUARD), "audit", str(repo)]).returncode == 0
+    assert env.run([PYTHON, str(env.guard), "audit", str(repo)]).returncode == 0
     env.commit_raw(repo, {"fixtures/b.txt": f"{DENY_EMAIL}\n"}, "mail")
-    assert env.run([PYTHON, str(GUARD), "audit", str(repo)]).returncode == 1
+    assert env.run([PYTHON, str(env.guard), "audit", str(repo)]).returncode == 1
 
 
 def test_inline_gitleaks_allow_comment_is_ignored(env):
@@ -933,7 +949,7 @@ BAD_STDIN = [
 @pytest.mark.parametrize("line", BAD_STDIN)
 def test_unparseable_pre_push_stdin_blocks(env, line):
     repo, remote = env.make_repo()
-    cmd = [PYTHON, str(GUARD), "pre-push", "origin", str(remote)]
+    cmd = [PYTHON, str(env.guard), "pre-push", "origin", str(remote)]
     res = env.run(cmd, cwd=repo, input_=line + "\n")
     assert res.returncode != 0 and "unparseable" in res.stderr
     assert env.run(cmd, cwd=repo, input_="").returncode == 0
@@ -949,7 +965,7 @@ def test_install_records_tool_paths(tmp_path):
     assert data["gitleaks"] == want
     assert data["gh"] is None or not data["gh"].startswith(("/tmp", "/var/tmp", "/dev/shm"))
     tj.write_text('{"gitleaks": "/tmp/evil/gitleaks", "gh": null}')
-    assert e.run(["bash", str(INSTALL), "--check"]).returncode == 1
+    assert e.run(["bash", str(e.install_sh), "--check"]).returncode == 1
     e.install()
     assert json.loads(tj.read_text())["gitleaks"] == data["gitleaks"]
     assert not (e.guard_dir / "private-remotes.txt").exists()
@@ -957,7 +973,7 @@ def test_install_records_tool_paths(tmp_path):
 
 def test_install_system_prints_commands_and_changes_nothing(tmp_path):
     e = Env(tmp_path)
-    res = e.run(["bash", str(INSTALL), "--system"])
+    res = e.run(["bash", str(e.install_sh), "--system"])
     assert res.returncode == 0
     out = res.stdout
     assert "sudo git config --system core.hooksPath" in out
@@ -1121,7 +1137,7 @@ def test_install_system_prints_full_root_owned_layout(tmp_path):
     e = Env(tmp_path)
     (e.guard_dir).mkdir(parents=True)
     (e.guard_dir / "denylist.txt").write_text("mine\n")
-    out = e.run(["bash", str(INSTALL), "--system"]).stdout
+    out = e.run(["bash", str(e.install_sh), "--system"]).stdout
     for needle in (
         "/usr/local/lib/public-guard/guard.py",
         "/usr/local/lib/public-guard/hooks/",

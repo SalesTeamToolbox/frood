@@ -252,12 +252,16 @@ class TestMCPServerCreation:
         _server, adapter = _create_server()
         tools = adapter.list_tools()
         names = {t.name for t in tools}
-        # Core tools must be present
-        assert "frood_context" in names
-        assert "frood_memory" in names
-        assert "frood_git" in names
-        # 25+ tools registered
-        assert len(tools) >= 25
+        # Memory-core set only (commit 54092074, "option B": 36 -> 6). Re-registering a tool means
+        # adding its class back in _build_registry and updating this set.
+        assert names == {
+            "frood_memory",
+            "frood_knowledge",
+            "frood_context",
+            "frood_behaviour",
+            "frood_node_sync",
+            "frood_python_exec",
+        }
 
     def test_resolve_workspace_defaults_to_cwd(self):
         from mcp_server import _resolve_workspace

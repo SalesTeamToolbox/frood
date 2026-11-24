@@ -39,11 +39,14 @@ from datetime import UTC
 from pathlib import Path
 
 # Frood memory config for dynamic collection prefix
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from memory.qdrant_store import QdrantConfig as _QdrConfig
+# .claude/hooks/<this file> -> repo root is two levels up from the hooks dir
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+try:
+    from memory.qdrant_store import QdrantConfig as _QdrConfig
 
-_qdr_config = _QdrConfig()
-_MEM_PREFIX = _qdr_config.collection_prefix
+    _MEM_PREFIX = _QdrConfig().collection_prefix
+except Exception:  # graceful degradation: a hook must never crash the prompt
+    _MEM_PREFIX = "frood"
 
 # Module-level TTL-based search result cache: cache_key -> (timestamp, results)
 _search_cache: dict[str, tuple[float, list]] = {}

@@ -215,14 +215,13 @@ async def test_load_without_name_returns_error(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # Tests — MCP server registration (Task 2)
 # ---------------------------------------------------------------------------
-def test_registered_in_mcp_server():
-    """SkillBridgeTool must be registered in `_build_registry` under the name "skill".
-
-    After the MCP prefix ("frood") is applied by `to_mcp_schema`, the final
-    tool name visible to MCP clients becomes "frood_skill" (MCP-01 locked).
+def test_not_registered_in_mcp_server():
+    """SkillBridgeTool was deliberately dropped from the MCP registry (commit 54092074, "option B":
+    redundant with harness built-in skills). The class stays on disk; re-registering it means adding
+    it back in `_build_registry` (exposed as "frood_skill") and flipping this test.
     """
     from mcp_server import _build_registry
 
     registry = _build_registry()
     names = [t["name"] for t in registry.list_tools()]
-    assert "skill" in names, f"`skill` tool not found in MCP registry; got: {names}"
+    assert "skill" not in names, f"`skill` re-registered; update this test. Got: {names}"
