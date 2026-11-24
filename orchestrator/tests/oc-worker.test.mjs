@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { summarize, acquireSlot, slotDir } from "../bin/oc-worker.mjs";
+import { CHAINS } from "../bin/chains.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.join(HERE, "..", "bin", "oc-worker.mjs");
@@ -234,6 +235,8 @@ test("--role worker expands to worker-nvidia first (one chain source)", () => {
   const r = spawnRole(dir, "--role", "worker");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(receiptOf(r).agent, "worker-nvidia");
+  // The expanded fallback order is exactly CHAINS.worker
+  assert.deepEqual(CHAINS.worker, ["worker-nvidia", "worker", "worker-burst", "worker-alt", "worker-free"]);
 });
 
 test("--role worker-strong expands to worker-strong first (unchanged chain)", () => {
@@ -241,6 +244,7 @@ test("--role worker-strong expands to worker-strong first (unchanged chain)", ()
   const r = spawnRole(dir, "--role", "worker-strong");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(receiptOf(r).agent, "worker-strong");
+  assert.deepEqual(CHAINS["worker-strong"], ["worker-strong", "worker-burst", "worker-nvidia", "worker-alt", "worker-free"]);
 });
 
 test("--role with --agent is refused (usage exit 2)", () => {

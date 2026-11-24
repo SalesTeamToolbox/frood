@@ -87,3 +87,18 @@ test("non-worker agent --fallback is not flagged by the worker-chain rule", () =
   const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent critic --fallback critic-alt,critic-free" });
   assert.ok(!r.problems.some((p) => /CHAINS/.test(p)));
 });
+
+test("worker-nvidia as --agent is flagged by the worker-chain rule", () => {
+  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker-nvidia --fallback worker,worker-burst" });
+  assert.ok(r.problems.some((p) => /worker-nvidia/.test(p) && /CHAINS/.test(p)));
+});
+
+test("worker-free as --agent is flagged by the worker-chain rule", () => {
+  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker-free --fallback worker-burst" });
+  assert.ok(r.problems.some((p) => /worker-free/.test(p) && /CHAINS/.test(p)));
+});
+
+test("trailing backtick in --fallback value is stripped", () => {
+  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker --fallback worker-burst,worker-alt,worker-free`" });
+  assert.ok(r.problems.some((p) => /disagrees with CHAINS/.test(p)));
+});

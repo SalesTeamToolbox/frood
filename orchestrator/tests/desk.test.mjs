@@ -672,6 +672,34 @@ test("step: verdict rows — round after two resumes, exhausted, no-session, sen
   assert.equal(cliLines(so.h, ["step", so.name, "verdict:worker-r1"]).lines[0], resume(so.name, so.runDir, 1), "another ticket's resume does not count");
 });
 
+test("step: worker-nvidia timed-out run resumes with --role worker --session, never --fallback worker-burst", () => {
+  const { h, name, runDir } = t8Stream("nvidia-timeout");
+  const OC_WORKER = fileURLToPath(new URL("../bin/oc-worker.mjs", import.meta.url)).replace(/\\/g, "/");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir, { agent: "worker-nvidia" }));
+    appendEvent(name, evDone("worker-r1", runDir, { agent: "worker-nvidia", outcome: "timeout", session: "ses_nvidia" }));
+  });
+  const line = cliLines(h, ["step", name, "run:worker-r1:done"]).lines[0];
+  assert.match(line, new RegExp(`^ACTION resume-worker node ${OC_WORKER} --role worker --dir ${fwd(runDir)} --prompt ${fwd(path.join(runDir, "worker-prompt-r1.md"))} --report ${fwd(path.join(runDir, "report.md"))} --out \\S+ --session ses_nvidia --stream ${name}$`));
+  assert.ok(!line.includes("--fallback"), "no hand-typed paid-first fallback");
+});
+
+test("step: CHANGES_REQUESTED on worker-nvidia resumes same agent + session, no --fallback", () => {
+  const { h, name, runDir } = t8Stream("nvidia-changes");
+  const OC_WORKER = fileURLToPath(new URL("../bin/oc-worker.mjs", import.meta.url)).replace(/\\/g, "/");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir, { agent: "worker-nvidia" }));
+    appendEvent(name, evDone("worker-r1", runDir, { agent: "worker-nvidia", session: "ses_nvidia" }));
+    appendEvent(name, evVerdict("worker-r1", runDir, { effective: "CHANGES_REQUESTED" }));
+  });
+  const line = cliLines(h, ["step", name, "verdict:worker-r1"]).lines[0];
+  assert.equal(
+    line,
+    `ACTION resume-worker node ${OC_WORKER} --agent worker-nvidia --dir ${fwd(runDir)} --prompt ${fwd(path.join(runDir, "findings-r1.md"))} --report ${fwd(path.join(runDir, "report.md"))} --out ${fwd(path.join(runDir, "worker-r2.md"))} --session ses_nvidia --stream ${name}`,
+  );
+  assert.ok(!line.includes("--fallback"), "same agent, no hand-typed fallback");
+});
+
 test("step: replay prints the stored line once and DONE once the effect exists", () => {
   // ACTION critic: replays until verdict:<run> exists, one ack line
   const critic = t8Stream("replay-critic");
@@ -1150,19 +1178,21 @@ test("step: a critic-keyed verdict with no ACTION linkage pages review-unlinked"
   assert.match(cliLines(h, ["step", name, "verdict:t8c/findings-r1"]).lines[0], /^ESCALATE review-unlinked .*findings-r1\.md/);
 });
 
-test("step: a free-agent round 1 escalates to the paid chain on CHANGES_REQUESTED", () => {
-  const { h, name, runDir } = t8Stream("resume-tier");
-  const findings = path.join(runDir, "findings-r1.md");
-  fs.writeFileSync(findings, "VERDICT: CHANGES_REQUESTED\n");
-  inHome(h, undefined, () => {
-    appendEvent(name, evQueued("worker-r1", runDir, "worker-nvidia"));
-    appendEvent(name, evDone("worker-r1", runDir, { agent: "worker-nvidia" }));
-    appendEvent(name, evVerdict("worker-r1", runDir, { effective: "CHANGES_REQUESTED" }));
-  });
-  const line = cliLines(h, ["step", name, "verdict:worker-r1"]).lines[0];
-  assert.match(line, /^ACTION resume-worker /);
-  assert.match(line, /--agent worker --fallback worker-burst,worker-alt,worker-nvidia,worker-free /);
-  assert.match(line, /--prompt .*findings-r1\.md .*--out .*worker-r2\.md --session ses_1 --stream resume-tier$/);
+test("step: CHANGES_REQUESTED resumes the same agent + session, no --fallback", () => {
+  for (const agent of ["worker-nvidia", "worker-free", "worker"]) {
+    const { h, name, runDir } = t8Stream(`resume-same-${agent}`);
+    const findings = path.join(runDir, "findings-r1.md");
+    fs.writeFileSync(findings, "VERDICT: CHANGES_REQUESTED\n");
+    inHome(h, undefined, () => {
+      appendEvent(name, evQueued("worker-r1", runDir, agent));
+      appendEvent(name, evDone("worker-r1", runDir, { agent }));
+      appendEvent(name, evVerdict("worker-r1", runDir, { effective: "CHANGES_REQUESTED" }));
+    });
+    const line = cliLines(h, ["step", name, "verdict:worker-r1"]).lines[0];
+    assert.match(line, new RegExp(`^ACTION resume-worker .*--agent ${agent} `), agent);
+    assert.match(line, /--session ses_1 /);
+    assert.doesNotMatch(line, /--fallback/, `${agent}: no hand-typed fallback`);
+  }
 });
 
 test("step: a paid round 1 resumes same-agent with no fallback added", () => {
@@ -1181,7 +1211,7 @@ test("step: a paid round 1 resumes same-agent with no fallback added", () => {
   }
 });
 
-test("step: a critic-keyed verdict on a free run escalates through the linkage", () => {
+test("step: a critic-keyed verdict on a free run resumes same agent + session via linkage", () => {
   const { h, name, runDir } = t8Stream("resume-tier-cc");
   inHome(h, undefined, () => {
     appendEvent(name, evQueued("worker-r1", runDir, "worker-free"));
@@ -1196,8 +1226,9 @@ test("step: a critic-keyed verdict on a free run escalates through the linkage",
     appendEvent(name, evVerdict("t8c/findings-r1", runDir, { effective: "CHANGES_REQUESTED" }));
   });
   const line = cliLines(h, ["step", name, "verdict:t8c/findings-r1"]).lines[0];
-  assert.match(line, /--agent worker --fallback worker-burst,worker-alt,worker-nvidia,worker-free /);
+  assert.match(line, /--agent worker-free /);
   assert.match(line, /--session ses_1 /);
+  assert.doesNotMatch(line, /--fallback/);
 });
 
 // ---------------------------------------------------------------- completion wake-up (loop-stay)

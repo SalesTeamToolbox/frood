@@ -51,7 +51,7 @@ Look for:
 - Worker receipt shows model Z was used
 - EGM waived but trigger existed in mandate scope
 - Board adapter `guarded_paths` matched but senior not triggered
-- **Signal**: mandate says `worker` but receipt shows `worker-nvidia` without free-first justification
+- **Signal**: mandate says `worker` but receipt shows `worker-nvidia` — expected, Nvidia is the default first agent of the `worker` chain (bin/chains.mjs); only note it if a `stalled`/`timeout` receipt shows the drop rule took effect.
 
 #### 4. Missed Shortcuts (existing tool/script/helper not used)
 Look for:

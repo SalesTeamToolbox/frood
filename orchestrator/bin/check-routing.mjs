@@ -67,20 +67,21 @@ function matchesDropped(id, dropped) {
 }
 
 // Worker roles that must be dispatched via `--role <name>` (one chain source in bin/chains.mjs).
-const WORKER_ROLES = new Set(["worker", "worker-strong"]);
+const WORKER_ROLES = new Set(["worker", "worker-strong", "worker-nvidia", "worker-free", "worker-burst", "worker-alt"]);
 
 // Extract `--agent <role> --fallback <a,b,...>` chains from a doc's text, scoped to worker roles.
+// The fallback value is trimmed of a trailing backtick (e.g. ``--fallback a,b,c` ``).
 function workerFallbackChains(text) {
   const out = [];
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const agentM = line.match(/--agent\s+(\S+)/);
-    const fbM = line.match(/--fallback\s+([^\s]+)/);
+    const fbM = line.match(/--fallback\s+([^\s`]+)/);
     if (!agentM || !fbM) continue;
     const agent = agentM[1];
     if (!WORKER_ROLES.has(agent)) continue;
-    const fallback = fbM[1].split(",").map((s) => s.trim()).filter(Boolean);
+    const fallback = fbM[1].split(",").map((s) => s.trim().replace(/`+$/, "")).filter(Boolean);
     out.push({ agent, fallback, lineNo: i + 1 });
   }
   return out;
