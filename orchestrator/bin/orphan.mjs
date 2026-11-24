@@ -6,7 +6,8 @@
 //   - its holder session's liveness is older than the threshold (ORCH_ORPHAN_MIN, default 60 min), or
 //   - it is held with no session id and the stream's own activity is older than the threshold.
 // Liveness of a holder session = the newest of its peer-mail `peers.last_seen`, its OpenCode session `time_updated`
-// (OpenCode sessions live in opencode's db, not in `peers`) and the stream's session claim `at` for that session.
+// (OpenCode sessions live in opencode's db, not in `peers`), the stream's session claim `at` for that session and,
+// once the session is known to a store, the stream's own activity.
 // peers.last_seen is refreshed only by peer-mail tool use (peer_register / send / authenticated read), NOT by tool
 // use in general, so on its own it under-reports a busy Claude Code session; the claim `at` (refreshed by
 // /frood-next steps 3 and 5) and the stream's activity cover that. A session found in neither store is judged by
@@ -120,7 +121,9 @@ export function streamOrphaned(name, now = Date.now()) {
   if (typeof s.held_session === "string" && s.held_session) {
     const peer = sessionSeen(s.held_session);
     const claim = s.claim?.session === s.held_session ? ms(s.claim.at) : null;
-    const alive = newest([peer, claim]);
+    // Found in a store: the newest of its mail presence, its claim and the stream's own activity, so a busy
+    // session that rarely touches peer-mail is not judged dead. Found nowhere: the activity rule below decides.
+    const alive = Number.isFinite(newest([peer, claim])) ? newest([peer, claim, streamActivity(s)]) : -Infinity;
     if (Number.isFinite(alive)) return idleMs(alive) > limit ? orphan(`holder ${s.held_by} session silent ${Math.round(idleMs(alive) / 60_000)}m`) : none;
   }
   const act = streamActivity(s);

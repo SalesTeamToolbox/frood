@@ -91,7 +91,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { appendAck, appendEvent, atomicWrite, listStreams, migrate, noteStream, orchRoot, readAckLines, readEvents, readStream, streamsDir, unhandled } from "./handoff.mjs";
 import { gate } from "./verdict-gate.mjs";
-import { orphanLedgerKey, streamOrphaned } from "./orphan.mjs";
+import { openEscalations, orphanLedgerKey, streamOrphaned } from "./orphan.mjs";
 export { streamOrphaned } from "./orphan.mjs";
 import { killPid, processStart, isZombie } from "./proc-tree.mjs";
 import { agentModel, isPolicyFree, isDown, modelAllowed, policyReason } from "./pool-health.mjs";
@@ -695,10 +695,26 @@ function dpage(stream, key, reason) {
     orphanPage(stream);
     return;
   }
+  // A missing, done or parked stream has no session to resume (/frood-next refuses it): plain page, no action.
+  const cur = readStream(stream);
+  if (!cur || cur.status === "done" || cur.status === "parked") {
+    notifyDesktop(text);
+    return;
+  }
   if (mailed) return;
   const holder = readStream(stream)?.held_by;
   if (holder) console.error(`daemon: escalation left for holder ${holder} (no reachable session): ${reason} (${stream} ${key})`);
 }
+
+// A plain critical notice (no action) for an escalation no session can resume. dpage's ledger makes it once per key.
+function notifyDesktop(text) {
+  if (process.env.ORCH_NO_NOTIFY === "1" || DAEMON_DRY()) return;
+  try {
+    execFileSync("notify-send", ["-u", "critical", "orchestrator desk", text], { stdio: "ignore", windowsHide: true });
+  } catch {}
+}
+
+const dryOrphanLogged = new Set(); // dry run only: log each would-be page once per process, not every poll
 
 // Page the owner once per stream per claim about an orphaned stream. The ledger (`orphaned` in state.json, key
 // `orphan:<stream>:<held_at|unheld>`) means N escalations on one dead stream page once and a new claim re-arms it.
@@ -709,7 +725,10 @@ function orphanPage(stream) {
     const id = orphanLedgerKey(stream);
     if (state.orphaned.includes(id)) return false;
     if (DAEMON_DRY()) {
-      console.log(`daemon: DRY would page orphaned stream ${stream}`);
+      if (!dryOrphanLogged.has(id)) {
+        dryOrphanLogged.add(id);
+        console.log(`daemon: DRY would page orphaned stream ${stream}`);
+      }
       return false;
     }
     state.orphaned.push(id);
@@ -727,6 +746,22 @@ function orphanPage(stream) {
   }
 }
 
+// A stream with no open escalation left forgets its ledger entries, so a later escalation on it pages again.
+function pruneOrphanLedger() {
+  if (DAEMON_DRY()) return;
+  try {
+    const state = readDaemonState();
+    const keep = state.orphaned.filter((id) => {
+      const stream = /^orphan:([^:]+):/.exec(id)?.[1];
+      return !stream || openEscalations(stream).length > 0;
+    });
+    if (keep.length !== state.orphaned.length) {
+      state.orphaned = keep;
+      writeDaemonState(state);
+    }
+  } catch {}
+}
+
 // Each poll: any stream with an open escalation and no live session pages the owner once.
 export function sweepOrphans() {
   const paged = [];
@@ -736,6 +771,7 @@ export function sweepOrphans() {
       if (streamOrphaned(s.name).orphaned && orphanPage(s.name)) paged.push(s.name);
     } catch {}
   }
+  pruneOrphanLedger();
   return paged;
 }
 

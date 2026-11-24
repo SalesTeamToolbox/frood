@@ -192,6 +192,31 @@ test("sweepOrphans: N escalations on one dead stream page once; a new claim re-a
   });
 });
 
+test("sweepOrphans: once its escalations are resolved a later one on the same stream pages again", () => {
+  const h = mkdtemp();
+  mkStream(h, "again");
+  withHome(h, { ORCH_NO_NOTIFY: "1" }, () => {
+    escalate("again", "k1");
+    assert.deepEqual(sweepOrphans(), ["again"]);
+    assert.deepEqual(sweepOrphans(), []);
+    appendAck("again", "k1", "resolved", { resolved: true });
+    assert.deepEqual(sweepOrphans(), [], "nothing open");
+    assert.deepEqual(readDaemonState().orphaned, [], "ledger entry pruned");
+    escalate("again", "k2");
+    assert.deepEqual(sweepOrphans(), ["again"], "k2 pages");
+  });
+});
+
+test("orphaned: a session known to the mail store but busy on the stream is alive", () => {
+  const h = mkdtemp();
+  mkPeers(h, { sess: 120 });
+  mkStream(h, "busy2", { ageMin: 300, held_by: "cc", held_session: "sess", held_at: iso(300), noted_at: iso(5) });
+  withHome(h, {}, () => {
+    escalate("busy2");
+    assert.equal(streamOrphaned("busy2").orphaned, false);
+  });
+});
+
 test("sweepOrphans: unheld stream keys on 'unheld'; a live holder is never swept", () => {
   const h = mkdtemp();
   mkPeers(h, { live: 1 });
