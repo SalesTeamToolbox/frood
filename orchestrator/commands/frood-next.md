@@ -6,7 +6,13 @@ Continue the orchestrated work from a stream handoff. This is the first thing to
 has a named stream in `~/.config/orchestrator/streams/` (`<name>.json` = the pointer, `<name>.events.jsonl` and
 `<name>.acks.jsonl` = what the desk logged).
 
+<!-- cc-only -->
+Run this as the first message of a session the orchestrator started with `start_session` (nested under it), or of
+a tab the owner opened by hand — that fresh context IS the clear.
+<!-- /cc-only -->
+<!-- oc-only -->
 Run this as the first message of a fresh session / new tab — that fresh context IS the clear.
+<!-- /oc-only -->
 Do not /clear an existing session into it.
 
 The tab title is set by the `orchestrator-handoff.js` hook to `[<stream>] <repo>: <module> — <what>` (truncated to
@@ -75,6 +81,11 @@ The tab title is set by the `orchestrator-handoff.js` hook to `[<stream>] <repo>
    `in_progress`, move on — and after any wait, check this session's `peer_inbox` before saying anything about the
    ticket, because the desk daemon peer-mails you the merge/senior/sign-off instead of paging the owner. Do not
    review or merge them here, and never tell the owner to watch `/frood-desk` or `desk.mjs status`.
+   <!-- cc-only -->
+   If `get_session self` shows `parentSessionId`, this session was started by a parent: at its module boundary it
+   writes the handoff, reports in one line, and stops — it does not start the next module (the parent does). If the
+   owner talks to this session directly and tells it to go on, it continues in place.
+   <!-- /cc-only -->
 5. Run `node {{ORCH_REPO}}/bin/handoff.mjs consume --stream <name> [--session <id>] [--takeover]` once you have loaded the
    plan, so a second `/frood-next` does not replay it. `consume` accepts a pending, consumed or stale stream and refuses
    `parked` and `done`; without `--stream` it works only when exactly one stream is pending. With `--session` it enforces

@@ -35,6 +35,11 @@ Requires Node >= 22 (`package.json` `engines`). No runtime dependencies.
 - Rules the loop enforces (from `bin/board.mjs` and `docs/designs/board.md`): EGM gate for new modules or
   risky scope, max 3 counted review rounds, sign-off bound to the shipped sha, senior review when triggered.
 
+The desktop-app standard is nested sessions: when an orchestrator or ticket command starts the next session it
+calls `start_session` so the child nests under it in the sidebar (`parentSessionId`). Orphan notices stay top
+level — their parent is dead by definition — and OpenCode is excepted: it has no session tool and keeps opening
+tabs by hand.
+
 ## Install
 
 ```

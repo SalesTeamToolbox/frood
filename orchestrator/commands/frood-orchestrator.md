@@ -82,6 +82,17 @@ question the owner must decide.
    Plan:  <plan file path>#handoff
    ```
 
+   <!-- cc-only -->
+   `<STATUS>` is exactly one of: **READY** (`You:` is `nothing`; continue in this session), **WAITING** (`You:` is
+   `nothing`; the next step depends on a running worker or the desk. `Next:` names the report the owner is
+   waiting for, never a desk command — `orchestrator reports merge of <run>; you do nothing until then`.
+   **`/frood-desk` and `desk.mjs status` are never given to the owner as an action item**: the desk daemon wakes
+   this session by peer-mail on a merge, senior review or sign-off, and this session reports it), **NEEDS YOU**
+   (answer `You:` before `/frood-next`), **BLOCKED** (cannot continue; `You:` says what unblocks it), **DONE**
+   (stream finished; `Next:` is `—`). Never READY with items under `You:`. Every line fits in 100 characters.
+   Omit a line only when it would be `none` (`You:` and `Next:` are always shown).
+   <!-- /cc-only -->
+   <!-- oc-only -->
    `<STATUS>` is exactly one of: **READY** (`You:` is `nothing`; clear and continue), **WAITING** (`You:` is
    `nothing`; the next step depends on a running worker or the desk. `Next:` names the report the owner is
    waiting for, never a desk command — `orchestrator reports merge of <run>; you do nothing until then`.
@@ -90,12 +101,24 @@ question the owner must decide.
    (answer `You:` before `/frood-next`), **BLOCKED** (cannot continue; `You:` says what unblocks it), **DONE**
    (stream finished; `Next:` is `—`). Never READY with items under `You:`. Every line fits in 100 characters.
    Omit a line only when it would be `none` (`You:` and `Next:` are always shown).
+   <!-- /oc-only -->
 4. Then ask the owner with these options (Claude Code: AskUserQuestion; OpenCode: a numbered list):
+   <!-- cc-only -->
+   - **Start the next module in a nested session (Recommended)** — this session calls `start_session` with
+     `initiation: "user_asked"`, `context: "fresh"`, `title: "<Module>: <plain outcome>"` (under 60 chars, readable
+     by a stranger), `name: <stream or ticket slug, ≤24 chars, [a-z0-9-]>`, `prompt` beginning `/frood-next <stream>`
+     followed by a short brief, and `background` (goal, plan path, what landed). This session stays the owner's
+     thread: it reports each child's note in one line, and starts the following module when the child's work ships.
+   - **Continue in this session**.
+   - **Stop here** — the handoff waits (72 h) for a later `/frood-next`.
+   <!-- /cc-only -->
+   <!-- oc-only -->
    - **Continue in this session (Recommended for a streamed ticket)** — its context is Mandates, verdicts and
      receipts, not dumps, and this session is the one the desk wakes, so it reports the merge itself.
    - **Fresh tab** — new tab, first message `/frood-next <stream>`; the old tab keeps its history. The escape hatch
      when the context is genuinely heavy; the handoff waits 72 h for it either way.
    - **Stop here** — the handoff waits (72 h) for a later `/frood-next`.
+   <!-- /oc-only -->
 
    Handing work to a session that does not exist yet is `/frood-ticket <repo-path> <one-line task>`: it writes the
    Mandate, the board ticket, the plan file and the stream, so the next session's `/frood-next <stream>` finds it.
@@ -111,12 +134,15 @@ board, or waits on an unshipped one (`held`), and lists a ticket whose `depends:
 (`unknown`; fix the typo).
 
 <!-- cc-only -->
-One desktop session per ticket of the first group, each running `/frood-next <stream>` for that ticket's stream
-(start it with the desktop app's session tool, or by hand). For every session, in this order:
+One desktop session per ticket of the first group, each running `/frood-next <stream>` for that ticket's stream.
+Start the session from THIS one with `start_session` (`initiation: "user_asked"`, `context: "fresh"`,
+`title: "<Ticket>: <plain outcome>"` under 60 chars, `name` the stream or ticket slug (≤24 chars, [a-z0-9-]),
+`prompt` `/frood-next <stream>` plus a short brief, `background` goal/plan/what landed) — never by hand and never
+via a `claude://` link, so every ticket session nests under the dispatcher. For every session, in this order:
 1. `node {{ORCH_REPO}}/bin/dispatch.mjs cap` — exit 1 means the build cap is reached (default 2 building; set
    `max_parallel` in `.opencode/board/adapter.json`): start no more until a ticket reaches `ready`.
-2. Start the session, then record it: `node {{ORCH_REPO}}/bin/board.mjs session <ticket> --session <sid>`
-   (stored in `assignment.session`; the session's own `claim` keeps it).
+2. Start the session, then record the returned `local_…` id: `node {{ORCH_REPO}}/bin/board.mjs session <ticket>
+   --session <sid>` (stored in `assignment.session`; the session's own `claim` keeps it).
 3. **You write this sentence into every dispatched Mandate**, before the session starts: "Stop at `board ready`;
    never run `train depart`. The dispatcher owns the train." You own the train.
 
@@ -245,6 +271,12 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   without one they cannot reach this session, so `--session` is required for Claude Code. Exit 3 (another harness took the stream over) or exit 4
   (another live session holds it) → stop at once with a **NEEDS YOU** card naming the holder. Never act on it,
   never take it back silently.
+  <!-- cc-only -->
+  - **One level only** (desktop app): if `get_session self` shows `parentSessionId`, this session was started by a
+    parent and does not start the next module. At its boundary it writes the handoff, reports in one line, and
+    stops; the parent starts the next one. If the owner talks to this session directly and tells it to go on, it
+    continues in place.
+  <!-- /cc-only -->
 - **Live progress — one spinner per live run (every ticket, both harnesses).** Chat
   text cannot spin; the native spinner is the todo list (Claude Code: `TodoWrite`,
   OpenCode: `todowrite`) — it must ALWAYS have exactly one `in_progress`, and that
