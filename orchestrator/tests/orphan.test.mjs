@@ -225,7 +225,12 @@ test("sweepOrphans: ledger entries for a deleted stream, a done stream and a sup
     escalate("done1");
     escalate("parked1");
     escalate("live1");
+    // "gone" has no pointer file, but a daemon page for it is still open: only the missing stream can drop it
+    const ddir = path.join(h, ".config", "orchestrator", "desk-daemon");
+    fs.mkdirSync(ddir, { recursive: true });
+    fs.writeFileSync(path.join(ddir, "escalations.jsonl"), JSON.stringify({ stream: "gone", key: "k", reason: "r" }) + "\n");
     seedLedger(h, [
+      "orphan:Bad Name:unheld", // not a valid stream name: readStream reads it as missing, so it is pruned and the prune goes on
       "orphan:gone:unheld", // the pointer file was deleted
       `orphan:done1:${heldAt}`, // the stream finished after it paged
       `orphan:parked1:${heldAt}`, // the stream was parked after it paged
