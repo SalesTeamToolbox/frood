@@ -9,11 +9,11 @@ const iso = (offsetS) => new Date(T0 + offsetS * 1000).toISOString();
 const P = (pid, ppid, offsetS, cmd = "") => ({ pid, ppid, start: iso(offsetS), cmd });
 const ME = process.pid;
 
-function harness(samples) {
+function harness(samples, opts = {}) {
   const queue = [...samples];
   const killed = [];
   const trees = new Map();
-  const w = watch(100, { everyMs: 0, since: T0, sample: async () => queue.shift() ?? [], kill: async (pid, o) => (killed.push(pid), trees.set(pid, o?.tree), true) });
+  const w = watch(100, { everyMs: 0, since: T0, ...opts, sample: async () => queue.shift() ?? [], kill: async (pid, o) => (killed.push(pid), trees.set(pid, o?.tree), true) });
   return { w, killed, trees };
 }
 
@@ -223,6 +223,33 @@ test("rule (c): a tracked parent never seen alive by a later sample has no trust
   await w.observe();
   await w.sweep();
   assert.deepEqual(killed, []);
+});
+
+test("a sampler whose start is ~1.5 s behind `since` tracks nothing without a skew shift (the bug)", async () => {
+  // Default (injected sampler → skew 0): root's ps start is older than wall `since`, so rootStart is
+  // never set and nothing is tracked — the production leak this fix closes.
+  const { w, killed } = harness(
+    [[P(100, 1, -1.5), P(200, 100, -1.5)], [P(200, 100, -1.5)]],
+    { now: () => T0 }
+  );
+  await w.observe();
+  assert.equal(w.tracked().length, 0, "rootStart never set: everything older than `since`");
+  assert.deepEqual(await w.sweep(), []);
+});
+
+test("an injected clock skew (~1.5 s behind `since`) still tracks and sweeps a reparented grandchild", async () => {
+  // Shifting `since` onto the ps clock (skew -1500 ms) makes root's ps start pass startOk, so the
+  // grandchild is tracked and swept even though its ps start reads behind wall `since`.
+  const { w, killed } = harness(
+    [[P(100, 1, -1.5), P(200, 100, -1.5)], [P(200, 100, -1.5)]],
+    { clockSkewMs: -1500, now: () => T0 }
+  );
+  await w.observe();
+  assert.equal(w.tracked().length, 1, "child tracked despite ps start behind `since`");
+  assert.ok(w.tracked().some((p) => p.pid === 200), "grandchild present in tracked");
+  const res = await w.sweep();
+  assert.deepEqual(killed, [200]);
+  assert.deepEqual(res.map((r) => r.pid).sort(), [200]);
 });
 
 test("sweep: a stale-ppid row (older than the tracked parent it points at) is never killed, and never with /T", async () => {
