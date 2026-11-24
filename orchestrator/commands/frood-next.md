@@ -85,6 +85,17 @@ The tab title is set by the `orchestrator-handoff.js` hook to `[<stream>] <repo>
    If `get_session self` shows `parentSessionId`, this session was started by a parent: at its module boundary it
    writes the handoff, reports in one line, and stops — it does not start the next module (the parent does). If the
    owner talks to this session directly and tells it to go on, it continues in place.
+
+   **A nested session reports to its parent, never to the owner.** The parent is the owner's only thread: it relays
+   status and carries every question and approval both ways. So in a nested session:
+   - Every turn report (and the start card in step 6) is written for the parent: what changed, what is running, what
+     is blocked. No `You:` line; it becomes `Parent:` (see step 6).
+   - Anything that needs the owner — an approval, a decision, a take-over question from step 3 — goes in the report
+     as `NEEDS OWNER: <one line>`, and the session stops on it. Never ask the owner directly (no AskUserQuestion),
+     and never address the owner in prose.
+   - An edit to the owner's harness config (`~/.claude/settings.json`, hooks, permissions) is done by the parent,
+     even when the approval is relayed to you: report the exact change as `NEEDS OWNER`, do not make it.
+   - The rule lifts only when the owner talks to this session directly; then answer them in place.
    <!-- /cc-only -->
 5. Run `node {{ORCH_REPO}}/bin/handoff.mjs consume --stream <name> [--session <id>] [--takeover]` once you have loaded the
    plan, so a second `/frood-next` does not replay it. `consume` accepts a pending, consumed or stale stream and refuses
@@ -104,6 +115,11 @@ The tab title is set by the `orchestrator-handoff.js` hook to `[<stream>] <repo>
    `Desk:` names the live run and who wakes whom, so the owner knows the merge reaches them through this
    session and not by watching `desk.mjs status`: `worker-r1 (pid 3356015) → desk daemon → peer-mail to this
    session → I report to you`. With no live run, omit the line.
+
+   <!-- cc-only -->
+   In a nested session the card is for the parent: replace `You:` with
+   `Parent: nothing | NEEDS OWNER: <item> (one line each)`, and end `Desk:` with `→ I report to the parent`.
+   <!-- /cc-only -->
 
    Mention items waiting on the owner once. Block on them only when the next step needs them (then stop with a
    **NEEDS YOU** handoff card). Every stop in this session ends with the handoff card from `/frood-orchestrator`

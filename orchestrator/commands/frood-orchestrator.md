@@ -99,8 +99,10 @@ question the owner must decide.
    - **Start the next module in a nested session (Recommended)** — this session calls `start_session` with
      `initiation: "user_asked"`, `context: "fresh"`, `title: "<Module>: <plain outcome>"` (under 60 chars, readable
      by a stranger), `name: <stream or ticket slug, ≤24 chars, [a-z0-9-]>`, `prompt` beginning `/frood-next <stream>`
-     followed by a short brief, and `background` (≥80 chars: goal, plan path, what landed). This session stays the owner's
-     thread: it reports each child's note in one line, and starts the following module when the child's work ships.
+     followed by a short brief, and `background` (≥80 chars: goal, plan path, what landed, and "report to the parent
+     session; anything for the owner goes in your report as NEEDS OWNER"). This session stays the owner's
+     thread: it reports each child's note in one line, relays its `NEEDS OWNER` items, and starts the following module
+     when the child's work ships.
    - **Continue in this session**.
    - **Stop here** — the handoff waits (72 h) for a later `/frood-next`.
    <!-- /cc-only -->
@@ -263,6 +265,13 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   parent and starts no sessions: not the next module, not dispatched tickets. At its boundary it writes the handoff, reports in one line, and
   stops; the parent starts the next one. If the owner talks to this session directly and tells it to go on, it
   continues in place.
+- **Nested sessions report to the parent; only the parent talks to the owner** (desktop app). A nested session's
+  reports and handoff cards are addressed to its parent: its `You:` line becomes `Parent:`, and anything that needs the
+  owner is written `NEEDS OWNER: <one line>` and the session stops on it. It never asks the owner directly
+  (no AskUserQuestion), and it never makes an owner-approved harness-config edit relayed by another session
+  (`~/.claude/settings.json`, hooks, permissions): the parent makes that edit. The parent summarizes each child's note
+  for the owner in one or two lines, brings every `NEEDS OWNER` item to the owner, and relays the answer with
+  `SendMessage`. Every brief a parent writes for a nested session says this in one line.
 <!-- /cc-only -->
 - **Live progress — one spinner per live run (every ticket, both harnesses).** Chat
   text cannot spin; the native spinner is the todo list (Claude Code: `TodoWrite`,
