@@ -209,9 +209,11 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
 ## Standing rules
 
 - **Lease guard.** Before every worker dispatch, merge, `handoff.mjs write` or `note` on a stream, run
-  `node {{ORCH_REPO}}/bin/handoff.mjs claim --stream <n> --by cc` (no `--takeover`).  # cc-only
-  `node {{ORCH_REPO}}/bin/handoff.mjs claim --stream <n> --by oc` (no `--takeover`).  # oc-only
-  Exit 3 → stop at once with a **NEEDS YOU** card naming the holder: another harness took the stream over. Never act on it,
+  `node {{ORCH_REPO}}/bin/handoff.mjs claim --stream <n> --by cc --session <your peer-mail session id>` (no `--takeover`).  # cc-only
+  `node {{ORCH_REPO}}/bin/handoff.mjs claim --stream <n> --by oc --session "$OPENCODE_SESSION_ID"` (no `--takeover`; drop `--session` if it is empty).  # oc-only
+  The `--session` is how the desk daemon finds you: it peer-mails escalations on the stream to `held_session`, and
+  without one they go to the owner's desktop instead. Exit 3 (another harness took the stream over) or exit 4
+  (another live session holds it) → stop at once with a **NEEDS YOU** card naming the holder. Never act on it,
   never take it back silently.
 - **Live progress — one spinner per live run (every ticket, both harnesses).** Chat
   text cannot spin; the native spinner is the todo list (Claude Code: `TodoWrite`,

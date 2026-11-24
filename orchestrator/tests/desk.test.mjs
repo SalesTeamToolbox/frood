@@ -1560,6 +1560,62 @@ test("completion wake-up: a senior escalation mails the holder exactly once (dpa
   }
 });
 
+// 2026-11-23: a stream held by a Claude Code orchestrator (held_by cc, held_session = its peer-mail id, a
+// transcript UUID) was never mailed — only `ses_` ids were — so every escalation on it paged the owner's
+// desktop. dpage now mails any holder and falls back to the desktop only when no mail went out.
+test("dpage: a Claude Code holder is mailed, not paged; the desktop gets only what no session received", { skip: IS_WIN ? "notify-send stub is a POSIX script" : false }, async () => {
+  const CC_HOLDER = "0f3c9a2e-5b7d-4e1a-9c2f-8d6b4a1e7c30";
+  const ns = stubNotifySend();
+  const saved = { ...process.env };
+  delete process.env.ORCH_DAEMON_DRY_RUN;
+  delete process.env.ORCH_NO_NOTIFY; // assert the real page path, through the stub
+  Object.assign(process.env, ns.env);
+  const escalateSenior = async (s) => {
+    inHome(s.h, undefined, () => {
+      appendEvent(s.name, evQueued("worker-r1", s.runDir));
+      appendEvent(s.name, evDone("worker-r1", s.runDir));
+      appendEvent(s.name, evVerdict("worker-r1", s.runDir, { effective: "APPROVED", senior: true })); // -> dpage
+    });
+    return inHome(s.h, undefined, () => handleEvent(s.name, "verdict:worker-r1", undefined));
+  };
+  const holdBy = (s, by, session) => {
+    const f = path.join(sdir(s.h), `${s.name}.json`);
+    const o = JSON.parse(fs.readFileSync(f, "utf8"));
+    Object.assign(o, { held_by: by, held_session: session, held_at: new Date().toISOString() });
+    fs.writeFileSync(f, JSON.stringify(o));
+  };
+  try {
+    // held by Claude Code, mailbox present: one mail to the CC session, no desktop page
+    const cc = t8Stream("cc-held");
+    holdBy(cc, "cc", CC_HOLDER);
+    const mailbox = mkMailbox(cc.h);
+    const r = await escalateSenior(cc);
+    assert.equal(r.outcome, "paged", JSON.stringify(r));
+    const mail = mailTo(mailbox, CC_HOLDER);
+    assert.equal(mail.length, 1, "the Claude Code holder is mailed once");
+    assert.match(mail[0].body, /--by cc\n/, "the resolve hint names the holder's harness");
+    assert.deepEqual(ns.reads(), [], "a reachable holder never pages the desktop");
+
+    // unheld (held_by cc, no session — how stt-resume looked): the desktop is the only page
+    const free = t8Stream("cc-no-session");
+    holdBy(free, "cc", null);
+    mkMailbox(free.h);
+    await escalateSenior(free);
+    assert.equal(ns.reads().length, 1, "no session to mail -> one desktop page");
+
+    // held by Claude Code but no mailbox: the mail cannot go out, so the escalation pages instead of vanishing
+    const gone = t8Stream("cc-no-mailbox");
+    holdBy(gone, "cc", CC_HOLDER);
+    await escalateSenior(gone);
+    assert.equal(ns.reads().length, 2, "an unreachable holder -> the desktop page, never a lost escalation");
+  } finally {
+    for (const k of ["ORCH_DAEMON_DRY_RUN", "ORCH_NO_NOTIFY", "PATH"]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
 // ---------------------------------------------------------------- dpage escalation ledger, stream-scoped
 
 const ddirOf = (h) => path.join(h, ".config", "orchestrator", "desk-daemon");

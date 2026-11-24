@@ -45,7 +45,9 @@
 //   ff-merge path) and pages once per ESCALATE (escalations.jsonl + notify-send). ORCH_DAEMON_DRY_RUN=1 logs
 //   every action instead of spawning anything.
 //   A judgment call is peer-mailed to the stream's holding session instead of the user (`notifyHeldSession`),
-//   with the notify-send page kept only for a stream no session holds. That same wake-up also fires when a
+//   whichever harness holds it (an OpenCode `ses_…` id or a Claude Code peer-mail id), with the notify-send
+//   page kept only for when no mail went out: no session holds the stream, or its mailbox cannot be written.
+//   That same wake-up also fires when a
 //   ticket reaches a terminal state the owner should hear about through that session — `ESCALATE merge`
 //   (ready, or merged by the daemon itself), `ESCALATE senior`, `ESCALATE owner-signoff` — so the owner never
 //   has to watch `status` for a merge. Quiet for `ACTION resume-worker`, critic dispatches and retries, and
@@ -110,22 +112,27 @@ function newId() {
   return `msg_${Date.now().toString(36)}${crypto.randomBytes(4).toString("hex")}`;
 }
 
+// The shape handoff.mjs accepts for `--session`: an OpenCode `ses_…` id and a Claude Code peer-mail id
+// (the transcript UUID) both pass. Until 2026-11-23 only `ses_` was mailed, so every escalation on a
+// stream a Claude Code orchestrator held fell through to the desktop page.
+const HELD_SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
 /** Send a peer-mail message to the session that holds `stream`, so that session's
  *  orchestrator agent can resolve the escalation instead of paging the user directly.
- *  Best-effort: never crashes the desk loop, and never pages on failure — a stream no
- *  session holds is the caller's notify-send case, not this function's. */
+ *  Returns true only when the message was written. Best-effort: never crashes the desk
+ *  loop and never pages itself — a false return is the caller's notify-send decision. */
 function notifyHeldSession(stream, key, reason) {
   const s = readStream(stream);
   const toSession = s?.held_session;
-  if (!toSession || !toSession.startsWith("ses_")) return; // only opencode sessions
+  if (typeof toSession !== "string" || !HELD_SESSION_RE.test(toSession)) return false;
   const file = mailboxDb();
   if (!fs.existsSync(file)) {
     // A held stream with no mailbox cannot be woken. Say so rather than fail silently:
-    // both the peer-mail and dpage's desktop page are skipped for a held stream, so this
-    // line is the only trace the operator gets.
+    // the completion wake-up has no desktop fallback, so this line is its only trace.
     console.error(`daemon: cannot send peer-mail to ${toSession}: no mailbox at ${file}`);
-    return;
+    return false;
   }
+  const by = s.held_by === "cc" ? "cc" : "oc";
   try {
     const { DatabaseSync } = requireSqlite("node:sqlite");
     const db = new DatabaseSync(file, { readOnly: false });
@@ -142,11 +149,13 @@ function notifyHeldSession(stream, key, reason) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unread', ?)`)
       .run(id, now, DESK_PEER_ID, "orchestrator desk", "", toSession,
         `desk: ${reason}`,
-        `${reason}\n\nStream: ${stream}\nEvent: ${key}\nResolve with:\n  node ${SELF_BIN} step ${stream} ${key} --by oc\n`,
+        `${reason}\n\nStream: ${stream}\nEvent: ${key}\nResolve with:\n  node ${SELF_BIN} step ${stream} ${key} --by ${by}\n`,
         now + 14 * 24 * 60 * 60 * 1000);
     db.close();
+    return true;
   } catch (e) {
     console.error(`daemon: cannot send peer-mail to ${toSession}: ${e.message}`);
+    return false;
   }
 }
 
@@ -679,11 +688,9 @@ function dpage(stream, key, reason) {
   console.log(text);
   // Notify the responsible orchestration session (stream holder) via peer-mail.
   // That session's agent resolves the escalation and brings questions to the user.
-  notifyHeldSession(stream, key, reason);
-  if (process.env.ORCH_NO_NOTIFY === "1") return;
-  // Fallback desktop notify only when there's no held session to route to.
-  const held = readStream(stream)?.held_session;
-  if (!held || !held.startsWith("ses_")) notifyDesktop(text);
+  // Fallback desktop notify only when no mail went out (unheld stream, or a holder we could not reach),
+  // so an escalation is never lost.
+  if (!notifyHeldSession(stream, key, reason)) notifyDesktop(text);
 }
 
 const sub = (args) => {
