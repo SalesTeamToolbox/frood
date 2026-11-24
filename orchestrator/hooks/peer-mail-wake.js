@@ -47,7 +47,8 @@ function unreadFor(session) {
   if (!fs.existsSync(file)) return [];
   process.emitWarning = () => {}; // node:sqlite ExperimentalWarning
   const { DatabaseSync } = require("node:sqlite");
-  const db = new DatabaseSync(file, { readOnly: true });
+  // timeout = SQLite busy timeout: wait out a writer (peer-mail MCP, desk.mjs) instead of skipping the poll.
+  const db = new DatabaseSync(file, { readOnly: true, timeout: 2000 });
   try {
     return db
       .prepare(

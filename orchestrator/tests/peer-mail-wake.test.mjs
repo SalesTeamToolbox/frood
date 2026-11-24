@@ -234,8 +234,15 @@ test("exit 0 at PEER_WAKE_MAX_MIN with nothing found", async () => {
 
 test("unreadable mailbox path is logged, not thrown", async () => {
   const d = tmpDir("pmw-");
-  const mbox = path.join(d, "nope", "m.db"); // parent never created
-  const { ps, wait } = startHook({ orchHome: d, mailbox: mbox, maxMin: 0 }, JSON.stringify({ session_id: SESSION }));
+  // The file exists (so it is not "missing") but cannot be opened: DatabaseSync throws.
+  const mbox = path.join(d, "m.db");
+  fs.writeFileSync(mbox, "");
+  fs.chmodSync(mbox, 0o000);
+  // maxMin 0.005 (0.3 s) at the test's 50 ms poll: several polls hit the open error before the deadline.
+  const { ps, wait } = startHook({ orchHome: d, mailbox: mbox, maxMin: 0.005 }, JSON.stringify({ session_id: SESSION }));
   const r = await waitWithTimeout(wait, 5000, "hook threw on unreadable mailbox");
+  fs.chmodSync(mbox, 0o600);
   assert.equal(r.code, 0, `expected exit 0, got ${r.code}`);
+  const log = path.join(d, ".config", "orchestrator", "peer-wake", "peer-wake.log");
+  assert.ok(fs.existsSync(log) && fs.readFileSync(log, "utf8").trim(), "the open error must be logged");
 });
