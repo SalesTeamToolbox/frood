@@ -87,6 +87,24 @@ other streams keep moving, the owner is never spammed. `status` prints pending e
 (unpaged-by-resolution: keys still unresolved) so any interactive `/frood-desk` sees them. Resolution
 is the existing `handoff.mjs ack --resolved` once the owner deals with it.
 
+## Orphaned streams
+
+A stream is orphaned when it has an open escalation (an unresolved `ESCALATE` ack, or a desk-daemon page
+nobody resolved) and no live session is working it: nobody holds it; or its holder session's liveness is older
+than `ORCH_ORPHAN_MIN` (minutes, default 60); or it is held with no session id and the stream shows no activity
+(pointer timestamps, session claim, events, non-escalation acks) for that long. Session liveness is the newest of
+its peer-mail `peers.last_seen`, its OpenCode `session` row `time_updated`, and the stream's claim `at`
+(`peers.last_seen` moves only on peer-mail tool use, so alone it under-reports a busy Claude Code session). A
+session found in no store is judged by stream activity. Detection is `orphan.mjs` (`streamOrphaned`).
+
+The daemon pages the owner once per stream per claim: ledger `orphaned` in `state.json`, key
+`orphan:<stream>:<held_at|unheld>` (separate from `pagedIds`; a new claim re-arms it). It spawns
+`orphan-notice.mjs <stream>` detached: `notify-send -u critical -A resolve="Resolve in new session" --wait`; on
+click it opens a terminal in the stream's repo running `/frood-next <stream>` (`claude`, or `opencode --prompt`
+for an OpenCode holder). `ORCH_LAUNCH_CMD` replaces the command (`sh -c`, `{stream}` and `{harness}`
+substituted). `ORCH_DAEMON_DRY_RUN=1` and `ORCH_NO_NOTIFY=1` log instead of spawning. This is the only desktop
+page: an escalation on an unheld stream takes the same path; a live holder gets peer-mail only.
+
 ## Lock contention (daemon vs interactive desk, never silent)
 
 - Daemon start vs live session owner ⇒ refuse with exit 3 (same message shape); only

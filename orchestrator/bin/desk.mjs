@@ -47,6 +47,10 @@
 //   A judgment call is peer-mailed to the stream's holding session instead of the user (`notifyHeldSession`),
 //   whichever harness holds it (an OpenCode `ses_…` id or a Claude Code peer-mail id), with the notify-send
 //   page kept only for when no mail went out: no session holds the stream, or its mailbox cannot be written.
+//   Orphaned streams: an open escalation on a stream nobody live is working (unheld, or the holder's session silent
+//   past ORCH_ORPHAN_MIN, default 60) pages the owner ONCE per stream per claim (`orphaned` ledger in state.json) with a
+//   desktop notice whose "Resolve in new session" action opens a terminal on `/frood-next <stream>`
+//   (orphan-notice.mjs, ORCH_LAUNCH_CMD overrides the command). See orphan.mjs for the detection rules.
 //   That same wake-up also fires when a
 //   ticket reaches a terminal state the owner should hear about through that session — `ESCALATE merge`
 //   (ready, or merged by the daemon itself), `ESCALATE senior`, `ESCALATE owner-signoff` — so the owner never
@@ -87,6 +91,8 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { appendAck, appendEvent, atomicWrite, listStreams, migrate, noteStream, orchRoot, readAckLines, readEvents, readStream, streamsDir, unhandled } from "./handoff.mjs";
 import { gate } from "./verdict-gate.mjs";
+import { orphanLedgerKey, streamOrphaned } from "./orphan.mjs";
+export { streamOrphaned } from "./orphan.mjs";
 import { killPid, processStart, isZombie } from "./proc-tree.mjs";
 import { agentModel, isPolicyFree, isDown, modelAllowed, policyReason } from "./pool-health.mjs";
 
@@ -94,6 +100,7 @@ const NEXT_CUT = 80;
 const DEFAULT_INTERVAL_S = 30;
 const ROUND_CAP = 3; // mirrors ticket.json max_rounds; only used when the ticket omits it
 // Derived from this module's location so the desk's resume line names the checkout it runs from.
+const ORPHAN_NOTICE = fileURLToPath(new URL("./orphan-notice.mjs", import.meta.url));
 const OC_WORKER = fileURLToPath(new URL("./oc-worker.mjs", import.meta.url)).replace(/\\/g, "/");
 const nowMs = () => (process.env.ORCH_NOW_MS ? Number(process.env.ORCH_NOW_MS) : Date.now());
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -157,15 +164,6 @@ function notifyHeldSession(stream, key, reason) {
     console.error(`daemon: cannot send peer-mail to ${toSession}: ${e.message}`);
     return false;
   }
-}
-
-// The page of last resort when no session can be woken: a notification the user sees on the desktop.
-// Critical priority because mako keeps those until dismissed — a one-shot page must not scroll away.
-function notifyDesktop(text) {
-  if (process.env.ORCH_NO_NOTIFY === "1") return;
-  try {
-    execFileSync("notify-send", ["-u", "critical", "orchestrator desk", text], { stdio: "ignore", windowsHide: true });
-  } catch {}
 }
 
 export const lockPath = () => path.join(orchRoot(), ".config", "orchestrator", "desk-watch.lock");
@@ -569,7 +567,7 @@ export function readDaemonState() {
   try {
     const s = JSON.parse(fs.readFileSync(daemonStateFile(), "utf8"));
     if (s && typeof s === "object") {
-      const st = { retries: s.retries ?? {}, paged: Array.isArray(s.paged) ? s.paged : [], pagedIds: Array.isArray(s.pagedIds) ? s.pagedIds : [], errors: s.errors ?? {} };
+      const st = { retries: s.retries ?? {}, paged: Array.isArray(s.paged) ? s.paged : [], pagedIds: Array.isArray(s.pagedIds) ? s.pagedIds : [], errors: s.errors ?? {}, orphaned: Array.isArray(s.orphaned) ? s.orphaned : [] };
       // Loop-stay ids sit in `paged` already stream-scoped. Adopt them on EVERY read, before the
       // pre-schema upgrade below: the two changes can board in either order, and the file dpage-scope
       // writes already has `pagedIds`, so the once-only upgrade would never run for it.
@@ -585,7 +583,7 @@ export function readDaemonState() {
       return st;
     }
   } catch {}
-  return { retries: {}, paged: [], pagedIds: [], errors: {} };
+  return { retries: {}, paged: [], pagedIds: [], errors: {}, orphaned: [] };
 }
 function writeDaemonState(s) {
   fs.mkdirSync(daemonDir(), { recursive: true });
@@ -690,10 +688,55 @@ function dpage(stream, key, reason) {
   // That session's agent resolves the escalation and brings questions to the user.
   // Desktop notify only for an unheld stream (no agent can act). A held stream whose holder cannot be
   // mailed is left for that holder: the escalation stays in the ack file, escalations.jsonl and `status`.
-  if (notifyHeldSession(stream, key, reason)) return;
+  const mailed = notifyHeldSession(stream, key, reason);
+  // The one desktop path: a stream nobody live is working (unheld, or its holder gone quiet) gets the
+  // once-per-stream notice with a "Resolve in new session" action. A live holder keeps peer-mail only.
+  if (streamOrphaned(stream).orphaned) {
+    orphanPage(stream);
+    return;
+  }
+  if (mailed) return;
   const holder = readStream(stream)?.held_by;
   if (holder) console.error(`daemon: escalation left for holder ${holder} (no reachable session): ${reason} (${stream} ${key})`);
-  else notifyDesktop(text);
+}
+
+// Page the owner once per stream per claim about an orphaned stream. The ledger (`orphaned` in state.json, key
+// `orphan:<stream>:<held_at|unheld>`) means N escalations on one dead stream page once and a new claim re-arms it.
+// Dry-run and ORCH_NO_NOTIFY log instead of spawning; a dry run writes no ledger entry. Returns true when it paged.
+function orphanPage(stream) {
+  try {
+    const state = readDaemonState();
+    const id = orphanLedgerKey(stream);
+    if (state.orphaned.includes(id)) return false;
+    if (DAEMON_DRY()) {
+      console.log(`daemon: DRY would page orphaned stream ${stream}`);
+      return false;
+    }
+    state.orphaned.push(id);
+    writeDaemonState(state);
+    if (process.env.ORCH_NO_NOTIFY === "1") {
+      console.log(`daemon: orphaned stream ${stream} (notify suppressed)`);
+      return true;
+    }
+    console.log(`daemon: orphaned stream ${stream}: notice launched`);
+    detached(process.execPath, [ORPHAN_NOTICE, stream]);
+    return true;
+  } catch (e) {
+    console.error(`daemon: cannot page orphaned stream ${stream}: ${e.message}`);
+    return false;
+  }
+}
+
+// Each poll: any stream with an open escalation and no live session pages the owner once.
+export function sweepOrphans() {
+  const paged = [];
+  for (const s of listStreams(Date.now())) {
+    if (s.state === "corrupt" || s.status === "done" || s.status === "parked") continue;
+    try {
+      if (streamOrphaned(s.name).orphaned && orphanPage(s.name)) paged.push(s.name);
+    } catch {}
+  }
+  return paged;
 }
 
 const sub = (args) => {
@@ -1476,6 +1519,7 @@ export async function driveOnce(ctx, opts = {}) {
     if (m) handled.push(await handleEvent(m[1], m[2], opts.by));
   }
   if (!opts.skipVerdicts) sweepVerdicts(opts);
+  sweepOrphans();
   return handled;
 }
 

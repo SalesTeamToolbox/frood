@@ -275,6 +275,8 @@ async function pagedDesktop(h, held) {
     process.env.PATH = saved.PATH;
     if (saved.ORCH_NO_NOTIFY !== undefined) process.env.ORCH_NO_NOTIFY = saved.ORCH_NO_NOTIFY;
   }
+  // an orphan notice is a detached helper: wait (briefly) for it to reach the stub when one is expected
+  if (!held) for (let i = 0; i < 100 && !fs.existsSync(log); i++) await new Promise((r) => setTimeout(r, 50));
   return { pages: fs.existsSync(log) ? fs.readFileSync(log, "utf8") : "", errs };
 }
 
@@ -288,6 +290,7 @@ test("escalation on an unheld stream pages the desktop", async () => {
   const { pages } = await pagedDesktop(home(), false);
   assert.match(pages, /orchestrator desk/);
   assert.match(pages, /lacks worktree/);
+  assert.match(pages, /Resolve in new session/);
 });
 
 test("driveOnce: a verdict that cannot run pages exactly once, naming the fix", async () => {
