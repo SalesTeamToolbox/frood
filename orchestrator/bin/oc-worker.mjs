@@ -4,7 +4,8 @@
 //   node oc-worker.mjs --agent worker --dir <worktree> --prompt <mandate.md>
 //        [--out <final-message.md>] [--session <ses_id>] [--model <provider/model>]
 //        [--ticket <id> --owner <session>]
-//        [--stream <name>] [--title <text>] [--timeout-min 30] [--idle-min 20] [--resume 1] [--slots 2] [--fallback <agent>[,<agent>]] [--report <path>] [--vision]
+//        [--stream <name>] [--title <text>] [--timeout-min 30] [--idle-min 20] [--resume 1] [--slots 2]
+//        [--role <name>] [--fallback <agent>[,<agent>]] [--report <path>] [--vision]
 //   node oc-worker.mjs --help   (or -h) prints this text and exits 0; nothing is launched
 //   node oc-worker.mjs active [--json]   list running headless runs with elapsed time, last-output
 //      age and watchdog limits (idle-min / timeout-min). STALE = wrapper pid gone; OVERDUE = past its
@@ -69,6 +70,7 @@ import { agentModel, classify, isDown, isPolicyFree, markDown, markUp, modelAllo
 import crypto from "node:crypto";
 import { appendEvent, atomicWrite, streamsDir } from "./handoff.mjs";
 import { workerOutcome } from "./outcome.mjs";
+import { CHAINS, chainFor } from "./chains.mjs";
 
 export const FOOTER = `
 
@@ -221,12 +223,28 @@ function args(argv) {
     else if (k === "--resume") a.resume = Number(v());
     else if (k === "--slots") a.slots = Number(v());
     else if (k === "--fallback") a.fallback = v().split(",").map((x) => x.trim()).filter(Boolean).slice(0, 8);
+    else if (k === "--role") a.role = v();
     else if (k === "--vision") a.vision = true;
     else if (k === "--no-vision") a.vision = false; // explicit opt-out
     else throw new Error(`unknown flag ${k}`);
   }
+  // --role <name> expands to --agent <first> --fallback <rest> from CHAINS[role].
+  // It refuses --agent/--fallback together (usage exit 2) and an unknown role.
+  // It applies the per-ticket Nvidia drop rule: if worker-nvidia dropped (exit timeout/stalled)
+  // on 2 earlier rounds in this run dir, the next round leaves worker-nvidia out.
+  if (a.role) {
+    if (a.agent || a.fallback) throw new Error("--role may not be combined with --agent or --fallback");
+    let chain = chainFor(a.role); // throws on unknown role
+    const provisionalOut = a.out || path.join(path.dirname(path.resolve(a.prompt)), `${chain[0]}-out.md`);
+    const outDir = path.dirname(path.resolve(provisionalOut));
+    if (chain[0] === "worker-nvidia" && nvidiaDropCount(outDir) >= 2) chain = chain.slice(1);
+    a.agent = chain[0];
+    a.fallback = chain.slice(1);
+  }
+
   for (const req of ["agent", "dir", "prompt"]) if (!a[req]) throw new Error(`--${req} is required`);
   if (a.ticket && !a.owner) throw new Error("--ticket needs --owner");
+
   a.out ||= path.join(path.dirname(path.resolve(a.prompt)), `${a.agent}-out.md`);
 
   // Auto-detect images in prompt/mandate and enable vision if found (unless --no-vision was explicit)
@@ -503,6 +521,28 @@ export function isQuotaError(receipt) {
 export function resumableReason(errors) {
   const r = classify(errors)?.reason;
   return r === "dropped" || r === "quota" || r === "rate-limit" || r === "provider-error" ? r : null;
+}
+
+// Per-ticket Nvidia drop rule (routing rule point 3): count receipts in the run dir whose
+// agent is worker-nvidia and whose exit is a drop (timeout / stalled). When a run dir has 2
+// such receipts, worker-nvidia is left out of the worker chain on the next dispatch — oc-worker
+// resumes dropped Nvidia runs on the same session instead of skipping ahead, so after 2 drops
+// on this ticket the orchestrator moves to the next pool.
+export function nvidiaDropCount(outDir) {
+  let count = 0;
+  try {
+    for (const f of fs.readdirSync(outDir)) {
+      if (!f.endsWith(".receipt.json")) continue;
+      let r;
+      try {
+        r = JSON.parse(fs.readFileSync(path.join(outDir, f), "utf8"));
+      } catch {
+        continue;
+      }
+      if (r.agent === "worker-nvidia" && (r.exit === "stalled" || r.exit === "timeout")) count++;
+    }
+  } catch {}
+  return count;
 }
 
 // A refused board attach (--ticket): nothing was launched, so it is not an opencode error.

@@ -14,6 +14,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { modelAllowed, lacksDecision } from "./pool-health.mjs";
+import { CHAINS } from "./chains.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CC_ALIASES = new Set(["haiku", "sonnet", "opus", "fable", "inherit"]);
@@ -65,6 +66,30 @@ function matchesDropped(id, dropped) {
   return dropped.some((d) => (d.endsWith("/*") ? id.startsWith(d.slice(0, -1)) : id === d));
 }
 
+// Worker roles that must be dispatched via `--role <name>` (one chain source in bin/chains.mjs).
+const WORKER_ROLES = new Set(["worker", "worker-strong"]);
+
+// Extract `--agent <role> --fallback <a,b,...>` chains from a doc's text, scoped to worker roles.
+function workerFallbackChains(text) {
+  const out = [];
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const agentM = line.match(/--agent\s+(\S+)/);
+    const fbM = line.match(/--fallback\s+([^\s]+)/);
+    if (!agentM || !fbM) continue;
+    const agent = agentM[1];
+    if (!WORKER_ROLES.has(agent)) continue;
+    const fallback = fbM[1].split(",").map((s) => s.trim()).filter(Boolean);
+    out.push({ agent, fallback, lineNo: i + 1 });
+  }
+  return out;
+}
+
+function eq(a, b) {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
 export function checkRouting({ root = REPO, extra = [], models = null } = {}) {
   const problems = [];
   const warn = [];
@@ -96,6 +121,21 @@ export function checkRouting({ root = REPO, extra = [], models = null } = {}) {
       }
       if (isRule && /(?<!["“])\bCC\b(?!["”])/.test(line)) problems.push(`${at}  bare "CC" is ambiguous — write "Claude Code" or "CmdC"`);
     });
+    // Worker-chain lint: any hand-typed `--agent worker|worker-strong --fallback ...` in
+    // commands/ or rules/ must match CHAINS and preferably use `--role <name>` instead.
+    const isDispatchDoc = rel.startsWith("commands/") || rel.startsWith("rules/");
+    if (isDispatchDoc) {
+      for (const { agent, fallback, lineNo } of workerFallbackChains(lines.join("\n"))) {
+        const expected = CHAINS[agent];
+        const full = [agent, ...fallback];
+        const at = `${rel}:${lineNo}`;
+        if (!expected || !eq(full, expected)) {
+          problems.push(`${at}  worker dispatch chain \`--agent ${agent} --fallback ${fallback.join(",")}\` disagrees with CHAINS.${agent} (expected ${expected.join(",")}); use \`--role ${agent}\``);
+        } else {
+          problems.push(`${at}  hand-typed \`--agent ${agent} --fallback ${fallback.join(",")}\` should use \`--role ${agent}\` instead`);
+        }
+      }
+    }
   }
   // Installed OpenCode agents must not be pinned to a model the owner's provider policy rejects.
   for (const dir of ["agents", "agent"]) {

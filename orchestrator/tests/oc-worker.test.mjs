@@ -212,6 +212,74 @@ test("--fallback does not re-pool ordinary failures; stops after the list", () =
   assert.equal(JSON.parse(r.stdout.trim()).repooled_from.length, 2);
 });
 
+// --role: single chain source from bin/chains.mjs
+function spawnRole(dir, ...flags) {
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const argsFile = path.join(dir, "args.json");
+  const out = path.join(dir, "out", "worker-r1.md");
+  const r = spawnSync(process.execPath, [BIN, "--dir", dir, "--prompt", prompt, "--out", out, ...flags], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, FAKE_OC_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  return { ...r, dir, argsFile, out };
+}
+
+function receiptOf(r) {
+  return JSON.parse(r.stdout.trim());
+}
+
+test("--role worker expands to worker-nvidia first (one chain source)", () => {
+  const dir = tmp();
+  const r = spawnRole(dir, "--role", "worker");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(receiptOf(r).agent, "worker-nvidia");
+});
+
+test("--role worker-strong expands to worker-strong first (unchanged chain)", () => {
+  const dir = tmp();
+  const r = spawnRole(dir, "--role", "worker-strong");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(receiptOf(r).agent, "worker-strong");
+});
+
+test("--role with --agent is refused (usage exit 2)", () => {
+  const dir = tmp();
+  const r = spawnRole(dir, "--role", "worker", "--agent", "worker");
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /oc-worker: --role may not be combined with --agent or --fallback/);
+});
+
+test("--role with --fallback is refused (usage exit 2)", () => {
+  const dir = tmp();
+  const r = spawnRole(dir, "--role", "worker", "--fallback", "worker");
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /oc-worker: --role may not be combined with --agent or --fallback/);
+});
+
+test("unknown role is refused (usage exit 2)", () => {
+  const dir = tmp();
+  const r = spawnRole(dir, "--role", "nope");
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /oc-worker: unknown role/);
+});
+
+test("two prior worker-nvidia stalled receipts drop worker-nvidia; one does not", () => {
+  const dir = tmp();
+  const outDir = path.join(dir, "out");
+  fs.mkdirSync(outDir, { recursive: true });
+  // One stalled receipt: worker-nvidia still used
+  fs.writeFileSync(path.join(outDir, "worker-r1.md.receipt.json"), JSON.stringify({ agent: "worker-nvidia", exit: "stalled" }));
+  const one = spawnRole(dir, "--role", "worker", "--out", path.join(outDir, "worker-r2.md"));
+  assert.equal(receiptOf(one).agent, "worker-nvidia", "one stall does not drop worker-nvidia");
+
+  // A timeout receipt also counts as a drop
+  fs.writeFileSync(path.join(outDir, "worker-r2.md.receipt.json"), JSON.stringify({ agent: "worker-nvidia", exit: "timeout" }));
+  const two = spawnRole(dir, "--role", "worker", "--out", path.join(outDir, "worker-r3.md"));
+  assert.equal(receiptOf(two).agent, "worker", "two stalls drop worker-nvidia, fall to worker");
+});
+
+
 test("timeout keeps partial output, clearly marked BLOCKED", () => {
   const r = run({ FAKE_OC_MODE: "hang-after-text" }, "--timeout-min", "0.03");
   assert.equal(r.status, 4);

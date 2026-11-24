@@ -72,3 +72,18 @@ test("missing live model list is a warning, not a crash", () => {
   assert.equal(r.problems.length, 0);
   assert.equal(r.warn.length, 1);
 });
+
+test("worker --agent/--fallback chain that disagrees with CHAINS is flagged with --role", () => {
+  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker --fallback worker-burst,worker-alt" });
+  assert.ok(r.problems.some((p) => /disagrees with CHAINS/.test(p) && /--role worker/.test(p)));
+});
+
+test("worker-strong --agent/--fallback chain matching CHAINS still suggests --role", () => {
+  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker-strong --fallback worker-burst,worker-nvidia,worker-alt,worker-free" });
+  assert.ok(r.problems.some((p) => /should use `--role worker-strong`/.test(p)));
+});
+
+test("non-worker agent --fallback is not flagged by the worker-chain rule", () => {
+  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent critic --fallback critic-alt,critic-free" });
+  assert.ok(!r.problems.some((p) => /CHAINS/.test(p)));
+});

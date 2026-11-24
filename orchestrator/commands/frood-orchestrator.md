@@ -49,12 +49,12 @@ question the owner must decide.
 
 **Direct handling pattern:**
 1. Write Mandate (scope, pass bars, test command)
-2. Dispatch `worker` (or `worker-nvidia` if free-first eligible) with `--fallback` chain
+2. Dispatch `oc-worker.mjs --role worker` (or `--role worker-strong` for hard tickets)
 3. Worker runs tests, commits, writes report
 4. Orchestrator re-runs tests, verifies pass, writes receipt — **no critic round**
-5. If tests fail → worker fixes (max 2 retries), then if still failing → escalate to full orchestration
+5. If tests fail → worker fixes (max 2 retries, same agent + `--session`), then if still failing → escalate to full orchestration
 
-**Nvidia note:** Nemotron 3.5 Super (critic-nvidia, orchestrator-nvidia, worker-nvidia) has no monthly quota — only per-minute rate limits (429). On 429: wait the `retryAfterMs` (default 5 min), nudge the same session with `--resume`, do NOT fall back to next model. Pool-health marks it `rate-limit` (short), not `quota` (long).
+**Nvidia 429:** worker-nvidia has no monthly quota — only per-minute rate limits (429). On 429: wait the `retryAfterMs` (default 5 min), nudge the same session with `--resume`, do NOT fall back to the next model. Pool-health marks it `rate-limit` (short), not `quota` (long). Per-ticket exception: if worker-nvidia dropped (receipt exit `timeout`/`stalled`) on 2 earlier rounds of the same run dir, the next round leaves worker-nvidia out.
 
 **At every module boundary (session hygiene — a long session re-reads its whole context every turn):**
 1. Write/replace the `## Handoff` section at the top of the plan file: done (with shas), next module and its first
@@ -168,20 +168,15 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
 2. **Worker** codes in the ticket worktree and writes `report_path`.
    <!-- cc-only -->
    From Claude Code, workers run on **OpenCode** (cheap pools, not the Claude
-   subscription), as a background job — paid-first by default:
-   Free-first for small, waived, non-money tickets: same command with `--agent worker-nvidia --fallback worker-free,worker-burst,worker-alt,worker` (routing rule).
-   `node {{ORCH_REPO}}/bin/oc-worker.mjs --agent worker --fallback worker-burst,worker-alt,worker-nvidia,worker-free --dir <worktree> --prompt <mandate.md> --report <run dir>/report.md --out <run dir>/worker-r1.md --stream <name>`
-   (`--agent worker-strong` for hard tickets; add `--session <id from the last receipt>` on
-   revision rounds so the worker keeps its context — round 2+ of a free-first run switches to agent worker with the paid-first fallback). Quota errors re-pool automatically. Use the Claude Code `worker` agent (Sonnet) only when OpenCode is unavailable. For a ticket touching >3 files or expected to run >15 min, leave `worker-nvidia` out of `--fallback` (long Nvidia runs drop); if every paid OpenCode pool is out, use the Claude Code `worker` (Sonnet) instead of the Nvidia/free tail. Dropped or stalled runs are resumed once automatically (`--resume`, `--idle-min`).
+   subscription), as a background job — one chain source: `oc-worker.mjs --role worker|worker-strong`.
+   `node {{ORCH_REPO}}/bin/oc-worker.mjs --role worker --dir <worktree> --prompt <mandate.md> --report <run dir>/report.md --out <run dir>/worker-r1.md --stream <name>`
+   (`--role worker-strong` for hard tickets; add `--session <id from the last receipt>` on revision rounds so the worker keeps its context — switch to the next stronger pool only after 2 rounds on one model). Quota/rate-limit errors re-pool automatically; Nvidia 429s are resumed on the same session, never skipped ahead (per-ticket: after 2 worker-nvidia drops in this run dir, worker-nvidia is left out). The Claude Code `worker` agent (Sonnet) is never an automatic fallback — use it only when every OpenCode pool, including Nvidia after its retry, is out, and the receipt states that reason.
    <!-- /cc-only -->
    <!-- oc-only -->
    From OpenCode, launch the same headless run in the background — the identical command Claude Code runs, so a desk
-   in either harness follows it and a Claude Code `/frood-desk` can pick up work started here (paid-first by default):
-   Free-first for small, waived, non-money tickets: same command with `--agent worker-nvidia --fallback worker-free,worker-burst,worker-alt,worker` (routing rule).
-   `node {{ORCH_REPO}}/bin/oc-worker.mjs --agent worker --fallback worker-burst,worker-alt,worker-free --dir <worktree> --prompt <mandate.md> --report <run dir>/report.md --out <run dir>/worker-r1.md --stream <name>`
-   (`--agent worker-strong` for hard tickets; add `--session <id from the last receipt>` on revision rounds so the
-   worker keeps its context — round 2+ of a free-first run switches to agent worker with the paid-first fallback). Quota errors re-pool automatically; leave `worker-nvidia` out of `--fallback` for a
-   ticket over 3 files or 15 minutes. The machine-wide `WORKER_SLOTS` cap is 2 — a third launch waits, never fails.
+   in either harness follows it and a Claude Code `/frood-desk` can pick up work started here.
+   `node {{ORCH_REPO}}/bin/oc-worker.mjs --role worker --dir <worktree> --prompt <mandate.md> --report <run dir>/report.md --out <run dir>/worker-r1.md --stream <name>`
+   (`--role worker-strong` for hard tickets; add `--session <id from the last receipt>` on revision rounds so the worker keeps its context — switch to the next stronger pool only after 2 rounds on one model). Quota/rate-limit errors re-pool automatically; Nvidia 429s are resumed on the same session, never skipped ahead (per-ticket: after 2 worker-nvidia drops in this run dir, worker-nvidia is left out). The Claude Code `worker` agent (Sonnet) is never an automatic fallback — only when every OpenCode pool is out, and the receipt states that reason. The machine-wide `WORKER_SLOTS` cap is 2 — a third launch waits, never fails.
    In-session `subagent({ agent: "worker" })` is the escape hatch for a quick ticket the owner does not want a desk
    to follow: no stream, no desk events.
    <!-- /oc-only -->
