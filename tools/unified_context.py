@@ -1,21 +1,19 @@
 """
-Unified Context Tool — 6-source context assembly for Claude Code.
+Unified Context Tool — 5-source context assembly for Claude Code.
 
 Wraps ContextAssemblerTool (memory, docs, git, skills) and adds three new
 sources:
 
-1. jcodemunch code symbols   — semantic symbol + text search via MCP-to-MCP
-2. GSD workstream state      — active phase/plan from .planning/workstreams/
-3. Effectiveness ranking     — top tools by success_rate for the inferred task type
+1. GSD workstream state      — active phase/plan from .planning/workstreams/
+2. Effectiveness ranking     — top tools by success_rate for the inferred task type
 
-Token budget is split across 6 sources (D-13). Unused budget from unavailable
+Token budget is split across 5 sources (D-13). Unused budget from unavailable
 sources is redistributed proportionally to active sources (D-14).
 
 MCP name: frood_unified_context  (avoids collision with existing "context" tool)
 """
 
 import asyncio
-import hashlib
 import logging
 from pathlib import Path
 from typing import ClassVar
@@ -30,18 +28,16 @@ from tools.context_assembler import (
     _extract_keywords,
     _truncate_to_budget,
 )
-from tools.mcp_client import MCPConnection
 
 logger = logging.getLogger("frood.tools.unified_context")
 
 # ---------------------------------------------------------------------------
 # Budget fractions (D-13) — must sum to 1.0
 # ---------------------------------------------------------------------------
-_UCT_BUDGET_MEMORY = 0.30
-_UCT_BUDGET_CODE = 0.25
-_UCT_BUDGET_GSD = 0.15
-_UCT_BUDGET_GIT = 0.10
-_UCT_BUDGET_SKILLS = 0.10
+_UCT_BUDGET_MEMORY = 0.40
+_UCT_BUDGET_GSD = 0.20
+_UCT_BUDGET_GIT = 0.15
+_UCT_BUDGET_SKILLS = 0.15
 _UCT_BUDGET_EFFECTIVENESS = 0.10
 
 # ---------------------------------------------------------------------------
@@ -193,17 +189,6 @@ _WORK_TYPE_KEYWORDS = {
     ],
 }
 
-# Task types that warrant fetching code symbols from jcodemunch
-_CODE_TASK_TYPES = {
-    "coding",
-    "debugging",
-    "refactoring",
-    "app_create",
-    "app_update",
-    "project_setup",
-}
-
-
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
@@ -232,13 +217,12 @@ def _infer_task_type(topic: str) -> str:
 
 
 class UnifiedContextTool(Tool):
-    """Assemble unified project context from 6 sources.
+    """Assemble unified project context from 5 sources.
 
     Sources:
     1. Semantic memory + project docs + git + skills  (via ContextAssemblerTool)
-    2. jcodemunch code symbols (MCP-to-MCP, per-call connect/disconnect, 3s timeout)
-    3. GSD workstream state   (active phases/plans from .planning/workstreams/)
-    4. Effectiveness ranking  (top tools by task_type from EffectivenessStore)
+    2. GSD workstream state   (active phases/plans from .planning/workstreams/)
+    3. Effectiveness ranking  (top tools by task_type from EffectivenessStore)
 
     Token budget is split across sources. Budget from unavailable sources is
     redistributed proportionally to sources that produced content (D-14).
@@ -271,10 +255,9 @@ class UnifiedContextTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Assemble unified project context from memory, code symbols, GSD workstream "
-            "state, and effectiveness-ranked tools. Extends the base context tool with "
-            "jcodemunch code search, active workstream awareness, and tool effectiveness "
-            "ranking."
+            "Assemble unified project context from memory, docs, git, skills, GSD "
+            "workstream state, and effectiveness-ranked tools. Extends the base context "
+            "tool with active workstream awareness and tool effectiveness ranking."
         )
 
     @property
@@ -329,26 +312,17 @@ class UnifiedContextTool(Tool):
         # Per-source token budgets
         budgets = {
             "memory": int(max_tokens * _UCT_BUDGET_MEMORY),
-            "code": int(max_tokens * _UCT_BUDGET_CODE),
             "gsd": int(max_tokens * _UCT_BUDGET_GSD),
             "git": int(max_tokens * _UCT_BUDGET_GIT),
             "skills": int(max_tokens * _UCT_BUDGET_SKILLS),
             "effectiveness": int(max_tokens * _UCT_BUDGET_EFFECTIVENESS),
         }
 
-        # Only fetch code symbols for code-related task types (or unknown)
-        fetch_code = inferred_type in _CODE_TASK_TYPES or not inferred_type
-
-        # Helper coroutine that resolves to None immediately (used when code skipped)
-        async def _noop():
-            return None
-
         # Gather all sources concurrently
         results = await asyncio.gather(
             self._assembler.execute(
                 topic=topic, scope=scope, depth=depth, max_tokens=max_tokens, **kwargs
             ),
-            self._fetch_code_symbols(topic, budgets["code"]) if fetch_code else _noop(),
             self._fetch_gsd_state(keywords, budgets["gsd"]),
             self._fetch_effectiveness(inferred_type, budgets["effectiveness"]),
             return_exceptions=True,
@@ -364,9 +338,9 @@ class UnifiedContextTool(Tool):
         else:
             base_output = str(base_result) if base_result else ""
 
-        # Process additional source results (code, gsd, effectiveness)
+        # Process additional source results (gsd, effectiveness)
         additional_sources = []
-        additional_results = results[1:]  # code, gsd, effectiveness
+        additional_results = results[1:]  # gsd, effectiveness
         for i, res in enumerate(additional_results):
             if isinstance(res, Exception):
                 logger.debug("Additional source %d failed: %s", i, res)
@@ -379,14 +353,14 @@ class UnifiedContextTool(Tool):
         available_indices = []
         for i, section in enumerate(additional_sources):
             if section is None:
-                budgets_keys = ["code", "gsd", "effectiveness"]
+                budgets_keys = ["gsd", "effectiveness"]
                 unavailable_budget += budgets[budgets_keys[i]]
             else:
                 available_indices.append(i)
 
         if unavailable_budget > 0 and available_indices:
             per_source_extra = unavailable_budget // len(available_indices)
-            budgets_keys = ["code", "gsd", "effectiveness"]
+            budgets_keys = ["gsd", "effectiveness"]
             for i in available_indices:
                 key = budgets_keys[i]
                 new_budget = budgets[key] + per_source_extra
@@ -415,63 +389,6 @@ class UnifiedContextTool(Tool):
         full_output += footer
 
         return ToolResult(output=full_output, success=True)
-
-    # ------------------------------------------------------------------
-    # Source: jcodemunch code symbols
-    # ------------------------------------------------------------------
-
-    async def _fetch_code_symbols(self, query: str, max_tokens: int) -> str | None:
-        """Fetch code symbols from jcodemunch via per-call MCPConnection.
-
-        Uses 3-second connect timeout and 5-second per-call timeout.
-        Returns formatted section string or None on any failure.
-        """
-        config = {"command": "uvx", "args": ["jcodemunch-mcp"]}
-        conn = MCPConnection("jcodemunch", config)
-        try:
-            await asyncio.wait_for(conn.connect(), timeout=3.0)
-
-            # Search symbols
-            symbols_result = await asyncio.wait_for(
-                conn.call_tool("search_symbols", {"query": query, "repo": "local/frood-663daaca"}),
-                timeout=5.0,
-            )
-
-            seen_hashes: set[str] = set()
-            parts = []
-
-            if symbols_result:
-                h = hashlib.sha256(symbols_result[:200].encode()).hexdigest()[:16]
-                seen_hashes.add(h)
-                parts.append(symbols_result)
-
-            # Also try text search for broader coverage
-            try:
-                text_result = await asyncio.wait_for(
-                    conn.call_tool("search_text", {"query": query, "repo": "local/frood-663daaca"}),
-                    timeout=5.0,
-                )
-                if text_result:
-                    h = hashlib.sha256(text_result[:200].encode()).hexdigest()[:16]
-                    if h not in seen_hashes:
-                        parts.append(text_result)
-            except Exception:
-                pass  # text search is best-effort
-
-            if not parts:
-                return None
-
-            combined = "\n\n".join(parts)
-            return _truncate_to_budget(f"## Code Symbols\n\n{combined}", max_tokens)
-
-        except Exception as e:
-            logger.debug("jcodemunch fetch failed (non-critical): %s", e)
-            return None
-        finally:
-            try:
-                await conn.disconnect()
-            except Exception:
-                pass
 
     # ------------------------------------------------------------------
     # Source: GSD workstream state

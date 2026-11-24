@@ -13,7 +13,7 @@ Deactivate an MCP server to save session resources.
 If no argument provided, list all currently active servers and ask which to deactivate.
 
 If an argument is provided:
-- **NEVER remove `frood` or `jcodemunch`** — these are always-on essentials
+- **NEVER remove `frood`** — it is the always-on essential
 - If the user tries to deactivate an essential, explain why and refuse
 - If the server is in `.mcp.json`, remove its entry using Edit tool
 - Tell the user: "Server `<name>` deactivated. **Restart your CC session** (Ctrl+Shift+P > Claude Code: Restart) for the change to take effect."

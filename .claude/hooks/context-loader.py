@@ -6,9 +6,8 @@
 Triggered on UserPromptSubmit. Detects work type from prompt keywords, then
 emits only high-value context to stderr:
 1. Filtered pitfalls (only rows matching work type, not the full 26KB archive)
-2. jcodemunch MCP tool call guidance (what to run before starting work)
-3. GSD nudge (for multi-step prompts not already in a GSD session)
-4. Memory nudge (reminder to store discoveries during knowledge-producing work)
+2. GSD nudge (for multi-step prompts not already in a GSD session)
+3. Memory nudge (reminder to store discoveries during knowledge-producing work)
 
 Reference docs (terminology, conventions, etc.) are NOT injected — Claude can
 read them on-demand via the pointers in CLAUDE.md. Lessons are folded into
@@ -254,98 +253,6 @@ PITFALL_AREAS = {
 # Maximum characters for pitfalls output
 MAX_PITFALLS_CHARS = 4000  # ~1,000 tokens
 
-# Map work types to jcodemunch MCP tool call recommendations.
-JCODEMUNCH_GUIDANCE = {
-    "tools": [
-        {
-            "tool": "search_symbols",
-            "params": {"query": "Tool", "kind": "class", "file_pattern": "tools/**/*.py"},
-            "purpose": "Understand existing tool API surface before making changes",
-        },
-        {
-            "tool": "get_file_outline",
-            "params": {"file_path": "tools/base.py"},
-            "purpose": "Review Tool/ToolExtension ABC interface",
-        },
-    ],
-    "security": [
-        {
-            "tool": "search_symbols",
-            "params": {"query": "sandbox", "file_pattern": "core/**/*.py"},
-            "purpose": "Map security-related symbols before editing",
-        },
-    ],
-    "providers": [
-        {
-            "tool": "get_file_outline",
-            "params": {"file_path": "providers/registry.py"},
-            "purpose": "Review ProviderSpec/ModelSpec patterns",
-        },
-    ],
-    "config": [
-        {
-            "tool": "get_file_outline",
-            "params": {"file_path": "core/config.py"},
-            "purpose": "Review Settings dataclass and from_env() pattern",
-        },
-    ],
-    "dashboard": [
-        {
-            "tool": "search_symbols",
-            "params": {"query": "endpoint", "file_pattern": "dashboard/**/*.py"},
-            "purpose": "Find dashboard API endpoints before modifying routes",
-        },
-    ],
-    "memory": [
-        {
-            "tool": "search_symbols",
-            "params": {"query": "memory", "file_pattern": "memory/**/*.py"},
-            "purpose": "Map memory subsystem symbols before editing",
-        },
-    ],
-    "skills": [
-        {
-            "tool": "get_file_outline",
-            "params": {"file_path": "skills/loader.py"},
-            "purpose": "Review SkillLoader interface and loading patterns",
-        },
-    ],
-    "testing": [
-        {
-            "tool": "search_symbols",
-            "params": {"query": "conftest", "file_pattern": "tests/**/*.py"},
-            "purpose": "Find shared fixtures and test utilities",
-        },
-    ],
-}
-
-
-def emit_jcodemunch_guidance(work_types, repo_id="local/frood"):
-    """Generate jcodemunch MCP tool call recommendations for detected work types."""
-    if not work_types:
-        return []
-
-    seen = set()
-    guidance_items = []
-
-    for wt in sorted(work_types):
-        for item in JCODEMUNCH_GUIDANCE.get(wt, []):
-            params = item["params"]
-            key_param = params.get("file_path") or params.get("query", "")
-            dedup_key = (item["tool"], key_param)
-            if dedup_key in seen:
-                continue
-            seen.add(dedup_key)
-
-            all_params = {"repo": repo_id}
-            all_params.update(params)
-            param_lines = "\n".join(f"      {k}: {json.dumps(v)}" for k, v in all_params.items())
-            guidance_items.append(
-                f"{item['purpose']}:\n    mcp__jcodemunch__{item['tool']} with:\n{param_lines}"
-            )
-
-    return guidance_items
-
 
 def detect_work_types(prompt_text, tool_input=None):
     """Detect work types from prompt text and tool input."""
@@ -460,20 +367,6 @@ def main():
             file=sys.stderr,
         )
         print(f"[context-loader] Pitfalls:\n{pitfalls}", file=sys.stderr)
-
-    # Emit jcodemunch MCP tool call guidance
-    guidance = emit_jcodemunch_guidance(work_types)
-    if guidance:
-        numbered = "\n".join(f"  {i + 1}. {g}" for i, g in enumerate(guidance))
-        if not pitfalls:
-            print(
-                f"[context-loader] Detected work types: {', '.join(sorted(work_types))}",
-                file=sys.stderr,
-            )
-        print(
-            f"[context-loader] jcodemunch guidance -- run these before starting work:\n{numbered}",
-            file=sys.stderr,
-        )
 
     # Memory storage reminder
     _emit_memory_nudge(prompt)

@@ -312,7 +312,7 @@ topic: docs/atlas/routes.md
 
 ### /api/stats/tokens
 handler: dashboard.server.create_app.get_token_stats
-decides: aggregate token usage totals (incl. jcodemunch stats)
+decides: aggregate token usage totals (currently all zero; no stats source is wired)
 sibling traps: /api/reports, /api/notifications/config
 topic: docs/atlas/routes.md
 

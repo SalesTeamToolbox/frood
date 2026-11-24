@@ -16,7 +16,6 @@ Display a table:
 | Server | Status | Tools | Notes |
 |--------|--------|-------|-------|
 | frood | Active (essential) | 29 | Core platform |
-| jcodemunch | Active (essential) | 30 | Codebase nav |
 | frood-remote | Inactive | 29 | Deploy only |
 | context7 | Inactive | 2 | Plugin covers this |
 | playwright | Inactive | ~20 | Plugin covers this |

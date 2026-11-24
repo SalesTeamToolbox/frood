@@ -1,6 +1,5 @@
 """Tests for setup.sh helper scripts — SETUP-01 through SETUP-05."""
 
-import io
 import json
 import os
 import sys
@@ -11,7 +10,6 @@ import pytest
 # Ensure project root is on sys.path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scripts.jcodemunch_index import index_project
 from scripts.setup_helpers import (
     _detect_project_context,
     check_health,
@@ -83,14 +81,14 @@ class TestMcpConfigGeneration:
         assert "frood" in config["mcpServers"]
         assert config["mcpServers"]["frood"]["command"] == venv_python
 
-    def test_includes_all_six_servers_when_ssh_alias_provided(self, tmp_path):
-        """With SSH alias, all 6 servers appear in generated config."""
+    def test_includes_all_five_servers_when_ssh_alias_provided(self, tmp_path):
+        """With SSH alias, all 5 servers appear in generated config."""
         _make_fake_venv(tmp_path)
         generate_mcp_config(str(tmp_path), ssh_alias="myserver")
 
         config = json.loads((tmp_path / ".mcp.json").read_text())
         servers = config["mcpServers"]
-        assert len(servers) == 6, f"Expected 6 servers, got {len(servers)}: {list(servers)}"
+        assert len(servers) == 5, f"Expected 5 servers, got {len(servers)}: {list(servers)}"
         assert "frood-remote" in servers
 
     def test_omits_frood_remote_when_no_ssh_alias(self, tmp_path):
@@ -101,7 +99,7 @@ class TestMcpConfigGeneration:
         config = json.loads((tmp_path / ".mcp.json").read_text())
         servers = config["mcpServers"]
         assert "frood-remote" not in servers
-        assert len(servers) == 5
+        assert len(servers) == 4
 
     def test_frood_env_vars_set_correctly(self, tmp_path):
         """frood entry has FROOD_WORKSPACE, REDIS_URL, QDRANT_URL."""
@@ -203,7 +201,7 @@ class TestHookFrontmatter:
         assert result[0]["timeout"] == 30
 
     def test_reads_multi_event_hook(self, tmp_path):
-        """Parses two # hook_event: lines from jcodemunch-reindex.py."""
+        """Parses two # hook_event: lines from a hook file."""
         hook_path = str(tmp_path / "multi_event.py")
         with open(hook_path, "w") as f:
             f.write("#!/usr/bin/env python3\n")
@@ -321,7 +319,7 @@ class TestHookRegistration:
         assert 60 in timeouts, f"Expected timeout 60, got {timeouts}"
 
     def test_multi_event_hook_registered_to_both_events(self, tmp_path):
-        """jcodemunch-reindex.py appears under both PostToolUse and Stop."""
+        """A hook declaring two events appears under both PostToolUse and Stop."""
         hooks_dir = tmp_path / ".claude" / "hooks"
         _make_hook_file(str(hooks_dir), "dual_hook.py", ["PostToolUse", "Stop"])
 
@@ -408,128 +406,6 @@ class TestHookMerge:
 
 
 # ---------------------------------------------------------------------------
-# TestJcodemunchIndex
-# ---------------------------------------------------------------------------
-
-
-class TestJcodemunchIndex:
-    """SETUP-03: jcodemunch indexing via MCP JSON-RPC."""
-
-    def test_sends_initialize_then_index_folder(self, tmp_path):
-        """Script sends MCP initialize followed by tools/call index_folder."""
-        # Mock subprocess.Popen to capture stdin.write calls
-        written_lines = []
-
-        mock_proc = mock.MagicMock()
-        mock_proc.stdin = mock.MagicMock()
-
-        # Capture write calls
-        def capture_write(data):
-            written_lines.append(data)
-
-        mock_proc.stdin.write.side_effect = capture_write
-
-        # Simulate stdout returning a successful index_folder response (id=2)
-        success_response = (
-            json.dumps({"jsonrpc": "2.0", "id": 2, "result": {"indexed": True}}) + "\n"
-        )
-        mock_proc.stdout = io.StringIO(success_response)
-
-        with (
-            mock.patch("subprocess.Popen", return_value=mock_proc),
-            mock.patch("shutil.which", return_value="/usr/bin/uvx"),
-        ):
-            result = index_project(str(tmp_path))
-
-        # Parse the written messages
-        messages = []
-        for line in written_lines:
-            stripped = line.strip()
-            if stripped:
-                try:
-                    messages.append(json.loads(stripped))
-                except json.JSONDecodeError:
-                    pass
-
-        methods = [m.get("method") for m in messages]
-        assert "initialize" in methods, f"initialize not sent; messages: {methods}"
-        assert "tools/call" in methods, f"tools/call not sent; messages: {methods}"
-
-        # Verify index_folder tool name
-        tool_calls = [m for m in messages if m.get("method") == "tools/call"]
-        assert any(tc["params"]["name"] == "index_folder" for tc in tool_calls)
-
-    def test_uses_correct_project_path(self, tmp_path):
-        """index_folder arguments.path is the project directory."""
-        written_lines = []
-
-        mock_proc = mock.MagicMock()
-        mock_proc.stdin.write.side_effect = lambda data: written_lines.append(data)
-
-        success_response = (
-            json.dumps({"jsonrpc": "2.0", "id": 2, "result": {"indexed": True}}) + "\n"
-        )
-        mock_proc.stdout = io.StringIO(success_response)
-
-        with (
-            mock.patch("subprocess.Popen", return_value=mock_proc),
-            mock.patch("shutil.which", return_value="/usr/bin/uvx"),
-        ):
-            index_project(str(tmp_path))
-
-        messages = []
-        for line in written_lines:
-            stripped = line.strip()
-            if stripped:
-                try:
-                    messages.append(json.loads(stripped))
-                except json.JSONDecodeError:
-                    pass
-
-        tool_calls = [m for m in messages if m.get("method") == "tools/call"]
-        assert len(tool_calls) >= 1
-        path_arg = tool_calls[0]["params"]["arguments"]["path"]
-        assert os.path.basename(path_arg) == os.path.basename(str(tmp_path)), (
-            f"path_arg={path_arg!r} does not match tmp_path={tmp_path!s}"
-        )
-
-
-# ---------------------------------------------------------------------------
-# TestJcodemunchIndexFailure
-# ---------------------------------------------------------------------------
-
-
-class TestJcodemunchIndexFailure:
-    """SETUP-03: Indexing failure is warning, not hard error."""
-
-    def test_returns_false_on_timeout(self):
-        """Timeout during indexing returns False (not exception)."""
-        mock_proc = mock.MagicMock()
-        mock_proc.stdin = mock.MagicMock()
-
-        # stdout never yields anything (simulates hang)
-        mock_proc.stdout = iter([])
-
-        with (
-            mock.patch("subprocess.Popen", return_value=mock_proc),
-            mock.patch("shutil.which", return_value="/usr/bin/uvx"),
-        ):
-            result = index_project("/tmp/test", timeout=1)
-
-        assert result is False
-
-    def test_returns_false_on_missing_uvx(self):
-        """Missing uvx command returns False (not exception)."""
-        with (
-            mock.patch("shutil.which", return_value=None),
-            mock.patch("subprocess.run", side_effect=FileNotFoundError("pip not found")),
-        ):
-            result = index_project("/tmp/test")
-
-        assert result is False
-
-
-# ---------------------------------------------------------------------------
 # TestIdempotency
 # ---------------------------------------------------------------------------
 
@@ -574,8 +450,8 @@ class TestIdempotency:
 class TestHealthReport:
     """SETUP-05: Post-setup health report."""
 
-    def test_reports_all_five_services(self):
-        """Health report checks MCP server, jcodemunch, Qdrant, Redis, Claude Code CLI."""
+    def test_reports_all_four_services(self):
+        """Health report checks MCP server, Qdrant, Redis, Claude Code CLI."""
         # Mock all subprocess and urllib calls to return unhealthy
         with (
             mock.patch("subprocess.run", side_effect=FileNotFoundError("not found")),
@@ -585,11 +461,10 @@ class TestHealthReport:
 
         names = [r["name"] for r in results]
         assert "MCP Server" in names
-        assert "jcodemunch" in names
         assert "Qdrant" in names
         assert "Redis" in names
         assert "Claude Code CLI" in names
-        assert len(results) == 5
+        assert len(results) == 4
 
     def test_pass_format(self, capsys):
         """Healthy service shows [✓] ServiceName: healthy."""
@@ -625,20 +500,13 @@ class TestHealthReport:
         assert "Qdrant" in captured.out
 
     def test_summary_line(self, capsys):
-        """Report ends with 'Setup complete. X/5 services healthy.'"""
+        """Report ends with 'Setup complete. X/N services healthy.'"""
         results = [
             {
                 "name": "MCP Server",
                 "healthy": True,
                 "detail": "healthy",
                 "fix": "",
-                "level": "error",
-            },
-            {
-                "name": "jcodemunch",
-                "healthy": False,
-                "detail": "not found",
-                "fix": "install uv",
                 "level": "error",
             },
             {
@@ -660,7 +528,7 @@ class TestHealthReport:
         print_health_report(results)
         captured = capsys.readouterr()
         assert "services healthy" in captured.out
-        assert "3/5" in captured.out
+        assert "3/4" in captured.out
 
 
 # ---------------------------------------------------------------------------
@@ -877,15 +745,6 @@ class TestProjectContext:
             ctx = _detect_project_context(str(tmp_path))
         assert ctx["project_name"] == "myrepo"
 
-    def test_detect_jcodemunch_repo_id(self, tmp_path):
-        """_detect_project_context returns jcodemunch_repo as 'local/{project_name}'."""
-        with mock.patch("subprocess.run") as mock_run:
-            mock_run.return_value = mock.MagicMock(
-                returncode=0, stdout="https://github.com/org/coolproject.git\n"
-            )
-            ctx = _detect_project_context(str(tmp_path))
-        assert ctx["jcodemunch_repo"] == "local/coolproject"
-
     def test_detect_active_workstream(self, tmp_path):
         """When .planning/workstreams/my-ws/STATE.md contains 'status: active', returns it."""
         ws_dir = tmp_path / ".planning" / "workstreams" / "my-ws"
@@ -943,11 +802,13 @@ class TestClaudeMdFull:
         content = (tmp_path / "CLAUDE.md").read_text()
         assert tmp_path.name in content
 
-    def test_full_claude_md_contains_jcodemunch_repo(self, tmp_path):
-        """Generated CLAUDE.md contains 'local/{project_name}' jcodemunch repo ID."""
+    def test_full_claude_md_has_neutral_navigation_section(self, tmp_path):
+        """Generated CLAUDE.md points at Grep/Glob/Read and docs/ATLAS.md, not an index server."""
         self._run_generate(tmp_path)
         content = (tmp_path / "CLAUDE.md").read_text()
-        assert f"local/{tmp_path.name}" in content
+        assert "## Codebase Navigation" in content
+        assert "Use Grep, Glob and Read" in content
+        assert "docs/ATLAS.md" in content
 
     def test_full_claude_md_merges_into_existing(self, tmp_path):
         """When CLAUDE.md exists with user content, merge preserves user content."""

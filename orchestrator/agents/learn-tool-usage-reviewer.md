@@ -1,6 +1,6 @@
 ---
 name: learn-tool-usage-reviewer  # cc-only
-description: Learn tool usage reviewer — analyzes orchestrator session artifacts for whether agents used the right tools (jcodemunch, board CLI, peer-mail, wt-finish, atlas)
+description: Learn tool usage reviewer — analyzes orchestrator session artifacts for whether agents used the right tools (atlas, board CLI, peer-mail, wt-finish, atlas)
 model: haiku  # cc-only
 tools: Read, Grep, Glob  # cc-only
 mode: primary  # oc-only
@@ -32,12 +32,12 @@ Analyze the artifacts for tool usage correctness. Output **only** a structured f
 
 ### Tool Usage Checks
 
-#### 1. jcodemunch vs Grep/Glob/Read
-For every symbol/definition/search task in worker reports:
-- Did the worker use `grep -r "symbol"` or `search_symbols` / `get_file_outline`?
-- jcodemunch is for: who calls X, what breaks if I change X, call graphs, module outlines
-- Grep is for: known file names, simple text patterns, small scopes
-- **Signal**: worker report shows 20+ `grep` lines for "find all callers of function" → should use jcodemunch
+#### 1. Atlas vs re-derivation
+For every "where does X live / what else shares this path" task in worker reports:
+- Did the agent consult `docs/ATLAS.md` (or the repo's atlas) before broad grepping?
+- When the agent learned where something lives the hard way, did it add a line to the atlas in the same commit?
+- Grep/Glob/Read are the tools for known file names, simple text patterns and small scopes; the atlas is the map for routes, handlers and sibling traps
+- **Signal**: worker report shows 20+ `grep` lines re-deriving a route → handler path that the atlas already records
 
 #### 2. Board CLI vs Manual Git
 For every ticket operation in stream events / board ticket:
@@ -88,7 +88,7 @@ Return a JSON array of findings. Each finding:
 
 ```json
 {
-  "type": "jcodemunch_vs_grep|board_vs_manual|peer_mail_vs_chat|worktree_hygiene|atlas_updates|mandate_completeness|critic_prompt",
+  "type": "atlas_vs_rederivation|board_vs_manual|peer_mail_vs_chat|worktree_hygiene|atlas_updates|mandate_completeness|critic_prompt",
   "severity": "high|medium|low",
   "description": "One sentence: what tool was used, what should have been used, where",
   "evidence": ["artifact_path:line_or_section", "..."],
@@ -99,6 +99,6 @@ Return a JSON array of findings. Each finding:
 
 ## Rules
 - **Check every occurrence**: don't sample; if worker grepped 20 times, that's 20 occurrences
-- **Map to root cause**: "worker prompt doesn't mention jcodemunch" not "worker used grep"
+- **Map to root cause**: "worker prompt doesn't point at docs/ATLAS.md" not "worker used grep"
 - **Reference house rules**: the `.config/opencode/rules/00-house-rules.md` and `CLAUDE.md` are the standards
 - **No prose**: JSON array only

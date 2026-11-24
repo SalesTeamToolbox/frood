@@ -52,7 +52,7 @@ def cc_fixture(tmp_path, monkeypatch):
     """Realistic ``~/.claude/settings.json`` pre-wire fixture.
 
     Matches the shape the plan calls out verbatim (env, model, permissions,
-    plus a pre-existing jcodemunch MCP server) so the merge + round-trip
+    plus a pre-existing other-tool MCP server) so the merge + round-trip
     assertions are exercised against something a real user could have on disk.
     """
     _redirect_home(monkeypatch, tmp_path)
@@ -64,7 +64,7 @@ def cc_fixture(tmp_path, monkeypatch):
             {
                 "env": {"CC_TELEMETRY": "off"},
                 "model": "claude-sonnet-4-6-20260217",
-                "mcpServers": {"jcodemunch": {"command": "node", "args": ["jcodemunch.js"]}},
+                "mcpServers": {"other-tool": {"command": "node", "args": ["other-tool.js"]}},
                 "permissions": {"allow": ["Bash", "Read"]},
             },
             indent=2,
@@ -181,7 +181,7 @@ def test_claude_code_merge_idempotent(cc_fixture):
 
 
 def test_claude_code_merge_preserves_non_frood_keys(cc_fixture):
-    """env, model, permissions, and the jcodemunch MCP entry all survive wire."""
+    """env, model, permissions, and the other-tool MCP entry all survive wire."""
     from core.cli_setup import ClaudeCodeSetup
 
     settings = cc_fixture
@@ -193,10 +193,10 @@ def test_claude_code_merge_preserves_non_frood_keys(cc_fixture):
     assert data["model"] == "claude-sonnet-4-6-20260217"
     assert data["permissions"] == {"allow": ["Bash", "Read"]}
     # Pre-existing MCP server is still there + frood was added alongside
-    assert "jcodemunch" in data["mcpServers"]
-    assert data["mcpServers"]["jcodemunch"] == {
+    assert "other-tool" in data["mcpServers"]
+    assert data["mcpServers"]["other-tool"] == {
         "command": "node",
-        "args": ["jcodemunch.js"],
+        "args": ["other-tool.js"],
     }
     assert "frood" in data["mcpServers"]
 

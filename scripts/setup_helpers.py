@@ -397,11 +397,6 @@ def _make_frood_remote_entry(ssh_alias: str) -> dict:
 
 
 _STATIC_SERVERS = {
-    "jcodemunch": {
-        "command": "uvx",
-        "args": ["jcodemunch-mcp"],
-        "env": {},
-    },
     "context7": {
         "command": "npx",
         "args": ["-y", "@upstash/context7-mcp@latest"],
@@ -472,13 +467,13 @@ frood_memory(action="log", event_type="task_completed", content="<summary>")
 
 
 def _detect_project_context(project_dir: str) -> dict:
-    """Detect project name, jcodemunch repo ID, and active GSD workstream.
+    """Detect project name and active GSD workstream.
 
     Args:
         project_dir: Absolute path to the project root.
 
     Returns:
-        Dict with keys: project_name, jcodemunch_repo, active_workstream, venv_python.
+        Dict with keys: project_name, active_workstream, venv_python.
     """
     project_name = os.path.basename(os.path.abspath(project_dir))
 
@@ -501,8 +496,6 @@ def _detect_project_context(project_dir: str) -> dict:
     except Exception:
         pass
 
-    jcodemunch_repo = f"local/{project_name}"
-
     active_workstream = None
     workstreams_dir = os.path.join(project_dir, ".planning", "workstreams")
     if os.path.isdir(workstreams_dir):
@@ -520,7 +513,6 @@ def _detect_project_context(project_dir: str) -> dict:
 
     return {
         "project_name": project_name,
-        "jcodemunch_repo": jcodemunch_repo,
         "active_workstream": active_workstream,
         "venv_python": _venv_python(project_dir),
     }
@@ -540,21 +532,9 @@ python -m pytest tests/ -v        # Verbose: see all test names
 
 ---
 
-## Codebase Navigation (jcodemunch)
+## Codebase Navigation
 
-This project is indexed by jcodemunch MCP server (`{jcodemunch_repo}`).
-**Use jcodemunch tools before reading files** to understand structure and find the right code:
-
-| When you need to... | Use this tool |
-|----------------------|---------------|
-| Understand a module before editing | `get_file_outline` — shows all classes, functions, signatures |
-| Find where something is defined | `search_symbols` — search by name across the codebase |
-| Explore a directory's structure | `get_file_tree` with `path_prefix` |
-| Read a specific symbol's code | `get_symbol` — returns the full source of a function/class |
-| Find text patterns across files | `search_text` — grep-like search across indexed files |
-| Re-index after major changes | `index_folder` with `incremental: true` |
-
-**Repo identifier:** `{jcodemunch_repo}` (use this as the `repo` parameter in all jcodemunch calls)
+Use Grep, Glob and Read. Start from `docs/ATLAS.md` if the project has one.
 
 ---
 
@@ -678,17 +658,13 @@ python -m pytest tests/ -k "test_name"      # Filter by name
 | 15 | Git | Force-pushing to main/master destroys teammates' history | Never `git push --force` to shared branches; use `--force-with-lease` if absolutely necessary |
 | 16 | Deps | Installing dependencies globally breaks other projects | Always use a virtualenv (`.venv/`); activate before installing: `source .venv/bin/activate` |
 | 17 | Perf | Synchronous subprocess calls in hot paths add latency | Use `asyncio.create_subprocess_exec` for async subprocess; or run in thread pool |
-| 18 | jcodemunch | Reading entire files costs tokens when only a function is needed | Use `get_symbol("ClassName.method_name")` instead of reading the whole file |
-| 19 | jcodemunch | Index goes stale after adding new files or major refactors | Re-index with `index_folder(incremental=true)` after structural changes |
-| 20 | Setup | `bash setup.sh` run from wrong directory fails silently | `setup.sh` uses `PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"` — always run from repo root |
+| 18 | Setup | `bash setup.sh` run from wrong directory fails silently | `setup.sh` uses `PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"` — always run from repo root |
 
 ---
 
 ## Project
 
 **{project_name}**{active_workstream_line}
-
-**jcodemunch repo:** `{jcodemunch_repo}`
 """
 
 
@@ -711,7 +687,6 @@ def generate_full_claude_md(project_dir: str) -> None:
 
     template_content = _FULL_CLAUDE_MD_TEMPLATE.format(
         project_name=ctx["project_name"],
-        jcodemunch_repo=ctx["jcodemunch_repo"],
         active_workstream_line=active_ws_line,
         venv_python=ctx["venv_python"],
     )
@@ -873,7 +848,7 @@ def read_hook_metadata(hook_path: str) -> list:
     non-comment, non-blank line. Returns a list of registration dicts — one
     per ``# hook_event:`` declaration.
 
-    Most hooks return 1 item. jcodemunch-reindex.py returns 2 (PostToolUse + Stop).
+    Most hooks return 1 item; a hook declaring two events returns 2 (e.g. PostToolUse + Stop).
 
     Returns:
         List of dicts with keys: event (str), matcher (str|None), timeout (int).
@@ -1082,14 +1057,13 @@ def register_hooks(project_dir: str) -> None:
 
 
 def check_health(project_dir: str) -> list:
-    """Run 5 health probes and return results.
+    """Run 4 health probes and return results.
 
     Probes (in order):
     1. MCP Server — runs mcp_server.py --health, expects exit 0
-    2. jcodemunch — runs uvx jcodemunch-mcp --help, expects exit 0
-    3. Qdrant — HTTP GET http://localhost:6333/healthz, expects HTTP 200
-    4. Redis — runs redis-cli ping, expects stdout to contain PONG
-    5. Claude Code CLI — runs claude --version, expects exit 0
+    2. Qdrant — HTTP GET http://localhost:6333/healthz, expects HTTP 200
+    3. Redis — runs redis-cli ping, expects stdout to contain PONG
+    4. Claude Code CLI — runs claude --version, expects exit 0
 
     Each probe is wrapped in try/except. Any exception = unhealthy.
 
@@ -1143,46 +1117,7 @@ def check_health(project_dir: str) -> list:
             }
         )
 
-    # -- 2. jcodemunch -------------------------------------------------------
-    try:
-        proc = subprocess.run(
-            ["uvx", "jcodemunch-mcp", "--help"],
-            capture_output=True,
-            timeout=15,
-        )
-        if proc.returncode == 0:
-            results.append(
-                {
-                    "name": "jcodemunch",
-                    "healthy": True,
-                    "detail": "healthy",
-                    "fix": "",
-                    "level": "error",
-                }
-            )
-        else:
-            stderr_text = proc.stderr.decode(errors="replace").strip()
-            results.append(
-                {
-                    "name": "jcodemunch",
-                    "healthy": False,
-                    "detail": stderr_text or f"exited {proc.returncode}",
-                    "fix": "pip install uv && uvx jcodemunch-mcp",
-                    "level": "error",
-                }
-            )
-    except Exception as e:
-        results.append(
-            {
-                "name": "jcodemunch",
-                "healthy": False,
-                "detail": str(e),
-                "fix": "pip install uv && uvx jcodemunch-mcp",
-                "level": "error",
-            }
-        )
-
-    # -- 3. Qdrant -----------------------------------------------------------
+    # -- 2. Qdrant -----------------------------------------------------------
     try:
         response = urllib.request.urlopen("http://localhost:6333/healthz", timeout=5)  # nosec B310  # fixed localhost URL
         if response.status == 200:
@@ -1210,7 +1145,7 @@ def check_health(project_dir: str) -> list:
             }
         )
 
-    # -- 4. Redis ------------------------------------------------------------
+    # -- 3. Redis ------------------------------------------------------------
     try:
         proc = subprocess.run(
             ["redis-cli", "ping"],
@@ -1243,7 +1178,7 @@ def check_health(project_dir: str) -> list:
             }
         )
 
-    # -- 5. Claude Code CLI --------------------------------------------------
+    # -- 4. Claude Code CLI --------------------------------------------------
     try:
         proc = subprocess.run(
             ["claude", "--version"],

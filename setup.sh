@@ -353,12 +353,6 @@ info "Installing Atlas pattern (checked map)..."
 $PYTHON_CMD scripts/setup_helpers.py install-atlas "$PROJECT_DIR"
 info "Atlas pattern installed"
 
-# ── jcodemunch indexing ───────────────────────────────────────────────────────
-info "Indexing project with jcodemunch..."
-if ! $PYTHON_CMD scripts/jcodemunch_index.py "$PROJECT_DIR" --timeout=120; then
-    warn "jcodemunch indexing failed — run manually: uvx jcodemunch-mcp"
-fi
-
 # ── Health report ─────────────────────────────────────────────────────────────
 if ! $QUIET; then
     echo ""

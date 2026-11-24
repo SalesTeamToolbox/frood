@@ -22,7 +22,6 @@ If an argument is provided:
 
 ## Always-on servers (do not remove)
 - `frood` — core platform
-- `jcodemunch` — codebase navigation
 
 ## On-demand servers
 - `frood-remote` — production server management & deployment

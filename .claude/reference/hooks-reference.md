@@ -12,8 +12,6 @@
 | `security-monitor.py` | PostToolUse (Write/Edit) | Flags security-sensitive changes for review (sandbox, auth, command filter) |
 | `format-on-write.py` | PostToolUse (Write/Edit) | Auto-formats Python files with ruff on every write |
 | `cc-memory-sync.py` | PostToolUse (Write/Edit) | Embeds CC memory files into Qdrant for semantic recall |
-| `jcodemunch-reindex.py` | Stop + PostToolUse (mcp__jcodemunch) | Re-indexes codebase after structural file changes |
-| `jcodemunch-token-tracker.py` | PostToolUse (mcp__jcodemunch) | Tracks token savings from jcodemunch vs full file reads |
 | ~~`session-handoff.py`~~ | ~~Stop~~ | **REMOVED** from project hooks — global `~/.claude/settings.json` already registers a Stop session-handoff, so the project copy was a duplicate. |
 | `test-validator.py` | Stop | Validates tests pass, checks new modules have test coverage |
 | `learning-engine.py` | Stop | Records development patterns, vocabulary, and skill candidates |
@@ -81,9 +79,6 @@ output for previous session state.
 │  ├─ security-monitor.py  — flags security-sensitive changes      │
 │  ├─ format-on-write.py   — auto-formats Python with ruff         │
 │  └─ cc-memory-sync.py    — embeds CC memory files into Qdrant    │
-│  PostToolUse (all):                                              │
-│  ├─ jcodemunch-token-tracker.py — tracks token savings           │
-│  └─ jcodemunch-reindex.py       — re-indexes after file changes  │
 └──────────────────────┬───────────────────────────────────────────┘
                        │
                        ▼
@@ -94,8 +89,7 @@ output for previous session state.
 │  ├─ learning-engine.py       — records patterns, updates lessons │
 │  ├─ memory-learn.py          — captures learnings to memory      │
 │  ├─ effectiveness-learn.py   — structured learning extraction    │
-│  ├─ knowledge-learn.py       — session knowledge to Qdrant       │
-│  └─ jcodemunch-reindex.py    — final re-index                    │
+│  └─ knowledge-learn.py       — session knowledge to Qdrant       │
 └──────────────────────────────────────────────────────────────────┘
 ```
 

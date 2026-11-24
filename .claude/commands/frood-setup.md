@@ -17,7 +17,7 @@ Frood setup. Delegates to `bash setup.sh`, run once after cloning.
 
 This runs `bash setup.sh [subcommand]` from the Frood repo root. The default
 (full setup) detects the platform, creates the venv, installs dependencies,
-runs jcodemunch indexing, and runs health checks via
+and runs health checks via
 `scripts/setup_helpers.py health <PROJECT_DIR>`.
 
 After setup: `source .venv/bin/activate && python frood.py`, then open

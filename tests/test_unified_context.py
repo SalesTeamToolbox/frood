@@ -1,9 +1,8 @@
 """
-Tests for UnifiedContextTool — 6-source context assembly with jcodemunch integration,
-GSD workstream state, and effectiveness-ranked tools.
+Tests for UnifiedContextTool — 5-source context assembly with GSD workstream
+state and effectiveness-ranked tools.
 
 Coverage:
-- CTX-01: jcodemunch code symbol integration + graceful degradation
 - CTX-02: GSD active workstream state injection
 - CTX-03: Effectiveness-ranked tool recommendations
 - Budget redistribution when sources are unavailable
@@ -11,7 +10,7 @@ Coverage:
 - Tool name and parameter schema validation
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -60,7 +59,7 @@ class MockEffectivenessStore:
 
 
 class TestUnifiedContext:
-    """Tests for UnifiedContextTool.execute() covering all 6 sources."""
+    """Tests for UnifiedContextTool.execute() covering all sources."""
 
     def _make_tool(self, effectiveness_recs=None, workspace=""):
         memory_store = MockMemoryStore()
@@ -72,49 +71,6 @@ class TestUnifiedContext:
             workspace=workspace,
             effectiveness_store=effectiveness_store,
         )
-
-    # ------------------------------------------------------------------
-    # Test 1: CTX-01 happy path — jcodemunch returns code symbols
-    # ------------------------------------------------------------------
-    @pytest.mark.asyncio
-    async def test_jcodemunch_happy_path_returns_code_symbols(self):
-        """When jcodemunch connects successfully, response includes '## Code Symbols'."""
-        tool = self._make_tool()
-
-        with patch("tools.unified_context.MCPConnection") as MockConn:
-            mock_conn = AsyncMock()
-            MockConn.return_value = mock_conn
-            mock_conn.connect = AsyncMock()
-            mock_conn.call_tool = AsyncMock(return_value="class SandboxViolation:\n    pass")
-            mock_conn.disconnect = AsyncMock()
-
-            result = await tool.execute(topic="sandbox security")
-
-        assert result.success is True
-        assert "## Code Symbols" in result.output
-        # Should also include memory results from assembler
-        assert len(result.output) > 100
-
-    # ------------------------------------------------------------------
-    # Test 2: CTX-01 graceful degradation — jcodemunch TimeoutError
-    # ------------------------------------------------------------------
-    @pytest.mark.asyncio
-    async def test_jcodemunch_timeout_still_returns_other_sources(self):
-        """When jcodemunch.connect() raises TimeoutError, tool still succeeds with other sources."""
-        tool = self._make_tool()
-
-        with patch("tools.unified_context.MCPConnection") as MockConn:
-            mock_conn = AsyncMock()
-            MockConn.return_value = mock_conn
-            mock_conn.connect = AsyncMock(side_effect=TimeoutError())
-            mock_conn.disconnect = AsyncMock()
-
-            result = await tool.execute(topic="sandbox security")
-
-        assert result.success is True
-        assert "## Code Symbols" not in result.output
-        # Should still have content from base assembler
-        assert len(result.output) > 50
 
     # ------------------------------------------------------------------
     # Test 3: CTX-02 GSD active — matching workstream STATE.md
@@ -142,13 +98,7 @@ Phase: 1
 
         tool = self._make_tool(workspace=str(tmp_path))
 
-        with patch("tools.unified_context.MCPConnection") as MockConn:
-            mock_conn = AsyncMock()
-            MockConn.return_value = mock_conn
-            mock_conn.connect = AsyncMock(side_effect=Exception("no jcodemunch in test"))
-            mock_conn.disconnect = AsyncMock()
-
-            result = await tool.execute(topic="context engine phase implementation")
+        result = await tool.execute(topic="context engine phase implementation")
 
         assert result.success is True
         assert "## GSD Workstream" in result.output
@@ -172,14 +122,8 @@ last_updated: "2026-03-25T10:00:00Z"
 
         tool = self._make_tool(workspace=str(tmp_path))
 
-        with patch("tools.unified_context.MCPConnection") as MockConn:
-            mock_conn = AsyncMock()
-            MockConn.return_value = mock_conn
-            mock_conn.connect = AsyncMock(side_effect=Exception("no jcodemunch in test"))
-            mock_conn.disconnect = AsyncMock()
-
-            # Topic has nothing to do with "payment" or "billing"
-            result = await tool.execute(topic="sandbox security vulnerability")
+        # Topic has nothing to do with "payment" or "billing"
+        result = await tool.execute(topic="sandbox security vulnerability")
 
         assert result.success is True
         assert "## GSD Workstream" not in result.output
@@ -201,13 +145,7 @@ last_updated: "2026-03-25T10:00:00Z"
         ]
         tool = self._make_tool(effectiveness_recs=recs)
 
-        with patch("tools.unified_context.MCPConnection") as MockConn:
-            mock_conn = AsyncMock()
-            MockConn.return_value = mock_conn
-            mock_conn.connect = AsyncMock(side_effect=Exception("no jcodemunch in test"))
-            mock_conn.disconnect = AsyncMock()
-
-            result = await tool.execute(topic="add new tool parameter", task_type="coding")
+        result = await tool.execute(topic="add new tool parameter", task_type="coding")
 
         assert result.success is True
         assert "## Effective Tools" in result.output
@@ -221,23 +159,17 @@ last_updated: "2026-03-25T10:00:00Z"
         """When EffectivenessStore returns empty, effectiveness section is omitted."""
         tool = self._make_tool(effectiveness_recs=[])
 
-        with patch("tools.unified_context.MCPConnection") as MockConn:
-            mock_conn = AsyncMock()
-            MockConn.return_value = mock_conn
-            mock_conn.connect = AsyncMock(side_effect=Exception("no jcodemunch in test"))
-            mock_conn.disconnect = AsyncMock()
-
-            result = await tool.execute(topic="add new tool parameter", task_type="coding")
+        result = await tool.execute(topic="add new tool parameter", task_type="coding")
 
         assert result.success is True
         assert "## Effective Tools" not in result.output
 
     # ------------------------------------------------------------------
-    # Test 7: D-14 budget redistribution when jcodemunch unavailable
+    # Test 7: D-14 budget redistribution when optional sources are unavailable
     # ------------------------------------------------------------------
     @pytest.mark.asyncio
-    async def test_budget_redistribution_when_code_symbols_unavailable(self):
-        """When jcodemunch is unavailable (25% unused), total output tokens should be near max_tokens."""
+    async def test_budget_redistribution_when_optional_sources_unavailable(self):
+        """When optional sources produce nothing, the tool still succeeds within a small budget."""
         recs = [
             {
                 "tool_name": "shell",
@@ -249,16 +181,10 @@ last_updated: "2026-03-25T10:00:00Z"
         ]
         tool = self._make_tool(effectiveness_recs=recs)
 
-        with patch("tools.unified_context.MCPConnection") as MockConn:
-            mock_conn = AsyncMock()
-            MockConn.return_value = mock_conn
-            mock_conn.connect = AsyncMock(side_effect=Exception("no jcodemunch"))
-            mock_conn.disconnect = AsyncMock()
-
-            # Use a small budget so we can detect redistribution
-            result = await tool.execute(
-                topic="add tool to registry coding", task_type="coding", max_tokens=500
-            )
+        # Use a small budget so we can detect redistribution
+        result = await tool.execute(
+            topic="add tool to registry coding", task_type="coding", max_tokens=500
+        )
 
         # Tool should still succeed
         assert result.success is True
@@ -333,13 +259,7 @@ last_updated: "2026-03-20T10:00:00Z"
 
         tool = self._make_tool(workspace=str(tmp_path))
 
-        with patch("tools.unified_context.MCPConnection") as MockConn:
-            mock_conn = AsyncMock()
-            MockConn.return_value = mock_conn
-            mock_conn.connect = AsyncMock(side_effect=Exception("no jcodemunch in test"))
-            mock_conn.disconnect = AsyncMock()
-
-            result = await tool.execute(topic="context engine phase implementation")
+        result = await tool.execute(topic="context engine phase implementation")
 
         assert result.success is True
         assert "## GSD Workstream" not in result.output
@@ -414,11 +334,11 @@ class TestMCPRegistration:
         assert params["properties"]["task_type"]["type"] == "string"
         assert "topic" in params["required"]
 
-    def test_description_mentions_code_symbols(self):
-        """Description mentions the new capabilities."""
+    def test_description_mentions_capabilities(self):
+        """Description mentions the current capabilities."""
         tool = UnifiedContextTool()
         desc = tool.description.lower()
-        assert "code" in desc or "symbol" in desc
+        assert "workstream" in desc
         assert "effectiveness" in desc or "ranked" in desc
 
 
@@ -432,7 +352,7 @@ class TestFullIntegration:
 
     @pytest.mark.asyncio
     async def test_all_sources_present(self, tmp_path):
-        """When all sources return data, output contains all 4 section types."""
+        """When all sources return data, output is assembled from the available sources."""
         # Set up mock workspace with GSD state
         ws = tmp_path / "workspace"
         ws.mkdir()
@@ -458,13 +378,7 @@ class TestFullIntegration:
             effectiveness_store=mock_eff,
         )
 
-        # Mock jcodemunch to return code symbols
-        with patch("tools.unified_context.MCPConnection") as MockConn:
-            mock_conn = AsyncMock()
-            mock_conn.call_tool.return_value = "class Foo:\n  def bar(self): pass"
-            MockConn.return_value = mock_conn
-
-            result = await tool.execute(topic="context engine coding", max_tokens=4000)
+        result = await tool.execute(topic="context engine coding", max_tokens=4000)
 
         assert result.success is True
         output = result.output
@@ -484,10 +398,7 @@ class TestFullIntegration:
             effectiveness_store=None,
         )
 
-        with patch("tools.unified_context.MCPConnection") as MockConn:
-            MockConn.return_value.connect = AsyncMock(side_effect=TimeoutError("no jcodemunch"))
-
-            result = await tool.execute(topic="anything", max_tokens=4000)
+        result = await tool.execute(topic="anything", max_tokens=4000)
 
         # Should still succeed — graceful degradation
         assert result.success is True

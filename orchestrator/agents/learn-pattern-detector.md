@@ -55,11 +55,11 @@ Look for:
 
 #### 4. Missed Shortcuts (existing tool/script/helper not used)
 Look for:
-- Worker uses `bash` + `grep` where `search_symbols` / `get_file_outline` would work
+- Worker re-derives with `bash` + `grep` something `docs/ATLAS.md` already maps
 - Manual git commands where `board.mjs` subcommand exists
 - Manual worktree cleanup where `wt-finish.mjs` exists
 - Peer-mail not checked at session start (per house rules)
-- **Signal**: worker report shows `grep -r "functionName"` ×20; jcodemunch was available
+- **Signal**: worker report shows `grep -r "functionName"` ×20; the atlas already listed the handler
 
 #### 5. Handoff Gaps
 Look for:
