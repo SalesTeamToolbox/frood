@@ -112,7 +112,9 @@ function run(session) {
   let announced = readAnnounced(session);
   const deadline = now() + MAX_MIN * 60 * 1000;
 
-  process.on("SIGTERM", () => { removeOwnPid(session); process.exit(0); });
+  // A SIGTERM means a successor took over and owns the pid file now: leave it alone. Unlinking here raced the
+  // successor's writePid and deleted ITS pid file. A stale pid file is harmless (the cmdline check guards the kill).
+  process.on("SIGTERM", () => process.exit(0));
 
   function tick() {
     try {
