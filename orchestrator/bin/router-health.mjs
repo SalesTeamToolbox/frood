@@ -28,20 +28,7 @@ import { fileURLToPath } from "node:url";
 import { agentModel, providerOf, readProviders, SEED_PROVIDERS, classify, isDown, markDown, markUp, readHealth, providerPolicy, modelAllowed, policyReason } from "./pool-health.mjs";
 import { collectUsage, poolHeadroom, loadLimits, LOW_HEADROOM_PCT_DEFAULT } from "./usage.mjs";
 import { opencodeBin } from "./oc-worker.mjs";
-
-export const CHAINS = {
-  // Cross-provider diversity at positions 1-2 prevents single-provider quota from killing the chain
-  worker: ["worker", "worker-burst", "worker-nvidia", "worker-alt", "worker-free"],
-  // worker-strong: add Nvidia + Zen free fallbacks (was all-paid, dead when Go+CmdC cap)
-  "worker-strong": ["worker-strong", "worker-burst", "worker-nvidia", "worker-alt", "worker-free"],
-  // critic: Go Haiku as position 2 (cross-family vs CmdC Haiku pos 1)
-  critic: ["critic", "critic-go", "critic-alt", "critic-nvidia", "critic-free"],
-  // scout: add Nvidia + CmdC fallbacks (was Zen-only, dead when Zen caps)
-  scout: ["scout", "worker-nvidia", "critic-nvidia", "worker-alt"],
-  senior: ["senior", "senior-alt", "senior-nvidia", "senior-free"],
-  // orchestrator: add Nvidia (was Go→CmdC→Zen only, no Nvidia)
-  orchestrator: ["orchestrator", "orchestrator-alt", "orchestrator-nvidia", "orchestrator-free"],
-};
+import { CHAINS } from "./chains.mjs";
 
 // Probing these costs real money per call (a large system prompt on a strong model — Sonnet ~$0.07)
 // and they run rarely; --probe skips them unless --probe-all. Existence + real failures still mark them.

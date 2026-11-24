@@ -952,27 +952,24 @@ export function decideStep(stream, key, events, lines) {
     if (ev.outcome === "done") return { action: `ACTION critic ${ticketPath} ${out} ${path.join(runDir, `findings-r${round}.md`)} ${round}`, ticket: slug };
     if (ev.outcome === "blocked_question") return { action: `ESCALATE question ${out}`, ticket: slug };
     // Worker errored: try auto-resume on the next round before paging the owner.
-    // Free-tier workers (worker-free, worker-nvidia) that timed out or dropped
-    // get retried on the paid-first chain. Paid workers and runs without a
-    // session are escalated with their original outcome.
+    // A run that timed out or dropped (worker-nvidia or worker-free) resumes on the
+    // same worker role with `--role worker --session` — oc-worker's Nvidia drop rule
+    // handles repeated Nvidia stalls (2 stalled/timeout receipts leave worker-nvidia
+    // out). Paid workers and runs without a session are escalated with their
+    // original outcome; paid-worker errors keep escalating as today.
     const m = run.match(/worker-r(\d+)$/);
     const workerRound = m ? Number(m[1]) : round;
-    let wagent = ev.agent;
-    let wfallback = "";
+    const wagent = ev.agent;
+    const wsession = done?.session ?? null;
     let canResume = false;
-    if (wagent === "worker-nvidia" || wagent === "worker-free") {
-      wagent = "worker";
-      wfallback = " --fallback worker-burst,worker-alt,worker-nvidia,worker-free";
-      canResume = true;
-    }
+    if ((wagent === "worker-nvidia" || wagent === "worker-free") && wsession) canResume = true;
     if (canResume) {
       let nr = workerRound;
       while (nr < max && nextOutTaken(runDir, nr, events, run)) nr++;
-      const wsession = done?.session ?? null;
-      if (nr < max && !nextOutTaken(runDir, nr, events, run) && wsession) {
+      if (nr < max && !nextOutTaken(runDir, nr, events, run)) {
         const next = path.join(runDir, `worker-r${nr}.md`);
         const prompt = path.join(runDir, `worker-prompt-r${workerRound}.md`);
-        const cmd = `node ${OC_WORKER} --agent ${wagent}${wfallback} --dir ${ticket.worktree} --prompt ${prompt} --report ${ticket.report} --out ${next} --session ${wsession} --stream ${stream}`;
+        const cmd = `node ${OC_WORKER} --role worker --dir ${ticket.worktree} --prompt ${prompt} --report ${ticket.report} --out ${next} --session ${wsession} --stream ${stream}`;
         return { action: `ACTION resume-worker ${cmd}`, ticket: slug };
       }
     }
@@ -999,21 +996,17 @@ export function decideStep(stream, key, events, lines) {
         // The next out must be fresh (B4) — but a taken slot is the desk's problem, not the
         // owner's: direct dispatches consume worker-r<N> names outside the resume flow, so
         // advance to the next free slot instead of paging. Only truly out of rounds pages.
-        // Tier plumbing (hybrid routing): a round-1 run on a free agent escalates to the
-        // paid-first chain from round 2 — free agents code round 1, paid agents own every
-        // resume. Same session for context; the paid tail also covers a down paid pool.
-        // (Free worker agents: routing rule "Worker (free-first)".)
+        // Revision rounds stay on the same agent and the same session (--session);
+        // switch to the next stronger pool only after 2 rounds on one model. No
+        // hand-typed --fallback: oc-worker --role expands the chain from CHAINS and
+        // applies the Nvidia drop rule. Same session keeps the worker's context.
+        // (Free agents code round 1; a drop is resumed via --role worker above.)
         let agent = wdone.agent;
-        let fallback = "";
-        if (agent === "worker-nvidia" || agent === "worker-free") {
-          agent = "worker";
-          fallback = " --fallback worker-burst,worker-alt,worker-nvidia,worker-free";
-        }
         let r = round;
         while (r < max && nextOutTaken(runDir, r, events, wrun)) r++;
         if (r < max && !nextOutTaken(runDir, r, events, wrun)) {
           const next = path.join(runDir, `worker-r${r + 1}.md`);
-          const cmd = `node ${OC_WORKER} --agent ${agent}${fallback} --dir ${ticket.worktree} --prompt ${findings} --report ${ticket.report} --out ${next} --session ${wsession} --stream ${stream}`;
+          const cmd = `node ${OC_WORKER} --agent ${agent} --dir ${ticket.worktree} --prompt ${findings} --report ${ticket.report} --out ${next} --session ${wsession} --stream ${stream}`;
           return { action: `ACTION resume-worker ${cmd}`, ticket: slug };
         }
         return { action: `ESCALATE rounds-exhausted ${findings}`, ticket: slug };

@@ -41,7 +41,7 @@ test("all models live: every role uses its first agent, exit 0", () => {
   const h = home(ALL);
   const r = run(h, Object.values(ALL));
   assert.equal(r.status, 0, r.stdout);
-  assert.match(r.stdout, /^worker\s+use worker$/m);
+  assert.match(r.stdout, /^worker\s+use worker-nvidia\s*(?:👁)?$/m);
   assert.match(r.stdout, /^critic\s+use critic\s*(?:👁)?$/m);
 });
 
@@ -50,7 +50,8 @@ test("a pinned model vanishing from opencode models self-corrects to the next ag
   const live = Object.values(ALL).filter((m) => m !== "commandcode/claude-haiku-5-5" && !m.startsWith("opencode-go/"));
   const r = run(h, live);
   assert.match(r.stdout, /^critic\s+use critic-alt\s+\[skipped critic: down \(unavailable until/m);
-  assert.match(r.stdout, /^worker\s+use worker-burst/m);
+  // Go gone: worker-nvidia (Nvidia, not Go) is still live and is now first in the worker chain
+  assert.match(r.stdout, /^worker\s+use worker-nvidia/m);
   // Go gone: the orchestrator self-corrects to the CommandCode Muse agent
   assert.match(r.stdout, /^orchestrator\s+use orchestrator-alt/m);
   assert.equal(r.status, 0);
@@ -584,7 +585,7 @@ test("headroom: a Go pool near its cap is skipped for a healthy paid fallback", 
       0, Date.now() - 3600_000, Date.now() - 3600_000, 100e6, 0, 0, 0, "/tmp/x");
   } finally { db.close(); }
   const r = run(h, Object.values(ALL));
-  assert.match(r.stdout, /^worker\s+use worker-burst\s+\[skipped worker: low-headroom/m, r.stdout);
+  assert.match(r.stdout, /^worker\s+use worker-nvidia\s*(?:👁)?\s*\[skipped worker: low-headroom/m, r.stdout);
   // critic-go rides the same exhausted Go pool, so it is skipped too — use stays critic (vision-capable).
   assert.match(r.stdout, /^critic\s+use critic\s*(?:👁)?\s+\[skipped critic-go: low-headroom/m, r.stdout);
   assert.equal(r.status, 0);
