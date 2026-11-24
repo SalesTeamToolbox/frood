@@ -1,0 +1,4 @@
+# public-guard exceptions for Frood (reviewed by the owner's session 2026-11-23).
+# Changing this file in a push always needs the owner's terminal approval.
+.opencode/opencode.json rule:forbidden-path
+dashboard/frontend/dist/vs/language/typescript/tsWorker.js rule:private-path
