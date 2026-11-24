@@ -688,9 +688,12 @@ function dpage(stream, key, reason) {
   console.log(text);
   // Notify the responsible orchestration session (stream holder) via peer-mail.
   // That session's agent resolves the escalation and brings questions to the user.
-  // Fallback desktop notify only when no mail went out (unheld stream, or a holder we could not reach),
-  // so an escalation is never lost.
-  if (!notifyHeldSession(stream, key, reason)) notifyDesktop(text);
+  // Desktop notify only for an unheld stream (no agent can act). A held stream whose holder cannot be
+  // mailed is left for that holder: the escalation stays in the ack file, escalations.jsonl and `status`.
+  if (notifyHeldSession(stream, key, reason)) return;
+  const holder = readStream(stream)?.held_by;
+  if (holder) console.error(`daemon: escalation left for holder ${holder} (no reachable session): ${reason} (${stream} ${key})`);
+  else notifyDesktop(text);
 }
 
 const sub = (args) => {

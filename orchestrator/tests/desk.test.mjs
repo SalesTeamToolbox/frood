@@ -1596,18 +1596,23 @@ test("dpage: a Claude Code holder is mailed, not paged; the desktop gets only wh
     assert.match(mail[0].body, /--by cc\n/, "the resolve hint names the holder's harness");
     assert.deepEqual(ns.reads(), [], "a reachable holder never pages the desktop");
 
-    // unheld (held_by cc, no session — how stt-resume looked): the desktop is the only page
+    // held_by cc but no session to mail: left for the holder (stderr + ack file), the desktop stays quiet
     const free = t8Stream("cc-no-session");
     holdBy(free, "cc", null);
     mkMailbox(free.h);
     await escalateSenior(free);
-    assert.equal(ns.reads().length, 1, "no session to mail -> one desktop page");
+    assert.equal(ns.reads().length, 0, "a held stream is never paged to the desktop, even without a reachable session");
 
-    // held by Claude Code but no mailbox: the mail cannot go out, so the escalation pages instead of vanishing
+    // held by Claude Code but no mailbox: still the holder's to read, not the desktop's
     const gone = t8Stream("cc-no-mailbox");
     holdBy(gone, "cc", CC_HOLDER);
     await escalateSenior(gone);
-    assert.equal(ns.reads().length, 2, "an unreachable holder -> the desktop page, never a lost escalation");
+    assert.equal(ns.reads().length, 0, "an unreachable holder -> no desktop page; the escalation stays in the ack file");
+
+    // unheld: no agent can act, so the desktop is the page
+    const unheld = t8Stream("unheld");
+    await escalateSenior(unheld);
+    assert.equal(ns.reads().length, 1, "an unheld stream -> one desktop page");
   } finally {
     for (const k of ["ORCH_DAEMON_DRY_RUN", "ORCH_NO_NOTIFY", "PATH"]) {
       if (saved[k] === undefined) delete process.env[k];

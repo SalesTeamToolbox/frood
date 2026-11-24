@@ -9,6 +9,8 @@ IOSchedulingPriority=7
 ExecStart=@NODE@ @REPO@/bin/desk.mjs daemon _run --by @BY@ --interval 30
 Restart=always
 RestartSec=120
+# exit 3 = a live session owns the desk lock; restarting would only loop
+RestartPreventExitStatus=3
 
 [Install]
 WantedBy=default.target

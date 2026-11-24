@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { check } from "../bin/desk-check.mjs";
-import { appendEvent, orchRoot } from "../bin/handoff.mjs";
+import { appendAck, appendEvent, orchRoot } from "../bin/handoff.mjs";
 import { processStart } from "../bin/proc-tree.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -61,6 +61,13 @@ test("check: pending events with no watcher pages (code 1)", () => {
   const r = inHome(h, () => check());
   assert.equal(r.code, 1);
   assert.match(r.text, /1 unhandled event\(s\) on m6a\(1\); no watcher — open a \/frood-desk/);
+});
+
+test("check: an unresolved ESCALATE alone does not page (the daemon mails the holder)", () => {
+  const h = home();
+  mkStream(h);
+  inHome(h, () => appendAck("m6a", "run:t1/worker-r1:done", "ESCALATE worker-blocked /x/out.md", { ticket: "t1" }));
+  assert.deepEqual(inHome(h, () => check()), { code: 0 });
 });
 
 test("check: pending events with a live watcher is code 0", () => {

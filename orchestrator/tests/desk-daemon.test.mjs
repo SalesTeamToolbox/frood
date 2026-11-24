@@ -232,13 +232,62 @@ test("daemon status names a daemon owner and pending escalations", () => {
   assert.match(r.stdout, /run:t1\/worker-r1:done worker-blocked/);
 });
 
-test("desk-check pages on an unresolved ESCALATE even with zero unhandled events", async () => {
+test("desk-check does not page on an unresolved ESCALATE with zero unhandled events", async () => {
   const h = home();
   mkStream(h);
   inHome(h, () => appendAck("m6a", "run:t1/worker-r1:done", "ESCALATE worker-blocked /x/out.md", { ticket: "t1" }));
   const r = await inHome(h, async () => (await import("../bin/desk-check.mjs")).check());
-  assert.equal(r.code, 1);
-  assert.match(r.text, /1 unresolved escalation\(s\) on m6a; no watcher — open a \/frood-desk/);
+  assert.deepEqual(r, { code: 0 });
+});
+
+// A stub notify-send on PATH records desktop pages; ORCH_NO_NOTIFY is cleared so notifyDesktop really runs.
+async function pagedDesktop(h, held) {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "orch-notify-"));
+  CLEAN.push(bin);
+  const log = path.join(bin, "pages.log");
+  fs.writeFileSync(path.join(bin, "notify-send"), `#!/bin/sh\necho "$@" >> "${log}"\n`, { mode: 0o755 });
+  mkStream(h);
+  if (held) {
+    const sp = path.join(sdir(h), "m6a.json");
+    fs.writeFileSync(sp, JSON.stringify({ ...JSON.parse(fs.readFileSync(sp, "utf8")), held_by: "cc" }));
+  }
+  mkTicket(h);
+  const tp = path.join(h, "reports", "t1", "ticket.json");
+  const tj = JSON.parse(fs.readFileSync(tp, "utf8"));
+  delete tj.worktree;
+  fs.writeFileSync(tp, JSON.stringify(tj));
+  const findings = path.join(h, "reports", "t1", "findings-r1.md");
+  fs.writeFileSync(findings, "VERDICT: CHANGES_REQUESTED\nTESTS: none\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/findings-r1", findings, tp, "critic"));
+    appendEvent("m6a", evDone("t1/findings-r1", findings, "critic", { outcome: "error" }));
+  });
+  const saved = { ...process.env };
+  delete process.env.ORCH_NO_NOTIFY;
+  process.env.PATH = `${bin}${path.delimiter}${saved.PATH}`;
+  const errs = [];
+  const origErr = console.error;
+  console.error = (...a) => errs.push(a.join(" "));
+  try {
+    await inHome(h, async () => await driveOnce({ lastPoll: null, printed: new Set() }, {}));
+  } finally {
+    console.error = origErr;
+    process.env.PATH = saved.PATH;
+    if (saved.ORCH_NO_NOTIFY !== undefined) process.env.ORCH_NO_NOTIFY = saved.ORCH_NO_NOTIFY;
+  }
+  return { pages: fs.existsSync(log) ? fs.readFileSync(log, "utf8") : "", errs };
+}
+
+test("escalation on a held stream with no reachable session leaves the desktop quiet", async () => {
+  const { pages, errs } = await pagedDesktop(home(), true);
+  assert.equal(pages, "");
+  assert.ok(errs.some((e) => /escalation left for holder cc \(no reachable session\)/.test(e)), errs.join("\n"));
+});
+
+test("escalation on an unheld stream pages the desktop", async () => {
+  const { pages } = await pagedDesktop(home(), false);
+  assert.match(pages, /orchestrator desk/);
+  assert.match(pages, /lacks worktree/);
 });
 
 test("driveOnce: a verdict that cannot run pages exactly once, naming the fix", async () => {
@@ -437,13 +486,12 @@ test("daemon status names a daemon owner and pending escalations", () => {
   assert.match(r.stdout, /run:t1\/worker-r1:done worker-blocked/);
 });
 
-test("desk-check pages on an unresolved ESCALATE even with zero unhandled events", async () => {
+test("desk-check does not page on an unresolved ESCALATE with zero unhandled events", async () => {
   const h = home();
   mkStream(h);
   inHome(h, () => appendAck("m6a", "run:t1/worker-r1:done", "ESCALATE worker-blocked /x/out.md", { ticket: "t1" }));
   const r = await inHome(h, async () => (await import("../bin/desk-check.mjs")).check());
-  assert.equal(r.code, 1);
-  assert.match(r.text, /1 unresolved escalation\(s\) on m6a; no watcher — open a \/frood-desk/);
+  assert.deepEqual(r, { code: 0 });
 });
 
 test("driveOnce: a verdict that cannot run pages exactly once, naming the fix", async () => {

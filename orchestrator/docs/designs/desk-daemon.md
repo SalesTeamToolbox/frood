@@ -44,8 +44,8 @@ single control-plane interface to every stream. Three approved pieces form one l
 
 Modify `bin/desk.mjs` (subcommand `daemon start|stop|status`, `kind: "daemon"` in the lock
 owner record, `verdict` resolved-acks the critic run-done so processed streams converge to
-`unhandled=0`, `ESCALATE` paging path), `bin/desk-check.mjs` (also pages on unresolved
-`ESCALATE` acks), `commands/frood-desk.md` (control-plane section: seize/hand back, reading
+`unhandled=0`, `ESCALATE` paging path), `bin/desk-check.mjs` (pages only on unhandled events with no live watcher;
+escalations are the daemon's job, never desk-check's), `commands/frood-desk.md` (control-plane section: seize/hand back, reading
 escalations via `status`), `bin/install.mjs` + `manifest.json` (install the systemd user
 unit — deferred per D2). Create `docs/designs/desk-daemon.md` (this file). State under the
 existing `~/.config/orchestrator/`: `desk-watch.lock/` (unchanged shape + `kind`/`log`
@@ -140,8 +140,8 @@ is queued; verdict on a fixture git repo appends the verdict event and resolved-
 run-done (`unhandled` drops); `ESCALATE` pages exactly once (`pagedIds`, the
 stream-scoped ledger, suppresses the second; the legacy `paged` field still gets its
 historical entry); `daemon stop` on a dead pid exits 0 and clears the lock; `status` shows the daemon
-owner plus pending escalations; `desk-check` pages on unresolved `ESCALATE` acks with zero
-unhandled events. The full merge path (ff into the Frood repo + install + wt-finish)
+owner plus pending escalations; `desk-check` does not page on unresolved `ESCALATE` acks (zero
+unhandled events: exit 0). The full merge path (ff into the Frood repo + install + wt-finish)
 is dry-run only in tests — it would touch the real checkout. Manual verification: dry run
 against a live board before the first armed run.
 

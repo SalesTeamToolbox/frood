@@ -14,6 +14,7 @@ test("daemon unit supervises _run in the foreground with restarts", () => {
   assert.match(svc, /^Type=simple$/m);
   assert.match(svc, /^Restart=always$/m);
   assert.match(svc, /^RestartSec=\d+$/m);
+  assert.match(svc, /^RestartPreventExitStatus=3$/m); // exit 3 = live session owns the lock
   assert.match(svc, /^ExecStart=@NODE@ @REPO@\/bin\/desk\.mjs daemon _run --by @BY@ --interval \d+$/m);
   assert.doesNotMatch(svc, /daemon start/); // start double-forks: wrong under a supervisor
 });
