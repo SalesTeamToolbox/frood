@@ -183,6 +183,13 @@
       ]
     },
     {
+      "src": "hooks/peer-mail-wake.js",
+      "kind": "hooks",
+      "harness": [
+        "cc"
+      ]
+    },
+    {
       "src": "agents/orchestrator.md",
       "kind": "agents",
       "harness": [
