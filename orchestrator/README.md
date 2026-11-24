@@ -96,7 +96,7 @@ same target (install errors out).
 | `install.mjs` | Installer and drift check (above). |
 | `desk.mjs` | The desk CLI: `status`, `watch --events [--by cc|oc] [--interval 30] [--once] [--takeover] [--until-event <sec>]`, `step <stream> <key> [--by cc|oc]`, `verdict`, `merge-check`. `--until-event` blocks until an event arrives (exit 0) or the deadline passes (exit 4). `--by` skips streams the other harness holds (`step` prints `HELD <stream> <holder>`). |
 | `check-routing.mjs` | Routing lint: every OpenCode model ID is in live `opencode models`; no "Dropped" model in dispatch files; Claude Code model values are aliases; no bare "CC" in `rules/`. Exit 1 on failure. |
-| `board.mjs` | Ticket board CLI: `create`, `egm`, `claim`, `heartbeat`, `attach`, `round`, `signoff`, `gates`, `ready`, `verify`, `shipped`, `watch`, `status`, `release`, `fail`, `unblock`, `quarantine`. `--help` lists them. |
+| `board.mjs` | Ticket board CLI: `create`, `egm`, `claim`, `heartbeat`, `attach`, `round`, `signoff`, `gates`, `ready`, `verify`, `shipped`, `reopen`, `watch`, `status`, `release`, `fail`, `unblock`, `quarantine`. `--help` lists them. |
 | `oc-worker.mjs` | Launch one headless OpenCode agent run (worker, critic, scout, senior); writes the final text, an events file and a receipt; machine-wide `WORKER_SLOTS` cap (default 2); `--fallback` chain; `--ticket/--owner` attaches to a board ticket. |
 | `verdict-gate.mjs` | Mechanical verdict for critic findings: needs a VERDICT line and a BLAST RADIUS section; any `UNREQUESTED` entry or `[blocker]`/`[major]` forces CHANGES_REQUESTED; `--free` turns APPROVED into APPROVED_FREE. Exit 0 approved, 1 changes, 2 invalid. |
 | `pool-health.mjs` | Library: which models are down (quota, unavailable), stored in `~/.config/orchestrator/pool-health.json`; also reads the provider policy in `~/.config/orchestrator/providers.json`. Shared by `oc-worker` and `router-health`. |
@@ -139,7 +139,9 @@ Example (a consuming repo, shipped):
 1. Commit `.opencode/board/adapter.json` with the six keys above.
 2. Add an `ops/board.sh` shim that forwards to this repo's `bin/board.mjs` (`node <orchestrator>/bin/board.mjs "$@"`).
 3. Wire the train (`ops/lib/orch-board.sh` in the design): `board verify <id> --sha <branch head>` at boarding
-   and on each lap, refusing on non-zero; `board shipped <id> --sha <sha>` after a verified deploy.
+   and on each lap, refusing on non-zero; `board shipped <id> --sha <sha>` after a verified deploy. When the train
+   refuses a ready ticket's sha, `board reopen <id> --owner <s> --harness <h> --note <why>` returns it to `working`
+   (same id and branch; its signoffs are invalidated, so the fix needs a new round, signoff and gates).
 4. Gitignore the runtime state: `.opencode/board/tickets`, `.opencode/board/locks`,
    `.opencode/board/.board.lock` (the design also lists `.watch.json` there as gitignored).
 5. The board finds the repo root from any worktree via `git rev-parse --git-common-dir`, so nothing else is needed.

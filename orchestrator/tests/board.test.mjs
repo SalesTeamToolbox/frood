@@ -1528,3 +1528,92 @@ test("round: a stalled worker receipt is recorded as a timeout, uncounted", () =
   assert.equal(t.ticket.rounds[0].counted, false);
   assert.equal(t.ticket.rounds[0].worker.outcome, "timeout");
 });
+
+// reopen: the train refused a ready sha. Before this command the only way out of `ready` was `fail` + a new id.
+test("reopen: ready → working keeps history, invalidates signoffs, and ready needs fresh evidence at the fix", () => {
+  const c = mk();
+  const { sha } = atReady(c, "re-one");
+  const why = "train: settings-hub suite failed 11 tests at this sha";
+
+  assert.equal(board(c, "reopen", "re-one", "--owner", "s1", "--harness", "claude").status, 2, "--note is required");
+  assert.equal(board(c, "reopen", "re-one", "--owner", "s1", "--harness", "claude", "--note", "flaky").status, 1, "a short note is refused");
+  assert.equal(board(c, "reopen", "re-one", "--owner", "s1", "--harness", "bob", "--note", why).status, 2);
+  assert.equal(fs.existsSync(lockDir(c, "re-one")), false, "a refused reopen takes no lock");
+
+  const r = board(c, "reopen", "re-one", "--owner", "s1", "--harness", "claude", "--note", why);
+  assert.equal(r.status, 0, r.stderr);
+  const t = r.ticket;
+  assert.equal(t.stage, "working");
+  assert.equal(t.assignment.owner, "s1");
+  assert.ok(fs.existsSync(lockDir(c, "re-one")), "reopen takes the ticket lock again");
+  assert.ok(t.signoffs.every((s) => s.invalidated_by === "reopen 1"), "every live signoff is invalidated");
+  assert.deepEqual(t.reopens.map((x) => [x.n, x.after_round, x.note]), [[1, 1, why]]);
+  assert.equal(t.rounds.length, 1, "rounds are never reset");
+  assert.deepEqual(t.history.map((h) => h.cmd).slice(-2), ["ready", "reopen"]);
+  assert.equal(board(c, "verify", "re-one", "--sha", sha).status, 1, "a reopened ticket is not verifiable");
+
+  // The old evidence does not carry: same sha, no new round -> ready refuses.
+  const stale = board(c, "ready", "re-one", "--owner", "s1");
+  assert.equal(stale.status, 1);
+  assert.match(stale.stderr, /every signoff was invalidated/);
+
+  // A fix, a new round, signoff and gates at the new sha -> ready again, verifiable at the new sha only.
+  const fix = commitFile(c, "bin/fix.mjs", "export const fixed = true;\n");
+  assert.equal(round(c, "re-one", { reviewed: fix }).status, 0);
+  signedCritic(c, "re-one");
+  gatesOk(c, "re-one");
+  const rd = board(c, "ready", "re-one", "--owner", "s1");
+  assert.equal(rd.status, 0, rd.stderr);
+  assert.equal(board(c, "verify", "re-one", "--sha", fix).status, 0);
+  assert.equal(board(c, "verify", "re-one", "--sha", sha).status, 1, "the refused sha stays refused");
+});
+
+test("reopen: owner lock, stage table, worktree check, and the reopen cap", () => {
+  const c = mk();
+  const why = "train: merge conflict against brain-backend in nav.ts";
+  workingTicket(c, "re-two");
+  assert.equal(board(c, "reopen", "re-two", "--owner", "s1", "--harness", "claude", "--note", why).status, 1, "working is not ready");
+
+  atReady(c, "re-cap");
+  const bogus = fs.mkdtempSync(path.join(os.tmpdir(), "not-a-wt-"));
+  CLEAN.push(bogus);
+  const bad = board(c, "reopen", "re-cap", "--owner", "s1", "--harness", "claude", "--note", why, "--worktree", bogus);
+  assert.equal(bad.status, 1, "a directory outside the repo is refused");
+  assert.match(bad.stderr, /not a worktree of this repo/);
+  seedLock(c, "re-cap", "someone-else");
+  assert.equal(board(c, "reopen", "re-cap", "--owner", "s1", "--harness", "claude", "--note", why).status, 3, "a live foreign lock is contention");
+  fs.rmSync(lockDir(c, "re-cap"), { recursive: true, force: true });
+
+  for (const n of [1, 2]) {
+    const r = board(c, "reopen", "re-cap", "--owner", "s1", "--harness", "claude", "--note", why);
+    assert.equal(r.status, 0, r.stderr);
+    const fix = commitFile(c, `bin/fix${n}.mjs`, `export const n = ${n};\n`);
+    assert.equal(round(c, "re-cap", { reviewed: fix }).status, 0);
+    // A counted-round total above 2 asks for a senior: a twice-refused ticket gets one, by the existing rule.
+    const tk = JSON.parse(fs.readFileSync(ticketFile(c, "re-cap"), "utf8"));
+    if (tk.senior.required) assert.equal(board(c, "signoff", "re-cap", "--by", "human").status, 0);
+    signedCritic(c, "re-cap");
+    gatesOk(c, "re-cap");
+    assert.equal(board(c, "ready", "re-cap", "--owner", "s1").status, 0);
+  }
+  const third = board(c, "reopen", "re-cap", "--owner", "s1", "--harness", "claude", "--note", why);
+  assert.equal(third.status, 1);
+  assert.match(third.stderr, /already reopened 2 times/);
+});
+
+test("reopen: each lap gets its own round cap; the 4th round of one lap still blocks", () => {
+  const c = mk();
+  atReady(c, "re-lap"); // lap 0 used 1 counted round
+  const why = "train: verify-commit failed the pinned suite at this sha";
+  assert.equal(board(c, "reopen", "re-lap", "--owner", "s1", "--harness", "claude", "--note", why).status, 0);
+  for (const n of [1, 2, 3]) {
+    const fix = commitFile(c, `bin/lap${n}.mjs`, `export const n = ${n};\n`);
+    const r = round(c, "re-lap", { reviewed: fix });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.ticket.stage, "working", `round ${n} of the new lap is allowed (4 counted in total by the 3rd)`);
+  }
+  const fourth = round(c, "re-lap", { reviewed: commitFile(c, "bin/lap4.mjs", "export const n = 4;\n") });
+  assert.equal(fourth.status, 0, fourth.stderr);
+  assert.equal(fourth.ticket.stage, "blocked");
+  assert.equal(fourth.ticket.blocked.reason, "rounds_exhausted");
+});

@@ -188,6 +188,9 @@ Mandate stays the record, `create` only proves the question was answered. (atlas
 - `commands/frood-orchestrator.md`: tickets go through the board when the repo has `.opencode/board/adapter.json`.
 - Train (M5, repo side): `train.sh board <branch>` first runs `board verify <id> --sha <branch head>` and
   refuses on non-zero; after a verified deploy it calls `board shipped <id> --sha`.
+- `reopen` (added 2026-11-24): `ready -> working` after the train refuses a sha. Before it, the only exit from
+  `ready` was `fail` + a new ticket id (`-b`, `-c`), which renamed the branch and split the history. Reopen
+  invalidates every live signoff, takes the ticket lock, and starts a fresh 3-round lap; at most 2 per ticket.
 
 ## What v2 deliberately drops
 

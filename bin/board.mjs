@@ -21,6 +21,9 @@
 //   signoff <id> --by senior --owner <s> --findings <path> (--receipt <path> | --native <alias>)
 //   gates <id> --owner <s>       |   ready <id> --owner <s>
 //   verify <id> --sha <sha>      |   shipped <id> --sha <sha>
+//   reopen <id> --owner <s> --harness claude|opencode --note <why> [--worktree <path>]
+//          (ready -> working after the train refused the sha: every live signoff is invalidated, the round cap
+//           starts a fresh lap of 3, at most 2 reopens per ticket; history and counted rounds are kept)
 //   --help  (or -h) prints this text and exits 0; nothing is written
 //
 // Repo root = parent of `git rev-parse --git-common-dir` from --repo/cwd, so it works from any worktree.
@@ -71,6 +74,7 @@ const GLOBAL_LOCK_STALE_MS = 30_000; // a global lock older than this is a dead 
 const BARE_LOCK_STALE_MS = 60_000; // a ticket lock dir with no owner.json is reclaimable after this
 const FUTURE_SKEW_MS = 60_000; // see the header: tolerated clock skew, not a licence for stale data
 const ROUND_CAP = 3; // counted rounds 1..3 are allowed; a 4th blocks the ticket (`rounds_exhausted`)
+const REOPEN_CAP = 2; // `reopen` laps per ticket; each lap gets its own ROUND_CAP, so the review spend stays bounded
 // Per adapter gate; a timeout is a failed gate, never a hang. BOARD_GATE_TIMEOUT_MS overrides it (tests use seconds,
 // so one stalled process spawn fails fast instead of holding the suite for 20 minutes — seen 2026-11-12).
 const GATE_TIMEOUT_MS = Number(process.env.BOARD_GATE_TIMEOUT_MS) || 20 * 60_000;
@@ -90,6 +94,7 @@ const STAGE = {
   gates: { from: ["working"], to: "working", phase: 2 },
   ready: { from: ["working"], to: "ready", phase: 2 },
   shipped: { from: ["ready"], to: "shipped", phase: 2 },
+  reopen: { from: ["ready"], to: "working", phase: 2 },
   attach: { from: ["working"], to: "working", phase: 3 },
   watch: { from: ["working"], to: "blocked", phase: 3 },
 };
@@ -923,7 +928,9 @@ function cmdRound(ctx, id) {
     needOwner(t, owner);
     const wt = needWorktree(t);
     const head = headOf(wt);
-    const counted = t.rounds.filter((r) => r.counted).length;
+    // The cap is per lap: a `reopen` starts a new one after the round it was reopened at (rounds are never reset).
+    const floor = isArr(t.reopens) && t.reopens.length ? t.reopens[t.reopens.length - 1].after_round : 0;
+    const counted = t.rounds.filter((r) => r.counted && r.n > floor).length;
 
     if (done) {
       if (counted >= ROUND_CAP) {
@@ -1157,6 +1164,43 @@ function cmdShipped(ctx, id) {
   }, true);
 }
 
+// reopen: the train refused a ready ticket's sha (a failing suite, a merge conflict). Before this, the only way out of
+// `ready` was `fail` plus a new ticket id, which lost the ticket's history and renamed its branch. Reopening keeps
+// both, and gives none of the old evidence a second life: every live signoff is invalidated, so `ready` needs a new
+// round, a new signoff and green gates at the fixed sha. It is owner-claimed like `claim` and takes the ticket lock.
+function cmdReopen(ctx, id) {
+  const o = ctx.o;
+  const owner = need(o, "owner");
+  const harness = need(o, "harness");
+  if (harness !== "claude" && harness !== "opencode") throw new Usage("--harness must be claude or opencode");
+  const note = text(o, "note");
+  if (!note) throw new Usage("--note is required (what the train refused)");
+  if (note.length < 20) throw new Refuse("reopen needs --note of at least 20 characters naming the train failure");
+  const wtArg = one(o, "worktree");
+  const wtNew = wtArg ? path.resolve(wtArg) : null;
+  return write(ctx, id, o, "reopen", (t) => {
+    assertFrom("reopen", t);
+    const reopens = isArr(t.reopens) ? t.reopens : [];
+    if (reopens.length >= REOPEN_CAP) {
+      throw new Refuse(`ticket ${id} was already reopened ${reopens.length} times — fail it and open a new ticket`);
+    }
+    const wt = wtNew ?? t.worktree;
+    if (!wt || !isDir(wt)) throw new Usage(`worktree does not exist: ${wt ?? "(none)"} — pass --worktree`);
+    const there = commonDir(wt);
+    if (!there || norm(there) !== norm(commonDir(ctx.root))) {
+      throw new Refuse(`--worktree is not a worktree of this repo: ${wt}`);
+    }
+    const after = t.rounds.length;
+    for (const s of t.signoffs) if (!s.invalidated_by) s.invalidated_by = `reopen ${reopens.length + 1}`;
+    takeTicketLock(ctx, id, owner, harness);
+    t.reopens = [...reopens, { n: reopens.length + 1, at: now(), by: owner, note, after_round: after }];
+    t.stage = STAGE.reopen.to;
+    t.worktree = wt;
+    t.assignment = { owner, harness, since: now(), missed_sweeps: 0, worker: null };
+    t.blocked = null;
+  });
+}
+
 // ---------- attach / watch (phase 3)
 // attach is called by the running oc-worker (`oc-worker --ticket`): it records the pid, that process's start
 // time and the output path a sweep should watch. The start-time lookup happens before the write, so the global
@@ -1345,6 +1389,7 @@ const COMMANDS = {
   ready: (ctx, id) => cmdReady(ctx, id),
   verify: (ctx, id) => cmdVerify(ctx, id),
   shipped: (ctx, id) => cmdShipped(ctx, id),
+  reopen: (ctx, id) => cmdReopen(ctx, id),
 };
 function main(argv) {
   const [cmd, ...rest] = argv;
