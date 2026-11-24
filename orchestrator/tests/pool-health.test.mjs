@@ -29,6 +29,12 @@ test("classify: quota uses retryAfterMs (capped at 7 days); model-not-found is '
   assert.equal(classify(["TypeError: boom"]), null);
 });
 
+test("classify: out of credits is a provider-wide quota, so the provider's other models are skipped too", () => {
+  const c = classify(['{"type":"provider.invalid-request","message":"You have insufficient credits to make this request. Please purchase more credits to continue using the service.","status":400}']);
+  assert.equal(c.reason, "quota");
+  assert.equal(c.scope, "provider");
+});
+
 test("markDown/isDown/markUp round trip and entries expire on their own", () => {
   process.env.ORCH_HOME = home();
   markDown("x/m", { reason: "quota", ms: 60_000 });

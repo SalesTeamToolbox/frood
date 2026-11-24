@@ -59,9 +59,22 @@ export function classify(errors = []) {
     const resets = text.match(/resets? at\s+(\d{4}-\d{2}-\d{2}T[\d:.]+Z)/i);
     let ms = retry ? Number(retry[1]) : resets ? Date.parse(resets[1]) - Date.now() : HOUR;
     ms = Math.min(Math.max(ms, 60_000), 7 * 24 * HOUR);
-    // A weekly/plan limit takes out every model on that provider, not just the one that hit it.
-    const scope = /weekly|monthly|your plan|plan limit|usage limit/i.test(text) ? "provider" : "model";
+    // A weekly/plan limit takes out every model on that provider, not just the one that hit it. So does
+    // an empty account ("insufficient credits", CommandCode 2026-11-24: worker-burst then worker-alt both
+    // failed on it, because only the first model was marked down).
+    const scope = /weekly|monthly|your plan|plan limit|usage limit|insufficient credits|purchase more credits/i.test(text) ? "provider" : "model";
     return { reason: "quota", ms, scope };
+  }
+  // Restored 2026-11-24: these two branches were dropped by an unrelated commit on 2026-11-21 (the
+  // /orchestrator-learn import), so a retired model or a broken provider never marked the pool down.
+  if (/model.{0,40}(not found|unknown|unsupported|does not exist|no longer|deprecated|retired)|ModelNotFound|unknown model|404/i.test(text)) {
+    return { reason: "unavailable", ms: 24 * HOUR };
+  }
+  // Any other provider-side failure (e.g. CommandCode's Anthropic shim rejecting a message shape:
+  // "provider.invalid-request ... messages.3.role", seen 2026-11-12): this pool is broken right now.
+  // Short outage, then it is retried — unlike quota, nothing tells us when it recovers.
+  if (/"type"\s*:\s*"provider\.[a-z-]+"|provider\.(invalid-request|error|overloaded|unavailable|timeout)|\b5\d\d\b.*(error|unavailable)|overloaded/i.test(text)) {
+    return { reason: "provider-error", ms: 15 * 60_000 };
   }
   // The connection dropped or the run went silent: this pool is flaky right now, retry it soon.
   // CommandCode transport timeouts ("Timed out waiting for response headers") land here so they
