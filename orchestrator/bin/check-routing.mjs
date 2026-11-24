@@ -131,7 +131,9 @@ export function checkRouting({ root = REPO, extra = [], models = null } = {}) {
         const full = [agent, ...fallback];
         const at = `${rel}:${lineNo}`;
         if (!expected || !eq(full, expected)) {
-          problems.push(`${at}  worker dispatch chain \`--agent ${agent} --fallback ${fallback.join(",")}\` disagrees with CHAINS.${agent} (expected ${expected.join(",")}); use \`--role ${agent}\``);
+          // A non-role agent (worker-nvidia, worker-free, …) has no CHAINS entry: say so instead of crashing.
+          const want = expected ? `CHAINS.${agent} (expected ${expected.join(",")}); use \`--role ${agent}\`` : "CHAINS: it is not a chain role; use \`--role worker\` or \`--role worker-strong\`";
+          problems.push(`${at}  worker dispatch chain \`--agent ${agent} --fallback ${fallback.join(",")}\` disagrees with ${want}`);
         } else {
           problems.push(`${at}  hand-typed \`--agent ${agent} --fallback ${fallback.join(",")}\` should use \`--role ${agent}\` instead`);
         }

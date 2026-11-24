@@ -235,7 +235,8 @@ test("--role worker expands to worker-nvidia first (one chain source)", () => {
   const r = spawnRole(dir, "--role", "worker");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(receiptOf(r).agent, "worker-nvidia");
-  // The expanded fallback order is exactly CHAINS.worker
+  // --role reads CHAINS directly, so this literal pin is what guards the expanded order (the fake
+  // opencode harness does not record the --fallback tail).
   assert.deepEqual(CHAINS.worker, ["worker-nvidia", "worker", "worker-burst", "worker-alt", "worker-free"]);
 });
 
