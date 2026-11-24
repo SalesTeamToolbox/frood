@@ -95,9 +95,9 @@ class TestAtlasTopicFiles:
             if not topic:
                 continue
             topic_path = ROOT / topic
-            assert (
-                topic_path.exists()
-            ), f"route {route!r} references missing topic {topic!r} ({topic_path})"
+            assert topic_path.exists(), (
+                f"route {route!r} references missing topic {topic!r} ({topic_path})"
+            )
 
     def test_at_least_one_topic_file(self):
         """At least one topic file must exist and be referenced (M6)."""

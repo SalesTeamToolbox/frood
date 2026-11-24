@@ -16,6 +16,9 @@ from pathlib import Path
 
 from core.task_types import TaskType
 
+# Strong references so fire-and-forget tasks are not garbage-collected mid-flight
+_background_tasks: set = set()
+
 # Cross-process bridge: Stop hooks (separate Python processes) read this file
 # to discover the current task_id and task_type.
 _TASK_FILE_DIR = os.environ.get("FROOD_DATA_DIR", ".frood")
@@ -104,13 +107,15 @@ def end_task(ctx: TaskContext) -> None:
 
             store = get_shared_store()
             if store:
-                asyncio.create_task(
+                _task = asyncio.create_task(
                     store.record_sequence(
                         agent_id="",
                         task_type=ctx.task_type.value if ctx.task_type else "general",
                         tool_names=tool_names,
                     )
                 )
+                _background_tasks.add(_task)
+                _task.add_done_callback(_background_tasks.discard)
         except Exception:
             pass  # Non-critical — never block task cleanup for pattern tracking
 

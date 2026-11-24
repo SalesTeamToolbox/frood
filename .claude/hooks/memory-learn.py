@@ -341,7 +341,7 @@ def main():
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=3) as resp:
+        with urllib.request.urlopen(req, timeout=3) as resp:  # nosec B310  # local Frood service URL
             resp.read()
         indexed = True
     except Exception:

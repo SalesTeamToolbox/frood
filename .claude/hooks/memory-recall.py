@@ -330,7 +330,7 @@ def try_semantic_search(memory_dir, prompt, frood_root):
             method="POST",
         )
 
-        with urllib.request.urlopen(req, timeout=3) as resp:
+        with urllib.request.urlopen(req, timeout=3) as resp:  # nosec B310  # local Frood service URL
             result = json.loads(resp.read())
 
         memories = []
@@ -376,7 +376,7 @@ def try_frood_api_search(prompt):
             method="POST",
         )
 
-        with urllib.request.urlopen(req, timeout=3) as resp:
+        with urllib.request.urlopen(req, timeout=3) as resp:  # nosec B310  # local Frood service URL
             result = json.loads(resp.read())
 
         memories = []
@@ -430,7 +430,7 @@ def try_qdrant_direct_search(keywords):
                 method="POST",
             )
 
-            with urllib.request.urlopen(req, timeout=3) as resp:
+            with urllib.request.urlopen(req, timeout=3) as resp:  # nosec B310  # local Frood service URL
                 result = json.loads(resp.read())
 
             points = result.get("result", {}).get("points", [])
@@ -731,7 +731,9 @@ def main():
 
     session_id = event.get("session_id", "")
     if not session_id:
-        session_id = hashlib.md5(f"{project_dir}-{os.getpid()}".encode()).hexdigest()[:16]
+        session_id = hashlib.md5(
+            f"{project_dir}-{os.getpid()}".encode(), usedforsecurity=False
+        ).hexdigest()[:16]
 
     # ── Layer 0: Previous session context ─────────────────────────────────
     # Surface when conversation has < 3 user turns (not just first prompt).

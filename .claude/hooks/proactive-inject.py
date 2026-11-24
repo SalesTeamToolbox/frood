@@ -251,7 +251,7 @@ def fetch_learnings(query: str, task_type: str) -> list:
         )
         url = f"{DASHBOARD_URL}/api/learnings/retrieve?{params}"
         req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310  # local Frood service URL
             data = json.loads(resp.read())
         return data.get("results", [])
     except Exception:
@@ -298,7 +298,7 @@ def fetch_recommendations(task_type: str) -> list:
         params = urllib.parse.urlencode({"task_type": task_type, "top_k": 3})
         url = f"{DASHBOARD_URL}/api/recommendations/retrieve?{params}"
         req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310  # local Frood service URL
             data = json.loads(resp.read())
         return data.get("recommendations", [])
     except Exception:
@@ -351,7 +351,7 @@ def main():
     session_id = event.get("session_id", "")
     if not session_id:
         # Derive stable session identifier from project_dir hash
-        session_id = hashlib.md5(project_dir.encode()).hexdigest()[:16]
+        session_id = hashlib.md5(project_dir.encode(), usedforsecurity=False).hexdigest()[:16]
 
     # Session-once guard — skip if already injected this session
     if is_injection_done(project_dir, session_id):

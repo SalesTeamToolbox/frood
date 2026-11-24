@@ -16,6 +16,9 @@ from pathlib import Path
 
 logger = logging.getLogger("frood.agent_runtime")
 
+# Strong references so fire-and-forget tasks are not garbage-collected mid-flight
+_background_tasks: set[asyncio.Task] = set()
+
 
 @dataclass
 class AgentProcess:
@@ -190,11 +193,13 @@ class AgentRuntime:
         )
         self._processes[agent_id] = agent_proc
 
-        asyncio.create_task(
+        _task = asyncio.create_task(
             self._run_openai_loop(
                 agent_id, agent_proc, log_path, prompt, api_key, base_url, model, agent_config
             )
         )
+        _background_tasks.add(_task)
+        _task.add_done_callback(_background_tasks.discard)
         logger.info(f"Agent {agent_id} started (OpenAI protocol, in-process)")
         return agent_proc
 
@@ -358,7 +363,9 @@ class AgentRuntime:
                 status="running",
             )
             self._processes[agent_id] = agent_proc
-            asyncio.create_task(self._monitor(agent_id, proc, log_file))
+            _task = asyncio.create_task(self._monitor(agent_id, proc, log_file))
+            _background_tasks.add(_task)
+            _task.add_done_callback(_background_tasks.discard)
 
             logger.info(f"Agent {agent_id} started (PID {proc.pid})")
             return agent_proc

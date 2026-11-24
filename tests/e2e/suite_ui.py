@@ -104,9 +104,9 @@ class UISuite(BaseSuite):
         has_login = "sign in" in snap.lower() or "password" in snap.lower()
         has_dashboard = "mission" in snap.lower() or "sidebar" in snap.lower()
         has_setup = "setup" in snap.lower()
-        assert (
-            has_login or has_dashboard or has_setup
-        ), f"Should show login, dashboard, or setup wizard:\n{snap[:500]}"
+        assert has_login or has_dashboard or has_setup, (
+            f"Should show login, dashboard, or setup wizard:\n{snap[:500]}"
+        )
 
     def test_03_login_flow(self, result):
         """Can log in with valid credentials."""

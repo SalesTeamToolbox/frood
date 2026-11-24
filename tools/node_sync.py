@@ -19,6 +19,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 from tools.base import Tool, ToolResult
 
@@ -131,7 +132,7 @@ def _rebuild_memory(local_content: str, merged_entries: dict) -> str:
 class NodeSyncTool(Tool):
     """Sync memory between Frood nodes."""
 
-    requires = ["memory_store", "workspace"]
+    requires: ClassVar[list[str]] = ["memory_store", "workspace"]
 
     def __init__(self, memory_store=None, workspace="", **kwargs):
         self._memory_store = memory_store

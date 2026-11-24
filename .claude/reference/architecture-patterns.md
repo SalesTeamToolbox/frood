@@ -25,7 +25,8 @@ When adding new configuration:
 
 ```python
 # Boolean fields use this pattern:
-sandbox_enabled=os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes")
+sandbox_enabled = os.getenv("SANDBOX_ENABLED", "true").lower() in ("true", "1", "yes")
+
 
 # Comma-separated fields have get_*() helper methods:
 def get_discord_guild_ids(self) -> list[int]: ...
@@ -39,12 +40,17 @@ register in `frood.py` `_register_tools()`.
 ```python
 class MyTool(Tool):
     @property
-    def name(self) -> str: return "my_tool"
+    def name(self) -> str:
+        return "my_tool"
+
     @property
-    def description(self) -> str: return "Does something useful"
+    def description(self) -> str:
+        return "Does something useful"
+
     @property
     def parameters(self) -> dict:
         return {"type": "object", "properties": {"input": {"type": "string"}}}
+
     async def execute(self, input: str = "", **kwargs) -> ToolResult:
         return ToolResult(output=f"Result: {input}")
 ```
@@ -57,6 +63,7 @@ Tools declare dependencies via a `requires` class variable for `ToolContext` inj
 # custom_tools/hello.py
 from tools.base import Tool, ToolResult
 
+
 class HelloTool(Tool):
     requires = ["workspace"]  # Injects workspace from ToolContext
 
@@ -64,12 +71,17 @@ class HelloTool(Tool):
         self._workspace = workspace
 
     @property
-    def name(self) -> str: return "hello"
+    def name(self) -> str:
+        return "hello"
+
     @property
-    def description(self) -> str: return "Says hello"
+    def description(self) -> str:
+        return "Says hello"
+
     @property
     def parameters(self) -> dict:
         return {"type": "object", "properties": {}}
+
     async def execute(self, **kwargs) -> ToolResult:
         return ToolResult(output=f"Hello from {self._workspace}!")
 ```
@@ -83,22 +95,24 @@ extensions can layer onto one base — just like skills.
 # custom_tools/shell_audit.py
 from tools.base import ToolExtension, ToolResult
 
+
 class ShellAuditExtension(ToolExtension):
-    extends = "shell"                      # Name of the tool to extend
-    requires = ["workspace"]               # ToolContext injection (same as Tool)
+    extends = "shell"  # Name of the tool to extend
+    requires = ["workspace"]  # ToolContext injection (same as Tool)
 
     def __init__(self, workspace="", **kwargs):
         self._workspace = workspace
 
     @property
-    def name(self) -> str: return "shell_audit"
+    def name(self) -> str:
+        return "shell_audit"
 
     @property
-    def extra_parameters(self) -> dict:    # Merged into the base tool's schema
+    def extra_parameters(self) -> dict:  # Merged into the base tool's schema
         return {"audit": {"type": "boolean", "description": "Log command to audit file"}}
 
     @property
-    def description_suffix(self) -> str:   # Appended to the base tool's description
+    def description_suffix(self) -> str:  # Appended to the base tool's description
         return "Supports audit logging."
 
     async def pre_execute(self, **kwargs) -> dict:
@@ -134,6 +148,7 @@ absence with fallback behavior, never with crashes.
 # CORRECT — conditional import and check
 if settings.redis_url:
     from memory.redis_session import RedisSessionStore
+
     session_store = RedisSessionStore(settings.redis_url)
 else:
     session_store = FileSessionStore(settings.sessions_dir)

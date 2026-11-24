@@ -75,9 +75,9 @@ class TestProvidersTabStructure:
     def test_no_old_model_routing_v2_box(self):
         """app.js must NOT contain old 'Model Routing (v2.0)' info box."""
         content = Path("dashboard/frontend/dist/app.js").read_text()
-        assert (
-            "Model Routing (v2.0)" not in content
-        ), "Old 'Model Routing (v2.0)' info box still present"
+        assert "Model Routing (v2.0)" not in content, (
+            "Old 'Model Routing (v2.0)' info box still present"
+        )
 
 
 class TestProviderStatusEndpoint:

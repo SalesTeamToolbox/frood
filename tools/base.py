@@ -13,6 +13,7 @@ Extension mechanism:
 import copy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import ClassVar
 
 
 @dataclass
@@ -113,7 +114,7 @@ class ToolExtension(ABC):
     """
 
     extends: str = ""
-    requires: list[str] = []
+    requires: ClassVar[list[str]] = []
 
     @property
     @abstractmethod

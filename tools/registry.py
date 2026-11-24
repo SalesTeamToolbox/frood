@@ -13,6 +13,9 @@ from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("frood.tools.registry")
 
+# Strong references so fire-and-forget tasks are not garbage-collected mid-flight
+_background_tasks: set = set()
+
 # Tools that are only relevant for code/technical task types.
 # Non-code tasks (content, marketing, email, strategy, etc.) should not
 # see these tools — free LLMs often call them inappropriately when they
@@ -134,7 +137,7 @@ class ToolRegistry:
                 from core.task_context import get_task_context
 
                 task_id, task_type = get_task_context()
-                asyncio.create_task(
+                _task = asyncio.create_task(
                     self._effectiveness_store.record(
                         tool_name=tool_name,
                         task_type=task_type or "general",
@@ -144,6 +147,8 @@ class ToolRegistry:
                         agent_id=agent_id,
                     )
                 )
+                _background_tasks.add(_task)
+                _task.add_done_callback(_background_tasks.discard)
             except Exception:
                 pass  # Never block tool execution for tracking
 

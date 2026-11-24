@@ -197,7 +197,7 @@ class RepoMapTool(Tool):
                     annotation = f": {a.annotation.value}"
             parts.append(f"{a.arg}{annotation}")
         if len(parts) > 5:
-            parts = parts[:5] + ["..."]
+            parts = [*parts[:5], "..."]
         return ", ".join(parts)
 
     def _js_signatures(self, filepath: str) -> list[str]:

@@ -77,7 +77,7 @@ class PRGeneratorTool(Tool):
 
     async def _run_gh(self, args: list[str], timeout: float = 60.0) -> ToolResult:
         """Execute a gh CLI command."""
-        cmd = ["gh"] + args
+        cmd = ["gh", *args]
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,

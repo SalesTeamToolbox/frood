@@ -10,6 +10,8 @@ Covers:
 - Graceful degradation when aiosqlite unavailable
 """
 
+from typing import ClassVar
+
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -418,7 +420,7 @@ async def test_registry_accumulates_tools(tmp_path):
     class FakeTool(Tool):
         name = "fake_tool"
         description = "Test"
-        parameters = {"type": "object", "properties": {}}
+        parameters: ClassVar[dict] = {"type": "object", "properties": {}}
 
         async def execute(self, **kwargs):
             return ToolResult(output="ok", success=True)

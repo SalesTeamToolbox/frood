@@ -24,6 +24,9 @@ from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("frood.tools.n8n_create_workflow")
 
+# Strong references so fire-and-forget tasks are not garbage-collected mid-flight
+_background_tasks: set = set()
+
 # ---------------------------------------------------------------------------
 # Safety constants
 # ---------------------------------------------------------------------------
@@ -331,7 +334,7 @@ class N8nCreateWorkflowTool(Tool):
 
                     eff_store = get_shared_store()
                     if eff_store:
-                        asyncio.create_task(
+                        _task = asyncio.create_task(
                             eff_store.record_workflow_mapping(
                                 agent_id=fp_agent_id,
                                 fingerprint=fingerprint,
@@ -340,6 +343,8 @@ class N8nCreateWorkflowTool(Tool):
                                 template=template,
                             )
                         )
+                        _background_tasks.add(_task)
+                        _task.add_done_callback(_background_tasks.discard)
                 except Exception:
                     pass  # Non-critical — workflow was still created successfully
 

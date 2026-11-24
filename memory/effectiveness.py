@@ -583,7 +583,9 @@ class EffectivenessStore:
             import json
 
             await self._ensure_db()
-            fingerprint = hashlib.md5(json.dumps(tool_names).encode()).hexdigest()
+            fingerprint = hashlib.md5(
+                json.dumps(tool_names).encode(), usedforsecurity=False
+            ).hexdigest()
             now = time.time()
             tool_seq_json = json.dumps(tool_names)
             async with aiosqlite.connect(self._db_path) as db:

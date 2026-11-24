@@ -144,20 +144,24 @@ import sqlite3
 app = Flask(__name__, template_folder="templates", static_folder="static")
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "app.db")
 
+
 def get_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
+
 def init_db():
     db = get_db()
     # Create tables here
     db.close()
 
+
 @app.route("/")
 def index():
     return render_template("index.html")
+
 
 if __name__ == "__main__":
     init_db()
@@ -189,9 +193,11 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
 
 if __name__ == "__main__":
     host = os.environ.get("HOST", "127.0.0.1")
@@ -265,11 +271,13 @@ Every internal app that Frood will operate should expose a JSON API alongside it
 ```python
 # Example: Crypto trading app with agent-operable API
 
+
 @app.route("/api/portfolio")
 def get_portfolio():
     """Frood calls this to check current holdings."""
     holdings = get_all_holdings()
     return jsonify({"holdings": holdings, "total_value_usd": sum(h["value"] for h in holdings)})
+
 
 @app.route("/api/trade", methods=["POST"])
 def execute_trade():
@@ -277,6 +285,7 @@ def execute_trade():
     data = request.get_json()
     result = process_trade(data["action"], data["symbol"], data["amount"])
     return jsonify(result)
+
 
 @app.route("/api/signals")
 def get_signals():

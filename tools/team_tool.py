@@ -600,7 +600,7 @@ class TeamTool(Tool):
         name: str = "",
         description: str = "",
         workflow: str = "sequential",
-        roles: list = None,
+        roles: list | None = None,
         task: str = "",
         run_id: str = "",
         project_id: str = "",
@@ -1051,7 +1051,7 @@ class TeamTool(Tool):
 
         Returns list of (role_name, feedback) tuples.
         """
-        pattern = r"REVISION_NEEDED:\s*(\S+)\s*[—\-–]\s*(.+)"
+        pattern = r"REVISION_NEEDED:\s*(\S+)\s*[—\-\u2013]\s*(.+)"
         matches = re.findall(pattern, manager_review)
         return [(name.strip(), feedback.strip()) for name, feedback in matches]
 

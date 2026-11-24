@@ -11,6 +11,7 @@ import logging
 import os
 import shutil
 from contextlib import AsyncExitStack
+from typing import ClassVar
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -24,7 +25,7 @@ class MCPConnection:
     """Manages a connection to a single MCP server via the MCP SDK."""
 
     # Commands that are allowed for MCP stdio servers
-    _ALLOWED_MCP_COMMANDS = {
+    _ALLOWED_MCP_COMMANDS: ClassVar[set[str]] = {
         "npx",
         "node",
         "python",
@@ -37,7 +38,7 @@ class MCPConnection:
     }
 
     # Env keys that cannot be overridden by MCP server configs
-    _BLOCKED_ENV_KEYS = {"PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH"}
+    _BLOCKED_ENV_KEYS: ClassVar[set[str]] = {"PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH"}
 
     def __init__(self, name: str, config: dict):
         self.name = name

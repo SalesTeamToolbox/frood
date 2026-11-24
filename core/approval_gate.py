@@ -21,6 +21,9 @@ import aiofiles
 
 logger = logging.getLogger("frood.approval")
 
+# Strong references so fire-and-forget tasks are not garbage-collected mid-flight
+_background_tasks: set[asyncio.Task] = set()
+
 
 class ProtectedAction(str, Enum):
     GMAIL_SEND = "gmail_send"
@@ -125,11 +128,13 @@ class ApprovalGate:
             logger.info(f"AUDIT: Approved {key} by {user or 'unknown'}")
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(
+                _task = loop.create_task(
                     self._log_event(
                         "approved", key, task_id=task_id, action=action, user=user or "unknown"
                     )
                 )
+                _background_tasks.add(_task)
+                _task.add_done_callback(_background_tasks.discard)
             except RuntimeError:
                 pass  # No running loop — skip async audit log
 
@@ -143,11 +148,13 @@ class ApprovalGate:
             logger.info(f"AUDIT: Denied {key} by {user or 'unknown'}")
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(
+                _task = loop.create_task(
                     self._log_event(
                         "denied", key, task_id=task_id, action=action, user=user or "unknown"
                     )
                 )
+                _background_tasks.add(_task)
+                _task.add_done_callback(_background_tasks.discard)
             except RuntimeError:
                 pass  # No running loop — skip async audit log
 

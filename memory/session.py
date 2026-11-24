@@ -21,6 +21,9 @@ import aiofiles
 
 logger = logging.getLogger("frood.memory.session")
 
+# Strong references so fire-and-forget tasks are not garbage-collected mid-flight
+_background_tasks: set = set()
+
 
 @dataclass
 class SessionMessage:
@@ -299,7 +302,9 @@ class SessionManager:
 
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(_consolidate())
+            _task = loop.create_task(_consolidate())
+            _background_tasks.add(_task)
+            _task.add_done_callback(_background_tasks.discard)
         except RuntimeError:
             # No running event loop — skip consolidation
             logger.debug("No event loop available for consolidation")

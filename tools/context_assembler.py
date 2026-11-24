@@ -17,6 +17,7 @@ import hashlib
 import logging
 import re
 from pathlib import Path
+from typing import ClassVar
 
 from tools.base import Tool, ToolResult
 
@@ -142,7 +143,7 @@ def _truncate_to_budget(text, max_tokens):
 class ContextAssemblerTool(Tool):
     """Assemble smart project context from multiple sources."""
 
-    requires = ["memory_store", "skill_loader", "workspace"]
+    requires: ClassVar[list[str]] = ["memory_store", "skill_loader", "workspace"]
 
     def __init__(self, memory_store=None, skill_loader=None, workspace="", **kwargs):
         self._memory_store = memory_store

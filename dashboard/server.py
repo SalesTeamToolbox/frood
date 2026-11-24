@@ -17,6 +17,7 @@ import logging
 import os
 import time as _time
 from pathlib import Path
+from typing import ClassVar
 
 from fastapi import (
     Depends,
@@ -46,6 +47,9 @@ from dashboard.auth import (
 from dashboard.websocket_manager import WebSocketManager
 
 logger = logging.getLogger("frood.server")
+
+# Strong references so fire-and-forget tasks are not garbage-collected mid-flight
+_background_tasks: set = set()
 
 _ZEN_MODELS_CACHE: list[dict] | None = None
 _ZEN_MODELS_CACHE_TIME: float = 0.0
@@ -783,7 +787,7 @@ def create_app(
         class _StubTracker:
             daily_spend_usd = 0.0
             daily_tokens = 0
-            _model_prices = {}
+            _model_prices: ClassVar[dict] = {}
 
             def get_flat_rate_daily(self):
                 return {}
@@ -1312,7 +1316,7 @@ def create_app(
                             fallbacks = get_fallback_models("zen", task_category, model_to_use)
                         except Exception:
                             fallbacks = []
-                        for m in [model_to_use] + fallbacks:
+                        for m in [model_to_use, *fallbacks]:
                             try:
                                 result = await zen_client.chat_completion(
                                     m, messages, max_tokens=4096
@@ -1342,10 +1346,10 @@ def create_app(
                             fallbacks = get_fallback_models("nvidia", task_category, model_to_use)
                         except Exception:
                             fallbacks = []
-                        for m in [model_to_use] + fallbacks:
+                        for m in [model_to_use, *fallbacks]:
                             try:
                                 nvidia_msgs = (
-                                    [{"role": "system", "content": system_prompt}] + messages
+                                    [{"role": "system", "content": system_prompt}, *messages]
                                     if system_prompt
                                     else messages
                                 )
@@ -1381,8 +1385,10 @@ def create_app(
                             },
                             json={
                                 "model": model_to_use,
-                                "messages": [{"role": "system", "content": system_prompt}]
-                                + messages,
+                                "messages": [
+                                    {"role": "system", "content": system_prompt},
+                                    *messages,
+                                ],
                                 "max_tokens": 4096,
                             },
                         )
@@ -2361,9 +2367,11 @@ def create_app(
                 end_task(ctx)
 
             # Fire-and-forget: check for quarantine promotions
-            _asyncio.create_task(
+            _task = _asyncio.create_task(
                 _maybe_promote_quarantined(memory_store, task_type, outcome, summary)
             )
+            _background_tasks.add(_task)
+            _task.add_done_callback(_background_tasks.discard)
 
             return {"status": "ok", "event_type": event_type}
         except Exception as e:

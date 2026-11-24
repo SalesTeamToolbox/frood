@@ -523,7 +523,7 @@ def main():
         qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
         try:
             req = urllib.request.Request(f"{qdrant_url}/collections", method="GET")
-            with urllib.request.urlopen(req, timeout=3) as resp:
+            with urllib.request.urlopen(req, timeout=3) as resp:  # nosec B310  # local Frood service URL
                 data = json.loads(resp.read())
             collections = [c["name"] for c in data.get("result", {}).get("collections", [])]
             qdrant_config = QdrantConfig()
@@ -539,7 +539,7 @@ def main():
         search_url = os.environ.get("FROOD_SEARCH_URL", "http://127.0.0.1:6380")
         try:
             req = urllib.request.Request(f"{search_url}/health", method="GET")
-            with urllib.request.urlopen(req, timeout=2) as resp:
+            with urllib.request.urlopen(req, timeout=2) as resp:  # nosec B310  # local Frood service URL
                 resp.read()
             results["memory_pipeline"]["search_service"] = "ok"
         except Exception:
@@ -597,7 +597,7 @@ def main():
         api_url = os.environ.get("FROOD_API_URL", "http://127.0.0.1:8000")
         try:
             req = urllib.request.Request(f"{api_url}/api/memory/stats", method="GET")
-            with urllib.request.urlopen(req, timeout=2) as resp:
+            with urllib.request.urlopen(req, timeout=2) as resp:  # nosec B310  # local Frood service URL
                 stats = json.loads(resp.read())
             results["memory_pipeline"]["24h_stats"] = {
                 "recall_queries": stats.get("recall_count", 0),

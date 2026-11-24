@@ -34,9 +34,9 @@ class TestBranding:
             line for line in lines if "// migrate" not in line and ".frood/" not in line
         ]
         filtered_text = "\n".join(filtered_lines)
-        assert (
-            "Agent42" not in filtered_text
-        ), "Found user-visible 'Agent42' text (excluding deferred internal keys)"
+        assert "Agent42" not in filtered_text, (
+            "Found user-visible 'Agent42' text (excluding deferred internal keys)"
+        )
 
     def test_server_title(self):
         """FastAPI server title is 'Frood Dashboard'."""

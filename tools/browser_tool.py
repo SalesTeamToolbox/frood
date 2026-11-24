@@ -11,6 +11,7 @@ Security: Gateway token required for browser control (OpenClaw CVE-2026-25253 fi
 import logging
 import os
 import re
+from typing import ClassVar
 
 from tools.base import Tool, ToolResult
 
@@ -241,7 +242,7 @@ class BrowserTool(Tool):
         return ToolResult(output=html, success=True)
 
     # Patterns that indicate data exfiltration or dangerous JS operations
-    _BLOCKED_JS_PATTERNS = [
+    _BLOCKED_JS_PATTERNS: ClassVar[list[re.Pattern]] = [
         re.compile(r"\bfetch\s*\(", re.IGNORECASE),
         re.compile(r"\bXMLHttpRequest\b", re.IGNORECASE),
         re.compile(r"\bnew\s+WebSocket\b", re.IGNORECASE),

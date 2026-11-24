@@ -145,7 +145,7 @@ class CodeIntelTool(Tool):
         end = getattr(node, "end_lineno", start + 10)
         body_lines = lines[start:end]
         if len(body_lines) > 50:
-            body_lines = body_lines[:50] + ["    # ... (truncated)\n"]
+            body_lines = [*body_lines[:50], "    # ... (truncated)\n"]
         return "".join(body_lines)
 
     def _relpath(self, filepath: str) -> str:

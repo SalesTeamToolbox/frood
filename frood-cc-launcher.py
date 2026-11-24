@@ -40,7 +40,7 @@ def check_frood_status():
     """Check if Frood is running and available."""
     try:
         req = urllib.request.Request(FROOD_HEALTH, method="GET")
-        with urllib.request.urlopen(req, timeout=3) as response:
+        with urllib.request.urlopen(req, timeout=3) as response:  # nosec B310  # fixed localhost URL
             return response.status == 200
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
         return False
@@ -50,7 +50,7 @@ def get_frood_models():
     """Fetch available models from Frood."""
     try:
         req = urllib.request.Request(FROOD_MODELS, method="GET")
-        with urllib.request.urlopen(req, timeout=5) as response:
+        with urllib.request.urlopen(req, timeout=5) as response:  # nosec B310  # fixed localhost URL
             data = json.loads(response.read().decode())
             return data.get("data", [])
     except Exception:

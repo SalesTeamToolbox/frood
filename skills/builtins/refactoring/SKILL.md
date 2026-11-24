@@ -58,8 +58,10 @@ def process(data):
 def process(data):
     return [apply_markup(item) for item in data if is_eligible(item)]
 
+
 def is_eligible(item):
     return item["type"] == "A" and item["status"] == "active" and item["value"] > 0
+
 
 def apply_markup(item):
     MARKUP_RATE = 1.1

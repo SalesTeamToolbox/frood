@@ -53,7 +53,7 @@ def _download_winsw(project_dir: str) -> str:
         try:
             import urllib.request
 
-            urllib.request.urlretrieve(url, winsw_path)
+            urllib.request.urlretrieve(url, winsw_path)  # nosec B310  # pinned https release URL
             if os.path.exists(winsw_path) and os.path.getsize(winsw_path) > 0:
                 print(f"WinSW downloaded to: {winsw_path}")
                 return winsw_path
@@ -1184,7 +1184,7 @@ def check_health(project_dir: str) -> list:
 
     # -- 3. Qdrant -----------------------------------------------------------
     try:
-        response = urllib.request.urlopen("http://localhost:6333/healthz", timeout=5)
+        response = urllib.request.urlopen("http://localhost:6333/healthz", timeout=5)  # nosec B310  # fixed localhost URL
         if response.status == 200:
             results.append(
                 {"name": "Qdrant", "healthy": True, "detail": "healthy", "fix": "", "level": "warn"}

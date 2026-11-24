@@ -312,7 +312,7 @@ class TemplateTool(Tool):
         self,
         action: str = "",
         name: str = "",
-        variables: dict = None,
+        variables: dict | None = None,
         content: str = "",
         description: str = "",
         **kwargs,

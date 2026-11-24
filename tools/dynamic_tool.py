@@ -197,7 +197,7 @@ class CreateToolTool(Tool):
         self,
         tool_name: str = "",
         description: str = "",
-        parameters: dict | str = None,
+        parameters: dict | str | None = None,
         code: str = "",
         **kwargs,
     ) -> ToolResult:

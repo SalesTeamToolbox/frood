@@ -16,7 +16,6 @@ import uuid
 from pathlib import Path
 
 import aiofiles
-
 from core.interview_questions import (
     ANSWER_EXTRACTION_PROMPT,
     ROUND_DISPLAY_NAMES,
@@ -26,6 +25,7 @@ from core.interview_questions import (
 )
 from core.project_spec import ProjectSpecGenerator
 from core.task_queue import Task, TaskType
+
 from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("frood.tools.project_interview")

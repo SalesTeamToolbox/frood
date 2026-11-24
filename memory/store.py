@@ -26,6 +26,9 @@ from memory.embeddings import EmbeddingStore
 
 logger = logging.getLogger("frood.memory")
 
+# Strong references so fire-and-forget tasks are not garbage-collected mid-flight
+_background_tasks: set = set()
+
 # ── UUID entry format constants ──────────────────────────────────────────────
 # Matches: [2026-03-24T14:22:10Z a4f7b2c1] at start of bullet content
 _ENTRY_TAG_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z) ([0-9a-f]{8})\] ")
@@ -168,7 +171,9 @@ class MemoryStore:
         if not sentinel.exists() and self.memory_path.exists():
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self._maybe_migrate())
+                _task = loop.create_task(self._maybe_migrate())
+                _background_tasks.add(_task)
+                _task.add_done_callback(_background_tasks.discard)
             except RuntimeError:
                 # No running event loop — run synchronously
                 asyncio.run(self._maybe_migrate())
@@ -205,7 +210,9 @@ class MemoryStore:
 
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(_reindex())
+            _task = loop.create_task(_reindex())
+            _background_tasks.add(_task)
+            _task.add_done_callback(_background_tasks.discard)
         except RuntimeError:
             # No running event loop — run synchronously
             try:

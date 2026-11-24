@@ -31,7 +31,7 @@ ZERO = "0" * 40
 DEFAULT_TOML = "[extend]\nuseDefault = true\n"
 HEX_RE = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
 # Tool binaries must never come from a world-writable or repo-local location.
-UNTRUSTED_PREFIXES = ("/tmp", "/var/tmp", "/dev/shm")
+UNTRUSTED_PREFIXES = ("/tmp", "/var/tmp", "/dev/shm")  # nosec B108  # paths REFUSED, not used
 # private remotes may only be declared by root (an agent running as the user cannot write here).
 SYSTEM_DIR = "/etc/public-guard"
 PRIVATE_REMOTES_FILE = SYSTEM_DIR + "/private-remotes.txt"

@@ -209,7 +209,7 @@ def persist_learning(learning_data, task_id, task_type, tools_used, files_modifi
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310  # local Frood service URL
             result = json.loads(resp.read())
         print(
             f"[effectiveness-learn] Persisted: {result.get('event_type', 'unknown')}",

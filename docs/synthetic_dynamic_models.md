@@ -48,6 +48,7 @@ For each category, the system prefers free models when available.
 You can manually refresh the models by calling:
 ```python
 from core.agent_manager import refresh_synthetic_models
+
 refresh_synthetic_models(force=True)
 ```
 

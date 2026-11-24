@@ -85,7 +85,7 @@ class DockerTool(Tool):
 
     async def _run_docker(self, args: list[str], timeout: float = 120.0) -> ToolResult:
         """Execute a docker command and return structured result."""
-        cmd = ["docker"] + args
+        cmd = ["docker", *args]
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,

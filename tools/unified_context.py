@@ -18,6 +18,7 @@ import asyncio
 import hashlib
 import logging
 from pathlib import Path
+from typing import ClassVar
 
 import aiofiles
 import yaml
@@ -243,7 +244,7 @@ class UnifiedContextTool(Tool):
     redistributed proportionally to sources that produced content (D-14).
     """
 
-    requires = ["memory_store", "skill_loader", "workspace"]
+    requires: ClassVar[list[str]] = ["memory_store", "skill_loader", "workspace"]
 
     def __init__(
         self,

@@ -292,9 +292,9 @@ class TestPersonaTool:
             for field in required_fields:
                 assert field in persona, f"Persona '{name}' missing field '{field}'"
             assert len(persona["goals"]) >= 2, f"Persona '{name}' needs at least 2 goals"
-            assert (
-                len(persona["pain_points"]) >= 2
-            ), f"Persona '{name}' needs at least 2 pain points"
+            assert len(persona["pain_points"]) >= 2, (
+                f"Persona '{name}' needs at least 2 pain points"
+            )
 
 
 # =============================================================================

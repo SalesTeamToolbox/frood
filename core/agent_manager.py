@@ -18,6 +18,9 @@ from pathlib import Path
 
 logger = logging.getLogger("frood.agent_manager")
 
+# Strong references so fire-and-forget tasks are not garbage-collected mid-flight
+_background_tasks: set[asyncio.Task] = set()
+
 # Module-level settings reference — used by _get_tier_semaphore() and get_effective_limits().
 # Monkeypatched in tests via monkeypatch.setattr("core.agent_manager.settings", ...).
 # Deferred import avoids circular-import risk at module load time.
@@ -528,7 +531,9 @@ class AgentManager:
 
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(start_zen_model_refresh_task())
+                _task = loop.create_task(start_zen_model_refresh_task())
+                _background_tasks.add(_task)
+                _task.add_done_callback(_background_tasks.discard)
             except RuntimeError:
                 pass  # No running loop — task starts when the app runs
         except Exception as e:

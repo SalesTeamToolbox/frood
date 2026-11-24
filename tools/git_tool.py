@@ -164,7 +164,7 @@ class GitTool(Tool):
         if args:
             # Extend defaults with user args rather than replacing entirely
             extra = [a for a in args.split() if not a.startswith("--exec")]
-            cmd = ["log", "--oneline", "-20"] + extra
+            cmd = ["log", "--oneline", "-20", *extra]
         code, out, err = await self._run_git(*cmd)
         if code != 0:
             return ToolResult(error=f"git log failed: {err}", success=False)

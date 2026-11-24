@@ -39,7 +39,7 @@ class PlaywrightCLI:
         self._binary = _find_playwright_cli()
 
     def _run(self, args: list[str], timeout: int = 30) -> str:
-        cmd = [self._binary, f"-s={self.session}"] + args
+        cmd = [self._binary, f"-s={self.session}", *args]
         env = os.environ.copy()
         env["PLAYWRIGHT_CLI_SESSION"] = self.session
         result = subprocess.run(

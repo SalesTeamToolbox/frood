@@ -16,10 +16,14 @@ Operations:
 """
 
 import logging
+from typing import ClassVar
 
 from tools.base import Tool, ToolResult
 
 logger = logging.getLogger("frood.tools.memory")
+
+# Strong references so fire-and-forget tasks are not garbage-collected mid-flight
+_background_tasks: set = set()
 
 # Semantic similarity thresholds for deduplication
 DEDUP_THRESHOLD = 0.90  # >= this = near-duplicate, skip or merge
@@ -72,7 +76,7 @@ class MemoryTool(Tool):
     Requires ``memory_store`` from ToolContext injection.
     """
 
-    requires = ["memory_store", "project_memory_factory"]
+    requires: ClassVar[list[str]] = ["memory_store", "project_memory_factory"]
 
     def __init__(self, memory_store=None, project_memory_factory=None, **kwargs):
         self._store = memory_store
@@ -375,7 +379,9 @@ class MemoryTool(Tool):
 
                         try:
                             loop = asyncio.get_running_loop()
-                            loop.create_task(_bg_consolidate())
+                            _task = loop.create_task(_bg_consolidate())
+                            _background_tasks.add(_task)
+                            _task.add_done_callback(_background_tasks.discard)
                         except RuntimeError:
                             pass
                 except Exception:

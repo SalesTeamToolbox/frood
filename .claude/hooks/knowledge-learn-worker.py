@@ -99,7 +99,7 @@ def call_extraction_api(extract_data: dict) -> list:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310  # local Frood service URL
             result = json.loads(resp.read())
         return result.get("learnings", [])
     except Exception:

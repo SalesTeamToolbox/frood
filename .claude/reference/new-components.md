@@ -8,6 +8,7 @@
 4. Register in `frood.py` `_register_tools()`:
    ```python
    from tools.my_tool import MyTool
+
    registry.register(MyTool(sandbox=self._sandbox))
    ```
 5. Create `tests/test_my_tool.py` with tests

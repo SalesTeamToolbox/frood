@@ -54,6 +54,7 @@ python -m pytest -k "test_pattern" -v
 ```python
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_async_function():
     result = await some_async_function()
