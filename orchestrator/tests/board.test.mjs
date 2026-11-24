@@ -1568,6 +1568,23 @@ test("reopen: ready → working keeps history, invalidates signoffs, and ready n
   assert.equal(board(c, "verify", "re-one", "--sha", sha).status, 1, "the refused sha stays refused");
 });
 
+test("reopen: a same-sha re-ready needs a fresh gate run, not the refused lap's green gates", () => {
+  const c = mk();
+  const { sha } = atReady(c, "re-same");
+  const r = board(c, "reopen", "re-same", "--owner", "s1", "--harness", "claude", "--note", "train: lap failed, suspected flaky suite");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.ticket.gates, [], "gate results are cleared");
+  assert.equal(r.ticket.reopens[0].refused_sha, sha);
+  assert.equal(round(c, "re-same", { reviewed: sha }).status, 0);
+  signedCritic(c, "re-same");
+  const noGates = board(c, "ready", "re-same", "--owner", "s1");
+  assert.equal(noGates.status, 1, "old green gates must not carry the refused sha back to ready");
+  assert.match(noGates.stderr, /has no exit 0/);
+  assert.equal(board(c, "verify", "re-same", "--sha", sha).status, 1);
+  gatesOk(c, "re-same");
+  assert.equal(board(c, "ready", "re-same", "--owner", "s1").status, 0, "with fresh evidence a flaky lap can re-ready");
+});
+
 test("reopen: owner lock, stage table, worktree check, and the reopen cap", () => {
   const c = mk();
   const why = "train: merge conflict against brain-backend in nav.ts";

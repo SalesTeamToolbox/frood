@@ -23,7 +23,9 @@
 //   verify <id> --sha <sha>      |   shipped <id> --sha <sha>
 //   reopen <id> --owner <s> --harness claude|opencode --note <why> [--worktree <path>]
 //          (ready -> working after the train refused the sha: every live signoff is invalidated, the round cap
-//           starts a fresh lap of 3, at most 2 reopens per ticket; history and counted rounds are kept)
+//           and gate results are cleared, the round cap starts a fresh lap of 3, at most 2 reopens per ticket;
+//           history and counted rounds are kept. The senior trigger "counted rounds > 2" stays cumulative, so a
+//           ticket reopened after 3 rounds needs a senior; base_sha is not refreshed on a rebase)
 //   --help  (or -h) prints this text and exits 0; nothing is written
 //
 // Repo root = parent of `git rev-parse --git-common-dir` from --repo/cwd, so it works from any worktree.
@@ -1191,9 +1193,14 @@ function cmdReopen(ctx, id) {
       throw new Refuse(`--worktree is not a worktree of this repo: ${wt}`);
     }
     const after = t.rounds.length;
-    for (const s of t.signoffs) if (!s.invalidated_by) s.invalidated_by = `reopen ${reopens.length + 1}`;
+    const live = t.signoffs.filter((s) => !s.invalidated_by);
+    const refused = live.length ? live[live.length - 1].reviewed_sha : null;
+    for (const s of live) s.invalidated_by = `reopen ${reopens.length + 1}`;
     takeTicketLock(ctx, id, owner, harness);
-    t.reopens = [...reopens, { n: reopens.length + 1, at: now(), by: owner, note, after_round: after }];
+    // Gate results go too: `ready` matches gates by sha, so green gates at the refused sha would otherwise carry a
+    // same-sha re-ready (a flaky lap) through without a single gate run. The log files stay on disk as evidence.
+    t.gates = [];
+    t.reopens = [...reopens, { n: reopens.length + 1, at: now(), by: owner, note, after_round: after, refused_sha: refused }];
     t.stage = STAGE.reopen.to;
     t.worktree = wt;
     t.assignment = { owner, harness, since: now(), missed_sweeps: 0, worker: null };

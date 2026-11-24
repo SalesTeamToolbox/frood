@@ -71,9 +71,10 @@ locks/<id>.lock/    gitignored; mkdir lock, contains owner.json
 | `assignment` | object\|null | `{owner, harness: claude\|opencode, since, missed_sweeps: int, worker: {pid, started, out_path}\|null}` |
 | `rounds` | object[] | see "Round object" in Precise rules |
 | `senior` | object | `{required: bool, reasons: string[]}` recomputed every round |
-| `signoffs` | object[] | `{by: critic\|senior\|human, model, free, free_source, reviewed_sha, at, invalidated_by: null\|round n}` |
+| `signoffs` | object[] | `{by: critic\|senior\|human, model, free, free_source, reviewed_sha, at, invalidated_by: null\|round n\|"reopen n"}` |
 | `gates` | object[] | `{argv, exit, sha, at, log_path}` from the latest `board gates` run |
 | `blocked` | object\|null | `{reason: stale\|rounds_exhausted\|worker_question\|no_pool\|manual, note, at}` — a failed gate never changes stage |
+| `reopens` | object[]? | `{n, at, by, note, after_round, refused_sha}` per `reopen`; absent on tickets never reopened |
 | `history` | object[] | `{at, cmd, from, to, by, note}` on every write except heartbeat |
 | `created`, `updated` | ISO-8601 UTC | future timestamps are treated as invalid |
 
@@ -106,6 +107,7 @@ Mandate stays the record, `create` only proves the question was answered. (atlas
 | `ready` | `working` → `ready` | rules below; releases the lock |
 | `verify` | (read-only) | exit 0 iff stage `ready` and `--sha` = signed-off sha |
 | `shipped` | `ready` → `shipped` | `--sha` = signed-off sha (called by the train) |
+| `reopen` | `ready` → `working` | the train refused the sha: `--owner --harness --note` (≥20 chars), worktree of this repo, no live lock; invalidates every live signoff, clears `gates`, takes the lock; round cap counts only rounds after the latest reopen; ≤2 per ticket |
 | `watch` | `working` → `blocked` | liveness rules below |
 | `unblock` | `blocked` → `queued` | `--by human --note` (≥10 chars); lock must be free |
 | `egm reopen` | `working` → `queued` | owner; sets `egm.status: pending`, releases lock (mid-ticket trigger) |
@@ -190,7 +192,10 @@ Mandate stays the record, `create` only proves the question was answered. (atlas
   refuses on non-zero; after a verified deploy it calls `board shipped <id> --sha`.
 - `reopen` (added 2026-11-24): `ready -> working` after the train refuses a sha. Before it, the only exit from
   `ready` was `fail` + a new ticket id (`-b`, `-c`), which renamed the branch and split the history. Reopen
-  invalidates every live signoff, takes the ticket lock, and starts a fresh 3-round lap; at most 2 per ticket.
+  invalidates every live signoff, clears gate results, takes the ticket lock, and starts a fresh 3-round lap; at
+  most 2 per ticket. A same-sha re-ready (a flaky lap) is allowed only with a new round, signoff and gate run.
+  Known limits: the senior trigger `counted rounds > 2` stays cumulative (a twice-refused ticket gets a senior),
+  and `base_sha` is not refreshed, so after a rebase the senior diff `base_sha..HEAD` can include base commits.
 
 ## What v2 deliberately drops
 
