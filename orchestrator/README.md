@@ -214,3 +214,7 @@ OC commands now install to `~/.config/opencode/commands/`; the legacy singular `
   background dashboard rebuilds and `bin/oc-worker.mjs` skips its dashboard kick (use it if console windows flash). Delete the file to re-enable.
 - `ORCH_MAIL_LIVE_H` (default 24): the peer-mail badge counts only unread mail whose recipient was active
   within this many hours; mail to sessions that have gone quiet is reported as idle, not counted.
+- `ORCH_ORPHAN_MIN` (default 60): minutes of holder silence after which an escalation on a held stream counts as
+  orphaned and the daemon pages the owner once (see `docs/designs/desk-daemon.md`, "Orphaned streams").
+- `ORCH_LAUNCH_CMD`: command the orphan notice's "Resolve in new session" action runs (`sh -c`, `{stream}` and
+  `{harness}` substituted). Default `xdg-terminal-exec -- claude "/frood-next {stream}"` (`opencode --prompt` for an OpenCode holder).

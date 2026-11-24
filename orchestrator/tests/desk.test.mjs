@@ -1612,7 +1612,10 @@ test("dpage: a Claude Code holder is mailed, not paged; the desktop gets only wh
     // unheld: no agent can act, so the desktop is the page
     const unheld = t8Stream("unheld");
     await escalateSenior(unheld);
+    // the notice is a detached helper (notify-send --wait): give it a moment to reach the stub
+    for (let i = 0; i < 100 && ns.reads().length === 0; i++) await new Promise((r) => setTimeout(r, 50));
     assert.equal(ns.reads().length, 1, "an unheld stream -> one desktop page");
+    assert.match(ns.reads()[0], /Resolve in new session/, "the page carries the resolve action");
   } finally {
     for (const k of ["ORCH_DAEMON_DRY_RUN", "ORCH_NO_NOTIFY", "PATH"]) {
       if (saved[k] === undefined) delete process.env[k];

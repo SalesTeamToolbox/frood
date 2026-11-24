@@ -249,7 +249,8 @@ async function pagedDesktop(h, held) {
   mkStream(h);
   if (held) {
     const sp = path.join(sdir(h), "m6a.json");
-    fs.writeFileSync(sp, JSON.stringify({ ...JSON.parse(fs.readFileSync(sp, "utf8")), held_by: "cc" }));
+    const patch = held === "done" ? { status: "done" } : { held_by: "cc" };
+    fs.writeFileSync(sp, JSON.stringify({ ...JSON.parse(fs.readFileSync(sp, "utf8")), ...patch }));
   }
   mkTicket(h);
   const tp = path.join(h, "reports", "t1", "ticket.json");
@@ -269,12 +270,16 @@ async function pagedDesktop(h, held) {
   const origErr = console.error;
   console.error = (...a) => errs.push(a.join(" "));
   try {
-    await inHome(h, async () => await driveOnce({ lastPoll: null, printed: new Set() }, {}));
+    // a done stream is not polled (its escalations come from a direct step), so hand the event over explicitly
+    if (held === "done") await inHome(h, async () => await handleEvent("m6a", "run:t1/findings-r1:done", undefined));
+    else await inHome(h, async () => await driveOnce({ lastPoll: null, printed: new Set() }, {}));
   } finally {
     console.error = origErr;
     process.env.PATH = saved.PATH;
     if (saved.ORCH_NO_NOTIFY !== undefined) process.env.ORCH_NO_NOTIFY = saved.ORCH_NO_NOTIFY;
   }
+  // an orphan notice is a detached helper: wait (briefly) for it to reach the stub when one is expected
+  if (held !== true) for (let i = 0; i < 100 && !fs.existsSync(log); i++) await new Promise((r) => setTimeout(r, 50));
   return { pages: fs.existsSync(log) ? fs.readFileSync(log, "utf8") : "", errs };
 }
 
@@ -288,6 +293,14 @@ test("escalation on an unheld stream pages the desktop", async () => {
   const { pages } = await pagedDesktop(home(), false);
   assert.match(pages, /orchestrator desk/);
   assert.match(pages, /lacks worktree/);
+  assert.match(pages, /Resolve in new session/);
+});
+
+test("escalation on a done stream gets a plain desktop page with no resolve action", async () => {
+  const { pages } = await pagedDesktop(home(), "done");
+  assert.match(pages, /orchestrator desk/);
+  assert.match(pages, /lacks worktree/);
+  assert.doesNotMatch(pages, /Resolve in new session/);
 });
 
 test("driveOnce: a verdict that cannot run pages exactly once, naming the fix", async () => {
