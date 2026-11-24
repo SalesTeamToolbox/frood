@@ -419,6 +419,7 @@ decides: which board tickets may run in their own sessions at once (shared file 
 ### oc-worker --role worker chain
 handler: orchestrator/bin/oc-worker.mjs --role <name> (expands to --agent/--fallback from CHAINS); orchestrator/bin/chains.mjs (CHAINS source, re-exported by orchestrator/bin/router-health.mjs)
 decides: which OpenCode agent pool to dispatch first for a worker run; worker-nvidia first for routine tickets, Nvidia 429 resumes on the same session, two stalled/timeout receipts drop worker-nvidia for the ticket
+- idle session woken by peer-mail → hooks/peer-mail-wake.js (Claude Code Stop hook, asyncRewake; polls the mailbox and exits 2 to wake the idle model)
 
 ## How to keep this map accurate
 

@@ -115,6 +115,7 @@ same target (install errors out).
 | Hook | Purpose |
 |---|---|
 | `peer-mail-session-id.js` | SessionStart: injects this session's peer-mail id and lists unread subjects (read-only). |
+| `peer-mail-wake.js` | Stop hook with `{"type":"command","command":"node ~/.claude/hooks/peer-mail-wake.js","asyncRewake":true,"timeout":86400}`: polls the mailbox every `PEER_WAKE_POLL_MS` and, on unread mail for this session, prints the messages and exits 2, which wakes the idle model via asyncRewake. Single instance per session (pid file in `${ORCH_HOME||~}/.config/orchestrator/peer-wake/`), announced ids capped at 200, exits 0 after `PEER_WAKE_MAX_MIN`. Read-only, never throws. |
 | `orchestrator-handoff.js` | SessionStart: announces a pending handoff so the owner only types `/frood-next`. UserPromptSubmit: names the session tab after the work on `/frood-next` and `/frood-gauntlet` (wire it under both events). |
 | `cross-harness-statusline.js` | Two-line statusline plus HTML/text/JSON dashboard (`--html`, `--text`, `--json`). |
 | `package.json` | Marks the directory CommonJS (`{ "type": "commonjs" }`); not installed. |
