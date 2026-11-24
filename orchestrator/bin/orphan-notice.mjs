@@ -37,6 +37,7 @@ export function launchPlan(stream, s) {
   const eff = effectiveLaunch();
   if (eff.mode === "custom" && eff.cmd) return { cwd, shell: eff.cmd.replaceAll("{stream}", stream).replaceAll("{harness}", harness) };
   const prompt = `/frood-next ${stream}`;
+  // (mode custom with no cmd, e.g. a hand-edited launch.json, falls through to the terminal default below.)
   // OpenCode has no desktop app: an oc-held stream always opens the terminal.
   if (eff.mode === "desktop" && harness === "cc") {
     const url = `claude://code/new?q=${encodeURIComponent(prompt)}` + (repo ? `&folder=${encodeURIComponent(repo)}` : "");

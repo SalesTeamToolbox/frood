@@ -67,18 +67,31 @@ export function effectiveLaunch(query) {
 
 const HOW = (self) => `change it with: node ${self} --set desktop|terminal|custom [--cmd "<template>"]`;
 
+/** Map a typed answer ("2", "desktop", "", junk, out of range) to a mode; anything unusable is the detected default. */
+export function parseChoice(answer, detected) {
+  const a = String(answer ?? "").trim().toLowerCase();
+  if (MODES.includes(a)) return a;
+  return /^\d+$/.test(a) && MODES[Number(a) - 1] ? MODES[Number(a) - 1] : detected;
+}
+
+/** The config to write for a chosen mode; custom with no command falls back to the detected mode. */
+export function choiceConfig(mode, cmd, detected) {
+  const c = String(cmd ?? "").trim();
+  return mode === "custom" ? (c ? { mode, cmd: c } : { mode: detected }) : { mode };
+}
+
 async function ask(detected) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const q = (t) => new Promise((r) => rl.question(t, r));
+  // EOF (Ctrl-D) closes the interface: every pending and later question resolves "" so the default is taken.
+  const closed = new Promise((r) => rl.once("close", () => r("")));
+  const q = (t) => Promise.race([new Promise((r) => rl.question(t, r)), closed]);
   console.log("How should 'Resolve in new session' open a session?");
   MODES.forEach((m, i) => console.log(`  ${i + 1}) ${m}${m === detected ? "  (default)" : ""}`));
   console.log("     desktop = Claude desktop app, terminal = xdg-terminal-exec, custom = your own command");
-  const a = (await q(`Choice [${MODES.indexOf(detected) + 1}]: `)).trim().toLowerCase();
-  const mode = MODES.includes(a) ? a : MODES[Number(a) - 1] ?? detected;
-  let cmd;
-  if (mode === "custom") cmd = (await q('Command template ({stream}, {harness}; run via sh -c): ')).trim();
+  const mode = parseChoice(await q(`Choice [${MODES.indexOf(detected) + 1}]: `), detected);
+  const cmd = mode === "custom" ? await q("Command template ({stream}, {harness}; run via sh -c): ") : "";
   rl.close();
-  return mode === "custom" && !cmd ? { mode: detected } : { mode, cmd };
+  return choiceConfig(mode, cmd, detected);
 }
 
 export async function cli(argv) {
@@ -102,7 +115,7 @@ export async function cli(argv) {
     const detected = detectDefaultMode();
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
       writeLaunchConfig({ mode: detected });
-      console.log(`not interactive: wrote the detected launch mode "${detected}" to ${launchConfigPath()}; ${HOW(self)}`);
+      console.log(`not interactive: saved the detected launch mode "${detected}" to ${launchConfigPath()}; it is now fixed and will not be re-detected. ${HOW(self)}`);
       return 0;
     }
     const chosen = writeLaunchConfig(await ask(detected));

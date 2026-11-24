@@ -51,15 +51,19 @@ if (process.argv.includes("--uninstall")) {
 
 const repo = path.resolve(dir, "..", "..");
 // First-time setup: how the orphan notice opens a session (desktop app / terminal / custom). Never overwrites.
-if (!fs.existsSync(launchConfigPath())) {
-  const launchCli = path.join(repo, "bin", "launch-config.mjs");
-  if (process.stdin.isTTY && process.stdout.isTTY) execFileSync(process.execPath, [launchCli, "--ask"], { stdio: "inherit" });
-  else {
-    const mode = detectDefaultMode();
-    writeLaunchConfig({ mode });
-    console.log(`launch mode: ${mode} (detected; not interactive)`);
+try {
+  if (!fs.existsSync(launchConfigPath())) {
+    const launchCli = path.join(repo, "bin", "launch-config.mjs");
+    if (process.stdin.isTTY && process.stdout.isTTY) execFileSync(process.execPath, [launchCli, "--ask"], { stdio: "inherit" });
+    else {
+      const mode = detectDefaultMode();
+      writeLaunchConfig({ mode });
+      console.log(`launch mode: ${mode} (detected and saved; not interactive; it will not be re-detected)`);
+    }
+    console.log(`Change it with: node ${launchCli} --set desktop|terminal|custom [--cmd "<template>"]`);
   }
-  console.log(`Change it with: node ${launchCli} --set desktop|terminal|custom [--cmd "<template>"]`);
+} catch (e) {
+  console.error(`install: launch mode not saved (${e.message}); continuing. Set it later with bin/launch-config.mjs --set`);
 }
 // Test hook: stop before touching systemd.
 if (process.env.ORCH_INSTALL_NO_SYSTEMD === "1") process.exit(0);

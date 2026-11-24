@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { launchPlan } from "../bin/orphan-notice.mjs";
-import { detectDefaultMode, readLaunchConfig, writeLaunchConfig, effectiveLaunch } from "../bin/launch-config.mjs";
+import { detectDefaultMode, parseChoice, choiceConfig, readLaunchConfig, writeLaunchConfig, effectiveLaunch } from "../bin/launch-config.mjs";
 
 const BIN = path.resolve(import.meta.dirname, "..", "bin");
 const CLI = path.join(BIN, "launch-config.mjs");
@@ -105,7 +105,7 @@ test("CLI: prints source, --set writes, custom needs --cmd", () => {
 test("CLI --ask on a non-TTY writes the detected mode and never overwrites an existing file", () => {
   const h = mkdtemp();
   const r = cli(h, ["--ask"], { PATH: mimeStub("com.anthropic.Claude.desktop") });
-  assert.match(r.stdout, /not interactive: wrote the detected launch mode "desktop"/);
+  assert.match(r.stdout, /not interactive: saved the detected launch mode "desktop".*will not be re-detected/);
   assert.deepEqual(JSON.parse(fs.readFileSync(cfgFile(h), "utf8")), { mode: "desktop" });
   fs.writeFileSync(cfgFile(h), '{"mode":"terminal"}');
   const r2 = cli(h, ["--ask"], { PATH: mimeStub("com.anthropic.Claude.desktop") });
@@ -123,4 +123,39 @@ test("systemd install.mjs first-time step writes launch.json only when absent (n
   fs.writeFileSync(cfgFile(h), '{"mode":"terminal"}');
   assert.equal(run("com.anthropic.Claude.desktop").status, 0);
   assert.deepEqual(JSON.parse(fs.readFileSync(cfgFile(h), "utf8")), { mode: "terminal" });
+});
+
+test("parseChoice / choiceConfig: numbers, words, empty, invalid, out of range", () => {
+  for (const [a, m] of [["1", "desktop"], ["2", "terminal"], ["3", "custom"], [" Desktop ", "desktop"], ["terminal", "terminal"]]) assert.equal(parseChoice(a, "x"), m);
+  for (const a of ["", "  ", "0", "4", "99", "-1", "banana", undefined]) assert.equal(parseChoice(a, "terminal"), "terminal");
+  assert.deepEqual(choiceConfig("custom", " go {stream} ", "desktop"), { mode: "custom", cmd: "go {stream}" });
+  assert.deepEqual(choiceConfig("custom", "  ", "desktop"), { mode: "desktop" });
+  assert.deepEqual(choiceConfig("terminal", "ignored", "desktop"), { mode: "terminal" });
+});
+
+test("CLI --ask on a real TTY: EOF at the prompt takes the detected default, writes it, exits 0", () => {
+  const h = mkdtemp();
+  const script = `
+import os, pty, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(sys.argv[1], [sys.argv[1], sys.argv[2], "--ask"])
+time.sleep(1.0)
+os.write(fd, b"\x04")
+out = b""
+try:
+    while True:
+        d = os.read(fd, 4096)
+        if not d: break
+        out += d
+except OSError:
+    pass
+_, st = os.waitpid(pid, 0)
+sys.stdout.write(out.decode(errors="replace"))
+sys.exit(os.waitstatus_to_exitcode(st))
+`;
+  const r = spawnSync("python3", ["-I", "-c", script, process.execPath, CLI], { env: { ...process.env, ORCH_HOME: h, ORCH_LAUNCH_CMD: "", PATH: mimeStub("com.anthropic.Claude.desktop") }, encoding: "utf8", timeout: 20000 });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /launch mode: desktop/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(cfgFile(h), "utf8")), { mode: "desktop" });
 });
