@@ -496,7 +496,9 @@ export function appendAck(name, key, action = "", { resolved = false, ticket } =
 // Events nobody has handled yet. `queued` is bookkeeping for the desk's dead detection, and `child` (handoff.mjs child,
 // written by /frood-ticket for /frood-learn) is a record of a child session: neither is something to act on. Until
 // 2026-11-25 a `child` event reached the desk's decideStep and paged "ESCALATE unknown-event child:…".
-export const isBookkeepingEvent = (e) => e?.kind === "queued" || e?.event === "child";
+// `claim` (handoff.mjs claim) records who held the stream, for /frood-learn: also never something to act on.
+export const isBookkeepingEvent = (e) =>
+  e?.kind === "queued" || e?.kind === "child" || e?.event === "child" || e?.kind === "claim" || e?.event === "claim";
 export function unhandled(name) {
   const acks = readAcks(name);
   return readEvents(name).filter((e) => !isBookkeepingEvent(e) && !acks.has(e.key));
@@ -635,10 +637,12 @@ export function claimStream(name, by, { session, takeover = false } = {}) {
       const line = { key: `takeover:${now}`, kind: "takeover", from: from.by, from_session: from.session, to: by, to_session: session ?? null, at: now };
       fs.appendFileSync(leaseFile(name), JSON.stringify(line) + "\n");
     }
+    if (session !== undefined) obj.claim = claim;
+    saveStream(name, obj);
+    // Record every claim on the stream so /frood-learn can collect claimants
+    // even after the stream is done (held_session / session cleared). Written
+    // after saveStream so a failed save leaves no orphan claim line.
     if (session !== undefined) {
-      obj.claim = claim;
-      // Record every claim on the stream so /frood-learn can collect claimants
-      // even after the stream is done (held_session / session cleared).
       fs.appendFileSync(eventsFile(name), JSON.stringify({
         key: `claim:${name}:${session}`,
         kind: "claim",
@@ -648,7 +652,6 @@ export function claimStream(name, by, { session, takeover = false } = {}) {
         at: now,
       }) + "\n");
     }
-    saveStream(name, obj);
     const out = { code: 0, value: obj };
     if (expired) out.note = claimExpiredLine(name, expired);
     return out;
@@ -964,6 +967,7 @@ function cmdChild(a) {
   const key = `child:${name}:${session}`;
   const added = appendEvent(name, {
     key,
+    kind: "child",
     event: "child",
     session,
     harness,

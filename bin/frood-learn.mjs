@@ -871,9 +871,14 @@ function resolveOcModel(eventModel, session, out) {
     } catch {}
   }
   // Check the column exists before selecting it (older opencode.db schemas may
-  // not have session_v2.model). Fails safe to null.
-  const cols = dbQuery(OPENCODE_DB, "PRAGMA table_info(session_v2)");
-  if (!cols || !cols.some((c) => c.name === "model")) return null;
+  // not have session_v2.model). pragma_table_info() returns JSON via
+  // json_group_array, unlike the plain PRAGMA which sqlite3 emits pipe-separated.
+  // Fails safe to null.
+  const cols = dbQuery(
+    OPENCODE_DB,
+    "SELECT json_group_array(json_object('name', name)) FROM pragma_table_info('session_v2')",
+  );
+  if (!cols || !cols.some((c) => c && c.name === "model")) return null;
   const rows = dbQuery(
     OPENCODE_DB,
     `SELECT json_group_array(json_object('model', model)) FROM session_v2 WHERE id = '${session.replace(/'/g, "''")}'`,
@@ -921,8 +926,8 @@ function collectChildren(streamName) {
     }
   }
   // Fallback for streams that predate claim events: board ticket history.
-  if (stream && stream.repo) {
-    const ticketPath = path.join(stream.repo, ".opencode", "board", "tickets", `${stream.name}.json`);
+  if (stream && typeof stream.repo === "string" && stream.repo) {
+    const ticketPath = path.join(stream.repo, ".opencode", "board", "tickets", `${streamName}.json`);
     let ticket;
     try { ticket = JSON.parse(fs.readFileSync(ticketPath, "utf8")); } catch {}
     if (ticket && Array.isArray(ticket.history)) {
@@ -936,6 +941,11 @@ function collectChildren(streamName) {
     }
   }
   for (const c of claimants) {
+    // Only transcript-identifiable ids are collectable: a UUID (Claude Code or
+    // board history) or an OpenCode `ses_...` id. Anything else (a desktop app
+    // `local_...` id, an `opus-...` id, ...) is skipped quietly: no child, no
+    // crash, no "not found at undefined" note.
+    if (!UUID_RE.test(c.session) && !c.session.startsWith("ses_")) continue;
     let harness;
     if (c.by === "cc" || UUID_RE.test(c.session)) harness = "claude-code";
     else if (c.session.startsWith("ses_") || c.by === "oc") harness = "opencode";
@@ -1043,14 +1053,6 @@ function reviewChild(child, streamName) {
     findings: [],
     transcriptCopied: false,
   };
-
-  // A desktop-app (`local_...`) id is not a transcript id — the session must
-  // record itself with $CLAUDE_CODE_SESSION_ID. List as missing, never crash.
-  if (child.session.startsWith("local_")) {
-    report.status = "missing";
-    report.note = "desktop app id, not a transcript id — the session must record itself with $CLAUDE_CODE_SESSION_ID";
-    return report;
-  }
 
   let parsed;
   if (child.harness === "opencode") {

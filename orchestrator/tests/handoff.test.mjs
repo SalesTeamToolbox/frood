@@ -1178,3 +1178,28 @@ test("claim --session appends one claim event; --takeover appends another; no --
   const ev4 = eventsRaw(h, "s1").split("\n").filter(Boolean).map((l) => JSON.parse(l));
   assert.equal(ev4.length, 3, "claim without --session appends nothing");
 });
+
+test("unhandled is empty after a claim (claim events are informational)", () => {
+  const { e, h } = leased();
+  run(e, "claim", "--stream", "s1", "--by", "cc", "--session", "sess-a");
+  run(e, "claim", "--stream", "s1", "--by", "oc", "--session", "sess-b", "--takeover");
+  withHome(h, () => assert.deepEqual(unhandled("s1"), []));
+});
+
+test("unhandled is empty after a child event", () => {
+  const { e, h } = leased();
+  run(e, "child", "--stream", "s1", "--session", "ses_abc123", "--harness", "claude-code", "--role", "nested");
+  withHome(h, () => assert.deepEqual(unhandled("s1"), []));
+});
+
+test("unhandled still returns a real unhandled event", () => {
+  const { e, h } = leased();
+  withHome(h, () =>
+    appendEvent("s1", { key: "dead:s1:x", kind: "dead", run: "x", out: "o", agent: "worker" }),
+  );
+  withHome(h, () => {
+    const un = unhandled("s1");
+    assert.equal(un.length, 1);
+    assert.equal(un[0].kind, "dead");
+  });
+});

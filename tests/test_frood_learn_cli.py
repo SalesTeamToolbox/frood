@@ -607,7 +607,7 @@ def fixture_children_home(tmp_path):
                 "status": "active",
                 "waiting": "",
                 "next": "2020-01-01T00:00:00Z",
-                "held_session": "sess_orch_01",
+                "held_session": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             }
         )
     )
@@ -667,7 +667,14 @@ def fixture_children_home(tmp_path):
     # Claude Code subagents under the orchestrator session's subagents/ folder.
     # Two subagents share one sessionId (sess_orch_01, the parent's id) but have
     # distinct agentIds -> they must surface as two children keyed by agentId.
-    cc_sub = home / ".claude" / "projects" / "frood" / "sess_orch_01" / "subagents"
+    cc_sub = (
+        home
+        / ".claude"
+        / "projects"
+        / "frood"
+        / "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        / "subagents"
+    )
     cc_sub.mkdir(parents=True)
     shutil.copyfile(FIXTURES / "agent-scout.jsonl", cc_sub / "agent-scout.jsonl")
     shutil.copyfile(FIXTURES / "agent-scout.meta.json", cc_sub / "agent-scout.meta.json")
@@ -683,11 +690,11 @@ def fixture_children_home(tmp_path):
             "content": [{"type": "text", "text": "orchestrator session work"}],
         },
         "timestamp": "2026-01-01T00:00:00.000Z",
-        "sessionId": "sess_orch_01",
+        "sessionId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
     }
-    (home / ".claude" / "projects" / "frood" / "sess_orch_01.jsonl").write_text(
-        json.dumps(orch_transcript) + "\n"
-    )
+    (
+        home / ".claude" / "projects" / "frood" / "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl"
+    ).write_text(json.dumps(orch_transcript) + "\n")
     # Nested Claude Code session as a top-level .jsonl file.
     cc_proj = home / ".claude" / "projects" / "frood"
     cc_proj.mkdir(parents=True, exist_ok=True)
@@ -715,7 +722,7 @@ def test_default_run_lists_all_children(fixture_children_home):
 
     # The orchestrator session (held_session) is a claimant: role orchestrator,
     # harness claude-code, its own transcript reviewed.
-    orch = by_session["sess_orch_01"]
+    orch = by_session["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]
     assert orch["role"] == "orchestrator", orch
     assert orch["harness"] == "claude-code", orch
     assert orch["status"] == "analyzed", orch
@@ -723,7 +730,7 @@ def test_default_run_lists_all_children(fixture_children_home):
     for f in orch["findings"]:
         assert f["role"] == "orchestrator", f
         assert f["harness"] == "claude-code", f
-        assert f["session"] == "sess_orch_01", f
+        assert f["session"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", f
 
     # OpenCode worker child (model resolved from the run-done event).
     oc = by_session["ses_fixture_oc"]
@@ -858,7 +865,14 @@ def test_cc_child_zero_turns_reports_empty_not_analyzed(fixture_children_home):
     """A Claude Code transcript that parses to zero turns is reported as
     `status: "empty"` with a note, not as a clean `analyzed` with no note."""
     home, proj = fixture_children_home
-    cc_sub = home / ".claude" / "projects" / "frood" / "sess_orch_01" / "subagents"
+    cc_sub = (
+        home
+        / ".claude"
+        / "projects"
+        / "frood"
+        / "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        / "subagents"
+    )
     (cc_sub / "agent-empty.jsonl").write_text(
         json.dumps(
             {
@@ -1004,10 +1018,8 @@ def test_local_id_child_is_missing_note_and_transcript_id_reviewed(tmp_path):
     by_session = {c["session"]: c for c in children}
     local = by_session["local_xyz"]
     assert local["status"] == "missing", local
-    assert local["note"] == (
-        "desktop app id, not a transcript id — "
-        "the session must record itself with $CLAUDE_CODE_SESSION_ID"
-    ), local["note"]
+    # No desktop-app metadata for local_xyz (resolveDesktopSessionId finds none): missing, with the reason.
+    assert "metadata not found" in local["note"], local["note"]
     nested = by_session["sess_nested"]
     assert nested["status"] == "analyzed", nested
     assert nested["role"] == "nested", nested
@@ -1037,9 +1049,9 @@ def test_done_stream_claim_event_reviews_claimant_and_subagents(tmp_path):
         },
         [
             {
-                "key": "claim:fx:sess_claimant",
+                "key": "claim:fx:cccccccc-dddd-eeee-ffff-111111111111",
                 "event": "claim",
-                "session": "sess_claimant",
+                "session": "cccccccc-dddd-eeee-ffff-111111111111",
                 "by": "cc",
                 "at": "2026-01-01T00:00:00Z",
             },
@@ -1053,13 +1065,13 @@ def test_done_stream_claim_event_reviews_claimant_and_subagents(tmp_path):
             "content": [{"type": "text", "text": "claimant work"}],
         },
         "timestamp": "2026-01-01T00:10:00.000Z",
-        "sessionId": "sess_claimant",
+        "sessionId": "cccccccc-dddd-eeee-ffff-111111111111",
     }
-    _cc_transcript(home, "frood", "sess_claimant", [assistant])
+    _cc_transcript(home, "frood", "cccccccc-dddd-eeee-ffff-111111111111", [assistant])
     _cc_subagents(
         home,
         "frood",
-        "sess_claimant",
+        "cccccccc-dddd-eeee-ffff-111111111111",
         [
             (
                 "scout",
@@ -1072,7 +1084,7 @@ def test_done_stream_claim_event_reviews_claimant_and_subagents(tmp_path):
                             "content": [{"type": "text", "text": "scouting"}],
                         },
                         "timestamp": "2026-01-01T00:00:00.000Z",
-                        "sessionId": "sess_claimant",
+                        "sessionId": "cccccccc-dddd-eeee-ffff-111111111111",
                         "agentId": "agent_scout_01",
                     }
                 ],
@@ -1087,7 +1099,7 @@ def test_done_stream_claim_event_reviews_claimant_and_subagents(tmp_path):
     rep = json.loads(out.read_text())
     children = rep.get("children") or []
     by_session = {c["session"]: c for c in children}
-    claimant = by_session["sess_claimant"]
+    claimant = by_session["cccccccc-dddd-eeee-ffff-111111111111"]
     assert claimant["role"] == "orchestrator", claimant
     assert claimant["harness"] == "claude-code", claimant
     assert claimant["status"] == "analyzed", claimant
@@ -1231,7 +1243,6 @@ def test_handoff_claim_appends_claim_event(tmp_path):
 
     home = tmp_path / "home"
     home.mkdir(parents=True)
-    os.environ["ORCH_HOME"] = str(home)
     try:
         plan = home / "plan.md"
         plan.write_text("# plan\n## Handoff\nnext: M1\n")
@@ -1261,6 +1272,7 @@ def test_handoff_claim_appends_claim_event(tmp_path):
                 ["node", bin_, "write", "--stream", "s1", "--plan", str(plan), "--next", "M1"],
                 capture_output=True,
                 text=True,
+                timeout=30,
                 env={
                     **os.environ,
                     "ORCH_HOME": str(home),
@@ -1292,7 +1304,7 @@ def test_handoff_claim_appends_claim_event(tmp_path):
         ev4 = (streams / "s1.events.jsonl").read_text().strip().split("\n")
         assert len(ev4) == 2, ev4
     finally:
-        os.environ.pop("ORCH_HOME", None)
+        pass
 
 
 # ------------------------------------------------------------------ D.4 minor-findings tests
@@ -1352,7 +1364,7 @@ def test_run_in_background_count(tmp_path):
             "status": "active",
             "waiting": "",
             "next": "2020-01-01T00:00:00Z",
-            "held_session": "sess_orch_01",
+            "held_session": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         },
         [
             {
@@ -1435,3 +1447,168 @@ def test_receipt_model_fallback(tmp_path):
     assert by_session["ses_receipt"]["model"] == "opencode-go/nemotron-free", by_session[
         "ses_receipt"
     ]
+
+
+def _oc_db_with_session(home, session_id, model, with_model_column=True):
+    """Create an opencode.db with a session_v2 table and one session row."""
+    oc_db_dir = home / ".local" / "share" / "opencode"
+    oc_db_dir.mkdir(parents=True)
+    oc_db = oc_db_dir / "opencode.db"
+    if with_model_column:
+        sql = (
+            "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, model TEXT, "
+            "time_created INTEGER, time_updated INTEGER);\n"
+            f"INSERT INTO session_v2 VALUES ('{session_id}','{session_id}','{model}',1700000000000,1700000300000);\n"
+        )
+    else:
+        sql = (
+            "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, "
+            "time_created INTEGER, time_updated INTEGER);\n"
+            f"INSERT INTO session_v2 VALUES ('{session_id}','{session_id}',1700000000000,1700000300000);\n"
+        )
+    subprocess.run(["sqlite3", str(oc_db)], input=sql, text=True, check=True)
+    return oc_db
+
+
+def test_resolve_oc_model_with_model_column(tmp_path):
+    """Fix 2: a fixture db WITH a `model` column returns its model (no crash)."""
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    _oc_db_with_session(home, "ses_model", "opencode-go/mimo-v2.6-flash", with_model_column=True)
+    _write_stream(
+        orch,
+        "fx",
+        {"name": "fx", "status": "active", "waiting": "", "next": "2020-01-01T00:00:00Z"},
+        [
+            {
+                "key": "run:fx/r1:done",
+                "kind": "run-done",
+                "run": "r1",
+                "out": "/x/worker-r1.md",
+                "agent": "worker",
+                "session": "ses_model",
+                "model": None,
+                "at": "2026-01-01T00:00:00Z",
+            },
+        ],
+    )
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    repj = json.loads(out.read_text())
+    children = repj.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    assert by_session["ses_model"]["model"] == "opencode-go/mimo-v2.6-flash", by_session[
+        "ses_model"
+    ]
+
+
+def test_resolve_oc_model_without_model_column(tmp_path):
+    """Fix 2: a fixture db WITHOUT a `model` column returns null and doesn't crash."""
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    _oc_db_with_session(home, "ses_nomodel", "ignored", with_model_column=False)
+    _write_stream(
+        orch,
+        "fx",
+        {"name": "fx", "status": "active", "waiting": "", "next": "2020-01-01T00:00:00Z"},
+        [
+            {
+                "key": "run:fx/r1:done",
+                "kind": "run-done",
+                "run": "r1",
+                "out": "/x/worker-r1.md",
+                "agent": "worker",
+                "session": "ses_nomodel",
+                "model": None,
+                "at": "2026-01-01T00:00:00Z",
+            },
+        ],
+    )
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    repj = json.loads(out.read_text())
+    children = repj.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    assert by_session["ses_nomodel"]["model"] is None, by_session["ses_nomodel"]
+
+
+def test_non_uuid_claimant_adds_no_child(tmp_path):
+    """Fix 3: a claimant whose id is neither a UUID nor `ses_…` (e.g.
+    `opus-797bcde8`) is skipped quietly: no child, no crash."""
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    _write_stream(
+        orch,
+        "fx",
+        {
+            "name": "fx",
+            "status": "done",
+            "waiting": "",
+            "next": "",
+            "held_session": None,
+            "session": None,
+        },
+        [
+            {
+                "key": "claim:fx:opus-797bcde8",
+                "event": "claim",
+                "session": "opus-797bcde8",
+                "by": "cc",
+                "at": "2026-01-01T00:00:00Z",
+            },
+        ],
+    )
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    repj = json.loads(out.read_text())
+    children = repj.get("children") or []
+    assert not any(c["session"] == "opus-797bcde8" for c in children), children
+
+
+def test_repo_non_string_does_not_crash(tmp_path):
+    """Fix 4: a stream whose `repo` is not a string (e.g. 123) doesn't crash
+    the board-ticket fallback path."""
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    _write_stream(
+        orch,
+        "fx",
+        {
+            "name": "fx",
+            "status": "done",
+            "waiting": "",
+            "next": "",
+            "held_session": None,
+            "session": None,
+            "repo": 123,
+        },
+        [],
+    )
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    repj = json.loads(out.read_text())
+    assert "children" in repj
