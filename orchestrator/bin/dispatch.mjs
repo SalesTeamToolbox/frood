@@ -3,6 +3,7 @@
 //
 //   node bin/dispatch.mjs plan <ticket-id|plan-file>... [--repo <path>] [--json]
 //   node bin/dispatch.mjs cap [--kind build|train] [--exclude <id>]... [--repo <path>] [--json]
+//   node bin/dispatch.mjs status [--ticket <id>] [--repo <path>] [--json | --line]
 //   --help  (or -h) prints this text and exits 0
 //
 // plan: each argument is a ticket id on the board, or a plan file; a plan file contributes every board ticket id it
@@ -31,9 +32,11 @@
 import "./no-window.mjs";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { slotConfig, readSample, allowedSlots } from "./slots.mjs";
+import { activeRuns } from "./oc-worker.mjs";
 
 const DEFAULT_CAPS = { build: 2, train: 1 };
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,59}$/;
@@ -301,6 +304,205 @@ export function capStatus(root, kind, exclude = []) {
   return { kind, running, max, ok: running < max, ...(auto ? { reason } : {}) };
 }
 
+// ---------- status
+// One status line / JSON snapshot of the sessions and runs the orchestrator is managing.
+// Side-effect-free: no git, no network, no locks; every read fails soft.
+
+const ORCH_HOME = process.env.ORCH_HOME || os.homedir();
+const STREAMS_DIR = path.join(ORCH_HOME, ".config", "orchestrator", "streams");
+
+function activeTicket(t) {
+  if (t.stage === "working" || t.stage === "ready") return true;
+  return t.stage === "queued" && t.assignment && t.assignment.session;
+}
+
+/** Walk up from `start` to the first dir holding `.opencode/board/` (no git involved). */
+function findBoardRoot(start) {
+  let dir = path.resolve(start);
+  for (let i = 0; i < 40; i++) {
+    try {
+      if (fs.statSync(path.join(dir, ".opencode", "board")).isDirectory()) return dir;
+    } catch { /* keep walking up */ }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+function fmtDurS(s) {
+  s = Math.max(0, Math.floor(Number(s ?? 0)));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h${m % 60 ? `${m % 60}m` : ""}`;
+}
+
+function shortAgent(agent) {
+  if (!agent) return "";
+  return agent.includes("-") ? agent.split("-").pop() : agent;
+}
+
+/** Newest mtime (ms) of a run's output files (events log first, then the report itself). */
+function outMsOf(run) {
+  let best = null;
+  for (const p of [`${run.out}.events.jsonl`, run.out]) {
+    if (typeof p !== "string") continue;
+    try {
+      const m = fs.statSync(p).mtimeMs;
+      if (best == null || m > best) best = m;
+    } catch { /* missing yet */ }
+  }
+  return best;
+}
+
+/** Age in seconds of the last line of a stream's events.jsonl, or null. */
+function streamLastAgeS(stream, now) {
+  if (!stream) return null;
+  const file = path.join(STREAMS_DIR, `${stream}.events.jsonl`);
+  try {
+    const text = fs.readFileSync(file, "utf8");
+    const line = text.split(/\r?\n/).filter(Boolean).pop();
+    if (!line) return null;
+    const e = JSON.parse(line);
+    const t = e && e.at ? Date.parse(e.at) : 0;
+    if (Number.isFinite(t) && t > 0) return (now - t) / 1000;
+  } catch { return null; }
+  return null;
+}
+
+/** Full status data, computed in-process (also used by the statusline hook). */
+export function statusData(root, opts = {}) {
+  const now = Number.isFinite(opts.now) ? opts.now : Date.now();
+  const ticketFilter = opts.ticket;
+
+  // 1. board tickets in an active stage, failing soft
+  let tickets = [];
+  try {
+    tickets = boardTickets(root).filter(activeTicket);
+  } catch { tickets = []; }
+  if (ticketFilter) tickets = tickets.filter((t) => t.id === ticketFilter);
+
+  // counts: `building` reuses capStatus --kind build; `ready` is staged-ready tickets.
+  let building = 0;
+  try {
+    building = capStatus(root, "build").running;
+  } catch {
+    building = tickets.filter((t) => t.stage === "working" || (t.stage === "queued" && t.assignment?.session)).length;
+  }
+  const ready = tickets.filter((t) => t.stage === "ready").length;
+
+  // 2. live oc-worker runs (reuse oc-worker's own active-run reader), failing soft
+  let runs = [];
+  try {
+    runs = activeRuns(now);
+  } catch { runs = []; }
+
+  // match runs to tickets: --ticket/board attach (run.session === ticket.assignment.session)
+  // or dir === ticket worktree; most recent run wins per ticket
+  const runByTicket = new Map();
+  for (const run of runs) {
+    let matched = null;
+    for (const t of tickets) {
+      if (run.session && run.session === (t.assignment && t.assignment.session)) { matched = t; break; }
+      if (run.dir && run.dir === t.worktree) { matched = t; break; }
+    }
+    if (!matched) continue;
+    const cur = runByTicket.get(matched.id);
+    if (!cur || (run.started || 0) > (cur.started || 0)) runByTicket.set(matched.id, run);
+  }
+
+  // 3. stream last-event ages (cached per stream), failing soft
+  const streamAge = new Map();
+  function streamAgeOf(stream) {
+    if (!stream) return null;
+    if (!streamAge.has(stream)) streamAge.set(stream, streamLastAgeS(stream, now));
+    return streamAge.get(stream);
+  }
+
+  const ticketRows = [];
+  const runSegs = [];
+  for (const t of tickets) {
+    const run = runByTicket.get(t.id);
+    let runObj = null;
+    let seg = null;
+    if (run) {
+      const elapsed_s = Number.isFinite(run.started) ? (now - run.started) / 1000 : null;
+      const outMs = outMsOf(run);
+      const out_age_s = outMs == null ? null : (now - outMs) / 1000;
+      const warn = !run.pidAlive || (out_age_s != null && Number.isInteger(run.idleMin) && run.idleMin > 0 && out_age_s > run.idleMin * 60);
+      runObj = {
+        pid: run.pid ?? null,
+        agent: run.agent ?? null,
+        model: run.model ?? null,
+        elapsed_s,
+        out_age_s,
+        alive: Boolean(run.pidAlive),
+      };
+      seg = `${t.id} ${shortAgent(run.agent)} ${fmtDurS(elapsed_s ?? 0)}${warn ? " ⚠" : ""}`;
+      runSegs.push({ elapsed_s: elapsed_s ?? 0, seg });
+    }
+    ticketRows.push({
+      id: t.id,
+      stage: t.stage,
+      session: (t.assignment && t.assignment.session) || null,
+      run: runObj,
+      ...(streamAgeOf(t.stream || (t.assignment && t.assignment.stream) || (run && run.stream)) != null
+        ? { last_event_age_s: streamAgeOf(t.stream || (t.assignment && t.assignment.stream) || (run && run.stream)) }
+        : {}),
+    });
+  }
+
+  // runs sort by elapsed, most recent last -> descending elapsed
+  runSegs.sort((a, b) => b.elapsed_s - a.elapsed_s);
+
+  const counts = { building, ready, runs: runs.length };
+  return {
+    at: new Date(now).toISOString(),
+    tickets: ticketRows,
+    counts,
+    line: buildLine(building, ready, runSegs.map((r) => r.seg)),
+  };
+}
+
+function buildLine(building, ready, runSegs) {
+  if (building === 0 && ready === 0 && runSegs.length === 0) return "";
+  const head = [];
+  if (building > 0) head.push(`${building} building`);
+  if (ready > 0) head.push(`${ready} ready`);
+  let line = `⇉ ${[...head, ...runSegs].join(" · ")}`;
+  if (line.length <= 120) return line;
+  // Overflow: keep the head and the first N runs, then append ` +K`.
+  const kept = [];
+  let out = "";
+  for (let i = 0; i < runSegs.length; i++) {
+    const trial = `⇉ ${[...head, ...kept, runSegs[i]].join(" · ")}`;
+    const remaining = runSegs.length - i - 1;
+    const candidate = remaining > 0 ? `${trial} +${remaining}` : trial;
+    if (candidate.length > 120) break;
+    kept.push(runSegs[i]);
+    out = candidate;
+  }
+  return out || line.slice(0, 120);
+}
+
+function statusTable(rows) {
+  const pad = (s, w) => String(s ?? "").slice(0, w).padEnd(w);
+  const lines = [
+    `ID${" ".repeat(7)}STAGE   SESSION${" ".repeat(7)}PID   AGENT${" ".repeat(10)}ELAPSED OUT_AGE  ALIVE`,
+  ];
+  for (const t of rows) {
+    const r = t.run;
+    lines.push(
+      `${pad(t.id, 16)}${pad(t.stage, 9)}${pad(t.session, 16)}${pad(r ? r.pid : "-", 6)}${
+        pad(r ? shortAgent(r.agent) : "-", 16)
+      }${pad(r ? fmtDurS(r.elapsed_s) : "-", 10)}${pad(r ? fmtDurS(r.out_age_s) : "-", 9)}${r ? (r.alive ? "yes" : "no") : "-"}`
+    );
+  }
+  return lines.join("\n");
+}
+
 // ---------- cli
 function usage() {
   const src = fs.readFileSync(fileURLToPath(import.meta.url), "utf8").split(/\r?\n/);
@@ -309,15 +511,16 @@ function usage() {
   return out.join("\n");
 }
 function parse(argv) {
-  const o = { _: [], json: false, repo: null, kind: "build", exclude: [] };
+  const o = { _: [], json: false, line: false, repo: null, ticket: null, kind: "build", exclude: [] };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === "--json") o.json = true;
+    else if (k === "--line") o.line = true;
     else if (k === "--exclude") {
       const v = argv[++i];
       if (v === undefined) throw new Usage("--exclude needs a value");
       o.exclude.push(v);
-    } else if (k === "--repo" || k === "--kind") {
+    } else if (k === "--repo" || k === "--kind" || k === "--ticket") {
       const v = argv[++i];
       if (v === undefined) throw new Usage(`${k} needs a value`);
       o[k.slice(2)] = v;
@@ -337,8 +540,8 @@ function main(argv) {
   }
   const [cmd, ...rest] = argv;
   const o = parse(rest);
-  const root = repoRoot(o.repo || process.cwd());
   if (cmd === "plan") {
+    const root = repoRoot(o.repo || process.cwd());
     let plan;
     try {
       plan = buildPlan(root, o._);
@@ -357,11 +560,32 @@ function main(argv) {
     return 0;
   }
   if (cmd === "cap") {
+    const root = repoRoot(o.repo || process.cwd());
     const s = capStatus(root, o.kind, o.exclude);
     if (o.json) console.log(JSON.stringify(s));
     else if (s.ok) console.log(`ok ${s.kind} ${s.running}/${s.max}`);
     else console.error(`dispatch: cap reached — ${s.kind} ${s.running}/${s.max}`);
     return s.ok ? 0 : 1;
+  }
+  if (cmd === "status") {
+    const root = o.repo ? path.resolve(o.repo) : findBoardRoot(process.cwd());
+    const now = Date.now();
+    if (!root) {
+      if (o.json) console.log(JSON.stringify({ at: new Date(now).toISOString(), tickets: [], counts: { building: 0, ready: 0, runs: 0 } }));
+      else if (o.line) { /* empty output */ }
+      else console.log("no board found — nothing active");
+      return 0;
+    }
+    const data = statusData(root, { ticket: o.ticket });
+    if (o.json) {
+      console.log(JSON.stringify({ at: data.at, tickets: data.tickets, counts: data.counts }));
+    } else if (o.line) {
+      if (data.line) console.log(data.line);
+    } else {
+      console.log(statusTable(data.tickets));
+      console.log(`counts: building ${data.counts.building}, ready ${data.counts.ready}, runs ${data.counts.runs}`);
+    }
+    return 0;
   }
   throw new Usage(`unknown command "${cmd}"`);
 }

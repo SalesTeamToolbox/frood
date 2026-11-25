@@ -815,6 +815,55 @@ function orchestratorState() {
   return { health, down, runs };
 }
 
+// ── dispatch.mjs status segment (in-process, never spawns node) ───────────────
+// Import dispatch.mjs once per process and call its exported statusData so the
+// statusline shows the same --line contract the CLI prints. Every read fails soft:
+// a throw here can never break the bar.
+const DISPATCH_PATH = path.join(__dirname, "..", "bin", "dispatch.mjs");
+let dispatchModule = null;
+let dispatchModulePromise = null;
+function dispatchModuleLazy() {
+  if (dispatchModule) return Promise.resolve(dispatchModule);
+  if (!dispatchModulePromise) {
+    dispatchModulePromise = import(pathToFileURL(DISPATCH_PATH).href)
+      .then((m) => { dispatchModule = m; return m; })
+      .catch(() => { dispatchModule = {}; return {}; });
+  }
+  return dispatchModulePromise;
+}
+
+/** Walk up from `start` to the first dir holding `.opencode/board/` (no git). */
+function findBoardRoot(start) {
+  let dir = path.resolve(start);
+  for (let i = 0; i < 40; i++) {
+    try {
+      if (fs.statSync(path.join(dir, ".opencode", "board")).isDirectory()) return dir;
+    } catch { /* keep walking up */ }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/** The --line text for the repo at `cwd`, or "" when nothing is active / no board.
+ *  `_statusData` is injected by tests; production imports dispatch.mjs. Any throw
+ *  is swallowed so the segment can never break the bar. */
+async function dispatchSegmentLine(cwd, _statusData) {
+  try {
+    let statusData = _statusData;
+    if (!statusData) {
+      const mod = await dispatchModuleLazy();
+      statusData = mod && mod.statusData;
+    }
+    if (typeof statusData !== "function") return "";
+    const root = findBoardRoot(cwd);
+    if (!root) return "";
+    const data = statusData(root);
+    return typeof data.line === "string" ? data.line : "";
+  } catch { return ""; }
+}
+
 // ── statusline rendering ────────────────────────────────────────────────────
 function ctxSegment(data) {
   const remaining = data?.context_window?.remaining_percentage;
@@ -915,7 +964,7 @@ function visibleWidth(s) {
   return stripAnsi(s).replace(/\x1b\]8;;[^\x1b]*\x1b\\/, "").length;
 }
 
-function renderLines(payload, fast) {
+function renderLines(payload, fast, dispatchLine) {
   const dir = path.basename(payload?.workspace?.current_dir || payload?.cwd || process.cwd());
   const model = payload?.model?.display_name || "Claude";
 
@@ -932,6 +981,7 @@ function renderLines(payload, fast) {
     oc,
     fast.unread > 0 ? `${YELLOW}✉${fast.unread}${R}` : "",
     remoteSegment(fast.remotes),
+    dispatchLine,
     ...fast.trains.flatMap((t) => [
       trainSegment(t.label, t.state),
       verifySegment(t.label, t.verify),
@@ -1342,6 +1392,7 @@ async function runJson(forId) {
     // Active oc-worker runs give the sidebar something to render as a live spinner
     // for headless desk-driven workers that cannot set todowrite themselves.
     const active = activeNow();
+    const dispatchLine = await dispatchSegmentLine(process.cwd()).catch(() => "");
     const out = {
       ts: Date.now(),
       oc: fast.oc,
@@ -1352,6 +1403,7 @@ async function runJson(forId) {
       unreadRows: recentUnread(3, { liveOnly: true }),
       cc: ccSidecar(),
       active,
+      dispatch: dispatchLine || null,
     };
     if (forId) {
       // Related-sessions view for one session: the panel shows only other
@@ -1391,7 +1443,9 @@ async function runStatusline(payload) {
   const fast = await collectFast(payload);
   writeSidecar(payload);
   if (dashStale()) spawnDashRebuild();
-  process.stdout.write(renderLines(payload, fast) + "\n");
+  const cwd = payload?.workspace?.current_dir || payload?.cwd || process.cwd();
+  const dispatchLine = await dispatchSegmentLine(cwd).catch(() => "");
+  process.stdout.write(renderLines(payload, fast, dispatchLine) + "\n");
 }
 
 function main() {
@@ -1444,6 +1498,8 @@ module.exports.__test = {
   mailLiveHours,
   renderText,
   renderHtml,
+  renderLines,
+  dispatchSegmentLine,
   loadConfig,
   ORCH_REPO_DIR,
 };

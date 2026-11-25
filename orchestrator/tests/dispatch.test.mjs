@@ -285,3 +285,131 @@ test("cap --kind build auto: no /proc sample -> max falls to min (2), reason nam
   assert.equal(s.max, 2);
   assert.match(s.reason, /no load sample/);
 });
+
+// ---------- status ----------
+// Each status run needs an isolated ORCH_HOME so the runs/streams dirs (shared with the real machine)
+// do not leak into the assertions.
+function mkStatus() {
+  const repo = mk();
+  const oh = fs.mkdtempSync(path.join(os.tmpdir(), "orch-status-home-"));
+  CLEAN.push(oh);
+  fs.mkdirSync(path.join(oh, ".config", "orchestrator", "runs"), { recursive: true });
+  fs.mkdirSync(path.join(oh, ".config", "orchestrator", "streams"), { recursive: true });
+  return { repo, oh };
+}
+const status = (repo, oh, ...args) => spawnSync(process.execPath, [BIN, ...args, "--repo", repo], {
+  encoding: "utf8", env: { ...process.env, ORCH_HOME: oh },
+});
+function runFile(oh, pid, started, over = {}) {
+  const dir = path.join(oh, ".config", "orchestrator", "runs");
+  const f = path.join(dir, `${pid}-${started}.json`);
+  fs.writeFileSync(f, JSON.stringify({
+    pid, agent: "worker-nvidia", model: "nvidia/nemotron", title: "run", dir: "/tmp/wt",
+    out: "/tmp/out.md", started, idleMin: 5, timeoutMin: 60, session: `sess-${pid}`, ...over,
+  }));
+  return f;
+}
+
+test("status: --line is empty with no active tickets; exit 0", () => {
+  const { repo, oh } = mkStatus();
+  ticket(repo, "done-one", { scope: ["d.mjs"], stage: "shipped" });
+  ticket(repo, "idle-one", { scope: ["i.mjs"], stage: "queued" }); // no session: not active
+  const r = status(repo, oh, "status", "--line");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "");
+});
+
+test("status: two building and one ready give the right counts", () => {
+  const { repo, oh } = mkStatus();
+  ticket(repo, "b-one", { scope: ["a.mjs"], stage: "working" });
+  ticket(repo, "b-two", { scope: ["b.mjs"], stage: "queued", session: "sess-1" }); // dispatched, not yet claimed
+  ticket(repo, "r-one", { scope: ["c.mjs"], stage: "ready" });
+  const r = status(repo, oh, "status", "--json");
+  assert.equal(r.status, 0, r.stderr);
+  const d = JSON.parse(r.stdout);
+  assert.equal(d.counts.building, 2);
+  assert.equal(d.counts.ready, 1);
+  assert.equal(d.tickets.length, 3);
+});
+
+test("status: --json has the documented shape", () => {
+  const { repo, oh } = mkStatus();
+  ticket(repo, "t-one", { scope: ["a.mjs"], stage: "working", session: "sess-1" });
+  ticket(repo, "t-two", { scope: ["b.mjs"], stage: "ready" });
+  const r = status(repo, oh, "status", "--json");
+  assert.equal(r.status, 0, r.stderr);
+  const d = JSON.parse(r.stdout);
+  assert.ok(Number.isFinite(Date.parse(d.at)), "at is an ISO instant");
+  assert.deepEqual(Object.keys(d), ["at", "tickets", "counts"]);
+  assert.deepEqual(Object.keys(d.counts), ["building", "ready", "runs"]);
+  assert.equal(d.counts.building, 1);
+  assert.equal(d.counts.ready, 1);
+  assert.equal(d.tickets.length, 2);
+  const byId = Object.fromEntries(d.tickets.map((t) => [t.id, t]));
+  assert.equal(byId["t-one"].stage, "working");
+  assert.equal(byId["t-one"].session, "sess-1");
+  assert.equal(byId["t-one"].run, null); // no run file registered
+  assert.equal(byId["t-two"].stage, "ready");
+  assert.equal(byId["t-two"].session, null);
+  assert.equal(byId["t-two"].run, null);
+  for (const t of d.tickets) {
+    assert.ok(["id", "stage", "session"].every((k) => k in t));
+    if (t.run) assert.ok(["pid", "agent", "model", "elapsed_s", "out_age_s", "alive"].every((k) => k in t.run));
+  }
+});
+
+test("status: a dead-pid run gets ⚠ in --line", () => {
+  const { repo, oh } = mkStatus();
+  ticket(repo, "t-one", { scope: ["a.mjs"], stage: "working", session: "sess-1" });
+  runFile(oh, 999999, Date.now() - 10_000, { session: "sess-1" }); // pid 999999 is not alive on this box
+  const r = status(repo, oh, "status", "--line");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /t-one/);
+  assert.match(r.stdout, /⚠/);
+});
+
+test("status: a live-pid run shows no ⚠ in --line", () => {
+  const { repo, oh } = mkStatus();
+  ticket(repo, "t-one", { scope: ["a.mjs"], stage: "working", session: "sess-1" });
+  runFile(oh, process.pid, Date.now() - 10_000, { session: "sess-1" });
+  const r = status(repo, oh, "status", "--line");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /t-one/);
+  assert.ok(!r.stdout.includes("⚠"), `live run should not warn: ${r.stdout}`);
+});
+
+test("status: overflow truncates with +K and stays ≤ 120 chars", () => {
+  const { repo, oh } = mkStatus();
+  const n = 24;
+  const base = Date.now();
+  for (let i = 0; i < n; i++) {
+    ticket(repo, `t-${i}`, { scope: [`src/${i}.mjs`], stage: "working", session: `sess-${i}` });
+    runFile(oh, 90000 + i, base - (n - i) * 1000, { session: `sess-${i}` }); // dead pids → ⚠
+  }
+  const r = status(repo, oh, "status", "--line");
+  assert.equal(r.status, 0, r.stderr);
+  const line = r.stdout;
+  assert.ok(line.length <= 120, `line too long (${line.length}): ${line}`);
+  assert.match(line, /⇉/);
+  assert.match(line, /\+[0-9]+/, `expected +K truncation: ${line}`);
+  // every shown run is a real segment; the +K accounts for the hidden remainder
+  assert.ok(line.split(" · ").some((s) => /\+\d+$/.test(s.trim())), `no +K tail: ${line}`);
+});
+
+test("status: stream last-event age appears in --json when a run names a stream", () => {
+  const { repo, oh } = mkStatus();
+  const stream = "stream-alpha";
+  ticket(repo, "t-one", { scope: ["a.mjs"], stage: "working", session: "sess-1" });
+  runFile(oh, 999999, Date.now() - 10_000, { session: "sess-1", stream }); // run names stream-alpha
+  fs.writeFileSync(
+    path.join(oh, ".config", "orchestrator", "streams", `${stream}.events.jsonl`),
+    '{"key":"k1","kind":"queued","at":"2026-11-24T10:00:00Z"}\n',
+  );
+  const r = status(repo, oh, "status", "--json");
+  assert.equal(r.status, 0, r.stderr);
+  const d = JSON.parse(r.stdout);
+  const t = d.tickets.find((x) => x.id === "t-one");
+  assert.ok(t && t.run, "t-one should carry its run");
+  assert.ok(t.last_event_age_s != null, "last_event_age_s missing for streamed run");
+  assert.ok(Number.isFinite(t.last_event_age_s) && t.last_event_age_s > 0);
+});

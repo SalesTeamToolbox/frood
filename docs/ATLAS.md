@@ -416,6 +416,10 @@ topic: docs/atlas/routes.md
 handler: orchestrator/bin/dispatch.mjs (plan: independence check, cap: concurrency limit); orchestrator/bin/board.mjs session (assignment.session); orchestrator/bin/desk.mjs status (ticketSessions)
 decides: which board tickets may run in their own sessions at once (shared file or `depends:` means serial), and whether the build cap leaves room — build cap may be `auto` (slots.mjs)
 
+### dispatch.mjs status + statusline segment
+handler: orchestrator/bin/dispatch.mjs status (board tickets in active stages, live oc-worker runs from `~/.config/orchestrator/runs`, stream last-event ages from `~/.config/orchestrator/streams`); orchestrator/hooks/cross-harness-statusline.js (the `--line` segment on statusline line 2 and the `dispatch` key in `--json`)
+decides: a single ≤120-char status line showing `building`/`ready` counts and live worker runs (dead pid or output past its idle limit marked `⚠`), computed in-process by importing `dispatch.mjs` — never spawning node; absent when no `.opencode/board/` is found. Contract: `--line` and `--json` are stable for a later desktop-app poller.
+
 ### desk: critic round floor, verdict replacement, patch-identical rebase
 handler: orchestrator/bin/desk.mjs criticRound() (run-done ACTION critic round floor), orchestrator/bin/desk.mjs latestVerdict() (newest verdict:<run>@<n> reader), orchestrator/bin/desk.mjs cmdMergeCheck() (head-moved rule with patch-identical rebase acceptance)
 decides: the critic round for a re-dispatched worker run (max of resume acks, worker-r<N> id, findings-r<N> on disk, board rounds.length), whether a corrected INVALID verdict is superseded at verdict:<run>@<n>, and whether a HEAD that moved past reviewed_sha is still a mergeable rebase (same patch-id). Step stays pure (file reads only, no git, no spawn); handoff.mjs append/read semantics are unchanged.
