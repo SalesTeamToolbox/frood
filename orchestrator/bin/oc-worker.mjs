@@ -13,9 +13,9 @@
 //      past its idle limit; STARTING = no output yet. Read-only; exits 0.
 //
 // - Runs `opencode run --standalone --format json --auto --agent <agent>` with cwd=<dir> and stdin closed
-//   (--standalone makes the server a child of the run process, so killing the process group ends the
-//   session; an open stdin makes `opencode run` wait forever).
-//   (an open stdin makes `opencode run` wait forever).
+//   (--standalone gives the run a private server on its stdio, so killing the run ends the session: the
+//   server exits when its pipe closes, with the proc-tree sweep as backstop. Without it the session lives
+//   on in the shared background service. An open stdin makes `opencode run` wait forever.)
 // - The prompt file's text is the message. A footer tells the agent it cannot ask questions:
 //   it must finish with `RESULT: BLOCKED: question — ...` instead.
 // - --session resumes the same agent session (revision rounds keep the worker's context).
@@ -831,9 +831,9 @@ export async function runWorker(a) {
   const reportLine = a.report ? `\nWrite your report to ${path.resolve(a.report)} (absolute path; not the worktree).` : "";
   const base = promptText + reportLine + FOOTER + readonlyFooter + visionFooter;
   const cliFor = (session, message) => {
-    // --standalone: the opencode server is a child of this run process, so killTree / the proc-tree
-    // sweep ends the whole session instead of leaving it writing in the worktree (see
-    // ticket killed-run-stops-agent).
+    // --standalone: a private opencode server on the run's stdio, so killTree ends the session (the server
+    // exits when its pipe closes; the proc-tree sweep is the backstop) instead of leaving it writing in the
+    // worktree via the shared service (ticket killed-run-stops-agent). Needs opencode >= 2.4 (--standalone).
     const cli = ["run", "--standalone", "--format", "json", "--auto", "--agent", a.agent, "--title", title];
     if (a.model) cli.push("--model", a.model);
     if (session) cli.push("--session", session);
