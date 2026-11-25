@@ -18,6 +18,10 @@
 //   edit-installed -> writes "modified by fake" to FAKE_OC_TARGET (an installed file), then finishes like ok
 //   edit-worktree -> same, for a worktree file; capture-scratch -> records ORCH_SCRATCH, whether it exists and the
 //                    message into FAKE_OC_RECORD, then finishes like ok
+//
+// Every `run` invocation is bounded by FAKE_OC_MAX_MS (default 300000 ms = 5 min): a timer exits the
+// process with code 124 once it elapses, and is unref()ed so it never delays a normal exit. No test needs
+// a fixture to outlive 5 minutes, so a hung fake can never strand a suite.
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -31,6 +35,15 @@ if (argv[0] === "models") {
     process.exit(0);
   }
 }
+// Max-life guard for every `run` invocation: exit 124 after FAKE_OC_MAX_MS, unref()ed so a normal exit
+// is never delayed. The orphan grandchild is killed by this timer too (see below).
+let grandchild = null;
+const maxMs = Number(process.env.FAKE_OC_MAX_MS || 300000);
+const maxTimer = setTimeout(() => {
+  try { if (grandchild) grandchild.kill("SIGKILL"); } catch {}
+  process.exit(124);
+}, maxMs);
+maxTimer.unref();
 const agent = argv[argv.indexOf("--agent") + 1];
 const session = argv.includes("--session") ? argv[argv.indexOf("--session") + 1] : "ses_fake123";
 let mode = process.env.FAKE_OC_MODE || "ok";
@@ -49,6 +62,8 @@ const dropEvents = () => {
 if (mode === "orphan") {
   const gc = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { detached: true, stdio: "ignore", windowsHide: true });
   gc.unref();
+  grandchild = gc;
+  // The detached grandchild must not outlive the fixture's own 5-minute cap: the max-life timer kills it.
   fs.writeFileSync(path.join(process.env.FAKE_OC_STATE_DIR, "grandchild.pid"), String(gc.pid));
   await new Promise((r) => setTimeout(r, Number(process.env.FAKE_OC_ORPHAN_WAIT || 4000)));
   mode = "ok";

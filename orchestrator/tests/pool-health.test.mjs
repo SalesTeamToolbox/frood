@@ -6,6 +6,10 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { classify, markDown, isDown, readHealth, agentModel, markUp } from "../bin/pool-health.mjs";
+import { installFixtureGuard } from "./fixtures/fixture-guard.mjs";
+
+// Every fixture child carries this process's suite marker; the guard reaps strays after the suite.
+installFixtureGuard();
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.join(HERE, "..", "bin", "oc-worker.mjs");
