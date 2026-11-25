@@ -1,5 +1,6 @@
 """CLI tests for bin/frood-learn.mjs (/frood-learn). Runs the real script via node."""
 
+import datetime
 import json
 import os
 import shutil
@@ -189,6 +190,387 @@ def test_propose_with_no_findings_sends_nothing(tmp_path):
     assert r.returncode != 0
     assert "no findings eligible to propose; nothing sent" in r.stderr
     assert "frood-learn failed" not in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# learn-runs: per-run opencode join (start delay, after-kill, long tool calls)
+# ---------------------------------------------------------------------------
+
+
+def _epoch_ms(iso):
+    return int(datetime.datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp() * 1000)
+
+
+def _build_learn_runs_fixture(home):
+    """Build a HOME with opencode.db + a stream whose events join runs to sessions."""
+    import sqlite3
+
+    orch = home / ".config" / "orchestrator"
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "streams").mkdir()
+    db_dir = home / ".local" / "share" / "opencode"
+    db_dir.mkdir(parents=True)
+    db_path = db_dir / "opencode.db"
+
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute(
+        "CREATE TABLE session_message("
+        "id text PRIMARY KEY, session_id text NOT NULL, type text NOT NULL, "
+        "seq integer NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)"
+    )
+    cur.execute(
+        "CREATE TABLE session_part("
+        "message_id text NOT NULL, session_id text NOT NULL, ordinal integer NOT NULL, "
+        "type text NOT NULL, call_id text, time_created integer NOT NULL, "
+        "time_updated integer NOT NULL, data text NOT NULL)"
+    )
+    con.commit()
+
+    stream = "lr"
+    (orch / "streams" / f"{stream}.json").write_text(
+        json.dumps(
+            {"name": stream, "status": "active", "waiting": "", "next": "2020-01-01T00:00:00Z"}
+        )
+    )
+
+    def part_data(name, command, created_ms, completed_ms=None):
+        call_id = "call-" + name
+        payload = {
+            "type": "tool",
+            "id": call_id,
+            "name": name,
+            "state": {
+                "status": "completed" if completed_ms is not None else "running",
+                "input": {"command": command},
+                "time": {
+                    "created": created_ms,
+                    **({"completed": completed_ms} if completed_ms is not None else {}),
+                },
+            },
+        }
+        return json.dumps(payload)
+
+    return con, cur, stream, db_path, part_data
+
+
+def _write_stream_events(orch, stream, events):
+    (orch / "streams" / f"{stream}.events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n"
+    )
+
+
+def _report_phase2(home, stream="lr", name="out.json"):
+    out = home / name
+    r = run([stream, "--phase", "2", "--no-mcp", "--report", str(out)], home, cwd=home)
+    assert r.returncode == 0, r.stderr
+    return json.loads(out.read_text())
+
+
+def test_learn_runs_start_delay_finding(tmp_path):
+    home = tmp_path / "home"
+    con, cur, stream, db_path, part_data = _build_learn_runs_fixture(home)
+    orch = home / ".config" / "orchestrator"
+
+    queued_iso = "2026-11-24T15:14:00Z"
+    queued_ms = _epoch_ms(queued_iso)
+    done_iso = "2026-11-24T16:43:00Z"
+    done_ms = _epoch_ms(done_iso)
+    session = "ses_delay"
+
+    # First session message 30 min after queued.
+    cur.execute(
+        "INSERT INTO session_message(id, session_id, type, seq, time_created, time_updated, data) VALUES(?,?,?,?,?,?,?)",
+        ("m1", session, "user", 1, queued_ms + 30 * 60 * 1000, queued_ms + 30 * 60 * 1000, "{}"),
+    )
+    con.commit()
+
+    _write_stream_events(
+        orch,
+        stream,
+        [
+            {
+                "key": f"run:{stream}/r1:queued",
+                "kind": "queued",
+                "at": queued_iso,
+                "run": f"{stream}/r1",
+                "out": "out1",
+            },
+            {
+                "key": f"run:{stream}/r1:done",
+                "kind": "run-done",
+                "at": done_iso,
+                "run": f"{stream}/r1",
+                "outcome": "timeout",
+                "exit": 1,
+                "session": session,
+            },
+        ],
+    )
+
+    rep = _report_phase2(home, stream)
+    details = {f["focus"]: f["detail"] for f in rep["findings"]}
+    sd = details.get("start delay", "")
+    assert "waited 30 min before opencode got its prompt" in sd, sd
+
+
+def test_learn_runs_after_kill_finding(tmp_path):
+    home = tmp_path / "home"
+    con, cur, stream, db_path, part_data = _build_learn_runs_fixture(home)
+    orch = home / ".config" / "orchestrator"
+
+    done_iso = "2026-11-24T16:43:00Z"
+    done_ms = _epoch_ms(done_iso)
+    session = "ses_kill"
+    five_after = done_ms + 5 * 60 * 1000
+
+    # Three tool parts 5 min after run-done; one is a shell git commit.
+    cur.execute(
+        "INSERT INTO session_message(id, session_id, type, seq, time_created, time_updated, data) VALUES(?,?,?,?,?,?,?)",
+        ("m1", session, "user", 1, done_ms - 60000, done_ms - 60000, "{}"),
+    )
+    cur.execute(
+        "INSERT INTO session_part(message_id, session_id, ordinal, type, call_id, time_created, time_updated, data) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "m1",
+            session,
+            1,
+            "tool",
+            "c1",
+            five_after,
+            five_after,
+            part_data("shell", "echo hi", five_after, five_after),
+        ),
+    )
+    cur.execute(
+        "INSERT INTO session_part(message_id, session_id, ordinal, type, call_id, time_created, time_updated, data) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "m1",
+            session,
+            2,
+            "tool",
+            "c2",
+            five_after + 1000,
+            five_after + 1000,
+            part_data("shell", "cd /wt && git commit -m x", five_after + 1000, five_after + 1000),
+        ),
+    )
+    cur.execute(
+        "INSERT INTO session_part(message_id, session_id, ordinal, type, call_id, time_created, time_updated, data) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "m1",
+            session,
+            3,
+            "tool",
+            "c3",
+            five_after + 2000,
+            five_after + 2000,
+            part_data("shell", "npm test", five_after + 2000, five_after + 2000),
+        ),
+    )
+    con.commit()
+
+    _write_stream_events(
+        orch,
+        stream,
+        [
+            {
+                "key": f"run:{stream}/r1:queued",
+                "kind": "queued",
+                "at": "2026-11-24T15:14:00Z",
+                "run": f"{stream}/r1",
+                "out": "out1",
+            },
+            {
+                "key": f"run:{stream}/r1:done",
+                "kind": "run-done",
+                "at": done_iso,
+                "run": f"{stream}/r1",
+                "outcome": "timeout",
+                "exit": 1,
+                "session": session,
+            },
+        ],
+    )
+
+    rep = _report_phase2(home, stream)
+    details = {f["focus"]: f["detail"] for f in rep["findings"]}
+    ak = details.get("after-kill activity", "")
+    assert "agent kept working" in ak and "3 tool calls" in ak and "git commit" in ak, ak
+
+
+def test_learn_runs_after_kill_resume_not_counted(tmp_path):
+    """Parts after a later queued resume of the same session are NOT after-kill."""
+    home = tmp_path / "home"
+    con, cur, stream, db_path, part_data = _build_learn_runs_fixture(home)
+    orch = home / ".config" / "orchestrator"
+
+    done_iso = "2026-11-24T16:43:00Z"
+    done_ms = _epoch_ms(done_iso)
+    resume_iso = "2026-11-24T17:00:00Z"
+    resume_ms = _epoch_ms(resume_iso)
+    session = "ses_resume"
+    after_resume = resume_ms + 2 * 60 * 1000
+
+    cur.execute(
+        "INSERT INTO session_message(id, session_id, type, seq, time_created, time_updated, data) VALUES(?,?,?,?,?,?,?)",
+        ("m1", session, "user", 1, done_ms - 60000, done_ms - 60000, "{}"),
+    )
+    cur.execute(
+        "INSERT INTO session_part(message_id, session_id, ordinal, type, call_id, time_created, time_updated, data) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "m1",
+            session,
+            1,
+            "tool",
+            "c1",
+            after_resume,
+            after_resume,
+            part_data("shell", "echo resumed", after_resume, after_resume),
+        ),
+    )
+    con.commit()
+
+    _write_stream_events(
+        orch,
+        stream,
+        [
+            {
+                "key": f"run:{stream}/r1:queued",
+                "kind": "queued",
+                "at": "2026-11-24T15:14:00Z",
+                "run": f"{stream}/r1",
+                "out": "out1",
+            },
+            {
+                "key": f"run:{stream}/r1:done",
+                "kind": "run-done",
+                "at": done_iso,
+                "run": f"{stream}/r1",
+                "outcome": "timeout",
+                "exit": 1,
+                "session": session,
+            },
+            # A later queued resume naming the same session bounds the after-kill window.
+            {
+                "key": f"run:{stream}/r2:queued",
+                "kind": "queued",
+                "at": resume_iso,
+                "run": f"{stream}/r2",
+                "out": "out2",
+                "session": session,
+            },
+        ],
+    )
+
+    rep = _report_phase2(home, stream)
+    details = {f["focus"]: f["detail"] for f in rep["findings"]}
+    assert "after-kill activity" not in details, details
+
+
+def test_learn_runs_long_tool_finding(tmp_path):
+    home = tmp_path / "home"
+    con, cur, stream, db_path, part_data = _build_learn_runs_fixture(home)
+    orch = home / ".config" / "orchestrator"
+
+    done_iso = "2026-11-24T16:43:00Z"
+    done_ms = _epoch_ms(done_iso)
+    session = "ses_long"
+    start = done_ms - 20 * 60 * 1000
+    end = start + 10 * 60 * 1000  # 10 min shell part
+
+    cur.execute(
+        "INSERT INTO session_message(id, session_id, type, seq, time_created, time_updated, data) VALUES(?,?,?,?,?,?,?)",
+        ("m1", session, "user", 1, start - 60000, start - 60000, "{}"),
+    )
+    cur.execute(
+        "INSERT INTO session_part(message_id, session_id, ordinal, type, call_id, time_created, time_updated, data) VALUES(?,?,?,?,?,?,?,?)",
+        (
+            "m1",
+            session,
+            1,
+            "tool",
+            "c1",
+            start,
+            end,
+            part_data(
+                "shell", "cd /tmp && node --test orchestrator/tests/ 2>&1 | tail -60", start, end
+            ),
+        ),
+    )
+    con.commit()
+
+    _write_stream_events(
+        orch,
+        stream,
+        [
+            {
+                "key": f"run:{stream}/r1:queued",
+                "kind": "queued",
+                "at": "2026-11-24T15:14:00Z",
+                "run": f"{stream}/r1",
+                "out": "out1",
+            },
+            {
+                "key": f"run:{stream}/r1:done",
+                "kind": "run-done",
+                "at": done_iso,
+                "run": f"{stream}/r1",
+                "outcome": "timeout",
+                "exit": 1,
+                "session": session,
+            },
+        ],
+    )
+
+    rep = _report_phase2(home, stream)
+    details = {f["focus"]: f["detail"] for f in rep["findings"]}
+    lt = details.get("long tool call", "")
+    assert "ran 10 min" in lt, lt
+
+
+def test_learn_runs_no_db_unchanged(tmp_path):
+    """No opencode.db at all → phase 2 output identical to today's fixture (no new findings, no crash)."""
+    home = tmp_path / "home"
+    # Deliberately do NOT create opencode.db.
+    orch = home / ".config" / "orchestrator"
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "streams").mkdir()
+    (orch / "streams" / "lr.json").write_text(
+        json.dumps(
+            {"name": "lr", "status": "active", "waiting": "", "next": "2020-01-01T00:00:00Z"}
+        )
+    )
+    (orch / "streams" / "lr.events.jsonl").write_text(
+        json.dumps(
+            {
+                "key": "run:lr/r1:queued",
+                "kind": "queued",
+                "at": "2026-11-24T15:14:00Z",
+                "run": "lr/r1",
+                "out": "out1",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "key": "run:lr/r1:done",
+                "kind": "run-done",
+                "at": "2026-11-24T16:43:00Z",
+                "run": "lr/r1",
+                "outcome": "timeout",
+                "exit": 1,
+                "session": "ses_x",
+            }
+        )
+        + "\n"
+    )
+
+    rep = _report_phase2(home, "lr")
+    focuses = {f["focus"] for f in rep["findings"]}
+    assert "start delay" not in focuses
+    assert "after-kill activity" not in focuses
+    assert "long tool call" not in focuses
 
 
 def test_wrapper_works_through_symlink(tmp_path):

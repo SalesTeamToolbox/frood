@@ -729,6 +729,209 @@ function readPitfallsArchive() {
 // Real finding generators — analyze ACTUAL session data
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Per-run join: stream events + opencode.db (learn-runs ticket)
+// Joins each stream run (queued + run-done) to its OpenCode session to surface
+// start delay, after-kill activity and long tool calls. Read-only: a missing
+// opencode.db or missing table yields no findings and never crashes.
+// ---------------------------------------------------------------------------
+
+function buildRunTimeline(events) {
+  const runs = {};
+  for (const e of events) {
+    const key = String(e.key || "");
+    const mq = key.match(/^run:(.+):queued$/);
+    const md = key.match(/^run:(.+):done$/);
+    if (mq) {
+      runs[mq[1]] = runs[mq[1]] || {};
+      runs[mq[1]].queued = { at: e.at, out: e.out, run: e.run, session: e.session };
+    }
+    if (md) {
+      runs[md[1]] = runs[md[1]] || {};
+      runs[md[1]].done = { at: e.at, outcome: e.outcome, exit: e.exit, session: e.session, run: e.run, out: e.out };
+    }
+  }
+  return runs;
+}
+
+function isoToMs(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d.getTime();
+}
+
+function dbQuery(dbPath, sql) {
+  if (!fs.existsSync(dbPath)) return null;
+  const result = spawnSync("sqlite3", [dbPath, sql], { encoding: "utf8", timeout: 30000 });
+  if (result.status !== 0) return null;
+  const out = result.stdout.trim();
+  if (!out || out === "[]") return null;
+  try { return JSON.parse(out); } catch { return null; }
+}
+
+// First session_message at/after fromMs; returns its time_created (ms) or null.
+function sessionFirstMessageAtOrAfter(dbPath, sessionId, fromMs) {
+  const safe = sessionId.replace(/'/g, "''");
+  const sql = `SELECT json_group_array(json_object('time_created', time_created)) FROM session_message WHERE session_id = '${safe}' AND time_created >= ${fromMs} ORDER BY seq LIMIT 1`;
+  const rows = dbQuery(dbPath, sql);
+  if (!rows || !rows.length) return null;
+  return Number(rows[0].time_created);
+}
+
+// Tool session_part rows for a session in (fromMs, toMs]; parsed data.
+function sessionToolParts(dbPath, sessionId, fromMs, toMs) {
+  const safe = sessionId.replace(/'/g, "''");
+  const upper = toMs ? `AND time_updated <= ${toMs}` : "";
+  const sql = `SELECT json_group_array(json_object('message_id', message_id, 'ordinal', ordinal, 'data', data, 'time_created', time_created, 'time_updated', time_updated)) FROM session_part WHERE session_id = '${safe}' AND type = 'tool' AND time_updated > ${fromMs} ${upper} ORDER BY time_updated`;
+  const rows = dbQuery(dbPath, sql);
+  if (!rows || !rows.length) return [];
+  return rows.map((r) => {
+    let data = null;
+    try { data = JSON.parse(r.data); } catch {}
+    return { message_id: r.message_id, ordinal: r.ordinal, time_created: r.time_created, time_updated: r.time_updated, data };
+  });
+}
+
+// Per-run opencode join findings for one stream.
+function perRunOpencodeFindings(stream) {
+  const findings = [];
+  const dbPath = OPENCODE_DB;
+  if (!fs.existsSync(dbPath)) return findings;
+
+  const events = readStreamEvents(stream);
+  const runs = buildRunTimeline(events);
+  const queuedEvents = events.filter((e) => String(e.key || "").endsWith(":queued"));
+
+  for (const [run, tl] of Object.entries(runs)) {
+    const done = tl.done;
+    const queued = tl.queued;
+    if (!done || !done.session) continue;
+    const doneMs = isoToMs(done.at);
+    if (doneMs === null) continue;
+
+    // --- start delay: first message at/after queued.at minus queued.at ---
+    if (queued && queued.at) {
+      const qMs = isoToMs(queued.at);
+      if (qMs !== null) {
+        // oc-worker's own record of the slot wait (receipt queued_s) wins; else first prompt message - queued.at.
+        let receiptQueuedS = null;
+        try {
+          const rc = done.out ? JSON.parse(fs.readFileSync(done.out + ".receipt.json", "utf8")) : null;
+          if (rc && Number.isFinite(rc.queued_s)) receiptQueuedS = rc.queued_s;
+        } catch {}
+        const firstMsg = receiptQueuedS === null ? sessionFirstMessageAtOrAfter(dbPath, done.session, qMs) : null;
+        if (receiptQueuedS !== null || firstMsg !== null) {
+          const delayMs = receiptQueuedS !== null ? receiptQueuedS * 1000 : firstMsg - qMs;
+          if (delayMs > 120 * 1000) {
+            const delayMin = Math.round(delayMs / 1000 / 60);
+            findings.push({
+              area: "process-metrics",
+              focus: "start delay",
+              lens: "retry-recovery",
+              status: "analyzed",
+              detail: `${run}: waited ${delayMin} min before opencode got its prompt (worker slot or server queue)`,
+              recommendation: "Raise WORKER_SLOTS / add a progress heartbeat so a queued run is visible instead of silently waiting.",
+              evidence: [run, done.session],
+              source: "opencode-session",
+            });
+          }
+        }
+      }
+    }
+
+    // --- after-kill activity: parts after run-done.at + 60s, bounded by next queued resume ---
+    if (["timeout", "stalled", "error"].includes(done.outcome)) {
+      const afterKillFrom = doneMs + 60 * 1000;
+      let resumeBoundMs = null;
+      const currentDir = done.out ? path.dirname(done.out) : null;
+      for (const qe of queuedEvents) {
+        const qeMs = isoToMs(qe.at);
+        if (qeMs === null || qeMs <= doneMs) continue;
+        const sameSession = qe.session && qe.session === done.session;
+        const sameDir = currentDir && qe.out && path.dirname(qe.out) === currentDir;
+        if (sameSession || sameDir) {
+          resumeBoundMs = qeMs;
+          break;
+        }
+      }
+      const parts = sessionToolParts(dbPath, done.session, afterKillFrom, resumeBoundMs);
+      let toolCalls = 0;
+      const gitWrites = [];
+      let lastUpdated = afterKillFrom;
+      for (const p of parts) {
+        toolCalls++;
+        lastUpdated = Math.max(lastUpdated, p.time_updated);
+        const data = p.data;
+        const input = data && data.state && data.state.input;
+        const cmd = input && input.command;
+        if (cmd && /\bgit\s+(?:-C\s+\S+\s+)?(add|commit|stash|reset|checkout)\b/.test(cmd)) {
+          gitWrites.push(cmd.trim().slice(0, 100));
+        }
+      }
+      if (toolCalls > 0) {
+        const keptMin = Math.round(Math.max(0, lastUpdated - afterKillFrom) / 1000 / 60);
+        findings.push({
+          area: "desk-operations",
+          focus: "after-kill activity",
+          lens: "retry-recovery",
+          status: "analyzed",
+          severity: "high",
+          detail: `${run}: agent kept working ${keptMin} min after the kill: ${toolCalls} tool calls, git writes: ${gitWrites.join("; ")}`,
+          recommendation: "Name ticket killed-run-stops-agent / --standalone so a killed run's agent is stopped instead of left to keep committing.",
+          evidence: [run, done.session],
+          source: "opencode-session",
+        });
+      }
+    }
+
+    // --- long tool calls: shell part duration > 5 min, or still open at run-done ---
+    const allParts = sessionToolParts(dbPath, done.session, 0, null);
+    for (const p of allParts) {
+      const data = p.data;
+      const state = data && data.state;
+      const t = state && state.time;
+      const input = state && state.input;
+      const cmd = input && input.command;
+      const name = data && data.name;
+      if (!cmd || (name !== "shell" && name !== "bash")) continue;
+      const created = t && t.created;
+      const completed = t && t.completed;
+      let longMin = null;
+      let stillOpen = false;
+      if (completed !== undefined && completed !== null && created !== undefined && created !== null) {
+        const durMs = completed - created;
+        if (durMs > 5 * 60 * 1000) longMin = Math.round(durMs / 1000 / 60);
+      } else if (created !== undefined && created !== null && created <= doneMs) {
+        stillOpen = true;
+      }
+      if (longMin !== null) {
+        findings.push({
+          area: "process-metrics",
+          focus: "long tool call",
+          lens: "retry-recovery",
+          status: "analyzed",
+          detail: `${run}: shell part ran ${longMin} min: ${String(cmd).slice(0, 100)}`,
+          recommendation: "Add a timeout to long shell calls (spawnSync { timeout } / `timeout `) so a hung tool cannot outlive its run.",
+          evidence: [run, done.session],
+          source: "opencode-session",
+        });
+      } else if (stillOpen) {
+        findings.push({
+          area: "process-metrics",
+          focus: "long tool call",
+          lens: "retry-recovery",
+          status: "analyzed",
+          detail: `${run}: shell part still open at run-done: ${String(cmd).slice(0, 100)}`,
+          recommendation: "Add a timeout to long shell calls (spawnSync { timeout } / `timeout `) so a hung tool cannot outlive its run.",
+          evidence: [run, done.session],
+          source: "opencode-session",
+        });
+      }
+    }
+  }
+  return findings;
+}
+
 function analyzeCommunicationPatterns(stream, args) {
   const findings = [];
   const streamState1 = readStreamState(args.stream);
@@ -896,13 +1099,16 @@ function analyzeErrorHandlingPatterns(stream, args) {
     });
   }
 
+  // Per-run opencode join: start delay, after-kill activity, long tool calls.
+  findings.push(...perRunOpencodeFindings(args.stream));
+
   return findings;
 }
 
 function getErrorRecommendation(pattern) {
   const recs = {
     "verdict-failed": "Validate worktree exists before verdict; auto-create worktree on claim.",
-    "worker-timeout": "Increase oc-worker timeout; add progress heartbeat to prevent false timeouts.",
+    "worker-timeout": "Check the start-delay, after-kill and long-tool findings for this run before raising the timeout — a queued worker slot, an orphaned agent still committing, or a hung shell call is usually the cause, not the timeout value itself.",
     "worker-error": "Improve error context in worker receipts; add stack trace capture.",
     "worker-no_pool": "Every worker pool was down (quota or out of credits): run router-health, then top up or drop the exhausted pool; the Claude Code worker fallback covers the run meanwhile.",
     "worker-blocked": "Add automatic unblock after timeout; escalate to desk daemon.",
@@ -972,12 +1178,19 @@ function analyzeCoordinationPatterns(stream, args) {
     const avgTime = totalTime / receipts.length;
     const medianTime = receipts.map(r => r.seconds || 0).sort((a, b) => a - b)[Math.floor(receipts.length / 2)];
     const maxSilence = Math.max(...receipts.map(r => r.max_silence_s || 0));
+
+    // Start-delay numbers from the per-run opencode join, folded into cycle time.
+    const runFindings = perRunOpencodeFindings(args.stream);
+    const startDelays = runFindings.filter((f) => f.focus === "start delay").map((f) => f.detail);
+    let detail = `Avg worker time: ${(avgTime / 60).toFixed(1)}m; median: ${(medianTime / 60).toFixed(1)}m; max silence: ${maxSilence}s.`;
+    if (startDelays.length) detail += " " + startDelays.join(" ");
+
     findings.push({
       area: "process-metrics",
       focus: "end-to-end cycle time",
       lens: "process-metrics",
       status: "analyzed",
-      detail: `Avg worker time: ${(avgTime / 60).toFixed(1)}m; median: ${(medianTime / 60).toFixed(1)}m; max silence: ${maxSilence}s.`,
+      detail,
       recommendation: "Add SLA tracking to board.mjs; alert on tickets >12h without critic round.",
       evidence: [".opencode/reports/*/orchestrator-receipt.md", "bin/board.mjs"],
       source: "session-data",
