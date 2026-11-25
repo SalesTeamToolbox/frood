@@ -46,6 +46,13 @@ This run's arguments: $ARGUMENTS
   use `Select-Object -First/-Last`, or run shell work in Git Bash where `.sh` scripts live.
 - Quote gate output, don't summarize counts from memory.
 
+<!-- cc-only -->
+**Claude plan usage (Claude Code desktop only).** At session start, before each dispatch and at each module
+boundary, call the `get_usage` tool and pipe its JSON to
+`node {{ORCH_REPO}}/bin/cc-usage.mjs snapshot --from-app -`. Skip silently where the tool is absent or the call
+fails; never block on it.
+<!-- /cc-only -->
+
 ## Per-module loop
 
 1. Build on the existing stack (reuse, do not greenfield).

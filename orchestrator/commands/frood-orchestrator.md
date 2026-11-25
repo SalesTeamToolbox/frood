@@ -30,6 +30,13 @@ quoted, deploy truth (verified sha or stated gap). Multi-repo task: one worktree
 one receipt per repo, landed separately. Modules run continuously — stop only on a
 question the owner must decide.
 
+<!-- cc-only -->
+**Claude plan usage (Claude Code desktop only).** At session start, before each dispatch and at each module
+boundary, call the `get_usage` tool and pipe its JSON to
+`node {{ORCH_REPO}}/bin/cc-usage.mjs snapshot --from-app -`. Skip silently where the tool is absent or the call
+fails; never block on it.
+<!-- /cc-only -->
+
 ### Quick Decision: Full Orchestration vs Direct Handling
 
 **Use full orchestration (worker → critic → senior loop) when ANY of these apply:**

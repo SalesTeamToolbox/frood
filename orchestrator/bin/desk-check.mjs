@@ -16,6 +16,7 @@ import path from "node:path";
 import { listStreams } from "./handoff.mjs";
 import { statusRows, watchInfo } from "./desk.mjs";
 import { readService, syncAllStreamTitles } from "./session-title.mjs";
+import { importStatusline } from "./cc-usage.mjs";
 import { measure, level, readState, writeState, shouldRunNotify, notifyNow, notifyParts } from "./session-pressure.mjs";
 
 function notify(text) {
@@ -57,6 +58,11 @@ export async function main(argv) {
           new Promise((res) => setTimeout(res, 8000)),
         ]);
       }
+    } catch {}
+    // Claude plan-usage snapshot from the statusline sidecar: best effort, silent, local file reads only
+    // (no network, so nothing to time out on); a missing sidecar or bad JSON changes nothing.
+    try {
+      importStatusline();
     } catch {}
     const r = check();
     let code = r.code;

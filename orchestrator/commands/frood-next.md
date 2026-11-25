@@ -132,4 +132,11 @@ The tab title is set by the `orchestrator-handoff.js` hook to `[<stream>] <repo>
    **NEEDS YOU** handoff card). Every stop in this session ends with the handoff card from `/frood-orchestrator`
    ("At every module boundary").
 
+<!-- cc-only -->
+**Claude plan usage (Claude Code desktop only).** At session start, before each dispatch and at each module
+boundary, call the `get_usage` tool and pipe its JSON to
+`node {{ORCH_REPO}}/bin/cc-usage.mjs snapshot --from-app -`. Skip silently where the tool is absent or the call
+fails; never block on it.
+<!-- /cc-only -->
+
 Extra instructions from the owner (optional): $ARGUMENTS
