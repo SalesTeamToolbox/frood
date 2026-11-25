@@ -592,6 +592,24 @@ function cmdStatus(opts) {
 // owner exactly once per stream+key (the `pagedIds` ledger) and never block other streams. ORCH_DAEMON_DRY_RUN=1
 // logs every action instead of spawning anything (tests, safe rehearsal).
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "..", "..");
+
+// The repo the desk may ff-merge into: the git checkout that holds this orchestrator. Since the orchestrator moved
+// into Frood (2026-11-23) REPO_ROOT is `<frood>/orchestrator`, not a repo root, so comparing a ticket's `repo`
+// against REPO_ROOT alone paged every Frood ticket as merge-train. Both spellings are accepted.
+export function isDeskRepo(repo, orchDir = REPO_ROOT) {
+  if (!repo) return false;
+  const real = (p) => {
+    try {
+      return fs.realpathSync(path.resolve(p));
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const want = real(repo);
+  if (want === real(orchDir)) return true;
+  const r = spawnSync("git", ["-C", orchDir, "rev-parse", "--show-toplevel"], { encoding: "utf8", timeout: 10000 });
+  return r.status === 0 && real(String(r.stdout).trim()) === want;
+}
 const SELF_BIN = fileURLToPath(import.meta.url);
 const daemonDir = () => path.join(orchRoot(), ".config", "orchestrator", "desk-daemon");
 const daemonLogFile = () => path.join(daemonDir(), "daemon.log");
@@ -1589,7 +1607,7 @@ function doMerge(stream, key, ticketPath, sha) {
     return { stream, key, line: "", outcome: "paged" };
   }
   const ticket = readTicket(ticketPath);
-  if (!ticket || ticket.merge !== "ff" || path.resolve(ticket.repo ?? "") !== REPO_ROOT) {
+  if (!ticket || ticket.merge !== "ff" || !isDeskRepo(ticket.repo)) {
     dpage(stream, key, `merge-train ${ticket?.branch ?? ticketPath} (${ticket?.repo ?? "unknown repo"})`);
     return { stream, key, line: "", outcome: "paged" };
   }
