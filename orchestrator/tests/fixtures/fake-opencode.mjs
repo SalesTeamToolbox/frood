@@ -38,7 +38,7 @@ let mode = process.env.FAKE_OC_MODE || "ok";
 if (mode.startsWith("quota-")) mode = mode.slice(6).split(",").includes(agent) ? "quota" : "ok";
 // rate429-<agent>: that agent gets Nvidia's real 429 (the body names no model), every other agent succeeds
 if (mode.startsWith("rate429-")) mode = mode.slice(8).split(",").includes(agent) ? "rate429" : "ok";
-if (process.env.FAKE_OC_ARGS_FILE) fs.writeFileSync(process.env.FAKE_OC_ARGS_FILE, JSON.stringify({ argv, cwd: process.cwd(), testVar: process.env.ORCH_TEST_VAR ?? null }));
+if (process.env.FAKE_OC_ARGS_FILE) fs.writeFileSync(process.env.FAKE_OC_ARGS_FILE, JSON.stringify({ argv, cwd: process.cwd(), pid: process.pid, testVar: process.env.ORCH_TEST_VAR ?? null }));
 // FAKE_OC_STDERR: text written to stderr on every call (a healthy run with benign stderr)
 if (process.env.FAKE_OC_STDERR) process.stderr.write(process.env.FAKE_OC_STDERR + "\n");
 const dropEvents = () => {

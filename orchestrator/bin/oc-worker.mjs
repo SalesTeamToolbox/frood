@@ -69,9 +69,15 @@
 //   its extension — e.g. `run:m6a-desk-minors/worker-r1:queued`. One stream therefore carries many tickets without
 //   their worker-r1 keys colliding; exit 9 still means this exact run id is already queued.
 //   Event write failures go to stderr and never change the run's status. Without --stream no stream file is touched.
+// - SIGTERM / SIGINT / SIGHUP to oc-worker while a run holds its slots (exit "killed"): the attempt's process group gets
+//   SIGTERM, then SIGKILL after 5 s if it is still there, and the proc-tree sweep kills the leftover descendants. Both
+//   slots are released, the receipt is written with exit "killed" (errors: "killed by <SIGNAL>"), the stream run-done is
+//   appended, and oc-worker exits 143 / 130 / 129. A second signal during cleanup is ignored. While still waiting for a
+//   slot nothing is held, so the signal just ends the process (no receipt).
 // Exit: 0 finished, 3 no final text, 4 timeout, 5 opencode error, 6 every pool in the chain known-down, 7 board
 // attach refused (--ticket), 8 model not allowed by provider policy (`ignored`; unreadable providers.json; model unresolvable while any provider is restricted; `free-only`
 // and not on the allowlist), 10 stale or dirty tree (fresh --stream worker refused before queued/spawn).
+//   Also 143 / 130 / 129: killed by SIGTERM / SIGINT / SIGHUP (receipt exit "killed").
 import "./no-window.mjs"; // hide console windows of every child process (Windows)
 import fs from "node:fs";
 import os from "node:os";
@@ -1012,6 +1018,7 @@ async function runChain(a) {
     // a new pool means a new session; a resumed session belongs to the first pool only
     r = await runWorker(first ? a : { ...a, agent, session: undefined, model: undefined });
     attempts += (r.attempts ?? 1) - 1; // cap 3 counts spawns: a resumed run used more than one
+    if (r.exit === "killed") break; // the owner stopped this run: no fallback hop, no pool-health change
     const anyCls = classify(r.classifyErrors ?? r.errors, model);
     // A pool that died mid-run (output already produced) is still down for the next run.
     if (anyCls && r.first_line) markDown(model, { ...anyCls, detail: r.errors[0] || "" });
@@ -1105,6 +1112,24 @@ export async function runWorker(a) {
     releaseMachine();
     providerSlot?.release();
   };
+  // Signals: from here on this run holds slots, so SIGTERM/SIGINT/SIGHUP must end its agent tree and release them.
+  // `sig.current` is the live attempt (child + the sweep watcher). The handler only kills and flags; the normal flow
+  // below then writes the receipt and releases the slots, so a signal takes the same path as any other end.
+  const sig = { name: null, code: null, current: null, wake: null };
+  const SIGNALS = { SIGTERM: 143, SIGINT: 130, SIGHUP: 129 };
+  const onSignal = (name) => {
+    if (sig.name) return; // idempotent: a second signal never interrupts cleanup
+    sig.name = name;
+    sig.code = SIGNALS[name];
+    sig.wake?.();
+    const cur = sig.current;
+    if (!cur) return;
+    if (process.platform === "win32") return killTree(cur.child);
+    try { process.kill(-cur.child.pid, "SIGTERM"); } catch { try { cur.child.kill("SIGTERM"); } catch {} }
+    cur.hard = setTimeout(() => killTree(cur.child), 5000); // 5 s to exit, then SIGKILL what is left
+  };
+  const handlers = Object.keys(SIGNALS).map((n) => [n, () => onSignal(n)]);
+  for (const [n, h] of handlers) process.on(n, h);
   const started = Date.now();
   let effectiveDeadline = started + a.timeoutMin * 60000; // one wall-clock budget for every attempt together
   // Grace: once extended, the dashboard's OVERDUE check must see the extended deadline.
@@ -1184,6 +1209,8 @@ export async function runWorker(a) {
           if (!prioWarned) { prioWarned = true; console.error(`oc-worker: could not set priority 10 on pid ${child.pid}: continuing at default niceness`); }
         }
       }
+      if (sig.name) { killTree(child); } // signalled between the loop check and the spawn
+      else sig.current = { child, hard: null };
       const tree = child.pid ? watch(child.pid, { since: attemptStart, everyMs: Number(process.env.ORCH_PROCTREE_MS) || 5000 }) : null;
       let buf = "";
       child.stdout.on("data", (d) => {
@@ -1227,6 +1254,7 @@ export async function runWorker(a) {
         }
       }, 5000);
       child.on("error", (e) => {
+        if (sig.current?.child === child) { clearTimeout(sig.current.hard); sig.current = null; }
         clearTimeout(timer);
         clearInterval(watchdog);
         tree?.stop();
@@ -1235,6 +1263,7 @@ export async function runWorker(a) {
       child.on("close", async (code) => {
         clearTimeout(timer);
         clearInterval(watchdog);
+        if (sig.current?.child === child) { clearTimeout(sig.current.hard); sig.current = null; }
         if (buf.trim()) lines.push(buf);
         let orphans = [];
         try {
@@ -1272,7 +1301,12 @@ export async function runWorker(a) {
       }
     }
     let cli = cliFor(a.session, base);
+    r = { code: null, lines: [], stderr: "", killReason: null, maxSilence: 0, orphans: [] }; // stands in if signalled before any attempt
+    sum = summarize([]);
+    errors = [];
+    classifyErrors = [];
     for (;;) {
+      if (sig.name) break;
       attempts++;
       const t0 = Date.now();
       r = await attempt(cli);
@@ -1302,10 +1336,11 @@ export async function runWorker(a) {
       const waitMs = resumeReason === "quota" || resumeReason === "rate-limit"
         ? Math.max(plainWaitMs, Number(process.env.ORCH_RATE_LIMIT_WAIT_MS ?? 60_000))
         : plainWaitMs;
-      if (!interrupted || !sum.all.trim() || !sum.session || resumed.length >= resumeMax || Date.now() + waitMs >= effectiveDeadline) break;
+      if (sig.name || !interrupted || !sum.all.trim() || !sum.session || resumed.length >= resumeMax || Date.now() + waitMs >= effectiveDeadline) break;
       const why = r.killReason === "stalled" ? `no output for ${idleMin} min` : (classifyErrors.find((e) => classify([e])?.reason === resumeReason) || errors[0] || "dropped").slice(0, 80);
       resumed.push({ session: sum.session, reason: why, seconds: Math.round((Date.now() - t0) / 1000) });
-      if (waitMs > 0) await new Promise((res) => setTimeout(res, waitMs));
+      if (waitMs > 0) await new Promise((res) => { const t = setTimeout(res, waitMs); sig.wake = () => { clearTimeout(t); res(); }; });
+      sig.wake = null;
       const msg =
         `The previous run was interrupted (${why}). Continue the task from where you stopped. The Mandate is unchanged.\n` +
         `Before continuing, check the worktree state below and verify any half-finished edit or command.\n\n` +
@@ -1314,7 +1349,8 @@ export async function runWorker(a) {
       cli = cliFor(sum.session, msg);
     }
     events.end();
-    const killReason = r.killReason;
+    const killReason = sig.name ? "killed" : r.killReason;
+    if (sig.name) errors.push(`killed by ${sig.name}`);
     // Landed work: a timed-out or stalled run whose commit made it in counts as done.
     // HEAD moved, tree is clean, and the --report file's status line says DONE.
     let landed;
@@ -1333,7 +1369,7 @@ export async function runWorker(a) {
     const all = alls.join("\n\n");
     if (killReason && all.trim()) {
       // Partial work survives a timeout or stall; the status line makes it impossible to mistake for a finished run.
-      const why = killReason === "stalled" ? `stalled — no output for ${idleMin} min` : `timeout after ${a.timeoutMin + (extendedMin || 0)} min`;
+      const why = killReason === "killed" ? `killed by ${sig.name}` : killReason === "stalled" ? `stalled — no output for ${idleMin} min` : `timeout after ${a.timeoutMin + (extendedMin || 0)} min`;
       fs.writeFileSync(out, `RESULT: BLOCKED: ${why} — partial output below\n\n${all}\n`);
       sum.final = "";
     } else if (sum.final) fs.writeFileSync(out, sum.final.endsWith("\n") ? sum.final : sum.final + "\n");
@@ -1425,12 +1461,13 @@ export async function runWorker(a) {
     };
     atomicWrite(out + ".receipt.json", JSON.stringify(receipt, null, 2) + "\n");
     Object.defineProperty(receipt, "classifyErrors", { value: classifyErrors, enumerable: false }); // for runWithFallback; not serialized
-    receipt.status = killReason ? 4 : code ? 5 : sum.final ? 0 : 3;
+    receipt.status = sig.name ? sig.code : killReason ? 4 : code ? 5 : sum.final ? 0 : 3;
     return receipt;
   } finally {
     clearInterval(kickTimer);
     run.end();
     release();
+    for (const [n, h] of handlers) process.off(n, h);
     // Clean up scratch dir for read-only roles
     if (scratchDir && fs.existsSync(scratchDir)) {
       try {

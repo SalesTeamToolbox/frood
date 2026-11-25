@@ -1846,3 +1846,144 @@ test("nvidia cap: an nvidia rate-limit classified by oc-worker is recorded in th
   await startNvidia(h2, "a", { model: "opencode/other-model", extraEnv: { FAKE_OC_MODE: "rate429" }, flags: ["--resume", "0"] }).done;
   assert.ok(!fs.existsSync(path.join(slotDir_(h2), "provider-nvidia.state.json")));
 });
+
+// ---- SIGTERM / SIGINT / SIGHUP to oc-worker end the agent and release the slots -----------------------------
+// Each test starts one oc-worker with the fake agent in `hang` mode, signals ONLY that pid, and in `finally`
+// kills the one agent pid it read from the fake's args file (never by name pattern), so a failure leaves nothing behind.
+const pidAlive = (pid) => {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
+};
+async function startHung(extraFlags = [], extraEnv = {}) {
+  const home = tmp();
+  CLEAN.push(home);
+  const prompt = path.join(home, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const runDir = path.join(home, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir }));
+  const out = path.join(runDir, "worker-r1.md");
+  const argsFile = path.join(home, "args.json");
+  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", home, "--prompt", prompt, "--out", out, "--slots", "2", ...extraFlags], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_HOME: home, FAKE_OC_MODE: "hang", FAKE_OC_ARGS_FILE: argsFile, ...extraEnv },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.on("data", (d) => (stderr += d));
+  const exited = new Promise((res) => child.on("close", (code, signal) => res({ code, signal })));
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 40000); // test-level backstop
+  let agentPid = null;
+  for (let i = 0; i < 200 && !agentPid; i++) {
+    try { agentPid = JSON.parse(fs.readFileSync(argsFile, "utf8")).pid; } catch { await sleep(100); }
+  }
+  const cleanup = () => {
+    clearTimeout(hard);
+    if (agentPid && pidAlive(agentPid)) { try { process.kill(agentPid, "SIGKILL"); } catch {} }
+    if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
+  };
+  return { home, out, child, exited, agentPid, cleanup, stderr: () => stderr, sd: path.join(home, ".config", "orchestrator", "streams") };
+}
+
+for (const [signal, code] of [["SIGTERM", 143], ["SIGINT", 130], ["SIGHUP", 129]]) {
+  test(`${signal} to oc-worker kills the agent, writes a killed receipt, frees the slot, exits ${code}`, async () => {
+    const h = await startHung();
+    try {
+      assert.ok(h.agentPid, `the fake agent started: ${h.stderr()}`);
+      assert.ok(pidAlive(h.agentPid));
+      const t0 = Date.now();
+      h.child.kill(signal);
+      const res = await h.exited;
+      assert.ok(Date.now() - t0 < 10000, "ended within 10 s");
+      assert.equal(res.code, code, h.stderr());
+      for (let i = 0; i < 50 && pidAlive(h.agentPid); i++) await sleep(100);
+      assert.equal(pidAlive(h.agentPid), false, "the agent process is gone");
+      const receipt = JSON.parse(fs.readFileSync(h.out + ".receipt.json", "utf8"));
+      assert.equal(receipt.exit, "killed");
+      assert.ok(receipt.errors.includes(`killed by ${signal}`), JSON.stringify(receipt.errors));
+      assert.deepEqual(fs.readdirSync(slotDir_(h.home)), [], "no slot dir left");
+    } finally {
+      h.cleanup();
+    }
+  });
+}
+
+test("SIGTERM with --stream appends one run-done for the killed run", async () => {
+
+
+  const probe = await startHungStream();
+  try {
+    assert.ok(probe.agentPid, probe.stderr());
+    probe.child.kill("SIGTERM");
+    const res = await probe.exited;
+    assert.equal(res.code, 143, probe.stderr());
+    const ev = eventsOf(probe.sd).filter((e) => e.kind === "run-done");
+    assert.equal(ev.length, 1);
+    assert.equal(ev[0].run, "m6a/worker-r1");
+    assert.equal(ev[0].exit, "killed");
+    assert.equal(ev[0].outcome, "error");
+  } finally {
+    probe.cleanup();
+  }
+});
+async function startHungStream() {
+  // same as startHung, but the home also holds the stream the run reports to
+  const home = tmp();
+  CLEAN.push(home);
+  const sd = path.join(home, ".config", "orchestrator", "streams");
+  fs.mkdirSync(sd, { recursive: true });
+  fs.writeFileSync(path.join(sd, "m6a.json"), JSON.stringify({ name: "m6a", repo: "", plan: "", status: "active", next: "x", done: "", waiting: "", written_at: new Date().toISOString(), written_by: "", consumed_at: null, done_at: null }));
+  const prompt = path.join(home, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const runDir = path.join(home, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir }));
+  const out = path.join(runDir, "worker-r1.md");
+  const argsFile = path.join(home, "args.json");
+  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", home, "--prompt", prompt, "--out", out, "--stream", "m6a", "--slots", "2"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_HOME: home, FAKE_OC_MODE: "hang", FAKE_OC_ARGS_FILE: argsFile },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.on("data", (d) => (stderr += d));
+  const exited = new Promise((res) => child.on("close", (code, signal) => res({ code, signal })));
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 40000);
+  let agentPid = null;
+  for (let i = 0; i < 200 && !agentPid; i++) {
+    try { agentPid = JSON.parse(fs.readFileSync(argsFile, "utf8")).pid; } catch { await sleep(100); }
+  }
+  const cleanup = () => {
+    clearTimeout(hard);
+    if (agentPid && pidAlive(agentPid)) { try { process.kill(agentPid, "SIGKILL"); } catch {} }
+    if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
+  };
+  return { home, out, child, exited, agentPid, cleanup, stderr: () => stderr, sd };
+}
+
+test("SIGTERM while waiting for a held slot exits and leaves no slot of its own", async () => {
+  const home = tmp();
+  CLEAN.push(home);
+  const slots = slotDir_(home);
+  fs.mkdirSync(path.join(slots, "slot-1"), { recursive: true });
+  fs.writeFileSync(path.join(slots, "slot-1", "owner"), JSON.stringify({ pid: process.pid, since: new Date().toISOString() })); // held by this live test process
+  const prompt = path.join(home, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const argsFile = path.join(home, "args.json");
+  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", home, "--prompt", prompt, "--out", path.join(home, "out", "f.md"), "--slots", "1"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_HOME: home, FAKE_OC_ARGS_FILE: argsFile },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const exited = new Promise((res) => child.on("close", (code, signal) => res({ code, signal })));
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 30000);
+  try {
+    await sleep(1500);
+    assert.equal(child.exitCode, null, "still waiting for the slot");
+    assert.ok(!fs.existsSync(argsFile), "the agent was never launched");
+    child.kill("SIGTERM");
+    const res = await exited;
+    assert.ok(res.code !== 0, "exits non-zero");
+    assert.deepEqual(fs.readdirSync(slots), ["slot-1"], "only the foreign holder's slot remains");
+    assert.ok(!fs.existsSync(path.join(home, "out", "f.md.receipt.json")), "no receipt: nothing ran");
+  } finally {
+    clearTimeout(hard);
+    if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
+  }
+});
