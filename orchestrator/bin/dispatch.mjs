@@ -33,6 +33,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { slotConfig, readSample, allowedSlots } from "./slots.mjs";
 
 const DEFAULT_CAPS = { build: 2, train: 1 };
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,59}$/;
@@ -265,6 +266,11 @@ function readCaps(root) {
   const caps = { ...DEFAULT_CAPS };
   for (const k of Object.keys(DEFAULT_CAPS)) {
     if (mp[k] === undefined) continue;
+    if (k === "build" && mp[k] === "auto") {
+      caps[k] = { mode: "auto" }; // dynamic: resolved per `cap` call from a live load sample
+      continue;
+    }
+    if (mp[k] === "auto") throw new Usage(`adapter.json: max_parallel.${k} must be a positive integer or "auto" for build`);
     if (!Number.isInteger(mp[k]) || mp[k] < 1) throw new Usage(`adapter.json: max_parallel.${k} must be a positive integer`);
     caps[k] = mp[k];
   }
@@ -272,13 +278,27 @@ function readCaps(root) {
 }
 export function capStatus(root, kind, exclude = []) {
   if (!Object.hasOwn(DEFAULT_CAPS, kind)) throw new Usage(`--kind must be build or train, not "${kind}"`);
-  const max = readCaps(root)[kind];
+  const caps = readCaps(root);
+  const cap = caps[kind];
+  let max, reason, auto;
+  if (kind === "build" && typeof cap === "object" && cap !== null && cap.mode === "auto") {
+    auto = true;
+    // Point-in-time advisory sample: no hysteresis state, so no 60 s wait. Treat a clear sample as
+    // already-sustained (clearSince in the past) so allowed resolves to max immediately.
+    const cfg = slotConfig(process.env, undefined);
+    const sample = readSample();
+    const { allowed, reason: r } = allowedSlots(sample, cfg, { clearSince: Date.now() - 120000 }, Date.now());
+    max = allowed;
+    reason = r + " (advisory)";
+  } else {
+    max = cap;
+  }
   const tickets = boardTickets(root);
   const running =
     kind === "build"
       ? tickets.filter((t) => t.stage === "working" || (t.stage === "queued" && t.assignment?.session)).length
       : tickets.filter((t) => t.stage === "ready" && !exclude.includes(t.id)).length;
-  return { kind, running, max, ok: running < max };
+  return { kind, running, max, ok: running < max, ...(auto ? { reason } : {}) };
 }
 
 // ---------- cli

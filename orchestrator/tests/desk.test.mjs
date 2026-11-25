@@ -433,8 +433,9 @@ test("lock: a second watcher exits 3; a fenced watcher exits 0; --takeover kills
 
 test("status: watch line first, then rows per stream and run; --json carries streams + watch", () => {
   const h = home();
-  assert.equal(cli(h, ["status"]).stdout, "watch none — no desk watcher holds the lock\n");
-  assert.deepEqual(JSON.parse(cli(h, ["status", "--json"]).stdout), { streams: [], watch: null });
+  const out = cli(h, ["status"]).stdout.split("\n").filter(Boolean);
+  assert.match(out[0], /^watch none — no desk watcher holds the lock$/);
+  assert.match(out[1], /^slots \d+\/\d+ \(fixed\)$/);
   mkStream(h);
   mkStream(h, "old", "done");
   const t0 = Date.parse("2026-11-13T10:00:00Z");
@@ -450,16 +451,18 @@ test("status: watch line first, then rows per stream and run; --json carries str
   const env = { ORCH_NOW_MS: String(t0) };
   const lines = cli(h, ["status"], env).stdout.split("\n").filter(Boolean);
   assert.match(lines[0], /^watch none/);
-  assert.match(lines[1], /^m6a {2}pending {2}next: ship T7 {2}unhandled=3$/); // run-dead, run-done, verdict; queued is not counted
-  assert.equal(lines[2], "  worker-r1  worker  running  12m");
-  assert.equal(lines[3], "  worker-r2  worker  dead  5m");
-  assert.equal(lines[4], "  worker-r3  worker  verdict CHANGES_REQUESTED  3m");
-  assert.equal(lines.length, 5, "watch line + stream + 3 runs; a done stream is not listed");
+  assert.match(lines[1], /^slots \d+\/\d+ \(fixed\)$/); // WORKER_SLOTS=3 in this environment -> fixed
+  assert.match(lines[2], /^m6a {2}pending {2}next: ship T7 {2}unhandled=3$/); // run-dead, run-done, verdict; queued is not counted
+  assert.equal(lines[3], "  worker-r1  worker  running  12m");
+  assert.equal(lines[4], "  worker-r2  worker  dead  5m");
+  assert.equal(lines[5], "  worker-r3  worker  verdict CHANGES_REQUESTED  3m");
+  assert.equal(lines.length, 6, "watch line + slots line + stream + 3 runs; a done stream is not listed");
   const j = JSON.parse(cli(h, ["status", "--json"], env).stdout);
   assert.deepEqual(j.watch, null, "no lock dir means no watch owner");
   assert.deepEqual(j.streams.map((s) => s.name), ["m6a"]);
   assert.deepEqual(j.streams[0].runs.map((x) => [x.run, x.state, x.age_min]), [["worker-r1", "running", 12], ["worker-r2", "dead", 5], ["worker-r3", "verdict", 3]]);
   assert.deepEqual(inHome(h, t0, () => statusRows()), j.streams);
+  assert.ok(Number.isInteger(j.slots.allowed) && Number.isInteger(j.slots.max), "json slots object present");
 });
 
 test("status watch line: live names harness + session; stale names the reason and the remedy", async () => {
@@ -1014,7 +1017,7 @@ test("status survives a throwing migrate: stderr names it and the command still 
   const r = cli(h, ["status"]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, /^desk: migrate failed: /m);
-  assert.equal(r.stdout, "watch none — no desk watcher holds the lock\n");
+  assert.match(r.stdout, /^watch none — no desk watcher holds the lock\nslots \d+\/\d+ \(fixed\)\n$/);
 });
 
 test("manifest: commands/frood-desk.md installs to both harnesses, and install --check sees it", () => {
@@ -2039,11 +2042,17 @@ test("status: board tickets holding a session are listed after the streams; abse
     fs.writeFileSync(path.join(repo, ".opencode", "board", "tickets", `${id}.json`), JSON.stringify({ schema: 1, id, stage, assignment }));
   put("t-none", "queued", null);
   const run = (args) => spawnSync(process.execPath, [BIN, ...args], { cwd: repo, env: { ...process.env, ORCH_HOME: h }, encoding: "utf8" });
-  assert.equal(run(["status"]).stdout, "watch none — no desk watcher holds the lock\n");
-  assert.deepEqual(JSON.parse(run(["status", "--json"]).stdout), { streams: [], watch: null });
+  const out = run(["status"]).stdout.split("\n").filter(Boolean);
+  assert.match(out[0], /^watch none — no desk watcher holds the lock$/);
+  assert.match(out[1], /^slots \d+\/\d+ \(fixed\)$/); // WORKER_SLOTS=3 in this environment -> fixed
+  const j = JSON.parse(run(["status", "--json"]).stdout);
+  assert.deepEqual(j.streams, []);
+  assert.deepEqual(j.watch, null);
+  assert.ok(Number.isInteger(j.slots.allowed) && Number.isInteger(j.slots.max), "json slots object present");
+  assert.match(j.slots.reason, /^slots/);
   put("t-held", "working", { owner: "s1", session: "sess-9" });
   put("t-wait", "queued", { owner: null, session: "sess-7" });
   const lines = run(["status"]).stdout.split("\n").filter(Boolean);
-  assert.deepEqual(lines.slice(1), ["ticket t-held  working  session sess-9  owner s1", "ticket t-wait  queued  session sess-7"]);
+  assert.deepEqual(lines.slice(2), ["ticket t-held  working  session sess-9  owner s1", "ticket t-wait  queued  session sess-7"]); // lines[0]=watch, lines[1]=slots
   assert.deepEqual(JSON.parse(run(["status", "--json"]).stdout).tickets.map((t) => t.id), ["t-held", "t-wait"]);
 });
