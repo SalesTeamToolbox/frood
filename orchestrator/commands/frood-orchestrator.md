@@ -181,7 +181,7 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    **When the repo has `.opencode/board/adapter.json`, every ticket is created and moved through
    `node {{ORCH_REPO}}/bin/board.mjs`** — `create` → `egm approve|waive` →
    `claim` → `oc-worker --ticket <id> --owner <session>` (which calls `board attach` itself) →
-   `round` per worker/critic receipt → `signoff` → `gates` → `ready`. The board file, not the
+   `round` per worker/critic receipt → `signoff` → `gates` → `ready` → `close` (human-only exit). The board file, not the
    conversation, is the ticket's state; `board watch` blocks a ticket whose worker has gone quiet.
    `board ready` prints the wake-up line `READY <id> <branch> <sha> — board verify then train`, and
    that line — with the report link — is what peer-mail carries.

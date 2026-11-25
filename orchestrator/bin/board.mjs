@@ -14,6 +14,8 @@
 //                                     working; claim/reopen carry it over; `dispatch.mjs` and `desk.mjs status` read it)
 //   release <id> --owner <s>   |   release <id> --force --by human --note <text>
 //   fail <id> --note <text>     |   unblock <id> --by human --note <text>
+//   close <id> --by human --sha <sha> --note <text>   (human-only: queued|working|ready|blocked → closed,
+//                                                        refuses shipped/failed/closed, names the sha and both refs)
 //   watch [--now <iso>]
 //   status [--json]             |   quarantine <id>
 //
@@ -73,7 +75,7 @@ class Conflict extends Error {} // exit 3: lock contention or epoch conflict —
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,59}$/;
 const EGM_STATUS = ["pending", "approved", "waived"];
-const STAGES = ["queued", "working", "ready", "shipped", "blocked", "failed"];
+const STAGES = ["queued", "working", "ready", "shipped", "blocked", "failed", "closed"];
 const GLOBAL_LOCK_STALE_MS = 30_000; // a global lock older than this is a dead writer, not contention
 const BARE_LOCK_STALE_MS = 60_000; // a ticket lock dir with no owner.json is reclaimable after this
 const FUTURE_SKEW_MS = 60_000; // see the header: tolerated clock skew, not a licence for stale data
@@ -98,6 +100,7 @@ const STAGE = {
   gates: { from: ["working"], to: "working", phase: 2 },
   ready: { from: ["working"], to: "ready", phase: 2 },
   shipped: { from: ["ready"], to: "shipped", phase: 2 },
+  close:   { from: ["queued", "working", "ready", "blocked"], to: "closed", phase: 2 },
   reopen: { from: ["ready"], to: "working", phase: 2 },
   attach: { from: ["working"], to: "working", phase: 3 },
   session: { from: ["queued", "working"], to: null, phase: 3 }, // stays where it is: a label, not a transition
@@ -179,6 +182,9 @@ function tryGit(cwd, args) {
   }
 }
 const commonDir = (d) => tryGit(d, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+// `git merge-base --is-ancestor` exits 0 iff the first rev is an ancestor of the second; anything else
+// (not an ancestor, unknown rev) is false — never a throw.
+const isAncestor = (root, a, b) => { try { git(root, ["merge-base", "--is-ancestor", a, b]); return true; } catch { return false; } };
 // Windows paths differ only by case and separators; compare them normalized.
 const posixPath = (p) => path.resolve(p).replace(/\\/g, "/").replace(/\/+$/, "");
 const norm = (p) => (process.platform === "win32" ? posixPath(p).toLowerCase() : posixPath(p));
@@ -308,6 +314,7 @@ const TICKET_RULES = [
   ["base_sha", nullishOf(isStr), "a sha or null"],
   ["assignment", isObjOrNull, "an object or null"],
   ["blocked", isObjOrNull, "an object or null"],
+  ["closed", (v) => v === undefined || isObjOrNull(v), "an object or null"],
   ["rounds", isArr, "an array"],
   ["signoffs", isArr, "an array"],
   ["gates", isArr, "an array"],
@@ -715,6 +722,7 @@ function cmdCreate(ctx) {
       signoffs: [],
       gates: [],
       blocked: null,
+      closed: null,
       history: [{ at, cmd: "create", from: null, to: STAGE.create.to, by: one(o, "owner") || null, note: null }],
       created: at,
       updated: at,
@@ -869,6 +877,40 @@ function cmdUnblock(ctx, id) {
     t.assignment = null;
     t.blocked = null;
   });
+}
+
+// ---------- close (phase 2 terminal exit, human-only)
+// A ticket that landed another way (desk ff-merge, superseded, abandoned) ends here instead of shipping or
+// failing. `--by human` and `--note` ≥ 10 chars follow the unblock rule; `--sha` must resolve and be an
+// ancestor of `adapter.base` (e.g. origin/main) or of the local branch with base's last segment (main) — a
+// local ff-merge not yet pushed to the base is accepted via the local branch. Refused (exit 1, nothing
+// written) from shipped/failed/closed, and for an unknown or unreachable sha, naming the sha and both refs.
+function cmdClose(ctx, id) {
+  const o = ctx.o;
+  if (one(o, "by") !== "human") throw new Usage("close needs --by human");
+  const note = text(o, "note");
+  if (!note) throw new Usage("--note is required");
+  if (note.length < 10) throw new Refuse("close needs --note of at least 10 characters");
+  const sha = String(need(o, "sha"));
+  return write(ctx, id, ctx.o, "close", (t) => {
+    assertFrom("close", t);
+    const full = tryGit(ctx.root, ["rev-parse", "--verify", `${sha}^{commit}`]);
+    if (!full) throw new Refuse(`close: sha ${sha} does not resolve`);
+    const base = ctx.adapter.base;
+    const baseRev = tryGit(ctx.root, ["rev-parse", "--verify", base]);
+    const last = base.split("/").pop();
+    const localRev = last === base ? null : tryGit(ctx.root, ["rev-parse", "--verify", `refs/heads/${last}`]);
+    const reached = (baseRev && isAncestor(ctx.root, full, baseRev)) || (localRev && isAncestor(ctx.root, full, localRev));
+    if (!reached) {
+      const where = [];
+      if (baseRev) where.push(`${base} (${baseRev})`); else where.push(base);
+      if (localRev) where.push(`${last} (${localRev})`);
+      throw new Refuse(`close: sha ${sha} is not an ancestor of ${where.join(" or ")}`);
+    }
+    t.stage = STAGE.close.to;
+    t.closed = { sha: full, by: "human", note, at: now() };
+    t.assignment = null;
+  }, true);
 }
 
 // ---------- round / signoff / gates / ready / verify / shipped (phase 2)
@@ -1427,6 +1469,7 @@ const COMMANDS = {
   release: (ctx, id) => cmdRelease(ctx, id),
   fail: (ctx, id) => cmdFail(ctx, id),
   unblock: (ctx, id) => cmdUnblock(ctx, id),
+  close: (ctx, id) => cmdClose(ctx, id),
   quarantine: (ctx, id) => cmdQuarantine(ctx, id),
   round: (ctx, id) => cmdRound(ctx, id),
   signoff: (ctx, id) => cmdSignoff(ctx, id),

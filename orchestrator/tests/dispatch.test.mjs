@@ -98,6 +98,16 @@ test("plan: a dependency on an unshipped ticket outside the list holds the ticke
   assert.deepEqual(p.held.map((h) => h.id).sort(), ["w-one", "w-two"]);
 });
 
+test("plan: a depends: on a closed ticket is satisfied, like shipped", () => {
+  const r = mk();
+  ticket(r, "done-one", { scope: ["d.mjs"], stage: "closed" });
+  ticket(r, "s-one", { scope: ["s.mjs"], depends: ["done-one"] });
+  const p = plan(r, "s-one");
+  assert.deepEqual(p.groups, [["s-one"]]);
+  assert.deepEqual(p.held, []);
+  assert.deepEqual(p.unknown, []);
+});
+
 test("plan: a dependency cycle exits 1; an unknown id exits 2; a plan file contributes the ticket ids it names", () => {
   const r = mk();
   ticket(r, "c-one", { scope: ["a.mjs"], depends: ["c-two"] });

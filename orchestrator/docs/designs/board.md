@@ -60,7 +60,7 @@ locks/<id>.lock/    gitignored; mkdir lock, contains owner.json
 | `schema` | 1 | required |
 | `id` | string | `^[a-z0-9][a-z0-9-]{0,59}$`; used as file, lock, branch suffix |
 | `title` | string | |
-| `stage` | enum | `queued` `working` `ready` `shipped` `blocked` `failed` |
+| `stage` | enum | `queued` `working` `ready` `shipped` `blocked` `failed` `closed` |
 | `epoch` | int | +1 on every write; a write whose read epoch ≠ current is refused (exit 3) |
 | `mandate_path` | string | absolute; file must exist at create |
 | `scope` | string[] | paths/globs the worker may touch (from `create --scope`) |
@@ -107,6 +107,7 @@ Mandate stays the record, `create` only proves the question was answered. (atlas
 | `ready` | `working` → `ready` | rules below; releases the lock |
 | `verify` | (read-only) | exit 0 iff stage `ready` and `--sha` = signed-off sha |
 | `shipped` | `ready` → `shipped` | `--sha` = signed-off sha (called by the train) |
+| `close` | `queued`/`working`/`ready`/`blocked` → `closed` | human-only: `--by human --sha <sha> --note <text>` (≥10 chars); `--sha` must resolve and be an ancestor of `adapter.base` or of the local branch with base's last segment — a local ff-merge not yet pushed is accepted via the local branch; refuses naming the sha and both refs; records `closed: {sha, by: "human", note, at}`, nulls `assignment`, drops the lock; terminal |
 | `reopen` | `ready` → `working` | the train refused the sha: `--owner --harness --note` (≥20 chars), worktree of this repo, no live lock; invalidates every live signoff, clears `gates`, takes the lock; round cap counts only rounds after the latest reopen; ≤2 per ticket |
 | `watch` | `working` → `blocked` | liveness rules below |
 | `unblock` | `blocked` → `queued` | `--by human --note` (≥10 chars); lock must be free |
@@ -170,6 +171,15 @@ Mandate stays the record, `create` only proves the question was answered. (atlas
 - **`status [--json]`** — one row per ticket `{id, stage, owner, age_min, rounds, cost, egm, signoff}`; a ticket
   file that fails to parse is listed as `CORRUPT` and skipped, never blocks other tickets. `quarantine <id>` moves
   it to `tickets/quarantine/`. (Critic #16.)
+- **`close <id> --by human --sha <sha> --note <text>`** — human-only terminal exit from `queued`, `working`,
+  `ready` or `blocked` into the new final stage `closed` (a ticket that landed another way: desk ff-merge,
+  superseded, abandoned). `--note` ≥ 10 characters (the `unblock` rule); `--sha` must resolve and be an
+  ancestor of `adapter.base` or of the local branch with base's last segment — a local ff-merge not yet pushed
+  to the base is accepted via the local branch; otherwise exit 1, naming the sha and both refs, nothing written.
+  Writes `closed: {sha, by: "human", note, at}`, sets `assignment: null`, adds one history row `cmd: "close"`,
+  and drops the lock. Refused from `shipped`, `failed` and `closed` (exit 1, no write). Closed tickets are
+  never watched or dispatched: `watch` sweeps only `working`, and `dispatch.mjs` treats a `depends:` on a
+  `closed` ticket as satisfied, like `shipped`.
 
 ## Locks and writes
 
@@ -238,7 +248,12 @@ the wake-up line; the orchestrator sends it), per-repo `WORKER_SLOTS` (machine-w
    → ready refused. 16. Corrupt ticket JSON → status lists CORRUPT, other tickets fine; release of another ticket
    ok. 17. Ids `a&b`, `..`, `A` → exit 2. 18. watch: stale once → still working; stale twice → blocked; live pid →
    never blocked; sweep after a long gap → records only. 19. Epoch conflict → exit 3. 20. `shipped` with wrong sha
-   → 1; `verify` twice → idempotent.
+   → 1; `verify` twice → idempotent. 29. `close` from `queued`/`working`/`ready`/`blocked` → `closed` with the
+   `closed: {sha, by: "human", note, at}` record, null `assignment` and no lock file; refused from `shipped`,
+   `failed` and `closed`; refused without `--by human` (exit 2), with a `--note` under 10 characters (exit 1),
+   with an unknown `--sha` (exit 1), and with a `--sha` not reachable from `adapter.base` or the local base
+   branch (exit 1, naming the sha and both refs). 30. A `--sha` on local `main` but not on `origin/main` is
+   accepted. 31. A pre-change ticket JSON with no `closed` key still loads and closes.
 
 ## Precise rules (v2.1 — answers re-review blockers B1–B13 and majors; these override anything above)
 
@@ -267,7 +282,7 @@ the wake-up line; the orchestrator sends it), per-repo `WORKER_SLOTS` (machine-w
   `signoff --by critic` uses the latest round with `counted: true` and refuses unless its effective verdict starts `APPROVED`.
 - **EGM (B6).** Every new ticket starts `egm.status: pending` (required or not); `claim` needs approve or waive first.
   `egm reopen <id> --owner <s> --trigger <name>` appends the trigger, sets `required: true`, `status: pending`, stage → queued.
-- **Locks on leaving working (B9).** Any transition into `blocked`, `queued` or `failed` removes `locks/<id>.lock/` in the same command.
+- **Locks on leaving working (B9).** Any transition into `blocked`, `queued`, `failed` or `closed` removes `locks/<id>.lock/` in the same command.
 - **Liveness (B7).** `attach` records `assignment.worker.started` = process start time, ISO UTC — win32:
   `powershell -NoProfile -Command "(Get-Process -Id <pid>).StartTime.ToUniversalTime().ToString('o')"`; elsewhere
   `ps -o lstart= -p <pid>` parsed to ISO. A worker is live iff the pid exists and its current start time equals `started` (if the

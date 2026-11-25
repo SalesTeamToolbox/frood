@@ -548,6 +548,127 @@ test("fail is terminal; a blocked ticket can be unblocked by a human", () => {
   assert.equal(u.ticket.blocked, null);
 });
 
+// close: a human-only terminal exit from queued/working/ready/blocked into the new final stage closed.
+test("close: lands in closed from queued, working, ready and blocked, with the closed record and no lock", () => {
+  const c = mk();
+  created(c, "c-q");
+  const q = board(c, "close", "c-q", "--by", "human", "--sha", head(c), "--note", "merged by the desk, not the train");
+  assert.equal(q.status, 0, q.stderr);
+  assert.equal(q.ticket.stage, "closed");
+  assert.equal(q.ticket.closed.by, "human");
+  assert.equal(q.ticket.closed.sha, head(c));
+  assert.match(q.ticket.closed.note, /merged by the desk/);
+  assert.match(q.ticket.closed.at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  assert.equal(q.ticket.assignment, null);
+  assert.equal(fs.existsSync(lockDir(c, "c-q")), false);
+  assert.deepEqual(q.ticket.history.map((h) => h.cmd).slice(-1), ["close"]);
+  assert.deepEqual(q.ticket.history.map((h) => h.by).slice(-1), ["human"]);
+
+  created(c, "c-w");
+  waived(c, "c-w");
+  assert.equal(claim(c, "c-w", "s1").status, 0);
+  const w = board(c, "close", "c-w", "--by", "human", "--sha", head(c), "--note", "superseded by a later ticket");
+  assert.equal(w.status, 0, w.stderr);
+  assert.equal(w.ticket.stage, "closed");
+  assert.equal(w.ticket.assignment, null);
+  assert.equal(fs.existsSync(lockDir(c, "c-w")), false, "leaving working drops the lock");
+
+  created(c, "c-r");
+  waived(c, "c-r");
+  assert.equal(claim(c, "c-r", "s1").status, 0);
+  editTicket(c, "c-r", (t) => { t.stage = "ready"; t.epoch += 1; t.updated = new Date().toISOString(); });
+  const r = board(c, "close", "c-r", "--by", "human", "--sha", head(c), "--note", "another path to production");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.ticket.stage, "closed");
+  assert.equal(r.ticket.assignment, null);
+
+  created(c, "c-b");
+  editTicket(c, "c-b", (t) => { t.stage = "blocked"; t.blocked = { reason: "stale", note: "gone", at: new Date().toISOString() }; t.epoch += 1; t.updated = new Date().toISOString(); });
+  const b = board(c, "close", "c-b", "--by", "human", "--sha", head(c), "--note", "abandoned, nothing to land");
+  assert.equal(b.status, 0, b.stderr);
+  assert.equal(b.ticket.stage, "closed");
+  assert.equal(b.ticket.assignment, null);
+});
+
+test("close: refused from shipped, failed and closed, writing nothing", () => {
+  const c = mk();
+  created(c, "c-t");
+  for (const stage of ["shipped", "failed", "closed"]) {
+    editTicket(c, "c-t", (t) => { t.stage = stage; t.epoch += 1; t.updated = new Date().toISOString(); });
+    const before = bytes(ticketFile(c, "c-t"));
+    const r = board(c, "close", "c-t", "--by", "human", "--sha", head(c), "--note", "a long enough note here");
+    assert.equal(r.status, 1, `${stage}: ${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`close needs stage .* ticket is ${stage}`));
+    assert.ok(Buffer.compare(before, bytes(ticketFile(c, "c-t"))) === 0, `${stage} wrote nothing`);
+  }
+});
+
+test("close: --by human, a long enough note, and a resolvable sha are required", () => {
+  const c = mk();
+  created(c, "c-u");
+  const noBy = board(c, "close", "c-u", "--sha", head(c), "--note", "a long enough note");
+  assert.equal(noBy.status, 2, noBy.stderr);
+  assert.match(noBy.stderr, /close needs --by human/);
+  const noNote = board(c, "close", "c-u", "--by", "human", "--sha", head(c));
+  assert.equal(noNote.status, 2, noNote.stderr);
+  assert.match(noNote.stderr, /--note is required/);
+  const noSha = board(c, "close", "c-u", "--by", "human", "--note", "a long enough note");
+  assert.equal(noSha.status, 2, noSha.stderr);
+  assert.match(noSha.stderr, /--sha is required/);
+  const short = board(c, "close", "c-u", "--by", "human", "--sha", head(c), "--note", "short");
+  assert.equal(short.status, 1, short.stderr);
+  assert.match(short.stderr, /close needs --note of at least 10 characters/);
+  const unknown = board(c, "close", "c-u", "--by", "human", "--note", "a long enough note", "--sha", "0".repeat(40));
+  assert.equal(unknown.status, 1, unknown.stderr);
+  assert.match(unknown.stderr, /does not resolve/);
+  assert.equal(JSON.parse(bytes(ticketFile(c, "c-u"))).stage, "queued", "refusals wrote nothing");
+});
+
+test("close: --sha must be an ancestor of adapter.base or of the local base branch", () => {
+  const c = mk();
+  created(c, "c-s");
+  // a commit on the worktree branch: its ancestor chain never reaches local main
+  const side = commitFile(c, "side.txt", "side work\n");
+  const notAncestor = board(c, "close", "c-s", "--by", "human", "--note", "a long enough note", "--sha", side);
+  assert.equal(notAncestor.status, 1, notAncestor.stderr);
+  assert.match(notAncestor.stderr, /not an ancestor of/);
+  assert.match(notAncestor.stderr, /main/);
+  assert.equal(JSON.parse(bytes(ticketFile(c, "c-s"))).stage, "queued");
+});
+
+test("close: a sha on local main but not on origin/main is accepted", () => {
+  const c = mk();
+  created(c, "c-a");
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), "orch-bare-"));
+  CLEAN.push(bare);
+  git(bare, "init", "--bare");
+  git(c.repo, "remote", "add", "origin", bare);
+  git(c.repo, "fetch", "origin");
+  git(c.repo, "commit", "--allow-empty", "-m", "ahead on local main");
+  const ahead = git(c.repo, "rev-parse", "HEAD");
+  const onOrigin = spawnSync("git", ["-C", c.repo, "merge-base", "--is-ancestor", ahead, "origin/main"]);
+  assert.notEqual(onOrigin.status, 0, "ahead must not be on origin/main yet");
+  const r = board(c, "close", "c-a", "--by", "human", "--sha", ahead, "--note", "ff-merged locally, not yet pushed");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.ticket.stage, "closed");
+  assert.equal(r.ticket.closed.sha, ahead);
+});
+
+test("close: a pre-change ticket with no closed key still loads", () => {
+  const c = mk();
+  created(c, "c-p");
+  editTicket(c, "c-p", (t) => { delete t.closed; });
+  const s = board(c, "status", "--json");
+  assert.equal(s.status, 0, s.stderr);
+  assert.equal(JSON.parse(s.stdout)[0].stage, "queued");
+  const r = board(c, "close", "c-p", "--by", "human", "--sha", head(c), "--note", "closed with no prior closed key");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.ticket.stage, "closed");
+  assert.equal(r.ticket.closed.by, "human");
+  assert.equal(r.ticket.closed.sha, head(c));
+  assert.equal(r.ticket.assignment, null);
+});
+
 test("egm reopen returns an owned ticket to queued with a pending egm, lock released", () => {
   const c = mk();
   created(c, "reopen-one");

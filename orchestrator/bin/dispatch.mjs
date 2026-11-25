@@ -14,7 +14,7 @@
 //   without a `/` (a bare `desk.mjs`) overlaps any path with that last segment.
 //   Output: ordered `groups`; every ticket in a group can run at once, and group N+1 starts only when every ticket
 //   of group N is shipped (groups run one after another). `held` (not grouped): a ticket that depends on a board
-//   ticket outside the argument list which is not `shipped`, or whose files overlap a ticket already in flight on
+//   ticket outside the argument list which is not `shipped` or `closed`, or whose files overlap a ticket already in flight on
 //   the board (working, ready, or queued with a session) that is not in the argument list. `unknown` (not
 //   grouped): a ticket whose `depends:` names an id that is not on the board, reported apart so a typo is seen.
 //   A `depends:` value of none / n/a / nothing / - means no dependency.
@@ -193,7 +193,7 @@ export function buildPlan(root, args) {
       unknown.push({ id: i.id, unknown_ids: missing });
       continue;
     }
-    const ext = i.depends.filter((d) => !inSet.has(d) && stageOf.get(d) !== "shipped");
+    const ext = i.depends.filter((d) => !inSet.has(d) && stageOf.get(d) !== "shipped" && stageOf.get(d) !== "closed");
     const busy = inFlight.map((f) => ({ id: f.id, file: sharedFile(i.files, f.files) })).filter((f) => f.file);
     if (ext.length || busy.length) {
       held.push({ id: i.id, waiting_on: [...ext, ...busy.map((b) => b.id)], ...(busy.length ? { in_flight: busy.map((b) => `${b.id}: ${b.file}`) } : {}) });
