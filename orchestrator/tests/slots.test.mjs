@@ -249,6 +249,106 @@ test("acquireSlot: floor slots claimed without the burst guard; above-floor slot
   delete process.env.ORCH_HOME;
 });
 
+function heldFloor(dir, me, T, sinceMs = 10000) {
+  // slot-1 and slot-2 held by a live pid, claimed `sinceMs` milliseconds before T.
+  for (const n of [1, 2]) {
+    fs.mkdirSync(path.join(dir, `slot-${n}`), { recursive: true });
+    fs.writeFileSync(path.join(dir, `slot-${n}`, "owner"), JSON.stringify({ pid: me, since: new Date(T - sinceMs).toISOString() }));
+  }
+}
+function dynamicCfg() { return { mode: "dynamic", min: 2, max: 6 }; }
+function clear() { return clearSample(); }
+
+test("acquireSlot: burst guard refuses an above-floor slot when a floor slot was claimed within 60 s", async () => {
+  process.env.ORCH_HOME = tmp();
+  process.env.ORCH_PROC_ROOT = tmp();
+  const dir = slotDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const T = 100000;
+  const me = process.pid;
+  heldFloor(dir, me, T); // since = T - 10 s, inside the 60 s burst window
+  const cfg = dynamicCfg();
+  // allowed = 6 (clearSince long past), but every slot above the floor is blocked by the burst guard.
+  await assert.rejects(
+    acquireSlot(cfg, { pollMs: 10, sample: clear(), now: T, state: { clearSince: T - 120000 }, deadline: T - 1 }),
+    /no free worker slot/,
+  );
+  assert.ok(!fs.existsSync(path.join(dir, "slot-3")), "no above-floor slot admitted");
+  delete process.env.ORCH_HOME;
+  delete process.env.ORCH_PROC_ROOT;
+});
+
+test("acquireSlot: burst guard admits slot-3 when floor slots are older than 60 s", async () => {
+  process.env.ORCH_HOME = tmp();
+  process.env.ORCH_PROC_ROOT = tmp();
+  const dir = slotDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const T = 100000;
+  const me = process.pid;
+  heldFloor(dir, me, T); // since = T - 10 s... override to 120 s below
+  // re-write with old since (outside the burst window)
+  for (const n of [1, 2]) {
+    fs.writeFileSync(path.join(dir, `slot-${n}`, "owner"), JSON.stringify({ pid: me, since: new Date(T - 120000).toISOString() }));
+  }
+  const cfg = dynamicCfg();
+  const release = await acquireSlot(cfg, { pollMs: 10, sample: clear(), now: T, state: { clearSince: T - 120000 }, deadline: T + 5000 });
+  assert.ok(fs.existsSync(path.join(dir, "slot-3")), "slot-3 admitted above the floor");
+  release();
+  delete process.env.ORCH_HOME;
+  delete process.env.ORCH_PROC_ROOT;
+});
+
+test("acquireSlot: two concurrent acquires admit exactly one above-floor slot", async () => {
+  process.env.ORCH_HOME = tmp();
+  process.env.ORCH_PROC_ROOT = tmp();
+  const dir = slotDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const T = 100000;
+  const me = process.pid;
+  heldFloor(dir, me, T);
+  for (const n of [1, 2]) {
+    fs.writeFileSync(path.join(dir, `slot-${n}`, "owner"), JSON.stringify({ pid: me, since: new Date(T - 120000).toISOString() }));
+  }
+  const cfg = dynamicCfg();
+  const deadline = T - 1; // injected now (T) is past the deadline: each call throws after one poll
+  const [r1, r2] = await Promise.allSettled([
+    acquireSlot(cfg, { pollMs: 10, sample: clear(), now: T, state: { clearSince: T - 120000 }, deadline }),
+    acquireSlot(cfg, { pollMs: 10, sample: clear(), now: T, state: { clearSince: T - 120000 }, deadline }),
+  ]);
+  const fulfilled = [r1, r2].filter((s) => s.status === "fulfilled");
+  assert.equal(fulfilled.length, 1, `exactly one above-floor admission, got ${fulfilled.length}`);
+  assert.ok(fs.existsSync(path.join(dir, "slot-3")), "slot-3 admitted by the winner");
+  fulfilled[0].value(); // release the winner's slot
+  const rejected = [r1, r2].filter((s) => s.status === "rejected");
+  assert.equal(rejected.length, 1, "the other acquire was refused");
+  delete process.env.ORCH_HOME;
+  delete process.env.ORCH_PROC_ROOT;
+});
+
+test("acquireSlot: an admit.lock older than 30 s is stale and removed", async () => {
+  process.env.ORCH_HOME = tmp();
+  process.env.ORCH_PROC_ROOT = tmp();
+  const dir = slotDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const T = 100000;
+  const me = process.pid;
+  heldFloor(dir, me, T, 120000); // floor slots old: burst guard passes, only the lock is in question
+  for (const n of [1, 2]) {
+    fs.writeFileSync(path.join(dir, `slot-${n}`, "owner"), JSON.stringify({ pid: me, since: new Date(T - 120000).toISOString() }));
+  }
+  // a stale admit.lock (40 s old, real clock) must not block admission
+  const lock = path.join(dir, "admit.lock");
+  fs.mkdirSync(lock, { recursive: true });
+  fs.utimesSync(lock, T - 40000, T - 40000);
+  const cfg = dynamicCfg();
+  const release = await acquireSlot(cfg, { pollMs: 10, sample: clear(), now: T, state: { clearSince: T - 120000 }, deadline: T + 5000 });
+  assert.ok(fs.existsSync(path.join(dir, "slot-3")), "stale lock did not block slot-3");
+  assert.ok(!fs.existsSync(lock), "stale admit.lock was removed");
+  release();
+  delete process.env.ORCH_HOME;
+  delete process.env.ORCH_PROC_ROOT;
+});
+
 // ---------------------------------------------------------------- decision log
 
 test("decision log: written on admission and allowed change only; rotates past maxLines", () => {

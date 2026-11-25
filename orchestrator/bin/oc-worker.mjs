@@ -397,11 +397,11 @@ export function slotDir() {
 // Test injection via opts: sample (object/null/function returning one per poll), cfg, now (ms).
 // Dynamic mode admits only slots 1..allowed; slots above min are gated by the burst guard.
 // A decision log line is written on admission and whenever `allowed` changes (never every poll).
-export async function acquireSlot(nOrCfg, { pollMs = 3000, deadline = Infinity, pid = process.pid, sample: injectedSample, cfg: injectedCfg, now: injectedNow } = {}) {
+export async function acquireSlot(nOrCfg, { pollMs = 3000, deadline = Infinity, pid = process.pid, sample: injectedSample, cfg: injectedCfg, now: injectedNow, state: injectedState } = {}) {
   fs.mkdirSync(slotDir(), { recursive: true });
   const isDynamic = typeof nOrCfg === "object" && nOrCfg !== null && nOrCfg.mode;
   const cfg = isDynamic ? (injectedCfg || nOrCfg) : { mode: "fixed", n: nOrCfg };
-  let state = { clearSince: null };
+  let state = injectedState || { clearSince: null };
   let lastAllowed = null;
   for (;;) {
     const now = injectedNow !== undefined ? injectedNow : Date.now();
