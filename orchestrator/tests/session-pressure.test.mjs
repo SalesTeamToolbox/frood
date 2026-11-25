@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { measure, level, shouldNotify, reportText, notifyParts } from "../bin/session-pressure.mjs";
+import { measure, level, shouldNotify, reportText, notifyParts, summaryLine } from "../bin/session-pressure.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.join(HERE, "..", "bin", "session-pressure.mjs");
@@ -83,6 +83,19 @@ function writeTranscript(homeDir, cwd, id, mtimeSec) {
   fs.writeFileSync(file, `{"type":"session","sessionId":"${id}","title":"title for ${id}"}\n`);
   fs.utimesSync(file, mtimeSec, mtimeSec);
   return file;
+}
+
+// Build a /proc/<pid>/stat line with controllable utime (f[13]) and stime (f[14]).
+// cpuTimeMs() returns (utime + stime) * 10 ms.
+function statLine(utime, stime) {
+  const f = [];
+  f[0] = "(claude)";
+  f[1] = "S";
+  for (let i = 2; i <= 22; i++) f[i] = "1";
+  f[13] = String(utime);
+  f[14] = String(stime);
+  f[21] = "1000";
+  return f.join(" ");
 }
 
 const MIN = 60 * 1000;
@@ -248,6 +261,40 @@ test("measure: disclaimer wrapper + child count as one session (dedupe, larger R
   const d1 = m.sessions.find((s) => s.sessionId === "d1");
   assert.ok(d1, "session d1 present");
   assert.equal(d1.rss, 3_000 / GB, "kept larger RSS (child)");
+});
+
+test("measure: CPU fallback counts unchanged time as idle age", () => {
+  const h = home();
+  const cwd = path.join(h, "myrepo");
+  const root = procRoot([{ pid: 100, id: "cpu1", cwd }]);
+  // No session file and no transcript -> falls to the CPU-time fallback.
+  const setCpu = (utime, stime) => {
+    fs.writeFileSync(path.join(root, "100", "stat"), statLine(utime, stime));
+  };
+  setCpu(10, 10);
+  // read 1: first read for the pid, idle age starts at 0
+  let m = withHome(h, () => measure(root, () => T));
+  assert.equal(m.sessions[0].idleMs, 0);
+  assert.equal(m.sessions[0].idleSource, "cpu");
+  // read 2 at T+20 min, CPU unchanged -> idle age = 20 min
+  m = withHome(h, () => measure(root, () => T + 20 * MIN));
+  assert.equal(m.sessions[0].idleMs, 20 * MIN);
+  // read 3 at T+40 min, CPU unchanged -> idle age = 40 min
+  m = withHome(h, () => measure(root, () => T + 40 * MIN));
+  assert.equal(m.sessions[0].idleMs, 40 * MIN);
+  // read 4 at T+40 min, CPU changed -> idle age resets to 0
+  setCpu(11, 10);
+  m = withHome(h, () => measure(root, () => T + 40 * MIN));
+  assert.equal(m.sessions[0].idleMs, 0);
+});
+
+test("summaryLine: RSS under 1 GB prints whole MB; 1 GB+ prints one decimal", () => {
+  const small = { claudeN: 1, sessions: [{ rss: 0.3 }], freeGb: 14.5, load: 0.5 };
+  assert.ok(summaryLine("warn", small).includes("307 MB"), "RSS under 1 GB as MB");
+  assert.ok(summaryLine("warn", small).includes("14.5 GB"), "free memory as GB");
+  const large = { claudeN: 1, sessions: [{ rss: 5.5 }], freeGb: 2, load: 0.5 };
+  assert.ok(summaryLine("critical", large).includes("5.5 GB"), "RSS over 1 GB as one decimal");
+  assert.ok(summaryLine("critical", large).includes("2.0 GB"), "free memory over 1 GB as one decimal");
 });
 
 test("measure: no idle sessions when none reach 30 min", () => {

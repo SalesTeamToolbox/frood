@@ -240,8 +240,11 @@ function measureOnce(procRoot, clock, homeDir) {
   const sessions = [];
 
   // Process CPU-time state, read once and written once at the end.
+  // cpuTimes maps pid -> { cpuMs, sinceMs }: cpuMs is the last observed CPU time and
+  // sinceMs is when it first stopped changing (idle age = now - sinceMs while unchanged).
   const state = readState(home);
   const cpuTimes = state.cpuTime || {};
+  const seenPids = new Set();
 
   try {
     const entries = fs.readdirSync(procRoot, { withFileTypes: true });
@@ -257,6 +260,7 @@ function measureOnce(procRoot, clock, homeDir) {
         ocN += 1; if (rss != null) ocRss += rss;
       }
       if (path.basename(procArgv0(procRoot, pid)) !== "claude") continue;
+      seenPids.add(pid);
 
       const sf = sessionFile(home, pid);
       const resume = procCmdline(procRoot, pid).match(/--resume=([^\s]+)/);
@@ -286,9 +290,19 @@ function measureOnce(procRoot, clock, homeDir) {
       // CPU-time fallback for idle age when nothing else is available.
       if (idleMs == null) {
         const cpuMs = cpuTimeMs(procRoot, pid);
-        const prevCpu = cpuTimes[String(pid)];
-        idleMs = prevCpu != null ? cpuMs - prevCpu : null;
-        if (cpuMs != null) cpuTimes[String(pid)] = cpuMs;
+        const prev = cpuTimes[String(pid)];
+        if (prev == null) {
+          // First read for this pid: nothing to measure yet; idle age starts at 0.
+          idleMs = 0;
+          cpuTimes[String(pid)] = { cpuMs, sinceMs: now };
+        } else if (cpuMs != null && cpuMs === prev.cpuMs) {
+          // CPU time unchanged since prev read: the span of stillness is the idle age.
+          idleMs = now - prev.sinceMs;
+        } else {
+          // CPU time changed (or unreadable): reset the stillness clock.
+          idleMs = 0;
+          if (cpuMs != null) cpuTimes[String(pid)] = { cpuMs, sinceMs: now };
+        }
         idleSource = idleMs != null ? "cpu" : "none";
       }
 
@@ -314,6 +328,11 @@ function measureOnce(procRoot, clock, homeDir) {
     }
   } catch {
     // /proc unreadable: nothing measurable
+  }
+
+  // Prune state for pids that are gone.
+  for (const pid of Object.keys(cpuTimes)) {
+    if (!seenPids.has(Number(pid))) delete cpuTimes[pid];
   }
 
   state.cpuTime = cpuTimes;
@@ -348,8 +367,12 @@ export function measure(procRoot = "/proc", clock = undefined, homeDir = undefin
   }
 }
 
-function fmtGb(g) {
-  return g == null ? "?" : `${Math.round(g)} GB`;
+function fmtRss(g) {
+  // Under 1 GB: whole MB (e.g. 312 MB). From 1 GB up: one decimal (e.g. 5.5 GB).
+  if (g == null) return "?";
+  const mb = g * 1024;
+  if (mb < 1024) return `${Math.round(mb)} MB`;
+  return `${g.toFixed(1)} GB`;
 }
 
 function fmtIdle(ms) {
@@ -359,9 +382,9 @@ function fmtIdle(ms) {
 }
 
 export function summaryLine(lvl, m) {
-  const free = fmtGb(m.freeGb);
+  const free = fmtRss(m.freeGb);
   const load = m.load == null ? "?" : m.load.toFixed(1);
-  const rss = fmtGb(m.claudeN ? m.sessions.reduce((a, s) => a + (s.rss ?? 0), 0) : 0);
+  const rss = fmtRss(m.claudeN ? m.sessions.reduce((a, s) => a + (s.rss ?? 0), 0) : 0);
   return `${lvl}: ${m.claudeN} sessions, ${rss}; ${free} free; load ${load}`;
 }
 
@@ -372,7 +395,7 @@ function idleLines(m) {
   for (const s of shown) {
     const base = s.cwd ? path.basename(s.cwd) : "?";
     const prefix = s.sessionId ? s.sessionId.slice(0, 8) : "-";
-    lines.push(`  ${base} ${prefix} ${fmtIdle(s.idleMs)} ${fmtGb(s.rss)}${s.title ? ` — ${s.title}` : ""}`);
+    lines.push(`  ${base} ${prefix} ${fmtIdle(s.idleMs)} ${fmtRss(s.rss)}${s.title ? ` — ${s.title}` : ""}`);
   }
   if (m.idle.length > NOTIFY_CAP) lines.push(`  +${m.idle.length - NOTIFY_CAP} more`);
   return lines;

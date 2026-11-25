@@ -16,7 +16,7 @@ import path from "node:path";
 import { listStreams } from "./handoff.mjs";
 import { statusRows, watchInfo } from "./desk.mjs";
 import { readService, syncAllStreamTitles } from "./session-title.mjs";
-import { measure, level, reportText, readState, writeState, shouldRunNotify, notifyNow, notifyParts } from "./session-pressure.mjs";
+import { measure, level, readState, writeState, shouldRunNotify, notifyNow, notifyParts } from "./session-pressure.mjs";
 
 function notify(text) {
   if (process.env.ORCH_NO_NOTIFY === "1") return;
