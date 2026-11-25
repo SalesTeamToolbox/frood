@@ -443,7 +443,7 @@ test("doCritic pages critic-spawn-failed when the spawn never queues (and retrie
 
 // The daemon's critic spawns must carry --stream, or oc-worker writes no queued/run-done event and the desk pages
 // critic-spawn-failed for a running critic and never sees its verdict (findings 7, plan-desk-daemon-errors).
-test("doCritic and the critic-alt retry spawn oc-worker with --stream <stream>", { skip: process.platform === "win32" ? "POSIX stub" : false }, async () => {
+test("doCritic and the critic retry spawn oc-worker with --stream <stream>", { skip: process.platform === "win32" ? "POSIX stub" : false }, async () => {
   const h = home();
   mkStream(h);
   mkTicket(h);
@@ -475,9 +475,11 @@ test("doCritic and the critic-alt retry spawn oc-worker with --stream <stream>",
     await inHome(h, async () => await desk.handleEvent("m6a", "run:t1/worker-r1:done", undefined));
     const [critic] = await waitArgv(1);
     assert.ok(critic, "the critic was spawned");
-    assert.equal(critic[critic.indexOf("--agent") + 1], "critic");
+    assert.equal(critic[critic.indexOf("--role") + 1], "critic", JSON.stringify(critic));
+    assert.ok(!critic.includes("--agent"), "no hand-typed --agent: " + JSON.stringify(critic));
+    assert.ok(!critic.includes("--fallback"), "no hand-typed --fallback: " + JSON.stringify(critic));
     assert.equal(critic[critic.indexOf("--stream") + 1], "m6a", JSON.stringify(critic));
-    // The critic ran and failed (no VERDICT in its out): the retry runs critic-alt on a fresh -alt out, with --stream.
+    // The critic ran and failed (no VERDICT in its out): the retry uses CHAINS.critic minus `critic` -> critic-go first.
     const findings = path.join(runDir, "findings-r1.md");
     fs.writeFileSync(findings, "no verdict here\n");
     inHome(h, () => {
@@ -487,10 +489,58 @@ test("doCritic and the critic-alt retry spawn oc-worker with --stream <stream>",
     await inHome(h, async () => await desk.handleEvent("m6a", "run:t1/findings-r1:done", undefined));
     const all = await waitArgv(2);
     const alt = all[1];
-    assert.ok(alt, "the critic-alt retry was spawned");
-    assert.equal(alt[alt.indexOf("--agent") + 1], "critic-alt");
+    assert.ok(alt, "the critic retry was spawned");
+    assert.equal(alt[alt.indexOf("--agent") + 1], "critic-go");
+    assert.equal(alt[alt.indexOf("--fallback") + 1], "critic-alt,critic-nvidia,critic-free");
     assert.equal(alt[alt.indexOf("--out") + 1], path.join(runDir, "findings-r1-alt.md"));
     assert.equal(alt[alt.indexOf("--stream") + 1], "m6a", JSON.stringify(alt));
+  } finally {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
+// A failed `critic-nvidia` run retries with CHAINS.critic minus critic-nvidia: critic first, then
+// critic-go,critic-alt,critic-free (never critic-free ahead of Nvidia).
+test("critic retry after a failed critic-nvidia run spawns critic first", { skip: process.platform === "win32" ? "POSIX stub" : false }, async () => {
+  const h = home();
+  mkStream(h);
+  mkTicket(h);
+  const runDir = path.join(h, "reports", "t1");
+  const tp = path.join(runDir, "ticket.json");
+  const findings = path.join(runDir, "findings-r1.md");
+  fs.writeFileSync(findings, "no verdict here\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/findings-r1", findings, tp, "critic-nvidia"));
+    appendEvent("m6a", evDone("t1/findings-r1", findings, "critic-nvidia"));
+  });
+  const argvLog = path.join(h, "argv.log");
+  const stub = path.join(h, "stub-oc-worker.mjs");
+  fs.writeFileSync(stub, `import fs from "node:fs"; fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify(process.argv.slice(2)) + "\\n");\n`);
+  const keys = ["ORCH_NO_NOTIFY", "ORCH_AWAIT_QUEUED_MS", "ORCH_OC_WORKER"];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1", ORCH_AWAIT_QUEUED_MS: "300", ORCH_OC_WORKER: stub });
+  const desk = await import(`../bin/desk.mjs?nvidia=${Date.now()}`);
+  const waitArgv = async (n) => {
+    for (let i = 0; i < 50; i++) {
+      try {
+        const lines = fs.readFileSync(argvLog, "utf8").trim().split("\n");
+        if (lines.length >= n) return lines.map((l) => JSON.parse(l));
+      } catch {}
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return [];
+  };
+  try {
+    await inHome(h, async () => await desk.handleEvent("m6a", "run:t1/findings-r1:done", undefined));
+    const [retry] = await waitArgv(1);
+    assert.ok(retry, "the critic retry was spawned");
+    assert.equal(retry[retry.indexOf("--agent") + 1], "critic");
+    assert.equal(retry[retry.indexOf("--fallback") + 1], "critic-go,critic-alt,critic-free");
+    assert.equal(retry[retry.indexOf("--out") + 1], path.join(runDir, "findings-r1-alt.md"));
+    assert.equal(retry[retry.indexOf("--stream") + 1], "m6a", JSON.stringify(retry));
   } finally {
     for (const k of keys) {
       if (saved[k] === undefined) delete process.env[k];

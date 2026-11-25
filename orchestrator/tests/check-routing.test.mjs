@@ -83,9 +83,14 @@ test("worker-strong --agent/--fallback chain matching CHAINS still suggests --ro
   assert.ok(r.problems.some((p) => /should use `--role worker-strong`/.test(p)));
 });
 
-test("non-worker agent --fallback is not flagged by the worker-chain rule", () => {
+test("critic --agent/--fallback chain that disagrees with CHAINS is flagged with --role critic", () => {
   const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent critic --fallback critic-alt,critic-free" });
-  assert.ok(!r.problems.some((p) => /CHAINS/.test(p)));
+  assert.ok(r.problems.some((p) => /disagrees with CHAINS/.test(p) && /CHAINS\.critic/.test(p) && /--role critic/.test(p)));
+});
+
+test("--role critic is not flagged by the chain rule", () => {
+  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --role critic --dir wt --prompt p --out o" });
+  assert.deepEqual(r.problems, []);
 });
 
 test("worker-nvidia as --agent is flagged by the worker-chain rule", () => {

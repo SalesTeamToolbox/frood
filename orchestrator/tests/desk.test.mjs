@@ -1046,7 +1046,7 @@ test("manifest: commands/frood-desk.md installs to both harnesses, and install -
   assert.doesNotMatch(oc.content, /\.claude\/(hooks|commands|agents)\//);
   assert.match(oc.content, /watch --events --by oc --until-event/);
   assert.match(oc.content, /desk: idle — no unhandled events, ending session/);
-  assert.match(oc.content, /oc-worker\.mjs --agent critic/);
+  assert.match(oc.content, /oc-worker\.mjs --role critic/);
   // 1f5aa26 removed the agent pin so /frood-desk never forces a switch to a down pool model:
   // no `agent: <desk-agent>` pin remains, and the models report is the availability path.
   assert.doesNotMatch(oc.content, /agent: orchestrator/);

@@ -229,7 +229,7 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    Claude Code: `Agent(subagent_type: "critic")` (Sonnet).
    <!-- /cc-only -->
    <!-- oc-only -->
-   OpenCode: `node {{ORCH_REPO}}/bin/oc-worker.mjs --agent critic --fallback critic-alt,critic-free --dir <worktree> --prompt <critic-prompt.md> --out <findings-r<N>.md>` (CmdC Haiku) — or `subagent({ agent: "critic" })` when no desk is involved.
+   OpenCode: `node {{ORCH_REPO}}/bin/oc-worker.mjs --role critic --dir <worktree> --prompt <critic-prompt.md> --out <findings-r<N>.md>` (CHAINS.critic) — or `subagent({ agent: "critic" })` when no desk is involved.
    <!-- /oc-only -->
 4. `CHANGES_REQUESTED` → send the same worker the findings file (round N+1). Max 3
    rounds; then stop for a person with all findings quoted. Never loop silently.

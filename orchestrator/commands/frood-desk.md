@@ -98,9 +98,9 @@ likewise) — a run id carries its ticket: `m6a-desk-minors/worker-r1`.
   - Write `critic-prompt-r<N>.md` beside the ticket — 6 short lines, no flags: `Mandate:`, `Worktree:`, `Base:`,
     `Report:`, `Round: <N>`, and `Previous findings:` when `<N>` is above 1 (the paths come from `<ticket.json>`).
   - Run the critic headless so its findings never enter your context (`shell`, `background: true`):
-    `node {{ORCH_REPO}}/bin/oc-worker.mjs --agent critic --fallback critic-alt,critic-free --dir <worktree> --prompt <run dir>/critic-prompt-r<N>.md --out <findings-r<N>.md>`
+    `node {{ORCH_REPO}}/bin/oc-worker.mjs --role critic --dir <worktree> --prompt <run dir>/critic-prompt-r<N>.md --out <findings-r<N>.md>`
   - When it notifies: exit **0** and `<findings-r<N>.md>` starts with `VERDICT:`. Anything else is not a review —
-    retry once with `--agent critic-alt`, then `ESCALATE`.
+    retry once with the rest of `--role critic`'s chain (CHAINS.critic minus the failed agent), then `ESCALATE`.
   <!-- /oc-only -->
   - `node {{ORCH_REPO}}/bin/desk.mjs verdict <stream> <run> --findings <findings-r<N>.md>`
     prints `KEY verdict:<run>`: run `step` on that key. The verdict that counts is verdict-gate's `gate()`, never

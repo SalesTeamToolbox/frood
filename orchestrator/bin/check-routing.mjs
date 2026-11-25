@@ -66,10 +66,12 @@ function matchesDropped(id, dropped) {
   return dropped.some((d) => (d.endsWith("/*") ? id.startsWith(d.slice(0, -1)) : id === d));
 }
 
-// Worker roles that must be dispatched via `--role <name>` (one chain source in bin/chains.mjs).
+// Roles that must be dispatched via `--role <name>` (one chain source in bin/chains.mjs).
 const WORKER_ROLES = new Set(["worker", "worker-strong", "worker-nvidia", "worker-free", "worker-burst", "worker-alt"]);
+const CRITIC_ROLES = new Set(["critic"]);
+const CHAIN_ROLES = new Set([...WORKER_ROLES, ...CRITIC_ROLES]);
 
-// Extract `--agent <role> --fallback <a,b,...>` chains from a doc's text, scoped to worker roles.
+// Extract `--agent <role> --fallback <a,b,...>` chains from a doc's text, scoped to worker and critic roles.
 // The fallback value is trimmed of a trailing backtick (e.g. ``--fallback a,b,c` ``).
 function workerFallbackChains(text) {
   const out = [];
@@ -80,7 +82,7 @@ function workerFallbackChains(text) {
     const fbM = line.match(/--fallback\s+([^\s`]+)/);
     if (!agentM || !fbM) continue;
     const agent = agentM[1];
-    if (!WORKER_ROLES.has(agent)) continue;
+    if (!CHAIN_ROLES.has(agent)) continue;
     const fallback = fbM[1].split(",").map((s) => s.trim().replace(/`+$/, "")).filter(Boolean);
     out.push({ agent, fallback, lineNo: i + 1 });
   }
@@ -122,18 +124,19 @@ export function checkRouting({ root = REPO, extra = [], models = null } = {}) {
       }
       if (isRule && /(?<!["“])\bCC\b(?!["”])/.test(line)) problems.push(`${at}  bare "CC" is ambiguous — write "Claude Code" or "CmdC"`);
     });
-    // Worker-chain lint: any hand-typed `--agent worker|worker-strong --fallback ...` in
-    // commands/ or rules/ must match CHAINS and preferably use `--role <name>` instead.
+    // Worker/critic-chain lint: any hand-typed `--agent <role> --fallback ...` in
+    // commands/ or rules/ must match CHAINS and preferably use `--role <role>` instead.
     const isDispatchDoc = rel.startsWith("commands/") || rel.startsWith("rules/");
     if (isDispatchDoc) {
       for (const { agent, fallback, lineNo } of workerFallbackChains(lines.join("\n"))) {
         const expected = CHAINS[agent];
         const full = [agent, ...fallback];
         const at = `${rel}:${lineNo}`;
+        const kind = CRITIC_ROLES.has(agent) ? "critic" : "worker";
         if (!expected || !eq(full, expected)) {
-          // A non-role agent (worker-nvidia, worker-free, …) has no CHAINS entry: say so instead of crashing.
-          const want = expected ? `CHAINS.${agent} (expected ${expected.join(",")}); use \`--role ${agent}\`` : "CHAINS: it is not a chain role; use \`--role worker\` or \`--role worker-strong\`";
-          problems.push(`${at}  worker dispatch chain \`--agent ${agent} --fallback ${fallback.join(",")}\` disagrees with ${want}`);
+          // A non-chain agent (worker-nvidia, worker-free, …) has no CHAINS entry: say so instead of crashing.
+          const want = expected ? `CHAINS.${agent} (expected ${expected.join(",")}); use \`--role ${agent}\`` : `CHAINS: it is not a chain role; use \`--role ${agent}\``;
+          problems.push(`${at}  ${kind} dispatch chain \`--agent ${agent} --fallback ${fallback.join(",")}\` disagrees with ${want}`);
         } else {
           problems.push(`${at}  hand-typed \`--agent ${agent} --fallback ${fallback.join(",")}\` should use \`--role ${agent}\` instead`);
         }
