@@ -1,0 +1,28 @@
+{
+  "agent": "worker-strong",
+  "model": "(agent default)",
+  "session": "ses_fixture_worker_landed",
+  "exit": "timeout",
+  "seconds": 1800,
+  "tokens": {
+    "input": 20000,
+    "output": 9000,
+    "reasoning": 4000,
+    "cache_read": 100000
+  },
+  "cost": 0.02,
+  "first_line": "",
+  "verdict": null,
+  "out": null,
+  "partial": false,
+  "errors": [],
+  "landed": {
+    "head_before": "0000000000000000000000000000000000000000",
+    "head_after": "1111111111111111111111111111111111111111"
+  },
+  "tree": {
+    "total_cost": 0.031,
+    "sessions": []
+  },
+  "gate": null
+}

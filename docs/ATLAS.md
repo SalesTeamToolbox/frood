@@ -425,6 +425,10 @@ decides: which OpenCode agent pool to dispatch first for a worker run; worker-nv
 handler: orchestrator/bin/oc-worker.mjs (--stream ticket.json preflight, caller-cwd --out/--report resolution); orchestrator/bin/board.mjs create (blast-radius test: refusal)
 decides: refused at dispatch/create time rather than late: --stream without dirname(--out)/ticket.json exits 2 before spawning; relative --report resolves against caller cwd; board create refuses a non-"unchanged" blast-radius bullet with no test: path
 
+### oc-worker: timed-out worker whose work landed counts done
+handler: orchestrator/bin/oc-worker.mjs (HEAD captured at run start; `landed` receipt field on timeout/stalled when HEAD moved + clean tree + DONE report); orchestrator/bin/outcome.mjs workerOutcome; orchestrator/bin/board.mjs workerOutcome copy (identical behaviour)
+decides: a timeout/stalled receipt whose HEAD moved, tree is clean, and --report says DONE is treated as done, so the desk dispatches the critic instead of resume-worker and board round accepts findings
+
 ## How to keep this map accurate
 
 - A handler rename is a same-commit map update: edit the `handler:` line in the

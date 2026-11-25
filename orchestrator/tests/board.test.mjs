@@ -1030,6 +1030,18 @@ test("round: timeout and no-output are recorded uncounted; a third in a row bloc
   assert.equal(t3.ticket.rounds.length, 2, "the third uncounted run blocks; it is not recorded");
 });
 
+test("round: a landed timeout receipt counts as done and proceeds to a reviewed round", () => {
+  const c = mk();
+  workingTicket(c, "p2-landed");
+  const sha = landBlastFile(c);
+  const t = round(c, "p2-landed", { worker: "receipts/worker-landed.json", reviewed: sha });
+  assert.equal(t.status, 0, t.stderr);
+  assert.equal(t.ticket.rounds.length, 1);
+  assert.equal(t.ticket.rounds[0].counted, true);
+  assert.equal(t.ticket.rounds[0].worker.outcome, "done", "a landed timeout is done");
+  assert.equal(t.ticket.rounds[0].reviewed_sha, sha);
+});
+
 test("round input matrix: a done round needs findings, a reviewed sha and exactly one critic source", () => {
   const c = mk();
   workingTicket(c, "p2-args");

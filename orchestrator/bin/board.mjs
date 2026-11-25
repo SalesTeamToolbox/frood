@@ -386,7 +386,7 @@ function workerStatusLine(r) {
   return String(r?.first_line ?? "").trim();
 }
 function workerOutcome(r) {
-  if (r.exit === "timeout" || r.exit === "stalled") return "timeout";
+  if (r.exit === "timeout" || r.exit === "stalled") return r.landed ? "done" : "timeout";
   if (r.exit === "no-healthy-pool") return "no_pool";
   // A missing `out` is as good as a null one: no final message was saved.
   if (r.exit === 0 && (r.out === null || r.out === undefined)) return "no_output";
