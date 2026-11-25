@@ -16,7 +16,11 @@
 //   grace-ok        -> one text event immediately, then finishes cleanly after FAKE_OC_DELAY ms
 //                     (output at the deadline triggers the grace extension)
 //   edit-installed -> writes "modified by fake" to FAKE_OC_TARGET (an installed file), then finishes like ok
-//   edit-worktree -> same, for a worktree file; capture-scratch -> records ORCH_SCRATCH, whether it exists and the
+//   edit-worktree -> same, for a worktree file
+//   escape-edit -> writes FAKE_OC_TARGET and emits a completed edit tool_use for it (a completed escape)
+//   escape-edit-attempted -> emits an edit tool_use with status "error" for FAKE_OC_TARGET but writes
+//                            nothing (an attempted-only escape: path recorded, no completed write)
+//   capture-scratch -> records ORCH_SCRATCH, whether it exists and the
 //                    message into FAKE_OC_RECORD, then finishes like ok
 //
 // Every `run` invocation is bounded by FAKE_OC_MAX_MS (default 300000 ms = 5 min): a timer exits the
@@ -88,6 +92,55 @@ if (mode === "drop-once") {
 }
 if (mode === "edit-installed" || mode === "edit-worktree") {
   fs.writeFileSync(process.env.FAKE_OC_TARGET, mode === "edit-installed" ? "modified by fake\n" : "modified\n");
+  mode = "ok";
+}
+// escape-edit: writes a file outside the worktree (FAKE_OC_TARGET) and emits an
+// edit tool_use in the real OpenCode 2.4.1 shape (part.tool, part.state.input,
+// path, oldString/newString), so oc-worker's worktree fence can detect it.
+// dirty-main: writes FAKE_OC_TARGET (another session's edit, say) without any tool event, then finishes normally.
+if (mode === "dirty-main") {
+  if (process.env.FAKE_OC_TARGET) fs.writeFileSync(process.env.FAKE_OC_TARGET, "someone else's edit\n");
+  mode = "ok";
+}
+if (mode === "escape-edit") {
+  const target = process.env.FAKE_OC_TARGET;
+  if (target) {
+    fs.writeFileSync(target, "escaped edit by fake\n");
+    process.stdout.write(JSON.stringify({
+      type: "tool_use",
+      sessionID: session,
+      part: {
+        type: "tool",
+        sessionID: session,
+        messageID: "msg_escape",
+        tool: "edit",
+        state: {
+          status: "completed",
+          input: { path: target, oldString: "original\n", newString: "escaped edit by fake\n" }
+        }
+      }
+    }) + "\n");
+  }
+  mode = "ok";
+}
+if (mode === "escape-edit-attempted") {
+  const target = process.env.FAKE_OC_TARGET;
+  if (target) {
+    process.stdout.write(JSON.stringify({
+      type: "tool_use",
+      sessionID: session,
+      part: {
+        type: "tool",
+        sessionID: session,
+        messageID: "msg_escape_attempt",
+        tool: "edit",
+        state: {
+          status: "error",
+          input: { path: target, oldString: "original\n", newString: "escaped edit by fake\n" }
+        }
+      }
+    }) + "\n");
+  }
   mode = "ok";
 }
 if (mode === "capture-scratch") {

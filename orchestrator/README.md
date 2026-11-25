@@ -239,3 +239,53 @@ OC commands now install to `~/.config/opencode/commands/`; the legacy singular `
   session, and desktop mode opens the app without a new session. When the holder session is gone the text and plan
   are unchanged ("no live session", "Resolve in new session" → `/frood-next <stream>`). Escalations whose board
   ticket is `closed` or `shipped` are no longer reported as open (a missing ticket stays open).
+
+## Worktree fence
+
+Workers must not write outside their own worktree. `bin/oc-worker.mjs` enforces this with the `bin/worktree-fence.mjs`
+module (no opencode, no slots — pure logic), wired into every headless run.
+
+### Detection
+
+Two independent checks run on every attempt:
+
+**B) Exact (from the run's own events).** After each attempt, scan the events the run wrote (`<out>.events.jsonl`)
+for write-file `tool_use` parts (`edit`, `write`, `patch`, `multiedit`, and any tool with `filePath` or `path` plus
+text). OpenCode 2.4.1 emits `{ type: "tool_use", part: { type: "tool", tool: "edit", state: { status, input: { path,
+oldString, newString } } } }`. Paths are resolved against `--dir` (lexical path first, then realpath, so a symlink like
+`D/.venv` that points outside is never an escape) and compared against the allowed roots: `--dir`, the directory of
+`--out`, `os.tmpdir()`, `/tmp`, and — when `--report` is given — the report's directory.
+
+**C) Backstop (main checkout, attribution not exact).** If `--dir` is a linked worktree (`git -C <dir>
+rev-parse --git-common-dir` differs from `--git-dir`), the main checkout is the parent of the common dir. A
+`git status --porcelain -z` snapshot is taken before the run and again after each attempt. Paths that turned dirty
+during the run are `suspected`: never reverted (another session may own them), only warned about.
+
+### Response
+
+For each exact escaped path inside the main checkout's git tree:
+- its `git diff` is appended to `<out>.escaped.patch` (created if needed);
+- if it was clean in the pre-run snapshot, it is restored with `git -C <main> checkout -- <path>`;
+- if it was already dirty before the run, it is left alone and listed in `escaped.left`.
+
+Paths outside any git tree are recorded only.
+
+The receipt gains an `escaped` field (`paths`, plus `restored`, `left`, `suspected` when non-empty) and an
+`errors[]` entry starting with `escaped-worktree:`. A run with exact escapes exits non-zero (status 5, receipt
+`exit: "escaped-worktree"`) so the desk escalates instead of sending it to a critic. Suspected-only results are a
+warning in the receipt; the exit is unchanged. Git failures never throw — they become receipt notes.
+
+### Prevention
+
+**Prompt footer.** `oc-worker` appends a paragraph: "Your worktree is `<D>`. Create and edit files only under it
+(plus the report folder). A path outside it, such as `<main>/orchestrator/…`, is another checkout's copy: read it if
+you need to, but make the edit to the same relative path under `<D>`." The `<main>/…` example is included only when
+a linked worktree / main checkout was found.
+
+**OpenCode edit permission (default off).** `ORCH_EDIT_FENCE=1` merges a per-run OpenCode config into
+`OPENCODE_CONFIG_CONTENT`:
+```
+{"permission":{"edit":{"*":"deny","<D>/**":"allow","<report-dir>/**":"allow","/tmp/**":"allow"}}}
+```
+It is opt-in because no live pool was available to verify it with one real `opencode run`. Unit tests cover the
+config text and the merge only. Set `ORCH_EDIT_FENCE=0` to explicitly opt out.

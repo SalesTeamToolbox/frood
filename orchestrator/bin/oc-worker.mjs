@@ -94,6 +94,7 @@ import { appendEvent, atomicWrite, streamsDir } from "./handoff.mjs";
 import { workerOutcome } from "./outcome.mjs";
 import { CHAINS, chainFor } from "./chains.mjs";
 import { readSample, slotConfig, allowedSlots, decisionLog, heldCount, nvidiaCapNow, recordNvidia429 } from "./slots.mjs";
+import { allowedRoots, findMain, gitStatusZ, parseStatusZ, footer, mergeEditFence, foldEscapes, finalizeEscapes, hasCompletedWrite } from "./worktree-fence.mjs";
 
 export const FOOTER = `
 
@@ -1179,7 +1180,18 @@ export async function runWorker(a) {
   // The agent writes the report itself (cwd = --dir), so point it at the absolute report path:
   // a relative --report would land in the worktree, not the caller's run dir.
   const reportLine = a.report ? `\nWrite your report to ${path.resolve(a.report)} (absolute path; not the worktree).` : "";
-  const base = promptText + reportLine + FOOTER + readonlyFooter + visionFooter;
+  // Worktree fence: allowed roots, main checkout (if linked), pre-run snapshot, prompt footer.
+  const reportDir = a.report ? path.dirname(path.resolve(a.report)) : null;
+  const fenceRoots = allowedRoots(dir, out, reportDir);
+  const fenceMain = findMain(dir);
+  let fenceBefore = null;
+  if (fenceMain) {
+    const snap = gitStatusZ(fenceMain);
+    fenceBefore = snap === null ? null : parseStatusZ(snap);
+  }
+  const fenceState = { paths: [], restored: [], left: [], suspected: [], notes: [], eventsByPath: new Map() };
+  const fenceFooter = footer(dir, out, fenceMain);
+  const base = promptText + reportLine + FOOTER + readonlyFooter + visionFooter + fenceFooter;
   const cliFor = (session, message) => {
     // --standalone: a private opencode server on the run's stdio, so killTree ends the session (the server
     // exits when its pipe closes; the proc-tree sweep is the backstop) instead of leaving it writing in the
@@ -1203,6 +1215,11 @@ export async function runWorker(a) {
       let maxSilence = 0;
       const attemptStart = Date.now();
       const childEnv = isReadOnly ? { ...workerEnv(), ORCH_SCRATCH: scratchDir, ...visionEnv } : { ...workerEnv(), ...visionEnv };
+      // Opt-in OpenCode edit fence: merge per-run edit permissions into OPENCODE_CONFIG_CONTENT.
+      if (process.env.ORCH_EDIT_FENCE === "1") {
+        const existing = childEnv.OPENCODE_CONFIG_CONTENT;
+        childEnv.OPENCODE_CONFIG_CONTENT = mergeEditFence(existing, dir, out);
+      }
       const child = spawn(bin.cmd, [...(bin.pre || []), ...cli], { cwd: dir, env: childEnv, stdio: ["ignore", "pipe", "pipe"], shell: bin.shell, windowsHide: true, detached: process.platform !== "win32" });
       if (process.platform !== "win32") {
         try { prio.set(child.pid, 10); } catch {
@@ -1286,6 +1303,7 @@ export async function runWorker(a) {
     let sum;
     let errors;
     let classifyErrors;
+    let receiptExitOverride;
     // Read-only guard pre-snapshot (inside try so errors is in scope)
     if (isReadOnly) {
       try {
@@ -1310,6 +1328,12 @@ export async function runWorker(a) {
       attempts++;
       const t0 = Date.now();
       r = await attempt(cli);
+      // Worktree fence: scan this attempt's events for exact escapes; check main for suspected dirt.
+      try {
+        foldEscapes(fenceState, { lines: r.lines, roots: fenceRoots, dir, main: fenceMain, beforeStatus: fenceBefore, out });
+      } catch (e) {
+        fenceState.notes.push(`worktree fence scan failed: ${e.message}`);
+      }
       for (const o of r.orphans) orphansKilled.push({ pid: o.pid, cmd: String(o.cmd || "").slice(0, 120) });
       sum = summarize(r.lines);
       maxSilenceMs = Math.max(maxSilenceMs, r.maxSilence);
@@ -1349,6 +1373,22 @@ export async function runWorker(a) {
       cli = cliFor(sum.session, msg);
     }
     events.end();
+    // Worktree fence: finalize the escape check.
+    const { escaped } = finalizeEscapes(fenceState);
+    // Any escaped path with a completed write means this run wrote outside its
+    // worktree: fail the run so the desk escalates instead of sending it to a
+    // critic. Suspected-only or attempted-but-not-completed writes are just a
+    // warning in the receipt; exit unchanged.
+    if (fenceState.paths.length > 0) {
+      errors.push(...fenceState.notes);
+      const anyCompleted = Array.from(fenceState.eventsByPath.values()).some(hasCompletedWrite);
+      if (anyCompleted) {
+        receiptExitOverride = "escaped-worktree";
+        errors.push(`escaped-worktree: ${fenceState.paths.length} path(s) written outside the worktree`);
+      }
+    }
+    // Suspected-only (main went dirty, no tool event of ours): `escaped.suspected` in the receipt is the warning;
+    // no errors[] entry, exit unchanged. Main is often busy with other sessions.
     const killReason = sig.name ? "killed" : r.killReason;
     if (sig.name) errors.push(`killed by ${sig.name}`);
     // Landed work: a timed-out or stalled run whose commit made it in counts as done.
@@ -1427,7 +1467,7 @@ export async function runWorker(a) {
       agent: a.agent,
       model,
       session: sum.session,
-      exit: killReason ?? code,
+      exit: receiptExitOverride ?? killReason ?? code,
       seconds: Math.round((Date.now() - started) / 1000),
       tokens,
       cost: Number(cost.toFixed(6)),
@@ -1450,6 +1490,8 @@ export async function runWorker(a) {
       ...(tampered.length ? { tampered } : {}),
       ...(worktreeChanged ? { worktree_changed: worktreeChanged } : {}),
       ...(readonlyViolation ? { readonly_violation: true } : {}),
+      // Worktree fence: only present when something escaped or was suspected.
+      ...(escaped ? { escaped } : {}),
       // Critics: the mechanical decision, not the critic's own claim (free critics find, then approve).
       gate: gateResult,
       // Vision metadata
@@ -1462,6 +1504,12 @@ export async function runWorker(a) {
     atomicWrite(out + ".receipt.json", JSON.stringify(receipt, null, 2) + "\n");
     Object.defineProperty(receipt, "classifyErrors", { value: classifyErrors, enumerable: false }); // for runWithFallback; not serialized
     receipt.status = sig.name ? sig.code : killReason ? 4 : code ? 5 : sum.final ? 0 : 3;
+    // A run with at least one completed escaped write is a failed run (non-zero
+    // exit) so the desk escalates instead of sending it to a critic. Status 5 is
+    // set only when the receipt exit is escaped-worktree (a completed write);
+    // an attempted-only escape (path recorded, no completed write) leaves exit
+    // and status unchanged — it is a warning, not a failure.
+    if (receipt.exit === "escaped-worktree" && !sig.name) receipt.status = 5;
     return receipt;
   } finally {
     clearInterval(kickTimer);

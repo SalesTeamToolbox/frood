@@ -113,6 +113,35 @@ test("timeout kills the run and exits 4", () => {
   assert.equal(JSON.parse(r.stdout.trim()).exit, "timeout");
 });
 
+test("fence: attempted-only escape (no completed write) leaves exit and status unchanged, not 5", () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  // outside every allowed root (/tmp is allowed, homedir is not)
+  const target = path.join(os.homedir(), ".wtf-oc-escape-attempted.txt");
+  CLEAN.push(target);
+  fs.writeFileSync(target, "original\n");
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const out = path.join(dir, "out", "findings-r1.md");
+  const argsFile = path.join(dir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", dir, "--prompt", prompt, "--out", out], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, FAKE_OC_ARGS_FILE: argsFile, FAKE_OC_MODE: "escape-edit-attempted", FAKE_OC_TARGET: target },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const receipt = JSON.parse(r.stdout.trim());
+  // `status` is stripped from the stdout receipt; it drives process.exit(code)
+  // no completed write -> exit unchanged (clean finish), exit code not 5
+  assert.equal(receipt.exit, 0, "exit unchanged on attempted-only escape: " + r.stdout);
+  assert.equal(r.status, 0, "exit code not 5 on attempted-only escape: " + r.stdout);
+  // path recorded as escaped
+  assert.ok(receipt.escaped, "receipt has escaped field: " + r.stdout);
+  assert.ok(receipt.escaped.paths.includes(target), "escaped.paths lists the target: " + JSON.stringify(receipt.escaped.paths));
+  // target file untouched (attempted only, nothing restored)
+  assert.equal(fs.readFileSync(target, "utf8"), "original\n", "target untouched by attempted escape");
+});
+
 test("opencode failure exits 5 with stderr in the receipt; no text exits 3", () => {
   const f = run({ FAKE_OC_MODE: "fail" });
   assert.equal(f.status, 5);
@@ -2033,4 +2062,118 @@ test("reap: a fixture child orphaned by a SIGKILLed oc-worker is reaped by the g
     await sleep(200);
   }
   assert.equal(gone, true, `fixture children survived reaping: ${fixtureChildren(id).join(",")}`);
+});
+
+// ── worktree fence tests ──────────────────────────────────────────
+
+test("fence: footer contains the worktree paragraph", () => {
+  const dir = tmp();
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the work.");
+  const out = path.join(dir, "out", "worker-r1.md");
+  const argsFile = path.join(dir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "worker", "--dir", dir, "--prompt", prompt, "--out", out], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, FAKE_OC_ARGS_FILE: argsFile },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const { argv } = JSON.parse(fs.readFileSync(argsFile, "utf8"));
+  const message = argv.at(-1);
+  assert.ok(message.includes("Your worktree is"), "footer has worktree paragraph");
+  assert.ok(message.includes("Create and edit files only under it"), "footer names allowed roots");
+  assert.ok(message.includes(path.resolve(dir)), "footer names D");
+});
+
+test("fence: ORCH_EDIT_FENCE=1 sets OPENCODE_CONFIG_CONTENT with the fence config", () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const envFile = path.join(dir, "env.json");
+  const fake = path.join(dir, "fake-env-oc.mjs");
+  fs.writeFileSync(fake, `#!/usr/bin/env node\nimport fs from "node:fs";\nconst argv = process.argv.slice(2);\nif (process.env.FAKE_OC_ARGS_FILE) fs.writeFileSync(process.env.FAKE_OC_ARGS_FILE, JSON.stringify({ argv, cwd: process.cwd() }));\nfs.writeFileSync(process.env.FAKE_OC_ENV_FILE, JSON.stringify({ oc: process.env.OPENCODE_CONFIG_CONTENT }));\nprocess.stdout.write(JSON.stringify({ type: "text", sessionID: "ses", part: { sessionID: "ses", messageID: "m", type: "text", text: "RESULT: DONE\\n" } }) + "\\n");\nprocess.stdout.write(JSON.stringify({ type: "step_finish", part: { type: "step-finish", cost: 0 } }) + "\\n");\n`);
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the work.");
+  const out = path.join(dir, "out", "worker-r1.md");
+  const argsFile = path.join(dir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "worker", "--dir", dir, "--prompt", prompt, "--out", out], {
+    env: {
+      ...process.env,
+      OPENCODE_BIN: fake,
+      ORCH_NO_PROCTREE: "1",
+      ORCH_HOME: dir,
+      FAKE_OC_ARGS_FILE: argsFile,
+      FAKE_OC_ENV_FILE: envFile,
+      ORCH_EDIT_FENCE: "1",
+    },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const env = JSON.parse(fs.readFileSync(envFile, "utf8"));
+  assert.ok(env.oc, "OPENCODE_CONFIG_CONTENT was set");
+  const cfg = JSON.parse(env.oc);
+  assert.equal(cfg.permission.edit["*"], "deny", "default deny");
+  assert.ok(cfg.permission.edit[`${path.resolve(dir)}/**`], "D allow");
+  assert.ok(cfg.permission.edit[`${path.resolve(path.dirname(out))}/**`], "report dir allow");
+  assert.ok(cfg.permission.edit[`${os.tmpdir()}/**`], "tmp allow");
+});
+
+test("fence: ORCH_EDIT_FENCE=1 merges fence into existing OPENCODE_CONFIG_CONTENT", () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const envFile = path.join(dir, "env.json");
+  const fake = path.join(dir, "fake-env-oc.mjs");
+  fs.writeFileSync(fake, `#!/usr/bin/env node\nimport fs from "node:fs";\nfs.writeFileSync(process.env.FAKE_OC_ENV_FILE, JSON.stringify({ oc: process.env.OPENCODE_CONFIG_CONTENT }));\nprocess.stdout.write(JSON.stringify({ type: "text", sessionID: "ses", part: { sessionID: "ses", messageID: "m", type: "text", text: "RESULT: DONE\\n" } }) + "\\n");\nprocess.stdout.write(JSON.stringify({ type: "step_finish", part: { type: "step-finish", cost: 0 } }) + "\\n");\n`);
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the work.");
+  const out = path.join(dir, "out", "worker-r1.md");
+  const existing = JSON.stringify({ permission: { edit: { "/existing/**": "allow" } }, other: 1 });
+  const r = spawnSync(process.execPath, [BIN, "--agent", "worker", "--dir", dir, "--prompt", prompt, "--out", out], {
+    env: {
+      ...process.env,
+      OPENCODE_BIN: fake,
+      ORCH_NO_PROCTREE: "1",
+      ORCH_HOME: dir,
+      FAKE_OC_ENV_FILE: envFile,
+      ORCH_EDIT_FENCE: "1",
+      OPENCODE_CONFIG_CONTENT: existing,
+    },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const env = JSON.parse(fs.readFileSync(envFile, "utf8"));
+  const cfg = JSON.parse(env.oc);
+  assert.equal(cfg.other, 1, "existing fields preserved");
+  assert.equal(cfg.permission.edit["/existing/**"], "allow", "existing edit rule preserved");
+  assert.equal(cfg.permission.edit["*"], "deny", "fence deny added");
+  assert.ok(cfg.permission.edit[`${path.resolve(dir)}/**`], "fence D allow added");
+});
+
+test("fence: ORCH_EDIT_FENCE=0 leaves OPENCODE_CONFIG_CONTENT untouched", () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const envFile = path.join(dir, "env.json");
+  const fake = path.join(dir, "fake-env-oc.mjs");
+  fs.writeFileSync(fake, `#!/usr/bin/env node\nimport fs from "node:fs";\nfs.writeFileSync(process.env.FAKE_OC_ENV_FILE, JSON.stringify({ oc: process.env.OPENCODE_CONFIG_CONTENT }));\nprocess.stdout.write(JSON.stringify({ type: "text", sessionID: "ses", part: { sessionID: "ses", messageID: "m", type: "text", text: "RESULT: DONE\\n" } }) + "\\n");\nprocess.stdout.write(JSON.stringify({ type: "step_finish", part: { type: "step-finish", cost: 0 } }) + "\\n");\n`);
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the work.");
+  const out = path.join(dir, "out", "worker-r1.md");
+  const existing = JSON.stringify({ permission: { edit: { "/existing/**": "allow" } } });
+  const r = spawnSync(process.execPath, [BIN, "--agent", "worker", "--dir", dir, "--prompt", prompt, "--out", out], {
+    env: {
+      ...process.env,
+      OPENCODE_BIN: fake,
+      ORCH_NO_PROCTREE: "1",
+      ORCH_HOME: dir,
+      FAKE_OC_ENV_FILE: envFile,
+      ORCH_EDIT_FENCE: "0",
+      OPENCODE_CONFIG_CONTENT: existing,
+    },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const env = JSON.parse(fs.readFileSync(envFile, "utf8"));
+  assert.equal(env.oc, existing, "config unchanged when ORCH_EDIT_FENCE=0");
 });
