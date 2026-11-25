@@ -178,6 +178,11 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    the repo has none — the line is still written. The critic holds the commit to it: a renamed, moved
    or reshaped symbol/route/page/model the map references without a same-commit map update is a major
    finding. `board.mjs create` refuses a Mandate without the line (board.md §create).
+   **Process safety (required, verbatim in every Mandate):** every child process a test or tool starts has a
+   timeout (`spawnSync(…, { timeout })`, `timeout <s>` around each test run) and no test leaves a process behind.
+   Never `pkill`, `killall` or `kill $(pgrep -f …)` — a name pattern also matches oc-worker and the worker's own
+   shell (2026-11-24: a worker's `pkill -f fake-opencode` killed its own run; a test's endless `spawnSync` hung
+   the suite for a whole round). Kill one pid read from `ps`, and only a process this run started.
    **When the repo has `.opencode/board/adapter.json`, every ticket is created and moved through
    `node {{ORCH_REPO}}/bin/board.mjs`** — `create` → `egm approve|waive` →
    `claim` → `oc-worker --ticket <id> --owner <session>` (which calls `board attach` itself) →

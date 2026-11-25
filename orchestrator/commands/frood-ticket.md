@@ -32,6 +32,11 @@ Write `<repo>/.opencode/reports/<id>/mandate.md` — the same shape `/frood-orch
   diff must update. Write `no map` plainly when the repo has none; silence is refused.
 - **Pass bars** — the exact gate commands and the expected output, plus the tests the diff must add or keep green.
 - **Gates** — the repo's `.opencode/board/adapter.json` gate list, and whether EGM or senior review is triggered.
+- **Process safety** (copy into every Mandate verbatim) — every child process a test or tool starts has a
+  timeout (`spawnSync(…, { timeout })`, `timeout <s>` around each test run), and no test leaves a process behind.
+  Never `pkill`, `killall` or `kill $(pgrep -f …)`: a name pattern also matches oc-worker and the worker's own
+  shell (2026-11-24: a worker's `pkill -f fake-opencode` killed its own run). Kill one pid read from `ps`, and only
+  a process this run started.
 
 ## 3. Put it on the board
 
