@@ -52,6 +52,7 @@ locks/<id>.lock/    gitignored; mkdir lock, contains owner.json
 | `egm_paths` | array of globs | `["**/migrations/**","**/alembic/**","prisma/**","**/auth*","**/billing*","**/wallet*"]` | scope match ⇒ EGM required |
 | `guarded_paths` | array of globs | `["**/auth*","**/billing*","ops/**"]` | scope match ⇒ senior required |
 | `stale_minutes` | number, > oc-worker timeout | `45` | liveness threshold |
+| `max_parallel.build` | number or `"auto"`, optional | `3` or `"auto"` | read by `dispatch.mjs cap --kind build`: max concurrent builds; absent defaults to 2; `"auto"` resolves from the live slots decision (2..6). `max_parallel.train` optional, default 1; `"auto"` is not valid for train. |
 
 ## Ticket schema v1 (files contain no comments)
 

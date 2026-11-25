@@ -4,7 +4,7 @@
 //   node oc-worker.mjs --agent worker --dir <worktree> --prompt <mandate.md>
 //        [--out <final-message.md>] [--session <ses_id>] [--model <provider/model>]
 //        [--ticket <id> --owner <session>]
-//        [--stream <name>] [--title <text>] [--timeout-min 30] [--idle-min 20] [--grace-min 15] [--resume 1] [--slots 2]
+//        [--stream <name>] [--title <text>] [--timeout-min 30] [--idle-min 20] [--grace-min 15] [--resume 1] [--slots N]
 //        [--role <name>] [--fallback <agent>[,<agent>]] [--report <path>] [--vision]
 //   node oc-worker.mjs --help   (or -h) prints this text and exits 0; nothing is launched
 //   node oc-worker.mjs active [--json]   list running headless runs with elapsed time, last-output
@@ -23,8 +23,12 @@
 //   text (e.g. Go weekly limit), that model is marked down in ~/.config/orchestrator/pool-health.json (until
 //   the provider's retry-after) and the next agent in the list runs; later runs skip known-down models
 //   without calling them. Max 3 real attempts. The receipt records every hop and skip.
-// - Machine-wide WORKER_SLOTS cap (default 2): waits for a free slot (lock dirs under
-//   ~/.config/orchestrator/slots, stale when the owning pid is gone).
+// - Machine-wide worker slot cap: `WORKER_SLOTS=N` (or --slots N) is a fixed cap of N. When unset, the cap is
+//   dynamic between WORKER_SLOTS_MIN (default 2) and WORKER_SLOTS_MAX (default 6), decided from machine load over
+//   the last 5 minutes (/proc/pressure/cpu some avg300, /proc/loadavg, /proc/meminfo MemAvailable); ORCH_PROC_ROOT
+//   overrides the proc tree (tests use temp fixtures, never the real /proc). Invalid values exit 2. Slots are lock
+//   dirs under ~/.config/orchestrator/slots, stale when the owning pid is gone. Decisions are logged to
+//   ~/.config/orchestrator/slot-decisions.log (on admission and on allowed changes only).
 // - --ticket <id> --owner <session>: the ticket names an OpenCode board ticket; before anything is launched this
 //   runs `node <board.mjs> attach <id> --pid <this pid> --out <out>` (execFileSync, no shell), which the board
 //   refuses unless the ticket is working, owned by --owner and past its EGM gate. A refusal exits 7 with nothing
@@ -73,6 +77,7 @@ import crypto from "node:crypto";
 import { appendEvent, atomicWrite, streamsDir } from "./handoff.mjs";
 import { workerOutcome } from "./outcome.mjs";
 import { CHAINS, chainFor } from "./chains.mjs";
+import { readSample, slotConfig, allowedSlots, decisionLog, heldCount } from "./slots.mjs";
 
 export const FOOTER = `
 
@@ -205,7 +210,7 @@ export function usage() {
 }
 
 function args(argv) {
-  const a = { timeoutMin: 30, idleMin: 20, resume: 1, slots: Number(process.env.WORKER_SLOTS || 2), vision: false, graceMin: 15 };
+  const a = { timeoutMin: 30, idleMin: 20, resume: 1, vision: false, graceMin: 15 };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = () => argv[++i];
@@ -224,7 +229,7 @@ function args(argv) {
     else if (k === "--idle-min") a.idleMin = Number(v());
     else if (k === "--grace-min") a.graceMin = Number(v());
     else if (k === "--resume") a.resume = Number(v());
-    else if (k === "--slots") a.slots = Number(v());
+    else if (k === "--slots") a.slots = v();
     else if (k === "--fallback") a.fallback = v().split(",").map((x) => x.trim()).filter(Boolean).slice(0, 8);
     else if (k === "--role") a.role = v();
     else if (k === "--vision") a.vision = true;
@@ -350,6 +355,10 @@ function alive(pid) {
   }
 }
 
+// Exported, test-replaceable priority setter: nice 10 for opencode children on non-win32.
+export const prio = { set: (pid, n) => os.setPriority(pid, n) };
+let prioWarned = false;
+
 // Extra env for worker runs comes from <state>/worker-env.json: { "VAR": "value" }.
 // Some MCP servers keep a locked dir under the session cwd unless told otherwise, which breaks
 // `git worktree remove`; pointing them at a shared dir outside any repo is a config concern, not
@@ -382,14 +391,38 @@ export function slotDir() {
 }
 
 // mkdir is atomic: the first claimant of slot-N wins. A slot whose owner pid is dead is reclaimed.
-export async function acquireSlot(n, { pollMs = 3000, deadline = Infinity, pid = process.pid } = {}) {
+//
+// `acquireSlot(n, opts)` — fixed mode when `n` is an integer (legacy signature, WORKER_SLOTS/--slots).
+// `acquireSlot(cfg, opts)` — dynamic mode when `cfg` is {mode, min, max} from slotConfig().
+// Test injection via opts: sample (object/null/function returning one per poll), cfg, now (ms).
+// Dynamic mode admits only slots 1..allowed; slots above min are gated by the burst guard.
+// A decision log line is written on admission and whenever `allowed` changes (never every poll).
+export async function acquireSlot(nOrCfg, { pollMs = 3000, deadline = Infinity, pid = process.pid, sample: injectedSample, cfg: injectedCfg, now: injectedNow } = {}) {
   fs.mkdirSync(slotDir(), { recursive: true });
+  const isDynamic = typeof nOrCfg === "object" && nOrCfg !== null && nOrCfg.mode;
+  const cfg = isDynamic ? (injectedCfg || nOrCfg) : { mode: "fixed", n: nOrCfg };
+  let state = { clearSince: null };
+  let lastAllowed = null;
   for (;;) {
-    for (let i = 1; i <= n; i++) {
+    const now = injectedNow !== undefined ? injectedNow : Date.now();
+    let sample;
+    if (isDynamic) {
+      if (typeof injectedSample === "function") sample = injectedSample();
+      else sample = injectedSample !== undefined ? injectedSample : readSample();
+    }
+    const { allowed, max, reason, state: newState } = allowedSlots(sample, cfg, state, now);
+    state = newState;
+    if (allowed !== lastAllowed) {
+      decisionLog({ allowed, held: heldCount(), sample, reason });
+      lastAllowed = allowed;
+    }
+    for (let i = 1; i <= allowed; i++) {
       const d = path.join(slotDir(), `slot-${i}`);
+      if (isDynamic && i > cfg.min && !burstGuardOk(now)) continue; // above the floor: one admission per 60 s
       try {
         fs.mkdirSync(d);
         fs.writeFileSync(path.join(d, "owner"), JSON.stringify({ pid, since: new Date().toISOString() }));
+        decisionLog({ allowed, held: heldCount(), sample, reason }); // admission
         return () => fs.rmSync(d, { recursive: true, force: true });
       } catch {
         let owner = null;
@@ -400,8 +433,47 @@ export async function acquireSlot(n, { pollMs = 3000, deadline = Infinity, pid =
         if ((owner && !alive(owner.pid)) || (!owner && age > 60000)) fs.rmSync(d, { recursive: true, force: true });
       }
     }
-    if (Date.now() > deadline) throw new Error(`no free worker slot (WORKER_SLOTS=${n})`);
+    if (now > deadline) {
+      throw new Error(cfg.mode === "fixed"
+        ? `no free worker slot (WORKER_SLOTS=${cfg.n})`
+        : `no free worker slot (${reason})`);
+    }
     await new Promise((r) => setTimeout(r, pollMs));
+  }
+}
+
+// Short box-wide lock around an above-floor admission: while a lock dir is held (or younger than 30 s)
+// another admission is in progress; if any live slot was claimed within the last 60 s, deny this one.
+// Slots 1..min are claimed without the guard.
+function burstGuardOk(now) {
+  const lock = path.join(slotDir(), "admit.lock");
+  let released;
+  try {
+    try {
+      const st = fs.statSync(lock);
+      if (Date.now() - st.mtimeMs > 30000) fs.rmSync(lock, { recursive: true, force: true });
+    } catch {}
+    fs.mkdirSync(lock);
+    released = () => { try { fs.rmSync(lock, { recursive: true, force: true }); } catch {} };
+  } catch {
+    return false; // lock held: treat as a concurrent recent admission
+  }
+  try {
+    const cutoff = now - 60000;
+    let names;
+    try { names = fs.readdirSync(slotDir()); } catch { return true; }
+    for (const n of names) {
+      if (!n.startsWith("slot-")) continue;
+      let owner;
+      try { owner = JSON.parse(fs.readFileSync(path.join(slotDir(), n, "owner"), "utf8")); } catch {}
+      if (owner && owner.pid && alive(owner.pid)) {
+        const since = Date.parse(owner.since);
+        if (Number.isFinite(since) && since > cutoff) return false; // a recent admission above the floor
+      }
+    }
+    return true;
+  } finally {
+    released();
   }
 }
 
@@ -644,7 +716,10 @@ function streamPreflight(a) {
     throw new StreamRefused(`--report must be an absolute path with --stream (pass the run-dir path, e.g. ${path.join(path.dirname(out), "report.md")})`, 2);
   }
   const run = runName(a);
-  const ev = { key: `run:${run}:queued`, kind: "queued", run, out, pid: process.pid, pid_start: processStart(process.pid), agent: a.agent, ticket: path.join(path.dirname(out), "ticket.json") };
+  // Queue-time snapshot of the slot decision (fresh sample, clearSince: null) — not the admission outcome.
+  const slotsNow = Date.now();
+  const slotsReason = allowedSlots(readSample(), a.slotCfg, { clearSince: null }, slotsNow).reason;
+  const ev = { key: `run:${run}:queued`, kind: "queued", run, out, pid: process.pid, pid_start: processStart(process.pid), agent: a.agent, ticket: path.join(path.dirname(out), "ticket.json"), slots: slotsReason };
   let added;
   try {
     added = appendEvent(stream, ev);
@@ -779,7 +854,7 @@ export async function runWorker(a) {
   const safe = (m) => (m.startsWith("-") ? "\n" + m : m);
 
   const promptText = fs.readFileSync(a.prompt, "utf8"); // before the slot: a bad --prompt must not leak a slot, registry entry or timer
-  const release = await acquireSlot(a.slots);
+  const release = await acquireSlot(a.slotCfg, { pollMs: 3000, pid: process.pid });
   const started = Date.now();
   let effectiveDeadline = started + a.timeoutMin * 60000; // one wall-clock budget for every attempt together
   // Grace: once extended, the dashboard's OVERDUE check must see the extended deadline.
@@ -854,6 +929,11 @@ export async function runWorker(a) {
       const attemptStart = Date.now();
       const childEnv = isReadOnly ? { ...workerEnv(), ORCH_SCRATCH: scratchDir, ...visionEnv } : { ...workerEnv(), ...visionEnv };
       const child = spawn(bin.cmd, [...(bin.pre || []), ...cli], { cwd: dir, env: childEnv, stdio: ["ignore", "pipe", "pipe"], shell: bin.shell, windowsHide: true, detached: process.platform !== "win32" });
+      if (process.platform !== "win32") {
+        try { prio.set(child.pid, 10); } catch {
+          if (!prioWarned) { prioWarned = true; console.error(`oc-worker: could not set priority 10 on pid ${child.pid}: continuing at default niceness`); }
+        }
+      }
       const tree = child.pid ? watch(child.pid, { since: attemptStart, everyMs: Number(process.env.ORCH_PROCTREE_MS) || 5000 }) : null;
       let buf = "";
       child.stdout.on("data", (d) => {
@@ -1270,6 +1350,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error(`oc-worker: ${e.message}`);
     process.exit(2);
   }
+  // Resolve the fixed/dynamic slot decision once at startup; a usage error exits 2.
+  let slotCfg;
+  try {
+    slotCfg = slotConfig(process.env, a.slots);
+  } catch (e) {
+    console.error(`oc-worker: ${e.message}`);
+    process.exit(2);
+  }
+  a.slotCfg = slotCfg;
   runWithFallback(a)
     .then((r) => {
       const { status, ...rest } = r;

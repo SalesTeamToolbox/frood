@@ -414,7 +414,11 @@ topic: docs/atlas/routes.md
 
 ### orchestrator parallel dispatch
 handler: orchestrator/bin/dispatch.mjs (plan: independence check, cap: concurrency limit); orchestrator/bin/board.mjs session (assignment.session); orchestrator/bin/desk.mjs status (ticketSessions)
-decides: which board tickets may run in their own sessions at once (shared file or `depends:` means serial), and whether the build/train cap leaves room
+decides: which board tickets may run in their own sessions at once (shared file or `depends:` means serial), and whether the build cap leaves room — build cap may be `auto` (slots.mjs)
+
+### oc-worker load-based slots
+handler: orchestrator/bin/slots.mjs (readSample, slotConfig, allowedSlots); orchestrator/bin/oc-worker.mjs acquireSlot; desk.mjs status header
+decides: how many workers may start now — fixed `WORKER_SLOTS=N` or dynamic `WORKER_SLOTS_MIN`..`WORKER_SLOTS_MAX` (2..6) from 5-minute machine load (/proc/pressure/cpu, /proc/loadavg, /proc/meminfo) via ORCH_PROC_ROOT; burst guard admits at most one slot above the floor per 60 s; opencode children nicened to 10 on non-Windows; decision log slot-decisions.log
 
 ### oc-worker --role worker chain
 handler: orchestrator/bin/oc-worker.mjs --role <name> (expands to --agent/--fallback from CHAINS); orchestrator/bin/chains.mjs (CHAINS source, re-exported by orchestrator/bin/router-health.mjs)

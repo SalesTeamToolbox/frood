@@ -205,3 +205,83 @@ test("--help prints the header and exits 0", () => {
   assert.equal(r.status, 0);
   assert.match(r.stdout, /plan <ticket-id\|plan-file>/);
 });
+
+// ---- cap --kind build with max_parallel.build: "auto" ----
+
+function procRoot(psi, load, mem) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "orch-dispatch-proc-"));
+  CLEAN.push(root);
+  fs.mkdirSync(path.join(root, "pressure"), { recursive: true });
+  fs.writeFileSync(path.join(root, "pressure", "cpu"), psi || "some avg300=5\n");
+  fs.writeFileSync(path.join(root, "loadavg"), load || "0.53 0.83 1.00\n");
+  fs.writeFileSync(path.join(root, "meminfo"), mem || "MemAvailable: 13500000 kB\n");
+  return root;
+}
+function runProc(repo, root, ...args) {
+  return spawnSync(process.execPath, [BIN, ...args, "--repo", repo], {
+    encoding: "utf8",
+    env: { ...process.env, ORCH_PROC_ROOT: root, WORKER_SLOTS: "" },
+  });
+}
+
+test("cap --kind build auto: clear sample -> max from slots max (6), reason present in --json", () => {
+  const repo = mk({ max_parallel: { build: "auto" } });
+  const root = procRoot("some avg300=5\n", "0.53 0.83 1.00\n", "MemAvailable: 13500000 kB\n");
+  const c = runProc(repo, root, "cap", "--kind", "build", "--json");
+  assert.equal(c.status, 0, c.stderr);
+  const s = JSON.parse(c.stdout);
+  assert.equal(s.kind, "build");
+  assert.equal(s.running, 0);
+  assert.equal(s.max, 6);
+  assert.equal(s.ok, true);
+  assert.ok(s.reason, "reason present in auto mode");
+  assert.match(s.reason, /^slots 6\/6 \(cpu wait 5%, load 0\.83, 13 GiB free\) \(advisory\)$/);
+  const text = runProc(repo, root, "cap", "--kind", "build");
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /^ok build 0\/6/);
+});
+
+test("cap --kind build auto: busy sample -> max falls to slots min (2), reason says so", () => {
+  const repo = mk({ max_parallel: { build: "auto" } });
+  const root = procRoot("some avg300=31\n", "0.53 0.83 1.00\n", "MemAvailable: 13500000 kB\n");
+  const c = runProc(repo, root, "cap", "--kind", "build", "--json");
+  assert.equal(c.status, 0, c.stderr); // 0 running < 2 max: room left
+  const s = JSON.parse(c.stdout);
+  assert.equal(s.max, 2);
+  assert.match(s.reason, /cpu wait 31%/);
+  assert.match(s.reason, /\(advisory\)$/);
+});
+
+test("cap --kind build auto: absent max_parallel still defaults to build 2", () => {
+  const repo = mk(); // no max_parallel at all
+  const root = procRoot("some avg300=5\n", "0.53 0.83 1.00\n", "MemAvailable: 13500000 kB\n");
+  const c = runProc(repo, root, "cap", "--kind", "build", "--json");
+  assert.equal(c.status, 0, c.stderr);
+  assert.deepEqual(JSON.parse(c.stdout), { kind: "build", running: 0, max: 2, ok: true });
+});
+
+test("cap --kind build auto: integer cap unchanged", () => {
+  const repo = mk({ max_parallel: { build: 3 } });
+  const root = procRoot("some avg300=5\n", "0.53 0.83 1.00\n", "MemAvailable: 13500000 kB\n");
+  const c = runProc(repo, root, "cap", "--kind", "build", "--json");
+  assert.equal(c.status, 0, c.stderr);
+  assert.deepEqual(JSON.parse(c.stdout), { kind: "build", running: 0, max: 3, ok: true });
+});
+
+test("cap --kind train auto: usage error (auto only valid for build)", () => {
+  const repo = mk({ max_parallel: { train: "auto" } });
+  const c = runProc(repo, null, "cap", "--kind", "train");
+  assert.equal(c.status, 2, c.stderr);
+  assert.match(c.stderr, /max_parallel\.train/);
+});
+
+test("cap --kind build auto: no /proc sample -> max falls to min (2), reason names the source", () => {
+  const repo = mk({ max_parallel: { build: "auto" } });
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "orch-dispatch-empty-"));
+  CLEAN.push(empty);
+  const c = runProc(repo, empty, "cap", "--kind", "build", "--json");
+  assert.equal(c.status, 0, c.stderr);
+  const s = JSON.parse(c.stdout);
+  assert.equal(s.max, 2);
+  assert.match(s.reason, /no load sample/);
+});

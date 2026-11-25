@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { summarize, acquireSlot, slotDir } from "../bin/oc-worker.mjs";
+import { summarize, acquireSlot, slotDir, prio } from "../bin/oc-worker.mjs";
 import { workerOutcome } from "../bin/outcome.mjs";
 import { CHAINS } from "../bin/chains.mjs";
 
@@ -1218,4 +1218,34 @@ test("grace: --grace-min 0 disables the extension", () => {
   const receipt = JSON.parse(r.stdout.trim());
   assert.equal(receipt.exit, "timeout");
   assert.equal(receipt.extended_min, undefined, "grace-min 0 must not extend");
+});
+
+test("--stream queued event carries slots (queue-time snapshot)", () => {
+  const { h, sd } = streamHome();
+  const r = streamRun(h, {}, "worker-r1.md");
+  assert.equal(r.status, 0, r.stderr);
+  const ev = eventsOf(sd);
+  const queued = ev.find((e) => e.kind === "queued");
+  assert.ok(queued, "queued event present");
+  assert.equal(typeof queued.slots, "string", "slots field present");
+  assert.match(queued.slots, /^slots \d+\/\d+ /, "slots reason text");
+});
+
+test("nice 10: prio is exported and the spawn path calls prio.set(child.pid, 10) on non-win32", () => {
+  if (process.platform === "win32") return; // Windows unchanged: no priority call
+  assert.ok(prio && typeof prio.set === "function", "prio.set exported and callable");
+  const src = fs.readFileSync(BIN, "utf8");
+  assert.ok(/os\.setPriority\(pid,\s*n\)/.test(src), "calls os.setPriority(pid, n)");
+  assert.ok(/prio\.set\(child\.pid,\s*10\)/.test(src), "spawn path calls prio.set(child.pid, 10)");
+  assert.ok(
+    /process\.platform\s*!==\s*"win32"/.test(src) || /process\.platform\s*!==\s*'win32'/.test(src),
+    "gated on non-win32",
+  );
+  assert.ok(/catch\s*\{/.test(src), "wrapped in try/catch (never fails the run)");
+});
+
+test("nice 10: a normal run succeeds (niceness set, never fails the run)", () => {
+  if (process.platform === "win32") return;
+  const r = run({});
+  assert.equal(r.status, 0, r.stderr);
 });

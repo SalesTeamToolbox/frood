@@ -96,6 +96,7 @@ export { streamOrphaned } from "./orphan.mjs";
 import { killPid, processStart, isZombie } from "./proc-tree.mjs";
 import { agentModel, isPolicyFree, isDown, modelAllowed, policyReason } from "./pool-health.mjs";
 import { chainFor } from "./chains.mjs";
+import { slotConfig, readSample, allowedSlots } from "./slots.mjs";
 
 const NEXT_CUT = 80;
 const DEFAULT_INTERVAL_S = 30;
@@ -565,12 +566,17 @@ function cmdStatus(opts) {
   const info = watchInfo();
   const rows = statusRows();
   const tickets = ticketSessions();
+  // Live slot snapshot: a point-in-time sample (no hysteresis state here), printed above the stream rows.
+  const slotCfg = slotConfig(process.env, undefined);
+  const slotSample = readSample();
+  const { allowed, max, reason } = allowedSlots(slotSample, slotCfg, { clearSince: null }, Date.now());
   if (opts.json) {
     // `tickets` appears only when some board ticket holds a session, so the existing shape is unchanged.
-    console.log(JSON.stringify({ streams: rows, watch: info.state === "none" ? null : info, ...(tickets.length ? { tickets } : {}) }));
+    console.log(JSON.stringify({ streams: rows, watch: info.state === "none" ? null : info, slots: { allowed, max, reason }, ...(tickets.length ? { tickets } : {}) }));
     return 0;
   }
   console.log(watchLine(info));
+  console.log(reason);
   for (const s of rows) {
     console.log(`${s.name}  ${s.state}  next: ${cut(s.next, NEXT_CUT)}  unhandled=${s.unhandled}${s.held_by ? ` held=${s.held_by}` : ""}`);
     for (const r of s.runs) console.log(`  ${r.run}  ${r.agent}  ${r.detail ? `${r.state} ${r.detail}` : r.state}  ${r.age_min ?? "-"}m${r.live_tree ? "  dead wrapper, live tree?" : ""}`);
