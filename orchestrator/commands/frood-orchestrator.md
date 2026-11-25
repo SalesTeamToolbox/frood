@@ -106,7 +106,7 @@ question the owner must decide.
      followed by a short brief, and `background` (≥80 chars: goal, plan path, what landed, and "report to the parent
      session; anything for the owner goes in your report as NEEDS OWNER"). This session stays the owner's
      thread: it reports each child's note in one line, relays its `NEEDS OWNER` items, and starts the following module
-     when the child's work ships, and archives the finished child (Standing rules).
+     when the child's work ships, archiving the finished child first (Standing rules).
      Once `start_session` succeeds, the child records itself on the stream in `/frood-next` (after its claim)
      so `/frood-learn <stream>` can collect and review it.
    - **Continue in this session**.
@@ -292,14 +292,20 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   - `node {{ORCH_REPO}}/bin/settings.mjs get archive_nested_sessions` prints `true`;
   - the child's latest report to the parent says its module shipped and names the merged commit sha(s);
   - every one of those shas is on the base branch:
-    `git -C <repo> merge-base --is-ancestor <sha> <base>` exits 0. (The "ticket closed" alternative is
-    dropped: abandoned work does not count as shipped.)
-  - the child no longer holds the stream: in the JSON from
-    `node {{ORCH_REPO}}/bin/handoff.mjs show --stream <stream>`, `held_session` is not the child's session id;
-    it is null or someone else's, because the child ran `write … --release` at its boundary;
+    `git -C <repo> merge-base --is-ancestor <sha> <base>` exits 0. (A closed ticket does not count: abandoned work
+    is not shipped. A squash or cherry-pick merge leaves the child's sha off the base history, so this check fails;
+    then confirm the change on base by hand, by the commit subject, or leave the child unarchived.)
+  - the child has released its claim: in the JSON from `node {{ORCH_REPO}}/bin/handoff.mjs show --stream <stream>`,
+    `claim` is `null` (`state` is `pending`). A progress write keeps `claim`, so a non-null `claim` means the child,
+    or a session that took the stream after it, is still working: do not archive. `held_session` stays set after a
+    boundary and is not a signal. `show` exits 1 when `state` is not `pending` but still prints the JSON: read the
+    JSON, not the exit code;
   - no run is still active for that stream: `node {{ORCH_REPO}}/bin/oc-worker.mjs active` shows no row ending in
     `| stream <stream>`, except rows marked STALE;
-  - the child has no unanswered `NEEDS OWNER` item, and it is idle (not working) in the app's session list.
+  - the child has no unanswered `NEEDS OWNER` item, and `get_session` on its `local_…` id reports it idle, not
+    working.
+  Archive the finished child before starting the next module's session, so a new claim on the stream cannot be
+  mistaken for the child's.
   Then the parent calls `archive_session` with the child's session id — the `local_…` id `start_session`
   returned, which the parent already holds — and says so in one line.
   A nested session never archives itself or its parent.
