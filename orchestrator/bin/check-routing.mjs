@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Routing lint. Fails (exit 1) when routing instructions can't be trusted:
-//   - an OpenCode model ID (opencode/, opencode-go/, commandcode/, nvidia/) is not in live `opencode models`
+//   - an OpenCode model ID (opencode/, opencode-go/, commandcode/, nvidia/) is not in live `opencode models`,
+//     while its provider still has other models there (a typo or a retired model). An ID whose provider has NO
+//     model at all in `opencode models` is a warning: the provider was removed from the harness on purpose.
 //   - a model the rule lists under "Dropped" appears in a dispatch file (commands/, agents/, skills/, CLAUDE.md)
 //   - a Claude Code model value is not an alias (haiku|sonnet|opus|fable|inherit), e.g. Task({ model: "claude-sonnet-4-5" })
 //   - a rules/ file uses bare "CC" (ambiguous: Claude Code vs CommandCode)
@@ -67,7 +69,7 @@ function matchesDropped(id, dropped) {
 }
 
 // Roles that must be dispatched via `--role <name>` (one chain source in bin/chains.mjs).
-const WORKER_ROLES = new Set(["worker", "worker-strong", "worker-nvidia", "worker-free", "worker-burst", "worker-alt"]);
+const WORKER_ROLES = new Set(["worker", "worker-strong", "worker-nvidia", "worker-free"]);
 const CRITIC_ROLES = new Set(["critic"]);
 const CHAIN_ROLES = new Set([...WORKER_ROLES, ...CRITIC_ROLES]);
 
@@ -100,6 +102,8 @@ export function checkRouting({ root = REPO, extra = [], models = null } = {}) {
   const rule = files.find((f) => /01-orchestrator-models\.md$/.test(f));
   const dropped = rule ? droppedIds(fs.readFileSync(rule, "utf8")) : [];
   if (!models) warn.push("`opencode models` unavailable — live ID check skipped");
+  const providerHasModels = (p) => [...models].some((m) => m.startsWith(`${p}/`));
+  const absentProviders = new Map(); // provider with no model in `opencode models` -> reference count
 
   for (const file of files) {
     const rel = path.relative(root, file).replace(/\\/g, "/");
@@ -111,7 +115,9 @@ export function checkRouting({ root = REPO, extra = [], models = null } = {}) {
       for (const m of line.matchAll(OC_ID)) {
         const id = m[0];
         if (/^\/?\*/.test(line.slice(m.index + id.length))) continue; // wildcard mention like commandcode/Qwen/*
-        if (models && !models.has(id)) problems.push(`${at}  unknown model ID \`${id}\` (not in opencode models)`);
+        const prov = id.split("/")[0];
+        if (models && !models.has(id) && !providerHasModels(prov)) absentProviders.set(prov, (absentProviders.get(prov) || 0) + 1);
+        else if (models && !models.has(id)) problems.push(`${at}  unknown model ID \`${id}\` (not in opencode models)`);
         if (!isRule && matchesDropped(id, dropped)) problems.push(`${at}  dropped model \`${id}\` used in a dispatch file`);
       }
       // Claude Code model values: Task/Agent call args, and cc-only frontmatter in agents/
@@ -143,6 +149,7 @@ export function checkRouting({ root = REPO, extra = [], models = null } = {}) {
       }
     }
   }
+  for (const [prov, n] of absentProviders) warn.push(`provider ${prov} not configured — ${n} reference(s)`);
   // Installed OpenCode agents must not be pinned to a model the owner's provider policy rejects.
   for (const dir of ["agents", "agent"]) {
     const d = path.join(process.env.ORCH_HOME || os.homedir(), ".config", "opencode", dir);

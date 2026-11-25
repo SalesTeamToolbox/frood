@@ -170,17 +170,12 @@ own model so a spawn cannot inherit the orchestrator's):
 | `scout` | Cheap read-only search; file:line evidence, never edits. |
 | `worker` | Routine code worker: one Mandate, one worktree, tests, commit, report. |
 | `worker-strong` | Same contract, for harder tickets. |
-| `worker-burst` | Same contract; used when the main worker pool is hot or capped. |
-| `worker-alt` | Same contract; second fallback hop. |
 | `worker-nvidia` | Same contract; free tier (cannot sign off). |
 | `worker-free` | Same contract; free tier, last resort. |
 | `critic` | One review pass of a diff against the Mandate; APPROVED or CHANGES_REQUESTED with file:line findings; never edits. |
-| `critic-alt` | Alternate critic when the main critic pool is unavailable. |
 | `critic-free` | Free-tier critic; its APPROVED counts only via `verdict-gate --free` plus a paid or human sign-off. |
 | `senior` | Final blockers-only review of an already critic-approved diff, when a critic or the ticket asks for it. |
-| `senior-alt` | Alternate senior when the main one is unavailable. |
 | `orchestrator` | Runs one ticket end to end headless (worker, critic, senior loop). |
-| `orchestrator-alt` | Orchestrator fallback when the main pool is capped. |
 | `orchestrator-free` | Last-resort free orchestrator; its tickets end READY and need human or senior review. |
 
 `scout`, `worker` and `critic` install to both harnesses; the rest are OpenCode only (`manifest.json`).

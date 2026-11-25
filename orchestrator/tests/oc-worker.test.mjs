@@ -198,10 +198,10 @@ test("invalid flags still exit 2 with the existing messages", () => {
 });
 
 test("--fallback re-pools on a quota error and records the hop", () => {
-  const r = run({ FAKE_OC_MODE: "quota-critic" }, "--fallback", "critic-alt,scout");
+  const r = run({ FAKE_OC_MODE: "quota-critic" }, "--fallback", "critic-go,scout");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const receipt = JSON.parse(r.stdout.trim());
-  assert.equal(receipt.agent, "critic-alt");
+  assert.equal(receipt.agent, "critic-go");
   assert.equal(receipt.repooled_from.length, 1);
   assert.match(receipt.repooled_from[0].error, /limit/);
   const onDisk = JSON.parse(fs.readFileSync(path.join(r.dir, "out", "findings-r1.md.receipt.json"), "utf8"));
@@ -239,7 +239,7 @@ test("--role worker expands to worker-nvidia first (one chain source)", () => {
   assert.equal(receiptOf(r).agent, "worker-nvidia");
   // --role reads CHAINS directly, so this literal pin is what guards the expanded order (the fake
   // opencode harness does not record the --fallback tail).
-  assert.deepEqual(CHAINS.worker, ["worker-nvidia", "worker", "worker-burst", "worker-alt", "worker-free"]);
+  assert.deepEqual(CHAINS.worker, ["worker-nvidia", "worker", "worker-free"]);
 });
 
 test("--role worker-strong expands to worker-strong first (unchanged chain)", () => {
@@ -247,7 +247,7 @@ test("--role worker-strong expands to worker-strong first (unchanged chain)", ()
   const r = spawnRole(dir, "--role", "worker-strong");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(receiptOf(r).agent, "worker-strong");
-  assert.deepEqual(CHAINS["worker-strong"], ["worker-strong", "worker-burst", "worker-nvidia", "worker-alt", "worker-free"]);
+  assert.deepEqual(CHAINS["worker-strong"], ["worker-strong", "worker-nvidia", "worker-free"]);
 });
 
 test("--role with --agent is refused (usage exit 2)", () => {
@@ -774,13 +774,13 @@ test("--stream appends queued then one run-done; no stream flag creates no strea
 
 test("--stream with a fallback hop appends run-done exactly once, for the final receipt", () => {
   const { h, sd } = streamHome();
-  const r = streamRun(h, { FAKE_OC_MODE: "quota-critic" }, "worker-r1.md", "--fallback", "critic-alt");
+  const r = streamRun(h, { FAKE_OC_MODE: "quota-critic" }, "worker-r1.md", "--fallback", "critic-go");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const ev = eventsOf(sd);
   assert.equal(ev.filter((e) => e.kind === "queued").length, 1);
   const done = ev.filter((e) => e.kind === "run-done");
   assert.equal(done.length, 1);
-  assert.equal(done[0].agent, "critic-alt");
+  assert.equal(done[0].agent, "critic-go");
 });
 
 test("status 6 (every pool down) and status 8 (model not allowed) runs still append run-done and a receipt", async () => {
@@ -1479,4 +1479,118 @@ test("nice 10: a normal run succeeds (niceness set, never fails the run)", () =>
   if (process.platform === "win32") return;
   const r = run({});
   assert.equal(r.status, 0, r.stderr);
+});
+
+// --- provider-removed: a model missing from `opencode models` is skipped before a spawn and costs no attempt.
+// Five agents on five providers (a quota hit takes the whole provider down). a1's model is absent; a2 and a3 hit a
+// quota; a4 answers. The 3-attempt cap lets a4 run only if the absent hop used no attempt (a1, a2, a3 would be 3).
+function chainHome() {
+  const h = tmp();
+  CLEAN.push(h);
+  const agents = path.join(h, ".config", "opencode", "agents");
+  fs.mkdirSync(agents, { recursive: true });
+  for (const n of ["a1", "a2", "a3", "a4", "a5"]) fs.writeFileSync(path.join(agents, `${n}.md`), `---\ndescription: x\nmode: subagent\nmodel: p${n[1]}/m\n---\nbody\n`);
+  return h;
+}
+function runChainFixture(h, env) {
+  const prompt = path.join(h, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "a1", "--fallback", "a2,a3,a4,a5", "--dir", h, "--prompt", prompt, "--out", path.join(h, "out", "r1.md")], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h, FAKE_OC_MODE: "quota-a2,a3", ...env },
+    encoding: "utf8",
+    timeout: 60000,
+  });
+  return { ...r, receipt: r.stdout.trim() ? JSON.parse(r.stdout.trim()) : null };
+}
+
+test("runChain: a model absent from opencode models is skipped with no spawn and no attempt counted", () => {
+  const h = chainHome();
+  const list = path.join(h, "models.txt");
+  fs.writeFileSync(list, ["p2/m", "p3/m", "p4/m", "p5/m"].join("\n"));
+  const r = runChainFixture(h, { ORCH_OPENCODE_MODELS_FILE: list });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.receipt.agent, "a4", "a4 is reached: the absent hop was not one of the 3 attempts");
+  const hops = r.receipt.repooled_from;
+  assert.deepEqual(hops.map((x) => x.agent), ["a1", "a2", "a3"]);
+  assert.equal(hops[0].skipped, true);
+  assert.match(hops[0].reason, /^absent: not in opencode models/);
+  assert.ok(!hops[1].skipped, "a2 was really spawned");
+});
+
+test("runChain: the real listing path (opencode models) skips an absent model and caches the list", () => {
+  const h = chainHome();
+  const r = runChainFixture(h, { FAKE_OC_MODELS: "p2/m,p3/m,p4/m,p5/m" });
+  assert.equal(r.receipt.agent, "a4", r.stdout + r.stderr);
+  assert.match(r.receipt.repooled_from[0].reason, /^absent/);
+  const cache = JSON.parse(fs.readFileSync(path.join(h, ".config", "orchestrator", "opencode-models.json"), "utf8"));
+  assert.ok(cache.models.includes("p5/m"));
+});
+
+test("runChain: when the models listing fails nothing is filtered (fail open)", () => {
+  const h = chainHome();
+  const r = runChainFixture(h, { FAKE_OC_MODE: "ok", FAKE_OC_MODELS_FAIL: "1" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.receipt.agent, "a1", "a1 ran: nothing was filtered");
+  assert.equal(r.receipt.repooled_from, undefined, "nothing recorded");
+});
+
+test("runChain: every hop absent returns no-healthy-pool naming the absent models", () => {
+  const h = chainHome();
+  const list = path.join(h, "models.txt");
+  fs.writeFileSync(list, "other/model\n");
+  const r = runChainFixture(h, { ORCH_OPENCODE_MODELS_FILE: list });
+  assert.equal(r.status, 6, r.stdout + r.stderr);
+  assert.equal(r.receipt.exit, "no-healthy-pool");
+  assert.match(r.receipt.errors[0], /absent from opencode models/);
+  assert.doesNotMatch(r.receipt.errors[0], /known-down/);
+  assert.match(r.receipt.errors.join("\n"), /p1\/m/);
+  assert.match(r.receipt.errors.join("\n"), /p5\/m/);
+});
+
+test("chains: no chain names a removed agent, and every chain agent has an agent file", () => {
+  const removed = ["worker-burst", "worker-alt", "critic-alt", "senior-alt", "orchestrator-alt"];
+  for (const [role, chain] of Object.entries(CHAINS)) {
+    for (const agent of chain) {
+      assert.ok(!removed.includes(agent), `${role} names removed agent ${agent}`);
+      assert.ok(fs.existsSync(path.join(HERE, "..", "agents", `${agent}.md`)), `${role}: agents/${agent}.md exists`);
+    }
+  }
+  assert.ok(!Object.values(CHAINS).flat().some((a) => /alt$|burst$/.test(a)));
+});
+
+test("runChain: a fresh models cache is used without spawning opencode models; a stale one is refetched", () => {
+  const cacheOf = (h) => path.join(h, ".config", "orchestrator", "opencode-models.json");
+  const put = (h, at, models) => {
+    fs.mkdirSync(path.dirname(cacheOf(h)), { recursive: true });
+    fs.writeFileSync(cacheOf(h), JSON.stringify({ at: new Date(at).toISOString(), models }));
+  };
+  // fresh cache lacks p1/m; the fake would list it (and fail if asked at all): the cache wins, so a1 is skipped
+  const fresh = chainHome();
+  put(fresh, Date.now() - 60_000, ["p2/m", "p3/m", "p4/m", "p5/m"]);
+  const f = runChainFixture(fresh, { FAKE_OC_MODELS_FAIL: "1" });
+  assert.equal(f.receipt.agent, "a4", f.stdout + f.stderr);
+  assert.match(f.receipt.repooled_from[0].reason, /^absent/);
+  // stale cache (11 min old) lacks p1/m, the live listing has it: refetched, a1 runs, cache rewritten
+  const stale = chainHome();
+  put(stale, Date.now() - 11 * 60_000, ["p2/m", "p3/m", "p4/m", "p5/m"]);
+  const s = runChainFixture(stale, { FAKE_OC_MODE: "ok", FAKE_OC_MODELS: "p1/m,p2/m" });
+  assert.equal(s.receipt.agent, "a1", s.stdout + s.stderr);
+  assert.ok(JSON.parse(fs.readFileSync(cacheOf(stale), "utf8")).models.includes("p1/m"), "cache refreshed");
+});
+
+test("runChain: an explicit --model on hop 1 is the model checked against the list", () => {
+  const h = chainHome();
+  const list = path.join(h, "models.txt");
+  fs.writeFileSync(list, ["p1/m", "p2/m", "p3/m", "p4/m", "p5/m"].join("\n"));
+  const prompt = path.join(h, "mandate.md");
+  fs.writeFileSync(prompt, "x");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "a1", "--model", "gone/explicit", "--fallback", "a2", "--dir", h, "--prompt", prompt, "--out", path.join(h, "out", "r1.md")], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h, ORCH_OPENCODE_MODELS_FILE: list },
+    encoding: "utf8",
+    timeout: 60000,
+  });
+  const rec = JSON.parse(r.stdout.trim());
+  assert.equal(rec.agent, "a2", r.stdout + r.stderr);
+  assert.equal(rec.repooled_from[0].model, "gone/explicit");
+  assert.match(rec.repooled_from[0].reason, /^absent/);
 });

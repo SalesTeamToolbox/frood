@@ -493,7 +493,7 @@ test("doCritic and the critic retry spawn oc-worker with --stream <stream>", { s
     const alt = all[1];
     assert.ok(alt, "the critic retry was spawned");
     assert.equal(alt[alt.indexOf("--agent") + 1], "critic-go");
-    assert.equal(alt[alt.indexOf("--fallback") + 1], "critic-alt,critic-nvidia,critic-free");
+    assert.equal(alt[alt.indexOf("--fallback") + 1], "critic-nvidia,critic-free");
     assert.equal(alt[alt.indexOf("--out") + 1], path.join(runDir, "findings-r1-alt.md"));
     assert.equal(alt[alt.indexOf("--stream") + 1], "m6a", JSON.stringify(alt));
   } finally {
@@ -505,7 +505,7 @@ test("doCritic and the critic retry spawn oc-worker with --stream <stream>", { s
 });
 
 // A failed `critic-nvidia` run retries with CHAINS.critic minus critic-nvidia: critic first, then
-// critic-go,critic-alt,critic-free (never critic-free ahead of Nvidia).
+// critic-go,critic-free (never critic-free ahead of Nvidia).
 test("critic retry after a failed critic-nvidia run spawns critic first", { skip: process.platform === "win32" ? "POSIX stub" : false }, async () => {
   const h = home();
   mkStream(h);
@@ -540,7 +540,7 @@ test("critic retry after a failed critic-nvidia run spawns critic first", { skip
     const [retry] = await waitArgv(1);
     assert.ok(retry, "the critic retry was spawned");
     assert.equal(retry[retry.indexOf("--agent") + 1], "critic");
-    assert.equal(retry[retry.indexOf("--fallback") + 1], "critic-go,critic-alt,critic-free");
+    assert.equal(retry[retry.indexOf("--fallback") + 1], "critic-go,critic-free");
     assert.equal(retry[retry.indexOf("--out") + 1], path.join(runDir, "findings-r1-alt.md"));
     assert.equal(retry[retry.indexOf("--stream") + 1], "m6a", JSON.stringify(retry));
   } finally {

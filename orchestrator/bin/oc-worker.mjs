@@ -66,7 +66,7 @@ import "./no-window.mjs"; // hide console windows of every child process (Window
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { gate } from "./verdict-gate.mjs";
@@ -96,9 +96,6 @@ const VISION_CAPABLE_MODELS = new Set([
   "nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b",
   "opencode-go/muse-spark-1.3-contributor",
   "opencode-go/muse-spark-1.2-contributor",
-  "commandcode/meta/muse-spark-1.3-contributor",
-  "commandcode/claude-sonnet-5-5",
-  "commandcode/claude-haiku-5-5",
 ]);
 
 // Check if a model is vision-capable
@@ -866,6 +863,35 @@ function filterVisionChain(chain, a) {
   return { chain: visionChain, fallback: false };
 }
 
+// The model IDs `opencode models` lists right now, or null when that cannot be known (fail open: nothing is
+// filtered). A provider the owner removed from the harness vanishes from this list; a hop on one of its models
+// would only fail instantly and use up an attempt. Cached 10 minutes at <ORCH_HOME>/.config/orchestrator/opencode-models.json.
+// ORCH_OPENCODE_MODELS_FILE (one ID per line) replaces the listing, for tests.
+const MODELS_CACHE_MS = 10 * 60_000;
+const modelIds = (text) => new Set(String(text).split(/\r?\n/).map((l) => l.trim()).filter((l) => /^[^\s/]+\/\S+$/.test(l)));
+export function opencodeModelSet(now = Date.now()) {
+  try {
+    if (process.env.ORCH_OPENCODE_MODELS_FILE) {
+      const set = modelIds(fs.readFileSync(process.env.ORCH_OPENCODE_MODELS_FILE, "utf8"));
+      return set.size ? set : null;
+    }
+    const cache = path.join(process.env.ORCH_HOME || os.homedir(), ".config", "orchestrator", "opencode-models.json");
+    try {
+      const c = JSON.parse(fs.readFileSync(cache, "utf8"));
+      if (now - Date.parse(c.at) < MODELS_CACHE_MS && Array.isArray(c.models) && c.models.length) return new Set(c.models);
+    } catch {}
+    const bin = opencodeBin();
+    const r = spawnSync(bin.cmd, [...(bin.pre || []), "models"], { encoding: "utf8", timeout: 20000, shell: bin.shell, windowsHide: true });
+    if (r.error || r.status !== 0) return null;
+    const set = modelIds(r.stdout);
+    if (!set.size) return null;
+    atomicWrite(cache, JSON.stringify({ at: new Date(now).toISOString(), models: [...set] }) + "\n");
+    return set;
+  } catch {
+    return null;
+  }
+}
+
 async function runChain(a) {
   if (a.ticket) attachTicket(a); // no ticket, no run: this is the only gate between the board and a launch
   const fullChain = [a.agent, ...(a.fallback || [])];
@@ -874,6 +900,7 @@ async function runChain(a) {
   let r = null;
   let attempts = 0;
   let visionFallbackWarning = false;
+  let liveModels; // `opencode models`, read once and only if some hop has a model to check
   for (let i = 0; i < chain.length && attempts < 3; i++) {
     const agent = chain[i];
     const first = i === 0;
@@ -881,6 +908,14 @@ async function runChain(a) {
     if (model && !modelAllowed(model)) {
       hops.push({ agent, model, skipped: true, reason: policyReason(model) });
       continue;
+    }
+    // A model the harness no longer lists (its provider was removed) is skipped before a spawn and costs no attempt.
+    if (model) {
+      if (liveModels === undefined) liveModels = opencodeModelSet();
+      if (liveModels && !liveModels.has(model)) {
+        hops.push({ agent, model, skipped: true, reason: "absent: not in opencode models" });
+        continue;
+      }
     }
     const down = isDown(model);
     if (down) {
@@ -912,7 +947,7 @@ async function runChain(a) {
   }
   if (!r) {
     // every pool in the chain is known-down: fail fast, no calls made
-    r = { agent: a.agent, model: a.model || agentModel(a.agent) || "(agent default)", session: null, exit: "no-healthy-pool", seconds: 0, tokens: null, cost: 0, first_line: "", verdict: null, out: null, partial: false, errors: ["every agent in the chain is known-down (pool-health); run router-health or wait"], status: 6 };
+    r = { agent: a.agent, model: a.model || agentModel(a.agent) || "(agent default)", session: null, exit: "no-healthy-pool", seconds: 0, tokens: null, cost: 0, first_line: "", verdict: null, out: null, partial: false, errors: noPoolErrors(hops), status: 6 };
   }
   if (hops.length) r.repooled_from = hops;
   if (visionFallbackWarning) r.vision_fallback = "no vision-capable agent available, using first healthy agent";
@@ -932,6 +967,17 @@ async function runChain(a) {
     atomicWrite(path.resolve(a.out) + ".receipt.json", JSON.stringify({ ...r, status: undefined }, null, 2) + "\n");
   }
   return r;
+}
+
+// Why no hop ran: known-down pools, plus the models `opencode models` no longer lists (named, so the owner sees what vanished).
+function noPoolErrors(hops) {
+  const absent = hops.filter((h) => /^absent:/.test(h.reason || "")).map((h) => h.model);
+  const why = !absent.length ? "known-down (pool-health); run router-health or wait"
+    : absent.length === hops.length ? "absent from opencode models"
+    : "absent from opencode models or known-down (pool-health)";
+  const errors = [`every agent in the chain is ${why}`];
+  if (absent.length) errors.push(`absent from opencode models: ${absent.join(", ")}`);
+  return errors;
 }
 
 export function notAllowedReceipt(a, model) {

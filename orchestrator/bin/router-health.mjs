@@ -138,12 +138,6 @@ const VISION_CAPABLE_MODELS = new Set([
   // Muse on Go - vision capable (per plan constraint #4)
   "opencode-go/muse-spark-1.3-contributor",
   "opencode-go/muse-spark-1.2-contributor",
-  // Muse on CommandCode - vision capable
-  "commandcode/meta/muse-spark-1.3-contributor",
-  // Sonnet 5.5 - vision capable
-  "commandcode/claude-sonnet-5-5",
-  // Haiku 5.5 - vision capable (conservative: assume yes for newer models)
-  "commandcode/claude-haiku-5-5",
 ]);
 
 // Check if a model is vision-capable (catalog-based with static fallback)
@@ -271,7 +265,7 @@ export async function check({ probeModels = false, probeAll = false, models = un
       }
     }
     // Get connected providers (for skipping catalog-only providers without auth)
-    // SEED_PROVIDERS (opencode, opencode-go, commandcode) are exempt from auth check
+    // SEED_PROVIDERS (opencode, opencode-go) are exempt from auth check
     let connectedProviderIds = new Set();
     if (!process.env.ORCH_NO_AUTH) {
       try {

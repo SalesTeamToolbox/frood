@@ -375,3 +375,20 @@ test("benign stderr on a clean run does not mark the model down (and marks it up
   assert.equal(readHealth()["commandcode/*"], undefined);
   delete process.env.ORCH_HOME;
 });
+
+test("classify: a model the provider no longer serves is 'absent' for 24 h, scoped to the model", () => {
+  const body = '{"type":"provider.no-route","message":"Model unavailable: commandcode/claude-haiku-5-5"}';
+  assert.deepEqual(classify([body]), { reason: "absent", ms: 24 * 3600_000, scope: "model" });
+  assert.equal(classify(["ProviderModelNotFoundError: x"]).reason, "absent");
+  assert.equal(classify(["provider gone not found"]).reason, "absent");
+  assert.equal(classify(['{"type":"provider.error","message":"overloaded"}']).reason, "provider-error", "other provider errors unchanged");
+});
+
+test("classify: rate-limit, quota, truncation and not-in-plan win over 'absent'", () => {
+  assert.equal(classify(["Rate limit: provider nvidia endpoint not found, 429"], "nvidia/x").reason, "rate-limit");
+  assert.equal(classify(["Your limit resets at 2099-01-01T00:00:00.000Z. Model unavailable"]).reason, "quota");
+  assert.equal(classify(["Model unavailable: output token limit truncated"]).reason, "dropped");
+  assert.equal(classify(["MODEL_NOT_IN_PLAN Model unavailable"]).reason, "not-in-plan");
+  assert.equal(classify(['{"type":"provider.no-route","message":"Model unavailable: commandcode/claude-haiku-5-5"}']).reason, "absent");
+  assert.equal(classify(["the provider endpoint was not found in the weekly report"]), null, "loose prose is not 'absent'");
+});

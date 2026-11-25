@@ -1,5 +1,5 @@
 ---
-description: Go-hosted paid critic on DeepSeek v4.1-flash (same contract as critic) — fallback when both CmdC critic pools are out; verdicts count normally (not free-tier). Cross-family vs MiMo workers. Code critic — one review pass of a worker's diff against the Mandate and tests. Returns APPROVED or CHANGES_REQUESTED with numbered file:line findings. Never edits code.
+description: Go-hosted paid critic on DeepSeek v4.1-flash (same contract as critic) — second paid critic (after `critic`, before the Nvidia and free pools); verdicts count normally (not free-tier). Cross-family vs MiMo workers. Code critic — one review pass of a worker's diff against the Mandate and tests. Returns APPROVED or CHANGES_REQUESTED with numbered file:line findings. Never edits code.
 mode: subagent  # oc-only
 model: opencode-go/deepseek-v4.1-flash  # oc-only
 vision: false  # oc-only

@@ -20,12 +20,12 @@ function home(agents) {
   return h;
 }
 const ALL = {
-  worker: "opencode-go/mimo-v2.6-flash", "worker-burst": "commandcode/deepseek/deepseek-v4.1-flash", "worker-alt": "commandcode/z-ai/glm-5.3-flash",
-  "worker-free": "opencode/deepseek-v4.1-flash-free", "worker-strong": "opencode-go/muse-spark-1.3-contributor",
+  worker: "opencode-go/mimo-v2.6-flash", "worker-free": "opencode/deepseek-v4.1-flash-free", "worker-strong": "opencode-go/muse-spark-1.3-contributor",
   "worker-nvidia": "nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b",
-  "senior-alt": "commandcode/deepseek/deepseek-v4-pro", "orchestrator-alt": "commandcode/meta/muse-spark-1.3-contributor", "orchestrator-free": "opencode/deepseek-v4.1-flash-free",
-  critic: "commandcode/claude-haiku-5-5", "critic-alt": "commandcode/gpt-6-luna", "critic-go": "opencode-go/deepseek-v4.1-flash", "critic-nvidia": "nvidia/minimaxai/minimax-m3.1-flash", "critic-free": "opencode/minimax-m3.1-flash-free",
-  scout: "opencode/mimo-v2.6-flash-free", senior: "commandcode/claude-sonnet-5-5", orchestrator: "opencode-go/muse-spark-1.3-contributor",
+  "senior-nvidia": "nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b", "senior-free": "opencode/deepseek-v4.1-flash-free",
+  "orchestrator-nvidia": "nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b", "orchestrator-free": "opencode/deepseek-v4.1-flash-free",
+  critic: "opencode-go/claude-haiku-5-5", "critic-go": "opencode-go/deepseek-v4.1-flash", "critic-nvidia": "nvidia/minimaxai/minimax-m3.1-flash", "critic-free": "opencode/minimax-m3.1-flash-free",
+  scout: "opencode/mimo-v2.6-flash-free", senior: "opencode-go/deepseek-v4-pro", orchestrator: "opencode-go/muse-spark-1.3-contributor",
 };
 function run(h, models, ...args) {
   const mf = path.join(h, "models.txt");
@@ -47,16 +47,20 @@ test("all models live: every role uses its first agent, exit 0", () => {
 
 test("a pinned model vanishing from opencode models self-corrects to the next agent and is remembered", () => {
   const h = home(ALL);
-  const live = Object.values(ALL).filter((m) => m !== "commandcode/claude-haiku-5-5" && !m.startsWith("opencode-go/"));
+  const live = Object.values(ALL).filter((m) => m !== "opencode-go/claude-haiku-5-5");
   const r = run(h, live);
-  assert.match(r.stdout, /^critic\s+use critic-alt\s+\[skipped critic: down \(unavailable until/m);
-  // Go gone: worker-nvidia (Nvidia, not Go) is still live and is now first in the worker chain
+  assert.match(r.stdout, /^critic\s+use critic-go\s+\[skipped critic: down \(unavailable until/m);
   assert.match(r.stdout, /^worker\s+use worker-nvidia/m);
-  // Go gone: the orchestrator self-corrects to the CommandCode Muse agent
-  assert.match(r.stdout, /^orchestrator\s+use orchestrator-alt/m);
   assert.equal(r.status, 0);
   const health = JSON.parse(fs.readFileSync(path.join(h, ".config", "orchestrator", "pool-health.json"), "utf8"));
-  assert.equal(health["commandcode/claude-haiku-5-5"].reason, "unavailable");
+  assert.equal(health["opencode-go/claude-haiku-5-5"].reason, "unavailable");
+});
+
+test("Go gone: the orchestrator self-corrects to the Nvidia agent, and no chain names a CommandCode agent", () => {
+  const h = home(ALL);
+  const r = run(h, Object.values(ALL).filter((m) => !m.startsWith("opencode-go/")));
+  assert.match(r.stdout, /^orchestrator\s+use orchestrator-nvidia/m);
+  assert.doesNotMatch(r.stdout, /-alt|-burst/);
 });
 
 test("--if-stale skips a fresh check", () => {
@@ -68,7 +72,7 @@ test("--if-stale skips a fresh check", () => {
 
 test("a role with every agent gone is NONE and exits 1", () => {
   const h = home(ALL);
-  const live = Object.values(ALL).filter((m) => !/claude-sonnet-5-5|deepseek-v4-pro/.test(m));
+  const live = Object.values(ALL).filter((m) => !/deepseek-v4-pro|nemotron|deepseek-v4.1-flash-free/.test(m));
   const r = run(h, live);
   assert.match(r.stdout, /^senior\s+use NONE/m);
   assert.equal(r.status, 1);
@@ -81,15 +85,14 @@ const AUTH = [
   `│`,
   `●  ${ESC}[1mOpenCode Go${ESC}[0m stored`,
   `●  Alibaba  API key stored`,
-  `●  CommandCode stored`,
   `●  Google  API key stored`,
   `●  Nvidia stored`,
   `●  OpenCode Console stored`,
   `●  OpenCode Console stored`,
-  `└  6 credentials`,
+  `└  5 credentials`,
 ].join("\n");
-const PREFIXES = ["alibaba/q", "anthropic/c", "commandcode/x", "google/g", "nvidia/a", "nvidia/b", "opencode/m", "opencode-go/m", "openrouter/z"];
-const SMALL = { worker: "opencode-go/mimo-v2.6-flash", critic: "commandcode/claude-haiku-5-5" };
+const PREFIXES = ["alibaba/q", "anthropic/c", "google/g", "nvidia/a", "nvidia/b", "opencode/m", "opencode-go/m", "openrouter/z"];
+const SMALL = { worker: "opencode-go/mimo-v2.6-flash", critic: "opencode/mimo-v2.6-flash-free" };
 const envFor = (h) => ({ ...process.env, ORCH_HOME: h });
 function runAuth(h, models, auth, ...args) {
   const af = path.join(h, "auth.txt");
@@ -99,7 +102,7 @@ function runAuth(h, models, auth, ...args) {
 
 test("connectedProviders strips ANSI and maps display names to model prefixes", async () => {
   const { connectedProviders } = await import("../bin/router-health.mjs");
-  assert.deepEqual(connectedProviders(AUTH, PREFIXES), ["alibaba", "commandcode", "google", "nvidia", "opencode", "opencode-go"]);
+  assert.deepEqual(connectedProviders(AUTH, PREFIXES), ["alibaba", "google", "nvidia", "opencode", "opencode-go"]);
 });
 
 test("a stored provider with no decision is NEW; a chain provider is auto-routed; unstored is ignored", () => {
@@ -107,14 +110,14 @@ test("a stored provider with no decision is NEW; a chain provider is auto-routed
   const r = runAuth(h, PREFIXES, AUTH);
   assert.match(r.stdout, /^NEW PROVIDER: nvidia — connected, 2 models, not in any chain\./m);
   assert.match(r.stdout, /router-health --decide nvidia routed\|ignored/);
-  assert.doesNotMatch(r.stdout, /NEW PROVIDER: (commandcode|opencode-go)\b/);
+  assert.doesNotMatch(r.stdout, /NEW PROVIDER: (opencode|opencode-go)\b/);
   assert.doesNotMatch(r.stdout, /NEW PROVIDER: openrouter/);
   const dir = path.join(h, ".config", "orchestrator");
   const stamp = JSON.parse(fs.readFileSync(path.join(dir, "router-health.json"), "utf8"));
   assert.ok(stamp.new_providers.some((p) => p.id === "nvidia" && p.models === 2));
   const dec = JSON.parse(fs.readFileSync(path.join(dir, "providers.json"), "utf8"));
-  assert.equal(dec.commandcode.decision, "routed");
-  assert.equal(dec.commandcode.note, "in a chain");
+  assert.equal(dec.opencode.decision, "routed");
+  assert.equal(dec.opencode.note, "in a chain");
 });
 
 test("--decide ignored removes it from NEW; an unknown decision exits 2", () => {
@@ -188,7 +191,7 @@ test("only seed providers are auto-routed from an agent pin; others stay NEW", (
   assert.match(r.stdout, /^NEW PROVIDER: nvidia /m);
   const dec = JSON.parse(fs.readFileSync(path.join(h, ".config", "orchestrator", "providers.json"), "utf8"));
   assert.equal(dec.nvidia, undefined);
-  assert.equal(dec.commandcode.decision, "routed");
+  assert.equal(dec.opencode.decision, "routed");
 });
 
 test("a NEW provider with zero matching models says so", () => {
@@ -374,7 +377,7 @@ test("live models unavailable prints note and skips inventory", () => {
 // ── T4 addendum: catalog-based free detection ─────────────────────────────────
 // Real catalog structure: { "<provider>": { "models": { "<id>": { "cost": {...} } } } }
 const CATALOG_FIXTURE = {
-  commandcode: {
+  "opencode-go": {
     models: {
       "x/y:free": { cost: { input: 0, output: 0 } },
       "zero-cost-model": { cost: { input: 0, output: 0 } },
@@ -407,13 +410,13 @@ function runWithCatalog(h, models, catalog, ...args) {
   });
 }
 
-test("catalog :free suffix models are detected as free (commandcode/x/y:free)", () => {
+test("catalog :free suffix models are detected as free (opencode-go/x/y:free)", () => {
   const h = homeFree();
   writeProviders(h, NVIDIA_FREE_ONLY);
-  const models = [...FREE_MODELS, "commandcode/x/y:free"];
+  const models = [...FREE_MODELS, "opencode-go/x/y:free"];
   const r = runWithCatalog(h, models, CATALOG_FIXTURE, "--free");
   // Should include the :free model
-  assert.match(r.stdout, /commandcode\/x\/y:free\s+unused/);
+  assert.match(r.stdout, /opencode-go\/x\/y:free\s+unused/);
   // Should have trains-on-data for contributor/iceman
   // (not in this test, separate test below)
 });
@@ -421,39 +424,39 @@ test("catalog :free suffix models are detected as free (commandcode/x/y:free)", 
 test("catalog zero-cost models without -free suffix are detected as free", () => {
   const h = homeFree();
   writeProviders(h, NVIDIA_FREE_ONLY);
-  const models = [...FREE_MODELS, "commandcode/zero-cost-model"];
+  const models = [...FREE_MODELS, "opencode-go/zero-cost-model"];
   const r = runWithCatalog(h, models, CATALOG_FIXTURE, "--free");
   // Should include the zero-cost model
-  assert.match(r.stdout, /commandcode\/zero-cost-model\s+unused/);
+  assert.match(r.stdout, /opencode-go\/zero-cost-model\s+unused/);
 });
 
 test("catalog paid models are NOT detected as free", () => {
   const h = homeFree();
   writeProviders(h, NVIDIA_FREE_ONLY);
-  const models = [...FREE_MODELS, "commandcode/paid-model"];
+  const models = [...FREE_MODELS, "opencode-go/paid-model"];
   const r = runWithCatalog(h, models, CATALOG_FIXTURE, "--free");
   // Should NOT include the paid model
-  assert.doesNotMatch(r.stdout, /commandcode\/paid-model/);
+  assert.doesNotMatch(r.stdout, /opencode-go\/paid-model/);
 });
 
 test("catalog-only models (not in live list) are NOT included", () => {
   const h = homeFree();
   writeProviders(h, NVIDIA_FREE_ONLY);
-  // Live list does NOT include commandcode/catalog-only-model
+  // Live list does NOT include opencode-go/catalog-only-model
   const models = [...FREE_MODELS];
   const r = runWithCatalog(h, models, CATALOG_FIXTURE, "--free");
   // Should NOT include catalog-only model
-  assert.doesNotMatch(r.stdout, /commandcode\/catalog-only-model/);
+  assert.doesNotMatch(r.stdout, /opencode-go\/catalog-only-model/);
 });
 
 test("trains-on-data tag appears for contributor and iceman models", () => {
   const h = homeFree();
   writeProviders(h, NVIDIA_FREE_ONLY);
-  const models = [...FREE_MODELS, "commandcode/contributor-model", "commandcode/iceman-model"];
+  const models = [...FREE_MODELS, "opencode-go/contributor-model", "opencode-go/iceman-model"];
   const r = runWithCatalog(h, models, CATALOG_FIXTURE, "--free");
   // Should include trains-on-data tag
-  assert.match(r.stdout, /commandcode\/contributor-model\s+unused trains-on-data/);
-  assert.match(r.stdout, /commandcode\/iceman-model\s+unused trains-on-data/);
+  assert.match(r.stdout, /opencode-go\/contributor-model\s+unused trains-on-data/);
+  assert.match(r.stdout, /opencode-go\/iceman-model\s+unused trains-on-data/);
 });
 
 test("unconnected provider without providers.json decision is skipped (openrouter without auth)", () => {
@@ -586,7 +589,7 @@ test("headroom: a Go pool near its cap is skipped for a healthy paid fallback", 
   } finally { db.close(); }
   const r = run(h, Object.values(ALL));
   assert.match(r.stdout, /^worker\s+use worker-nvidia\s*(?:👁)?\s*\[skipped worker: low-headroom/m, r.stdout);
-  // critic-go rides the same exhausted Go pool, so it is skipped too — use stays critic (vision-capable).
-  assert.match(r.stdout, /^critic\s+use critic\s*(?:👁)?\s+\[skipped critic-go: low-headroom/m, r.stdout);
+  // critic and critic-go both ride the same exhausted Go pool, so both are skipped — use falls to critic-nvidia.
+  assert.match(r.stdout, /^critic\s+use critic-nvidia\s*(?:👁)?\s+\[skipped critic: low-headroom[^\]]*critic-go: low-headroom/m, r.stdout);
   assert.equal(r.status, 0);
 });
