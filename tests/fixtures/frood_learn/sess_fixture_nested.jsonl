@@ -1,5 +1,2 @@
-{"type":"system","subtype":"init","session_id":"sess_fixture_nested","model":"claude-opus-4-5","cwd":"/workspace","tools":[]}
-{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_n","type":"message","role":"assistant","content":[],"model":"claude-opus-4-5","stop_reason":null,"time_created":1700002000000},"time_created":1700002000000}}
-{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Nested session work done."},"time_created":1700002001000},"time_created":1700002001000}}
-{"type":"stream_event","event":{"type":"message_stop","time_created":1700002002000},"time_created":1700002002000}}
-{"type":"result","session_id":"sess_fixture_nested","usage":{"input_tokens":50,"output_tokens":20},"time_created":1700002003000}
+{"type":"assistant","message":{"model":"claude-opus-4-5","role":"assistant","content":[{"type":"text","text":"Nested session work done."},{"type":"tool_use","id":"toolu_n","name":"Write","input":{"file_path":"/workspace/nested.md"}}],"usage":{"input_tokens":5,"output_tokens":10}},"timestamp":"2026-01-01T00:10:00.000Z","sessionId":"sess_fixture_nested"}
+{"type":"user","message":{"role":"user","content":"plain string prompt"},"timestamp":"2026-01-01T00:11:00.000Z","sessionId":"sess_fixture_nested"}

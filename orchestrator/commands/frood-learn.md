@@ -107,10 +107,13 @@ The report gains a top-level `children` array (omitted with `--no-children`).
 ## Retention
 
 Claude Code deletes transcripts after `cleanupPeriodDays` (default ~30; unset on this machine). To keep
-child transcripts available beyond that, prefer having `frood-learn` copy each child transcript it reads
-to `~/.config/orchestrator/learnings/<stream>/children/` (outside every repo, so transcripts that can
-hold secrets never reach `.opencode/reports` and a commit). Alternatively, raise `cleanupPeriodDays` in
-your Claude Code settings; document the chosen value here.
+child transcripts available beyond that, `frood-learn` copies each **Claude Code** child transcript it reads
+(a nested-session `.jsonl` or a subagent `agent-*.jsonl`) to
+`~/.config/orchestrator/learnings/<stream>/children/` (outside every repo, so transcripts that can hold
+secrets never reach `.opencode/reports` and a commit). OpenCode transcripts live in the single shared
+`~/.local/share/opencode/opencode.db`, which `frood-learn` never copies: it is shared by every OpenCode
+session, so copying it would leak other sessions' transcripts, and opencode.db retention is OpenCode's own.
+Alternatively, raise `cleanupPeriodDays` in your Claude Code settings; document the chosen value here.
 
 ## Meta-review exclusion (enforced)
 

@@ -3,6 +3,7 @@
 import datetime
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -702,14 +703,24 @@ def test_default_run_lists_all_three_children(fixture_children_home):
         assert f["harness"] == "opencode"
         assert f["session"] == "ses_fixture_oc"
 
-    # Claude Code subagent child.
+    # Claude Code subagent child: real-shaped transcript parses to non-zero turns,
+    # a model and a non-zero duration.
     cc = by_session["sess_subagent_01"]
     assert cc["harness"] == "claude-code"
     assert cc["role"] == "scout"
     assert cc["status"] == "analyzed"
     assert cc["model"] == "claude-3-5-sonnet-20241022", cc
     assert cc["transcriptCopied"] is True
-    assert any(f["lens"] == "session-summary" for f in cc["findings"]), cc["findings"]
+    ss = next(f for f in cc["findings"] if f["lens"] == "session-summary")
+    turns = re.search(r"(\d+) agent turns", ss["detail"])
+    assert turns and int(turns.group(1)) >= 1, ss["detail"]
+    assert "claude-3-5-sonnet-20241022" in ss["detail"], ss["detail"]
+    dur = re.search(r", (\d+)m", ss["detail"])
+    assert dur and int(dur.group(1)) >= 1, ss["detail"]
+    for f in cc["findings"]:
+        assert f["role"] == "scout"
+        assert f["harness"] == "claude-code"
+        assert f["session"] == "sess_subagent_01"
     for f in cc["findings"]:
         assert f["role"] == "scout"
         assert f["harness"] == "claude-code"
@@ -760,6 +771,34 @@ def test_child_missing_transcript_status_missing_exits_zero(fixture_children_hom
     assert ghost["status"] == "missing", ghost
     assert ghost["note"], "missing child needs a one-line note"
     assert ghost["findings"] == []
+
+
+def test_cc_child_zero_turns_reports_empty_not_analyzed(fixture_children_home):
+    """A Claude Code transcript that parses to zero turns is reported as
+    `status: "empty"` with a note, not as a clean `analyzed` with no note."""
+    home, proj = fixture_children_home
+    cc_sub = home / ".claude" / "projects" / "frood" / "sess_orch_01" / "subagents"
+    (cc_sub / "agent-empty.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "user",
+                "message": {"role": "user", "content": "only a prompt, no assistant turn"},
+                "timestamp": "2026-01-01T00:00:00.000Z",
+                "sessionId": "sess_subagent_empty",
+            }
+        )
+        + "\n"
+    )
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(out.read_text())
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    empty = by_session["sess_subagent_empty"]
+    assert empty["status"] == "empty", empty
+    assert empty["note"], "empty child needs a one-line note"
+    assert empty["findings"] == [], empty
 
 
 def test_no_children_output_matches_today(fixture_children_home):

@@ -1,7 +1,2 @@
-{"type":"system","subtype":"init","session_id":"sess_subagent_01","model":"claude-3-5-sonnet-20241022","cwd":"/workspace","tools":[]}
-{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-3-5-sonnet-20241022","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0},"time_created":1700001000000},"time_created":1700001000000}}
-{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""},"time_created":1700001000000},"time_created":1700001000000}}
-{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Reading the scout file. I see an error here."},"time_created":1700001001000},"time_created":1700001001000}}
-{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_1","name":"read_file","input":{"path":"/workspace/scout.md"}},"time_created":1700001002000},"time_created":1700001002000}}
-{"type":"stream_event","event":{"type":"message_stop","time_created":1700001003000},"time_created":1700001003000}}
-{"type":"result","session_id":"sess_subagent_01","usage":{"input_tokens":100,"output_tokens":50},"time_created":1700001004000}
+{"type":"assistant","message":{"model":"claude-3-5-sonnet-20241022","role":"assistant","content":[{"type":"text","text":"Reading the scout file. I see an error here."},{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"/workspace/scout.md"}}],"usage":{"input_tokens":10,"output_tokens":20}},"timestamp":"2026-01-01T00:00:00.000Z","sessionId":"sess_subagent_01","agentId":"agent_scout_01"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"file contents\nline with an error","is_error":true}]},"timestamp":"2026-01-01T00:01:00.000Z","sessionId":"sess_subagent_01","agentId":"agent_scout_01"}

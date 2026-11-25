@@ -249,11 +249,20 @@ function listAvailableStreams() {
 
 const OPENCODE_DB = path.join(process.env.HOME || process.env.USERPROFILE, ".local", "share", "opencode", "opencode.db");
 
-function readOpenCodeSession(sessionId) {
-  if (!fs.existsSync(OPENCODE_DB)) {
-    console.error(`OpenCode database not found at ${OPENCODE_DB}`);
-    return null;
+// Existence of opencode.db is checked once per run (the check ran on every OpenCode
+// child before, printing "not found" once per child). The db itself is never copied:
+// it is shared by every OpenCode session and would leak other sessions' transcripts.
+let openCodeDbChecked = null;
+function openCodeDbAvailable() {
+  if (openCodeDbChecked === null) {
+    openCodeDbChecked = fs.existsSync(OPENCODE_DB);
+    if (!openCodeDbChecked) console.error(`OpenCode database not found at ${OPENCODE_DB}`);
   }
+  return openCodeDbChecked;
+}
+
+function readOpenCodeSession(sessionId) {
+  if (!openCodeDbAvailable()) return null;
 
   // Get session info - use JSON output mode
   const sessionQuery = `
@@ -264,7 +273,7 @@ function readOpenCodeSession(sessionId) {
       'time_updated', time_updated
     )) FROM session_v2 WHERE id = '${sessionId.replace(/'/g, "''")}'
   `;
-  const sessionResult = spawnSync("sqlite3", [OPENCODE_DB, sessionQuery], { encoding: "utf8" });
+  const sessionResult = spawnSync("sqlite3", [OPENCODE_DB, sessionQuery], { encoding: "utf8", timeout: 30000 });
   if (sessionResult.status !== 0 || !sessionResult.stdout.trim() || sessionResult.stdout.trim() === "[]") {
     return null;
   }
@@ -280,7 +289,7 @@ function readOpenCodeSession(sessionId) {
       'time_created', time_created
     )) FROM session_message WHERE session_id = '${sessionId.replace(/'/g, "''")}' ORDER BY seq
   `;
-  const messagesResult = spawnSync("sqlite3", [OPENCODE_DB, messagesQuery], { encoding: "utf8" });
+  const messagesResult = spawnSync("sqlite3", [OPENCODE_DB, messagesQuery], { encoding: "utf8", timeout: 30000 });
   if (messagesResult.status !== 0 || !messagesResult.stdout.trim() || messagesResult.stdout.trim() === "[]") {
     session.messages = [];
     return session;
@@ -373,6 +382,14 @@ function analyzeSessionData(messages, sessionId, title, startedAt, updatedAt, mo
     }
     else if (msg.type === "user") {
       userPrompts.push(msg.data.text || "");
+      // Claude Code tool results flagged is_error feed the error lens.
+      const toolResults = msg.data.toolResults || [];
+      for (const r of toolResults) {
+        if (r.is_error) {
+          errors++;
+          errorPatterns.push(String(r.content || "").slice(0, 200));
+        }
+      }
     }
     else if (msg.type === "synthetic") {
       // Synthetic messages contain tool results (like shell commands)
@@ -407,7 +424,7 @@ function analyzeSessionData(messages, sessionId, title, startedAt, updatedAt, mo
     focus: "session summary",
     lens: "session-summary",
     status: "analyzed",
-    detail: `Session "${title || ""}" (${sessionId}): ${agentTurns} agent turns, ${shellCommands} shell commands, ${backgroundShellCommands} background commands, ${toolCalls} tool call rounds, ${filesModified.size} files modified, ${errors} errors detected, ${userPrompts.length} user prompts.${model ? ` Model: ${model}.` : ""}`,
+    detail: `Session "${title || ""}" (${sessionId}): ${agentTurns} agent turns${minutes > 0 ? `, ${minutes}m` : ""}, ${shellCommands} shell commands, ${backgroundShellCommands} background commands, ${toolCalls} tool call rounds, ${filesModified.size} files modified, ${errors} errors detected, ${userPrompts.length} user prompts.${model ? ` Model: ${model}.` : ""}`,
     recommendation: "Review session timeline for patterns. High error count may indicate environment issues.",
     evidence: [sessionId],
     source: "opencode-session",
@@ -573,78 +590,94 @@ function readClaudeCodeJSONL(filePath) {
   let startedAt = null;
   let updatedAt = null;
   let agentTurns = 0;
-  // In-progress assistant message being assembled from stream_event blocks.
-  let curAssistant = null; // { content: string[], files: string[], finish: string|null }
 
   const touch = (t) => {
-    if (!t) return;
-    if (!startedAt || t < startedAt) startedAt = t;
-    if (!updatedAt || t > updatedAt) updatedAt = t;
+    const ms = isoToMs(t);
+    if (!ms) return;
+    if (!startedAt || ms < startedAt) startedAt = ms;
+    if (!updatedAt || ms > updatedAt) updatedAt = ms;
   };
 
-  const flushAssistant = () => {
-    if (!curAssistant) return;
-    agentTurns++;
-    const content = curAssistant.content.length ? [{ text: curAssistant.content.join("") }] : [];
-    messages.push({
-      type: "assistant",
-      data: {
-        content,
-        finish: curAssistant.finish || "stop",
-        snapshot: curAssistant.files.length ? { files: curAssistant.files } : null,
-      },
-      time_created: curAssistant.at,
-    });
-    curAssistant = null;
+  // File targets a tool_use input may address (Read/Write/Edit/Grep/Glob/Bash...).
+  const toolTargets = (input) => {
+    if (!input || typeof input !== "object") return [];
+    const out = [];
+    for (const k of ["file_path", "path", "notebook_path", "command"]) {
+      if (typeof input[k] === "string" && input[k] && !out.includes(input[k])) out.push(input[k]);
+    }
+    return out;
   };
 
+  // Coerce message content (string or list of items) into a list of items.
+  const contentItems = (content) => {
+    if (content == null) return [];
+    if (Array.isArray(content)) return content;
+    return [{ type: "text", text: String(content) }];
+  };
+
+  // Real Claude Code transcript: one JSON object per line, top-level keys
+  // type/message/timestamp/sessionId/agentId. Only assistant and user lines are
+  // read; everything else (attachment, api-request, ...) is ignored.
   for (const line of raw.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let v;
     try { v = JSON.parse(line); } catch { continue; }
     if (!v || typeof v !== "object") continue;
-    touch(v.time_created || v.timestamp);
+    const msg = v.message;
+    const ts = v.timestamp;
+    touch(ts);
 
-    if (v.type === "system" && v.subtype === "init") {
-      id = v.session_id || id;
-      model = v.model || model;
-      title = title || "Claude Code session";
-    } else if (v.type === "result") {
-      id = v.session_id || id;
-      model = v.model || model;
-    } else if (v.type === "stream_event") {
-      const ev = v.event || {};
-      if (!ev || typeof ev !== "object") continue;
-      if (ev.type === "message_start" && ev.message) {
-        id = ev.message.id || id;
-        model = ev.message.model || model;
-        title = title || (ev.message.title || "Claude Code session");
-        flushAssistant();
-        curAssistant = { content: [], files: [], finish: null, at: ev.message.time_created || v.time_created };
-      } else if (ev.type === "content_block_start") {
-        const cb = ev.content_block || {};
-        if (cb.type === "tool_use" && curAssistant) {
-          const input = cb.input || {};
-          const target = input.path || input.file || input.target || "";
-          if (target && !curAssistant.files.includes(target)) curAssistant.files.push(target);
+    if (v.type === "assistant" && msg && typeof msg === "object") {
+      model = msg.model || model;
+      id = id || v.sessionId || v.agentId;
+      const items = contentItems(msg.content);
+      let turnText = "";
+      const files = [];
+      let hadContent = false;
+      for (const c of items) {
+        if (!c || typeof c !== "object") continue;
+        if (c.type === "text" && typeof c.text === "string") {
+          turnText += c.text;
+          hadContent = true;
+        } else if (c.type === "tool_use") {
+          hadContent = true;
+          for (const t of toolTargets(c.input)) files.push(t);
         }
-      } else if (ev.type === "content_block_delta" && curAssistant) {
-        const d = ev.delta || {};
-        if (d.type === "text_delta" && d.text) curAssistant.content.push(d.text);
-        if (d.type === "input_json_delta" && d.partial_json) {
-          try {
-            const patch = JSON.parse(d.partial_json);
-            const target = patch.path || patch.file || patch.target || "";
-            if (target && !curAssistant.files.includes(target)) curAssistant.files.push(target);
-          } catch {}
-        }
-      } else if (ev.type === "message_stop") {
-        if (curAssistant) curAssistant.finish = "stop";
-        flushAssistant();
       }
+      if (!hadContent) continue;
+      agentTurns++;
+      messages.push({
+        type: "assistant",
+        data: {
+          content: turnText ? [{ text: turnText }] : [],
+          finish: "stop",
+          snapshot: files.length ? { files } : null,
+        },
+        time_created: ts,
+      });
+    } else if (v.type === "user" && msg && typeof msg === "object") {
+      id = id || v.sessionId || v.agentId;
+      const items = contentItems(msg.content);
+      let textParts = [];
+      const toolResults = [];
+      for (const c of items) {
+        if (!c || typeof c !== "object") continue;
+        if (c.type === "text" && typeof c.text === "string") textParts.push(c.text);
+        else if (c.type === "tool_result") {
+          toolResults.push(c);
+          if (c.is_error) {
+            textParts.push(`[tool_result error for ${c.tool_use_id || ""}]`);
+            textParts.push(String(c.content || ""));
+          }
+        }
+      }
+      messages.push({
+        type: "user",
+        data: { text: textParts.join("\n"), toolResults },
+        time_created: ts,
+      });
     }
   }
-  flushAssistant();
 
   if (!id) id = path.basename(filePath, ".jsonl");
   if (!startedAt) startedAt = null;
@@ -825,7 +858,6 @@ function reviewChild(child, streamName) {
       startedAt: session.time_created,
       updatedAt: session.time_updated,
     };
-    // OpenCode transcript lives in the single opencode.db; copy that db once per stream.
   } else {
     parsed = readClaudeCodeJSONL(child.filePath);
     if (!parsed) {
@@ -837,6 +869,15 @@ function reviewChild(child, streamName) {
 
   child.model = parsed.model || child.model;
   report.model = parsed.model || child.model;
+
+  // A transcript that parses to zero turns is not a clean "analyzed": report it
+  // as "empty" with a note so the run never looks like it reviewed nothing.
+  if (parsed.agentTurns === 0) {
+    report.status = "empty";
+    report.note = `no turns parsed from ${child.harness} transcript${child.filePath ? ` (${child.filePath})` : ""}`;
+    return report;
+  }
+
   report.status = "analyzed";
   report.note = null;
 
