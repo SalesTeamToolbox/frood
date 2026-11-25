@@ -143,10 +143,61 @@ function decisionLogFile(env = process.env) {
 }
 
 // Count slot dirs whose owner pid is still live.
-// NVIDIA_SLOTS: machine-wide cap on concurrent runs on an nvidia/ model. Not a positive integer -> 1.
-export function nvidiaSlots(env = process.env) {
-  const v = String(env.NVIDIA_SLOTS ?? "").trim();
-  return /^[1-9]\d*$/.test(v) ? Number(v) : 1;
+// ---- Nvidia provider cap -----------------------------------------------------------------------------------
+// NVIDIA_SLOTS=N (positive integer) is a fixed cap and turns the adaptive mode off. Unset (or not a positive
+// integer): adaptive. NVIDIA_SLOTS_MAX (default 3) with no recent 429; within NVIDIA_COOLDOWN_MS (default 600000)
+// of the last Nvidia 429 the cap is 1, then it steps up one per further quiet cooldown:
+//   cap = min(max, 1 + floor((now - last429) / cooldown)).
+// Pure: takes env, now and state ({ last429 } or null); the state file helpers below do the I/O.
+const nvInt = (v) => (/^[1-9]\d*$/.test(String(v ?? "").trim()) ? Number(String(v).trim()) : null);
+
+export function nvidiaCap({ env = process.env, now = Date.now(), state = null } = {}) {
+  const fixed = nvInt(env.NVIDIA_SLOTS);
+  if (fixed !== null) return { cap: fixed, fixed: true, max: fixed, last429: state?.last429 ?? null };
+  const max = nvInt(env.NVIDIA_SLOTS_MAX) ?? 3;
+  const cooldown = nvInt(env.NVIDIA_COOLDOWN_MS) ?? 600000;
+  const last = Number.isFinite(state?.last429) ? state.last429 : null;
+  if (last === null) return { cap: max, fixed: false, max, last429: null };
+  const quiet = Math.max(0, now - last);
+  return { cap: Math.min(max, 1 + Math.floor(quiet / cooldown)), fixed: false, max, last429: last };
+}
+
+const nvidiaStateFile = (dir) => path.join(dir, "provider-nvidia.state.json");
+const nvidiaCapFile = (dir) => path.join(dir, "provider-nvidia.cap.json");
+
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
+}
+function writeJsonAtomic(file, obj) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(obj));
+  fs.renameSync(tmp, file);
+}
+
+export function readNvidiaState(dir) {
+  const st = readJson(nvidiaStateFile(dir));
+  return st && Number.isFinite(st.last429) ? { last429: st.last429 } : null;
+}
+
+// An Nvidia rate-limit or quota was classified: remember when. tmp + rename, so a reader never sees half a file.
+export function recordNvidia429(dir, now = Date.now()) {
+  writeJsonAtomic(nvidiaStateFile(dir), { last429: now });
+}
+
+// The cap for a new admission now. Appends one decision line (decisionLog) when it differs from the last cap
+// logged; that last cap lives in its own file so it can never clobber a concurrent recordNvidia429.
+export function nvidiaCapNow(dir, { env = process.env, now = Date.now() } = {}) {
+  const r = nvidiaCap({ env, now, state: readNvidiaState(dir) });
+  const prev = readJson(nvidiaCapFile(dir))?.cap ?? null;
+  if (prev !== r.cap) {
+    const why = r.fixed ? "NVIDIA_SLOTS fixed" : r.last429 === null ? "no recent 429" : `429 at ${new Date(r.last429).toISOString()}`;
+    try {
+      decisionLog({ provider: "nvidia", cap: r.cap, prev, reason: `nvidia cap ${prev ?? "-"} -> ${r.cap} (${why})` }, { env });
+      writeJsonAtomic(nvidiaCapFile(dir), { cap: r.cap });
+    } catch {} // logging never changes admission
+  }
+  return r;
 }
 
 export function heldCount() {

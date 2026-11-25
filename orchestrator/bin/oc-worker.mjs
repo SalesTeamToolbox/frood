@@ -29,12 +29,15 @@
 //   overrides the proc tree (tests use temp fixtures, never the real /proc). Invalid values exit 2. Slots are lock
 //   dirs under ~/.config/orchestrator/slots, stale when the owning pid is gone. Decisions are logged to
 //   ~/.config/orchestrator/slot-decisions.log (on admission and on allowed changes only).
-// - Machine-wide Nvidia provider slot: a run whose model starts with `nvidia/` first claims one of NVIDIA_SLOTS
-//   (default 1; a value that is not a positive integer falls back to 1) lock dirs `provider-nvidia-<i>` beside the
-//   worker slots, then a machine slot. One API key means one 429 budget, so Nvidia runs queue behind each other
-//   across every ticket and role. Waiting takes no machine slot and does not spend --timeout-min; a chain hop to a
-//   non-Nvidia agent holds none. ORCH_NVIDIA_POLL_MS (default 3000) is the poll interval. The queued event's
-//   `slots` names it (`nvidia <held>/<cap>`) and the receipt has `provider_slot` (`nvidia <index>/<cap>`).
+// - Machine-wide Nvidia provider slot: a run whose model starts with `nvidia/` first claims one of the lock dirs
+//   `provider-nvidia-<i>` beside the worker slots, then a machine slot. One API key means one 429 budget, so Nvidia
+//   runs are capped across every ticket and role. The cap is adaptive: NVIDIA_SLOTS_MAX (default 3) with no recent
+//   429; an Nvidia rate-limit/quota classification is recorded in provider-nvidia.state.json and for
+//   NVIDIA_COOLDOWN_MS (default 600000) the cap is 1, then it steps up one per further quiet cooldown. NVIDIA_SLOTS=N
+//   (positive integer) is a fixed cap that turns adaptive off. In-flight runs keep their slot; only new admissions
+//   see a lower cap. Cap changes are logged to slot-decisions.log. Waiting takes no machine slot and does not spend
+//   --timeout-min; a chain hop to a non-Nvidia agent holds none. ORCH_NVIDIA_POLL_MS (default 3000) is the poll
+//   interval. The queued event's `slots` names it (`nvidia <held>/<cap>`); the receipt has `provider_slot`.
 // - --ticket <id> --owner <session>: the ticket names an OpenCode board ticket; before anything is launched this
 //   runs `node <board.mjs> attach <id> --pid <this pid> --out <out>` (execFileSync, no shell), which the board
 //   refuses unless the ticket is working, owned by --owner and past its EGM gate. A refusal exits 7 with nothing
@@ -84,7 +87,7 @@ import crypto from "node:crypto";
 import { appendEvent, atomicWrite, streamsDir } from "./handoff.mjs";
 import { workerOutcome } from "./outcome.mjs";
 import { CHAINS, chainFor } from "./chains.mjs";
-import { readSample, slotConfig, allowedSlots, decisionLog, heldCount, nvidiaSlots } from "./slots.mjs";
+import { readSample, slotConfig, allowedSlots, decisionLog, heldCount, nvidiaCapNow, recordNvidia429 } from "./slots.mjs";
 
 export const FOOTER = `
 
@@ -465,9 +468,12 @@ export function providerHeld(provider) {
 // Machine-wide slot for one provider: same atomic mkdir and dead-owner reclaim as acquireSlot, under
 // slotDir()/provider-<name>-<i>. Returns { release, index, cap }. Claimed before the machine slot and before the
 // run's clock starts, so waiting for the provider costs neither.
-export async function acquireProviderSlot(provider, cap, { pollMs = 3000, deadline = Infinity, pid = process.pid } = {}) {
+export async function acquireProviderSlot(provider, capOrFn, { pollMs = 3000, deadline = Infinity, pid = process.pid } = {}) {
   fs.mkdirSync(slotDir(), { recursive: true });
   for (;;) {
+    // A number is a fixed cap; a function is asked at every poll (the adaptive Nvidia cap). Only new admissions
+    // see a lower cap: a slot already held is never revoked.
+    const cap = typeof capOrFn === "function" ? capOrFn() : capOrFn;
     for (let i = 1; i <= cap; i++) {
       const d = path.join(slotDir(), `provider-${provider}-${i}`);
       try {
@@ -869,7 +875,7 @@ function streamPreflight(a) {
   // Queue-time snapshot of the slot decision (fresh sample, clearSince: null) — not the admission outcome.
   const slotsNow = Date.now();
   const slotsReason = allowedSlots(readSample(), a.slotCfg, { clearSince: null }, slotsNow).reason;
-  const ev = { key: `run:${run}:queued`, kind: "queued", run, out, pid: process.pid, pid_start: processStart(process.pid), agent: a.agent, ticket: path.join(path.dirname(out), "ticket.json"), slots: slotsReason + (isNvidiaModel(a.model || agentModel(a.agent)) ? `; nvidia ${providerHeld("nvidia")}/${nvidiaSlots()}` : "") };
+  const ev = { key: `run:${run}:queued`, kind: "queued", run, out, pid: process.pid, pid_start: processStart(process.pid), agent: a.agent, ticket: path.join(path.dirname(out), "ticket.json"), slots: slotsReason + (isNvidiaModel(a.model || agentModel(a.agent)) ? `; nvidia ${providerHeld("nvidia")}/${nvidiaCapNow(slotDir()).cap}` : "") };
   let added;
   try {
     added = appendEvent(stream, ev);
@@ -1055,7 +1061,7 @@ export async function runWorker(a) {
   const promptText = fs.readFileSync(a.prompt, "utf8"); // before the slot: a bad --prompt must not leak a slot, registry entry or timer
   // Provider slot first: a run waiting for Nvidia holds no machine slot and has not started its clock.
   let providerSlot = null;
-  if (isNvidiaModel(wanted)) providerSlot = await acquireProviderSlot("nvidia", nvidiaSlots(), { pollMs: Number(process.env.ORCH_NVIDIA_POLL_MS) || 3000, pid: process.pid });
+  if (isNvidiaModel(wanted)) providerSlot = await acquireProviderSlot("nvidia", () => nvidiaCapNow(slotDir()).cap, { pollMs: Number(process.env.ORCH_NVIDIA_POLL_MS) || 3000, pid: process.pid });
   let releaseMachine;
   try {
     releaseMachine = await acquireSlot(a.slotCfg, { pollMs: 3000, pid: process.pid });
@@ -1254,6 +1260,10 @@ export async function runWorker(a) {
         if (!clean) classifyErrors.push(r.stderr.slice(-500));
       }
       const resumeReason = !clean && !r.killReason ? resumableReason(classifyErrors) : null;
+      // An Nvidia rate limit shrinks the machine-wide Nvidia cap for the next admissions (slots.mjs nvidiaCap).
+      if (isNvidiaModel(wanted) && (resumeReason === "quota" || resumeReason === "rate-limit")) {
+        try { recordNvidia429(slotDir()); } catch {}
+      }
       const interrupted = r.killReason === "stalled" || resumeReason != null;
       const plainWaitMs = Number(process.env.ORCH_RESUME_WAIT_MS ?? 30_000);
       // A 429 window outlasts a dropped socket: wait it out rather than nudge into the same limit.
