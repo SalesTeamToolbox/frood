@@ -971,8 +971,11 @@ async function runChain(a) {
 
 // Why no hop ran: known-down pools, plus the models `opencode models` no longer lists (named, so the owner sees what vanished).
 function noPoolErrors(hops) {
-  const errors = ["every agent in the chain is known-down (pool-health); run router-health or wait"];
   const absent = hops.filter((h) => /^absent:/.test(h.reason || "")).map((h) => h.model);
+  const why = !absent.length ? "known-down (pool-health); run router-health or wait"
+    : absent.length === hops.length ? "absent from opencode models"
+    : "absent from opencode models or known-down (pool-health)";
+  const errors = [`every agent in the chain is ${why}`];
   if (absent.length) errors.push(`absent from opencode models: ${absent.join(", ")}`);
   return errors;
 }

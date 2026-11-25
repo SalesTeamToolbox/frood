@@ -40,12 +40,6 @@ export function classify(errors = [], model = null) {
   if (/MODEL_NOT_IN_PLAN|not in (your )?plan|available in \w+ and above plans/i.test(text)) {
     return { reason: "not-in-plan", ms: 7 * 24 * HOUR };
   }
-  // The harness no longer offers this model (a provider was removed: `{"type":"provider.no-route","message":"Model
-  // unavailable: ..."}`). It will not come back on its own and the next run would pay the same dead hop, so hold the
-  // one model down for a day. The scope is the model: the provider's other models may still be there.
-  if (/provider\.no-route|Model unavailable|ProviderModelNotFound|provider\b.*\bnot found/i.test(text)) {
-    return { reason: "absent", ms: 24 * HOUR, scope: "model" };
-  }
   // Output token limit / truncation (e.g., Nemotron "Response still truncated after two output token
   // limit continuations"): this is a model output constraint, not a pool failure. Treat as transient
   // so the model isn't marked down and the fallback chain doesn't trigger on output truncation.
@@ -73,6 +67,12 @@ export function classify(errors = [], model = null) {
     // failed on it, because only the first model was marked down).
     const scope = /weekly|monthly|your plan|plan limit|usage limit|insufficient credits|purchase more credits/i.test(text) ? "provider" : "model";
     return { reason: "quota", ms, scope };
+  }
+  // The harness no longer offers this model (a provider was removed: `{"type":"provider.no-route","message":"Model
+  // unavailable: ..."}`). It will not come back on its own and the next run would pay the same dead hop, so hold the
+  // one model down for a day. The scope is the model: the provider's other models may still be there.
+  if (/provider\.no-route|Model unavailable|ProviderModelNotFound|provider \S+ not found/i.test(text)) {
+    return { reason: "absent", ms: 24 * HOUR, scope: "model" };
   }
   // Restored 2026-11-24: these two branches were dropped by an unrelated commit on 2026-11-21 (the
   // /orchestrator-learn import), so a retired model or a broken provider never marked the pool down.

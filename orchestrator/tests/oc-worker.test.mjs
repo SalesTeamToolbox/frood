@@ -1541,6 +1541,8 @@ test("runChain: every hop absent returns no-healthy-pool naming the absent model
   const r = runChainFixture(h, { ORCH_OPENCODE_MODELS_FILE: list });
   assert.equal(r.status, 6, r.stdout + r.stderr);
   assert.equal(r.receipt.exit, "no-healthy-pool");
+  assert.match(r.receipt.errors[0], /absent from opencode models/);
+  assert.doesNotMatch(r.receipt.errors[0], /known-down/);
   assert.match(r.receipt.errors.join("\n"), /p1\/m/);
   assert.match(r.receipt.errors.join("\n"), /p5\/m/);
 });
@@ -1554,4 +1556,41 @@ test("chains: no chain names a removed agent, and every chain agent has an agent
     }
   }
   assert.ok(!Object.values(CHAINS).flat().some((a) => /alt$|burst$/.test(a)));
+});
+
+test("runChain: a fresh models cache is used without spawning opencode models; a stale one is refetched", () => {
+  const cacheOf = (h) => path.join(h, ".config", "orchestrator", "opencode-models.json");
+  const put = (h, at, models) => {
+    fs.mkdirSync(path.dirname(cacheOf(h)), { recursive: true });
+    fs.writeFileSync(cacheOf(h), JSON.stringify({ at: new Date(at).toISOString(), models }));
+  };
+  // fresh cache lacks p1/m; the fake would list it (and fail if asked at all): the cache wins, so a1 is skipped
+  const fresh = chainHome();
+  put(fresh, Date.now() - 60_000, ["p2/m", "p3/m", "p4/m", "p5/m"]);
+  const f = runChainFixture(fresh, { FAKE_OC_MODELS_FAIL: "1" });
+  assert.equal(f.receipt.agent, "a4", f.stdout + f.stderr);
+  assert.match(f.receipt.repooled_from[0].reason, /^absent/);
+  // stale cache (11 min old) lacks p1/m, the live listing has it: refetched, a1 runs, cache rewritten
+  const stale = chainHome();
+  put(stale, Date.now() - 11 * 60_000, ["p2/m", "p3/m", "p4/m", "p5/m"]);
+  const s = runChainFixture(stale, { FAKE_OC_MODE: "ok", FAKE_OC_MODELS: "p1/m,p2/m" });
+  assert.equal(s.receipt.agent, "a1", s.stdout + s.stderr);
+  assert.ok(JSON.parse(fs.readFileSync(cacheOf(stale), "utf8")).models.includes("p1/m"), "cache refreshed");
+});
+
+test("runChain: an explicit --model on hop 1 is the model checked against the list", () => {
+  const h = chainHome();
+  const list = path.join(h, "models.txt");
+  fs.writeFileSync(list, ["p1/m", "p2/m", "p3/m", "p4/m", "p5/m"].join("\n"));
+  const prompt = path.join(h, "mandate.md");
+  fs.writeFileSync(prompt, "x");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "a1", "--model", "gone/explicit", "--fallback", "a2", "--dir", h, "--prompt", prompt, "--out", path.join(h, "out", "r1.md")], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h, ORCH_OPENCODE_MODELS_FILE: list },
+    encoding: "utf8",
+    timeout: 60000,
+  });
+  const rec = JSON.parse(r.stdout.trim());
+  assert.equal(rec.agent, "a2", r.stdout + r.stderr);
+  assert.equal(rec.repooled_from[0].model, "gone/explicit");
+  assert.match(rec.repooled_from[0].reason, /^absent/);
 });
