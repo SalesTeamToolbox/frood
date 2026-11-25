@@ -5,9 +5,9 @@ model: fable  # cc-only
 effort: high  # cc-only
 vision: true  # cc-only
 tools: Read, Grep, Glob, Bash  # cc-only
-description: Senior final review (CommandCode Sonnet 5.5 — Opus is not in the GOAT plan) — one pass, blockers only, on an already critic-approved diff. Use only when the critic or ticket says SENIOR_REVIEW needed. Never bulk.  # oc-only
+description: Senior final review (Go DeepSeek v4 Pro) — one pass, blockers only, on an already critic-approved diff. Use only when the critic or ticket says SENIOR_REVIEW needed. Never bulk.  # oc-only
 mode: subagent  # oc-only
-model: commandcode/claude-sonnet-5-5  # oc-only
+model: opencode-go/deepseek-v4-pro  # oc-only
 vision: true  # oc-only
 permission:  # oc-only
   edit: deny  # oc-only

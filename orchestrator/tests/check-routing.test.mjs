@@ -74,17 +74,17 @@ test("missing live model list is a warning, not a crash", () => {
 });
 
 test("worker --agent/--fallback chain that disagrees with CHAINS is flagged with --role", () => {
-  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker --fallback worker-burst,worker-alt" });
+  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker --fallback worker-free" });
   assert.ok(r.problems.some((p) => /disagrees with CHAINS/.test(p) && /--role worker/.test(p)));
 });
 
 test("worker-strong --agent/--fallback chain matching CHAINS still suggests --role", () => {
-  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker-strong --fallback worker-burst,worker-nvidia,worker-alt,worker-free" });
+  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker-strong --fallback worker-nvidia,worker-free" });
   assert.ok(r.problems.some((p) => /should use `--role worker-strong`/.test(p)));
 });
 
 test("critic --agent/--fallback chain that disagrees with CHAINS is flagged with --role critic", () => {
-  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent critic --fallback critic-alt,critic-free" });
+  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent critic --fallback critic-nvidia,critic-free" });
   assert.ok(r.problems.some((p) => /disagrees with CHAINS/.test(p) && /CHAINS\.critic/.test(p) && /--role critic/.test(p)));
 });
 
@@ -94,16 +94,31 @@ test("--role critic is not flagged by the chain rule", () => {
 });
 
 test("worker-nvidia as --agent is flagged by the worker-chain rule", () => {
-  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker-nvidia --fallback worker,worker-burst" });
+  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker-nvidia --fallback worker,worker-free" });
   assert.ok(r.problems.some((p) => /worker-nvidia/.test(p) && /CHAINS/.test(p)));
 });
 
 test("worker-free as --agent is flagged by the worker-chain rule", () => {
-  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker-free --fallback worker-burst" });
+  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker-free --fallback worker" });
   assert.ok(r.problems.some((p) => /worker-free/.test(p) && /CHAINS/.test(p)));
 });
 
 test("trailing backtick in --fallback value is stripped", () => {
-  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker --fallback worker-burst,worker-alt,worker-free`" });
+  const r = run({ "commands/w.md": "run node bin/oc-worker.mjs --agent worker --fallback worker-nvidia,worker-free`" });
   assert.ok(r.problems.some((p) => /disagrees with CHAINS/.test(p)));
+});
+
+// OC_ID only recognises the known provider prefixes, so `commandcode` stands in for the removed provider.
+test("an ID under a provider with no model at all in opencode models is a warning, not a problem", () => {
+  const root = fixture({ "rules/01-orchestrator-models.md": "# routing\n", "commands/x.md": "use commandcode/x here\nand commandcode/y too\nand opencode-go/real" });
+  const r = checkRouting({ root, extra: [], models: new Set(["opencode-go/real"]) });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.warn.filter((w) => /not configured/.test(w)), ["provider commandcode not configured — 2 reference(s)"]);
+});
+
+test("an unknown ID under a provider that is still configured stays a problem", () => {
+  const root = fixture({ "rules/01-orchestrator-models.md": "# routing\n", "commands/x.md": "use opencode-go/typo here" });
+  const r = checkRouting({ root, extra: [], models: new Set(["opencode-go/real"]) });
+  assert.equal(r.problems.length, 1);
+  assert.match(r.problems[0], /unknown model ID `opencode-go\/typo`/);
 });

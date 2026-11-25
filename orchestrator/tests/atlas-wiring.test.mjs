@@ -31,8 +31,8 @@ function body(file) {
 }
 
 // Each variant set: the base file plus every pool/fallback copy that must stay in sync with it.
-const WORKERS = ["worker.md", "worker-burst.md", "worker-alt.md", "worker-free.md", "worker-nvidia.md", "worker-strong.md"];
-const CRITICS = ["critic.md", "critic-alt.md", "critic-go.md", "critic-free.md", "critic-nvidia.md"];
+const WORKERS = ["worker.md", "worker-free.md", "worker-nvidia.md", "worker-strong.md"];
+const CRITICS = ["critic.md", "critic-go.md", "critic-free.md", "critic-nvidia.md"];
 
 // ---------------------------------------------------------------- 1. worker rule: orient via the repo map first
 test("worker rule: every worker variant orients via the repo map (docs/ATLAS.md, docs/atlas/, or the map CLAUDE.md/AGENTS.md names) before touching code", () => {

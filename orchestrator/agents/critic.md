@@ -6,7 +6,7 @@ effort: high  # cc-only
 vision: false  # cc-only
 tools: Read, Grep, Glob, Bash  # cc-only
 mode: subagent  # oc-only
-model: commandcode/claude-haiku-5-5  # oc-only
+model: opencode-go/claude-haiku-5-5  # oc-only
 vision: false  # oc-only
 permission:  # oc-only
   edit: deny  # oc-only

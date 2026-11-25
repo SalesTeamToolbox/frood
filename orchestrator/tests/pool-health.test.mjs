@@ -375,3 +375,11 @@ test("benign stderr on a clean run does not mark the model down (and marks it up
   assert.equal(readHealth()["commandcode/*"], undefined);
   delete process.env.ORCH_HOME;
 });
+
+test("classify: a model the provider no longer serves is 'absent' for 24 h, scoped to the model", () => {
+  const body = '{"type":"provider.no-route","message":"Model unavailable: commandcode/claude-haiku-5-5"}';
+  assert.deepEqual(classify([body]), { reason: "absent", ms: 24 * 3600_000, scope: "model" });
+  assert.equal(classify(["ProviderModelNotFoundError: x"]).reason, "absent");
+  assert.equal(classify(["provider gone not found"]).reason, "absent");
+  assert.equal(classify(['{"type":"provider.error","message":"overloaded"}']).reason, "provider-error", "other provider errors unchanged");
+});

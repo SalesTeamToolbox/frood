@@ -133,13 +133,6 @@
       ]
     },
     {
-      "src": "agents/worker-burst.md",
-      "kind": "agents",
-      "harness": [
-        "oc"
-      ]
-    },
-    {
       "src": "agents/worker-strong.md",
       "kind": "agents",
       "harness": [
@@ -151,20 +144,6 @@
       "kind": "agents",
       "harness": [
         "cc",
-        "oc"
-      ]
-    },
-    {
-      "src": "agents/worker-alt.md",
-      "kind": "agents",
-      "harness": [
-        "oc"
-      ]
-    },
-    {
-      "src": "agents/critic-alt.md",
-      "kind": "agents",
-      "harness": [
         "oc"
       ]
     },
@@ -218,13 +197,6 @@
       ]
     },
     {
-      "src": "agents/senior-alt.md",
-      "kind": "agents",
-      "harness": [
-        "oc"
-      ]
-    },
-    {
       "src": "agents/senior-nvidia.md",
       "kind": "agents",
       "harness": [
@@ -233,13 +205,6 @@
     },
     {
       "src": "agents/senior-free.md",
-      "kind": "agents",
-      "harness": [
-        "oc"
-      ]
-    },
-    {
-      "src": "agents/orchestrator-alt.md",
       "kind": "agents",
       "harness": [
         "oc"

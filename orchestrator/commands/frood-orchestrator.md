@@ -245,7 +245,7 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    Senior = you (Opus), one pass, blockers only.
    <!-- /cc-only -->
    <!-- oc-only -->
-   Senior = `subagent({ agent: "senior" })` (CmdC Sonnet 5.5, one pass, blockers only).
+   Senior = `subagent({ agent: "senior" })` (Go DeepSeek v4 Pro, one pass, blockers only).
    <!-- /oc-only -->
 6. Board `ready` → the repo's train ships it: board the branch, start the
    departure detached (`depart-bg` — it survives this session and the
@@ -395,7 +395,7 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   5. **Default = next session**: `Y` records "apply at next session start"; `--respawn-now` explicit opt-in for immediate re-spawn (warns about context loss).
   6. **Receipt**: records `model_optimization: { current, recommended, decision: "kept"|"switched-next"|"switched-now"|"skipped", reason, timestamp }`.
 - **Router freshness (pricing):** if `**Last audited:**` in the routing rule is >14 days old, or
-  `opencode models` shows a `commandcode/*` model the rule does not name, run
+  `opencode models` shows a model the rule does not name, run
   `/frood-model-router-refresh` (OpenCode). New models enter a chain only through that refresh + a probe +
   owner approval — health checks never promote a model on their own.
 - **Restart reconciliation (after router health, before any dispatch in a session that starts after a host

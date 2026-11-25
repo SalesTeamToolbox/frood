@@ -1996,7 +1996,6 @@ async function cmdDaemon(opts) {
 // Agent → model pins come from ~/.config/opencode/agents/<agent>.md frontmatter.
 const DESK_CHAIN = [
   { agent: "orchestrator", tier: "paid (Go)" },
-  { agent: "orchestrator-alt", tier: "paid (CmdC)" },
   { agent: "orchestrator-free", tier: "free (Zen)" },
 ];
 

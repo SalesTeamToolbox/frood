@@ -9,16 +9,16 @@ export const CHAINS = {
   // Cross-provider diversity at positions 1-2 prevents single-provider quota from killing the chain
   // Routine tickets: Nvidia first (no monthly quota — only per-minute 429s, which oc-worker
   // resumes rather than skips). Never hand-type this chain; use `--role worker`.
-  worker: ["worker-nvidia", "worker", "worker-burst", "worker-alt", "worker-free"],
-  // worker-strong: add Nvidia + Zen free fallbacks (was all-paid, dead when Go+CmdC cap) — unchanged
-  "worker-strong": ["worker-strong", "worker-burst", "worker-nvidia", "worker-alt", "worker-free"],
-  // critic: Go Haiku as position 2 (cross-family vs CmdC Haiku pos 1)
-  critic: ["critic", "critic-go", "critic-alt", "critic-nvidia", "critic-free"],
-  // scout: add Nvidia + CmdC fallbacks (was Zen-only, dead when Zen caps)
-  scout: ["scout", "worker-nvidia", "critic-nvidia", "worker-alt"],
-  senior: ["senior", "senior-alt", "senior-nvidia", "senior-free"],
-  // orchestrator: add Nvidia (was Go→CmdC→Zen only, no Nvidia)
-  orchestrator: ["orchestrator", "orchestrator-alt", "orchestrator-nvidia", "orchestrator-free"],
+  worker: ["worker-nvidia", "worker", "worker-free"],
+  // worker-strong: Nvidia + Zen free fallbacks (was all-paid, dead when Go caps)
+  "worker-strong": ["worker-strong", "worker-nvidia", "worker-free"],
+  // critic: Go Haiku first, then Go DeepSeek (cross-family), then Nvidia, then Zen free
+  critic: ["critic", "critic-go", "critic-nvidia", "critic-free"],
+  // scout: Zen free first; Nvidia fallbacks (was Zen-only, dead when Zen caps)
+  scout: ["scout", "worker-nvidia", "critic-nvidia"],
+  senior: ["senior", "senior-nvidia", "senior-free"],
+  // orchestrator: Go first; Nvidia, then Zen free
+  orchestrator: ["orchestrator", "orchestrator-nvidia", "orchestrator-free"],
 };
 
 export function chainFor(role) {

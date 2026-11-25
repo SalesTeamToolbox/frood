@@ -1,8 +1,10 @@
 # Orchestrator model routing — the one source of truth
 
-**Last audited:** 2026-11-17 (prices/allowances from `https://opencode.ai/docs/console/go/#usage-limits`, `https://commandcode.ai/docs/plans/goat`, `https://commandcode.ai/docs/resources/pricing-limits` as fetched 2026-11-16; model IDs checked against live `opencode models`, 92 `commandcode/*` (was 71 on 2026-11-11). CmdC weekly quota was out at audit time (429 till ~2026-11-17T21:53Z), so the CmdC probe leg was skipped — no demotions, quota not capability.) **Refresh:** `/frood-model-router-refresh` when this date is >14 days old or `opencode models` shows a `commandcode/*` not named here. Edit the source in the Frood repo's `{{ORCH_REPO}}/rules/` and run its installer — the installed copy is overwritten. `node bin/check-routing.mjs` (in that repo) verifies every ID below is live.
+**Last audited:** 2026-11-17 (prices/allowances from `https://opencode.ai/docs/console/go/#usage-limits`, as fetched 2026-11-16; model IDs checked against live `opencode models`. CommandCode was removed from the harness 2026-11-25; its rows are gone.) **Refresh:** `/frood-model-router-refresh` when this date is >14 days old or `opencode models` shows a model this file does not name. Edit the source in the Frood repo's `{{ORCH_REPO}}/rules/` and run its installer — the installed copy is overwritten. `node bin/check-routing.mjs` (in that repo) verifies every ID below is live.
 
-**Names.** "Claude Code" = the Anthropic harness on the Claude subscription. "CmdC" = CommandCode GOAT ($10/mo flat plan, models `commandcode/*`). "Go" = OpenCode Go (`opencode-go/*`, metered against monthly caps). "Zen free" = `opencode/*-free` ($0). Never write bare "CC" — it has meant both.
+**Names.** "Claude Code" = the Anthropic harness on the Claude subscription. "Go" = OpenCode Go (`opencode-go/*`, metered against monthly caps). "Zen free" = `opencode/*-free` ($0). Never write bare "CC" — it has meant both.
+
+CommandCode (CmdC) removed from the OpenCode harness 2026-11-25 (low allowance vs Go); no agent routes to it.
 
 ## Roles → agents (spawn the agent; never hand-type a model)
 
@@ -12,16 +14,13 @@ Every role is a named agent with its model pinned in its definition, so a spawn 
 
 | Role | Claude Code agent (model alias) | OpenCode agent (model) | Vision |
 |---|---|---|---|
-| Scout — grep/read/ls, file:line answers, no edits | `scout` (`haiku`) | `scout` (`opencode/mimo-v2.6-flash-free`, $0) → `worker-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) → `critic-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) → `worker-alt` (`commandcode/z-ai/glm-5.3-flash`) | worker-nvidia ✓, critic-nvidia ✓ |
-| Worker — routine code from a Mandate | `worker` (`sonnet`) | `worker-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) → `worker` (`opencode-go/mimo-v2.6-flash`) → `worker-burst` (`commandcode/deepseek/deepseek-v4.1-flash`) → `worker-alt` (`commandcode/z-ai/glm-5.3-flash`) → `worker-free` (`opencode/deepseek-v4.1-flash-free`) | worker-nvidia ✓ |
-| Worker burst — when Go MiMo is hot or capped | — | `worker-burst` (`commandcode/deepseek/deepseek-v4.1-flash`) | no |
-| Worker alt — second hop | — | `worker-alt` (`commandcode/z-ai/glm-5.3-flash`) | no |
-| Worker strong — high-allowance strength for harder tickets | — | `worker-strong` (`opencode-go/muse-spark-1.3-contributor`) → `worker-burst` (`commandcode/deepseek/deepseek-v4.1-flash`) → `worker-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) → `worker-alt` (`commandcode/z-ai/glm-5.3-flash`) → `worker-free` (`opencode/deepseek-v4.1-flash-free`) | worker-nvidia ✓ |
-| Critic — 1 review pass: verdict + findings, no edits | `critic` (`sonnet`) | `critic` (`commandcode/claude-haiku-5-5`) → `critic-go` (`opencode-go/claude-haiku-5-5`) → `critic-alt` (`commandcode/gpt-6-luna`) → `critic-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) → `critic-free` (`opencode/deepseek-v4.1-flash-free`) | critic ✓, critic-nvidia ✓ |
-| Critic alt — when the Haiku pool is unavailable | — | `critic-alt` (`commandcode/gpt-6-luna`) | no |
-| Critic go — paid Go fallback when both CmdC pools are out (verdicts count) | — | `critic-go` (`opencode-go/claude-haiku-5-5`, probed live 2026-11-17) | no |
-| Senior — final sign-off only, when triggered | `senior` (`fable`, effort high) for guarded paths / money / tenancy; otherwise the Opus orchestrator itself | `senior` (`commandcode/claude-sonnet-5-5`) → `senior-alt` (`commandcode/deepseek/deepseek-v4-pro`) → `senior-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) → `senior-free` (`opencode/deepseek-v4.1-flash-free`) | senior ✓, senior-nvidia ✓ |
-| Orchestrator (OpenCode) | — | `orchestrator` (`opencode-go/muse-spark-1.3-contributor`) → `orchestrator-alt` (`commandcode/meta/muse-spark-1.3-contributor`) → `orchestrator-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) → `orchestrator-free` (`opencode/deepseek-v4.1-flash-free`) | orchestrator ✓, orchestrator-alt ✓, orchestrator-nvidia ✓ |
+| Scout — grep/read/ls, file:line answers, no edits | `scout` (`haiku`) | `scout` (`opencode/mimo-v2.6-flash-free`, $0) → `worker-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) → `critic-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) | worker-nvidia ✓, critic-nvidia ✓ |
+| Worker — routine code from a Mandate | `worker` (`sonnet`) | `worker-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) → `worker` (`opencode-go/mimo-v2.6-flash`) → `worker-free` (`opencode/deepseek-v4.1-flash-free`) | worker-nvidia ✓ |
+| Worker strong — high-allowance strength for harder tickets | — | `worker-strong` (`opencode-go/muse-spark-1.3-contributor`) → `worker-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) → `worker-free` (`opencode/deepseek-v4.1-flash-free`) | worker-nvidia ✓ |
+| Critic — 1 review pass: verdict + findings, no edits | `critic` (`sonnet`) | `critic` (`opencode-go/claude-haiku-5-5`) → `critic-go` (`opencode-go/deepseek-v4.1-flash`) → `critic-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) → `critic-free` (`opencode/deepseek-v4.1-flash-free`) | critic ✓, critic-nvidia ✓ |
+| Critic go — second Go critic, cross-family (verdicts count) | — | `critic-go` (see its agent file) | no |
+| Senior — final sign-off only, when triggered | `senior` (`fable`, effort high) for guarded paths / money / tenancy; otherwise the Opus orchestrator itself | `senior` (`opencode-go/deepseek-v4-pro`) → `senior-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) → `senior-free` (`opencode/deepseek-v4.1-flash-free`) | senior ✓, senior-nvidia ✓ |
+| Orchestrator (OpenCode) | — | `orchestrator` (`opencode-go/muse-spark-1.3-contributor`) → `orchestrator-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`) → `orchestrator-free` (`opencode/deepseek-v4.1-flash-free`) | orchestrator ✓, orchestrator-nvidia ✓ |
 | Free tier (last resort) | — | `worker-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`), `worker-free` (`opencode/deepseek-v4.1-flash-free`), `critic-free` (`opencode/deepseek-v4.1-flash-free`, bake-off 2026-11-18 pass), `critic-nvidia` (`nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b`, bake-off 2026-11-18 pass, advisory only) | worker-nvidia ✓, critic-nvidia ✓ |
 
 Claude Code `Agent`/`Task` takes `subagent_type: "<agent>"`. If a raw `model` is ever passed it must be an alias — `haiku`, `sonnet`, `opus`, `fable` — never a full ID like `claude-sonnet-4-5` (invalid there). OpenCode `subagent({ agent: "<agent>" })` uses the pinned model; pass `model:` only to override deliberately (and say why in the receipt).
@@ -30,7 +29,7 @@ Claude Code `Agent`/`Task` takes `subagent_type: "<agent>"`. If a raw `model` is
 
 When `oc-worker --vision` is set, the worker chain is filtered to agents where **BOTH** conditions hold:
 1. Agent's frontmatter has `vision: true` (or inherits default `false` if missing)
-2. Agent's pinned model is in the router-health vision-capable list (static list: Nemotron 3.5 VL, Muse, Sonnet 5.5, Haiku 5.5)
+2. Agent's pinned model is in the router-health vision-capable list (static list: Nemotron 3.5 VL, Muse)
 
 If no agent in the chain satisfies both, `oc-worker` falls back to the first healthy agent in the chain (non-vision) and emits a warning in the receipt: `VISION_FALLBACK: no vision-capable agent available, using <agent>`.
 
@@ -42,8 +41,8 @@ Nemotron 3.5 VL rate limiting: pool-health retry-after cooldown (not hard-block)
 
 Orchestrator writes the ticket + Mandate → **worker** codes in the ticket worktree → **critic** reviews diff + tests → `CHANGES_REQUESTED` goes back to the same worker with the findings (max 3 rounds) → `APPROVED` → **senior** only if triggered (guarded path, risky diff, or >2 rounds) → board `ready` → train.
 
-- **Claude Code available (cost play):** orchestrator Opus 5.5 in Claude Code; workers are **OpenCode** agents (`worker`/`worker-burst`/`worker-strong`), launched headless by `bin/oc-worker` — none of the code-writing touches the Claude subscription; critic = Claude Code `critic` (Sonnet); senior = Claude Code `senior` (Fable, effort high) when the diff touches the repo adapter's `guarded_paths`/`egm_paths` or a money/tenancy trigger — rare, one pass — else the Opus orchestrator.
-- **No Claude Code (fallback):** orchestrator = first healthy of `orchestrator` → `orchestrator-alt` → `orchestrator-free`; workers the same; critic = OpenCode `critic` (CmdC Haiku); senior = OpenCode `senior` (CmdC Sonnet 5.5, 1 pass). **CmdC Opus and GPT-6 Sol are NOT in the GOAT plan** (`MODEL_NOT_IN_PLAN`, probed 2026-11-12).
+- **Claude Code available (cost play):** orchestrator Opus 5.5 in Claude Code; workers are **OpenCode** agents (`worker`/`worker-strong`), launched headless by `bin/oc-worker` — none of the code-writing touches the Claude subscription; critic = Claude Code `critic` (Sonnet); senior = Claude Code `senior` (Fable, effort high) when the diff touches the repo adapter's `guarded_paths`/`egm_paths` or a money/tenancy trigger — rare, one pass — else the Opus orchestrator.
+- **No Claude Code (fallback):** orchestrator = first healthy of `orchestrator` → `orchestrator-nvidia` → `orchestrator-free`; workers the same; critic = OpenCode `critic` (Go Haiku); senior = OpenCode `senior` (Go DeepSeek v4 Pro, 1 pass).
 - **Free-only run** (every paid pool out): ends `READY — HUMAN/SENIOR REVIEW REQUIRED`; never boarded until a bake-off-passing critic, a senior, or the owner signs off (price is not the qualifier — a free critic that passes the fixture counts). Critics' verdicts always pass `bin/verdict-gate.mjs` (free: `--free`).
 - Prefer cross-family between worker and critic (MiMo/DeepSeek worker → Anthropic critic) so the critic pushes back.
 
@@ -51,17 +50,18 @@ Orchestrator writes the ticket + Mandate → **worker** codes in the ticket work
 
 - **Provider policy (owner decisions, `~/.config/orchestrator/providers.json`; enforced by oc-worker exit 8, check-routing, board free-ness):** Google **free-only** — text Flash/Flash-Lite (`gemini-*-flash`, `-flash-lite`, `-flash-preview`, `-flash-lite-preview`; image/tts/live/audio/embedding always denied); Alibaba **ignored**; Nvidia **free-only** — Nemotron 3 Ultra 550B, Nemotron 3.5 Super, DeepSeek v4.1 Flash, GPT-OSS 20B (probed 2026-11-12; GLM and MiniMax via Nvidia timed out). Free-only models count as FREE (they code and review early rounds; sign-off needs a bake-off-passing critic — free or paid — per the capability rule above). New connections are flagged by router-health (`NEW PROVIDER:`) and need an owner decision (`router-health --decide`).
 
+  - **A model missing from `opencode models` is skipped before a spawn** (`oc-worker` reads the list, cached 10 min; reason `absent`) and costs no attempt against the 3-attempt cap. A run that fails with `provider.no-route` / `Model unavailable` marks that one model down 24 h (`absent`). If the listing itself fails, nothing is filtered.
 - **Self-correcting availability.** `oc-worker --fallback` walks the chain; a run that dies on quota / not-in-plan / model-unavailable before any output marks that model down in `~/.config/orchestrator/pool-health.json` (until the provider's retry-after; not-in-plan 7 days; missing model 24 h) and moves on — later runs skip known-down models without calling them. `bin/router-health.mjs --if-stale 24 --probe` (run by `/frood-orchestrator` at start) checks every pinned model still exists, probes the cheap roles, and prints the agent to use per role. **Chains (updated 2026-11-21 for cross-provider diversity at positions 1-2):**
-  - `worker`: `worker-nvidia` (Nvidia Nemotron 3.5 Super) → `worker` (Go MiMo) → `worker-burst` (CmdC DeepSeek base) → `worker-alt` (CmdC GLM) → `worker-free` (Zen DeepSeek)
-  - `worker-strong`: `worker-strong` (Go Muse) → `worker-burst` (CmdC DeepSeek) → `worker-nvidia` (Nvidia Nemotron 3.5 Super) → `worker-alt` (CmdC GLM) → `worker-free` (Zen DeepSeek)
-  - `critic`: `critic` (CmdC Haiku) → `critic-go` (Go Haiku) → `critic-alt` (CmdC Luna) → `critic-nvidia` (Nvidia Nemotron 3.5 Super) → `critic-free` (Zen DeepSeek)
-  - `scout`: `scout` (Zen MiMo) → `worker-nvidia` (Nvidia Nemotron 3.5 Super) → `critic-nvidia` (Nvidia Nemotron 3.5 Super) → `worker-alt` (CmdC GLM)
-  - `senior`: `senior` (CmdC Sonnet) → `senior-alt` (CmdC DeepSeek Pro) → `senior-nvidia` (Nvidia Nemotron 3.5 Super) → `senior-free` (Zen DeepSeek)
-  - `orchestrator`: `orchestrator` (Go Muse) → `orchestrator-alt` (CmdC Muse) → `orchestrator-nvidia` (Nvidia Nemotron 3.5 Super) → `orchestrator-free` (Zen DeepSeek)
+  - `worker`: `worker-nvidia` (Nvidia Nemotron 3.5 Super) → `worker` (Go MiMo) → `worker-free` (Zen DeepSeek)
+  - `worker-strong`: `worker-strong` (Go Muse) → `worker-nvidia` (Nvidia Nemotron 3.5 Super) → `worker-free` (Zen DeepSeek)
+  - `critic`: `critic` (Go Haiku) → `critic-go` (Go DeepSeek) → `critic-nvidia` (Nvidia Nemotron 3.5 Super) → `critic-free` (Zen DeepSeek)
+  - `scout`: `scout` (Zen MiMo) → `worker-nvidia` (Nvidia Nemotron 3.5 Super) → `critic-nvidia` (Nvidia Nemotron 3.5 Super)
+  - `senior`: `senior` (Go DeepSeek Pro) → `senior-nvidia` (Nvidia Nemotron 3.5 Super) → `senior-free` (Zen DeepSeek)
+  - `orchestrator`: `orchestrator` (Go Muse) → `orchestrator-nvidia` (Nvidia Nemotron 3.5 Super) → `orchestrator-free` (Zen DeepSeek)
 
   Two worker chains, chosen by difficulty (not file count), from the single source `bin/chains.mjs`:
-  - routine (`worker`): `worker-nvidia` → `worker` → `worker-burst` → `worker-alt` → `worker-free`
-  - hard (`worker-strong`): `worker-strong` → `worker-burst` → `worker-nvidia` → `worker-alt` → `worker-free` (unchanged)
+  - routine (`worker`): `worker-nvidia` → `worker` → `worker-free`
+  - hard (`worker-strong`): `worker-strong` → `worker-nvidia` → `worker-free`
 
   3. **Nvidia 429: wait and resume on the same session, never skip ahead.** worker-nvidia has no monthly
      quota — only per-minute rate limits (429). Pool-health marks it `rate-limit` (short), `oc-worker`
@@ -78,31 +78,30 @@ Orchestrator writes the ticket + Mandate → **worker** codes in the ticket work
 
 - **Orchestrator (OpenCode):** `opencode-go/muse-spark-1.3-contributor` — $0.10/$0.20/$0.002 per 1M, $60/mo cap → ~45,300 req/5hr. Fallback `opencode-go/muse-spark-1.2-contributor` if region-limited. Its bucket is separate from the workers'; don't run bulk workers on Muse unless the ticket needs `worker-strong`.
 - **Scout (free):** `opencode/mimo-v2.6-flash-free`; alternates `opencode/nemotron-3.5-lightning-free`, `opencode/deepseek-v4.1-flash-free`, `opencode/glm-5.3-flash`. Avoid `opencode/iceman-free` for proprietary code (trains on data). `opencode-go/longcat-2.5` (paid; the `-free` variant is gone as of 2026-11-24) and `opencode/beam-free` exist but are region-limited. Go also lists four Unlimited free models (limited time): `beam-free`, `iceman-contributor-free`, `longcat-2.5-free`, `hy4-flash-free`.
-- **Worker pool prices:** `opencode-go/mimo-v2.6-flash` ($0.14/$0.28, $60 → ~30,100 req/5hr) → burst `commandcode/deepseek/deepseek-v4.1-flash` (**base, not `-fast`**; $0.15/$0.60, $100 → ~51,300 req/5hr) → alt `commandcode/z-ai/glm-5.3-flash` ($0.15/$0.50, $100 → ~11,800 req/5hr). If CmdC is down: `opencode-go/deepseek-v4.1-flash` ($100 → ~43,330 req/5hr off-peak; peak 01–04 and 06–10 UTC Mon–Fri costs 2×) or `opencode-go/glm-5.3-flash` ($60 → ~6,320). Not Muse.
-- **Qwen-only tasks:** `opencode-go/qwen3.8-flash` ($30 → ~5,400 req/5hr). Never CmdC Qwen (`commandcode/Qwen/Qwen3.8-Max` ~261 req/5hr).
-- **Critic:** `commandcode/claude-haiku-5-5` ($0.10/$0.50, $20 → ~5,970 req/5hr, CmdC intel 43.4); alt `commandcode/gpt-6-luna` (~6,060, intel 38.1); Go fallback `opencode-go/claude-haiku-5-5` (~3,850) or `opencode-go/gpt-6-luna` (~4,230).
+- **Worker pool prices:** `opencode-go/mimo-v2.6-flash` ($0.14/$0.28, $60 → ~30,100 req/5hr). Alternates on Go: `opencode-go/deepseek-v4.1-flash` ($100 → ~43,330 req/5hr off-peak; peak 01–04 and 06–10 UTC Mon–Fri costs 2×) or `opencode-go/glm-5.3-flash` ($60 → ~6,320). Not Muse.
+- **Qwen-only tasks:** `opencode-go/qwen3.8-flash` ($30 → ~5,400 req/5hr).
+- **Critic:** `opencode-go/claude-haiku-5-5` (~3,850 req/5hr); Go alternates `opencode-go/deepseek-v4.1-flash` (`critic-go`) or `opencode-go/gpt-6-luna` (~4,230).
 - **Placement is capability-based, never price-based.** A model is never kept out of (or kept in) a chain position for being free or cheap — chain order follows demonstrated merit: probe health, the bake-off fixture for the role, and intel scores, with cost as the tiebreaker. The 2026-11-12 bake-off is one ticket (a signal, not a benchmark): any model, free or paid, that catches the fixture *and* verdicts it correctly earns critic-chain placement, and any chain member that fails a re-run loses its place. The mechanical gates (verdict-gate, board gates, paid/human sign-off on triggers) are the backstop for *every* model — that is what makes a weaker model safe to use, not its price tag. Until the free pool is re-baked, the current critic order stands as the only measurement we have, not as a principle.
-- **Hard / escalation — Kimi FROZEN (2026-11-11: burned >50% of the weekly allowance in one day; re-checked 2026-11-17: still ~1,350 req/5hr Go / ~1,080 CmdC, intel 25.8):** `opencode-go/kimi-k2.7-code` only after two worker stalls, max 1 worker at a time, receipt justification. Try first: `opencode-go/longcat-2.5` (replaced 2.0 on Go 2026-11-24; the old 2.0 figures — $60 → ~11,400 req/5hr, CmdC intel 19.1 per 2026-11-11 audit — do not carry over: unproven, probe first) or `opencode-go/minimax-m3` (~3,200).
-- **Trial bulk (rate-limited, not dependable):** `nvidia/deepseek-ai/deepseek-v4.1-flash` — EOL 2026-11-16 on Nvidia (do not route; CmdC/Go-hosted DeepSeek unaffected).
-- **Never bulk:** `commandcode/claude-sonnet-5-5` (senior only; audited 2026-11-17: $10 credits → ~238 req/5hr, intel 56.0 — treat as Opus-class). `commandcode/claude-opus-5-5` is not in the GOAT plan.
+- **Hard / escalation — Kimi FROZEN (2026-11-11: burned >50% of the weekly allowance in one day; re-checked 2026-11-17: still ~1,350 req/5hr Go, intel 25.8):** `opencode-go/kimi-k2.7-code` only after two worker stalls, max 1 worker at a time, receipt justification. Try first: `opencode-go/longcat-2.5` (replaced 2.0 on Go 2026-11-24; the old 2.0 figures — $60 → ~11,400 req/5hr per 2026-11-11 audit — do not carry over: unproven, probe first) or `opencode-go/minimax-m3` (~3,200).
+- **Trial bulk (rate-limited, not dependable):** DeepSeek v4.1 Flash on Nvidia — EOL 2026-11-16 (do not route; Go-hosted DeepSeek unaffected).
 - **Critic bake-off 2026-11-12** (same diff with a known call-site regression, new BLAST RADIUS contract): CmdC Luna and Haiku → CHANGES_REQUESTED (caught); MiniMax free and DeepSeek free found it but APPROVED (hence the mechanical gate); GLM free and Nemotron free missed it; MiMo free timed out (15 min). One ticket — a signal, not a benchmark.
 - **Critic bake-off 2026-11-18** (fresh fixture: `userLabel` string→`{label,id}` migration, email+audit migrated, SMS caller left breaking and untested; same BLAST RADIUS contract, mechanical scoring: verdict correct + defect named): CmdC Haiku + Luna → CHANGES_REQUESTED (controls, caught); **DeepSeek free, GLM free, MiMo free, Nemotron free → all CHANGES_REQUESTED with the defect named** (reverses 11-12); GPT-OSS (Nvidia) incomplete — slow pool, mid-review at the 12m budget; GLM-via-Nvidia incomplete — transport timeouts, no verdict. Two tickets — still a signal, not a benchmark. **Promoted 2026-11-18:** `critic-free` → `opencode/deepseek-v4.1-flash-free` (33s, fastest free; GLM free 38s as alternate), `critic-nvidia` → `nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b` (41s, only passing nvidia pool). Alternates that also passed (MiMo free 124s, GLM free) remain in free inventory.
-- **Dropped (do not route to):** `commandcode/deepseek/deepseek-v4.1-flash-fast` (~11,500 req/5hr, 4.5× worse than base), `commandcode/google/gemini-3.8-flash` (~784), `commandcode/Qwen/*`, `claude-sonnet-4-5` (stale ID).
+- **Dropped (do not route to):** `claude-sonnet-4-5` (stale ID).
 
-## Bang-for-buck (requests per 5 hours on the $10/mo plans; Go 5hr = 20% of monthly cap, CmdC 5hr = $20 credit value)
+## Bang-for-buck (requests per 5 hours on Go; 5hr = 20% of the monthly cap)
 
-| Role | Go | CmdC | Winner |
-|---|---|---|---|
-| Orchestrator | `opencode-go/muse-spark-1.3-contributor` → 45,300 | `commandcode/meta/muse-spark-1.3-contributor` → 18,200 | Go 2.5× |
-| Worker | `opencode-go/mimo-v2.6-flash` → 30,100 | not offered | Go |
-| Worker burst | `opencode-go/deepseek-v4.1-flash` → 43,330 (off-peak) | `commandcode/deepseek/deepseek-v4.1-flash` → 51,300 (intel 39.5) | CmdC 1.18× |
-| Worker alt | `opencode-go/glm-5.3-flash` → 6,320 | `commandcode/z-ai/glm-5.3-flash` → 11,800 (intel 41.8) | CmdC 1.87× |
-| Critic | `opencode-go/claude-haiku-5-5` → 3,850 | `commandcode/claude-haiku-5-5` → 5,970 (intel 43.4) | CmdC 1.55× |
-| Qwen-only | `opencode-go/qwen3.8-flash` → 5,400 | `commandcode/Qwen/Qwen3.8-Max` → 261 | Go 20× |
-| Hard (frozen) | `opencode-go/kimi-k2.7-code` → 1,350 | `commandcode/moonshotai/Kimi-K2.7-Code` → 1,080 | neither by default |
-| Scout | Zen free → unlimited | — | Zen free |
+| Role | Go | Note |
+|---|---|---|
+| Orchestrator | `opencode-go/muse-spark-1.3-contributor` → 45,300 | |
+| Worker | `opencode-go/mimo-v2.6-flash` → 30,100 | |
+| Worker, Go DeepSeek | `opencode-go/deepseek-v4.1-flash` → 43,330 (off-peak) | |
+| Worker, Go GLM | `opencode-go/glm-5.3-flash` → 6,320 | |
+| Critic | `opencode-go/claude-haiku-5-5` → 3,850 | |
+| Qwen-only | `opencode-go/qwen3.8-flash` → 5,400 | |
+| Hard (frozen) | `opencode-go/kimi-k2.7-code` → 1,350 | not by default |
+| Scout | Zen free → unlimited | |
 
-Top-up credits on both plans roll over. Past a window without top-up, paid models pause and free ones keep working.
+Top-up credits roll over. Past a window without top-up, paid models pause and free ones keep working.
 
 ## Privacy
 
@@ -110,4 +109,4 @@ Muse on Go requires enabling endpoints that train on request data (`Console → 
 
 ## Claude Code subscription
 
-Claude Code stays on the Anthropic subscription; `opencode-go/*` and `commandcode/*` are OpenCode-only. (Routing Claude Code through Go via `ANTHROPIC_BASE_URL` would bill Opus to Go too — don't.) The OpenCode global default model is set once in `~/.config/opencode/opencode.json`; no per-repo `model` overrides.
+Claude Code stays on the Anthropic subscription; `opencode-go/*` is OpenCode-only. (Routing Claude Code through Go via `ANTHROPIC_BASE_URL` would bill Opus to Go too — don't.) The OpenCode global default model is set once in `~/.config/opencode/opencode.json`; no per-repo `model` overrides.

@@ -4,7 +4,7 @@ description: Learn tool usage reviewer — analyzes orchestrator session artifac
 model: haiku  # cc-only
 tools: Read, Grep, Glob  # cc-only
 mode: primary  # oc-only
-model: commandcode/claude-haiku-5-5  # oc-only
+model: opencode-go/claude-haiku-5-5  # oc-only
 permission:  # oc-only
   edit: deny  # oc-only
   bash: deny  # oc-only

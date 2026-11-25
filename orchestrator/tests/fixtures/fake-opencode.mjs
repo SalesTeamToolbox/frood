@@ -22,6 +22,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 const argv = process.argv.slice(2);
+// `opencode models`: FAKE_OC_MODELS (comma list) is the listing; FAKE_OC_MODELS_FAIL=1 exits 1;
+// with neither set it prints nothing (an empty listing).
+if (argv[0] === "models") {
+  if (process.env.FAKE_OC_MODELS_FAIL) { process.stderr.write("models: boom\n"); process.exit(1); }
+  else {
+    if (process.env.FAKE_OC_MODELS) process.stdout.write(process.env.FAKE_OC_MODELS.split(",").join("\n") + "\n");
+    process.exit(0);
+  }
+}
 const agent = argv[argv.indexOf("--agent") + 1];
 const session = argv.includes("--session") ? argv[argv.indexOf("--session") + 1] : "ses_fake123";
 let mode = process.env.FAKE_OC_MODE || "ok";

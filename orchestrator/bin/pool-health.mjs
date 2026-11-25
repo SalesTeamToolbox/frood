@@ -30,7 +30,7 @@ function writeHealth(h) {
   fs.renameSync(tmp, p); // atomic replace; last writer wins, entries are idempotent facts
 }
 
-/** Classify a run's errors: "quota" | "unavailable" | "rate-limit" | null, with a suggested outage length.
+/** Classify a run's errors: "quota" | "unavailable" | "absent" | "rate-limit" | null, with a suggested outage length.
  *  Pass the model that was called: Nvidia's 429 body names no model, so the error text alone cannot tell it apart. */
 export function classify(errors = [], model = null) {
   const text = errors.join("\n");
@@ -39,6 +39,12 @@ export function classify(errors = [], model = null) {
   // it will not come back on its own, so hold it down for a week and let router-health re-check.
   if (/MODEL_NOT_IN_PLAN|not in (your )?plan|available in \w+ and above plans/i.test(text)) {
     return { reason: "not-in-plan", ms: 7 * 24 * HOUR };
+  }
+  // The harness no longer offers this model (a provider was removed: `{"type":"provider.no-route","message":"Model
+  // unavailable: ..."}`). It will not come back on its own and the next run would pay the same dead hop, so hold the
+  // one model down for a day. The scope is the model: the provider's other models may still be there.
+  if (/provider\.no-route|Model unavailable|ProviderModelNotFound|provider\b.*\bnot found/i.test(text)) {
+    return { reason: "absent", ms: 24 * HOUR, scope: "model" };
   }
   // Output token limit / truncation (e.g., Nemotron "Response still truncated after two output token
   // limit continuations"): this is a model output constraint, not a pool failure. Treat as transient
@@ -212,7 +218,7 @@ export function isPolicyFree(model) {
 
 // Providers auto-recorded as routed when an installed agent pins them; every other connected provider needs an
 // explicit owner decision in providers.json even if an agent already uses it.
-export const SEED_PROVIDERS = new Set(["opencode", "opencode-go", "commandcode"]);
+export const SEED_PROVIDERS = new Set(["opencode", "opencode-go"]);
 
 /** True when the provider of `model` is neither a seed provider nor has an owner decision. */
 export function lacksDecision(model) {
