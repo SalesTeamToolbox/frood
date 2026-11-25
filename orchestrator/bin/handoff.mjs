@@ -635,7 +635,19 @@ export function claimStream(name, by, { session, takeover = false } = {}) {
       const line = { key: `takeover:${now}`, kind: "takeover", from: from.by, from_session: from.session, to: by, to_session: session ?? null, at: now };
       fs.appendFileSync(leaseFile(name), JSON.stringify(line) + "\n");
     }
-    if (session !== undefined) obj.claim = claim;
+    if (session !== undefined) {
+      obj.claim = claim;
+      // Record every claim on the stream so /frood-learn can collect claimants
+      // even after the stream is done (held_session / session cleared).
+      fs.appendFileSync(eventsFile(name), JSON.stringify({
+        key: `claim:${name}:${session}`,
+        kind: "claim",
+        event: "claim",
+        session,
+        by,
+        at: now,
+      }) + "\n");
+    }
     saveStream(name, obj);
     const out = { code: 0, value: obj };
     if (expired) out.note = claimExpiredLine(name, expired);

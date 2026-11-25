@@ -38,6 +38,9 @@ The tab title is set by the `orchestrator-handoff.js` hook to `[<stream>] <repo>
    `node {{ORCH_REPO}}/bin/handoff.mjs claim --stream <name> --by cc --session <your peer-mail session id>`
    (the id injected at session start, "your session id for the peer_* messaging tools is ..."). `--session` is
    required here: without it the desk daemon cannot mail escalations to this session and they sit unseen.
+   If `get_session self` shows `parentSessionId`, this session is nested: once the claim succeeds, record itself
+   on the stream with its transcript id so `/frood-learn <stream>` can find and review it:
+   `node {{ORCH_REPO}}/bin/handoff.mjs child --stream <name> --session "$CLAUDE_CODE_SESSION_ID" --harness claude-code --role nested`.
    <!-- /cc-only -->
    <!-- oc-only -->
    `node {{ORCH_REPO}}/bin/handoff.mjs claim --stream <name> --by oc --session "$OPENCODE_SESSION_ID"`

@@ -76,6 +76,8 @@ const META_REVIEW_EXCLUSION = [
 
 // OpenCode session ids carried on stream events look like `ses_...`.
 const SESSION_RE = /^ses_[A-Za-z0-9_-]+$/;
+// UUID (8-4-4-4-12 hex) for board ticket history claim/attach `by` values.
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 // Valid child roles, mirrored from handoff.mjs so the two stay in sync.
 const CHILD_ROLES = ["worker", "critic", "scout", "senior", "nested", "orchestrator"];
 // Valid harnesses a child event may record.
@@ -687,7 +689,6 @@ function readClaudeCodeJSONL(filePath, { preferAgentId = false } = {}) {
       });
     } else if (v.type === "user" && msg && typeof msg === "object") {
       id = id || (preferAgentId ? v.agentId || v.sessionId : v.sessionId || v.agentId);
-      id = id || v.sessionId || v.agentId;
       const items = contentItems(msg.content);
       let textParts = [];
       const toolResults = [];
@@ -869,6 +870,10 @@ function resolveOcModel(eventModel, session, out) {
       if (rc && rc.model) return rc.model;
     } catch {}
   }
+  // Check the column exists before selecting it (older opencode.db schemas may
+  // not have session_v2.model). Fails safe to null.
+  const cols = dbQuery(OPENCODE_DB, "PRAGMA table_info(session_v2)");
+  if (!cols || !cols.some((c) => c.name === "model")) return null;
   const rows = dbQuery(
     OPENCODE_DB,
     `SELECT json_group_array(json_object('model', model)) FROM session_v2 WHERE id = '${session.replace(/'/g, "''")}'`,
@@ -881,6 +886,8 @@ function resolveOcModel(eventModel, session, out) {
 //  - OpenCode workers/critics: `ses_...` ids carried on stream events.
 //  - Nested Claude Code sessions: `child` events recorded on the stream.
 //  - Claude Code subagents: agent-*.jsonl under the orchestrator session's subagents/.
+//  - Claimants: sessions that held the stream lease (role "orchestrator"), from
+//      claim events, current stream state, and (fallback) board ticket history.
 function collectChildren(streamName) {
   const children = [];
   const seen = new Set();
@@ -888,10 +895,64 @@ function collectChildren(streamName) {
   const stream = readStreamState(streamName);
 
   const add = (session, harness, role, source, model) => {
-    if (!session || seen.has(session)) return;
+    if (!session || seen.has(session)) return null;
     seen.add(session);
-    children.push({ session, harness, role, source, model });
+    const child = { session, harness, role, source, model };
+    children.push(child);
+    return child;
   };
+
+  // --- Claimants: sessions that held the stream lease. Role is always
+  //     "orchestrator". Deduped by session id. ---
+  const claimants = [];
+  const claimSeen = new Set();
+  for (const e of events) {
+    if ((e.event === "claim" || e.kind === "claim") && e.session && !claimSeen.has(e.session)) {
+      claimSeen.add(e.session);
+      claimants.push({ session: e.session, by: e.by, source: "claim-event" });
+    }
+  }
+  if (stream) {
+    for (const s of [stream.held_session, stream.session]) {
+      if (s && !claimSeen.has(s)) {
+        claimSeen.add(s);
+        claimants.push({ session: s, by: stream.held_by, source: "stream-state" });
+      }
+    }
+  }
+  // Fallback for streams that predate claim events: board ticket history.
+  if (stream && stream.repo) {
+    const ticketPath = path.join(stream.repo, ".opencode", "board", "tickets", `${stream.name}.json`);
+    let ticket;
+    try { ticket = JSON.parse(fs.readFileSync(ticketPath, "utf8")); } catch {}
+    if (ticket && Array.isArray(ticket.history)) {
+      for (const h of ticket.history) {
+        const by = h.by;
+        if ((h.cmd === "claim" || h.cmd === "attach") && by && UUID_RE.test(by) && !claimSeen.has(by)) {
+          claimSeen.add(by);
+          claimants.push({ session: by, by: null, source: "ticket-history" });
+        }
+      }
+    }
+  }
+  for (const c of claimants) {
+    let harness;
+    if (c.by === "cc" || UUID_RE.test(c.session)) harness = "claude-code";
+    else if (c.session.startsWith("ses_") || c.by === "oc") harness = "opencode";
+    else harness = "claude-code";
+
+    let filePath;
+    if (harness === "claude-code") {
+      filePath = findClaudeCodeNestedSession(c.session);
+      // A CC claimant's own transcript is reviewed AND its subagents collected.
+      for (const sa of readClaudeCodeSubagents(c.session)) {
+        const child = add(sa.session, sa.harness, sa.role, "subagent", sa.model);
+        if (child) child.filePath = sa.filePath;
+      }
+    }
+    const child = add(c.session, harness, "orchestrator", c.source, null, filePath);
+    if (child && filePath) child.filePath = filePath;
+  }
 
   // OpenCode children: session ids on stream events, with role/model from the
   // run-done/queued event, the run's receipt (<out>.receipt.json), or opencode.db.
@@ -926,10 +987,22 @@ function collectChildren(streamName) {
     if ((e.event === "child" || e.kind === "child") && e.session) {
       const role = e.role && CHILD_ROLES.includes(e.role) ? e.role : "nested";
       const harness = e.harness || "claude-code";
+      const existing = children.find((c) => c.session === e.session);
+      if (existing) {
+        // When a session is both a claimant and a child event, one child is kept;
+        // role `nested` wins over `orchestrator`.
+        if (role === "nested" && existing.role === "orchestrator") {
+          existing.role = "nested";
+          existing.harness = harness;
+          existing.source = "child-event";
+          const fp = harness === "claude-code" ? findClaudeCodeNestedSession(e.session) : null;
+          if (fp) existing.filePath = fp;
+        }
+        continue;
+      }
       const filePath = harness === "claude-code" ? findClaudeCodeNestedSession(e.session) : null;
-      add(e.session, harness, role, "child-event");
-      const child = children[children.length - 1];
-      if (filePath) child.filePath = filePath;
+      const child = add(e.session, harness, role, "child-event", null, filePath);
+      if (child && filePath) child.filePath = filePath;
     }
   }
 
@@ -937,10 +1010,8 @@ function collectChildren(streamName) {
   const orchSessionId = (stream && (stream.held_session || stream.session)) || null;
   if (orchSessionId) {
     for (const sa of readClaudeCodeSubagents(orchSessionId)) {
-      add(sa.session, sa.harness, sa.role, "subagent", sa.model);
-      // attach filePath for review; not part of the public child descriptor
-      const child = children[children.length - 1];
-      child.filePath = sa.filePath;
+      const child = add(sa.session, sa.harness, sa.role, "subagent", sa.model);
+      if (child) child.filePath = sa.filePath;
     }
   }
 
@@ -973,6 +1044,14 @@ function reviewChild(child, streamName) {
     transcriptCopied: false,
   };
 
+  // A desktop-app (`local_...`) id is not a transcript id — the session must
+  // record itself with $CLAUDE_CODE_SESSION_ID. List as missing, never crash.
+  if (child.session.startsWith("local_")) {
+    report.status = "missing";
+    report.note = "desktop app id, not a transcript id — the session must record itself with $CLAUDE_CODE_SESSION_ID";
+    return report;
+  }
+
   let parsed;
   if (child.harness === "opencode") {
     const session = readOpenCodeSession(child.session);
@@ -989,7 +1068,9 @@ function reviewChild(child, streamName) {
       updatedAt: session.time_updated,
     };
   } else {
-    parsed = readClaudeCodeJSONL(child.filePath);
+    // Subagent transcripts carry the parent's sessionId, so read them with
+    // preferAgentId so the subagent's own id (agentId) surfaces.
+    parsed = readClaudeCodeJSONL(child.filePath, { preferAgentId: child.source === "subagent" });
     if (!parsed) {
       const where = child.filePath
         ? `at ${child.filePath}`

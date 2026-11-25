@@ -673,6 +673,21 @@ def fixture_children_home(tmp_path):
     shutil.copyfile(FIXTURES / "agent-scout.meta.json", cc_sub / "agent-scout.meta.json")
     shutil.copyfile(FIXTURES / "agent-critic.jsonl", cc_sub / "agent-critic.jsonl")
     shutil.copyfile(FIXTURES / "agent-critic.meta.json", cc_sub / "agent-critic.meta.json")
+    # The orchestrator session itself is also a claimant (held_session) whose own
+    # top-level transcript is reviewed as role `orchestrator`.
+    orch_transcript = {
+        "type": "assistant",
+        "message": {
+            "model": "claude-opus-4-5",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "orchestrator session work"}],
+        },
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "sessionId": "sess_orch_01",
+    }
+    (home / ".claude" / "projects" / "frood" / "sess_orch_01.jsonl").write_text(
+        json.dumps(orch_transcript) + "\n"
+    )
     # Nested Claude Code session as a top-level .jsonl file.
     cc_proj = home / ".claude" / "projects" / "frood"
     cc_proj.mkdir(parents=True, exist_ok=True)
@@ -695,8 +710,20 @@ def test_default_run_lists_all_children(fixture_children_home):
     assert r.returncode == 0, r.stderr
     rep = json.loads(out.read_text())
     children = rep.get("children") or []
-    assert len(children) == 4, children
+    assert len(children) == 5, children
     by_session = {c["session"]: c for c in children}
+
+    # The orchestrator session (held_session) is a claimant: role orchestrator,
+    # harness claude-code, its own transcript reviewed.
+    orch = by_session["sess_orch_01"]
+    assert orch["role"] == "orchestrator", orch
+    assert orch["harness"] == "claude-code", orch
+    assert orch["status"] == "analyzed", orch
+    assert orch["model"] == "claude-opus-4-5", orch
+    for f in orch["findings"]:
+        assert f["role"] == "orchestrator", f
+        assert f["harness"] == "claude-code", f
+        assert f["session"] == "sess_orch_01", f
 
     # OpenCode worker child (model resolved from the run-done event).
     oc = by_session["ses_fixture_oc"]
@@ -871,7 +898,7 @@ def test_no_children_output_matches_today(fixture_children_home):
     assert r2.returncode == 0, r2.stderr
     rep_with = json.loads(out_with.read_text())
     rep_without = json.loads(out_without.read_text())
-    assert len(rep_with.get("children") or []) == 4
+    assert len(rep_with.get("children") or []) == 5
     assert "children" not in rep_without, "children section must be omitted with --no-children"
     assert rep_with["findings"] == rep_without["findings"], "stream-level findings identical"
 
@@ -892,3 +919,519 @@ def test_session_phase5_unchanged(fixture_children_home):
     assert rep["findings"], "phase 5 should still produce findings"
     for f in rep["findings"]:
         assert "role" not in f, "phase-5 findings are not child-tagged"
+
+
+# ------------------------------------------------------------------ nested session id handling (C.1)
+
+
+def _cc_transcript(home, project_slug, session_id, lines):
+    """Write a Claude Code top-level transcript <session_id>.jsonl and return its path."""
+    proj = home / ".claude" / "projects" / project_slug
+    proj.mkdir(parents=True, exist_ok=True)
+    p = proj / f"{session_id}.jsonl"
+    p.write_text("".join(json.dumps(l) + "\n" for l in lines))
+    return p
+
+
+def _cc_subagents(home, project_slug, orch_session_id, agents):
+    """Write agent-*.jsonl (+ meta) under <project>/<orch_session_id>/subagents/."""
+    sub = home / ".claude" / "projects" / project_slug / orch_session_id / "subagents"
+    sub.mkdir(parents=True, exist_ok=True)
+    for name, body, meta in agents:
+        (sub / f"agent-{name}.jsonl").write_text("".join(json.dumps(l) + "\n" for l in body))
+        if meta:
+            (sub / f"agent-{name}.meta.json").write_text(json.dumps(meta))
+
+
+def _write_stream(orch, name, state, events=None):
+    (orch / "streams" / f"{name}.json").write_text(json.dumps(state) + "\n")
+    if events is not None:
+        (orch / "streams" / f"{name}.events.jsonl").write_text(
+            "\n".join(json.dumps(e) for e in events) + "\n"
+        )
+
+
+def test_local_id_child_is_missing_note_and_transcript_id_reviewed(tmp_path):
+    """C.1: a `child` event whose session is a desktop-app `local_...` id is
+    `missing` with the note; the same session recorded with its transcript id is reviewed."""
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    _write_stream(
+        orch,
+        "fx",
+        {"name": "fx", "status": "active", "waiting": "", "next": "2020-01-01T00:00:00Z"},
+        [
+            {
+                "key": "child:fx:local_xyz",
+                "event": "child",
+                "session": "local_xyz",
+                "harness": "claude-code",
+                "role": "nested",
+                "ts": "2026-01-01T00:00:00Z",
+            },
+            {
+                "key": "child:fx:sess_nested",
+                "event": "child",
+                "session": "sess_nested",
+                "harness": "claude-code",
+                "role": "nested",
+                "ts": "2026-01-01T00:00:00Z",
+            },
+        ],
+    )
+    assistant = {
+        "type": "assistant",
+        "message": {
+            "model": "claude-opus-4-5",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "nested work done"}],
+        },
+        "timestamp": "2026-01-01T00:10:00.000Z",
+        "sessionId": "sess_nested",
+    }
+    _cc_transcript(home, "frood", "sess_nested", [assistant])
+
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(out.read_text())
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    local = by_session["local_xyz"]
+    assert local["status"] == "missing", local
+    assert local["note"] == (
+        "desktop app id, not a transcript id — "
+        "the session must record itself with $CLAUDE_CODE_SESSION_ID"
+    ), local["note"]
+    nested = by_session["sess_nested"]
+    assert nested["status"] == "analyzed", nested
+    assert nested["role"] == "nested", nested
+
+
+def test_done_stream_claim_event_reviews_claimant_and_subagents(tmp_path):
+    """C.2: a done stream (held_session null) with a claim event reviews the
+    claimant's transcript as orchestrator and collects its subagents."""
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    _write_stream(
+        orch,
+        "fx",
+        {
+            "name": "fx",
+            "status": "done",
+            "waiting": "",
+            "next": "",
+            "held_session": None,
+            "session": None,
+            "repo": str(proj),
+        },
+        [
+            {
+                "key": "claim:fx:sess_claimant",
+                "event": "claim",
+                "session": "sess_claimant",
+                "by": "cc",
+                "at": "2026-01-01T00:00:00Z",
+            },
+        ],
+    )
+    assistant = {
+        "type": "assistant",
+        "message": {
+            "model": "claude-opus-4-5",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "claimant work"}],
+        },
+        "timestamp": "2026-01-01T00:10:00.000Z",
+        "sessionId": "sess_claimant",
+    }
+    _cc_transcript(home, "frood", "sess_claimant", [assistant])
+    _cc_subagents(
+        home,
+        "frood",
+        "sess_claimant",
+        [
+            (
+                "scout",
+                [
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "model": "claude-3-5-sonnet-20241022",
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "scouting"}],
+                        },
+                        "timestamp": "2026-01-01T00:00:00.000Z",
+                        "sessionId": "sess_claimant",
+                        "agentId": "agent_scout_01",
+                    }
+                ],
+                {"agentType": "scout", "model": "claude-3-5-sonnet-20241022"},
+            ),
+        ],
+    )
+
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(out.read_text())
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    claimant = by_session["sess_claimant"]
+    assert claimant["role"] == "orchestrator", claimant
+    assert claimant["harness"] == "claude-code", claimant
+    assert claimant["status"] == "analyzed", claimant
+    scout = by_session["agent_scout_01"]
+    assert scout["role"] == "scout", scout
+    assert scout["status"] == "analyzed", scout
+
+
+def test_done_stream_board_ticket_uuid_history_reviews_claimant(tmp_path):
+    """C.3: a done stream with no claim events but a board ticket fixture whose
+    history has claim/attach by a UUID reviews that claimant as orchestrator."""
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    uuid_a = "11111111-2222-3333-4444-555555555555"
+    _write_stream(
+        orch,
+        "fx",
+        {
+            "name": "fx",
+            "status": "done",
+            "waiting": "",
+            "next": "",
+            "held_session": None,
+            "session": None,
+            "repo": str(proj),
+        },
+        [],  # no claim events
+    )
+    tickets = proj / ".opencode" / "board" / "tickets"
+    tickets.mkdir(parents=True)
+    (tickets / "fx.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "id": "fx",
+                "stage": "done",
+                "history": [
+                    {
+                        "at": "2026-01-01T00:00:00Z",
+                        "cmd": "claim",
+                        "from": "queued",
+                        "to": "working",
+                        "by": uuid_a,
+                        "note": None,
+                    },
+                ],
+            }
+        )
+        + "\n"
+    )
+    assistant = {
+        "type": "assistant",
+        "message": {
+            "model": "claude-opus-4-5",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "ticket claimant work"}],
+        },
+        "timestamp": "2026-01-01T00:10:00.000Z",
+        "sessionId": uuid_a,
+    }
+    _cc_transcript(home, "frood", uuid_a, [assistant])
+
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(out.read_text())
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    claimant = by_session[uuid_a]
+    assert claimant["role"] == "orchestrator", claimant
+    assert claimant["status"] == "analyzed", claimant
+
+
+def test_claimant_plus_child_same_id_one_child_role_nested(tmp_path):
+    """C.4: a session that is both a claimant (claim event) and a child event is
+    one child; role `nested` wins over `orchestrator`."""
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    _write_stream(
+        orch,
+        "fx",
+        {"name": "fx", "status": "active", "waiting": "", "next": "2020-01-01T00:00:00Z"},
+        [
+            {
+                "key": "claim:fx:sess_both",
+                "event": "claim",
+                "session": "sess_both",
+                "by": "cc",
+                "at": "2026-01-01T00:00:00Z",
+            },
+            {
+                "key": "child:fx:sess_both",
+                "event": "child",
+                "session": "sess_both",
+                "harness": "claude-code",
+                "role": "nested",
+                "ts": "2026-01-01T00:00:00Z",
+            },
+        ],
+    )
+    assistant = {
+        "type": "assistant",
+        "message": {
+            "model": "claude-opus-4-5",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "both work"}],
+        },
+        "timestamp": "2026-01-01T00:10:00.000Z",
+        "sessionId": "sess_both",
+    }
+    _cc_transcript(home, "frood", "sess_both", [assistant])
+
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(out.read_text())
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    assert len([c for c in children if c["session"] == "sess_both"]) == 1, children
+    both = by_session["sess_both"]
+    assert both["role"] == "nested", both
+
+
+# ------------------------------------------------------------------ handoff claim event (A)
+
+
+def test_handoff_claim_appends_claim_event(tmp_path):
+    """A.1: `claim --session X` appends one claim event; `--takeover` appends
+    another; claim without `--session` appends none."""
+    import subprocess
+
+    home = tmp_path / "home"
+    home.mkdir(parents=True)
+    os.environ["ORCH_HOME"] = str(home)
+    try:
+        plan = home / "plan.md"
+        plan.write_text("# plan\n## Handoff\nnext: M1\n")
+        streams = home / ".config" / "orchestrator" / "streams"
+        streams.mkdir(parents=True)
+        bin_ = str(Path(__file__).resolve().parent.parent / "orchestrator" / "bin" / "handoff.mjs")
+
+        def claim(*args, env_extra=None):
+            env = {
+                **os.environ,
+                "ORCH_HOME": str(home),
+                "HOME": str(home),
+                "USERPROFILE": str(home),
+            }
+            if env_extra:
+                env.update(env_extra)
+            return subprocess.run(
+                ["node", bin_, "claim", "--stream", "s1", "--by", "cc", *args],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
+
+        assert (
+            subprocess.run(
+                ["node", bin_, "write", "--stream", "s1", "--plan", str(plan), "--next", "M1"],
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "ORCH_HOME": str(home),
+                    "HOME": str(home),
+                    "USERPROFILE": str(home),
+                },
+            ).returncode
+            == 0
+        )
+
+        r1 = claim("--session", "sess-a")
+        assert r1.returncode == 0, r1.stderr
+        ev1 = (streams / "s1.events.jsonl").read_text().strip().split("\n")
+        assert len(ev1) == 1, ev1
+        e1 = json.loads(ev1[0])
+        assert e1["event"] == "claim" and e1["session"] == "sess-a" and e1["by"] == "cc", e1
+
+        # takeover by another session -> another claim event
+        r3 = claim("--session", "sess-b", "--takeover")
+        assert r3.returncode == 0, r3.stderr
+        ev3 = (streams / "s1.events.jsonl").read_text().strip().split("\n")
+        assert len(ev3) == 2, ev3
+        e3 = json.loads(ev3[1])
+        assert e3["event"] == "claim" and e3["session"] == "sess-b" and e3["by"] == "cc", e3
+
+        # claim without --session -> no event added
+        r4 = claim()
+        assert r4.returncode == 0, r4.stderr
+        ev4 = (streams / "s1.events.jsonl").read_text().strip().split("\n")
+        assert len(ev4) == 2, ev4
+    finally:
+        os.environ.pop("ORCH_HOME", None)
+
+
+# ------------------------------------------------------------------ D.4 minor-findings tests
+
+
+def test_findings_out_path_is_critic_role(tmp_path):
+    """D.4.1: a stream event whose `out` basename starts with `findings-`
+    (no `agent`) is a critic child."""
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    _write_stream(
+        orch,
+        "fx",
+        {"name": "fx", "status": "active", "waiting": "", "next": "2020-01-01T00:00:00Z"},
+        [
+            {
+                "key": "run:fx/r1:done",
+                "kind": "run-done",
+                "run": "r1",
+                "out": "/x/findings-foo.md",
+                "agent": None,
+                "session": "ses_fx",
+                "model": "opencode-go/mimo-v2.6-flash",
+                "at": "2026-01-01T00:00:00Z",
+            },
+        ],
+    )
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(out.read_text())
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    assert by_session["ses_fx"]["role"] == "critic", by_session["ses_fx"]
+
+
+def test_run_in_background_count(tmp_path):
+    """D.4.2: a Claude Code transcript whose Bash call sets run_in_background
+    counts a background command in the session-summary detail."""
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    _write_stream(
+        orch,
+        "fx",
+        {
+            "name": "fx",
+            "status": "active",
+            "waiting": "",
+            "next": "2020-01-01T00:00:00Z",
+            "held_session": "sess_orch_01",
+        },
+        [
+            {
+                "key": "child:fx:sess_bg",
+                "event": "child",
+                "session": "sess_bg",
+                "harness": "claude-code",
+                "role": "nested",
+                "ts": "2026-01-01T00:00:00Z",
+            },
+        ],
+    )
+    bash_bg = {
+        "type": "assistant",
+        "message": {
+            "model": "claude-opus-4-5",
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "bg"},
+                {
+                    "type": "tool_use",
+                    "id": "t1",
+                    "name": "Bash",
+                    "input": {"command": "deploy x", "run_in_background": True},
+                },
+            ],
+        },
+        "timestamp": "2026-01-01T00:10:00.000Z",
+        "sessionId": "sess_bg",
+    }
+    _cc_transcript(home, "frood", "sess_bg", [bash_bg])
+
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(out.read_text())
+    children = rep.get("children") or []
+    bg = {c["session"]: c for c in children}["sess_bg"]
+    ss = next(f for f in bg["findings"] if f["lens"] == "session-summary")
+    assert "1 background commands" in ss["detail"], ss["detail"]
+
+
+def test_receipt_model_fallback(tmp_path):
+    """D.4.3: an OpenCode child whose event has no model resolves the model
+    from the run's receipt (<out>.receipt.json)."""
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    proj = home / "proj"
+    rep = proj / ".opencode" / "reports" / "fx"
+    rep.mkdir(parents=True)
+    (rep / "worker-r1.md.receipt.json").write_text(
+        json.dumps({"model": "opencode-go/nemotron-free"}) + "\n"
+    )
+    _write_stream(
+        orch,
+        "fx",
+        {"name": "fx", "status": "active", "waiting": "", "next": "2020-01-01T00:00:00Z"},
+        [
+            {
+                "key": "run:fx/r1:done",
+                "kind": "run-done",
+                "run": "r1",
+                "out": str(rep / "worker-r1.md"),
+                "agent": "worker",
+                "session": "ses_receipt",
+                "model": None,
+                "at": "2026-01-01T00:00:00Z",
+            },
+        ],
+    )
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    repj = json.loads(out.read_text())
+    children = repj.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    assert by_session["ses_receipt"]["model"] == "opencode-go/nemotron-free", by_session[
+        "ses_receipt"
+    ]

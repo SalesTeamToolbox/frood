@@ -616,7 +616,12 @@ test("claim --takeover records taken_from and a lease line, never an event; two 
   let lines = leaseLines(h, "s1");
   assert.equal(lines.length, 1);
   assert.deepEqual(lines[0], { key: `takeover:${o.held_at}`, kind: "takeover", from: "cc", from_session: "a1", to: "oc", to_session: "b1", at: o.held_at });
-  assert.equal(eventsRaw(h, "s1"), evBefore);
+  // a takeover with --session appends a claim event too
+  const evAfter = eventsRaw(h, "s1").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(evAfter.length, evBefore.split("\n").filter(Boolean).length + 1);
+  assert.deepEqual(evAfter[evAfter.length - 1], {
+    key: `claim:s1:b1`, kind: "claim", event: "claim", session: "b1", by: "oc", at: evAfter[evAfter.length - 1].at,
+  });
   const t2 = run(e, "claim", "--stream", "s1", "--by", "cc", "--takeover");
   assert.equal(t2.status, 0);
   lines = leaseLines(h, "s1");
@@ -1143,4 +1148,33 @@ test("child rejects a bad harness, a bad role, a bad session and missing fields"
     assert.match(r.stderr.trim(), new RegExp(msg), args.join(" "));
   }
   assert.equal(run(e, "child", "--session", "ses_x", "--harness", "claude-code", "--role", "worker").status, 2);
+});
+
+test("claim --session appends one claim event; --takeover appends another; no --session appends none", () => {
+  const { e, h } = leased();
+  // claim by sess-a -> one claim event
+  assert.equal(run(e, "claim", "--stream", "s1", "--by", "cc", "--session", "sess-a").status, 0);
+  const ev1 = eventsRaw(h, "s1").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(ev1.length, 1, "one claim event");
+  assert.deepEqual(ev1[0], {
+    key: `claim:s1:sess-a`, kind: "claim", event: "claim", session: "sess-a", by: "cc", at: ev1[0].at,
+  });
+
+  // same session again (refresh) -> claims are not deduped, so a second event
+  assert.equal(run(e, "claim", "--stream", "s1", "--by", "cc", "--session", "sess-a").status, 0);
+  const ev2 = eventsRaw(h, "s1").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(ev2.length, 2, "claims append an event each time");
+
+  // takeover by another session -> another claim event
+  assert.equal(run(e, "claim", "--stream", "s1", "--by", "oc", "--session", "sess-b", "--takeover").status, 0);
+  const ev3 = eventsRaw(h, "s1").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(ev3.length, 3, "takeover adds a third claim event");
+  assert.equal(ev3[2].event, "claim");
+  assert.equal(ev3[2].session, "sess-b");
+  assert.equal(ev3[2].by, "oc");
+
+  // claim without --session by the holding harness -> no event added
+  assert.equal(run(e, "claim", "--stream", "s1", "--by", "oc").status, 0);
+  const ev4 = eventsRaw(h, "s1").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  assert.equal(ev4.length, 3, "claim without --session appends nothing");
 });

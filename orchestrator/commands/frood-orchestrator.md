@@ -107,8 +107,8 @@ question the owner must decide.
      session; anything for the owner goes in your report as NEEDS OWNER"). This session stays the owner's
      thread: it reports each child's note in one line, relays its `NEEDS OWNER` items, and starts the following module
      when the child's work ships.
-     Once `start_session` succeeds, record the child on the stream so `/frood-learn <stream>` can collect and review it:
-     `node {{ORCH_REPO}}/bin/handoff.mjs child --stream <stream> --session <returned session id> --harness claude-code --role nested`.
+     Once `start_session` succeeds, the child records itself on the stream in `/frood-next` (after its claim)
+     so `/frood-learn <stream>` can collect and review it.
    - **Continue in this session**.
    - **Stop here** — the handoff waits (72 h) for a later `/frood-next`.
    <!-- /cc-only -->

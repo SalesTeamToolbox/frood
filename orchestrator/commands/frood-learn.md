@@ -98,11 +98,20 @@ stream's child sessions and reviews each through the phase-5 lenses:
 - Claude Code subagents: `agent-*.jsonl` under the orchestrator session's `subagents/` folder (the
   orchestrator session id is the stream's `held_session` / `session`).
 - Nested Claude Code sessions: ids recorded on the stream via `handoff.mjs child`.
+- Claimants (sessions that held the stream lease), role `orchestrator`: from `claim` events written to
+  `<stream>.events.jsonl` by `handoff.mjs claim`, from the stream's current `held_session` / `session`,
+  and — for streams that predate claim events — from the board ticket with the same id as the stream
+  (`<stream.repo>/.opencode/board/tickets/<id>.json`), `history[]` entries with `cmd` `claim` or `attach`
+  and a `by` that is a UUID. A CC claimant's own transcript is reviewed and its `subagents/` are collected;
+  an OpenCode claimant goes through the OpenCode reader.
 
 Each child finding is tagged with `role` (worker / critic / scout / senior / nested / orchestrator),
 `harness` (opencode / claude-code), `model` when known, and `session` id. A child whose transcript is
 missing or aged out is listed with `status: "missing"` and a one-line note; the run never crashes on it.
-The report gains a top-level `children` array (omitted with `--no-children`).
+A `child` event whose session starts with `local_` (the desktop app's id, not a transcript id) is listed
+with `status: "missing"` and a note that the session must record itself with `$CLAUDE_CODE_SESSION_ID`.
+When a session is both a claimant and a `child` event, one child is kept and role `nested` wins over
+`orchestrator`. The report gains a top-level `children` array (omitted with `--no-children`).
 
 ## Retention
 
