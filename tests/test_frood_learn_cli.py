@@ -1694,3 +1694,353 @@ def test_local_and_transcript_id_for_one_session_review_it_once(tmp_path):
     assert mine[0]["session"] == uid, mine[0]
     assert mine[0]["role"] == "nested", mine[0]
     assert mine[0]["status"] == "analyzed", mine[0]
+
+
+# ------------------------------------------------------------------ Claude Code child fixtures
+
+FIXTURES = REPO / "tests" / "fixtures" / "frood_learn"
+
+
+def _cc_child_home(tmp_path, fixture_name, session_id):
+    """A HOME whose stream fx has one Claude Code nested child whose transcript is a fixture."""
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    (orch / "streams" / "fx.json").write_text(
+        json.dumps(
+            {"name": "fx", "status": "active", "waiting": "", "next": "2020-01-01T00:00:00Z"}
+        )
+    )
+    cc_proj = home / ".claude" / "projects" / "frood"
+    cc_proj.mkdir(parents=True, exist_ok=True)
+    (cc_proj / f"{session_id}.jsonl").write_text((FIXTURES / fixture_name).read_text())
+    (orch / "streams" / "fx.events.jsonl").write_text(
+        json.dumps(
+            {
+                "key": f"child:fx:{session_id}",
+                "event": "child",
+                "session": session_id,
+                "harness": "claude-code",
+                "role": "nested",
+                "ts": "2026-01-01T00:00:00Z",
+            }
+        )
+        + "\n"
+    )
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    return home, proj
+
+
+def _cc_report(tmp_path, fixture_name, session_id, extra_env=None):
+    home, proj = _cc_child_home(tmp_path, fixture_name, session_id)
+    out = home / "out.json"
+    r = run(
+        ["fx", "--phase", "1", "--no-mcp", "--report", str(out)],
+        home,
+        cwd=proj,
+        extra_env=extra_env,
+    )
+    assert r.returncode == 0, r.stderr
+    return json.loads(out.read_text()), home, proj
+
+
+def test_cc_child_denied_board_write_high(tmp_path):
+    """A classifier-denied `board.mjs round …` Bash call → blocked-actions, severity high, command named."""
+    rep, _, _ = _cc_report(tmp_path, "cc-denied-board.jsonl", "sess_cc_board")
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    assert "sess_cc_board" in by_session, children
+    child = by_session["sess_cc_board"]
+    assert child["status"] == "analyzed", child
+    bf = [f for f in child["findings"] if f["lens"] == "blocked-actions"]
+    assert len(bf) == 1, bf
+    assert bf[0]["area"] == "permissions", bf
+    assert bf[0]["severity"] == "high", bf
+    assert bf[0]["source"] == "session-data", bf
+    assert "board.mjs" in bf[0]["detail"] and "round" in bf[0]["detail"], bf[0]
+    assert "board.mjs round orphan-notice-holder" in bf[0]["detail"], bf[0]
+    rec = bf[0]["recommendation"]
+    assert "desk cannot merge" in rec and "owner must" in rec and "permission settings" in rec, rec
+
+
+def test_cc_child_denied_nonboard_medium(tmp_path):
+    """A denied non-board command → blocked-actions, severity medium."""
+    rep, _, _ = _cc_report(tmp_path, "cc-denied-medium.jsonl", "sess_cc_medium")
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    child = by_session["sess_cc_medium"]
+    bf = [f for f in child["findings"] if f["lens"] == "blocked-actions"]
+    assert len(bf) == 1, bf
+    assert bf[0]["severity"] == "medium", bf
+    assert "rm -rf /tmp/secrets" in bf[0]["detail"], bf[0]
+
+
+def test_cc_child_no_denials_no_blocked_actions(tmp_path):
+    """A transcript with no denials → no blocked-actions finding."""
+    rep, _, _ = _cc_report(tmp_path, "cc-clean.jsonl", "sess_cc_clean")
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    child = by_session["sess_cc_clean"]
+    assert not any(f["lens"] == "blocked-actions" for f in child["findings"]), child["findings"]
+
+
+def test_cc_child_two_denials_two_findings(tmp_path):
+    """Two denials in one transcript → two blocked-actions findings, both high (board/handoff writes)."""
+    rep, _, _ = _cc_report(tmp_path, "cc-two-denials.jsonl", "sess_cc_two")
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    child = by_session["sess_cc_two"]
+    bf = [f for f in child["findings"] if f["lens"] == "blocked-actions"]
+    assert len(bf) == 2, bf
+    assert all(f["severity"] == "high" for f in bf), bf
+    assert all(f["area"] == "permissions" for f in bf), bf
+    assert all(f["source"] == "session-data" for f in bf), bf
+    commands = [f["detail"] for f in bf]
+    assert any("board.mjs round" in c for c in commands), commands
+    assert any("handoff.mjs write" in c for c in commands), commands
+
+
+def test_cc_child_user_prompt_count(tmp_path):
+    """3 typed prompts + 20 tool_result-only user lines (some errors) → 3 user prompts, no iteration-patterns."""
+    rep, _, _ = _cc_report(tmp_path, "cc-prompts.jsonl", "sess_cc_prompts")
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    child = by_session["sess_cc_prompts"]
+    ss = next(f for f in child["findings"] if f["lens"] == "session-summary")
+    assert "3 user prompts" in ss["detail"], ss["detail"]
+    assert not any(f["lens"] == "iteration-patterns" for f in child["findings"]), child["findings"]
+    # Errors still counted via error-patterns (the tool_result-only error lines).
+    assert any(f["lens"] == "error-patterns" for f in child["findings"]), child["findings"]
+
+
+def test_cc_child_custom_title_in_summary(tmp_path):
+    """The last custom-title line's title appears in the session-summary."""
+    rep, _, _ = _cc_report(tmp_path, "cc-titled.jsonl", "sess_cc_titled")
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    child = by_session["sess_cc_titled"]
+    ss = next(f for f in child["findings"] if f["lens"] == "session-summary")
+    assert 'Session "The Real Session Title"' in ss["detail"], ss["detail"]
+    assert "First title" not in ss["detail"], ss["detail"]
+
+
+def test_cc_child_desktop_title_fallback(tmp_path):
+    """A local_ child with no custom-title uses the desktop app metadata title."""
+    home, proj = _cc_child_home(tmp_path, "cc-desktop-title.jsonl", "local_cc-desktop")
+    # Point the local_ id at the real transcript id via the app metadata file, with a title.
+    meta_dir = home / "desktop-sessions" / "acct" / "org"
+    meta_dir.mkdir(parents=True)
+    (meta_dir / "local_cc-desktop.json").write_text(
+        json.dumps(
+            {
+                "sessionId": "local_cc-desktop",
+                "cliSessionId": "sess_cc_desktop",
+                "title": "Desktop App Title",
+            }
+        )
+    )
+    # The nested transcript id is sess_cc_desktop (no custom-title line).
+    cc_proj = home / ".claude" / "projects" / "frood"
+    (cc_proj / "sess_cc_desktop.jsonl").write_text(
+        (FIXTURES / "cc-desktop-title.jsonl").read_text()
+    )
+    out = home / "out.json"
+    env = {"CLAUDE_DESKTOP_SESSIONS_DIR": str(home / "desktop-sessions")}
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj, extra_env=env)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(out.read_text())
+    by_session = {c["session"]: c for c in rep.get("children") or []}
+    child = by_session["local_cc-desktop"]
+    assert child["status"] == "analyzed", child
+    ss = next(f for f in child["findings"] if f["lens"] == "session-summary")
+    assert 'Session "Desktop App Title"' in ss["detail"], ss["detail"]
+
+
+def test_cc_child_local_custom_title_wins_desktop(tmp_path):
+    """A local_ child with a custom-title line uses the custom title, not the desktop title."""
+    home, proj = _cc_child_home(tmp_path, "cc-titled.jsonl", "local_cc-titled")
+    meta_dir = home / "desktop-sessions" / "acct" / "org"
+    meta_dir.mkdir(parents=True)
+    (meta_dir / "local_cc-titled.json").write_text(
+        json.dumps(
+            {
+                "sessionId": "local_cc-titled",
+                "cliSessionId": "sess_cc_titled",
+                "title": "Desktop App Title",
+            }
+        )
+    )
+    (home / ".claude" / "projects" / "frood" / "sess_cc_titled.jsonl").write_text(
+        (FIXTURES / "cc-titled.jsonl").read_text()
+    )
+    out = home / "out.json"
+    env = {"CLAUDE_DESKTOP_SESSIONS_DIR": str(home / "desktop-sessions")}
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj, extra_env=env)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(out.read_text())
+    by_session = {c["session"]: c for c in rep.get("children") or []}
+    child = by_session["local_cc-titled"]
+    ss = next(f for f in child["findings"] if f["lens"] == "session-summary")
+    assert 'Session "The Real Session Title"' in ss["detail"], ss["detail"]
+    assert "Desktop App Title" not in ss["detail"], ss["detail"]
+
+
+# ------------------------------------------------------------------ stream board-integrity cross-check
+
+
+def _git(cmd, cwd):
+    return subprocess.run(["git", *cmd], cwd=str(cwd), capture_output=True, text=True)
+
+
+def _board_integrity_home(tmp_path):
+    """A HOME + temp git repo where a stream ticket is merged to main with an empty board ticket."""
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    (orch / "streams" / "fx.json").write_text(
+        json.dumps(
+            {"name": "fx", "status": "active", "waiting": "", "next": "2020-01-01T00:00:00Z"}
+        )
+    )
+    # Temp git repo: main + a feature branch merged into main.
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    _git(["init", "-b", "main"], repo)
+    _git(["config", "user.email", "t@t"], repo)
+    _git(["config", "user.name", "t"], repo)
+    (repo / "file.txt").write_text("hello\n")
+    _git(["add", "file.txt"], repo)
+    _git(["commit", "-m", "base"], repo)
+    _git(["checkout", "-b", "feature"], repo)
+    (repo / "file.txt").write_text("hello2\n")
+    _git(["commit", "-am", "feature work"], repo)
+    _git(["checkout", "main"], repo)
+    _git(["merge", "--ff-only", "feature"], repo)
+    # Board ticket (empty rounds/gates/signoffs) at <repo>/.opencode/board/tickets/<id>.json
+    board = repo / ".opencode" / "board" / "tickets"
+    board.mkdir(parents=True)
+    (board / "tk-merge-empty.json").write_text(
+        json.dumps({"id": "tk-merge-empty", "rounds": [], "gates": [], "signoffs": []})
+    )
+    # Stream run dir holding ticket.json pointing at the merged ticket.
+    rundir = tmp_path / "run"
+    rundir.mkdir(parents=True)
+    (rundir / "ticket.json").write_text(
+        json.dumps({"ticket": "tk-merge-empty", "branch": "feature", "repo": str(repo)})
+    )
+    (orch / "streams" / "fx.events.jsonl").write_text(
+        json.dumps(
+            {
+                "key": "run:fx/r1:done",
+                "kind": "run-done",
+                "run": "fx/r1",
+                "out": str(rundir / "ticket.json"),
+                "at": "2026-01-01T00:00:00Z",
+            }
+        )
+        + "\n"
+    )
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    return home, proj, repo
+
+
+def _learn_report(home, proj, stream="fx", extra_args=None, cwd=None):
+    out = home / "out.json"
+    args = [stream, "--phase", "1", "--no-mcp", "--report", str(out)]
+    if extra_args:
+        args += extra_args
+    r = run(args, home, cwd=cwd or proj)
+    assert r.returncode == 0, r.stderr
+    return json.loads(out.read_text())
+
+
+def test_stream_board_integrity_merged_empty(tmp_path):
+    """Merged ticket with empty rounds/gates/signoffs → board-integrity finding."""
+    home, proj, repo = _board_integrity_home(tmp_path)
+    rep = _learn_report(home, proj)
+    details = {f["focus"]: f for f in rep["findings"]}
+    bf = details.get("board ticket tk-merge-empty")
+    assert bf is not None, rep["findings"]
+    assert bf["area"] == "board", bf
+    assert "merged with no recorded rounds/gates/signoffs" in bf["detail"], bf
+
+
+def test_stream_board_integrity_not_merged_silent(tmp_path):
+    """A ticket whose branch is not merged to main → no board-integrity finding."""
+    home, proj, repo = _board_integrity_home(tmp_path)
+    # Repoint the ticket at an unmerged branch.
+    _git(["checkout", "-b", "unmerged"], repo)
+    (repo / "file.txt").write_text("unmerged\n")
+    _git(["commit", "-am", "unmerged work"], repo)
+    rundir = tmp_path / "run"
+    (home / ".config" / "orchestrator" / "streams" / "fx.events.jsonl").write_text(
+        json.dumps(
+            {
+                "key": "run:fx/r1:done",
+                "kind": "run-done",
+                "run": "fx/r1",
+                "out": str(rundir / "ticket.json"),
+                "at": "2026-01-01T00:00:00Z",
+            }
+        )
+        + "\n"
+    )
+    # Rewrite ticket.json branch to unmerged.
+    (rundir / "ticket.json").write_text(
+        json.dumps({"ticket": "tk-merge-empty", "branch": "unmerged", "repo": str(repo)})
+    )
+    rep = _learn_report(home, proj)
+    assert not any(f["focus"] == "board ticket tk-merge-empty" for f in rep["findings"]), rep[
+        "findings"
+    ]
+
+
+def test_stream_board_integrity_rounds_exist_silent(tmp_path):
+    """A merged ticket whose board ticket has rounds → no board-integrity finding."""
+    home, proj, repo = _board_integrity_home(tmp_path)
+    board = repo / ".opencode" / "board" / "tickets"
+    (board / "tk-merge-empty.json").write_text(
+        json.dumps(
+            {"id": "tk-merge-empty", "rounds": [{"counted": True}], "gates": [], "signoffs": []}
+        )
+    )
+    rep = _learn_report(home, proj)
+    assert not any(f["focus"] == "board ticket tk-merge-empty" for f in rep["findings"]), rep[
+        "findings"
+    ]
+
+
+def test_stream_board_integrity_links_denied_board_session(tmp_path):
+    """If a child review found a denied board write, the board-integrity finding links to it."""
+    # Build the board-integrity scenario.
+    home, proj, repo = _board_integrity_home(tmp_path)
+    # Add a CC child whose transcript denies a board.mjs write.
+    cc_proj = home / ".claude" / "projects" / "frood"
+    cc_proj.mkdir(parents=True, exist_ok=True)
+    (cc_proj / "sess_cc_board.jsonl").write_text((FIXTURES / "cc-denied-board.jsonl").read_text())
+    events = home / ".config" / "orchestrator" / "streams" / "fx.events.jsonl"
+    events.write_text(
+        events.read_text()
+        + json.dumps(
+            {
+                "key": "child:fx:sess_cc_board",
+                "event": "child",
+                "session": "sess_cc_board",
+                "harness": "claude-code",
+                "role": "nested",
+                "ts": "2026-01-01T00:00:00Z",
+            }
+        )
+        + "\n"
+    )
+    rep = _learn_report(home, proj)
+    bf = next((f for f in rep["findings"] if f["focus"] == "board ticket tk-merge-empty"), None)
+    assert bf is not None, rep["findings"]
+    assert "a board write was denied in session sess_cc_board" in bf["detail"], bf
+    assert "sess_cc_board" in bf["evidence"], bf

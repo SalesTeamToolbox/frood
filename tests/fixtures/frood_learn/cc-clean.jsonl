@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"model":"claude-3-5-sonnet-20241022","role":"assistant","content":[{"type":"text","text":"Hello, I can help with that."}],"usage":{"input_tokens":5,"output_tokens":10}},"timestamp":"2026-01-01T00:00:00.000Z","sessionId":"sess_cc_clean","agentId":"sess_cc_clean"}
+{"type":"user","message":{"role":"user","content":"Thanks, that works."},"timestamp":"2026-01-01T00:01:00.000Z","sessionId":"sess_cc_clean","agentId":"sess_cc_clean"}

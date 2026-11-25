@@ -88,6 +88,8 @@ tagged `source: "session-data"` are computed from the artifacts actually read;
 | `frood-code-changes` | Frood repo file modifications | File paths in snapshots |
 | `local-code-changes` | Local/project file modifications | File paths in snapshots |
 | `session-length` | Session duration, iteration patterns | Time spans, user prompts |
+| `blocked-actions` | Claude Code tool calls denied by the permission classifier; board/handoff writes are severity high | Claude Code child transcript (session-data) |
+| `board-integrity` | Stream ticket merged to main with no recorded rounds/gates/signoffs | Stream run dirs + repo board tickets |
 
 ## Child sessions
 
@@ -115,6 +117,18 @@ When a session is both a claimant and a `child` event, one child is kept and rol
 `orchestrator`. The report gains a top-level `children` array (omitted with `--no-children`).
 Archived sessions are still reviewed: archiving keeps the transcript (`~/.claude/projects/…`), which is what
 `/frood-learn` reads. Claude Code deletes transcripts older than `cleanupPeriodDays` either way.
+
+On Claude Code children, `readClaudeCodeJSONL` also scans the transcript for tool calls denied by the
+permission classifier. Each denial becomes a `blocked-actions` finding (area: `permissions`): board/handoff
+writes (`board.mjs round|signoff|gates|ready|close|claim`, `handoff.mjs write|note|child|done`) are
+severity `high` with the consequence (the step was not recorded, so the desk cannot merge; the owner must)
+and the fix (allow the command in the session's permission settings, or run it from the parent session);
+every other denial is severity `medium`. A `custom-title` line sets the child's session title (last wins);
+a `local_` child with no custom title falls back to the desktop app metadata `title`.
+
+At stream level, the `board-integrity` finding fires when a ticket on the stream has its branch merged to
+local `main` but its board record has empty `rounds`, `gates` and `signoffs`. If a child review found a
+denied board write, the finding links to that session.
 
 ## Retention
 

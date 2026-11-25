@@ -397,6 +397,17 @@ function analyzeSessionData(messages, sessionId, title, startedAt, updatedAt, mo
         }
       }
     }
+    // A Claude Code user line that carried only tool_result blocks (no text) is
+    // recorded as type "tool_result": count its errors, but never as a prompt.
+    else if (msg.type === "tool_result") {
+      const toolResults = msg.data.toolResults || [];
+      for (const r of toolResults) {
+        if (r.is_error) {
+          errors++;
+          errorPatterns.push(String(r.content || "").slice(0, 200));
+        }
+      }
+    }
     else if (msg.type === "synthetic") {
       // Synthetic messages contain tool results (like shell commands)
       backgroundShellCommands++;
@@ -608,6 +619,12 @@ function readClaudeCodeJSONL(filePath, { preferAgentId = false } = {}) {
   // Tool names whose file_path / notebook_path input names a modified file.
   const MODIFICATION_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
+  // assistant tool_use id -> { name, input }, used to recover the command behind a
+  // denied tool_result (which carries only tool_use_id).
+  const toolUses = new Map();
+  // Denied tool calls found in this transcript: { tool, command, reason, ts }.
+  const denials = [];
+
   // File targets a tool_use input may address. Only `file_path` / `notebook_path`
   // count (never a Bash `command`), and only from modification tools (never Read,
   // Grep, Glob, ...).
@@ -625,6 +642,52 @@ function readClaudeCodeJSONL(filePath, { preferAgentId = false } = {}) {
     if (content == null) return [];
     if (Array.isArray(content)) return content;
     return [{ type: "text", text: String(content) }];
+  };
+
+  // Text content of a tool_result block: a string, or the joined text of its list items.
+  const toolResultText = (c) => {
+    if (typeof c.content === "string") return c.content;
+    if (Array.isArray(c.content)) {
+      return c.content
+        .filter((item) => item && item.type === "text" && typeof item.text === "string")
+        .map((item) => item.text)
+        .join("\n");
+    }
+    return String(c.content || "");
+  };
+
+  // A tool_result block is a denial when its text names the classifier/permission
+  // refusal, or the user-rejection text Claude Code writes when a tool is declined.
+  const isDenial = (text) =>
+    text.includes("Permission for this action was denied") ||
+    text.includes("The user doesn't want to proceed with this tool use");
+
+  // Reason inside the first `Reason: [ … ]` brackets; whitespace and literal \n
+  // collapsed to one space. Null when absent.
+  const reasonOf = (text) => {
+    const m = text.match(/Reason:\s*\[([^\]]*)\]/);
+    if (!m) return null;
+    return String(m[1]).replace(/\s+/g, " ").trim() || null;
+  };
+
+  // Collapse whitespace and cut to 160 chars.
+  const collapseCut = (s) => String(s || "").replace(/\s+/g, " ").trim().slice(0, 160);
+
+  // Recover the command behind a denied tool_use_id: Bash -> input.command;
+  // any other tool -> "<name> <first string input value>" or just "<name>".
+  const recoverCommand = (toolUseId) => {
+    const rec = toolUses.get(toolUseId);
+    if (!rec) return null;
+    const { name, input } = rec;
+    if (name === "Bash") {
+      return input && typeof input.command === "string" ? input.command : name;
+    }
+    if (input && typeof input === "object") {
+      for (const k of Object.keys(input)) {
+        if (typeof input[k] === "string" && input[k]) return `${name} ${input[k]}`;
+      }
+    }
+    return name;
   };
 
   // Real Claude Code transcript: one JSON object per line, top-level keys
@@ -645,6 +708,11 @@ function readClaudeCodeJSONL(filePath, { preferAgentId = false } = {}) {
     agentId = agentId || v.agentId;
     touch(ts);
 
+    // The last non-empty customTitle line wins as the session title.
+    if (v.type === "custom-title" && typeof v.customTitle === "string" && v.customTitle.trim()) {
+      title = v.customTitle.trim();
+    }
+
     if (v.type === "assistant" && msg && typeof msg === "object") {
       model = msg.model || model;
       id = id || (preferAgentId ? v.agentId || v.sessionId : v.sessionId || v.agentId);
@@ -663,6 +731,7 @@ function readClaudeCodeJSONL(filePath, { preferAgentId = false } = {}) {
           hadContent = true;
           const name = c.name;
           const input = c.input;
+          toolUses.set(c.id, { name, input });
           if (MODIFICATION_TOOLS.has(name)) {
             for (const t of toolTargets(input)) {
               if (!files.includes(t)) files.push(t);
@@ -690,24 +759,57 @@ function readClaudeCodeJSONL(filePath, { preferAgentId = false } = {}) {
     } else if (v.type === "user" && msg && typeof msg === "object") {
       id = id || (preferAgentId ? v.agentId || v.sessionId : v.sessionId || v.agentId);
       const items = contentItems(msg.content);
-      let textParts = [];
+      const textParts = [];
       const toolResults = [];
+      let hadText = false;
       for (const c of items) {
         if (!c || typeof c !== "object") continue;
-        if (c.type === "text" && typeof c.text === "string") textParts.push(c.text);
-        else if (c.type === "tool_result") {
+        if (c.type === "text" && typeof c.text === "string") {
+          textParts.push(c.text);
+          hadText = true;
+        } else if (c.type === "tool_result") {
           toolResults.push(c);
+          // Denial detection: a tool_result whose text names a permission refusal.
+          const text = toolResultText(c);
+          if (isDenial(text)) {
+            const id_ = c.tool_use_id || "";
+            const rec = toolUses.get(id_) || {};
+            const toolName = rec.name || "tool";
+            denials.push({
+              tool: toolName,
+              command: collapseCut(rec ? recoverCommand(id_) : "tool"),
+              reason: reasonOf(text),
+              ts,
+            });
+          }
           if (c.is_error) {
             textParts.push(`[tool_result error for ${c.tool_use_id || ""}]`);
             textParts.push(String(c.content || ""));
           }
         }
       }
-      messages.push({
-        type: "user",
-        data: { text: textParts.join("\n"), toolResults },
-        time_created: ts,
-      });
+      // A user line carrying only tool_result blocks (no text) is not a typed
+      // prompt: record it as tool_result so analyzeSessionData never counts it as
+      // a prompt. Error tool_results still feed error-patterns via data.toolResults.
+      if (hadText) {
+        messages.push({
+          type: "user",
+          data: { text: textParts.join("\n"), toolResults },
+          time_created: ts,
+        });
+      } else if (toolResults.length) {
+        messages.push({
+          type: "tool_result",
+          data: {
+            text: toolResults
+              .filter((r) => r.is_error)
+              .map((r) => String(r.content || ""))
+              .join("\n"),
+            toolResults,
+          },
+          time_created: ts,
+        });
+      }
     }
   }
 
@@ -715,7 +817,7 @@ function readClaudeCodeJSONL(filePath, { preferAgentId = false } = {}) {
   if (!startedAt) startedAt = null;
   if (!updatedAt) updatedAt = null;
 
-  return { id, agentId, title, messages, model, startedAt, updatedAt, agentTurns };
+  return { id, agentId, title, messages, model, denials, startedAt, updatedAt, agentTurns };
 }
 
 // Orchestrator session id -> Claude Code subagent transcripts
@@ -785,7 +887,8 @@ function desktopSessionsDir() {
 
 // A desktop-app session id (`local_<uuid>`, what start_session returns and /frood-ticket records) is not the
 // transcript's id: the app's metadata file carries that as `cliSessionId`. Returns it, or null. Never throws.
-export function resolveDesktopSessionId(localId) {
+// Shared directory walk for the desktop metadata file; returns the trimmed string value of `field`, or null.
+function desktopMetaString(localId, field) {
   if (!/^local_[A-Za-z0-9-]{1,64}$/.test(String(localId))) return null;
   const root = desktopSessionsDir();
   const file = `${localId}.json`;
@@ -800,13 +903,25 @@ export function resolveDesktopSessionId(localId) {
       for (const org of orgs) {
         try {
           const meta = JSON.parse(fs.readFileSync(path.join(root, account, org, file), "utf8"));
-          const cli = meta && typeof meta.cliSessionId === "string" ? meta.cliSessionId : "";
-          if (/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(cli)) return cli;
+          const v = meta && typeof meta[field] === "string" ? meta[field] : "";
+          if (v.trim()) return v.trim();
         } catch {}
       }
     }
   } catch {}
   return null;
+}
+
+export function resolveDesktopSessionId(localId) {
+  const raw = desktopMetaString(localId, "cliSessionId");
+  if (!raw) return null;
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(raw) ? raw : null;
+}
+
+// The desktop app's metadata `title` for a `local_` child session, used as the
+// session title when the transcript carries no custom-title line. Never throws.
+export function resolveDesktopSessionTitle(localId) {
+  return desktopMetaString(localId, "title") || null;
 }
 
 // Nested Claude Code session recorded on the stream: a top-level
@@ -1108,14 +1223,47 @@ function reviewChild(child, streamName) {
   report.status = "analyzed";
   report.note = null;
 
+  // Title: last custom-title line wins; else a desktop local_ child falls back to
+  // the app metadata title; else null as today.
+  let sessionTitle = parsed.title;
+  if (!sessionTitle && String(child.session).startsWith("local_")) {
+    sessionTitle = resolveDesktopSessionTitle(child.session) || null;
+  }
+
   const findings = analyzeSessionData(
     parsed.messages,
     parsed.id,
-    parsed.title,
+    sessionTitle,
     parsed.startedAt,
     parsed.updatedAt,
     parsed.model,
   );
+
+  // Blocked-actions finding (Claude Code children only): one per denied tool call.
+  // Board/handoff writes are severity high with the consequence + fix named.
+  if (child.harness === "claude-code" && parsed.denials && parsed.denials.length) {
+    const boardWrite = /\b(board\.mjs)\s+(round|signoff|gates|ready|close|claim)\b/;
+    const handoffWrite = /\b(handoff\.mjs)\s+(write|note|child|done)\b/;
+    for (const d of parsed.denials) {
+      const isBoardHandoff = boardWrite.test(d.command) || handoffWrite.test(d.command);
+      const severity = isBoardHandoff ? "high" : "medium";
+      const recommendation = isBoardHandoff
+        ? "The board did not record this step, so the desk cannot merge it and the owner must merge by hand. Allow this command in the session's permission settings, or run it from the parent session."
+        : "Allow this command in the session's permission settings, or decline it intentionally so the work is not silently skipped.";
+      findings.push({
+        area: "permissions",
+        focus: `blocked ${d.tool}`,
+        lens: "blocked-actions",
+        status: "analyzed",
+        severity,
+        detail: `Denied ${d.tool}: ${d.command}${d.reason ? ` [Reason: ${d.reason}]` : ""}`,
+        recommendation,
+        evidence: [child.session],
+        source: "session-data",
+      });
+    }
+  }
+
   report.findings = tagChildFindings(findings, child);
   return report;
 }
@@ -1164,6 +1312,67 @@ function readStreamEscalations(streamName) {
 // wherever that repo lives. This is what ties a receipt to a stream.
 function streamRunDirs(streamName) {
   return [...new Set(readStreamEvents(streamName).map(e => (e.out ? path.dirname(e.out) : null)).filter(Boolean))];
+}
+
+// Stream cross-check (default stream run): a ticket on the stream whose branch is
+// merged to local main but whose board record has empty rounds/gates/signoffs.
+// deniedBoardSessions are sessions whose child review produced a high
+// blocked-actions (denied board/handoff write) finding, linked into the finding.
+function streamBoardIntegrityFindings(streamName, deniedBoardSessions) {
+  const findings = [];
+  for (const dir of streamRunDirs(streamName)) {
+    let ticket;
+    try {
+      ticket = JSON.parse(fs.readFileSync(path.join(dir, "ticket.json"), "utf8"));
+    } catch {
+      continue;
+    }
+    const { ticket: tid, branch, repo } = ticket || {};
+    if (!tid || !branch || !repo) continue;
+    let board;
+    try {
+      board = JSON.parse(fs.readFileSync(path.join(repo, ".opencode", "board", "tickets", `${tid}.json`), "utf8"));
+    } catch {
+      continue;
+    }
+    if (!board || typeof board !== "object") continue;
+    // Merged = branch is an ancestor of the repo's local main.
+    let merged = false;
+    try {
+      const mb = spawnSync("git", ["-C", repo, "merge-base", "--is-ancestor", branch, "main"], {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+      merged = mb.status === 0;
+    } catch {
+      merged = false;
+    }
+    if (!merged) continue;
+    const rounds = board.rounds, gates = board.gates, signoffs = board.signoffs;
+    const empty = Array.isArray(rounds) && rounds.length === 0
+      && Array.isArray(gates) && gates.length === 0
+      && Array.isArray(signoffs) && signoffs.length === 0;
+    if (!empty) continue;
+    let detail = `board ticket ${tid} merged with no recorded rounds/gates/signoffs`;
+    const evidence = [];
+    const linked = deniedBoardSessions.filter(Boolean);
+    if (linked.length) {
+      detail += `; a board write was denied in session ${linked.join(", ")}`;
+      evidence.push(...linked);
+    }
+    findings.push({
+      area: "board",
+      focus: `board ticket ${tid}`,
+      lens: "board-integrity",
+      status: "analyzed",
+      severity: "high",
+      detail,
+      recommendation: "Record the round/gate/signoff on the board ticket (or re-run the blocked board write from a session with permission) so the desk can merge it.",
+      evidence,
+      source: "session-data",
+    });
+  }
+  return findings;
 }
 
 // Worker receipts of this stream's runs only (all rounds). Until 2026-11-24 this read every ticket dir
@@ -2886,10 +3095,33 @@ async function main() {
   // phase-5 lenses. Only on stream runs (phases 1-4); --session (phase 5) is
   // unchanged and --no-children skips this entirely.
   let children = [];
+  // Sessions whose child review found a denied board/handoff write (severity high),
+  // used to link the stream board-integrity cross-check.
+  const deniedBoardSessions = [];
   const isStreamRun = Boolean(args.stream) && !args.stream.startsWith("ses_") && args.phase !== 5;
   if (isStreamRun && !args.noChildren) {
     for (const child of collectChildren(args.stream)) {
-      children.push(reviewChild(child, args.stream));
+      const childReport = reviewChild(child, args.stream);
+      children.push(childReport);
+      if (child.harness === "claude-code") {
+        for (const f of childReport.findings) {
+          if (f.lens === "blocked-actions" && f.severity === "high") {
+            deniedBoardSessions.push(child.session);
+          }
+        }
+      }
+    }
+  }
+
+  // Stream cross-check: a merged ticket with no recorded rounds/gates/signoffs.
+  if (isStreamRun && !args.noChildren) {
+    const boardFindings = streamBoardIntegrityFindings(args.stream, deniedBoardSessions);
+    for (const bf of boardFindings) {
+      categorizedFindings.push({
+        ...bf,
+        id: categorizedFindings.length + 1,
+        category: categorizeFinding(bf),
+      });
     }
   }
 

@@ -442,6 +442,12 @@ decides: a timeout/stalled receipt whose HEAD moved, tree is clean, and --report
 handler: bin/frood-learn.mjs (perRunOpencodeFindings: readStreamEvents queued/run-done → opencode.db session_message + session_part)
 decides: start delay, after-kill activity and long tool calls per run; why a worker timed out / kept working
 
+### frood-learn Claude Code child review
+handler: bin/frood-learn.mjs (readClaudeCodeJSONL: user lines, custom-title title, denied tool_results → parsed.denials; analyzeSessionData prompt counting; reviewChild blocked-actions findings)
+decides: whether a user line is a typed prompt (text present) or tool_result-only (not counted); the session title (last custom-title, else desktop metadata title for a local_ child); which tool calls were denied by the permission classifier, and board/handoff writes severity high with the fix named
+sibling traps: frood-learn per-run opencode join
+trap: a `user` line holding only tool_results is not a prompt
+
 ### orchestrator handoff write
 handler: orchestrator/bin/handoff.mjs writeStream
 decides: a write by the claim holder keeps the claim (refreshing claim.at, keeping consumed_at) unless `--release`; every other write clears claim and consumed_at; lease keys (held_by, …) always untouched

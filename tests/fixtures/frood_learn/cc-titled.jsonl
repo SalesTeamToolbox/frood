@@ -1,0 +1,4 @@
+{"type":"custom-title","customTitle":"First title","timestamp":"2026-01-01T00:00:00.000Z","sessionId":"sess_cc_titled","agentId":"sess_cc_titled"}
+{"type":"custom-title","customTitle":"The Real Session Title","timestamp":"2026-01-01T00:00:01.000Z","sessionId":"sess_cc_titled","agentId":"sess_cc_titled"}
+{"type":"assistant","message":{"model":"claude-3-5-sonnet-20241022","role":"assistant","content":[{"type":"text","text":"Work done."}],"usage":{"input_tokens":5,"output_tokens":5}},"timestamp":"2026-01-01T00:02:00.000Z","sessionId":"sess_cc_titled","agentId":"sess_cc_titled"}
+{"type":"user","message":{"role":"user","content":"thanks"},"timestamp":"2026-01-01T00:03:00.000Z","sessionId":"sess_cc_titled","agentId":"sess_cc_titled"}
