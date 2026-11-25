@@ -433,6 +433,10 @@ decides: a timeout/stalled receipt whose HEAD moved, tree is clean, and --report
 handler: bin/frood-learn.mjs (perRunOpencodeFindings: readStreamEvents queued/run-done → opencode.db session_message + session_part)
 decides: start delay, after-kill activity and long tool calls per run; why a worker timed out / kept working
 
+### orchestrator handoff write
+handler: orchestrator/bin/handoff.mjs writeStream
+decides: a write by the claim holder keeps the claim (refreshing claim.at, keeping consumed_at) unless `--release`; every other write clears claim and consumed_at; lease keys (held_by, …) always untouched
+
 ## How to keep this map accurate
 
 - A handler rename is a same-commit map update: edit the `handler:` line in the

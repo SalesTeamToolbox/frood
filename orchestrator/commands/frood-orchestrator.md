@@ -60,8 +60,10 @@ question the owner must decide.
 1. Write/replace the `## Handoff` section at the top of the plan file: done (with shas), next module and its first
    step, pool status (router-health), and anything waiting on the owner.
 2. Record the pointer: `node {{ORCH_REPO}}/bin/handoff.mjs write --stream <effort-name>
-   --plan <plan> --next "<next>" --done "<one line>" --waiting "<owner items or empty>" --by cc`.  # cc-only
-   --plan <plan> --next "<next>" --done "<one line>" --waiting "<owner items or empty>" --by oc`.  # oc-only
+   --plan <plan> --next "<next>" --done "<one line>" --waiting "<owner items or empty>" --session <id> --by cc`.  # cc-only
+   --plan <plan> --next "<next>" --done "<one line>" --waiting "<owner items or empty>" --session <id> --by oc`.  # oc-only
+   A mid-session progress write passes `--session <id>` (keeps the claim); the end-of-session handoff passes
+   `--session <id> --release` (clears it).
    <!-- oc-only -->
    Then retitle this session's tab to the next module (same shape as the CC hook title, ≤60 chars, plain words):
    `node {{ORCH_REPO}}/bin/session-title.mjs --title "[<stream>] <repo>: <next module> — <first step>"`.
