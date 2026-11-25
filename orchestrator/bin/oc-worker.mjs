@@ -12,7 +12,9 @@
 //      timeout budget but still alive; HEARTBEAT-STALE = wrapper alive but not ticking; QUIET = silent
 //      past its idle limit; STARTING = no output yet. Read-only; exits 0.
 //
-// - Runs `opencode run --format json --auto --agent <agent>` with cwd=<dir> and stdin closed
+// - Runs `opencode run --standalone --format json --auto --agent <agent>` with cwd=<dir> and stdin closed
+//   (--standalone makes the server a child of the run process, so killing the process group ends the
+//   session; an open stdin makes `opencode run` wait forever).
 //   (an open stdin makes `opencode run` wait forever).
 // - The prompt file's text is the message. A footer tells the agent it cannot ask questions:
 //   it must finish with `RESULT: BLOCKED: question — ...` instead.
@@ -829,7 +831,10 @@ export async function runWorker(a) {
   const reportLine = a.report ? `\nWrite your report to ${path.resolve(a.report)} (absolute path; not the worktree).` : "";
   const base = promptText + reportLine + FOOTER + readonlyFooter + visionFooter;
   const cliFor = (session, message) => {
-    const cli = ["run", "--format", "json", "--auto", "--agent", a.agent, "--title", title];
+    // --standalone: the opencode server is a child of this run process, so killTree / the proc-tree
+    // sweep ends the whole session instead of leaving it writing in the worktree (see
+    // ticket killed-run-stops-agent).
+    const cli = ["run", "--standalone", "--format", "json", "--auto", "--agent", a.agent, "--title", title];
     if (a.model) cli.push("--model", a.model);
     if (session) cli.push("--session", session);
     cli.push(safe(message));

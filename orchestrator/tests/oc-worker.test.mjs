@@ -93,7 +93,7 @@ test("happy path: saves final message, receipt, events; passes agent, cwd, foote
   assert.ok(fs.existsSync(path.join(r.dir, "out", "findings-r1.md.events.jsonl")));
   const { argv, cwd } = JSON.parse(fs.readFileSync(r.argsFile, "utf8"));
   assert.equal(fs.realpathSync(cwd), fs.realpathSync(r.dir));
-  for (const f of ["run", "--format", "json", "--auto", "--agent", "critic"]) assert.ok(argv.includes(f), f);
+  for (const f of ["run", "--standalone", "--format", "json", "--auto", "--agent", "critic"]) assert.ok(argv.includes(f), f);
   assert.match(argv[argv.length - 1], /Review the diff\.[\s\S]*RESULT: BLOCKED: question/);
 });
 
@@ -469,6 +469,8 @@ test("drop-once: a dropped run is resumed with --session and finishes (one slot,
   assert.match(calls[1].at(-1), /^The previous run was interrupted \(.*ECONNRESET/);
   assert.match(calls[1].at(-1), /git status --short/);
   assert.match(calls[1].at(-1), /Run constraints/);
+  assert.ok(calls[0].includes("--standalone"), "first attempt carries --standalone");
+  assert.ok(calls[1].includes("--standalone"), "resumed call carries --standalone");
 });
 
 test("drop with --resume 0 is not resumed; stderr and events errors reach the receipt", () => {
@@ -979,6 +981,8 @@ test("midrun-quota-once: a mid-run quota death is nudged with --session and fini
   assert.ok(!calls[0].includes("--session"));
   assert.equal(calls[1][calls[1].indexOf("--session") + 1], "ses_fake123");
   assert.match(calls[1].at(-1), /^The previous run was interrupted \(.*weekly usage limit/);
+  assert.ok(calls[0].includes("--standalone"), "first attempt carries --standalone");
+  assert.ok(calls[1].includes("--standalone"), "resumed call carries --standalone");
 });
 
 test("quota with --resume 0 is not nudged; a persistent quota fails after one nudge", () => {
