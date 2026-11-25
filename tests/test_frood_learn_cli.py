@@ -1968,6 +1968,8 @@ def test_stream_board_integrity_merged_empty(tmp_path):
     bf = details.get("board ticket tk-merge-empty")
     assert bf is not None, rep["findings"]
     assert bf["area"] == "board", bf
+    assert bf["lens"] == "board-integrity", bf
+    assert bf["severity"] == "high", bf
     assert "merged with no recorded rounds/gates/signoffs" in bf["detail"], bf
 
 
@@ -2044,3 +2046,96 @@ def test_stream_board_integrity_links_denied_board_session(tmp_path):
     assert bf is not None, rep["findings"]
     assert "a board write was denied in session sess_cc_board" in bf["detail"], bf
     assert "sess_cc_board" in bf["evidence"], bf
+
+
+def test_stream_board_integrity_no_children_still_fires(tmp_path):
+    """§2: the board-integrity cross-check fires on every stream run even with
+    --no-children (no denied-session link since no children were reviewed)."""
+    home, proj, repo = _board_integrity_home(tmp_path)
+    rep = _learn_report(home, proj, extra_args=["--no-children"])
+    bf = next((f for f in rep["findings"] if f["focus"] == "board ticket tk-merge-empty"), None)
+    assert bf is not None, rep["findings"]
+    assert bf["lens"] == "board-integrity", bf
+    assert bf["severity"] == "high", bf
+    assert "merged with no recorded rounds/gates/signoffs" in bf["detail"], bf
+    assert "denied" not in bf["detail"], bf
+    assert bf["evidence"] == [], bf
+
+
+def test_cc_child_two_board_denials_dedupes(tmp_path):
+    """§3: one session denying two board writes → two findings, session named once,
+    evidence lists it once (also verified at stream level)."""
+    home, proj, repo = _board_integrity_home(tmp_path)
+    # Add a CC child whose transcript denies two board.mjs writes.
+    cc_proj = home / ".claude" / "projects" / "frood"
+    cc_proj.mkdir(parents=True, exist_ok=True)
+    (cc_proj / "sess_cc_two_board.jsonl").write_text(
+        (FIXTURES / "cc-two-board-denials.jsonl").read_text()
+    )
+    events = home / ".config" / "orchestrator" / "streams" / "fx.events.jsonl"
+    events.write_text(
+        events.read_text()
+        + json.dumps(
+            {
+                "key": "child:fx:sess_cc_two_board",
+                "event": "child",
+                "session": "sess_cc_two_board",
+                "harness": "claude-code",
+                "role": "nested",
+                "ts": "2026-01-01T00:00:00Z",
+            }
+        )
+        + "\n"
+    )
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(out.read_text())
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    child = by_session["sess_cc_two_board"]
+    bf = [f for f in child["findings"] if f["lens"] == "blocked-actions"]
+    assert len(bf) == 2, bf
+    assert all(f["severity"] == "high" for f in bf), bf
+    # Stream-level board-integrity names the session once and lists it once in evidence.
+    sbf = next((f for f in rep["findings"] if f["focus"] == "board ticket tk-merge-empty"), None)
+    assert sbf is not None, rep["findings"]
+    assert sbf["detail"].count("sess_cc_two_board") == 1, sbf
+    assert sbf["evidence"].count("sess_cc_two_board") == 1, sbf
+
+
+def test_cc_child_unknown_tool_falls_back(tmp_path):
+    """§4: a denial whose tool_use_id matches no tool_use → command "<unknown tool>", tool "<unknown tool>"."""
+    rep, _, _ = _cc_report(tmp_path, "cc-unknown-tool.jsonl", "sess_cc_unknown")
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    child = by_session["sess_cc_unknown"]
+    bf = [f for f in child["findings"] if f["lens"] == "blocked-actions"]
+    assert len(bf) == 1, bf
+    assert bf[0]["severity"] == "medium", bf
+    assert "<unknown tool>" in bf[0]["detail"], bf
+
+
+def test_cc_child_false_positives_no_blocked_actions(tmp_path):
+    """§7: a non-error tool_result with the phrase mid-text, and an is_error
+    tool_result with the phrase mid-text, give no blocked-actions finding.
+    A genuine denial (is_error, starts with phrase) still fires."""
+    rep, _, _ = _cc_report(tmp_path, "cc-false-positive.jsonl", "sess_cc_fp")
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    child = by_session["sess_cc_fp"]
+    bf = [f for f in child["findings"] if f["lens"] == "blocked-actions"]
+    assert len(bf) == 1, bf
+    assert "board.mjs round" in bf[0]["detail"], bf
+
+
+def test_cc_child_image_only_stays_user(tmp_path):
+    """§6: a user line with neither text nor tool_result (image-only) stays type
+    "user" and is counted as a prompt; it never becomes tool_result-only."""
+    rep, _, _ = _cc_report(tmp_path, "cc-image-only.jsonl", "sess_cc_image")
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    child = by_session["sess_cc_image"]
+    ss = next(f for f in child["findings"] if f["lens"] == "session-summary")
+    assert "1 user prompts" in ss["detail"], ss["detail"]
+    assert not any(f["lens"] == "iteration-patterns" for f in child["findings"]), child["findings"]

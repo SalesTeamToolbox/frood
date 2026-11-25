@@ -656,11 +656,19 @@ function readClaudeCodeJSONL(filePath, { preferAgentId = false } = {}) {
     return String(c.content || "");
   };
 
-  // A tool_result block is a denial when its text names the classifier/permission
-  // refusal, or the user-rejection text Claude Code writes when a tool is declined.
-  const isDenial = (text) =>
-    text.includes("Permission for this action was denied") ||
-    text.includes("The user doesn't want to proceed with this tool use");
+  // A tool_result block is a denial when it is an error and its text starts with
+  // the classifier/permission refusal phrase, or the user-rejection text Claude
+  // Code writes when a tool is declined. Matching on startsWith (after trimming
+  // leading whitespace) avoids false positives where the phrase appears mid-text
+  // of a command's output (e.g. cat/grep/Read printing the refusal text).
+  const isDenial = (text, isError) => {
+    if (isError !== true) return false;
+    const t = String(text || "").trimStart();
+    return (
+      t.startsWith("Permission for this action was denied") ||
+      t.startsWith("The user doesn't want to proceed with this tool use")
+    );
+  };
 
   // Reason inside the first `Reason: [ … ]` brackets; whitespace and literal \n
   // collapsed to one space. Null when absent.
@@ -770,14 +778,15 @@ function readClaudeCodeJSONL(filePath, { preferAgentId = false } = {}) {
         } else if (c.type === "tool_result") {
           toolResults.push(c);
           // Denial detection: a tool_result whose text names a permission refusal.
+          // Real classifier denials are is_error true and start with the phrase.
           const text = toolResultText(c);
-          if (isDenial(text)) {
+          if (isDenial(text, c.is_error)) {
             const id_ = c.tool_use_id || "";
-            const rec = toolUses.get(id_) || {};
-            const toolName = rec.name || "tool";
+            const rec = toolUses.get(id_);
+            const toolName = rec ? rec.name : "<unknown tool>";
             denials.push({
               tool: toolName,
-              command: collapseCut(rec ? recoverCommand(id_) : "tool"),
+              command: collapseCut(rec ? recoverCommand(id_) : toolName),
               reason: reasonOf(text),
               ts,
             });
@@ -791,13 +800,14 @@ function readClaudeCodeJSONL(filePath, { preferAgentId = false } = {}) {
       // A user line carrying only tool_result blocks (no text) is not a typed
       // prompt: record it as tool_result so analyzeSessionData never counts it as
       // a prompt. Error tool_results still feed error-patterns via data.toolResults.
-      if (hadText) {
+      // A line with neither text nor tool_result (e.g. image-only) stays "user".
+      if (hadText || toolResults.length === 0) {
         messages.push({
           type: "user",
           data: { text: textParts.join("\n"), toolResults },
           time_created: ts,
         });
-      } else if (toolResults.length) {
+      } else {
         messages.push({
           type: "tool_result",
           data: {
@@ -885,10 +895,11 @@ function desktopSessionsDir() {
   return path.join(process.env.XDG_CONFIG_HOME || path.join(home, ".config"), "Claude", "claude-code-sessions");
 }
 
-// A desktop-app session id (`local_<uuid>`, what start_session returns and /frood-ticket records) is not the
-// transcript's id: the app's metadata file carries that as `cliSessionId`. Returns it, or null. Never throws.
-// Shared directory walk for the desktop metadata file; returns the trimmed string value of `field`, or null.
-function desktopMetaString(localId, field) {
+// Shared directory walk for the desktop metadata file. `accept` is called with
+// the raw (untrimmed) field value; the first file whose value passes accept wins
+// and its trimmed string is returned. Validation happens inside the walk so a
+// failing file continues to the next account/org file. Never throws.
+function desktopMetaString(localId, field, accept) {
   if (!/^local_[A-Za-z0-9-]{1,64}$/.test(String(localId))) return null;
   const root = desktopSessionsDir();
   const file = `${localId}.json`;
@@ -904,7 +915,7 @@ function desktopMetaString(localId, field) {
         try {
           const meta = JSON.parse(fs.readFileSync(path.join(root, account, org, file), "utf8"));
           const v = meta && typeof meta[field] === "string" ? meta[field] : "";
-          if (v.trim()) return v.trim();
+          if (accept(v)) return v.trim();
         } catch {}
       }
     }
@@ -912,16 +923,19 @@ function desktopMetaString(localId, field) {
   return null;
 }
 
+// A desktop-app session id (`local_<uuid>`, what start_session returns and /frood-ticket records) is not the
+// transcript's id: the app's metadata file carries that as `cliSessionId`. Returns it, or null. Never throws.
+// The raw (untrimmed) cliSessionId is validated inside the walk; a failing file is skipped.
 export function resolveDesktopSessionId(localId) {
-  const raw = desktopMetaString(localId, "cliSessionId");
-  if (!raw) return null;
-  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(raw) ? raw : null;
+  return desktopMetaString(localId, "cliSessionId", (v) =>
+    /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(v)
+  );
 }
 
 // The desktop app's metadata `title` for a `local_` child session, used as the
 // session title when the transcript carries no custom-title line. Never throws.
 export function resolveDesktopSessionTitle(localId) {
-  return desktopMetaString(localId, "title") || null;
+  return desktopMetaString(localId, "title", (v) => v.trim() !== "") || null;
 }
 
 // Nested Claude Code session recorded on the stream: a top-level
@@ -3096,8 +3110,9 @@ async function main() {
   // unchanged and --no-children skips this entirely.
   let children = [];
   // Sessions whose child review found a denied board/handoff write (severity high),
-  // used to link the stream board-integrity cross-check.
-  const deniedBoardSessions = [];
+  // used to link the stream board-integrity cross-check. Deduped so a session that
+  // denied two board writes is named once.
+  const deniedBoardSessions = new Set();
   const isStreamRun = Boolean(args.stream) && !args.stream.startsWith("ses_") && args.phase !== 5;
   if (isStreamRun && !args.noChildren) {
     for (const child of collectChildren(args.stream)) {
@@ -3106,7 +3121,7 @@ async function main() {
       if (child.harness === "claude-code") {
         for (const f of childReport.findings) {
           if (f.lens === "blocked-actions" && f.severity === "high") {
-            deniedBoardSessions.push(child.session);
+            deniedBoardSessions.add(child.session);
           }
         }
       }
@@ -3114,8 +3129,10 @@ async function main() {
   }
 
   // Stream cross-check: a merged ticket with no recorded rounds/gates/signoffs.
-  if (isStreamRun && !args.noChildren) {
-    const boardFindings = streamBoardIntegrityFindings(args.stream, deniedBoardSessions);
+  // Runs on every stream run (gated on isStreamRun alone, not on --no-children);
+  // the denied-session link is added only when children were actually reviewed.
+  if (isStreamRun) {
+    const boardFindings = streamBoardIntegrityFindings(args.stream, [...deniedBoardSessions]);
     for (const bf of boardFindings) {
       categorizedFindings.push({
         ...bf,
@@ -3144,6 +3161,8 @@ async function main() {
       evidence: f.evidence,
       source: f.source,
       category: f.category,
+      ...(f.lens ? { lens: f.lens } : {}),
+      ...(f.severity ? { severity: f.severity } : {}),
     })),
     children: isStreamRun && !args.noChildren
       ? children.map((c) => ({
