@@ -21,10 +21,11 @@ constraints (e.g. "Go is capped").
    trigger without an approved EGM review in the Mandate ⇒ stop with `RESULT: BLOCKED: egm review
    required — <trigger>`. None ⇒ record `egm: waived (<triggers checked, why none apply>)`. If a trigger
    appears mid-ticket (e.g. the fix must change stored data), stop the same way.
-2. Round N: delegate to a worker subagent (`worker`; `worker-burst` / `worker-alt` when the Go pool is
-   capped or a worker fails on a quota error; `worker-strong` only for a genuinely hard ticket). Give it the
+2. Round N: delegate to a worker subagent (`worker`; when the Go pool is
+   capped or a worker fails on a quota error, `oc-worker --role worker` walks worker-nvidia, worker,
+   worker-free; `worker-strong` only for a genuinely hard ticket). Give it the
    Mandate path, the worktree, `report_path = <reports>/report.md`, and on N > 1 the previous findings file.
-3. Delegate review to the `critic` subagent (`critic-alt` if critic's pool fails). Give it the Mandate, the
+3. Delegate review to the `critic` subagent (`oc-worker --role critic` falls through critic-go, critic-nvidia, critic-free if critic's pool fails). Give it the Mandate, the
    worktree, base ref, the worker report and round N. Save its reply verbatim to `<reports>/findings-r<N>.md`.
 4. `CHANGES_REQUESTED` → round N+1 with those findings (max 3 rounds; then stop, BLOCKED, quoting all
    findings). `APPROVED` → if the critic says `SENIOR_REVIEW: needed`, or the diff touches a guarded

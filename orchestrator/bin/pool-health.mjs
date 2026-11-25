@@ -69,7 +69,7 @@ export function classify(errors = [], model = null) {
     let ms = retry ? Number(retry[1]) : resets ? Date.parse(resets[1]) - Date.now() : HOUR;
     ms = Math.min(Math.max(ms, 60_000), 7 * 24 * HOUR);
     // A weekly/plan limit takes out every model on that provider, not just the one that hit it. So does
-    // an empty account ("insufficient credits", CommandCode 2026-11-24: worker-burst then worker-alt both
+    // an empty account ("insufficient credits", CommandCode 2026-11-24: two models on one provider both
     // failed on it, because only the first model was marked down).
     const scope = /weekly|monthly|your plan|plan limit|usage limit|insufficient credits|purchase more credits/i.test(text) ? "provider" : "model";
     return { reason: "quota", ms, scope };

@@ -664,7 +664,7 @@ const wakeId = (stream, key) => `${stream}\u0000${key}`;
 //     suppression) and `markPaged`'s dedupe both read `pagedIds` alone; `paged` is read by `readDaemonState`
 //     (to hold it), `adoptLoopStayIds` and `adoptLegacyPaged` (upgrade only).
 //   `errors` and `retries` are keyed by that same `wakeId(stream, key)`: both are per-stream counters (step
-//     failures against the 3-strike page, and the one critic-alt retry), so a bare key let stream A's failures
+//     failures against the 3-strike page, and the one critic retry), so a bare key let stream A's failures
 //     push stream B's counter over the limit and page B for an event B never failed. Entries a pre-upgrade file
 //     wrote bare are inert after the upgrade (they match no stream) — the counter restarts at zero, never
 //     shared, which is the safe direction: one extra retry, never a page for another stream's failures.
@@ -1012,7 +1012,7 @@ function slotJudged(runDir, r, events) {
 // The worker run a critic reviewed: the ACTION critic ack whose findings path matches carries the
 // worker run-done key. Null when the critic was launched outside the step flow (a direct oc-worker
 // run records no ACTION) — then nobody wrote down what it reviewed.
-// A critic-alt retry writes `findings-r<N>-alt.md` for the `ACTION critic … findings-r<N>.md` it stands in for.
+// A critic retry writes `findings-r<N>-alt.md` for the `ACTION critic … findings-r<N>.md` it stands in for.
 const baseFindings = (f) => (typeof f === "string" ? f.replace(/-alt\.md$/, ".md") : f);
 
 function criticReviewedRun(lines, events, slug, findings) {

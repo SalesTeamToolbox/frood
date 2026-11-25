@@ -1,5 +1,5 @@
 ---
-description: Free-tier code worker (same contract as worker) on Zen free DeepSeek — last resort when every paid pool (Go, CommandCode) is out. Expect slower, weaker output; the critic matters more.
+description: Free-tier code worker (same contract as worker) on Zen free DeepSeek — last resort when every paid pool (Go) is out. Expect slower, weaker output; the critic matters more.
 mode: subagent  # oc-only
 permission:  # oc-only
   question: deny  # oc-only
