@@ -229,11 +229,17 @@ OC commands now install to `~/.config/opencode/commands/`; the legacy singular `
   within this many hours; mail to sessions that have gone quiet is reported as idle, not counted.
 - `ORCH_ORPHAN_MIN` (default 60): minutes of holder silence after which an escalation on a held stream counts as
   orphaned and the daemon pages the owner once (see `docs/designs/desk-daemon.md`, "Orphaned streams").
-- `ORCH_LAUNCH_CMD`: command the orphan notice's "Resolve in new session" action runs (`sh -c`, `{stream}` and
-  `{harness}` substituted); overrides `launch.json`. Without it the action follows
-  `~/.config/orchestrator/launch.json` (`{"mode": "desktop"|"terminal"|"custom", "cmd"?}`), written at setup by
+- `ORCH_LAUNCH_CMD`: command the orphan notice action runs (`sh -c`, `{stream}` and `{harness}` substituted, plus
+  `{session}` — the holder session id, empty when there is none); overrides `launch.json`. Without it the action
+  follows `~/.config/orchestrator/launch.json` (`{"mode": "desktop"|"terminal"|"custom", "cmd"?}`), written at setup by
   `ops/systemd/install.mjs` / `setup.sh` and changed with `node bin/launch-config.mjs --set desktop|terminal|custom
   [--cmd "<tpl>"]` (no args prints the effective mode). `desktop` opens the Claude desktop app via
   `claude://code/new?q=/frood-next <stream>&folder=<repo>`; `terminal` runs `xdg-terminal-exec -- claude "/frood-next
   <stream>"`. OpenCode-held streams always use `opencode --prompt` in a terminal. With no file the mode is detected
   (desktop if `xdg-mime query default x-scheme-handler/claude` has a handler).
+- Orphan notices: when a holder session still exists (idle, waiting on the owner) the notice reads
+  "<stream>: N escalation(s) waiting on you — session \"<title>\" idle <age>" and the button reads `Open session`;
+  terminal mode resumes the holder (`claude --resume <id>` / `opencode --session <id>`) instead of opening a new
+  session, and desktop mode opens the app without a new session. When the holder session is gone the text and plan
+  are unchanged ("no live session", "Resolve in new session" → `/frood-next <stream>`). Escalations whose board
+  ticket is `closed` or `shipped` are no longer reported as open (a missing ticket stays open).

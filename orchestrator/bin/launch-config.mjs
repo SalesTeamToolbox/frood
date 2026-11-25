@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// How the orphan notice's "Resolve in new session" action opens a session.
+// How the orphan notice's action ("Open session" when a holder session still exists, otherwise
+// "Resolve in new session") opens a session.
 //   node launch-config.mjs                       print the effective mode and where it came from
 //   node launch-config.mjs --set desktop|terminal|custom [--cmd "<template>"]
 //   node launch-config.mjs --ask                 choose interactively (default = detected); on a non-TTY writes the
@@ -89,7 +90,7 @@ async function ask(detected) {
   MODES.forEach((m, i) => console.log(`  ${i + 1}) ${m}${m === detected ? "  (default)" : ""}`));
   console.log("     desktop = Claude desktop app, terminal = xdg-terminal-exec, custom = your own command");
   const mode = parseChoice(await q(`Choice [${MODES.indexOf(detected) + 1}]: `), detected);
-  const cmd = mode === "custom" ? await q("Command template ({stream}, {harness}; run via sh -c): ") : "";
+  const cmd = mode === "custom" ? await q("Command template ({stream}, {harness}, {session}; run via sh -c): ") : "";
   rl.close();
   return choiceConfig(mode, cmd, detected);
 }

@@ -7,7 +7,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { appendAck } from "../bin/handoff.mjs";
-import { openEscalations, orphanThresholdMs, streamOrphaned } from "../bin/orphan.mjs";
+import { openEscalations, orphanThresholdMs, streamOrphaned, holderSession, ticketResolved } from "../bin/orphan.mjs";
 import { sweepOrphans, readDaemonState } from "../bin/desk.mjs";
 
 const NOTICE = path.resolve(import.meta.dirname, "..", "bin", "orphan-notice.mjs");
@@ -347,4 +347,187 @@ test("notice helper: ORCH_NO_NOTIFY=1 does nothing", () => {
   const st = stubs("resolve");
   runNotice(h, st, { ORCH_NO_NOTIFY: "1" });
   assert.equal(fs.existsSync(st.log), false);
+});
+
+// ---- holderSession ---------------------------------------------------------
+
+function sessionsDir(h) { return path.join(h, ".claude", "sessions"); }
+function writeSessionFile(h, pid, { sessionId, cwd = "/repo", name = "The Work", status = "idle", statusUpdatedAt } = {}) {
+  fs.mkdirSync(sessionsDir(h), { recursive: true });
+  fs.writeFileSync(path.join(sessionsDir(h), `${pid}.json`), JSON.stringify({
+    sessionId, cwd, name, status,
+    statusUpdatedAt: statusUpdatedAt ?? Date.now() - 10 * MIN,
+  }));
+}
+// Mirror orphan.mjs's cwdSlug so the transcript lands where holderSession looks for it.
+function testCwdSlug(cwd, home) {
+  if (!cwd) return "home";
+  let rel = cwd;
+  if (home && rel.startsWith(home)) rel = rel.slice(home.length);
+  rel = rel.replace(/^\/+/, "");
+  return rel.replace(/\//g, "-") || "home";
+}
+function writeTranscript(h, sessionId, cwd, { mtimeAgoMin = 5, title } = {}) {
+  const slug = testCwdSlug(cwd, h);
+  const tdir = path.join(h, ".claude", "projects", slug);
+  fs.mkdirSync(tdir, { recursive: true });
+  const tfile = path.join(tdir, `${sessionId}.jsonl`);
+  const now = Date.now();
+  fs.writeFileSync(tfile, title ? JSON.stringify({ title }) : "{}", { flag: "wx" });
+  try { fs.utimesSync(tfile, now - mtimeAgoMin * MIN, now - mtimeAgoMin * MIN); } catch {}
+}
+
+test("holderSession: cc live session file -> {id, title, idleMs, alive:true}", () => {
+  const h = mkdtemp();
+  mkStream(h, "s", { held_by: "cc", held_session: "ses_live", held_at: iso(300) });
+  writeSessionFile(h, process.pid, { sessionId: "ses_live" });
+  withHome(h, {}, () => {
+    const got = holderSession("s");
+    assert.ok(got, "holder found");
+    assert.equal(got.id, "ses_live");
+    assert.equal(got.alive, true);
+    assert.ok(got.idleMs >= 0 && got.idleMs < 120 * MIN, "idleMs plausible: " + got.idleMs);
+  });
+});
+
+test("holderSession: cc transcript fallback (no session file) -> alive:false", () => {
+  const h = mkdtemp();
+  mkStream(h, "s", { held_by: "cc", held_session: "ses_tx", repo: h, held_at: iso(300) });
+  writeTranscript(h, "ses_tx", h, { mtimeAgoMin: 7, title: "Tx Work" });
+  withHome(h, {}, () => {
+    const got = holderSession("s");
+    assert.ok(got, "holder found via transcript");
+    assert.equal(got.id, "ses_tx");
+    assert.equal(got.title, "Tx Work");
+    assert.equal(got.alive, false);
+    assert.ok(Number.isFinite(got.idleMs), "idleMs finite: " + got.idleMs);
+  });
+});
+
+test("holderSession: oc opencode.db row -> {id, idleMs, alive:true}", () => {
+  const h = mkdtemp();
+  const ocdb = path.join(h, "opencode.db");
+  const db = new DatabaseSync(ocdb);
+  db.exec("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, time_updated INTEGER);");
+  db.prepare("INSERT INTO session_v2 VALUES ('oc_ses', ?)").run(Date.now() - 4 * MIN);
+  db.close();
+  mkStream(h, "s", { held_by: "oc", held_session: "oc_ses", held_at: iso(300) });
+  withHome(h, { PEER_MAIL_OC_DB: ocdb }, () => {
+    const got = holderSession("s");
+    assert.ok(got, "oc holder found");
+    assert.equal(got.id, "oc_ses");
+    assert.equal(got.alive, true);
+    assert.ok(got.idleMs >= 0 && got.idleMs < 60 * MIN, "idleMs plausible: " + got.idleMs);
+  });
+});
+
+test("holderSession: not held / no held_session -> null", () => {
+  const h = mkdtemp();
+  mkStream(h, "s", { held_by: "cc", held_session: null });
+  withHome(h, {}, () => assert.equal(holderSession("s"), null));
+});
+
+test("holderSession: held_session but nothing found -> null", () => {
+  const h = mkdtemp();
+  mkStream(h, "s", { held_by: "cc", held_session: "ses_gone", held_at: iso(300) });
+  withHome(h, {}, () => assert.equal(holderSession("s"), null));
+});
+
+// ---- streamOrphaned waiting/holder -----------------------------------------
+
+test("streamOrphaned: held idle cc with live holder session -> waiting:true, holder set", () => {
+  const h = mkdtemp();
+  mkPeers(h, { ses_live: 120 }); // present in mail store but silent -> enters the holder branch
+  mkStream(h, "s", { ageMin: 300, held_by: "cc", held_session: "ses_live", held_at: iso(300) });
+  writeSessionFile(h, process.pid, { sessionId: "ses_live", statusUpdatedAt: Date.now() - 90 * MIN });
+  withHome(h, {}, () => {
+    escalate("s");
+    const r = streamOrphaned("s");
+    assert.equal(r.orphaned, true);
+    assert.equal(r.waiting, true);
+    assert.equal(r.holder.id, "ses_live");
+    assert.match(r.why, /waiting on you/);
+    assert.match(r.why, /idle \d+h/);
+  });
+});
+
+test("streamOrphaned: held idle cc whose holder session is gone -> today's activity text", () => {
+  const h = mkdtemp();
+  mkPeers(h, {});
+  mkStream(h, "s", { ageMin: 300, held_by: "cc", held_session: "ses_gone", held_at: iso(300) });
+  withHome(h, {}, () => {
+    escalate("s");
+    const r = streamOrphaned("s");
+    assert.equal(r.orphaned, true);
+    assert.equal(r.waiting, undefined);
+    assert.equal(r.holder, undefined);
+    assert.match(r.why, /no activity/);
+  });
+});
+
+// ---- openEscalations ticket filtering --------------------------------------
+
+function boardDir(h) { return path.join(h, ".opencode", "board", "tickets"); }
+function writeTicket(h, id, stage) {
+  const d = boardDir(h);
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, `${id}.json`), JSON.stringify({ schema: 1, id, title: `t ${id}`, stage }));
+}
+
+test("openEscalations: ticket closed -> row dropped", () => {
+  const h = mkdtemp();
+  mkStream(h, "s", { repo: h });
+  writeTicket(h, "t1", "closed");
+  const key = "verdict:t1/worker-r1:done";
+  const dir = path.join(h, ".config", "orchestrator", "desk-daemon");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "escalations.jsonl"), JSON.stringify({ stream: "s", key, reason: "r" }) + "\n");
+  withHome(h, {}, () => assert.equal(openEscalations("s").length, 0, "closed ticket drops the row"));
+});
+
+test("openEscalations: ticket shipped -> row dropped", () => {
+  const h = mkdtemp();
+  mkStream(h, "s", { repo: h });
+  writeTicket(h, "t2", "shipped");
+  const key = "run:t2/critic-r3:fail";
+  const dir = path.join(h, ".config", "orchestrator", "desk-daemon");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "escalations.jsonl"), JSON.stringify({ stream: "s", key, reason: "r" }) + "\n");
+  withHome(h, {}, () => assert.equal(openEscalations("s").length, 0, "shipped ticket drops the row"));
+});
+
+test("openEscalations: missing ticket -> row stays open", () => {
+  const h = mkdtemp();
+  mkStream(h, "s", { repo: h });
+  const key = "verdict:t3/worker-r1:done";
+  const dir = path.join(h, ".config", "orchestrator", "desk-daemon");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "escalations.jsonl"), JSON.stringify({ stream: "s", key, reason: "r" }) + "\n");
+  withHome(h, {}, () => {
+    const rows = openEscalations("s");
+    assert.equal(rows.length, 1, "missing ticket keeps the row open");
+    assert.equal(rows[0].key, key);
+  });
+});
+
+test("openEscalations: escalation ack key without verdict/run prefix stays open", () => {
+  const h = mkdtemp();
+  mkStream(h, "s", { repo: h });
+  const dir = path.join(h, ".config", "orchestrator", "desk-daemon");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "escalations.jsonl"), JSON.stringify({ stream: "s", key: "plain-key", reason: "r" }) + "\n");
+  withHome(h, {}, () => assert.equal(openEscalations("s").length, 1));
+});
+
+test("ticketResolved: closed/shipped true, open false, missing ticket false", () => {
+  const h = mkdtemp();
+  writeTicket(h, "tc", "closed");
+  writeTicket(h, "ts", "shipped");
+  writeTicket(h, "to", "working");
+  withHome(h, {}, () => {
+    assert.equal(ticketResolved("verdict:tc/worker-r1:done", h), true);
+    assert.equal(ticketResolved("run:ts/critic-r3:fail", h), true);
+    assert.equal(ticketResolved("verdict:to/worker-r1:done", h), false);
+    assert.equal(ticketResolved("verdict:nope/worker-r1:done", h), false);
+  });
 });

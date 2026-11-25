@@ -68,6 +68,21 @@ test("custom mode in launch.json runs its cmd via sh with substitutions", () => 
   });
 });
 
+test("ORCH_LAUNCH_CMD substitutes {stream}, {harness} and {session} (session empty without a holder)", () => {
+  const h = mkdtemp();
+  withEnv({ ORCH_HOME: h, ORCH_LAUNCH_CMD: undefined }, () => {
+    process.env.ORCH_LAUNCH_CMD = "go {stream} {harness} {session}";
+    try {
+      const held = launchPlan("my-stream", { repo: mkdtemp(), held_by: "cc", held_session: "ses_x" }, { id: "ses_x" });
+      assert.equal(held.shell, "go my-stream cc ses_x");
+      const free = launchPlan("my-stream", { repo: mkdtemp(), held_by: "cc", held_session: null }, undefined);
+      assert.equal(free.shell, "go my-stream cc ");
+    } finally {
+      delete process.env.ORCH_LAUNCH_CMD;
+    }
+  });
+});
+
 test("desktop mode: exact xdg-open argv; oc-held stays on the terminal; missing repo omits folder", () => {
   const h = mkdtemp();
   const repo = mkdtemp();
