@@ -54,7 +54,7 @@ tagged `source: "session-data"` are computed from the artifacts actually read;
 | Lens | Focus | Data Source |
 |---|---|---|
 | `error-propagation` | Verdict-failed, worker-error, critic-failed, no-ticket | Desk daemon logs |
-| `retry-recovery` | Worker-timeout, run-dead, receipt analysis | Desk daemon logs, worker receipts |
+| `retry-recovery` | Worker-timeout, run-dead, receipt analysis; per run: start delay (slot/server wait), agent activity after the kill (with git writes), tool calls over 5 min | Desk daemon logs, worker receipts, `~/.local/share/opencode/opencode.db` (read-only, joined by each run's session id) |
 | `dead-letter-handling` | Worker-blocked patterns | Desk daemon logs |
 | `circuit-breakers` | Review-unlinked, agent-senior, critic rounds | Desk daemon logs, critic findings |
 
@@ -65,7 +65,7 @@ tagged `source: "session-data"` are computed from the artifacts actually read;
 | `process-coordination` | Subagent orchestration depth | Worker receipts |
 | `cross-harness-sync` | Claude Code ↔ OpenCode state sync | Peer-mail events |
 | `handoff-quality` | Stream handoff fidelity | Stream state (`waiting`, `next`) |
-| `process-metrics` | End-to-end cycle time, critic efficiency | Worker receipts, orchestrator receipts |
+| `process-metrics` | End-to-end cycle time (with start delays), critic efficiency | Worker receipts, orchestrator receipts, opencode.db |
 
 ## Phase 4 — Work Logic & Code Quality
 
