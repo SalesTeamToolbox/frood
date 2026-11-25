@@ -74,6 +74,11 @@ CREATE TABLE IF NOT EXISTS messages (
     reply_to      TEXT,
     expires_at    INTEGER
 );
+"""
+
+# Indexes run after _migrate(): a mailbox created by older peer-mail tooling has
+# no reply_to column, and indexing it before the column exists fails.
+INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_messages_to_status ON messages(to_session, status);
 CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_session);
 CREATE INDEX IF NOT EXISTS idx_messages_reply_to ON messages(reply_to);
@@ -101,7 +106,15 @@ class Mailbox:
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
+        self.conn.executescript(INDEXES)
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Bring a mailbox created by older tooling up to this schema (idempotent)."""
+        cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(messages)")}
+        if "reply_to" not in cols:
+            self.conn.execute("ALTER TABLE messages ADD COLUMN reply_to TEXT")
 
     def close(self) -> None:
         try:

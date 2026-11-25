@@ -190,3 +190,75 @@ class TestWakeupTwoSessions:
             assert inbox_a == []
         finally:
             client.close()
+
+
+def _load_server_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("peer_mail_server_under_test", SERVER)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# The messages table as the live peer-mail tooling creates it: no reply_to column.
+OLD_SCHEMA = """
+CREATE TABLE messages (
+    id            TEXT PRIMARY KEY,
+    ts            INTEGER NOT NULL,
+    from_session  TEXT NOT NULL,
+    from_title    TEXT,
+    from_branch   TEXT,
+    to_session    TEXT NOT NULL,
+    subject       TEXT NOT NULL,
+    body          TEXT,
+    status        TEXT NOT NULL DEFAULT 'unread'
+                  CHECK (status IN ('unread', 'read', 'acked')),
+    expires_at    INTEGER
+);
+"""
+
+
+class TestOldSchemaMigration:
+    def test_opens_mailbox_without_reply_to(self, tmp_path):
+        import sqlite3
+
+        db_path = tmp_path / "old-mailbox.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(OLD_SCHEMA)
+        conn.execute(
+            "INSERT INTO messages (id, ts, from_session, to_session, subject, body, status)"
+            " VALUES ('m1', 1, 'sess-a', 'sess-b', 'hello', 'old body', 'unread')"
+        )
+        conn.commit()
+        conn.close()
+
+        server = _load_server_module()
+        mb = server.Mailbox(db_path)
+        try:
+            cols = {row["name"] for row in mb.conn.execute("PRAGMA table_info(messages)")}
+            assert "reply_to" in cols
+            indexes = {row["name"] for row in mb.conn.execute("PRAGMA index_list(messages)")}
+            assert "idx_messages_reply_to" in indexes
+
+            # The pre-existing message survives and is readable by its recipient.
+            msg = mb.read("sess-b", "m1")
+            assert msg["subject"] == "hello"
+            assert msg["body"] == "old body"
+
+            # An ack with a reply writes reply_to into the migrated table.
+            mb.ack("m1", reply_body="got it")
+            replies = mb.conn.execute("SELECT * FROM messages WHERE reply_to = 'm1'").fetchall()
+            assert len(replies) == 1
+            assert replies[0]["to_session"] == "sess-a"
+        finally:
+            mb.close()
+
+        # Re-opening an already-migrated mailbox is a no-op.
+        mb2 = server.Mailbox(db_path)
+        try:
+            count = mb2.conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            assert count == 2
+        finally:
+            mb2.close()
