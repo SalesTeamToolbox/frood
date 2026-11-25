@@ -1072,3 +1072,66 @@ test("write with a bad --session exits 2 (usage)", () => {
   assert.equal(run(e, "write", "--stream", "p6", "--plan", plan, "--next", "M1", "--session", "bad id!").status, 2);
   assert.equal(run(e, "write", "--stream", "p6", "--plan", plan, "--next", "M1", "--release").status, 0);
 });
+
+test("child appends a child event to the stream's events and leaves show working", () => {
+  const { h, plan, e } = env();
+  assert.equal(run(e, "write", "--stream", "s1", "--plan", plan, "--next", "M1").status, 0);
+  const before = eventsRaw(h, "s1");
+  const count = (s) => s.split("\n").filter(Boolean).length;
+  assert.equal(count(before), 0);
+  const c = run(e, "child", "--stream", "s1", "--session", "ses_abc123", "--harness", "claude-code", "--role", "nested");
+  assert.equal(c.status, 0, c.stderr);
+  const obj = JSON.parse(c.stdout);
+  assert.equal(obj.event, "child");
+  assert.equal(obj.session, "ses_abc123");
+  assert.equal(obj.harness, "claude-code");
+  assert.equal(obj.role, "nested");
+  assert.equal(obj.key, "child:s1:ses_abc123");
+  // the event is actually appended to the events jsonl, with a readable ts
+  assert.equal(count(eventsRaw(h, "s1")), count(before) + 1);
+  const last = JSON.parse(eventsRaw(h, "s1").split("\n").filter(Boolean).pop());
+  assert.equal(last.event, "child");
+  assert.equal(last.session, "ses_abc123");
+  assert.equal(last.harness, "claude-code");
+  assert.equal(last.role, "nested");
+  assert.ok(Date.parse(last.ts) > 0, "ts is a readable timestamp");
+  // show still works (the stream pointer is untouched)
+  const s = run(e, "show", "--stream", "s1");
+  assert.equal(s.status, 0);
+  assert.equal(JSON.parse(s.stdout).name, "s1");
+  // an opencode-harness child is accepted too
+  const c2 = run(e, "child", "--stream", "s1", "--session", "ses_worker1", "--harness", "opencode", "--role", "worker");
+  assert.equal(c2.status, 0, c2.stderr);
+  assert.equal(count(eventsRaw(h, "s1")), count(before) + 2);
+});
+
+test("child dedupes by key: recording the same child twice is a no-op", () => {
+  const { h, plan, e } = env();
+  assert.equal(run(e, "write", "--stream", "s1", "--plan", plan, "--next", "M1").status, 0);
+  const count = (s) => s.split("\n").filter(Boolean).length;
+  const c1 = run(e, "child", "--stream", "s1", "--session", "ses_dup", "--harness", "claude-code", "--role", "critic");
+  assert.equal(c1.status, 0, c1.stderr);
+  const c2 = run(e, "child", "--stream", "s1", "--session", "ses_dup", "--harness", "claude-code", "--role", "critic");
+  assert.equal(c2.status, 0, c2.stderr);
+  assert.equal(JSON.parse(c2.stdout).duplicate, true, "second recording reports a duplicate");
+  assert.equal(count(eventsRaw(h, "s1")), 1, "only one event line is written");
+});
+
+test("child rejects a bad harness, a bad role, a bad session and missing fields", () => {
+  const { h, plan, e } = env();
+  assert.equal(run(e, "write", "--stream", "s1", "--plan", plan, "--next", "M1").status, 0);
+  const base = ["child", "--stream", "s1", "--session", "ses_x", "--harness", "claude-code", "--role", "worker"];
+  const cases = [
+    [["child", "--stream", "s1", "--session", "ses_x", "--harness", "zzz", "--role", "worker"], "--harness must be opencode or claude-code"],
+    [["child", "--stream", "s1", "--session", "ses_x", "--harness", "claude-code", "--role", "boss"], "--role must be one of"],
+    [["child", "--stream", "s1", "--session", "bad id!", "--harness", "claude-code", "--role", "worker"], "bad --session"],
+    [["child", "--stream", "s1", "--session", "ses_x", "--harness", "claude-code"], "--role must be one of"],
+    [["child", "--stream", "s1", "--session", "ses_x", "--role", "worker"], "--harness must be opencode or claude-code"],
+  ];
+  for (const [args, msg] of cases) {
+    const r = run(e, ...args);
+    assert.equal(r.status, 2, args.join(" "));
+    assert.match(r.stderr.trim(), new RegExp(msg), args.join(" "));
+  }
+  assert.equal(run(e, "child", "--session", "ses_x", "--harness", "claude-code", "--role", "worker").status, 2);
+});

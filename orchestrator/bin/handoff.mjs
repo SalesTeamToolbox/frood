@@ -59,6 +59,8 @@ const HARNESSES = ["cc", "oc"];
 const SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const LEASE_KEYS = ["held_by", "held_session", "held_at", "taken_from", "handback_to"];
 const CLAIM_KEYS = ["session", "at", "taken_from"];
+const CHILD_HARNESSES = ["opencode", "claude-code"];
+const CHILD_ROLES = ["worker", "critic", "scout", "senior", "nested", "orchestrator"];
 
 // ---------------------------------------------------------------- paths
 
@@ -706,6 +708,7 @@ function usage() {
       "       handoff.mjs done --stream <n>\n" +
       "       handoff.mjs claim --stream <n> --by <cc|oc> [--session <id>] [--takeover]\n" +
       "       handoff.mjs release --stream <n> --by <cc|oc> [--to <cc|oc>]\n" +
+      "       handoff.mjs child --stream <n> --session <id> --harness <opencode|claude-code> --role <worker|critic|scout|senior|nested|orchestrator>\n" +
       "       (write and note also take --by <cc|oc>; exit 3 = held by the other harness; exit 4 = claimed by a live session with --session)",
   );
 }
@@ -931,6 +934,35 @@ function cmdDone(a, name) {
   return 0;
 }
 
+// Append a `child` event to a stream's events.jsonl, recording a child session
+// (an OpenCode worker/critic, a Claude Code subagent, or a nested Claude Code
+// session) so /frood-learn <stream> can collect and review it. Dedupes by key
+// so re-recording the same child is a no-op. Never touches the stream pointer.
+function cmdChild(a) {
+  const name = requireStream(a);
+  const session = a.get("session");
+  if (typeof session !== "string" || !SESSION_RE.test(session)) throw new Error("bad --session");
+  const harness = a.get("harness");
+  if (!CHILD_HARNESSES.includes(harness)) throw new Error("--harness must be opencode or claude-code");
+  const role = a.get("role");
+  if (!CHILD_ROLES.includes(role)) throw new Error("--role must be one of " + CHILD_ROLES.join(","));
+  const key = `child:${name}:${session}`;
+  const added = appendEvent(name, {
+    key,
+    event: "child",
+    session,
+    harness,
+    role,
+    ts: new Date().toISOString(),
+  });
+  if (!added) {
+    console.log(JSON.stringify({ key, event: "child", session, harness, role, duplicate: true }));
+    return 0;
+  }
+  console.log(JSON.stringify({ key, event: "child", session, harness, role }));
+  return 0;
+}
+
 function main(argv) {
   const [cmd, ...rest] = argv;
   const a = parseArgs(rest);
@@ -955,6 +987,8 @@ function main(argv) {
       return cmdClaim(a);
     case "release":
       return cmdRelease(a);
+    case "child":
+      return cmdChild(a);
     default:
       usage();
       return 2;

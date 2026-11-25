@@ -38,6 +38,7 @@ tagged `source: "session-data"` are computed from the artifacts actually read;
 - `--propose` — send the findings as a community PR proposal (needs the community PR API; exits non-zero when it is not deployed)
 - `--apply` — **interactive mode**: categorize findings and apply fixes or create PRs
 - `--session <id>` — explicit OpenCode session ID (for phase 5)
+- `--no-children` — skip collecting and reviewing the stream's child sessions (output matches the default run without a children section)
 - `--help` / `-h` — show usage
 
 ## Phase 1 — Communication Patterns
@@ -88,6 +89,29 @@ tagged `source: "session-data"` are computed from the artifacts actually read;
 | `local-code-changes` | Local/project file modifications | File paths in snapshots |
 | `session-length` | Session duration, iteration patterns | Time spans, user prompts |
 
+## Child sessions
+
+A default run `/frood-learn <stream>` (phases 1-4, without `--no-children`) also collects the
+stream's child sessions and reviews each through the phase-5 lenses:
+
+- OpenCode workers/critics: the `ses_...` ids carried on stream events (written by `oc-worker`).
+- Claude Code subagents: `agent-*.jsonl` under the orchestrator session's `subagents/` folder (the
+  orchestrator session id is the stream's `held_session` / `session`).
+- Nested Claude Code sessions: ids recorded on the stream via `handoff.mjs child`.
+
+Each child finding is tagged with `role` (worker / critic / scout / senior / nested / orchestrator),
+`harness` (opencode / claude-code), `model` when known, and `session` id. A child whose transcript is
+missing or aged out is listed with `status: "missing"` and a one-line note; the run never crashes on it.
+The report gains a top-level `children` array (omitted with `--no-children`).
+
+## Retention
+
+Claude Code deletes transcripts after `cleanupPeriodDays` (default ~30; unset on this machine). To keep
+child transcripts available beyond that, prefer having `frood-learn` copy each child transcript it reads
+to `~/.config/orchestrator/learnings/<stream>/children/` (outside every repo, so transcripts that can
+hold secrets never reach `.opencode/reports` and a commit). Alternatively, raise `cleanupPeriodDays` in
+your Claude Code settings; document the chosen value here.
+
 ## Meta-review exclusion (enforced)
 
 Learning hooks are never in scope for any phase:
@@ -134,7 +158,9 @@ A JSON findings report is written (default:
 `.opencode/reports/frood-learn-<stream>-phase<n>.json`) and a human summary is
 printed to stdout. The report includes the phase, lens, findings (each tagged
 with source: `mcp:frood_process_review` or `builtin`), the MCP
-availability/fallback reason, and the enforced meta-review exclusion list.
+availability/fallback reason, the enforced meta-review exclusion list, and — on
+stream runs — a `children` array with one entry per child session (each tagged
+with `role`, `harness`, `model`, `session` and `status`).
 
 ## Cross-harness compatibility
 

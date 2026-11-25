@@ -579,3 +579,222 @@ def test_wrapper_works_through_symlink(tmp_path):
     r = run(["--help"], tmp_path, script=link)
     assert r.returncode == 0
     assert "Phases:" in r.stdout
+
+
+# ------------------------------------------------------------------ children fixtures
+
+FIXTURES = REPO / "tests" / "fixtures" / "frood_learn"
+
+
+@pytest.fixture
+def fixture_children_home(tmp_path):
+    """A HOME whose stream fx has three children:
+    - 1 OpenCode worker (ses_ id on a stream event, opencode.db transcript)
+    - 1 Claude Code subagent (agent-*.jsonl under the orchestrator session's subagents/)
+    - 1 nested Claude Code session (top-level .jsonl recorded via a child event)
+    """
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    (orch / "desk-daemon").mkdir(parents=True)
+    (orch / "peer-mail").mkdir()
+    (orch / "desk-daemon" / "daemon.log").write_text("t1 verdict-failed ticket-a\n")
+    (orch / "streams" / "fx.json").write_text(
+        json.dumps(
+            {
+                "name": "fx",
+                "status": "active",
+                "waiting": "",
+                "next": "2020-01-01T00:00:00Z",
+                "held_session": "sess_orch_01",
+            }
+        )
+    )
+    # Stream events: one OpenCode run-done carrying a ses_ id, plus a child event for a nested CC session.
+    (orch / "streams" / "fx.events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "key": "run:fx/worker-r1:done",
+                        "kind": "run-done",
+                        "run": "worker-r1",
+                        "out": "/x/worker-r1.md",
+                        "agent": "worker",
+                        "session": "ses_fixture_oc",
+                        "at": "2026-01-01T00:00:00Z",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "key": "child:fx:sess_fixture_nested",
+                        "event": "child",
+                        "session": "sess_fixture_nested",
+                        "harness": "claude-code",
+                        "role": "nested",
+                        "ts": "2026-01-01T00:00:00Z",
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+    # OpenCode database with the ses_fixture_oc session (built here, not shipped as
+    # a committed .db fixture, which public-guard forbids).
+    oc_db_dir = home / ".local" / "share" / "opencode"
+    oc_db_dir.mkdir(parents=True)
+    oc_db = oc_db_dir / "opencode.db"
+    assistant = json.dumps(
+        {
+            "content": [{"text": "I hit an error reading the file"}, {"text": "more text"}],
+            "snapshot": {"files": ["/workspace/bin/frood-learn.mjs", "/workspace/README.md"]},
+            "finish": "tool-calls",
+        }
+    )
+    shell = json.dumps({"text": "npm install"})
+    userp = json.dumps({"text": "fix the error"})
+    sql = (
+        "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER, time_updated INTEGER);\n"
+        "CREATE TABLE session_message (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, type TEXT, data TEXT, seq INTEGER, time_created INTEGER);\n"
+        f"INSERT INTO session_v2 VALUES ('ses_fixture_oc','Fixture OC worker',1700000000000,1700000300000);\n"
+        f"INSERT INTO session_message (session_id,type,data,seq,time_created) VALUES ('ses_fixture_oc','assistant',json('{assistant}'),1,1700000050000);\n"
+        f"INSERT INTO session_message (session_id,type,data,seq,time_created) VALUES ('ses_fixture_oc','shell',json('{shell}'),2,1700000100000);\n"
+        f"INSERT INTO session_message (session_id,type,data,seq,time_created) VALUES ('ses_fixture_oc','user',json('{userp}'),3,1700000200000);\n"
+    )
+    subprocess.run(["sqlite3", str(oc_db)], input=sql, text=True, check=True)
+    # Claude Code subagent under the orchestrator session's subagents/ folder.
+    cc_sub = home / ".claude" / "projects" / "frood" / "sess_orch_01" / "subagents"
+    cc_sub.mkdir(parents=True)
+    shutil.copyfile(FIXTURES / "agent-scout.jsonl", cc_sub / "agent-scout.jsonl")
+    # Nested Claude Code session as a top-level .jsonl file.
+    cc_proj = home / ".claude" / "projects" / "frood"
+    cc_proj.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(FIXTURES / "sess_fixture_nested.jsonl", cc_proj / "sess_fixture_nested.jsonl")
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    return home, proj
+
+
+# ------------------------------------------------------------------ children tests
+
+
+def test_default_run_lists_all_three_children(fixture_children_home):
+    """Default run lists the OC child, CC subagent and CC nested child, each with
+    phase-5 findings tagged role/harness/model/session."""
+    home, proj = fixture_children_home
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(out.read_text())
+    children = rep.get("children") or []
+    assert len(children) == 3, children
+    by_session = {c["session"]: c for c in children}
+
+    # OpenCode worker child.
+    oc = by_session["ses_fixture_oc"]
+    assert oc["harness"] == "opencode"
+    assert oc["role"] == "worker"
+    assert oc["status"] == "analyzed"
+    assert oc["note"] is None
+    assert any(f["lens"] == "session-summary" for f in oc["findings"]), oc["findings"]
+    for f in oc["findings"]:
+        assert f["role"] == "worker"
+        assert f["harness"] == "opencode"
+        assert f["session"] == "ses_fixture_oc"
+
+    # Claude Code subagent child.
+    cc = by_session["sess_subagent_01"]
+    assert cc["harness"] == "claude-code"
+    assert cc["role"] == "scout"
+    assert cc["status"] == "analyzed"
+    assert cc["model"] == "claude-3-5-sonnet-20241022", cc
+    assert cc["transcriptCopied"] is True
+    assert any(f["lens"] == "session-summary" for f in cc["findings"]), cc["findings"]
+    for f in cc["findings"]:
+        assert f["role"] == "scout"
+        assert f["harness"] == "claude-code"
+        assert f["session"] == "sess_subagent_01"
+
+    # Nested Claude Code session child.
+    nn = by_session["sess_fixture_nested"]
+    assert nn["harness"] == "claude-code"
+    assert nn["role"] == "nested"
+    assert nn["status"] == "analyzed"
+    assert nn["model"] == "claude-opus-4-5", nn
+    assert nn["transcriptCopied"] is True
+    for f in nn["findings"]:
+        assert f["role"] == "nested"
+        assert f["harness"] == "claude-code"
+        assert f["session"] == "sess_fixture_nested"
+
+    # Stream-level findings are unchanged (still present).
+    assert rep["findings"], "stream-level findings should still be present"
+
+
+def test_child_missing_transcript_status_missing_exits_zero(fixture_children_home):
+    """A child id with no transcript is listed with status missing; exit 0, no crash."""
+    home, proj = fixture_children_home
+    # Add a child event pointing at a session that has no transcript anywhere.
+    events = home / ".config" / "orchestrator" / "streams" / "fx.events.jsonl"
+    with events.open("a") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "key": "child:fx:ses_ghost",
+                    "event": "child",
+                    "session": "ses_ghost",
+                    "harness": "opencode",
+                    "role": "worker",
+                    "ts": "2026-01-01T00:00:00Z",
+                }
+            )
+            + "\n"
+        )
+    out = home / "out.json"
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(out.read_text())
+    children = rep.get("children") or []
+    by_session = {c["session"]: c for c in children}
+    ghost = by_session["ses_ghost"]
+    assert ghost["status"] == "missing", ghost
+    assert ghost["note"], "missing child needs a one-line note"
+    assert ghost["findings"] == []
+
+
+def test_no_children_output_matches_today(fixture_children_home):
+    """--no-children omits the children section (output matches today's default)."""
+    home, proj = fixture_children_home
+    out_with = home / "with.json"
+    out_without = home / "without.json"
+    r1 = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out_with)], home, cwd=proj)
+    r2 = run(
+        ["fx", "--phase", "1", "--no-mcp", "--no-children", "--report", str(out_without)],
+        home,
+        cwd=proj,
+    )
+    assert r1.returncode == 0, r1.stderr
+    assert r2.returncode == 0, r2.stderr
+    rep_with = json.loads(out_with.read_text())
+    rep_without = json.loads(out_without.read_text())
+    assert len(rep_with.get("children") or []) == 3
+    assert "children" not in rep_without, "children section must be omitted with --no-children"
+    assert rep_with["findings"] == rep_without["findings"], "stream-level findings identical"
+
+
+def test_session_phase5_unchanged(fixture_children_home):
+    """--session <ses_...> (phase 5) still analyzes a single OpenCode session and
+    does not emit a children section."""
+    home, proj = fixture_children_home
+    out = home / "out.json"
+    r = run(
+        ["--phase", "5", "--session", "ses_fixture_oc", "--no-mcp", "--report", str(out)],
+        home,
+        cwd=proj,
+    )
+    assert r.returncode == 0, r.stderr
+    rep = json.loads(out.read_text())
+    assert "children" not in rep
+    assert rep["findings"], "phase 5 should still produce findings"
+    for f in rep["findings"]:
+        assert "role" not in f, "phase-5 findings are not child-tagged"

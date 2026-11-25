@@ -71,6 +71,26 @@ const META_REVIEW_EXCLUSION = [
 ];
 
 // ---------------------------------------------------------------------------
+// Children (stream -> child session) collection
+// ---------------------------------------------------------------------------
+
+// OpenCode session ids carried on stream events look like `ses_...`.
+const SESSION_RE = /^ses_[A-Za-z0-9_-]+$/;
+// Valid child roles, mirrored from handoff.mjs so the two stay in sync.
+const CHILD_ROLES = ["worker", "critic", "scout", "senior", "nested", "orchestrator"];
+// Valid harnesses a child event may record.
+const CHILD_HARNESSES = ["opencode", "claude-code"];
+
+// Where child transcripts are copied for retention (outside every repo, so
+// transcripts that can hold secrets never reach .opencode/reports and a commit).
+const LEARNINGS_ROOT = path.join(
+  process.env.HOME || process.env.USERPROFILE,
+  ".config",
+  "orchestrator",
+  "learnings",
+);
+
+// ---------------------------------------------------------------------------
 // Argument parsing
 // ---------------------------------------------------------------------------
 
@@ -85,6 +105,7 @@ function parseArgs(argv) {
     apply: false,
     autoDetect: false,
     sessionId: null,
+    noChildren: false,
     quick: false, // -a / --auto flag
   };
 
@@ -100,6 +121,7 @@ function parseArgs(argv) {
     else if (k === "--auto" || k === "-A") { args.apply = true; args.noMcp = true; args.quick = true; }
     else if (k === "--auto-detect") args.autoDetect = true;
     else if (k === "--session") args.sessionId = v();
+    else if (k === "--no-children") args.noChildren = true;
     else if (k === "--help" || k === "-h") { printUsage(); process.exit(0); }
     else if (!args.stream && !k.startsWith("--")) args.stream = k;
     else if (k.startsWith("--")) { console.error(`frood-learn: unknown flag ${k}`); process.exit(2); }
@@ -273,10 +295,14 @@ function readOpenCodeSession(sessionId) {
   return session;
 }
 
-function analyzeOpenCodeSession(session) {
+// Shared session analysis used by both the OpenCode reader (opencode.db) and the
+// Claude Code reader (JSONL transcripts). Produces the phase-5 lens findings
+// (session-summary, error-patterns, tool-efficiency, frood-code-changes,
+// local-code-changes, session-length) from a normalized message list.
+function analyzeSessionData(messages, sessionId, title, startedAt, updatedAt, model) {
   const findings = [];
 
-  if (!session || !session.messages) return findings;
+  if (!messages) return findings;
 
   // Analyze session for patterns
   let shellCommands = 0;
@@ -291,7 +317,7 @@ function analyzeOpenCodeSession(session) {
   const userPrompts = [];
   const assistantErrors = [];
 
-  for (const msg of session.messages) {
+  for (const msg of messages) {
     if (msg.type === "assistant") {
       agentTurns++;
       // Check for tool calls in assistant messages
@@ -371,15 +397,19 @@ function analyzeOpenCodeSession(session) {
     }
   }
 
+  const minutes = startedAt !== null && updatedAt !== null
+    ? Math.round((updatedAt - startedAt) / 1000 / 60)
+    : 0;
+
   // Finding: Session overview
   findings.push({
     area: "session-overview",
     focus: "session summary",
     lens: "session-summary",
     status: "analyzed",
-    detail: `Session "${session.title}" (${session.id}): ${agentTurns} agent turns, ${shellCommands} shell commands, ${backgroundShellCommands} background commands, ${toolCalls} tool call rounds, ${filesModified.size} files modified, ${errors} errors detected, ${userPrompts.length} user prompts.`,
+    detail: `Session "${title || ""}" (${sessionId}): ${agentTurns} agent turns, ${shellCommands} shell commands, ${backgroundShellCommands} background commands, ${toolCalls} tool call rounds, ${filesModified.size} files modified, ${errors} errors detected, ${userPrompts.length} user prompts.${model ? ` Model: ${model}.` : ""}`,
     recommendation: "Review session timeline for patterns. High error count may indicate environment issues.",
-    evidence: [session.id],
+    evidence: [sessionId],
     source: "opencode-session",
     category: "local-environment",
   });
@@ -394,7 +424,7 @@ function analyzeOpenCodeSession(session) {
       status: "analyzed",
       detail: `Found ${errors} errors in session (shell: ${shellCommands}, background: ${backgroundShellCommands}, assistant: ${assistantErrors.length}). Patterns: ${[...new Set(allErrors.slice(0, 5))].join("; ")}.`,
       recommendation: "Investigate recurring errors. Add error handling or fix environment issues. Consider automated health checks.",
-      evidence: [session.id],
+      evidence: [sessionId],
       source: "opencode-session",
       category: "local-environment",
     });
@@ -409,7 +439,7 @@ function analyzeOpenCodeSession(session) {
       status: "analyzed",
       detail: `Tools used: ${[...toolsUsed].join(", ")}. ${shellCommands} shell commands, ${backgroundShellCommands} background commands executed.`,
       recommendation: "Consider if repetitive shell/deploy commands could be automated via scripts or CI/CD.",
-      evidence: [session.id],
+      evidence: [sessionId],
       source: "opencode-session",
       category: "local-environment",
     });
@@ -472,9 +502,9 @@ function analyzeOpenCodeSession(session) {
       focus: "long session",
       lens: "session-length",
       status: "analyzed",
-      detail: `Session had ${agentTurns} agent turns over ${Math.round((session.time_updated - session.time_created) / 1000 / 60)} minutes.`,
+      detail: `Session had ${agentTurns} agent turns over ${minutes} minutes.`,
       recommendation: "Long sessions may indicate unclear objectives or iterative trial-and-error. Consider breaking into smaller tasks with clear mandates.",
-      evidence: [session.id],
+      evidence: [sessionId],
       source: "opencode-session",
       category: "local-environment",
     });
@@ -497,7 +527,7 @@ function analyzeOpenCodeSession(session) {
         status: "analyzed",
         detail: `User sent ${continuationPrompts.length} continuation/debugging prompts (e.g., "still failing", "error", "didn't work"). Suggests agent struggled to resolve issue.`,
         recommendation: "When agent struggles, consider: clearer mandate, breaking task into smaller pieces, or human intervention. Add pre-flight checks to catch issues earlier.",
-        evidence: [session.id],
+        evidence: [sessionId],
         source: "opencode-session",
         category: "local-environment",
       });
@@ -507,7 +537,320 @@ function analyzeOpenCodeSession(session) {
   return findings;
 }
 
-// New phase 5 for OpenCode session analysis
+function analyzeOpenCodeSession(session) {
+  const findings = [];
+
+  if (!session || !session.messages) return findings;
+
+  return analyzeSessionData(
+    session.messages,
+    session.id,
+    session.title,
+    session.time_created,
+    session.time_updated,
+    null,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Claude Code JSONL reader (new): reads a Claude Code transcript (a nested
+// session .jsonl file or a subagent agent-*.jsonl) into the normalized shape
+// analyzeSessionData expects. One reader per harness: opencode.db (above) and
+// Claude Code JSONL (here).
+// ---------------------------------------------------------------------------
+
+function readClaudeCodeJSONL(filePath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(filePath, "utf8");
+  } catch {
+    return null;
+  }
+  const messages = [];
+  let id = null;
+  let title = null;
+  let model = null;
+  let startedAt = null;
+  let updatedAt = null;
+  let agentTurns = 0;
+  // In-progress assistant message being assembled from stream_event blocks.
+  let curAssistant = null; // { content: string[], files: string[], finish: string|null }
+
+  const touch = (t) => {
+    if (!t) return;
+    if (!startedAt || t < startedAt) startedAt = t;
+    if (!updatedAt || t > updatedAt) updatedAt = t;
+  };
+
+  const flushAssistant = () => {
+    if (!curAssistant) return;
+    agentTurns++;
+    const content = curAssistant.content.length ? [{ text: curAssistant.content.join("") }] : [];
+    messages.push({
+      type: "assistant",
+      data: {
+        content,
+        finish: curAssistant.finish || "stop",
+        snapshot: curAssistant.files.length ? { files: curAssistant.files } : null,
+      },
+      time_created: curAssistant.at,
+    });
+    curAssistant = null;
+  };
+
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let v;
+    try { v = JSON.parse(line); } catch { continue; }
+    if (!v || typeof v !== "object") continue;
+    touch(v.time_created || v.timestamp);
+
+    if (v.type === "system" && v.subtype === "init") {
+      id = v.session_id || id;
+      model = v.model || model;
+      title = title || "Claude Code session";
+    } else if (v.type === "result") {
+      id = v.session_id || id;
+      model = v.model || model;
+    } else if (v.type === "stream_event") {
+      const ev = v.event || {};
+      if (!ev || typeof ev !== "object") continue;
+      if (ev.type === "message_start" && ev.message) {
+        id = ev.message.id || id;
+        model = ev.message.model || model;
+        title = title || (ev.message.title || "Claude Code session");
+        flushAssistant();
+        curAssistant = { content: [], files: [], finish: null, at: ev.message.time_created || v.time_created };
+      } else if (ev.type === "content_block_start") {
+        const cb = ev.content_block || {};
+        if (cb.type === "tool_use" && curAssistant) {
+          const input = cb.input || {};
+          const target = input.path || input.file || input.target || "";
+          if (target && !curAssistant.files.includes(target)) curAssistant.files.push(target);
+        }
+      } else if (ev.type === "content_block_delta" && curAssistant) {
+        const d = ev.delta || {};
+        if (d.type === "text_delta" && d.text) curAssistant.content.push(d.text);
+        if (d.type === "input_json_delta" && d.partial_json) {
+          try {
+            const patch = JSON.parse(d.partial_json);
+            const target = patch.path || patch.file || patch.target || "";
+            if (target && !curAssistant.files.includes(target)) curAssistant.files.push(target);
+          } catch {}
+        }
+      } else if (ev.type === "message_stop") {
+        if (curAssistant) curAssistant.finish = "stop";
+        flushAssistant();
+      }
+    }
+  }
+  flushAssistant();
+
+  if (!id) id = path.basename(filePath, ".jsonl");
+  if (!startedAt) startedAt = null;
+  if (!updatedAt) updatedAt = null;
+
+  return { id, title, messages, model, startedAt, updatedAt, agentTurns };
+}
+
+// Orchestrator session id -> Claude Code subagent transcripts
+// (~/.claude/projects/<repo-slug>/<session-id>/subagents/agent-*.jsonl).
+function readClaudeCodeSubagents(orchSessionId) {
+  const projectsDir = path.join(process.env.HOME || process.env.USERPROFILE, ".claude", "projects");
+  const out = [];
+  if (!fs.existsSync(projectsDir)) return out;
+  let projectFolders;
+  try {
+    projectFolders = fs.readdirSync(projectsDir);
+  } catch {
+    return out;
+  }
+  for (const project of projectFolders) {
+    const subagentsDir = path.join(projectsDir, project, orchSessionId, "subagents");
+    let files;
+    try {
+      files = fs.readdirSync(subagentsDir);
+    } catch {
+      continue;
+    }
+    for (const f of files.sort()) {
+      if (!/^agent-.*\.jsonl$/.test(f)) continue;
+      const filePath = path.join(subagentsDir, f);
+      const parsed = readClaudeCodeJSONL(filePath);
+      if (!parsed) continue;
+      out.push({
+        session: parsed.session || parsed.id || path.basename(f, ".jsonl").replace(/^agent-/, ""),
+        role: "scout",
+        harness: "claude-code",
+        filePath,
+        ...parsed,
+      });
+    }
+  }
+  return out;
+}
+
+// Nested Claude Code session recorded on the stream: a top-level
+// ~/.claude/projects/<repo-slug>/<session-id>.jsonl file.
+function findClaudeCodeNestedSession(sessionId) {
+  const projectsDir = path.join(process.env.HOME || process.env.USERPROFILE, ".claude", "projects");
+  if (!fs.existsSync(projectsDir)) return null;
+  let projectFolders;
+  try {
+    projectFolders = fs.readdirSync(projectsDir);
+  } catch {
+    return null;
+  }
+  for (const project of projectFolders) {
+    const candidate = path.join(projectsDir, project, `${sessionId}.jsonl`);
+    try {
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch {}
+  }
+  return null;
+}
+
+// Copy a child transcript we have read into the learnings area (retention option b),
+// outside every repo so transcripts that can hold secrets never reach .opencode/reports
+// and a commit. Never throws.
+function copyChildTranscript(sourcePath, streamName, sessionId, harness) {
+  if (!sourcePath || !fs.existsSync(sourcePath)) return false;
+  const destDir = path.join(LEARNINGS_ROOT, streamName, "children");
+  try {
+    fs.mkdirSync(destDir, { recursive: true });
+  } catch {
+    return false;
+  }
+  const ext = path.extname(sourcePath) || (harness === "opencode" ? ".db" : ".jsonl");
+  const dest = path.join(destDir, `${sessionId}${ext}`);
+  try {
+    fs.copyFileSync(sourcePath, dest);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Collect every child session of a stream:
+//  - OpenCode workers/critics: `ses_...` ids carried on stream events.
+//  - Nested Claude Code sessions: `child` events recorded on the stream.
+//  - Claude Code subagents: agent-*.jsonl under the orchestrator session's subagents/.
+function collectChildren(streamName) {
+  const children = [];
+  const seen = new Set();
+  const events = readStreamEvents(streamName);
+  const stream = readStreamState(streamName);
+
+  const add = (session, harness, role, source) => {
+    if (!session || seen.has(session)) return;
+    seen.add(session);
+    children.push({ session, harness, role, source });
+  };
+
+  // OpenCode children: session ids on stream events, with role from the event's agent.
+  const ocRoleBySession = new Map();
+  for (const e of events) {
+    if (e.session && SESSION_RE.test(e.session)) {
+      if (!ocRoleBySession.has(e.session)) ocRoleBySession.set(e.session, e.agent);
+    }
+  }
+  for (const [session, agent] of ocRoleBySession) {
+    add(session, "opencode", agent && CHILD_ROLES.includes(agent) ? agent : "worker", "stream-event");
+  }
+
+  // Nested Claude Code sessions recorded via `child` events.
+  for (const e of events) {
+    if ((e.event === "child" || e.kind === "child") && e.session) {
+      const role = e.role && CHILD_ROLES.includes(e.role) ? e.role : "nested";
+      const harness = e.harness || "claude-code";
+      const filePath = harness === "claude-code" ? findClaudeCodeNestedSession(e.session) : null;
+      add(e.session, harness, role, "child-event");
+      const child = children[children.length - 1];
+      if (filePath) child.filePath = filePath;
+    }
+  }
+
+  // Claude Code subagents of the orchestrator session (held_session / session on the stream).
+  const orchSessionId = (stream && (stream.held_session || stream.session)) || null;
+  if (orchSessionId) {
+    for (const sa of readClaudeCodeSubagents(orchSessionId)) {
+      add(sa.session, sa.harness, sa.role, "subagent");
+      // attach filePath for review; not part of the public child descriptor
+      const child = children[children.length - 1];
+      child.filePath = sa.filePath;
+    }
+  }
+
+  return children;
+}
+
+// Tag a finding with the child's role/harness/model/session so every child
+// finding is attributable in the merged report.
+function tagChildFindings(findings, child) {
+  return findings.map((f) => ({
+    ...f,
+    role: child.role,
+    harness: child.harness,
+    ...(child.model ? { model: child.model } : {}),
+    session: child.session,
+  }));
+}
+
+// Review one child session through the phase-5 lenses. Never crashes on a
+// missing or aged-out transcript; reports status "missing" instead.
+function reviewChild(child, streamName) {
+  const report = {
+    session: child.session,
+    harness: child.harness,
+    role: child.role,
+    model: child.model,
+    status: "missing",
+    note: null,
+    findings: [],
+    transcriptCopied: false,
+  };
+
+  let parsed;
+  if (child.harness === "opencode") {
+    const session = readOpenCodeSession(child.session);
+    if (!session) {
+      report.note = `OpenCode session ${child.session} not found in ${OPENCODE_DB}`;
+      return report;
+    }
+    parsed = {
+      id: session.id,
+      title: session.title,
+      messages: session.messages,
+      model: null,
+      startedAt: session.time_created,
+      updatedAt: session.time_updated,
+    };
+    // OpenCode transcript lives in the single opencode.db; copy that db once per stream.
+  } else {
+    parsed = readClaudeCodeJSONL(child.filePath);
+    if (!parsed) {
+      report.note = `Claude Code transcript for ${child.session} not found at ${child.filePath}`;
+      return report;
+    }
+    report.transcriptCopied = copyChildTranscript(child.filePath, streamName, child.session, child.harness);
+  }
+
+  child.model = parsed.model || child.model;
+  report.model = parsed.model || child.model;
+  report.status = "analyzed";
+  report.note = null;
+
+  const findings = analyzeSessionData(
+    parsed.messages,
+    parsed.id,
+    parsed.title,
+    parsed.startedAt,
+    parsed.updatedAt,
+    parsed.model,
+  );
+  report.findings = tagChildFindings(findings, child);
+  return report;
+}
 
 // ---------------------------------------------------------------------------
 // Real session data readers
@@ -2123,6 +2466,7 @@ function printUsage() {
   console.log(`  --auto, -A            QUICK: phase 5 + apply + no-mcp (current session)`);
   console.log(`  --auto-detect         Auto-detect stream from current context (default when <stream> omitted)`);
   console.log(`  --session <id>        Explicit OpenCode session ID (for phase 5)`);
+  console.log(`  --no-children         Skip collecting/reviewing the stream's child sessions`);
   console.log(`  --help, -h            Show this help`);
   console.log(``);
   console.log(`Phases:`);
@@ -2270,6 +2614,17 @@ async function main() {
   // Categorize findings: Frood code vs Local environment
   const categorizedFindings = categorizeFindings(filteredFindings);
 
+  // Children: collect & review every child session of this stream through the
+  // phase-5 lenses. Only on stream runs (phases 1-4); --session (phase 5) is
+  // unchanged and --no-children skips this entirely.
+  let children = [];
+  const isStreamRun = Boolean(args.stream) && !args.stream.startsWith("ses_") && args.phase !== 5;
+  if (isStreamRun && !args.noChildren) {
+    for (const child of collectChildren(args.stream)) {
+      children.push(reviewChild(child, args.stream));
+    }
+  }
+
   // Build and write report (include category)
   const report = {
     schema: 1,
@@ -2290,6 +2645,18 @@ async function main() {
       source: f.source,
       category: f.category,
     })),
+    children: isStreamRun && !args.noChildren
+      ? children.map((c) => ({
+        session: c.session,
+        harness: c.harness,
+        role: c.role,
+        model: c.model,
+        status: c.status,
+        note: c.note,
+        transcriptCopied: c.transcriptCopied,
+        findings: c.findings,
+      }))
+      : undefined,
     mcp: { available: isMcpAvailable(), ...mcpResult },
     metaReviewExclusion: META_REVIEW_EXCLUSION,
   };
