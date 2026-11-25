@@ -290,11 +290,19 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
 - **Archive a nested child once its work has shipped** (default on).
   Before archiving, the parent checks all of these:
   - `node {{ORCH_REPO}}/bin/settings.mjs get archive_nested_sessions` prints `true`;
-  - the child's stream reads `done` in `handoff.mjs show --stream `;
-  - the child's commits are on the base branch, or its ticket is closed;
-  - the child has no unanswered `NEEDS OWNER` item, and no worker or desk run is still active for that stream
-    (`oc-worker.mjs active`).
-  Then the parent calls `archive_session` on the child and says so in one line.
+  - the child's latest report to the parent says its module shipped and names the merged commit sha(s);
+  - every one of those shas is on the base branch:
+    `git -C <repo> merge-base --is-ancestor <sha> <base>` exits 0. (The "ticket closed" alternative is
+    dropped: abandoned work does not count as shipped.)
+  - the child no longer holds the stream: in the JSON from
+    `node {{ORCH_REPO}}/bin/handoff.mjs show --stream <stream>`, `held_session` is not the child's session id;
+    it is null or someone else's, because the child ran `write … --release` at its boundary;
+  - no run is still active for that stream: `node {{ORCH_REPO}}/bin/oc-worker.mjs active` shows no row ending in
+    `| stream <stream>`, except rows marked STALE;
+  - the child has no unanswered `NEEDS OWNER` item, and it is idle (not working) in the app's session list.
+  Then the parent calls `archive_session` with the child's session id — the `local_…` id `start_session`
+  returned, which the parent already holds — and says so in one line.
+  A nested session never archives itself or its parent.
   Never archive a child that is still working, is waiting on the owner or the parent, or has unmerged work.
   Archiving keeps the transcript, so `/frood-learn` still reviews the child.
   To turn it off: `node {{ORCH_REPO}}/bin/settings.mjs set archive_nested_sessions false`.

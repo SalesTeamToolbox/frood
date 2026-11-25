@@ -12,7 +12,9 @@
 // Defaults (from code): { "archive_nested_sessions": true }
 //   `install.mjs` is intentionally not edited: the default ships from here.
 //
-// Exports `getSetting(key)` for other scripts.
+// Exports `getSetting(key)` for other scripts. `getSetting` always returns a
+// boolean for a known key: a non-boolean value in the file is ignored and the
+// default applies, nothing throws.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -37,12 +39,18 @@ export function readSettings() {
   }
 }
 
-// Effective value for a known key: the file's value, else the default.
-// Unknown keys return undefined (the CLI treats them as an error, exit 2).
+// Effective value for a known key: the file's value if it is a boolean, else
+// the default. Unknown keys return undefined (the CLI treats them as an error,
+// exit 2). Using Object.hasOwn (not `in`) so prototype keys such as
+// `toString` / `constructor` are rejected rather than resolved.
 export function getSetting(key) {
-  if (!(key in DEFAULTS)) return undefined;
+  if (!Object.hasOwn(DEFAULTS, key)) return undefined;
   const file = readSettings();
-  return key in file ? file[key] : DEFAULTS[key];
+  if (Object.hasOwn(file, key)) {
+    const v = file[key];
+    return typeof v === "boolean" ? v : DEFAULTS[key];
+  }
+  return DEFAULTS[key];
 }
 
 // All effective settings (defaults overlaid with the file's known keys).
@@ -54,12 +62,19 @@ export function effectiveSettings() {
 
 function writeSettings(key, value) {
   const file = settingsFile();
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.mkdirSync(path.dirname(file), { recursive: true }); // create parent dir if missing
   const current = readSettings();
   current[key] = value;
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(current, null, 2) + "\n", { encoding: "utf8" });
-  fs.renameSync(tmp, file); // atomic on the same filesystem
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(current, null, 2) + "\n", { encoding: "utf8" });
+    fs.renameSync(tmp, file); // atomic on the same filesystem
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+    console.error(`settings: cannot write ${file}: ${e.message}`); // one line, no stack trace
+    return 1;
+  }
+  return 0;
 }
 
 function isBooleanString(v) {
@@ -74,7 +89,7 @@ async function main(argv) {
         console.error("usage: settings.mjs get <key>");
         return 2;
       }
-      if (!(key in DEFAULTS)) {
+      if (!Object.hasOwn(DEFAULTS, key)) {
         console.error(`settings: unknown key "${key}"`);
         return 2;
       }
@@ -85,7 +100,7 @@ async function main(argv) {
         console.error('usage: settings.mjs set <key> <true|false>');
         return 2;
       }
-      if (!(key in DEFAULTS)) {
+      if (!Object.hasOwn(DEFAULTS, key)) {
         console.error(`settings: unknown key "${key}"`);
         return 2; // file unchanged
       }
@@ -93,8 +108,7 @@ async function main(argv) {
         console.error(`settings: value for "${key}" must be true or false, got "${value}"`);
         return 2; // file unchanged
       }
-      writeSettings(key, value === "true");
-      return 0;
+      return writeSettings(key, value === "true");
     case "list":
       console.log(JSON.stringify(effectiveSettings()));
       return 0;

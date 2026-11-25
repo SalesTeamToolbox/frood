@@ -115,6 +115,24 @@ test("unknown key: exit 2 and the file is unchanged", () => {
   });
 });
 
+test("prototype keys (toString / constructor) are rejected: exit 2", () => {
+  withHome((h) => {
+    const file = settingsFile(h);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ archive_nested_sessions: true }), "utf8");
+    const before = fs.readFileSync(file, "utf8");
+
+    const get = cli(["get", "toString"], h);
+    assert.equal(get.status, 2, `get toString status ${get.status}`);
+    assert.equal(get.stdout, "");
+
+    const set = cli(["set", "constructor", "true"], h);
+    assert.equal(set.status, 2, `set constructor status ${set.status}`);
+
+    assert.equal(fs.readFileSync(file, "utf8"), before, "file unchanged on prototype key set");
+  });
+});
+
 test("non-boolean value: exit 2 and the file is unchanged", () => {
   withHome((h) => {
     const file = settingsFile(h);
@@ -131,10 +149,45 @@ test("non-boolean value: exit 2 and the file is unchanged", () => {
   });
 });
 
+test("non-boolean value in the file is ignored; default applies, nothing throws", () => {
+  withHome((h) => {
+    const file = settingsFile(h);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ archive_nested_sessions: "false" }), "utf8");
+
+    const r = cli(["get", "archive_nested_sessions"], h);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout.trim(), "true");
+
+    // getSetting returns the boolean default, nothing throws
+    assert.equal(getSetting("archive_nested_sessions"), true);
+
+    // a numeric non-boolean also falls back to the default
+    fs.writeFileSync(file, JSON.stringify({ archive_nested_sessions: 0 }), "utf8");
+    assert.equal(cli(["get", "archive_nested_sessions"], h).stdout.trim(), "true");
+    assert.equal(getSetting("archive_nested_sessions"), true);
+  });
+});
+
 test("list prints the effective settings as JSON", () => {
   withHome((h) => {
     const r = cli(["list"], h);
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(JSON.parse(r.stdout), { archive_nested_sessions: true });
+  });
+});
+
+test("set creates the parent directory when it is missing", () => {
+  withHome((h) => {
+    const file = settingsFile(h);
+    // do NOT create .config/orchestrator
+    assert.equal(fs.existsSync(path.dirname(file)), false);
+
+    const set = cli(["set", "archive_nested_sessions", "false"], h);
+    assert.equal(set.status, 0, set.stderr);
+
+    assert.equal(fs.existsSync(file), true);
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).archive_nested_sessions, false);
+    assert.equal(getSetting("archive_nested_sessions"), false);
   });
 });

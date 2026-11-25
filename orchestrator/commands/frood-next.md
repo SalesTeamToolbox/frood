@@ -89,7 +89,8 @@ The tab title is set by the `orchestrator-handoff.js` hook to `[<stream>] <repo>
    review or merge them here, and never tell the owner to watch `/frood-desk` or `desk.mjs status`.
    <!-- cc-only -->
    If `get_session self` shows `parentSessionId`, this session was started by a parent: at its module boundary it
-   writes the handoff, reports in one line, and stops — it does not start the next module (the parent does). If the
+   writes the handoff, reports in one line, and stops — it does not start the next module (the parent does). Its
+   final report names the merged commit sha(s) of its module, so the parent can check them before archiving. If the
    owner talks to this session directly and tells it to go on, it continues in place.
 
    **A nested session reports to its parent, never to the owner.** The parent is the owner's only thread: it relays
