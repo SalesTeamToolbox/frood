@@ -29,6 +29,18 @@ test("classify: quota uses retryAfterMs (capped at 7 days); model-not-found is '
   assert.equal(classify(["TypeError: boom"]), null);
 });
 
+test("classify: Nvidia's real 429 body names no model, so the model passed in makes it a short rate limit", () => {
+  // The exact error oc-worker recorded on 2026-11-25: no "nvidia/" anywhere in the text.
+  const real = ['{"type":"provider.rate-limit","message":"Provider request failed with HTTP 429: {\\"status\\":429,\\"title\\":\\"Too Many Requests\\"}","status":429,"response":{"body":"{\\"status\\":429,\\"title\\":\\"Too Many Requests\\"}"}}'];
+  const m = "nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b";
+  assert.deepEqual(classify(real, m), { reason: "rate-limit", ms: 5 * 60_000, scope: "model" });
+  assert.equal(classify(['{"status":429,"retryAfterMs":120000}'], m).ms, 120_000);
+  assert.equal(classify(['{"status":429,"retryAfterMs":99999999}'], m).ms, 30 * 60_000); // clamped to 30 min
+  // Without the model (old callers) the same text is still the generic 1-hour quota; other providers unchanged.
+  assert.equal(classify(real).reason, "quota");
+  assert.equal(classify(real, "commandcode/z-ai/glm-5.3-flash").reason, "quota");
+});
+
 test("classify: out of credits is a provider-wide quota, so the provider's other models are skipped too", () => {
   const c = classify(['{"type":"provider.invalid-request","message":"You have insufficient credits to make this request. Please purchase more credits to continue using the service.","status":400}']);
   assert.equal(c.reason, "quota");
@@ -74,6 +86,22 @@ test("a quota failure marks the model down; the next run skips it without callin
   assert.equal(rec.agent, "critic-free");
   assert.equal(rec.repooled_from[0].skipped, true);
   assert.match(rec.repooled_from[0].reason, /^quota until /);
+});
+
+test("an Nvidia 429 marks only that model down, as a 5-minute rate limit — not a 1-hour quota", () => {
+  const h = home();
+  fs.writeFileSync(path.join(h, ".config", "opencode", "agents", "critic.md"), "---\ndescription: x\nmode: subagent\nmodel: nvidia/nvidia/nemotron-test\n---\nbody\n");
+  const before = Date.now();
+  const r = run(h, { FAKE_OC_MODE: "rate429-critic" }, "--fallback", "critic-alt");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(JSON.parse(r.stdout.trim()).agent, "critic-alt");
+  process.env.ORCH_HOME = h;
+  const down = isDown("nvidia/nvidia/nemotron-test");
+  assert.equal(down.reason, "rate-limit");
+  const ms = Date.parse(down.until) - before;
+  assert.ok(ms > 4 * 60_000 && ms <= 6 * 60_000, `until is ~5 min out, got ${ms} ms`);
+  assert.equal(isDown("nvidia/nvidia/other-model"), null, "scope is the model, not the provider");
+  delete process.env.ORCH_HOME;
 });
 
 test("every pool known-down: exit 6, no call made", () => {

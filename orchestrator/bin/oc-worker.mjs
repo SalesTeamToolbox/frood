@@ -891,7 +891,7 @@ async function runChain(a) {
     // a new pool means a new session; a resumed session belongs to the first pool only
     r = await runWorker(first ? a : { ...a, agent, session: undefined, model: undefined });
     attempts += (r.attempts ?? 1) - 1; // cap 3 counts spawns: a resumed run used more than one
-    const anyCls = classify(r.classifyErrors ?? r.errors);
+    const anyCls = classify(r.classifyErrors ?? r.errors, model);
     // A pool that died mid-run (output already produced) is still down for the next run.
     if (anyCls && r.first_line) markDown(model, { ...anyCls, detail: r.errors[0] || "" });
     const cls = !r.first_line ? anyCls : null;

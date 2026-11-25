@@ -27,6 +27,8 @@ const session = argv.includes("--session") ? argv[argv.indexOf("--session") + 1]
 let mode = process.env.FAKE_OC_MODE || "ok";
 // quota-<agent>: that agent hits a provider limit, every other agent succeeds
 if (mode.startsWith("quota-")) mode = mode.slice(6).split(",").includes(agent) ? "quota" : "ok";
+// rate429-<agent>: that agent gets Nvidia's real 429 (the body names no model), every other agent succeeds
+if (mode.startsWith("rate429-")) mode = mode.slice(8).split(",").includes(agent) ? "rate429" : "ok";
 if (process.env.FAKE_OC_ARGS_FILE) fs.writeFileSync(process.env.FAKE_OC_ARGS_FILE, JSON.stringify({ argv, cwd: process.cwd(), testVar: process.env.ORCH_TEST_VAR ?? null }));
 // FAKE_OC_STDERR: text written to stderr on every call (a healthy run with benign stderr)
 if (process.env.FAKE_OC_STDERR) process.stderr.write(process.env.FAKE_OC_STDERR + "\n");
@@ -72,6 +74,10 @@ if (mode === "capture-scratch") {
 if (mode === "drop") dropEvents();
 else if (mode === "quota") {
   process.stdout.write(JSON.stringify({ type: "error", sessionID: session, error: { type: "provider.go-limit", message: "OpenCode Go weekly usage limit reached", status: 429 } }) + "\n");
+  process.exit(1);
+} else if (mode === "rate429") {
+  const body = JSON.stringify({ status: 429, title: "Too Many Requests" });
+  process.stdout.write(JSON.stringify({ type: "error", sessionID: session, error: { type: "provider.rate-limit", message: `Provider request failed with HTTP 429: ${body}`, status: 429, response: { body } } }) + "\n");
   process.exit(1);
 } else if (mode === "hang") setInterval(() => {}, 1000);
 else if (mode === "text-then-quota") {

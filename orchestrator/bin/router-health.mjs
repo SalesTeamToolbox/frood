@@ -244,8 +244,8 @@ function writeFreeInventory(inv) {
   writeFileAtomic(freeInventoryPath(), JSON.stringify(inv, null, 2) + "\n");
 }
 
-function classifyProbe(errors = []) {
-  const cls = classify(errors);
+function classifyProbe(errors = [], model = null) {
+  const cls = classify(errors, model);
   return cls ? cls.reason : "unknown";
 }
 
@@ -353,7 +353,7 @@ export async function check({ probeModels = false, probeAll = false, models = un
     const freeInv = readFreeInventory();
     for (const m of toProbe) {
       const result = await probeModel(m);
-      const cls = classifyProbe(result.errors);
+      const cls = classifyProbe(result.errors, m);
       freeInv[m] = { ok: result.ok, seconds: result.seconds, class: cls, at: new Date().toISOString() };
     }
     // Do NOT persist an entry for a model past the probe cap: the file holds measured results only, and an un-probed
@@ -401,12 +401,12 @@ export async function check({ probeModels = false, probeAll = false, models = un
         const p = probed.get(model);
         if (p.ok) markUp(model);
         else {
-          const cls = classify(p.errors);
+          const cls = classify(p.errors, model);
           if (cls) markDown(model, { ...cls, detail: p.errors[0] || "" });
           else rows.push({ agent, model, state: "probe-failed", detail: (p.errors[0] || `exit ${p.code}`).slice(0, 160) });
         }
         down = isDown(model);
-        if (!down && !p.ok && !classify(p.errors)) continue; // reported above as probe-failed
+        if (!down && !p.ok && !classify(p.errors, model)) continue; // reported above as probe-failed
       }
       let row = down
         ? { agent, model, state: "down", detail: `${down.reason} until ${down.until}` }

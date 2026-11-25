@@ -30,8 +30,9 @@ function writeHealth(h) {
   fs.renameSync(tmp, p); // atomic replace; last writer wins, entries are idempotent facts
 }
 
-/** Classify a run's errors: "quota" | "unavailable" | "rate-limit" | null, with a suggested outage length. */
-export function classify(errors = []) {
+/** Classify a run's errors: "quota" | "unavailable" | "rate-limit" | null, with a suggested outage length.
+ *  Pass the model that was called: Nvidia's 429 body names no model, so the error text alone cannot tell it apart. */
+export function classify(errors = [], model = null) {
   const text = errors.join("\n");
   const retry = text.match(/"retryAfterMs"\s*:\s*(\d+)/);
   // The plan does not include the model (e.g. CommandCode GOAT: Claude Opus, GPT-6 Sol). Not a quota:
@@ -48,7 +49,9 @@ export function classify(errors = []) {
   }
   // Nvidia (nvidia/*) 429s are rate limits, not monthly quotas — they recover in minutes, not hours.
   // Treat as "rate-limit" with a short retry window so the same model can be retried after a brief wait.
-  const isNvidia = /nvidia\//i.test(text);
+  // Know it by the model that was called: Nvidia's real 429 body ({"status":429,"title":"Too Many Requests"}) names no
+  // model, so a text-only check sent it to the generic branch below as a 1-hour "quota" (2026-11-25).
+  const isNvidia = providerOf(model) === "nvidia" || /nvidia\//i.test(text);
   if (isNvidia && /429|rate.?limit|too many requests|rate limit exceeded/i.test(text)) {
     let ms = retry ? Number(retry[1]) : 5 * 60_000; // default 5 min if no retryAfterMs
     ms = Math.min(Math.max(ms, 60_000), 30 * 60_000); // clamp 1-30 min
