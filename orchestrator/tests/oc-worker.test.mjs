@@ -1200,7 +1200,7 @@ test("O4: both receipt writes go through atomicWrite", () => {
 test("midrun-quota-once: a mid-run quota death is nudged with --session and finishes", () => {
   const state = tmp();
   CLEAN.push(state);
-  const r = run({ FAKE_OC_MODE: "midrun-quota-once", FAKE_OC_STATE_DIR: state, ORCH_RESUME_WAIT_MS: "0" });
+  const r = run({ FAKE_OC_MODE: "midrun-quota-once", FAKE_OC_STATE_DIR: state, ORCH_RESUME_WAIT_MS: "0", ORCH_RATE_LIMIT_WAIT_MS: "0" });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const receipt = JSON.parse(r.stdout.trim());
   assert.equal(receipt.attempts, 2);
@@ -1217,10 +1217,10 @@ test("midrun-quota-once: a mid-run quota death is nudged with --session and fini
 });
 
 test("quota with --resume 0 is not nudged; a persistent quota fails after one nudge", () => {
-  const noNudge = run({ FAKE_OC_MODE: "text-then-quota", ORCH_RESUME_WAIT_MS: "0" }, "--resume", "0");
+  const noNudge = run({ FAKE_OC_MODE: "text-then-quota", ORCH_RESUME_WAIT_MS: "0", ORCH_RATE_LIMIT_WAIT_MS: "0" }, "--resume", "0");
   assert.equal(noNudge.status, 5, noNudge.stdout);
   assert.deepEqual(JSON.parse(noNudge.stdout.trim()).resumed, []);
-  const persistent = run({ FAKE_OC_MODE: "text-then-quota", ORCH_RESUME_WAIT_MS: "0" });
+  const persistent = run({ FAKE_OC_MODE: "text-then-quota", ORCH_RESUME_WAIT_MS: "0", ORCH_RATE_LIMIT_WAIT_MS: "0" });
   assert.equal(persistent.status, 5, persistent.stdout);
   const receipt = JSON.parse(persistent.stdout.trim());
   assert.equal(receipt.attempts, 2);
@@ -1593,4 +1593,148 @@ test("runChain: an explicit --model on hop 1 is the model checked against the li
   assert.equal(rec.agent, "a2", r.stdout + r.stderr);
   assert.equal(rec.repooled_from[0].model, "gone/explicit");
   assert.match(rec.repooled_from[0].reason, /^absent/);
+});
+
+// ---- Nvidia provider slot (ticket nvidia-throttle) ----------------------------------------------------------
+// Runs are launched on the nvidia/ model via --model; the fake's grace-ok mode holds a run for FAKE_OC_DELAY ms.
+function startNvidia(home, name, { delay = 600, extraEnv = {}, flags = [], model = "nvidia/test-model" } = {}) {
+  const dir = path.join(home, name);
+  fs.mkdirSync(dir, { recursive: true });
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const argsFile = path.join(dir, "args.json");
+  const out = path.join(dir, "out", "findings.md");
+  const env = { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: home, FAKE_OC_ARGS_FILE: argsFile, FAKE_OC_MODE: "grace-ok", FAKE_OC_DELAY: String(delay), ORCH_NVIDIA_POLL_MS: "50", ...extraEnv };
+  delete env.NVIDIA_SLOTS;
+  Object.assign(env, extraEnv);
+  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", dir, "--prompt", prompt, "--out", out, "--model", model, ...flags], { env, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "";
+  child.stdout.on("data", (d) => (stdout += d));
+  const killer = setTimeout(() => child.kill("SIGKILL"), 30000); // every child has a timeout
+  const done = new Promise((resolve) => child.on("close", (code) => { clearTimeout(killer); resolve({ code, stdout, endedAt: Date.now(), argsFile, out }); }));
+  return { done, argsFile, started: () => fs.existsSync(argsFile) && fs.statSync(argsFile).mtimeMs };
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test("nvidia slot: NVIDIA_SLOTS unset runs two nvidia runs one after the other", async () => {
+  const home = tmp();
+  CLEAN.push(home);
+  const a = startNvidia(home, "a");
+  await sleep(250); // a is running (its fake started and is holding for 600 ms)
+  const b = startNvidia(home, "b");
+  const [ra, rb] = await Promise.all([a.done, b.done]);
+  assert.equal(ra.code, 0);
+  assert.equal(rb.code, 0);
+  const aStart = fs.statSync(ra.argsFile).mtimeMs;
+  const bStart = fs.statSync(rb.argsFile).mtimeMs;
+  assert.ok(bStart >= aStart + 600, `b's first spawn (${bStart - aStart} ms after a's) must come after a's exit (a holds 600 ms)`);
+  assert.deepEqual(fs.readdirSync(slotDir_(home)).filter((n) => n.startsWith("provider-")), [], "the provider slot is released");
+});
+function slotDir_(home) {
+  return path.join(home, ".config", "orchestrator", "slots");
+}
+
+test("nvidia slot: NVIDIA_SLOTS=2 lets two nvidia runs overlap; a non-nvidia run never waits on a held slot", async () => {
+  const home = tmp();
+  CLEAN.push(home);
+  const a = startNvidia(home, "a", { delay: 1500, extraEnv: { NVIDIA_SLOTS: "2" } });
+  const b = startNvidia(home, "b", { delay: 1500, extraEnv: { NVIDIA_SLOTS: "2" } });
+  await sleep(700);
+  assert.ok(a.started() && b.started(), "both nvidia runs are running at once under NVIDIA_SLOTS=2");
+  await Promise.all([a.done, b.done]);
+
+  // cap 1, one nvidia run holding: a run on a non-nvidia model starts at once
+  const h2 = tmp();
+  CLEAN.push(h2);
+  const holder = startNvidia(h2, "holder", { delay: 1500 });
+  await sleep(500);
+  assert.ok(holder.started());
+  const other = startNvidia(h2, "other", { delay: 100, model: "opencode/other-model" });
+  await sleep(700);
+  assert.ok(other.started(), "a non-nvidia run starts while the nvidia slot is held");
+  const blocked = startNvidia(h2, "blocked", { delay: 100 });
+  await sleep(400);
+  assert.ok(!blocked.started(), "a second nvidia run waits while the single slot is held");
+  await blocked.done;
+  const ro = await other.done;
+  const rh = await holder.done;
+  assert.equal(ro.code, 0);
+  assert.ok(ro.endedAt < rh.endedAt, "the non-nvidia run finished before the nvidia holder");
+});
+
+test("nvidia slot: a slot whose owner pid is dead is reclaimed; a live one is not", async () => {
+  process.env.ORCH_HOME = tmp();
+  CLEAN.push(process.env.ORCH_HOME);
+  const { acquireProviderSlot } = await import("../bin/oc-worker.mjs");
+  assert.equal(typeof acquireProviderSlot, "function");
+  const dead = spawnSync(process.execPath, ["-e", "0"], { timeout: 10000 });
+  assert.equal(dead.status, 0);
+  const d = path.join(slotDir(), "provider-nvidia-1");
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, "owner"), JSON.stringify({ pid: 2 ** 22 + 12345, since: new Date().toISOString() }));
+  const got = await acquireProviderSlot("nvidia", 1, { pollMs: 20 });
+  assert.equal(got.index, 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(d, "owner"), "utf8")).pid, process.pid, "the dead owner's slot is now ours");
+  // we are alive: a second claimant times out rather than stealing
+  let second = "claimed";
+  const waiting = acquireProviderSlot("nvidia", 1, { pollMs: 20 }).then(() => (second = "stole"));
+  await sleep(200);
+  assert.equal(second, "claimed");
+  got.release();
+  await waiting; // released: the waiter gets it
+  fs.rmSync(path.join(slotDir(), "provider-nvidia-1"), { recursive: true, force: true });
+});
+
+test("nvidia slot: the queued event and the receipt name the slot", async () => {
+  const { h: home, sd } = streamHome();
+  const dir = path.join(home, "w");
+  fs.mkdirSync(path.join(dir, "run"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "mandate.md"), "Do the thing.");
+  fs.writeFileSync(path.join(dir, "run", "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: dir }));
+  const r = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", dir, "--prompt", path.join(dir, "mandate.md"), "--out", path.join(dir, "run", "c.md"), "--stream", "m6a", "--model", "nvidia/test-model"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: home, ORCH_NVIDIA_POLL_MS: "50", NVIDIA_SLOTS: "" },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const queued = eventsOf(sd).find((e) => e.kind === "queued");
+  assert.match(queued.slots, /nvidia 0\/1/);
+  assert.equal(JSON.parse(r.stdout.trim()).provider_slot, "nvidia 1/1");
+});
+
+test("resume wait: a mid-run 429 waits ORCH_RATE_LIMIT_WAIT_MS; a mid-run drop waits only ORCH_RESUME_WAIT_MS", () => {
+  const timed = (mode, extra) => {
+    const state = tmp();
+    CLEAN.push(state);
+    const t0 = Date.now();
+    const r = run({ FAKE_OC_MODE: mode, FAKE_OC_STATE_DIR: state, ORCH_RESUME_WAIT_MS: "10", ORCH_RATE_LIMIT_WAIT_MS: "1500", ...extra });
+    return { r, ms: Date.now() - t0 };
+  };
+  const quota = timed("midrun-quota-once");
+  assert.equal(quota.r.status, 0, quota.r.stdout + quota.r.stderr);
+  assert.equal(JSON.parse(quota.r.stdout.trim()).attempts, 2);
+  assert.ok(quota.ms >= 1500, `a 429 resume waited ${quota.ms} ms, wanted at least ORCH_RATE_LIMIT_WAIT_MS (1500)`);
+  const drop = timed("drop-once");
+  assert.equal(drop.r.status, 0, drop.r.stdout + drop.r.stderr);
+  assert.equal(JSON.parse(drop.r.stdout.trim()).attempts, 2);
+  assert.ok(drop.ms < 1500, `a drop resume took ${drop.ms} ms, must wait only ORCH_RESUME_WAIT_MS (10)`);
+  // the larger of the two wins: a resume wait above the rate-limit wait is kept
+  const big = timed("midrun-quota-once", { ORCH_RESUME_WAIT_MS: "1800", ORCH_RATE_LIMIT_WAIT_MS: "10" });
+  assert.ok(big.ms >= 1800);
+});
+
+test("nvidia slot: waiting for the slot does not consume --timeout-min", async () => {
+  const home = tmp();
+  CLEAN.push(home);
+  const a = startNvidia(home, "a", { delay: 2000 });
+  await sleep(500);
+  // --timeout-min 0.03 = 1.8 s: shorter than the 1.5+ s wait plus its own 700 ms run, longer than the run alone
+  const b = startNvidia(home, "b", { delay: 700, flags: ["--timeout-min", "0.03", "--grace-min", "0"] });
+  const [ra, rb] = await Promise.all([a.done, b.done]);
+  assert.equal(ra.code, 0);
+  assert.equal(rb.code, 0, "b was not timed out while it waited for the slot");
+  const receipt = JSON.parse(fs.readFileSync(rb.out + ".receipt.json", "utf8"));
+  assert.notEqual(receipt.exit, "timeout");
+  assert.ok(fs.statSync(rb.argsFile).mtimeMs >= fs.statSync(ra.argsFile).mtimeMs + 2000, "b ran after a finished, so it did wait");
+  assert.ok(receipt.seconds <= 2, `b's clock started after the wait (${receipt.seconds} s)`);
 });

@@ -143,6 +143,12 @@ function decisionLogFile(env = process.env) {
 }
 
 // Count slot dirs whose owner pid is still live.
+// NVIDIA_SLOTS: machine-wide cap on concurrent runs on an nvidia/ model. Not a positive integer -> 1.
+export function nvidiaSlots(env = process.env) {
+  const v = String(env.NVIDIA_SLOTS ?? "").trim();
+  return /^[1-9]\d*$/.test(v) ? Number(v) : 1;
+}
+
 export function heldCount() {
   const dir = path.join(process.env.ORCH_HOME || os.homedir(), ".config", "orchestrator", "slots");
   let count = 0;

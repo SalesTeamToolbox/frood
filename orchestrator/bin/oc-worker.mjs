@@ -29,6 +29,12 @@
 //   overrides the proc tree (tests use temp fixtures, never the real /proc). Invalid values exit 2. Slots are lock
 //   dirs under ~/.config/orchestrator/slots, stale when the owning pid is gone. Decisions are logged to
 //   ~/.config/orchestrator/slot-decisions.log (on admission and on allowed changes only).
+// - Machine-wide Nvidia provider slot: a run whose model starts with `nvidia/` first claims one of NVIDIA_SLOTS
+//   (default 1; a value that is not a positive integer falls back to 1) lock dirs `provider-nvidia-<i>` beside the
+//   worker slots, then a machine slot. One API key means one 429 budget, so Nvidia runs queue behind each other
+//   across every ticket and role. Waiting takes no machine slot and does not spend --timeout-min; a chain hop to a
+//   non-Nvidia agent holds none. ORCH_NVIDIA_POLL_MS (default 3000) is the poll interval. The queued event's
+//   `slots` names it (`nvidia <held>/<cap>`) and the receipt has `provider_slot` (`nvidia <index>/<cap>`).
 // - --ticket <id> --owner <session>: the ticket names an OpenCode board ticket; before anything is launched this
 //   runs `node <board.mjs> attach <id> --pid <this pid> --out <out>` (execFileSync, no shell), which the board
 //   refuses unless the ticket is working, owned by --owner and past its EGM gate. A refusal exits 7 with nothing
@@ -42,7 +48,8 @@
 // - --resume <n> (default 1, 0 disables): a run that dropped (ECONNRESET, socket hang up, ...), stalled, or died
 //   mid-run on a transient pool error (quota/rate-limit, provider 5xx/overload) after producing output and a session
 //   id is resumed with --session after 30 s (ORCH_RESUME_WAIT_MS), inside the same slot: the manual "nudge it along",
-//   automatic. Deterministic failures (unknown/retired model, not-in-plan) and clean finishes never resume.
+//   automatic. After a quota/rate-limit death the wait is max(ORCH_RESUME_WAIT_MS, ORCH_RATE_LIMIT_WAIT_MS), the
+//   latter default 60000: a 429 window is longer than a dropped socket. Deterministic failures (unknown/retired model, not-in-plan) and clean finishes never resume.
 //   --timeout-min is one wall-clock budget for all attempts together. Receipt: resumed [{session, reason,
 //   seconds}] and attempts (spawns). On a resumed run, errors, first_line and verdict come from the last attempt only;
 //   tokens and cost are summed. stderr is always listed in errors but counts as pool-health evidence only when the
@@ -77,7 +84,7 @@ import crypto from "node:crypto";
 import { appendEvent, atomicWrite, streamsDir } from "./handoff.mjs";
 import { workerOutcome } from "./outcome.mjs";
 import { CHAINS, chainFor } from "./chains.mjs";
-import { readSample, slotConfig, allowedSlots, decisionLog, heldCount } from "./slots.mjs";
+import { readSample, slotConfig, allowedSlots, decisionLog, heldCount, nvidiaSlots } from "./slots.mjs";
 
 export const FOOTER = `
 
@@ -435,6 +442,47 @@ export async function acquireSlot(nOrCfg, { pollMs = 3000, deadline = Infinity, 
         ? `no free worker slot (WORKER_SLOTS=${cfg.n})`
         : `no free worker slot (${reason})`);
     }
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+}
+
+export const isNvidiaModel = (m) => typeof m === "string" && m.startsWith("nvidia/");
+
+// Live holders of provider-<name>-* slots (queued event only; never reclaims).
+export function providerHeld(provider) {
+  let count = 0;
+  let names;
+  try { names = fs.readdirSync(slotDir()); } catch { return 0; }
+  for (const n of names) {
+    if (!n.startsWith(`provider-${provider}-`)) continue;
+    let owner;
+    try { owner = JSON.parse(fs.readFileSync(path.join(slotDir(), n, "owner"), "utf8")); } catch {}
+    if (owner && owner.pid && alive(owner.pid)) count++;
+  }
+  return count;
+}
+
+// Machine-wide slot for one provider: same atomic mkdir and dead-owner reclaim as acquireSlot, under
+// slotDir()/provider-<name>-<i>. Returns { release, index, cap }. Claimed before the machine slot and before the
+// run's clock starts, so waiting for the provider costs neither.
+export async function acquireProviderSlot(provider, cap, { pollMs = 3000, deadline = Infinity, pid = process.pid } = {}) {
+  fs.mkdirSync(slotDir(), { recursive: true });
+  for (;;) {
+    for (let i = 1; i <= cap; i++) {
+      const d = path.join(slotDir(), `provider-${provider}-${i}`);
+      try {
+        fs.mkdirSync(d);
+        fs.writeFileSync(path.join(d, "owner"), JSON.stringify({ pid, since: new Date().toISOString() }));
+        return { index: i, cap, release: () => fs.rmSync(d, { recursive: true, force: true }) };
+      } catch {
+        let owner = null;
+        try { owner = JSON.parse(fs.readFileSync(path.join(d, "owner"), "utf8")); } catch {}
+        let age = 0;
+        try { age = Date.now() - fs.statSync(d).mtimeMs; } catch {}
+        if ((owner && !alive(owner.pid)) || (!owner && age > 60000)) fs.rmSync(d, { recursive: true, force: true });
+      }
+    }
+    if (Date.now() > deadline) throw new Error(`no free ${provider} slot (${provider.toUpperCase()}_SLOTS=${cap})`);
     await new Promise((r) => setTimeout(r, pollMs));
   }
 }
@@ -821,7 +869,7 @@ function streamPreflight(a) {
   // Queue-time snapshot of the slot decision (fresh sample, clearSince: null) — not the admission outcome.
   const slotsNow = Date.now();
   const slotsReason = allowedSlots(readSample(), a.slotCfg, { clearSince: null }, slotsNow).reason;
-  const ev = { key: `run:${run}:queued`, kind: "queued", run, out, pid: process.pid, pid_start: processStart(process.pid), agent: a.agent, ticket: path.join(path.dirname(out), "ticket.json"), slots: slotsReason };
+  const ev = { key: `run:${run}:queued`, kind: "queued", run, out, pid: process.pid, pid_start: processStart(process.pid), agent: a.agent, ticket: path.join(path.dirname(out), "ticket.json"), slots: slotsReason + (isNvidiaModel(a.model || agentModel(a.agent)) ? `; nvidia ${providerHeld("nvidia")}/${nvidiaSlots()}` : "") };
   let added;
   try {
     added = appendEvent(stream, ev);
@@ -1005,7 +1053,20 @@ export async function runWorker(a) {
   const safe = (m) => (m.startsWith("-") ? "\n" + m : m);
 
   const promptText = fs.readFileSync(a.prompt, "utf8"); // before the slot: a bad --prompt must not leak a slot, registry entry or timer
-  const release = await acquireSlot(a.slotCfg, { pollMs: 3000, pid: process.pid });
+  // Provider slot first: a run waiting for Nvidia holds no machine slot and has not started its clock.
+  let providerSlot = null;
+  if (isNvidiaModel(wanted)) providerSlot = await acquireProviderSlot("nvidia", nvidiaSlots(), { pollMs: Number(process.env.ORCH_NVIDIA_POLL_MS) || 3000, pid: process.pid });
+  let releaseMachine;
+  try {
+    releaseMachine = await acquireSlot(a.slotCfg, { pollMs: 3000, pid: process.pid });
+  } catch (e) {
+    providerSlot?.release();
+    throw e;
+  }
+  const release = () => {
+    releaseMachine();
+    providerSlot?.release();
+  };
   const started = Date.now();
   let effectiveDeadline = started + a.timeoutMin * 60000; // one wall-clock budget for every attempt together
   // Grace: once extended, the dashboard's OVERDUE check must see the extended deadline.
@@ -1194,7 +1255,11 @@ export async function runWorker(a) {
       }
       const resumeReason = !clean && !r.killReason ? resumableReason(classifyErrors) : null;
       const interrupted = r.killReason === "stalled" || resumeReason != null;
-      const waitMs = Number(process.env.ORCH_RESUME_WAIT_MS ?? 30_000);
+      const plainWaitMs = Number(process.env.ORCH_RESUME_WAIT_MS ?? 30_000);
+      // A 429 window outlasts a dropped socket: wait it out rather than nudge into the same limit.
+      const waitMs = resumeReason === "quota" || resumeReason === "rate-limit"
+        ? Math.max(plainWaitMs, Number(process.env.ORCH_RATE_LIMIT_WAIT_MS ?? 60_000))
+        : plainWaitMs;
       if (!interrupted || !sum.all.trim() || !sum.session || resumed.length >= resumeMax || Date.now() + waitMs >= effectiveDeadline) break;
       const why = r.killReason === "stalled" ? `no output for ${idleMin} min` : (classifyErrors.find((e) => classify([e])?.reason === resumeReason) || errors[0] || "dropped").slice(0, 80);
       resumed.push({ session: sum.session, reason: why, seconds: Math.round((Date.now() - t0) / 1000) });
@@ -1297,6 +1362,7 @@ export async function runWorker(a) {
       max_silence_s: Math.round(maxSilenceMs / 1000),
       resumed,
       attempts,
+      ...(providerSlot ? { provider_slot: `nvidia ${providerSlot.index}/${providerSlot.cap}` } : {}),
       ...(orphansKilled.length ? { orphans_killed: orphansKilled } : {}),
       ...(landed ? { landed } : {}),
       ...(extendedMin !== undefined ? { extended_min: extendedMin } : {}),
