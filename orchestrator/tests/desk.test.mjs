@@ -2172,6 +2172,13 @@ test("desk: superseding an INVALID verdict on the same sha writes verdict:<run>@
   const mc = cliLines(h, ["merge-check", name, "worker-r1"]);
   assert.equal(mc.status, 0, mc.stderr);
   assert.deepEqual(mc.lines, ["OK"]);
+  // stepping the @2 key decides fresh (merge at the reviewed sha) — it never replays the INVALID decision —
+  // and the superseded key reads DONE
+  const step2 = cliLines(h, ["step", name, "verdict:worker-r1@2"]);
+  assert.equal(step2.status, 0, step2.stderr);
+  assert.equal(step2.lines.length, 1);
+  assert.match(step2.lines[0], new RegExp(`^ESCALATE merge \\S+ticket\\.json ${head}$`));
+  assert.deepEqual(cliLines(h, ["step", name, "verdict:worker-r1"]).lines, ["DONE verdict:worker-r1"]);
 });
 
 // Same flow but HEAD moved before the second verdict -> exit 2, no new event.

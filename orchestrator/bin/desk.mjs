@@ -875,7 +875,7 @@ const runOfKey = (key) => {
 };
 
 // verdict:<run>@<n> -> <run>; plain ids pass through unchanged.
-const stripVerdictSuffix = (run) => (typeof run === "string" ? run.replace(/@\d+$/, "") : run);;
+const stripVerdictSuffix = (run) => (typeof run === "string" ? run.replace(/@\d+$/, "") : run);
 
 // ticket.json = dirname(out)/ticket.json, written once by /frood-orchestrator before the first dispatch.
 function readTicket(file) {
