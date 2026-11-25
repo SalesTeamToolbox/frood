@@ -540,7 +540,7 @@ export function nvidiaDropCount(outDir) {
       } catch {
         continue;
       }
-      if (r.agent === "worker-nvidia" && (r.exit === "stalled" || r.exit === "timeout")) count++;
+      if (r.agent === "worker-nvidia" && (r.exit === "stalled" || r.exit === "timeout") && !r.landed) count++; // a run whose work landed is not a drop
     }
   } catch {}
   return count;
@@ -764,6 +764,7 @@ export async function runWorker(a) {
   // Grace: once extended, the dashboard's OVERDUE check must see the extended deadline.
   const graceMin = Number.isFinite(a.graceMin) ? a.graceMin : 15;
   let extendedMin;
+  let graceUsed = false; // run scope: one extension per run, not per resume attempt
   const out = path.resolve(a.out);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   // Live registry for the dashboard: one file per running oc-worker, removed when it ends.
@@ -841,7 +842,6 @@ export async function runWorker(a) {
       });
       child.stderr.on("data", (d) => (stderr += d));
       // Grace: an active run at the deadline gets one extension instead of a kill.
-      let graceUsed = false;
       const GRACE_WINDOW_MS = 5 * 60000; // output within the last 5 minutes counts as active
       const arm = () => {
         timer = setTimeout(() => {
@@ -968,7 +968,7 @@ export async function runWorker(a) {
     const all = alls.join("\n\n");
     if (killReason && all.trim()) {
       // Partial work survives a timeout or stall; the status line makes it impossible to mistake for a finished run.
-      const why = killReason === "stalled" ? `stalled — no output for ${idleMin} min` : `timeout after ${a.timeoutMin} min`;
+      const why = killReason === "stalled" ? `stalled — no output for ${idleMin} min` : `timeout after ${a.timeoutMin + (extendedMin || 0)} min`;
       fs.writeFileSync(out, `RESULT: BLOCKED: ${why} — partial output below\n\n${all}\n`);
       sum.final = "";
     } else if (sum.final) fs.writeFileSync(out, sum.final.endsWith("\n") ? sum.final : sum.final + "\n");
@@ -1121,7 +1121,9 @@ export function registerRun(info) {
   kickDashboard();
   return {
     touch(extra) {
-      write(extra);
+      // An override (e.g. the grace-extended timeoutMin) sticks: later heartbeats call touch() with no argument.
+      if (extra) Object.assign(info, extra);
+      write();
       kickDashboard();
     },
     end() {

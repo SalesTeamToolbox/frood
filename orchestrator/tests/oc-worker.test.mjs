@@ -1005,7 +1005,7 @@ test("landed: timeout with report not DONE -> no landed, outcome stays timeout",
   const head = gitRepo(repo);
   const headBefore = head();
   // Pre-write a non-DONE report; the landed fixture won't clobber an existing report.
-  fs.writeFileSync(path.join(artDir, "report.md"), "STATUS: NOT DONE\n");
+  fs.writeFileSync(path.join(artDir, "report.md"), "RESULT: NOT DONE\n");
   const r = workerRun(repo, artDir, headBefore, { FAKE_OC_MODE: "landed" }, "--timeout-min", "0.02", "--grace-min", "0", "--resume", "0");
   assert.equal(r.status, 4);
   const receipt = JSON.parse(r.stdout.trim());

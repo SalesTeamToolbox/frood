@@ -34,6 +34,22 @@ function inHome(h, fn) {
   }
 }
 
+test("registerRun keeps a touch() override (grace-extended timeoutMin) across later heartbeats", () => {
+  const h = home();
+  const read = () => {
+    const d = path.join(h, ".config", "orchestrator", "runs");
+    return JSON.parse(fs.readFileSync(path.join(d, fs.readdirSync(d)[0]), "utf8"));
+  };
+  inHome(h, () => {
+    const r = registerRun({ agent: "worker", model: "m", title: "t", dir: h, out: path.join(h, "o.md"), started: NOW, idleMin: 5, timeoutMin: 9 });
+    r.touch({ timeoutMin: 24 });
+    assert.equal(read().timeoutMin, 24);
+    r.touch(); // the 20 s heartbeat
+    assert.equal(read().timeoutMin, 24, "a plain heartbeat must not revert the extended deadline");
+    r.end();
+  });
+});
+
 test("fmtDur renders compact durations", () => {
   assert.equal(fmtDur(45_000), "45s");
   assert.equal(fmtDur(26 * 60_000), "26m");

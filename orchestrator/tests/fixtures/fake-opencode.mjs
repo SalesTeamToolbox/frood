@@ -91,8 +91,8 @@ else if (mode === "landed") {
   const session = argv[argv.indexOf("--session") + 1] || "ses_fake123";
   process.stdout.write(JSON.stringify({ type: "text", sessionID: session, part: { sessionID: session, messageID: "msg_1", type: "text", text: "RESULT: DONE work in progress\n" } }) + "\n");
   try { fs.writeFileSync(path.join(process.cwd(), "landed-work.txt"), "done\n"); } catch {}
-  try { spawnSync("git", ["-C", process.cwd(), "add", "landed-work.txt"], { stdio: "pipe", encoding: "utf8" }); } catch {}
-  try { spawnSync("git", ["-C", process.cwd(), "commit", "-m", "work by fake opencode"], { stdio: "pipe", encoding: "utf8" }); } catch {}
+  try { spawnSync("git", ["-C", process.cwd(), "add", "landed-work.txt"], { stdio: "pipe", encoding: "utf8", timeout: 10000 }); } catch {}
+  try { spawnSync("git", ["-C", process.cwd(), "commit", "-m", "work by fake opencode"], { stdio: "pipe", encoding: "utf8", timeout: 10000 }); } catch {}
   const report = process.env.FAKE_OC_REPORT;
   if (report && !fs.existsSync(report)) {
     try { fs.writeFileSync(report, "RESULT: DONE\nwork landed\n"); } catch {}
