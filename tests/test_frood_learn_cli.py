@@ -1612,3 +1612,85 @@ def test_repo_non_string_does_not_crash(tmp_path):
     assert r.returncode == 0, r.stderr
     repj = json.loads(out.read_text())
     assert "children" in repj
+
+
+def test_local_and_transcript_id_for_one_session_review_it_once(tmp_path):
+    """One nested session recorded under two ids — an old parent's desktop `local_` record and its own
+    transcript id (claim + self-record) — resolves to one transcript, so it is reviewed once, as `nested`,
+    under the transcript id."""
+    uid = "aaaaaaaa-bbbb-cccc-dddd-222222222222"
+    home = tmp_path / "home"
+    orch = home / ".config" / "orchestrator"
+    (orch / "streams").mkdir(parents=True)
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    _write_stream(
+        orch,
+        "fx",
+        {
+            "name": "fx",
+            "status": "done",
+            "waiting": "",
+            "next": "",
+            "held_session": None,
+            "session": None,
+            "repo": str(proj),
+        },
+        [
+            {
+                "key": f"claim:fx:{uid}",
+                "event": "claim",
+                "kind": "claim",
+                "session": uid,
+                "by": "cc",
+                "at": "2026-01-01T00:00:00Z",
+            },
+            {
+                "key": "child:fx:local_old",
+                "event": "child",
+                "kind": "child",
+                "session": "local_old",
+                "harness": "claude-code",
+                "role": "nested",
+            },
+            {
+                "key": f"child:fx:{uid}",
+                "event": "child",
+                "kind": "child",
+                "session": uid,
+                "harness": "claude-code",
+                "role": "nested",
+            },
+        ],
+    )
+    assistant = {
+        "type": "assistant",
+        "message": {
+            "model": "claude-opus-4-5",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "nested work"}],
+        },
+        "timestamp": "2026-01-01T00:10:00.000Z",
+        "sessionId": uid,
+    }
+    _cc_transcript(home, "frood", uid, [assistant])
+    meta_dir = tmp_path / "desktop" / "acct" / "org"
+    meta_dir.mkdir(parents=True)
+    (meta_dir / "local_old.json").write_text(
+        json.dumps({"sessionId": "local_old", "cliSessionId": uid})
+    )
+
+    out = home / "out.json"
+    r = run(
+        ["fx", "--phase", "1", "--no-mcp", "--report", str(out)],
+        home,
+        cwd=proj,
+        extra_env={"CLAUDE_DESKTOP_SESSIONS_DIR": str(tmp_path / "desktop")},
+    )
+    assert r.returncode == 0, r.stderr
+    children = json.loads(out.read_text())["children"]
+    mine = [c for c in children if c["session"] in (uid, "local_old")]
+    assert len(mine) == 1, mine
+    assert mine[0]["session"] == uid, mine[0]
+    assert mine[0]["role"] == "nested", mine[0]
+    assert mine[0]["status"] == "analyzed", mine[0]

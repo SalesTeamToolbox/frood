@@ -997,7 +997,11 @@ function collectChildren(streamName) {
     if ((e.event === "child" || e.kind === "child") && e.session) {
       const role = e.role && CHILD_ROLES.includes(e.role) ? e.role : "nested";
       const harness = e.harness || "claude-code";
-      const existing = children.find((c) => c.session === e.session);
+      const filePath = harness === "claude-code" ? findClaudeCodeNestedSession(e.session) : null;
+      // One session can arrive under two ids: an old parent's desktop `local_…` record and the session's own
+      // transcript id (its claim or self-record). Both resolve to the same transcript, so match on the file too,
+      // and review it once under the transcript id.
+      const existing = children.find((c) => c.session === e.session || (filePath && c.filePath === filePath));
       if (existing) {
         // When a session is both a claimant and a child event, one child is kept;
         // role `nested` wins over `orchestrator`.
@@ -1005,12 +1009,17 @@ function collectChildren(streamName) {
           existing.role = "nested";
           existing.harness = harness;
           existing.source = "child-event";
-          const fp = harness === "claude-code" ? findClaudeCodeNestedSession(e.session) : null;
-          if (fp) existing.filePath = fp;
+          if (filePath) existing.filePath = filePath;
         }
+        if (existing.session.startsWith("local_") && !e.session.startsWith("local_")) {
+          existing.aliases = [...(existing.aliases || []), existing.session];
+          existing.session = e.session;
+        } else if (e.session !== existing.session) {
+          existing.aliases = [...(existing.aliases || []), e.session];
+        }
+        seen.add(e.session);
         continue;
       }
-      const filePath = harness === "claude-code" ? findClaudeCodeNestedSession(e.session) : null;
       const child = add(e.session, harness, role, "child-event", null, filePath);
       if (child && filePath) child.filePath = filePath;
     }
