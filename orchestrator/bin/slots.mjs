@@ -142,7 +142,6 @@ function decisionLogFile(env = process.env) {
   return path.join(env.ORCH_HOME || os.homedir(), ".config", "orchestrator", "slot-decisions.log");
 }
 
-// Count slot dirs whose owner pid is still live.
 // ---- Nvidia provider cap -----------------------------------------------------------------------------------
 // NVIDIA_SLOTS=N (positive integer) is a fixed cap and turns the adaptive mode off. Unset (or not a positive
 // integer): adaptive. NVIDIA_SLOTS_MAX (default 3) with no recent 429; within NVIDIA_COOLDOWN_MS (default 600000)
@@ -200,6 +199,7 @@ export function nvidiaCapNow(dir, { env = process.env, now = Date.now() } = {}) 
   return r;
 }
 
+// Count slot dirs whose owner pid is still live.
 export function heldCount() {
   const dir = path.join(process.env.ORCH_HOME || os.homedir(), ".config", "orchestrator", "slots");
   let count = 0;

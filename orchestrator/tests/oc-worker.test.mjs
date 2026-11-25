@@ -1663,15 +1663,20 @@ test("nvidia slot: NVIDIA_SLOTS=2 lets two nvidia runs overlap; a non-nvidia run
 });
 
 test("nvidia slot: a slot whose owner pid is dead is reclaimed; a live one is not", async () => {
+  const savedHome = process.env.ORCH_HOME;
   process.env.ORCH_HOME = tmp();
   CLEAN.push(process.env.ORCH_HOME);
   const { acquireProviderSlot } = await import("../bin/oc-worker.mjs");
   assert.equal(typeof acquireProviderSlot, "function");
-  const dead = spawnSync(process.execPath, ["-e", "0"], { timeout: 10000 });
-  assert.equal(dead.status, 0);
+  // a pid that is certainly dead: a short-lived child we started and waited for
+  const child = spawn(process.execPath, ["-e", "0"], { stdio: "ignore" });
+  const killer = setTimeout(() => child.kill("SIGKILL"), 10000);
+  await new Promise((r) => child.on("close", r));
+  clearTimeout(killer);
+  const deadPid = child.pid;
   const d = path.join(slotDir(), "provider-nvidia-1");
   fs.mkdirSync(d, { recursive: true });
-  fs.writeFileSync(path.join(d, "owner"), JSON.stringify({ pid: 2 ** 22 + 12345, since: new Date().toISOString() }));
+  fs.writeFileSync(path.join(d, "owner"), JSON.stringify({ pid: deadPid, since: new Date().toISOString() }));
   const got = await acquireProviderSlot("nvidia", 1, { pollMs: 20 });
   assert.equal(got.index, 1);
   assert.equal(JSON.parse(fs.readFileSync(path.join(d, "owner"), "utf8")).pid, process.pid, "the dead owner's slot is now ours");
@@ -1683,6 +1688,64 @@ test("nvidia slot: a slot whose owner pid is dead is reclaimed; a live one is no
   got.release();
   await waiting; // released: the waiter gets it
   fs.rmSync(path.join(slotDir(), "provider-nvidia-1"), { recursive: true, force: true });
+  if (savedHome === undefined) delete process.env.ORCH_HOME;
+  else process.env.ORCH_HOME = savedHome;
+});
+
+test("nvidia cap: admission is by live-holder count, not slot index (cap 1, slots 2 and 3 held, slot 1 free)", async () => {
+  const savedHome = process.env.ORCH_HOME;
+  const savedSlots = process.env.NVIDIA_SLOTS;
+  process.env.ORCH_HOME = tmp();
+  CLEAN.push(process.env.ORCH_HOME);
+  delete process.env.NVIDIA_SLOTS;
+  try {
+    const { acquireProviderSlot } = await import("../bin/oc-worker.mjs");
+    const { nvidiaCapNow, recordNvidia429 } = await import("../bin/slots.mjs");
+    fs.mkdirSync(slotDir(), { recursive: true });
+    recordNvidia429(slotDir()); // a 429 just now: cap 1
+    const holders = [spawn(process.execPath, ["-e", "setTimeout(()=>{}, 20000)"], { stdio: "ignore" }), spawn(process.execPath, ["-e", "setTimeout(()=>{}, 20000)"], { stdio: "ignore" })];
+    try {
+      [2, 3].forEach((i, k) => {
+        const d = path.join(slotDir(), `provider-nvidia-${i}`);
+        fs.mkdirSync(d);
+        fs.writeFileSync(path.join(d, "owner"), JSON.stringify({ pid: holders[k].pid, since: new Date(Date.now() - 5000).toISOString() }));
+      });
+      assert.equal(nvidiaCapNow(slotDir()).cap, 1);
+      let got = null;
+      const waiting = acquireProviderSlot("nvidia", () => nvidiaCapNow(slotDir()).cap, { pollMs: 20 }).then((g) => (got = g));
+      await sleep(300);
+      assert.equal(got, null, "a new run waits: 2 live holders >= cap 1, even though slot 1 is free");
+      fs.rmSync(path.join(slotDir(), "provider-nvidia-2"), { recursive: true, force: true });
+      await sleep(200);
+      assert.equal(got, null, "one holder left, still >= cap 1");
+      fs.rmSync(path.join(slotDir(), "provider-nvidia-3"), { recursive: true, force: true });
+      await waiting;
+      assert.ok(got, "admitted once live holders < cap");
+      got.release();
+    } finally {
+      for (const h of holders) h.kill("SIGKILL");
+    }
+  } finally {
+    if (savedHome === undefined) delete process.env.ORCH_HOME;
+    else process.env.ORCH_HOME = savedHome;
+    if (savedSlots !== undefined) process.env.NVIDIA_SLOTS = savedSlots;
+  }
+});
+
+test("nvidia cap: simultaneous claimants never exceed the cap and never all back off", async () => {
+  const savedHome = process.env.ORCH_HOME;
+  process.env.ORCH_HOME = tmp();
+  CLEAN.push(process.env.ORCH_HOME);
+  try {
+    const { acquireProviderSlot } = await import("../bin/oc-worker.mjs");
+    const claims = await Promise.all([1, 2, 3, 4, 5].map(() => acquireProviderSlot("nvidia", 2, { pollMs: 10, deadline: Date.now() + 500 }).catch(() => null)));
+    const won = claims.filter(Boolean);
+    assert.equal(won.length, 2, "exactly the cap is admitted");
+    for (const w of won) w.release();
+  } finally {
+    if (savedHome === undefined) delete process.env.ORCH_HOME;
+    else process.env.ORCH_HOME = savedHome;
+  }
 });
 
 test("nvidia slot: the queued event and the receipt name the slot", async () => {

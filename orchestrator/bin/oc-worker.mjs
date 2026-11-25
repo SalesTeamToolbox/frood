@@ -465,27 +465,59 @@ export function providerHeld(provider) {
   return count;
 }
 
-// Machine-wide slot for one provider: same atomic mkdir and dead-owner reclaim as acquireSlot, under
-// slotDir()/provider-<name>-<i>. Returns { release, index, cap }. Claimed before the machine slot and before the
-// run's clock starts, so waiting for the provider costs neither.
+// Live holders of provider-<name>-<i> dirs, oldest claim first (ties: lowest index). A dir whose owner pid is dead
+// (or that never got an owner file and is older than 60 s) is reclaimed here. A young dir without an owner yet is a
+// claim in progress: it counts as a holder, ranked last.
+function providerHolders(provider) {
+  const holders = [];
+  let names;
+  try { names = fs.readdirSync(slotDir()); } catch { return holders; }
+  for (const n of names) {
+    const m = new RegExp(`^provider-${provider}-(\\d+)$`).exec(n);
+    if (!m) continue;
+    const d = path.join(slotDir(), n);
+    let owner = null;
+    try { owner = JSON.parse(fs.readFileSync(path.join(d, "owner"), "utf8")); } catch {}
+    let age = 0;
+    try { age = Date.now() - fs.statSync(d).mtimeMs; } catch { continue; }
+    if ((owner && !alive(owner.pid)) || (!owner && age > 60000)) {
+      fs.rmSync(d, { recursive: true, force: true });
+      continue;
+    }
+    const since = owner ? Date.parse(owner.since) : NaN;
+    holders.push({ index: Number(m[1]), pid: owner?.pid, since: Number.isFinite(since) ? since : Infinity });
+  }
+  return holders.sort((x, y) => x.since - y.since || x.index - y.index);
+}
+
+// Machine-wide slot for one provider under slotDir()/provider-<name>-<i>: atomic mkdir, dead-owner reclaim.
+// Admission is COUNT-based: a run is admitted only while the live holders number fewer than the cap, and then it
+// takes any free index. So after a 429 lowers the cap, in-flight runs keep their slots (never revoked) and new runs
+// queue until live holders < cap, whichever indexes are free. Race: after the mkdir the claimant re-reads the
+// holders; it keeps its claim only if fewer than `cap` holders rank before it (oldest `since` first, ties by lowest
+// index), otherwise it removes its dir and keeps waiting. The order is total and older holders always rank first,
+// so simultaneous claimants cannot all back off, and an in-flight run is never displaced.
+// Returns { release, index, cap }. Claimed before the machine slot and before the run's clock starts.
 export async function acquireProviderSlot(provider, capOrFn, { pollMs = 3000, deadline = Infinity, pid = process.pid } = {}) {
   fs.mkdirSync(slotDir(), { recursive: true });
   for (;;) {
-    // A number is a fixed cap; a function is asked at every poll (the adaptive Nvidia cap). Only new admissions
-    // see a lower cap: a slot already held is never revoked.
-    const cap = typeof capOrFn === "function" ? capOrFn() : capOrFn;
-    for (let i = 1; i <= cap; i++) {
+    const cap = typeof capOrFn === "function" ? capOrFn() : capOrFn; // a function is asked at every poll
+    const holders = providerHolders(provider);
+    if (holders.length < cap) {
+      const taken = new Set(holders.map((h) => h.index));
+      let i = 1;
+      while (taken.has(i)) i++;
       const d = path.join(slotDir(), `provider-${provider}-${i}`);
+      let claimed = false;
       try {
         fs.mkdirSync(d);
+        claimed = true;
         fs.writeFileSync(path.join(d, "owner"), JSON.stringify({ pid, since: new Date().toISOString() }));
-        return { index: i, cap, release: () => fs.rmSync(d, { recursive: true, force: true }) };
-      } catch {
-        let owner = null;
-        try { owner = JSON.parse(fs.readFileSync(path.join(d, "owner"), "utf8")); } catch {}
-        let age = 0;
-        try { age = Date.now() - fs.statSync(d).mtimeMs; } catch {}
-        if ((owner && !alive(owner.pid)) || (!owner && age > 60000)) fs.rmSync(d, { recursive: true, force: true });
+      } catch {}
+      if (claimed) {
+        const rank = providerHolders(provider).findIndex((h) => h.index === i && h.pid === pid);
+        if (rank >= 0 && rank < cap) return { index: i, cap, release: () => fs.rmSync(d, { recursive: true, force: true }) };
+        fs.rmSync(d, { recursive: true, force: true }); // lost the race: back off and keep waiting
       }
     }
     if (Date.now() > deadline) throw new Error(`no free ${provider} slot (${provider.toUpperCase()}_SLOTS=${cap})`);
