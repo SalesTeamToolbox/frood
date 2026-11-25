@@ -8,6 +8,10 @@ import { fileURLToPath } from "node:url";
 import { summarize, acquireSlot, slotDir, prio } from "../bin/oc-worker.mjs";
 import { workerOutcome } from "../bin/outcome.mjs";
 import { CHAINS } from "../bin/chains.mjs";
+import { installFixtureGuard, fixtureChildren, reapFixtureChildren } from "./fixtures/fixture-guard.mjs";
+
+// Every fixture child carries this process's suite marker; the guard reaps strays after the suite.
+installFixtureGuard();
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.join(HERE, "..", "bin", "oc-worker.mjs");
@@ -25,6 +29,7 @@ function tmp() {
 }
 function run(extraEnv, ...flags) {
   const dir = tmp();
+  CLEAN.push(dir);
   const prompt = path.join(dir, "mandate.md");
   fs.writeFileSync(prompt, "Review the diff.");
   const argsFile = path.join(dir, "args.json");
@@ -1986,4 +1991,46 @@ test("SIGTERM while waiting for a held slot exits and leaves no slot of its own"
     clearTimeout(hard);
     if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
   }
+});
+
+// ── fixture orphan guard (test-orphans M2) ───────────────────────────────────
+
+test("fake-opencode cap: a hung run exits 124 after FAKE_OC_MAX_MS, well inside the spawn timeout", () => {
+  const r = spawnSync(process.execPath, [FAKE, "run", "--agent", "critic"], {
+    env: { ...process.env, FAKE_OC_MODE: "hang", FAKE_OC_MAX_MS: "500" },
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  assert.equal(r.status, 124, `expected exit 124, got status=${r.status} signal=${r.signal}: ${r.stderr}`);
+});
+
+test("reap: a fixture child orphaned by a SIGKILLed oc-worker is reaped by the guard (Linux)", { skip: process.platform !== "linux", timeout: 15000 }, async () => {
+  const id = `reap-test-${process.pid}-${Date.now()}`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "orch-reap-"));
+  CLEAN.push(dir);
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const argsFile = path.join(dir, "args.json");
+  const out = path.join(dir, "out", "f.md");
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  const r = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", dir, "--prompt", prompt, "--out", out, "--timeout-min", "5"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, FAKE_OC_ARGS_FILE: argsFile, FAKE_OC_MODE: "hang", FAKE_OC_SUITE: id },
+    encoding: "utf8",
+    timeout: 3000,
+    killSignal: "SIGKILL",
+  });
+  // The wrapper died without running its handler (simulates a crash). The detached fake agent survives.
+  const children = fixtureChildren(id);
+  assert.ok(children.length > 0, `expected at least one fixture child for ${id}, got none (r.status=${r.status} signal=${r.signal})`);
+  const killed = reapFixtureChildren(id);
+  assert.ok(killed.length > 0, `expected to kill at least one child, got none`);
+  // Within 5 s every fixture child for this id is gone.
+  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+  let gone = false;
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (fixtureChildren(id).length === 0) { gone = true; break; }
+    await sleep(200);
+  }
+  assert.equal(gone, true, `fixture children survived reaping: ${fixtureChildren(id).join(",")}`);
 });

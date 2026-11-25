@@ -8,6 +8,10 @@ import { fileURLToPath } from "node:url";
 
 import { readSample, slotConfig, allowedSlots, decisionLog, nvidiaCap, nvidiaCapNow, readNvidiaState, recordNvidia429 } from "../bin/slots.mjs";
 import { acquireSlot, slotDir } from "../bin/oc-worker.mjs";
+import { installFixtureGuard } from "./fixtures/fixture-guard.mjs";
+
+// Every fixture child carries this process's suite marker; the guard reaps strays after the suite.
+installFixtureGuard();
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.join(HERE, "..", "bin", "oc-worker.mjs");
