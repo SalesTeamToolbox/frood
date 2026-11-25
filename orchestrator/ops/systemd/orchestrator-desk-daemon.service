@@ -11,6 +11,10 @@ Restart=always
 RestartSec=120
 # exit 3 = a live session owns the desk lock; restarting would only loop
 RestartPreventExitStatus=3
+# Stop and restart signal the daemon alone. The critics and workers it launches are detached runs that report
+# to their stream when they end; with the default KillMode=control-group a restart killed them mid-run (findings 8,
+# plan-desk-daemon-errors: board-close's round-2 critic, 2026-11-24).
+KillMode=process
 
 [Install]
 WantedBy=default.target

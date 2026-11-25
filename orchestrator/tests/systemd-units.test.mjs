@@ -19,6 +19,12 @@ test("daemon unit supervises _run in the foreground with restarts", () => {
   assert.doesNotMatch(svc, /daemon start/); // start double-forks: wrong under a supervisor
 });
 
+test("daemon unit: a stop or restart signals the daemon only, never the runs it launched", () => {
+  const svc = fs.readFileSync(path.join(DIR, "orchestrator-desk-daemon.service"), "utf8");
+  // control-group (the default) and mixed both kill the detached oc-worker critics/workers left in the cgroup.
+  assert.match(svc, /^KillMode=process$/m);
+});
+
 test("every template placeholder is one install.mjs fills", () => {
   const installer = fs.readFileSync(path.join(DIR, "install.mjs"), "utf8");
   const filled = new Set([...installer.matchAll(/"(@[A-Z]+@)"/g)].map((m) => m[1]));

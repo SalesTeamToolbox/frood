@@ -6,7 +6,8 @@
 //   - orchestrator-desk-daemon.service: supervises `desk.mjs daemon _run` (the headless
 //     desk driver). Restart=always + RestartSec=120: a fenced or crashed daemon is back
 //     within ~2 minutes and re-takes an abandoned lock; SIGTERM (systemctl stop) exits
-//     cleanly with the lock released.
+//     cleanly with the lock released. KillMode=process: a stop or restart signals the daemon
+//     only; the critics and workers it launched keep running and report to their stream.
 // Usage: ops/systemd/install.mjs [--by cc|oc] [--uninstall]
 // When the service is enabled, stop/start it with systemctl, not `desk.mjs daemon stop`
 // (the supervisor restarts a SIGTERMed daemon). The service owns the desk whenever no

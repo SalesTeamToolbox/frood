@@ -28,7 +28,9 @@ them, resolve each with `handoff.mjs ack --resolved`. `daemon stop` seizes contr
 watch takes over afterwards); `daemon start` hands back. Never `--takeover` a live daemon silently —
 stop it first. When the systemd unit is enabled (`systemctl --user is-enabled orchestrator-desk-daemon`),
 use `systemctl --user stop/start` instead — the supervisor restarts a SIGTERMed daemon within ~2 minutes,
-so `daemon stop` cannot hold.
+so `daemon stop` cannot hold. The unit runs with `KillMode=process`: stop and restart end the daemon only, while
+the critics and workers it launched keep running and report to their stream. To end those runs too, follow the
+stop with `systemctl --user kill orchestrator-desk-daemon`.
 
 ## 2. Arm the watcher
 
