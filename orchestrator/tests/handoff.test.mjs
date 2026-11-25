@@ -306,6 +306,15 @@ test("appendEvent dedupes by key and writes the documented line shape", () => {
   });
 });
 
+test("unhandled ignores a child-session record (handoff.mjs child), so the desk never pages it", () => {
+  const { h } = env();
+  withHome(h, () => {
+    appendEvent("s", { key: "child:s:local_abc", event: "child", session: "local_abc", harness: "claude-code", role: "nested" });
+    appendEvent("s", { key: "run:worker-r1:done", kind: "run-done", run: "worker-r1", out: "o", agent: "worker" });
+    assert.deepEqual(unhandled("s").map((e) => e.key), ["run:worker-r1:done"]);
+  });
+});
+
 test("unhandled ignores queued, and an ack clears an event; resolved is a second line on the same key", () => {
   const { h } = env();
   withHome(h, () => {

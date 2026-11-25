@@ -93,7 +93,9 @@ export function openEscalations(stream) {
       rows.set(e.key, { key: e.key, reason: String(e.reason ?? e.key) });
     }
   } catch {}
-  return [...rows.values()].filter((r) => !ticketResolved(r.key, repo));
+  // A `child:` key is a child-session record, never an escalation; rows paged for one before the 2026-11-25 fix
+  // (handoff.mjs isBookkeepingEvent) stay in escalations.jsonl, so drop them here.
+  return [...rows.values()].filter((r) => !String(r.key).startsWith("child:") && !ticketResolved(r.key, repo));
 }
 
 // A session's newest sign of life in the two session stores, or null when it is in neither.

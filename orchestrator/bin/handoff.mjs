@@ -493,10 +493,13 @@ export function appendAck(name, key, action = "", { resolved = false, ticket } =
   });
 }
 
-// Events nobody has handled yet. `queued` is bookkeeping for the desk's dead detection, never something to act on.
+// Events nobody has handled yet. `queued` is bookkeeping for the desk's dead detection, and `child` (handoff.mjs child,
+// written by /frood-ticket for /frood-learn) is a record of a child session: neither is something to act on. Until
+// 2026-11-25 a `child` event reached the desk's decideStep and paged "ESCALATE unknown-event child:…".
+export const isBookkeepingEvent = (e) => e?.kind === "queued" || e?.event === "child";
 export function unhandled(name) {
   const acks = readAcks(name);
-  return readEvents(name).filter((e) => e.kind !== "queued" && !acks.has(e.key));
+  return readEvents(name).filter((e) => !isBookkeepingEvent(e) && !acks.has(e.key));
 }
 
 // ---------------------------------------------------------------- the verbs (shared with T8's desk)

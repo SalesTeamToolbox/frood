@@ -474,6 +474,15 @@ function writeTicket(h, id, stage) {
   fs.writeFileSync(path.join(d, `${id}.json`), JSON.stringify({ schema: 1, id, title: `t ${id}`, stage }));
 }
 
+test("openEscalations: a paged child-session record is not an escalation", () => {
+  const h = mkdtemp();
+  mkStream(h, "s");
+  const dir = path.join(h, ".config", "orchestrator", "desk-daemon");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "escalations.jsonl"), [{ stream: "s", key: "child:s:local_abc", reason: "ESCALATE unknown-event child:s:local_abc" }, { stream: "s", key: "a", reason: "r-a" }].map((o) => JSON.stringify(o)).join("\n") + "\n");
+  withHome(h, {}, () => assert.deepEqual(openEscalations("s").map((e) => e.key), ["a"]));
+});
+
 test("openEscalations: ticket closed -> row dropped", () => {
   const h = mkdtemp();
   mkStream(h, "s", { repo: h });
