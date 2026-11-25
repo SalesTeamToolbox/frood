@@ -352,7 +352,7 @@ def test_learn_runs_after_kill_finding(tmp_path):
             "c2",
             five_after + 1000,
             five_after + 1000,
-            part_data("shell", "git commit -m x", five_after + 1000, five_after + 1000),
+            part_data("shell", "cd /wt && git commit -m x", five_after + 1000, five_after + 1000),
         ),
     )
     cur.execute(

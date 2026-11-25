@@ -762,7 +762,7 @@ function isoToMs(s) {
 
 function dbQuery(dbPath, sql) {
   if (!fs.existsSync(dbPath)) return null;
-  const result = spawnSync("sqlite3", [dbPath, sql], { encoding: "utf8" });
+  const result = spawnSync("sqlite3", [dbPath, sql], { encoding: "utf8", timeout: 30000 });
   if (result.status !== 0) return null;
   const out = result.stdout.trim();
   if (!out || out === "[]") return null;
@@ -813,9 +813,15 @@ function perRunOpencodeFindings(stream) {
     if (queued && queued.at) {
       const qMs = isoToMs(queued.at);
       if (qMs !== null) {
-        const firstMsg = sessionFirstMessageAtOrAfter(dbPath, done.session, qMs);
-        if (firstMsg !== null) {
-          const delayMs = firstMsg - qMs;
+        // oc-worker's own record of the slot wait (receipt queued_s) wins; else first prompt message - queued.at.
+        let receiptQueuedS = null;
+        try {
+          const rc = done.out ? JSON.parse(fs.readFileSync(done.out + ".receipt.json", "utf8")) : null;
+          if (rc && Number.isFinite(rc.queued_s)) receiptQueuedS = rc.queued_s;
+        } catch {}
+        const firstMsg = receiptQueuedS === null ? sessionFirstMessageAtOrAfter(dbPath, done.session, qMs) : null;
+        if (receiptQueuedS !== null || firstMsg !== null) {
+          const delayMs = receiptQueuedS !== null ? receiptQueuedS * 1000 : firstMsg - qMs;
           if (delayMs > 120 * 1000) {
             const delayMin = Math.round(delayMs / 1000 / 60);
             findings.push({
@@ -858,7 +864,7 @@ function perRunOpencodeFindings(stream) {
         const data = p.data;
         const input = data && data.state && data.state.input;
         const cmd = input && input.command;
-        if (cmd && /^\s*git\s+(add|commit|stash|reset|checkout)\b/.test(cmd)) {
+        if (cmd && /\bgit\s+(?:-C\s+\S+\s+)?(add|commit|stash|reset|checkout)\b/.test(cmd)) {
           gitWrites.push(cmd.trim().slice(0, 100));
         }
       }
