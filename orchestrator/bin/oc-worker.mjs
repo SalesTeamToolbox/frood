@@ -691,13 +691,18 @@ function ticketIdOf(out) {
 const runName = (a) => `${ticketIdOf(a.out)}/${path.basename(a.out, path.extname(a.out))}`;
 
 // Run one git command in <dir> with a hard timeout (process-safety rule: no unbounded spawns).
-function gitTimed(dir, argv, timeoutMs) {
-  return execFileSync("git", ["-C", dir, ...argv], {
+// Trims only trailing newlines per line so porcelain output keeps its leading status columns
+// (` M a.txt` stays ` M a.txt`); `maxBuffer` bounds a huge dirty-tree listing.
+function gitTimed(dir, argv, timeoutMs, env) {
+  const out = execFileSync("git", ["-C", dir, ...argv], {
     encoding: "utf8",
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
     timeout: timeoutMs,
-  }).trim();
+    maxBuffer: 10 * 1024 * 1024,
+    env,
+  }).toString("utf8");
+  return out.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n+$/, "");
 }
 
 // Fresh-tree preflight for a fresh (non--session) worker run with --stream.
@@ -707,6 +712,10 @@ function freshTreeCheck(dir, base) {
   if (!base) {
     console.error(`oc-worker: ticket.json has no "base": skipping fresh-tree check`);
     return;
+  }
+  // A leading "-" would be read as a git option.
+  if (base.startsWith("-")) {
+    throw new StreamRefused(`base ${base} starts with '-' — pass a bare commit sha`, 10);
   }
   // 1. --dir is a git work tree; if not, skip the check (warn on stderr).
   let inside;
@@ -720,11 +729,13 @@ function freshTreeCheck(dir, base) {
     return;
   }
   // 2. Base resolves. origin/<rest>: fetch first (60 s); a failed fetch is a warning only.
+  //    GIT_TERMINAL_PROMPT=0 keeps a missing remote from blocking on a credential prompt.
+  const fetchEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
   let rest = base;
   if (base.startsWith("origin/")) {
     rest = base.slice("origin/".length);
     try {
-      gitTimed(dir, ["fetch", "origin", rest], 60000);
+      gitTimed(dir, ["fetch", "origin", rest], 60000, fetchEnv);
     } catch {
       console.error(`oc-worker: fetch origin ${rest} failed: fresh-tree check continues`);
     }
@@ -750,14 +761,27 @@ function freshTreeCheck(dir, base) {
       10,
     );
   }
-  // 4. Tree must be clean (.gitignore honoured).
+  // 4. Tree must be clean (.gitignore honoured). A git-status failure refuses rather than
+  //    reading as clean; untracked symlinks/junctions are not counted as dirt.
   let status;
   try {
     status = gitTimed(dir, ["status", "--porcelain"], 10000);
   } catch {
-    status = "";
+    throw new StreamRefused(`dirty check failed: git status --porcelain failed in ${dir}`, 10);
   }
-  const dirty = status.split("\n").filter(Boolean);
+  const dirty = [];
+  for (const line of status.split("\n")) {
+    if (line.length === 0) continue;
+    if (line.startsWith("?? ")) {
+      const p = path.join(dir, line.slice(3));
+      let isLink = false;
+      try {
+        isLink = fs.lstatSync(p).isSymbolicLink();
+      } catch {}
+      if (isLink) continue; // untracked symlink/junction: not real dirt
+    }
+    dirty.push(line);
+  }
   if (dirty.length) {
     throw new StreamRefused(
       `dirty tree: ${dirty.length} uncommitted path(s) in ${dir} (first: ${dirty[0]}) — commit, stash or remove them before dispatch; another session's work is the owner's call`,

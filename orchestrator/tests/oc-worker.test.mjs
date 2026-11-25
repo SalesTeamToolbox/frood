@@ -1097,6 +1097,100 @@ test("ticket.json without base: runs (warning only)", () => {
   assert.ok(r.stderr.includes("no \"base\""), `expected base-missing warning, got: ${r.stderr}`);
 });
 
+test("dirty tree: untracked symlink/junction is not counted as dirty -> runs", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, head } = makeRepo();
+  fs.mkdirSync(path.join(workdir, "real-dir"), { recursive: true });
+  fs.symlinkSync(path.join(workdir, "real-dir"), path.join(workdir, "link-to-dir")); // untracked symlink
+  const r = freshStream(h, workdir, "worker", "worker-r1.md", head);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
+test("dirty tree: a tracked change still refuses even alongside an untracked symlink", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, head } = makeRepo();
+  fs.symlinkSync(path.join(workdir, "a.txt"), path.join(workdir, "link.txt")); // untracked symlink (ignored)
+  fs.writeFileSync(path.join(workdir, "a.txt"), "modified\n"); // tracked change => real dirt
+  const r = freshStream(h, workdir, "worker", "worker-r1.md", head);
+  assert.equal(r.status, 10, r.stdout + r.stderr);
+  assert.match(r.stderr, /oc-worker: dirty tree/);
+});
+
+test("--role worker expansion runs on a clean tree (agent worker-nvidia)", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, head } = makeRepo();
+  const prompt = path.join(workdir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const git = (...args) => spawnSync("git", ["-C", workdir, ...args], { encoding: "utf8" });
+  git("add", prompt);
+  git("commit", "-m", "prompt");
+  const runDir = path.join(workdir, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir, base: head }));
+  const out = path.join(runDir, "worker-r1.md");
+  const argsFile = path.join(workdir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--role", "worker", "--dir", workdir, "--prompt", prompt, "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h, FAKE_OC_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(JSON.parse(r.stdout.trim()).agent, "worker-nvidia", "--role worker expands to worker-nvidia");
+  const ev = eventsOf(sd);
+  assert.deepEqual(ev.map((e) => e.key), ["run:m6a/worker-r1:queued", "run:m6a/worker-r1:done"]);
+});
+
+test("--agent worker-nvidia runs on a clean tree", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, head } = makeRepo();
+  const r = freshStream(h, workdir, "worker-nvidia", "worker-r1.md", head);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
+test("origin/ base: fetch succeeds and base is an ancestor of HEAD -> runs", () => {
+  const { h, sd } = streamHome();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "orch-ocw-origin-"));
+  CLEAN.push(root);
+  const git = (cwd, ...args) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+  const origin = path.join(root, "origin");
+  fs.mkdirSync(origin);
+  git(origin, "init", "-b", "main");
+  git(origin, "config", "user.email", "t@t");
+  git(origin, "config", "user.name", "t");
+  fs.writeFileSync(path.join(origin, "o.txt"), "o\n");
+  git(origin, "add", "o.txt");
+  git(origin, "commit", "-m", "origin");
+  const originHead = git(origin, "rev-parse", "HEAD");
+
+  const workdir = path.join(root, "wt");
+  fs.mkdirSync(workdir);
+  git(workdir, "init", "-b", "main");
+  git(workdir, "config", "user.email", "t@t");
+  git(workdir, "config", "user.name", "t");
+  git(workdir, "remote", "add", "origin", origin);
+  git(workdir, "fetch", "origin");
+  git(workdir, "checkout", "-b", "dev", "origin/main");
+  fs.writeFileSync(path.join(workdir, ".gitignore"), "run/\n");
+  git(workdir, "add", ".gitignore");
+  git(workdir, "commit", "-m", "gitignore");
+  fs.writeFileSync(path.join(workdir, "a.txt"), "a\n");
+  git(workdir, "add", "a.txt");
+  git(workdir, "commit", "-m", "head");
+
+  const prompt = path.join(workdir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  git(workdir, "add", prompt);
+  git(workdir, "commit", "-m", "prompt");
+  const runDir = path.join(workdir, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir, base: "origin/main" }));
+  const out = path.join(runDir, "worker-r1.md");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "worker", "--dir", workdir, "--prompt", prompt, "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
 test("O4: both receipt writes go through atomicWrite", () => {
   const src = fs.readFileSync(BIN, "utf8");
   assert.equal((src.match(/atomicWrite\([^\n]*receipt\.json/g) || []).length, 2);
