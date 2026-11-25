@@ -674,7 +674,7 @@ test("step: verdict rows — round after two resumes, exhausted, no-session, sen
   assert.equal(cliLines(so.h, ["step", so.name, "verdict:worker-r1"]).lines[0], resume(so.name, so.runDir, 1), "another ticket's resume does not count");
 });
 
-test("step: worker-nvidia timed-out run resumes with --role worker --session, never --fallback worker-burst", () => {
+test("step: worker-nvidia timed-out run resumes with --role worker --session, fresh out + mandate prompt", () => {
   const { h, name, runDir } = t8Stream("nvidia-timeout");
   const OC_WORKER = fileURLToPath(new URL("../bin/oc-worker.mjs", import.meta.url)).replace(/\\/g, "/");
   inHome(h, undefined, () => {
@@ -682,8 +682,40 @@ test("step: worker-nvidia timed-out run resumes with --role worker --session, ne
     appendEvent(name, evDone("worker-r1", runDir, { agent: "worker-nvidia", outcome: "timeout", session: "ses_nvidia" }));
   });
   const line = cliLines(h, ["step", name, "run:worker-r1:done"]).lines[0];
-  assert.match(line, new RegExp(`^ACTION resume-worker node ${OC_WORKER} --role worker --dir ${fwd(runDir)} --prompt ${fwd(path.join(runDir, "worker-prompt-r1.md"))} --report ${fwd(path.join(runDir, "report.md"))} --out \\S+ --session ses_nvidia --stream ${name}$`));
+  assert.equal(
+    line,
+    `ACTION resume-worker node ${OC_WORKER} --role worker --dir ${fwd(runDir)} --prompt ${fwd(path.join(runDir, "mandate.md"))} --report ${fwd(path.join(runDir, "report.md"))} --out ${fwd(path.join(runDir, "worker-r2.md"))} --session ses_nvidia --stream ${name}`,
+  );
   assert.ok(!line.includes("--fallback"), "no hand-typed paid-first fallback");
+  assert.ok(!line.includes("worker-prompt-r1"), "prompt is the Mandate, never the unwritten worker-prompt-r1.md");
+});
+
+test("step: a timed-out worker-nvidia run resumes on a fresh out, never DONE on replay", () => {
+  const { h, name, runDir } = t8Stream("nvidia-resume");
+  const OC_WORKER = fileURLToPath(new URL("../bin/oc-worker.mjs", import.meta.url)).replace(/\\/g, "/");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir, { agent: "worker-nvidia" }));
+    appendEvent(name, evDone("worker-r1", runDir, { agent: "worker-nvidia", outcome: "timeout", session: "ses_nvidia" }));
+  });
+  const first = cliLines(h, ["step", name, "run:worker-r1:done"]).lines[0];
+  assert.match(first, new RegExp(`^ACTION resume-worker node ${OC_WORKER} --role worker --dir ${fwd(runDir)} --prompt ${fwd(path.join(runDir, "mandate.md"))} --report ${fwd(path.join(runDir, "report.md"))} --out ${fwd(path.join(runDir, "worker-r2.md"))} --session ses_nvidia --stream ${name}$`));
+  // Replay: the fresh out worker-r2.md has no queued event, so effectPresent is false and the stored line
+  // repeats (not DONE, not resume-inflight) — doResume would spawn it.
+  const second = cliLines(h, ["step", name, "run:worker-r1:done"]).lines[0];
+  assert.equal(second, first, "fresh out has no queued event: the resume line repeats");
+  assert.ok(!/DONE/.test(second), "not reported DONE / resume-inflight");
+});
+
+test("step: a timed-out worker-nvidia run with every resume slot taken pages worker-timeout", () => {
+  const { h, name, runDir } = t8Stream("nvidia-exhausted");
+  fs.writeFileSync(path.join(runDir, "worker-r2.md"), "taken\n");
+  fs.writeFileSync(path.join(runDir, "worker-r3.md"), "taken\n");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir, { agent: "worker-nvidia" }));
+    appendEvent(name, evDone("worker-r1", runDir, { agent: "worker-nvidia", outcome: "timeout", session: "ses_nvidia" }));
+  });
+  const line = cliLines(h, ["step", name, "run:worker-r1:done"]).lines[0];
+  assert.match(line, /^ESCALATE worker-timeout /);
 });
 
 test("step: CHANGES_REQUESTED on worker-nvidia resumes same agent + session, no --fallback", () => {

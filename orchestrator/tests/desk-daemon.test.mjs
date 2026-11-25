@@ -184,6 +184,35 @@ test("driveOnce: a finished critic run becomes a verdict and its run-done leaves
   }
 });
 
+test("driveOnce (dry): a timed-out worker-nvidia run resumes on a fresh out with the mandate prompt", async () => {
+  const h = home();
+  mkStream(h);
+  const t = mkTicket(h);
+  const out = path.join(h, "reports", "t1", "worker-r1.md");
+  fs.writeFileSync(out, "done\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/worker-r1", out, path.join(h, "reports", "t1", "ticket.json"), "worker-nvidia"));
+    appendEvent("m6a", evDone("t1/worker-r1", out, "worker-nvidia", { outcome: "timeout", session: "ses_nvidia" }));
+  });
+  const saved = { ...process.env };
+  Object.assign(process.env, { ORCH_DAEMON_DRY_RUN: "1", ORCH_NO_NOTIFY: "1" });
+  try {
+    const first = await inHome(h, async () => await driveOnce({ lastPoll: null, printed: new Set() }, {}));
+    assert.equal(first.length, 1);
+    assert.equal(first[0].outcome, "resume", JSON.stringify(first));
+    // nextOutTaken checks worker-r<nr+1>.md, so the fresh slot is worker-r2.md (never the timed-out run's own out).
+    assert.match(first[0].line, /--out .*worker-r2\.md/, "resume names the fresh next out");
+    assert.match(first[0].line, /--prompt .*mandate\.md/, "resume restates the task from the Mandate");
+    assert.ok(!first[0].line.includes("worker-prompt-r1"), "prompt is the Mandate, never the unwritten worker-prompt-r1.md");
+    assert.ok(!first[0].line.includes("--fallback"), "no hand-typed paid-first fallback");
+  } finally {
+    for (const k of Object.keys({ ORCH_DAEMON_DRY_RUN: 1, ORCH_NO_NOTIFY: 1 })) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
 test("daemon start refuses a live session lock; takes a stale one; stop clears it", () => {
   const h = home();
   mkStream(h);

@@ -980,8 +980,10 @@ export function decideStep(stream, key, events, lines) {
       let nr = workerRound;
       while (nr < max && nextOutTaken(runDir, nr, events, run)) nr++;
       if (nr < max && !nextOutTaken(runDir, nr, events, run)) {
-        const next = path.join(runDir, `worker-r${nr}.md`);
-        const prompt = path.join(runDir, `worker-prompt-r${workerRound}.md`);
+        // nextOutTaken(nr) checks worker-r<nr+1>.md, so the fresh slot is r<nr+1> (never the timed-out run's own out).
+        // The prompt is the Mandate: it always exists, and step stays pure (an interactive desk runs this verbatim).
+        const next = path.join(runDir, `worker-r${nr + 1}.md`);
+        const prompt = ticket.mandate;
         const cmd = `node ${OC_WORKER} --role worker --dir ${ticket.worktree} --prompt ${prompt} --report ${ticket.report} --out ${next} --session ${wsession} --stream ${stream}`;
         return { action: `ACTION resume-worker ${cmd}`, ticket: slug };
       }
