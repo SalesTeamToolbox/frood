@@ -108,8 +108,9 @@ stream's child sessions and reviews each through the phase-5 lenses:
 Each child finding is tagged with `role` (worker / critic / scout / senior / nested / orchestrator),
 `harness` (opencode / claude-code), `model` when known, and `session` id. A child whose transcript is
 missing or aged out is listed with `status: "missing"` and a one-line note; the run never crashes on it.
-A `child` event whose session starts with `local_` (the desktop app's id, not a transcript id) is listed
-with `status: "missing"` and a note that the session must record itself with `$CLAUDE_CODE_SESSION_ID`.
+A `child` event whose session starts with `local_` (the desktop app's id, not a transcript id) is mapped
+to its transcript id through the app's session metadata (`cliSessionId`); if that metadata is gone it is listed
+as `missing` with the reason. Nested sessions record themselves with `$CLAUDE_CODE_SESSION_ID` (`/frood-next`).
 When a session is both a claimant and a `child` event, one child is kept and role `nested` wins over
 `orchestrator`. The report gains a top-level `children` array (omitted with `--no-children`).
 
