@@ -5,16 +5,16 @@
 //   node session-pressure.mjs [--json] [--notify]
 //
 // Reads /proc/meminfo + /proc/loadavg, every claude process (pid, RSS, cwd,
-// session id from --resume=<id>, idle age), Frood MCP server count + RSS, and
-// opencode count + RSS. Prints one summary line and the idle sessions (>= 30 min),
-// oldest first. --notify sends notify-send when the level rises or every 60 min
-// while warn-or-above (rate-limited through a state file). Skips all notifying
-// when ORCH_NO_NOTIFY=1, and is a no-op on non-Linux or when /proc is missing.
+// session id, idle age), Frood MCP server count + RSS, and opencode count + RSS.
+// Prints one summary line and the idle sessions (>= 30 min), oldest first.
+// --notify sends notify-send when the level rises or every 60 min while
+// warn-or-above (rate-limited through a state file). Skips all notifying when
+// ORCH_NO_NOTIFY=1, and is a no-op on non-Linux or when /proc is missing.
 // It never kills, archives or renices anything — only reports.
 //
-//   export function measure(procRoot, clock)  // injectable /proc root + clock
-//   export function level(freeGB, claudeN, load5)  // pure level decision
-//   export function shouldNotify(prev, nowMs, level)  // notify decision + rate-limit
+//   export function measure(procRoot, clock, homeDir)  // injectable /proc root, clock, home
+//   export function level(freeGB, claudeN, load5)        // pure level decision
+//   export function shouldNotify(prev, nowMs, lvl)       // notify decision + rate-limit
 //
 // State: <ORCH_HOME || ~>/.config/orchestrator/session-pressure.json
 //   { lastLevel, lastNotifyMs, cpuTime: { [pid]: ns } }
@@ -29,6 +29,7 @@ import { execFileSync } from "node:child_process";
 const GB = 1024 * 1024;
 const IDLE_MIN = 30;
 const NOTIFY_MS = 60 * 60 * 1000;
+const NOTIFY_CAP = 8; // oldest idle sessions to show in a notification body
 
 // Env-overridable thresholds. ORCH_PRESSURE_* (values in GB, sessions, load).
 const MEM_OK_GB = envNum("ORCH_PRESSURE_MEM_OK_GB", 8);
@@ -42,23 +43,27 @@ function envNum(name, def) {
   return Number.isFinite(v) ? v : def;
 }
 
-function statePath() {
-  return path.join(process.env.ORCH_HOME || os.homedir(), ".config", "orchestrator", "session-pressure.json");
+function resolveHome(homeDir) {
+  return homeDir ?? process.env.ORCH_HOME ?? os.homedir();
 }
 
-export function readState() {
+function statePath(homeDir) {
+  return path.join(resolveHome(homeDir), ".config", "orchestrator", "session-pressure.json");
+}
+
+export function readState(homeDir) {
   try {
-    const s = JSON.parse(fs.readFileSync(statePath(), "utf8"));
+    const s = JSON.parse(fs.readFileSync(statePath(homeDir), "utf8"));
     return s && typeof s === "object" ? s : {};
   } catch {
     return {};
   }
 }
 
-export function writeState(s) {
+export function writeState(s, homeDir) {
   try {
-    fs.mkdirSync(path.dirname(statePath()), { recursive: true });
-    fs.writeFileSync(statePath(), JSON.stringify(s));
+    fs.mkdirSync(path.dirname(statePath(homeDir)), { recursive: true });
+    fs.writeFileSync(statePath(homeDir), JSON.stringify(s));
   } catch {
     // best effort: notifying without state still works (just no rate-limit memory)
   }
@@ -130,25 +135,60 @@ function procCmdline(procRoot, pid) {
   }
 }
 
+function procArgv0(procRoot, pid) {
+  // argv[0] is the first NUL-terminated segment of cmdline.
+  try {
+    const raw = fs.readFileSync(path.join(procRoot, String(pid), "cmdline"), "utf8");
+    return raw.split("\0")[0];
+  } catch {
+    return "";
+  }
+}
 
-function cwdSlug(cwd) {
-  // ~/.claude/projects/<slug> matches the home-relative path with slashes -> dashes.
-  const rel = cwd.replace(os.homedir(), "").replace(/^\/+/, "");
+function cwdSlug(cwd, home) {
+  // <home>/.claude/projects/<slug>: home-relative path, slashes -> dashes.
+  if (!cwd) return "home";
+  let rel = cwd;
+  if (home && rel.startsWith(home)) rel = rel.slice(home.length);
+  rel = rel.replace(/^\/+/, "");
   return rel.replace(/\//g, "-") || "home";
 }
 
-function findIdleAge(sessionId, cwd, nowMs) {
-  // Prefer transcript mtime; fall back to process CPU-time delta tracked in state.
-  if (!cwd) return { ms: null, source: "none" };
-  const tdir = path.join(os.homedir(), ".claude", "projects", cwdSlug(cwd));
+// Read a live-session file <home>/.claude/sessions/<pid>.json.
+// Returns { sessionId, cwd, name, status, statusUpdatedAt } or null.
+function sessionFile(home, pid) {
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(home, ".claude", "sessions", String(pid) + ".json"), "utf8"));
+    if (!s || typeof s !== "object") return null;
+    return {
+      sessionId: s.sessionId || null,
+      cwd: s.cwd || null,
+      name: s.name || null,
+      status: s.status || null,
+      statusUpdatedAt: s.statusUpdatedAt != null ? Number(s.statusUpdatedAt) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Transcript mtime fallback for idle age, and title fallback.
+function transcriptInfo(home, sessionId, cwd, nowMs) {
+  if (!cwd || !sessionId) return { ms: null, title: null };
+  const tdir = path.join(home, ".claude", "projects", cwdSlug(cwd, home));
   const tfile = path.join(tdir, `${sessionId}.jsonl`);
+  let ms = null;
+  let title = null;
   try {
     const st = fs.statSync(tfile);
-    return { ms: nowMs - st.mtimeMs, source: "transcript" };
-  } catch {
-    // no transcript: fall back below
-  }
-  return { ms: null, source: "none" };
+    ms = nowMs - st.mtimeMs;
+  } catch {}
+  try {
+    const content = fs.readFileSync(tfile, "utf8");
+    const mt = content.match(/"title":"([^"]{0,80})"/);
+    if (mt) title = mt[1];
+  } catch {}
+  return { ms, title };
 }
 
 // ---- pure, exported helpers -------------------------------------------------
@@ -162,35 +202,46 @@ export function level(freeGB, claudeN, load5) {
   return "ok";
 }
 
-// Decide whether to notify now, and record the result. prev = last state.
-// Returns { notify: boolean, reason: string }. Rate-limits: notifies when the
-// level rises above the last reported level, or every NOTIFY_MS while warn+.
-export function shouldNotify(prev, nowMs, lvl) {
-  const last = prev.lastLevel;
-  const lastNotify = prev.lastNotifyMs;
-  const rising = last && last !== "ok" && lvl !== "ok" && levelRank(lvl) > levelRank(last);
-  const overdue = lastNotify == null || nowMs - lastNotify >= NOTIFY_MS;
-  const notify = (lvl !== "ok") && (rising || overdue);
-  return { notify, reason: rising ? "level rose" : overdue ? "60 min elapsed" : "unchanged" };
-}
-
 function levelRank(l) {
   return { ok: 0, warn: 1, critical: 2 }[l] ?? 0;
 }
 
+// Decide whether to notify now. Returns { notify, reason }.
+// Notifies when the level rises above the last observed level (ok included) or
+// every NOTIFY_MS while warn-or-above. ok never notifies.
+export function shouldNotify(prev, nowMs, lvl) {
+  const last = prev.lastLevel;
+  const lastNotify = prev.lastNotifyMs;
+  const rising = last != null && levelRank(lvl) > levelRank(last);
+  const overdue = lastNotify == null || nowMs - lastNotify >= NOTIFY_MS;
+  const notify = lvl !== "ok" && (rising || overdue);
+  return {
+    notify,
+    reason: rising ? "level rose" : overdue ? "60 min elapsed" : "unchanged",
+  };
+}
+
 // ---- measurement -----------------------------------------------------------
 
-function measureOnce(procRoot, clock) {
+function measureOnce(procRoot, clock, homeDir) {
   const now = clock ? clock() : Date.now();
+  const home = resolveHome(homeDir);
   const mi = meminfo(procRoot);
   const freeGb = mi.availKb != null ? mi.availKb / (1024 * 1024) : null;
   const load = load5(procRoot);
 
-  // Count processes. On this box "claude" means the claude code binary
-  // (comm == "claude"); mcp_server.py and opencode are counted by cmdline.
-  let claudeProcs = [];
+  // Count a process as a session only when the basename of argv[0] is "claude"
+  // (excludes the claude-desktop disclaimer wrapper and other helper processes).
+  // Dedupe by session id, keeping the larger RSS.
+  // mcp_server.py and opencode are counted separately for every process.
   let mcpN = 0, mcpRss = 0;
   let ocN = 0, ocRss = 0;
+  const bySession = new Map(); // sessionId -> entry (largest rss)
+  const sessions = [];
+
+  // Process CPU-time state, read once and written once at the end.
+  const state = readState(home);
+  const cpuTimes = state.cpuTime || {};
 
   try {
     const entries = fs.readdirSync(procRoot, { withFileTypes: true });
@@ -205,52 +256,74 @@ function measureOnce(procRoot, clock) {
       } else if (low.includes("opencode") || low.includes("opencode-pty")) {
         ocN += 1; if (rss != null) ocRss += rss;
       }
-      if (/--resume=([^\s]+)/.test(cmd)) {
-        claudeProcs.push({ pid, cmd, rss });
+      if (path.basename(procArgv0(procRoot, pid)) !== "claude") continue;
+
+      const sf = sessionFile(home, pid);
+      const resume = procCmdline(procRoot, pid).match(/--resume=([^\s]+)/);
+      const sessionId = (sf && sf.sessionId) ? sf.sessionId : (resume ? resume[1] : "");
+      const cwd = (sf && sf.cwd) ? sf.cwd : procCwd(procRoot, pid);
+      const rssGb = rss != null ? rss / GB : null;
+
+      // Idle age: session file (status idle -> now - statusUpdatedAt) first,
+      // then transcript mtime, then process CPU-time delta tracked in state.
+      let idleMs, idleSource;
+      let title = sf ? sf.name : null;
+      if (sf) {
+        if (sf.status === "idle") {
+          idleMs = sf.statusUpdatedAt != null ? now - sf.statusUpdatedAt : null;
+          idleSource = "session-file";
+        } else {
+          idleMs = 0; // non-idle status: not idle
+          idleSource = "session-file";
+        }
+      } else {
+        const tr = transcriptInfo(home, sessionId, cwd, now);
+        idleMs = tr.ms;
+        idleSource = tr.ms != null ? "transcript" : "none";
+        title = tr.title;
+      }
+
+      // CPU-time fallback for idle age when nothing else is available.
+      if (idleMs == null) {
+        const cpuMs = cpuTimeMs(procRoot, pid);
+        const prevCpu = cpuTimes[String(pid)];
+        idleMs = prevCpu != null ? cpuMs - prevCpu : null;
+        if (cpuMs != null) cpuTimes[String(pid)] = cpuMs;
+        idleSource = idleMs != null ? "cpu" : "none";
+      }
+
+      const entry = { pid, sessionId, cwd, rss: rssGb, idleMs, idleSource, title };
+
+      if (sessionId) {
+        const existing = bySession.get(sessionId);
+        if (existing) {
+          if (rssGb != null && (existing.rss == null || rssGb > existing.rss)) {
+            // keep the larger RSS; merge idle/title info from the winning entry
+            bySession.set(sessionId, {
+              ...existing,
+              ...entry,
+              rss: Math.max(existing.rss ?? 0, rssGb ?? 0),
+            });
+          }
+        } else {
+          bySession.set(sessionId, entry);
+        }
+      } else {
+        sessions.push(entry);
       }
     }
   } catch {
     // /proc unreadable: nothing measurable
   }
 
-  // claude processes counted by comm regardless of --resume
-  try {
-    for (const e of fs.readdirSync(procRoot, { withFileTypes: true })) {
-      if (!e.isDirectory() || !/^\d+$/.test(e.name)) continue;
-      try {
-        const comm = fs.readFileSync(path.join(procRoot, e.name, "comm"), "utf8").trim();
-        if (comm === "claude" && !claudeProcs.some((c) => c.pid === Number(e.name))) {
-          claudeProcs.push({ pid: Number(e.name), cmd: procCmdline(procRoot, Number(e.name)), rss: rssKb(procRoot, Number(e.name)) });
-        }
-      } catch {}
-    }
-  } catch {}
+  state.cpuTime = cpuTimes;
+  writeState(state, home);
 
-  const state = readState();
-  const cpuTimes = state.cpuTime || {};
-  const sessions = [];
-  for (const c of claudeProcs) {
-    const m = c.cmd.match(/--resume=([^\s]+)/);
-    const sessionId = m ? m[1] : "";
-    const cwd = procCwd(procRoot, c.pid);
-    const idle = findIdleAge(sessionId, cwd, now);
-    const rss = c.rss != null ? c.rss / GB : null;
-    const cpuMs = cpuTimeMs(procRoot, c.pid);
-    let idleMs = idle.ms;
-    if (idleMs == null && cpuMs != null) {
-      const prev = cpuTimes[String(c.pid)];
-      idleMs = prev != null ? cpuMs - prev : null;
-      cpuTimes[String(c.pid)] = cpuMs;
-    }
-    sessions.push({ pid: c.pid, sessionId, cwd, rss, idleMs, idleSource: idle.source });
-  }
+  for (const e of bySession.values()) sessions.push(e);
 
   const idle = sessions
     .filter((s) => s.idleMs != null && s.idleMs >= IDLE_MIN * 60 * 1000)
     .sort((a, b) => (b.idleMs ?? 0) - (a.idleMs ?? 0));
-
-  state.cpuTime = cpuTimes;
-  writeState(state);
 
   return {
     now,
@@ -263,13 +336,13 @@ function measureOnce(procRoot, clock) {
   };
 }
 
-export function measure(procRoot = "/proc", clock = undefined) {
+export function measure(procRoot = "/proc", clock = undefined, homeDir = undefined) {
   // non-Linux or missing /proc: a no-op (nothing measurable, nothing to report)
   if (process.platform !== "linux") {
     return { freeGb: null, load: null, claudeN: 0, mcpN: 0, mcpRss: 0, ocN: 0, ocRss: 0, sessions: [], idle: [] };
   }
   try {
-    return measureOnce(procRoot, clock);
+    return measureOnce(procRoot, clock, homeDir);
   } catch {
     return { freeGb: null, load: null, claudeN: 0, mcpN: 0, mcpRss: 0, ocN: 0, ocRss: 0, sessions: [], idle: [] };
   }
@@ -285,57 +358,53 @@ function fmtIdle(ms) {
   return h > 0 ? `${h}h ${m % 60}m` : `${m}m`;
 }
 
-function titleOf(sessionId, cwd) {
-  try {
-    if (!cwd) return null;
-    const tdir = path.join(os.homedir(), ".claude", "projects", cwdSlug(cwd));
-    const tf = path.join(tdir, `${sessionId}.jsonl`);
-    const content = fs.readFileSync(tf, "utf8");
-    const mt = content.match(/"title":"([^"]{0,80})"/);
-    if (mt) return mt[1];
-    const ct = path.join(tdir, "custom-title.json");
-    try {
-      const cj = JSON.parse(fs.readFileSync(ct, "utf8"));
-      if (cj.customTitle) return cj.customTitle;
-    } catch {}
-    return null;
-  } catch {
-    return null;
+export function summaryLine(lvl, m) {
+  const free = fmtGb(m.freeGb);
+  const load = m.load == null ? "?" : m.load.toFixed(1);
+  const rss = fmtGb(m.claudeN ? m.sessions.reduce((a, s) => a + (s.rss ?? 0), 0) : 0);
+  return `${lvl}: ${m.claudeN} sessions, ${rss}; ${free} free; load ${load}`;
+}
+
+function idleLines(m) {
+  if (!m.idle.length) return [];
+  const lines = ["idle sessions (oldest first):"];
+  const shown = m.idle.slice(0, NOTIFY_CAP);
+  for (const s of shown) {
+    const base = s.cwd ? path.basename(s.cwd) : "?";
+    const prefix = s.sessionId ? s.sessionId.slice(0, 8) : "-";
+    lines.push(`  ${base} ${prefix} ${fmtIdle(s.idleMs)} ${fmtGb(s.rss)}${s.title ? ` — ${s.title}` : ""}`);
   }
+  if (m.idle.length > NOTIFY_CAP) lines.push(`  +${m.idle.length - NOTIFY_CAP} more`);
+  return lines;
 }
 
 export function reportText(m) {
-  const free = fmtGb(m.freeGb);
-  const load = m.load == null ? "?" : m.load.toFixed(1);
-  const lines = [`${m.claudeN} sessions, ${fmtGb(m.claudeN ? m.sessions.reduce((a, s) => a + (s.rss ?? 0), 0) : 0)}; ${free} free; load ${load}`];
-  if (m.idle.length) {
-    lines.push("idle sessions (oldest first):");
-    for (const s of m.idle) {
-      const title = titleOf(s.sessionId, s.cwd);
-      const base = s.cwd ? path.basename(s.cwd) : "?";
-      const prefix = s.sessionId ? s.sessionId.slice(0, 8) : "-";
-      lines.push(`  ${base} ${prefix} ${fmtIdle(s.idleMs)} ${fmtGb(s.rss)}${title ? ` — ${title}` : ""}`);
-    }
-  }
-  lines.push("archive finished sessions in the Claude app sidebar");
-  return lines.join("\n");
+  const lvl = level(m.freeGb, m.claudeN, m.load);
+  return [summaryLine(lvl, m), ...idleLines(m), "archive finished sessions in the Claude app sidebar"].join("\n");
 }
 
-// ---- notify ----------------------------------------------------------------
+// summary + body for a notification: summary line as the summary, idle lines
+// (capped at NOTIFY_CAP oldest, "+N more" after) plus the archive line as body.
+export function notifyParts(lvl, m) {
+  const summary = summaryLine(lvl, m);
+  const body = [...idleLines(m), "archive finished sessions in the Claude app sidebar"].join("\n");
+  return { summary, body };
+}
 
-export function notifyNow(lvl, text) {
+// ---- notify -----------------------------------------------------------------
+
+export function notifyNow(lvl, summary, body) {
   if (process.env.ORCH_NO_NOTIFY === "1") return;
   try {
     const u = lvl === "critical" ? "critical" : "normal";
-    execFileSync("notify-send", ["-u", u, "orchestrator", text], { stdio: "ignore", windowsHide: true });
+    execFileSync("notify-send", ["-u", u, "orchestrator", summary, body], { stdio: "ignore", windowsHide: true });
   } catch {
     // best effort
   }
 }
 
 export function shouldRunNotify(prev, nowMs, lvl) {
-  const d = shouldNotify(prev, nowMs, lvl);
-  return d.notify;
+  return shouldNotify(prev, nowMs, lvl).notify;
 }
 
 // ---- CLI -------------------------------------------------------------------
@@ -361,15 +430,18 @@ function main(argv) {
     } else {
       console.log(text);
     }
-    if (notify && lvl !== "ok") {
+    if (notify) {
       const prev = readState();
       const now = m.now;
-      if (shouldRunNotify(prev, now, lvl)) {
-        notifyNow(lvl, text.split("\n")[0]);
-        prev.lastLevel = lvl;
+      const d = shouldNotify(prev, now, lvl);
+      if (d.notify && lvl !== "ok") {
+        const { summary, body } = notifyParts(lvl, m);
+        notifyNow(lvl, summary, body);
         prev.lastNotifyMs = now;
-        writeState(prev);
       }
+      // Record the observed level on every --notify tick, including ok.
+      prev.lastLevel = lvl;
+      writeState(prev);
     }
     return 0;
   } catch {

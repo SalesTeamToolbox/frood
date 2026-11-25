@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { measure, level, shouldNotify, reportText } from "../bin/session-pressure.mjs";
+import { measure, level, shouldNotify, reportText, notifyParts } from "../bin/session-pressure.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.join(HERE, "..", "bin", "session-pressure.mjs");
@@ -65,6 +65,14 @@ function procRoot(procs, memAvailableKb = 15_000_000, load = 0.5) {
   return root;
 }
 
+// Write a live-session file <home>/.claude/sessions/<pid>.json with given fields.
+function writeSessionFile(homeDir, pid, fields) {
+  const dir = path.join(homeDir, ".claude", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${pid}.json`), JSON.stringify({ pid, ...fields }));
+  return path.join(dir, `${pid}.json`);
+}
+
 // Write a transcript under HOME/.claude/projects/<slug>/<id>.jsonl with a fixed mtime.
 // cwd is expected to be under HOME so the slug is the cwd basename.
 function writeTranscript(homeDir, cwd, id, mtimeSec) {
@@ -78,6 +86,7 @@ function writeTranscript(homeDir, cwd, id, mtimeSec) {
 }
 
 const MIN = 60 * 1000;
+const GB = 1024 * 1024;
 const T = 1_700_000_000_000; // fixed clock (ms)
 
 test("level: ok when everything is within limits", () => {
@@ -149,6 +158,54 @@ test("measure: counts mcp_server.py and opencode separately", () => {
   assert.equal(m.ocN, 1);
 });
 
+test("measure: session file idle — listed with title (status idle 45 min ago)", () => {
+  const h = home();
+  const cwd = path.join(h, "myrepo");
+  const root = procRoot([{ pid: 100, id: "sidle", cwd }]);
+  // Session file: idle, statusUpdatedAt 45 min ago, name "Desk daemon: errors"
+  writeSessionFile(h, 100, {
+    sessionId: "sidle",
+    cwd,
+    name: "Desk daemon: errors",
+    status: "idle",
+    statusUpdatedAt: (T - 45 * MIN),
+  });
+  const m = withHome(h, () => measure(root, () => T));
+  assert.equal(m.claudeN, 1);
+  assert.equal(m.idle.length, 1);
+  assert.equal(m.idle[0].sessionId, "sidle");
+  assert.equal(m.idle[0].idleSource, "session-file");
+  assert.ok(m.idle[0].idleMs >= 44 * MIN && m.idle[0].idleMs <= 46 * MIN);
+  assert.equal(m.idle[0].title, "Desk daemon: errors");
+});
+
+test("measure: session file busy — not idle", () => {
+  const h = home();
+  const cwd = path.join(h, "myrepo");
+  const root = procRoot([{ pid: 100, id: "sbusy", cwd }]);
+  writeSessionFile(h, 100, {
+    sessionId: "sbusy",
+    cwd,
+    name: "Working hard",
+    status: "busy",
+    statusUpdatedAt: T,
+  });
+  const m = withHome(h, () => measure(root, () => T));
+  assert.equal(m.claudeN, 1);
+  assert.equal(m.idle.length, 0);
+  assert.equal(m.sessions[0].idleMs, 0);
+  assert.equal(m.sessions[0].idleSource, "session-file");
+});
+
+test("measure: session file idle but no statusUpdatedAt — no idle age from it", () => {
+  const h = home();
+  const cwd = path.join(h, "myrepo");
+  const root = procRoot([{ pid: 100, id: "snots", cwd }]);
+  writeSessionFile(h, 100, { sessionId: "snots", cwd, name: "No ts", status: "idle" });
+  const m = withHome(h, () => measure(root, () => T));
+  assert.equal(m.idle.length, 0);
+});
+
 test("measure: idle sessions listed oldest first (transcript mtime)", () => {
   const h = home();
   const cwd = path.join(h, "myrepo");
@@ -169,12 +226,28 @@ test("measure: idle sessions listed oldest first (transcript mtime)", () => {
   assert.deepEqual(m.idle.map((s) => s.sessionId), ["id-oldest", "id-mid", "id-newest"]);
   assert.ok(m.idle[0].idleMs >= m.idle[1].idleMs);
   assert.ok(m.idle[1].idleMs >= m.idle[2].idleMs);
-  // every idle entry carries cwd, id prefix, rss
   for (const s of m.idle) {
     assert.equal(s.cwd, cwd);
-    assert.equal(s.sessionId.slice(0, 8), s.sessionId.slice(0, 8));
     assert.ok(s.idleMs >= 30 * MIN);
   }
+});
+
+test("measure: disclaimer wrapper + child count as one session (dedupe, larger RSS)", () => {
+  const h = home();
+  const cwd = path.join(h, "myrepo");
+  const root = procRoot([
+    { pid: 100, id: "d1", cwd, rss: 1_700 }, // disclaimer wrapper (argv[0] = disclaimer)
+    { pid: 101, id: "d1", cwd, rss: 3_000 }, // real claude child, same session id
+    { pid: 102, id: "d2", cwd, rss: 2_500 }, // another real session
+  ]);
+  // pid 100's argv[0] is the wrapper; pids 101/102 are real claude.
+  fs.writeFileSync(path.join(root, "100", "cmdline"), "/usr/lib/claude-desktop/resources/disclaimer\0--pgroup\0--claude\0");
+  fs.writeFileSync(path.join(root, "100", "comm"), "disclaimer\n");
+  const m = withHome(h, () => measure(root, () => T));
+  assert.equal(m.claudeN, 2, "one deduped session + one more = 2");
+  const d1 = m.sessions.find((s) => s.sessionId === "d1");
+  assert.ok(d1, "session d1 present");
+  assert.equal(d1.rss, 3_000 / GB, "kept larger RSS (child)");
 });
 
 test("measure: no idle sessions when none reach 30 min", () => {
@@ -186,7 +259,7 @@ test("measure: no idle sessions when none reach 30 min", () => {
   assert.deepEqual(m.idle, []);
 });
 
-test("reportText: summary line + idle list + archive line", () => {
+test("reportText: summary line starts with level + idle list + archive line", () => {
   const h = home();
   const cwd = path.join(h, "myrepo");
   const root = procRoot([
@@ -199,13 +272,43 @@ test("reportText: summary line + idle list + archive line", () => {
     m = measure(root, () => T);
     text = reportText(m);
   });
-  assert.ok(text.includes("sessions,"), "summary line");
-  assert.ok(text.includes("free; load"), "summary line");
+  assert.ok(text.startsWith("warn:") || text.startsWith("ok:") || text.startsWith("critical:"), "level-prefixed summary");
   assert.ok(text.includes("idle sessions (oldest first):"), "idle header");
   assert.ok(text.includes("id-oldes"), "session id prefix");
   assert.ok(text.includes("40m"), "idle age");
   assert.ok(text.includes("title for id-oldest"), "transcript title");
   assert.ok(text.includes("archive finished sessions in the Claude app sidebar"), "archive line");
+});
+
+test("notifyParts: summary + idle body capped at 8 oldest with +N more", () => {
+  const h = home();
+  const cwd = path.join(h, "myrepo");
+  const root = procRoot([]);
+  const m = { ...measure(root, () => T), idle: [] };
+  // Build 10 fake idle sessions, oldest first
+  const idle = [];
+  for (let i = 0; i < 10; i++) {
+    idle.push({
+      pid: 100 + i,
+      sessionId: `sess-${i}`,
+      cwd,
+      rss: 0.5,
+      idleMs: (10 - i) * 40 * MIN,
+      idleSource: "transcript",
+      title: `title ${i}`,
+    });
+  }
+  m.idle = idle;
+  m.claudeN = 10;
+  m.freeGb = 10;
+  m.load = 0.5;
+  const { summary, body } = notifyParts("warn", m);
+  assert.ok(summary.startsWith("warn:"), "summary starts with level");
+  const bodyLines = body.split("\n");
+  assert.ok(bodyLines[0].startsWith("idle sessions"), "body starts with idle header");
+  assert.equal(bodyLines.length, 1 + 8 + 1 + 1, "header + 8 shown + +2 more + archive"); // header, 8 sessions, +2 more, archive
+  assert.ok(bodyLines[9].includes("+2 more"), "+N more present");
+  assert.ok(bodyLines[10].includes("archive finished sessions"), "archive line last");
 });
 
 test("shouldNotify: first warn notifies (no previous state)", () => {
@@ -234,6 +337,13 @@ test("shouldNotify: level rising warn->critical notifies", () => {
   assert.equal(d.reason, "level rose");
 });
 
+test("shouldNotify: rise from ok notifies (ok last level counts)", () => {
+  const prev = { lastLevel: "ok", lastNotifyMs: T };
+  const d = shouldNotify(prev, T + 5 * MIN, "warn");
+  assert.equal(d.notify, true);
+  assert.equal(d.reason, "level rose");
+});
+
 test("shouldNotify: ok never notifies", () => {
   const prev = { lastLevel: "warn", lastNotifyMs: T };
   assert.equal(shouldNotify(prev, T + 61 * MIN, "ok").notify, false);
@@ -242,6 +352,17 @@ test("shouldNotify: ok never notifies", () => {
 test("shouldNotify: ok->warn on first occurrence notifies (overdue, no lastNotify)", () => {
   const d = shouldNotify({ lastLevel: "ok" }, T, "warn");
   assert.equal(d.notify, true);
+});
+
+test("shouldNotify: warn notified at t0, ok at t0+10min, warn at t0+20min sends (rise from ok)", () => {
+  const t0 = T;
+  const d1 = shouldNotify({}, t0, "warn"); // first warn: notifies
+  assert.equal(d1.notify, true);
+  const d2 = shouldNotify({ lastLevel: "warn", lastNotifyMs: t0 }, t0 + 10 * MIN, "ok"); // ok: never notifies
+  assert.equal(d2.notify, false);
+  const d3 = shouldNotify({ lastLevel: "ok", lastNotifyMs: t0 }, t0 + 20 * MIN, "warn"); // rise from ok: notifies
+  assert.equal(d3.notify, true);
+  assert.equal(d3.reason, "level rose");
 });
 
 test("CLI: runs and exits 0 with ORCH_NO_NOTIFY=1 (state written to temp ORCH_HOME)", () => {

@@ -16,7 +16,7 @@ import path from "node:path";
 import { listStreams } from "./handoff.mjs";
 import { statusRows, watchInfo } from "./desk.mjs";
 import { readService, syncAllStreamTitles } from "./session-title.mjs";
-import { measure, level, reportText, readState, writeState, shouldRunNotify, notifyNow } from "./session-pressure.mjs";
+import { measure, level, reportText, readState, writeState, shouldRunNotify, notifyNow, notifyParts } from "./session-pressure.mjs";
 
 function notify(text) {
   if (process.env.ORCH_NO_NOTIFY === "1") return;
@@ -68,15 +68,17 @@ export async function main(argv) {
     try {
       const m = measure();
       const lvl = level(m.freeGb, m.claudeN, m.load);
+      const prev = readState();
       if (lvl !== "ok") {
-        const prev = readState();
         if (shouldRunNotify(prev, m.now, lvl)) {
-          notifyNow(lvl, reportText(m).split("\n")[0]);
-          prev.lastLevel = lvl;
+          const { summary, body } = notifyParts(lvl, m);
+          notifyNow(lvl, summary, body);
           prev.lastNotifyMs = m.now;
-          writeState(prev);
         }
       }
+      // Record the observed level on every tick, including ok.
+      prev.lastLevel = lvl;
+      writeState(prev);
     } catch {}
     return code;
   } catch (e) {
