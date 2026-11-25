@@ -91,3 +91,42 @@ test("history is pruned past 8 weeks", async () => {
   assert.equal(lines.length, 1);
   assert.equal(JSON.parse(lines[0]).weekly.pct, 42);
 });
+
+test("plan.status other than ok exits 2 with a distinct message, files untouched", () => {
+  for (const st of ["not_applicable", "unavailable"]) {
+    const s = sandbox();
+    const r = s.run(["snapshot", "--from-app", "-"], JSON.stringify({ plan: { status: st, windows: [] } }));
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, new RegExp(`usage unavailable \\(plan\\.status=${st}\\)`));
+    assert.equal(fs.existsSync(path.join(s.dir, "cc-usage.json")), false);
+    assert.equal(fs.existsSync(path.join(s.dir, "cc-usage.jsonl")), false);
+  }
+});
+
+test("non-object JSON exits 2 without crashing, files untouched", () => {
+  for (const input of ["null", "42", '"x"']) {
+    const s = sandbox();
+    const r = s.run(["snapshot", "--from-app", "-"], input);
+    assert.equal(r.status, 2, input);
+    assert.doesNotMatch(r.stderr, /TypeError|at .*\.mjs:\d/);
+    assert.equal(fs.existsSync(path.join(s.dir, "cc-usage.json")), false);
+  }
+});
+
+test("a bare-array app payload still normalizes", () => {
+  const s = sandbox();
+  const r = s.run(["snapshot", "--from-app", "-"], JSON.stringify([{ label: "Weekly · all models", percentUsed: 5, resetsAt: "2026-01-08T12:00:00Z" }]));
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("a duplicate snapshot does not rewrite the files; CC_SIDECAR overrides the sidecar path", () => {
+  const s = sandbox();
+  const side = path.join(s.home, "side.json");
+  fs.writeFileSync(side, JSON.stringify({ saved_at: Date.now() - 1000, rate_limits: { seven_day: { used_percentage: 7, resets_at: 1893456000 } } }));
+  const env = { ...process.env, ORCH_HOME: s.home, CC_SIDECAR: side };
+  const run = () => spawnSync(process.execPath, [BIN, "snapshot", "--from-statusline"], { env, encoding: "utf8", timeout: 20000 });
+  assert.equal(run().stdout.trim(), "stored");
+  const before = fs.statSync(path.join(s.dir, "cc-usage.jsonl")).ino;
+  assert.equal(run().stdout.trim(), "older");
+  assert.equal(fs.statSync(path.join(s.dir, "cc-usage.jsonl")).ino, before);
+});

@@ -31,6 +31,8 @@ function mkStream(h, name = "m6a") {
     JSON.stringify({ name, repo: "", plan: "", status: "active", next: "n", done: "", waiting: "", written_at: new Date().toISOString(), written_by: "", consumed_at: null, done_at: null }),
   );
 }
+// desk-check imports the Claude statusline sidecar each tick; never let a test read the real one.
+process.env.CC_SIDECAR = path.join(os.tmpdir(), "no-such-cc-sidecar.json");
 function inHome(h, fn) {
   const saved = process.env.ORCH_HOME;
   process.env.ORCH_HOME = h;

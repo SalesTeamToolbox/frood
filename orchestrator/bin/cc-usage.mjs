@@ -31,7 +31,8 @@ const win = (pct, resets) => {
 
 /** Desktop-app get_usage JSON -> record, or null when there is no weekly window. */
 export function normalizeApp(json, now = Date.now()) {
-  const list = Array.isArray(json) ? json : json?.windows ?? json?.limits ?? json?.usage ?? [];
+  if (json == null || typeof json !== "object") return null;
+  const list = Array.isArray(json) ? json : json.plan?.windows ?? json.windows ?? json.limits ?? json.usage ?? [];
   if (!Array.isArray(list)) return null;
   const find = (label) => {
     const w = list.find((x) => typeof x?.label === "string" && x.label.trim() === label);
@@ -65,6 +66,12 @@ export function normalizeStatusline(json, fallbackAtMs = Date.now()) {
   };
 }
 
+/** The get_usage envelope reports why it has no windows in plan.status; anything but "ok" is "unavailable". */
+export function appStatusProblem(json) {
+  const st = json?.plan?.status;
+  return typeof st === "string" && st !== "ok" ? st : null;
+}
+
 const latestPath = () => path.join(orchDir(), "cc-usage.json");
 const historyPath = () => path.join(orchDir(), "cc-usage.jsonl");
 
@@ -88,20 +95,24 @@ export function readHistory() {
 /** Append to history (pruned past 8 weeks) and replace latest when this record is the newest. Returns "stored" | "older". */
 export function store(record, now = Date.now()) {
   fs.mkdirSync(orchDir(), { recursive: true });
+  const cur = readLatest();
+  if (cur && Date.parse(cur.at) >= Date.parse(record.at)) return "older"; // duplicate or older: no writes
   const cutoff = now - HISTORY_MS;
   const hist = readHistory().filter((r) => Date.parse(r.at) >= cutoff);
   const dup = hist.some((r) => r.at === record.at && r.source === record.source);
   if (!dup && Date.parse(record.at) >= cutoff) hist.push(record);
   hist.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   writeFileAtomic(historyPath(), hist.map((r) => JSON.stringify(r)).join("\n") + (hist.length ? "\n" : ""));
-  const cur = readLatest();
-  if (cur && Date.parse(cur.at) > Date.parse(record.at)) return "older";
   writeFileAtomic(latestPath(), JSON.stringify(record, null, 2) + "\n");
   return "stored";
 }
 
 /** Quiet statusline import for callers that must not print (desk-check tick). Returns store()'s result or null. */
-export function importStatusline(p = path.join(os.homedir(), ".claude", ".harness-cc.json")) {
+export function sidecarPath() {
+  return process.env.CC_SIDECAR || path.join(os.homedir(), ".claude", ".harness-cc.json");
+}
+
+export function importStatusline(p = sidecarPath()) {
   const rec = normalizeStatusline(JSON.parse(fs.readFileSync(p, "utf8")), fs.statSync(p).mtimeMs);
   return rec ? store(rec) : null;
 }
@@ -125,9 +136,12 @@ export function main(argv) {
   try {
     if (rest[0] === "--from-app") {
       if (!rest[1]) return fail("--from-app needs <file|->");
-      rec = normalizeApp(JSON.parse(readInput(rest[1])));
+      const json = JSON.parse(readInput(rest[1]));
+      const bad = appStatusProblem(json);
+      if (bad) return fail(`usage unavailable (plan.status=${bad})`);
+      rec = normalizeApp(json);
     } else if (rest[0] === "--from-statusline") {
-      const p = rest[1] || path.join(os.homedir(), ".claude", ".harness-cc.json");
+      const p = rest[1] || sidecarPath();
       const json = JSON.parse(fs.readFileSync(p, "utf8"));
       rec = normalizeStatusline(json, fs.statSync(p).mtimeMs);
     } else return fail("snapshot needs --from-app or --from-statusline");

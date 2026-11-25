@@ -1,5 +1,1 @@
-[
-  {"label": "5-hour limit", "percentUsed": 40, "resetsAt": "2026-01-07T05:00:00Z"},
-  {"label": "Weekly · all models", "percentUsed": 42, "resetsAt": "2026-01-08T12:00:00Z"},
-  {"label": "Weekly · Fable", "percentUsed": 13, "resetsAt": "2026-01-08T12:00:00Z"}
-]
+{"plan":{"status":"ok","plan":"Max","windows":[{"label":"5-hour limit","percentUsed":40,"resetsAt":"2026-01-07T05:00:00.000Z","resetsIn":"4h 58m"},{"label":"Weekly · all models","percentUsed":42,"resetsAt":"2026-01-08T12:00:00.000Z","resetsIn":"18h 28m"},{"label":"Weekly · Fable","percentUsed":13,"resetsAt":"2026-01-08T12:00:00.000Z","resetsIn":"18h 28m"}],"extraUsage":{"enabled":false,"percentUsed":0,"spent":"0.00","monthlyLimit":"100.00","currency":"USD"}},"context":{"session":"self","status":"ok","tokensUsed":205335,"contextWindow":1000000,"percentUsed":21}}
