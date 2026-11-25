@@ -4,5 +4,6 @@
   "gates": [["make", "check"]],
   "egm_paths": ["core/sandbox.py", "core/config.py", "core/*auth*.py", "core/github_oauth.py", "core/security_scanner.py", "dashboard/auth.py", "dashboard/server.py", "orchestrator/bin/install.mjs"],
   "guarded_paths": ["core/sandbox.py", "core/*auth*.py", "core/github_oauth.py", "core/security_scanner.py", "dashboard/auth.py", "ops/**", "orchestrator/bin/install.mjs", "orchestrator/ops/**"],
-  "stale_minutes": 45
+  "stale_minutes": 45,
+  "max_parallel": {"build": 3, "train": 1}
 }
