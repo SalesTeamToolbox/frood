@@ -101,7 +101,8 @@ const DEFAULT_INTERVAL_S = 30;
 const ROUND_CAP = 3; // mirrors ticket.json max_rounds; only used when the ticket omits it
 // Derived from this module's location so the desk's resume line names the checkout it runs from.
 const ORPHAN_NOTICE = fileURLToPath(new URL("./orphan-notice.mjs", import.meta.url));
-const OC_WORKER = fileURLToPath(new URL("./oc-worker.mjs", import.meta.url)).replace(/\\/g, "/");
+// ORCH_OC_WORKER: tests point the daemon's spawns at a stub that records its argv.
+const OC_WORKER = process.env.ORCH_OC_WORKER || fileURLToPath(new URL("./oc-worker.mjs", import.meta.url)).replace(/\\/g, "/");
 const nowMs = () => (process.env.ORCH_NOW_MS ? Number(process.env.ORCH_NOW_MS) : Date.now());
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const isStr = (v) => typeof v === "string";
@@ -897,7 +898,7 @@ function effectPresent(key, action, events, lines) {
     const m = /^ACTION critic \S+ \S+ (\S+) \d+$/.exec(action);
     if (m) {
       for (const [, e] of events) {
-        if (e.kind === "verdict" && typeof e.findings === "string" && e.findings === m[1]) return true;
+        if (e.kind === "verdict" && typeof e.findings === "string" && baseFindings(e.findings) === m[1]) return true;
       }
     }
     return false;
@@ -926,11 +927,14 @@ function nextOutTaken(runDir, round, events, run) {
 // The worker run a critic reviewed: the ACTION critic ack whose findings path matches carries the
 // worker run-done key. Null when the critic was launched outside the step flow (a direct oc-worker
 // run records no ACTION) — then nobody wrote down what it reviewed.
+// A critic-alt retry writes `findings-r<N>-alt.md` for the `ACTION critic … findings-r<N>.md` it stands in for.
+const baseFindings = (f) => (typeof f === "string" ? f.replace(/-alt\.md$/, ".md") : f);
+
 function criticReviewedRun(lines, events, slug, findings) {
   for (const l of lines) {
     if (l.ticket !== slug) continue;
     const m = /^ACTION critic \S+ \S+ (\S+) \d+$/.exec(l.action ?? "");
-    if (!m || m[1] !== findings) continue;
+    if (!m || m[1] !== baseFindings(findings)) continue;
     const run = runOfKey(l.key);
     if (run && (events.get(`run:${run}:done`)?.agent ?? "").startsWith("worker")) return run;
   }
@@ -1303,7 +1307,7 @@ export async function handleEvent(stream, key, by) {
   }
   const ev = events.get(key);
   // A finished critic run is not stepped (step would ESCALATE agent-critic): it is verdicted, like a session does.
-  if (ev?.kind === "run-done" && (ev.agent ?? "").startsWith("critic")) return verdictFlow(stream, key, state);
+  if (ev?.kind === "run-done" && (ev.agent ?? "").startsWith("critic")) return await verdictFlow(stream, key, state);
   const r = sub(["step", stream, key, ...(by ? ["--by", by] : [])]);
   const line = r.out.split(/\r?\n/).filter(Boolean)[0] ?? "";
   if (r.status !== 0 || !line) {
@@ -1417,7 +1421,7 @@ export function wakeHolder(stream, key, decision, result) {
 }
 
 // A critic run-done with findings becomes a verdict event; a failed critic is retried once, then paged.
-function verdictFlow(stream, key, state) {
+async function verdictFlow(stream, key, state) {
   const run = runOfKey(key);
   const events = eventsOf(stream);
   const ev = events.get(key) ?? {};
@@ -1441,19 +1445,35 @@ function verdictFlow(stream, key, state) {
     return { stream, key, line: (r.out.split(/\r?\n/).filter(Boolean)[0] ?? "").trim(), outcome: "verdict" };
   }
   // No usable findings: the critic failed. Retry once with critic-alt, then page.
+  // The retry writes its own out, `findings-r<N>-alt.md`: under --stream oc-worker refuses a used out (exit 2) and a
+  // run id that is already queued (exit 9), and the failed critic's run id is. An -alt run is never retried again.
   const queued = events.get(`run:${run}:queued`) ?? {};
   const ticket = queued.ticket ? readTicket(queued.ticket) : null;
   // Same stream scoping as the ledger: one stream's critic retry must not consume another stream's retry
   // for the same-named run, nor page it on the strength of this stream's failures.
   const retryId = wakeId(stream, key);
-  if ((state.retries[retryId] ?? 0) < 1 && ticket?.worktree) {
+  const isAlt = /-alt\.md$/.test(findings);
+  const alt = findings && !isAlt ? findings.replace(/\.md$/, "-alt.md") : null;
+  // The retry is already running or done: its own run-done carries the outcome (a verdict, or critic-failed since an
+  // -alt is never retried). This run-done is settled — ack it so it leaves `unhandled`, and never page it again.
+  if (alt && ticket && (events.has(`run:${runIdOf(alt)}:queued`) || events.has(`run:${runIdOf(alt)}:done`))) {
+    try {
+      appendAck(stream, key, `retried as critic-alt ${alt}`, { resolved: true, ticket: ticket.ticket });
+    } catch {}
+    return { stream, key, line: "", outcome: "noop" };
+  }
+  if ((state.retries[retryId] ?? 0) < 1 && ticket?.worktree && alt) {
     state.retries[retryId] = (state.retries[retryId] ?? 0) + 1;
     writeDaemonState(state);
     if (DAEMON_DRY()) return { stream, key, line: "retry critic-alt", outcome: "critic-retry" };
+    detached(process.execPath, [OC_WORKER, "--agent", "critic-alt", "--dir", ticket.worktree, "--prompt", promptFor(ticket, findings), "--out", alt, "--stream", stream]);
+    if (!(await awaitQueued(stream, runIdOf(alt)))) {
+      dpage(stream, key, `critic-spawn-failed ${alt} (critic-alt retry: no queued event in 30s — check oc-worker)`);
+      return { stream, key, line: "", outcome: "paged" };
+    }
     try {
-      fs.rmSync(findings, { force: true });
+      appendAck(stream, key, `retried as critic-alt ${alt}`, { resolved: true, ticket: ticket.ticket });
     } catch {}
-    detached(process.execPath, [OC_WORKER, "--agent", "critic-alt", "--dir", ticket.worktree, "--prompt", promptFor(ticket, findings), "--out", findings]);
     return { stream, key, line: "retry critic-alt", outcome: "critic-retry" };
   }
   dpage(stream, key, `critic-failed ${findings || "(no findings)"}`);
@@ -1487,7 +1507,10 @@ async function doCritic(stream, key, events, ticketPath, out, findings, round) {
     dpage(stream, key, `critic-prompt-failed ${e.message}`);
     return { stream, key, line: "", outcome: "paged" };
   }
-  detached(process.execPath, [OC_WORKER, "--agent", "critic", "--fallback", "critic-alt,critic-go,critic-free,critic-nvidia", "--dir", ticket.worktree, "--prompt", prompt, "--out", findings]);
+  // --stream: oc-worker writes this run's `queued` and `run-done` events to the stream. Without it (a19c2e87 to
+  // 2026-11-24) awaitQueued below never saw a queued event and paged critic-spawn-failed for a running critic, and the
+  // finished critic's verdict never reached the desk.
+  detached(process.execPath, [OC_WORKER, "--agent", "critic", "--fallback", "critic-alt,critic-go,critic-free,critic-nvidia", "--dir", ticket.worktree, "--prompt", prompt, "--out", findings, "--stream", stream]);
   const started = await awaitQueued(stream, crun);
   if (!started) {
     dpage(stream, key, `critic-spawn-failed ${findings} (no queued event in 30s — check oc-worker)`);
@@ -1584,13 +1607,13 @@ export async function driveOnce(ctx, opts = {}) {
     const m = /^EVENT (\S+) (\S+) (\S+)/.exec(line);
     if (m) handled.push(await handleEvent(m[1], m[2], opts.by));
   }
-  if (!opts.skipVerdicts) sweepVerdicts(opts);
+  if (!opts.skipVerdicts) await sweepVerdicts(opts);
   sweepOrphans();
   return handled;
 }
 
 // Critic completions become verdicts without waiting for their own EVENT turn (their run-done is never stepped).
-function sweepVerdicts(opts = {}) {
+async function sweepVerdicts(opts = {}) {
   const state = readDaemonState();
   for (const s of listStreams(Date.now())) {
     if (s.status !== "active") continue;
@@ -1605,7 +1628,7 @@ function sweepVerdicts(opts = {}) {
       if (ev.kind !== "run-done" || !(ev.agent ?? "").startsWith("critic")) continue;
       const vkey = `verdict:${ev.run}`;
       if (!ev.run || events.has(vkey)) continue;
-      verdictFlow(s.name, k, state);
+      await verdictFlow(s.name, k, state);
     }
   }
 }

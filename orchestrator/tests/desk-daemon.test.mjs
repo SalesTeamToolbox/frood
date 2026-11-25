@@ -380,6 +380,9 @@ test("doCritic pages critic-spawn-failed when the spawn never queues (and retrie
   fs.mkdirSync(tj.worktree, { recursive: true });
   fs.writeFileSync(path.join(tj.worktree, ".git"), "gitdir: placeholder\n");
   fs.writeFileSync(tp, JSON.stringify(tj));
+  // The spawn must die before it queues. A findings file that already exists does that: oc-worker --stream refuses a
+  // used --out (exit 2) before writing the queued event. (Before --stream was passed, every spawn "never queued".)
+  fs.writeFileSync(path.join(h, "reports", "t1", "findings-r1.md"), "stale\n");
   const saved = { ...process.env };
   Object.assign(process.env, { ORCH_NO_NOTIFY: "1", ORCH_AWAIT_QUEUED_MS: "1500" });
   // Short-circuit the 30s watch: patch awaitQueued via a dead OC_WORKER is overkill;
@@ -407,4 +410,140 @@ test("doCritic pages critic-spawn-failed when the spawn never queues (and retrie
       else process.env[k] = saved[k];
     }
   }
+});
+
+// The daemon's critic spawns must carry --stream, or oc-worker writes no queued/run-done event and the desk pages
+// critic-spawn-failed for a running critic and never sees its verdict (findings 7, plan-desk-daemon-errors).
+test("doCritic and the critic-alt retry spawn oc-worker with --stream <stream>", { skip: process.platform === "win32" ? "POSIX stub" : false }, async () => {
+  const h = home();
+  mkStream(h);
+  mkTicket(h);
+  const runDir = path.join(h, "reports", "t1");
+  const out = path.join(runDir, "worker-r1.md");
+  fs.writeFileSync(out, "done\n");
+  const argvLog = path.join(h, "argv.log");
+  const stub = path.join(h, "stub-oc-worker.mjs");
+  fs.writeFileSync(stub, `import fs from "node:fs"; fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify(process.argv.slice(2)) + "\\n");\n`);
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/worker-r1", out, path.join(runDir, "ticket.json")));
+    appendEvent("m6a", evDone("t1/worker-r1", out));
+  });
+  const keys = ["ORCH_NO_NOTIFY", "ORCH_AWAIT_QUEUED_MS", "ORCH_OC_WORKER"];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1", ORCH_AWAIT_QUEUED_MS: "300", ORCH_OC_WORKER: stub });
+  const desk = await import(`../bin/desk.mjs?stub=${Date.now()}`); // re-read OC_WORKER with the stub in place
+  const waitArgv = async (n) => {
+    for (let i = 0; i < 50; i++) {
+      try {
+        const lines = fs.readFileSync(argvLog, "utf8").trim().split("\n");
+        if (lines.length >= n) return lines.map((l) => JSON.parse(l));
+      } catch {}
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return [];
+  };
+  try {
+    await inHome(h, async () => await desk.handleEvent("m6a", "run:t1/worker-r1:done", undefined));
+    const [critic] = await waitArgv(1);
+    assert.ok(critic, "the critic was spawned");
+    assert.equal(critic[critic.indexOf("--agent") + 1], "critic");
+    assert.equal(critic[critic.indexOf("--stream") + 1], "m6a", JSON.stringify(critic));
+    // The critic ran and failed (no VERDICT in its out): the retry runs critic-alt on a fresh -alt out, with --stream.
+    const findings = path.join(runDir, "findings-r1.md");
+    fs.writeFileSync(findings, "no verdict here\n");
+    inHome(h, () => {
+      appendEvent("m6a", evQ("t1/findings-r1", findings, path.join(runDir, "ticket.json"), "critic"));
+      appendEvent("m6a", evDone("t1/findings-r1", findings, "critic"));
+    });
+    await inHome(h, async () => await desk.handleEvent("m6a", "run:t1/findings-r1:done", undefined));
+    const all = await waitArgv(2);
+    const alt = all[1];
+    assert.ok(alt, "the critic-alt retry was spawned");
+    assert.equal(alt[alt.indexOf("--agent") + 1], "critic-alt");
+    assert.equal(alt[alt.indexOf("--out") + 1], path.join(runDir, "findings-r1-alt.md"));
+    assert.equal(alt[alt.indexOf("--stream") + 1], "m6a", JSON.stringify(alt));
+  } finally {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
+// A failed critic is retried once as critic-alt. The retry's run is a stream event of its own, so the failed critic's
+// run-done must not page critic-failed on the next sweep while the -alt critic is still running.
+test("critic-alt retry: one spawn, no critic-failed page across polls, and the failed run-done is settled", { skip: process.platform === "win32" ? "POSIX stub" : false }, async () => {
+  const h = home();
+  mkStream(h);
+  mkTicket(h);
+  const runDir = path.join(h, "reports", "t1");
+  const tp = path.join(runDir, "ticket.json");
+  const findings = path.join(runDir, "findings-r1.md");
+  fs.writeFileSync(findings, "critic crashed, no verdict\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/findings-r1", findings, tp, "critic"));
+    appendEvent("m6a", evDone("t1/findings-r1", findings, "critic"));
+  });
+  // The stub queues its run like oc-worker --stream does, so awaitQueued sees it.
+  const argvLog = path.join(h, "argv.log");
+  const stub = path.join(h, "stub-oc-worker.mjs");
+  const handoff = path.resolve(import.meta.dirname, "..", "bin", "handoff.mjs");
+  fs.writeFileSync(
+    stub,
+    `import fs from "node:fs"; import path from "node:path"; import { appendEvent } from ${JSON.stringify(handoff)};
+const a = process.argv.slice(2); fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify(a) + "\\n");
+const out = a[a.indexOf("--out") + 1], stream = a[a.indexOf("--stream") + 1];
+const run = "t1/" + path.basename(out, ".md");
+appendEvent(stream, { key: "run:" + run + ":queued", kind: "queued", run, out, agent: "critic-alt", ticket: ${JSON.stringify(tp)}, pid: process.pid, at: new Date().toISOString() });
+`,
+  );
+  const keys = ["ORCH_NO_NOTIFY", "ORCH_AWAIT_QUEUED_MS", "ORCH_OC_WORKER"];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  Object.assign(process.env, { ORCH_NO_NOTIFY: "1", ORCH_AWAIT_QUEUED_MS: "5000", ORCH_OC_WORKER: stub });
+  const desk = await import(`../bin/desk.mjs?alt=${Date.now()}`);
+  const ctx = { lastPoll: null, printed: new Set() };
+  try {
+    const first = await inHome(h, async () => await desk.driveOnce(ctx, {}));
+    assert.ok(first.some((r) => r.outcome === "critic-retry"), JSON.stringify(first));
+    await inHome(h, async () => await desk.driveOnce(ctx, {}));
+    await inHome(h, async () => await desk.driveOnce(ctx, {}));
+    const spawns = fs.readFileSync(argvLog, "utf8").trim().split("\n");
+    assert.equal(spawns.length, 1, "exactly one critic-alt spawn");
+    const esc = fs.existsSync(path.join(h, ".config", "orchestrator", "desk-daemon", "escalations.jsonl")) ? escLines(h) : [];
+    assert.deepEqual(esc.filter((l) => /critic-failed/.test(l)), [], "no critic-failed page while the -alt critic runs");
+    const un = inHome(h, () => unhandled("m6a"));
+    assert.ok(!un.some((e) => e.key === "run:t1/findings-r1:done"), "the retried run-done is settled");
+  } finally {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
+// An -alt critic's CHANGES_REQUESTED must still resume the worker it reviewed (the ACTION critic ack names
+// findings-r<N>.md, the -alt verdict names findings-r<N>-alt.md).
+test("step: an -alt critic's CHANGES_REQUESTED verdict resumes the reviewed worker, not review-unlinked", () => {
+  const h = home();
+  mkStream(h);
+  mkTicket(h);
+  const runDir = path.join(h, "reports", "t1");
+  const tp = path.join(runDir, "ticket.json");
+  const out = path.join(runDir, "worker-r1.md");
+  const findings = path.join(runDir, "findings-r1.md");
+  const alt = path.join(runDir, "findings-r1-alt.md");
+  fs.writeFileSync(out, "done\n");
+  fs.writeFileSync(alt, "VERDICT: CHANGES_REQUESTED\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/worker-r1", out, tp, "worker"));
+    appendEvent("m6a", evDone("t1/worker-r1", out, "worker", { session: "ses_W1" }));
+    appendAck("m6a", "run:t1/worker-r1:done", `ACTION critic ${tp} ${out} ${findings} 1`, { ticket: "t1" });
+    appendEvent("m6a", evQ("t1/findings-r1-alt", alt, tp, "critic-alt"));
+    appendEvent("m6a", evDone("t1/findings-r1-alt", alt, "critic-alt"));
+    appendEvent("m6a", { key: "verdict:t1/findings-r1-alt", kind: "verdict", run: "t1/findings-r1-alt", at: at(), effective: "CHANGES_REQUESTED", senior: false, findings: alt, reviewed_sha: "abc1234" });
+  });
+  const r = cli(h, ["step", "m6a", "verdict:t1/findings-r1-alt", "--by", "cc"], { ORCH_NO_NOTIFY: "1" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^ACTION resume-worker .*--session ses_W1/m, r.stdout);
+  assert.doesNotMatch(r.stdout, /review-unlinked/);
 });
