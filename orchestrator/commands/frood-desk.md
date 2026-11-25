@@ -105,12 +105,19 @@ likewise) — a run id carries its ticket: `m6a-desk-minors/worker-r1`.
   - `node {{ORCH_REPO}}/bin/desk.mjs verdict <stream> <run> --findings <findings-r<N>.md>`
     prints `KEY verdict:<run>`: run `step` on that key. The verdict that counts is verdict-gate's `gate()`, never
     the critic's own claim.
+    If an earlier verdict for `<run>` is `INVALID` and HEAD is unchanged, a corrected findings file supersedes it
+    under `verdict:<run>@<n>` (carrying `replaces: <previous key>`); a non-INVALID verdict is never replaced, and
+    an INVALID verdict on a moved HEAD exits 2.
 - **`ACTION resume-worker <command>`** — run the printed command with `run_in_background`. If it exits **9**  # cc-only
 - **`ACTION resume-worker <command>`** — run the printed command in the background (`shell`, `background: true`). If it exits **9**  # oc-only
   (`oc-worker: run <run> already queued`) that resume was already started: a no-op for the desk, not a failure.
 - **`ESCALATE merge <ticket.json> <sha>`**
   - `node {{ORCH_REPO}}/bin/desk.mjs merge-check <stream> <run>` → `OK` or `FAIL <check>`.
     A `FAIL` is reported, never merged.
+    `merge-check` accepts a patch-identical rebase: when HEAD moved past the reviewed sha but the ticket's patch is
+    byte-for-byte identical (`git patch-id --stable` of both diff ranges match, both non-empty, reviewed sha still a
+    commit) it prints `OK` plus a stderr note `desk: HEAD <h8> is a rebase of reviewed <r8> (same patch-id)`.
+    Otherwise a moved HEAD still prints `FAIL head-moved`.
   - On `OK`, read the ticket's `repo` and `merge` fields. Only `merge: "ff"` means an ff-merge:
     `git -C <repo> merge --ff-only <branch>`. Then — only when `<repo>` is
     `{{ORCH_REPO}}` — run `node {{ORCH_REPO}}/bin/install.mjs` and

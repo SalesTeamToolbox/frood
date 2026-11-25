@@ -416,6 +416,11 @@ topic: docs/atlas/routes.md
 handler: orchestrator/bin/dispatch.mjs (plan: independence check, cap: concurrency limit); orchestrator/bin/board.mjs session (assignment.session); orchestrator/bin/desk.mjs status (ticketSessions)
 decides: which board tickets may run in their own sessions at once (shared file or `depends:` means serial), and whether the build cap leaves room — build cap may be `auto` (slots.mjs)
 
+### desk: critic round floor, verdict replacement, patch-identical rebase
+handler: orchestrator/bin/desk.mjs criticRound() (run-done ACTION critic round floor), orchestrator/bin/desk.mjs latestVerdict() (newest verdict:<run>@<n> reader), orchestrator/bin/desk.mjs cmdMergeCheck() (head-moved rule with patch-identical rebase acceptance)
+decides: the critic round for a re-dispatched worker run (max of resume acks, worker-r<N> id, findings-r<N> on disk, board rounds.length), whether a corrected INVALID verdict is superseded at verdict:<run>@<n>, and whether a HEAD that moved past reviewed_sha is still a mergeable rebase (same patch-id). Step stays pure (file reads only, no git, no spawn); handoff.mjs append/read semantics are unchanged.
+topic: docs/atlas/desk.md
+
 ### oc-worker load-based slots
 handler: orchestrator/bin/slots.mjs (readSample, slotConfig, allowedSlots); orchestrator/bin/oc-worker.mjs acquireSlot; desk.mjs status header
 decides: how many workers may start now — fixed `WORKER_SLOTS=N` or dynamic `WORKER_SLOTS_MIN`..`WORKER_SLOTS_MAX` (2..6) from 5-minute machine load (/proc/pressure/cpu, /proc/loadavg, /proc/meminfo) via ORCH_PROC_ROOT; burst guard admits at most one slot above the floor per 60 s; opencode children nicened to 10 on non-Windows; decision log slot-decisions.log

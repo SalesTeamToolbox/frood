@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { handleEvent, poll, readDaemonState, statusRows, runIsLive, lockPath, wakeHolder, watchInfo } from "../bin/desk.mjs";
+import { handleEvent, poll, readDaemonState, statusRows, runIsLive, lockPath, wakeHolder, watchInfo, latestVerdict } from "../bin/desk.mjs";
 import { workerOutcome } from "../bin/outcome.mjs";
 import { appendEvent, appendAck, orchRoot, readAckLines } from "../bin/handoff.mjs";
 import { plan } from "../bin/install.mjs";
@@ -2056,3 +2056,239 @@ test("status: board tickets holding a session are listed after the streams; abse
   assert.deepEqual(lines.slice(2), ["ticket t-held  working  session sess-9  owner s1", "ticket t-wait  queued  session sess-7"]); // lines[0]=watch, lines[1]=slots
   assert.deepEqual(JSON.parse(run(["status", "--json"]).stdout).tickets.map((t) => t.id), ["t-held", "t-wait"]);
 });
+
+// ---------------------------------------------------------------- desk bookkeeping (Fix 1: critic round floor)
+
+// worker-r2 done, no resume acks, findings-r1.md already on disk -> round 2 -> findings-r2.md
+test("desk: worker-r2 run-done with findings-r1.md on disk reviews in round 2", () => {
+  const { h, name, runDir } = t8Stream("fix1-disk");
+  fs.writeFileSync(path.join(runDir, "findings-r1.md"), "r1\n");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r2", runDir));
+    appendEvent(name, evDone("worker-r2", runDir));
+  });
+  const ticketJson = fwd(path.join(runDir, "ticket.json"));
+  assert.equal(
+    cliLines(h, ["step", name, "run:worker-r2:done"]).lines[0],
+    `ACTION critic ${ticketJson} ${fwd(path.join(runDir, "worker-r2.md"))} ${fwd(path.join(runDir, "findings-r2.md"))} 2`,
+  );
+});
+
+// findings-r1.md + findings-r2.md on disk -> round 3 -> findings-r3.md
+test("desk: two findings files on disk bumps the run-done critic round to 3", () => {
+  const { h, name, runDir } = t8Stream("fix1-disk2");
+  fs.writeFileSync(path.join(runDir, "findings-r1.md"), "r1\n");
+  fs.writeFileSync(path.join(runDir, "findings-r2.md"), "r2\n");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r2", runDir));
+    appendEvent(name, evDone("worker-r2", runDir));
+  });
+  const ticketJson = fwd(path.join(runDir, "ticket.json"));
+  assert.equal(
+    cliLines(h, ["step", name, "run:worker-r2:done"]).lines[0],
+    `ACTION critic ${ticketJson} ${fwd(path.join(runDir, "worker-r2.md"))} ${fwd(path.join(runDir, "findings-r3.md"))} 3`,
+  );
+});
+
+// board ticket rounds.length 2 -> round 3 with nothing on disk
+test("desk: board ticket rounds length 2 floors the critic round at 3", () => {
+  const { h, name, runDir } = t8Stream("fix1-board");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "orch-board-"));
+  CLEAN.push(repo);
+  fs.mkdirSync(path.join(repo, ".opencode", "board", "tickets"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repo, ".opencode", "board", "tickets", "t8.json"),
+    JSON.stringify({ schema: 1, id: "t8", rounds: [{ n: 1 }, { n: 2 }] }),
+  );
+  const t = mkTicket(runDir, { repo });
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+  });
+  const ticketJson = fwd(path.join(runDir, "ticket.json"));
+  assert.equal(
+    cliLines(h, ["step", name, "run:worker-r1:done"]).lines[0],
+    `ACTION critic ${ticketJson} ${fwd(path.join(runDir, "worker-r1.md"))} ${fwd(path.join(runDir, "findings-r3.md"))} 3`,
+  );
+});
+
+// unparseable board ticket -> no throw, falls back to round 1
+test("desk: unparseable board ticket does not throw and falls back", () => {
+  const { h, name, runDir } = t8Stream("fix1-badboard");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "orch-badboard-"));
+  CLEAN.push(repo);
+  fs.mkdirSync(path.join(repo, ".opencode", "board", "tickets"), { recursive: true });
+  fs.writeFileSync(path.join(repo, ".opencode", "board", "tickets", "t8.json"), "{not json");
+  mkTicket(runDir, { repo });
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+  });
+  const ticketJson = fwd(path.join(runDir, "ticket.json"));
+  assert.equal(
+    cliLines(h, ["step", name, "run:worker-r1:done"]).lines[0],
+    `ACTION critic ${ticketJson} ${fwd(path.join(runDir, "worker-r1.md"))} ${fwd(path.join(runDir, "findings-r1.md"))} 1`,
+  );
+});
+
+// ---------------------------------------------------------------- desk bookkeeping (Fix 2: verdict replacement)
+
+// INVALID first verdict; corrected APPROVED at same HEAD -> KEY verdict:<run>@2, old key resolved acked,
+// merge-check reads the @2 verdict (OK on an ff fixture).
+test("desk: superseding an INVALID verdict on the same sha writes verdict:<run>@2 and resolves the old key", () => {
+  const { h, name, runDir } = t8Stream("fix2-same");
+  const repo = gitRepo();
+  mkTicket(runDir, { worktree: repo.dir, base: "main" });
+  const head = repo.head;
+  const bad = path.join(runDir, "bad.md");
+  const good = path.join(runDir, "good.md");
+  fs.writeFileSync(bad, "TESTS: npm test -> 200 pass\nno verdict line\n");
+  fs.writeFileSync(good, `VERDICT: APPROVED\nTESTS: npm test -> 200 pass\nBLAST RADIUS:\n- bin/x.mjs:1 - unchanged\nSENIOR_REVIEW: not-needed - small\n`);
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+  });
+  const first = cliLines(h, ["verdict", name, "worker-r1", "--findings", bad]);
+  assert.equal(first.status, 0, first.stderr);
+  assert.deepEqual(first.lines, [`KEY verdict:worker-r1`]);
+  // the first verdict is INVALID
+  const ev1 = eventsOf(h, name).find((e) => e.key === "verdict:worker-r1");
+  assert.equal(ev1.effective, "INVALID");
+  // corrected findings at the same HEAD -> verdict:worker-r1@2
+  const second = cliLines(h, ["verdict", name, "worker-r1", "--findings", good]);
+  assert.equal(second.status, 0, second.stderr);
+  assert.deepEqual(second.lines, [`KEY verdict:worker-r1@2`]);
+  const ev2 = eventsOf(h, name).find((e) => e.key === "verdict:worker-r1@2");
+  assert.ok(ev2, "verdict:worker-r1@2 exists");
+  assert.equal(ev2.effective, "APPROVED");
+  assert.equal(ev2.replaces, "verdict:worker-r1");
+  // latestVerdict returns the @2 verdict
+  const latest = inHome(h, undefined, () => latestVerdict(new Map(eventsOf(h, name).map((e) => [e.key, e])), "worker-r1"));
+  assert.equal(latest.key, "verdict:worker-r1@2");
+  // old key has a resolved ack
+  const acks = inHome(h, undefined, () => readAckLines(name).filter((l) => l.key === "verdict:worker-r1" && l.resolved));
+  assert.equal(acks.length, 1, "old verdict key resolved-acked");
+  // merge-check reads the @2 verdict -> OK (ff fixture, clean tree, HEAD == reviewed_sha)
+  const mc = cliLines(h, ["merge-check", name, "worker-r1"]);
+  assert.equal(mc.status, 0, mc.stderr);
+  assert.deepEqual(mc.lines, ["OK"]);
+});
+
+// Same flow but HEAD moved before the second verdict -> exit 2, no new event.
+test("desk: superseding an INVALID verdict on a different sha exits 2 and writes nothing", () => {
+  const { h, name, runDir } = t8Stream("fix2-moved");
+  const repo = gitRepo();
+  mkTicket(runDir, { worktree: repo.dir, base: "main" });
+  const bad = path.join(runDir, "bad.md");
+  const good = path.join(runDir, "good.md");
+  fs.writeFileSync(bad, "TESTS: npm test -> 200 pass\nno verdict line\n");
+  fs.writeFileSync(good, `VERDICT: APPROVED\nTESTS: npm test -> 200 pass\nBLAST RADIUS:\n- bin/x.mjs:1 - unchanged\nSENIOR_REVIEW: not-needed - small\n`);
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+  });
+  const first = cliLines(h, ["verdict", name, "worker-r1", "--findings", bad]);
+  assert.equal(first.status, 0, first.stderr);
+  // move HEAD before the second verdict
+  fs.appendFileSync(path.join(repo.dir, "a.txt"), "later\n");
+  repo.g("add", "a.txt");
+  repo.g("commit", "-m", "after the review");
+  const second = cli(h, ["verdict", name, "worker-r1", "--findings", good]);
+  assert.equal(second.status, 2, second.stderr);
+  assert.match(second.stderr, /reviewed_sha .* !== HEAD/);
+  // no @2 event was written
+  assert.equal(
+    eventsOf(h, name).filter((e) => e.key.startsWith("verdict:worker-r1")).length,
+    1,
+    "only the original verdict event exists",
+  );
+});
+
+// An APPROVED first verdict is never replaced.
+test("desk: an APPROVED first verdict is never superseded", () => {
+  const { h, name, runDir } = t8Stream("fix2-approved");
+  const repo = gitRepo();
+  mkTicket(runDir, { worktree: repo.dir, base: "main" });
+  const good = path.join(runDir, "good.md");
+  fs.writeFileSync(good, `VERDICT: APPROVED\nTESTS: npm test -> 200 pass\nBLAST RADIUS:\n- bin/x.mjs:1 - unchanged\nSENIOR_REVIEW: not-needed - small\n`);
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+  });
+  const first = cliLines(h, ["verdict", name, "worker-r1", "--findings", good]);
+  assert.equal(first.status, 0, first.stderr);
+  assert.deepEqual(first.lines, [`KEY verdict:worker-r1`]);
+  // a second verdict for the same run prints the existing key, no @2
+  const second = cliLines(h, ["verdict", name, "worker-r1", "--findings", good]);
+  assert.equal(second.status, 0, second.stderr);
+  assert.deepEqual(second.lines, [`KEY verdict:worker-r1`]);
+  assert.equal(
+    eventsOf(h, name).filter((e) => e.key.startsWith("verdict:worker-r1")).length,
+    1,
+    "no superseding @2 event for an APPROVED verdict",
+  );
+});
+
+// ---------------------------------------------------------------- desk bookkeeping (Fix 3: patch-identical rebase)
+
+// main gains an unrelated commit; feat rebased with the same ticket patch -> merge-check OK
+test("desk: merge-check accepts a patch-identical rebase of an approved ticket", () => {
+  const r = rebaseRepo(false);
+  const { h, name, runDir } = t8Stream("fix3-same");
+  mkTicket(runDir, { worktree: r.dir, base: "main" });
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+    appendEvent(name, evVerdict("worker-r1", runDir, { effective: "APPROVED", reviewed_sha: r.t }));
+  });
+  const mc = cliLines(h, ["merge-check", name, "worker-r1"]);
+  assert.equal(mc.status, 0, mc.stderr);
+  assert.deepEqual(mc.lines, ["OK"]);
+  assert.match(mc.stderr || "", /same patch-id/, "stderr notes the rebase");
+});
+
+// rebase that also amends the ticket's change -> FAIL head-moved
+test("desk: merge-check rejects a rebase that changed the ticket's patch", () => {
+  const r = rebaseRepo(true);
+  const { h, name, runDir } = t8Stream("fix3-amend");
+  mkTicket(runDir, { worktree: r.dir, base: "main" });
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+    appendEvent(name, evVerdict("worker-r1", runDir, { effective: "APPROVED", reviewed_sha: r.t }));
+  });
+  const mc = cliLines(h, ["merge-check", name, "worker-r1"]);
+  assert.equal(mc.status, 1, mc.stderr);
+  assert.deepEqual(mc.lines, ["FAIL head-moved"]);
+});
+
+// repo helper: main M1, feat branched at M1 with ticket commit T (=reviewed_sha), then main gets M2
+// unrelated and feat is rebased onto main. If amend, the ticket commit is amended after rebase.
+function rebaseRepo(amend = false) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "orch-rebase-"));
+  CLEAN.push(dir);
+  const g = (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  g("init", "-b", "main");
+  g("config", "user.email", "t8@example.com");
+  g("config", "user.name", "t8");
+  fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+  g("add", "a.txt");
+  g("commit", "-m", "M1 base");
+  g("checkout", "-b", "feat");
+  fs.appendFileSync(path.join(dir, "ticket.txt"), "ticket change\n");
+  g("add", "ticket.txt");
+  g("commit", "-m", "ticket change");
+  const t = g("rev-parse", "HEAD");
+  g("checkout", "main");
+  fs.appendFileSync(path.join(dir, "unrelated.txt"), "unrelated\n");
+  g("add", "unrelated.txt");
+  g("commit", "-m", "M2 unrelated on main");
+  g("checkout", "feat");
+  g("rebase", "main");
+  if (amend) {
+    fs.appendFileSync(path.join(dir, "ticket.txt"), " amended\n");
+    g("add", "ticket.txt");
+    g("commit", "--amend", "--no-edit");
+  }
+  return { dir, g, t, head: g("rev-parse", "HEAD") };
+}

@@ -195,9 +195,9 @@ export function runIsLive(q) {
 // ---------------------------------------------------------------- runs (derived from events)
 
 function runOf(e) {
-  if (typeof e.run === "string" && e.run) return e.run;
+  if (typeof e.run === "string" && e.run) return stripVerdictSuffix(e.run);
   const m = /^(?:run:(.+):(?:queued|done|dead)|verdict:(.+))$/.exec(e.key);
-  return m ? m[1] ?? m[2] : null;
+  return m ? stripVerdictSuffix(m[1] ?? m[2]) : null;
 }
 
 export function runsOf(events) {
@@ -870,8 +870,12 @@ const streamExists = (name) => {
 };
 const runOfKey = (key) => {
   const m = RUN_KEY_RE.exec(key);
-  return m ? m[1] ?? m[2] : null;
+  if (!m) return null;
+  return stripVerdictSuffix(m[1] ?? m[2]);
 };
+
+// verdict:<run>@<n> -> <run>; plain ids pass through unchanged.
+const stripVerdictSuffix = (run) => (typeof run === "string" ? run.replace(/@\d+$/, "") : run);;
 
 // ticket.json = dirname(out)/ticket.json, written once by /frood-orchestrator before the first dispatch.
 function readTicket(file) {
@@ -890,6 +894,53 @@ function roundOf(lines, slug) {
     1 +
     lines.filter((l) => !l.resolved && typeof l.action === "string" && l.action.startsWith("ACTION resume-worker") && slug && l.ticket === slug).length
   );
+}
+
+// Critic round floor for a run: the max of today's resume-ack round, the worker run id's N (a worker-r2 is
+// never reviewed in round 1), 1 + the highest findings-r<N>[-alt].md already on disk, and 1 + the board ticket's
+// counted rounds length. Pure: file reads only, no git, no spawn. A missing/unreadable board ticket contributes
+// nothing and never throws.
+function criticRound(lines, slug, run, runDir, ticket) {
+  let n = roundOf(lines, slug);
+  const m = run.match(/worker-r(\d+)$/);
+  if (m) n = Math.max(n, Number(m[1]));
+  // 1 + the highest findings-r<N>[-alt].md already in runDir
+  try {
+    for (const entry of fs.readdirSync(runDir)) {
+      const mm = /^findings-r(\d+)(-alt)?\.md$/.exec(entry);
+      if (mm) n = Math.max(n, Number(mm[1]) + 1);
+    }
+  } catch {}
+  // 1 + rounds.length of the board ticket, when ticket.repo is set and the file parses
+  if (ticket && typeof ticket.repo === "string" && ticket.repo) {
+    try {
+      const boardFile = path.join(ticket.repo, ".opencode", "board", "tickets", `${slug}.json`);
+      const b = JSON.parse(fs.readFileSync(boardFile, "utf8"));
+      if (Array.isArray(b?.rounds)) n = Math.max(n, b.rounds.length + 1);
+    } catch {}
+  }
+  return Math.max(1, n);
+}
+
+// The newest verdict for a run: verdict:<run>, verdict:<run>@2, verdict:<run>@3 … (highest @n wins;
+// verdict:<run> counts as n=1). readEvents dedupes first-wins per key, so a later @<n> append is a
+// distinct key that outranks the base. Returns the event object, or null when none exists.
+export function latestVerdict(events, run) {
+  let latest = null;
+  let latestN = 0;
+  const base = events.get(`verdict:${run}`);
+  if (base) latestN = 1;
+  for (const [key, e] of events) {
+    const m = /^verdict:(.+)@(\d+)$/.exec(key);
+    if (m && m[1] === run) {
+      const n = Number(m[2]);
+      if (n > latestN) {
+        latestN = n;
+        latest = e;
+      }
+    }
+  }
+  return latest ?? base;
 }
 
 // The ticket a run was dispatched under: the `ticket` string of dirname(out)/ticket.json, else the directory's
@@ -918,7 +969,7 @@ function nextRunId(run, round) {
 function effectPresent(key, action, events, lines) {
   if (action.startsWith("ACTION critic")) {
     const run = runOfKey(key);
-    if (run && events.has(`verdict:${run}`)) return true;
+    if (run && latestVerdict(events, run)) return true;
     // Daemon verdicts key on the critic run, not the worker run: match by the findings path instead.
     const m = /^ACTION critic \S+ \S+ (\S+) \d+$/.exec(action);
     if (m) {
@@ -980,7 +1031,7 @@ export function decideStep(stream, key, events, lines) {
 
   const runDir = path.dirname(ticket.mandate);
   const out = ev.out ?? done?.out ?? queued?.out ?? "";
-  const round = roundOf(lines, slug);
+  const round = criticRound(lines, slug, run, runDir, ticket);
   const max = Number.isInteger(ticket.max_rounds) ? ticket.max_rounds : ROUND_CAP;
   const findings = ev.findings ?? path.join(runDir, `findings-r${round}.md`);
 
@@ -1018,6 +1069,10 @@ export function decideStep(stream, key, events, lines) {
   if (ev.kind === "run-dead") return { action: `ESCALATE run-dead ${out}`, ticket: slug };
   if (ev.kind === "verdict") {
     const session = done?.session ?? null;
+    // The round that was actually reviewed: floor the resume-ack round at the findings file's own N so a
+    // verdict recorded outside the step flow (findings-r2.md for worker-r2) still counts its round.
+    const findingsRound = /^findings-r(\d+)(-alt)?\.md$/.exec(path.basename(String(ev.findings ?? "")));
+    const verdictRound = Math.max(roundOf(lines, slug), findingsRound ? Number(findingsRound[1]) : 0);
     if (ev.effective === "CHANGES_REQUESTED") {
       // The resume always targets the reviewed WORKER run, never the critic: a verdict may key on
       // either (daemon verdicts key on the critic run, sessions and step tests on the worker run).
@@ -1042,7 +1097,7 @@ export function decideStep(stream, key, events, lines) {
         // applies the Nvidia drop rule. Same session keeps the worker's context.
         // (Free agents code round 1; a drop is resumed via --role worker above.)
         let agent = wdone.agent;
-        let r = round;
+        let r = verdictRound;
         while (r < max && nextOutTaken(runDir, r, events, wrun)) r++;
         if (r < max && !nextOutTaken(runDir, r, events, wrun)) {
           const next = path.join(runDir, `worker-r${r + 1}.md`);
@@ -1059,7 +1114,7 @@ export function decideStep(stream, key, events, lines) {
       return { action: `ESCALATE owner-signoff ${findings} (free review: ${ev.reviewed_sha ?? "unknown"})`, ticket: slug };
     }
     if (ev.effective === "APPROVED") {
-      if (ev.senior || ticket.senior_trigger || round > 2) return { action: `ESCALATE senior ${findings}`, ticket: slug };
+      if (ev.senior || ticket.senior_trigger || verdictRound > 2) return { action: `ESCALATE senior ${findings}`, ticket: slug };
       return { action: `ESCALATE merge ${ticketPath} ${ev.reviewed_sha ?? ""}`.trimEnd(), ticket: slug };
     }
     return { action: `ESCALATE critic-invalid ${findings}`, ticket: slug };
@@ -1152,7 +1207,7 @@ function cmdStep(opts) {
       const slug = typeof closed.ticket === "string" ? closed.ticket : "";
       // D2: if a run-done for a closed ticket has no verdict event, it was merged without review
       // Only escalate once per ticket (first time we see the closed ticket)
-      if (kind === "run-done" && !events.has(`verdict:${run}`)) {
+      if (kind === "run-done" && !latestVerdict(events, run)) {
         // Check if we already escalated unreviewed-merge for this ticket (any run)
         const alreadyEscalated = lines.some((l) => l.ticket === slug && l.action?.startsWith("ESCALATE unreviewed-merge"));
         if (!alreadyEscalated) {
@@ -1193,7 +1248,10 @@ function cmdStep(opts) {
 
 // ---------------------------------------------------------------- verdict and merge-check (the only git here)
 
-const git = (dir, args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+// Every git call here carries a timeout so a stuck repo cannot hang the desk.
+const GIT_TIMEOUT_MS = 30000;
+const git = (dir, args) =>
+  execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", timeout: GIT_TIMEOUT_MS });
 
 // The ticket a run was dispatched under (the `ticket` field of its queued event), or null.
 // The ticket a run was dispatched under — or exactly why it is unusable (never queued
@@ -1249,6 +1307,36 @@ function cmdVerdict(opts) {
   const { free } = criticFreeFromReceipt(receiptPath);
   const result = gate(text, { free });
   const senior = /^\s*SENIOR_REVIEW:\s*needed\b/m.test(text);
+
+  // A verdict for this run may already exist (first-write-wins per key, unchanged semantics). Only an INVALID
+  // verdict can be superseded, and only on the same sha — a corrected findings file replaces it under a new
+  // verdict:<run>@<n> key that carries `replaces: <previous key>`.
+  const existing = latestVerdict(events, run);
+  if (existing) {
+    if (existing.effective !== "INVALID") {
+      // Already reviewed with a usable verdict: never replace, no write.
+      console.log(`KEY ${existing.key}`);
+      return 0;
+    }
+    // latest is INVALID: supersede only on the same sha.
+    if (existing.reviewed_sha !== sha) {
+      console.error(`desk: cannot supersede INVALID verdict ${existing.key} for ${run}: reviewed_sha ${existing.reviewed_sha} !== HEAD ${sha}`);
+      return 2;
+    }
+    const existingN = existing.key === `verdict:${run}` ? 1 : (Number(/@(\d+)$/.exec(existing.key)?.[1]) ?? 1);
+    const newKey = `verdict:${run}@${existingN + 1}`;
+    try {
+      appendEvent(stream, { key: newKey, kind: "verdict", run, effective: result.effective, senior, findings: path.resolve(findings), reviewed_sha: sha, replaces: existing.key });
+      appendAck(stream, existing.key, `superseded by ${newKey}`, { resolved: true, ticket: ticket?.ticket });
+    } catch (e) {
+      console.error(`desk: cannot append superseding verdict for ${run}: ${e.message}`);
+      return 2;
+    }
+    console.log(`KEY ${newKey}`);
+    return 0;
+  }
+
+  // No verdict yet: first write wins (appendEvent returns false on a duplicate key).
   try {
     appendEvent(stream, { key: `verdict:${run}`, kind: "verdict", run, effective: result.effective, senior, findings: path.resolve(findings), reviewed_sha: sha });
   } catch (e) {
@@ -1269,11 +1357,54 @@ function cmdVerdict(opts) {
 // ff is only possible when base is an ancestor of HEAD; a moved base is a train's job, not the desk's.
 function isAncestor(dir, base) {
   try {
-    execFileSync("git", ["-C", dir, "merge-base", "--is-ancestor", base, "HEAD"], { stdio: "ignore" });
+    execFileSync("git", ["-C", dir, "merge-base", "--is-ancestor", base, "HEAD"], { stdio: "ignore", timeout: GIT_TIMEOUT_MS });
     return true;
   } catch (e) {
     if (e.status === 1) return false;
     throw e;
+  }
+}
+
+// The merge base of two refs, or null when it cannot be computed (missing ref, not a repo).
+function mergeBase(dir, a, b) {
+  try {
+    return execFileSync("git", ["-C", dir, "merge-base", a, b], { encoding: "utf8", timeout: GIT_TIMEOUT_MS }).trim();
+  } catch {
+    return null;
+  }
+}
+
+// The stable patch-id of the diff range a..b, or null. `git patch-id --stable` ignores context line
+// noise so a patch-identical rebase produces the same id as the original.
+function patchId(dir, a, b) {
+  const diff = spawnSync("git", ["-C", dir, "diff", a, b], { encoding: "utf8", timeout: GIT_TIMEOUT_MS });
+  if (diff.status !== 0) return null;
+  const id = spawnSync("git", ["patch-id", "--stable"], { input: diff.stdout, encoding: "utf8", timeout: GIT_TIMEOUT_MS });
+  if (id.status !== 0) return null;
+  return id.stdout.trim().split(/\s+/)[0] || null;
+}
+
+// True when HEAD is a patch-identical rebase of `reviewed` off `base`: reviewed is still a commit, both
+// diff ranges are non-empty, and their stable patch-ids match. Pure read, every git call time-boxed.
+function patchIdenticalRebase(dir, base, head, reviewed) {
+  try {
+    execFileSync("git", ["-C", dir, "cat-file", "-e", reviewed], { stdio: "ignore", timeout: GIT_TIMEOUT_MS });
+  } catch {
+    return false; // reviewed is no longer a commit
+  }
+  const mbReviewed = mergeBase(dir, base, reviewed);
+  const mbHead = mergeBase(dir, base, head);
+  if (!mbReviewed || !mbHead) return false;
+  const pidReviewed = patchId(dir, mbReviewed, reviewed);
+  const pidHead = patchId(dir, mbHead, head);
+  if (!pidReviewed || !pidHead || pidReviewed !== pidHead) return false;
+  // Both ranges must be non-empty: an empty diff means nothing to compare.
+  try {
+    const dReviewed = execFileSync("git", ["-C", dir, "diff", mbReviewed, reviewed], { encoding: "utf8", timeout: GIT_TIMEOUT_MS }).trim();
+    const dHead = execFileSync("git", ["-C", dir, "diff", mbHead, head], { encoding: "utf8", timeout: GIT_TIMEOUT_MS }).trim();
+    return Boolean(dReviewed) && Boolean(dHead);
+  } catch {
+    return false;
   }
 }
 
@@ -1288,7 +1419,7 @@ function cmdMergeCheck(opts) {
     return 2;
   }
   const events = eventsOf(stream);
-  const verdict = events.get(`verdict:${run}`);
+  const verdict = latestVerdict(events, run);
   if (!events.has(`run:${run}:queued`) && !events.has(`run:${run}:done`) && !verdict) {
     console.error(`desk: no run ${run} in stream ${stream}`);
     return 2;
@@ -1312,7 +1443,15 @@ function cmdMergeCheck(opts) {
   try {
     if (git(ticket.worktree, ["status", "--porcelain"]).trim()) return fail("dirty");
     const head = git(ticket.worktree, ["rev-parse", "HEAD"]).trim();
-    if (head !== verdict.reviewed_sha) return fail("head-moved");
+    if (head !== verdict.reviewed_sha) {
+      // A patch-identical rebase (same ticket patch, replayed on a moved base) is still mergeable: the
+      // reviewed change is byte-for-byte identical, only its parent changed.
+      if (patchIdenticalRebase(ticket.worktree, ticket.base, head, verdict.reviewed_sha)) {
+        console.error(`desk: HEAD ${head.slice(0, 8)} is a rebase of reviewed ${verdict.reviewed_sha.slice(0, 8)} (same patch-id)`);
+      } else {
+        return fail("head-moved");
+      }
+    }
     if (!isAncestor(ticket.worktree, ticket.base)) return fail("not-ff");
   } catch (e) {
     console.error(`desk: git failed in ${ticket.worktree}: ${(e.stderr || e.message).toString().trim()}`);
@@ -1454,7 +1593,7 @@ async function verdictFlow(stream, key, state) {
   const ev = events.get(key) ?? {};
   const findings = ev.out ?? "";
   const verdictKey = `verdict:${run}`;
-  if (events.has(verdictKey)) return { stream, key, line: verdictKey, outcome: "noop" };
+  if (latestVerdict(events, run)) return { stream, key, line: verdictKey, outcome: "noop" };
   let text = null;
   try {
     text = fs.readFileSync(findings, "utf8");
