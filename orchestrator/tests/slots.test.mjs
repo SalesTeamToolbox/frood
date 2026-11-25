@@ -6,7 +6,7 @@ import path from "path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { readSample, slotConfig, allowedSlots, decisionLog } from "../bin/slots.mjs";
+import { readSample, slotConfig, allowedSlots, decisionLog, nvidiaCap, nvidiaCapNow, readNvidiaState, recordNvidia429 } from "../bin/slots.mjs";
 import { acquireSlot, slotDir } from "../bin/oc-worker.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -393,4 +393,50 @@ test("oc-worker: invalid WORKER_SLOTS exits 2 (usage error)", () => {
   });
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /invalid WORKER_SLOTS/);
+});
+
+// ---- Nvidia adaptive cap: pure math, injected `now`, no sleeps ----------------------------------------------
+const C = 600000;
+test("nvidiaCap: no 429 on record -> NVIDIA_SLOTS_MAX (default 3; bad values fall back to 3)", () => {
+  assert.equal(nvidiaCap({ env: {}, now: 1e9, state: null }).cap, 3);
+  assert.equal(nvidiaCap({ env: { NVIDIA_SLOTS_MAX: "5" }, now: 1e9, state: null }).cap, 5);
+  for (const bad of ["0", "-2", "x", "1.5", ""]) assert.equal(nvidiaCap({ env: { NVIDIA_SLOTS_MAX: bad }, now: 1e9, state: null }).cap, 3, bad);
+});
+
+test("nvidiaCap: a 429 gives 1, then steps up one per quiet cooldown and never past the max", () => {
+  const t = 1e12;
+  const cap = (since, env = {}) => nvidiaCap({ env, now: t + since, state: { last429: t } }).cap;
+  assert.equal(cap(0), 1);
+  assert.equal(cap(C - 1), 1);
+  assert.equal(cap(C), 2);
+  assert.equal(cap(2 * C - 1), 2);
+  assert.equal(cap(2 * C), 3);
+  assert.equal(cap(50 * C), 3, "never more than the max");
+  assert.equal(cap(5 * C, { NVIDIA_SLOTS_MAX: "4" }), 4);
+  assert.equal(cap(1500, { NVIDIA_COOLDOWN_MS: "1000" }), 2, "cooldown is configurable");
+});
+
+test("nvidiaCap: a fixed NVIDIA_SLOTS overrides the adaptive cap in both directions", () => {
+  const t = 1e12;
+  assert.equal(nvidiaCap({ env: { NVIDIA_SLOTS: "1" }, now: t + 99 * C, state: { last429: t - 99 * C } }).cap, 1, "fixed 1 below the adaptive max, long after a 429");
+  assert.equal(nvidiaCap({ env: { NVIDIA_SLOTS: "5" }, now: t, state: { last429: t } }).cap, 5, "fixed 5 above the adaptive cap, right after a 429");
+  assert.equal(nvidiaCap({ env: { NVIDIA_SLOTS: "2", NVIDIA_SLOTS_MAX: "9" }, now: t, state: null }).fixed, true);
+  assert.equal(nvidiaCap({ env: { NVIDIA_SLOTS: "abc" }, now: t, state: null }).fixed, false, "not a positive integer: adaptive");
+});
+
+test("nvidia state file: atomic write, read back, cap change logged once per change", () => {
+  const home = tmp();
+  const env = { ORCH_HOME: home };
+  const dir = path.join(home, ".config", "orchestrator", "slots");
+  assert.equal(readNvidiaState(dir), null);
+  assert.equal(nvidiaCapNow(dir, { env, now: 1e12 }).cap, 3);
+  recordNvidia429(dir, 1e12);
+  assert.deepEqual(readNvidiaState(dir), { last429: 1e12 });
+  assert.ok(!fs.readdirSync(dir).some((n) => n.endsWith(".tmp")), "no tmp file left behind");
+  assert.equal(nvidiaCapNow(dir, { env, now: 1e12 + 10 }).cap, 1);
+  assert.equal(nvidiaCapNow(dir, { env, now: 1e12 + 20 }).cap, 1);
+  assert.equal(nvidiaCapNow(dir, { env, now: 1e12 + C }).cap, 2);
+  const log = fs.readFileSync(path.join(home, ".config", "orchestrator", "slot-decisions.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.provider === "nvidia");
+  assert.deepEqual(log.map((e) => [e.prev, e.cap]), [[null, 3], [3, 1], [1, 2]], "one line per cap change");
+  assert.match(log[1].reason, /^nvidia cap 3 -> 1 \(429 at /);
 });
