@@ -105,6 +105,8 @@ function emit(lines) {
 }
 
 function run(session) {
+  // Leave the session's cwd: a watcher sitting in a worktree for hours keeps wt-finish from deleting it ("busy").
+  try { process.chdir(os.homedir()); } catch { /* stay put */ }
   fs.mkdirSync(stateDir(), { recursive: true });
   sigtermExisting(session);
   writePid(session);
