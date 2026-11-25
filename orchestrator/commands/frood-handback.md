@@ -12,8 +12,8 @@ This run's arguments: $ARGUMENTS
    (`~/.config/orchestrator/streams/<stream>.json`); if not, say so and stop. Never hand back mid-dispatch: finish
    the current step or park it, and note what is in flight.
 2. Replace the plan's `## Handoff` section (done with shas, next step, in-flight runs, owner items), then record it:
-   `node {{ORCH_REPO}}/bin/handoff.mjs write --stream <n> --plan <plan> --next "<next>" --done "<line>" --waiting "<items>" --by cc`  # cc-only
-   `node {{ORCH_REPO}}/bin/handoff.mjs write --stream <n> --plan <plan> --next "<next>" --done "<line>" --waiting "<items>" --by oc`  # oc-only
+   `node {{ORCH_REPO}}/bin/handoff.mjs write --stream <n> --plan <plan> --next "<next>" --done "<line>" --waiting "<items>" --session <id> --release --by cc`  # cc-only
+   `node {{ORCH_REPO}}/bin/handoff.mjs write --stream <n> --plan <plan> --next "<next>" --done "<line>" --waiting "<items>" --session <id> --release --by oc`  # oc-only
    Exit 3 means this harness does not hold the stream: stop here, say so, and restore the plan's previous
    `## Handoff` section.
 3. Desk: if this harness runs a desk watcher for the stream, stop it.

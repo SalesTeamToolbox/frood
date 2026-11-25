@@ -4,7 +4,10 @@
 //
 //   node handoff.mjs write --stream <n> --plan <plan.md> --next "<next module / step>" [--done "<summary>"]
 //                          [--waiting "<owner items>"] [--repo <dir>] [--status active|parked|done]
-//                          [--written-by <id>]
+//                          [--written-by <id>] [--session <id>] [--release]
+//                          A write whose --session equals the current claim.session is a progress write: it keeps
+//                          the claim (refreshing claim.at) and keeps consumed_at. Every other write releases it.
+//                          --release lets the holder hand off explicitly even with a matching --session.
 //   node handoff.mjs note  --stream <n> [--next <t>] [--done <t>] [--waiting <t>]   (the desk's update)
 //   node handoff.mjs show  [--stream <n>]    one stream as JSON, or the table of every stream
 //   node handoff.mjs consume [--stream <n>] [--session <id>] [--takeover]
@@ -31,7 +34,8 @@
 // same stream. There is no pid and no heartbeat; the TTL is the liveness proxy (10 min, ORCH_CLAIM_TTL_MIN overrides,
 // 0 = no enforcement). A claim older than the TTL is presumed dead and replaced (the expired session lands in
 // `taken_from`, with a one-line note on stderr). Only a claim/consume re-run refreshes it — `note` (the desk) never
-// does. `write`, `done` and `release` by the holder clear it. A missing or corrupt claim reads as no claim at all.
+// does. `write` by the holder keeps it when `--session` matches and `--release` is absent (progress write);
+// otherwise `write`, `done` and `release` by the holder clear it. A missing or corrupt claim reads as no claim at all.
 // The prose handoff still lives in the plan file itself under "## Handoff"; these files only say where to look.
 // A stream written more than 72 h ago is stale (listed, never auto-resumed); parked and done are never watched.
 // Everything here is synchronous; only proc-tree's killPid is async (taskkill on win32).
@@ -499,7 +503,11 @@ function saveStream(name, obj) {
   atomicWrite(streamFile(name), JSON.stringify(obj, null, 2) + "\n");
 }
 
-// Create or update a stream; a write is an end-of-session handoff, so it clears consumed_at and the session claim.
+// Create or update a stream. By default a write is an end-of-session handoff: it clears consumed_at and the session
+// claim. A write whose --session equals the current claim.session is a progress write: it keeps claim (refreshing
+// claim.at) and keeps consumed_at, so the state (consumed) survives. Every other write releases the claim: no
+// --session, a different session, or no current claim. A --release flag lets the holder hand off explicitly even
+// with a matching --session. The lease keys (held_by, …) are untouched in every case.
 // A write also resets status to "active" unless explicitly provided, because a new handoff means the stream is being worked on again.
 export function writeStream(name, fields = {}) {
   checkName(name);
@@ -509,6 +517,8 @@ export function writeStream(name, fields = {}) {
     const cur = readStream(name);
     if (heldByOther(cur, fields.by)) throw heldError(name, cur);
     const status = fields.status ?? "active"; // a write always makes the stream active unless explicitly set
+    const claim = cur?.claim;
+    const isProgressWrite = fields.session !== undefined && claim?.session === fields.session && !fields.release;
     const obj = {
       name,
       repo: fields.repo ?? cur?.repo ?? "",
@@ -519,9 +529,9 @@ export function writeStream(name, fields = {}) {
       waiting: fields.waiting ?? cur?.waiting ?? "",
       written_at: now,
       written_by: fields.writtenBy ?? cur?.written_by ?? "",
-      consumed_at: null,
+      consumed_at: isProgressWrite ? cur?.consumed_at ?? null : null,
       done_at: status === "done" ? cur?.done_at ?? now : cur?.done_at ?? null,
-      claim: null, // the new session has not claimed it yet
+      claim: isProgressWrite ? { ...claim, at: now } : null,
     };
     if (cur?.noted_at) obj.noted_at = cur.noted_at;
     for (const k of LEASE_KEYS) obj[k] = cur?.[k] ?? null;
@@ -689,7 +699,7 @@ function parseArgs(argv) {
 function usage() {
   console.error(
     "usage: handoff.mjs write --stream <n> --plan <p> --next <text> [--done <text>] [--waiting <text>] [--repo <dir>]\n" +
-      "                  [--status active|parked|done] [--written-by <id>]\n" +
+      "                  [--status active|parked|done] [--written-by <id>] [--session <id>] [--release]\n" +
       "       handoff.mjs note --stream <n> [--next <text>] [--done <text>] [--waiting <text>]\n" +
       "       handoff.mjs show [--stream <n>] | consume [--stream <n>] | list [--json]\n" +
       "       handoff.mjs ack --stream <n> --key <k> [--action <line>] [--ticket <slug>] [--resolved]\n" +
@@ -752,7 +762,8 @@ function cmdRelease(a) {
 }
 
 function cmdWrite(a, name) {
-  const { by } = leaseArgs(a);
+  const { by, session } = leaseArgs(a);
+  const release = a.has("release");
   const plan = a.get("plan");
   if (!plan) throw new Error("--plan is required");
   if (!fs.existsSync(plan)) throw new Error(`plan file not found: ${plan}`);
@@ -761,6 +772,8 @@ function cmdWrite(a, name) {
   const obj = writeStream(name, {
     plan,
     next,
+    session,
+    release,
     done: a.has("done") ? a.get("done") ?? "" : undefined,
     waiting: a.has("waiting") ? a.get("waiting") ?? "" : undefined,
     repo: a.get("repo"),
