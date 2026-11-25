@@ -11,12 +11,16 @@
 //                   FAKE_OC_ORPHAN_WAIT ms (default 4000) so a watcher can see it, then finishes like `ok` and exits,
 //                   leaving the grandchild orphaned
 //   hang-after-text -> one text event, then sleeps
+//   landed          -> git add -A + commit (moves HEAD), writes "RESULT: DONE" to the --report path,
+//                     then hangs (a worker that committed and reported done before the timeout killed it)
+//   grace-ok        -> one text event immediately, then finishes cleanly after FAKE_OC_DELAY ms
+//                     (output at the deadline triggers the grace extension)
 //   edit-installed -> writes "modified by fake" to FAKE_OC_TARGET (an installed file), then finishes like ok
 //   edit-worktree -> same, for a worktree file; capture-scratch -> records ORCH_SCRATCH, whether it exists and the
 //                    message into FAKE_OC_RECORD, then finishes like ok
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 const argv = process.argv.slice(2);
 const agent = argv[argv.indexOf("--agent") + 1];
 const session = argv.includes("--session") ? argv[argv.indexOf("--session") + 1] : "ses_fake123";
@@ -79,6 +83,31 @@ else if (mode === "text-then-quota") {
 else if (mode === "hang-after-text") {
   process.stdout.write(JSON.stringify({ type: "text", sessionID: session, part: { sessionID: session, messageID: "msg_1", type: "text", text: "found candidate A at x.py:12" } }) + "\n");
   setInterval(() => {}, 1000);
+}
+else if (mode === "landed") {
+  // Commit (moves HEAD) and write a DONE report, then hang: work landed before the kill.
+  process.on("SIGTERM", () => process.exit(0));
+  process.on("SIGINT", () => process.exit(0));
+  const session = argv[argv.indexOf("--session") + 1] || "ses_fake123";
+  process.stdout.write(JSON.stringify({ type: "text", sessionID: session, part: { sessionID: session, messageID: "msg_1", type: "text", text: "RESULT: DONE work in progress\n" } }) + "\n");
+  try { fs.writeFileSync(path.join(process.cwd(), "landed-work.txt"), "done\n"); } catch {}
+  try { spawnSync("git", ["-C", process.cwd(), "add", "landed-work.txt"], { stdio: "pipe", encoding: "utf8" }); } catch {}
+  try { spawnSync("git", ["-C", process.cwd(), "commit", "-m", "work by fake opencode"], { stdio: "pipe", encoding: "utf8" }); } catch {}
+  const report = process.env.FAKE_OC_REPORT;
+  if (report && !fs.existsSync(report)) {
+    try { fs.writeFileSync(report, "RESULT: DONE\nwork landed\n"); } catch {}
+  }
+  setInterval(() => {}, 1000);
+}
+else if (mode === "grace-ok") {
+  // Emit output right away, then finish cleanly after FAKE_OC_DELAY ms so a grace
+  // extension lets the run complete past the original deadline.
+  const ev = (type, part) => process.stdout.write(JSON.stringify({ type, sessionID: session, part: { sessionID: session, messageID: "msg_2", ...part } }) + "\n");
+  ev("text", { type: "text", text: "RESULT: DONE\ngrace work\n" });
+  setTimeout(() => {
+    ev("step_finish", { type: "step-finish", cost: 0.0012, tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 1000, write: 0 } } });
+    process.exit(0);
+  }, Number(process.env.FAKE_OC_DELAY || 500));
 }
 else if (mode === "fail") {
   process.stderr.write("boom: provider error\n");

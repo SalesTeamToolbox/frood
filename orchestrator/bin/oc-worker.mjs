@@ -4,7 +4,7 @@
 //   node oc-worker.mjs --agent worker --dir <worktree> --prompt <mandate.md>
 //        [--out <final-message.md>] [--session <ses_id>] [--model <provider/model>]
 //        [--ticket <id> --owner <session>]
-//        [--stream <name>] [--title <text>] [--timeout-min 30] [--idle-min 20] [--resume 1] [--slots 2]
+//        [--stream <name>] [--title <text>] [--timeout-min 30] [--idle-min 20] [--grace-min 15] [--resume 1] [--slots 2]
 //        [--role <name>] [--fallback <agent>[,<agent>]] [--report <path>] [--vision]
 //   node oc-worker.mjs --help   (or -h) prints this text and exits 0; nothing is launched
 //   node oc-worker.mjs active [--json]   list running headless runs with elapsed time, last-output
@@ -203,7 +203,7 @@ export function usage() {
 }
 
 function args(argv) {
-  const a = { timeoutMin: 30, idleMin: 20, resume: 1, slots: Number(process.env.WORKER_SLOTS || 2), vision: false };
+  const a = { timeoutMin: 30, idleMin: 20, resume: 1, slots: Number(process.env.WORKER_SLOTS || 2), vision: false, graceMin: 15 };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = () => argv[++i];
@@ -220,6 +220,7 @@ function args(argv) {
     else if (k === "--report") a.report = v();
     else if (k === "--timeout-min") a.timeoutMin = Number(v());
     else if (k === "--idle-min") a.idleMin = Number(v());
+    else if (k === "--grace-min") a.graceMin = Number(v());
     else if (k === "--resume") a.resume = Number(v());
     else if (k === "--slots") a.slots = Number(v());
     else if (k === "--fallback") a.fallback = v().split(",").map((x) => x.trim()).filter(Boolean).slice(0, 8);
@@ -759,12 +760,19 @@ export async function runWorker(a) {
   const promptText = fs.readFileSync(a.prompt, "utf8"); // before the slot: a bad --prompt must not leak a slot, registry entry or timer
   const release = await acquireSlot(a.slots);
   const started = Date.now();
-  const deadline = started + a.timeoutMin * 60000; // one wall-clock budget for every attempt together
+  let effectiveDeadline = started + a.timeoutMin * 60000; // one wall-clock budget for every attempt together
+  // Grace: once extended, the dashboard's OVERDUE check must see the extended deadline.
+  const graceMin = Number.isFinite(a.graceMin) ? a.graceMin : 15;
+  let extendedMin;
   const out = path.resolve(a.out);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   // Live registry for the dashboard: one file per running oc-worker, removed when it ends.
   const run = registerRun({ agent: a.agent, model, title, dir, out, started, idleMin: a.idleMin, timeoutMin: a.timeoutMin, stream: a.stream ?? null, session: a.session ?? null });
   const kickTimer = setInterval(() => run.touch(), 20_000);
+  // HEAD at run start, for every agent (not only read-only roles): used to detect landed work when a run
+  // times out or stalls — a commit after the start HEAD means work landed even though the run was killed.
+  let wtHeadBefore = null;
+  try { wtHeadBefore = gitOut(dir, ["rev-parse", "HEAD"]); } catch {}
   const events = fs.createWriteStream(out + ".events.jsonl"); // appended across attempts
   const idleMin = a.idleMin ?? 20;
   const resumeMax = a.resume ?? 1;
@@ -773,7 +781,6 @@ export async function runWorker(a) {
   let isReadOnly = READONLY_AGENT_RE.test(a.agent) && !process.env.ORCH_NO_READONLY_GUARD;
   const guardErrors = []; // guard failures never change the run outcome; they only add error lines
   let preDiff = null;
-  let wtHeadBefore = null;
   let wtStatusBefore = null;
   let scratchDir = null;
   let readonlyFooter = "";
@@ -812,7 +819,8 @@ export async function runWorker(a) {
       const lines = [];
       let stderr = "";
       let killReason = null;
-      let lastOut = Date.now();
+      let lastOut = Date.now();      // stall watchdog (updated by stdout + host-sleep hack)
+      let lastRealOutput = null;     // real opencode stdout output only — used for the grace window
       let lastTick = Date.now();
       let maxSilence = 0;
       const attemptStart = Date.now();
@@ -822,6 +830,7 @@ export async function runWorker(a) {
       let buf = "";
       child.stdout.on("data", (d) => {
         lastOut = Date.now();
+        lastRealOutput = Date.now(); // real opencode output, not the host-sleep hack
         events.write(d);
         buf += d;
         let i;
@@ -831,10 +840,26 @@ export async function runWorker(a) {
         }
       });
       child.stderr.on("data", (d) => (stderr += d));
-      const timer = setTimeout(() => {
-        killReason = "timeout";
-        killTree(child);
-      }, Math.max(0, deadline - Date.now()));
+      // Grace: an active run at the deadline gets one extension instead of a kill.
+      let graceUsed = false;
+      const GRACE_WINDOW_MS = 5 * 60000; // output within the last 5 minutes counts as active
+      const arm = () => {
+        timer = setTimeout(() => {
+          const active = lastRealOutput != null && Date.now() - lastRealOutput <= GRACE_WINDOW_MS;
+          if (!graceUsed && graceMin > 0 && active) {
+            graceUsed = true;
+            effectiveDeadline += graceMin * 60000;
+            run.touch({ timeoutMin: Math.round((effectiveDeadline - started) / 60000) });
+            extendedMin = graceMin;
+            arm(); // re-arm for the extended deadline
+          } else {
+            killReason = "timeout";
+            killTree(child);
+          }
+        }, Math.max(0, effectiveDeadline - Date.now()));
+      };
+      let timer;
+      arm();
       const watchdog = setInterval(() => {
         if (Date.now() - lastTick > 30_000) lastOut = Date.now(); // the host slept: never call that a stall
         lastTick = Date.now();
@@ -912,7 +937,7 @@ export async function runWorker(a) {
       const resumeReason = !clean && !r.killReason ? resumableReason(classifyErrors) : null;
       const interrupted = r.killReason === "stalled" || resumeReason != null;
       const waitMs = Number(process.env.ORCH_RESUME_WAIT_MS ?? 30_000);
-      if (!interrupted || !sum.all.trim() || !sum.session || resumed.length >= resumeMax || Date.now() + waitMs >= deadline) break;
+      if (!interrupted || !sum.all.trim() || !sum.session || resumed.length >= resumeMax || Date.now() + waitMs >= effectiveDeadline) break;
       const why = r.killReason === "stalled" ? `no output for ${idleMin} min` : (classifyErrors.find((e) => classify([e])?.reason === resumeReason) || errors[0] || "dropped").slice(0, 80);
       resumed.push({ session: sum.session, reason: why, seconds: Math.round((Date.now() - t0) / 1000) });
       if (waitMs > 0) await new Promise((res) => setTimeout(res, waitMs));
@@ -925,6 +950,21 @@ export async function runWorker(a) {
     }
     events.end();
     const killReason = r.killReason;
+    // Landed work: a timed-out or stalled run whose commit made it in counts as done.
+    // HEAD moved, tree is clean, and the --report file's status line says DONE.
+    let landed;
+    if (killReason === "timeout" || killReason === "stalled") {
+      try {
+        const headAfter = gitOut(dir, ["rev-parse", "HEAD"]);
+        const status = gitOut(dir, ["status", "--porcelain"]);
+        const headMoved = wtHeadBefore != null && wtHeadBefore !== "(git unavailable)"
+          && headAfter !== "(git unavailable)" && headAfter !== wtHeadBefore;
+        const clean = status === "" || status === "(clean)";
+        const report = a.report ? statusLine(readText(path.resolve(dir, a.report))) : "";
+        const reportDone = report.startsWith("RESULT: DONE");
+        if (headMoved && clean && reportDone) landed = { head_before: wtHeadBefore, head_after: headAfter };
+      } catch {}
+    }
     const all = alls.join("\n\n");
     if (killReason && all.trim()) {
       // Partial work survives a timeout or stall; the status line makes it impossible to mistake for a finished run.
@@ -1000,6 +1040,8 @@ export async function runWorker(a) {
       resumed,
       attempts,
       ...(orphansKilled.length ? { orphans_killed: orphansKilled } : {}),
+      ...(landed ? { landed } : {}),
+      ...(extendedMin !== undefined ? { extended_min: extendedMin } : {}),
       // An orchestrator's own events do not include the subagents it spawned; price the whole tree.
       tree: sum.session ? sessionTree(sum.session) : null,
       // Read-only guard fields

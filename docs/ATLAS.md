@@ -420,6 +420,10 @@ decides: which board tickets may run in their own sessions at once (shared file 
 handler: orchestrator/bin/oc-worker.mjs --role <name> (expands to --agent/--fallback from CHAINS); orchestrator/bin/chains.mjs (CHAINS source, re-exported by orchestrator/bin/router-health.mjs)
 decides: which OpenCode agent pool to dispatch first for a worker run; worker-nvidia first for routine tickets, Nvidia 429 resumes on the same session, two stalled/timeout receipts drop worker-nvidia for the ticket
 
+### oc-worker: timed-out worker whose work landed counts done
+handler: orchestrator/bin/oc-worker.mjs (HEAD captured at run start; `landed` receipt field on timeout/stalled when HEAD moved + clean tree + DONE report); orchestrator/bin/outcome.mjs workerOutcome; orchestrator/bin/board.mjs workerOutcome copy (identical behaviour)
+decides: a timeout/stalled receipt whose HEAD moved, tree is clean, and --report says DONE is treated as done, so the desk dispatches the critic instead of resume-worker and board round accepts findings
+
 ## How to keep this map accurate
 
 - A handler rename is a same-commit map update: edit the `handler:` line in the

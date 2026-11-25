@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { summarize, acquireSlot, slotDir } from "../bin/oc-worker.mjs";
+import { workerOutcome } from "../bin/outcome.mjs";
 import { CHAINS } from "../bin/chains.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -30,6 +31,7 @@ function run(extraEnv, ...flags) {
   const r = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", dir, "--prompt", prompt, "--out", path.join(dir, "out", "findings-r1.md"), ...flags], {
     env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, FAKE_OC_ARGS_FILE: argsFile, ...extraEnv },
     encoding: "utf8",
+    timeout: 30000,
   });
   return { ...r, dir, argsFile };
 }
@@ -286,7 +288,7 @@ test("two prior worker-nvidia stalled receipts drop worker-nvidia; one does not"
 
 
 test("timeout keeps partial output, clearly marked BLOCKED", () => {
-  const r = run({ FAKE_OC_MODE: "hang-after-text" }, "--timeout-min", "0.03");
+  const r = run({ FAKE_OC_MODE: "hang-after-text" }, "--timeout-min", "0.03", "--grace-min", "0");
   assert.equal(r.status, 4);
   const receipt = JSON.parse(r.stdout.trim());
   assert.equal(receipt.partial, true);
@@ -500,7 +502,7 @@ test("hang-after-text with --idle-min is killed as stalled and keeps its partial
 });
 
 test("--idle-min 0 never stalls: the run ends on the timeout", () => {
-  const r = run({ FAKE_OC_MODE: "hang-after-text" }, "--idle-min", "0", "--timeout-min", "0.1");
+  const r = run({ FAKE_OC_MODE: "hang-after-text" }, "--idle-min", "0", "--timeout-min", "0.1", "--grace-min", "0");
   assert.equal(r.status, 4);
   assert.equal(JSON.parse(r.stdout.trim()).exit, "timeout");
 });
@@ -920,4 +922,144 @@ test("quota with --resume 0 is not nudged; a persistent quota fails after one nu
   assert.equal(receipt.attempts, 2);
   assert.equal(receipt.resumed.length, 1, "one nudge, then the failure stands");
   assert.match(receipt.errors.join("\n"), /weekly usage limit/);
+});
+
+// ── landed-work detection (worker-done-detection) ──────────────────────────
+
+function gitRepo(dir) {
+  const git = (...args) => {
+    const r = spawnSync("git", ["-C", dir, ...args], { encoding: "utf8", timeout: 10000 });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  git("init", "-b", "main");
+  git("config", "user.email", "t@t");
+  git("config", "user.name", "t");
+  fs.writeFileSync(path.join(dir, "file.txt"), "original\n");
+  git("add", "file.txt");
+  git("commit", "-m", "init");
+  return () => git("rev-parse", "HEAD");
+}
+
+// workerRun runs oc-worker against `repo` (a git repo) while mandate/report/out/args live in `artDir`
+// (outside the repo), so `git status --porcelain` inside the repo stays clean.
+function workerRun(repo, artDir, headBefore, extraEnv, ...flags) {
+  const mandate = path.join(artDir, "mandate.md");
+  fs.writeFileSync(mandate, "Do the work.");
+  const report = path.join(artDir, "report.md");
+  const out = path.join(artDir, "out", "worker-r1.md");
+  const argsFile = path.join(artDir, "args.json");
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  const r = spawnSync(process.execPath, [BIN, "--agent", "worker", "--dir", repo, "--prompt", mandate, "--out", out, "--report", report, ...flags], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: artDir, FAKE_OC_ARGS_FILE: argsFile, FAKE_OC_REPORT: report, ...extraEnv },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  return { ...r, repo, artDir, out, report, headBefore };
+}
+
+test("landed: timeout after a commit with a clean tree and DONE report -> landed + outcome done", () => {
+  const repo = tmp(); const artDir = tmp(); CLEAN.push(repo, artDir);
+  const head = gitRepo(repo);
+  const headBefore = head();
+  const r = workerRun(repo, artDir, headBefore, { FAKE_OC_MODE: "landed" }, "--timeout-min", "0.02", "--grace-min", "0", "--resume", "0");
+  assert.equal(r.status, 4, r.stdout + r.stderr);
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.exit, "timeout");
+  assert.ok(receipt.landed, "landed field missing: " + r.stdout);
+  assert.equal(receipt.landed.head_before, headBefore);
+  assert.notEqual(receipt.landed.head_after, headBefore, "HEAD must have moved");
+  assert.equal(receipt.partial, true);
+  assert.equal(workerOutcome(receipt), "done");
+});
+
+test("landed: timeout with uncommitted changes left -> no landed, outcome stays timeout", () => {
+  const repo = tmp(); const artDir = tmp(); CLEAN.push(repo, artDir);
+  const head = gitRepo(repo);
+  const headBefore = head();
+  // Leave the tree dirty: HEAD moves but an untracked file remains after.
+  fs.writeFileSync(path.join(repo, "untracked.txt"), "junk\n");
+  const r = workerRun(repo, artDir, headBefore, { FAKE_OC_MODE: "landed" }, "--timeout-min", "0.02", "--grace-min", "0", "--resume", "0");
+  assert.equal(r.status, 4);
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.exit, "timeout");
+  assert.equal(receipt.landed, undefined, "dirty tree must not count as landed");
+  assert.equal(workerOutcome(receipt), "timeout");
+});
+
+test("landed: timeout with HEAD unchanged -> no landed, outcome stays timeout", () => {
+  const repo = tmp(); const artDir = tmp(); CLEAN.push(repo, artDir);
+  const head = gitRepo(repo);
+  const headBefore = head();
+  // hang-after-text produces output but never commits: HEAD unchanged.
+  const r = workerRun(repo, artDir, headBefore, { FAKE_OC_MODE: "hang-after-text" }, "--timeout-min", "0.02", "--grace-min", "0", "--resume", "0");
+  assert.equal(r.status, 4);
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.exit, "timeout");
+  assert.equal(receipt.landed, undefined, "unchanged HEAD must not count as landed");
+  assert.equal(workerOutcome(receipt), "timeout");
+});
+
+test("landed: timeout with report not DONE -> no landed, outcome stays timeout", () => {
+  const repo = tmp(); const artDir = tmp(); CLEAN.push(repo, artDir);
+  const head = gitRepo(repo);
+  const headBefore = head();
+  // Pre-write a non-DONE report; the landed fixture won't clobber an existing report.
+  fs.writeFileSync(path.join(artDir, "report.md"), "STATUS: NOT DONE\n");
+  const r = workerRun(repo, artDir, headBefore, { FAKE_OC_MODE: "landed" }, "--timeout-min", "0.02", "--grace-min", "0", "--resume", "0");
+  assert.equal(r.status, 4);
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.exit, "timeout");
+  assert.equal(receipt.landed, undefined, "non-DONE report must not count as landed");
+  assert.equal(workerOutcome(receipt), "timeout");
+});
+
+// ── grace (worker-done-detection) ──────────────────────────────────────────
+
+test("grace: output in the last 5 minutes extends the deadline once and the run finishes", () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const mandate = path.join(dir, "mandate.md");
+  fs.writeFileSync(mandate, "Do the work.");
+  const out = path.join(dir, "out", "worker-r1.md");
+  const argsFile = path.join(dir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", dir, "--prompt", mandate, "--out", out, "--timeout-min", "0.02", "--grace-min", "0.1", "--resume", "0"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, FAKE_OC_ARGS_FILE: argsFile, FAKE_OC_MODE: "grace-ok", FAKE_OC_DELAY: "1500" },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.exit, 0);
+  assert.equal(receipt.extended_min, 0.1, "grace extension not recorded: " + r.stdout);
+  const outText = fs.readFileSync(out, "utf8");
+  assert.match(outText, /grace work/);
+});
+
+test("grace: silent run is killed at the deadline, no extension", () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const r = run({ FAKE_OC_MODE: "hang" }, "--timeout-min", "0.02", "--grace-min", "0.1", "--resume", "0");
+  assert.equal(r.status, 4);
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.exit, "timeout");
+  assert.equal(receipt.extended_min, undefined, "silent run must not be extended");
+});
+
+test("grace: --grace-min 0 disables the extension", () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const mandate = path.join(dir, "mandate.md");
+  fs.writeFileSync(mandate, "Do the work.");
+  const out = path.join(dir, "out", "worker-r1.md");
+  const argsFile = path.join(dir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", dir, "--prompt", mandate, "--out", out, "--timeout-min", "0.02", "--grace-min", "0", "--resume", "0"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, FAKE_OC_ARGS_FILE: argsFile, FAKE_OC_MODE: "grace-ok", FAKE_OC_DELAY: "1500" },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  assert.equal(r.status, 4, r.stdout + r.stderr);
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.exit, "timeout");
+  assert.equal(receipt.extended_min, undefined, "grace-min 0 must not extend");
 });

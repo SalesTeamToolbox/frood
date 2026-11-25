@@ -9,7 +9,7 @@ export function workerStatusLine(r) {
 }
 
 export function workerOutcome(r) {
-  if (r.exit === "timeout" || r.exit === "stalled") return "timeout";
+  if (r.exit === "timeout" || r.exit === "stalled") return r.landed ? "done" : "timeout";
   if (r.exit === "no-healthy-pool") return "no_pool";
   if (r.exit === "model-not-allowed" || r.exit === "model-unresolvable") return "not_allowed";
   // A missing `out` is as good as a null one: no final message was saved.
