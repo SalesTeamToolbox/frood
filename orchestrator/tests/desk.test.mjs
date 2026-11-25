@@ -802,6 +802,31 @@ test("step: a resume with every slot through max_rounds taken pages rounds-exhau
   assert.match(cliLines(h, ["step", name, "verdict:worker-r1"]).lines[0], /^ESCALATE rounds-exhausted /, "max_rounds=3, r2+r3 taken");
 });
 
+test("step: a critic round past max_rounds pages rounds-exhausted naming the highest findings file", () => {
+  const { h, name, runDir } = t8Stream("past-max");
+  mkTicket(runDir, { max_rounds: 2 });
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r2", runDir));
+    appendEvent(name, evDone("worker-r2", runDir));
+  });
+  fs.writeFileSync(path.join(runDir, "findings-r2.md"), "taken\n");
+  const line = cliLines(h, ["step", name, "run:worker-r2:done"]).lines[0];
+  assert.equal(line, `ESCALATE rounds-exhausted ${fwd(path.join(runDir, "findings-r2.md"))}`);
+});
+
+test("step: a findings slot judged by a recorded verdict advances the critic round even when its file is gone", () => {
+  const { h, name, runDir } = t8Stream("judged");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+    appendEvent(name, evQueued("findings-r1", runDir, "critic"));
+    appendEvent(name, evDone("findings-r1", runDir, { agent: "critic" }));
+    appendEvent(name, evVerdict("findings-r1", runDir, { effective: "INVALID" }));
+  });
+  const line = cliLines(h, ["step", name, "run:worker-r1:done"]).lines[0];
+  assert.match(line, /findings-r2\.md 2$/, line);
+});
+
 test("verdict: gate() decides the four findings kinds, stores reviewed_sha, prints KEY", () => {
   const { h, name, runDir } = t8Stream("verdicts");
   const repo = gitRepo();

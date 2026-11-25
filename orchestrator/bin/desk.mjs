@@ -1000,6 +1000,15 @@ function nextOutTaken(runDir, round, events, run) {
   return fs.existsSync(out) || fs.existsSync(out + ".receipt.json") || events.has(`run:${nextRunId(run, round)}:queued`) ? out : null;
 }
 
+// A findings slot whose critic already delivered a verdict is judged, even when criticRound cannot see it on disk
+// (its findings file was deleted). Matches the critic run's verdict key or any verdict naming the findings path.
+function slotJudged(runDir, r, events) {
+  const f = path.join(runDir, `findings-r${r}.md`);
+  if (latestVerdict(events, runIdOf(f))) return true;
+  for (const [, e] of events) if (e.kind === "verdict" && baseFindings(e.findings) === f) return true;
+  return false;
+}
+
 // The worker run a critic reviewed: the ACTION critic ack whose findings path matches carries the
 // worker run-done key. Null when the critic was launched outside the step flow (a direct oc-worker
 // run records no ACTION) — then nobody wrote down what it reviewed.
@@ -1038,7 +1047,14 @@ export function decideStep(stream, key, events, lines) {
   if (ev.kind === "run-done") {
     const agent = ev.agent ?? "";
     if (!agent.startsWith("worker")) return { action: `ESCALATE agent-${agent} ${out}`, ticket: slug };
-    if (ev.outcome === "done") return { action: `ACTION critic ${ticketPath} ${out} ${path.join(runDir, `findings-r${round}.md`)} ${round}`, ticket: slug };
+    if (ev.outcome === "done") {
+      // criticRound floors the round; a slot already judged by a recorded verdict advances it, and a round past
+      // max pages rounds-exhausted naming the highest taken findings file instead of a critic that cannot run.
+      let r = round;
+      while (r <= max && slotJudged(runDir, r, events)) r++;
+      if (r > max) return { action: `ESCALATE rounds-exhausted ${path.join(runDir, `findings-r${r - 1}.md`)}`, ticket: slug };
+      return { action: `ACTION critic ${ticketPath} ${out} ${path.join(runDir, `findings-r${r}.md`)} ${r}`, ticket: slug };
+    }
     if (ev.outcome === "blocked_question") return { action: `ESCALATE question ${out}`, ticket: slug };
     // Worker errored: try auto-resume on the next round before paging the owner.
     // A run that timed out or dropped (worker-nvidia or worker-free) resumes on the
@@ -1666,7 +1682,13 @@ async function doCritic(stream, key, events, ticketPath, out, findings, round) {
     return { stream, key, line: "", outcome: "paged" };
   }
   const crun = runIdOf(findings);
-  if (events.has(`run:${crun}:queued`) || events.has(`run:${crun}:done`)) return { stream, key, line: "", outcome: "critic-inflight" };
+  if (events.has(`run:${crun}:queued`) || events.has(`run:${crun}:done`)) {
+    // Queued or done with no verdict yet is a genuine replay; a judged slot means decideStep named a taken one.
+    const judged = events.has(`verdict:${crun}`) || [...events.values()].some((e) => e.kind === "verdict" && typeof e.findings === "string" && baseFindings(e.findings) === baseFindings(findings));
+    if (!judged) return { stream, key, line: "", outcome: "critic-inflight" };
+    dpage(stream, key, `critic-slot-taken ${findings}`);
+    return { stream, key, line: "", outcome: "paged" };
+  }
   const runDir = path.dirname(ticket.mandate);
   const prompt = path.join(runDir, `critic-prompt-r${round}.md`);
   const lines = [`Mandate: ${ticket.mandate}`, `Worktree: ${ticket.worktree}`, `Base: ${ticket.base ?? ""}`, `Report: ${ticket.report ?? ""}`, `Round: ${round}`];

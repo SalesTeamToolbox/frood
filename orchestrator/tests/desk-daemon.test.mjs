@@ -412,6 +412,8 @@ test("doCritic pages critic-spawn-failed when the spawn never queues (and retrie
   // The spawn must die before it queues. A findings file that already exists does that: oc-worker --stream refuses a
   // used --out (exit 2) before writing the queued event. (Before --stream was passed, every spawn "never queued".)
   fs.writeFileSync(path.join(h, "reports", "t1", "findings-r1.md"), "stale\n");
+  // step now skips a taken findings slot, so the stale slot reaches doCritic only through a stored decision (a replay).
+  inHome(h, () => appendAck("m6a", "run:t1/worker-r1:done", `ACTION critic ${tp} ${out} ${path.join(h, "reports", "t1", "findings-r1.md")} 1`, { ticket: "t1" }));
   const saved = { ...process.env };
   Object.assign(process.env, { ORCH_NO_NOTIFY: "1", ORCH_AWAIT_QUEUED_MS: "1500" });
   // Short-circuit the 30s watch: patch awaitQueued via a dead OC_WORKER is overkill;
@@ -625,4 +627,36 @@ test("step: an -alt critic's CHANGES_REQUESTED verdict resumes the reviewed work
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^ACTION resume-worker .*--session ses_W1/m, r.stdout);
   assert.doesNotMatch(r.stdout, /review-unlinked/);
+});
+
+test("driveOnce (dry or stubbed): a critic whose run already has a verdict pages critic-slot-taken", async () => {
+  const h = home();
+  mkStream(h);
+  mkTicket(h);
+  const runDir = path.join(h, "reports", "t1");
+  const tp = path.join(runDir, "ticket.json");
+  const out = path.join(runDir, "worker-r2.md");
+  const findings = path.join(runDir, "findings-r2.md");
+  fs.writeFileSync(out, "done\n");
+  inHome(h, () => {
+    appendEvent("m6a", evQ("t1/worker-r2", out, tp));
+    appendEvent("m6a", evDone("t1/worker-r2", out));
+    appendEvent("m6a", evQ("t1/findings-r2", findings, tp, "critic"));
+    appendEvent("m6a", evDone("t1/findings-r2", findings, "critic"));
+    appendEvent("m6a", { key: "verdict:t1/findings-r2", kind: "verdict", run: "t1/findings-r2", effective: "APPROVED", senior: false, reviewed_sha: "abc", at: at() });
+    // The stored decision names a slot whose critic already ran and was judged.
+    appendAck("m6a", "run:t1/worker-r2:done", `ACTION critic ${tp} ${out} ${findings} 2`, { ticket: "t1" });
+  });
+  const saved = { ...process.env };
+  Object.assign(process.env, DRY);
+  try {
+    const r = await inHome(h, () => handleEvent("m6a", "run:t1/worker-r2:done", undefined));
+    assert.equal(r.outcome, "paged");
+    assert.match(escLines(h)[0], /critic-slot-taken/);
+  } finally {
+    for (const k of Object.keys(DRY)) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
 });
