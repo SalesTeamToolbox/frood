@@ -4,7 +4,8 @@
     "cc": {
       "commands": "~/.claude/commands",
       "agents": "~/.claude/agents",
-      "hooks": "~/.claude/hooks"
+      "hooks": "~/.claude/hooks",
+      "mods": "~/.claude/frood-mods"
     },
     "oc": {
       "commands": "~/.config/opencode/commands",
@@ -387,6 +388,13 @@
       "harness": [
         "cc",
         "oc"
+      ]
+    },
+    {
+      "src": "mods/dispatch-status",
+      "kind": "mods",
+      "harness": [
+        "cc"
       ]
     }
   ]
