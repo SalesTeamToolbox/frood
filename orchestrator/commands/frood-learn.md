@@ -113,6 +113,8 @@ to its transcript id through the app's session metadata (`cliSessionId`); if tha
 as `missing` with the reason. Nested sessions record themselves with `$CLAUDE_CODE_SESSION_ID` (`/frood-next`).
 When a session is both a claimant and a `child` event, one child is kept and role `nested` wins over
 `orchestrator`. The report gains a top-level `children` array (omitted with `--no-children`).
+Archived sessions are still reviewed: archiving keeps the transcript (`~/.claude/projects/…`), which is what
+`/frood-learn` reads. Claude Code deletes transcripts older than `cleanupPeriodDays` either way.
 
 ## Retention
 

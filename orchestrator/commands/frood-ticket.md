@@ -89,7 +89,8 @@ the returned `proposal_id`: `context: "fresh"`, `name: <slug ≤24 chars, [a-z0-
 and `background` (≥80 chars: goal, plan path, what is on disk, and "report to the parent session; anything for the
 owner goes in your report as NEEDS OWNER" — this session then relays those items to the owner and answers back with
 `SendMessage`). Once `start_session` succeeds, the child records itself on the stream in `/frood-next` (after its
-claim) so `/frood-learn <stream>` can collect and review it.
+claim) so `/frood-learn <stream>` can collect and review it. When the nested session's work ships, the parent
+archives it under the same rule as frood-orchestrator's Standing rules (archive_nested_sessions, default on).
 If the owner picks **Do it here**, run `/frood-next <name>`'s
 steps in this session. Otherwise end with: `Run /frood-next <name> in a fresh session in <repo>.` Nothing else is
 needed from the owner: the Mandate, the board ticket, the plan and the stream are all on disk.

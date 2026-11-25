@@ -106,7 +106,7 @@ question the owner must decide.
      followed by a short brief, and `background` (≥80 chars: goal, plan path, what landed, and "report to the parent
      session; anything for the owner goes in your report as NEEDS OWNER"). This session stays the owner's
      thread: it reports each child's note in one line, relays its `NEEDS OWNER` items, and starts the following module
-     when the child's work ships.
+     when the child's work ships, and archives the finished child (Standing rules).
      Once `start_session` succeeds, the child records itself on the stream in `/frood-next` (after its claim)
      so `/frood-learn <stream>` can collect and review it.
    - **Continue in this session**.
@@ -287,6 +287,17 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   (`~/.claude/settings.json`, hooks, permissions): the parent makes that edit. The parent summarizes each child's note
   for the owner in one or two lines, brings every `NEEDS OWNER` item to the owner, and relays the answer with
   `SendMessage`. Every brief a parent writes for a nested session says this in one line.
+- **Archive a nested child once its work has shipped** (default on).
+  Before archiving, the parent checks all of these:
+  - `node {{ORCH_REPO}}/bin/settings.mjs get archive_nested_sessions` prints `true`;
+  - the child's stream reads `done` in `handoff.mjs show --stream `;
+  - the child's commits are on the base branch, or its ticket is closed;
+  - the child has no unanswered `NEEDS OWNER` item, and no worker or desk run is still active for that stream
+    (`oc-worker.mjs active`).
+  Then the parent calls `archive_session` on the child and says so in one line.
+  Never archive a child that is still working, is waiting on the owner or the parent, or has unmerged work.
+  Archiving keeps the transcript, so `/frood-learn` still reviews the child.
+  To turn it off: `node {{ORCH_REPO}}/bin/settings.mjs set archive_nested_sessions false`.
 <!-- /cc-only -->
 - **Live progress — one spinner per live run (every ticket, both harnesses).** Chat
   text cannot spin; the native spinner is the todo list (Claude Code: `TodoWrite`,
