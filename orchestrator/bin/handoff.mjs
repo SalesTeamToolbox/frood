@@ -699,7 +699,7 @@ function parseArgs(argv) {
 function usage() {
   console.error(
     "usage: handoff.mjs write --stream <n> --plan <p> --next <text> [--done <text>] [--waiting <text>] [--repo <dir>]\n" +
-      "                  [--status active|parked|done] [--written-by <id>]\n" +
+      "                  [--status active|parked|done] [--written-by <id>] [--session <id>] [--release]\n" +
       "       handoff.mjs note --stream <n> [--next <text>] [--done <text>] [--waiting <text>]\n" +
       "       handoff.mjs show [--stream <n>] | consume [--stream <n>] | list [--json]\n" +
       "       handoff.mjs ack --stream <n> --key <k> [--action <line>] [--ticket <slug>] [--resolved]\n" +

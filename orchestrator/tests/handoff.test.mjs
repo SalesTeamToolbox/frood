@@ -994,7 +994,7 @@ test("streamTitle names the tab after the work: [stream] repo: module — what",
 // ------------------------------------------------------------------ progress write keeps claim
 
 test("progress write --session matching claim keeps claim (at refreshed) and consumed_at; state stays consumed", () => {
-  const { h, plan, e } = env();
+  const { plan, e } = env();
   assert.equal(run(e, "write", "--stream", "p1", "--plan", plan, "--next", "M1").status, 0);
   run(e, "claim", "--stream", "p1", "--by", "cc", "--session", "sess-a");
   run(e, "consume", "--stream", "p1", "--session", "sess-a");
@@ -1002,6 +1002,9 @@ test("progress write --session matching claim keeps claim (at refreshed) and con
   assert.equal(before.claim.session, "sess-a");
   assert.equal(before.state, "consumed");
   assert.ok(before.consumed_at);
+  assert.equal(before.held_by, "cc");
+  assert.equal(before.held_session, "sess-a");
+  const heldAtBefore = before.held_at;
 
   const w = run(e, "write", "--stream", "p1", "--plan", plan, "--next", "M2", "--session", "sess-a");
   assert.equal(w.status, 0);
@@ -1010,10 +1013,13 @@ test("progress write --session matching claim keeps claim (at refreshed) and con
   assert.ok(after.claim.at > before.claim.at, "claim.at refreshed on progress write");
   assert.ok(after.consumed_at, "consumed_at kept");
   assert.equal(after.state, "consumed", "state stays consumed");
+  assert.equal(after.held_by, before.held_by, "held_by untouched");
+  assert.equal(after.held_session, before.held_session, "held_session untouched");
+  assert.equal(after.held_at, heldAtBefore, "held_at untouched");
 });
 
 test("progress write --session A --release clears claim and consumed_at; state becomes pending", () => {
-  const { h, plan, e } = env();
+  const { plan, e } = env();
   assert.equal(run(e, "write", "--stream", "p2", "--plan", plan, "--next", "M1").status, 0);
   run(e, "claim", "--stream", "p2", "--by", "cc", "--session", "sess-a");
   run(e, "consume", "--stream", "p2", "--session", "sess-a");
@@ -1026,7 +1032,7 @@ test("progress write --session A --release clears claim and consumed_at; state b
 });
 
 test("write --session B (different session) is a true handoff: clears claim, state pending", () => {
-  const { h, plan, e } = env();
+  const { plan, e } = env();
   assert.equal(run(e, "write", "--stream", "p3", "--plan", plan, "--next", "M1").status, 0);
   run(e, "claim", "--stream", "p3", "--by", "cc", "--session", "sess-a");
   run(e, "consume", "--stream", "p3", "--session", "sess-a");
@@ -1039,7 +1045,7 @@ test("write --session B (different session) is a true handoff: clears claim, sta
 });
 
 test("write with no --session clears claim (unchanged behaviour); state pending", () => {
-  const { h, plan, e } = env();
+  const { plan, e } = env();
   assert.equal(run(e, "write", "--stream", "p4", "--plan", plan, "--next", "M1").status, 0);
   run(e, "claim", "--stream", "p4", "--by", "cc", "--session", "sess-a");
   run(e, "consume", "--stream", "p4", "--session", "sess-a");
@@ -1052,11 +1058,17 @@ test("write with no --session clears claim (unchanged behaviour); state pending"
 });
 
 test("write --session A with no existing claim: claim stays null, state pending", () => {
-  const { h, plan, e } = env();
+  const { plan, e } = env();
   assert.equal(run(e, "write", "--stream", "p5", "--plan", plan, "--next", "M1").status, 0);
   const w = run(e, "write", "--stream", "p5", "--plan", plan, "--next", "M2", "--session", "sess-a");
   assert.equal(w.status, 0);
   const after = JSON.parse(run(e, "show", "--stream", "p5").stdout);
   assert.equal(after.claim, null, "no claim to keep, so claim stays null");
   assert.equal(after.state, "pending", "state stays pending (no consumed_at)");
+});
+
+test("write with a bad --session exits 2 (usage)", () => {
+  const { plan, e } = env();
+  assert.equal(run(e, "write", "--stream", "p6", "--plan", plan, "--next", "M1", "--session", "bad id!").status, 2);
+  assert.equal(run(e, "write", "--stream", "p6", "--plan", plan, "--next", "M1", "--release").status, 0);
 });

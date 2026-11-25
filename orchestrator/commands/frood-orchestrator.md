@@ -60,10 +60,12 @@ question the owner must decide.
 1. Write/replace the `## Handoff` section at the top of the plan file: done (with shas), next module and its first
    step, pool status (router-health), and anything waiting on the owner.
 2. Record the pointer: `node {{ORCH_REPO}}/bin/handoff.mjs write --stream <effort-name>
-   --plan <plan> --next "<next>" --done "<one line>" --waiting "<owner items or empty>" --session <id> --by cc`.  # cc-only
-   --plan <plan> --next "<next>" --done "<one line>" --waiting "<owner items or empty>" --session <id> --by oc`.  # oc-only
-   A mid-session progress write passes `--session <id>` (keeps the claim); the end-of-session handoff passes
-   `--session <id> --release` (clears it).
+   --plan <plan> --next "<next>" --done "<one line>" --waiting "<owner items or empty>" --session <id> --release --by cc`.  # cc-only
+   --plan <plan> --next "<next>" --done "<one line>" --waiting "<owner items or empty>" --session <id> --release --by oc`.  # oc-only
+   This session is stopping, so it passes `--release` (hands the stream off; claim and consumed_at cleared). A mid-session
+   progress write — the session keeps working — passes `--session <id>` without `--release`, which keeps the claim
+   (refreshing `at`) and keeps `consumed_at`, so the stream reads consumed not pending. `<id>` is the same session id passed
+   to `claim --session`; a mismatch silently releases the claim.
    <!-- oc-only -->
    Then retitle this session's tab to the next module (same shape as the CC hook title, ≤60 chars, plain words):
    `node {{ORCH_REPO}}/bin/session-title.mjs --title "[<stream>] <repo>: <next module> — <first step>"`.
@@ -266,7 +268,9 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   `node {{ORCH_REPO}}/bin/handoff.mjs claim --stream <n> --by cc --session <your peer-mail session id>` (no `--takeover`).  # cc-only
   `node {{ORCH_REPO}}/bin/handoff.mjs claim --stream <n> --by oc --session "$OPENCODE_SESSION_ID"` (no `--takeover`; drop `--session` if it is empty).  # oc-only
   The `--session` is how the desk daemon finds you: it peer-mails escalations on the stream to `held_session`, and
-  without one they cannot reach this session, so `--session` is required for Claude Code. Exit 3 (another harness took the stream over) or exit 4
+  without one they cannot reach this session, so `--session` is required for Claude Code. A mid-session `write`
+  (progress write) must pass `--session <id>` with the same id as the claim; a different id or no `--session`
+  releases the claim (the stream reads pending again). Exit 3 (another harness took the stream over) or exit 4
   (another live session holds it) → stop at once with a **NEEDS YOU** card naming the holder. Never act on it,
   never take it back silently.
 <!-- cc-only -->
