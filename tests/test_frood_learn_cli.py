@@ -623,6 +623,7 @@ def fixture_children_home(tmp_path):
                         "out": "/x/worker-r1.md",
                         "agent": "worker",
                         "session": "ses_fixture_oc",
+                        "model": "opencode-go/mimo-v2.6-flash",
                         "at": "2026-01-01T00:00:00Z",
                     }
                 ),
@@ -663,10 +664,15 @@ def fixture_children_home(tmp_path):
         f"INSERT INTO session_message (session_id,type,data,seq,time_created) VALUES ('ses_fixture_oc','user',json('{userp}'),3,1700000200000);\n"
     )
     subprocess.run(["sqlite3", str(oc_db)], input=sql, text=True, check=True)
-    # Claude Code subagent under the orchestrator session's subagents/ folder.
+    # Claude Code subagents under the orchestrator session's subagents/ folder.
+    # Two subagents share one sessionId (sess_orch_01, the parent's id) but have
+    # distinct agentIds -> they must surface as two children keyed by agentId.
     cc_sub = home / ".claude" / "projects" / "frood" / "sess_orch_01" / "subagents"
     cc_sub.mkdir(parents=True)
     shutil.copyfile(FIXTURES / "agent-scout.jsonl", cc_sub / "agent-scout.jsonl")
+    shutil.copyfile(FIXTURES / "agent-scout.meta.json", cc_sub / "agent-scout.meta.json")
+    shutil.copyfile(FIXTURES / "agent-critic.jsonl", cc_sub / "agent-critic.jsonl")
+    shutil.copyfile(FIXTURES / "agent-critic.meta.json", cc_sub / "agent-critic.meta.json")
     # Nested Claude Code session as a top-level .jsonl file.
     cc_proj = home / ".claude" / "projects" / "frood"
     cc_proj.mkdir(parents=True, exist_ok=True)
@@ -679,52 +685,70 @@ def fixture_children_home(tmp_path):
 # ------------------------------------------------------------------ children tests
 
 
-def test_default_run_lists_all_three_children(fixture_children_home):
-    """Default run lists the OC child, CC subagent and CC nested child, each with
-    phase-5 findings tagged role/harness/model/session."""
+def test_default_run_lists_all_children(fixture_children_home):
+    """Default run lists the OC child, two CC subagents (shared sessionId,
+    distinct agentIds) and the CC nested child, each with phase-5 findings
+    tagged role/harness/model/session."""
     home, proj = fixture_children_home
     out = home / "out.json"
     r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj)
     assert r.returncode == 0, r.stderr
     rep = json.loads(out.read_text())
     children = rep.get("children") or []
-    assert len(children) == 3, children
+    assert len(children) == 4, children
     by_session = {c["session"]: c for c in children}
 
-    # OpenCode worker child.
+    # OpenCode worker child (model resolved from the run-done event).
     oc = by_session["ses_fixture_oc"]
     assert oc["harness"] == "opencode"
     assert oc["role"] == "worker"
     assert oc["status"] == "analyzed"
     assert oc["note"] is None
+    assert oc["model"] == "opencode-go/mimo-v2.6-flash", oc
     assert any(f["lens"] == "session-summary" for f in oc["findings"]), oc["findings"]
     for f in oc["findings"]:
         assert f["role"] == "worker"
         assert f["harness"] == "opencode"
         assert f["session"] == "ses_fixture_oc"
 
-    # Claude Code subagent child: real-shaped transcript parses to non-zero turns,
-    # a model and a non-zero duration.
-    cc = by_session["sess_subagent_01"]
-    assert cc["harness"] == "claude-code"
-    assert cc["role"] == "scout"
-    assert cc["status"] == "analyzed"
-    assert cc["model"] == "claude-3-5-sonnet-20241022", cc
-    assert cc["transcriptCopied"] is True
-    ss = next(f for f in cc["findings"] if f["lens"] == "session-summary")
+    # Claude Code subagent 1 (scout): id is agentId (sessionId is the parent's),
+    # role/model from the sibling .meta.json, Read-only transcript -> 0 files
+    # modified, 2 Bash shell commands.
+    scout = by_session["agent_scout_01"]
+    assert scout["harness"] == "claude-code"
+    assert scout["role"] == "scout", scout
+    assert scout["status"] == "analyzed"
+    assert scout["model"] == "claude-3-5-sonnet-20241022", scout
+    assert scout["transcriptCopied"] is True
+    ss = next(f for f in scout["findings"] if f["lens"] == "session-summary")
     turns = re.search(r"(\d+) agent turns", ss["detail"])
     assert turns and int(turns.group(1)) >= 1, ss["detail"]
     assert "claude-3-5-sonnet-20241022" in ss["detail"], ss["detail"]
-    dur = re.search(r", (\d+)m", ss["detail"])
-    assert dur and int(dur.group(1)) >= 1, ss["detail"]
-    for f in cc["findings"]:
+    assert "0 files modified" in ss["detail"], ss["detail"]
+    assert "2 shell commands" in ss["detail"], ss["detail"]
+    for f in scout["findings"]:
         assert f["role"] == "scout"
         assert f["harness"] == "claude-code"
-        assert f["session"] == "sess_subagent_01"
-    for f in cc["findings"]:
-        assert f["role"] == "scout"
+        assert f["session"] == "agent_scout_01"
+
+    # Claude Code subagent 2 (critic): same sessionId as the scout, distinct
+    # agentId -> a separate child. Edit transcript -> 1 file modified, 1 shell
+    # command; model comes from the transcript (meta model ignored).
+    critic = by_session["agent_critic_01"]
+    assert critic["harness"] == "claude-code"
+    assert critic["role"] == "critic", critic
+    assert critic["status"] == "analyzed"
+    assert critic["model"] == "claude-sonnet-5-5", critic
+    assert critic["transcriptCopied"] is True
+    cs = next(f for f in critic["findings"] if f["lens"] == "session-summary")
+    assert "1 files modified" in cs["detail"], cs["detail"]
+    assert "1 shell commands" in cs["detail"], cs["detail"]
+    lc = next(f for f in critic["findings"] if f["lens"] == "local-code-changes")
+    assert "/workspace/review.md" in lc["detail"], lc["detail"]
+    for f in critic["findings"]:
+        assert f["role"] == "critic"
         assert f["harness"] == "claude-code"
-        assert f["session"] == "sess_subagent_01"
+        assert f["session"] == "agent_critic_01"
 
     # Nested Claude Code session child.
     nn = by_session["sess_fixture_nested"]
@@ -785,6 +809,7 @@ def test_cc_child_zero_turns_reports_empty_not_analyzed(fixture_children_home):
                 "message": {"role": "user", "content": "only a prompt, no assistant turn"},
                 "timestamp": "2026-01-01T00:00:00.000Z",
                 "sessionId": "sess_subagent_empty",
+                "agentId": "sess_subagent_empty",
             }
         )
         + "\n"
@@ -816,7 +841,7 @@ def test_no_children_output_matches_today(fixture_children_home):
     assert r2.returncode == 0, r2.stderr
     rep_with = json.loads(out_with.read_text())
     rep_without = json.loads(out_without.read_text())
-    assert len(rep_with.get("children") or []) == 3
+    assert len(rep_with.get("children") or []) == 4
     assert "children" not in rep_without, "children section must be omitted with --no-children"
     assert rep_with["findings"] == rep_without["findings"], "stream-level findings identical"
 

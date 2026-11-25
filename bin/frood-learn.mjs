@@ -329,6 +329,10 @@ function analyzeSessionData(messages, sessionId, title, startedAt, updatedAt, mo
   for (const msg of messages) {
     if (msg.type === "assistant") {
       agentTurns++;
+      // Shell/Bash tool_use calls embedded in a Claude Code assistant turn count
+      // as shell commands (and background ones), as OpenCode bash calls do.
+      shellCommands += msg.data.shellCommands || 0;
+      backgroundShellCommands += msg.data.backgroundShellCommands || 0;
       // Check for tool calls in assistant messages
       if (msg.data.snapshot && msg.data.snapshot.files) {
         for (const f of msg.data.snapshot.files) {
@@ -576,7 +580,7 @@ function analyzeOpenCodeSession(session) {
 // Claude Code JSONL (here).
 // ---------------------------------------------------------------------------
 
-function readClaudeCodeJSONL(filePath) {
+function readClaudeCodeJSONL(filePath, { preferAgentId = false } = {}) {
   let raw;
   try {
     raw = fs.readFileSync(filePath, "utf8");
@@ -585,6 +589,7 @@ function readClaudeCodeJSONL(filePath) {
   }
   const messages = [];
   let id = null;
+  let agentId = null;
   let title = null;
   let model = null;
   let startedAt = null;
@@ -598,11 +603,16 @@ function readClaudeCodeJSONL(filePath) {
     if (!updatedAt || ms > updatedAt) updatedAt = ms;
   };
 
-  // File targets a tool_use input may address (Read/Write/Edit/Grep/Glob/Bash...).
+  // Tool names whose file_path / notebook_path input names a modified file.
+  const MODIFICATION_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+
+  // File targets a tool_use input may address. Only `file_path` / `notebook_path`
+  // count (never a Bash `command`), and only from modification tools (never Read,
+  // Grep, Glob, ...).
   const toolTargets = (input) => {
     if (!input || typeof input !== "object") return [];
     const out = [];
-    for (const k of ["file_path", "path", "notebook_path", "command"]) {
+    for (const k of ["file_path", "notebook_path"]) {
       if (typeof input[k] === "string" && input[k] && !out.includes(input[k])) out.push(input[k]);
     }
     return out;
@@ -618,6 +628,11 @@ function readClaudeCodeJSONL(filePath) {
   // Real Claude Code transcript: one JSON object per line, top-level keys
   // type/message/timestamp/sessionId/agentId. Only assistant and user lines are
   // read; everything else (attachment, api-request, ...) is ignored.
+  //
+  // `preferAgentId` is set for subagent transcripts (agent-*.jsonl): there
+  // `sessionId` is the PARENT session's id, so the subagent's own id comes from
+  // `agentId` (falling back to the filename without `agent-`). A nested top-level
+  // `<id>.jsonl` uses `sessionId` (default).
   for (const line of raw.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let v;
@@ -625,14 +640,17 @@ function readClaudeCodeJSONL(filePath) {
     if (!v || typeof v !== "object") continue;
     const msg = v.message;
     const ts = v.timestamp;
+    agentId = agentId || v.agentId;
     touch(ts);
 
     if (v.type === "assistant" && msg && typeof msg === "object") {
       model = msg.model || model;
-      id = id || v.sessionId || v.agentId;
+      id = id || (preferAgentId ? v.agentId || v.sessionId : v.sessionId || v.agentId);
       const items = contentItems(msg.content);
       let turnText = "";
       const files = [];
+      let shellCommands = 0;
+      let backgroundShellCommands = 0;
       let hadContent = false;
       for (const c of items) {
         if (!c || typeof c !== "object") continue;
@@ -641,7 +659,17 @@ function readClaudeCodeJSONL(filePath) {
           hadContent = true;
         } else if (c.type === "tool_use") {
           hadContent = true;
-          for (const t of toolTargets(c.input)) files.push(t);
+          const name = c.name;
+          const input = c.input;
+          if (MODIFICATION_TOOLS.has(name)) {
+            for (const t of toolTargets(input)) {
+              if (!files.includes(t)) files.push(t);
+            }
+          }
+          if (name === "Bash") {
+            shellCommands++;
+            if (input && input.run_in_background === true) backgroundShellCommands++;
+          }
         }
       }
       if (!hadContent) continue;
@@ -652,10 +680,13 @@ function readClaudeCodeJSONL(filePath) {
           content: turnText ? [{ text: turnText }] : [],
           finish: "stop",
           snapshot: files.length ? { files } : null,
+          shellCommands,
+          backgroundShellCommands,
         },
         time_created: ts,
       });
     } else if (v.type === "user" && msg && typeof msg === "object") {
+      id = id || (preferAgentId ? v.agentId || v.sessionId : v.sessionId || v.agentId);
       id = id || v.sessionId || v.agentId;
       const items = contentItems(msg.content);
       let textParts = [];
@@ -683,7 +714,7 @@ function readClaudeCodeJSONL(filePath) {
   if (!startedAt) startedAt = null;
   if (!updatedAt) updatedAt = null;
 
-  return { id, title, messages, model, startedAt, updatedAt, agentTurns };
+  return { id, agentId, title, messages, model, startedAt, updatedAt, agentTurns };
 }
 
 // Orchestrator session id -> Claude Code subagent transcripts
@@ -709,14 +740,31 @@ function readClaudeCodeSubagents(orchSessionId) {
     for (const f of files.sort()) {
       if (!/^agent-.*\.jsonl$/.test(f)) continue;
       const filePath = path.join(subagentsDir, f);
-      const parsed = readClaudeCodeJSONL(filePath);
+      const parsed = readClaudeCodeJSONL(filePath, { preferAgentId: true });
       if (!parsed) continue;
+      // A subagent's own id is agentId (sessionId is the parent's). Fall back to
+      // the filename without `agent-` when neither is present.
+      const agentId = parsed.agentId || path.basename(f, ".jsonl").replace(/^agent-/, "");
+      // Role (+ model hint) from the sibling agent-<id>.meta.json, which real
+      // subagent folders carry next to each transcript. A missing or bad meta
+      // must never crash.
+      let role = "subagent";
+      let metaModel = null;
+      const metaPath = path.join(subagentsDir, f.replace(/\.jsonl$/, ".meta.json"));
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+        const agentType = meta && meta.agentType ? String(meta.agentType).toLowerCase() : "";
+        if (CHILD_ROLES.includes(agentType)) role = agentType;
+        else if (agentType) role = agentType; // Explore, general-purpose, Plan, learn-* → lowercased agentType
+        metaModel = meta && meta.model ? String(meta.model) : null;
+      } catch {}
       out.push({
-        session: parsed.session || parsed.id || path.basename(f, ".jsonl").replace(/^agent-/, ""),
-        role: "scout",
+        ...parsed,
+        session: agentId,
+        role,
         harness: "claude-code",
         filePath,
-        ...parsed,
+        model: parsed.model || metaModel,
       });
     }
   }
@@ -764,6 +812,25 @@ function copyChildTranscript(sourcePath, streamName, sessionId, harness) {
   }
 }
 
+// Resolve the model for an OpenCode child: from the stream event's `model`,
+// then the run's receipt (<out>.receipt.json), then opencode.db's session_v2.
+// Never throws.
+function resolveOcModel(eventModel, session, out) {
+  if (eventModel) return eventModel;
+  if (out) {
+    try {
+      const rc = JSON.parse(fs.readFileSync(out + ".receipt.json", "utf8"));
+      if (rc && rc.model) return rc.model;
+    } catch {}
+  }
+  const rows = dbQuery(
+    OPENCODE_DB,
+    `SELECT json_group_array(json_object('model', model)) FROM session_v2 WHERE id = '${session.replace(/'/g, "''")}'`,
+  );
+  if (rows && rows.length && rows[0].model) return rows[0].model;
+  return null;
+}
+
 // Collect every child session of a stream:
 //  - OpenCode workers/critics: `ses_...` ids carried on stream events.
 //  - Nested Claude Code sessions: `child` events recorded on the stream.
@@ -774,21 +841,38 @@ function collectChildren(streamName) {
   const events = readStreamEvents(streamName);
   const stream = readStreamState(streamName);
 
-  const add = (session, harness, role, source) => {
+  const add = (session, harness, role, source, model) => {
     if (!session || seen.has(session)) return;
     seen.add(session);
-    children.push({ session, harness, role, source });
+    children.push({ session, harness, role, source, model });
   };
 
-  // OpenCode children: session ids on stream events, with role from the event's agent.
-  const ocRoleBySession = new Map();
+  // OpenCode children: session ids on stream events, with role/model from the
+  // run-done/queued event, the run's receipt (<out>.receipt.json), or opencode.db.
+  // Role: the event's `agent` (a critic run → "critic"), else an out basename
+  // starting with `findings-` → "critic", else "worker".
+  const ocBySession = new Map();
   for (const e of events) {
     if (e.session && SESSION_RE.test(e.session)) {
-      if (!ocRoleBySession.has(e.session)) ocRoleBySession.set(e.session, e.agent);
+      let cur = ocBySession.get(e.session);
+      if (!cur) {
+        cur = { agent: e.agent, model: e.model || null, out: e.out || null };
+        ocBySession.set(e.session, cur);
+      } else {
+        cur.agent = cur.agent || e.agent;
+        cur.model = cur.model || e.model;
+        cur.out = cur.out || e.out;
+      }
     }
   }
-  for (const [session, agent] of ocRoleBySession) {
-    add(session, "opencode", agent && CHILD_ROLES.includes(agent) ? agent : "worker", "stream-event");
+  for (const [session, cur] of ocBySession) {
+    const model = resolveOcModel(cur.model, session, cur.out);
+    let role = cur.agent && CHILD_ROLES.includes(cur.agent) ? cur.agent : null;
+    if (!role) {
+      const base = cur.out ? path.basename(cur.out) : "";
+      role = /^findings-/.test(base) ? "critic" : "worker";
+    }
+    add(session, "opencode", role, "stream-event", model);
   }
 
   // Nested Claude Code sessions recorded via `child` events.
@@ -807,7 +891,7 @@ function collectChildren(streamName) {
   const orchSessionId = (stream && (stream.held_session || stream.session)) || null;
   if (orchSessionId) {
     for (const sa of readClaudeCodeSubagents(orchSessionId)) {
-      add(sa.session, sa.harness, sa.role, "subagent");
+      add(sa.session, sa.harness, sa.role, "subagent", sa.model);
       // attach filePath for review; not part of the public child descriptor
       const child = children[children.length - 1];
       child.filePath = sa.filePath;
