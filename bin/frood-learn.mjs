@@ -771,9 +771,55 @@ function readClaudeCodeSubagents(orchSessionId) {
   return out;
 }
 
+// The Claude desktop app's per-session metadata folder (<root>/<account>/<org>/local_<uuid>.json).
+// CLAUDE_DESKTOP_SESSIONS_DIR overrides it (tests); otherwise the platform's app-data folder.
+function desktopSessionsDir() {
+  const env = (process.env.CLAUDE_DESKTOP_SESSIONS_DIR || "").trim();
+  if (env) return env;
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  if (process.platform === "darwin") return path.join(home, "Library", "Application Support", "Claude", "claude-code-sessions");
+  if (process.platform === "win32") return path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "Claude", "claude-code-sessions");
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(home, ".config"), "Claude", "claude-code-sessions");
+}
+
+// A desktop-app session id (`local_<uuid>`, what start_session returns and /frood-ticket records) is not the
+// transcript's id: the app's metadata file carries that as `cliSessionId`. Returns it, or null. Never throws.
+export function resolveDesktopSessionId(localId) {
+  if (!/^local_[A-Za-z0-9-]{1,64}$/.test(String(localId))) return null;
+  const root = desktopSessionsDir();
+  const file = `${localId}.json`;
+  try {
+    for (const account of fs.readdirSync(root)) {
+      let orgs;
+      try {
+        orgs = fs.readdirSync(path.join(root, account));
+      } catch {
+        continue;
+      }
+      for (const org of orgs) {
+        try {
+          const meta = JSON.parse(fs.readFileSync(path.join(root, account, org, file), "utf8"));
+          const cli = meta && typeof meta.cliSessionId === "string" ? meta.cliSessionId : "";
+          if (/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(cli)) return cli;
+        } catch {}
+      }
+    }
+  } catch {}
+  return null;
+}
+
 // Nested Claude Code session recorded on the stream: a top-level
-// ~/.claude/projects/<repo-slug>/<session-id>.jsonl file.
+// ~/.claude/projects/<repo-slug>/<session-id>.jsonl file. A desktop `local_` id is mapped to its
+// transcript id first (resolveDesktopSessionId).
 function findClaudeCodeNestedSession(sessionId) {
+  if (String(sessionId).startsWith("local_")) {
+    const cli = resolveDesktopSessionId(sessionId);
+    return cli ? findClaudeCodeTranscript(cli) : null;
+  }
+  return findClaudeCodeTranscript(sessionId);
+}
+
+function findClaudeCodeTranscript(sessionId) {
   const projectsDir = path.join(process.env.HOME || process.env.USERPROFILE, ".claude", "projects");
   if (!fs.existsSync(projectsDir)) return null;
   let projectFolders;
@@ -945,7 +991,12 @@ function reviewChild(child, streamName) {
   } else {
     parsed = readClaudeCodeJSONL(child.filePath);
     if (!parsed) {
-      report.note = `Claude Code transcript for ${child.session} not found at ${child.filePath}`;
+      const where = child.filePath
+        ? `at ${child.filePath}`
+        : String(child.session).startsWith("local_")
+          ? `(desktop session ${resolveDesktopSessionId(child.session) ? "mapped, but its transcript is gone from ~/.claude/projects" : "metadata not found, so its transcript id is unknown"})`
+          : "under ~/.claude/projects";
+      report.note = `Claude Code transcript for ${child.session} not found ${where}`;
       return report;
     }
     report.transcriptCopied = copyChildTranscript(child.filePath, streamName, child.session, child.harness);

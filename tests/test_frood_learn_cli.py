@@ -766,6 +766,36 @@ def test_default_run_lists_all_children(fixture_children_home):
     assert rep["findings"], "stream-level findings should still be present"
 
 
+def test_desktop_local_id_child_resolves_via_app_metadata(fixture_children_home):
+    """A nested child recorded with the desktop app's local_ id (what start_session returns) is found
+    through the app's metadata file, whose cliSessionId is the transcript id."""
+    home, proj = fixture_children_home
+    events = home / ".config" / "orchestrator" / "streams" / "fx.events.jsonl"
+    lines = events.read_text().replace("sess_fixture_nested", "local_fixture-desktop")
+    events.write_text(lines)
+    meta_dir = home / "desktop-sessions" / "acct" / "org"
+    meta_dir.mkdir(parents=True)
+    (meta_dir / "local_fixture-desktop.json").write_text(
+        json.dumps({"sessionId": "local_fixture-desktop", "cliSessionId": "sess_fixture_nested"})
+    )
+    out = home / "out.json"
+    env = {"CLAUDE_DESKTOP_SESSIONS_DIR": str(home / "desktop-sessions")}
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj, extra_env=env)
+    assert r.returncode == 0, r.stderr
+    by_session = {c["session"]: c for c in json.loads(out.read_text())["children"]}
+    nn = by_session["local_fixture-desktop"]
+    assert nn["status"] == "analyzed", nn
+    assert nn["role"] == "nested"
+
+    # Metadata gone: listed as missing with a note that says why, never "undefined".
+    (meta_dir / "local_fixture-desktop.json").unlink()
+    r = run(["fx", "--phase", "1", "--no-mcp", "--report", str(out)], home, cwd=proj, extra_env=env)
+    assert r.returncode == 0, r.stderr
+    nn = {c["session"]: c for c in json.loads(out.read_text())["children"]}["local_fixture-desktop"]
+    assert nn["status"] == "missing", nn
+    assert "undefined" not in nn["note"] and "metadata not found" in nn["note"], nn["note"]
+
+
 def test_child_missing_transcript_status_missing_exits_zero(fixture_children_home):
     """A child id with no transcript is listed with status missing; exit 0, no crash."""
     home, proj = fixture_children_home
