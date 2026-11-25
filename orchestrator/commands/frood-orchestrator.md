@@ -365,8 +365,10 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   code: `git fetch origin <base>`; in the ticket worktree `git merge-base --is-ancestor origin/<base> HEAD`
   must succeed, else (fresh, empty branch only) `git reset --hard origin/<base>`, else stop. Write the base
   into the Mandate (`base: origin/<base> @ <sha>`) and make the worker re-run the check as its FIRST step,
-  stopping with `RESULT: BLOCKED: stale tree` if it fails. A shared checkout is never evidence: scouts and
-  reviewers read the ticket worktree or `git show origin/<base>:<path>`, and their prompts say so.
+  stopping with `RESULT: BLOCKED: stale tree` if it fails. A fresh `--stream` worker run is also refused by
+  `oc-worker` itself (exit 10, before `queued`/spawn) when the tree is stale or dirty — see the FIRST STEP
+  in each Mandate, which stays as a defence for runs without `--stream`. A shared checkout is never evidence:
+  scouts and reviewers read the ticket worktree or `git show origin/<base>:<path>`, and their prompts say so.
 - Shell: no `head`/`tail` pipes on pwsh (use `Select-Object` or Git Bash); quote output.
 - Another session's uncommitted work: stop and tell the user, do not edit around it.
 - Noisy investigation goes to `scout` agents; the orchestrator's context holds

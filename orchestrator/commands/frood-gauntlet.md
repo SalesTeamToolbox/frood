@@ -25,8 +25,9 @@ This run's arguments: $ARGUMENTS
 - On an isolated branch for this unit of work (worktree where the repo uses them).
 - The worktree is FRESH: after `git fetch origin <base>`, `git merge-base --is-ancestor origin/<base> HEAD`
   succeeds (a repo's create-worktree script may branch from a stale local ref — check, don't trust).
-  Quote the base sha. Reads for planning/review come from this worktree or `origin/<base>`, never a
-  shared checkout.
+  Quote the base sha. A fresh `--stream` worker run is refused by `oc-worker` itself (exit 10, before
+  `queued`/spawn) when the tree is stale or dirty. Reads for planning/review come from this worktree or
+  `origin/<base>`, never a shared checkout.
 - The repo's boundary gates green BEFORE touching guarded paths.
 - No uncommitted work in the files you will touch. Another session's work: stop and
   tell the user, do not edit around it.

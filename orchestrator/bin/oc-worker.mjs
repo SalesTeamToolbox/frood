@@ -61,7 +61,7 @@
 //   Event write failures go to stderr and never change the run's status. Without --stream no stream file is touched.
 // Exit: 0 finished, 3 no final text, 4 timeout, 5 opencode error, 6 every pool in the chain known-down, 7 board
 // attach refused (--ticket), 8 model not allowed by provider policy (`ignored`; unreadable providers.json; model unresolvable while any provider is restricted; `free-only`
-// and not on the allowlist).
+// and not on the allowlist), 10 stale or dirty tree (fresh --stream worker refused before queued/spawn).
 import "./no-window.mjs"; // hide console windows of every child process (Windows)
 import fs from "node:fs";
 import os from "node:os";
@@ -690,6 +690,82 @@ function ticketIdOf(out) {
 // for resume effects; legacy un-prefixed ids already in a stream keep stepping (the desk reads the key as written).
 const runName = (a) => `${ticketIdOf(a.out)}/${path.basename(a.out, path.extname(a.out))}`;
 
+// Run one git command in <dir> with a hard timeout (process-safety rule: no unbounded spawns).
+function gitTimed(dir, argv, timeoutMs) {
+  return execFileSync("git", ["-C", dir, ...argv], {
+    encoding: "utf8",
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: timeoutMs,
+  }).trim();
+}
+
+// Fresh-tree preflight for a fresh (non--session) worker run with --stream.
+// Refuses a stale or dirty tree before the `queued` event and before any slot is taken.
+// ticket.json's `base` names the commit the worktree must be built on.
+function freshTreeCheck(dir, base) {
+  if (!base) {
+    console.error(`oc-worker: ticket.json has no "base": skipping fresh-tree check`);
+    return;
+  }
+  // 1. --dir is a git work tree; if not, skip the check (warn on stderr).
+  let inside;
+  try {
+    inside = gitTimed(dir, ["rev-parse", "--is-inside-work-tree"], 10000);
+  } catch {
+    inside = "";
+  }
+  if (inside !== "true") {
+    console.error(`oc-worker: fresh-tree check skipped: ${dir} is not a git work tree`);
+    return;
+  }
+  // 2. Base resolves. origin/<rest>: fetch first (60 s); a failed fetch is a warning only.
+  let rest = base;
+  if (base.startsWith("origin/")) {
+    rest = base.slice("origin/".length);
+    try {
+      gitTimed(dir, ["fetch", "origin", rest], 60000);
+    } catch {
+      console.error(`oc-worker: fetch origin ${rest} failed: fresh-tree check continues`);
+    }
+  }
+  let baseSha;
+  try {
+    baseSha = gitTimed(dir, ["rev-parse", "--verify", `${base}^{commit}`], 10000);
+  } catch {
+    throw new StreamRefused(`base ${base} not found in ${dir}`, 10);
+  }
+  // 3. base must be an ancestor of HEAD.
+  let headSha;
+  try {
+    headSha = gitTimed(dir, ["rev-parse", "HEAD"], 10000);
+  } catch {
+    headSha = "";
+  }
+  try {
+    gitTimed(dir, ["merge-base", "--is-ancestor", base, "HEAD"], 30000);
+  } catch {
+    throw new StreamRefused(
+      `stale tree: ${base} (${baseSha}) is not an ancestor of HEAD (${headSha || "(unavailable)"}) in ${dir} — rebase onto ${base} or recreate the worktree`,
+      10,
+    );
+  }
+  // 4. Tree must be clean (.gitignore honoured).
+  let status;
+  try {
+    status = gitTimed(dir, ["status", "--porcelain"], 10000);
+  } catch {
+    status = "";
+  }
+  const dirty = status.split("\n").filter(Boolean);
+  if (dirty.length) {
+    throw new StreamRefused(
+      `dirty tree: ${dirty.length} uncommitted path(s) in ${dir} (first: ${dirty[0]}) — commit, stash or remove them before dispatch; another session's work is the owner's call`,
+      10,
+    );
+  }
+}
+
 // --stream checks and the `queued` event, before attachTicket and before any slot is taken.
 function streamPreflight(a) {
   const stream = a.stream;
@@ -709,6 +785,11 @@ function streamPreflight(a) {
   }
   if (typeof ticket.ticket !== "string" || !ticket.ticket) {
     throw new StreamRefused(`--stream needs ${ticketPath} beside --out: missing non-empty string "ticket"`, 2);
+  }
+  // Fresh-worker freshness check: refuse a stale or dirty tree before the `queued` event and before any
+  // slot is taken. Revision rounds (--session), critics, scouts and seniors are never checked.
+  if (!a.session && a.stream && /^worker/.test(a.agent)) {
+    freshTreeCheck(path.resolve(a.dir), ticket.base);
   }
   // With --stream the agent writes the report itself (cwd = --dir), so a relative --report would
   // land in the worktree, not the caller's run dir. Require an absolute run-dir path.

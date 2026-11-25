@@ -151,7 +151,7 @@ function help(...flags) {
 }
 
 // The header comment block ends with the "Exit: ..." lines, so this assertion fails if usage() truncates.
-const LAST_HEADER_LINE = /Exit: 0 finished, 3 no final text, 4 timeout, 5 opencode error, 6 every pool in the chain known-down, 7 board\nattach refused \(--ticket\), 8 model not allowed by provider policy[^\n]*\nand not on the allowlist\)\./;
+const LAST_HEADER_LINE = /Exit: 0 finished, 3 no final text, 4 timeout, 5 opencode error, 6 every pool in the chain known-down, 7 board\nattach refused \(--ticket\), 8 model not allowed by provider policy[^\n]*\nand not on the allowlist\), 10 stale or dirty tree \(fresh --stream worker refused before queued\/spawn\)\./;
 
 test("--help prints usage and exits 0 without launching anything", () => {
   const r = help("--help");
@@ -958,6 +958,143 @@ test("--stream requires ticket.json to parse with a non-empty string ticket", ()
     encoding: "utf8",
   });
   assert.equal(valid.status, 0, valid.stderr);
+});
+
+// ── stale / dirty tree preflight (M3) ─────────────────────────────────
+// A temp git repo: HEAD = "head" commit, base = a commit on an orphan branch (not an ancestor of HEAD).
+function makeRepo() {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const git = (...args) => spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  const ran = (...args) => { const r = git(...args); assert.equal(r.status, 0, `git ${args.join(" ")}: ${r.stderr}`); return r.stdout.trim(); };
+  assert.equal(ran("init", "-b", "main").length > 0, true, "git init");
+  ran("config", "user.email", "t@t");
+  ran("config", "user.name", "t");
+  fs.writeFileSync(path.join(dir, ".gitignore"), "run/\n");
+  fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+  ran("add", ".gitignore", "a.txt");
+  ran("commit", "-m", "head");
+  const head = ran("rev-parse", "HEAD");
+  ran("checkout", "--orphan", "base-branch");
+  fs.writeFileSync(path.join(dir, "b.txt"), "b\n");
+  ran("add", "b.txt");
+  ran("commit", "-m", "base");
+  const base = ran("rev-parse", "HEAD");
+  ran("checkout", "main");
+  return { dir, head, base };
+}
+
+// --stream worker run against a git repo dir; stream home is h (ORCH_HOME). ticket.json carries base.
+function freshStream(h, workdir, agent, outName, base, ...flags) {
+  const git = (...args) => spawnSync("git", ["-C", workdir, ...args], { encoding: "utf8" });
+  const prompt = path.join(workdir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  git("add", prompt);
+  git("commit", "-m", "prompt");
+  const runDir = path.join(workdir, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir, base }));
+  const out = path.join(runDir, outName);
+  const argsFile = path.join(workdir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--agent", agent, "--dir", workdir, "--prompt", prompt, "--out", out, "--stream", "m6a", ...flags], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h, FAKE_OC_ARGS_FILE: argsFile },
+    encoding: "utf8",
+  });
+  return { ...r, out, argsFile, workdir };
+}
+
+test("stale tree: base not an ancestor of HEAD -> exit 10, 'stale tree', no queued, fake-opencode not called", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, base } = makeRepo();
+  const r = freshStream(h, workdir, "worker", "worker-r1.md", base);
+  assert.equal(r.status, 10, r.stdout + r.stderr);
+  assert.match(r.stderr, /oc-worker: stale tree/);
+  assert.ok(!fs.existsSync(r.argsFile), "opencode must not be spawned");
+  assert.deepEqual(eventsOf(sd), [], "no queued event appended");
+});
+
+test("dirty tree: modified tracked file -> exit 10 'dirty tree'", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, head } = makeRepo();
+  fs.writeFileSync(path.join(workdir, "a.txt"), "modified\n"); // tracked file modified
+  const r = freshStream(h, workdir, "worker", "worker-r1.md", head);
+  assert.equal(r.status, 10, r.stdout + r.stderr);
+  assert.match(r.stderr, /oc-worker: dirty tree/);
+  assert.ok(!fs.existsSync(r.argsFile), "opencode must not be spawned");
+  assert.deepEqual(eventsOf(sd), [], "no queued event appended");
+});
+
+test("dirty tree: untracked file -> exit 10 'dirty tree'", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, head } = makeRepo();
+  fs.writeFileSync(path.join(workdir, "junk.txt"), "junk\n"); // untracked file
+  const r = freshStream(h, workdir, "worker", "worker-r1.md", head);
+  assert.equal(r.status, 10, r.stdout + r.stderr);
+  assert.match(r.stderr, /oc-worker: dirty tree/);
+  assert.ok(!fs.existsSync(r.argsFile), "opencode must not be spawned");
+  assert.deepEqual(eventsOf(sd), [], "no queued event appended");
+});
+
+test("clean tree + fresh base: worker runs as today (exit 0, queued + run-done)", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, head } = makeRepo();
+  const r = freshStream(h, workdir, "worker", "worker-r1.md", head);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.session, "ses_fake123");
+  const ev = eventsOf(sd);
+  assert.deepEqual(ev.map((e) => e.key), ["run:m6a/worker-r1:queued", "run:m6a/worker-r1:done"]);
+});
+
+test("--session on a stale tree is not checked: runs", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, base } = makeRepo();
+  const prompt = path.join(workdir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const runDir = path.join(workdir, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir, base }));
+  const out = path.join(runDir, "worker-r1.md");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "worker", "--dir", workdir, "--prompt", prompt, "--out", out, "--session", "ses_round1", "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(JSON.parse(r.stdout.trim()).session, "ses_round1");
+});
+
+test("critic agent (--agent critic-nvidia) on a dirty tree is not checked: runs", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, head } = makeRepo();
+  fs.writeFileSync(path.join(workdir, "junk.txt"), "junk\n"); // untracked => dirty
+  const prompt = path.join(workdir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const runDir = path.join(workdir, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir, base: head }));
+  const out = path.join(runDir, "findings-r1.md");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "critic-nvidia", "--dir", workdir, "--prompt", prompt, "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
+test("ticket.json without base: runs (warning only)", () => {
+  const { h, sd } = streamHome();
+  const { dir: workdir, head } = makeRepo();
+  const prompt = path.join(workdir, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const runDir = path.join(workdir, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir })); // no base
+  const out = path.join(runDir, "worker-r1.md");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "worker", "--dir", workdir, "--prompt", prompt, "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(r.stderr.includes("no \"base\""), `expected base-missing warning, got: ${r.stderr}`);
 });
 
 test("O4: both receipt writes go through atomicWrite", () => {
