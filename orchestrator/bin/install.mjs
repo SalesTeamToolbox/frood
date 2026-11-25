@@ -7,6 +7,8 @@
 //   node bin/install.mjs --check    report drift; exit 1 if any installed file differs/missing/orphaned
 //   node bin/install.mjs --dry-run  show what install would do, write nothing
 //
+// Install also registers the peer-mail MCP server with Claude Code at user scope (bin/mcp-register.mjs) when Claude
+// Code is on the machine; --check prints a WARN line (it does not fail) when it is missing. ORCH_SKIP_MCP=1 skips both.
 // ORCH_HOME overrides the home directory (tests). Never creates symlinks or junctions.
 import "./no-window.mjs"; // hide console windows of every child process (Windows)
 import fs from "node:fs";
@@ -14,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { registerPeerMail, peerMailDrift } from "./mcp-register.mjs";
 
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HARNESSES = ["cc", "oc"];
@@ -206,7 +209,9 @@ export function install({ dryRun = false, log = console.log } = {}) {
     fs.writeFileSync(statePath(), JSON.stringify(state, null, 2) + "\n");
   }
   if (!changes.length && !orphans.length) log("up to date — nothing to change");
-  return { changes: changes.length, orphans: orphans.length };
+  // Not a file this install owns: Claude Code's user-scope MCP list. Never fails the install.
+  const mcp = process.env.ORCH_SKIP_MCP ? "skipped" : registerPeerMail({ home: homeDir(), dryRun, log });
+  return { changes: changes.length, orphans: orphans.length, mcp };
 }
 
 export function check({ log = console.log } = {}) {
@@ -222,6 +227,10 @@ export function check({ log = console.log } = {}) {
       routingOk = false;
     }
   }
+  // A warning, not drift: install cannot always repair it (no `claude` on PATH), and the desk gates every merge on
+  // --check, so a failing check here would page on each merge.
+  const mcp = process.env.ORCH_SKIP_MCP ? null : peerMailDrift(homeDir());
+  if (mcp) log(`WARN MCP peer-mail ${mcp.registered ? "differs from" : "not registered in"} Claude Code user scope (OpenCode runs: ${[mcp.wanted.command, ...mcp.wanted.args].join(" ")}) — run install`);
   const ok = !changes.length && !orphans.length && routingOk;
   log(ok ? "check: OK — installed files match the repo" : "check: FAILED — run install (or fix routing) and re-check");
   return ok;

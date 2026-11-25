@@ -49,6 +49,12 @@ node bin/install.mjs --check    report drift; exit 1 if anything differs, is mis
 node bin/install.mjs --dry-run  show what install would do, write nothing
 ```
 
+Install also registers the `peer-mail` MCP server with Claude Code at user scope (`claude mcp add -s user`),
+taking the command from the `peer-mail` entry in OpenCode's `~/.config/opencode/opencode.json`. It does this only
+when Claude Code is on the machine (`~/.claude.json` exists); a failing `claude` CLI prints a
+warning and the install carries on. `--check` prints `WARN MCP peer-mail …` when the entry is missing or differs,
+without failing. `ORCH_SKIP_MCP=1` skips both.
+
 `install.ps1` is a thin PowerShell wrapper: `pwsh install.ps1 [-Check] [-DryRun]` just runs
 `node bin/install.mjs` with the matching flag and passes on its exit code. `package.json` also has
 `npm run install-harness` and `npm run check`.
@@ -99,6 +105,7 @@ same target (install errors out).
 | Script | Purpose |
 |---|---|
 | `install.mjs` | Installer and drift check (above). |
+| `mcp-register.mjs` | The installer's peer-mail MCP step: reads OpenCode's entry, registers it with Claude Code at user scope (above). |
 | `desk.mjs` | The desk CLI: `status`, `watch --events [--by cc|oc] [--interval 30] [--once] [--takeover] [--until-event <sec>]`, `step <stream> <key> [--by cc|oc]`, `verdict`, `merge-check`. `--until-event` blocks until an event arrives (exit 0) or the deadline passes (exit 4). `--by` skips streams the other harness holds (`step` prints `HELD <stream> <holder>`). |
 | `check-routing.mjs` | Routing lint: every OpenCode model ID is in live `opencode models`; no "Dropped" model in dispatch files; Claude Code model values are aliases; no bare "CC" in `rules/`. Exit 1 on failure. |
 | `board.mjs` | Ticket board CLI: `create`, `egm`, `claim`, `heartbeat`, `attach`, `round`, `signoff`, `gates`, `ready`, `verify`, `shipped`, `reopen`, `watch`, `status`, `release`, `fail`, `unblock`, `quarantine`. `--help` lists them. |
