@@ -16,6 +16,7 @@ import path from "node:path";
 import { listStreams } from "./handoff.mjs";
 import { statusRows, watchInfo } from "./desk.mjs";
 import { readService, syncAllStreamTitles } from "./session-title.mjs";
+import { measure, level, readState, writeState, shouldRunNotify, notifyNow, notifyParts } from "./session-pressure.mjs";
 
 function notify(text) {
   if (process.env.ORCH_NO_NOTIFY === "1") return;
@@ -58,11 +59,28 @@ export async function main(argv) {
       }
     } catch {}
     const r = check();
+    let code = r.code;
     if (r.code === 1) {
       console.log(r.text);
       notify(r.text);
     }
-    return r.code;
+    // Session-pressure notice: best effort, never changes desk-check output or exit codes.
+    try {
+      const m = measure();
+      const lvl = level(m.freeGb, m.claudeN, m.load);
+      const prev = readState();
+      if (lvl !== "ok") {
+        if (shouldRunNotify(prev, m.now, lvl)) {
+          const { summary, body } = notifyParts(lvl, m);
+          notifyNow(lvl, summary, body);
+          prev.lastNotifyMs = m.now;
+        }
+      }
+      // Record the observed level on every tick, including ok.
+      prev.lastLevel = lvl;
+      writeState(prev);
+    } catch {}
+    return code;
   } catch (e) {
     console.error(`desk-check: ${e.message}`);
     return 2;

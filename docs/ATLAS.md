@@ -437,6 +437,10 @@ decides: start delay, after-kill activity and long tool calls per run; why a wor
 handler: orchestrator/bin/handoff.mjs writeStream
 decides: a write by the claim holder keeps the claim (refreshing claim.at, keeping consumed_at) unless `--release`; every other write clears claim and consumed_at; lease keys (held_by, …) always untouched
 
+### session-pressure notice
+handler: orchestrator/bin/desk-check.mjs main() → orchestrator/bin/session-pressure.mjs measure()/level()/shouldNotify()
+decides: session-pressure level (ok/warn/critical) from /proc/meminfo, /proc/loadavg and process counts; a notify-send is sent when the level rises or every 60 min while warn-or-above, never on ok, and skipped when ORCH_NO_NOTIFY=1
+
 ## How to keep this map accurate
 
 - A handler rename is a same-commit map update: edit the `handler:` line in the
