@@ -73,3 +73,46 @@ test("fail safe: UNREQUESTED with no separator still counts", () => {
   assert.equal(r.overridden, true);
   assert.equal(r.unrequested.length, 1);
 });
+
+test("UNREQUESTED still counts when an earlier dash precedes the tag (senior finding 1)", () => {
+  const blasts = [
+    "- orchestrator/bin/x.mjs:10 (a - b) — UNREQUESTED: changes y",
+    "- foo.mjs:3 -- helper (a - b) — UNREQUESTED: z",
+    "- desk.mjs:1324 – verdict path — UNREQUESTED: changed",
+    "- node x.mjs -- --free (cli) — UNREQUESTED: flag changed",
+    "- oc-worker.mjs:1018-1021 runChain: UNREQUESTED. No fallback hop — see finding 2",
+    "- x.mjs:10: UNREQUESTED: changes y - and z",
+  ];
+  for (const blast of blasts) {
+    const r = gate(doc("APPROVED", blast));
+    assert.equal(r.effective, "CHANGES_REQUESTED", blast);
+    assert.equal(r.overridden, true, blast);
+    assert.equal(r.unrequested.length, 1, blast);
+  }
+});
+
+test("UNREQUESTED counts with punctuation around/after the tag (senior finding 2)", () => {
+  const blasts = [
+    "- x.py:9 — UNREQUESTED. changed y",
+    "- x.py:9 — UNREQUESTED; changed y",
+    "- x.py:9 — UNREQUESTED, changed y",
+    "- x.py:9 — *UNREQUESTED*: …",
+    "- x.py:9 — ***UNREQUESTED***: …",
+    "- x.py:9 — [UNREQUESTED]: …",
+    "- x.py:9 — (UNREQUESTED) …",
+  ];
+  for (const blast of blasts) {
+    const r = gate(doc("APPROVED", blast));
+    assert.equal(r.effective, "CHANGES_REQUESTED", blast);
+    assert.equal(r.overridden, true, blast);
+    assert.equal(r.unrequested.length, 1, blast);
+  }
+});
+
+test("intended tag after an earlier dash is still the tag; its UNREQUESTED detail is ignored", () => {
+  const d = doc("APPROVED", "- c.py:3 (a - b) — intended: nothing UNREQUESTED");
+  const r = gate(d);
+  assert.equal(r.effective, "APPROVED");
+  assert.equal(r.overridden, false);
+  assert.equal(r.unrequested.length, 0);
+});

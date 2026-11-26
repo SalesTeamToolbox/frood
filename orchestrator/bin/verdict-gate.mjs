@@ -6,10 +6,11 @@
 // Rules (2026-11-12 bake-off: free critics FOUND a call-site regression but still APPROVED it):
 //   - no VERDICT line                       -> INVALID   (not a review)
 //   - no BLAST RADIUS section / no entries  -> INVALID   (caller trace is mandatory)
-//   - any BLAST RADIUS line whose TAG (first word after the caller's ` — ` / ` – ` / ` -- ` / ` - `
-//     separator, **emphasis** or `backticks` stripped) is UNREQUESTED -> CHANGES_REQUESTED, whatever
-//     the critic wrote; UNREQUESTED in prose or in an unchanged/intended tag's detail does not count;
-//     a line with no separator still counts if it contains UNREQUESTED (fail safe)
+//   - any BLAST RADIUS line whose TAG (the first of unchanged / intended / UNREQUESTED directly
+//     following a separator ` — ` / ` – ` / ` -- ` / ` - ` / `: ` (colon only for UNREQUESTED),
+//     walking every separator left to right; `**`, `_`, backtick, `[`, `(` around the tag ignored;
+//     UNREQUESTED in prose or in an unchanged/intended detail does not count; a line with no dash
+//     separator still counts if it contains UNREQUESTED) -> CHANGES_REQUESTED, whatever the critic wrote
 //   - any [blocker] or [major] finding       -> CHANGES_REQUESTED, whatever the critic wrote
 //   - otherwise the critic's verdict stands
 // --free marks the review as done on a free model: an APPROVED becomes APPROVED_FREE
@@ -43,17 +44,27 @@ export function gate(text, { free = false } = {}) {
   if (start < 0 || !entries.length) {
     return { effective: "INVALID", critic, overridden: true, reasons: ["no BLAST RADIUS entries (caller trace is mandatory)"], unrequested: [], majors: [] };
   }
-  // A line is UNREQUESTED only when UNREQUESTED is its TAG: the first word after the first
-  // caller separator (` — `, ` – `, ` -- ` or ` - `), ignoring **emphasis** or `backticks`
-  // around it, followed by `:`, whitespace, `—` or end of line. A line with no separator at
-  // all is fail-safe: any UNREQUESTED in it still counts (an unparseable line never lets a
-  // real one through). A line tagged unchanged/intended never counts, whatever its detail says.
-  const SEPARATOR = / — | – | -- | - /;
-  const TAG_UNREQUESTED = /^(?:\*\*|`)?UNREQUESTED(?:\*\*|`)?(?::|\s|—|$)/;
+  // A line is UNREQUESTED only when UNREQUESTED is its TAG: the first of unchanged / intended /
+  // UNREQUESTED that directly follows a separator (` — `, ` – `, ` -- `, ` - `, or `: ` for
+  // UNREQUESTED only), walking every separator left to right; ignore a run of `*`, `_`, backtick,
+  // `[`, `(` before the tag; after it require only a non-alphanumeric. A line with no dash
+  // separator at all that mentions UNREQUESTED still counts (fail safe); a line tagged
+  // unchanged/intended never counts, whatever its detail says.
+  const MENTION = /(?<![A-Za-z0-9])UNREQUESTED(?![A-Za-z0-9])/;
+  const SEP = / — | – | -- | - |: /g;
+  const KNOWN = /^[*_`\[(]*(unchanged|intended|UNREQUESTED)(?![A-Za-z0-9])/;
   const isUnrequested = (e) => {
-    const m = e.match(SEPARATOR);
-    if (!m) return /\bUNREQUESTED\b/.test(e);
-    return TAG_UNREQUESTED.test(e.slice(m.index + m[0].length).trimStart());
+    if (!MENTION.test(e)) return false;
+    let dash = false;
+    for (const m of e.matchAll(SEP)) {
+      const colon = m[0] === ": ";
+      if (!colon) dash = true;
+      const k = e.slice(m.index + m[0].length).trimStart().match(KNOWN);
+      if (!k) continue;
+      if (k[1] === "UNREQUESTED") return true;
+      if (!colon) return false; // unchanged/intended after a dash separator is the tag
+    }
+    return !dash; // no dash separator at all: fail safe, as today
   };
   const unrequested = entries.filter(isUnrequested);
   const majors = lines.filter((l) => /^\s*\d+\.\s*\[(blocker|major)\]/i.test(l)).map((l) => l.trim());
