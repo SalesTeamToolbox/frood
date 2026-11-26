@@ -1056,6 +1056,10 @@ export function decideStep(stream, key, events, lines) {
       return { action: `ACTION critic ${ticketPath} ${out} ${path.join(runDir, `findings-r${r}.md`)} ${r}`, ticket: slug };
     }
     if (ev.outcome === "blocked_question") return { action: `ESCALATE question ${out}`, ticket: slug };
+    // A run that wrote outside its worktree (oc-worker's fence: exit "escaped-worktree") is never auto-resumed:
+    // resuming hands the same session the same Mandate and the same absolute paths. Page the owner instead; the
+    // receipt lists the escaped paths and <out>.escaped.patch holds their diff.
+    if (ev.exit === "escaped-worktree") return { action: `ESCALATE worktree-escape ${out}`, ticket: slug };
     // Worker errored: try auto-resume on the next round before paging the owner.
     // A run that timed out or dropped (worker-nvidia or worker-free) resumes on the
     // same worker role with `--role worker --session` — oc-worker's Nvidia drop rule

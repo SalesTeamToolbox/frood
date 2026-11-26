@@ -127,6 +127,9 @@ likewise) — a run id carries its ticket: `m6a-desk-minors/worker-r1`.
   - `merge: "train"`, or any repo other than the orchestrator: hand the branch to that repo's train and ask the
     owner first. Never ff-merge there.
 - **`ESCALATE senior <findings>`** — senior review (one pass, blockers only) before the merge.
+- **`ESCALATE worktree-escape <out>`** — the worker wrote outside its worktree (oc-worker's fence). Never resume it.
+  Tell the owner in one line which main-checkout paths the receipt lists under `escaped` (`restored` vs `left`) and
+  point to `<out>.escaped.patch`; anything in `left` is the owner's call.
 - **Any other `ESCALATE ...`** — a judgment call for the desk, or a question for the owner when the decision is
   theirs. A `FAIL` from `merge-check`, a `BLOCKED:` question, an exhausted round count: say what it is in one line
   and ask.

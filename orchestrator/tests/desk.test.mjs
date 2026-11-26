@@ -693,6 +693,17 @@ test("step: worker-nvidia timed-out run resumes with --role worker --session, fr
   assert.ok(!line.includes("worker-prompt-r1"), "prompt is the Mandate, never the unwritten worker-prompt-r1.md");
 });
 
+test("step: a worker-nvidia run that escaped its worktree pages the owner, never auto-resumes", () => {
+  const { h, name, runDir } = t8Stream("nvidia-escaped");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir, { agent: "worker-nvidia" }));
+    appendEvent(name, evDone("worker-r1", runDir, { agent: "worker-nvidia", outcome: "error", exit: "escaped-worktree", session: "ses_nvidia" }));
+  });
+  const line = cliLines(h, ["step", name, "run:worker-r1:done"]).lines[0];
+  assert.equal(line, `ESCALATE worktree-escape ${fwd(path.join(runDir, "worker-r1.md"))}`);
+  assert.ok(!line.includes("resume-worker"), "an escaped run is never resumed");
+});
+
 test("step: a timed-out worker-nvidia run resumes on a fresh out, never DONE on replay", () => {
   const { h, name, runDir } = t8Stream("nvidia-resume");
   const OC_WORKER = fileURLToPath(new URL("../bin/oc-worker.mjs", import.meta.url)).replace(/\\/g, "/");
