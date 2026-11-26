@@ -6,7 +6,10 @@
 // Rules (2026-11-12 bake-off: free critics FOUND a call-site regression but still APPROVED it):
 //   - no VERDICT line                       -> INVALID   (not a review)
 //   - no BLAST RADIUS section / no entries  -> INVALID   (caller trace is mandatory)
-//   - any BLAST RADIUS line tagged UNREQUESTED -> CHANGES_REQUESTED, whatever the critic wrote
+//   - any BLAST RADIUS line whose TAG (first word after the caller's ` — ` / ` – ` / ` -- ` / ` - `
+//     separator, **emphasis** or `backticks` stripped) is UNREQUESTED -> CHANGES_REQUESTED, whatever
+//     the critic wrote; UNREQUESTED in prose or in an unchanged/intended tag's detail does not count;
+//     a line with no separator still counts if it contains UNREQUESTED (fail safe)
 //   - any [blocker] or [major] finding       -> CHANGES_REQUESTED, whatever the critic wrote
 //   - otherwise the critic's verdict stands
 // --free marks the review as done on a free model: an APPROVED becomes APPROVED_FREE
@@ -40,7 +43,19 @@ export function gate(text, { free = false } = {}) {
   if (start < 0 || !entries.length) {
     return { effective: "INVALID", critic, overridden: true, reasons: ["no BLAST RADIUS entries (caller trace is mandatory)"], unrequested: [], majors: [] };
   }
-  const unrequested = entries.filter((e) => /\bUNREQUESTED\b/.test(e));
+  // A line is UNREQUESTED only when UNREQUESTED is its TAG: the first word after the first
+  // caller separator (` — `, ` – `, ` -- ` or ` - `), ignoring **emphasis** or `backticks`
+  // around it, followed by `:`, whitespace, `—` or end of line. A line with no separator at
+  // all is fail-safe: any UNREQUESTED in it still counts (an unparseable line never lets a
+  // real one through). A line tagged unchanged/intended never counts, whatever its detail says.
+  const SEPARATOR = / — | – | -- | - /;
+  const TAG_UNREQUESTED = /^(?:\*\*|`)?UNREQUESTED(?:\*\*|`)?(?::|\s|—|$)/;
+  const isUnrequested = (e) => {
+    const m = e.match(SEPARATOR);
+    if (!m) return /\bUNREQUESTED\b/.test(e);
+    return TAG_UNREQUESTED.test(e.slice(m.index + m[0].length).trimStart());
+  };
+  const unrequested = entries.filter(isUnrequested);
   const majors = lines.filter((l) => /^\s*\d+\.\s*\[(blocker|major)\]/i.test(l)).map((l) => l.trim());
   if (unrequested.length) reasons.push(`${unrequested.length} UNREQUESTED caller change(s)`);
   if (majors.length) reasons.push(`${majors.length} blocker/major finding(s)`);
