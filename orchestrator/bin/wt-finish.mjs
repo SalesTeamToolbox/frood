@@ -218,7 +218,8 @@ function parseRows(text) {
       ppid: Number.isInteger(ppid) ? ppid : 0,
       cmd: String(r?.cmd ?? ""),
       cwd: typeof r?.cwd === "string" && r.cwd ? r.cwd : null,
-      // Same ISO form proc-tree's processStart() returns, so the two compare with ===.
+      // Same ISO form proc-tree's processStart() returns; killHolder compares the two with sameStart's
+      // 3 s tolerance, so lstart skew never skips a live holder.
       start: Number.isFinite(start) && start > 0 ? new Date(start).toISOString() : null,
     });
   }

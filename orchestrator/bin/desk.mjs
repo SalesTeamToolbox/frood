@@ -544,7 +544,7 @@ export function watchInfo(now = nowMs()) {
   const zombie = isZombie(owner.pid);
   const live = runIsLive({ pid: owner.pid, pid_start: owner.pid_start ?? null });
   const started = owner.pid_start ? processStart(owner.pid) : null;
-  const verified = Boolean(owner.pid_start) && started !== null && started === owner.pid_start;
+  const verified = Boolean(owner.pid_start) && started !== null && sameStart(started, owner.pid_start);
   const fresh = ageMs !== null && ageMs <= 3 * DEFAULT_INTERVAL_S * 1000;
   const info = { pid: owner.pid, by: owner.by ?? null, session: owner.session ?? null, kind: owner.kind ?? "session", log: owner.log ?? null, age_ms: ageMs, verified };
   if (live && fresh) return { state: "live", ...info };

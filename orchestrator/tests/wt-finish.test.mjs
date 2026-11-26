@@ -442,7 +442,7 @@ test("--json keeps the busy shape and exit code", { timeout: 180_000 }, async ()
 
 // ------------------------------------------------------------------ guards
 
-test("killHolder skips when the start time differs or is missing, kills only on an exact match", () => {
+test("killHolder skips when the start differs beyond 3 s or is missing, kills only within tolerance", () => {
   const calls = [];
   const kill = (pid) => (calls.push(pid), true);
   assert.equal(killHolder({ pid: 4242, start: "2026-01-01T00:00:00.000Z" }, { start: () => "2026-02-02T00:00:00.000Z", kill }), false);

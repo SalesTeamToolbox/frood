@@ -517,6 +517,24 @@ test("status watch line: live names harness + session; stale names the reason an
   assert.equal(inHome(h, now, () => watchInfo().reason), "pid recycled (start mismatch)");
 });
 
+test("watchInfo: a live watcher whose recorded start is 1 s off reads verified === true", () => {
+  const h = home();
+  mkStream(h);
+  const ownerFile = path.join(lockDirOf(h), "owner");
+  const now = Date.now();
+  fs.mkdirSync(lockDirOf(h), { recursive: true });
+  const actual = processStart(process.pid);
+  assert.match(String(actual), /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/, `unexpected start ${actual}`);
+  const skewed = new Date(Date.parse(actual) - 1000).toISOString(); // recorded 1 s behind the live start
+  fs.writeFileSync(
+    ownerFile,
+    JSON.stringify({ pid: process.pid, pid_start: skewed, at: new Date(now - 5000).toISOString(), token: "self", by: "oc", session: "ses_verified1" }),
+  );
+  const live = inHome(h, now, () => watchInfo());
+  assert.equal(live.state, "live", "the watcher is still live despite the skew");
+  assert.equal(live.verified, true, "verified matches live within tolerance");
+});
+
 test("watch records owner identity; exit 3 names it; a dead owner is replaced without --takeover", { timeout: 90_000 }, async () => {
   const h = home();
   mkStream(h);
