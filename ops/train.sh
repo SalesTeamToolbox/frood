@@ -15,9 +15,10 @@
 #   c. $main_root/.opencode/reports/<ticket>/mandate.md      ^tests: line
 #   d. none -> exit 1 "test failure" receipt naming every source tried
 # *.py runs under `timeout -k 10 $TRAIN_PYTEST_TIMEOUT python3 -m pytest <file> -q`
-# (default 1200, appended to pytest.log); *.test.mjs / *.test.js under
-# `timeout -k 10 $TRAIN_NODE_TIMEOUT node --test <file>` (default 600, appended
-# to node-test.log). Files run serially, one at a time; the first failure stops
+# (default 1200, log pytest.log); *.test.mjs / *.test.js under
+# `timeout -k 10 $TRAIN_NODE_TIMEOUT node --test <file>` (default 600, log
+# node-test.log). Both logs are emptied at the start of each run, then appended
+# per file. Files run serially, one at a time; the first failure stops
 # the run. Paths with spaces are not supported (Mandate tests: line).
 #
 # Exit codes: 0 = pass, 1 = test failure, 2 = lint failure.
@@ -147,7 +148,10 @@ PY
     if [ -n "$mandate_raw" ]; then
       tests_source="mandate"
       # split on commas and whitespace, drop empties, de-dupe keeping order.
+      # set -f: a token is a path, never a glob pattern.
+      set -f
       tests_list="$(printf '%s\n' ${mandate_raw//,/ } | awk 'NF && !seen[$0]++')"
+      set +f
     fi
   fi
 fi

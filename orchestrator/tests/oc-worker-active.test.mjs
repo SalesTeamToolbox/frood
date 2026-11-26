@@ -82,14 +82,14 @@ function baseRec(over = {}) {
   };
 }
 
-function mkOut(homeDir, name, ageMs) {
+function mkOut(homeDir, name, ageMs, now = NOW) {
   const runDir = path.join(homeDir, "reports");
   fs.mkdirSync(runDir, { recursive: true });
   const out = path.join(runDir, `${name}.md`);
   if (ageMs == null) return out; // never written: STARTING
   fs.writeFileSync(out, "partial\n");
   fs.writeFileSync(out + ".events.jsonl", '{"type":"text"}\n');
-  const t = new Date(NOW - ageMs);
+  const t = new Date(now - ageMs);
   fs.utimesSync(out + ".events.jsonl", t, t);
   fs.utimesSync(out, t, t);
   return out;
@@ -131,10 +131,17 @@ test("activeRuns states: RUNNING, QUIET, STALE, OVERDUE, HEARTBEAT-STALE, STARTI
 
 test("active CLI prints text rows and --json", () => {
   const h = home();
-  const out = mkOut(h, "cli1", 3 * 60_000);
+  // The CLI reads the live clock, so anchor this test to a fresh now (not the module's NOW, which can be
+  // minutes old by the time this runs) and sit mid-minute so floor-to-minute output cannot flip.
+  const now = Date.now();
+  const started = now - 26 * 60_000 - 30_000;
+  const out = mkOut(h, "cli1", 3 * 60_000 + 30_000, now);
   const dir = path.join(h, ".config", "orchestrator", "runs");
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, `${process.pid}-${NOW - 26 * 60_000}.json`), JSON.stringify(baseRec({ out, title: "cli run" })));
+  fs.writeFileSync(
+    path.join(dir, `${process.pid}-${started}.json`),
+    JSON.stringify(baseRec({ out, title: "cli run", started, heartbeat: iso(now) })),
+  );
   const env = { ...process.env, ORCH_HOME: h };
   const text = spawnSync(process.execPath, [BIN, "active"], { env, encoding: "utf8" });
   assert.equal(text.status, 0, text.stderr);

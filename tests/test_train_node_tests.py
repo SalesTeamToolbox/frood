@@ -367,6 +367,24 @@ class TestMandate:
         assert receipt["tests_source"] == "mandate"
         assert receipt["tests"] == "a.test.mjs,b.test.mjs"
 
+    def test_mandate_tests_token_is_not_globbed(self, tmp_path):
+        ticket = "mandate-ticket"
+        bin_dir = tmp_path / "bin"
+        make_stub_ruff(bin_dir)
+        reports_root = tmp_path / "reports"
+        repo = make_fixture(
+            tmp_path,
+            ticket,
+            tracked_files={"a.test.mjs": PASS_NODE},
+            untracked_files={
+                ".opencode/reports/mandate-ticket/mandate.md": "# mandate\ntests: *.test.mjs\n",
+            },
+        )
+        res = run_train(repo, ticket, bin_dir, reports_root)
+        assert res.returncode == 1
+        receipt_text = (reports_root / ticket / "receipt.md").read_text()
+        assert "detail: listed test not found: *.test.mjs" in receipt_text
+
 
 class TestLogsFresh:
     def test_failure_log_holds_only_this_run(self, tmp_path):
