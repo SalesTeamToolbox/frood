@@ -445,6 +445,8 @@ decides: `--agent cc-worker` spawns `claude -p` (ORCH_CLAUDE_BIN) instead of ope
 ### oc-worker --role worker chain
 handler: orchestrator/bin/oc-worker.mjs --role <name> (expands to --agent/--fallback from CHAINS); orchestrator/bin/chains.mjs (CHAINS source, re-exported by orchestrator/bin/router-health.mjs)
 decides: which OpenCode agent pool to dispatch first for a worker run; worker-nvidia first for routine tickets, Nvidia 429 resumes on the same session, two stalled/timeout receipts drop worker-nvidia for the ticket; then the pace prepend (orchestrator/bin/pace-read.mjs readPace/paceChain, one read per launch): an `under` pace puts cc-worker first for `--role worker` only, after the Nvidia drop rule; `--session` never prepends (the session pins the backend: desk.mjs resume-worker must not hand an OpenCode session to `claude --resume`); a detached child gets the launcher's chain via ORCH_PACE_DECISION; every receipt carries `cc_pace` {state, weekly, projected, at, prepended}
+- session routing: `--role worker --session <id>` with an id not starting `ses_` is a Claude session → chain [cc-worker, today's chain] in any pace state (no pace decision, `prepended` false); a `ses_` id keeps today's chain
+- vision: orchestrator/bin/oc-worker.mjs filterVisionChain keeps cc-worker (Claude reads images with Read); runChain's first hop reuses `a` (session, --model) only when chain[0] is `a.agent`, so a filtered-out first agent never runs under the next agent's pool key
 - idle session woken by peer-mail → hooks/peer-mail-wake.js (Claude Code Stop hook, asyncRewake; polls the mailbox and exits 2 to wake the idle model)
 
 ### oc-worker dispatch preflight

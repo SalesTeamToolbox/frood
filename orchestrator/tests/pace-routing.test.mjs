@@ -353,6 +353,110 @@ test("oc-worker: the detached child strips ORCH_PACE_DECISION and ORCH_DETACHED_
   assert.deepEqual(seen, { decision: null, detached: null }, "a nested oc-worker inside the run must not inherit either variable");
 });
 
+// ---- senior finding 1: the vision filter vs the first hop ----
+const NV_MODEL = "nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b"; // in VISION_CAPABLE_MODELS
+function agentFiles(h, agents) {
+  const d = path.join(h, ".config", "opencode", "agents");
+  fs.mkdirSync(d, { recursive: true });
+  for (const [n, { model, vision }] of Object.entries(agents)) fs.writeFileSync(path.join(d, `${n}.md`), `---\nmode: subagent\nmodel: ${model}\n${vision ? "vision: true\n" : ""}---\nx\n`);
+  const mf = path.join(h, "oc-models.txt");
+  fs.writeFileSync(mf, Object.values(agents).map((x) => x.model).join("\n") + "\n");
+  return mf;
+}
+const VISION_AGENTS = {
+  "worker-nvidia": { model: NV_MODEL, vision: true },
+  worker: { model: "opencode-go/mimo-v2.6-flash" },
+  "worker-free": { model: "opencode/deepseek-v4.1-flash-free" },
+};
+/** A Mandate naming an existing image in the worktree (auto-vision). */
+function imageMandate(h, name) {
+  const dir = path.join(h, `wt-${name}`);
+  fs.mkdirSync(path.join(dir, "static"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "static", "icon.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  return " Match the design in static/icon.png exactly.";
+}
+function ocwPrompt(h, argvExtra, extraEnv, name, text) {
+  const dir = path.join(h, `wt-${name}`);
+  fs.mkdirSync(dir, { recursive: true });
+  const prompt = path.join(h, `${name}-mandate.md`);
+  fs.writeFileSync(prompt, `Implement the ticket.${text}`);
+  const out = path.join(h, "out", `${name}.md`);
+  const env = baseEnv(h, { ORCH_CLAUDE_BIN: FAKE_CC, OPENCODE_BIN: FAKE_OC, ORCH_NO_PROCTREE: "1", ORCH_CC_POLL_MS: "50", ORCH_NVIDIA_POLL_MS: "50", FAKE_CC_MAX_MS: "60000", FAKE_OC_MAX_MS: "60000", ...extraEnv });
+  delete env.WORKER_SLOTS;
+  const r = spawnSync(process.execPath, [OCW, "--dir", dir, "--prompt", prompt, "--out", out, ...argvExtra], { env, encoding: "utf8", timeout: 60000 });
+  const line = r.stdout.trim().split("\n").filter((l) => l.startsWith("{")).pop();
+  return { ...r, receipt: line ? JSON.parse(line) : null };
+}
+const health = (h) => {
+  try { return JSON.parse(fs.readFileSync(path.join(h, ".config", "orchestrator", "pool-health.json"), "utf8")); } catch { return {}; }
+};
+const healthKeys = (h) => JSON.stringify(health(h));
+
+test("senior repro: under + image Mandate + cc-worker usage limit → cc-worker marked down (not Nvidia), re-pools to worker-nvidia, exit 0", () => {
+  const h = paceHome("under");
+  const mf = agentFiles(h, VISION_AGENTS);
+  const text = imageMandate(h, "v");
+  const ocArgs = path.join(h, "oc-args.json");
+  const r = ocwPrompt(h, ["--role", "worker"], { ORCH_OPENCODE_MODELS_FILE: mf, FAKE_CC_MODE: "usage-limit", FAKE_OC_ARGS_FILE: ocArgs }, "v", text);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.equal(r.receipt.cc_pace.prepended, true);
+  assert.equal(r.receipt.vision?.auto_detected, true, "the image Mandate turned vision on");
+  assert.equal(r.receipt.agent, "worker-nvidia");
+  assert.equal(r.receipt.repooled_from?.[0]?.agent, "cc-worker", "cc-worker ran first");
+  assert.match(r.receipt.repooled_from[0].error, /limit/i);
+  const hl = healthKeys(h);
+  assert.match(hl, /"cc-worker"/, "the cc-worker pool is marked down");
+  assert.ok(!hl.includes(NV_MODEL), `the Nvidia model must not be marked down: ${hl}`);
+  const { argv } = JSON.parse(fs.readFileSync(ocArgs, "utf8"));
+  assert.equal(argv[argv.indexOf("--agent") + 1], "worker-nvidia");
+  assert.equal(argv.includes("--session"), false, "a fallback hop starts a fresh OpenCode session");
+});
+
+test("vision filter drops a.agent: the first hop runs and books the same agent (worker-nvidia), fresh session, its own model", () => {
+  const h = paceHome("over");
+  const mf = agentFiles(h, VISION_AGENTS);
+  const text = imageMandate(h, "f");
+  const ocArgs = path.join(h, "oc-args.json");
+  const r = ocwPrompt(h, ["--agent", "worker", "--fallback", "worker-nvidia", "--session", "ses_old", "--model", "opencode-go/mimo-v2.6-flash"], { ORCH_OPENCODE_MODELS_FILE: mf, FAKE_OC_ARGS_FILE: ocArgs }, "f", text);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const { argv } = JSON.parse(fs.readFileSync(ocArgs, "utf8"));
+  assert.equal(argv[argv.indexOf("--agent") + 1], "worker-nvidia", "the agent that ran is the one the hop booked");
+  assert.equal(argv.includes("ses_old"), false, "the dropped agent's session is not handed on");
+  assert.equal(r.receipt.agent, "worker-nvidia");
+  assert.equal(r.receipt.model, NV_MODEL);
+});
+
+// ---- senior finding 2: --role worker --session <Claude session id> resumes on cc-worker ----
+const CLAUDE_SES = "0b6f3c2e-1d4a-4f6b-9c8e-2a7d5e9f1b3c";
+
+test("dry: --role worker --session <non-ses_ id> → [cc-worker, today's chain] in every pace state, no pace read; ses_ keeps today's", () => {
+  for (const s of ["over", "unknown", "on", "off", "under"]) {
+    const r = dryRun(["--role", "worker", "--session", CLAUDE_SES], { state: s });
+    assert.deepEqual(r.chain, ["cc-worker", ...TODAY], s);
+    assert.equal(r.prepended, false);
+    assert.equal(r.reads, 0);
+  }
+  assert.deepEqual(dryRun(["--role", "worker", "--session", CLAUDE_SES], { state: "over" }, { drops: 2 }).chain, ["cc-worker", "worker", "worker-free"]);
+  assert.deepEqual(dryRun(["--role", "worker", "--session", "ses_x"], { state: "under" }).chain, TODAY);
+  assert.deepEqual(dryRun(["--role", "worker-strong", "--session", CLAUDE_SES], { state: "under" }).chain, ["worker-strong", "worker-nvidia", "worker-free"]);
+});
+
+for (const state of ["over", "unknown"]) {
+  test(`oc-worker ${state}: --role worker --session <Claude id> resumes on cc-worker (fake claude gets --resume <id>), prepended false`, () => {
+    const h = paceHome(state);
+    const c = countingBin(h);
+    const ccArgs = path.join(h, "cc-args.json");
+    const r = ocw(h, ["--role", "worker", "--session", CLAUDE_SES], { ORCH_PACE_BIN: c.bin, FAKE_CC_ARGS_FILE: ccArgs });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.receipt.agent, "cc-worker");
+    const { argv } = JSON.parse(fs.readFileSync(ccArgs, "utf8"));
+    assert.equal(argv[argv.indexOf("--resume") + 1], CLAUDE_SES);
+    assert.equal(r.receipt.cc_pace.state, state);
+    assert.equal(r.receipt.cc_pace.prepended, false);
+    assert.equal(c.reads(), 1, "one read, for the receipt only");
+  });
+}
+
 // ---- check-routing: cc-worker is a known agent ----
 test("check-routing: --agent cc-worker (with or without --fallback) is not flagged; the shipped rules and commands are green", () => {
   const root = tmp();

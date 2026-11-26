@@ -70,7 +70,9 @@ Orchestrator writes the ticket + Mandate → **worker** codes in the ticket work
      worker-nvidia out.
   4. **The Claude Code `worker` (Sonnet) is never a fallback; preferred first only when pace is UNDER.**
      `oc-worker --role worker` puts `cc-worker` (headless Claude Code, Sonnet) first by itself when the
-     `pace:` line reads UNDER (never on a `--session` round). Otherwise use the in-session Claude Code
+     `pace:` line reads UNDER (never on a `ses_` `--session` round). A revision round after a `cc-worker`
+     receipt is `--agent cc-worker --session <id>`; `--role worker --session <id>` routes an id that does
+     not start with `ses_` to `cc-worker` by itself, in any pace state. Otherwise use the in-session Claude Code
      `worker` agent only when every OpenCode pool, including Nvidia after its retry, is out. The receipt
      states that reason, and the orchestrator tells the owner.
   5. **Revision rounds stay on the same agent and session (`--session`).** Switch to the next stronger

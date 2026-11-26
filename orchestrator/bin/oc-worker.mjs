@@ -119,7 +119,11 @@
 // - Pace-aware routing (bin/pace-read.mjs): every launch reads `cc-pace.mjs status --json` once (10 s timeout; any
 //   failure reads as `unknown`, never fails the run; ORCH_NO_PACE=1 → `off`). On an `under` pace, `--role worker`
 //   becomes [cc-worker, <today's chain after the Nvidia drop rule>]; every other state, every other role, --agent /
-//   --fallback launches and any `--session` launch (the session pins the backend) keep today's chain. Every receipt
+//   --fallback launches and any `ses_` `--session` launch (the session pins the backend) keep today's chain. A
+//   `--role worker --session <id>` whose id does not start with `ses_` is a Claude session: the chain becomes
+//   [cc-worker, <today's chain>] so the resume goes to cc-worker, in every pace state, without a pace decision.
+//   With --vision (or an image Mandate) cc-worker counts as vision-capable; a first hop that is not the agent
+//   `a` books (the vision filter dropped it) runs fresh on its own pinned model. Every receipt
 //   gets cc_pace {state, weekly, projected, at, prepended}. A detached child takes the launcher's read and chain
 //   (env ORCH_PACE_DECISION) and never reads again. ORCH_PACE_BIN overrides the cc-pace.mjs path (tests).
 // Exit: 0 finished, 3 no final text, 4 timeout, 5 opencode error, 6 every pool in the chain known-down, 7 board
@@ -323,6 +327,10 @@ export function args(argv, opts = {}) {
     if (chain[0] === "worker-nvidia" && nvidiaDropCount(outDir) >= 2) chain = chain.slice(1);
     if (Array.isArray(opts.chain) && opts.chain.length) {
       chain = [...opts.chain]; // detached child: the launcher's decision, never a second pace read
+    } else if (a.role === "worker" && a.session && !a.session.startsWith("ses_")) {
+      // A non-`ses_` session is a Claude Code session (a cc-worker round): resume it on cc-worker (rule 5, same
+      // agent and session) whatever the pace; fallback hops start fresh OpenCode sessions. Not a pace decision.
+      chain = ["cc-worker", ...chain];
     } else if (!a.session && opts.pace !== undefined) {
       // Pace-aware routing (M4): an `under` pace puts cc-worker first for --role worker. --session pins the
       // backend (a revision round stays on its agent and session), so it never prepends.
@@ -1148,10 +1156,12 @@ function streamEvent(a, ev) {
   }
 }
 
-// Filter chain for vision-capable agents when --vision is set
-function filterVisionChain(chain, a) {
+// Filter chain for vision-capable agents when --vision is set. cc-worker (headless Claude Sonnet) counts as
+// vision-capable: it reads image files with its Read tool, so it is never filtered out.
+export function filterVisionChain(chain, a) {
   if (!a.vision) return { chain, fallback: false };
   const visionChain = chain.filter((agent) => {
+    if (isCcAgent(agent)) return true;
     const model = agentModel(agent);
     return model && isVisionCapable(model) && agentHasVision(agent);
   });
@@ -1202,7 +1212,9 @@ async function runChain(a) {
   let liveModels; // `opencode models`, read once and only if some hop has a model to check
   for (let i = 0; i < chain.length && attempts < 3; i++) {
     const agent = chain[i];
-    const first = i === 0;
+    // The first hop reuses `a` (its --session, --model) only when it is the agent `a` books: after the vision
+    // filter dropped a.agent, chain[0] is another agent and runs fresh, with its own pinned model.
+    const first = i === 0 && agent === a.agent;
     const cc = isCcAgent(agent);
     const model = cc ? ((first && a.model) || "sonnet") : (first && a.model) || agentModel(agent);
     const poolKey = cc ? CC_POOL : model; // pool-health key: the cc runner is one pool whatever --model says
