@@ -53,7 +53,7 @@ A `—` in the private-path column means no machine-private path applies.
 | Biz repo `sidebar` | OUT | Private business repo; nothing copied | — |
 | Private keys / tokens / `.env` | OUT | Real secrets never enter public history; only `.env.example` publishes | machine-local `.env` (real keys/tokens) |
 | Pool-health ledger (`pool-health.json`) | OUT | Machine-local pool health/spend state; public `router-health` uses public defaults | `~/.config/orchestrator/pool-health.json` |
-| Usage ledger | OUT | Machine-local spend/allowance per window (read by `bin/usage.mjs`); public copy has no private ledger dependency | `~/.config/orchestrator/usage-limits.json` |
+| Usage ledger | OUT | Machine-local spend/allowance per window (read by `orchestrator/bin/usage.mjs`); public copy has no private ledger dependency | `~/.config/orchestrator/usage-limits.json` |
 | Provider policy (`providers.json`) | OUT | Machine-local provider allow/deny decisions (Google free-only, Nvidia free-only, Alibaba ignored); public copy has public defaults | `~/.config/orchestrator/providers.json` |
 | Desk-daemon state | OUT | Machine-local desk daemon state | `~/.config/orchestrator/desk-daemon/state.json` |
 | Peer-mail history / ids | OUT | Session ids, inbox/outbox history never enter the tree | `~/.config/opencode/` peer-mail state (session ids, inbox, outbox) |

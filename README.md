@@ -363,9 +363,9 @@ cd ~/projects/orchestrator && node bin/install.mjs
 |-----------|---------|
 | **`/orchestrator`** | Slash command — full lifecycle: discuss → plan → execute via `/gauntlet` |
 | **`/gauntlet`** | Runs one module: worker → critic loop → senior → board ready → train |
-| **`bin/oc-worker.mjs`** | Launches headless OpenCode agent (worker, critic, scout, senior) |
-| **`bin/board.mjs`** | Ticket board: create, claim, EGM, rounds, signoff, gates, ready, verify, shipped |
-| **`bin/router-health.mjs`** | Self-correcting routing: probes models, prints healthy agent per role |
+| **`orchestrator/bin/oc-worker.mjs`** | Launches headless OpenCode agent (worker, critic, scout, senior) |
+| **`orchestrator/bin/board.mjs`** | Ticket board: create, claim, EGM, rounds, signoff, gates, ready, verify, shipped |
+| **`orchestrator/bin/router-health.mjs`** | Self-correcting routing: probes models, prints healthy agent per role |
 | **`peer-mail`** | Cross-harness messaging (session wake-ups, handoff links) |
 
 ### Model Routing (The "Infinite Improbability Drive")
