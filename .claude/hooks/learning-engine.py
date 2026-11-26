@@ -57,11 +57,20 @@ def save_patterns(project_dir, patterns):
     patterns["last_updated"] = datetime.now(UTC).isoformat()
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    # Write to a temp file and os.replace() it in: truncating the tracked file
+    # in place made a concurrent `git diff` (memory-learn.py, same Stop group)
+    # SIGBUS on its mmap of the file (git crashes 2026-11-25 11:05 and 18:46).
+    tmp = f"{path}.{os.getpid()}.tmp"
     try:
-        with open(path, "w") as f:
+        with open(tmp, "w") as f:
             json.dump(patterns, f, indent=2)
+        os.replace(tmp, path)
     except OSError as e:
         print(f"[learning-engine] Failed to save patterns: {e}", file=sys.stderr)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 def extract_session_data(event):
