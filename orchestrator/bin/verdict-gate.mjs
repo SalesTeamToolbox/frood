@@ -30,13 +30,18 @@ export function gate(text, { free = false } = {}) {
   if (!critic) return { effective: "INVALID", critic, overridden: false, reasons: ["no VERDICT line"], unrequested: [], majors: [] };
 
   // BLAST RADIUS section: from its heading to the first numbered finding / SENIOR_REVIEW / blank-then-non-bullet.
+  // A blast-line entry is a list item: a bullet (`-`, `*`) always; list numbering (`1.`, `1)`, `(a)`, `a.`)
+  // only when it leads with a tag word (`UNREQUESTED`/`unchanged`/`intended`) — a numbered blast line is
+  // tag-first like the bullet form. Numbered findings (`1. [minor] ...`) and `1. none` / `1. No findings`
+  // / `1. (none)` placeholders are findings, not blast lines.
+  const BLAST_LINE = /^\s*(?:[-*]|\d+[.)](?=\s*(?:UNREQUESTED|unchanged|intended)\b)|\([a-zA-Z]\)(?=\s*(?:UNREQUESTED|unchanged|intended)\b)|[a-zA-Z]\.(?=\s*(?:UNREQUESTED|unchanged|intended)\b))\s/i;
   const lines = t.split("\n");
   const start = lines.findIndex((l) => /^\s*\**BLAST RADIUS:?\**/i.test(l));
   const entries = [];
   if (start >= 0) {
     for (let i = start + 1; i < lines.length; i++) {
       const l = lines[i];
-      if (/^\s*[-*]\s+/.test(l)) entries.push(l.trim());
+      if (BLAST_LINE.test(l)) entries.push(l.trim());
       else if (/^\s*$/.test(l)) continue;
       else break;
     }
@@ -44,9 +49,11 @@ export function gate(text, { free = false } = {}) {
   if (start < 0 || !entries.length) {
     return { effective: "INVALID", critic, overridden: true, reasons: ["no BLAST RADIUS entries (caller trace is mandatory)"], unrequested: [], majors: [] };
   }
-  // New format: the blast line's FIRST word is its tag (strip the bullet, then a run of `*`, `_`,
-  // backtick, `[`, `(`). UNREQUESTED (any case) as the first word -> the line counts as UNREQUESTED,
-  // whatever follows (fail safe). unchanged/intended as the first word, closed by emphasis/brackets
+  // New format: the blast line's FIRST word is its tag. Before reading it, strip a leading decoration
+  // run (bullet, list numbering, checkbox, emoji/symbol, emphasis/bracket openers), repeated in any
+  // order with whitespace between. UNREQUESTED (any case) as the first word -> the line counts as
+  // UNREQUESTED, whatever follows (fail safe). unchanged/intended as the first word, closed by
+  // emphasis/brackets
   // (`*`, `_`, backtick, `]`, `)`) then followed by a separator (` — ` ` – ` ` -- ` ` - ` `:` `|`)
   // or end of line -> the line does NOT count, whatever the rest says.
   // Transition (old format): any other line (first word not a tag, or unchanged/intended followed by
@@ -56,7 +63,11 @@ export function gate(text, { free = false } = {}) {
   const MENTION = /(?<![A-Za-z0-9])UNREQUESTED(?![A-Za-z0-9])/;
   const SEP = / — | – | -- | - |: /g;
   const KNOWN = /^[*_`\[(]*(unchanged|intended|UNREQUESTED)(?![A-Za-z0-9])/;
-  const LEAD = /^[-*]\s*[*_`\[(]*/;
+  // Leading decoration run, repeated in any order, whitespace allowed between:
+  // bullet (- * +), list numbering (1. 1) (a) a.), checkbox ([ ] [x] [X]),
+  // emoji/symbol (\p{Extended_Pictographic} \p{So} + U+FE0F U+200D), and the
+  // existing emphasis/bracket openers (* _ backtick [ ().
+  const DECOR = /^(?:\s*(?:[-*+]|\d+[.)]|\([a-zA-Z]\)|[a-zA-Z]\.|\[[ xX]\]|[\p{Extended_Pictographic}\p{So}\uFE0F\u200D]|[_`\[(])\s*)*/u;
   const TAG = /^[A-Za-z]+/;
   const IS_TAG = /^(unchanged|intended|UNREQUESTED)$/i;
   const IS_UNREQ = /^UNREQUESTED$/i;
@@ -67,7 +78,7 @@ export function gate(text, { free = false } = {}) {
   // old-format caller names like `unchanged-callers` from being misread as benign tags.
   const TAG_CLOSE = /^(?:\s*$|\s*[:|](?:\s|$)|\s+(?:—|–|--|-)(?:\s|$))/;
   const isUnrequested = (e) => {
-    const body = e.replace(LEAD, "");
+    const body = e.replace(DECOR, "");
     const first = body.match(TAG);
     const tag = first ? first[0] : "";
     if (IS_TAG.test(tag)) {

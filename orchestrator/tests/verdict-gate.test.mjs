@@ -244,3 +244,37 @@ test("caller token starting with unchanged/intended + unspaced dash still counts
     assert.equal(r.unrequested.length, 1, blast);
   }
 });
+
+// Pass bar (this ticket): decoration before the first word never hides an UNREQUESTED tag.
+test("decorated UNREQUESTED blast lines count: emoji, checkbox, numbering, emphasis", () => {
+  const blasts = [
+    "- ❌ UNREQUESTED — a.mjs:1: x",
+    "- [x] UNREQUESTED — a.mjs:1: x",
+    "- [ ] UNREQUESTED — a.mjs:1: x",
+    "- 1. UNREQUESTED — a.mjs:1: x",
+    "1. UNREQUESTED — a.mjs:1: x",
+    "- (a) UNREQUESTED — a.mjs:1: x",
+    "- **❌ UNREQUESTED** — a.mjs:1: x",
+    "- ⚠️ UNREQUESTED — a.mjs:1: x",
+  ];
+  for (const blast of blasts) {
+    const r = gate(doc("APPROVED", blast));
+    assert.equal(r.effective, "CHANGES_REQUESTED", blast);
+    assert.equal(r.overridden, true, blast);
+    assert.equal(r.unrequested.length, 1, blast);
+  }
+});
+
+test("decorated unchanged/intended blast lines stay APPROVED", () => {
+  const blasts = [
+    "- ✅ unchanged — a.mjs:1: x",
+    "- [x] intended — a.mjs:1: x",
+    "- 1. unchanged — a.mjs:1: no UNREQUESTED callers",
+  ];
+  for (const blast of blasts) {
+    const r = gate(doc("APPROVED", blast));
+    assert.equal(r.effective, "APPROVED", blast);
+    assert.equal(r.overridden, false, blast);
+    assert.equal(r.unrequested.length, 0, blast);
+  }
+});

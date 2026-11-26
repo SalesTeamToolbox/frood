@@ -76,3 +76,19 @@ The four gates:
   pages the owner instead of writing an empty findings file.
 
 In-scope rounds, `verdict-gate.mjs`, `oc-worker.mjs` and `board verify`/`shipped` are unchanged.
+
+## blast-line tag rule — verdict-gate.mjs
+
+`orchestrator/bin/verdict-gate.mjs` classifies each BLAST RADIUS line by its first word (ticket
+`gate-decorated-tags`). Before reading the first word it strips a leading decoration run, repeated in
+any order with whitespace between: a bullet (`-`, `*`, `+`), list numbering (`1.`, `1)`, `(a)`, `a.`),
+a checkbox (`[ ]`, `[x]`, `[X]`), emoji and symbol characters (`\p{Extended_Pictographic}`, `\p{So}`,
+plus variation selector U+FE0F and zero-width joiner U+200D), and the emphasis/bracket openers
+(`*`, `_`, backtick, `[`, `(`).
+
+- `UNREQUESTED` (any case) as the first word -> CHANGES_REQUESTED, whatever follows (fail safe).
+- `unchanged`/`intended` as the first word, closed by emphasis/brackets then a separator
+  (` — ` ` – ` ` -- ` ` - ` `:` `|`) or end of line -> does not count.
+- any other line -> the transition (old format) separator walk plus the no-dash-separator fail safe.
+
+The INVALID rule (no BLAST RADIUS entries) and the blocker/major parser are unchanged.
