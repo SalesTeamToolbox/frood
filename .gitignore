@@ -166,3 +166,6 @@ arianna_email_cycle_state.json
 .opencode/board/.watch.json
 .opencode/reports/
 .opencode/plans/
+
+# Rewritten by the learning-engine Stop hook every session
+.claude/learned-patterns.json
