@@ -8,8 +8,10 @@
 //   - no BLAST RADIUS section / no entries  -> INVALID   (caller trace is mandatory)
 //   - any BLAST RADIUS line whose TAG (the first of unchanged / intended / UNREQUESTED directly
 //     following a separator ` — ` / ` – ` / ` -- ` / ` - ` / `: ` (colon only for UNREQUESTED),
-//     walking every separator left to right; `**`, `_`, backtick, `[`, `(` around the tag ignored;
-//     UNREQUESTED in prose or in an unchanged/intended detail does not count; a line with no dash
+//     walking every separator left to right; an unchanged/intended tag does not end the walk — a
+//     later UNREQUESTED tag still wins; `**`, `_`, backtick, `[`, `(` around the tag ignored;
+//     UNREQUESTED in prose or in an unchanged/intended detail does not count; `: ` after
+//     unchanged/intended is ignored (`— intended: UNREQUESTED none` passes); a line with no dash
 //     separator still counts if it contains UNREQUESTED) -> CHANGES_REQUESTED, whatever the critic wrote
 //   - any [blocker] or [major] finding       -> CHANGES_REQUESTED, whatever the critic wrote
 //   - otherwise the critic's verdict stands
@@ -46,23 +48,25 @@ export function gate(text, { free = false } = {}) {
   }
   // A line is UNREQUESTED only when UNREQUESTED is its TAG: the first of unchanged / intended /
   // UNREQUESTED that directly follows a separator (` — `, ` – `, ` -- `, ` - `, or `: ` for
-  // UNREQUESTED only), walking every separator left to right; ignore a run of `*`, `_`, backtick,
-  // `[`, `(` before the tag; after it require only a non-alphanumeric. A line with no dash
-  // separator at all that mentions UNREQUESTED still counts (fail safe); a line tagged
-  // unchanged/intended never counts, whatever its detail says.
+  // UNREQUESTED only), walking every separator left to right; an unchanged/intended tag does not
+  // end the walk — a later UNREQUESTED tag still wins; ignore a run of `*`, `_`, backtick, `[`, `(`
+  // before the tag; after it require only a non-alphanumeric. A line with no dash separator at all
+  // that mentions UNREQUESTED still counts (fail safe); `: ` after unchanged/intended is ignored so
+  // `— intended: UNREQUESTED none` still passes.
   const MENTION = /(?<![A-Za-z0-9])UNREQUESTED(?![A-Za-z0-9])/;
   const SEP = / — | – | -- | - |: /g;
   const KNOWN = /^[*_`\[(]*(unchanged|intended|UNREQUESTED)(?![A-Za-z0-9])/;
   const isUnrequested = (e) => {
     if (!MENTION.test(e)) return false;
-    let dash = false;
+    let dash = false, benign = false;
     for (const m of e.matchAll(SEP)) {
       const colon = m[0] === ": ";
       if (!colon) dash = true;
+      if (colon && benign) continue; // after unchanged/intended only a dash separator can open a second tag
       const k = e.slice(m.index + m[0].length).trimStart().match(KNOWN);
       if (!k) continue;
-      if (k[1] === "UNREQUESTED") return true;
-      if (!colon) return false; // unchanged/intended after a dash separator is the tag
+      if (k[1] === "UNREQUESTED") return true; // UNREQUESTED in tag position anywhere on the line wins
+      if (!colon) benign = true;
     }
     return !dash; // no dash separator at all: fail safe, as today
   };

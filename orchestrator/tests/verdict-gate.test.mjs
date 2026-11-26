@@ -82,6 +82,8 @@ test("UNREQUESTED still counts when an earlier dash precedes the tag (senior fin
     "- node x.mjs -- --free (cli) — UNREQUESTED: flag changed",
     "- oc-worker.mjs:1018-1021 runChain: UNREQUESTED. No fallback hop — see finding 2",
     "- x.mjs:10: UNREQUESTED: changes y - and z",
+    "- oc-worker.mjs:863 watch(child.pid) — unchanged; the receipt can now list serve in orphans_killed — UNREQUESTED: not asked",
+    "- run.ts (150-161) — intended (deviation 3). A job with no sealed config now pauses - UNREQUESTED: ticket 5 must seal {}",
   ];
   for (const blast of blasts) {
     const r = gate(doc("APPROVED", blast));
@@ -111,6 +113,14 @@ test("UNREQUESTED counts with punctuation around/after the tag (senior finding 2
 
 test("intended tag after an earlier dash is still the tag; its UNREQUESTED detail is ignored", () => {
   const d = doc("APPROVED", "- c.py:3 (a - b) — intended: nothing UNREQUESTED");
+  const r = gate(d);
+  assert.equal(r.effective, "APPROVED");
+  assert.equal(r.overridden, false);
+  assert.equal(r.unrequested.length, 0);
+});
+
+test("backtick-wrapped unchanged tag then `: UNREQUESTED none` still passes (senior must-pass)", () => {
+  const d = doc("APPROVED", "- b.py:2 -- `unchanged`: UNREQUESTED none");
   const r = gate(d);
   assert.equal(r.effective, "APPROVED");
   assert.equal(r.overridden, false);
