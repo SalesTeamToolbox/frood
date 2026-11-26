@@ -101,7 +101,8 @@ fails; never block on it.
    (answer `You:` before `/frood-next`), **BLOCKED** (cannot continue; `You:` says what unblocks it), **DONE**
    (stream finished; `Next:` is `—`). Never READY with items under `You:`. Every line fits in 100 characters.
    Omit a line only when it would be `none` (`You:` and `Next:` are always shown).
-4. Then ask the owner with these options (Claude Code: AskUserQuestion; OpenCode: a numbered list):
+4. Then, unless Auto-start applies (below), ask the owner with these options (AskUserQuestion):  # cc-only
+4. Then ask the owner with these options (a numbered list):  # oc-only
    <!-- cc-only -->
    A nested session (`get_session self` shows `parentSessionId`) skips this question: it writes the handoff, reports
    in one line and stops, unless the owner told it to go on (one-level rule, Standing rules). `auto_next_module`
@@ -112,8 +113,9 @@ fails; never block on it.
    **Auto-start (default on).** In a session without `parentSessionId`, first run
    `node {{ORCH_REPO}}/bin/settings.mjs get auto_next_module`. When it prints `true`, do not ask. Archive the
    finished child (Standing rules), then start the next module's nested session yourself, with the same
-   `start_session` fields as the **Start the next module** option below. Also start every other independent ticket
-   in the current `dispatch.mjs plan` group, and run `dispatch.mjs cap` before each one ("Dispatch in parallel").
+   `start_session` fields as the **Start the next module** option below. Also start every other ticket in the next
+   unstarted `dispatch.mjs plan` group, and run `dispatch.mjs cap` before each one ("Dispatch in parallel").
+   If `start_session` is not available, use the options below.
    Ask the owner only on a real owner decision:
    - an unanswered `NEEDS OWNER` item;
    - a **BLOCKED** or **NEEDS YOU** status;
@@ -124,10 +126,11 @@ fails; never block on it.
 
    **Desktop limit.** On a turn started by a child session's note (`<side-sessions-event>`) or another automated
    event, the app refuses `start_session`. Then propose the next module as an `own_initiative` card instead (one
-   click for the owner). Record the proposal in the plan file's `## Handoff` (`Next:` plus
-   "proposed as card <task_id>") and in `handoff.mjs write --next`. At the owner's next message, start that module:
-   call `dismiss_task` on the card first, then `start_session`, unless the dismiss result says the card was already
-   started. Never start the module twice.
+   click for the owner). Card each other ticket of that group the same way, one card per ticket. Record every
+   proposal in the plan file's `## Handoff` (`Next:` plus "proposed as card <task_id>") and in
+   `handoff.mjs write --next`. At the owner's next message, start each carded module or ticket: call `dismiss_task`
+   on its card first, then `start_session`, unless the dismiss result says the card was already started. Never
+   start anything twice.
    - **Start the next module in a nested session (Recommended)** — this session calls `start_session` with
      `initiation: "user_asked"`, `context: "fresh"`, `title: "<Module>: <plain outcome>"` (under 60 chars, readable
      by a stranger), `name: <stream or ticket slug, ≤24 chars, [a-z0-9-]>`, `prompt` beginning `/frood-next <stream>`
@@ -285,7 +288,8 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    question). Never poll the train or sleep-wait for prod in-session; the
    shipped verification (prod sha readback) is deferred to the next session
    start or a desk event. Workers never push, merge or deploy.
-   After the train lands a ticket on the base branch, a top-level parent pushes the base branch when
+   After the train lands a ticket on the base branch, a top-level parent pushes the local base branch (short
+   name, e.g. `main`) from the main checkout when
    `node {{ORCH_REPO}}/bin/settings.mjs get auto_push` prints `true` (Standing rule **Push the base branch after
    a landing**). Workers and nested sessions never push.
 
@@ -349,12 +353,17 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   To turn it off: `node {{ORCH_REPO}}/bin/settings.mjs set archive_nested_sessions false`.
 <!-- /cc-only -->
 - **Push the base branch after a landing** (default on, both harnesses). Workers never push, merge or deploy;
-  only the top-level parent pushes, and only the base branch. Push when all of these hold:
+  only the top-level parent pushes, and only the base branch. The parent checks the conditions when it learns
+  the ticket shipped: when the train's or desk's shipped or merge report reaches this session, or at the next
+  session start (where the deferred shipped check already happens). It never polls for it. Push when all of
+  these hold:
   - the parent's train landed the ticket: its branch was ff-merged into the base branch;
   - `node {{ORCH_REPO}}/bin/board.mjs` shows the ticket `shipped`;
-  - `node {{ORCH_REPO}}/bin/install.mjs --check` exits 0;
+  - after `node {{ORCH_REPO}}/bin/install.mjs` installs the landed text, `install.mjs --check` exits 0. If
+    `--check` still fails, do not push; report the drift;
   - `node {{ORCH_REPO}}/bin/settings.mjs get auto_push` prints `true`.
-  Then run a plain `git -C <repo> push origin <base>`. Rules:
+  Then run a plain `git -C <repo> push origin <base-branch>`. `<repo>` is the main checkout, never a ticket
+  worktree. `<base-branch>` is the adapter `base` without the `origin/` prefix (e.g. `main`). Rules:
   - never use `--force`, `--force-with-lease`, `--no-verify` or `-c` overrides;
   - never push a worker, ticket or `worktree/` branch;
   - never push with the GitHub API, `gh api` or MCP push tools;
