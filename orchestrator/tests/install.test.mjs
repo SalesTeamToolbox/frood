@@ -340,6 +340,51 @@ test("workstation install in a sandbox home never calls systemctl", () => {
   assert.match(c.stdout, /check: OK/);
 });
 
+test("workstation uninstall in a sandbox home never calls systemctl", () => {
+  const home = freshHome();
+  const sysdir = tmp2();
+  const fake = makeFakeSystemctl(sysdir);
+  // Create the workstation files manually (do not use install, which would call systemctl)
+  fs.mkdirSync(path.join(wsLib(home)), { recursive: true });
+  fs.mkdirSync(path.join(wsUnit(home)), { recursive: true });
+  fs.writeFileSync(path.join(wsLib(home), "agent-priority.mjs"), "// guard\n");
+  fs.writeFileSync(path.join(wsLib(home), "suite-lock.sh"), "# lock\n");
+  fs.writeFileSync(path.join(wsUnit(home), "frood-agent-priority.service"), "[Unit]\n");
+  assert.ok(fs.existsSync(path.join(wsLib(home), "agent-priority.mjs")));
+  // Run uninstall with ORCH_HOME set and no ORCH_SYSTEMCTL; fake systemctl on PATH
+  const u = spawnSync(process.execPath, [INSTALL, "--uninstall-workstation"], {
+    env: { ...process.env, ORCH_HOME: home, ORCH_SKIP_ROUTING: "1", PATH: `${sysdir}${path.delimiter}${process.env.PATH}` },
+    encoding: "utf8",
+  });
+  assert.equal(u.status, 0, u.stderr + u.stdout);
+  assert.ok(!fs.existsSync(path.join(wsLib(home), "agent-priority.mjs")), "guard removed from sandbox");
+  assert.ok(!fs.existsSync(path.join(wsLib(home), "suite-lock.sh")), "lock removed from sandbox");
+  assert.ok(!fs.existsSync(path.join(wsUnit(home), "frood-agent-priority.service")), "unit removed from sandbox");
+  // The fake systemctl must never have been called
+  const callsLog = path.join(sysdir, "calls.log");
+  assert.ok(!fs.existsSync(callsLog) || fs.readFileSync(callsLog, "utf8").trim() === "", "fake systemctl must never be called in sandbox uninstall");
+});
+
+test("workstation --dry-run never writes files or calls systemctl", () => {
+  const home = freshHome();
+  const sysdir = tmp2();
+  const fake = makeFakeSystemctl(sysdir);
+  const r = spawnSync(process.execPath, [INSTALL, "--dry-run"], {
+    env: { ...process.env, ORCH_HOME: home, ORCH_SKIP_ROUTING: "1", ORCH_SYSTEMCTL: fake },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.match(r.stdout, /workstation: would copy/, "should print would-copy lines");
+  assert.match(r.stdout, /workstation: dry run — no files written/, "should print dry run notice");
+  // No files written
+  assert.ok(!fs.existsSync(path.join(wsLib(home), "agent-priority.mjs")), "guard not written in dry run");
+  assert.ok(!fs.existsSync(path.join(wsLib(home), "suite-lock.sh")), "lock not written in dry run");
+  assert.ok(!fs.existsSync(path.join(wsUnit(home), "frood-agent-priority.service")), "unit not written in dry run");
+  // Fake systemctl never called
+  const callsLog = path.join(sysdir, "calls.log");
+  assert.ok(!fs.existsSync(callsLog) || fs.readFileSync(callsLog, "utf8").trim() === "", "fake systemctl must never be called in dry run");
+});
+
 // tmp2 is a separate temp allocator so workstation tests don't collide with freshHome users.
 function tmp2() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "ws-install-"));

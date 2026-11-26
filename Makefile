@@ -1,4 +1,5 @@
 .PHONY: install install-dev test test-verbose test-security lint format check security run run-headless clean help
+SHELL := /bin/bash
 
 PYTHON ?= python3
 VENV := .venv

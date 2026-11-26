@@ -42,3 +42,12 @@ test("desk-check timer still pages every 5 minutes", () => {
   const timer = fs.readFileSync(path.join(DIR, "orchestrator-desk-check.timer"), "utf8");
   assert.match(timer, /^OnCalendar=\*:0\/5$/m);
 });
+
+const WS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "ops", "workstation");
+
+test("frood-agent-priority.service unit shape", () => {
+  const svc = fs.readFileSync(path.join(WS_DIR, "frood-agent-priority.service"), "utf8");
+  assert.match(svc, /^ExecStart=\/usr\/bin\/env node %h\/.local\/lib\/frood-workstation\/agent-priority\.mjs$/m);
+  assert.match(svc, /^Restart=always$/m);
+  assert.match(svc, /^WantedBy=default\.target$/m);
+});

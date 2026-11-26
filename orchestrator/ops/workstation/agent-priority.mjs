@@ -22,7 +22,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
 
 const TARGET_NICE = 10;
 const GUARD_PID = process.pid;
@@ -48,7 +47,12 @@ function intervalMs() {
 const ROOT_NAME_RE = /^(claude|opencode\d*|codex|gemini|aider|cursor-agent|copilot|copilot-runtime|goose|amp)$/;
 const INTERPRETER_RE = /^(node|bun|python|python3|deno)$/;
 // argv[1..] element that marks an agent launched through an interpreter.
-const AGENT_ARGV_RE = /@openai\/codex|@google\/gemini-cli|@github\/copilot|opencode-ai|@sourcegraph\/amp|aider(\/__main__)?$|claude-code/;
+// Anchored on path-segment boundaries so `/work/claude-code-foo/x.js` does not
+// match while `/x/node_modules/@anthropic-ai/claude-code/cli.js` does, and
+// `raider` does not match `aider`. `aider` matches exactly, or ending in
+// `/aider` or `aider/__main__.py`.
+const AGENT_ARGV_RE =
+  /(?:^|\/)(@openai\/codex|@google\/gemini-cli|@github\/copilot|opencode-ai|@sourcegraph\/amp|claude-code)(?:$|\/)|^aider$|\/aider$|(?:^|\/)aider\/__main__\.py$/;
 
 function stripExe(name) {
   return String(name).replace(/\.exe$/i, "");
@@ -164,23 +168,15 @@ function walkDescendants(procs, roots) {
   return visited;
 }
 
-// Production setpriority per thread. Node has no os.setPriority, so use renice
-// per thread (PRIO_PROCESS is per-thread on Linux). ESRCH/ENOENT are skipped
-// by the caller; EPERM is counted.
+// Production setpriority per thread. Node's os.setPriority calls
+// setpriority(PRIO_PROCESS, pid, …), which is per-thread on Linux: passing a
+// thread ID sets that thread's priority. ESRCH/ENOENT (vanished) are surfaced
+// via err.code and handled by the caller.
 function realSetPriority(tid, value) {
-  if (!fs.existsSync(path.join(defaultProcRoot(), String(tid)))) {
-    const e = new Error("esrch");
-    e.code = "ESRCH";
-    throw e;
-  }
-  const res = spawnSync("renice", ["-n", String(value), "-p", String(tid)]);
-  if (res.status === 0) return;
-  const e = new Error(`renice exit ${res.status}`);
-  e.code = "EPERM";
-  throw e;
+  os.setPriority(tid, value);
 }
 
-// One pass. Returns { lowered, eperm, roots, pids, paused }. Never throws.
+// One pass. Returns { lowered, eperm, errors, roots, pids, paused }. Never throws.
 // `log`, if given, is called once per lowered tid:
 //   `<pid> <tid> <comm> <old>->10`
 export function runPass({ procRoot, setPriority = realSetPriority, uid = process.getuid(), log } = {}) {
@@ -190,6 +186,7 @@ export function runPass({ procRoot, setPriority = realSetPriority, uid = process
   }
   let lowered = 0;
   let eperm = 0;
+  let errors = 0;
   let roots = 0;
   let pids = 0;
   try {
@@ -207,7 +204,7 @@ export function runPass({ procRoot, setPriority = realSetPriority, uid = process
     for (const pid of set) {
       const p = procs.get(pid);
       if (!p || p.uid !== uid) continue;
-      const taskDir = path.join(procRoot, String(pid), "task");
+      const taskDir = path.join(root, String(pid), "task");
       let tids;
       try {
         tids = fs.readdirSync(taskDir);
@@ -231,18 +228,23 @@ export function runPass({ procRoot, setPriority = realSetPriority, uid = process
           lowered += 1;
           if (log) log(`${pid} ${tid} ${p.comm} ${current}->10`);
         } catch (err) {
-          if (err && err.code === "EPERM") eperm += 1;
-          // ESRCH/ENOENT and anything else: skipped silently.
+          if (err && err.code === "ESRCH") continue; // vanished task
+          if (err && (err.code === "EPERM" || err.code === "EACCES")) {
+            eperm += 1;
+            continue;
+          }
+          errors += 1;
+          console.error(`agent-priority: setpriority(${tid}, 10) failed: ${err && err.message}`);
         }
       }
     }
   } catch {
     // A pass never throws.
   }
-  return { lowered, eperm, roots, pids, paused: false };
+  return { lowered, eperm, errors, roots, pids, paused: false };
 }
 
-function writePassLog(lowered, eperm, roots) {
+export function writePassLog(lowered, eperm, errors, roots) {
   try {
     fs.mkdirSync(stateDir(), { recursive: true });
     const lf = logFile();
@@ -253,7 +255,7 @@ function writePassLog(lowered, eperm, roots) {
         // rotation is best-effort
       }
     }
-    fs.appendFileSync(lf, `${new Date().toISOString()} lowered=${lowered} eperm=${eperm} roots=${roots}\n`);
+    fs.appendFileSync(lf, `${new Date().toISOString()} lowered=${lowered} eperm=${eperm} errors=${errors} roots=${roots}\n`);
   } catch {
     // logging must never break a pass
   }
@@ -272,8 +274,8 @@ function doPass() {
     console.log("paused");
     return { paused: true, lowered: 0, eperm: 0, roots: 0 };
   }
-  if (result.lowered > 0 || result.eperm > 0) {
-    writePassLog(result.lowered, result.eperm, result.roots);
+  if (result.lowered > 0 || result.eperm > 0 || result.errors > 0) {
+    writePassLog(result.lowered, result.eperm, result.errors, result.roots);
   }
   return { paused: false, ...result };
 }
@@ -305,7 +307,7 @@ async function runLoop() {
 function runOnce() {
   const result = doPass();
   if (!result.paused) {
-    console.log(`lowered ${result.lowered} eperm ${result.eperm} roots ${result.roots}`);
+    console.log(`lowered ${result.lowered} eperm ${result.eperm} errors ${result.errors} roots ${result.roots}`);
   }
   process.exit(0);
 }
