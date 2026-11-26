@@ -15,6 +15,6 @@ Resolution:
 
 Loop:
 1. Intake — prompt for missing inputs one at a time.
-2. For each iteration: re-resolve SemanticTarget line numbers (file may have been edited), launch reviewer swarm as fresh subagents with an **explicit cheap model — never inherit** (`subagent({ model: "opencode-go/claude-haiku-5-5", agent: "explore" })`; alt `opencode/mimo-v2.6-flash-free` $0 if Go quota is hot), collect reports, Elephant (you) resolves findings, apply approved fixes, re-loop.
+2. For each iteration: re-resolve SemanticTarget line numbers (file may have been edited), launch reviewer swarm as fresh subagents with an **explicit cheap model — never inherit** (`subagent({ model: "opencode-go/deepseek-v4.1-flash", agent: "explore" })`; alt `opencode/mimo-v2.6-flash-free` $0 if Go quota is hot), collect reports, Elephant (you) resolves findings, apply approved fixes, re-loop.
 
 Artifact-first, plain-English, one question per turn.
