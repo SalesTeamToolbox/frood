@@ -217,3 +217,38 @@ test("lease commands render the right holder token per harness; frood-harness.md
   assert.match(ccHarness, /\.claude\/hooks\/cross-harness-statusline\.js" --text`\n/);
   assert.ok(!ccHarness.includes(`${REPO_FWD}/hooks/cross`), ccHarness);
 });
+
+// A mid-line `<!-- cc-only -->…<!-- /cc-only -->` is not understood by renderForHarness (whole-line blocks and
+// end-of-line tags only), so both renders used to carry both harness texts plus the raw markers.
+const HARNESS_MARKER = /<!--\s*\/?(cc|oc)-only/;
+const CC_EXIT2 = "Fix the session id and retry once";
+const OC_EXIT2 = "Retry the claim once without `--session`";
+
+function checkNextExit2(text) {
+  const cc = renderForHarness(text, "cc");
+  const oc = renderForHarness(text, "oc");
+  assert.doesNotMatch(cc, HARNESS_MARKER);
+  assert.doesNotMatch(oc, HARNESS_MARKER);
+  assert.ok(cc.includes(CC_EXIT2), "cc render lacks the cc Exit-2 text");
+  assert.ok(!cc.includes(OC_EXIT2), "cc render carries the oc Exit-2 text");
+  assert.ok(oc.includes(OC_EXIT2), "oc render lacks the oc Exit-2 text");
+  assert.ok(!oc.includes(CC_EXIT2), "oc render carries the cc Exit-2 text");
+}
+
+test("frood-next Exit-2 bullet renders exactly one harness text per harness, no raw markers", () => {
+  checkNextExit2(fs.readFileSync(path.join(REPO, "commands", "frood-next.md"), "utf8"));
+});
+
+test("no (cc|oc)-only marker survives either render of any command file", () => {
+  const dir = path.join(REPO, "commands");
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
+  assert.ok(files.length > 0);
+  for (const f of files) {
+    const text = fs.readFileSync(path.join(dir, f), "utf8");
+    for (const h of ["cc", "oc"]) {
+      const out = addManagedHeader(renderForHarness(text, h));
+      const bad = out.split("\n").find((l) => HARNESS_MARKER.test(l));
+      assert.equal(bad, undefined, `${f} (${h}) keeps a harness marker: ${bad}`);
+    }
+  }
+});

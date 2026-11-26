@@ -69,9 +69,13 @@ The tab title is set by the `orchestrator-handoff.js` hook to `[<stream>] <repo>
      Show that line and ask: "Stream <n> is claimed by session <s> since <t>. Take it over?" with options
      **Take over** / **Leave it**. **Leave it** stops with **NEEDS YOU**. On **Take over**, re-run the claim with
      `--takeover` (records `taken_from`); no peer-mail needed since it's the same harness.
-   - Exit 2: usage error (often a bad `--session`). <!-- cc-only -->Fix the session id and retry once; if it
-     still fails, show the error and stop.<!-- /cc-only --><!-- oc-only -->Retry the claim once without
-     `--session`; if it still fails, show the error and stop.<!-- /oc-only -->
+   - Exit 2: usage error (often a bad `--session`).
+     <!-- cc-only -->
+     Fix the session id and retry once; if it still fails, show the error and stop.
+     <!-- /cc-only -->
+     <!-- oc-only -->
+     Retry the claim once without `--session`; if it still fails, show the error and stop.
+     <!-- /oc-only -->
    - Exit 1: the stream is parked or done (or missing). Say so in one line and ask the owner what to work on.
    - Exit 0: name this session's tab NOW, before reading anything else — the owner tells tabs apart by title, and the default `next <stream>` title says nothing about the work.
      <!-- cc-only -->
