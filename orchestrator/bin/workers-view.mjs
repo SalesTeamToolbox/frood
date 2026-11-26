@@ -4,7 +4,8 @@
 //
 //   node bin/workers-view.mjs [--json | --html <path> [--watch <sec>]] [--repo <path>]
 //
-// Data (each child CLI via spawnSync, 10 s timeout; a failing child degrades only its own section):
+// Data (each child CLI via spawnSync, ~3 s timeout inside a 9 s overall budget; a failing or hung child degrades only
+// its own section):
 //   runs     oc-worker.mjs active --json   (states verbatim from activeRuns(): RUNNING STARTING QUIET ...)
 //   tickets  board.mjs status --json       (+ .opencode/board/tickets/<id>.json for assignment.worker, which the
 //                                           status row does not carry; board.mjs exports nothing)
@@ -18,9 +19,10 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// Each child gets at most CHILD_TIMEOUT_MS, and the whole collect() stays inside BUDGET_MS (under the mod's 12 s kill),
-// so one hung child degrades its own section and the others still answer.
-const CHILD_TIMEOUT_MS = Number(process.env.WV_CHILD_TIMEOUT_MS) || 10_000;
+// Each child gets at most CHILD_TIMEOUT_MS (3 s), capped by the time left in BUDGET_MS (9 s, under the mod's 12 s
+// kill). Three children fit in the budget, so one hung child, the first (runs) included, loses only its own section
+// and the others still answer.
+const CHILD_TIMEOUT_MS = Number(process.env.WV_CHILD_TIMEOUT_MS) || 3_000;
 const BUDGET_MS = Number(process.env.WV_BUDGET_MS) || 9_000;
 let deadline = Infinity;
 const NA = "—";
@@ -201,8 +203,11 @@ function main(argv) {
       fs.writeFileSync(tmp, renderHtml(collect(o), o.watch || 15));
       fs.renameSync(tmp, o.html);
     };
-    write();
-    // A failed refresh is logged and the watcher keeps going.
+    if (!(o.watch > 0)) {
+      write();
+      return 0;
+    }
+    // Under --watch a failed write (the first one included) is logged and the watcher keeps going.
     const safeWrite = () => {
       try {
         write();
@@ -210,8 +215,8 @@ function main(argv) {
         console.error(`workers-view: ${e.message}`);
       }
     };
-    if (o.watch > 0) setInterval(safeWrite, o.watch * 1000);
-    else return 0;
+    safeWrite();
+    setInterval(safeWrite, o.watch * 1000);
     return null; // keep running
   }
   const d = collect(o);

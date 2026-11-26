@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -152,14 +152,31 @@ test("bad arguments exit 2", () => {
   assert.equal(spawnSync(process.execPath, [BIN, "--html"], { encoding: "utf8", timeout: 20_000 }).status, 2);
 });
 
-test("a hung child is killed at the timeout and degrades only its own section", () => {
+test("a hung child is killed at its own timeout and degrades only its own section", () => {
+  const board = [{ id: "t-w", stage: "working" }, { id: "t-q", stage: "queued" }];
   const t0 = Date.now();
-  const r = view({ board: [{ id: "t-w", stage: "working" }], env: { WV_OCW_CLI: path.join(FIX, "hang.mjs"), WV_CHILD_TIMEOUT_MS: "700" } }, ["--json"]);
+  const r = view({ board, dispatch: "held: t-q — waiting on t-w\n", env: { WV_OCW_CLI: path.join(FIX, "hang.mjs"), WV_CHILD_TIMEOUT_MS: "300" } }, ["--json"]);
+  const ms = Date.now() - t0;
   const d = JSON.parse(r.stdout);
-  assert.ok(Date.now() - t0 < 20_000);
+  // The injected 300 ms timeout must be what stopped it: the 3 s default (or no hook) would take longer than this.
+  assert.ok(ms < 3_000, `took ${ms} ms`);
   assert.equal(d.runs, null);
-  assert.match(d.errors.runs, /timed out/);
+  assert.match(d.errors.runs, /timed out after 0\.3s/);
   assert.deepEqual(d.no_live_run.map((n) => n.ticket), ["t-w"]);
+  assert.deepEqual(d.held, ["t-q — waiting on t-w"]);
+  assert.equal(d.errors.board, undefined);
+  assert.equal(d.errors.held, undefined);
+});
+
+test("by default a hung first child takes ~3 s, not the whole budget", () => {
+  const board = [{ id: "t-w", stage: "working" }, { id: "t-q", stage: "queued" }];
+  const t0 = Date.now();
+  const d = JSON.parse(view({ board, dispatch: "held: t-q — x\n", env: { WV_OCW_CLI: path.join(FIX, "hang.mjs") } }, ["--json"]).stdout);
+  const ms = Date.now() - t0;
+  assert.match(d.errors.runs, /timed out after 3s/);
+  assert.ok(ms < 8_000, `took ${ms} ms`);
+  assert.deepEqual(d.no_live_run.map((n) => n.ticket), ["t-w"]);
+  assert.deepEqual(d.held, ["t-q — x"]);
 });
 
 test("the overall budget stops later children once it is spent", () => {
@@ -203,4 +220,39 @@ test("a linked git worktree reads the main repo's board", () => {
   const d = JSON.parse(r.stdout);
   assert.equal(d.runs[0].ticket, "t-m"); // only the main repo holds the ticket file
   assert.deepEqual(d.no_live_run, []);
+});
+
+test("--watch: an unwritable --html path is logged to stderr and the watcher keeps running", async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "wv-watch-"));
+  CLEAN.push(d);
+  const dir = path.join(d, "missing"); // does not exist yet -> every write fails
+  const html = path.join(dir, "out.html");
+  const runs = path.join(d, "runs.json");
+  fs.writeFileSync(runs, "[]");
+  const board = path.join(d, "board.json");
+  fs.writeFileSync(board, "[]");
+  const env = { ...process.env, WV_OCW_CLI: path.join(FIX, "ocw.mjs"), WV_FIX_OCW: runs, WV_BOARD_CLI: path.join(FIX, "board.mjs"), WV_FIX_BOARD: board, WV_PACE_CLI: path.join(d, "none.mjs") };
+  // The child's own timeout is the backstop; the test kills this one pid when done.
+  const child = spawn(process.execPath, [BIN, "--repo", d, "--html", html, "--watch", "1"], { env, stdio: ["ignore", "ignore", "pipe"], timeout: 30_000, killSignal: "SIGKILL" });
+  let stderr = "";
+  child.stderr.on("data", (b) => (stderr += b));
+  const exited = new Promise((res) => child.on("exit", (code, sig) => res({ code, sig })));
+  const until = async (ok, ms, what) => {
+    const end = Date.now() + ms;
+    while (!ok()) {
+      if (Date.now() > end) throw new Error(`timed out waiting for ${what}; stderr: ${stderr}`);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  };
+  try {
+    await until(() => /workers-view: .*ENOENT/.test(stderr), 10_000, "the logged write error");
+    assert.equal(child.exitCode, null, "watcher exited after a failed write");
+    fs.mkdirSync(dir); // now writable: the next tick must write the page
+    await until(() => fs.existsSync(html), 10_000, "the page after the path became writable");
+    assert.match(fs.readFileSync(html, "utf8"), /no live runs/);
+    assert.equal(child.exitCode, null);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    await exited;
+  }
 });

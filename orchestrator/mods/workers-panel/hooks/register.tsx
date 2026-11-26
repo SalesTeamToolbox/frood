@@ -4,7 +4,9 @@ import type { Register } from 'claude-code'
 import type { WorkersPanelText } from '../types'
 
 // /workers opens a side pane showing `workers-view.mjs` (plain text) refreshed every 15 s. One child per refresh,
-// 10 s timeout, never overlapping (busy flag). Same {{ORCH_REPO}} / {{HOME}} node fallback as dispatch-status.
+// 12 s timeout (workers-view keeps itself inside 9 s), never overlapping (busy flag). poll() never rejects: any
+// failure, $.ui.panes() included, is caught and shown in the pane. Same {{ORCH_REPO}} / {{HOME}} node fallback as
+// dispatch-status.
 const VIEW = '{{ORCH_REPO}}/bin/workers-view.mjs'
 const NODES = ['node', '{{HOME}}/.local/share/mise/shims/node']
 const PERIOD_MS = 15_000
@@ -44,6 +46,14 @@ export const register: Register = on => {
           text = `workers-view: ${String(err).slice(0, 120)}`
         }
         await update($, view, () => ({ text, at: Date.now() }))
+      } catch (err) {
+        // panes() or update() failed: show it if we can, and never let the rejection escape the timer.
+        const text = `workers-panel: ${String(err).slice(0, 120)}`
+        try {
+          await update($, view, () => ({ text, at: Date.now() }))
+        } catch {
+          // nothing left to report to; the next poll tries again
+        }
       } finally {
         busy = false
       }
