@@ -17,6 +17,7 @@ import { listStreams } from "./handoff.mjs";
 import { statusRows, watchInfo } from "./desk.mjs";
 import { readService, syncAllStreamTitles } from "./session-title.mjs";
 import { importStatusline } from "./cc-usage.mjs";
+import { adviseTick } from "./cc-pace.mjs";
 import { measure, level, readState, writeState, shouldRunNotify, notifyNow, notifyParts } from "./session-pressure.mjs";
 
 function notify(text) {
@@ -64,6 +65,8 @@ export async function main(argv) {
     try {
       importStatusline();
     } catch {}
+    // Claude reset advice (cc-pace advise): silent, once-a-day desktop notice per advice; never pages, prints or fails.
+    try { adviseTick(); } catch {}
     const r = check();
     let code = r.code;
     if (r.code === 1) {

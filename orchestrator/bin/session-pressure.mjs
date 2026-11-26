@@ -209,11 +209,12 @@ function levelRank(l) {
 // Decide whether to notify now. Returns { notify, reason }.
 // Notifies when the level rises above the last observed level (ok included) or
 // every NOTIFY_MS while warn-or-above. ok never notifies.
-export function shouldNotify(prev, nowMs, lvl) {
+// intervalMs (optional, default NOTIFY_MS) is the repeat interval; the cc-pace reset advisor passes 24 h.
+export function shouldNotify(prev, nowMs, lvl, intervalMs = NOTIFY_MS) {
   const last = prev.lastLevel;
   const lastNotify = prev.lastNotifyMs;
   const rising = last != null && levelRank(lvl) > levelRank(last);
-  const overdue = lastNotify == null || nowMs - lastNotify >= NOTIFY_MS;
+  const overdue = lastNotify == null || nowMs - lastNotify >= intervalMs;
   const notify = lvl !== "ok" && (rising || overdue);
   return {
     notify,
@@ -426,8 +427,8 @@ export function notifyNow(lvl, summary, body) {
   }
 }
 
-export function shouldRunNotify(prev, nowMs, lvl) {
-  return shouldNotify(prev, nowMs, lvl).notify;
+export function shouldRunNotify(prev, nowMs, lvl, intervalMs = NOTIFY_MS) {
+  return shouldNotify(prev, nowMs, lvl, intervalMs).notify;
 }
 
 // ---- CLI -------------------------------------------------------------------
