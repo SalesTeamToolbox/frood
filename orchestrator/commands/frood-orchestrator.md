@@ -127,7 +127,9 @@ fails; never block on it.
    - the handoff status is **READY** or **DONE** (not WAITING, NEEDS YOU or BLOCKED);
    - no live run for the stream: `node {{ORCH_REPO}}/bin/oc-worker.mjs active` shows no row ending in
      `| stream <stream>`, except rows marked STALE;
-   - no unanswered `NEEDS OWNER` item.
+   - no unanswered `NEEDS OWNER` item;
+   - no nested child this session started, on any stream, is still working, waiting on this session, or holding
+     unmerged work (`get_session` on each child's `local_…` id reports it idle, and its work has shipped).
    While a run is live (WAITING), stay open until the run's report arrives, then check again. On **NEEDS YOU** or
    **BLOCKED**, ask the owner with the options below, as before. When it applies, this session hands off to a fresh
    top-level session instead of nesting one. In order:
@@ -137,7 +139,9 @@ fails; never block on it.
    2. Start the successor with `start_session`: `initiation: "user_asked"`, `context: "fresh"`, a `title`, a `name`,
       `prompt` beginning `/frood-next <stream>` (or `/frood-orchestrator <plan>` for a plan not yet discussed), and
       a complete `background` (≥80 chars: goal, plan path, handoff, what landed). Do NOT add the "report to the
-      parent session" line: the successor talks to the owner directly.
+      parent session" line: the successor talks to the owner directly. Add this line instead: "You are a fresh
+      successor; the session that started you detaches you. If `get_session self` still shows `parentSessionId`,
+      check it again before following the nested-session rules."
    3. Immediately call `detach_session` on the returned `local_…` id. The successor is then top-level: not nested,
       not archived with this session, and it owns the train and pushes (`auto_next_module`, `auto_push`).
    4. Tell the owner in one line that this session can now be closed, and offer to archive it. Archive it only on
@@ -424,7 +428,8 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   `node {{ORCH_REPO}}/bin/settings.mjs set auto_next_module false`.
 - **Fresh successor for long sessions (default on).** When a top-level session finishes a stream (DONE) with
   follow-on work, or its own context is long (several modules in one session), and nothing is in flight (status
-  READY or DONE, no live non-STALE run for the stream, no unanswered `NEEDS OWNER`), it does not keep going or nest.
+  READY or DONE, no live non-STALE run for the stream, no unanswered `NEEDS OWNER`, no nested child still working
+  or holding unmerged work), it does not keep going or nest.
   While a run is live it stays open until the report arrives, then checks again; on NEEDS YOU or BLOCKED it asks
   the owner as before. When it applies:
 <!-- cc-only -->
