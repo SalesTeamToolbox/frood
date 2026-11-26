@@ -69,6 +69,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { gate } from "./verdict-gate.mjs";
 import { agentModel, isPolicyFree } from "./pool-health.mjs";
+import { matchAny, DENY, checkScope } from "./scope-check.mjs";
 class Refuse extends Error {} // exit 1: a rule said no, nothing was written
 class Usage extends Error {} // exit 2: usage, schema, or missing file
 class Conflict extends Error {} // exit 3: lock contention or epoch conflict — retry
@@ -264,21 +265,6 @@ function readAdapter(root) {
   }
   return a;
 }
-
-// Globs (B10): P matches G iff P matches G, or one of P's ancestor directories matches G.
-// So scope "auth/login.ts" matches "**/auth" through its parent dir, even though the file itself never does.
-function matchGlob(p, g) {
-  const P = String(p).replace(/\\/g, "/").replace(/^\.\//, "");
-  if (path.posix.matchesGlob(P, g)) return true;
-  const ancestors = P.split("/");
-  ancestors.pop();
-  while (ancestors.length) {
-    if (path.posix.matchesGlob(ancestors.join("/"), g)) return true;
-    ancestors.pop();
-  }
-  return false;
-}
-const matchAny = (p, globs) => globs.some((g) => matchGlob(p, g));
 
 // ---------- ticket schema v1
 function nullishOf(f) {
@@ -666,6 +652,82 @@ function seniorFor(scope, adapter) {
   const reasons = scope.filter((s) => matchAny(s, adapter.guarded_paths)).map((s) => `guarded path: ${s}`);
   return { required: reasons.length > 0, reasons };
 }
+// The Mandate's "## Scope" section (or a leading "**Scope:**" block), parsed back
+// to its sentences so an open-ended grant can be detected. A "## Scope" heading
+// runs to the next heading of the same or a higher level, so its sub-headings
+// ("### May touch") and bold labels ("**Files:** …") stay inside it. A
+// "**Scope:**" block runs to the next heading or bold label.
+function scopeSection(md) {
+  const lines = String(md).replace(/\r\n/g, "\n").split("\n");
+  let start = -1;
+  let level = 0; // 0: the "**Scope:**" form
+  for (let i = 0; i < lines.length; i++) {
+    const h = /^(#+)\s*scope\b/i.exec(lines[i]);
+    if (h) { start = i; level = h[1].length; break; }
+    if (/^\*\*scope/i.test(lines[i])) { start = i; break; }
+  }
+  if (start < 0) return "";
+  const ends = (line) => {
+    if (!level) return /^(#+|\*\*)/.test(line);
+    const h = /^(#+)\s/.exec(line);
+    return Boolean(h) && h[1].length <= level;
+  };
+  const end = lines.findIndex((l, i) => i > start && ends(l));
+  return lines.slice(start, end < 0 ? lines.length : end).join("\n");
+}
+// Sentences of the Scope section that hand the worker a blank cheque. A grant is
+// allowed only when the same sentence names exact paths and each of them is in
+// `--scope`. A blank line or a list item starts a new block; a wrapped line
+// continues the block it is in, so a sentence wrapped across lines stays whole.
+// Each block is split on sentence-ending punctuation followed by whitespace, so
+// path names like `bin/a.mjs` are not broken at their dot.
+const OPEN_ENDED_SCOPE = ["any doc", "any file", "as needed", "any other", "wherever"];
+function mandateScopeSentences(mand) {
+  const blocks = [];
+  let cur = [];
+  for (const raw of scopeSection(mand).split("\n")) {
+    const line = raw.trim();
+    if (!line || /^([-*+]|\d+[.)])\s/.test(line) || /^(#+\s|\*\*)/.test(line)) {
+      if (cur.length) blocks.push(cur.join(" "));
+      cur = [];
+    }
+    if (line) cur.push(line);
+  }
+  if (cur.length) blocks.push(cur.join(" "));
+  const sentences = [];
+  for (const block of blocks) {
+    for (const part of block.split(/(?<=[.!?])\s+/)) {
+      const t = part.trim();
+      if (t) sentences.push(t);
+    }
+  }
+  return sentences;
+}
+// A grant phrase is negated when its clause (the text since the last ";" before
+// it) carries a negation: "never edit any file outside X", "May not touch: … any
+// other file" restrict the worker, they do not grant anything.
+const NEGATION = /\b(never|not|no|nor|cannot|without)\b|n't\b/;
+function grantsOpenEnded(lower) {
+  for (const phrase of OPEN_ENDED_SCOPE) {
+    for (let i = lower.indexOf(phrase); i >= 0; i = lower.indexOf(phrase, i + 1)) {
+      const before = lower.slice(0, i);
+      const clause = before.slice(before.lastIndexOf(";") + 1);
+      if (!NEGATION.test(clause)) return true;
+    }
+  }
+  return false;
+}
+function mandateScopeIsOpenEnded(mand, scope) {
+  for (const s of mandateScopeSentences(mand)) {
+    if (!grantsOpenEnded(s.toLowerCase())) continue;
+    // Allowed only when the sentence names exact paths and each is in --scope.
+    const paths = s.split(/\s+/).map((t) => t.replace(/^["'`([]+|["'`.,;:)\]]+$/g, "")).filter((t) => t.includes("/") || /\.[A-Za-z0-9]+$/.test(t));
+    if (paths.length > 0 && paths.every((p) => matchAny(p, scope))) continue;
+    return s;
+  }
+  return null;
+}
+
 function cmdCreate(ctx) {
   const o = ctx.o;
   const id = o._[0];
@@ -675,6 +737,16 @@ function cmdCreate(ctx) {
   const scope = need(o, "scope").split(",").map((s) => s.trim()).filter(Boolean);
   if (!scope.length) throw new Usage("--scope needs at least one path");
   const mand = fs.readFileSync(mandate, "utf8");
+  // A scope entry on the hard deny list is never a worker's to edit, even when
+  // `--scope` covers it.
+  for (const s of scope) {
+    if (matchAny(s, DENY)) throw new Refuse(`--scope entry is on the deny list: ${s}`);
+  }
+  // An open-ended Mandate Scope grant ("any doc", "any file", "as needed",
+  // "any other", "wherever") is refused unless it names exact paths and each
+  // of those paths is in --scope.
+  const open = mandateScopeIsOpenEnded(mand, scope);
+  if (open) throw new Refuse(`mandate scope is open-ended: "${open}"`);
   const blast = parseBlastRadius(mand);
   if (!blast.length) throw new Refuse("mandate has no blast-radius bullets");
   // A changed-expectation bullet must name a test path: create refuses it here, not at ready
@@ -1003,12 +1075,37 @@ function cmdRound(ctx, id) {
         return DROP;
       }
       if (reviewedArg !== head) throw new Refuse(`--reviewed-sha ${reviewedArg} is not HEAD ${head}`);
+      // Scope fence: a round whose diff leaves the ticket's `--scope` or touches
+      // the deny list is recorded as CHANGES_REQUESTED, even when the critic
+      // approved. The round still counts (a critic APPROVED cannot override it).
+      let roundCritic = critic;
+      if (t.base_sha) {
+        const fence = checkScope({ repo: wt, base: t.base_sha, sha: head, scope: t.scope, baseRef: ctx.adapter.base });
+        if (!fence.ok) {
+          const reasons = [];
+          for (const p of fence.outOfScope) reasons.push(`out of scope: ${p}`);
+          for (const p of fence.denied) reasons.push(`denied path: ${p}`);
+          if (!reasons.length) reasons.push(`scope check failed: ${fence.error ?? "the diff could not be computed"}`);
+          roundCritic = {
+            source: "scope",
+            alias: null,
+            model: null,
+            free: false,
+            free_source: "scope-check",
+            critic_verdict: critic.critic_verdict,
+            effective: "CHANGES_REQUESTED",
+            reasons,
+            findings_sha256: critic.findings_sha256,
+            receipt_sha256: critic.receipt_sha256,
+          };
+        }
+      }
       const round = {
         n: t.rounds.length + 1,
         at: now(),
         counted: true,
         worker,
-        critic,
+        critic: roundCritic,
         reviewed_sha: head,
         cost,
         senior_needed: false,
@@ -1164,6 +1261,19 @@ function cmdReady(ctx, id) {
     }
     if (sig.reviewed_sha !== head) {
       throw new Refuse(`HEAD ${head} is not the signed-off sha ${sig.reviewed_sha}`);
+    }
+    // Scope fence backstop: refuse a ticket whose signed-off sha leaves the
+    // ticket's `--scope` or touches the deny list, covering rounds recorded
+    // before this check existed.
+    if (t.base_sha) {
+      const fence = checkScope({ repo: wt, base: t.base_sha, sha: sig.reviewed_sha, scope: t.scope, baseRef: ctx.adapter.base });
+      if (!fence.ok) {
+        const reasons = [];
+        for (const p of fence.outOfScope) reasons.push(`out of scope: ${p}`);
+        for (const p of fence.denied) reasons.push(`denied path: ${p}`);
+        if (!reasons.length) reasons.push(`scope check failed: ${fence.error ?? "the diff could not be computed"}`);
+        throw new Refuse(`signed-off sha leaves the ticket scope — ${reasons.join("; ")}`);
+      }
     }
     const humanSameSha = live.some((s) => s.by === "human" && s.reviewed_sha === sig.reviewed_sha);
     if (sig.free && !humanSameSha) {

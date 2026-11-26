@@ -6,7 +6,15 @@ import path from "node:path";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { handleEvent, poll, readDaemonState, statusRows, runIsLive, lockPath, wakeHolder, watchInfo, latestVerdict } from "../bin/desk.mjs";
+// desk.mjs reads ORCH_OC_WORKER once, at module load. Point it at a script that does not exist while this file
+// imports desk.mjs, so an in-process test that regresses into a real spawn (e.g. a scope-fence miss reaching the
+// critic spawn) fails locally instead of launching a real detached oc-worker run. The variable is restored at
+// once, so the CLI subprocesses these tests start still resolve the real oc-worker path.
+const SAVED_OC_WORKER = process.env.ORCH_OC_WORKER;
+process.env.ORCH_OC_WORKER = path.join(os.tmpdir(), `orch-no-oc-worker-${process.pid}.mjs`);
+const { handleEvent, poll, readDaemonState, statusRows, runIsLive, lockPath, wakeHolder, watchInfo, latestVerdict } = await import("../bin/desk.mjs");
+if (SAVED_OC_WORKER === undefined) delete process.env.ORCH_OC_WORKER;
+else process.env.ORCH_OC_WORKER = SAVED_OC_WORKER;
 import { workerOutcome } from "../bin/outcome.mjs";
 import { appendEvent, appendAck, orchRoot, readAckLines } from "../bin/handoff.mjs";
 import { plan } from "../bin/install.mjs";
@@ -2482,3 +2490,114 @@ function rebaseRepo(amend = false) {
   }
   return { dir, g, t, head: g("rev-parse", "HEAD") };
 }
+
+// Scope fence: a done worker run whose committed sha leaves the ticket's `--scope` gets synthetic
+// CHANGES_REQUESTED findings naming the path, and no critic is spawned (the desk returns before
+// detached() is reached). The declared scope is the board ticket's, exactly as `board round`/`ready` read
+// it: the desk ticket.json carries `base` only (no scope, no base_sha).
+test("desk scope fence: out-of-scope worker sha writes synthetic CHANGES_REQUESTED findings and spawns no critic", async () => {
+  const { h, name, runDir } = t8Stream("scope-fence");
+  // t8Stream wrote a .git placeholder; replace it with a real git repo.
+  fs.rmSync(path.join(runDir, ".git"), { force: true });
+  fs.mkdirSync(path.join(runDir, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(runDir, "bin", "x.mjs"), "x\n");
+  const g = (...args) => execFileSync("git", ["-C", runDir, ...args], { encoding: "utf8" }).trim();
+  g("init", "-b", "main");
+  g("config", "user.email", "t8@example.com");
+  g("config", "user.name", "t8");
+  g("config", "commit.gpgsign", "false");
+  g("add", "bin/x.mjs");
+  g("commit", "-m", "base");
+  const base = g("rev-parse", "HEAD");
+  fs.writeFileSync(path.join(runDir, "README.md"), "out of scope\n");
+  g("add", "README.md");
+  g("commit", "-m", "out of scope");
+  // A repo holding the board ticket that declares the scope (the desk ticket.json keeps its own shape).
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "orch-scope-repo-"));
+  CLEAN.push(repo);
+  const bdir = path.join(repo, ".opencode", "board", "tickets");
+  fs.mkdirSync(bdir, { recursive: true });
+  fs.writeFileSync(path.join(bdir, "t8.json"), JSON.stringify({ id: "t8", base_sha: base, scope: ["bin/**"], rounds: [], reopens: [] }));
+  // mkTicket only writes a .git placeholder when none exists; git init already created a real one.
+  mkTicket(runDir, { worktree: runDir, repo, base });
+  await inHome(h, undefined, async () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+    const out = await handleEvent(name, "run:worker-r1:done");
+    assert.equal(out.line, "critic r1");
+    // No critic was spawned: no critic run was queued.
+    const criticQueued = eventsOf(h, name).some((e) => e.kind === "queued" && e.agent === "critic");
+    assert.equal(criticQueued, false);
+  });
+  // The critic prompt is written immediately before the critic is spawned; it was never written.
+  assert.equal(fs.existsSync(path.join(runDir, "critic-prompt-r1.md")), false, "no critic prompt, so no critic spawn");
+  const findings = fs.readFileSync(path.join(runDir, "findings-r1.md"), "utf8");
+  assert.match(findings, /VERDICT: CHANGES_REQUESTED/);
+  assert.match(findings, /out of scope: README.md/);
+  // The synthetic verdict is the existing CHANGES_REQUESTED path: the next step resumes the worker.
+  const next = await inHome(h, undefined, async () => cli(h, ["step", name, "verdict:worker-r1"]));
+  assert.match(next.stdout, /ACTION resume-worker/);
+});
+
+// The fallback: a desk ticket.json that itself carries `scope` and `base_sha` (no board repo) is fenced too.
+test("desk scope fence: a desk ticket's own scope and base_sha are fenced without a board", async () => {
+  const { h, name, runDir } = t8Stream("scope-fence-own");
+  fs.rmSync(path.join(runDir, ".git"), { force: true });
+  fs.mkdirSync(path.join(runDir, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(runDir, "bin", "x.mjs"), "x\n");
+  const g = (...args) => execFileSync("git", ["-C", runDir, ...args], { encoding: "utf8" }).trim();
+  g("init", "-b", "main");
+  g("config", "user.email", "t8@example.com");
+  g("config", "user.name", "t8");
+  g("config", "commit.gpgsign", "false");
+  g("add", "bin/x.mjs");
+  g("commit", "-m", "base");
+  const base = g("rev-parse", "HEAD");
+  fs.writeFileSync(path.join(runDir, "README.md"), "out of scope\n");
+  g("add", "README.md");
+  g("commit", "-m", "out of scope");
+  mkTicket(runDir, { worktree: runDir, base_sha: base, scope: ["bin/**"] });
+  await inHome(h, undefined, async () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+    const out = await handleEvent(name, "run:worker-r1:done");
+    assert.equal(out.line, "critic r1");
+  });
+  assert.match(fs.readFileSync(path.join(runDir, "findings-r1.md"), "utf8"), /out of scope: README.md/);
+});
+
+// Dry run: the fence fires but makes no durable write — no findings file, no verdict event, no critic.
+test("desk scope fence: a dry run writes no findings and appends no verdict", async () => {
+  const { h, name, runDir } = t8Stream("scope-fence-dry");
+  fs.rmSync(path.join(runDir, ".git"), { force: true });
+  fs.mkdirSync(path.join(runDir, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(runDir, "bin", "x.mjs"), "x\n");
+  const g = (...args) => execFileSync("git", ["-C", runDir, ...args], { encoding: "utf8", timeout: 30000 }).trim();
+  g("init", "-b", "main");
+  g("config", "user.email", "t8@example.com");
+  g("config", "user.name", "t8");
+  g("config", "commit.gpgsign", "false");
+  g("add", "bin/x.mjs");
+  g("commit", "-m", "base");
+  const base = g("rev-parse", "HEAD");
+  fs.writeFileSync(path.join(runDir, "README.md"), "out of scope\n");
+  g("add", "README.md");
+  g("commit", "-m", "out of scope");
+  mkTicket(runDir, { worktree: runDir, base_sha: base, scope: ["bin/**"] });
+  const findings = path.join(runDir, "findings-r1.md");
+  process.env.ORCH_DAEMON_DRY_RUN = "1";
+  try {
+    await inHome(h, undefined, async () => {
+      appendEvent(name, evQueued("worker-r1", runDir));
+      appendEvent(name, evDone("worker-r1", runDir));
+      const out = await handleEvent(name, "run:worker-r1:done");
+      assert.equal(out.line, `critic r1 -> ${findings}`);
+      assert.equal(out.outcome, "critic");
+      assert.equal(eventsOf(h, name).some((e) => e.kind === "verdict"), false, "no verdict event");
+    });
+  } finally {
+    delete process.env.ORCH_DAEMON_DRY_RUN;
+  }
+  assert.equal(fs.existsSync(findings), false, "no findings file");
+  assert.equal(fs.existsSync(path.join(runDir, "critic-prompt-r1.md")), false, "no critic prompt");
+});

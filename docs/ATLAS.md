@@ -429,6 +429,11 @@ handler: orchestrator/bin/desk.mjs boardRounds() (board counted/lap/has reader, 
 decides: the critic round for a re-dispatched worker run (max of resume acks, worker-r<N> id, findings-r<N> on disk, board lap), whether a corrected INVALID verdict is superseded at verdict:<run>@<n>, and whether a HEAD that moved past reviewed_sha is still a mergeable rebase (same patch-id). Step stays pure (file reads only, no git, no spawn); handoff.mjs append/read semantics are unchanged.
 topic: docs/atlas/desk.md
 
+### scope fence (a worker's diff vs its ticket scope)
+handler: orchestrator/bin/scope-check.mjs checkScope() (git diff --name-only <base>..<sha> against the ticket's --scope, plus the hard deny list .claude/plans/** and .opencode/**; matchAny() lives here and board.mjs imports it back); callers orchestrator/bin/board.mjs cmdCreate()/cmdRound()/cmdReady() and orchestrator/bin/desk.mjs doCritic()
+decides: whether a worker's committed diff may land — a path outside --scope or on the deny list records the round as CHANGES_REQUESTED even when the critic approved, refuses ready at the signed-off sha, is refused at create, and is sent back to the worker by the desk without spawning a paid critic
+topic: docs/atlas/desk.md
+
 ### oc-worker load-based slots
 handler: orchestrator/bin/slots.mjs (readSample, slotConfig, allowedSlots); orchestrator/bin/oc-worker.mjs acquireSlot; desk.mjs status header
 decides: how many workers may start now — fixed `WORKER_SLOTS=N` or dynamic `WORKER_SLOTS_MIN`..`WORKER_SLOTS_MAX` (2..6) from 5-minute machine load (/proc/pressure/cpu, /proc/loadavg, /proc/meminfo) via ORCH_PROC_ROOT; burst guard admits at most one slot above the floor per 60 s; opencode children nicened to 10 on non-Windows; decision log slot-decisions.log

@@ -56,8 +56,10 @@ function board(c, ...args) {
 const ticketFile = (c, id) => path.join(c.repo, ".opencode", "board", "tickets", `${id}.json`);
 const lockDir = (c, id) => path.join(c.repo, ".opencode", "board", "locks", `${id}.lock`);
 const bytes = (p) => fs.readFileSync(p);
+// The default scope is broad (`bin/**`, was `bin/demo.mjs`): with the scope fence on, rounds and ready diff
+// base..sha against it, and the existing tests commit other files under bin/. A later --scope in `extra` wins.
 function created(c, id, ...extra) {
-  const r = board(c, "create", id, "--mandate", c.mandate, "--scope", "bin/demo.mjs", ...extra);
+  const r = board(c, "create", id, "--mandate", c.mandate, "--scope", "bin/**", ...extra);
   assert.equal(r.status, 0, r.stderr);
   return r.ticket;
 }
@@ -1850,4 +1852,116 @@ test("session: stays visible when the ticket reaches ready; a ticket without one
   assert.equal(t.stage, "ready");
   assert.equal(t.assignment.session, "sess-keep");
   assert.equal(t.assignment.owner, null);
+});
+
+// ---------------------------------------------------------------- scope fence
+test("scope create: a --scope entry on the hard deny list is refused", () => {
+  const c = mk();
+  const r = board(c, "create", "scope-deny", "--mandate", c.mandate, "--scope", ".claude/plans/foo.md");
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /deny list/);
+  assert.equal(fs.existsSync(ticketFile(c, "scope-deny")), false, "nothing was written");
+});
+
+test("scope create: an open-ended Mandate Scope is refused", () => {
+  const c = mk();
+  const mandate = path.join(c.root, "scope-open.md");
+  fs.writeFileSync(mandate, `# Ticket x\n\n**Atlas refs consulted / updated?** no map\n\n**Scope:** and any doc line found\n\n**Blast radius:**\n\n- \`run()\` in \`bin/main.mjs\` — unchanged; test: bin/demo.test.mjs\n`);
+  const r = board(c, "create", "scope-open", "--mandate", mandate, "--scope", "bin/**");
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /board: mandate scope is open-ended: "\*\*Scope:\*\* and any doc line found"/);
+  assert.equal(fs.existsSync(ticketFile(c, "scope-open")), false, "nothing was written");
+});
+
+test("scope create: an open-ended grant under a ## Scope heading, wrapped across lines, is refused whole", () => {
+  const c = mk();
+  const mandate = path.join(c.root, "scope-open-h.md");
+  fs.writeFileSync(mandate, `# Ticket x\n\n**Atlas refs consulted / updated?** no map\n\n## Scope\nMay touch:\n- bin/a.mjs\n- README.md, and any doc\n  line found\n\n## Blast radius\n\n- \`run()\` in \`bin/main.mjs\` — unchanged; test: bin/demo.test.mjs\n`);
+  const r = board(c, "create", "scope-open-h", "--mandate", mandate, "--scope", "bin/**");
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /board: mandate scope is open-ended: "- README.md, and any doc line found"/);
+  assert.equal(fs.existsSync(ticketFile(c, "scope-open-h")), false, "nothing was written");
+});
+
+function scopeMandate(c, name, scopeBody) {
+  const mandate = path.join(c.root, `${name}.md`);
+  fs.writeFileSync(mandate, `# Ticket x\n\n**Atlas refs consulted / updated?** no map\n\n${scopeBody}\n\n**Blast radius:**\n\n- \`run()\` in \`bin/main.mjs\` — unchanged; test: bin/demo.test.mjs\n`);
+  return board(c, "create", name, "--mandate", mandate, "--scope", "bin/**");
+}
+
+test("scope create: an open-ended grant under a ### sub-heading of ## Scope is refused", () => {
+  const c = mk();
+  const r = scopeMandate(c, "scope-sub", "## Scope\n\n### May touch\n- README.md, and any doc line found");
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /board: mandate scope is open-ended: "- README.md, and any doc line found"/);
+});
+
+test("scope create: an open-ended grant on a bold label inside ## Scope is refused", () => {
+  const c = mk();
+  const r = scopeMandate(c, "scope-bold", "## Scope\n\n**Files:** README.md, and any doc line found");
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /board: mandate scope is open-ended: "\*\*Files:\*\* README.md, and any doc line found"/);
+});
+
+test("scope create: a negated grant phrase in the Scope section is accepted", () => {
+  const c = mk();
+  const r = scopeMandate(c, "scope-neg", "## Scope\n\nMay touch bin/a.mjs. Never edit any file outside bin/. Do not touch any other stream's plan.");
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("scope create: an open-ended grant naming backticked paths all in --scope is accepted", () => {
+  const c = mk();
+  const mandate = path.join(c.root, "scope-ok-bt.md");
+  fs.writeFileSync(mandate, `# Ticket x\n\n**Atlas refs consulted / updated?** no map\n\n**Scope:** \`bin/a.mjs\` and \`bin/b.mjs\`, as needed.\n\n**Blast radius:**\n\n- \`run()\` in \`bin/main.mjs\` — unchanged; test: bin/demo.test.mjs\n`);
+  const r = board(c, "create", "scope-ok-bt", "--mandate", mandate, "--scope", "bin/**");
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("scope create: an open-ended grant naming exact paths all in --scope is accepted", () => {
+  const c = mk();
+  const mandate = path.join(c.root, "scope-ok.md");
+  fs.writeFileSync(mandate, `# Ticket x\n\n**Atlas refs consulted / updated?** no map\n\n**Scope:** bin/a.mjs and any doc line found\n\n**Blast radius:**\n\n- \`run()\` in \`bin/main.mjs\` — unchanged; test: bin/demo.test.mjs\n`);
+  const r = board(c, "create", "scope-ok", "--mandate", mandate, "--scope", "bin/**");
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("scope round: an out-of-scope reviewed sha records CHANGES_REQUESTED even when the critic approved", () => {
+  const c = mk();
+  created(c, "sround", "--scope", "bin/demo.mjs");
+  waived(c, "sround");
+  claim(c, "sround");
+  commitFile(c, "README.md", "out of scope\n", "touch readme");
+  const sha = head(c);
+  const r = round(c, "sround", { reviewed: sha, native: "sonnet", findings: "findings/approved.md", critic: null });
+  assert.equal(r.status, 0, r.stderr);
+  const ro = r.ticket.rounds[0];
+  assert.equal(ro.counted, true, "the round still counts");
+  assert.equal(ro.critic.critic_verdict, "APPROVED", "the critic did approve");
+  assert.equal(ro.critic.effective, "CHANGES_REQUESTED", "scope overrode the critic");
+  assert.ok(ro.critic.reasons.some((x) => x === "out of scope: README.md"), JSON.stringify(ro.critic.reasons));
+});
+
+test("scope ready: refuses a ticket whose signed-off sha leaves the scope", () => {
+  const c = mk();
+  created(c, "sready", "--scope", "bin/demo.mjs");
+  waived(c, "sready");
+  claim(c, "sready");
+  commitFile(c, "README.md", "out of scope\n", "touch readme");
+  const sha = head(c);
+  // Fabricate a pre-fence counted round plus a critic signoff at the out-of-scope sha: this is the backstop
+  // case `ready` exists for (rounds recorded before the scope check).
+  editTicket(c, "sready", (t) => {
+    const sha64 = "x".repeat(64);
+    t.rounds.push({
+      n: 1, at: new Date().toISOString(), counted: true,
+      worker: { outcome: "done", agent: "worker", model: null, receipt_sha256: sha64 },
+      critic: { source: "receipt", alias: "critic", model: "critic", free: false, free_source: "model:critic",
+        critic_verdict: "APPROVED", effective: "APPROVED", reasons: [], findings_sha256: sha64, receipt_sha256: sha64 },
+      reviewed_sha: sha, cost: 0, senior_needed: false,
+    });
+    t.signoffs.push({ by: "human", model: null, free: false, free_source: null, reviewed_sha: sha, at: new Date().toISOString(), invalidated_by: null });
+  });
+  const rd = board(c, "ready", "sready", "--owner", "s1");
+  assert.equal(rd.status, 1, rd.stderr);
+  assert.match(rd.stderr, /out of scope: README.md/);
 });
