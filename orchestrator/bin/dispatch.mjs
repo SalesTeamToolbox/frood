@@ -10,15 +10,20 @@
 //
 // plan: each argument is a ticket id on the board, or a plan file; a plan file contributes every board ticket id it
 //   names as a whole token. Per ticket it reads the stored `scope` and `blast_radius` (callers and tests) from
-//   .opencode/board/tickets/<id>.json and any `depends: <id>, <id>` line in the ticket's Mandate. Two tickets
-//   CONFLICT when their file sets overlap (the same path, a path under the other's directory, or globs whose
-//   literal prefixes nest) or when one depends on the other. It never guesses: overlap means serial.
+//   .opencode/board/tickets/<id>.json and any `depends: <id>, <id>` line in the ticket's Mandate. A ticket EDITS its
+//   scope and blast-radius tests and READS the paths named in its blast-radius callers. Two tickets CONFLICT when
+//   both edit a file, or one edits a file the other reads (the same path, a path under the other's directory, or
+//   globs whose literal prefixes nest), or when one depends on the other. Two tickets that only read the same file
+//   do not conflict. It never guesses: overlap means serial.
 //   Paths are compared normalised (posix, `..` collapsed, repo/worktree prefix stripped, case-insensitive); an entry
 //   without a `/` (a bare `desk.mjs`) overlaps any path with that last segment.
 //   Output: ordered `groups`; every ticket in a group can run at once, and group N+1 starts only when every ticket
 //   of group N is shipped (groups run one after another). `held` (not grouped): a ticket that depends on a board
 //   ticket outside the argument list which is not `shipped` or `closed`, or whose files overlap a ticket already in flight on
-//   the board (working, ready, or queued with a session) that is not in the argument list. `unknown` (not
+//   the board (working, ready, or queued with a session) that is not in the argument list (`in_flight`), or — queue
+//   priority, for a queued ticket — whose files overlap an OLDER queued, undispatched board ticket outside the list
+//   whose EGM is approved or waived and which was created within adapter.json `queue_priority_hours` (default 48,
+//   0 = off) (`queued_first`). Each hold names its reason (`both edit <f>` / `<a> edits <f>, which <b> calls`). `unknown` (not
 //   grouped): a ticket whose `depends:` names an id that is not on the board, reported apart so a typo is seen.
 //   A `depends:` value of none / n/a / nothing / - means no dependency.
 //   Exit 0 ok, 1 a dependency cycle, 2 usage / missing ticket.
@@ -90,14 +95,23 @@ function normPath(p, roots = []) {
   // normalise to "" and be filtered out, so a whole-repo scope overlapped nothing and failed open.
   return x === "." || x === "" ? "**" : x;
 }
-export function filesOf(t, root = null) {
+// A ticket's files in two sets: `edits` (scope and blast-radius tests: what it may change) and `reads` (paths named
+// in blast-radius callers that it does not also edit: what it depends on staying put).
+export function fileSetsOf(t, root = null) {
   const roots = [t.worktree, root];
-  const set = new Set((t.scope ?? []).map((p) => normPath(p, roots)));
+  const edits = new Set((t.scope ?? []).map((p) => normPath(p, roots)));
+  const reads = new Set();
   for (const b of t.blast_radius ?? []) {
-    for (const m of String(b.caller ?? "").match(PATH_RE) ?? []) set.add(normPath(m, roots));
-    if (typeof b.test === "string" && b.test) set.add(normPath(b.test, roots));
+    if (typeof b.test === "string" && b.test) edits.add(normPath(b.test, roots));
+    for (const m of String(b.caller ?? "").match(PATH_RE) ?? []) reads.add(normPath(m, roots));
   }
-  return [...set].filter(Boolean);
+  for (const e of edits) reads.delete(e);
+  return { edits: [...edits].filter(Boolean), reads: [...reads].filter(Boolean) };
+}
+// Every file a ticket names, edits and reads together.
+export function filesOf(t, root = null) {
+  const { edits, reads } = fileSetsOf(t, root);
+  return [...new Set([...edits, ...reads])];
 }
 // The literal directory/file path before the first wildcard, as segments: "a/b/*.mjs" -> [a, b].
 function literal(g) {
@@ -131,6 +145,18 @@ export function pathsOverlap(a, b) {
 // The first pair of paths shared by two tickets, or null. THE shared-file check: dispatch never groups on a hit.
 export function sharedFile(fa, fb) {
   for (const a of fa) for (const b of fb) if (pathsOverlap(a, b)) return a === b ? a : `${a} ~ ${b}`;
+  return null;
+}
+// Why tickets A and B may not run at once, or null. Both editing a file conflicts; one editing a file the other
+// calls conflicts (the caller's expectations may break); both only calling the same file does NOT.
+// `a`/`b` are { id, edits, reads }.
+export function overlapOf(a, b) {
+  let f = sharedFile(a.edits, b.edits);
+  if (f) return { kind: "edit", file: f, text: `both edit ${f}` };
+  f = sharedFile(a.edits, b.reads);
+  if (f) return { kind: "read", file: f, text: `${a.id} edits ${f}, which ${b.id} calls` };
+  f = sharedFile(a.reads, b.edits);
+  if (f) return { kind: "read", file: f, text: `${b.id} edits ${f}, which ${a.id} calls` };
   return null;
 }
 
@@ -180,21 +206,43 @@ function resolveArgs(root, args, tickets) {
   return ids.map((id) => byId.get(id));
 }
 
-export function buildPlan(root, args) {
+// How long an EGM-cleared queued ticket keeps priority over newer overlapping ones (adapter.json
+// `queue_priority_hours`, default 48, 0 = off), so an abandoned queued ticket never blocks anyone forever.
+const DEFAULT_QUEUE_PRIORITY_HOURS = 48;
+function queuePriorityHours(root) {
+  const v = readJson(path.join(root, ".opencode", "board", "adapter.json"))?.queue_priority_hours;
+  if (v === undefined) return DEFAULT_QUEUE_PRIORITY_HOURS;
+  if (typeof v !== "number" || !(v >= 0)) throw new Usage("adapter.json: queue_priority_hours must be a number >= 0");
+  return v;
+}
+const inFlightStage = (t) => t.stage === "working" || t.stage === "ready" || (t.stage === "queued" && Boolean(t.assignment?.session));
+const createdMs = (t) => {
+  const ms = Date.parse(t.created ?? "");
+  return Number.isFinite(ms) ? ms : null;
+};
+
+export function buildPlan(root, args, { now = Date.now() } = {}) {
   const all = boardTickets(root);
   const picked = resolveArgs(root, args, all);
   const inSet = new Set(picked.map((t) => t.id));
   const stageOf = new Map(all.map((t) => [t.id, t.stage]));
   const info = picked.map((t) => {
     const mandate = fs.existsSync(t.mandate_path ?? "") ? fs.readFileSync(t.mandate_path, "utf8") : "";
-    return { id: t.id, files: filesOf(t, root), depends: dependsOf(mandate).filter((d) => d !== t.id) };
+    return { id: t.id, stage: t.stage, dispatched: inFlightStage(t), created: createdMs(t), ...fileSetsOf(t, root), depends: dependsOf(mandate).filter((d) => d !== t.id) };
   });
   const held = [];
   const unknown = [];
   const live = [];
-  const inFlight = all
-    .filter((t) => !inSet.has(t.id) && (t.stage === "working" || t.stage === "ready" || (t.stage === "queued" && t.assignment?.session)))
-    .map((t) => ({ id: t.id, files: filesOf(t, root) }));
+  const inFlight = all.filter((t) => !inSet.has(t.id) && inFlightStage(t)).map((t) => ({ id: t.id, ...fileSetsOf(t, root) }));
+  // Queue priority: EGM-cleared queued tickets outside the list, not yet dispatched, created inside the window.
+  const windowMs = queuePriorityHours(root) * 3600_000;
+  const waiting = windowMs
+    ? all
+        .filter((t) => !inSet.has(t.id) && t.stage === "queued" && !inFlightStage(t))
+        .filter((t) => t.egm?.status === "approved" || t.egm?.status === "waived")
+        .filter((t) => createdMs(t) !== null && now - createdMs(t) <= windowMs)
+        .map((t) => ({ id: t.id, created: createdMs(t), ...fileSetsOf(t, root) }))
+    : [];
   for (const i of info) {
     const missing = i.depends.filter((d) => !stageOf.has(d));
     if (missing.length) {
@@ -202,9 +250,20 @@ export function buildPlan(root, args) {
       continue;
     }
     const ext = i.depends.filter((d) => !inSet.has(d) && stageOf.get(d) !== "shipped" && stageOf.get(d) !== "closed");
-    const busy = inFlight.map((f) => ({ id: f.id, file: sharedFile(i.files, f.files) })).filter((f) => f.file);
-    if (ext.length || busy.length) {
-      held.push({ id: i.id, waiting_on: [...ext, ...busy.map((b) => b.id)], ...(busy.length ? { in_flight: busy.map((b) => `${b.id}: ${b.file}`) } : {}) });
+    const busy = inFlight.map((f) => ({ id: f.id, o: overlapOf(i, f) })).filter((f) => f.o);
+    // Only an undispatched queued ticket yields, and only to one queued strictly before it (a ticket without `created`
+    // yields to none). Holds point only at strictly older tickets, so they can never form a cycle.
+    const first =
+      i.stage === "queued" && !i.dispatched && i.created !== null
+        ? waiting.filter((w) => w.created < i.created).map((w) => ({ id: w.id, o: overlapOf(i, w) })).filter((w) => w.o)
+        : [];
+    if (ext.length || busy.length || first.length) {
+      held.push({
+        id: i.id,
+        waiting_on: [...ext, ...busy.map((b) => b.id), ...first.map((w) => w.id)],
+        ...(busy.length ? { in_flight: busy.map((b) => `${b.id}: ${b.o.text}`) } : {}),
+        ...(first.length ? { queued_first: first.map((w) => `${w.id}: ${w.o.text}`) } : {}),
+      });
     } else live.push(i);
   }
   const unknownIds = new Set(unknown.map((u) => u.id));
@@ -233,8 +292,8 @@ export function buildPlan(root, args) {
       if (a.depends.includes(b.id)) why = `${a.id} depends on ${b.id}`;
       else if (b.depends.includes(a.id)) why = `${b.id} depends on ${a.id}`;
       else {
-        const f = sharedFile(a.files, b.files);
-        if (f) why = `shared file ${f}`;
+        const o = overlapOf(a, b);
+        if (o) why = o.kind === "edit" ? `shared file ${o.file}` : o.text;
       }
       if (why) {
         conflicts.push({ a: a.id, b: b.id, why });
@@ -576,7 +635,10 @@ function main(argv) {
     else {
       plan.groups.forEach((g, i) => console.log(`group ${i + 1}: ${g.join(" ")}`));
       for (const c of plan.conflicts) console.log(`serial: ${c.a} / ${c.b} — ${c.why}`);
-      for (const h of plan.held) console.log(`held: ${h.id} — waiting on ${h.waiting_on.join(", ")}${h.in_flight ? ` (in flight, shared file: ${h.in_flight.join("; ")})` : ""}`);
+      for (const h of plan.held) {
+        const why = [h.in_flight && `in flight: ${h.in_flight.join("; ")}`, h.queued_first && `older queued: ${h.queued_first.join("; ")}`].filter(Boolean);
+        console.log(`held: ${h.id} — waiting on ${h.waiting_on.join(", ")}${why.length ? ` (${why.join("; ")})` : ""}`);
+      }
       for (const u of plan.unknown) console.log(`unknown: ${u.id} — depends on ids not on the board: ${u.unknown_ids.join(", ")}`);
     }
     return 0;

@@ -135,10 +135,13 @@ fails; never block on it.
 
 When the plan has several tickets on the board, find out which may run at once before starting any:
 `node {{ORCH_REPO}}/bin/dispatch.mjs plan <plan-file|ticket-id...>` prints ordered groups. Tickets in one group are
-independent (no shared file, no `depends:` line between them); groups run one after another: **group N+1 starts only when every ticket of group N is shipped**. Overlap means
-serial; the check never guesses. `plan` also holds a ticket that shares a file with a ticket already in flight on the
-board, or waits on an unshipped one (`held`), and lists a ticket whose `depends:` names an id not on the board
-(`unknown`; fix the typo).
+independent (neither edits a file the other edits or names as a blast-radius caller, no `depends:` line between them; two
+tickets that only call the same file are independent); groups run one after another: **group N+1 starts only when every ticket of group N is shipped**. Overlap means
+serial; the check never guesses. `plan` also holds a ticket that overlaps a ticket already in flight on the board, or
+waits on an unshipped one, or overlaps an OLDER queued EGM-cleared ticket that has not been dispatched yet (queue
+priority, adapter `queue_priority_hours`, default 48) (`held`, with the reason), and lists a ticket whose `depends:`
+names an id not on the board (`unknown`; fix the typo). Dispatch the older queued ticket first rather than around it. If that older ticket is itself stuck (held, or waiting on a `depends:`), the hold still
+lasts until its window ends: dispatch it, close it, or set `queue_priority_hours: 0` for the repo.
 
 <!-- cc-only -->
 One desktop session per ticket of the first group, each running `/frood-next <stream>` for that ticket's stream.

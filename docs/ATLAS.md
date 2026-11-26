@@ -414,7 +414,7 @@ topic: docs/atlas/routes.md
 
 ### orchestrator parallel dispatch
 handler: orchestrator/bin/dispatch.mjs (plan: independence check, cap: concurrency limit); orchestrator/bin/board.mjs session (assignment.session); orchestrator/bin/desk.mjs status (ticketSessions)
-decides: which board tickets may run in their own sessions at once (shared file or `depends:` means serial), and whether the build cap leaves room — build cap may be `auto` (slots.mjs)
+decides: which board tickets may run in their own sessions at once (both edit a file, one edits a file the other's blast-radius caller names, or `depends:` means serial; two callers of the same file do not — dispatch.mjs overlapOf/fileSetsOf), which are held (in flight, or queue priority: an older queued EGM-cleared ticket within adapter `queue_priority_hours`, default 48), and whether the build cap leaves room — build cap may be `auto` (slots.mjs)
 
 ### dispatch.mjs status + statusline segment
 handler: orchestrator/bin/dispatch.mjs status (board tickets in active stages, live oc-worker runs from `~/.config/orchestrator/runs`, stream last-event ages from `~/.config/orchestrator/streams`); orchestrator/hooks/cross-harness-statusline.js (the `--line` segment on statusline line 2 and the `dispatch` key in `--json`)
