@@ -7,6 +7,10 @@ Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 ExecStart=@NODE@ @REPO@/bin/desk.mjs daemon _run --by @BY@ --interval 30
+# systemd --user starts with the default PATH, which does not include mise shims where
+# opencode and claude live; @PATH@ is filled by ops/systemd/install.mjs so the critics and
+# workers this daemon spawns can resolve opencode and claude.
+Environment=PATH=@PATH@
 Restart=always
 RestartSec=120
 # exit 3 = a live session owns the desk lock; restarting would only loop

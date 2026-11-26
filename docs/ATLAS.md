@@ -516,6 +516,10 @@ handler: orchestrator/bin/workers-view.mjs (text/--json/--html [--watch]; joins 
 decides: which headless worker run belongs to which ticket, its oc-worker state (names copied verbatim), `NO LIVE RUN` for a working ticket with no live run, and held reasons from `dispatch.mjs plan`; 9 s budget, a failing child blanks only its section
 sibling traps: the pane loads only when `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json` env names `~/.claude/frood-mods/workers-panel`; the `pace:` line is the first stdout line of `bin/cc-pace.mjs` run with no arguments ('Claude weekly pace' section), skipped when that file is absent
 
+### desk daemon systemd units
+handler: orchestrator/ops/systemd/orchestrator-desk-daemon.service; orchestrator/ops/systemd/orchestrator-desk-check.service; orchestrator/ops/systemd/install.mjs
+decides: install.mjs fills @PATH@ at install time (node's directory first, then opencode and claude directories when found, mise shims, then system dirs, de-duplicated and existing-only) and both service templates carry `Environment=PATH=@PATH@`, so the desk daemon and check launched by systemd --user can spawn opencode and claude despite systemd's default user PATH
+
 ## Release train
 
 ### ops/train.sh step 2 (pinned tests)
