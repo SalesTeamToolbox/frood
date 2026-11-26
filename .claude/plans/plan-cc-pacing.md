@@ -46,7 +46,7 @@ at the moment they give the most back.
   errors and writes a receipt. **Desk:** the daemon that follows streamed runs, then runs critic → merge.
 - **router-health:** `orchestrator/bin/router-health.mjs`, which prints which agent to use for each role.
 - **Mandate / board / handoff card / gauntlet:** the ticket brief, the ticket state machine
-  (`orchestrator/bin/board.mjs`, stages `queued|working|ready|shipped|blocked|failed|closed`), the stop summary
+  (`bin/board.mjs`, stages `queued|working|ready|shipped|blocked|failed|closed`), the stop summary
   (template in `commands/frood-orchestrator.md` and `commands/frood-gauntlet.md`), and the per-module run.
 - **Laptop rule:** an 8-thread laptop. All agents run at BelowNormal priority, and only one heavy test suite runs at once.
 
@@ -96,7 +96,7 @@ Times are UTC ISO.
   `claude` turn refreshes the sidecar, and `cc-usage.mjs snapshot --from-statusline` (called on the desk-check
   5-minute tick) imports it when newer.
 - Store: `<orchDir()>/cc-usage.json` (latest) and `cc-usage.jsonl` (history, pruned to 8 weeks). `orchDir()` is
-  from `orchestrator/bin/usage.mjs`, so `ORCH_HOME` makes the tests hermetic. Writes are atomic (`writeFileAtomic`).
+  from `bin/usage.mjs`, so `ORCH_HOME` makes the tests hermetic. Writes are atomic (`writeFileAtomic`).
   **The newest `at` wins**, whatever the source.
 - A 5-hour value whose `resets_at` has passed reads as 0.
 
@@ -144,14 +144,14 @@ Status line (≤ 100 chars): `pace UNDER wk 42%→53% @Thu08 rsv 1% 5h 40% fable
 - `oc-worker --role worker` reads `cc-pace status --json` at launch. On `under` it prepends `cc-worker` to the
   chain. On any other state the chain is exactly today's. The receipt records
   `cc_pace: {state, weekly, projected, at}` on every run, whatever the agent.
-- `router-health` evaluates pace **on every invocation, before the `--if-stale` early return** (orchestrator/bin/router-health.mjs
+- `router-health` evaluates pace **on every invocation, before the `--if-stale` early return** (bin/router-health.mjs
   ~L461) and prints one `pace:` line. On `under`, the worker line reads `use cc-worker` with the OpenCode chain
   as fallback. All other lines are unchanged.
 - On `over`, it prints one advice line, `pace: OVER — conserve: no Fable senior unless guarded; scouts haiku`.
   Advice only (see Non-goals).
 - Rule text: "never an automatic fallback" changes to "never a fallback; preferred first only when pace is
   UNDER" in all three places: `orchestrator/rules/01-orchestrator-models.md:71`,
-  `orchestrator/commands/frood-orchestrator.md:204` and `:211`. `orchestrator/bin/check-routing.mjs` accepts `cc-worker` as a
+  `orchestrator/commands/frood-orchestrator.md:204` and `:211`. `bin/check-routing.mjs` accepts `cc-worker` as a
   known agent.
 
 ### Reset advisor (`cc-pace advise`, run from the desk-check tick)
@@ -227,8 +227,8 @@ pace line once M2 lands.
   timeout kills only its own pid; no `pkill`.
 
 ### M4 — pace-aware routing
-- Files: `orchestrator/bin/oc-worker.mjs` (prepend on `under`, `cc_pace` on every receipt), `orchestrator/bin/router-health.mjs` (pace
-  line before the early return; the worker line on `under`), `orchestrator/bin/check-routing.mjs` (knows `cc-worker`),
+- Files: `bin/oc-worker.mjs` (prepend on `under`, `cc_pace` on every receipt), `bin/router-health.mjs` (pace
+  line before the early return; the worker line on `under`), `bin/check-routing.mjs` (knows `cc-worker`),
   `rules/01-orchestrator-models.md:71`, `commands/frood-orchestrator.md:204,211`, and the tests for each.
   Install with `node orchestrator/bin/install.mjs`.
 - Pass bars: a golden capture of today's `router-health` output, taken **before** the change, matches
@@ -247,7 +247,7 @@ pace line once M2 lands.
 
 ### M6 — visibility
 - Files: the handoff-card template in `commands/frood-orchestrator.md` and `commands/frood-gauntlet.md:88`
-  (new `Pace:` line, ≤ 100 chars); the `orchestrator/bin/desk.mjs status` header.
+  (new `Pace:` line, ≤ 100 chars); the `bin/desk.mjs status` header.
 - Pass bars: the card renders the `Pace:` line from the fixtures; desk status shows it; omitted when `off`.
 
 **M6b — live worker view (owner request 2026-11-25).** Today a headless OpenCode worker is invisible in the
