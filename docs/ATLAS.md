@@ -488,10 +488,15 @@ handler: orchestrator/bin/cc-usage.mjs (normalizeApp, normalizeStatusline, store
 decides: the normalized Claude Code 5-hour / weekly / Fable usage record and which snapshot is the latest (newest `at` wins across sources `app` and `statusline`); history in `<orchDir()>/cc-usage.jsonl` pruned past 8 weeks
 sibling traps: orchestrator/bin/desk-check.mjs (main imports the statusline sidecar each tick, silently), orchestrator/hooks/cross-harness-statusline.js (writes ~/.claude/.harness-cc.json; not wired until the owner adds `statusLine`)
 
+### Claude weekly pace (cc-pace)
+handler: orchestrator/bin/cc-pace.mjs (`paceState` pure model, `reserve`, `projected`, `statusLine`; CLI `[status] [--json]`)
+decides: the pace state off / unknown / over / on / under from the cc-usage snapshots (newest `at` is current; recent slope over the last 24 h of the same weekly window when it spans >= 4 h), config `usage-limits.json` `cc` over defaults; last state for hysteresis in `<orchDir()>/cc-pace-state.json`
+trap: `status` must print exactly one line <= 100 chars with no leading `pace` word and exit 0 for every state, because workers-view prints `pace: <first stdout line>`; `ORCH_NO_PACE=1` maps to `off`; nothing routes on it until M4
+
 ### Live worker view (headless runs)
 handler: orchestrator/bin/workers-view.mjs (text/--json/--html [--watch]; joins `oc-worker active --json` to board tickets on `assignment.worker` pid/out_path, never the title); orchestrator/mods/workers-panel/hooks/register.tsx (the `/workers` pane, polls the CLI every 15 s only while open)
 decides: which headless worker run belongs to which ticket, its oc-worker state (names copied verbatim), `NO LIVE RUN` for a working ticket with no live run, and held reasons from `dispatch.mjs plan`; 9 s budget, a failing child blanks only its section
-sibling traps: the pane loads only when `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json` env names `~/.claude/frood-mods/workers-panel`; the `pace:` line assumes the `bin/cc-pace.mjs` interface M2 has not built yet
+sibling traps: the pane loads only when `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json` env names `~/.claude/frood-mods/workers-panel`; the `pace:` line is the first stdout line of `bin/cc-pace.mjs` run with no arguments ('Claude weekly pace' section), skipped when that file is absent
 
 ## Release train
 
