@@ -517,6 +517,17 @@ sibling traps: the pane loads only when `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/
 handler: ops/train.sh
 decides: which tests the train runs for a ticket (python convention → board ticket blast_radius test → Mandate tests: line) or refuses it with exit 1
 
+## Workstation (Linux)
+
+### workstation priority guard
+handler: orchestrator/ops/workstation/agent-priority.mjs runPass (systemd user service, 15 s loop; --once)
+decides: which agent process trees are reniced to nice>=10 per thread — never lowers a nice value, never touches a non-agent tree, excludes the Claude desktop UI
+sibling traps: oc-worker load-based slots
+
+### box-wide suite lock
+handler: orchestrator/ops/workstation/suite-lock.sh suite_lock_acquire / suite_lock_release
+decides: one pinned full suite at a time across every repo sharing one box-wide SUITE_LOCK_ROOT queue (arrival-order, heartbeat, two-read stale break, token-checked release)
+
 ## How to keep this map accurate
 
 - A handler rename is a same-commit map update: edit the `handler:` line in the

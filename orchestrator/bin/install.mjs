@@ -236,11 +236,184 @@ export function check({ log = console.log } = {}) {
   return ok;
 }
 
+// ---------------------------------------------------------------------------
+// Workstation guard + box-wide suite lock (Linux only).
+//
+//   agent-priority.mjs  -> <home>/.local/lib/frood-workstation/agent-priority.mjs
+//   suite-lock.sh       -> <home>/.local/lib/frood-workstation/suite-lock.sh
+//   *.service           -> <home>/.config/systemd/user/frood-agent-priority.service
+//
+// Never run from a worktree: install copies them to ~/.local/lib/frood-workstation/ and the
+// unit is executed from there. ORCH_SYSTEMCTL overrides the systemctl binary (tests).
+// ---------------------------------------------------------------------------
+
+export function workstationLibDir() {
+  return path.join(homeDir(), ".local", "lib", "frood-workstation");
+}
+
+export function workstationUnitDir() {
+  return path.join(homeDir(), ".config", "systemd", "user");
+}
+
+const WORKSTATION_UNIT = "frood-agent-priority.service";
+const WS_AGENT_SRC = path.join(REPO, "ops", "workstation", "agent-priority.mjs");
+const WS_LOCK_SRC = path.join(REPO, "ops", "workstation", "suite-lock.sh");
+const WS_UNIT_SRC = path.join(REPO, "ops", "workstation", "frood-agent-priority.service");
+
+// A sandbox home is set (ORCH_HOME) but no systemctl binary was requested (ORCH_SYSTEMCTL unset):
+// install copies the files there but never calls the real systemctl, which would operate on the
+// real user's systemd session instead of the sandbox. With a real run (no ORCH_HOME) behaviour is
+// unchanged.
+function sandboxHome() {
+  return process.env.ORCH_HOME && !process.env.ORCH_SYSTEMCTL;
+}
+
+function wsCopyIfDiffers(src, dest) {
+  const cur = readIfExists(dest);
+  const next = fs.readFileSync(src, "utf8").replace(/\r\n/g, "\n");
+  if (cur === next) return false;
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.writeFileSync(dest, next);
+  return true;
+}
+
+export function installWorkstation({ log = console.log } = {}) {
+  if (process.platform !== "linux") {
+    log("workstation: skipped (non-linux)");
+    return { skipped: true, reason: "non-linux" };
+  }
+  if (process.env.ORCH_SKIP_WORKSTATION === "1") {
+    log("workstation: skipped (ORCH_SKIP_WORKSTATION=1)");
+    return { skipped: true, reason: "ORCH_SKIP_WORKSTATION=1" };
+  }
+  const libDir = workstationLibDir();
+  const unitDir = workstationUnitDir();
+  const guardDest = path.join(libDir, "agent-priority.mjs");
+  const lockDest = path.join(libDir, "suite-lock.sh");
+  const unitDest = path.join(unitDir, WORKSTATION_UNIT);
+
+  const guardChanged = wsCopyIfDiffers(WS_AGENT_SRC, guardDest);
+  const lockChanged = wsCopyIfDiffers(WS_LOCK_SRC, lockDest);
+  const unitChanged = wsCopyIfDiffers(WS_UNIT_SRC, unitDest);
+
+  const systemctl = process.env.ORCH_SYSTEMCTL || "systemctl";
+  const sand = sandboxHome();
+  if (!sand) {
+    try {
+      execFileSync(systemctl, ["--user", "daemon-reload"], { timeout: 15000 });
+    } catch (err) {
+      if (err.code === "ENOENT") {
+        log("workstation: systemctl not found, unit not enabled");
+        return { skipped: false, systemctlMissing: true };
+      }
+      throw err;
+    }
+    execFileSync(systemctl, ["--user", "enable", "--now", WORKSTATION_UNIT], { timeout: 15000 });
+    if (guardChanged) {
+      execFileSync(systemctl, ["--user", "restart", WORKSTATION_UNIT], { timeout: 15000 });
+    }
+  } else {
+    log("workstation: sandbox home, systemctl not called");
+  }
+  return { guardChanged, lockChanged, unitChanged };
+}
+
+export function checkWorkstation({ log = console.log } = {}) {
+  if (process.platform !== "linux" || process.env.ORCH_SKIP_WORKSTATION === "1") {
+    return { ok: true, skipped: true };
+  }
+  let drift = 0;
+  const libDir = workstationLibDir();
+  const unitDir = workstationUnitDir();
+  const guardDest = path.join(libDir, "agent-priority.mjs");
+  const lockDest = path.join(libDir, "suite-lock.sh");
+  const unitDest = path.join(unitDir, WORKSTATION_UNIT);
+  for (const [src, dest] of [
+    [WS_AGENT_SRC, guardDest],
+    [WS_LOCK_SRC, lockDest],
+    [WS_UNIT_SRC, unitDest],
+  ]) {
+    const cur = readIfExists(dest);
+    const next = fs.readFileSync(src, "utf8").replace(/\r\n/g, "\n");
+    if (cur === null) {
+      log(`DRIFT missing: ${dest}  (source ${path.relative(REPO, src)})`);
+      drift += 1;
+    } else if (cur !== next) {
+      log(`DRIFT differs: ${dest}  (source ${path.relative(REPO, src)})`);
+      drift += 1;
+    }
+  }
+  const systemctl = process.env.ORCH_SYSTEMCTL || "systemctl";
+  let active = null;
+  // A sandbox home without an explicit ORCH_SYSTEMCTL: do not probe the real user's unit state.
+  if (process.env.ORCH_HOME !== undefined && process.env.ORCH_SYSTEMCTL === undefined) {
+    return { ok: drift === 0, sandbox: true };
+  }
+  try {
+    active = execFileSync(systemctl, ["--user", "is-active", WORKSTATION_UNIT], {
+      encoding: "utf8",
+      timeout: 15000,
+    }).trim();
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      log("WARN workstation: systemctl not found, cannot verify unit state");
+      return { ok: drift === 0, warn: true };
+    }
+    // is-active exited non-zero -> not active
+    active = "";
+  }
+  if (active !== "active") {
+    log(`DRIFT: ${WORKSTATION_UNIT} is not active (is-active: ${active || "<none>"})`);
+    drift += 1;
+  }
+  return { ok: drift === 0, drift };
+}
+
+export function uninstallWorkstation({ log = console.log } = {}) {
+  if (process.platform !== "linux") {
+    log("workstation: skipped (non-linux)");
+    return;
+  }
+  const systemctl = process.env.ORCH_SYSTEMCTL || "systemctl";
+  const unitDir = workstationUnitDir();
+  const unitDest = path.join(unitDir, WORKSTATION_UNIT);
+  const libDir = workstationLibDir();
+  const guardDest = path.join(libDir, "agent-priority.mjs");
+  const lockDest = path.join(libDir, "suite-lock.sh");
+
+  try {
+    execFileSync(systemctl, ["--user", "disable", "--now", WORKSTATION_UNIT], { timeout: 15000 });
+  } catch {
+    // best effort: the unit may not be enabled
+  }
+  for (const f of [unitDest, guardDest, lockDest]) {
+    try {
+      fs.rmSync(f);
+    } catch {
+      // already gone
+    }
+  }
+  try {
+    execFileSync(systemctl, ["--user", "daemon-reload"], { timeout: 15000 });
+  } catch {
+    // best effort
+  }
+  log("workstation: uninstalled");
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = new Set(process.argv.slice(2));
   try {
-    if (args.has("--check")) process.exit(check() ? 0 : 1);
+    if (args.has("--uninstall-workstation")) {
+      uninstallWorkstation();
+      process.exit(0);
+    }
+    if (args.has("--check")) {
+      const ok = check() && checkWorkstation().ok;
+      process.exit(ok ? 0 : 1);
+    }
     install({ dryRun: args.has("--dry-run") });
+    installWorkstation();
   } catch (err) {
     console.error(`install: ${err.message}`);
     process.exit(2);

@@ -1,0 +1,9 @@
+[Unit]
+Description=Frood agent priority guard (nice>=10 for agent process trees)
+[Service]
+ExecStart=/usr/bin/env node %h/.local/lib/frood-workstation/agent-priority.mjs
+Restart=always
+RestartSec=5
+Nice=5
+[Install]
+WantedBy=default.target
