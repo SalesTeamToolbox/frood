@@ -46,7 +46,13 @@ exports `checkScope({ repo, base, sha, scope })`:
   file is listed by its old path and a **renamed** file by both its old and new paths;
 - a path is `denied` when it matches the hard deny list — `.claude/plans/**` and `.opencode/**` — even when `--scope`
   covers it; otherwise it is `outOfScope` when it does not match `--scope`;
-- it returns `{ ok, outOfScope, denied, error }`, and `ok` is false when the diff cannot be computed (`error` says why).
+- it returns `{ ok, outOfScope, denied, error, from }`, and `ok` is false when the diff cannot be computed (`error`
+  says why);
+- the diff uses `-z`, so a non-ASCII path is not quoted past the deny list;
+- with `baseRef` (the adapter's `base`, passed by `board round`/`ready` and by the desk when it can read the repo's
+  `adapter.json`), it diffs from M = `merge-base(baseRef, sha)` when the ticket base is an ancestor of M (a branch
+  rebased onto a newer main), and otherwise from the ticket base (a base ref that lags it). `from` names the commit
+  used. A missing or unresolvable base ref diffs from the ticket base.
 
 `matchAny`/`matchGlob` live in `scope-check.mjs`; `board.mjs` imports them back for `seniorFor` and the EGM trigger.
 There is exactly one glob matcher.
@@ -55,7 +61,8 @@ The four gates:
 
 - **`board create`** — refuses a `--scope` entry on the deny list, and refuses a Mandate whose `## Scope` section
   grants an open-ended ("any doc", "any file", "as needed", "any other", "wherever") unless that sentence names exact
-  paths and each of them is in `--scope`. Refusal: `board: mandate scope is open-ended: "<sentence>"`.
+  paths and each of them is in `--scope`. A `## Scope` section runs to the next heading of the same or a higher level
+  (sub-headings and bold labels stay inside it), and a negated phrase ("never edit any file outside X") is no grant. Refusal: `board: mandate scope is open-ended: "<sentence>"`.
 - **`board round`** — before recording a done round it fences `base_sha..--reviewed-sha`. When the fence fails the
   recorded critic is `effective: CHANGES_REQUESTED` with one `out of scope: <path>` / `denied path: <path>` reason per
   path; the round still counts, and a critic `APPROVED` cannot override it.
@@ -64,7 +71,8 @@ The four gates:
 - **`doCritic`** — before writing the critic prompt it fences the worker's committed sha. On a failure it writes
   `findings-r<N>.md` with `VERDICT: CHANGES_REQUESTED` and one numbered finding per path (`out of scope: <path> —
   revert this file to <base>`), appends the `verdict:<run>` event so the existing CHANGES_REQUESTED path resumes the
-  worker, and spawns no critic — no paid review of a diff that cannot merge. A diff that cannot be computed at all
+  worker, and spawns no critic — no paid review of a diff that cannot merge. A dry run (`ORCH_DAEMON_DRY_RUN=1`) writes
+  neither the findings nor the verdict. A diff that cannot be computed at all
   pages the owner instead of writing an empty findings file.
 
 In-scope rounds, `verdict-gate.mjs`, `oc-worker.mjs` and `board verify`/`shipped` are unchanged.

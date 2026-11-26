@@ -56,6 +56,8 @@ function board(c, ...args) {
 const ticketFile = (c, id) => path.join(c.repo, ".opencode", "board", "tickets", `${id}.json`);
 const lockDir = (c, id) => path.join(c.repo, ".opencode", "board", "locks", `${id}.lock`);
 const bytes = (p) => fs.readFileSync(p);
+// The default scope is broad (`bin/**`, was `bin/demo.mjs`): with the scope fence on, rounds and ready diff
+// base..sha against it, and the existing tests commit other files under bin/. A later --scope in `extra` wins.
 function created(c, id, ...extra) {
   const r = board(c, "create", id, "--mandate", c.mandate, "--scope", "bin/**", ...extra);
   assert.equal(r.status, 0, r.stderr);
@@ -1879,6 +1881,32 @@ test("scope create: an open-ended grant under a ## Scope heading, wrapped across
   assert.equal(r.status, 1, r.stderr);
   assert.match(r.stderr, /board: mandate scope is open-ended: "- README.md, and any doc line found"/);
   assert.equal(fs.existsSync(ticketFile(c, "scope-open-h")), false, "nothing was written");
+});
+
+function scopeMandate(c, name, scopeBody) {
+  const mandate = path.join(c.root, `${name}.md`);
+  fs.writeFileSync(mandate, `# Ticket x\n\n**Atlas refs consulted / updated?** no map\n\n${scopeBody}\n\n**Blast radius:**\n\n- \`run()\` in \`bin/main.mjs\` — unchanged; test: bin/demo.test.mjs\n`);
+  return board(c, "create", name, "--mandate", mandate, "--scope", "bin/**");
+}
+
+test("scope create: an open-ended grant under a ### sub-heading of ## Scope is refused", () => {
+  const c = mk();
+  const r = scopeMandate(c, "scope-sub", "## Scope\n\n### May touch\n- README.md, and any doc line found");
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /board: mandate scope is open-ended: "- README.md, and any doc line found"/);
+});
+
+test("scope create: an open-ended grant on a bold label inside ## Scope is refused", () => {
+  const c = mk();
+  const r = scopeMandate(c, "scope-bold", "## Scope\n\n**Files:** README.md, and any doc line found");
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /board: mandate scope is open-ended: "\*\*Files:\*\* README.md, and any doc line found"/);
+});
+
+test("scope create: a negated grant phrase in the Scope section is accepted", () => {
+  const c = mk();
+  const r = scopeMandate(c, "scope-neg", "## Scope\n\nMay touch bin/a.mjs. Never edit any file outside bin/. Do not touch any other stream's plan.");
+  assert.equal(r.status, 0, r.stderr);
 });
 
 test("scope create: an open-ended grant naming backticked paths all in --scope is accepted", () => {

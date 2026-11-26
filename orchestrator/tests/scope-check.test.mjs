@@ -101,3 +101,54 @@ test("checkScope: a renamed file is checked by its old and new paths", () => {
   assert.ok(r.outOfScope.includes("bin/old.mjs"), `expected bin/old.mjs in outOfScope, got ${JSON.stringify(r.outOfScope)}`);
   assert.ok(!r.outOfScope.includes("bin/new.mjs"), `bin/new.mjs is in scope, got ${JSON.stringify(r.outOfScope)}`);
 });
+
+test("checkScope: a non-ASCII deny-listed path is denied, not hidden by git's path quoting", () => {
+  const { repo } = mkRepo();
+  const base = commit(repo, { "bin/a.mjs": "a\n" }, "base");
+  const sha = commit(repo, { ".claude/plans/é.md": "plan\n" }, "touch a non-ASCII plan");
+  const r = checkScope({ repo, base, sha, scope: ["**"] });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.denied, [".claude/plans/é.md"]);
+});
+
+test("checkScope: a branch rebased onto a main that advanced an unrelated file is still ok with baseRef", () => {
+  const { repo } = mkRepo();
+  const base = commit(repo, { "bin/a.mjs": "a\n" }, "base");
+  git(repo, "checkout", "-q", "-b", "work");
+  commit(repo, { "bin/a.mjs": "a2\n" }, "in scope");
+  git(repo, "checkout", "-q", "main");
+  commit(repo, { "README.md": "main moved\n" }, "main advances");
+  git(repo, "checkout", "-q", "work");
+  git(repo, "rebase", "-q", "main");
+  const sha = git(repo, "rev-parse", "HEAD");
+  // Without the base ref, the stale ticket base reports main's README.md as out of scope.
+  assert.deepEqual(checkScope({ repo, base, sha, scope: ["bin/**"] }).outOfScope, ["README.md"]);
+  const r = checkScope({ repo, base, sha, scope: ["bin/**"], baseRef: "main" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.outOfScope, []);
+});
+
+test("checkScope: a base ref that lags the ticket base is still checked from the ticket base", () => {
+  const { repo } = mkRepo();
+  commit(repo, { "bin/a.mjs": "a\n" }, "first");
+  git(repo, "branch", "lag"); // the base ref stays here, behind the ticket base
+  const base = commit(repo, { "README.md": "ticket base\n" }, "ticket base");
+  git(repo, "checkout", "-q", "-b", "work");
+  const ok = commit(repo, { "bin/a.mjs": "a2\n" }, "in scope");
+  // README.md changed before the ticket base: it must not be reported.
+  const r = checkScope({ repo, base, sha: ok, scope: ["bin/**"], baseRef: "lag" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.from, base);
+  const bad = commit(repo, { "docs/x.md": "x\n" }, "out of scope");
+  const r2 = checkScope({ repo, base, sha: bad, scope: ["bin/**"], baseRef: "lag" });
+  assert.deepEqual(r2.outOfScope, ["docs/x.md"]);
+});
+
+test("checkScope: an unresolvable baseRef falls back to the ticket base", () => {
+  const { repo } = mkRepo();
+  const base = commit(repo, { "bin/a.mjs": "a\n" }, "base");
+  const sha = commit(repo, { "README.md": "r\n" }, "out of scope");
+  const r = checkScope({ repo, base, sha, scope: ["bin/**"], baseRef: "no-such-ref" });
+  assert.equal(r.from, base);
+  assert.deepEqual(r.outOfScope, ["README.md"]);
+});

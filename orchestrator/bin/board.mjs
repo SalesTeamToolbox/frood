@@ -652,16 +652,27 @@ function seniorFor(scope, adapter) {
   const reasons = scope.filter((s) => matchAny(s, adapter.guarded_paths)).map((s) => `guarded path: ${s}`);
   return { required: reasons.length > 0, reasons };
 }
-// The Mandate's "## Scope" section (or a leading "**Scope:**" line), parsed back
-// to its sentences so an open-ended grant can be detected.
+// The Mandate's "## Scope" section (or a leading "**Scope:**" block), parsed back
+// to its sentences so an open-ended grant can be detected. A "## Scope" heading
+// runs to the next heading of the same or a higher level, so its sub-headings
+// ("### May touch") and bold labels ("**Files:** …") stay inside it. A
+// "**Scope:**" block runs to the next heading or bold label.
 function scopeSection(md) {
   const lines = String(md).replace(/\r\n/g, "\n").split("\n");
   let start = -1;
+  let level = 0; // 0: the "**Scope:**" form
   for (let i = 0; i < lines.length; i++) {
-    if (/^#+\s*scope\b/i.test(lines[i]) || /^\*\*scope/i.test(lines[i])) { start = i; break; }
+    const h = /^(#+)\s*scope\b/i.exec(lines[i]);
+    if (h) { start = i; level = h[1].length; break; }
+    if (/^\*\*scope/i.test(lines[i])) { start = i; break; }
   }
   if (start < 0) return "";
-  const end = lines.findIndex((_, i) => i > start && /^(#+|\*\*)/.test(lines[i]));
+  const ends = (line) => {
+    if (!level) return /^(#+|\*\*)/.test(line);
+    const h = /^(#+)\s/.exec(line);
+    return Boolean(h) && h[1].length <= level;
+  };
+  const end = lines.findIndex((l, i) => i > start && ends(l));
   return lines.slice(start, end < 0 ? lines.length : end).join("\n");
 }
 // Sentences of the Scope section that hand the worker a blank cheque. A grant is
@@ -676,7 +687,7 @@ function mandateScopeSentences(mand) {
   let cur = [];
   for (const raw of scopeSection(mand).split("\n")) {
     const line = raw.trim();
-    if (!line || /^([-*+]|\d+[.)])\s/.test(line)) {
+    if (!line || /^([-*+]|\d+[.)])\s/.test(line) || /^(#+\s|\*\*)/.test(line)) {
       if (cur.length) blocks.push(cur.join(" "));
       cur = [];
     }
@@ -692,10 +703,23 @@ function mandateScopeSentences(mand) {
   }
   return sentences;
 }
+// A grant phrase is negated when its clause (the text since the last ";" before
+// it) carries a negation: "never edit any file outside X", "May not touch: … any
+// other file" restrict the worker, they do not grant anything.
+const NEGATION = /\b(never|not|no|nor|cannot|without)\b|n't\b/;
+function grantsOpenEnded(lower) {
+  for (const phrase of OPEN_ENDED_SCOPE) {
+    for (let i = lower.indexOf(phrase); i >= 0; i = lower.indexOf(phrase, i + 1)) {
+      const before = lower.slice(0, i);
+      const clause = before.slice(before.lastIndexOf(";") + 1);
+      if (!NEGATION.test(clause)) return true;
+    }
+  }
+  return false;
+}
 function mandateScopeIsOpenEnded(mand, scope) {
   for (const s of mandateScopeSentences(mand)) {
-    const lower = s.toLowerCase();
-    if (!OPEN_ENDED_SCOPE.some((phrase) => lower.includes(phrase))) continue;
+    if (!grantsOpenEnded(s.toLowerCase())) continue;
     // Allowed only when the sentence names exact paths and each is in --scope.
     const paths = s.split(/\s+/).map((t) => t.replace(/^["'`([]+|["'`.,;:)\]]+$/g, "")).filter((t) => t.includes("/") || /\.[A-Za-z0-9]+$/.test(t));
     if (paths.length > 0 && paths.every((p) => matchAny(p, scope))) continue;
@@ -1056,7 +1080,7 @@ function cmdRound(ctx, id) {
       // approved. The round still counts (a critic APPROVED cannot override it).
       let roundCritic = critic;
       if (t.base_sha) {
-        const fence = checkScope({ repo: wt, base: t.base_sha, sha: head, scope: t.scope });
+        const fence = checkScope({ repo: wt, base: t.base_sha, sha: head, scope: t.scope, baseRef: ctx.adapter.base });
         if (!fence.ok) {
           const reasons = [];
           for (const p of fence.outOfScope) reasons.push(`out of scope: ${p}`);
@@ -1242,7 +1266,7 @@ function cmdReady(ctx, id) {
     // ticket's `--scope` or touches the deny list, covering rounds recorded
     // before this check existed.
     if (t.base_sha) {
-      const fence = checkScope({ repo: wt, base: t.base_sha, sha: sig.reviewed_sha, scope: t.scope });
+      const fence = checkScope({ repo: wt, base: t.base_sha, sha: sig.reviewed_sha, scope: t.scope, baseRef: ctx.adapter.base });
       if (!fence.ok) {
         const reasons = [];
         for (const p of fence.outOfScope) reasons.push(`out of scope: ${p}`);

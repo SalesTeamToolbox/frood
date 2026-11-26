@@ -958,7 +958,15 @@ function scopeInputs(ticket, slug) {
     null;
   const scope = b && Array.isArray(b.scope) && b.scope.length ? b.scope : Array.isArray(ticket.scope) ? ticket.scope : [];
   if (!base || !scope.length) return null;
-  return { base, scope };
+  // The adapter's base ref (e.g. origin/main) lets checkScope diff a rebased branch from its new merge-base.
+  let baseRef = null;
+  if (typeof ticket.repo === "string" && ticket.repo) {
+    try {
+      const a = JSON.parse(fs.readFileSync(path.join(ticket.repo, ".opencode", "board", "adapter.json"), "utf8"));
+      if (typeof a.base === "string" && a.base) baseRef = a.base;
+    } catch {}
+  }
+  return { base, scope, baseRef };
 }
 
 // The newest verdict for a run: verdict:<run>, verdict:<run>@2, verdict:<run>@3 … (highest @n wins;
@@ -1765,10 +1773,11 @@ async function doCritic(stream, key, events, ticketPath, out, findings, round) {
       head = git(ticket.worktree, ["rev-parse", "HEAD"]).trim();
     } catch {}
     if (head) {
-      const fence = checkScope({ repo: ticket.worktree, base: fenceIn.base, sha: head, scope: fenceIn.scope });
+      const fence = checkScope({ repo: ticket.worktree, base: fenceIn.base, sha: head, scope: fenceIn.scope, baseRef: fenceIn.baseRef ?? undefined });
+      const from = fence.from || fenceIn.base;
       const reasons = [];
-      for (const p of fence.outOfScope) reasons.push(`out of scope: ${p} — revert this file to ${fenceIn.base}`);
-      for (const p of fence.denied) reasons.push(`denied path: ${p} — revert this file to ${fenceIn.base}`);
+      for (const p of fence.outOfScope) reasons.push(`out of scope: ${p} — revert this file to ${from}`);
+      for (const p of fence.denied) reasons.push(`denied path: ${p} — revert this file to ${from}`);
       // A diff that cannot be computed names no path: fail closed to the owner rather than write an empty
       // findings file that would resume the worker with nothing to fix.
       if (!fence.ok && !reasons.length) {
@@ -1776,6 +1785,8 @@ async function doCritic(stream, key, events, ticketPath, out, findings, round) {
         return { stream, key, line: "", outcome: "paged" };
       }
       if (reasons.length) {
+        // A dry run makes no durable write: no findings file, no verdict event.
+        if (DAEMON_DRY()) return { stream, key, line: `critic r${round} -> ${findings}`, outcome: "critic" };
         const runDir = path.dirname(ticket.mandate);
         const findingsText = ["VERDICT: CHANGES_REQUESTED", "", "BLAST RADIUS:"];
         for (const r of reasons) findingsText.push(`- ${r}`);
