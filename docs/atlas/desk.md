@@ -9,7 +9,7 @@ Used by `decideStep`'s `run-done`/`done` branch and the verdict branch. The crit
 - `roundOf(lines, slug)` — 1 + `ACTION resume-worker` acks for this ticket's slug.
 - N from the worker run id `…worker-r<N>` (a worker-r2 is never reviewed in round 1).
 - 1 + the highest N among `findings-r<N>.md` / `findings-r<N>-alt.md` already in the run dir.
-- 1 + `rounds.length` of the board ticket `<ticket.repo>/.opencode/board/tickets/<slug>.json` when `ticket.repo` is set and the file parses (missing/unreadable contributes nothing, never throws).
+- `1 + board.lap` of the board ticket `<ticket.repo>/.opencode/board/tickets/<slug>.json` — `board.lap` is the counted rounds in this lap after the last `reopens[].after_round` floor (mirrors `board.mjs` ~:994-996); `board.counted` is the cumulative counted rounds across all laps and `board.has(sha)` names a counted round already recorded for a verdict. Read via the pure `boardRounds()` helper (desk.mjs); missing/unreadable contributes nothing, never throws.
 
 The printed `ACTION critic … findings-r<N>.md <N>` path is never an existing file. Step stays pure: file reads only, no git, no spawn.
 

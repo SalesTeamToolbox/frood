@@ -911,15 +911,32 @@ function criticRound(lines, slug, run, runDir, ticket) {
       if (mm) n = Math.max(n, Number(mm[1]) + 1);
     }
   } catch {}
-  // 1 + rounds.length of the board ticket, when ticket.repo is set and the file parses
-  if (ticket && typeof ticket.repo === "string" && ticket.repo) {
-    try {
-      const boardFile = path.join(ticket.repo, ".opencode", "board", "tickets", `${slug}.json`);
-      const b = JSON.parse(fs.readFileSync(boardFile, "utf8"));
-      if (Array.isArray(b?.rounds)) n = Math.max(n, b.rounds.length + 1);
-    } catch {}
-  }
+  // 1 + lap of the board ticket (mirrors board.mjs's per-lap cap: board.mjs ~:994-996), never the raw
+  // rounds.length (that counts uncounted rounds and ignores reopen laps). boardRounds never throws.
+  const board = ticket && typeof ticket.repo === "string" ? boardRounds(ticket, slug) : null;
+  if (board) n = Math.max(n, board.lap + 1);
   return Math.max(1, n);
+}
+
+// boardRounds: reads the board ticket the way criticRound does (never throws; absent/unreadable -> null).
+// Mirrors board.mjs: `counted` is the cumulative number of rounds with counted: true across all laps
+// (board.mjs ~:436-438, the desk's own senior rule `counted > 2`); `lap` is the counted rounds in this
+// lap after the last reopen (board.mjs ~:994-996). `has(sha)` names a counted round already recorded
+// for a verdict's reviewed_sha. File names stay slots — counted/lap come only from the board ticket.
+function boardRounds(ticket, slug) {
+  if (!ticket || typeof ticket.repo !== "string" || !ticket.repo || !slug) return null;
+  const boardFile = path.join(ticket.repo, ".opencode", "board", "tickets", `${slug}.json`);
+  let b;
+  try {
+    b = JSON.parse(fs.readFileSync(boardFile, "utf8"));
+  } catch {
+    return null;
+  }
+  if (!b || !Array.isArray(b.rounds)) return null;
+  const counted = b.rounds.filter((r) => r.counted).length;
+  const floor = Array.isArray(b.reopens) && b.reopens.length ? Number(b.reopens[b.reopens.length - 1].after_round) || 0 : 0;
+  const lap = b.rounds.filter((r) => r.counted && Number(r.n) > floor).length;
+  return { counted, lap, has: (sha) => b.rounds.some((r) => r.counted && r.reviewed_sha === sha) };
 }
 
 // The newest verdict for a run: verdict:<run>, verdict:<run>@2, verdict:<run>@3 … (highest @n wins;
@@ -1048,11 +1065,23 @@ export function decideStep(stream, key, events, lines) {
     const agent = ev.agent ?? "";
     if (!agent.startsWith("worker")) return { action: `ESCALATE agent-${agent} ${out}`, ticket: slug };
     if (ev.outcome === "done") {
-      // criticRound floors the round; a slot already judged by a recorded verdict advances it, and a round past
-      // max pages rounds-exhausted naming the highest taken findings file instead of a critic that cannot run.
+      // criticRound floors the round; a slot already judged by a recorded verdict advances it. rounds-exhausted
+      // is a board cap on counted rounds in this lap: page it only when lap >= max (board ticket readable).
+      // Otherwise pick the next free findings slot even when its number is above max. File names stay slots;
+      // the board's counted rounds decide exhaustion. Without a board ticket, today's slot-number rule stands.
+      const board = ticket && typeof ticket.repo === "string" ? boardRounds(ticket, slug) : null;
       let r = round;
-      while (r <= max && slotJudged(runDir, r, events)) r++;
-      if (r > max) return { action: `ESCALATE rounds-exhausted ${path.join(runDir, `findings-r${r - 1}.md`)}`, ticket: slug };
+      if (board) {
+        if (board.lap >= max) {
+          return { action: `ESCALATE rounds-exhausted ${path.join(runDir, `findings-r${r - 1}.md`)}`, ticket: slug };
+        }
+        while (slotJudged(runDir, r, events)) r++;
+      } else {
+        while (r <= max && slotJudged(runDir, r, events)) r++;
+        if (r > max) {
+          return { action: `ESCALATE rounds-exhausted ${path.join(runDir, `findings-r${r - 1}.md`)}`, ticket: slug };
+        }
+      }
       return { action: `ACTION critic ${ticketPath} ${out} ${path.join(runDir, `findings-r${r}.md`)} ${r}`, ticket: slug };
     }
     if (ev.outcome === "blocked_question") return { action: `ESCALATE question ${out}`, ticket: slug };
@@ -1118,13 +1147,18 @@ export function decideStep(stream, key, events, lines) {
         // (Free agents code round 1; a drop is resumed via --role worker above.)
         let agent = wdone.agent;
         let r = verdictRound;
-        while (r < max && nextOutTaken(runDir, r, events, wrun)) r++;
-        if (r < max && !nextOutTaken(runDir, r, events, wrun)) {
-          const next = path.join(runDir, `worker-r${r + 1}.md`);
-          const cmd = `node ${OC_WORKER} --agent ${agent} --dir ${ticket.worktree} --prompt ${findings} --report ${ticket.report} --out ${next} --session ${wsession} --stream ${stream}`;
-          return { action: `ACTION resume-worker ${cmd}`, ticket: slug };
+        const board = ticket && typeof ticket.repo === "string" ? boardRounds(ticket, slug) : null;
+        if (board) {
+          if (board.lap >= max) return { action: `ESCALATE rounds-exhausted ${findings}`, ticket: slug };
+          // lap < max: resume on the next free slot even when its number is above max
+          while (nextOutTaken(runDir, r, events, wrun)) r++;
+        } else {
+          while (r < max && nextOutTaken(runDir, r, events, wrun)) r++;
+          if (r >= max) return { action: `ESCALATE rounds-exhausted ${findings}`, ticket: slug };
         }
-        return { action: `ESCALATE rounds-exhausted ${findings}`, ticket: slug };
+        const next = path.join(runDir, `worker-r${r + 1}.md`);
+        const cmd = `node ${OC_WORKER} --agent ${agent} --dir ${ticket.worktree} --prompt ${findings} --report ${ticket.report} --out ${next} --session ${wsession} --stream ${stream}`;
+        return { action: `ACTION resume-worker ${cmd}`, ticket: slug };
       }
       if (!wrun) return { action: `ESCALATE review-unlinked ${findings} (critic run outside the step flow: say which worker run it reviewed)`, ticket: slug };
       if (!wsession) return { action: `ESCALATE no-session ${out}`, ticket: slug };
@@ -1134,7 +1168,20 @@ export function decideStep(stream, key, events, lines) {
       return { action: `ESCALATE owner-signoff ${findings} (free review: ${ev.reviewed_sha ?? "unknown"})`, ticket: slug };
     }
     if (ev.effective === "APPROVED") {
-      if (ev.senior || ticket.senior_trigger || verdictRound > 2) return { action: `ESCALATE senior ${findings}`, ticket: slug };
+      // Senior trigger: counted rounds this approval makes (> 2), from the board ticket when readable.
+      // The board round for this verdict may or may not be recorded yet when the desk sees the verdict event;
+      // `has()` covers both orders (adds 1 only when the sha isn't already a counted round). Without a board,
+      // fall back to resume acks only (roundOf), not the findings file name.
+      let senior = ev.senior || ticket.senior_trigger;
+      if (!senior) {
+        const board = ticket && typeof ticket.repo === "string" ? boardRounds(ticket, slug) : null;
+        if (board) {
+          senior = board.counted + (board.has(ev.reviewed_sha) ? 0 : 1) > 2;
+        } else {
+          senior = roundOf(lines, slug) > 2;
+        }
+      }
+      if (senior) return { action: `ESCALATE senior ${findings}`, ticket: slug };
       return { action: `ESCALATE merge ${ticketPath} ${ev.reviewed_sha ?? ""}`.trimEnd(), ticket: slug };
     }
     return { action: `ESCALATE critic-invalid ${findings}`, ticket: slug };
