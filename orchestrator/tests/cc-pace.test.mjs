@@ -67,6 +67,23 @@ test("table: over / on / unknown rows, first match wins", () => {
   assert.equal(pace([]).reason, "no snapshot");
 });
 
+test("reserve rule alone: weekly >= 100 - reserve is over even when projected < 95", () => {
+  // margin -200 pins projected far below 95, so only the reserve ceiling (100 - 11.28 = 88.72 at H=100) can fire.
+  const cfg = { ...DEFAULTS, margin: -200 };
+  const hit = pace([snap({ weekly: 90, H: 100, five: 10 })], null, cfg);
+  assert.ok(hit.projected < 95, String(hit.projected));
+  assert.equal(hit.state, "over");
+  assert.match(hit.reason, /weekly 90% >= 88\.7 \(100 - reserve\)/);
+  // Just under the ceiling, projected < 95, five_hour < 85: not over.
+  const miss = pace([snap({ weekly: 88.5, H: 100, five: 10 })], null, cfg);
+  assert.ok(miss.projected < 95 && 88.5 < 100 - miss.reserve);
+  assert.notEqual(miss.state, "over");
+  // A raised reserve moves the ceiling: 60 % reserve at H=100 -> ceiling ~66.2.
+  const raised = pace([snap({ weekly: 70, H: 100, five: 10 })], null, { ...cfg, weekly_reserve_pct: 60 });
+  assert.equal(raised.state, "over");
+  assert.match(raised.reason, /100 - reserve/);
+});
+
 test("off when cfg.enabled is false, even with no snapshot", () => {
   assert.equal(pace([snap()], null, { ...DEFAULTS, enabled: false }).state, "off");
   assert.equal(pace([], null, { enabled: false }).state, "off");

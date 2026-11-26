@@ -491,7 +491,7 @@ sibling traps: orchestrator/bin/desk-check.mjs (main imports the statusline side
 ### Claude weekly pace (cc-pace)
 handler: orchestrator/bin/cc-pace.mjs (`paceState` pure model, `reserve`, `projected`, `statusLine`; CLI `[status] [--json]`)
 decides: the pace state off / unknown / over / on / under from the cc-usage snapshots (newest `at` is current; recent slope over the last 24 h of the same weekly window when it spans >= 4 h), config `usage-limits.json` `cc` over defaults; last state for hysteresis in `<orchDir()>/cc-pace-state.json`
-trap: `status` must print exactly one line <= 100 chars with no leading `pace` word and exit 0 for every state, because workers-view prints `pace: <first stdout line>`; `ORCH_NO_PACE=1` maps to `off`; nothing routes on it until M4
+trap: `status` must print exactly one line <= 100 chars with no leading `pace` word and exit 0 for every state, because workers-view prints `pace: <first stdout line>`; `ORCH_NO_PACE=1` maps to `off`; `unknown`/`off` overwrite cc-pace-state.json too, so the `under` hysteresis memory restarts after a stale or disabled run (deliberate: fails toward the stricter 80 ceiling); nothing routes on it until M4
 
 ### Live worker view (headless runs)
 handler: orchestrator/bin/workers-view.mjs (text/--json/--html [--watch]; joins `oc-worker active --json` to board tickets on `assignment.worker` pid/out_path, never the title); orchestrator/mods/workers-panel/hooks/register.tsx (the `/workers` pane, polls the CLI every 15 s only while open)
