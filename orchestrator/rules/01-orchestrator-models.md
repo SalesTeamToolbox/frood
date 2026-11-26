@@ -68,9 +68,11 @@ Orchestrator writes the ticket + Mandate → **worker** codes in the ticket work
      resumes dropped Nvidia runs on the same session. Per-ticket exception: if worker-nvidia dropped
      (receipt exit `timeout`/`stalled`) on 2 earlier rounds of the same run dir, the next round leaves
      worker-nvidia out.
-  4. **The Claude Code `worker` (Sonnet) is never an automatic fallback.** Use it only when every
-     OpenCode pool, including Nvidia after its retry, is out. The receipt states that reason, and the
-     orchestrator tells the owner.
+  4. **The Claude Code `worker` (Sonnet) is never a fallback; preferred first only when pace is UNDER.**
+     `oc-worker --role worker` puts `cc-worker` (headless Claude Code, Sonnet) first by itself when the
+     `pace:` line reads UNDER (never on a `--session` round). Otherwise use the in-session Claude Code
+     `worker` agent only when every OpenCode pool, including Nvidia after its retry, is out. The receipt
+     states that reason, and the orchestrator tells the owner.
   5. **Revision rounds stay on the same agent and session (`--session`).** Switch to the next stronger
      pool only after 2 rounds on one model. This replaces "round 2+ goes paid".
 

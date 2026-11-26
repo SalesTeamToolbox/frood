@@ -16,6 +16,10 @@
 // It never edits agents or rules and never promotes a model outside the chains below: choosing a NEW
 // model stays a human decision via /frood-model-router-refresh (bake-off evidence first).
 // --if-stale N: exit 0 immediately when the last check is younger than N hours.
+// Pace (cc-pacing M4): every run except --decide reads `cc-pace.mjs status --json` once, before the --if-stale
+//   early return, and in text mode prints `pace: <cc-pace status line>` as the first stdout line (both paths).
+//   OVER adds `pace: OVER — conserve: ...` right after it; UNDER changes only the worker line to
+//   `use cc-worker (pace UNDER), fallback <agent>`. --json adds a top-level `pace` key; the stamp never holds it.
 // --free: prints a FREE INVENTORY section after the role lines (also included in default output)
 // --probe-free: probes every unused, allowed free model (max 12, serial), writes free-inventory.json, never marks down/up
 // Exit: 0 every role has a healthy agent, 1 some role has none, 2 usage error.
@@ -29,6 +33,8 @@ import { agentModel, providerOf, readProviders, SEED_PROVIDERS, classify, isDown
 import { collectUsage, poolHeadroom, loadLimits, LOW_HEADROOM_PCT_DEFAULT } from "./usage.mjs";
 import { opencodeBin } from "./oc-worker.mjs";
 import { CHAINS } from "./chains.mjs";
+import { readPace } from "./pace-read.mjs";
+import { statusLine as paceStatusLine } from "./cc-pace.mjs";
 
 // Probing these costs real money per call (a large system prompt on a strong model — Sonnet ~$0.07)
 // and they run rarely; --probe skips them unless --probe-all. Existence + real failures still mark them.
@@ -449,6 +455,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log(`${id}: ${decision}${decision === "free-only" ? ` (allow ${allow.join(", ")})` : ""}`);
     process.exit(0);
   }
+  // Pace first: before the --if-stale early return, so a fresh skip still shows it.
+  const pace = readPace();
+  if (!flag("--json")) {
+    console.log(`pace: ${paceStatusLine(pace)}`);
+    if (pace.state === "over") console.log("pace: OVER — conserve: no Fable senior unless guarded; scouts haiku");
+  }
   const mf = val("--models-file");
   const live = liveModels(mf);
   // Detection is cheap, so it runs even when --if-stale skips the probes.
@@ -473,12 +485,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     } catch {}
   }
   const report = await check({ probeModels: flag("--probe") || flag("--probe-all"), probeAll: flag("--probe-all"), models: live, newProviders: detected.providers, free: flag("--free"), probeFree: flag("--probe-free"), authFile: val("--auth-file") });
-  if (flag("--json")) console.log(JSON.stringify(report, null, 2));
+  if (flag("--json")) console.log(JSON.stringify({ ...report, pace }, null, 2));
   else {
     for (const [role, r] of Object.entries(report.roles)) {
       const why = r.chain.filter((c) => c.state !== "healthy").map((c) => `${c.agent}: ${c.state}${c.detail ? ` (${c.detail})` : ""}`);
       const visionInfo = r.use ? (r.chain.find(c => c.agent === r.use)?.vision ? " 👁" : "") : "";
-      console.log(`${role.padEnd(14)} use ${r.use || "NONE — no healthy agent in chain"}${visionInfo}${why.length ? `   [skipped ${why.join("; ")}]` : ""}`);
+      const pacePrefix = role === "worker" && pace.state === "under" ? "cc-worker (pace UNDER), fallback " : "";
+      console.log(`${role.padEnd(14)} use ${pacePrefix}${r.use || "NONE — no healthy agent in chain"}${visionInfo}${why.length ? `   [skipped ${why.join("; ")}]` : ""}`);
     }
     for (const n of report.notes) console.log(`note: ${n}`);
     // Print free inventory summary ALWAYS (when live available), details only with --free/--probe-free

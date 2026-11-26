@@ -6,6 +6,7 @@
 //   - a model the rule lists under "Dropped" appears in a dispatch file (commands/, agents/, skills/, CLAUDE.md)
 //   - a Claude Code model value is not an alias (haiku|sonnet|opus|fable|inherit), e.g. Task({ model: "claude-sonnet-4-5" })
 //   - a rules/ file uses bare "CC" (ambiguous: Claude Code vs CommandCode)
+// `--agent cc-worker` (headless Claude Code) is a known agent, never flagged; it is not a CHAINS role.
 //
 //   node bin/check-routing.mjs [--root <dir>] [--extra <file>]... [--models-file <file>]
 // Defaults: --root = this repo, --extra = ~/.claude/CLAUDE.md, models from `opencode models`.
@@ -72,6 +73,9 @@ function matchesDropped(id, dropped) {
 const WORKER_ROLES = new Set(["worker", "worker-strong", "worker-nvidia", "worker-free"]);
 const CRITIC_ROLES = new Set(["critic"]);
 const CHAIN_ROLES = new Set([...WORKER_ROLES, ...CRITIC_ROLES]);
+// Known agents outside CHAINS: `--agent cc-worker` (headless Claude Code, with or without --fallback) is a valid
+// dispatch; `oc-worker --role worker` puts it first by itself when the pace is UNDER.
+export const KNOWN_NON_CHAIN_AGENTS = new Set(["cc-worker"]);
 
 // Extract `--agent <role> --fallback <a,b,...>` chains from a doc's text, scoped to worker and critic roles.
 // The fallback value is trimmed of a trailing backtick (e.g. ``--fallback a,b,c` ``).
@@ -84,7 +88,7 @@ function workerFallbackChains(text) {
     const fbM = line.match(/--fallback\s+([^\s`]+)/);
     if (!agentM || !fbM) continue;
     const agent = agentM[1];
-    if (!CHAIN_ROLES.has(agent)) continue;
+    if (KNOWN_NON_CHAIN_AGENTS.has(agent) || !CHAIN_ROLES.has(agent)) continue;
     const fallback = fbM[1].split(",").map((s) => s.trim().replace(/`+$/, "")).filter(Boolean);
     out.push({ agent, fallback, lineNo: i + 1 });
   }

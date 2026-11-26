@@ -107,7 +107,7 @@
 //   quota / rate-limit, so --fallback moves on, and `cc-worker` is marked down in pool-health until the 5-hour reset (the
 //   reset time in the message, else now + 5 h). At most `cc.max_workers` (usage-limits.json, default 1) cc-worker runs
 //   at once machine-wide, via the lock dirs `provider-cc-<i>`; a waiting run waits (ORCH_CC_POLL_MS, default 3000) and
-//   never fails. cc-worker is not in any CHAINS role: name it with --agent.
+//   never fails. cc-worker is not in any CHAINS role: name it with --agent (or see pace-aware routing below).
 // - Detached runs (detachRun): a cc-worker run (or any run with --detach) survives its launcher. The launching oc-worker
 //   re-spawns itself (same argv, env marker ORCH_DETACHED_CHILD=1) in a new session and process group (POSIX setsid),
 //   stdin ignored, the child's stderr to <out>.detached.log and its stdout to <out>.detached.out (<out> is the --out path,
@@ -116,6 +116,12 @@
 //   same output and status. SIGTERM / SIGINT / SIGHUP to the launcher exit it (143 / 130 / 129) WITHOUT signalling the
 //   child, so a Claude Code session that ends its turn no longer kills the run; signal the child pid to stop the run.
 //   --no-detach runs in process (the old behaviour). Windows never detaches. OpenCode agents detach only with --detach.
+// - Pace-aware routing (bin/pace-read.mjs): every launch reads `cc-pace.mjs status --json` once (10 s timeout; any
+//   failure reads as `unknown`, never fails the run; ORCH_NO_PACE=1 → `off`). On an `under` pace, `--role worker`
+//   becomes [cc-worker, <today's chain after the Nvidia drop rule>]; every other state, every other role, --agent /
+//   --fallback launches and any `--session` launch (the session pins the backend) keep today's chain. Every receipt
+//   gets cc_pace {state, weekly, projected, at, prepended}. A detached child takes the launcher's read and chain
+//   (env ORCH_PACE_DECISION) and never reads again. ORCH_PACE_BIN overrides the cc-pace.mjs path (tests).
 // Exit: 0 finished, 3 no final text, 4 timeout, 5 opencode error, 6 every pool in the chain known-down, 7 board
 // attach refused (--ticket), 8 model not allowed by provider policy (`ignored`; unreadable providers.json; model unresolvable while any provider is restricted; `free-only`
 // and not on the allowlist), 10 stale or dirty tree (fresh --stream worker refused before queued/spawn).
@@ -135,6 +141,7 @@ import crypto from "node:crypto";
 import { appendEvent, atomicWrite, streamsDir } from "./handoff.mjs";
 import { workerOutcome } from "./outcome.mjs";
 import { CHAINS, chainFor } from "./chains.mjs";
+import { readPace, paceChain, ccPaceRecord } from "./pace-read.mjs";
 import { readSample, slotConfig, allowedSlots, decisionLog, heldCount, nvidiaCapNow, recordNvidia429 } from "./slots.mjs";
 import { allowedRoots, findMain, gitStatusZ, parseStatusZ, footer, mergeEditFence, foldEscapes, finalizeEscapes, hasCompletedWrite } from "./worktree-fence.mjs";
 
@@ -273,7 +280,9 @@ export function usage() {
 function isNvidiaAgent(agent) {
   return typeof agent === "string" && /-nvidia$/.test(agent);
 }
-export function args(argv) {
+// opts.pace: the pace object (or a function returning it, called at most once) used by `--role` expansion;
+// opts.chain: an already-decided chain (the detached child). Neither given: today's chain, no pace read.
+export function args(argv, opts = {}) {
   const a = { timeoutMin: 30, idleMin: undefined, resume: undefined, vision: false, graceMin: 15 };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
@@ -312,6 +321,18 @@ export function args(argv) {
     const provisionalOut = a.out || path.join(path.dirname(path.resolve(a.prompt)), `${chain[0]}-out.md`);
     const outDir = path.dirname(path.resolve(provisionalOut));
     if (chain[0] === "worker-nvidia" && nvidiaDropCount(outDir) >= 2) chain = chain.slice(1);
+    if (Array.isArray(opts.chain) && opts.chain.length) {
+      chain = [...opts.chain]; // detached child: the launcher's decision, never a second pace read
+    } else if (!a.session && opts.pace !== undefined) {
+      // Pace-aware routing (M4): an `under` pace puts cc-worker first for --role worker. --session pins the
+      // backend (a revision round stays on its agent and session), so it never prepends.
+      const pace = typeof opts.pace === "function" ? opts.pace() : opts.pace;
+      const next = paceChain(a.role, chain, pace);
+      if (next.length > chain.length) {
+        chain = next;
+        a.pacePrepended = true;
+      }
+    }
     a.agent = chain[0];
     a.fallback = chain.slice(1);
   }
@@ -1231,6 +1252,7 @@ async function runChain(a) {
     r = { agent: a.agent, model: a.model || agentModel(a.agent) || "(agent default)", session: null, exit: "no-healthy-pool", seconds: 0, tokens: null, cost: 0, first_line: "", verdict: null, out: null, partial: false, errors: noPoolErrors(hops), status: 6 };
   }
   if (hops.length) r.repooled_from = hops;
+  r.cc_pace = a.ccPace ?? ccPaceRecord(null); // the launch's one pace read (main block), on every receipt
   if (visionFallbackWarning) r.vision_fallback = "no vision-capable agent available, using first healthy agent";
   // Record auto-vision detection info
   if (a.autoVision) {
@@ -1764,6 +1786,8 @@ export async function runWorker(a) {
       ...(readonlyViolation ? { readonly_violation: true } : {}),
       // Worktree fence: only present when something escaped or was suspected.
       ...(escaped ? { escaped } : {}),
+      // Claude Code weekly pace at launch (M4): read once per launch, never fails the run.
+      cc_pace: a.ccPace ?? ccPaceRecord(null),
       // Critics: the mechanical decision, not the critic's own claim (free critics find, then approve).
       gate: gateResult,
       // Vision metadata
@@ -1942,6 +1966,19 @@ export function activeRuns(now = Date.now()) {
   }).sort((a, b) => (a.started || 0) - (b.started || 0));
 }
 
+// ORCH_PACE_DECISION (set by detachRun for its child): { cc_pace, chain }. Unreadable → null (the child reads itself).
+export function paceDecision(text) {
+  if (!text) return null;
+  try {
+    const d = JSON.parse(text);
+    if (!d || typeof d !== "object" || !d.cc_pace || typeof d.cc_pace !== "object") return null;
+    const chain = Array.isArray(d.chain) && d.chain.every((x) => typeof x === "string") ? d.chain : null;
+    return { cc_pace: ccPaceRecord(d.cc_pace, d.cc_pace.prepended === true), chain };
+  } catch {
+    return null;
+  }
+}
+
 // Survive the launcher: re-spawn this script in its own session (setsid) and wait for it, relaying its output and exit
 // code; a signal to the launcher ends only the launcher. Returns false when this process should do the run itself:
 // it is the detached child (marker set), detach is off (--no-detach, or a non-cc agent without --detach), or Windows.
@@ -1957,7 +1994,9 @@ export function detachRun(a, argv) {
   const stdoutFile = out + ".detached.out"; // the child's stdout (the receipt JSON line)
   const errFd = fs.openSync(log, "w");
   const outFd = fs.openSync(stdoutFile, "w");
-  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv], { detached: true, stdio: ["ignore", outFd, errFd], env: { ...process.env, ORCH_DETACHED_CHILD: "1" }, windowsHide: true });
+  // The pace decision travels to the child (ORCH_PACE_DECISION): one read, one chain, one receipt value.
+  const decision = a.ccPace ? { ORCH_PACE_DECISION: JSON.stringify({ cc_pace: a.ccPace, chain: a.role ? [a.agent, ...(a.fallback || [])] : null }) } : {};
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv], { detached: true, stdio: ["ignore", outFd, errFd], env: { ...process.env, ORCH_DETACHED_CHILD: "1", ...decision }, windowsHide: true });
   fs.closeSync(errFd);
   fs.closeSync(outFd);
   const SIGNALS = { SIGTERM: 143, SIGINT: 130, SIGHUP: 129 };
@@ -2001,13 +2040,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     process.exit(0);
   }
+  // Pace (M4): read at most once per launch. A detached child takes the launcher's decision instead.
+  const inherited = process.env.ORCH_DETACHED_CHILD === "1" ? paceDecision(process.env.ORCH_PACE_DECISION) : null;
+  delete process.env.ORCH_PACE_DECISION; // the run's own children (a nested oc-worker) decide for themselves
+  let paceRead;
+  const pace = () => (paceRead ??= readPace());
   let a;
   try {
-    a = args(argv);
+    a = inherited ? args(argv, { chain: inherited.chain }) : args(argv, { pace });
   } catch (e) {
     console.error(`oc-worker: ${e.message}`);
     process.exit(2);
   }
+  a.ccPace = inherited ? inherited.cc_pace : ccPaceRecord(pace(), a.pacePrepended === true);
   // Resolve the fixed/dynamic slot decision once at startup; a usage error exits 2.
   let slotCfg;
   try {

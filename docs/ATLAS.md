@@ -444,7 +444,7 @@ decides: `--agent cc-worker` spawns `claude -p` (ORCH_CLAUDE_BIN) instead of ope
 
 ### oc-worker --role worker chain
 handler: orchestrator/bin/oc-worker.mjs --role <name> (expands to --agent/--fallback from CHAINS); orchestrator/bin/chains.mjs (CHAINS source, re-exported by orchestrator/bin/router-health.mjs)
-decides: which OpenCode agent pool to dispatch first for a worker run; worker-nvidia first for routine tickets, Nvidia 429 resumes on the same session, two stalled/timeout receipts drop worker-nvidia for the ticket
+decides: which OpenCode agent pool to dispatch first for a worker run; worker-nvidia first for routine tickets, Nvidia 429 resumes on the same session, two stalled/timeout receipts drop worker-nvidia for the ticket; then the pace prepend (orchestrator/bin/pace-read.mjs readPace/paceChain, one read per launch): an `under` pace puts cc-worker first for `--role worker` only, after the Nvidia drop rule; `--session` never prepends (the session pins the backend: desk.mjs resume-worker must not hand an OpenCode session to `claude --resume`); a detached child gets the launcher's chain via ORCH_PACE_DECISION; every receipt carries `cc_pace` {state, weekly, projected, at, prepended}
 - idle session woken by peer-mail → hooks/peer-mail-wake.js (Claude Code Stop hook, asyncRewake; polls the mailbox and exits 2 to wake the idle model)
 
 ### oc-worker dispatch preflight
@@ -491,7 +491,12 @@ sibling traps: orchestrator/bin/desk-check.mjs (main imports the statusline side
 ### Claude weekly pace (cc-pace)
 handler: orchestrator/bin/cc-pace.mjs (`paceState` pure model, `reserve`, `projected`, `statusLine`; CLI `[status] [--json]`)
 decides: the pace state off / unknown / over / on / under from the cc-usage snapshots (newest `at` is current; recent slope over the last 24 h of the same weekly window when it spans >= 4 h), config `usage-limits.json` `cc` over defaults; last state for hysteresis in `<orchDir()>/cc-pace-state.json`
-trap: `status` must print exactly one line <= 100 chars with no leading `pace` word and exit 0 for every state, because workers-view prints `pace: <first stdout line>`; `ORCH_NO_PACE=1` maps to `off`; `unknown`/`off` overwrite cc-pace-state.json too, so the `under` hysteresis memory restarts after a stale or disabled run (deliberate: fails toward the stricter 80 ceiling); nothing routes on it until M4
+trap: `status` must print exactly one line <= 100 chars with no leading `pace` word and exit 0 for every state, because workers-view prints `pace: <first stdout line>`; `ORCH_NO_PACE=1` maps to `off`; `unknown`/`off` overwrite cc-pace-state.json too, so the `under` hysteresis memory restarts after a stale or disabled run (deliberate: fails toward the stricter 80 ceiling); routing reads it through orchestrator/bin/pace-read.mjs (child process, 10 s timeout, failure = `unknown`): oc-worker `--role worker` puts cc-worker first on `under` (see 'oc-worker --role worker chain'), and router-health prints the `pace:` line, so both also rewrite cc-pace-state.json
+
+### router-health pace line
+handler: orchestrator/bin/router-health.mjs CLI block (readPace + cc-pace statusLine, read before the `--if-stale` early return; `--decide` never reads it)
+decides: text mode's first stdout line is `pace: <cc-pace status line>` on both the fresh `--if-stale` skip and the full run; `over` adds one `pace: OVER — conserve: …` line after it; `under` changes only the worker line to `use cc-worker (pace UNDER), fallback <agent>`; `--json` adds a top-level `pace` key, never written to the router-health.json stamp
+trap: goldens orchestrator/tests/fixtures/router-health-golden/ (captured before M4) must match after the pace line, so any other output change breaks orchestrator/tests/pace-routing.test.mjs
 
 ### Claude reset advisor (cc-pace advise)
 handler: orchestrator/bin/cc-pace.mjs (`adviseState` pure, `effectiveDeadline`, `dueNotifications`, `activeTickets`, `adviseTick`; CLI `advise [--json] [--notify]`, `reset-used full|fable|none`)

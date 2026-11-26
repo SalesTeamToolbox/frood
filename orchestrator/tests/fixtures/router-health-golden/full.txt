@@ -1,0 +1,8 @@
+worker         use worker-nvidia 👁
+worker-strong  use worker-strong 👁
+critic         use critic
+scout          use scout
+senior         use senior
+orchestrator   use orchestrator 👁
+note: usage: no usage-limits.json — Go monthly assumed $60; create one to set your plan cap
+free models: 3 live, 3 in chains, 0 blocked by policy, 0 unused, 0 down — router-health --free
