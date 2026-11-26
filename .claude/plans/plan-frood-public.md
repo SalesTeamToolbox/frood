@@ -41,11 +41,11 @@
 
 ## Scope
 
-**IN (generic tooling only):** orchestrator commands + role agents + `bin/` (oc-worker, desk, router-health, verdict-gate, handoff, session-title, check-routing) + routing rule + EGM skills/commands + installer adapted to project-local install; README/docs CTA.
+**IN (generic tooling only):** orchestrator commands + role agents + `orchestrator/bin/` (oc-worker, desk, router-health, verdict-gate, handoff, session-title, check-routing) + routing rule + EGM skills/commands + installer adapted to project-local install; README/docs CTA.
 
 **OUT (never publishes):** all STT/Volnova product code; all biz repos (`aitradingbot`, `axisenergyventures`, `meatheadgear`, `clientdealerportal`, `black-knight`, `salesteamtoolbox`, `video-studio`, sidebar); real private keys/tokens/`.env` (shipped as `.env.example` placeholders only), real ledgers (`pool-health.json`, `usage-ledger.json`) — shipped as empty templates only, real desk-daemon state, real peer-mail session ids/history, ticket dumps with proprietary diffs, platform deploy scripts, any customer data. Local `sales-team-toolbox/main` is behind `origin/brain_backend` — nothing is copied from either.
 
-Also **not in v1 scope** (per EGM Stage 8 findings — speculative infrastructure with no public consumer): peer-mail MCP server (`process/peer-mail/`), board/train/progress system (`.opencode/board/`, `ops/train.sh`, `ops/progress.sh`, `bin/board.mjs`), token-proof benchmark (`scripts/bench-tokens/`, `docs/token-proof.md`), route atlas (`docs/ATLAS.md`, `docs/atlas/`). These may be reconsidered post-v1.
+Also **not in v1 scope** (per EGM Stage 8 findings — speculative infrastructure with no public consumer): peer-mail MCP server (`process/peer-mail/`), board/train/progress system (`.opencode/board/`, `ops/train.sh`, `ops/progress.sh`, `orchestrator/bin/board.mjs`), token-proof benchmark (`scripts/bench-tokens/`, `docs/token-proof.md`), route atlas (`docs/ATLAS.md`, `docs/atlas/`). These may be reconsidered post-v1.
 
 **Atlas refs consulted / updated?** Frood has no map (`docs/` = `PERSONA.md`, `synthetic_dynamic_models.md` only; no `docs/ATLAS.md`, no `ops/`, no board adapter — verified 2026-11-20). Atlas import is **not in v1 scope** per EGM Stage 8 findings (Frood has no routes to map).
 
@@ -76,13 +76,13 @@ Clean-copy commands, role agents, `bin/`, routing rule, EGM skills; adapt instal
 |---|---|---|
 | `commands/orchestrator.md` | `.claude/commands/orchestrator.md` | machine paths stripped |
 | `commands/gauntlet.md` | `.claude/commands/gauntlet.md` | machine paths stripped |
-| `commands/router-health.mjs` | `bin/router-health.mjs` | reads user-created `providers.json` and `pool-health.json` at runtime; user creates them via `router-health --decide <provider>` on first run |
-| `commands/oc-worker.mjs` | `bin/oc-worker.mjs` | user creates providers.json via `router-health --decide` on first run |
-| `commands/desk.mjs` | `bin/desk.mjs` | user creates `providers.json` via `router-health --decide` on first run |
-| `commands/verdict-gate.mjs` | `bin/verdict-gate.mjs` | repo-local paths |
-| `commands/handoff.mjs` | `bin/handoff.mjs` | repo-local paths |
-| `commands/session-title.mjs` | `bin/session-title.mjs` | repo-local paths |
-| `commands/check-routing.mjs` | `bin/check-routing.mjs` | repo-local paths |
+| `commands/router-health.mjs` | `orchestrator/bin/router-health.mjs` | reads user-created `providers.json` and `pool-health.json` at runtime; user creates them via `router-health --decide <provider>` on first run |
+| `commands/oc-worker.mjs` | `orchestrator/bin/oc-worker.mjs` | user creates providers.json via `router-health --decide` on first run |
+| `commands/desk.mjs` | `orchestrator/bin/desk.mjs` | user creates `providers.json` via `router-health --decide` on first run |
+| `commands/verdict-gate.mjs` | `orchestrator/bin/verdict-gate.mjs` | repo-local paths |
+| `commands/handoff.mjs` | `orchestrator/bin/handoff.mjs` | repo-local paths |
+| `commands/session-title.mjs` | `orchestrator/bin/session-title.mjs` | repo-local paths |
+| `commands/check-routing.mjs` | `orchestrator/bin/check-routing.mjs` | repo-local paths |
 | `agents/worker.md` | `.claude/agents/worker.md` | machine paths stripped |
 | `agents/critic.md` | `.claude/agents/critic.md` | machine paths stripped |
 | `agents/senior.md` | `.claude/agents/senior.md` | machine paths stripped |
@@ -96,7 +96,7 @@ Clean-copy commands, role agents, `bin/`, routing rule, EGM skills; adapt instal
 | `skills/egm-brainstorm.md` | `.claude/skills/egm-brainstorm.md` | machine paths stripped |
 | installer (orchestrator) | `ops/install.mjs` | project-local-first; `ops/` + optional user-global |
 
-**Installer adaptation:** replace every `~/`-style or `C:/Users`-style machine path with repo-local `ops/` paths; optional user-global install documented but not required. First-run setup: user runs `node bin/router-health.mjs --decide <provider>` to create `providers.json`; `router-health` prints available chains; no static placeholder defaults are shipped as operational state.
+**Installer adaptation:** replace every `~/`-style or `C:/Users`-style machine path with repo-local `ops/` paths; optional user-global install documented but not required. First-run setup: user runs `node orchestrator/bin/router-health.mjs --decide <provider>` to create `providers.json`; `router-health` prints available chains; no static placeholder defaults are shipped as operational state.
 
 ## Repo gates (every module close-out)
 

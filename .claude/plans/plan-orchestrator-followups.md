@@ -60,13 +60,11 @@ while Go is out.
    - Fix it so every spawn has a timeout and is reaped.
    - Add a suite-level guard: an `after()` hook asserts no fixture child pid survives.
    - Kill the five strays by pid once they are confirmed to be fixture children.
-3. **M3 root bin copy (owner decision).** `bin/desk.mjs` and `bin/router-health.mjs` at the repo root are the
-   "sanitized generic copies" imported in 4e262982. `ops/install.mjs:49-50` still ships them, and they still name
-   the removed CmdC agents. Options:
-   - (a) regenerate them from orchestrator/bin;
-   - (b) stop shipping and delete them.
-
-   `ops/**` is a guarded path, so this needs the owner's choice plus a senior review.
+3. **M3 root bin copy (owner decision) — DONE.** All 13 root `bin/` copies (`board.mjs`, `check-routing.mjs`,
+   `desk.mjs`, `handoff.mjs`, `no-window.mjs`, `oc-worker.mjs`, `outcome.mjs`, `pool-health.mjs`, `proc-tree.mjs`,
+   `router-health.mjs`, `session-title.mjs`, `usage.mjs`, `verdict-gate.mjs`) imported in 4e262982 were deleted
+   and their `VENDORED` entries removed from `ops/install.mjs` (option (b): stop shipping and delete them).
+   `ops/install.mjs --check` passes with 13 fewer required files.
 4. **M4 small review follow-ups** (one ticket):
    - The board round floor in desk.mjs criticRound (`rounds.length + 1`) ignores reopen laps, so a reopened
      ticket can page `rounds-exhausted` early. Use the per-lap count that board.mjs:994-996 uses.

@@ -7,7 +7,7 @@
              work; r3 → critic APPROVED). Gates make check green; board shipped; install.mjs run, --check OK. Installed
              peer-mail-session-id.js answers UserPromptSubmit (smoke-tested). Worktree removed.
 - Next:      parent adds the UserPromptSubmit settings.json entry (now safe). Follow-ups (not done): vendored
-             repo-root bin/oc-worker.mjs + bin/board.mjs still have the old behaviour; README hook row says SessionStart only;
+             repo-root bin/oc-worker.mjs + bin/board.mjs deleted (M3 root bin cleanup); README hook row says SessionStart only;
              desk escalated critic-spawn-failed for a critic that ran, and does not follow hand-driven rounds.
 - Waiting:   nothing in this stream.
 
