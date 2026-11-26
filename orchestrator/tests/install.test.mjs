@@ -320,6 +320,29 @@ test("workstation --uninstall-workstation removes copies and unit, leaves state 
   assert.ok(calls.includes("--user daemon-reload"), "daemon-reload after uninstall: " + JSON.stringify(calls));
 });
 
+test("workstation --uninstall-workstation with ORCH_SKIP_WORKSTATION=1 prints the skip line and touches nothing", () => {
+  const home = freshHome();
+  const sysdir = tmp2();
+  const fake = makeFakeSystemctl(sysdir);
+  // Pre-create the workstation files; the skip branch must leave them alone.
+  fs.mkdirSync(path.join(wsLib(home)), { recursive: true });
+  fs.mkdirSync(path.join(wsUnit(home)), { recursive: true });
+  fs.writeFileSync(path.join(wsLib(home), "agent-priority.mjs"), "// guard\n");
+  fs.writeFileSync(path.join(wsLib(home), "suite-lock.sh"), "# lock\n");
+  fs.writeFileSync(path.join(wsUnit(home), "frood-agent-priority.service"), "[Unit]\n");
+  const u = spawnSync(process.execPath, [INSTALL, "--uninstall-workstation"], {
+    env: { ...process.env, ORCH_HOME: home, ORCH_SKIP_ROUTING: "1", ORCH_SKIP_WORKSTATION: "1", ORCH_SYSTEMCTL: fake },
+    encoding: "utf8",
+  });
+  assert.equal(u.status, 0, u.stderr + u.stdout);
+  assert.match(u.stdout, /workstation: skipped \(ORCH_SKIP_WORKSTATION=1\)/);
+  assert.ok(fs.existsSync(path.join(wsLib(home), "agent-priority.mjs")), "guard untouched");
+  assert.ok(fs.existsSync(path.join(wsLib(home), "suite-lock.sh")), "lock untouched");
+  assert.ok(fs.existsSync(path.join(wsUnit(home), "frood-agent-priority.service")), "unit untouched");
+  const callsLog = path.join(sysdir, "calls.log");
+  assert.ok(!fs.existsSync(callsLog), "fake systemctl must never be called on the skip path");
+});
+
 test("workstation install in a sandbox home never calls systemctl", () => {
   const home = freshHome();
   function runSandbox(...args) {

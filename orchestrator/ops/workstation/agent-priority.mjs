@@ -171,8 +171,8 @@ function walkDescendants(procs, roots) {
 // Production setpriority per thread. Node's os.setPriority calls
 // setpriority(PRIO_PROCESS, pid, …), which is per-thread on Linux: passing a
 // thread ID sets that thread's priority. ESRCH/ENOENT (vanished) are surfaced
-// via err.code and handled by the caller.
-function realSetPriority(tid, value) {
+// via err.info.code (err.code is "ERR_SYSTEM_ERROR") and handled by the caller.
+export function realSetPriority(tid, value) {
   os.setPriority(tid, value);
 }
 
@@ -228,8 +228,11 @@ export function runPass({ procRoot, setPriority = realSetPriority, uid = process
           lowered += 1;
           if (log) log(`${pid} ${tid} ${p.comm} ${current}->10`);
         } catch (err) {
-          if (err && err.code === "ESRCH") continue; // vanished task
-          if (err && (err.code === "EPERM" || err.code === "EACCES")) {
+          // Real os.setPriority throws code "ERR_SYSTEM_ERROR" with the errno
+          // name in err.info.code (e.g. ESRCH for a vanished tid).
+          const code = err?.info?.code ?? err?.code;
+          if (code === "ESRCH") continue; // vanished task
+          if (code === "EPERM" || code === "EACCES") {
             eperm += 1;
             continue;
           }

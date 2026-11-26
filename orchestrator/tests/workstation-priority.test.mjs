@@ -5,7 +5,7 @@ import os from "os";
 import path from "path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { runPass, writePassLog } from "../ops/workstation/agent-priority.mjs";
+import { runPass, writePassLog, realSetPriority } from "../ops/workstation/agent-priority.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WORKSTATION = path.join(HERE, "..", "ops", "workstation");
@@ -15,6 +15,8 @@ function tmp() {
 }
 
 const ME = process.getuid();
+// A uid that is never the current uid, for "another user" cases.
+const OTHER_UID = process.getuid() + 1;
 
 // /proc/<pid>/stat: field 19 is nice. f[18] = field 19 (nice), f[17] = field 18 (priority).
 function makeStat(pid, comm, ppid, nice) {
@@ -115,7 +117,7 @@ test("runPass renices only agent tree threads to 10, never lowers, skips non-age
     argv: ["node"],
     exe: "/usr/bin/node",
     nice: 0,
-    uid: 999,
+    uid: OTHER_UID,
     tasks: { 6000: 0 },
   });
   writeProc(root, 6001, {
@@ -123,7 +125,7 @@ test("runPass renices only agent tree threads to 10, never lowers, skips non-age
     argv: ["node"],
     exe: "/usr/bin/node",
     nice: 0,
-    uid: 999,
+    uid: OTHER_UID,
     ppid: 6000,
     tasks: { 6001: 0 },
   });
@@ -333,11 +335,107 @@ test("runPass: EPERM-throwing setter is counted as eperm", () => {
 
 function runOnceCLI(procRoot, extraEnv = {}) {
   return spawnSync(process.execPath, [path.join(WORKSTATION, "agent-priority.mjs"), "--once"], {
-    env: { ...process.env, ORCH_PROC_ROOT: procRoot, ...extraEnv },
+    env: { ...process.env, FROOD_WS_STATE: tmp(), ORCH_PROC_ROOT: procRoot, ...extraEnv },
     encoding: "utf8",
     timeout: 10000,
   });
 }
+
+test("runOnceCLI defaults FROOD_WS_STATE to an isolated temp dir", () => {
+  const root = tmp();
+  writeProc(root, 1000, {
+    comm: "foo",
+    argv: ["foo"],
+    exe: "/usr/bin/foo",
+    nice: 0,
+    uid: OTHER_UID,
+    tasks: { 1000: 0 },
+  });
+  // A pause file in the (fake) HOME default state dir must NOT pause the run:
+  // the helper injects its own FROOD_WS_STATE, so a real pause file can never
+  // affect a test.
+  const fakeHome = tmp();
+  const defaultState = path.join(fakeHome, ".local", "state", "frood-workstation");
+  fs.mkdirSync(defaultState, { recursive: true });
+  fs.writeFileSync(path.join(defaultState, "priority-guard.off"), "");
+  // No FROOD_WS_STATE passed: the helper must isolate state so the pause file
+  // above (standing in for a real one) is never seen.
+  const res = runOnceCLI(root, { HOME: fakeHome });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /lowered 0 eperm 0 errors 0 roots 0/);
+  assert.doesNotMatch(res.stdout, /paused/);
+});
+
+test("runPass: Node ERR_SYSTEM_ERROR shape with info.code ESRCH is skipped", () => {
+  const state = tmp();
+  const root = tmp();
+  const calls = [];
+  function setPriority(tid, value) {
+    calls.push([tid, value]);
+    const e = new Error("no such process");
+    e.code = "ERR_SYSTEM_ERROR";
+    e.info = { code: "ESRCH" };
+    throw e;
+  }
+  writeProc(root, 1000, {
+    comm: "claude",
+    argv: ["claude"],
+    exe: "/home/user/.config/Claude/claude-code/claude",
+    nice: 0,
+    tasks: { 1000: 0 },
+  });
+  process.env.FROOD_WS_STATE = state;
+  try {
+    const res = runPass({ procRoot: root, setPriority, uid: ME });
+    assert.equal(res.lowered, 0);
+    assert.equal(res.eperm, 0);
+    assert.equal(res.errors, 0);
+    assert.equal(calls.length, 1);
+  } finally {
+    delete process.env.FROOD_WS_STATE;
+  }
+});
+
+test("runPass: Node ERR_SYSTEM_ERROR shape with info.code EPERM is counted as eperm", () => {
+  const state = tmp();
+  const root = tmp();
+  const calls = [];
+  function setPriority(tid, value) {
+    calls.push([tid, value]);
+    const e = new Error("operation not permitted");
+    e.code = "ERR_SYSTEM_ERROR";
+    e.info = { code: "EPERM" };
+    throw e;
+  }
+  writeProc(root, 1000, {
+    comm: "claude",
+    argv: ["claude"],
+    exe: "/home/user/.config/Claude/claude-code/claude",
+    nice: 0,
+    tasks: { 1000: 0 },
+  });
+  process.env.FROOD_WS_STATE = state;
+  try {
+    const res = runPass({ procRoot: root, setPriority, uid: ME });
+    assert.equal(res.lowered, 0);
+    assert.equal(res.eperm, 1);
+    assert.equal(res.errors, 0);
+    assert.equal(calls.length, 1);
+  } finally {
+    delete process.env.FROOD_WS_STATE;
+  }
+});
+
+test("realSetPriority on a pid that cannot exist throws with mapped code ESRCH", () => {
+  // pid_max itself is never a valid pid, so this never touches a real process.
+  const pidMax = Number(fs.readFileSync("/proc/sys/kernel/pid_max", "utf8").trim());
+  assert.ok(Number.isInteger(pidMax) && pidMax > 0, "pid_max must be a positive integer");
+  assert.throws(
+    () => realSetPriority(pidMax, 10),
+    (err) => (err?.info?.code ?? err?.code) === "ESRCH",
+    "expected ESRCH for a pid that cannot exist",
+  );
+});
 
 test("--once CLI: no agent roots -> lowered 0 eperm 0 roots 0", () => {
   const root = tmp();
@@ -347,7 +445,7 @@ test("--once CLI: no agent roots -> lowered 0 eperm 0 roots 0", () => {
     argv: ["foo"],
     exe: "/usr/bin/foo",
     nice: 0,
-    uid: 999,
+    uid: OTHER_UID,
     tasks: { 1000: 0 },
   });
   const res = runOnceCLI(root);
@@ -362,7 +460,7 @@ test("--once CLI: all pids outside uid -> nothing lowered", () => {
     argv: ["claude"],
     exe: "/home/user/.config/Claude/claude-code/claude",
     nice: 0,
-    uid: 999,
+    uid: OTHER_UID,
     tasks: { 1000: 0 },
   });
   const res = runOnceCLI(root);

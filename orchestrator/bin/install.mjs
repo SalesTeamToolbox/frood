@@ -383,7 +383,7 @@ export function checkWorkstation({ log = console.log } = {}) {
   const systemctl = process.env.ORCH_SYSTEMCTL || "systemctl";
   let active = null;
   // A sandbox home without an explicit ORCH_SYSTEMCTL: do not probe the real user's unit state.
-  if (process.env.ORCH_HOME !== undefined && process.env.ORCH_SYSTEMCTL === undefined) {
+  if (sandboxHome()) {
     return { ok: drift === 0, sandbox: true };
   }
   try {
