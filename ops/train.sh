@@ -142,12 +142,12 @@ PY
     # (c) Mandate ^tests: line (only when the ticket JSON yields nothing).
     mandate_raw=""
     if [ -f "$mandate_path" ]; then
-      mandate_raw="$(awk '/^tests:[ \t]/{sub(/^tests:[ \t]*/,""); print; exit}' "$mandate_path")"
+      mandate_raw="$(awk '/^tests:/{sub(/^tests:[ \t]*/,""); print; exit}' "$mandate_path")"
     fi
     if [ -n "$mandate_raw" ]; then
       tests_source="mandate"
       # split on commas and whitespace, drop empties, de-dupe keeping order.
-      tests_list="$(printf '%s\n' $mandate_raw | awk '!seen[$0]++')"
+      tests_list="$(printf '%s\n' ${mandate_raw//,/ } | awk 'NF && !seen[$0]++')"
     fi
   fi
 fi
@@ -175,6 +175,9 @@ while IFS= read -r f; do
 done <<< "$tests_list"
 
 # Run serially, one file at a time; the first failure stops the run.
+# Logs start empty each run, so a failure never dumps a previous run's output.
+: >"$pytest_log"
+: >"$node_test_log"
 while IFS= read -r f; do
   [ -z "$f" ] && continue
   case "$f" in

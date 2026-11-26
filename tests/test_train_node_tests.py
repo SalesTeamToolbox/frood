@@ -346,6 +346,46 @@ class TestMandate:
         assert receipt["tests_source"] == "mandate"
         assert receipt["tests"] == "a.test.mjs"
 
+    def test_mandate_tests_line_comma_list(self, tmp_path):
+        ticket = "mandate-ticket"
+        bin_dir = tmp_path / "bin"
+        make_stub_ruff(bin_dir)
+        reports_root = tmp_path / "reports"
+        repo = make_fixture(
+            tmp_path,
+            ticket,
+            tracked_files={"a.test.mjs": PASS_NODE, "b.test.mjs": PASS_NODE},
+            untracked_files={
+                ".opencode/reports/mandate-ticket/mandate.md": (
+                    "# mandate\ntests:a.test.mjs, b.test.mjs,a.test.mjs\n"
+                ),
+            },
+        )
+        res = run_train(repo, ticket, bin_dir, reports_root)
+        assert res.returncode == 0, res.stderr
+        receipt = parse_receipt(reports_root, ticket)
+        assert receipt["tests_source"] == "mandate"
+        assert receipt["tests"] == "a.test.mjs,b.test.mjs"
+
+
+class TestLogsFresh:
+    def test_failure_log_holds_only_this_run(self, tmp_path):
+        ticket = "py-ticket"
+        bin_dir = tmp_path / "bin"
+        make_stub_ruff(bin_dir)
+        reports_root = tmp_path / "reports"
+        repo = make_fixture(
+            tmp_path,
+            ticket,
+            tracked_files={"tests/test_py-ticket.py": PASS_PY},
+        )
+        log = reports_root / ticket / "pytest.log"
+        log.parent.mkdir(parents=True)
+        log.write_text("STALE-PREVIOUS-RUN\n")
+        res = run_train(repo, ticket, bin_dir, reports_root)
+        assert res.returncode == 0, res.stderr
+        assert "STALE-PREVIOUS-RUN" not in log.read_text()
+
 
 class TestTimeoutNoChild:
     def test_node_timeout_no_child_left(self, tmp_path):
