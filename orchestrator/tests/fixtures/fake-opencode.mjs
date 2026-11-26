@@ -11,6 +11,10 @@
 //                   FAKE_OC_ORPHAN_WAIT ms (default 4000) so a watcher can see it, then finishes like `ok` and exits,
 //                   leaving the grandchild orphaned
 //   hang-after-text -> one text event, then sleeps
+//   nudge-once      -> silent forever on the first call; the resumed call finishes (the nudge worked)
+//   hung-tool       -> spawns a detached child that sleeps forever, emits one text, then stays silent;
+//                      the resumed call records whether the first opencode was alive when it started
+//   silent-no-session -> no session id in any event, then sleeps (a stall with nothing to resume)
 //   landed          -> git add -A + commit (moves HEAD), writes "RESULT: DONE" to the --report path,
 //                     then hangs (a worker that committed and reported done before the timeout killed it)
 //   grace-ok        -> one text event immediately, then finishes cleanly after FAKE_OC_DELAY ms
@@ -165,6 +169,63 @@ else if (mode === "text-then-quota") {
 }
 else if (mode === "hang-after-text") {
   process.stdout.write(JSON.stringify({ type: "text", sessionID: session, part: { sessionID: session, messageID: "msg_1", type: "text", text: "found candidate A at x.py:12" } }) + "\n");
+  setInterval(() => {}, 1000);
+}
+else if (mode === "nudge-once") {
+  // First call: go silent forever (simulates a run that stalls). Resumed call (marker present):
+  // produce output and finish — the nudge worked.
+  const dir = process.env.FAKE_OC_STATE_DIR;
+  const marker = path.join(dir, "nudged");
+  if (dir && !fs.existsSync(marker)) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(marker, "1");
+    // A session id but no text: a silent stall with a session may be nudged (--session). Without a
+    // session id a stall must not resume (see silent-no-session).
+    process.stdout.write(JSON.stringify({ type: "step_start", sessionID: session, part: { sessionID: session, messageID: "msg_1", type: "step-start" } }) + "\n");
+    setInterval(() => {}, 1000); // silent forever: oc-worker will stall and nudge
+  } else {
+    const ev = (type, part) => process.stdout.write(JSON.stringify({ type, sessionID: session, part: { sessionID: session, messageID: "msg_2", ...part } }) + "\n");
+    ev("text", { type: "text", text: "RESULT: DONE\nnudged work\n" });
+    ev("step_finish", { type: "step-finish", cost: 0.0012, tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 1000, write: 0 } } });
+    process.exit(0);
+  }
+}
+else if (mode === "hung-tool") {
+  // Spawns a detached child that sleeps forever (simulates a hung tool: node --test, npm, ...), produces
+  // one text event, then goes silent. oc-worker kills the descendant (not opencode) and restarts the
+  // silence clock; the fake does not recover, so the next idle window is a normal stall: oc-worker kills
+  // opencode and nudges. The resumed call records whether the first opencode was still alive when it
+  // started (it must not be), then finishes.
+  const dir = process.env.FAKE_OC_STATE_DIR;
+  fs.mkdirSync(dir, { recursive: true });
+  fs.appendFileSync(path.join(dir, "calls.jsonl"), JSON.stringify({ pid: process.pid, argv }) + "\n");
+  const firstPidFile = path.join(dir, "opencode-pid-1");
+  if (!fs.existsSync(firstPidFile)) {
+    fs.writeFileSync(firstPidFile, String(process.pid));
+    const gc = spawn(process.execPath, ["-e", "setTimeout(() => {}, 600000)"], { detached: true, stdio: "ignore", windowsHide: true });
+    gc.unref();
+    fs.writeFileSync(path.join(dir, "hung-tool-pid"), String(gc.pid)); // the pid oc-worker kills
+    process.stdout.write(JSON.stringify({ type: "text", sessionID: session, part: { sessionID: session, messageID: "msg_1", type: "text", text: "found candidate A at x.py:12" } }) + "\n");
+    setInterval(() => {}, 1000); // silent: the tool is killed, opencode does not recover, the next window stalls
+  } else {
+    fs.writeFileSync(path.join(dir, "opencode-pid-2"), String(process.pid));
+    let firstAlive = false;
+    try { process.kill(Number(fs.readFileSync(firstPidFile, "utf8")), 0); firstAlive = true; } catch {}
+    fs.writeFileSync(path.join(dir, "first-alive-at-resume"), firstAlive ? "1" : "0");
+    const ev = (type, part) => process.stdout.write(JSON.stringify({ type, sessionID: session, part: { sessionID: session, messageID: "msg_2", ...part } }) + "\n");
+    ev("text", { type: "text", text: "RESULT: DONE\ntool-killed work\n" });
+    ev("step_finish", { type: "step-finish", cost: 0.0012, tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 1000, write: 0 } } });
+    process.exit(0);
+  }
+}
+else if (mode === "silent-no-session") {
+  // No session id in any event, then silence: a stall with nothing to resume must never spawn a fresh
+  // agent (whose prompt would be only "Continue…" with no Mandate).
+  const dir = process.env.FAKE_OC_STATE_DIR;
+  if (dir) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, "calls.jsonl"), JSON.stringify({ pid: process.pid, argv }) + "\n");
+  }
   setInterval(() => {}, 1000);
 }
 else if (mode === "landed") {

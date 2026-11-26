@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { summarize, acquireSlot, slotDir, prio } from "../bin/oc-worker.mjs";
+import { summarize, acquireSlot, slotDir, prio, args } from "../bin/oc-worker.mjs";
 import { workerOutcome } from "../bin/outcome.mjs";
 import { CHAINS } from "../bin/chains.mjs";
 import { installFixtureGuard, fixtureChildren, reapFixtureChildren } from "./fixtures/fixture-guard.mjs";
@@ -155,10 +155,10 @@ test("slots: two holders, third waits until one releases; dead owner is reclaime
   const r1 = await acquireSlot(2, { pollMs: 20 });
   const r2 = await acquireSlot(2, { pollMs: 20 });
   await assert.rejects(acquireSlot(2, { pollMs: 20, deadline: Date.now() + 150 }), /no free worker slot/);
-  r1();
+  r1.release();
   const r3 = await acquireSlot(2, { pollMs: 20, deadline: Date.now() + 1000 });
-  r2();
-  r3();
+  r2.release();
+  r3.release();
   // dead owner
   const d = path.join(slotDir(), "slot-1");
   fs.mkdirSync(d, { recursive: true });
@@ -166,7 +166,7 @@ test("slots: two holders, third waits until one releases; dead owner is reclaime
   fs.mkdirSync(path.join(slotDir(), "slot-2"), { recursive: true });
   fs.writeFileSync(path.join(slotDir(), "slot-2", "owner"), JSON.stringify({ pid: process.pid, since: "x" }));
   const r4 = await acquireSlot(2, { pollMs: 20, deadline: Date.now() + 500 });
-  r4();
+  r4.release();
   delete process.env.ORCH_HOME;
 });
 
@@ -210,7 +210,8 @@ test("--help wins over invalid arguments", () => {
   assert.equal(help("--help", "--bogus").status, 0);
   assert.equal(help("--not-a-flag", "-h").status, 0);
   const r = help("--help");
-  assert.doesNotMatch(r.stdout, /oc-worker:/);
+  // help text documents the `oc-worker: waiting for ...` stderr format; error lines start at column 0.
+  assert.doesNotMatch(r.stdout, /^oc-worker: /m);
 });
 
 test("--help as another flag's value still prints usage and exits 0", () => {
@@ -543,6 +544,208 @@ test("--idle-min 0 never stalls: the run ends on the timeout", () => {
   assert.equal(r.status, 4);
   assert.equal(JSON.parse(r.stdout.trim()).exit, "timeout");
 });
+
+// ---------------------------------------------------------------- worker-liveness: Nvidia idle/resume defaults
+
+test("nvidia agent defaults: idle-min 6, resume 3 (explicit flags still win)", () => {
+  const dir = tmp();
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const nv = args(["--agent", "worker-nvidia", "--dir", dir, "--prompt", prompt]);
+  assert.equal(nv.idleMin, 6, "worker-nvidia idle-min default is 6");
+  assert.equal(nv.resume, 3, "worker-nvidia resume default is 3");
+  const nvc = args(["--agent", "critic-nvidia", "--dir", dir, "--prompt", prompt]);
+  assert.equal(nvc.idleMin, 6, "critic-nvidia idle-min default is 6");
+  assert.equal(nvc.resume, 3, "critic-nvidia resume default is 3");
+  const plain = args(["--agent", "critic", "--dir", dir, "--prompt", prompt]);
+  assert.equal(plain.idleMin, 20, "non-nvidia idle-min default stays 20");
+  assert.equal(plain.resume, 1, "non-nvidia resume default stays 1");
+  // explicit flags win over nvidia defaults
+  const expl = args(["--agent", "worker-nvidia", "--dir", dir, "--prompt", prompt, "--idle-min", "9", "--resume", "7"]);
+  assert.equal(expl.idleMin, 9);
+  assert.equal(expl.resume, 7);
+});
+
+// ---------------------------------------------------------------- worker-liveness: visible slot wait
+
+test("slot wait: both worker slots held -> stderr names both holders, registry is queued, queued_s > 0 after release", async () => {
+  const home = tmp();
+  CLEAN.push(home);
+  const slots = path.join(home, ".config", "orchestrator", "slots");
+  // Hold both slots with live owner files
+  fs.mkdirSync(slots, { recursive: true });
+  for (const i of [1, 2]) {
+    fs.mkdirSync(path.join(slots, `slot-${i}`), { recursive: true });
+    fs.writeFileSync(path.join(slots, `slot-${i}`, "owner"), JSON.stringify({ pid: process.pid, agent: "worker", title: "holder " + i, out: "/tmp/holder" + i + ".md", since: new Date().toISOString() }));
+  }
+  const prompt = path.join(home, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const argsFile = path.join(home, "args.json");
+  const out = path.join(home, "out", "worker-r1.md");
+  const stderr = [];
+  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", home, "--prompt", prompt, "--out", out, "--slots", "2"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_HOME: home, FAKE_OC_ARGS_FILE: argsFile, ORCH_NO_PROCTREE: "1", ORCH_NVIDIA_POLL_MS: "50" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stderr.on("data", (d) => stderr.push(d.toString()));
+  const exited = new Promise((res) => child.on("close", (code) => res(code)));
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 20000);
+  try {
+    // Wait until the waiting line appears on stderr
+    let sawWait = false;
+    for (let i = 0; i < 100 && !sawWait; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      const joined = stderr.join("");
+      if (/oc-worker: waiting for a worker slot \(cap 2 fixed; held by pid/.test(joined)) sawWait = true;
+    }
+    assert.ok(sawWait, "stderr should show the worker slot waiting line naming holders; got: " + stderr.join(""));
+    const joined = stderr.join("");
+    assert.match(joined, /pid \d+ worker holder 1/);
+    assert.match(joined, /pid \d+ worker holder 2/);
+    // Registry entry exists and is queued
+    const runs = path.join(home, ".config", "orchestrator", "runs");
+    const runFiles = fs.readdirSync(runs).filter((f) => f.endsWith(".json"));
+    assert.equal(runFiles.length, 1, "exactly one registry entry while waiting");
+    const reg = JSON.parse(fs.readFileSync(path.join(runs, runFiles[0]), "utf8"));
+    assert.equal(reg.state, "queued", "registry state is queued while waiting");
+    // Release one slot: the run should acquire it and complete
+    fs.rmSync(path.join(slots, "slot-1"), { recursive: true, force: true });
+    const code = await exited;
+    assert.equal(code, 0, "run completes after a slot frees");
+    clearTimeout(hard);
+    const receipt = JSON.parse(fs.readFileSync(out + ".receipt.json", "utf8"));
+    assert.ok(receipt.queued_s > 0, `receipt.queued_s should be > 0, got ${receipt.queued_s}`);
+  } finally {
+    clearTimeout(hard);
+    if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
+  }
+});
+
+test("slot wait: nvidia slot held -> stderr names the nvidia holder", async () => {
+  const home = tmp();
+  CLEAN.push(home);
+  const slots = path.join(home, ".config", "orchestrator", "slots");
+  fs.mkdirSync(slots, { recursive: true });
+  fs.mkdirSync(path.join(slots, "provider-nvidia-1"), { recursive: true });
+  fs.writeFileSync(path.join(slots, "provider-nvidia-1", "owner"), JSON.stringify({ pid: process.pid, agent: "worker-nvidia", title: "nvidia holder", out: "/tmp/nv.md", since: new Date().toISOString() }));
+  const prompt = path.join(home, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const argsFile = path.join(home, "args.json");
+  const out = path.join(home, "out", "nv-r1.md");
+  const stderr = [];
+  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", home, "--prompt", prompt, "--out", out, "--model", "nvidia/test-model", "--slots", "2"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_HOME: home, FAKE_OC_ARGS_FILE: argsFile, ORCH_NO_PROCTREE: "1", ORCH_NVIDIA_POLL_MS: "50", NVIDIA_SLOTS: "1" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stderr.on("data", (d) => stderr.push(d.toString()));
+  const exited = new Promise((res) => child.on("close", (code) => res(code)));
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 20000);
+  try {
+    let sawWait = false;
+    for (let i = 0; i < 100 && !sawWait; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      if (/oc-worker: waiting for a nvidia slot \(cap 1 fixed; held by pid/.test(stderr.join(""))) sawWait = true;
+    }
+    assert.ok(sawWait, "stderr should show the nvidia slot waiting line; got: " + stderr.join(""));
+    const joined = stderr.join("");
+    assert.match(joined, /pid \d+ worker-nvidia nvidia holder/);
+    // Release the nvidia slot: run completes
+    fs.rmSync(path.join(slots, "provider-nvidia-1"), { recursive: true, force: true });
+    const code = await exited;
+    assert.equal(code, 0, "run completes after the nvidia slot frees");
+    clearTimeout(hard);
+  } finally {
+    clearTimeout(hard);
+    if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
+  }
+});
+
+// ---------------------------------------------------------------- worker-liveness: nvidia nudge (silent -> resumed -> done)
+
+test("worker-nvidia nudge: a silent fake is nudged then finishes (resumed.length >= 1, exit 0)", () => {
+  const state = tmp();
+  CLEAN.push(state);
+  // The real Nvidia default (6 min) cannot fit a suite, so assert it here — the mutation check reverts the
+  // default to 20 and this assertion fails — then shorten the idle window for the behavioural part below.
+  const dflt = args(["--agent", "worker-nvidia", "--dir", state, "--prompt", "/dev/null"]);
+  assert.equal(dflt.idleMin, 6, "worker-nvidia default idle-min is 6 (mutation check)");
+  const r = run({ FAKE_OC_MODE: "nudge-once", FAKE_OC_STATE_DIR: state, ORCH_RESUME_WAIT_MS: "0" }, "--agent", "worker-nvidia", "--idle-min", "0.02", "--resume", "3", "--timeout-min", "2");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.ok(receipt.resumed.length >= 1, `expected resumed.length >= 1, got ${receipt.resumed.length}: ${r.stdout}`);
+  assert.equal(receipt.exit, 0);
+  assert.ok(receipt.resumed.some((x) => /no output for/.test(x.reason)), `resumed reason should mention stall: ${JSON.stringify(receipt.resumed)}`);
+  // The marker file proves the resumed call was handled differently from the first
+  assert.ok(fs.existsSync(path.join(state, "nudged")), "nudged marker should exist after the resumed call");
+});
+
+test("non-nvidia agent keeps idle-min 20 / resume 1 defaults (no flags)", () => {
+  const dir = tmp();
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const nv = args(["--agent", "worker", "--dir", dir, "--prompt", prompt]);
+  assert.equal(nv.idleMin, 20);
+  assert.equal(nv.resume, 1);
+});
+
+// ---------------------------------------------------------------- worker-liveness: hung tool call
+
+test("hung tool call: the descendant tool child is killed, opencode survives, then the next stall nudges it", async () => {
+  const state = tmp();
+  CLEAN.push(state);
+  const home = tmp();
+  CLEAN.push(home);
+  const prompt = path.join(home, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const argsFile = path.join(home, "args.json");
+  const out = path.join(home, "out", "worker-r1.md");
+  const stderr = [];
+  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", home, "--prompt", prompt, "--out", out, "--slots", "2", "--idle-min", "0.02", "--resume", "2", "--timeout-min", "2", "--grace-min", "0"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_HOME: home, FAKE_OC_ARGS_FILE: argsFile, ORCH_NO_PROCTREE: "", ORCH_PROCTREE_MS: "300", FAKE_OC_MODE: "hung-tool", FAKE_OC_STATE_DIR: state, ORCH_RESUME_WAIT_MS: "0" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stderr.on("data", (d) => stderr.push(d.toString()));
+  const exited = new Promise((res) => child.on("close", (code) => res(code)));
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 40000);
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  try {
+    const code = await exited;
+    assert.equal(code, 0, "run finishes after the hung tool is killed and opencode is nudged");
+    clearTimeout(hard);
+    const receipt = JSON.parse(fs.readFileSync(out + ".receipt.json", "utf8"));
+    // The tool child was killed (and named in the receipt)
+    const toolPid = Number(fs.readFileSync(path.join(state, "hung-tool-pid"), "utf8"));
+    assert.ok(receipt.orphans_killed?.some((o) => o.pid === toolPid), `receipt orphans_killed should include the tool child pid ${toolPid}: ${JSON.stringify(receipt.orphans_killed)}`);
+    // The resume happened and its message names the stopped command
+    assert.ok(receipt.resumed.length >= 1, `expected a nudge, got ${JSON.stringify(receipt.resumed)}`);
+    const call = JSON.parse(fs.readFileSync(argsFile, "utf8"));
+    const lastMsg = call.argv[call.argv.length - 1];
+    assert.ok(/A tool command ran over/.test(lastMsg), "resume message should mention the stopped tool command: " + lastMsg);
+    // Never a second opencode while the first was alive (the killed-run-stops-agent class): the resumed
+    // invocation recorded whether the first pid was still running when it started.
+    assert.equal(fs.readFileSync(path.join(state, "first-alive-at-resume"), "utf8"), "0", "the first opencode must be dead before the resume spawns");
+    // No opencode process survives the run
+    const pid1 = Number(fs.readFileSync(path.join(state, "opencode-pid-1"), "utf8"));
+    const pid2 = Number(fs.readFileSync(path.join(state, "opencode-pid-2"), "utf8"));
+    assert.equal(alive(pid1), false, `first opencode pid ${pid1} must not survive the run`);
+    assert.equal(alive(pid2), false, `resumed opencode pid ${pid2} must not survive the run`);
+  } finally {
+    clearTimeout(hard);
+    if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
+  }
+});
+
+test("stall with no session id: never resumes into a fresh agent without the Mandate", () => {
+  const state = tmp();
+  CLEAN.push(state);
+  const r = run({ FAKE_OC_MODE: "silent-no-session", FAKE_OC_STATE_DIR: state, ORCH_RESUME_WAIT_MS: "0" }, "--agent", "critic", "--idle-min", "0.02", "--resume", "3", "--timeout-min", "1", "--grace-min", "0");
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.exit, "stalled", `a stall with no session stays stalled: ${r.stdout}`);
+  assert.equal(receipt.resumed.length, 0, "no resume without a session id");
+  const calls = fs.readFileSync(path.join(state, "calls.jsonl"), "utf8").trim().split("\n");
+  assert.equal(calls.length, 1, "exactly one opencode spawn (no resume without a session)");
+});
+
 
 test("a prompt starting with --- reaches opencode as a message (newline-prefixed), not a flag", () => {
   const dir = tmp();

@@ -38,25 +38,45 @@
 //   see a lower cap. Cap changes are logged to slot-decisions.log. Waiting takes no machine slot and does not spend
 //   --timeout-min; a chain hop to a non-Nvidia agent holds none. ORCH_NVIDIA_POLL_MS (default 3000) is the poll
 //   interval. The queued event's `slots` names it (`nvidia <held>/<cap>`); the receipt has `provider_slot`.
+// - Visible slot waits: while waiting for either the worker slot (`acquireSlot`) or the Nvidia provider slot
+//   (`acquireProviderSlot`), oc-worker prints one stderr line when each wait begins and again at most once a
+//   minute: `oc-worker: waiting for a worker slot (cap <n> <fixed|dynamic>; held by pid <p> <agent> <title>, …)`
+//   and `oc-worker: waiting for an nvidia slot (cap <n>; held by pid <p> <agent> <title>, …)`.
+//   Slot owners carry `agent`/`title`/`out` so they can be named. The run registers in the live registry with
+//   `state: "queued"` while waiting (distinguishable from running), and the receipt gains `queued_s` (seconds
+//   spent waiting, both waits together). Slot caps and admission logic are unchanged; the time budget starts
+//   after the slot is acquired.
 // - --ticket <id> --owner <session>: the ticket names an OpenCode board ticket; before anything is launched this
 //   runs `node <board.mjs> attach <id> --pid <this pid> --out <out>` (execFileSync, no shell), which the board
 //   refuses unless the ticket is working, owned by --owner and past its EGM gate. A refusal exits 7 with nothing
 //   launched and no slot taken.
 // - Writes <out> (the agent's final text), <out>.events.jsonl (raw events), <out>.receipt.json
-//   ({agent, model, session, exit, seconds, tokens, cost, first_line}); model is the pinned model of the agent
-//   when --model was not given. Prints the receipt JSON.
+//   ({agent, model, session, exit, seconds, tokens, cost, first_line, queued_s, …}); model is the pinned model
+//   of the agent when --model was not given. Prints the receipt JSON.
 // - --idle-min <n> (default 20, 0 disables): kills a run whose stdout has been silent for n minutes (a sleeping host
-//   never counts). Receipt exit "stalled", status 4, partial output kept like a timeout. Receipt max_silence_s is the
-//   longest stdout silence seen, for tuning the default.
+//   never counts). For agents whose name ends `-nvidia` (worker-nvidia, critic-nvidia) the default is 6 instead
+//   of 20; explicit --idle-min always wins. Receipt exit "stalled", status 4, partial output kept like a timeout.
+//   Receipt max_silence_s is the longest stdout silence seen, for tuning the default.
 // - --resume <n> (default 1, 0 disables): a run that dropped (ECONNRESET, socket hang up, ...), stalled, or died
 //   mid-run on a transient pool error (quota/rate-limit, provider 5xx/overload) after producing output and a session
 //   id is resumed with --session after 30 s (ORCH_RESUME_WAIT_MS), inside the same slot: the manual "nudge it along",
-//   automatic. After a quota/rate-limit death the wait is max(ORCH_RESUME_WAIT_MS, ORCH_RATE_LIMIT_WAIT_MS), the
-//   latter default 60000: a 429 window is longer than a dropped socket. Deterministic failures (unknown/retired model, not-in-plan) and clean finishes never resume.
-//   --timeout-min is one wall-clock budget for all attempts together. Receipt: resumed [{session, reason,
-//   seconds}] and attempts (spawns). On a resumed run, errors, first_line and verdict come from the last attempt only;
-//   tokens and cost are summed. stderr is always listed in errors but counts as pool-health evidence only when the
-//   run did not finish cleanly (exit 0 with a final message). A stalled run exits 4 like a timeout.
+//   automatic. For `*-nvidia` agents the default is 3 instead of 1; explicit --resume always wins. After a
+//   quota/rate-limit death the wait is max(ORCH_RESUME_WAIT_MS, ORCH_RATE_LIMIT_WAIT_MS), the latter default
+//   60000: a 429 window is longer than a dropped socket. Deterministic failures (unknown/retired model, not-in-plan)
+//   and clean finishes never resume. --timeout-min is one wall-clock budget for all attempts together. Receipt:
+//   resumed [{session, reason, seconds}] and attempts (spawns). On a resumed run, errors, first_line and verdict
+//   come from the last attempt only; tokens and cost are summed. stderr is always listed in errors but counts as
+//   pool-health evidence only when the run did not finish cleanly (exit 0 with a final message). A stalled run
+//   exits 4 like a timeout.
+// - Hung tool calls: when the stall rule fires and the opencode process tree holds exactly one live
+//   descendant that has existed longer than the idle window (a shell tool child: `node --test`, `npm`, …),
+//   that descendant is killed and the silence clock restarts — opencode survives and is nudged by the tool
+//   failure. If it stays silent for another idle window, the normal stall path kills opencode and the resume
+//   message carries one extra line: `A tool command ran over <n> min and was stopped: <cmd>`. With more than
+//   one such descendant (a hung tool next to long-lived MCP servers / a pty daemon) the pid cannot be
+//   identified, so the normal stall kill runs instead — a pid is never guessed. Only pids from this run's
+//   opencode child tree are ever killed — never by name pattern. bin/proc-tree.mjs read-only helpers list
+//   descendants; its sweep rules are unchanged.
 // - After every attempt (finished, failed, timeout, stall) the run's leftover descendants are killed (bin/proc-tree.mjs: the
 //   process table is sampled while opencode runs; a child whose parent died is still swept). Receipt orphans_killed
 //   [{pid, cmd}] appears only when something was killed. ORCH_NO_PROCTREE=1 disables.
@@ -233,8 +253,16 @@ export function usage() {
   return out.join("\n");
 }
 
-function args(argv) {
-  const a = { timeoutMin: 30, idleMin: 20, resume: 1, vision: false, graceMin: 15 };
+// Agents whose name ends `-nvidia` (worker-nvidia, critic-nvidia) run on Nvidia models whose steps take
+// 2-50 s with silences up to ~5 min, so their stall defaults are tighter: idle-min 6 (the worst healthy
+// silence is ~80 s, so 6 min catches real stalls fast) and resume 3 (repeated nudges inside the same
+// wall-clock budget). Explicit --idle-min / --resume flags always win; non-Nvidia agents keep idle 20 /
+// resume 1. `isNvidiaAgent` is also applied after `--role` expansion (the agent is only known then).
+function isNvidiaAgent(agent) {
+  return typeof agent === "string" && /-nvidia$/.test(agent);
+}
+export function args(argv) {
+  const a = { timeoutMin: 30, idleMin: undefined, resume: undefined, vision: false, graceMin: 15 };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = () => argv[++i];
@@ -250,9 +278,9 @@ function args(argv) {
     else if (k === "--title") a.title = v();
     else if (k === "--report") a.report = v();
     else if (k === "--timeout-min") a.timeoutMin = Number(v());
-    else if (k === "--idle-min") a.idleMin = Number(v());
+    else if (k === "--idle-min") { a.idleMin = Number(v()); a.idleMinSet = true; }
     else if (k === "--grace-min") a.graceMin = Number(v());
-    else if (k === "--resume") a.resume = Number(v());
+    else if (k === "--resume") { a.resume = Number(v()); a.resumeSet = true; }
     else if (k === "--slots") a.slots = v();
     else if (k === "--fallback") a.fallback = v().split(",").map((x) => x.trim()).filter(Boolean).slice(0, 8);
     else if (k === "--role") a.role = v();
@@ -272,6 +300,15 @@ function args(argv) {
     if (chain[0] === "worker-nvidia" && nvidiaDropCount(outDir) >= 2) chain = chain.slice(1);
     a.agent = chain[0];
     a.fallback = chain.slice(1);
+  }
+
+  // Nvidia agents (`*-nvidia`) get tighter stall defaults: idle-min 6, resume 3. Explicit flags win.
+  if (isNvidiaAgent(a.agent)) {
+    if (!a.idleMinSet) a.idleMin = 6;
+    if (!a.resumeSet) a.resume = 3;
+  } else {
+    if (!a.idleMinSet) a.idleMin = 20;
+    if (!a.resumeSet) a.resume = 1;
   }
 
   for (const req of ["agent", "dir", "prompt"]) if (!a[req]) throw new Error(`--${req} is required`);
@@ -448,12 +485,17 @@ export function slotDir() {
 // Test injection via opts: sample (object/null/function returning one per poll), cfg, now (ms).
 // Dynamic mode admits only slots 1..allowed; slots above min are gated by the burst guard.
 // A decision log line is written on admission and whenever `allowed` changes (never every poll).
-export async function acquireSlot(nOrCfg, { pollMs = 3000, deadline = Infinity, pid = process.pid, sample: injectedSample, cfg: injectedCfg, now: injectedNow, state: injectedState } = {}) {
+// `opts.agent`/`title`/`out` are written to the slot owner file so waiters can name holders.
+// `opts.onWait(info)` is called (stderr line, registry update) each poll while no slot is free;
+// info = { type: "worker", cap, mode, holders: [{pid, agent, title, out}] }.
+export async function acquireSlot(nOrCfg, { pollMs = 3000, deadline = Infinity, pid = process.pid, sample: injectedSample, cfg: injectedCfg, now: injectedNow, state: injectedState, agent, title, out, onWait } = {}) {
   fs.mkdirSync(slotDir(), { recursive: true });
   const isDynamic = typeof nOrCfg === "object" && nOrCfg !== null && nOrCfg.mode;
   const cfg = isDynamic ? (injectedCfg || nOrCfg) : { mode: "fixed", n: nOrCfg };
   let state = injectedState || { clearSince: null };
   let lastAllowed = null;
+  let waitedSince = null; // ms when this run started waiting (null = not waiting right now)
+  let claimedDir = null;
   for (;;) {
     const now = injectedNow !== undefined ? injectedNow : Date.now();
     let sample;
@@ -472,9 +514,10 @@ export async function acquireSlot(nOrCfg, { pollMs = 3000, deadline = Infinity, 
       if (isDynamic && i > cfg.min && !burstGuardOk(now)) continue; // above the floor: one admission per 60 s
       try {
         fs.mkdirSync(d);
-        fs.writeFileSync(path.join(d, "owner"), JSON.stringify({ pid, since: new Date().toISOString() }));
+        fs.writeFileSync(path.join(d, "owner"), JSON.stringify({ pid, agent, title, out, since: new Date().toISOString() }));
         decisionLog({ allowed, held: heldCount(), sample, reason }); // admission
-        return () => fs.rmSync(d, { recursive: true, force: true });
+        claimedDir = d;
+        break;
       } catch {
         let owner = null;
         try {
@@ -484,6 +527,12 @@ export async function acquireSlot(nOrCfg, { pollMs = 3000, deadline = Infinity, 
         if ((owner && !alive(owner.pid)) || (!owner && age > 60000)) fs.rmSync(d, { recursive: true, force: true });
       }
     }
+    if (claimedDir) break;
+    // No slot free this poll: report the wait (on entry and every poll thereafter; the caller throttles the
+    // stderr line to once a minute, the registry update is cheap).
+    if (waitedSince === null) waitedSince = now;
+    const holders = slotHolders("slot");
+    if (onWait) onWait({ type: "worker", cap: cfg.mode === "fixed" ? cfg.n : allowed, mode: cfg.mode, holders });
     if (now > deadline) {
       throw new Error(cfg.mode === "fixed"
         ? `no free worker slot (WORKER_SLOTS=${cfg.n})`
@@ -491,6 +540,31 @@ export async function acquireSlot(nOrCfg, { pollMs = 3000, deadline = Infinity, 
     }
     await new Promise((r) => setTimeout(r, pollMs));
   }
+  // The release stays callable (`release()`, the legacy contract) and also carries the wait start
+  // (`release.waitedSince`) so existing callers and the receipt's `queued_s` both work.
+  const release = () => fs.rmSync(claimedDir, { recursive: true, force: true });
+  release.release = release;
+  release.waitedSince = waitedSince;
+  return release;
+}
+
+// Read live holders of slot-<i> or provider-<name>-<i> dirs, returning {pid, agent, title, out} for each.
+// A dir whose owner pid is dead (or that never got an owner file and is older than 60 s) is skipped.
+function slotHolders(prefix) {
+  const holders = [];
+  let names;
+  try { names = fs.readdirSync(slotDir()); } catch { return holders; }
+  for (const n of names) {
+    const re = prefix === "slot" ? /^slot-(\d+)$/ : new RegExp(`^provider-${prefix}-(\\d+)$`);
+    const m = re.exec(n);
+    if (!m) continue;
+    const d = path.join(slotDir(), n);
+    let owner = null;
+    try { owner = JSON.parse(fs.readFileSync(path.join(d, "owner"), "utf8")); } catch {}
+    if (!owner || !owner.pid || !alive(owner.pid)) continue;
+    holders.push({ pid: owner.pid, agent: owner.agent || "-", title: owner.title || "-", out: owner.out || "-" });
+  }
+  return holders.sort((x, y) => x.pid - y.pid);
 }
 
 export const isNvidiaModel = (m) => typeof m === "string" && m.startsWith("nvidia/");
@@ -541,9 +615,11 @@ function providerHolders(provider) {
 // holders; it keeps its claim only if fewer than `cap` holders rank before it (oldest `since` first, ties by lowest
 // index), otherwise it removes its dir and keeps waiting. The order is total and older holders always rank first,
 // so simultaneous claimants cannot all back off, and an in-flight run is never displaced.
-// Returns { release, index, cap }. Claimed before the machine slot and before the run's clock starts.
-export async function acquireProviderSlot(provider, capOrFn, { pollMs = 3000, deadline = Infinity, pid = process.pid } = {}) {
+// `opts.agent`/`title`/`out` are written to the slot owner file; `opts.onWait(info)` is called each poll while waiting.
+// Returns { release, index, cap, waitedSince }. Claimed before the machine slot and before the run's clock starts.
+export async function acquireProviderSlot(provider, capOrFn, { pollMs = 3000, deadline = Infinity, pid = process.pid, agent, title, out, onWait } = {}) {
   fs.mkdirSync(slotDir(), { recursive: true });
+  let waitedSince = null;
   for (;;) {
     const cap = typeof capOrFn === "function" ? capOrFn() : capOrFn; // a function is asked at every poll
     const holders = providerHolders(provider);
@@ -556,14 +632,18 @@ export async function acquireProviderSlot(provider, capOrFn, { pollMs = 3000, de
       try {
         fs.mkdirSync(d);
         claimed = true;
-        fs.writeFileSync(path.join(d, "owner"), JSON.stringify({ pid, since: new Date().toISOString() }));
+        fs.writeFileSync(path.join(d, "owner"), JSON.stringify({ pid, agent, title, out, since: new Date().toISOString() }));
       } catch {}
       if (claimed) {
         const rank = providerHolders(provider).findIndex((h) => h.index === i && h.pid === pid);
-        if (rank >= 0 && rank < cap) return { index: i, cap, release: () => fs.rmSync(d, { recursive: true, force: true }) };
+        if (rank >= 0 && rank < cap) return { index: i, cap, release: () => fs.rmSync(d, { recursive: true, force: true }), waitedSince };
         fs.rmSync(d, { recursive: true, force: true }); // lost the race: back off and keep waiting
       }
     }
+    // No provider slot free this poll: report the wait (on entry and every poll thereafter).
+    if (waitedSince === null) waitedSince = Date.now();
+    const ph = slotHolders(provider);
+    if (onWait) onWait({ type: provider, cap, mode: "fixed", holders: ph });
     if (Date.now() > deadline) throw new Error(`no free ${provider} slot (${provider.toUpperCase()}_SLOTS=${cap})`);
     await new Promise((r) => setTimeout(r, pollMs));
   }
@@ -1178,16 +1258,58 @@ export async function runWorker(a) {
   const promptText = fs.readFileSync(a.prompt, "utf8"); // before the slot: a bad --prompt must not leak a slot, registry entry or timer
   // Provider slot first: a run waiting for Nvidia holds no machine slot and has not started its clock.
   let providerSlot = null;
-  if (isNvidiaModel(wanted)) providerSlot = await acquireProviderSlot("nvidia", () => nvidiaCapNow(slotDir()).cap, { pollMs: Number(process.env.ORCH_NVIDIA_POLL_MS) || 3000, pid: process.pid });
-  // cc-worker: at most cc.max_workers headless Claude runs machine-wide; a waiting run waits and never fails.
-  if (isCc) providerSlot = await acquireProviderSlot("cc", await ccCapReader(), { pollMs: Number(process.env.ORCH_CC_POLL_MS) || 3000, pid: process.pid });
-  let releaseMachine;
+  let releaseMachine = null;
+  let queuedMs = 0; // total seconds spent waiting for a slot (nvidia + worker), reported as receipt.queued_s
+  const out = path.resolve(a.out);
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  // Live registry for the dashboard: one file per running oc-worker, removed when it ends.
+  // Register as "queued" before taking any slot, so the desk shows queued runs distinguishable from running.
+  const run = registerRun({ agent: a.agent, model, title, dir, out, started: Date.now(), queuedSince: Date.now(), idleMin: a.idleMin, timeoutMin: a.timeoutMin, stream: a.stream ?? null, session: a.session ?? null, state: "queued" });
+  const kickTimer = setInterval(() => run.touch(), 20_000);
+  // One stderr line when each wait begins and then at most once a minute, naming the slot holders.
+  let waitLineAt = 0;
+  let waitLineType = null;
+  const announceWait = (info) => {
+    const now = Date.now();
+    if (waitLineType === info.type && waitLineAt && now - waitLineAt < 60_000) return;
+    waitLineType = info.type;
+    waitLineAt = now;
+    const held = info.holders.map((h) => `pid ${h.pid} ${h.agent} ${h.title}`).join(", ");
+    const what = info.type; // "worker", "nvidia" or "cc"
+    console.error(`oc-worker: waiting for a ${what} slot (cap ${info.cap} ${info.mode}; held by ${held || "none"})`);
+  };
   try {
-    releaseMachine = await acquireSlot(a.slotCfg, { pollMs: 3000, pid: process.pid });
+    if (isNvidiaModel(wanted)) {
+      providerSlot = await acquireProviderSlot("nvidia", () => nvidiaCapNow(slotDir()).cap, {
+        pollMs: Number(process.env.ORCH_NVIDIA_POLL_MS) || 3000,
+        pid: process.pid,
+        agent: a.agent, title, out,
+        onWait: announceWait,
+      });
+      queuedMs += providerSlot.waitedSince != null ? Date.now() - providerSlot.waitedSince : 0;
+    }
+    // cc-worker: at most cc.max_workers headless Claude runs machine-wide; a waiting run waits and never fails.
+    if (isCc) {
+      providerSlot = await acquireProviderSlot("cc", await ccCapReader(), {
+        pollMs: Number(process.env.ORCH_CC_POLL_MS) || 3000,
+        pid: process.pid,
+        agent: a.agent, title, out,
+        onWait: announceWait,
+      });
+      queuedMs += providerSlot.waitedSince != null ? Date.now() - providerSlot.waitedSince : 0;
+    }
+    const slotResult = await acquireSlot(a.slotCfg, { pollMs: 3000, pid: process.pid, agent: a.agent, title, out, onWait: announceWait });
+    releaseMachine = slotResult.release;
+    queuedMs += slotResult.waitedSince != null ? Date.now() - slotResult.waitedSince : 0;
   } catch (e) {
     providerSlot?.release();
+    run.end();
+    clearInterval(kickTimer);
     throw e;
   }
+  // Both slots held: the clock starts now (the time budget does not count slot wait time). The registry
+  // heartbeat moves the run out of `queued`, and `started` resets so elapsed/OVERDUE measure the run only.
+  run.touch({ state: "running", started: Date.now() });
   const release = () => {
     releaseMachine();
     providerSlot?.release();
@@ -1216,11 +1338,6 @@ export async function runWorker(a) {
   const graceMin = Number.isFinite(a.graceMin) ? a.graceMin : 15;
   let extendedMin;
   let graceUsed = false; // run scope: one extension per run, not per resume attempt
-  const out = path.resolve(a.out);
-  fs.mkdirSync(path.dirname(out), { recursive: true });
-  // Live registry for the dashboard: one file per running oc-worker, removed when it ends.
-  const run = registerRun({ agent: a.agent, model, title, dir, out, started, idleMin: a.idleMin, timeoutMin: a.timeoutMin, stream: a.stream ?? null, session: a.session ?? null });
-  const kickTimer = setInterval(() => run.touch(), 20_000);
   // HEAD at run start, for every agent (not only read-only roles): used to detect landed work when a run
   // times out or stalls — a commit after the start HEAD means work landed even though the run was killed.
   let wtHeadBefore = null;
@@ -1299,6 +1416,7 @@ export async function runWorker(a) {
       let lastTick = Date.now();
       let maxSilence = 0;
       const attemptStart = Date.now();
+      let hungToolChild = null; // a descendant tool child killed because it outlived the idle window
       const childEnv = isReadOnly ? { ...workerEnv(), ORCH_SCRATCH: scratchDir, ...visionEnv } : { ...workerEnv(), ...visionEnv };
       // Opt-in OpenCode edit fence: merge per-run edit permissions into OPENCODE_CONFIG_CONTENT.
       if (process.env.ORCH_EDIT_FENCE === "1") {
@@ -1314,6 +1432,24 @@ export async function runWorker(a) {
       if (sig.name) { killTree(child); } // signalled between the loop check and the spawn
       else sig.current = { child, hard: null };
       const tree = child.pid ? watch(child.pid, { since: attemptStart, everyMs: Number(process.env.ORCH_PROCTREE_MS) || 5000 }) : null;
+      // Find a tracked descendant that has outlived the idle window (a hung tool child: node --test, npm, ...).
+      // Only pids from this run's opencode tree are ever killed — never by name pattern. Exactly one live
+      // candidate is the hung command; with more than one (a hung tool next to MCP servers / a pty daemon) the
+      // pid cannot be identified and is not guessed — the normal stall kill of opencode runs instead.
+      // `t.start` (from ps lstart via toISOString) is wall-clock time, so compare directly against the
+      // wall-clock cutoff without skew (proc-tree already applies skew internally for its `since` checks).
+      const findHungTool = () => {
+        if (!tree) return null;
+        const cutoff = Date.now() - idleMin * 60000;
+        const candidates = [];
+        for (const t of tree.tracked()) {
+          const start = Date.parse(t.start);
+          if (!Number.isFinite(start) || start >= cutoff) continue;
+          if (!alive(t.pid)) continue; // tracked entries stay after death; never target a dead/recycled pid
+          candidates.push(t);
+        }
+        return candidates.length === 1 ? candidates[0] : null;
+      };
       let buf = "";
       child.stdout.on("data", (d) => {
         lastOut = Date.now();
@@ -1351,8 +1487,19 @@ export async function runWorker(a) {
         lastTick = Date.now();
         maxSilence = Math.max(maxSilence, Date.now() - lastOut);
         if (idleMin > 0 && !killReason && Date.now() - lastOut > idleMin * 60000) {
-          killReason = "stalled";
-          killTree(child);
+          const hung = findHungTool();
+          if (hung) {
+            // Kill only the hung tool child; opencode survives and is nudged by the tool failure. Never
+            // resolve while `child` is alive: a second opencode on the same session/worktree is exactly the
+            // bug killed-run-stops-agent fixed. If it stays silent for another idle window, the normal stall
+            // path below kills opencode, and the resume message carries `hungToolChild` into the nudge line.
+            hungToolChild = hung;
+            try { process.kill(hung.pid, "SIGKILL"); } catch {}
+            lastOut = Date.now(); // the tool kill is progress: restart the silence clock
+          } else {
+            killReason = "stalled";
+            killTree(child);
+          }
         }
       }, 5000);
       child.on("error", (e) => {
@@ -1372,7 +1519,7 @@ export async function runWorker(a) {
           orphans = (await tree?.sweep()) || [];
         } catch {} // a watcher failure never changes a run's outcome
         tree?.stop();
-        resolve({ code, lines, stderr, killReason, maxSilence, orphans });
+        resolve({ code, lines, stderr, killReason, maxSilence, orphans, hungToolChild });
       });
     });
 
@@ -1420,6 +1567,7 @@ export async function runWorker(a) {
         fenceState.notes.push(`worktree fence scan failed: ${e.message}`);
       }
       for (const o of r.orphans) orphansKilled.push({ pid: o.pid, cmd: String(o.cmd || "").slice(0, 120) });
+      if (r.hungToolChild) orphansKilled.push({ pid: r.hungToolChild.pid, cmd: String(r.hungToolChild.cmd || "").slice(0, 120) });
       sum = isCc ? summarizeClaude(r.lines) : summarize(r.lines);
       maxSilenceMs = Math.max(maxSilenceMs, r.maxSilence);
       for (const k of Object.keys(tokens)) tokens[k] += sum.tokens[k];
@@ -1445,7 +1593,11 @@ export async function runWorker(a) {
       const waitMs = resumeReason === "quota" || resumeReason === "rate-limit"
         ? Math.max(plainWaitMs, Number(process.env.ORCH_RATE_LIMIT_WAIT_MS ?? 60_000))
         : plainWaitMs;
-      if (sig.name || !interrupted || !sum.all.trim() || !sum.session || resumed.length >= resumeMax || Date.now() + waitMs >= effectiveDeadline) break;
+      // A stalled run may be nudged before it produced output (silent stall) only if it has a session id:
+      // resuming without one would start a fresh agent whose whole prompt is "Continue…" — it never saw the
+      // Mandate. A dropped run also needs output. No session id => no resume (the run fails as stalled).
+      const canResumeSilent = r.killReason === "stalled";
+      if (sig.name || !interrupted || (!sum.all.trim() && !canResumeSilent) || !sum.session || resumed.length >= resumeMax || Date.now() + waitMs >= effectiveDeadline) break;
       const why = r.killReason === "stalled" ? `no output for ${idleMin} min` : (classifyErrors.find((e) => classify([e])?.reason === resumeReason) || errors[0] || "dropped").slice(0, 80);
       resumed.push({ session: sum.session, reason: why, seconds: Math.round((Date.now() - t0) / 1000) });
       if (waitMs > 0) await new Promise((res) => { const t = setTimeout(res, waitMs); sig.wake = () => { clearTimeout(t); res(); }; });
@@ -1454,6 +1606,7 @@ export async function runWorker(a) {
         `The previous run was interrupted (${why}). Continue the task from where you stopped. The Mandate is unchanged.\n` +
         `Before continuing, check the worktree state below and verify any half-finished edit or command.\n\n` +
         `git status --short:\n${gitOut(dir, ["status", "--short"])}\n\ngit diff --stat:\n${gitOut(dir, ["diff", "--stat"])}` +
+        (r.hungToolChild ? `\nA tool command ran over ${idleMin} min and was stopped: ${r.hungToolChild.cmd}` : "") +
         FOOTER;
       cli = cliFor(sum.session, msg);
     }
@@ -1563,6 +1716,7 @@ export async function runWorker(a) {
       partial: Boolean(killReason && all.trim()),
       errors,
       max_silence_s: Math.round(maxSilenceMs / 1000),
+      queued_s: Math.round(queuedMs / 1000), // seconds spent waiting for a slot (nvidia + worker together)
       resumed,
       attempts,
       ...(providerSlot && !isCc ? { provider_slot: `nvidia ${providerSlot.index}/${providerSlot.cap}` } : {}),
@@ -1711,7 +1865,8 @@ function lastOutMs(run) {
  * output yet), QUIET (silent past its idle limit — the killer should fire on its
  * next poll), OVERDUE (alive past its timeout budget — the wrapper should have
  * exited), HEARTBEAT-STALE (wrapper alive but not ticking its 20s heartbeat),
- * STALE (wrapper pid gone — a crash that skipped end()). Read-only.
+ * STALE (wrapper pid gone — a crash that skipped end()), QUEUED (registered, waiting for a slot:
+ * never OVERDUE/QUIET, since its clock has not started). Read-only.
  */
 export function activeRuns(now = Date.now()) {
   return readRunFiles().map((r) => {
@@ -1726,6 +1881,11 @@ export function activeRuns(now = Date.now()) {
     if (!pidAlive) {
       state = "STALE";
       detail = "wrapper pid gone (crashed without end())";
+    } else if (r.state === "queued") {
+      // Waiting for a slot (Nvidia and/or machine-wide): no output yet and not yet on the clock,
+      // so it is never OVERDUE/QUIET — the wait itself is the expected state.
+      state = "QUEUED";
+      detail = `waiting for a slot since ${fmtDur(now - (r.queuedSince || r.started || now))}`;
     } else if (timeoutMin != null && timeoutMin > 0 && Number.isFinite(r.started) && now - r.started > timeoutMin * 60000) {
       state = "OVERDUE";
       detail = `over timeout-min ${timeoutMin}m budget`;
