@@ -114,6 +114,48 @@ else if (mode === "hang-after-text") {
   process.stdout.write(JSON.stringify({ type: "text", sessionID: session, part: { sessionID: session, messageID: "msg_1", type: "text", text: "found candidate A at x.py:12" } }) + "\n");
   setInterval(() => {}, 1000);
 }
+else if (mode === "nudge-once") {
+  // First call: go silent forever (simulates a run that stalls). Resumed call (marker present):
+  // produce output and finish — the nudge worked.
+  const dir = process.env.FAKE_OC_STATE_DIR;
+  const marker = path.join(dir, "nudged");
+  if (dir && !fs.existsSync(marker)) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(marker, "1");
+    setInterval(() => {}, 1000); // silent forever: oc-worker will stall and nudge
+  } else {
+    const ev = (type, part) => process.stdout.write(JSON.stringify({ type, sessionID: session, part: { sessionID: session, messageID: "msg_2", ...part } }) + "\n");
+    ev("text", { type: "text", text: "RESULT: DONE\nnudged work\n" });
+    ev("step_finish", { type: "step-finish", cost: 0.0012, tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 1000, write: 0 } } });
+    process.exit(0);
+  }
+}
+else if (mode === "hung-tool") {
+  // Spawns a detached child that sleeps forever (simulates a hung tool: node --test, npm, ...),
+  // produces one text event, then goes silent. oc-worker's stall rule should kill the descendant
+  // (not opencode) and nudge. On the resumed call, exit 0.
+  const dir = process.env.FAKE_OC_STATE_DIR;
+  const marker = path.join(dir, "tool-killed");
+  const gc = spawn(process.execPath, ["-e", "setTimeout(() => {}, 600000)"], { detached: true, stdio: "ignore", windowsHide: true });
+  gc.unref();
+  if (dir && !fs.existsSync(marker)) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "hung-tool-pid"), String(gc.pid)); // first call only: the pid oc-worker kills
+    fs.writeFileSync(marker, "1");
+    process.stdout.write(JSON.stringify({ type: "text", sessionID: session, part: { sessionID: session, messageID: "msg_1", type: "text", text: "found candidate A at x.py:12" } }) + "\n");
+    // Once oc-worker kills the hung tool child, a real opencode unblocks and exits on its own; the fake
+    // does the same so no fixture child is left behind. The stall already resolved the attempt, so the
+    // resumed invocation is what produces the final text.
+    gc.on("exit", () => process.exit(0));
+    setInterval(() => {}, 1000); // go silent: stall fires, descendant killed, nudge sent
+  } else {
+    try { gc.kill("SIGKILL"); } catch {}
+    const ev = (type, part) => process.stdout.write(JSON.stringify({ type, sessionID: session, part: { sessionID: session, messageID: "msg_2", ...part } }) + "\n");
+    ev("text", { type: "text", text: "RESULT: DONE\ntool-killed work\n" });
+    ev("step_finish", { type: "step-finish", cost: 0.0012, tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 1000, write: 0 } } });
+    process.exit(0);
+  }
+}
 else if (mode === "landed") {
   // Commit (moves HEAD) and write a DONE report, then hang: work landed before the kill.
   process.on("SIGTERM", () => process.exit(0));

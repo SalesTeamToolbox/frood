@@ -442,6 +442,10 @@ decides: refused at dispatch/create time rather than late: --stream without dirn
 handler: orchestrator/bin/oc-worker.mjs (HEAD captured at run start; `landed` receipt field on timeout/stalled when HEAD moved + clean tree + DONE report); orchestrator/bin/outcome.mjs workerOutcome; orchestrator/bin/board.mjs workerOutcome copy (identical behaviour)
 decides: a timeout/stalled receipt whose HEAD moved, tree is clean, and --report says DONE is treated as done, so the desk dispatches the critic instead of resume-worker and board round accepts findings
 
+### oc-worker: visible slot waits, earlier nudges, hung tool calls
+handler: orchestrator/bin/oc-worker.mjs (acquireSlot + acquireProviderSlot stderr wait lines naming holders; registry `state: "queued"`; receipt `queued_s`; `--idle-min`/`--resume` defaults 6/3 for `*-nvidia` agents; hung-tool descendant kill + nudge)
+decides: worker looks hung / waiting for a slot → oc-worker acquireSlot + idle defaults; Nvidia stalls caught at 6 min and nudged up to 3 times; hung tool child killed instead of opencode
+
 ### frood-learn per-run opencode join
 handler: bin/frood-learn.mjs (perRunOpencodeFindings: readStreamEvents queued/run-done → opencode.db session_message + session_part)
 decides: start delay, after-kill activity and long tool calls per run; why a worker timed out / kept working
