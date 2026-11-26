@@ -93,7 +93,8 @@ any of them.
   never by waiting in this one. A session that boards + departs and then idles
   on the train has stalled — the rule above is what restarts it.
 - End the message with the handoff card (`/frood-orchestrator`, "At every module boundary"): status first, then `You:`
-  and `Next:`. Put an unverified deploy under `You:`. Nothing goes after the card.
+  and `Next:`. The card includes the `Pace:` line (and `Reset:` when `cc-pace advise` prints advice), filled and
+  omitted by the rules in `/frood-orchestrator`. Put an unverified deploy under `You:`. Nothing goes after the card.
 - Token hygiene: clear before the next module; orchestrator on the strong model,
   workers on the routed cheap agents (`rules/01-orchestrator-models.md`); noisy
   investigation to subagents with isolated context.

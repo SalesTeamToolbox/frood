@@ -51,6 +51,19 @@ test("app with only a weekly window: five_hour and fable null", () => {
   const rec = JSON.parse(fs.readFileSync(path.join(s.dir, "cc-usage.json"), "utf8"));
   assert.equal(rec.five_hour, null);
   assert.equal(rec.fable, null);
+  // cc-pacing M6 (plan gap 5): an absent value prints `n/a` with no `%`
+  const line = s.run(["latest"]).stdout.trim();
+  assert.match(line, / 5h n\/a weekly 5% /);
+  assert.match(line, / fable n\/a$/);
+  assert.doesNotMatch(line, /n\/a%/);
+});
+
+test("latest keeps the % on present 5h and fable values", () => {
+  const s = sandbox();
+  assert.equal(s.run(["snapshot", "--from-app", "-"], fs.readFileSync(FX("app.json"), "utf8")).status, 0);
+  const line = s.run(["latest"]).stdout.trim();
+  assert.match(line, / 5h 40% weekly 42% /);
+  assert.match(line, / fable 13%$/);
 });
 
 test("non-JSON or no weekly window exits 2 and leaves files untouched", () => {

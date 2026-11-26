@@ -88,7 +88,7 @@ function inHome(h, now, fn) {
 const lockDirOf = (h) => path.join(h, ".config", "orchestrator", "desk-watch.lock");
 // cwd: h — `status` lists tickets from the board of the repo it runs in (ticketSessions(process.cwd())); from the real
 // checkout every live ticket on the real board leaked into the expected output.
-const cli = (h, args, extraEnv = {}) => spawnSync(process.execPath, [BIN, ...args], { cwd: h, env: { ...process.env, ORCH_HOME: h, WORKER_SLOTS: "3", ...extraEnv }, encoding: "utf8", timeout: 60000 });
+const cli = (h, args, extraEnv = {}) => spawnSync(process.execPath, [BIN, ...args], { cwd: h, env: { ...process.env, ORCH_HOME: h, WORKER_SLOTS: "3", ORCH_NO_PACE: "1", ...extraEnv }, encoding: "utf8", timeout: 60000 });
 const queued = (run, pid, pid_start, at = new Date().toISOString()) => ({ key: `run:${run}:queued`, kind: "queued", at, run, out: `/x/${run}.md`, pid, pid_start, agent: "worker", ticket: "/x/ticket.json" });
 const eventsOf = (h, name = "m6a") =>
   fs.readFileSync(path.join(sdir(h), `${name}.events.jsonl`), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -2085,7 +2085,7 @@ test("status: board tickets holding a session are listed after the streams; abse
   const put = (id, stage, assignment) =>
     fs.writeFileSync(path.join(repo, ".opencode", "board", "tickets", `${id}.json`), JSON.stringify({ schema: 1, id, stage, assignment }));
   put("t-none", "queued", null);
-  const run = (args) => spawnSync(process.execPath, [BIN, ...args], { cwd: repo, env: { ...process.env, ORCH_HOME: h, WORKER_SLOTS: "3" }, encoding: "utf8" });
+  const run = (args) => spawnSync(process.execPath, [BIN, ...args], { cwd: repo, env: { ...process.env, ORCH_HOME: h, WORKER_SLOTS: "3", ORCH_NO_PACE: "1" }, encoding: "utf8", timeout: 60000 });
   const out = run(["status"]).stdout.split("\n").filter(Boolean);
   assert.match(out[0], /^watch none — no desk watcher holds the lock$/);
   assert.match(out[1], /^slots \d+\/\d+ \(fixed\)$/);

@@ -98,6 +98,8 @@ import { killPid, processStart, isZombie } from "./proc-tree.mjs";
 import { agentModel, isPolicyFree, isDown, modelAllowed, policyReason } from "./pool-health.mjs";
 import { chainFor } from "./chains.mjs";
 import { slotConfig, readSample, allowedSlots } from "./slots.mjs";
+import { readPace } from "./pace-read.mjs";
+import { statusLine as paceStatusLine } from "./cc-pace.mjs";
 
 const NEXT_CUT = 80;
 const DEFAULT_INTERVAL_S = 30;
@@ -571,11 +573,16 @@ function cmdStatus(opts) {
   const slotCfg = slotConfig(process.env, undefined);
   const slotSample = readSample();
   const { allowed, max, reason } = allowedSlots(slotSample, slotCfg, { clearSince: null }, Date.now());
+  // Pace (cc-pacing M6): one readPace() per status call (one child process, 10 s timeout, never throws). Text mode
+  // prints `pace: <statusLine>` first; `off` omits the line and the JSON key. A failed read shows as UNKNOWN.
+  const pace = readPace();
+  const showPace = pace.state !== "off";
   if (opts.json) {
     // `tickets` appears only when some board ticket holds a session, so the existing shape is unchanged.
-    console.log(JSON.stringify({ streams: rows, watch: info.state === "none" ? null : info, slots: { allowed, max, reason }, ...(tickets.length ? { tickets } : {}) }));
+    console.log(JSON.stringify({ streams: rows, watch: info.state === "none" ? null : info, slots: { allowed, max, reason }, ...(tickets.length ? { tickets } : {}), ...(showPace ? { pace } : {}) }));
     return 0;
   }
+  if (showPace) console.log(`pace: ${paceStatusLine(pace)}`);
   console.log(watchLine(info));
   console.log(reason);
   for (const s of rows) {

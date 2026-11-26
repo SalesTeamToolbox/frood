@@ -121,6 +121,9 @@ function readInput(src) {
   return src === "-" ? fs.readFileSync(0, "utf8") : fs.readFileSync(src, "utf8");
 }
 
+// An absent value prints `n/a` (no `%`); a present one keeps its `%`.
+const pctOrNa = (v) => (v == null ? "n/a" : `${v}%`);
+
 export function main(argv) {
   const [cmd, ...rest] = argv;
   const fail = (m) => { console.error(`cc-usage: ${m}`); return 2; };
@@ -128,7 +131,7 @@ export function main(argv) {
     const r = readLatest();
     if (!r) { console.log("no snapshot"); return 0; }
     if (rest.includes("--json")) console.log(JSON.stringify(r));
-    else console.log(`${r.at} (${r.source}) 5h ${r.five_hour?.pct ?? "n/a"}% weekly ${r.weekly.pct}% (resets ${r.weekly.resets_at}) fable ${r.fable?.pct ?? "n/a"}%`);
+    else console.log(`${r.at} (${r.source}) 5h ${pctOrNa(r.five_hour?.pct)} weekly ${r.weekly.pct}% (resets ${r.weekly.resets_at}) fable ${pctOrNa(r.fable?.pct)}`);
     return 0;
   }
   if (cmd !== "snapshot") return fail("usage: snapshot --from-app <file|-> | snapshot --from-statusline [path] | latest [--json]");

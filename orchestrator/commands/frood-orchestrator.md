@@ -89,6 +89,8 @@ fails; never block on it.
    You:   nothing | 1. <one-line action or question>  2. …
    Next:  <plain next step> — /frood-next <stream> [<ticket or module>]
    Done:  <plain what landed> (<ticket> <short-sha> · …)   (≤3 items)
+   Pace:  <first stdout line of cc-pace status>
+   Reset: <top line of cc-pace advise, without its leading `You: `>
    Desk:  <live run> (pid <P>) → desk daemon → peer-mail to this session → I report to you | none
    Plan:  <plan file path>#handoff
    ```
@@ -100,7 +102,14 @@ fails; never block on it.
    this session by peer-mail on a merge, senior review or sign-off, and this session reports it), **NEEDS YOU**
    (answer `You:` before `/frood-next`), **BLOCKED** (cannot continue; `You:` says what unblocks it), **DONE**
    (stream finished; `Next:` is `—`). Never READY with items under `You:`. Every line fits in 100 characters.
-   Omit a line only when it would be `none` (`You:` and `Next:` are always shown).
+   Omit a line only when it would be `none` (`You:` and `Next:` are always shown); `Pace:` and `Reset:` have their
+   own omit rules below.
+
+   `Pace:` is the first stdout line of `node {{ORCH_REPO}}/bin/cc-pace.mjs status`; omit it when the pace is off
+   (status prints `OFF …`). `Reset:` is the top (first) line of `node {{ORCH_REPO}}/bin/cc-pace.mjs advise`
+   without its leading `You: `; omit it when advise prints nothing. Cut both at 100 characters, don't wrap.
+   They are information only: a pace or reset line does NOT by itself make the status NEEDS YOU or put an
+   item under `You:`. Pressing a reset stays the owner's call; Frood never presses one.
 4. Then, unless Auto-start applies (below), ask the owner with these options (AskUserQuestion):  # cc-only
 4. Then ask the owner with these options (a numbered list):  # oc-only
    <!-- cc-only -->

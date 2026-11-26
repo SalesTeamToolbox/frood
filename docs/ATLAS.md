@@ -500,6 +500,11 @@ handler: orchestrator/bin/router-health.mjs CLI block (readPace + cc-pace status
 decides: text mode's first stdout line is `pace: <cc-pace status line>` on both the fresh `--if-stale` skip and the full run; `over` adds one `pace: OVER — conserve: …` line after it; `under` changes only the worker line to `use cc-worker (pace UNDER), fallback <agent>`; `--json` adds a top-level `pace` key, never written to the router-health.json stamp
 trap: goldens orchestrator/tests/fixtures/router-health-golden/ (captured before M4) must match after the pace line, so any other output change breaks orchestrator/tests/pace-routing.test.mjs
 
+### desk status pace line
+handler: orchestrator/bin/desk.mjs `cmdStatus` (readPace + cc-pace statusLine, read once per `status` call)
+decides: text mode's first stdout line is `pace: <cc-pace status line>`, before the watch line, omitted when the state is `off`; `--json` adds a top-level `pace` key, absent on `off`; a failed read prints `pace: UNKNOWN (pace read failed: …)` and status still exits 0
+trap: reuses orchestrator/bin/pace-read.mjs's single child process (10 s timeout, never throws) — spawn nothing new; existing status tests in orchestrator/tests/desk.test.mjs pin `ORCH_NO_PACE=1` so the watch line stays first there; pace cases live in orchestrator/tests/desk-pace.test.mjs
+
 ### Claude reset advisor (cc-pace advise)
 handler: orchestrator/bin/cc-pace.mjs (`adviseState` pure, `effectiveDeadline`, `dueNotifications`, `activeTickets`, `adviseTick`; CLI `advise [--json] [--notify]`, `reset-used full|fable|none`)
 decides: when to press the full / fable plan resets from `usage-limits.json` `cc.resets` (expiry warnings at 14 d / 72 h / 24 h / late against the effective deadline = the last weekly reset when the expiry falls < 24 h after it; `press-full` and `press-fable` on a fresh snapshot, fable only with a queued/working board ticket); a > 20-point weekly fall inside one window (`detectDrop`: the LAST fall, re-baselined after each) pauses `press-full` and asks until an ack clears it (`dropAcked`: any `reset-used` ack, including `none`, written at or after `drop.before_at`, the snapshot just before the fall, because the fall only shows in the snapshot after the press); notify memory (24 h per advice id via session-pressure `shouldNotify`) and the acks in `<orchDir()>/cc-advise-state.json`
