@@ -76,3 +76,24 @@ The four gates:
   pages the owner instead of writing an empty findings file.
 
 In-scope rounds, `verdict-gate.mjs`, `oc-worker.mjs` and `board verify`/`shipped` are unchanged.
+
+## blast-line tag rule — verdict-gate.mjs
+
+`orchestrator/bin/verdict-gate.mjs` classifies each BLAST RADIUS line by its first word (ticket
+`gate-decorated-tags`). A bullet (`-`, `*`, `+`) is always collected as a blast-line entry; a
+leading skip run — a checkbox, any non-letter character, or a single-letter list marker
+(`a.`/`a)`) — opens any other entry, collected only when the first content word is a tag
+(`UNREQUESTED`/`unchanged`/`intended`). This catches decorated bullets (`• UNREQUESTED`,
+`❌ UNREQUESTED`, `[x] UNREQUESTED`) and decorated numbered lines (`1. **UNREQUESTED**`,
+`a) UNREQUESTED`). Numbered findings (`1. [minor] ...`) and `1. none` / `1. No findings` /
+`1. (none)` placeholders are findings, not blast lines. Before reading the first word it strips a
+leading skip run (checkbox, any non-letter character, single-letter marker), so decoration never
+hides an UNREQUESTED tag and never turns a line into a false UNREQUESTED. The gate fails safe:
+when in doubt about a decorated tag, it counts.
+
+- `UNREQUESTED` (any case) as the first word -> CHANGES_REQUESTED, whatever follows (fail safe).
+- `unchanged`/`intended` as the first word, closed by emphasis/brackets then a separator
+  (` — ` ` – ` ` -- ` ` - ` `:` `|`) or end of line -> does not count.
+- any other line -> the transition (old format) separator walk plus the no-dash-separator fail safe.
+
+The INVALID rule (no BLAST RADIUS entries) and the blocker/major parser are unchanged.
