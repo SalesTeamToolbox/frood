@@ -78,6 +78,22 @@ test("plan: overlap through a blast-radius caller, a directory or a glob also se
   assert.equal(together("b-one", "c-one"), true, "lib/ and src/ are disjoint");
 });
 
+test("plan: a whole-repo scope (`.`, `./` or the repo root path) overlaps every ticket — never fails open", () => {
+  const r = mk();
+  ticket(r, "a-one", { scope: ["src/a.mjs"] });
+  ticket(r, "dot-one", { scope: ["."] });
+  ticket(r, "slash-one", { scope: ["./"] });
+  ticket(r, "root-one", { scope: [r] });
+  ticket(r, "b-one", { scope: ["docs/b.md"] });
+  const p = plan(r, "a-one", "dot-one", "slash-one", "root-one", "b-one");
+  const together = (x, y) => p.groups.some((g) => g.includes(x) && g.includes(y));
+  for (const whole of ["dot-one", "slash-one", "root-one"]) {
+    assert.equal(together(whole, "a-one"), false, `${whole} overlaps src/a.mjs`);
+    assert.equal(together(whole, "b-one"), false, `${whole} overlaps docs/b.md`);
+  }
+  assert.equal(together("a-one", "b-one"), true, "disjoint files still share a group");
+});
+
 test("plan: a depends: chain stays serial, in dependency order, even when files are disjoint", () => {
   const r = mk();
   ticket(r, "t-three", { scope: ["c.mjs"], depends: ["t-two"] });

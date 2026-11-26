@@ -69,7 +69,7 @@ locks/<id>.lock/    gitignored; mkdir lock, contains owner.json
 | `egm` | object | `{required: bool, triggers: string[], status: pending\|approved\|waived, reason, report_path, report_sha256, by, at}` |
 | `worktree` | string\|null | absolute; set at claim |
 | `base_sha` | string\|null | full 40-char sha of `adapter.base` at claim |
-| `assignment` | object\|null | `{owner, harness: claude\|opencode, since, missed_sweeps: int, worker: {pid, started, out_path}\|null}` |
+| `assignment` | object\|null | `{owner, harness: claude\|opencode, since, missed_sweeps: int, worker: {pid, started, out_path}\|null, session?: string}` — `session` is the desktop session holding the ticket (`board session`; claim/reopen carry it over; read by `dispatch.mjs` and `desk.mjs status`) |
 | `rounds` | object[] | see "Round object" in Precise rules |
 | `senior` | object | `{required: bool, reasons: string[]}` recomputed every round |
 | `signoffs` | object[] | `{by: critic\|senior\|human, model, free, free_source, reviewed_sha, at, invalidated_by: null\|round n\|"reopen n"}` |

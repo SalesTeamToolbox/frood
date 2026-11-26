@@ -78,13 +78,15 @@ function normPath(p, roots = []) {
   let x = String(p).replace(/\\/g, "/").toLowerCase();
   for (const r of roots) {
     const rr = String(r ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-    if (rr && x.startsWith(`${rr}/`)) {
+    if (rr && (x === rr || x.startsWith(`${rr}/`))) {
       x = x.slice(rr.length + 1);
       break;
     }
   }
-  x = path.posix.normalize(x).replace(/^\.\//, "").replace(/\/+$/, "");
-  return x === "." ? "" : x;
+  x = path.posix.normalize(x || ".").replace(/^\.\//, "").replace(/\/+$/, "");
+  // The repo root (`.`, `./`, or the root path itself) is the whole tree: `**` overlaps every file. It used to
+  // normalise to "" and be filtered out, so a whole-repo scope overlapped nothing and failed open.
+  return x === "." || x === "" ? "**" : x;
 }
 export function filesOf(t, root = null) {
   const roots = [t.worktree, root];
