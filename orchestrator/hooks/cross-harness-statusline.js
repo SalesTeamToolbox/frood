@@ -1229,7 +1229,7 @@ ${trainsHtml}
 
 <div class="footer">file is truth: train state mirrors ops/train.sh (departing → boarded → last receipt);
 verify reads .claude/worktrees/verify-*/.claude/verify.log; sessions via opencode-peer-mail.
-Quota note: Go/CommandCode allowances have no local counter — CC's own 5h/7d windows are above;
+Quota note: Go and Nvidia allowances have no local counter — CC's own 5h/7d windows are above;
 check the opencode console for the rest.</div>
 
 </div></body></html>`;

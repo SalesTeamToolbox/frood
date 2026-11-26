@@ -425,8 +425,8 @@ handler: orchestrator/mods/dispatch-status/hooks/register.tsx (session.start pol
 decides: the row above the prompt in the Claude desktop app (which does not draw `$.ui.status`; the terminal still gets the status line). Loaded in every session only when `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json` env names `~/.claude/frood-mods/dispatch-status`.
 
 ### desk: critic round floor, verdict replacement, patch-identical rebase
-handler: orchestrator/bin/desk.mjs criticRound() (run-done ACTION critic round floor), orchestrator/bin/desk.mjs latestVerdict() (newest verdict:<run>@<n> reader), orchestrator/bin/desk.mjs cmdMergeCheck() (head-moved rule with patch-identical rebase acceptance)
-decides: the critic round for a re-dispatched worker run (max of resume acks, worker-r<N> id, findings-r<N> on disk, board rounds.length), whether a corrected INVALID verdict is superseded at verdict:<run>@<n>, and whether a HEAD that moved past reviewed_sha is still a mergeable rebase (same patch-id). Step stays pure (file reads only, no git, no spawn); handoff.mjs append/read semantics are unchanged.
+handler: orchestrator/bin/desk.mjs boardRounds() (board counted/lap/has reader, mirrors board.mjs ~:436-438 and ~:994-996), orchestrator/bin/desk.mjs criticRound() (run-done ACTION critic round floor), orchestrator/bin/desk.mjs latestVerdict() (newest verdict:<run>@<n> reader), orchestrator/bin/desk.mjs cmdMergeCheck() (head-moved rule with patch-identical rebase acceptance)
+decides: the critic round for a re-dispatched worker run (max of resume acks, worker-r<N> id, findings-r<N> on disk, board lap), whether a corrected INVALID verdict is superseded at verdict:<run>@<n>, and whether a HEAD that moved past reviewed_sha is still a mergeable rebase (same patch-id). Step stays pure (file reads only, no git, no spawn); handoff.mjs append/read semantics are unchanged.
 topic: docs/atlas/desk.md
 
 ### oc-worker load-based slots

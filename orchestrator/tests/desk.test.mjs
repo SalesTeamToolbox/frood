@@ -80,7 +80,7 @@ function inHome(h, now, fn) {
 const lockDirOf = (h) => path.join(h, ".config", "orchestrator", "desk-watch.lock");
 // cwd: h — `status` lists tickets from the board of the repo it runs in (ticketSessions(process.cwd())); from the real
 // checkout every live ticket on the real board leaked into the expected output.
-const cli = (h, args, extraEnv = {}) => spawnSync(process.execPath, [BIN, ...args], { cwd: h, env: { ...process.env, ORCH_HOME: h, ...extraEnv }, encoding: "utf8" });
+const cli = (h, args, extraEnv = {}) => spawnSync(process.execPath, [BIN, ...args], { cwd: h, env: { ...process.env, ORCH_HOME: h, WORKER_SLOTS: "3", ...extraEnv }, encoding: "utf8", timeout: 60000 });
 const queued = (run, pid, pid_start, at = new Date().toISOString()) => ({ key: `run:${run}:queued`, kind: "queued", at, run, out: `/x/${run}.md`, pid, pid_start, agent: "worker", ticket: "/x/ticket.json" });
 const eventsOf = (h, name = "m6a") =>
   fs.readFileSync(path.join(sdir(h), `${name}.events.jsonl`), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -451,7 +451,7 @@ test("status: watch line first, then rows per stream and run; --json carries str
   const env = { ORCH_NOW_MS: String(t0) };
   const lines = cli(h, ["status"], env).stdout.split("\n").filter(Boolean);
   assert.match(lines[0], /^watch none/);
-  assert.match(lines[1], /^slots \d+\/\d+ \(fixed\)$/); // WORKER_SLOTS=3 in this environment -> fixed
+  assert.match(lines[1], /^slots \d+\/\d+ \(fixed\)$/);
   assert.match(lines[2], /^m6a {2}pending {2}next: ship T7 {2}unhandled=3$/); // run-dead, run-done, verdict; queued is not counted
   assert.equal(lines[3], "  worker-r1  worker  running  12m");
   assert.equal(lines[4], "  worker-r2  worker  dead  5m");
@@ -2066,10 +2066,10 @@ test("status: board tickets holding a session are listed after the streams; abse
   const put = (id, stage, assignment) =>
     fs.writeFileSync(path.join(repo, ".opencode", "board", "tickets", `${id}.json`), JSON.stringify({ schema: 1, id, stage, assignment }));
   put("t-none", "queued", null);
-  const run = (args) => spawnSync(process.execPath, [BIN, ...args], { cwd: repo, env: { ...process.env, ORCH_HOME: h }, encoding: "utf8" });
+  const run = (args) => spawnSync(process.execPath, [BIN, ...args], { cwd: repo, env: { ...process.env, ORCH_HOME: h, WORKER_SLOTS: "3" }, encoding: "utf8" });
   const out = run(["status"]).stdout.split("\n").filter(Boolean);
   assert.match(out[0], /^watch none — no desk watcher holds the lock$/);
-  assert.match(out[1], /^slots \d+\/\d+ \(fixed\)$/); // WORKER_SLOTS=3 in this environment -> fixed
+  assert.match(out[1], /^slots \d+\/\d+ \(fixed\)$/);
   const j = JSON.parse(run(["status", "--json"]).stdout);
   assert.deepEqual(j.streams, []);
   assert.deepEqual(j.watch, null);
@@ -2116,14 +2116,14 @@ test("desk: two findings files on disk bumps the run-done critic round to 3", ()
 });
 
 // board ticket rounds.length 2 -> round 3 with nothing on disk
-test("desk: board ticket rounds length 2 floors the critic round at 3", () => {
+test("desk: board ticket counted rounds 2 floors the critic round at 3", () => {
   const { h, name, runDir } = t8Stream("fix1-board");
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "orch-board-"));
   CLEAN.push(repo);
   fs.mkdirSync(path.join(repo, ".opencode", "board", "tickets"), { recursive: true });
   fs.writeFileSync(
     path.join(repo, ".opencode", "board", "tickets", "t8.json"),
-    JSON.stringify({ schema: 1, id: "t8", rounds: [{ n: 1 }, { n: 2 }] }),
+    JSON.stringify({ schema: 1, id: "t8", rounds: [{ n: 1, counted: true }, { n: 2, counted: true }] }),
   );
   const t = mkTicket(runDir, { repo });
   inHome(h, undefined, () => {
@@ -2156,7 +2156,154 @@ test("desk: unparseable board ticket does not throw and falls back", () => {
   );
 });
 
-// ---------------------------------------------------------------- desk bookkeeping (Fix 2: verdict replacement)
+// ---------------------------------------------------------------- Pass bars (desk-senior-rounds)
+
+// Helper: write a board ticket for slug t8 in a temp repo, return the repo dir.
+const boardRepo = (rounds, reopens) => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "orch-pb-"));
+  CLEAN.push(repo);
+  fs.mkdirSync(path.join(repo, ".opencode", "board", "tickets"), { recursive: true });
+  fs.writeFileSync(path.join(repo, ".opencode", "board", "tickets", "t8.json"),
+    JSON.stringify({ schema: 1, id: "t8", rounds, reopens }));
+  return repo;
+};
+
+// 1. Senior misfire (test-orphans): r1/r2 never reviewed, r3 DONE, critic APPROVED at findings-r3.md;
+// board has 1 counted round whose reviewed_sha == the verdict's -> merge, not senior.
+test("pass bar: APPROVED with 1 counted board round (matching sha) -> merge, not senior", () => {
+  const { h, name, runDir } = t8Stream("pb-orphans");
+  const repo = boardRepo([{ n: 1, counted: true, reviewed_sha: "abc" }]);
+  mkTicket(runDir, { repo });
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r3", runDir));
+    appendEvent(name, evDone("worker-r3", runDir));
+    appendEvent(name, evVerdict("worker-r3", runDir, { effective: "APPROVED", findings: path.join(runDir, "findings-r3.md"), reviewed_sha: "abc" }));
+  });
+  const ticketJson = fwd(path.join(runDir, "ticket.json"));
+  assert.equal(
+    cliLines(h, ["step", name, "verdict:worker-r3"]).lines[0],
+    `ESCALATE merge ${ticketJson} abc`,
+    "one counted round including this verdict is not > 2",
+  );
+});
+
+// 2. Same but the board round is not recorded yet (0 counted) -> still merge.
+test("pass bar: APPROVED with 0 counted board rounds -> merge, not senior", () => {
+  const { h, name, runDir } = t8Stream("pb-nocount");
+  const repo = boardRepo([{ n: 1, counted: false, reviewed_sha: "other" }]);
+  mkTicket(runDir, { repo });
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r3", runDir));
+    appendEvent(name, evDone("worker-r3", runDir));
+    appendEvent(name, evVerdict("worker-r3", runDir, { effective: "APPROVED", findings: path.join(runDir, "findings-r3.md"), reviewed_sha: "abc" }));
+  });
+  const ticketJson = fwd(path.join(runDir, "ticket.json"));
+  assert.equal(
+    cliLines(h, ["step", name, "verdict:worker-r3"]).lines[0],
+    `ESCALATE merge ${ticketJson} abc`,
+    "zero counted rounds is not > 2",
+  );
+});
+
+// 3. Real third round: 3 counted board rounds, last with the verdict's sha -> senior.
+test("pass bar: APPROVED with 3 counted board rounds (matching sha) -> senior", () => {
+  const { h, name, runDir } = t8Stream("pb-third");
+  const repo = boardRepo([
+    { n: 1, counted: true, reviewed_sha: "x" },
+    { n: 2, counted: true, reviewed_sha: "y" },
+    { n: 3, counted: true, reviewed_sha: "abc" },
+  ]);
+  mkTicket(runDir, { repo });
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r3", runDir));
+    appendEvent(name, evDone("worker-r3", runDir));
+    appendEvent(name, evVerdict("worker-r3", runDir, { effective: "APPROVED", findings: path.join(runDir, "findings-r3.md"), reviewed_sha: "abc" }));
+  });
+  const ticketJson = fwd(path.join(runDir, "ticket.json"));
+  assert.equal(
+    cliLines(h, ["step", name, "verdict:worker-r3"]).lines[0],
+    `ESCALATE senior ${fwd(path.join(runDir, "findings-r3.md"))}`,
+    "three counted rounds including this verdict is > 2",
+  );
+});
+
+// 5. Rounds-exhausted not early: 1 counted round, findings-r1..r3 on disk (unreviewed), new worker DONE ->
+// ACTION critic findings-r4.md 4, not rounds-exhausted (slot numbers are slots, not rounds).
+test("pass bar: rounds-exhausted not early when lap < max, next free slot above max", () => {
+  const { h, name, runDir } = t8Stream("pb-notearly");
+  const repo = boardRepo([{ n: 1, counted: true, reviewed_sha: "x" }]);
+  mkTicket(runDir, { repo });
+  fs.writeFileSync(path.join(runDir, "findings-r1.md"), "r1\n");
+  fs.writeFileSync(path.join(runDir, "findings-r2.md"), "r2\n");
+  fs.writeFileSync(path.join(runDir, "findings-r3.md"), "r3\n");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r4", runDir));
+    appendEvent(name, evDone("worker-r4", runDir));
+  });
+  const ticketJson = fwd(path.join(runDir, "ticket.json"));
+  assert.equal(
+    cliLines(h, ["step", name, "run:worker-r4:done"]).lines[0],
+    `ACTION critic ${ticketJson} ${fwd(path.join(runDir, "worker-r4.md"))} ${fwd(path.join(runDir, "findings-r4.md"))} 4`,
+    "lap 1 < max 3: pick the next free slot even above max",
+  );
+});
+
+// 6. Reopen lap: 3 counted rounds + reopens after_round 3 => lap 0, CHANGES_REQUESTED resumes (not exhausted).
+test("pass bar: reopen lap resets the lap cap; CHANGES_REQUESTED resumes instead of rounds-exhausted", () => {
+  const { h, name, runDir } = t8Stream("pb-reopen");
+  const repo = boardRepo(
+    [
+      { n: 1, counted: true, reviewed_sha: "x" },
+      { n: 2, counted: true, reviewed_sha: "y" },
+      { n: 3, counted: true, reviewed_sha: "z" },
+    ],
+    [{ after_round: 3 }],
+  );
+  mkTicket(runDir, { repo });
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+    appendEvent(name, evVerdict("worker-r1", runDir, { effective: "CHANGES_REQUESTED", findings: path.join(runDir, "findings-r1.md"), reviewed_sha: "z" }));
+  });
+  const OC_WORKER = fileURLToPath(new URL("../bin/oc-worker.mjs", import.meta.url)).replace(/\\/g, "/");
+  const ticketJson = fwd(path.join(runDir, "ticket.json"));
+  assert.equal(
+    cliLines(h, ["step", name, "verdict:worker-r1"]).lines[0],
+    `ACTION resume-worker node ${OC_WORKER} --agent worker --dir ${fwd(runDir)} --prompt ${fwd(path.join(runDir, "findings-r1.md"))} --report ${fwd(path.join(runDir, "report.md"))} --out ${fwd(path.join(runDir, "worker-r2.md"))} --session ses_1 --stream ${name}`,
+    "lap 0 after reopen: resume on the next free slot",
+  );
+});
+
+// 6b. With 3 counted rounds after the reopen, CHANGES_REQUESTED pages rounds-exhausted.
+test("pass bar: 3 counted rounds after a reopen pages rounds-exhausted", () => {
+  const { h, name, runDir } = t8Stream("pb-reopen-exh");
+  const repo = boardRepo(
+    [
+      { n: 1, counted: true, reviewed_sha: "x" },
+      { n: 2, counted: true, reviewed_sha: "y" },
+      { n: 3, counted: true, reviewed_sha: "z" },
+    ],
+    [{ after_round: 3 }],
+  );
+  // 3 more counted rounds in the new lap
+  fs.writeFileSync(path.join(repo, ".opencode", "board", "tickets", "t8.json"),
+    JSON.stringify({ schema: 1, id: "t8", rounds: [
+      { n: 1, counted: true, reviewed_sha: "x" },
+      { n: 2, counted: true, reviewed_sha: "y" },
+      { n: 3, counted: true, reviewed_sha: "z" },
+      { n: 4, counted: true, reviewed_sha: "a" },
+      { n: 5, counted: true, reviewed_sha: "b" },
+      { n: 6, counted: true, reviewed_sha: "c" },
+    ], reopens: [{ after_round: 3 }] }));
+  mkTicket(runDir, { repo });
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+    appendEvent(name, evVerdict("worker-r1", runDir, { effective: "CHANGES_REQUESTED", findings: path.join(runDir, "findings-r1.md"), reviewed_sha: "c" }));
+  });
+  const line = cliLines(h, ["step", name, "verdict:worker-r1"]).lines[0];
+  assert.match(line, /^ESCALATE rounds-exhausted /, "lap 3 >= max 3: rounds-exhausted after reopen");
+});
 
 // INVALID first verdict; corrected APPROVED at same HEAD -> KEY verdict:<run>@2, old key resolved acked,
 // merge-check reads the @2 verdict (OK on an ff fixture).
