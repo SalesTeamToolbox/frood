@@ -302,6 +302,80 @@ test("standalone decoration bullet counts after a plain entry", () => {
   assert.equal(r.unrequested[0], "• UNREQUESTED — b.mjs:2: the caller now returns null");
 });
 
+// Pass bar (this ticket): decoration before the first word never hides an UNREQUESTED tag,
+// whatever follows the tag (: end of line, glued dash, comma). These all failed APPROVED at HEAD.
+test("decorated UNREQUESTED tag counts whatever follows it (finding 2)", () => {
+  const blasts = [
+    "- a.mjs:1 — unchanged\n1. UNREQUESTED: a.mjs:1 x",
+    "- a.mjs:1 — unchanged\n1. UNREQUESTED",
+    "- a.mjs:1 — unchanged\n1. UNREQUESTED— a.mjs:1: x",
+    "- a.mjs:1 — unchanged\n1. **UNREQUESTED:** a.mjs:1 x",
+    "- a.mjs:1 — unchanged\n1) UNREQUESTED: …",
+    "- a.mjs:1 — unchanged\n(a) UNREQUESTED: …",
+    "- a.mjs:1 — unchanged\na. UNREQUESTED: …",
+    "- a.mjs:1 — unchanged\n❌ UNREQUESTED: …",
+    "- a.mjs:1 — unchanged\n[x] UNREQUESTED: …",
+    "- a.mjs:1 — unchanged\n• UNREQUESTED: …",
+    "- a.mjs:1 — unchanged\n**UNREQUESTED**: …",
+    "- a.mjs:1 — unchanged\n1. _UNREQUESTED_ — …",
+    "- a.mjs:1 — unchanged\n1. __UNREQUESTED__ — …",
+    "- a.mjs:1 — unchanged\n(1) UNREQUESTED — a.mjs:1: x",
+  ];
+  for (const blast of blasts) {
+    const r = gate(doc("APPROVED", blast));
+    assert.equal(r.effective, "CHANGES_REQUESTED", blast);
+    assert.equal(r.overridden, true, blast);
+    assert.equal(r.unrequested.length, 1, blast);
+  }
+});
+
+// Pass bar (this ticket): out-of-set decorations (arrow, dagger, skin-tone emoji, keycap) count
+// as the bullet (critic r4 finding 1). These failed APPROVED at HEAD.
+test("out-of-set decoration bullets count: arrow, dagger, skin-tone, keycap", () => {
+  const blasts = [
+    "- a.mjs:1 — unchanged\n→ UNREQUESTED — b.mjs:2: x",
+    "- a.mjs:1 — unchanged\n⇒ UNREQUESTED — b.mjs:2: x",
+    "- a.mjs:1 — unchanged\n‣ UNREQUESTED — b.mjs:2: x",
+    "- a.mjs:1 — unchanged\n⁃ UNREQUESTED — b.mjs:2: x",
+    "- a.mjs:1 — unchanged\n✋🏽 UNREQUESTED — b.mjs:2: x",
+    "- a.mjs:1 — unchanged\n1️⃣ UNREQUESTED — b.mjs:2: x",
+  ];
+  for (const blast of blasts) {
+    const r = gate(doc("APPROVED", blast));
+    assert.equal(r.effective, "CHANGES_REQUESTED", blast);
+    assert.equal(r.overridden, true, blast);
+    assert.equal(r.unrequested.length, 1, blast);
+  }
+});
+
+// Pass bar (this ticket): spaced decoration runs must gate in bounded time (no exponential
+// backtracking). A 200-unit spaced run must not spin for minutes to hours.
+test("spaced decoration run gates in bounded time (no exponential backtracking)", () => {
+  const spaced = "_ ".repeat(200) + "UNREQUESTED — x.mjs:1: x";
+  const emoji = "❌ ".repeat(200) + "UNREQUESTED — x.mjs:1: x";
+  const start = Date.now();
+  const r1 = gate(doc("APPROVED", "- a.mjs:1 — unchanged\n" + spaced));
+  const mid = Date.now();
+  const r2 = gate(doc("APPROVED", "- a.mjs:1 — unchanged\n" + emoji));
+  const end = Date.now();
+  assert.equal(r1.effective, "CHANGES_REQUESTED");
+  assert.equal(r1.unrequested.length, 1);
+  assert.equal(r2.effective, "CHANGES_REQUESTED");
+  assert.equal(r2.unrequested.length, 1);
+  assert.ok(end - start < 1000, `spaced decoration gated in ${end - start} ms, expected < 1000`);
+});
+
+// A bare tag-first numbered line with no decoration stays collected (finding 2).
+test("bare tag-first numbered line counts: a) UNREQUESTED", () => {
+  const r = gate(
+    doc("APPROVED", "- a.mjs:1 — unchanged\na) UNREQUESTED — a.mjs:1: x"),
+  );
+  assert.equal(r.effective, "CHANGES_REQUESTED");
+  assert.equal(r.overridden, true);
+  assert.equal(r.unrequested.length, 1);
+  assert.equal(r.unrequested[0], "a) UNREQUESTED — a.mjs:1: x");
+});
+
 test("decorated unchanged/intended blast lines stay APPROVED", () => {
   const blasts = [
     "- ✅ unchanged — a.mjs:1: x",

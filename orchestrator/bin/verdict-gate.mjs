@@ -6,12 +6,12 @@
 // Rules (2026-11-12 bake-off: free critics FOUND a call-site regression but still APPROVED it):
 //   - no VERDICT line                       -> INVALID   (not a review)
 //   - no BLAST RADIUS section / no entries  -> INVALID   (caller trace is mandatory)
-//   - any BLAST RADIUS line whose first word (after the bullet and a run of `*`, `_`, backtick, `[`,
-//     `(`, bullet/list-numbering/checkbox/emoji/symbol decoration) is UNREQUESTED (any case) ->
-//     CHANGES_REQUESTED, whatever follows; unchanged/intended first word, closed by emphasis/brackets
-//     then a separator (` — ` ` – ` ` -- ` ` - ` `:` `|`) or end of line -> does not count; any
-//     other line (old format) -> today's separator walk plus the no-dash-separator fail safe ->
-//     CHANGES_REQUESTED if UNREQUESTED is in tag position.
+//   - any BLAST RADIUS line whose first word (after a leading skip run of checkboxes, non-letter
+//     characters, and single-letter list markers `a.`/`a)`; bullets `-`/`*`/`+` are always entries)
+//     is UNREQUESTED (any case) -> CHANGES_REQUESTED, whatever follows; unchanged/intended first word,
+//     closed by emphasis/brackets then a separator (` — ` ` – ` ` -- ` ` - ` `:` `|`) or end of line
+//     -> does not count; any other line (old format) -> today's separator walk plus the no-dash-separator
+//     fail safe -> CHANGES_REQUESTED if UNREQUESTED is in tag position.
 //   - any [blocker] or [major] finding       -> CHANGES_REQUESTED, whatever the critic wrote
 //   - otherwise the critic's verdict stands
 // --free marks the review as done on a free model: an APPROVED becomes APPROVED_FREE
@@ -31,21 +31,18 @@ export function gate(text, { free = false } = {}) {
   if (!critic) return { effective: "INVALID", critic, overridden: false, reasons: ["no VERDICT line"], unrequested: [], majors: [] };
 
   // BLAST RADIUS section: from its heading to the first numbered finding / SENIOR_REVIEW / blank-then-non-bullet.
-  // A blast-line entry is a list item whose first content word is its tag: a bullet (`-`, `*`, `+`) or
-  // list numbering (`1.`, `1)`, `(a)`, `a.`, `a)`), each optionally wrapped in a decoration run
-  // (checkbox, emoji/symbol incl. bullet U+2022, emphasis/bracket openers) before and/or after the
-  // marker; the decoration run may also act as the bullet itself (`• UNREQUESTED`, `[x] UNREQUESTED`).
-  // Numbered findings (`1. [minor] ...`) and `1. none` / `1. No findings` / `1. (none)` placeholders are
-  // excluded because what follows the marker is not a tag word.
-  const DEC_CHAR = /(?:\[[ xX]\]|[*_`\[\()]|[\p{Extended_Pictographic}\p{So}\uFE0F\u200D\u2022])/u;
-  const PURE_DEC = new RegExp(`\\s*(?:${DEC_CHAR.source})\\s*`, "u");
-  const TAG_WORD = /(?:UNREQUESTED|unchanged|intended)\b/;
-  // Bullets are collected as entries exactly as before (any `-`/`*`/`+` line); the tag decision
-  // stays in isUnrequested. Numbered and standalone-decoration lines are collected only when the
-  // first content word is a tag, with optional decoration before and/or after the tag. Numbered
-  // findings (`1. [minor] ...`) and `1. none` / placeholders stay excluded (not tag-first).
+  // A blast-line entry is a list item whose first content word is a tag (`UNREQUESTED`/`unchanged`/`intended`):
+  // a bullet (`-`, `*`, `+`) is always collected; any leading skip unit — a checkbox, a non-letter
+  // character, or a single-letter list marker (`a.`/`a)`) — opens a line, then zero or more skip units
+  // may precede the tag, so decorated bullets (`• UNREQUESTED`, `[x] UNREQUESTED`, `❌ UNREQUESTED`) and
+  // decorated numbered lines (`1. **UNREQUESTED**`, `a) UNREQUESTED`) are collected too. Numbered findings
+  // (`1. [minor] ...`) and `1. none` / `1. No findings` / `1. (none)` placeholders stay findings because
+  // their first content word is not a tag. The loop has no optional nested quantifier, so it is linear and
+  // cannot backtrack exponentially on spaced decoration runs.
+  const SKIP = String.raw`(?:\[[xX]\]|[^\p{L}]|[a-zA-Z][.)])`;
+  // One skip unit before the first word: checkbox, any non-letter character, or single-letter marker.
   const BLAST_LINE = new RegExp(
-    `^\\s*(?:[-*+]\\s|(?:\\d+[.)]|\\([a-zA-Z]\\)|[a-zA-Z]\\)|[a-zA-Z]\\.)(?:${PURE_DEC.source})*\\s*${TAG_WORD.source}(?:${DEC_CHAR.source})*\\s|(?:${PURE_DEC.source})+\\s*${TAG_WORD.source}(?:${DEC_CHAR.source})*\\s)`,
+    String.raw`^\s*(?:[-*+]\s|(?:\[[xX]\]|[^\p{L}\s]|[a-zA-Z][.)])${SKIP}*(?:UNREQUESTED|unchanged|intended)(?![A-Za-z0-9]))`,
     "iu"
   );
   const lines = t.split("\n");
@@ -77,10 +74,8 @@ export function gate(text, { free = false } = {}) {
   const SEP = / — | – | -- | - |: /g;
   const KNOWN = /^[*_`\[(]*(unchanged|intended|UNREQUESTED)(?![A-Za-z0-9])/;
   // Leading decoration run, repeated in any order, whitespace allowed between:
-  // bullet (- * +), list numbering (1. 1) (a) a. a)), checkbox ([ ] [x] [X]),
-  // emoji/symbol (\p{Extended_Pictographic} \p{So} + U+FE0F U+200D, plus bullet U+2022),
-  // and the existing emphasis/bracket openers (* _ backtick [ ().
-  const DECOR = /^(?:\s*(?:[-*+]|\d+[.)]|[a-zA-Z]\)|\([a-zA-Z]\)|[a-zA-Z]\.|\[[ xX]\]|[\p{Extended_Pictographic}\p{So}\uFE0F\u200D\u2022]|[_`\[(])\s*)*/u;
+  // checkbox, any non-letter character, or single-letter list marker (`a.`/`a)`).
+  const DECOR = new RegExp(`^${SKIP}*`, "u");
   const TAG = /^[A-Za-z]+/;
   const IS_TAG = /^(unchanged|intended|UNREQUESTED)$/i;
   const IS_UNREQ = /^UNREQUESTED$/i;
