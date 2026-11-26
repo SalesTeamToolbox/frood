@@ -159,3 +159,10 @@ email_monitor_state.json
 arianna_cycle_state.json
 arianna_email_cycle_state.json
 *_cycle_state.json
+
+# Orchestrator board/run state (local to this machine; reports and event logs carry home paths)
+.opencode/board/tickets/
+.opencode/board/locks/
+.opencode/board/.watch.json
+.opencode/reports/
+.opencode/plans/
