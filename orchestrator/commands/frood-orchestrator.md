@@ -426,7 +426,7 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   follow-on work, or its own context is long (several modules in one session), and nothing is in flight (status
   READY or DONE, no live non-STALE run for the stream, no unanswered `NEEDS OWNER`), it does not keep going or nest.
   While a run is live it stays open until the report arrives, then checks again; on NEEDS YOU or BLOCKED it asks
-  the owner as before. Otherwise:
+  the owner as before. When it applies:
 <!-- cc-only -->
   it archives each finished child, writes the handoff, starts a fresh successor (`start_session`, `context: "fresh"`, prompt
   `/frood-next <stream>`), calls `detach_session` on it at once so it is top-level, and tells the owner this session
