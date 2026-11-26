@@ -343,6 +343,11 @@ class Settings:
     n8n_pattern_threshold: int = 3  # Executions before suggesting N8N workflow
     n8n_auto_create_workflows: bool = False  # When true, create without agent confirmation
 
+    # Claude Code pace card (read-only; reads orchestrator/bin/cc-pace.mjs)
+    cc_pace_enabled: bool = True  # False -> pace reads "off", nothing is spawned
+    cc_pace_node: str = "node"  # Node binary used to run cc-pace.mjs
+    cc_pace_orch_home: str = ""  # ORCH_HOME passed to cc-pace.mjs when set
+
     @classmethod
     def from_env(cls) -> "Settings":
         # Enforce secure JWT secret
@@ -670,6 +675,10 @@ class Settings:
             n8n_pattern_threshold=int(os.getenv("N8N_PATTERN_THRESHOLD", "3")),
             n8n_auto_create_workflows=os.getenv("N8N_AUTO_CREATE_WORKFLOWS", "false").lower()
             in ("true", "1", "yes"),
+            # Claude Code pace card
+            cc_pace_enabled=os.getenv("CC_PACE_ENABLED", "true").lower() in ("true", "1", "yes"),
+            cc_pace_node=os.getenv("CC_PACE_NODE", "node"),
+            cc_pace_orch_home=os.getenv("CC_PACE_ORCH_HOME", ""),
         )
 
     def is_paid_allowed(self, provider: str) -> bool:
