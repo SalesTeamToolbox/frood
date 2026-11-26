@@ -9,7 +9,7 @@
 //   Missing or unreadable file  -> the defaults apply (every install is on by default).
 //   Corrupt file                -> the defaults apply, exit 0.
 //
-// Defaults (from code): { "archive_nested_sessions": true }
+// Defaults (from code): { "archive_nested_sessions": true, "auto_next_module": true, "auto_push": true }
 //   `install.mjs` is intentionally not edited: the default ships from here.
 //
 // Exports `getSetting(key)` for other scripts. `getSetting` always returns a
@@ -22,7 +22,11 @@ import path from "node:path";
 
 // Known keys and their defaults. Adding a key here turns it on by default for
 // every install without touching install.mjs.
-export const DEFAULTS = Object.freeze({ archive_nested_sessions: true });
+export const DEFAULTS = Object.freeze({
+  archive_nested_sessions: true,
+  auto_next_module: true, // top-level parent starts the next module's nested session without asking
+  auto_push: true, // top-level parent pushes the base branch after its train lands a ticket
+});
 
 export function settingsFile() {
   return path.join(process.env.ORCH_HOME || os.homedir(), ".config", "orchestrator", "settings.json");

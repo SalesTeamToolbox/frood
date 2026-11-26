@@ -173,7 +173,11 @@ test("list prints the effective settings as JSON", () => {
   withHome((h) => {
     const r = cli(["list"], h);
     assert.equal(r.status, 0, r.stderr);
-    assert.deepEqual(JSON.parse(r.stdout), { archive_nested_sessions: true });
+    assert.deepEqual(JSON.parse(r.stdout), {
+      archive_nested_sessions: true,
+      auto_next_module: true,
+      auto_push: true,
+    });
   });
 });
 
@@ -191,3 +195,43 @@ test("set creates the parent directory when it is missing", () => {
     assert.equal(getSetting("archive_nested_sessions"), false);
   });
 });
+
+for (const key of ["auto_next_module", "auto_push"]) {
+  test(`${key}: default true with no settings file`, () => {
+    withHome((h) => {
+      const r = cli(["get", key], h);
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(r.stdout.trim(), "true");
+      assert.equal(getSetting(key), true);
+    });
+  });
+
+  test(`${key}: set false then get prints false`, () => {
+    withHome((h) => {
+      const set = cli(["set", key, "false"], h);
+      assert.equal(set.status, 0, set.stderr);
+      const got = cli(["get", key], h);
+      assert.equal(got.status, 0, got.stderr);
+      assert.equal(got.stdout.trim(), "false");
+      assert.equal(getSetting(key), false);
+      // the other keys keep their defaults
+      const list = JSON.parse(cli(["list"], h).stdout);
+      assert.equal(list[key], false);
+      assert.equal(list.archive_nested_sessions, true);
+    });
+  });
+
+  test(`${key}: non-boolean value in the file falls back to true`, () => {
+    withHome((h) => {
+      const file = settingsFile(h);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      for (const bad of ["false", 0, null, "no"]) {
+        fs.writeFileSync(file, JSON.stringify({ [key]: bad }), "utf8");
+        const r = cli(["get", key], h);
+        assert.equal(r.status, 0, r.stderr);
+        assert.equal(r.stdout.trim(), "true", `file value ${JSON.stringify(bad)}`);
+        assert.equal(getSetting(key), true);
+      }
+    });
+  });
+}
