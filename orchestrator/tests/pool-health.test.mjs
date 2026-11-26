@@ -396,3 +396,14 @@ test("classify: rate-limit, quota, truncation and not-in-plan win over 'absent'"
   assert.equal(classify(['{"type":"provider.no-route","message":"Model unavailable: commandcode/claude-haiku-5-5"}']).reason, "absent");
   assert.equal(classify(["the provider endpoint was not found in the weekly report"]), null, "loose prose is not 'absent'");
 });
+
+test("markUp on a model also clears its provider-wide mark, and leaves other providers alone", () => {
+  process.env.ORCH_HOME = home();
+  markDown("go/a", { reason: "quota", ms: 5 * 86400_000, scope: "provider" });
+  markDown("zen/b", { reason: "quota", ms: 60_000, scope: "provider" });
+  assert.equal(isDown("go/other").key, "go/*");
+  markUp("go/a");
+  assert.equal(isDown("go/other"), null, "provider-wide mark cleared by any model that answered");
+  assert.equal(isDown("zen/b").key, "zen/*", "another provider's mark is untouched");
+  delete process.env.ORCH_HOME;
+});

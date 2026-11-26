@@ -11,7 +11,8 @@
 //   1. reads the model each installed OpenCode agent pins;
 //   2. marks a model `unavailable` in pool-health if it is missing from live `opencode models`;
 //   3. with --probe, sends each not-known-down model a one-word prompt ("PONG") and marks it down/up
-//      from the result (quota/unavailable errors only — anything else is reported, not marked);
+//      from the result (quota/unavailable errors only — anything else is reported, not marked); a quota mark (which
+//      can last days) is re-tested once per run, and a model that answers also clears its provider-wide mark;
 //   4. prints, per role, the first healthy agent to dispatch and why earlier ones were skipped.
 // It never edits agents or rules and never promotes a model outside the chains below: choosing a NEW
 // model stays a human decision via /frood-model-router-refresh (bake-off evidence first).
@@ -386,6 +387,10 @@ export async function check({ probeModels = false, probeAll = false, models = un
   const floor = (usageLimits.low_headroom_pct ?? LOW_HEADROOM_PCT_DEFAULT) / 100;
   if (usageLimits.missing) report.notes.push("usage: no usage-limits.json — Go monthly assumed $60; create one to set your plan cap");
   const probed = new Map();
+  // Quota marks are re-tested on --probe instead of being trusted until they expire: a quota's retry-after can be
+  // days away (a monthly cap), and a renewed or topped-up plan never tells us. One re-test per mark key per run, so a
+  // provider-wide mark that is still real costs one call, not one per model on that provider.
+  const retested = new Set();
   for (const [role, chain] of Object.entries(CHAINS)) {
     const rows = [];
     for (const agent of chain) {
@@ -396,17 +401,28 @@ export async function check({ probeModels = false, probeAll = false, models = un
       }
       if (live && !live.has(model)) markDown(model, { reason: "unavailable", ms: 24 * 3600_000, detail: "missing from `opencode models`" });
       let down = isDown(model);
-      if (!down && probeModels && (probeAll || !EXPENSIVE_ROLES.has(role))) {
+      const canProbe = probeModels && (probeAll || !EXPENSIVE_ROLES.has(role));
+      let retestKey = null;
+      if (down && canProbe && down.reason === "quota" && !retested.has(down.key) && !probed.has(model)) {
+        retestKey = down.key;
+        retested.add(retestKey);
+        down = null; // fall through to the probe below; success clears the mark (model and provider-wide)
+      }
+      if (!down && canProbe) {
         if (!probed.has(model)) probed.set(model, await probe(agent));
         const p = probed.get(model);
         if (p.ok) markUp(model);
         else {
           const cls = classify(p.errors, model);
           if (cls) markDown(model, { ...cls, detail: p.errors[0] || "" });
-          else rows.push({ agent, model, state: "probe-failed", detail: (p.errors[0] || `exit ${p.code}`).slice(0, 160) });
+          else {
+            rows.push({ agent, model, state: "probe-failed", detail: (p.errors[0] || `exit ${p.code}`).slice(0, 160) });
+            // An unclassified failure says nothing about the quota: let the next model under this mark re-test it.
+            if (retestKey) retested.delete(retestKey);
+            continue; // reported as probe-failed (a quota mark it was re-testing stays, so it is skipped either way)
+          }
         }
         down = isDown(model);
-        if (!down && !p.ok && !classify(p.errors, model)) continue; // reported above as probe-failed
       }
       let row = down
         ? { agent, model, state: "down", detail: `${down.reason} until ${down.until}` }

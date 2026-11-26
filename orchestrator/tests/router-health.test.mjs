@@ -593,3 +593,59 @@ test("headroom: a Go pool near its cap is skipped for a healthy paid fallback", 
   assert.match(r.stdout, /^critic\s+use critic-nvidia\s*(?:👁)?\s+\[skipped critic: low-headroom[^\]]*critic-go: low-headroom/m, r.stdout);
   assert.equal(r.status, 0);
 });
+
+// ── Quota marks are re-tested on --probe (Go 2026-11-21 → 11-26: a monthly-cap retry-after held the whole provider
+// down for five days after the subscription was live again) ─────────────────────────────────────────────────────
+function goQuotaHome() {
+  const h = home(ALL);
+  const healthPath = path.join(h, ".config", "orchestrator", "pool-health.json");
+  fs.mkdirSync(path.dirname(healthPath), { recursive: true });
+  fs.writeFileSync(healthPath, JSON.stringify({
+    "opencode-go/*": { reason: "quota", since: new Date().toISOString(), until: new Date(Date.now() + 5 * 86400_000).toISOString(), detail: "OpenCode Go monthly usage limit reached" },
+    "nvidia/*": { reason: "unavailable", since: new Date().toISOString(), until: new Date(Date.now() + 86400_000).toISOString(), detail: "not a quota" },
+  }, null, 2) + "\n");
+  return { h, healthPath };
+}
+function runProbe(h, env) {
+  const log = path.join(h, "probes.log");
+  const r = spawnSync(process.execPath, [BIN, "--models-file", (fs.writeFileSync(path.join(h, "models.txt"), Object.values(ALL).join("\n")), path.join(h, "models.txt")),
+    "--auth-file", (fs.writeFileSync(path.join(h, "empty-auth.txt"), ""), path.join(h, "empty-auth.txt")), "--probe"], {
+    env: { ...process.env, ORCH_HOME: h, OPENCODE_DB: path.join(h, "oc.db"), OPENCODE_BIN: path.join(HERE, "fixtures", "fake-probe.mjs"), FAKE_PROBE_LOG: log, ...env }, encoding: "utf8",
+  });
+  const probes = fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : [];
+  return { r, probes };
+}
+
+test("--probe re-tests a provider-wide quota mark; a model that answers clears it and the Go agents are used again", () => {
+  const { h, healthPath } = goQuotaHome();
+  const goAgents = Object.entries(ALL).filter(([, m]) => m.startsWith("opencode-go/")).map(([a]) => a).join(",");
+  const { r } = runProbe(h, { FAKE_PROBE_OK_AGENTS: `${goAgents},scout,worker-free,critic-free,senior-free,orchestrator-free` });
+  const health = JSON.parse(fs.readFileSync(healthPath, "utf8"));
+  assert.equal(health["opencode-go/*"], undefined, "the Go quota mark is cleared");
+  assert.equal(health["nvidia/*"].reason, "unavailable", "a non-quota mark is still trusted, never re-tested");
+  assert.match(r.stdout, /^critic\s+use critic\s/m, r.stdout);
+  assert.match(r.stdout, /^worker\s+use worker\s/m, r.stdout);
+  assert.match(r.stdout, /^worker-strong\s+use worker-strong/m, r.stdout);
+});
+
+test("a quota mark that is still real costs one probe per run, not one per model on that provider", () => {
+  const { h, healthPath } = goQuotaHome();
+  const quota = JSON.stringify({ type: "error", error: { type: "provider.go-limit", message: "OpenCode Go monthly usage limit reached.", status: 429 } });
+  const { r, probes } = runProbe(h, { FAKE_PROBE_FAIL_BODY: quota, FAKE_PROBE_OK_AGENTS: "scout,worker-free,critic-free,orchestrator-free" });
+  const goProbes = probes.filter((a) => ALL[a]?.startsWith("opencode-go/"));
+  assert.equal(goProbes.length, 1, `Go probed once: ${probes.join(",")}`);
+  const health = JSON.parse(fs.readFileSync(healthPath, "utf8"));
+  assert.equal(health["opencode-go/*"].reason, "quota", "still down after a failed re-test");
+  assert.match(r.stdout, /^worker-strong\s+use worker-free/m, r.stdout);
+});
+
+test("a quota re-test that fails for another reason is one probe-failed row, and the next model under the mark re-tests it", () => {
+  const { h, healthPath } = goQuotaHome();
+  const flaky = JSON.stringify({ type: "error", error: { type: "weird", message: "something odd" } });
+  const { r, probes } = runProbe(h, { FAKE_PROBE_FAIL_BODY: flaky, FAKE_PROBE_OK_AGENTS: "scout,worker-free,critic-free,orchestrator-free" });
+  const workerLine = r.stdout.split("\n").find((l) => /^worker\s/.test(l)) || "";
+  assert.equal((workerLine.match(/\bworker:/g) || []).length, 1, `worker listed once: ${workerLine}`);
+  assert.match(workerLine, /worker: probe-failed/);
+  assert.ok(probes.filter((a) => ALL[a]?.startsWith("opencode-go/")).length > 1, `re-tested past the flaky one: ${probes.join(",")}`);
+  assert.equal(JSON.parse(fs.readFileSync(healthPath, "utf8"))["opencode-go/*"].reason, "quota", "mark kept: nothing proved it wrong");
+});

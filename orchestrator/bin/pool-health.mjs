@@ -142,10 +142,14 @@ export function markDown(model, { reason, ms, detail = "", scope = "model" }, no
   writeHealth(h);
 }
 
+// A model that just answered proves its provider is reachable, so a provider-wide mark (`go/*`, set from a
+// monthly/plan quota) goes too. Without this, renewing a plan left the whole provider skipped until the old
+// retry-after ran out (Go, 2026-11-21 -> 11-26: five days of no Go after the subscription was live again).
 export function markUp(model) {
   const h = readHealth();
-  if (h[model]) {
-    delete h[model];
+  const keys = [model, providerOf(model) ? `${providerOf(model)}/*` : null].filter((k) => k && h[k]);
+  if (keys.length) {
+    for (const k of keys) delete h[k];
     writeHealth(h);
   }
 }
