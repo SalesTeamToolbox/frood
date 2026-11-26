@@ -1062,13 +1062,17 @@ function slotJudged(runDir, r, events) {
 // A critic retry writes `findings-r<N>-alt.md` for the `ACTION critic … findings-r<N>.md` it stands in for.
 const baseFindings = (f) => (typeof f === "string" ? f.replace(/-alt\.md$/, ".md") : f);
 
+// A worker run: worker, worker-<pool> or cc-worker (headless Claude Code). Critics are never workers.
+// Same test as oc-worker's own worker-role check.
+const isWorkerAgent = (a) => /^(cc-)?worker/.test(a ?? "");
+
 function criticReviewedRun(lines, events, slug, findings) {
   for (const l of lines) {
     if (l.ticket !== slug) continue;
     const m = /^ACTION critic \S+ \S+ (\S+) \d+$/.exec(l.action ?? "");
     if (!m || m[1] !== baseFindings(findings)) continue;
     const run = runOfKey(l.key);
-    if (run && (events.get(`run:${run}:done`)?.agent ?? "").startsWith("worker")) return run;
+    if (run && isWorkerAgent(events.get(`run:${run}:done`)?.agent)) return run;
   }
   return null;
 }
@@ -1093,7 +1097,7 @@ export function decideStep(stream, key, events, lines) {
 
   if (ev.kind === "run-done") {
     const agent = ev.agent ?? "";
-    if (!agent.startsWith("worker")) return { action: `ESCALATE agent-${agent} ${out}`, ticket: slug };
+    if (!isWorkerAgent(agent)) return { action: `ESCALATE agent-${agent} ${out}`, ticket: slug };
     if (ev.outcome === "done") {
       // criticRound floors the round; a slot already judged by a recorded verdict advances it. rounds-exhausted
       // is a board cap on counted rounds in this lap: page it only when lap >= max (board ticket readable).
@@ -1157,7 +1161,7 @@ export function decideStep(stream, key, events, lines) {
       // either (daemon verdicts key on the critic run, sessions and step tests on the worker run).
       let wrun = run;
       let wdone = done;
-      if ((wdone?.agent ?? "") && !wdone.agent.startsWith("worker")) {
+      if ((wdone?.agent ?? "") && !isWorkerAgent(wdone.agent)) {
         wrun = null;
         const linked = criticReviewedRun(lines, events, slug, findings);
         if (linked) {
@@ -1166,7 +1170,7 @@ export function decideStep(stream, key, events, lines) {
         }
       }
       const wsession = wdone?.session ?? null;
-      if (wrun && wsession && (wdone?.agent ?? "").startsWith("worker")) {
+      if (wrun && wsession && isWorkerAgent(wdone?.agent)) {
         // The next out must be fresh (B4) — but a taken slot is the desk's problem, not the
         // owner's: direct dispatches consume worker-r<N> names outside the resume flow, so
         // advance to the next free slot instead of paging. Only truly out of rounds pages.
