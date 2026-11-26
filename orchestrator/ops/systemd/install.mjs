@@ -30,7 +30,13 @@ const systemctl = (...args) => run("systemctl", ["--user", ...args]);
 
 // Only running this file directly performs the installer side effects.
 // Importing it (e.g. for the pure unitPath) defines functions and executes nothing.
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+// Compare real paths so a symlinked invocation still counts as main.
+let isMain = false;
+try {
+  isMain = process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+} catch {
+  isMain = false;
+}
 
 // Build the PATH the installed units run under: node's directory first, then the opencode
 // and claude directories, mise shims, local bin, and the system directories. Missing and

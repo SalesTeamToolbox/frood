@@ -92,11 +92,13 @@ test("unitPath: drops missing and duplicate directories", async () => {
   const unitPath = await loadUnitPath();
   const nodeDir = "/opt/node/bin";
   const shims = "/tmp/x/.local/share/mise/shims";
-  const which = () => null; // opencode and claude not found
+  // opencode resolves into node's own directory -> must appear exactly once.
+  const which = (cmd) => (cmd === "opencode" ? path.join(nodeDir, "opencode") : null);
   const exists = (d) => d === nodeDir || d === "/usr/bin" || d === "/bin";
   const p = unitPath({ node: nodeDir + "/node", which, home: "/tmp/x", exists });
   const parts = p.split(":");
   assert.ok(parts.includes(nodeDir));
+  assert.equal(parts.filter((d) => d === nodeDir).length, 1, "node dir appears exactly once");
   assert.ok(!parts.includes(shims), "missing mise shims dropped");
   assert.equal(parts[0], nodeDir);
   assert.equal(parts[parts.length - 1], "/bin");
@@ -162,6 +164,35 @@ test("importing install.mjs writes nothing and spawns nothing observable", async
       "import wrote launch.json",
     );
   } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("install runs the body when invoked through a symlinked path", () => {
+  const INSTALL = path.join(DIR, "install.mjs");
+  const linkRoot = fs.mkdtempSync(path.join(os.tmpdir(), "orch-link-root-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "orch-link-home-"));
+  try {
+    fs.symlinkSync(DIR, path.join(linkRoot, "systemd"), "dir");
+    const res = spawnSync(process.execPath, [path.join(linkRoot, "systemd", "install.mjs")], {
+      env: {
+        ...process.env,
+        ORCH_HOME: home,
+        ORCH_LAUNCH_CMD: "",
+        ORCH_INSTALL_NO_SYSTEMD: "1",
+        PATH: `${path.dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`,
+      },
+      encoding: "utf8",
+      timeout: 60000,
+    });
+    assert.equal(res.status, 0, res.stderr);
+    // The body ran: launch-config wrote launch.json under the temp ORCH_HOME.
+    assert.ok(
+      fs.existsSync(path.join(home, ".config", "orchestrator", "launch.json")),
+      `symlinked install did not run the body: ${res.stdout} ${res.stderr}`,
+    );
+  } finally {
+    fs.rmSync(linkRoot, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
