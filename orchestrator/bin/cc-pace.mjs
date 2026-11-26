@@ -9,7 +9,8 @@
 // Env: ORCH_NO_PACE=1 -> off. Exit 2 on unknown commands/flags. No network, no child processes.
 //
 //   node cc-pace.mjs advise [--json] [--notify]   reset advice (M5); advise only, Frood never presses a reset
-//   node cc-pace.mjs reset-used full|fable        the owner pressed one: decrement usage-limits.json cc.resets + ack
+//   node cc-pace.mjs reset-used full|fable|none   the owner pressed one: decrement usage-limits.json cc.resets + ack
+//                                                 (none: ack a false-alarm drop, no count changes)
 // Advisor state (once-a-day notify memory per advice id, reset acks) lives in <orchDir()>/cc-advise-state.json.
 import fs from "node:fs";
 import path from "node:path";
@@ -141,7 +142,8 @@ function writeFileAtomic(file, text) {
 
 // ---- reset advisor (cc-pacing M5) ------------------------------------------------------------------------
 // Advise only: Frood never presses a reset. The owner presses it on the usage page, then runs
-// `cc-pace reset-used full|fable`, which decrements the count in usage-limits.json and acks any usage drop.
+// `cc-pace reset-used full|fable`, which decrements the count in usage-limits.json and acks any usage drop
+// (`reset-used none` acks a false alarm without spending a count).
 
 const DAY = 24 * HOUR;
 const WEEK = WEEK_H * HOUR;
@@ -191,19 +193,34 @@ export function parseResets(resets) {
 
 const weeklyResetOf = (s) => (s?.weekly && typeof s.weekly === "object" ? ms(s.weekly.resets_at) : NaN);
 
-/** The first fall of more than 20 points within one weekly window, scanning forward; restarts after each drop. */
+/**
+ * The LAST fall of more than 20 points (max earlier - later) within one weekly window, scanning forward in `at`
+ * order. After each fall the baseline restarts at the fallen value, so the low snapshots that follow one press
+ * are not a second fall, while a second press later in the week is. Returns {from, to, at, before_at} or null:
+ * `at` is the first snapshot showing the fall, `before_at` the snapshot just before it (the reset happened in
+ * between, so an ack written at or after `before_at` covers it).
+ */
 export function detectDrop(list, windowMs) {
   if (!fin(windowMs)) return null;
   const win = list.filter((s) => fin(s.weekly?.pct) && roundMin(weeklyResetOf(s)) === windowMs);
   let maxE = -Infinity;
   let drop = null;
+  let prev = null;
   for (const s of win) {
     if (maxE - s.weekly.pct > DROP_POINTS) {
-      drop = { from: maxE, to: s.weekly.pct, at: s.at };
+      drop = { from: maxE, to: s.weekly.pct, at: s.at, before_at: prev.at };
       maxE = s.weekly.pct; // a new baseline: later low snapshots of the same press are not a second drop
     } else maxE = Math.max(maxE, s.weekly.pct);
+    prev = s;
   }
   return drop;
+}
+
+/** An ack (from reset-used, any kind incl. "none") clears a drop when written at or after the pre-drop snapshot. */
+export function dropAcked(drop, acks) {
+  if (!drop) return false;
+  const since = ms(drop.before_at ?? drop.at);
+  return (Array.isArray(acks) ? acks : []).some((a) => fin(ms(a?.at)) && ms(a.at) >= since);
 }
 
 const plural = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
@@ -228,9 +245,7 @@ export function adviseState({ snapshots, resets, now, activeTickets = 0, acks = 
     && wk && typeof wk === "object" && fin(wk.pct) && fin(curResetMs) && curResetMs > now;
 
   const drop = detectDrop(list, weeklyMs);
-  const ackList = Array.isArray(acks) ? acks : [];
-  const acked = drop != null && ackList.some((a) => fin(ms(a?.at)) && ms(a.at) >= ms(drop.at));
-  const paused = drop != null && !acked;
+  const paused = drop != null && !dropAcked(drop, acks);
 
   const advice = [];
   const live = parseResets(resets).filter((e) => e.count > 0 && now < e.expiresMs);
@@ -280,7 +295,7 @@ export function adviseState({ snapshots, resets, now, activeTickets = 0, acks = 
 
   if (paused) {
     advice.push({ id: "ask-reset-drop", kind: "full", level: "warn",
-      text: cap(`Weekly fell ${Math.round(drop.from)}%→${Math.round(drop.to)}%: if you pressed a reset, run cc-pace reset-used full|fable`) });
+      text: cap(`Weekly fell ${Math.round(drop.from)}%→${Math.round(drop.to)}%: if you pressed a reset, run cc-pace reset-used full|fable|none`) });
   }
   return { advice, paused, drop };
 }
@@ -309,6 +324,16 @@ function writeAdviseState(st) {
   writeFileAtomic(adviseStatePath(), JSON.stringify(st, null, 2) + "\n");
 }
 
+function writeAdviseStateIfChanged(st) {
+  const text = JSON.stringify(st, null, 2) + "\n";
+  let raw = null;
+  try { raw = fs.readFileSync(adviseStatePath(), "utf8"); } catch { raw = null; }
+  if (raw === text) return false;
+  if (raw == null && Object.keys(st).length === 0) return false;
+  writeAdviseState(st);
+  return true;
+}
+
 /** Board tickets in `queued` or `working`, read straight from each stream repo's board. No children, no network. */
 export function activeTickets(now = Date.now()) {
   let streams = [];
@@ -334,16 +359,22 @@ function adviseInputs(now, deps = {}) {
   let cc;
   try { cc = loadLimits().cc; } catch { cc = undefined; }
   const snapshots = [...readHistory(), readLatest()].filter(Boolean);
+  // The board walk only matters to press-fable: skip it when no reset is live (count > 0, not expired).
+  const live = parseResets(cc?.resets).some((e) => e.count > 0 && now < e.expiresMs);
   const count = deps.activeTickets ?? activeTickets;
   let active = 0;
-  try { active = Number(count(now)) || 0; } catch { active = 0; }
+  if (live) {
+    try { active = Number(count(now)) || 0; } catch { active = 0; }
+  }
   const st = readAdviseState();
   return { input: { snapshots, resets: cc?.resets, now, activeTickets: active, acks: Array.isArray(st.acks) ? st.acks : [] }, st };
 }
 
 /**
  * One advisor tick: compute advice, send due notifications (notifyNow honours ORCH_NO_NOTIFY), record every
- * advice id's level (lastNotifyMs only when sent) atomically. Prints nothing; never throws (null on failure).
+ * advice id's level (lastNotifyMs only when sent). The state file is rewritten atomically only when its content
+ * changes (never created for an empty state), and its `acks` are re-read just before the write so an ack that
+ * `reset-used` wrote during the tick survives. Prints nothing; never throws (null on failure).
  */
 export function adviseTick(now = Date.now(), deps = {}) {
   try {
@@ -359,7 +390,10 @@ export function adviseTick(now = Date.now(), deps = {}) {
       }
       st[item.id] = { lastLevel: item.level, lastNotifyMs: sent ? now : prev.lastNotifyMs ?? null };
     }
-    writeAdviseState(st);
+    const disk = readAdviseState();
+    if (Array.isArray(disk.acks)) st.acks = disk.acks;
+    else delete st.acks;
+    writeAdviseStateIfChanged(st);
     return r;
   } catch {
     return null;
@@ -388,28 +422,39 @@ function adviseMain(args) {
   return 0;
 }
 
+function appendAck(kind, now) {
+  const st = readAdviseState();
+  st.acks = [...(Array.isArray(st.acks) ? st.acks : []), { kind, at: new Date(now).toISOString() }].slice(-ACKS_KEPT);
+  writeAdviseState(st);
+}
+
 function resetUsedMain(args, now = Date.now()) {
-  const fail = (m) => { console.error(`cc-pace reset-used: ${m}\nusage: cc-pace.mjs reset-used full|fable`); return 2; };
-  if (args.length !== 1 || !KINDS.includes(args[0])) return fail(`kind must be full or fable`);
+  const fail = (m) => { console.error(`cc-pace reset-used: ${m}\nusage: cc-pace.mjs reset-used full|fable|none`); return 2; };
+  if (args.length !== 1 || ![...KINDS, "none"].includes(args[0])) return fail(`kind must be full, fable or none`);
   const kind = args[0];
+  if (kind === "none") {
+    // A false alarm: ack the weekly drop without spending a reset.
+    try { appendAck("none", now); } catch (e) { return fail(e.message); }
+    console.log("ack recorded");
+    return 0;
+  }
   let j;
   try { j = JSON.parse(fs.readFileSync(limitsPath(), "utf8")); } catch (e) { return fail(`cannot read usage-limits.json: ${e.message}`); }
   const resets = j && typeof j === "object" && j.cc && typeof j.cc === "object" ? j.cc.resets : null;
-  const entry = Array.isArray(resets) ? resets.find((e) => e && typeof e === "object" && e.kind === kind && fin(e.count)) : null;
-  if (!entry) return fail(`no ${kind} reset in usage-limits.json cc.resets`);
-  if (entry.count <= 0) return fail(`no ${kind} resets left (count ${entry.count})`);
+  const ofKind = Array.isArray(resets) ? resets.filter((e) => e && typeof e === "object" && e.kind === kind && fin(e.count)) : [];
+  if (!ofKind.length) return fail(`no ${kind} reset in usage-limits.json cc.resets`);
+  const entry = ofKind.find((e) => e.count > 0);
+  if (!entry) return fail(`no ${kind} resets left`);
   entry.count -= 1;
   try { writeFileAtomic(limitsPath(), JSON.stringify(j, null, 2) + "\n"); } catch (e) { return fail(e.message); }
   try {
-    const st = readAdviseState();
-    st.acks = [...(Array.isArray(st.acks) ? st.acks : []), { kind, at: new Date(now).toISOString() }].slice(-ACKS_KEPT);
-    writeAdviseState(st);
+    appendAck(kind, now);
   } catch { /* the count is the record; the ack only silences the drop question */ }
   console.log(`${kind} resets left: ${entry.count}`);
   return 0;
 }
 
-const USAGE = "usage: cc-pace.mjs [status] [--json] | advise [--json] [--notify] | reset-used full|fable";
+const USAGE = "usage: cc-pace.mjs [status] [--json] | advise [--json] [--notify] | reset-used full|fable|none";
 
 export function main(argv) {
   if (argv[0] === "advise") return adviseMain(argv.slice(1));

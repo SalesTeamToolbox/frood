@@ -96,6 +96,8 @@ test("press-full (a): weekly >= 90 with >= 36 h to the weekly reset", () => {
   assert.deepEqual(ids(adviseState({ snapshots: [snap({ at: now30, weekly: 91 })], resets, now: now30 })), []);
   // Stale (3 h) snapshot: no press advice.
   assert.deepEqual(ids(adviseState({ snapshots: [snap({ at: now - 3 * HOUR, weekly: 91 })], resets, now })), []);
+  // Fresh snapshot whose weekly resets_at is already past: no press advice.
+  assert.deepEqual(ids(adviseState({ snapshots: [snap({ at: now - 10 * 60000, weekly: 95, resets: now - HOUR })], resets, now })), []);
   // No full entry: no press advice.
   assert.deepEqual(ids(adviseState({ snapshots: [snap({ at: now, weekly: 91 })], resets: [], now })), []);
 });
@@ -135,18 +137,41 @@ test("reset detection: a 25-point drop in one window pauses press-full and asks;
   ];
   const r = adviseState({ snapshots: snaps, resets, now });
   assert.equal(r.paused, true);
-  assert.deepEqual(r.drop, { from: 80, to: 55, at: iso(now - 3 * HOUR) });
+  assert.deepEqual(r.drop, { from: 80, to: 55, at: iso(now - 3 * HOUR), before_at: iso(now - 5 * HOUR) });
   assert.deepEqual(ids(r), ["expiry-full-24h", "ask-reset-drop"]);
   const ask = r.advice.find((a) => a.id === "ask-reset-drop");
   assert.equal(ask.level, "warn");
-  assert.equal(ask.text, "Weekly fell 80%→55%: if you pressed a reset, run cc-pace reset-used full|fable");
+  assert.equal(ask.text, "Weekly fell 80%→55%: if you pressed a reset, run cc-pace reset-used full|fable|none");
+  assert.ok(adviseState({ snapshots: [snap({ at: now - HOUR, weekly: 100 }), snap({ at: now, weekly: 0 })], resets, now })
+    .advice.every((a) => a.text.length <= 100));
 
   // Same drop, acknowledged after it: press-full is back, no question.
   const acked = adviseState({ snapshots: snaps, resets, now, acks: [{ kind: "full", at: iso(now - HOUR) }] });
   assert.equal(acked.paused, false);
   assert.deepEqual(ids(acked), ["expiry-full-24h", "press-full"]);
-  // An ack older than the drop does not count.
-  assert.equal(adviseState({ snapshots: snaps, resets, now, acks: [{ kind: "full", at: iso(now - 4 * HOUR) }] }).paused, true);
+  // The owner presses, runs reset-used, and only the NEXT snapshot shows the fall: an ack in the gap between the
+  // pre-drop snapshot and the drop snapshot counts.
+  const gap = adviseState({ snapshots: snaps, resets, now, acks: [{ kind: "full", at: iso(now - 4 * HOUR) }] });
+  assert.equal(gap.paused, false);
+  assert.deepEqual(ids(gap), ["expiry-full-24h", "press-full"]);
+  // Boundary (pinned): an ack exactly at before_at counts.
+  assert.equal(adviseState({ snapshots: snaps, resets, now, acks: [{ kind: "fable", at: iso(now - 5 * HOUR) }] }).paused, false);
+  // An ack before the pre-drop snapshot does not.
+  assert.equal(adviseState({ snapshots: snaps, resets, now, acks: [{ kind: "full", at: iso(now - 5 * HOUR - 1) }] }).paused, true);
+  // reset-used none (a false alarm) clears it too.
+  assert.equal(adviseState({ snapshots: snaps, resets, now, acks: [{ kind: "none", at: iso(now) }] }).paused, false);
+
+  // Two presses in one week: the LAST fall is reported, measured from the re-baselined value.
+  const twice = [
+    snap({ at: now - 8 * HOUR, weekly: 80 }),
+    snap({ at: now - 6 * HOUR, weekly: 50 }),
+    snap({ at: now - 4 * HOUR, weekly: 75 }),
+    snap({ at: now - 2 * HOUR, weekly: 40 }),
+    snap({ at: now, weekly: 41 }),
+  ];
+  const t2 = adviseState({ snapshots: twice, resets, now, acks: [{ kind: "full", at: iso(now - 7 * HOUR) }] });
+  assert.deepEqual(t2.drop, { from: 75, to: 40, at: iso(now - 2 * HOUR), before_at: iso(now - 4 * HOUR) });
+  assert.equal(t2.paused, true, "an ack for the first press does not cover the second");
 
   // The same fall across two different weekly windows is the weekly reset itself, not a press.
   const across = [
@@ -239,6 +264,44 @@ test("adviseTick: notifies once a day per id, records every level, prints nothin
   assert.ok(JSON.parse(fs.readFileSync(s.state, "utf8"))["expiry-fable-14d"]);
 });
 
+test("adviseTick: no live reset -> no board walk and no state file; unchanged state is not rewritten; a mid-tick ack survives", () => {
+  const s = sandbox();
+  const now = Date.now();
+  let walked = 0;
+  const deps = { activeTickets: () => { walked++; return 1; }, notify: () => {} };
+  // No cc.resets at all, then only a spent and an expired entry: nothing live.
+  let r = inHome(s.home, () => adviseTick(now, deps));
+  assert.deepEqual(r.advice, []);
+  fs.writeFileSync(s.limits, JSON.stringify({ cc: { resets: [{ kind: "full", count: 0, expires_at: iso(now + DAY) }, { kind: "fable", count: 2, expires_at: iso(now - HOUR) }] } }));
+  r = inHome(s.home, () => adviseTick(now, deps));
+  assert.deepEqual(r.advice, []);
+  assert.equal(walked, 0, "board not walked without a live reset");
+  assert.ok(!fs.existsSync(s.state), "no state file created by an empty tick");
+
+  // A live entry: the tick walks the board once and writes; a second identical tick leaves the file alone.
+  fs.writeFileSync(s.limits, JSON.stringify({ cc: { resets: [{ kind: "full", count: 1, expires_at: iso(now + 10 * DAY) }] } }));
+  inHome(s.home, () => adviseTick(now, deps));
+  assert.equal(walked, 1);
+  const old = new Date(now - DAY);
+  fs.utimesSync(s.state, old, old);
+  const before = fs.readFileSync(s.state, "utf8");
+  inHome(s.home, () => adviseTick(now + HOUR, deps));
+  assert.equal(fs.readFileSync(s.state, "utf8"), before);
+  assert.equal(fs.statSync(s.state).mtimeMs, old.getTime(), "unchanged state is not rewritten");
+
+  // reset-used writing an ack while a tick is in flight (here: from inside the notifier, after the tick read
+  // the state) is kept by the tick's write.
+  const ack = { kind: "full", at: iso(now) };
+  const racing = { activeTickets: () => 0, notify: () => {
+    const cur = JSON.parse(fs.readFileSync(s.state, "utf8"));
+    fs.writeFileSync(s.state, JSON.stringify({ ...cur, acks: [ack] }));
+  } };
+  inHome(s.home, () => adviseTick(now + 2 * DAY, racing));
+  const st = JSON.parse(fs.readFileSync(s.state, "utf8"));
+  assert.deepEqual(st.acks, [ack]);
+  assert.equal(st["expiry-full-14d"].lastNotifyMs, now + 2 * DAY);
+});
+
 test("activeTickets: queued + working across distinct stream repos; junk and missing boards count 0", () => {
   const s = sandbox();
   const streams = path.join(s.dir, "streams");
@@ -320,6 +383,23 @@ test("CLI reset-used: full 1 -> 0 keeps other keys and acks; again exits 2 byte-
     assert.equal(r.status, 2, bad.join(" "));
     assert.ok(fs.readFileSync(s.limits).equals(bytes));
   }
+  // reset-used none: an ack, no count change.
+  const acksBefore = JSON.parse(fs.readFileSync(s.state, "utf8")).acks.length;
+  r = s.run(["reset-used", "none"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "ack recorded\n");
+  assert.ok(fs.readFileSync(s.limits).equals(bytes), "none changes no count");
+  const acks2 = JSON.parse(fs.readFileSync(s.state, "utf8")).acks;
+  assert.equal(acks2.length, acksBefore + 1);
+  assert.equal(acks2.at(-1).kind, "none");
+  // The first entry of the kind with count > 0 is the one decremented.
+  fs.writeFileSync(s.limits, JSON.stringify({ cc: { resets: [{ kind: "full", count: 0, expires_at: FULL_EXP }, { kind: "full", count: 1, expires_at: "2027-01-01T00:00:00Z" }] } }));
+  r = s.run(["reset-used", "full"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(s.limits, "utf8")).cc.resets.map((e) => e.count), [0, 0]);
+  const b0 = fs.readFileSync(s.limits);
+  assert.equal(s.run(["reset-used", "full"]).status, 2);
+  assert.ok(fs.readFileSync(s.limits).equals(b0));
   // Kind missing from config.
   fs.writeFileSync(s.limits, JSON.stringify({ cc: { resets: [{ kind: "fable", count: 2, expires_at: "2027-03-09T07:59:00Z" }] } }));
   const b2 = fs.readFileSync(s.limits);
