@@ -83,8 +83,8 @@ In-scope rounds, `verdict-gate.mjs`, `oc-worker.mjs` and `board verify`/`shipped
 `gate-decorated-tags`). Before reading the first word it strips a leading decoration run, repeated in
 any order with whitespace between: a bullet (`-`, `*`, `+`), list numbering (`1.`, `1)`, `(a)`, `a.`),
 a checkbox (`[ ]`, `[x]`, `[X]`), emoji and symbol characters (`\p{Extended_Pictographic}`, `\p{So}`,
-plus variation selector U+FE0F and zero-width joiner U+200D), and the emphasis/bracket openers
-(`*`, `_`, backtick, `[`, `(`).
+plus variation selector U+FE0F, zero-width joiner U+200D and bullet U+2022), list numbering `a)`,
+and the emphasis/bracket openers (`*`, `_`, backtick, `[`, `(`).
 
 - `UNREQUESTED` (any case) as the first word -> CHANGES_REQUESTED, whatever follows (fail safe).
 - `unchanged`/`intended` as the first word, closed by emphasis/brackets then a separator

@@ -6,11 +6,12 @@
 // Rules (2026-11-12 bake-off: free critics FOUND a call-site regression but still APPROVED it):
 //   - no VERDICT line                       -> INVALID   (not a review)
 //   - no BLAST RADIUS section / no entries  -> INVALID   (caller trace is mandatory)
-//   - any BLAST RADIUS line whose first word (after the bullet and a `*`, `_`, backtick, `[`, `(`
-//     run) is UNREQUESTED (any case) -> CHANGES_REQUESTED, whatever follows; unchanged/intended
-//     first word, closed by emphasis/brackets then a separator (` — ` ` – ` ` -- ` ` - ` `:` `|`)
-//     or end of line -> does not count; any other line (old format) -> today's separator walk plus
-//     the no-dash-separator fail safe -> CHANGES_REQUESTED if UNREQUESTED is in tag position.
+//   - any BLAST RADIUS line whose first word (after the bullet and a run of `*`, `_`, backtick, `[`,
+//     `(`, bullet/list-numbering/checkbox/emoji/symbol decoration) is UNREQUESTED (any case) ->
+//     CHANGES_REQUESTED, whatever follows; unchanged/intended first word, closed by emphasis/brackets
+//     then a separator (` — ` ` – ` ` -- ` ` - ` `:` `|`) or end of line -> does not count; any
+//     other line (old format) -> today's separator walk plus the no-dash-separator fail safe ->
+//     CHANGES_REQUESTED if UNREQUESTED is in tag position.
 //   - any [blocker] or [major] finding       -> CHANGES_REQUESTED, whatever the critic wrote
 //   - otherwise the critic's verdict stands
 // --free marks the review as done on a free model: an APPROVED becomes APPROVED_FREE
@@ -34,7 +35,7 @@ export function gate(text, { free = false } = {}) {
   // only when it leads with a tag word (`UNREQUESTED`/`unchanged`/`intended`) — a numbered blast line is
   // tag-first like the bullet form. Numbered findings (`1. [minor] ...`) and `1. none` / `1. No findings`
   // / `1. (none)` placeholders are findings, not blast lines.
-  const BLAST_LINE = /^\s*(?:[-*]|\d+[.)](?=\s*(?:UNREQUESTED|unchanged|intended)\b)|\([a-zA-Z]\)(?=\s*(?:UNREQUESTED|unchanged|intended)\b)|[a-zA-Z]\.(?=\s*(?:UNREQUESTED|unchanged|intended)\b))\s/i;
+  const BLAST_LINE = /^\s*(?:[-*+]|\d+[.)](?=\s*(?:UNREQUESTED|unchanged|intended)\b)|[a-zA-Z]\)(?=\s*(?:UNREQUESTED|unchanged|intended)\b)|\([a-zA-Z]\)(?=\s*(?:UNREQUESTED|unchanged|intended)\b)|[a-zA-Z]\.(?=\s*(?:UNREQUESTED|unchanged|intended)\b))\s/i;
   const lines = t.split("\n");
   const start = lines.findIndex((l) => /^\s*\**BLAST RADIUS:?\**/i.test(l));
   const entries = [];
@@ -64,10 +65,10 @@ export function gate(text, { free = false } = {}) {
   const SEP = / — | – | -- | - |: /g;
   const KNOWN = /^[*_`\[(]*(unchanged|intended|UNREQUESTED)(?![A-Za-z0-9])/;
   // Leading decoration run, repeated in any order, whitespace allowed between:
-  // bullet (- * +), list numbering (1. 1) (a) a.), checkbox ([ ] [x] [X]),
-  // emoji/symbol (\p{Extended_Pictographic} \p{So} + U+FE0F U+200D), and the
-  // existing emphasis/bracket openers (* _ backtick [ ().
-  const DECOR = /^(?:\s*(?:[-*+]|\d+[.)]|\([a-zA-Z]\)|[a-zA-Z]\.|\[[ xX]\]|[\p{Extended_Pictographic}\p{So}\uFE0F\u200D]|[_`\[(])\s*)*/u;
+  // bullet (- * +), list numbering (1. 1) (a) a. a)), checkbox ([ ] [x] [X]),
+  // emoji/symbol (\p{Extended_Pictographic} \p{So} + U+FE0F U+200D, plus bullet U+2022),
+  // and the existing emphasis/bracket openers (* _ backtick [ ().
+  const DECOR = /^(?:\s*(?:[-*+]|\d+[.)]|[a-zA-Z]\)|\([a-zA-Z]\)|[a-zA-Z]\.|\[[ xX]\]|[\p{Extended_Pictographic}\p{So}\uFE0F\u200D\u2022]|[_`\[(])\s*)*/u;
   const TAG = /^[A-Za-z]+/;
   const IS_TAG = /^(unchanged|intended|UNREQUESTED)$/i;
   const IS_UNREQ = /^UNREQUESTED$/i;

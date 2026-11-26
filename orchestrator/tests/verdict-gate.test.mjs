@@ -249,6 +249,7 @@ test("caller token starting with unchanged/intended + unspaced dash still counts
 test("decorated UNREQUESTED blast lines count: emoji, checkbox, numbering, emphasis", () => {
   const blasts = [
     "- ❌ UNREQUESTED — a.mjs:1: x",
+    "+ UNREQUESTED — a.mjs:1: x",
     "- [x] UNREQUESTED — a.mjs:1: x",
     "- [ ] UNREQUESTED — a.mjs:1: x",
     "- 1. UNREQUESTED — a.mjs:1: x",
@@ -256,6 +257,7 @@ test("decorated UNREQUESTED blast lines count: emoji, checkbox, numbering, empha
     "- (a) UNREQUESTED — a.mjs:1: x",
     "- **❌ UNREQUESTED** — a.mjs:1: x",
     "- ⚠️ UNREQUESTED — a.mjs:1: x",
+    "- • UNREQUESTED — b.mjs:2: x",
   ];
   for (const blast of blasts) {
     const r = gate(doc("APPROVED", blast));
@@ -263,6 +265,20 @@ test("decorated UNREQUESTED blast lines count: emoji, checkbox, numbering, empha
     assert.equal(r.overridden, true, blast);
     assert.equal(r.unrequested.length, 1, blast);
   }
+});
+
+// Pass bar (this ticket): a decorated UNREQUESTED line counts even when it is not the
+// first blast-line entry (real findings-file shape — a plain entry precedes it).
+test("decorated UNREQUESTED blast line counts after a plain entry", () => {
+  const d = doc(
+    "APPROVED",
+    "- a.mjs:1 — unchanged\n- ❌ UNREQUESTED — b.mjs:2: the caller now returns null",
+  );
+  const r = gate(d);
+  assert.equal(r.effective, "CHANGES_REQUESTED");
+  assert.equal(r.overridden, true);
+  assert.equal(r.unrequested.length, 1);
+  assert.equal(r.unrequested[0], "- ❌ UNREQUESTED — b.mjs:2: the caller now returns null");
 });
 
 test("decorated unchanged/intended blast lines stay APPROVED", () => {
