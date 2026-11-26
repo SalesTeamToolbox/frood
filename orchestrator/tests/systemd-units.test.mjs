@@ -4,6 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -52,10 +53,10 @@ test("both service units set PATH via @PATH@", () => {
   }
 });
 
-// loadUnitPath imports install.mjs hermetically: ORCH_INSTALL_NO_SYSTEMD=1 keeps the
-// installer from writing unit files or calling systemctl while exposing the pure unitPath.
+// loadUnitPath imports install.mjs hermetically: with the installer body behind a
+// main-module check, importing only defines the pure unitPath and touches neither
+// systemd nor launch config.
 async function loadUnitPath() {
-  process.env.ORCH_INSTALL_NO_SYSTEMD = "1";
   const mod = await import(path.join(DIR, "install.mjs"));
   return mod.unitPath;
 }
@@ -115,11 +116,52 @@ test("unitPath: opencode not found still returns a PATH", async () => {
 test("install: opencode missing still installs a PATH and warns", () => {
   const INSTALL = path.join(DIR, "install.mjs");
   const nodeDir = path.dirname(process.execPath);
-  const res = spawnSync(process.execPath, [INSTALL], {
-    env: { ...process.env, ORCH_INSTALL_NO_SYSTEMD: "1", PATH: `${nodeDir}:/usr/local/bin:/usr/bin:/bin` },
-    encoding: "utf8",
-    timeout: 60000,
-  });
-  assert.equal(res.status, 0, res.stderr);
-  assert.match(res.stderr, /opencode not found on PATH/);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "orch-install-home-"));
+  try {
+    const res = spawnSync(process.execPath, [INSTALL], {
+      env: {
+        ...process.env,
+        ORCH_HOME: home,
+        ORCH_LAUNCH_CMD: "",
+        ORCH_INSTALL_NO_SYSTEMD: "1",
+        PATH: `${nodeDir}:/usr/local/bin:/usr/bin:/bin`,
+      },
+      encoding: "utf8",
+      timeout: 60000,
+    });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, /opencode not found on PATH/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("importing install.mjs writes nothing and spawns nothing observable", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "orch-import-home-"));
+  const before = process.env.ORCH_INSTALL_NO_SYSTEMD;
+  try {
+    // Import with a temp ORCH_HOME so any launch-config write would land here.
+    const origEnv = process.env.ORCH_HOME;
+    process.env.ORCH_HOME = home;
+    try {
+      const mod = await import(path.join(DIR, "install.mjs"));
+      assert.equal(typeof mod.unitPath, "function");
+    } finally {
+      if (origEnv === undefined) delete process.env.ORCH_HOME;
+      else process.env.ORCH_HOME = origEnv;
+    }
+    // Importing must not write launch.json nor change ORCH_INSTALL_NO_SYSTEMD.
+    assert.equal(
+      process.env.ORCH_INSTALL_NO_SYSTEMD,
+      before,
+      "import changed ORCH_INSTALL_NO_SYSTEMD",
+    );
+    assert.equal(
+      fs.existsSync(path.join(home, ".config", "orchestrator", "launch.json")),
+      false,
+      "import wrote launch.json",
+    );
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
