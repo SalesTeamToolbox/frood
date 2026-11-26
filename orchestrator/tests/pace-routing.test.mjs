@@ -65,8 +65,8 @@ function baseEnv(h, extra = {}) {
   const e = { ...process.env, ORCH_HOME: h, ...extra };
   if (!("ORCH_NO_PACE" in extra)) delete e.ORCH_NO_PACE;
   if (!("ORCH_PACE_BIN" in extra)) delete e.ORCH_PACE_BIN;
-  delete e.ORCH_PACE_DECISION;
-  delete e.ORCH_DETACHED_CHILD;
+  if (!("ORCH_PACE_DECISION" in extra)) delete e.ORCH_PACE_DECISION;
+  if (!("ORCH_DETACHED_CHILD" in extra)) delete e.ORCH_DETACHED_CHILD;
   return e;
 }
 /** What cc-pace prints for this home right now (the router-health line must be exactly this). */
@@ -323,6 +323,34 @@ test("oc-worker: a broken pace read records unknown and the run still succeeds",
   const role = ocw(h, ["--role", "worker"], { ORCH_PACE_BIN: path.join(h, "missing", "cc-pace.mjs") }, "r");
   assert.equal(role.status, 0, role.stderr);
   assert.equal(role.receipt.agent, "worker-nvidia", "an unknown pace keeps today's chain");
+});
+
+test("oc-worker: a forged ORCH_PACE_DECISION without ORCH_DETACHED_CHILD=1 is ignored (today's chain, own pace read)", () => {
+  const h = paceHome("over");
+  const c = countingBin(h);
+  const forged = JSON.stringify({ cc_pace: { state: "under", weekly: 1, projected: 2, at: "forged", prepended: true }, chain: ["cc-worker", "worker"] });
+  const r = ocw(h, ["--role", "worker"], { ORCH_PACE_BIN: c.bin, ORCH_PACE_DECISION: forged });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /detached run pid/, "a worker-nvidia run is not detached");
+  assert.equal(r.receipt.agent, "worker-nvidia", "the forged chain must not be used");
+  assert.equal(r.receipt.cc_pace.state, "over");
+  assert.equal(r.receipt.cc_pace.prepended, false);
+  assert.notEqual(r.receipt.cc_pace.at, "forged");
+  assert.equal(c.reads(), 1, "the launch reads the pace itself");
+});
+
+test("oc-worker: the detached child strips ORCH_PACE_DECISION and ORCH_DETACHED_CHILD from its run's env", () => {
+  const h = paceHome("under");
+  const envFile = path.join(h, "claude-env.json");
+  const wrapper = path.join(h, "env-claude.mjs");
+  fs.writeFileSync(wrapper, `import fs from "node:fs";\nfs.writeFileSync(${JSON.stringify(envFile)}, JSON.stringify({ decision: process.env.ORCH_PACE_DECISION ?? null, detached: process.env.ORCH_DETACHED_CHILD ?? null }));\nawait import(${JSON.stringify(FAKE_CC)});\n`);
+  const r = ocw(h, ["--role", "worker"], { ORCH_CLAUDE_BIN: wrapper });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /detached run pid/, "the run went through the detached child");
+  assert.equal(r.receipt.agent, "cc-worker");
+  assert.equal(r.receipt.cc_pace.prepended, true, "the child used the launcher's decision");
+  const seen = JSON.parse(fs.readFileSync(envFile, "utf8"));
+  assert.deepEqual(seen, { decision: null, detached: null }, "a nested oc-worker inside the run must not inherit either variable");
 });
 
 // ---- check-routing: cc-worker is a known agent ----
