@@ -1,0 +1,1 @@
+{ "name": "workers-panel", "version": "0.1.0", "description": "Side pane (/workers) listing the headless worker runs, their tickets, held tickets and tickets with no live run (workers-view.mjs, refreshed every 15 s).", "types": "./types/index.d.ts" }
