@@ -258,6 +258,53 @@ owner question, status READY or DONE):
 
 Turn it off with `node bin/settings.mjs set fresh_successor false`.
 
+## Workstation guards (Linux)
+
+The laptop is shared by every agent, and concurrent full suites (pytest with a headless Chromium, vitest at
+`cpus-1` forks, `tsc`, `make check`) once drove the 1-minute load average to 15.75 on an i3-1215U. Three guards
+close the gaps, installed by `node bin/install.mjs` on Linux:
+
+### Agent priority guard
+
+`orchestrator/ops/workstation/agent-priority.mjs` is installed to
+`~/.local/lib/frood-workstation/agent-priority.mjs` and run as the systemd user service
+`frood-agent-priority.service` (`Restart=always`). It loops every 15 s (`FROOD_WS_INTERVAL_MS` overrides) and
+renices every thread of every agent process tree to nice >= 10, never lowering a nice value and never touching a
+non-agent tree.
+
+Agent roots are matched by name (`claude`, `opencode`, `codex`, `gemini`, `aider`, `cursor-agent`, `copilot`,
+`copilot-runtime`, `goose`, `amp`, `.exe` stripped) or by interpreter (`node`/`bun`/`python`/`python3`/`deno`)
+whose argv names an agent package (`@openai/codex`, `@google/gemini-cli`, `@github/copilot`, `opencode-ai`,
+`@sourcegraph/amp`, `aider`, `claude-code`). A shell or `grep`/`rg` never becomes a root through its arguments,
+and anything under `/usr/lib/claude-desktop/`, `/opt/Claude` or `/usr/lib/electron*` (the Claude desktop UI) is
+never a root — Claude Code under `~/.config/Claude/claude-code/` matches by name instead.
+
+The proc root is `ORCH_PROC_ROOT || /proc` (the same name `slots.mjs:21` uses). The pause file is
+`~/.local/state/frood-workstation/priority-guard.off` (state dir overridable with `FROOD_WS_STATE`); while it
+exists a pass does nothing. `--once` runs one pass and prints what it lowered. The log is
+`~/.local/state/frood-workstation/priority-guard.log`, rotating at 512 KB. `oc-worker.mjs`'s own nice-10 on
+opencode children is unchanged — this guard is the box-wide equivalent for every agent tree.
+
+### Box-wide suite lock
+
+`orchestrator/ops/workstation/suite-lock.sh` is installed to
+`~/.local/lib/frood-workstation/suite-lock.sh`. It is the same arrival-order queue / heartbeat / two-read stale
+break / token-checked release as the per-repo locks, but the root is `SUITE_LOCK_ROOT`, defaulting to
+`~/.local/state/frood-workstation/suite-lock`, so every repo on the box shares ONE lock and one queue. `SUITE_LOCK=0`
+skips it (loudly) for emergencies; `POLL`, `BEAT`, `STALE`, `WAITER_STALE` and `REPORT` are overridable.
+
+`make test` now waits for the box-wide lock before running pytest; `SUITE_LOCK=0 make test` bypasses it. `make
+check`'s lint step is not locked, and its test step takes the lock once. `FROOD_SUITE_LOCK_HELD=1` stops a nested
+`make test` spawned under pytest from deadlocking. Frood had no suite lock before; `make check` never queued.
+
+### Recommended parallelism caps (documented, not enforced)
+
+None of Frood's runners are capped by this ticket; set these where you run them:
+- vitest: `maxWorkers: process.env.VITEST_MAX_WORKERS ?? '50%'`
+- pytest-xdist: `-n` ≤ 4
+
+Frood's own `make test` has no xdist, so it is unchanged.
+
 ## Worktree fence
 
 Workers must not write outside their own worktree. `bin/oc-worker.mjs` enforces this with the `bin/worktree-fence.mjs`

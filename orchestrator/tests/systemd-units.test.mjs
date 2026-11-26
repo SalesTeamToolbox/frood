@@ -196,3 +196,12 @@ test("install runs the body when invoked through a symlinked path", () => {
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+const WS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "ops", "workstation");
+
+test("frood-agent-priority.service unit shape", () => {
+  const svc = fs.readFileSync(path.join(WS_DIR, "frood-agent-priority.service"), "utf8");
+  assert.match(svc, /^ExecStart=\/usr\/bin\/env node %h\/.local\/lib\/frood-workstation\/agent-priority\.mjs$/m);
+  assert.match(svc, /^Restart=always$/m);
+  assert.match(svc, /^WantedBy=default\.target$/m);
+});

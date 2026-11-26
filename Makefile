@@ -1,4 +1,5 @@
 .PHONY: install install-dev test test-verbose test-security lint format check security run run-headless clean help
+SHELL := /bin/bash
 
 PYTHON ?= python3
 VENV := .venv
@@ -21,8 +22,12 @@ install-dev:  ## Install development dependencies (testing, linting, security)
 	$(PIP) install -r requirements-dev.txt
 	@if [ -f $(VENV)/bin/pre-commit ]; then $(VENV)/bin/pre-commit install; fi
 
-test:  ## Run test suite (stop on first failure)
-	$(PYTEST) tests/ -x -q
+test:  ## Run test suite (stop on first failure; waits for the box-wide suite lock)
+	@if [ "$${FROOD_SUITE_LOCK_HELD:-0}" = "1" ]; then exec $(PYTEST) tests/ -x -q; fi; \
+	. "$(CURDIR)/orchestrator/ops/workstation/suite-lock.sh"; \
+	suite_lock_acquire "frood make test ($(CURDIR))" || exit 1; \
+	FROOD_SUITE_LOCK_HELD=1 $(PYTEST) tests/ -x -q; rc=$$?; \
+	suite_lock_release; exit $$rc
 
 test-verbose:  ## Run tests with verbose output
 	$(PYTEST) tests/ -v
