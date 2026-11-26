@@ -9,6 +9,31 @@ import os from "node:os";
 import path from "node:path";
 
 const HOUR = 3600_000;
+/** Pool-health key of the headless Claude Code runner (oc-worker --agent cc-worker). */
+export const CC_POOL = "cc-worker";
+const CC_WINDOW_MS = 5 * HOUR;
+
+/** Milliseconds until the reset a Claude limit message names, or null. Forms: "limit reached|<epoch seconds>",
+ *  "resets at <ISO>", "resets 3pm" / "resets 3:30 pm" (next such local time). */
+export function ccResetMs(text, now = Date.now()) {
+  const epoch = text.match(/limit reached\|(\d{9,13})\b/i);
+  if (epoch) {
+    const n = Number(epoch[1]);
+    return (n < 1e11 ? n * 1000 : n) - now;
+  }
+  const iso = text.match(/resets?\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T[\d:.]+Z)/i);
+  if (iso) return Date.parse(iso[1]) - now;
+  const clock = text.match(/resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  if (clock) {
+    let h = Number(clock[1]) % 12;
+    if (clock[3].toLowerCase() === "pm") h += 12;
+    const t = new Date(now);
+    t.setHours(h, Number(clock[2] || 0), 0, 0);
+    if (t.getTime() <= now) t.setDate(t.getDate() + 1);
+    return t.getTime() - now;
+  }
+  return null;
+}
 
 export function healthPath() {
   return path.join(process.env.ORCH_HOME || os.homedir(), ".config", "orchestrator", "pool-health.json");
@@ -46,6 +71,17 @@ export function classify(errors = [], model = null) {
   // Must run BEFORE the generic quota/limit check to avoid "limit" in "output token limit" matching quota.
   if (/output.?token.?limit|output.?limit|truncat|output.?exceeded/i.test(text)) {
     return { reason: "dropped", ms: 10 * 60_000 };
+  }
+  // Claude Code (cc-worker) limits. The pool key is "cc-worker" (no provider prefix). A subscription usage limit
+  // holds the pool down until the 5-hour window resets: the reset time when the text names one, else now + 5 h.
+  // A plain 429 / rate_limit_error recovers in minutes, so it is a short "rate-limit". "overloaded" falls through
+  // to the provider-error branch below.
+  const isCc = model === CC_POOL || /Claude AI usage limit|5-hour limit|hit your limit/i.test(text);
+  if (isCc && /usage limit|limit reached|hit your limit|5-hour limit|weekly limit|limit.{0,40}resets?/i.test(text)) {
+    return { reason: "quota", ms: Math.min(Math.max(ccResetMs(text) ?? CC_WINDOW_MS, 60_000), 7 * 24 * HOUR), scope: "model" };
+  }
+  if (isCc && /rate.?limit|\b429\b|too many requests/i.test(text)) {
+    return { reason: "rate-limit", ms: 5 * 60_000, scope: "model" };
   }
   // Nvidia (nvidia/*) 429s are rate limits, not monthly quotas — they recover in minutes, not hours.
   // Treat as "rate-limit" with a short retry window so the same model can be retried after a brief wait.

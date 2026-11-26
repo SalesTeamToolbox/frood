@@ -433,6 +433,10 @@ topic: docs/atlas/desk.md
 handler: orchestrator/bin/slots.mjs (readSample, slotConfig, allowedSlots); orchestrator/bin/oc-worker.mjs acquireSlot; desk.mjs status header
 decides: how many workers may start now — fixed `WORKER_SLOTS=N` or dynamic `WORKER_SLOTS_MIN`..`WORKER_SLOTS_MAX` (2..6) from 5-minute machine load (/proc/pressure/cpu, /proc/loadavg, /proc/meminfo) via ORCH_PROC_ROOT; burst guard admits at most one slot above the floor per 60 s; opencode children nicened to 10 on non-Windows; decision log slot-decisions.log
 
+### oc-worker cc-worker backend (headless Claude Code)
+handler: orchestrator/bin/oc-worker.mjs (`--agent cc-worker`: claudeBin, summarizeClaude, ccCapReader, runChain pool key `cc-worker`); orchestrator/bin/pool-health.mjs (classify, ccResetMs, CC_POOL); orchestrator/tests/fixtures/fake-claude.mjs
+decides: `--agent cc-worker` spawns `claude -p` (ORCH_CLAUDE_BIN) instead of opencode, same receipt/--stream/timeout/signal path; at most `cc.max_workers` (usage-limits.json via usage.mjs loadLimits, default 1) run machine-wide on `provider-cc-<i>` slot dirs; a Claude usage limit is `quota` (pool-health `cc-worker` down until the message's reset, else 5 h) and a 429 is `rate-limit`, so `--fallback` moves on. Not in any CHAINS role (routing is a later module)
+
 ### oc-worker --role worker chain
 handler: orchestrator/bin/oc-worker.mjs --role <name> (expands to --agent/--fallback from CHAINS); orchestrator/bin/chains.mjs (CHAINS source, re-exported by orchestrator/bin/router-health.mjs)
 decides: which OpenCode agent pool to dispatch first for a worker run; worker-nvidia first for routine tickets, Nvidia 429 resumes on the same session, two stalled/timeout receipts drop worker-nvidia for the ticket

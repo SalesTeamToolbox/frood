@@ -74,6 +74,16 @@
 //   slots are released, the receipt is written with exit "killed" (errors: "killed by <SIGNAL>"), the stream run-done is
 //   appended, and oc-worker exits 143 / 130 / 129. A second signal during cleanup is ignored. While still waiting for a
 //   slot nothing is held, so the signal just ends the process (no receipt).
+// - --agent cc-worker: the backend is headless Claude Code, not OpenCode. It runs `claude` (ORCH_CLAUDE_BIN, else `claude` on
+//   PATH) with cwd=<dir>: `-p <prompt> --model sonnet --tools Read,Grep,Glob,Edit,Write,Bash --strict-mcp-config
+//   --permission-mode acceptEdits --allowedTools Bash --permission-prompts none --output-format stream-json --verbose`,
+//   plus `--resume <id>` for --session and the automatic resume. The receipt model is `sonnet` (or --model); session, final
+//   text, tokens and cost come from the stream-json `session_id` / `result` events. Timeout, idle, BelowNormal, the proc-tree
+//   sweep, signals, --stream, --out and --report behave as for an OpenCode agent. A Claude usage/rate limit is classified
+//   quota / rate-limit, so --fallback moves on, and `cc-worker` is marked down in pool-health until the 5-hour reset (the
+//   reset time in the message, else now + 5 h). At most `cc.max_workers` (usage-limits.json, default 1) cc-worker runs
+//   at once machine-wide, via the lock dirs `provider-cc-<i>`; a waiting run waits (ORCH_CC_POLL_MS, default 3000) and
+//   never fails. cc-worker is not in any CHAINS role: name it with --agent.
 // Exit: 0 finished, 3 no final text, 4 timeout, 5 opencode error, 6 every pool in the chain known-down, 7 board
 // attach refused (--ticket), 8 model not allowed by provider policy (`ignored`; unreadable providers.json; model unresolvable while any provider is restricted; `free-only`
 // and not on the allowlist), 10 stale or dirty tree (fresh --stream worker refused before queued/spawn).
@@ -88,7 +98,7 @@ import { createRequire } from "node:module";
 import { gate } from "./verdict-gate.mjs";
 import { watch, processStart } from "./proc-tree.mjs";
 import { diff, homeDir } from "./install.mjs";
-import { agentModel, classify, isDown, isPolicyFree, markDown, markUp, modelAllowed, policyReason, providerOf, hasRestrictivePolicy, readHealth } from "./pool-health.mjs";
+import { agentModel, classify, isDown, isPolicyFree, markDown, markUp, modelAllowed, policyReason, providerOf, hasRestrictivePolicy, readHealth, CC_POOL } from "./pool-health.mjs";
 import crypto from "node:crypto";
 import { appendEvent, atomicWrite, streamsDir } from "./handoff.mjs";
 import { workerOutcome } from "./outcome.mjs";
@@ -360,6 +370,33 @@ export function opencodeBin() {
   return { cmd: "opencode", shell: false };
 }
 
+// The headless Claude Code runner: --agent cc-worker. ORCH_CLAUDE_BIN overrides the binary (tests: a fake .mjs).
+export const isCcAgent = (agent) => agent === CC_POOL;
+export function claudeBin() {
+  const env = process.env.ORCH_CLAUDE_BIN;
+  if (env && /\.m?js$/.test(env)) return { cmd: process.execPath, pre: [env], shell: false };
+  return { cmd: env || "claude", shell: false };
+}
+
+// `cc.max_workers` from usage-limits.json via usage.mjs loadLimits(): a positive integer, else 1. Imported lazily:
+// usage.mjs pulls in node:sqlite, which an old Node build cannot load; that case also reads as 1.
+// Returns a synchronous cap reader (acquireProviderSlot asks it at every poll, so an edited file takes effect).
+export async function ccCapReader() {
+  let loadLimits = null;
+  try {
+    ({ loadLimits } = await import("./usage.mjs"));
+  } catch {}
+  return () => {
+    try {
+      const l = loadLimits();
+      const n = Number(l?.cc?.max_workers ?? l?.["cc.max_workers"]);
+      return Number.isInteger(n) && n >= 1 ? n : 1;
+    } catch {
+      return 1;
+    }
+  };
+}
+
 function alive(pid) {
   try {
     process.kill(pid, 0);
@@ -615,6 +652,43 @@ export function summarize(lines) {
   // Everything the agent said, in order — kept so a timeout does not throw away its findings.
   const all = [...s.texts.values()].map((parts) => parts.join("")).join("\n\n");
   return { session: s.session, final, all, tokens: s.tokens, cost: Number(s.cost.toFixed(6)), errors: s.errors };
+}
+
+// Fold Claude Code's `--output-format stream-json` lines into the same shape summarize() returns.
+// The final text is the `result` event's `result`; an `is_error` result is an error (never a final message), so a
+// usage limit reads as "no output yet" and the chain can move on. Tokens: input + cache creation as `input`, cache
+// reads as `cache_read`; cost is `total_cost_usd`.
+export function summarizeClaude(lines) {
+  const s = { session: null, texts: [], final: "", tokens: { input: 0, output: 0, reasoning: 0, cache_read: 0 }, cost: 0, errors: [] };
+  for (const line of lines) {
+    let e;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!e || typeof e !== "object") continue;
+    s.session ||= e.session_id || null;
+    if (e.type === "assistant" && Array.isArray(e.message?.content)) {
+      const t = e.message.content.filter((c) => c?.type === "text" && typeof c.text === "string").map((c) => c.text).join("");
+      if (t) s.texts.push(t);
+    }
+    if (e.type === "result") {
+      if (e.session_id) s.session = e.session_id;
+      const u = e.usage || {};
+      s.tokens.input += (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      s.tokens.output += u.output_tokens || 0;
+      s.tokens.cache_read += u.cache_read_input_tokens || 0;
+      s.cost += Number(e.total_cost_usd) || 0;
+      const text = typeof e.result === "string" ? e.result : "";
+      if (e.is_error) {
+        s.errors.push((text || e.subtype || "claude error").slice(0, 500));
+        // the limit/error message also arrives as the last assistant text: it is not the agent's work
+        while (s.texts.length && text && s.texts[s.texts.length - 1] === text) s.texts.pop();
+      } else if (text) s.final = text;
+    }
+  }
+  return { session: s.session, final: s.final, all: s.texts.join("\n\n"), tokens: s.tokens, cost: Number(s.cost.toFixed(6)), errors: s.errors };
 }
 
 export function statusLine(text) {
@@ -902,7 +976,7 @@ function streamPreflight(a) {
   }
   // Fresh-worker freshness check: refuse a stale or dirty tree before the `queued` event and before any
   // slot is taken. Revision rounds (--session), critics, scouts and seniors are never checked.
-  if (!a.session && a.stream && /^worker/.test(a.agent)) {
+  if (!a.session && a.stream && /^(cc-)?worker/.test(a.agent)) {
     freshTreeCheck(path.resolve(a.dir), ticket.base);
   }
   // With --stream the agent writes the report itself (cwd = --dir), so a relative --report would
@@ -914,7 +988,7 @@ function streamPreflight(a) {
   // Queue-time snapshot of the slot decision (fresh sample, clearSince: null) — not the admission outcome.
   const slotsNow = Date.now();
   const slotsReason = allowedSlots(readSample(), a.slotCfg, { clearSince: null }, slotsNow).reason;
-  const ev = { key: `run:${run}:queued`, kind: "queued", run, out, pid: process.pid, pid_start: processStart(process.pid), agent: a.agent, ticket: path.join(path.dirname(out), "ticket.json"), slots: slotsReason + (isNvidiaModel(a.model || agentModel(a.agent)) ? `; nvidia ${providerHeld("nvidia")}/${nvidiaCapNow(slotDir()).cap}` : "") };
+  const ev = { key: `run:${run}:queued`, kind: "queued", run, out, pid: process.pid, pid_start: processStart(process.pid), agent: a.agent, ticket: path.join(path.dirname(out), "ticket.json"), slots: slotsReason + (isNvidiaModel(a.model || agentModel(a.agent)) ? `; nvidia ${providerHeld("nvidia")}/${nvidiaCapNow(slotDir()).cap}` : "") + (isCcAgent(a.agent) ? `; cc ${providerHeld("cc")}` : "") };
   let added;
   try {
     added = appendEvent(stream, ev);
@@ -997,20 +1071,22 @@ async function runChain(a) {
   for (let i = 0; i < chain.length && attempts < 3; i++) {
     const agent = chain[i];
     const first = i === 0;
-    const model = (first && a.model) || agentModel(agent);
+    const cc = isCcAgent(agent);
+    const model = cc ? ((first && a.model) || "sonnet") : (first && a.model) || agentModel(agent);
+    const poolKey = cc ? CC_POOL : model; // pool-health key: the cc runner is one pool whatever --model says
     if (model && !modelAllowed(model)) {
       hops.push({ agent, model, skipped: true, reason: policyReason(model) });
       continue;
     }
     // A model the harness no longer lists (its provider was removed) is skipped before a spawn and costs no attempt.
-    if (model) {
+    if (model && !cc) {
       if (liveModels === undefined) liveModels = opencodeModelSet();
       if (liveModels && !liveModels.has(model)) {
         hops.push({ agent, model, skipped: true, reason: "absent: not in opencode models" });
         continue;
       }
     }
-    const down = isDown(model);
+    const down = isDown(poolKey);
     if (down) {
       hops.push({ agent, model, skipped: true, reason: `${down.reason} until ${down.until}` });
       continue;
@@ -1020,15 +1096,15 @@ async function runChain(a) {
     r = await runWorker(first ? a : { ...a, agent, session: undefined, model: undefined });
     attempts += (r.attempts ?? 1) - 1; // cap 3 counts spawns: a resumed run used more than one
     if (r.exit === "killed") break; // the owner stopped this run: no fallback hop, no pool-health change
-    const anyCls = classify(r.classifyErrors ?? r.errors, model);
+    const anyCls = classify(r.classifyErrors ?? r.errors, poolKey);
     // A pool that died mid-run (output already produced) is still down for the next run.
-    if (anyCls && r.first_line) markDown(model, { ...anyCls, detail: r.errors[0] || "" });
+    if (anyCls && r.first_line) markDown(poolKey, { ...anyCls, detail: r.errors[0] || "" });
     const cls = !r.first_line ? anyCls : null;
     if (!cls) {
-      if (r.first_line && !anyCls) markUp(model);
+      if (r.first_line && !anyCls) markUp(poolKey);
       break;
     }
-    markDown(model, { ...cls, detail: r.errors[0] || "" });
+    markDown(poolKey, { ...cls, detail: r.errors[0] || "" });
     if (i === chain.length - 1) break; // nothing left to move to: this failure is the result
     hops.push({ agent, model, session: r.session, error: (r.errors[0] || "").slice(0, 200) });
   }
@@ -1089,11 +1165,12 @@ export async function runWorker(a) {
   if (!fs.existsSync(dir)) throw new Error(`--dir does not exist: ${dir}`);
   // The model the receipt records is the one that actually runs: --model, else the agent's pinned model. The
   // board reads this to decide whether a review was paid (a receipt no longer says "(agent default)").
-  const wanted = a.model || agentModel(a.agent);
+  const wanted = isCcAgent(a.agent) ? (a.model || "sonnet") : a.model || agentModel(a.agent);
   if (!wanted && hasRestrictivePolicy()) return unresolvableReceipt(a); // policy cannot be checked without a model
   if (wanted && !modelAllowed(wanted)) return notAllowedReceipt(a, wanted); // before a slot is taken or opencode started
-  const model = wanted || "(agent default)";
-  const bin = opencodeBin();
+  const isCc = isCcAgent(a.agent);
+  const model = isCc ? (a.model || "sonnet") : wanted || "(agent default)";
+  const bin = isCc ? claudeBin() : opencodeBin();
   const title = a.title || `orch ${a.agent} ${path.basename(dir)}`;
   // A message that starts with "-" (YAML front-matter) would be parsed by `opencode run` as a flag.
   const safe = (m) => (m.startsWith("-") ? "\n" + m : m);
@@ -1102,6 +1179,8 @@ export async function runWorker(a) {
   // Provider slot first: a run waiting for Nvidia holds no machine slot and has not started its clock.
   let providerSlot = null;
   if (isNvidiaModel(wanted)) providerSlot = await acquireProviderSlot("nvidia", () => nvidiaCapNow(slotDir()).cap, { pollMs: Number(process.env.ORCH_NVIDIA_POLL_MS) || 3000, pid: process.pid });
+  // cc-worker: at most cc.max_workers headless Claude runs machine-wide; a waiting run waits and never fails.
+  if (isCc) providerSlot = await acquireProviderSlot("cc", await ccCapReader(), { pollMs: Number(process.env.ORCH_CC_POLL_MS) || 3000, pid: process.pid });
   let releaseMachine;
   try {
     releaseMachine = await acquireSlot(a.slotCfg, { pollMs: 3000, pid: process.pid });
@@ -1193,6 +1272,12 @@ export async function runWorker(a) {
   const fenceFooter = footer(dir, out, fenceMain);
   const base = promptText + reportLine + FOOTER + readonlyFooter + visionFooter + fenceFooter;
   const cliFor = (session, message) => {
+    if (isCc) {
+      // The prompt comes right after -p: --tools and --allowedTools are variadic and would swallow a later positional.
+      const cc = ["-p", safe(message), "--model", model, "--tools", "Read,Grep,Glob,Edit,Write,Bash", "--strict-mcp-config", "--permission-mode", "acceptEdits", "--allowedTools", "Bash", "--permission-prompts", "none", "--output-format", "stream-json", "--verbose"];
+      if (session) cc.push("--resume", session);
+      return cc;
+    }
     // --standalone: a private opencode server on the run's stdio, so killTree ends the session (the server
     // exits when its pipe closes; the proc-tree sweep is the backstop) instead of leaving it writing in the
     // worktree via the shared service (ticket killed-run-stops-agent). Needs opencode >= 2.4 (--standalone).
@@ -1335,7 +1420,7 @@ export async function runWorker(a) {
         fenceState.notes.push(`worktree fence scan failed: ${e.message}`);
       }
       for (const o of r.orphans) orphansKilled.push({ pid: o.pid, cmd: String(o.cmd || "").slice(0, 120) });
-      sum = summarize(r.lines);
+      sum = isCc ? summarizeClaude(r.lines) : summarize(r.lines);
       maxSilenceMs = Math.max(maxSilenceMs, r.maxSilence);
       for (const k of Object.keys(tokens)) tokens[k] += sum.tokens[k];
       cost += sum.cost;
@@ -1480,12 +1565,12 @@ export async function runWorker(a) {
       max_silence_s: Math.round(maxSilenceMs / 1000),
       resumed,
       attempts,
-      ...(providerSlot ? { provider_slot: `nvidia ${providerSlot.index}/${providerSlot.cap}` } : {}),
+      ...(providerSlot && !isCc ? { provider_slot: `nvidia ${providerSlot.index}/${providerSlot.cap}` } : {}),
       ...(orphansKilled.length ? { orphans_killed: orphansKilled } : {}),
       ...(landed ? { landed } : {}),
       ...(extendedMin !== undefined ? { extended_min: extendedMin } : {}),
       // An orchestrator's own events do not include the subagents it spawned; price the whole tree.
-      tree: sum.session ? sessionTree(sum.session) : null,
+      tree: sum.session && !isCc ? sessionTree(sum.session) : null,
       // Read-only guard fields
       ...(tampered.length ? { tampered } : {}),
       ...(worktreeChanged ? { worktree_changed: worktreeChanged } : {}),
