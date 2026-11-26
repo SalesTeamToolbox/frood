@@ -110,7 +110,7 @@ fails; never block on it.
    without its leading `You: `; omit it when advise prints nothing. Cut both at 100 characters, don't wrap.
    They are information only: a pace or reset line does NOT by itself make the status NEEDS YOU or put an
    item under `You:`. Pressing a reset stays the owner's call; Frood never presses one.
-4. Then, unless Auto-start applies (below), ask the owner with these options (AskUserQuestion):  # cc-only
+4. Then, unless Fresh successor or Auto-start applies (below), ask the owner with these options (AskUserQuestion):  # cc-only
 4. Then ask the owner with these options (a numbered list):  # oc-only
    <!-- cc-only -->
    A nested session (`get_session self` shows `parentSessionId`) skips this question: it writes the handoff, reports
@@ -119,7 +119,44 @@ fails; never block on it.
    is not available (a terminal `claude`), the first option is instead **Fresh tab** — new tab, first message
    `/frood-next <stream>`.
 
-   **Auto-start (default on).** In a session without `parentSessionId`, first run
+   **Fresh successor (default on).** In a session without `parentSessionId`, run
+   `node {{ORCH_REPO}}/bin/settings.mjs get fresh_successor`. It applies when the setting prints `true`, nothing is
+   in flight, and either (a) the stream is finished (**DONE**) and the follow-on work is a new plan or version, or
+   (b) this session's own context is long (several modules done in this one session — "one session per module").
+   Nothing in flight means all of these hold:
+   - the handoff status is **READY** or **DONE** (not WAITING, NEEDS YOU or BLOCKED);
+   - no live run for the stream: `node {{ORCH_REPO}}/bin/oc-worker.mjs active` shows no row ending in
+     `| stream <stream>`, except rows marked STALE;
+   - no unanswered `NEEDS OWNER` item.
+   While a run is live (WAITING), stay open until the run's report arrives, then check again. On **NEEDS YOU** or
+   **BLOCKED**, ask the owner with the options below, as before. When it applies, this session hands off to a fresh
+   top-level session instead of nesting one. In order:
+   1. Archive each finished child first (Standing rules, `archive_nested_sessions`). Then write the handoff: the
+      plan file's `## Handoff` and `handoff.mjs write … --release`. For (a), also the follow-on plan file and its
+      stream (`/frood-ticket` when nothing exists yet).
+   2. Start the successor with `start_session`: `initiation: "user_asked"`, `context: "fresh"`, a `title`, a `name`,
+      `prompt` beginning `/frood-next <stream>` (or `/frood-orchestrator <plan>` for a plan not yet discussed), and
+      a complete `background` (≥80 chars: goal, plan path, handoff, what landed). Do NOT add the "report to the
+      parent session" line: the successor talks to the owner directly.
+   3. Immediately call `detach_session` on the returned `local_…` id. The successor is then top-level: not nested,
+      not archived with this session, and it owns the train and pushes (`auto_next_module`, `auto_push`).
+   4. Tell the owner in one line that this session can now be closed, and offer to archive it. Archive it only on
+      the owner's yes; a session never archives itself without it.
+   **Desktop limit** applies here too: on a turn started by an automated event (`<side-sessions-event>` etc.) the
+   app refuses `start_session`. Propose the successor as an `own_initiative` card and record "proposed as card
+   <task_id>" in the `## Handoff` and `handoff.mjs write --next`. When the owner says go or clicks it, start it
+   (`dismiss_task` first, unless the dismiss result says it was already started) and call `detach_session` on it as
+   soon as its id is known — including when the owner clicked the card. Never start it twice. If `detach_session`
+   is not available or fails, say so in one line: the successor stays nested, and this session must stay open (not
+   archived) until it finishes. Where `start_session` is not available (terminal `claude`), the successor is a
+   **Fresh tab** with first message `/frood-next <stream>`. If `start_session` fails for any other reason, propose
+   the successor as a card (or a Fresh tab where cards do not exist), keep the handoff recorded, and never start it
+   twice.
+   When `fresh_successor` prints `false`, or neither (a) nor (b) holds, use Auto-start or the options below as
+   before.
+
+   **Auto-start (default on).** If Fresh successor (above) applies, it wins: do that instead.
+   In a session without `parentSessionId`, first run
    `node {{ORCH_REPO}}/bin/settings.mjs get auto_next_module`. When it prints `true`, do not ask. Archive the
    finished child (Standing rules), then start the next module's nested session yourself, with the same
    `start_session` fields as the **Start the next module** option below. Also start every other ticket in the next
@@ -141,31 +178,6 @@ fails; never block on it.
    on its card first, then `start_session`, unless the dismiss result says the card was already started. Never
    start anything twice.
 
-   **Fresh successor (default on).** In a session without `parentSessionId`, run
-   `node {{ORCH_REPO}}/bin/settings.mjs get fresh_successor`. When it prints `true` and either (a) the stream is
-   finished (**DONE**) and the follow-on work is a new plan or version, or (b) this session's own context is long
-   (several modules done in this one session — "one session per module"), this session hands off to a fresh
-   top-level session instead of nesting one (this takes precedence over Auto-start). In order:
-   1. Write the handoff: the plan file's `## Handoff` and `handoff.mjs write … --release`. For (a), also the
-      follow-on plan file and its stream (`/frood-ticket` when nothing exists yet).
-   2. Start the successor with `start_session`: `initiation: "user_asked"`, `context: "fresh"`, a `title`, a `name`,
-      `prompt` beginning `/frood-next <stream>` (or `/frood-orchestrator <plan>` for a plan not yet discussed), and
-      a complete `background` (≥80 chars: goal, plan path, handoff, what landed). Do NOT add the "report to the
-      parent session" line: the successor talks to the owner directly.
-   3. Immediately call `detach_session` on the returned `local_…` id. The successor is then top-level: not nested,
-      not archived with this session, and it owns the train and pushes (`auto_next_module`, `auto_push`).
-   4. Tell the owner in one line that this session can now be closed, and offer to archive it. Archive it only on
-      the owner's yes; a session never archives itself without it.
-   **Desktop limit** applies here too: on a turn started by an automated event (`<side-sessions-event>` etc.) the
-   app refuses `start_session`. Propose the successor as an `own_initiative` card and record "proposed as card
-   <task_id>" in the `## Handoff` and `handoff.mjs write --next`. When the owner says go or clicks it, start it
-   (`dismiss_task` first, unless the dismiss result says it was already started) and call `detach_session` on it as
-   soon as its id is known — including when the owner clicked the card. Never start it twice. If `detach_session`
-   is not available or fails, say so in one line: the successor stays nested, and this session must stay open (not
-   archived) until it finishes. Where `start_session` is not available (terminal `claude`), the successor is a
-   **Fresh tab** with first message `/frood-next <stream>`.
-   When `fresh_successor` prints `false`, or neither (a) nor (b) holds, use Auto-start or the options below as
-   before.
    - **Start the next module in a nested session (Recommended)** — this session calls `start_session` with
      `initiation: "user_asked"`, `context: "fresh"`, `title: "<Module>: <plain outcome>"` (under 60 chars, readable
      by a stranger), `name: <stream or ticket slug, ≤24 chars, [a-z0-9-]>`, `prompt` beginning `/frood-next <stream>`
@@ -411,9 +423,12 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   To turn it off: `node {{ORCH_REPO}}/bin/settings.mjs set auto_push false`. To turn off auto-start:
   `node {{ORCH_REPO}}/bin/settings.mjs set auto_next_module false`.
 - **Fresh successor for long sessions (default on).** When a top-level session finishes a stream (DONE) with
-  follow-on work, or its own context is long (several modules in one session), it does not keep going or nest:
+  follow-on work, or its own context is long (several modules in one session), and nothing is in flight (status
+  READY or DONE, no live non-STALE run for the stream, no unanswered `NEEDS OWNER`), it does not keep going or nest.
+  While a run is live it stays open until the report arrives, then checks again; on NEEDS YOU or BLOCKED it asks
+  the owner as before. Otherwise:
 <!-- cc-only -->
-  it writes the handoff, starts a fresh successor (`start_session`, `context: "fresh"`, prompt
+  it archives each finished child, writes the handoff, starts a fresh successor (`start_session`, `context: "fresh"`, prompt
   `/frood-next <stream>`), calls `detach_session` on it at once so it is top-level, and tells the owner this session
   can be closed (archive only on the owner's yes). On an automated-event turn it proposes the successor as a card,
   then starts and detaches it on the owner's go; if detaching fails, this session stays open until the successor

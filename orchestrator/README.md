@@ -244,7 +244,9 @@ OC commands now install to `~/.config/opencode/commands/`; the legacy singular `
 
 A long session gets slower and costlier every turn, because it re-reads its whole context. So when a top-level
 orchestrator session finishes a stream (DONE) and the follow-on work is a new plan or version, or when it has done
-several modules in one session, it hands off to a fresh session instead of carrying on:
+several modules in one session, it hands off to a fresh session instead of carrying on. This wins over
+auto-starting the next nested module, and it only fires when nothing is in flight (no live worker run, no open
+owner question, status READY or DONE):
 
 - It writes the handoff (plan file `## Handoff` and the stream handoff), then starts a fresh top-level successor
   whose first message is `/frood-next <stream>`, and tells you the old session can be closed.
