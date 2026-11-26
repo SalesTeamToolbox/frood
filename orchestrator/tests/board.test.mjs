@@ -1867,8 +1867,26 @@ test("scope create: an open-ended Mandate Scope is refused", () => {
   fs.writeFileSync(mandate, `# Ticket x\n\n**Atlas refs consulted / updated?** no map\n\n**Scope:** and any doc line found\n\n**Blast radius:**\n\n- \`run()\` in \`bin/main.mjs\` — unchanged; test: bin/demo.test.mjs\n`);
   const r = board(c, "create", "scope-open", "--mandate", mandate, "--scope", "bin/**");
   assert.equal(r.status, 1, r.stderr);
-  assert.match(r.stderr, /mandate scope is open-ended:/);
+  assert.match(r.stderr, /board: mandate scope is open-ended: "\*\*Scope:\*\* and any doc line found"/);
   assert.equal(fs.existsSync(ticketFile(c, "scope-open")), false, "nothing was written");
+});
+
+test("scope create: an open-ended grant under a ## Scope heading, wrapped across lines, is refused whole", () => {
+  const c = mk();
+  const mandate = path.join(c.root, "scope-open-h.md");
+  fs.writeFileSync(mandate, `# Ticket x\n\n**Atlas refs consulted / updated?** no map\n\n## Scope\nMay touch:\n- bin/a.mjs\n- README.md, and any doc\n  line found\n\n## Blast radius\n\n- \`run()\` in \`bin/main.mjs\` — unchanged; test: bin/demo.test.mjs\n`);
+  const r = board(c, "create", "scope-open-h", "--mandate", mandate, "--scope", "bin/**");
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /board: mandate scope is open-ended: "- README.md, and any doc line found"/);
+  assert.equal(fs.existsSync(ticketFile(c, "scope-open-h")), false, "nothing was written");
+});
+
+test("scope create: an open-ended grant naming backticked paths all in --scope is accepted", () => {
+  const c = mk();
+  const mandate = path.join(c.root, "scope-ok-bt.md");
+  fs.writeFileSync(mandate, `# Ticket x\n\n**Atlas refs consulted / updated?** no map\n\n**Scope:** \`bin/a.mjs\` and \`bin/b.mjs\`, as needed.\n\n**Blast radius:**\n\n- \`run()\` in \`bin/main.mjs\` — unchanged; test: bin/demo.test.mjs\n`);
+  const r = board(c, "create", "scope-ok-bt", "--mandate", mandate, "--scope", "bin/**");
+  assert.equal(r.status, 0, r.stderr);
 });
 
 test("scope create: an open-ended grant naming exact paths all in --scope is accepted", () => {

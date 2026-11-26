@@ -2521,6 +2521,8 @@ test("desk scope fence: out-of-scope worker sha writes synthetic CHANGES_REQUEST
     const criticQueued = eventsOf(h, name).some((e) => e.kind === "queued" && e.agent === "critic");
     assert.equal(criticQueued, false);
   });
+  // The critic prompt is written immediately before the critic is spawned; it was never written.
+  assert.equal(fs.existsSync(path.join(runDir, "critic-prompt-r1.md")), false, "no critic prompt, so no critic spawn");
   const findings = fs.readFileSync(path.join(runDir, "findings-r1.md"), "utf8");
   assert.match(findings, /VERDICT: CHANGES_REQUESTED/);
   assert.match(findings, /out of scope: README.md/);

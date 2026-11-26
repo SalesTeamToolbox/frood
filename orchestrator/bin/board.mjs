@@ -662,18 +662,30 @@ function scopeSection(md) {
   }
   if (start < 0) return "";
   const end = lines.findIndex((_, i) => i > start && /^(#+|\*\*)/.test(lines[i]));
-  return lines.slice(start, end < 0 ? lines.length : end).join(" ");
+  return lines.slice(start, end < 0 ? lines.length : end).join("\n");
 }
 // Sentences of the Scope section that hand the worker a blank cheque. A grant is
 // allowed only when the same sentence names exact paths and each of them is in
-// `--scope`. Split on newlines and on sentence-ending punctuation followed by
-// whitespace, so path names like `bin/a.mjs` are not broken at their dot.
+// `--scope`. A blank line or a list item starts a new block; a wrapped line
+// continues the block it is in, so a sentence wrapped across lines stays whole.
+// Each block is split on sentence-ending punctuation followed by whitespace, so
+// path names like `bin/a.mjs` are not broken at their dot.
 const OPEN_ENDED_SCOPE = ["any doc", "any file", "as needed", "any other", "wherever"];
 function mandateScopeSentences(mand) {
-  const section = scopeSection(mand);
+  const blocks = [];
+  let cur = [];
+  for (const raw of scopeSection(mand).split("\n")) {
+    const line = raw.trim();
+    if (!line || /^([-*+]|\d+[.)])\s/.test(line)) {
+      if (cur.length) blocks.push(cur.join(" "));
+      cur = [];
+    }
+    if (line) cur.push(line);
+  }
+  if (cur.length) blocks.push(cur.join(" "));
   const sentences = [];
-  for (const line of section.split(/\r?\n/)) {
-    for (const part of line.split(/(?<=[.!?])\s+/)) {
+  for (const block of blocks) {
+    for (const part of block.split(/(?<=[.!?])\s+/)) {
       const t = part.trim();
       if (t) sentences.push(t);
     }
@@ -685,7 +697,7 @@ function mandateScopeIsOpenEnded(mand, scope) {
     const lower = s.toLowerCase();
     if (!OPEN_ENDED_SCOPE.some((phrase) => lower.includes(phrase))) continue;
     // Allowed only when the sentence names exact paths and each is in --scope.
-    const paths = s.split(/\s+/).map((t) => t.replace(/^\["'`\(]+|[\]"'`\.,;:\)]+$/g, "")).filter((t) => t.includes("/") || /\.[A-Za-z0-9]+$/.test(t));
+    const paths = s.split(/\s+/).map((t) => t.replace(/^["'`([]+|["'`.,;:)\]]+$/g, "")).filter((t) => t.includes("/") || /\.[A-Za-z0-9]+$/.test(t));
     if (paths.length > 0 && paths.every((p) => matchAny(p, scope))) continue;
     return s;
   }
