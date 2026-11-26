@@ -91,6 +91,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { appendAck, appendEvent, atomicWrite, listStreams, migrate, noteStream, orchRoot, readAckLines, readEvents, readStream, streamsDir, unhandled } from "./handoff.mjs";
 import { gate } from "./verdict-gate.mjs";
+import { checkScope } from "./scope-check.mjs";
 import { openEscalations, orphanLedgerKey, streamOrphaned } from "./orphan.mjs";
 export { streamOrphaned } from "./orphan.mjs";
 import { killPid, processStart, isZombie } from "./proc-tree.mjs";
@@ -939,6 +940,27 @@ function boardRounds(ticket, slug) {
   return { counted, lap, has: (sha) => b.rounds.some((r) => r.counted && r.reviewed_sha === sha) };
 }
 
+// The scope fence inputs for a run: the board ticket's `base_sha` + `scope` — the authoritative pair, since the
+// board is what gates `round` and `ready` — falling back to the desk ticket's own `base`/`scope` fields. Null when
+// neither names a base and a scope (a repo without a board, or a ticket older than the fence): no fence, as today.
+function scopeInputs(ticket, slug) {
+  if (!ticket) return null;
+  let b = null;
+  if (typeof ticket.repo === "string" && ticket.repo && slug) {
+    try {
+      b = JSON.parse(fs.readFileSync(path.join(ticket.repo, ".opencode", "board", "tickets", `${slug}.json`), "utf8"));
+    } catch {}
+  }
+  const base =
+    (b && typeof b.base_sha === "string" && b.base_sha) ||
+    (typeof ticket.base_sha === "string" && ticket.base_sha) ||
+    (typeof ticket.base === "string" && ticket.base) ||
+    null;
+  const scope = b && Array.isArray(b.scope) && b.scope.length ? b.scope : Array.isArray(ticket.scope) ? ticket.scope : [];
+  if (!base || !scope.length) return null;
+  return { base, scope };
+}
+
 // The newest verdict for a run: verdict:<run>, verdict:<run>@2, verdict:<run>@3 … (highest @n wins;
 // verdict:<run> counts as n=1). readEvents dedupes first-wins per key, so a later @<n> append is a
 // distinct key that outranks the base. Returns the event object, or null when none exists.
@@ -1731,6 +1753,47 @@ async function doCritic(stream, key, events, ticketPath, out, findings, round) {
   if (!ticket?.mandate || !ticket.worktree) {
     dpage(stream, key, `no-ticket ${ticketPath}`);
     return { stream, key, line: "", outcome: "paged" };
+  }
+  // Scope fence: a worker whose diff leaves the ticket's `--scope` (or touches
+  // the deny list) never gets a critic. Synthetic CHANGES_REQUESTED findings go
+  // straight back to the worker, saving a paid critic call on a diff that cannot
+  // merge; the existing CHANGES_REQUESTED path then resumes the worker.
+  const fenceIn = scopeInputs(ticket, ticket.ticket);
+  if (fenceIn) {
+    let head = null;
+    try {
+      head = git(ticket.worktree, ["rev-parse", "HEAD"]).trim();
+    } catch {}
+    if (head) {
+      const fence = checkScope({ repo: ticket.worktree, base: fenceIn.base, sha: head, scope: fenceIn.scope });
+      const reasons = [];
+      for (const p of fence.outOfScope) reasons.push(`out of scope: ${p} — revert this file to ${fenceIn.base}`);
+      for (const p of fence.denied) reasons.push(`denied path: ${p} — revert this file to ${fenceIn.base}`);
+      // A diff that cannot be computed names no path: fail closed to the owner rather than write an empty
+      // findings file that would resume the worker with nothing to fix.
+      if (!fence.ok && !reasons.length) {
+        dpage(stream, key, `scope-check-failed ${fenceIn.base}..${head} in ${ticket.worktree}`);
+        return { stream, key, line: "", outcome: "paged" };
+      }
+      if (reasons.length) {
+        const runDir = path.dirname(ticket.mandate);
+        const findingsText = ["VERDICT: CHANGES_REQUESTED", "", "BLAST RADIUS:"];
+        for (const r of reasons) findingsText.push(`- ${r}`);
+        findingsText.push("", ...reasons.map((r, i) => `${i + 1}. ${r}`));
+        try {
+          fs.mkdirSync(runDir, { recursive: true });
+          fs.writeFileSync(findings, findingsText.join("\n") + "\n");
+        } catch (e) {
+          dpage(stream, key, `scope-findings-failed ${e.message}`);
+          return { stream, key, line: "", outcome: "paged" };
+        }
+        // Record the verdict so the existing CHANGES_REQUESTED path resumes the worker on the next poll.
+        try {
+          appendEvent(stream, { key: `verdict:${runOfKey(key)}`, kind: "verdict", run: runOfKey(key), effective: "CHANGES_REQUESTED", findings, reviewed_sha: head, at: new Date().toISOString() });
+        } catch {}
+        return { stream, key, line: `critic r${round}`, outcome: "critic" };
+      }
+    }
   }
   const crun = runIdOf(findings);
   if (events.has(`run:${crun}:queued`) || events.has(`run:${crun}:done`)) {

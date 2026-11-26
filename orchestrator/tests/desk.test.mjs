@@ -2482,3 +2482,76 @@ function rebaseRepo(amend = false) {
   }
   return { dir, g, t, head: g("rev-parse", "HEAD") };
 }
+
+// Scope fence: a done worker run whose committed sha leaves the ticket's `--scope` gets synthetic
+// CHANGES_REQUESTED findings naming the path, and no critic is spawned (the desk returns before
+// detached() is reached). The declared scope is the board ticket's, exactly as `board round`/`ready` read
+// it: the desk ticket.json carries `base` only (no scope, no base_sha).
+test("desk scope fence: out-of-scope worker sha writes synthetic CHANGES_REQUESTED findings and spawns no critic", async () => {
+  const { h, name, runDir } = t8Stream("scope-fence");
+  // t8Stream wrote a .git placeholder; replace it with a real git repo.
+  fs.rmSync(path.join(runDir, ".git"), { force: true });
+  fs.mkdirSync(path.join(runDir, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(runDir, "bin", "x.mjs"), "x\n");
+  const g = (...args) => execFileSync("git", ["-C", runDir, ...args], { encoding: "utf8" }).trim();
+  g("init", "-b", "main");
+  g("config", "user.email", "t8@example.com");
+  g("config", "user.name", "t8");
+  g("config", "commit.gpgsign", "false");
+  g("add", "bin/x.mjs");
+  g("commit", "-m", "base");
+  const base = g("rev-parse", "HEAD");
+  fs.writeFileSync(path.join(runDir, "README.md"), "out of scope\n");
+  g("add", "README.md");
+  g("commit", "-m", "out of scope");
+  // A repo holding the board ticket that declares the scope (the desk ticket.json keeps its own shape).
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "orch-scope-repo-"));
+  CLEAN.push(repo);
+  const bdir = path.join(repo, ".opencode", "board", "tickets");
+  fs.mkdirSync(bdir, { recursive: true });
+  fs.writeFileSync(path.join(bdir, "t8.json"), JSON.stringify({ id: "t8", base_sha: base, scope: ["bin/**"], rounds: [], reopens: [] }));
+  // mkTicket only writes a .git placeholder when none exists; git init already created a real one.
+  mkTicket(runDir, { worktree: runDir, repo, base });
+  await inHome(h, undefined, async () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+    const out = await handleEvent(name, "run:worker-r1:done");
+    assert.equal(out.line, "critic r1");
+    // No critic was spawned: no critic run was queued.
+    const criticQueued = eventsOf(h, name).some((e) => e.kind === "queued" && e.agent === "critic");
+    assert.equal(criticQueued, false);
+  });
+  const findings = fs.readFileSync(path.join(runDir, "findings-r1.md"), "utf8");
+  assert.match(findings, /VERDICT: CHANGES_REQUESTED/);
+  assert.match(findings, /out of scope: README.md/);
+  // The synthetic verdict is the existing CHANGES_REQUESTED path: the next step resumes the worker.
+  const next = await inHome(h, undefined, async () => cli(h, ["step", name, "verdict:worker-r1"]));
+  assert.match(next.stdout, /ACTION resume-worker/);
+});
+
+// The fallback: a desk ticket.json that itself carries `scope` and `base_sha` (no board repo) is fenced too.
+test("desk scope fence: a desk ticket's own scope and base_sha are fenced without a board", async () => {
+  const { h, name, runDir } = t8Stream("scope-fence-own");
+  fs.rmSync(path.join(runDir, ".git"), { force: true });
+  fs.mkdirSync(path.join(runDir, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(runDir, "bin", "x.mjs"), "x\n");
+  const g = (...args) => execFileSync("git", ["-C", runDir, ...args], { encoding: "utf8" }).trim();
+  g("init", "-b", "main");
+  g("config", "user.email", "t8@example.com");
+  g("config", "user.name", "t8");
+  g("config", "commit.gpgsign", "false");
+  g("add", "bin/x.mjs");
+  g("commit", "-m", "base");
+  const base = g("rev-parse", "HEAD");
+  fs.writeFileSync(path.join(runDir, "README.md"), "out of scope\n");
+  g("add", "README.md");
+  g("commit", "-m", "out of scope");
+  mkTicket(runDir, { worktree: runDir, base_sha: base, scope: ["bin/**"] });
+  await inHome(h, undefined, async () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+    const out = await handleEvent(name, "run:worker-r1:done");
+    assert.equal(out.line, "critic r1");
+  });
+  assert.match(fs.readFileSync(path.join(runDir, "findings-r1.md"), "utf8"), /out of scope: README.md/);
+});
