@@ -479,6 +479,12 @@ handler: orchestrator/bin/cc-usage.mjs (normalizeApp, normalizeStatusline, store
 decides: the normalized Claude Code 5-hour / weekly / Fable usage record and which snapshot is the latest (newest `at` wins across sources `app` and `statusline`); history in `<orchDir()>/cc-usage.jsonl` pruned past 8 weeks
 sibling traps: orchestrator/bin/desk-check.mjs (main imports the statusline sidecar each tick, silently), orchestrator/hooks/cross-harness-statusline.js (writes ~/.claude/.harness-cc.json; not wired until the owner adds `statusLine`)
 
+## Release train
+
+### ops/train.sh step 2 (pinned tests)
+handler: ops/train.sh
+decides: which tests the train runs for a ticket (python convention → board ticket blast_radius test → Mandate tests: line) or refuses it with exit 1
+
 ## How to keep this map accurate
 
 - A handler rename is a same-commit map update: edit the `handler:` line in the
