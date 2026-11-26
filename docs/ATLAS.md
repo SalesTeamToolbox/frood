@@ -421,8 +421,8 @@ handler: orchestrator/bin/dispatch.mjs status (board tickets in active stages, l
 decides: a single ≤120-char status line showing `building`/`ready` counts and live worker runs (dead pid or output past its idle limit marked `⚠`), computed in-process by importing `dispatch.mjs` — never spawning node; absent when no `.opencode/board/` is found. Contract: `--line` and `--json` are stable for a later desktop-app poller.
 
 ### dispatch-status desktop mod
-handler: orchestrator/mods/dispatch-status/hooks/register.tsx (session.start polls `dispatch.mjs status --line` every 10 s; ui.render AbovePrompt draws it); orchestrator/manifest.json `mods` kind → `~/.claude/frood-mods`
-decides: the row above the prompt in the Claude desktop app (which does not draw `$.ui.status`; the terminal still gets the status line). Loaded in every session only when `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json` env names `~/.claude/frood-mods/dispatch-status`.
+handler: orchestrator/mods/dispatch-status/hooks/register.ts (session.start polls `dispatch.mjs status --line --session <$.session.id()>` every 10 s and sets `$.ui.status`); orchestrator/bin/dispatch.mjs heldBy (the `--session` filter: assignment.session/owner, or the ticket-named stream's held_session); orchestrator/manifest.json `mods` kind → `~/.claude/frood-mods`
+decides: the status entry (desktop footer / terminal line) showing only the tickets this session holds; empty → no entry. Loaded in every session only when `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json` env names `~/.claude/frood-mods/dispatch-status`.
 
 ### desk: critic round floor, verdict replacement, patch-identical rebase
 handler: orchestrator/bin/desk.mjs criticRound() (run-done ACTION critic round floor), orchestrator/bin/desk.mjs latestVerdict() (newest verdict:<run>@<n> reader), orchestrator/bin/desk.mjs cmdMergeCheck() (head-moved rule with patch-identical rebase acceptance)

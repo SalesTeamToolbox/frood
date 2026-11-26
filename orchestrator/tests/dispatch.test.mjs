@@ -348,6 +348,26 @@ test("status: two building and one ready give the right counts", () => {
   assert.equal(d.tickets.length, 3);
 });
 
+test("status: --session keeps only that session's tickets (board assignment or held stream); counts follow", () => {
+  const { repo, oh } = mkStatus();
+  ticket(repo, "mine-board", { scope: ["a.mjs"], stage: "working", session: "me" });
+  ticket(repo, "mine-stream", { scope: ["b.mjs"], stage: "working" });
+  fs.writeFileSync(path.join(oh, ".config", "orchestrator", "streams", "mine-stream.json"), JSON.stringify({ name: "mine-stream", held_session: "me" }));
+  ticket(repo, "mine-ready", { scope: ["c.mjs"], stage: "ready", session: "me" });
+  ticket(repo, "other-one", { scope: ["d.mjs"], stage: "working", session: "other" });
+  const r = status(repo, oh, "status", "--json", "--session", "me");
+  assert.equal(r.status, 0, r.stderr);
+  const d = JSON.parse(r.stdout);
+  assert.deepEqual(d.tickets.map((t) => t.id).sort(), ["mine-board", "mine-ready", "mine-stream"]);
+  assert.equal(d.counts.building, 2, "only this session's building tickets, not the repo-wide cap count");
+  assert.equal(d.counts.ready, 1);
+  const none = status(repo, oh, "status", "--line", "--session", "nobody");
+  assert.equal(none.status, 0, none.stderr);
+  assert.equal(none.stdout, "", "a session with no tickets draws nothing");
+  const all = JSON.parse(status(repo, oh, "status", "--json").stdout);
+  assert.equal(all.tickets.length, 4, "without --session every active ticket is listed");
+});
+
 test("status: --json has the documented shape", () => {
   const { repo, oh } = mkStatus();
   ticket(repo, "t-one", { scope: ["a.mjs"], stage: "working", session: "sess-1" });

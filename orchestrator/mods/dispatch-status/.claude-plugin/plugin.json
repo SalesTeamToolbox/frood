@@ -1,1 +1,1 @@
-{ "name": "dispatch-status", "version": "0.2.0", "description": "Shows the tickets and worker runs the Frood orchestrator is managing (dispatch.mjs status --line) above the prompt.", "types": "./types/index.d.ts" }
+{ "name": "dispatch-status", "version": "0.3.0", "description": "Status entry for the tickets and worker runs this session's orchestrator stream holds (dispatch.mjs status --line --session)." }

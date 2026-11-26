@@ -3,7 +3,9 @@
 //
 //   node bin/dispatch.mjs plan <ticket-id|plan-file>... [--repo <path>] [--json]
 //   node bin/dispatch.mjs cap [--kind build|train] [--exclude <id>]... [--repo <path>] [--json]
-//   node bin/dispatch.mjs status [--ticket <id>] [--repo <path>] [--json | --line]
+//   node bin/dispatch.mjs status [--ticket <id>] [--session <sid>] [--repo <path>] [--json | --line]
+//     --session keeps only tickets held by that session (assignment.session or assignment.owner, or a stream named
+//     after the ticket whose held_session is sid); counts then cover those tickets alone.
 //   --help  (or -h) prints this text and exits 0
 //
 // plan: each argument is a ticket id on the board, or a plan file; a plan file contributes every board ticket id it
@@ -375,6 +377,18 @@ function streamLastAgeS(stream, now) {
 }
 
 /** Full status data, computed in-process (also used by the statusline hook). */
+// A ticket is held by session `sid` when the board says so (assignment.session / assignment.owner) or when the
+// stream named after the ticket is held by that session. Fails soft: an unreadable stream file is not a match.
+function heldBy(t, sid) {
+  const a = t.assignment || {};
+  if (a.session === sid || a.owner === sid) return true;
+  try {
+    const f = path.join(STREAMS_DIR, `${t.id}.json`);
+    return JSON.parse(fs.readFileSync(f, "utf8")).held_session === sid;
+  } catch {
+    return false;
+  }
+}
 export function statusData(root, opts = {}) {
   const now = Number.isFinite(opts.now) ? opts.now : Date.now();
   const ticketFilter = opts.ticket;
@@ -385,13 +399,19 @@ export function statusData(root, opts = {}) {
     tickets = boardTickets(root).filter(activeTicket);
   } catch { tickets = []; }
   if (ticketFilter) tickets = tickets.filter((t) => t.id === ticketFilter);
+  const sid = opts.session || null;
+  if (sid) tickets = tickets.filter((t) => heldBy(t, sid));
 
   // counts: `building` reuses capStatus --kind build; `ready` is staged-ready tickets.
+  const localBuilding = () => tickets.filter((t) => t.stage === "working" || (t.stage === "queued" && t.assignment?.session)).length;
   let building = 0;
-  try {
-    building = capStatus(root, "build").running;
-  } catch {
-    building = tickets.filter((t) => t.stage === "working" || (t.stage === "queued" && t.assignment?.session)).length;
+  if (sid) building = localBuilding(); // one session's tickets: the repo-wide cap count would include others'
+  else {
+    try {
+      building = capStatus(root, "build").running;
+    } catch {
+      building = localBuilding();
+    }
   }
   const ready = tickets.filter((t) => t.stage === "ready").length;
 
@@ -459,7 +479,7 @@ export function statusData(root, opts = {}) {
   // runs sort by elapsed, most recent last -> descending elapsed
   runSegs.sort((a, b) => b.elapsed_s - a.elapsed_s);
 
-  const counts = { building, ready, runs: runs.length };
+  const counts = { building, ready, runs: sid ? runByTicket.size : runs.length };
   return {
     at: new Date(now).toISOString(),
     tickets: ticketRows,
@@ -522,7 +542,7 @@ function parse(argv) {
       const v = argv[++i];
       if (v === undefined) throw new Usage("--exclude needs a value");
       o.exclude.push(v);
-    } else if (k === "--repo" || k === "--kind" || k === "--ticket") {
+    } else if (k === "--repo" || k === "--kind" || k === "--ticket" || k === "--session") {
       const v = argv[++i];
       if (v === undefined) throw new Usage(`${k} needs a value`);
       o[k.slice(2)] = v;
@@ -578,7 +598,7 @@ function main(argv) {
       else console.log("no board found — nothing active");
       return 0;
     }
-    const data = statusData(root, { ticket: o.ticket });
+    const data = statusData(root, { ticket: o.ticket, session: o.session });
     if (o.json) {
       console.log(JSON.stringify({ at: data.at, tickets: data.tickets, counts: data.counts }));
     } else if (o.line) {
