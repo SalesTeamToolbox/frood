@@ -117,8 +117,9 @@ test("fence: attempted-only escape (no completed write) leaves exit and status u
   const dir = tmp();
   CLEAN.push(dir);
   // outside every allowed root (/tmp is allowed, homedir is not)
-  const target = path.join(os.homedir(), ".wtf-oc-escape-attempted.txt");
-  CLEAN.push(target);
+  const outside = fs.mkdtempSync(path.join(os.homedir(), ".wtf-oc-escape-"));
+  CLEAN.push(outside);
+  const target = path.join(outside, "attempted.txt");
   fs.writeFileSync(target, "original\n");
   const prompt = path.join(dir, "mandate.md");
   fs.writeFileSync(prompt, "Review the diff.");

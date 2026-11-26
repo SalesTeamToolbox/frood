@@ -495,7 +495,8 @@ export function foldEscapes(state, { lines, roots, dir, main, beforeStatus, out 
     const currentOk = currentBuf !== null && Buffer.from(currentBuf.toString("utf8")).equals(currentBuf);
     if (!indexOk || !currentOk) {
       state.left.push(abs);
-      state.notes.push(leftNote || `${abs}: not valid UTF-8`);
+      const why = indexContent === null ? "index blob unreadable" : currentBuf === null ? "file unreadable" : "not valid UTF-8";
+      state.notes.push(leftNote || `${abs}: ${why}`);
       continue;
     }
     const replayed = replayWrites(indexContent.toString("utf8"), prior);

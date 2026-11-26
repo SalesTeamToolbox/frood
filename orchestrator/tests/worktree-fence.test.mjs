@@ -70,7 +70,7 @@ function linkedWorktree() {
 // Creates a main repo outside /tmp and a linked worktree outside /tmp, so that
 // writing to main from the worktree is outside the allowed roots (/tmp is allowed).
 function linkedWorktreeOutsideTmp() {
-  const base = path.join(os.homedir(), ".wtf-test");
+  const base = fs.mkdtempSync(path.join(os.homedir(), ".wtf-test-"));
   fs.mkdirSync(base, { recursive: true });
   CLEAN.push(base);
   const main = fs.mkdtempSync(path.join(base, "main-XXXXXX"));
@@ -100,7 +100,7 @@ function linkedWorktreeOutsideTmp() {
 // top level (its real toplevel is <top>). Returns { top, wt, git } where git
 // runs against <top>.
 function separateGitDirInsideRepo() {
-  const base = path.join(os.homedir(), ".wtf-toplevel-test");
+  const base = fs.mkdtempSync(path.join(os.homedir(), ".wtf-toplevel-test-"));
   fs.mkdirSync(base, { recursive: true });
   CLEAN.push(base);
   const top = fs.mkdtempSync(path.join(base, "top-XXXXXX"));
@@ -281,7 +281,7 @@ test("findMain: returns null when git is unavailable", () => {
 
 test("findMain: returns null when the common dir's parent is not the real top level", () => {
   // enclosing repo <top> tracking a/b/x.txt and a/b/a/b/x.txt
-  const base = path.join(os.homedir(), ".wtf-toplevel-test");
+  const base = fs.mkdtempSync(path.join(os.homedir(), ".wtf-toplevel-test-"));
   fs.mkdirSync(base, { recursive: true });
   CLEAN.push(base);
   const top = fs.mkdtempSync(path.join(base, "top-XXXXXX"));
@@ -988,7 +988,7 @@ test("scanEvents: all 8 real escaped edits from fence-real-edits.jsonl are flagg
 
   // Create a temp main checkout and a temp linked worktree (both outside /tmp so
   // they are not trivially covered by the tmpdir root).
-  const base = path.join(os.homedir(), ".wtf-real-edit");
+  const base = fs.mkdtempSync(path.join(os.homedir(), ".wtf-real-edit-"));
   fs.mkdirSync(base, { recursive: true });
   CLEAN.push(base);
   const main = fs.mkdtempSync(base + "/main-XXXXXX");

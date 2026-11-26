@@ -272,7 +272,9 @@ Paths outside any git tree are recorded only.
 
 The receipt gains an `escaped` field (`paths`, plus `restored`, `left`, `suspected` when non-empty) and an
 `errors[]` entry starting with `escaped-worktree:`. A run with exact escapes exits non-zero (status 5, receipt
-`exit: "escaped-worktree"`) so the desk escalates instead of sending it to a critic. Suspected-only results are a
+`exit: "escaped-worktree"`) so the desk escalates instead of sending it to a critic. This also replaces status 4
+for a timed-out or stalled run; a run killed by a signal keeps the signal's exit code. Only a completed write counts:
+an attempted-only escape is recorded with the run's own exit. Suspected-only results are a
 warning in the receipt; the exit is unchanged. Git failures never throw — they become receipt notes.
 
 ### Prevention
