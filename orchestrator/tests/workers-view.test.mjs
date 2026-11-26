@@ -31,6 +31,7 @@ function view(s, args = []) {
   env.WV_FIX_BOARD = board === "FAIL" ? "FAIL" : put("board.json", board.map(({ worker, ...row }) => row));
   for (const t of board === "FAIL" ? [] : board) fs.writeFileSync(path.join(tdir, `${t.id}.json`), JSON.stringify({ assignment: { worker: t.worker ?? null } }));
   env.WV_FIX_DISPATCH = s.dispatch === "FAIL" ? "FAIL" : put("dispatch.txt", s.dispatch ?? "");
+  Object.assign(env, s.env);
   // A pace script that does not exist -> skipped; else a one-line script.
   env.WV_PACE_CLI = path.join(d, "no-pace.mjs");
   if (s.pace) {
@@ -149,4 +150,57 @@ test("--html writes a self-contained, escaped, self-refreshing page", () => {
 test("bad arguments exit 2", () => {
   assert.equal(view({}, ["--nope"]).status, 2);
   assert.equal(spawnSync(process.execPath, [BIN, "--html"], { encoding: "utf8", timeout: 20_000 }).status, 2);
+});
+
+test("a hung child is killed at the timeout and degrades only its own section", () => {
+  const t0 = Date.now();
+  const r = view({ board: [{ id: "t-w", stage: "working" }], env: { WV_OCW_CLI: path.join(FIX, "hang.mjs"), WV_CHILD_TIMEOUT_MS: "700" } }, ["--json"]);
+  const d = JSON.parse(r.stdout);
+  assert.ok(Date.now() - t0 < 20_000);
+  assert.equal(d.runs, null);
+  assert.match(d.errors.runs, /timed out/);
+  assert.deepEqual(d.no_live_run.map((n) => n.ticket), ["t-w"]);
+});
+
+test("the overall budget stops later children once it is spent", () => {
+  const board = [{ id: "t-q", stage: "queued" }];
+  const d = JSON.parse(view({ board, env: { WV_OCW_CLI: path.join(FIX, "hang.mjs"), WV_CHILD_TIMEOUT_MS: "5000", WV_BUDGET_MS: "600" } }, ["--json"]).stdout);
+  assert.match(d.errors.runs, /timed out/);
+  assert.match(d.errors.board, /no time left/);
+});
+
+test("when several tickets match one pid, the working ticket wins", () => {
+  const d = json({
+    runs: [run({ pid: 42, out: "/o/w-r1.md" })],
+    board: [
+      { id: "t-old", stage: "shipped", worker: { pid: 42, out_path: "/old.md" } },
+      { id: "t-now", stage: "working", worker: { pid: 42, out_path: "/o/w-r1.md" } },
+      { id: "t-zzz", stage: "closed", worker: { pid: 42, out_path: "/z.md" } },
+    ],
+  });
+  assert.equal(d.runs[0].ticket, "t-now");
+});
+
+test("a linked git worktree reads the main repo's board", () => {
+  const git = (cwd, ...a) => {
+    const r = spawnSync("git", a, { cwd, encoding: "utf8", timeout: 30_000 });
+    assert.equal(r.status, 0, r.stderr);
+  };
+  const main = fs.mkdtempSync(path.join(os.tmpdir(), "wv-git-"));
+  CLEAN.push(main);
+  git(main, "init", "-q");
+  git(main, "-c", "user.name=t", "-c", "user.email=t@e.x", "commit", "-q", "--allow-empty", "-m", "i");
+  const wt = `${main}-linked`;
+  CLEAN.push(wt);
+  git(main, "worktree", "add", "-q", wt);
+  fs.mkdirSync(path.join(main, ".opencode", "board", "tickets"), { recursive: true });
+  fs.writeFileSync(path.join(main, ".opencode", "board", "tickets", "t-m.json"), JSON.stringify({ assignment: { worker: { pid: 77, out_path: "/o/m-r4.md" } } }));
+  const f = path.join(main, "f.json");
+  fs.writeFileSync(f, JSON.stringify([{ id: "t-m", stage: "working" }]));
+  fs.writeFileSync(path.join(main, "r.json"), JSON.stringify([{ agent: "worker", state: "RUNNING", pid: 77, out: "/o/m-r4.md" }]));
+  const env = { ...process.env, WV_OCW_CLI: path.join(FIX, "ocw.mjs"), WV_FIX_OCW: path.join(main, "r.json"), WV_BOARD_CLI: path.join(FIX, "board.mjs"), WV_FIX_BOARD: f, WV_PACE_CLI: path.join(main, "none.mjs") };
+  const r = spawnSync(process.execPath, [BIN, "--json", "--repo", wt], { env, encoding: "utf8", timeout: 30_000 });
+  const d = JSON.parse(r.stdout);
+  assert.equal(d.runs[0].ticket, "t-m"); // only the main repo holds the ticket file
+  assert.deepEqual(d.no_live_run, []);
 });

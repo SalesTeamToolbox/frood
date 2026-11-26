@@ -18,14 +18,20 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CHILD_TIMEOUT_MS = 10_000;
+// Each child gets at most CHILD_TIMEOUT_MS, and the whole collect() stays inside BUDGET_MS (under the mod's 12 s kill),
+// so one hung child degrades its own section and the others still answer.
+const CHILD_TIMEOUT_MS = Number(process.env.WV_CHILD_TIMEOUT_MS) || 10_000;
+const BUDGET_MS = Number(process.env.WV_BUDGET_MS) || 9_000;
+let deadline = Infinity;
 const NA = "—";
 
 const script = (env, name) => process.env[env] || path.join(HERE, name);
 
 function runChild(file, args, cwd) {
-  const r = spawnSync(process.execPath, [file, ...args], { cwd, encoding: "utf8", timeout: CHILD_TIMEOUT_MS, windowsHide: true });
-  if (r.error) throw new Error(r.error.code === "ETIMEDOUT" ? `timed out after ${CHILD_TIMEOUT_MS / 1000}s` : r.error.message);
+  const timeout = Math.min(CHILD_TIMEOUT_MS, deadline - Date.now());
+  if (timeout <= 0) throw new Error("no time left in the overall budget");
+  const r = spawnSync(process.execPath, [file, ...args], { cwd, encoding: "utf8", timeout, killSignal: "SIGKILL", windowsHide: true });
+  if (r.error) throw new Error(r.error.code === "ETIMEDOUT" ? `timed out after ${Math.round(timeout / 100) / 10}s` : r.error.message);
   if (r.status !== 0) throw new Error(`exit ${r.status}${r.stderr ? `: ${r.stderr.trim().slice(0, 120)}` : ""}`);
   return r.stdout;
 }
@@ -59,6 +65,7 @@ function readWorker(root, id) {
 
 export function collect({ repo = process.cwd() } = {}) {
   const errors = {};
+  deadline = Date.now() + BUDGET_MS;
   const root = boardRoot(repo);
 
   let runs = null;
@@ -81,9 +88,14 @@ export function collect({ repo = process.cwd() } = {}) {
 
   const byPid = new Map();
   const byOut = new Map();
+  // Several tickets may carry the same pid/out (a recycled pid on a stale ticket): a `working` ticket wins.
+  const put = (m, k, t) => {
+    const old = m.get(k);
+    if (!old || old.stage !== "working" || t.stage === "working") m.set(k, t);
+  };
   for (const t of tickets ?? []) {
-    if (Number.isInteger(t.worker?.pid)) byPid.set(t.worker.pid, t);
-    if (t.worker?.out_path) byOut.set(norm(t.worker.out_path), t);
+    if (Number.isInteger(t.worker?.pid)) put(byPid, t.worker.pid, t);
+    if (t.worker?.out_path) put(byOut, norm(t.worker.out_path), t);
   }
   const matched = new Set();
   const runRows = (runs ?? []).map((r) => {
@@ -190,7 +202,15 @@ function main(argv) {
       fs.renameSync(tmp, o.html);
     };
     write();
-    if (o.watch > 0) setInterval(write, o.watch * 1000);
+    // A failed refresh is logged and the watcher keeps going.
+    const safeWrite = () => {
+      try {
+        write();
+      } catch (e) {
+        console.error(`workers-view: ${e.message}`);
+      }
+    };
+    if (o.watch > 0) setInterval(safeWrite, o.watch * 1000);
     else return 0;
     return null; // keep running
   }

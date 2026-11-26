@@ -15,35 +15,45 @@ const view = atom({ plugin: 'workers-panel', key: 'view' } as const, { text: 'lo
 })
 
 export const register: Register = on => {
+  // One timer per session, started by the first /workers; polling skips while the pane is not placed.
+  let timer = false
+  let node = 0
+  let busy = false
+
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'workers', description: 'Show the live headless workers in a pane' })
-    let node = 0
-    let busy = false
-
-    const poll = async () => {
-      if (busy) return
-      busy = true
-      let text: string
-      try {
-        const { exitCode, stdout } = await $.process.run([NODES[node] ?? 'node', VIEW], { timeoutMs: 12_000 })
-        text = exitCode === 0 ? stdout.trim() || 'no output' : `workers-view: exit ${exitCode}`
-      } catch (err) {
-        // `node` not on the app's PATH: try the mise shim once, next poll.
-        if (node + 1 < NODES.length) node++
-        text = `workers-view: ${String(err).slice(0, 120)}`
-      } finally {
-        busy = false
-      }
-      await update($, view, () => ({ text, at: Date.now() }))
-    }
-
-    void poll()
-    $.clock.every(PERIOD_MS, poll)
     return next(e)
   })
 
   on('command.run', { command: 'workers' }, async $ => {
     await $.ui.open({ id: PANE, title: 'Workers' })
+
+    const poll = async () => {
+      if (busy) return
+      busy = true
+      try {
+        const up = (await $.ui.panes()).some(p => p.id === PANE && p.isPlaced)
+        if (!up) return
+        let text: string
+        try {
+          const { exitCode, stdout } = await $.process.run([NODES[node] ?? 'node', VIEW], { timeoutMs: 12_000 })
+          text = exitCode === 0 ? stdout.trim() || 'no output' : `workers-view: exit ${exitCode}`
+        } catch (err) {
+          // `node` not on the app's PATH: try the mise shim once, next poll.
+          if (node + 1 < NODES.length) node++
+          text = `workers-view: ${String(err).slice(0, 120)}`
+        }
+        await update($, view, () => ({ text, at: Date.now() }))
+      } finally {
+        busy = false
+      }
+    }
+
+    if (!timer) {
+      timer = true
+      $.clock.every(PERIOD_MS, poll)
+    }
+    void poll()
     return { text: 'Workers pane opened.' }
   })
 
