@@ -31,11 +31,23 @@ export function gate(text, { free = false } = {}) {
   if (!critic) return { effective: "INVALID", critic, overridden: false, reasons: ["no VERDICT line"], unrequested: [], majors: [] };
 
   // BLAST RADIUS section: from its heading to the first numbered finding / SENIOR_REVIEW / blank-then-non-bullet.
-  // A blast-line entry is a list item: a bullet (`-`, `*`) always; list numbering (`1.`, `1)`, `(a)`, `a.`)
-  // only when it leads with a tag word (`UNREQUESTED`/`unchanged`/`intended`) — a numbered blast line is
-  // tag-first like the bullet form. Numbered findings (`1. [minor] ...`) and `1. none` / `1. No findings`
-  // / `1. (none)` placeholders are findings, not blast lines.
-  const BLAST_LINE = /^\s*(?:[-*+]|\d+[.)](?=\s*(?:UNREQUESTED|unchanged|intended)\b)|[a-zA-Z]\)(?=\s*(?:UNREQUESTED|unchanged|intended)\b)|\([a-zA-Z]\)(?=\s*(?:UNREQUESTED|unchanged|intended)\b)|[a-zA-Z]\.(?=\s*(?:UNREQUESTED|unchanged|intended)\b))\s/i;
+  // A blast-line entry is a list item whose first content word is its tag: a bullet (`-`, `*`, `+`) or
+  // list numbering (`1.`, `1)`, `(a)`, `a.`, `a)`), each optionally wrapped in a decoration run
+  // (checkbox, emoji/symbol incl. bullet U+2022, emphasis/bracket openers) before and/or after the
+  // marker; the decoration run may also act as the bullet itself (`• UNREQUESTED`, `[x] UNREQUESTED`).
+  // Numbered findings (`1. [minor] ...`) and `1. none` / `1. No findings` / `1. (none)` placeholders are
+  // excluded because what follows the marker is not a tag word.
+  const DEC_CHAR = /(?:\[[ xX]\]|[*_`\[\()]|[\p{Extended_Pictographic}\p{So}\uFE0F\u200D\u2022])/u;
+  const PURE_DEC = new RegExp(`\\s*(?:${DEC_CHAR.source})\\s*`, "u");
+  const TAG_WORD = /(?:UNREQUESTED|unchanged|intended)\b/;
+  // Bullets are collected as entries exactly as before (any `-`/`*`/`+` line); the tag decision
+  // stays in isUnrequested. Numbered and standalone-decoration lines are collected only when the
+  // first content word is a tag, with optional decoration before and/or after the tag. Numbered
+  // findings (`1. [minor] ...`) and `1. none` / placeholders stay excluded (not tag-first).
+  const BLAST_LINE = new RegExp(
+    `^\\s*(?:[-*+]\\s|(?:\\d+[.)]|\\([a-zA-Z]\\)|[a-zA-Z]\\)|[a-zA-Z]\\.)(?:${PURE_DEC.source})*\\s*${TAG_WORD.source}(?:${DEC_CHAR.source})*\\s|(?:${PURE_DEC.source})+\\s*${TAG_WORD.source}(?:${DEC_CHAR.source})*\\s)`,
+    "iu"
+  );
   const lines = t.split("\n");
   const start = lines.findIndex((l) => /^\s*\**BLAST RADIUS:?\**/i.test(l));
   const entries = [];

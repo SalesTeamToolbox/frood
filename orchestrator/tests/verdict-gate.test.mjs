@@ -255,9 +255,17 @@ test("decorated UNREQUESTED blast lines count: emoji, checkbox, numbering, empha
     "- 1. UNREQUESTED — a.mjs:1: x",
     "1. UNREQUESTED — a.mjs:1: x",
     "- (a) UNREQUESTED — a.mjs:1: x",
+    "- a) UNREQUESTED — a.mjs:1: x",
     "- **❌ UNREQUESTED** — a.mjs:1: x",
     "- ⚠️ UNREQUESTED — a.mjs:1: x",
     "- • UNREQUESTED — b.mjs:2: x",
+    // decoration as the bullet itself, or between a numbering and the tag (finding 1)
+    "❌ UNREQUESTED — a.mjs:1: x",
+    "• UNREQUESTED — b.mjs:2: x",
+    "[x] UNREQUESTED — a.mjs:1: x",
+    "1. **UNREQUESTED** — b.mjs:2: x",
+    "1. ❌ UNREQUESTED — a.mjs:1: x",
+    "1. [x] UNREQUESTED — a.mjs:1: x",
   ];
   for (const blast of blasts) {
     const r = gate(doc("APPROVED", blast));
@@ -279,6 +287,19 @@ test("decorated UNREQUESTED blast line counts after a plain entry", () => {
   assert.equal(r.overridden, true);
   assert.equal(r.unrequested.length, 1);
   assert.equal(r.unrequested[0], "- ❌ UNREQUESTED — b.mjs:2: the caller now returns null");
+});
+
+// A standalone decoration acting as the bullet (no `-`/`*`/`+`) still counts after a plain entry.
+test("standalone decoration bullet counts after a plain entry", () => {
+  const d = doc(
+    "APPROVED",
+    "- a.mjs:1 — unchanged\n• UNREQUESTED — b.mjs:2: the caller now returns null",
+  );
+  const r = gate(d);
+  assert.equal(r.effective, "CHANGES_REQUESTED");
+  assert.equal(r.overridden, true);
+  assert.equal(r.unrequested.length, 1);
+  assert.equal(r.unrequested[0], "• UNREQUESTED — b.mjs:2: the caller now returns null");
 });
 
 test("decorated unchanged/intended blast lines stay APPROVED", () => {
