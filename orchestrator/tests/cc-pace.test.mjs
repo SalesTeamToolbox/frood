@@ -84,6 +84,28 @@ test("reserve rule alone: weekly >= 100 - reserve is over even when projected < 
   assert.match(raised.reason, /100 - reserve/);
 });
 
+test("early week (E < 12): projected alone is not over; 5h and reserve rules still are", () => {
+  // E = 2 h, weekly 3 -> avg 1.5 %/h, projected >> 95: cold start wins over the projection.
+  const steep = pace([snap({ weekly: 3, H: 166, five: 0 })]);
+  assert.ok(steep.projected >= 95, String(steep.projected));
+  assert.equal(steep.state, "on");
+  assert.match(steep.reason, /^early week/);
+  // E = 2 h with five_hour 90: the 5-hour rule stays ahead of cold start.
+  const five = pace([snap({ weekly: 3, H: 166, five: 90 })]);
+  assert.equal(five.state, "over");
+  assert.match(five.reason, /^5h 90% >= 85/);
+  // E = 2 h with weekly above the reserve ceiling (~80.3 at H=166): the reserve rule stays ahead of cold start.
+  const rsv = pace([snap({ weekly: 85, H: 166, five: 0 })]);
+  assert.ok(85 >= 100 - rsv.reserve, String(rsv.reserve));
+  assert.equal(rsv.state, "over");
+  assert.match(rsv.reason, /100 - reserve/);
+  // E = 13 h, weekly 20 -> projected >> 95: past the cold-start window the projection rules again.
+  const later = pace([snap({ weekly: 20, H: 155, five: 0 })]);
+  assert.ok(later.projected >= 95 && 20 < 100 - later.reserve, String(later.projected));
+  assert.equal(later.state, "over");
+  assert.match(later.reason, /^projected/);
+});
+
 test("off when cfg.enabled is false, even with no snapshot", () => {
   assert.equal(pace([snap()], null, { ...DEFAULTS, enabled: false }).state, "off");
   assert.equal(pace([], null, { enabled: false }).state, "off");

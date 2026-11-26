@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Claude Code weekly pace model (cc-pacing M2). Pure model over the M1 snapshots (cc-usage.mjs) + a status CLI.
-// States, first match wins: off -> unknown -> over -> on (E < 12) -> under (hysteresis) -> on.
+// States, first match wins: off -> unknown -> over (5h >= 85) -> over (weekly >= 100 - reserve) -> on (E < 12)
+// -> over (projected >= 95) -> under (hysteresis) -> on.
 // All numbers are percentage points of the weekly limit; H = hours to the weekly reset, E = 168 - H.
 //
 //   node cc-pace.mjs [status] [--json]
@@ -100,8 +101,8 @@ export function paceState(snapshots, cfg, now, prev = null) {
   const out = (state, reason) => ({ state, reason, ...base });
   if (five >= 85) return out("over", `5h ${five}% >= 85`);
   if (wk.pct >= 100 - rsv) return out("over", `weekly ${wk.pct}% >= ${(100 - rsv).toFixed(1)} (100 - reserve)`);
+  if (E < 12) return out("on", `early week (E ${E.toFixed(1)}h < 12)`); // projection from < 12 h of data is noise
   if (proj >= 95) return out("over", `projected ${proj.toFixed(1)} >= 95`);
-  if (E < 12) return out("on", `early week (E ${E.toFixed(1)}h < 12)`);
   const prevState = typeof prev === "string" ? prev : prev?.state ?? null;
   const ceiling = prevState === "under" ? 85 : 80;
   if (proj <= ceiling && five < 60) return out("under", `projected ${proj.toFixed(1)} <= ${ceiling}`);
