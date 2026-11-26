@@ -37,7 +37,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { parsePsLine, processStart } from "./proc-tree.mjs";
+import { parsePsLine, processStart, sameStart } from "./proc-tree.mjs";
 
 const IS_WIN = process.platform === "win32";
 const SEP = IS_WIN ? "\\" : "/";
@@ -386,7 +386,7 @@ export function killHolder(h, deps = {}) {
   const start = deps.start ?? processStart;
   const kill = deps.kill ?? killOne;
   if (!h || !h.start) return false;
-  if (start(h.pid) !== h.start) return false;
+  if (!sameStart(start(h.pid), h.start)) return false;
   return kill(h.pid);
 }
 

@@ -4,8 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { appendEvent, appendAck, readEvents, readAcks, readAckLines, unhandled, withStreamLock, streamTitle } from "../bin/handoff.mjs";
+import { processStart } from "../bin/proc-tree.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..");
@@ -20,6 +22,15 @@ function env() {
   fs.writeFileSync(plan, "# plan\n## Handoff\nnext: M5\n");
   // ORCH_REPO makes the hook import this worktree's handoff.mjs, not whatever is installed in the real repo.
   return { h, plan, e: { ...process.env, ORCH_HOME: h, USERPROFILE: h, HOME: h, ORCH_REPO: REPO } };
+}
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
 }
 const run = (e, ...a) => spawnSync(process.execPath, [BIN, ...a], { env: e, encoding: "utf8" });
 const hook = (e, source) => spawnSync(process.execPath, [HOOK], { env: e, input: JSON.stringify({ session_id: "x", source }), encoding: "utf8" });
@@ -381,6 +392,45 @@ test("the lock reclaims an owner whose pid is dead", () => {
   withHome(h, () => assert.equal(appendEvent("dead", { key: "k1", kind: "run-done" }), true));
   assert.equal(fs.existsSync(lock), false, "the dead owner's lock is gone");
   assert.equal(withHome(h, () => readEvents("dead").length), 1);
+});
+
+test("withStreamLock keeps a live owner whose start is skewed 1 s, drops it at 10 s", async () => {
+  const { h } = env();
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", windowsHide: true });
+  await once(child, "spawn");
+  try {
+    assert.ok(alive(child.pid), "the holder child is alive");
+    const start = processStart(child.pid);
+    assert.match(String(start), /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/, `unexpected start ${start}`);
+    const lock = path.join(dirOf(h), "s1.lock");
+    fs.mkdirSync(lock, { recursive: true });
+
+    // 1 s skew: the live owner keeps its lock (reclaim refuses, the lock wait expires)
+    fs.writeFileSync(
+      path.join(lock, "owner"),
+      JSON.stringify({ pid: child.pid, pid_start: new Date(Date.parse(start) - 1000).toISOString(), at: new Date().toISOString() }),
+    );
+    withHome(h, () =>
+      assert.throws(
+        () => withStreamLock("s1", () => "kept"),
+        (err) => err.message === "stream s1 is locked",
+        "1 s skew: the live owner keeps the lock",
+      ),
+    );
+    assert.ok(fs.existsSync(lock), "1 s skew: the lock directory survives");
+
+    // 10 s skew: dropped as recycled, the lock is taken
+    fs.writeFileSync(
+      path.join(lock, "owner"),
+      JSON.stringify({ pid: child.pid, pid_start: new Date(Date.parse(start) + 10_000).toISOString(), at: new Date().toISOString() }),
+    );
+    withHome(h, () => assert.equal(withStreamLock("s1", () => "taken"), "taken", "10 s skew: the stale owner's lock is reclaimed"));
+    assert.equal(fs.existsSync(lock), false, "10 s skew: the reclaimed lock is gone");
+  } finally {
+    try {
+      child.kill();
+    } catch {}
+  }
 });
 
 // ------------------------------------------------------------------ list

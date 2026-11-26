@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
-import { watch, parseJsonLine, parsePsLine, processStart, killPid, procState, isZombie } from "../bin/proc-tree.mjs";
+import { watch, parseJsonLine, parsePsLine, processStart, killPid, procState, isZombie, sameStart } from "../bin/proc-tree.mjs";
 
 // All samples are injected: no real process is ever killed except in the smoke test, which only touches its own.
 const T0 = Date.parse("2026-01-01T00:00:00.000Z");
@@ -307,6 +307,20 @@ test("processStart: this process has a start time, a pid that does not exist doe
   assert.equal(processStart(0), null);
   assert.equal(processStart(-1), null);
   assert.equal(processStart("4242"), null, "a non-integer pid never reaches the command line");
+});
+
+test("sameStart: within the tolerance is the same process; beyond, null, or garbage is not", () => {
+  const base = "2026-01-01T00:00:00.000Z";
+  const plus = (ms) => new Date(Date.parse(base) + ms).toISOString();
+  assert.equal(sameStart(base, plus(1000)), true, "starts 1 s apart are the same process");
+  assert.equal(sameStart(base, plus(2000)), true, "starts 2 s apart are the same process");
+  assert.equal(sameStart(plus(2000), base), true, "order does not matter");
+  assert.equal(sameStart(base, plus(4000)), false, "starts 4 s apart are a different process");
+  assert.equal(sameStart(null, base), false, "a null left side is not the same process");
+  assert.equal(sameStart(base, null), false, "a null right side is not the same process");
+  assert.equal(sameStart(base, "not-a-time"), false, "an unparseable right side is not the same process");
+  assert.equal(sameStart("not-a-time", base), false, "an unparseable left side is not the same process");
+  assert.equal(sameStart("", base), false, "an empty string is not parseable");
 });
 
 test("killPid always returns a Promise and a dead pid resolves false", async () => {

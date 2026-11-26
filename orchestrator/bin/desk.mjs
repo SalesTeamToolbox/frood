@@ -94,7 +94,7 @@ import { gate } from "./verdict-gate.mjs";
 import { checkScope } from "./scope-check.mjs";
 import { openEscalations, orphanLedgerKey, streamOrphaned } from "./orphan.mjs";
 export { streamOrphaned } from "./orphan.mjs";
-import { killPid, processStart, isZombie } from "./proc-tree.mjs";
+import { killPid, processStart, isZombie, sameStart } from "./proc-tree.mjs";
 import { agentModel, isPolicyFree, isDown, modelAllowed, policyReason } from "./pool-health.mjs";
 import { chainFor } from "./chains.mjs";
 import { slotConfig, readSample, allowedSlots } from "./slots.mjs";
@@ -192,7 +192,7 @@ export function runIsLive(q) {
   if (isZombie(q.pid)) return false;
   if (!q.pid_start) return true;
   const cur = processStart(q.pid);
-  return cur !== null && cur === q.pid_start;
+  return cur !== null && sameStart(cur, q.pid_start);
 }
 
 // ---------------------------------------------------------------- runs (derived from events)

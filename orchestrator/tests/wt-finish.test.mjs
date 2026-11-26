@@ -453,6 +453,24 @@ test("killHolder skips when the start time differs or is missing, kills only on 
   assert.deepEqual(calls, [4242]);
 });
 
+test("killHolder tolerates start skew: within 3 s kills, beyond skips", () => {
+  const calls = [];
+  const kill = (pid) => (calls.push(pid), true);
+  const start = () => "2026-01-01T00:00:00.000Z";
+  const rec = (s) => ({ pid: 4242, start: s });
+  assert.equal(killHolder(rec("2026-01-01T00:00:01.000Z"), { start, kill }), true, "a 1 s skew is the same process");
+  assert.deepEqual(calls, [4242]);
+  calls.length = 0;
+  assert.equal(killHolder(rec("2026-01-01T00:00:02.000Z"), { start, kill }), true, "a 2 s skew is the same process");
+  assert.deepEqual(calls, [4242]);
+  calls.length = 0;
+  assert.equal(killHolder(rec("2026-01-01T00:00:04.000Z"), { start, kill }), false, "a 4 s skew is recycled");
+  assert.deepEqual(calls, []);
+  assert.equal(killHolder(rec(null), { start, kill }), false, "a null start is not killed");
+  assert.equal(killHolder(rec("garbage"), { start, kill }), false, "garbage is not killed");
+  assert.deepEqual(calls, []);
+});
+
 test("mcpTarget decides on the program and its script argument only", () => {
   assert.match(mcpTarget("node C:/x/opencode-peer-mail/dist/index.js"), /opencode-peer-mail/);
   assert.match(mcpTarget('"C:\\tools\\python.exe" C:\\tools\\mcp\\mcp_server.py serve'), /mcp_server\.py/);

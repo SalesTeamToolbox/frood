@@ -152,6 +152,19 @@ export function processStart(pid) {
   }
 }
 
+// Two process start stamps name the same process when they are within tolMs (default 3 s) of each other:
+// ps derives `lstart` from /proc boot time + uptime and truncates to whole seconds, so a live process's
+// start can read 1-2 s behind its spawn time (farther after a suspend), and a pid can be recycled. Identity
+// is pid + start-within-tolerance: clock skew never turns a live run or lock into a dead one; a start more
+// than tolMs off is a different (recycled) process.
+export function sameStart(a, b, tolMs = 3000) {
+  if (a == null || b == null) return false;
+  const x = Date.parse(String(a).trim());
+  const y = Date.parse(String(b).trim());
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+  return Math.abs(x - y) <= Number(tolMs);
+}
+
 // The state letter of a /proc/<pid>/stat line (R S D Z T t W X x K P...), or null when it cannot be parsed.
 // The comm field (inside parens) may itself contain parens, so the state is read after the LAST close paren.
 export function procState(stat) {

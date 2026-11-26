@@ -44,7 +44,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { processStart } from "./proc-tree.mjs";
+import { processStart, sameStart } from "./proc-tree.mjs";
 
 const STALE_MS = 72 * 3600_000;
 const DONE_KEEP_MS = 14 * 24 * 3600_000;
@@ -185,7 +185,7 @@ function reclaimIfStale(name) {
   if (!Number.isInteger(owner.pid) || !alive(owner.pid)) return dropLock(name, owner);
   if (owner.pid === process.pid) return dropLock(name, owner); // our own pid, but we are not inside the lock
   const current = startFor(owner.pid);
-  if (current && owner.pid_start && current !== owner.pid_start) return dropLock(name, owner); // pid was recycled
+  if (current && owner.pid_start && !sameStart(current, owner.pid_start)) return dropLock(name, owner); // pid was recycled
   return false;
 }
 

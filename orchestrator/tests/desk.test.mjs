@@ -249,6 +249,15 @@ test("dead detection: a live pid with a different start is dead; a null pid_star
   });
 });
 
+test("runIsLive tolerates start skew: same pid, current start 1 s after the recorded one stays live; 10 s off is dead", () => {
+  const cur = processStart(process.pid);
+  assert.match(String(cur), /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/, `unexpected start ${cur}`);
+  const recorded = new Date(Date.parse(cur) - 1000).toISOString(); // now reads 1 s after the recorded start
+  assert.equal(runIsLive({ pid: process.pid, pid_start: recorded }), true, "a 1 s skew keeps the run live");
+  const far = new Date(Date.parse(cur) + 10_000).toISOString();
+  assert.equal(runIsLive({ pid: process.pid, pid_start: far }), false, "a 10 s skew reads the pid as recycled");
+});
+
 test("a sleep gap (now - lastPoll > 5 x interval) skips dead detection for that poll", () => {
   const h = home();
   mkStream(h);
