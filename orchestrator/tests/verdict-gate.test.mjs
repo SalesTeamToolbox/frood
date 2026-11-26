@@ -223,3 +223,24 @@ test("transition: old-format two-clause line and no-separator UNREQUESTED still 
   assert.equal(d2.overridden, true);
   assert.equal(d2.unrequested.length, 1);
 });
+
+// Pass bar (senior-r1 blocker): an old-format line whose caller token starts with
+// `unchanged`/`intended` plus an UNSPACED dash must NOT be read as a benign tag-first
+// line; it falls through to the transition walk and counts UNREQUESTED. Each failed
+// (returned APPROVED) on 9734ba4a.
+test("caller token starting with unchanged/intended + unspaced dash still counts UNREQUESTED (senior-r1 blocker)", () => {
+  const blasts = [
+    "- intended-callers.mjs:3 — UNREQUESTED: real change",
+    "- unchanged-callers.test.mjs:12 — UNREQUESTED: real change",
+    "- `intended-use.mjs:3` — UNREQUESTED: real change",
+    "- Unchanged-by-design paths in a.mjs — UNREQUESTED: y",
+    "- unchanged—x — UNREQUESTED: real",
+    "- unchanged-UNREQUESTED",
+  ];
+  for (const blast of blasts) {
+    const r = gate(doc("APPROVED", blast));
+    assert.equal(r.effective, "CHANGES_REQUESTED", blast);
+    assert.equal(r.overridden, true, blast);
+    assert.equal(r.unrequested.length, 1, blast);
+  }
+});

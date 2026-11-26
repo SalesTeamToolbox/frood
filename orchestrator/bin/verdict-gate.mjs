@@ -61,10 +61,11 @@ export function gate(text, { free = false } = {}) {
   const IS_TAG = /^(unchanged|intended|UNREQUESTED)$/i;
   const IS_UNREQ = /^UNREQUESTED$/i;
   const CLOSE = /^[*_`\]\)]*/;
-  // After the tag (+ closing emphasis), optional whitespace then a separator token
-  // (— – -- - : |) or end of line closes the tag. A leading space before the separator
-  // is normal (`unchanged — x`, `intended | x`) and is trimmed here.
-  const TAG_CLOSE = /^(?:—|–|--|-|:|\||$)/;
+  // After closing emphasis, a separator closes the tag only with whitespace around it:
+  // end of line, `: ` / `| `, or whitespace + dash + whitespace/end. A bare `-`/`—`
+  // glued to the tag (e.g. `unchanged-callers.mjs`) is NOT a separator — that keeps
+  // old-format caller names like `unchanged-callers` from being misread as benign tags.
+  const TAG_CLOSE = /^(?:\s*$|\s*[:|](?:\s|$)|\s+(?:—|–|--|-)(?:\s|$))/;
   const isUnrequested = (e) => {
     const body = e.replace(LEAD, "");
     const first = body.match(TAG);
@@ -72,7 +73,7 @@ export function gate(text, { free = false } = {}) {
     if (IS_TAG.test(tag)) {
       if (IS_UNREQ.test(tag)) return true; // rule 2: UNREQUESTED first word -> counts, whatever follows
       // rule 3: unchanged/intended first word, closed then separator/EOL -> does not count
-      const closed = body.slice(tag.length).replace(CLOSE, "").replace(/^\s*/, "");
+      const closed = body.slice(tag.length).replace(CLOSE, "");
       if (TAG_CLOSE.test(closed)) return false;
       // unchanged/intended followed by ordinary words -> fall through to the transition (old format)
     }
