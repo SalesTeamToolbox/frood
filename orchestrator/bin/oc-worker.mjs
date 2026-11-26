@@ -157,7 +157,8 @@ Run constraints (from the orchestrator):
   stop and make your final message start with: RESULT: BLOCKED: question — <one specific question>
 - Stay inside the working directory you were started in. Never push, merge, deploy, or touch other worktrees.
 - Your final message is saved verbatim for the orchestrator. Make its first line the status line your role defines
-  (RESULT: ... for workers, VERDICT: ... for critics).`;
+  (RESULT: ... for workers, VERDICT: ... for critics).
+- Workers: The first line of your final reply is exactly \`RESULT: DONE\` or \`RESULT: BLOCKED: <reason>\`: capitals, with no markdown, emoji, quote or prefix. The parser is case-sensitive, and anything else counts as an error.`;
 
 export const READONLY_AGENT_RE = /^(critic|senior|scout|explorer)(-|$)/;
 

@@ -430,8 +430,8 @@ decides: the critic round for a re-dispatched worker run (max of resume acks, wo
 topic: docs/atlas/desk.md
 
 ### scope fence (a worker's diff vs its ticket scope)
-handler: orchestrator/bin/scope-check.mjs checkScope() (git diff --name-only <base>..<sha> against the ticket's --scope, plus the hard deny list .claude/plans/** and .opencode/**; matchAny() lives here and board.mjs imports it back); callers orchestrator/bin/board.mjs cmdCreate()/cmdRound()/cmdReady() and orchestrator/bin/desk.mjs doCritic()
-decides: whether a worker's committed diff may land — a path outside --scope or on the deny list records the round as CHANGES_REQUESTED even when the critic approved, refuses ready at the signed-off sha, is refused at create, and is sent back to the worker by the desk without spawning a paid critic
+handler: orchestrator/bin/scope-check.mjs checkScope() (git diff --name-only <base>..<sha> against the ticket's --scope, plus the hard deny list .claude/plans/** and .opencode/**; matchAny() lives here and board.mjs imports it back); callers orchestrator/bin/board.mjs cmdCreate()/cmdScope()/cmdRound()/cmdReady() and orchestrator/bin/desk.mjs doCritic()
+decides: whether a worker's committed diff may land — a path outside --scope or on the deny list records the round as CHANGES_REQUESTED even when the critic approved, refuses ready at the signed-off sha, is refused at create, and is sent back to the worker by the desk without spawning a paid critic; board.mjs scope amends a queued/working ticket's scope with the create-time checks, a senior-reason union and EGM-trigger rules
 topic: docs/atlas/desk.md
 
 ### oc-worker load-based slots
@@ -529,13 +529,13 @@ decides: which tests the train runs for a ticket (python convention → board ti
 ## Workstation (Linux)
 
 ### workstation priority guard
-handler: orchestrator/ops/workstation/agent-priority.mjs runPass (systemd user service, 15 s loop; --once)
-decides: which agent process trees are reniced to nice>=10 per thread — never lowers a nice value, never touches a non-agent tree, excludes the Claude desktop UI
+handler: orchestrator/ops/workstation/agent-priority.mjs runPass (systemd user service, 15 s loop with an interruptible sleep — SIGTERM/SIGINT exit 0 within 2 s; --once)
+decides: which agent process trees are reniced to nice>=10 per thread — never lowers a nice value, never touches a non-agent tree, excludes the Claude desktop UI; paused/resumed is printed once per pause transition
 sibling traps: oc-worker load-based slots
 
 ### box-wide suite lock
 handler: orchestrator/ops/workstation/suite-lock.sh suite_lock_acquire / suite_lock_release
-decides: one pinned full suite at a time across every repo sharing one box-wide SUITE_LOCK_ROOT queue (arrival-order, heartbeat, two-read stale break, token-checked release)
+decides: one pinned full suite at a time across every repo sharing one box-wide SUITE_LOCK_ROOT queue (arrival-order, heartbeat, two-read stale break, token-checked release); the Makefile test recipe traps TERM/INT to kill its pytest child and release the lock (exit 143/130)
 
 ## How to keep this map accurate
 

@@ -1965,3 +1965,121 @@ test("scope ready: refuses a ticket whose signed-off sha leaves the scope", () =
   assert.equal(rd.status, 1, rd.stderr);
   assert.match(rd.stderr, /out of scope: README.md/);
 });
+
+// ---------------------------------------------------------------- scope normalisation + `scope` amend (ws-guard-followups)
+test("create normalises --scope: trims, strips ./, collapses //, drops dups; empty-after-normalise is exit 2", () => {
+  const c = mk();
+  const r = board(c, "create", "norm-one", "--mandate", c.mandate, "--scope", "a/,./b//c/,a");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.ticket.scope, ["a", "b/c"]);
+  const bad = board(c, "create", "norm-bad", "--mandate", c.mandate, "--scope", "x,/");
+  assert.equal(bad.status, 2, bad.stderr);
+  assert.match(bad.stderr, /empty after normalisation/);
+  assert.equal(fs.existsSync(ticketFile(c, "norm-bad")), false, "a refused create writes nothing");
+});
+
+test("a normalised directory scope keeps its senior reason against a guarded glob", () => {
+  const c = mk();
+  const p = path.join(c.repo, ".opencode", "board", "adapter.json");
+  const a = JSON.parse(fs.readFileSync(p, "utf8"));
+  a.guarded_paths = ["orchestrator/ops/**"];
+  fs.writeFileSync(p, JSON.stringify(a, null, 2) + "\n");
+  const r = board(c, "create", "guarded-dir", "--mandate", c.mandate, "--scope", "orchestrator/ops/");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.ticket.scope, ["orchestrator/ops"]);
+  assert.equal(r.ticket.senior.required, true);
+  assert.deepEqual(r.ticket.senior.reasons, ["guarded path: orchestrator/ops"]);
+});
+
+test("checkScope admits a path under a stored directory scope (no fence override on round)", () => {
+  const c = mk();
+  const cr = board(c, "create", "dir-ok", "--mandate", c.mandate, "--scope", "orchestrator/ops");
+  assert.equal(cr.status, 0, cr.stderr);
+  assert.deepEqual(cr.ticket.scope, ["orchestrator/ops"]);
+  waived(c, "dir-ok");
+  assert.equal(claim(c, "dir-ok", "s1").status, 0);
+  const sha = commitFile(c, "orchestrator/ops/x.mjs", "// under the stored dir scope\n");
+  const r = round(c, "dir-ok", { reviewed: sha });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.ticket.rounds[0].critic.effective, "APPROVED", "the fence left the critic's verdict alone");
+});
+
+test("scope amends a queued ticket: new scope, senior union, history event", () => {
+  const c = mk();
+  const cr = board(c, "create", "amend-q", "--mandate", c.mandate, "--scope", "bin/a.mjs");
+  assert.equal(cr.status, 0, cr.stderr);
+  const r = board(c, "scope", "amend-q", "--scope", "bin/b.mjs,docs/c.md", "--reason", "widen a little", "--by", "rick");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.ticket.scope, ["bin/b.mjs", "docs/c.md"]);
+  assert.equal(r.ticket.stage, "queued");
+  const h = r.ticket.history.at(-1);
+  assert.equal(h.cmd, "scope");
+  assert.equal(h.from, "queued");
+  assert.equal(h.to, "queued");
+  assert.equal(h.by, "rick");
+  assert.equal(h.note, "widen a little; scope bin/a.mjs -> bin/b.mjs,docs/c.md");
+});
+
+test("scope keeps earlier senior reasons and unions new ones", () => {
+  const c = mk();
+  const cr = board(c, "create", "amend-senior", "--mandate", c.mandate, "--scope", "ops/train.sh");
+  assert.equal(cr.status, 0, cr.stderr);
+  assert.deepEqual(cr.ticket.senior.reasons, ["guarded path: ops/train.sh"]);
+  const r = board(c, "scope", "amend-senior", "--scope", "docs/x.md", "--reason", "docs only now", "--by", "rick");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.ticket.scope, ["docs/x.md"]);
+  assert.deepEqual(r.ticket.senior.reasons, ["guarded path: ops/train.sh"], "old reasons are never removed");
+  assert.equal(r.ticket.senior.required, true);
+  const r2 = board(c, "scope", "amend-senior", "--scope", "bin/auth.mjs", "--reason", "guarded now", "--by", "rick");
+  assert.equal(r2.status, 0, r2.stderr);
+  assert.deepEqual(r2.ticket.senior.reasons, ["guarded path: ops/train.sh", "guarded path: bin/auth.mjs"]);
+  assert.equal(r2.ticket.senior.required, true);
+});
+
+test("scope amends a working ticket and is refused on ready/blocked/failed/closed", () => {
+  const c = mk();
+  workingTicket(c, "amend-w");
+  const r = board(c, "scope", "amend-w", "--scope", "bin/c.mjs", "--reason", "narrow it", "--by", "s1");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.ticket.stage, "working");
+  assert.deepEqual(r.ticket.scope, ["bin/c.mjs"]);
+  for (const stage of ["ready", "blocked", "failed", "closed"]) {
+    editTicket(c, "amend-w", (t) => { t.stage = stage; });
+    const before = bytes(ticketFile(c, "amend-w"));
+    const bad = board(c, "scope", "amend-w", "--scope", "bin/d.mjs", "--reason", "too late", "--by", "s1");
+    assert.equal(bad.status, 1, `${stage}: ${bad.stderr}`);
+    assert.match(bad.stderr, /scope needs stage queued\|working/);
+    assert.ok(Buffer.compare(before, bytes(ticketFile(c, "amend-w"))) === 0, `${stage} wrote nothing`);
+  }
+});
+
+test("scope refusals: deny list (exit 1), missing --reason (exit 2), EGM trigger on working (exit 1)", () => {
+  const c = mk();
+  const cr = board(c, "create", "scope-deny", "--mandate", c.mandate, "--scope", "bin/a.mjs");
+  assert.equal(cr.status, 0, cr.stderr);
+  const d = board(c, "scope", "scope-deny", "--scope", ".opencode/x", "--reason", "nope", "--by", "rick");
+  assert.equal(d.status, 1, d.stderr);
+  assert.match(d.stderr, /deny list/);
+  const nr = board(c, "scope", "scope-deny", "--scope", "bin/b.mjs", "--by", "rick");
+  assert.equal(nr.status, 2, nr.stderr);
+  assert.match(nr.stderr, /--reason is required/);
+  assert.deepEqual(JSON.parse(bytes(ticketFile(c, "scope-deny"))).scope, ["bin/a.mjs"], "refusals wrote nothing");
+});
+
+test("scope on a queued ticket adds an EGM trigger and re-pends; on working it refuses", () => {
+  const c = mk();
+  const cr = board(c, "create", "scope-egm", "--mandate", c.mandate, "--scope", "bin/a.mjs");
+  assert.equal(cr.status, 0, cr.stderr);
+  assert.deepEqual(cr.ticket.egm.triggers, []);
+  const q = board(c, "scope", "scope-egm", "--scope", "bin/a.mjs,prisma/schema.prisma", "--reason", "data model", "--by", "rick");
+  assert.equal(q.status, 0, q.stderr);
+  assert.deepEqual(q.ticket.egm.triggers, ["data-model"]);
+  assert.equal(q.ticket.egm.required, true);
+  assert.equal(q.ticket.egm.status, "pending");
+
+  workingTicket(c, "scope-w");
+  const w = board(c, "scope", "scope-w", "--scope", "bin/a.mjs,prisma/schema.prisma", "--reason", "data model", "--by", "s1");
+  assert.equal(w.status, 1, w.stderr);
+  assert.match(w.stderr, /scope adds EGM trigger data-model; release the ticket and amend it while queued/);
+  assert.deepEqual(JSON.parse(bytes(ticketFile(c, "scope-w"))).scope, ["bin/**"], "the refused amend wrote nothing");
+});

@@ -12,6 +12,7 @@ outside the board itself).
 /frood-board create <id> --mandate <path> --scope <a,b,...> [--title <t>] [--egm-trigger <name>]...
 /frood-board egm <id> approve --report <path> --by <who>  |  waive --reason <text> --by <who>
 /frood-board claim <id> --owner <session> --harness claude|opencode --worktree <path>
+/frood-board scope <id> --scope <a,b,...> --reason <text> --by <who> [--expect-epoch N]
 /frood-board status [--json]
 /frood-board round <id> --owner <session> --worker-receipt <path> --findings <path> --reviewed-sha <sha>
 /frood-board signoff <id> --by critic|senior|human

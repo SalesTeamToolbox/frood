@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { runPass, writePassLog, realSetPriority } from "../ops/workstation/agent-priority.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -533,5 +533,70 @@ test("runPass: log rotates when over 512 KB", () => {
     assert.ok(curSize < 512 * 1024, `current log ${curSize} bytes should be under 512 KB`);
   } finally {
     delete process.env.FROOD_WS_STATE;
+  }
+});
+
+// ----------------------------------------------------------- signal + pause-transition (ws-guard-followups)
+
+// Poll `fn` every 50 ms up to `capMs`; throw (failing the test) past the cap.
+// Assertions never rest on a fixed sleep: a slow box just polls longer.
+async function waitFor(fn, capMs, what) {
+  const deadline = Date.now() + capMs;
+  for (;;) {
+    if (fn()) return;
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+function spawnLoop(extraEnv = {}, startPaused = false) {
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), "ws-prio-state-"));
+  const procRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ws-prio-proc-"));
+  if (startPaused) fs.writeFileSync(path.join(state, "priority-guard.off"), "");
+  const child = spawn(process.execPath, [path.join(WORKSTATION, "agent-priority.mjs")], {
+    env: { ...process.env, FROOD_WS_STATE: state, ORCH_PROC_ROOT: procRoot, ...extraEnv },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let out = "";
+  child.stdout.on("data", (d) => { out += d; });
+  const done = () => child.exitCode !== null || child.signalCode !== null;
+  const cleanup = () => {
+    try {
+      if (!done() && child.pid) process.kill(child.pid, "SIGKILL");
+    } catch {}
+    fs.rmSync(state, { recursive: true, force: true });
+    fs.rmSync(procRoot, { recursive: true, force: true });
+  };
+  return { child, state, text: () => out, done, cleanup };
+}
+
+test("loop: SIGTERM exits 0 within 2 s on the default 15 s interval", { timeout: 30_000 }, async () => {
+  const { child, text, done, cleanup } = spawnLoop();
+  try {
+    await new Promise((r) => setTimeout(r, 300)); // let the first pass run
+    child.kill("SIGTERM"); // the loop's own pid only
+    await waitFor(done, 2000, "exit within 2 s of SIGTERM");
+    assert.equal(child.exitCode, 0, `SIGTERM exits 0, not ${child.exitCode} (output: ${text()})`);
+  } finally {
+    cleanup();
+  }
+});
+
+test("loop: pause prints exactly once, resume exactly once on unpause", { timeout: 30_000 }, async () => {
+  const { child, state, text, done, cleanup } = spawnLoop({ FROOD_WS_INTERVAL_MS: "100" }, true);
+  // Pause before the first pass: the daemon starts paused and must say so once.
+  try {
+    await new Promise((r) => setTimeout(r, 500)); // several 100 ms passes, all paused
+    fs.rmSync(path.join(state, "priority-guard.off"));
+    await new Promise((r) => setTimeout(r, 300)); // several passes, all resumed
+    child.kill("SIGTERM"); // the loop's own pid only
+    await waitFor(done, 2000, "exit after SIGTERM");
+    assert.equal(child.exitCode, 0);
+    const lines = text().split("\n").map((l) => l.trim());
+    assert.deepEqual(lines.filter((l) => l === "paused").length, 1, `exactly one paused line: ${JSON.stringify(text())}`);
+    assert.deepEqual(lines.filter((l) => l === "resumed").length, 1, `exactly one resumed line: ${JSON.stringify(text())}`);
+    assert.ok(text().indexOf("paused") < text().indexOf("resumed"), "paused comes before resumed");
+  } finally {
+    cleanup();
   }
 });

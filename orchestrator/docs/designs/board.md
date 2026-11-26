@@ -114,6 +114,7 @@ Mandate stays the record, `create` only proves the question was answered. (atlas
 | `unblock` | `blocked` → `queued` | `--by human --note` (≥10 chars); lock must be free |
 | `egm reopen` | `working` → `queued` | owner; sets `egm.status: pending`, releases lock (mid-ticket trigger) |
 | `release` | `working` → `queued` | owner; or `--force --note` (human) |
+| `scope` | `queued`/`working` → same | `--scope`, `--reason`, `--by` (all required); create-time checks on the normalised scope, senior-reason union, EGM-trigger rules; refused on any other stage |
 | `fail` | any non-terminal → `failed` | `--note`; terminal |
 
 ## Commands — inputs, rules, outputs
@@ -135,6 +136,15 @@ Mandate stays the record, `create` only proves the question was answered. (atlas
 - **`heartbeat <id> --owner <s>`** — rewrites `locks/<id>.lock/owner.json` only (no ticket write, no history).
 - **`attach <id> --pid <n> --out <path>`** — records the running `oc-worker` (pid, process start time,
   output path) in `assignment.worker`. Called by `oc-worker --ticket` (Phase 3).
+- **`scope <id> --scope <a,b,…> --reason <text> --by <who> [--expect-epoch N]`** — amends a `queued` or
+  `working` ticket's scope with the create-time checks (normalisation, deny list, open-ended Mandate grant).
+  `scope` becomes the normalised list (duplicates dropped, first-seen order); `senior.reasons` is a union —
+  old reasons stay, new `guarded path:` reasons append, `required` once true stays true; the history note is
+  `<reason>; scope <old> -> <new>`. EGM triggers `create` would compute (`data-model` when an entry matches
+  `egm_paths`, `many-modules` when the scope spans > 3 top-level directories) append to a `queued` ticket
+  (`required: true`, `status: "pending"`); on a `working` ticket a new trigger refuses with exit 1 (release
+  the ticket and amend it while queued). Refused on any other stage (exit 1); missing `--scope`/`--reason`/`--by`
+  is a usage error (exit 2). Never removes a senior reason or an EGM trigger.
 - **`round <id> --owner <s> --worker-receipt <path> [--critic-receipt <path>] [--native-critic <alias>] --findings <path>`**
   - Receipts are the `<out>.receipt.json` files `oc-worker` writes (paths, never inline JSON).
   - Worker outcome from the receipt: `exit 0` + first line `RESULT: DONE` ⇒ `done`; `RESULT: BLOCKED: question` ⇒
