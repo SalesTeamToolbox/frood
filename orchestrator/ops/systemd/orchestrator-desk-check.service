@@ -7,3 +7,6 @@ Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 ExecStart=@NODE@ @REPO@/bin/desk-check.mjs
+# systemd --user starts with the default PATH, which does not include mise shims where
+# opencode and claude live; @PATH@ is filled by ops/systemd/install.mjs.
+Environment=PATH=@PATH@

@@ -66,8 +66,7 @@ try {
 } catch (e) {
   console.error(`install: launch mode not saved (${e.message}); continuing. Set it later with bin/launch-config.mjs --set`);
 }
-// Test hook: stop before touching systemd.
-if (process.env.ORCH_INSTALL_NO_SYSTEMD === "1") process.exit(0);
+// Test hook: stop before touching systemd (writes + systemctl calls are guarded below).
 let node;
 try {
   node = execFileSync("command -v node", { shell: true, encoding: "utf8" }).trim();
@@ -79,32 +78,76 @@ if (!node || !fs.existsSync(path.join(repo, "bin", "desk-check.mjs"))) {
   console.error(`install: cannot resolve node or ${repo}/bin/desk-check.mjs`);
   process.exit(2);
 }
+// Resolve the other CLI tools the daemon spawns (opencode / claude).
+function which(cmd) {
+  try {
+    return execFileSync(`command -v ${cmd}`, { shell: true, encoding: "utf8" }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+// Build the PATH the installed units run under: node's directory first, then the opencode
+// and claude directories, mise shims, local bin, and the system directories. Missing and
+// duplicate directories are dropped.
+export function unitPath({ node: nodePath, which: whichFn, home, exists }) {
+  const dirs = [];
+  const seen = new Set();
+  const add = (d) => {
+    if (!d || seen.has(d) || !exists(d)) return;
+    seen.add(d);
+    dirs.push(d);
+  };
+  add(path.dirname(nodePath));
+  const opencode = whichFn("opencode");
+  const claude = whichFn("claude");
+  if (opencode) add(path.dirname(opencode));
+  if (claude) add(path.dirname(claude));
+  add(path.join(home, ".local", "share", "mise", "shims"));
+  add(path.join(home, ".local", "bin"));
+  add("/usr/local/bin");
+  add("/usr/bin");
+  add("/bin");
+  return dirs.join(":");
+}
+const pathValue = unitPath({
+  node,
+  which,
+  home: os.homedir(),
+  exists: fs.existsSync,
+});
+if (!which("opencode")) {
+  console.error("install: warning: opencode not found on PATH; the desk cannot launch OpenCode critics or workers");
+}
 function renderTemplate(file, extra = {}) {
   let text = fs.readFileSync(path.join(dir, file), "utf8");
-  const subs = { "@NODE@": node, "@REPO@": repo, "@BY@": by, ...extra };
+  const subs = { "@NODE@": node, "@REPO@": repo, "@BY@": by, "@PATH@": pathValue, ...extra };
   for (const [k, v] of Object.entries(subs)) text = text.replaceAll(k, v);
   return text;
 }
 function checkPlaceholders(text, file) {
-  for (const p of ["@NODE@", "@REPO@", "@BY@"]) {
+  for (const p of ["@NODE@", "@REPO@", "@BY@", "@PATH@"]) {
     if (text.includes(p)) {
       console.error(`install: template placeholder ${p} left unsubstituted in ${file}`);
       process.exit(2);
     }
   }
 }
-fs.mkdirSync(unitDir, { recursive: true });
-// Timer (oneshot service + timer).
-const checkService = renderTemplate(`${timerName}.service`);
-checkPlaceholders(checkService, `${timerName}.service`);
-fs.writeFileSync(path.join(unitDir, `${timerName}.service`), checkService);
-fs.copyFileSync(path.join(dir, `${timerName}.timer`), path.join(unitDir, `${timerName}.timer`));
-// Daemon (supervised driver).
-const daemonService = renderTemplate(`${daemonName}.service`);
-checkPlaceholders(daemonService, `${daemonName}.service`);
-fs.writeFileSync(path.join(unitDir, `${daemonName}.service`), daemonService);
-systemctl("daemon-reload");
-systemctl("enable", "--now", `${timerName}.timer`);
-systemctl("enable", "--now", `${daemonName}.service`);
-systemctl("status", `${timerName}.timer`, "--no-pager");
-systemctl("status", `${daemonName}.service`, "--no-pager");
+// Touch systemd only when not in test mode; ORCH_INSTALL_NO_SYSTEMD=1 keeps tests hermetic
+// (no unit files written, no systemctl calls).
+if (process.env.ORCH_INSTALL_NO_SYSTEMD !== "1") {
+  fs.mkdirSync(unitDir, { recursive: true });
+  // Timer (oneshot service + timer).
+  const checkService = renderTemplate(`${timerName}.service`);
+  checkPlaceholders(checkService, `${timerName}.service`);
+  fs.writeFileSync(path.join(unitDir, `${timerName}.service`), checkService);
+  fs.copyFileSync(path.join(dir, `${timerName}.timer`), path.join(unitDir, `${timerName}.timer`));
+  // Daemon (supervised driver).
+  const daemonService = renderTemplate(`${daemonName}.service`);
+  checkPlaceholders(daemonService, `${daemonName}.service`);
+  fs.writeFileSync(path.join(unitDir, `${daemonName}.service`), daemonService);
+  systemctl("daemon-reload");
+  systemctl("enable", "--now", `${timerName}.timer`);
+  systemctl("enable", "--now", `${daemonName}.service`);
+  systemctl("status", `${timerName}.timer`, "--no-pager");
+  systemctl("status", `${daemonName}.service`, "--no-pager");
+}
