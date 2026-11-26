@@ -221,9 +221,9 @@ test("timeout kills only its own claude pid", async () => {
   assert.deepEqual(fs.readdirSync(slotsOf(home)), [], "slots released after a timeout");
 });
 
-test("SIGTERM to oc-worker ends the claude process and releases the cc slot (exit 143, receipt killed)", async () => {
+test("SIGTERM to an in-process (--no-detach) oc-worker ends the claude process and releases the cc slot (exit 143, receipt killed)", async () => {
   const home = tmp();
-  const a = runAsync(home, "a", [], { FAKE_CC_MODE: "hang" });
+  const a = runAsync(home, "a", ["--no-detach"], { FAKE_CC_MODE: "hang" });
   assert.ok(await waitFor(a.started), "claude started");
   const { pid } = JSON.parse(fs.readFileSync(a.argsFile, "utf8"));
   a.child.kill("SIGTERM");
@@ -232,6 +232,96 @@ test("SIGTERM to oc-worker ends the claude process and releases the cc slot (exi
   assert.equal(JSON.parse(fs.readFileSync(a.out + ".receipt.json", "utf8")).exit, "killed");
   assert.ok(await waitFor(() => dead(pid), 7000), "claude is gone");
   assert.deepEqual(fs.readdirSync(slotsOf(home)), []);
+});
+
+test("hook-free: --settings disableAllHooks in the claude argv and PEER_WAKE_MAX_MIN=0 even when the parent sets 30; OpenCode argv has no --settings", () => {
+  const home = tmp();
+  const r = runSync(home, [], { PEER_WAKE_MAX_MIN: "30" });
+  assert.equal(r.status, 0, r.stderr);
+  const { argv, peerWakeMaxMin } = JSON.parse(fs.readFileSync(r.argsFile, "utf8"));
+  assert.equal(argv[0], "-p", "the prompt stays right after -p");
+  const settings = argv[argv.indexOf("--settings") + 1];
+  assert.ok(argv.includes("--settings"));
+  assert.equal(JSON.parse(settings).disableAllHooks, true);
+  assert.ok(!argv.includes("--bare") && !argv.includes("--safe-mode"));
+  assert.equal(peerWakeMaxMin, "0");
+  const s = setup(home, "oc");
+  const ocArgs = path.join(home, "oc-args.json");
+  const oc = spawnSync(process.execPath, [BIN, "--agent", "worker", "--dir", s.dir, "--prompt", s.prompt, "--out", s.out], { env: env(home, { FAKE_OC_ARGS_FILE: ocArgs, PEER_WAKE_MAX_MIN: "30" }), encoding: "utf8", timeout: 30000 });
+  assert.equal(oc.status, 0, oc.stderr);
+  assert.ok(!JSON.parse(fs.readFileSync(ocArgs, "utf8")).argv.includes("--settings"));
+});
+
+test("foreground: a default (detached) cc-worker run exits 0 with the receipt on stdout; the fake's parent is the detached child", () => {
+  const home = tmp();
+  const r = runSync(home);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /oc-worker: detached run pid \d+, log .*\.detached\.log/);
+  assert.equal(r.receipt.exit, 0);
+  assert.equal(r.receipt.first_line, "RESULT: DONE");
+  assert.deepEqual(JSON.parse(fs.readFileSync(r.out + ".receipt.json", "utf8")).first_line, "RESULT: DONE");
+  const childPid = Number(r.stderr.match(/detached run pid (\d+)/)[1]);
+  const { ppid } = JSON.parse(fs.readFileSync(r.argsFile, "utf8"));
+  assert.equal(ppid, childPid, "claude ran under the detached oc-worker");
+  assert.ok(fs.existsSync(r.out + ".detached.log"));
+});
+
+test("--no-detach runs in process: the fake's parent pid is the launcher's pid, no detached log", () => {
+  const home = tmp();
+  const s = setup(home);
+  const child = spawnSync(process.execPath, [BIN, ...flags(s, ["--no-detach"])], { env: env(home, { FAKE_CC_ARGS_FILE: s.argsFile }), encoding: "utf8", timeout: 30000 });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(JSON.parse(child.stdout.trim()).first_line, "RESULT: DONE");
+  assert.doesNotMatch(child.stderr, /detached run pid/);
+  assert.equal(JSON.parse(fs.readFileSync(s.argsFile, "utf8")).ppid, child.pid);
+  assert.ok(!fs.existsSync(s.out + ".detached.log"));
+});
+
+test("survival: SIGTERM to the launcher exits it 143; the detached run finishes and writes its receipt (exit 0); nothing is left", async () => {
+  const home = tmp();
+  const s = setup(home, "surv");
+  const launcher = spawn(process.execPath, [BIN, ...flags(s)], { env: env(home, { FAKE_CC_ARGS_FILE: s.argsFile, FAKE_CC_MODE: "slow", FAKE_CC_DELAY: "2500" }), stdio: ["ignore", "pipe", "pipe"] });
+  let stderr = "";
+  launcher.stderr.on("data", (d) => (stderr += d));
+  const killer = setTimeout(() => launcher.kill("SIGKILL"), 40000);
+  const exited = new Promise((resolve) => launcher.on("exit", (code, signal) => { clearTimeout(killer); resolve({ code, signal }); }));
+  let childPid = null;
+  try {
+    assert.ok(await waitFor(() => fs.existsSync(s.argsFile)), "fake claude started");
+    childPid = Number(stderr.match(/detached run pid (\d+)/)?.[1]) || null;
+    assert.ok(childPid, `launcher named its detached child: ${stderr}`);
+    const { pid: claudePid } = JSON.parse(fs.readFileSync(s.argsFile, "utf8"));
+    process.kill(launcher.pid, "SIGTERM");
+    const { code } = await exited;
+    assert.equal(code, 143);
+    assert.ok(await waitFor(() => fs.existsSync(s.out + ".receipt.json"), 20000), "the run wrote its receipt");
+    const rc = JSON.parse(fs.readFileSync(s.out + ".receipt.json", "utf8"));
+    assert.equal(rc.exit, 0);
+    assert.equal(rc.first_line, "RESULT: DONE");
+    assert.ok(await waitFor(() => dead(childPid) && dead(claudePid), 10000), "no process of the run remains");
+    assert.deepEqual(fs.readdirSync(slotsOf(home)), [], "slots released");
+  } finally {
+    if (childPid && !dead(childPid)) try { process.kill(childPid, "SIGKILL"); } catch {}
+  }
+});
+
+test("tokens: no result event (killed by timeout) falls back to assistant usage, each message id once", () => {
+  const home = tmp();
+  const r = runSync(home, ["--timeout-min", "0.03", "--idle-min", "0", "--grace-min", "0", "--resume", "0"], { FAKE_CC_MODE: "usage-no-result" });
+  assert.equal(r.status, 4, r.stderr);
+  assert.equal(r.receipt.exit, "timeout");
+  assert.deepEqual(r.receipt.tokens, { input: 24, output: 12, reasoning: 0, cache_read: 200 });
+});
+
+test("summarizeClaude: assistant usage is only a fallback; a result event's usage wins", () => {
+  const u = { input_tokens: 1, output_tokens: 1 };
+  const lines = [
+    JSON.stringify({ type: "assistant", message: { id: "m1", content: [], usage: u } }),
+    JSON.stringify({ type: "assistant", message: { id: "m1", content: [], usage: u } }),
+  ];
+  assert.deepEqual(summarizeClaude(lines).tokens, { input: 1, output: 1, reasoning: 0, cache_read: 0 });
+  const withResult = [...lines, JSON.stringify({ type: "result", is_error: false, result: "x", usage: { input_tokens: 50, output_tokens: 9 } })];
+  assert.deepEqual(summarizeClaude(withResult).tokens, { input: 50, output: 9, reasoning: 0, cache_read: 0 });
 });
 
 test("summarizeClaude: result event folds session, text, tokens, cost; an is_error result is an error, not a final message", () => {

@@ -5,7 +5,7 @@
 //        [--out <final-message.md>] [--session <ses_id>] [--model <provider/model>]
 //        [--ticket <id> --owner <session>]
 //        [--stream <name>] [--title <text>] [--timeout-min 30] [--idle-min 20] [--grace-min 15] [--resume 1] [--slots N]
-//        [--role <name>] [--fallback <agent>[,<agent>]] [--report <path>] [--vision]
+//        [--role <name>] [--fallback <agent>[,<agent>]] [--report <path>] [--vision] [--detach | --no-detach]
 //   node oc-worker.mjs --help   (or -h) prints this text and exits 0; nothing is launched
 //   node oc-worker.mjs active [--json]   list running headless runs with elapsed time, last-output
 //      age and watchdog limits (idle-min / timeout-min). STALE = wrapper pid gone; OVERDUE = past its
@@ -96,14 +96,26 @@
 //   slot nothing is held, so the signal just ends the process (no receipt).
 // - --agent cc-worker: the backend is headless Claude Code, not OpenCode. It runs `claude` (ORCH_CLAUDE_BIN, else `claude` on
 //   PATH) with cwd=<dir>: `-p <prompt> --model sonnet --tools Read,Grep,Glob,Edit,Write,Bash --strict-mcp-config
-//   --permission-mode acceptEdits --allowedTools Bash --permission-prompts none --output-format stream-json --verbose`,
-//   plus `--resume <id>` for --session and the automatic resume. The receipt model is `sonnet` (or --model); session, final
-//   text, tokens and cost come from the stream-json `session_id` / `result` events. Timeout, idle, BelowNormal, the proc-tree
+//   --permission-mode acceptEdits --allowedTools Bash --permission-prompts none --output-format stream-json --verbose
+//   --settings {"disableAllHooks":true}`, plus `--resume <id>` for --session and the automatic resume. Hook-free: the owner's
+//   Stop hooks (an asyncRewake peer-mail wake, the repo's learning hooks) would keep a finished run alive and dirty the
+//   worktree; the child env also gets PEER_WAKE_MAX_MIN=0 (overriding any inherited value) as a backstop. Never `--bare`
+//   (it refuses the OAuth subscription login). The receipt model is `sonnet` (or --model); session, final text, tokens and
+//   cost come from the stream-json `session_id` / `result` events; with no `result` event (timeout, kill) tokens are the
+//   sum of the `assistant` events' message.usage, each message id counted once. Timeout, idle, BelowNormal, the proc-tree
 //   sweep, signals, --stream, --out and --report behave as for an OpenCode agent. A Claude usage/rate limit is classified
 //   quota / rate-limit, so --fallback moves on, and `cc-worker` is marked down in pool-health until the 5-hour reset (the
 //   reset time in the message, else now + 5 h). At most `cc.max_workers` (usage-limits.json, default 1) cc-worker runs
 //   at once machine-wide, via the lock dirs `provider-cc-<i>`; a waiting run waits (ORCH_CC_POLL_MS, default 3000) and
 //   never fails. cc-worker is not in any CHAINS role: name it with --agent.
+// - Detached runs (detachRun): a cc-worker run (or any run with --detach) survives its launcher. The launching oc-worker
+//   re-spawns itself (same argv, env marker ORCH_DETACHED_CHILD=1) in a new session and process group (POSIX setsid),
+//   stdin ignored, the child's stderr to <out>.detached.log and its stdout to <out>.detached.out (<out> is the --out path,
+//   or its default beside the prompt). The launcher prints `oc-worker: detached run pid <n>, log <path>` on stderr, waits,
+//   then copies the child's stderr and stdout to its own and exits with the child's code: a foreground caller sees the
+//   same output and status. SIGTERM / SIGINT / SIGHUP to the launcher exit it (143 / 130 / 129) WITHOUT signalling the
+//   child, so a Claude Code session that ends its turn no longer kills the run; signal the child pid to stop the run.
+//   --no-detach runs in process (the old behaviour). Windows never detaches. OpenCode agents detach only with --detach.
 // Exit: 0 finished, 3 no final text, 4 timeout, 5 opencode error, 6 every pool in the chain known-down, 7 board
 // attach refused (--ticket), 8 model not allowed by provider policy (`ignored`; unreadable providers.json; model unresolvable while any provider is restricted; `free-only`
 // and not on the allowlist), 10 stale or dirty tree (fresh --stream worker refused before queued/spawn).
@@ -286,6 +298,8 @@ export function args(argv) {
     else if (k === "--role") a.role = v();
     else if (k === "--vision") a.vision = true;
     else if (k === "--no-vision") a.vision = false; // explicit opt-out
+    else if (k === "--detach") a.detach = true;
+    else if (k === "--no-detach") a.detach = false;
     else throw new Error(`unknown flag ${k}`);
   }
   // --role <name> expands to --agent <first> --fallback <rest> from CHAINS[role].
@@ -409,6 +423,7 @@ export function opencodeBin() {
 
 // The headless Claude Code runner: --agent cc-worker. ORCH_CLAUDE_BIN overrides the binary (tests: a fake .mjs).
 export const isCcAgent = (agent) => agent === CC_POOL;
+export const CC_SETTINGS = JSON.stringify({ disableAllHooks: true });
 export function claudeBin() {
   const env = process.env.ORCH_CLAUDE_BIN;
   if (env && /\.m?js$/.test(env)) return { cmd: process.execPath, pre: [env], shell: false };
@@ -737,9 +752,19 @@ export function summarize(lines) {
 // Fold Claude Code's `--output-format stream-json` lines into the same shape summarize() returns.
 // The final text is the `result` event's `result`; an `is_error` result is an error (never a final message), so a
 // usage limit reads as "no output yet" and the chain can move on. Tokens: input + cache creation as `input`, cache
-// reads as `cache_read`; cost is `total_cost_usd`.
+// reads as `cache_read`; cost is `total_cost_usd`. The `result` event's usage is the source of truth; when no `result`
+// event arrived (timeout, kill) the tokens are the `assistant` events' `message.usage`, each `message.id` counted once
+// (stream-json repeats a message per content block), with the same mapping.
 export function summarizeClaude(lines) {
   const s = { session: null, texts: [], final: "", tokens: { input: 0, output: 0, reasoning: 0, cache_read: 0 }, cost: 0, errors: [] };
+  const addUsage = (t, u) => {
+    t.input += (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+    t.output += u.output_tokens || 0;
+    t.cache_read += u.cache_read_input_tokens || 0;
+  };
+  const seen = new Set();
+  const fallback = { input: 0, output: 0, reasoning: 0, cache_read: 0 };
+  let sawResult = false;
   for (const line of lines) {
     let e;
     try {
@@ -753,12 +778,17 @@ export function summarizeClaude(lines) {
       const t = e.message.content.filter((c) => c?.type === "text" && typeof c.text === "string").map((c) => c.text).join("");
       if (t) s.texts.push(t);
     }
+    if (e.type === "assistant" && e.message?.usage && typeof e.message.usage === "object") {
+      const id = e.message.id;
+      if (!id || !seen.has(id)) {
+        if (id) seen.add(id);
+        addUsage(fallback, e.message.usage);
+      }
+    }
     if (e.type === "result") {
+      sawResult = true;
       if (e.session_id) s.session = e.session_id;
-      const u = e.usage || {};
-      s.tokens.input += (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-      s.tokens.output += u.output_tokens || 0;
-      s.tokens.cache_read += u.cache_read_input_tokens || 0;
+      addUsage(s.tokens, e.usage || {});
       s.cost += Number(e.total_cost_usd) || 0;
       const text = typeof e.result === "string" ? e.result : "";
       if (e.is_error) {
@@ -768,6 +798,7 @@ export function summarizeClaude(lines) {
       } else if (text) s.final = text;
     }
   }
+  if (!sawResult) s.tokens = fallback;
   return { session: s.session, final: s.final, all: s.texts.join("\n\n"), tokens: s.tokens, cost: Number(s.cost.toFixed(6)), errors: s.errors };
 }
 
@@ -1391,7 +1422,8 @@ export async function runWorker(a) {
   const cliFor = (session, message) => {
     if (isCc) {
       // The prompt comes right after -p: --tools and --allowedTools are variadic and would swallow a later positional.
-      const cc = ["-p", safe(message), "--model", model, "--tools", "Read,Grep,Glob,Edit,Write,Bash", "--strict-mcp-config", "--permission-mode", "acceptEdits", "--allowedTools", "Bash", "--permission-prompts", "none", "--output-format", "stream-json", "--verbose"];
+      // --settings disableAllHooks: the owner's Stop hooks must not keep a finished run alive or dirty the worktree.
+      const cc = ["-p", safe(message), "--model", model, "--settings", CC_SETTINGS, "--tools", "Read,Grep,Glob,Edit,Write,Bash", "--strict-mcp-config", "--permission-mode", "acceptEdits", "--allowedTools", "Bash", "--permission-prompts", "none", "--output-format", "stream-json", "--verbose"];
       if (session) cc.push("--resume", session);
       return cc;
     }
@@ -1418,6 +1450,7 @@ export async function runWorker(a) {
       const attemptStart = Date.now();
       let hungToolChild = null; // a descendant tool child killed because it outlived the idle window
       const childEnv = isReadOnly ? { ...workerEnv(), ORCH_SCRATCH: scratchDir, ...visionEnv } : { ...workerEnv(), ...visionEnv };
+      if (isCc) childEnv.PEER_WAKE_MAX_MIN = "0"; // backstop for the hook-free flag: no peer-mail wake keeps the run alive
       // Opt-in OpenCode edit fence: merge per-run edit permissions into OPENCODE_CONFIG_CONTENT.
       if (process.env.ORCH_EDIT_FENCE === "1") {
         const existing = childEnv.OPENCODE_CONFIG_CONTENT;
@@ -1909,6 +1942,42 @@ export function activeRuns(now = Date.now()) {
   }).sort((a, b) => (a.started || 0) - (b.started || 0));
 }
 
+// Survive the launcher: re-spawn this script in its own session (setsid) and wait for it, relaying its output and exit
+// code; a signal to the launcher ends only the launcher. Returns false when this process should do the run itself:
+// it is the detached child (marker set), detach is off (--no-detach, or a non-cc agent without --detach), or Windows.
+export function detachRun(a, argv) {
+  if (process.env.ORCH_DETACHED_CHILD === "1") {
+    delete process.env.ORCH_DETACHED_CHILD; // the run's own children (claude, a nested oc-worker) must not inherit it
+    return false;
+  }
+  if (process.platform === "win32" || !(a.detach ?? isCcAgent(a.agent))) return false;
+  const out = path.resolve(a.out);
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  const log = out + ".detached.log"; // the child's stderr
+  const stdoutFile = out + ".detached.out"; // the child's stdout (the receipt JSON line)
+  const errFd = fs.openSync(log, "w");
+  const outFd = fs.openSync(stdoutFile, "w");
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv], { detached: true, stdio: ["ignore", outFd, errFd], env: { ...process.env, ORCH_DETACHED_CHILD: "1" }, windowsHide: true });
+  fs.closeSync(errFd);
+  fs.closeSync(outFd);
+  const SIGNALS = { SIGTERM: 143, SIGINT: 130, SIGHUP: 129 };
+  for (const [name, code] of Object.entries(SIGNALS)) process.on(name, () => process.exit(code)); // never signal the child
+  child.on("error", (e) => {
+    console.error(`oc-worker: detached run failed to start: ${e.message}`);
+    process.exit(5);
+  });
+  if (!child.pid) return true; // the error handler exits
+  console.error(`oc-worker: detached run pid ${child.pid}, log ${log}`);
+  child.on("exit", (code, signal) => {
+    const status = code ?? (signal ? 128 + (os.constants.signals[signal] || 0) : 5);
+    const done = () => process.exit(status);
+    process.stdout.on("error", done); // a closed caller pipe must not change the exit code
+    process.stderr.on("error", done);
+    process.stderr.write(readText(log), () => process.stdout.write(readText(stdoutFile), done));
+  });
+  return true;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const argv = process.argv.slice(2);
   // Help wins over everything: no validation, no slot, no launch.
@@ -1948,7 +2017,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.exit(2);
   }
   a.slotCfg = slotCfg;
-  runWithFallback(a)
+  if (!detachRun(a, argv)) runWithFallback(a)
     .then((r) => {
       const { status, ...rest } = r;
       console.log(JSON.stringify(rest));
