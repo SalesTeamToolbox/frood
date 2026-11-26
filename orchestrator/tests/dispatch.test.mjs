@@ -23,7 +23,7 @@ function mk(adapterExtra = {}) {
   return repo;
 }
 // A board ticket (schema 1) with a Mandate carrying optional `depends:` lines.
-function ticket(repo, id, { scope = [], callers = [], depends = [], stage = "queued", session = null } = {}) {
+function ticket(repo, id, { scope = [], callers = [], tests = [], depends = [], stage = "queued", session = null, created = undefined, egm = undefined } = {}) {
   const mandate = path.join(repo, `${id}.mandate.md`);
   fs.writeFileSync(mandate, `# ${id}\n${depends.length ? `depends: ${depends.join(", ")}\n` : ""}`);
   fs.writeFileSync(
@@ -34,7 +34,9 @@ function ticket(repo, id, { scope = [], callers = [], depends = [], stage = "que
       stage,
       mandate_path: mandate,
       scope,
-      blast_radius: callers.map((c) => ({ caller: c, expect: "unchanged" })),
+      blast_radius: [...callers.map((c) => ({ caller: c, expect: "unchanged" })), ...tests.map((t) => ({ caller: "new code", expect: "x", test: t }))],
+      ...(created ? { created } : {}),
+      ...(egm ? { egm: { status: egm } } : {}),
       assignment: session ? { owner: null, session } : stage === "working" ? { owner: "s1" } : null,
     }),
   );
@@ -214,6 +216,90 @@ test("plan: a ticket sharing a file with an in-flight board ticket outside the l
   assert.deepEqual(p.groups, [["new-two"]]);
   assert.equal(p.held[0].id, "new-one");
   assert.deepEqual(p.held[0].waiting_on, ["fly-one"]);
+});
+
+// ---- edits vs reads, and queue priority (dispatch-fair-holds)
+
+test("plan: two tickets that only CALL the same file are not serialised or held (caller∩caller)", () => {
+  const r = mk();
+  ticket(r, "m6b-like", { scope: ["orchestrator/bin/workers-view.mjs"], callers: ["orchestrator/bin/oc-worker.mjs active reader"] });
+  ticket(r, "gate-like", { scope: ["orchestrator/bin/verdict-gate.mjs"], callers: ["`gate()` called by oc-worker.mjs receipt verdict (:1701)"], stage: "working" });
+  ticket(r, "peer-like", { scope: ["orchestrator/bin/other.mjs"], callers: ["orchestrator/bin/oc-worker.mjs"] });
+  const p = plan(r, "m6b-like", "peer-like");
+  assert.deepEqual(p.held, [], "not held by an in-flight ticket that only calls oc-worker.mjs too");
+  assert.deepEqual(p.groups, [["m6b-like", "peer-like"]], "not serialised against each other either");
+});
+
+test("plan: one ticket editing a file the other calls still holds/serialises, in both directions, with the reason", () => {
+  const r = mk();
+  ticket(r, "edit-fly", { scope: ["lib/core.mjs"], stage: "working" });
+  ticket(r, "call-new", { scope: ["src/a.mjs"], callers: ["`x()` in lib/core.mjs"] });
+  let p = plan(r, "call-new");
+  assert.deepEqual(p.held, [{ id: "call-new", waiting_on: ["edit-fly"], in_flight: ["edit-fly: edit-fly edits lib/core.mjs, which call-new calls"] }]);
+  ticket(r, "call-fly", { scope: ["src/b.mjs"], callers: ["lib/util.mjs"], stage: "working" });
+  ticket(r, "edit-new", { scope: ["lib/util.mjs"] });
+  p = plan(r, "edit-new");
+  assert.deepEqual(p.held[0].in_flight, ["call-fly: edit-new edits lib/util.mjs, which call-fly calls"]);
+  const t = run(r, "plan", "edit-new");
+  assert.match(t.stdout, /^held: edit-new — waiting on call-fly \(in flight: call-fly: edit-new edits lib\/util\.mjs, which call-fly calls\)$/m);
+  ticket(r, "both-fly", { scope: ["src/s.mjs"], stage: "working" });
+  ticket(r, "both-new", { scope: ["src/s.mjs"] });
+  assert.deepEqual(plan(r, "both-new").held[0].in_flight, ["both-fly: both edit src/s.mjs"]);
+  ticket(r, "x-one", { scope: ["q/x.mjs"], callers: ["q/y.mjs"] });
+  ticket(r, "y-one", { scope: ["q/y.mjs"] });
+  assert.deepEqual(plan(r, "x-one", "y-one").conflicts, [{ a: "x-one", b: "y-one", why: "y-one edits q/y.mjs, which x-one calls" }]);
+});
+
+test("plan: a blast-radius test path counts as an edit", () => {
+  const r = mk();
+  ticket(r, "t-fly", { scope: ["a.mjs"], tests: ["tests/shared.test.mjs"], stage: "working" });
+  ticket(r, "t-new", { scope: ["b.mjs"], tests: ["tests/shared.test.mjs"] });
+  assert.deepEqual(plan(r, "t-new").held[0].in_flight, ["t-fly: both edit tests/shared.test.mjs"]);
+});
+
+const NOW = Date.now();
+const ago = (h) => new Date(NOW - h * 3600_000).toISOString();
+
+test("plan: an older queued EGM-cleared ticket holds a newer overlapping one (queue priority)", () => {
+  const r = mk();
+  ticket(r, "old-q", { scope: ["orchestrator/bin/workers-view.mjs"], callers: ["orchestrator/bin/dispatch.mjs plan"], created: ago(5), egm: "approved" });
+  ticket(r, "new-q", { scope: ["orchestrator/bin/dispatch.mjs"], created: ago(1), egm: "waived" });
+  const p = plan(r, "new-q");
+  assert.deepEqual(p.groups, []);
+  assert.deepEqual(p.held, [{ id: "new-q", waiting_on: ["old-q"], queued_first: ["old-q: new-q edits orchestrator/bin/dispatch.mjs, which old-q calls"] }]);
+  assert.match(run(r, "plan", "new-q").stdout, /^held: new-q — waiting on old-q \(older queued: old-q: /m);
+  // The older one is never held by the newer one.
+  assert.deepEqual(plan(r, "old-q").groups, [["old-q"]]);
+  // Both in the list: grouped by the normal rules, no hold.
+  assert.deepEqual(plan(r, "old-q", "new-q").held, []);
+});
+
+test("plan: queue priority skips EGM-pending, stale, dispatched, caller-only and non-queued cases; window 0 turns it off", () => {
+  const r = mk();
+  ticket(r, "pend-q", { scope: ["p.mjs"], created: ago(5), egm: "pending" });
+  ticket(r, "stale-q", { scope: ["s.mjs"], created: ago(49), egm: "approved" });
+  ticket(r, "read-q", { scope: ["r1.mjs"], callers: ["shared/c.mjs"], created: ago(5), egm: "approved" });
+  ticket(r, "new-q", { scope: ["p.mjs", "s.mjs", "n.mjs"], callers: ["shared/c.mjs"], created: ago(1), egm: "approved" });
+  assert.deepEqual(plan(r, "new-q").held, [], "pending EGM, older than 48 h, and caller∩caller give no priority");
+  ticket(r, "old-q", { scope: ["n.mjs"], created: ago(5), egm: "approved" });
+  assert.deepEqual(plan(r, "new-q").held.map((h) => h.waiting_on), [["old-q"]]);
+  ticket(r, "work-new", { scope: ["n.mjs"], created: ago(1), stage: "working" });
+  assert.deepEqual(plan(r, "work-new").held, [], "a ticket already working is not held behind a queued one");
+  fs.rmSync(path.join(r, ".opencode", "board", "tickets", "work-new.json"));
+  ticket(r, "sess-new", { scope: ["n.mjs"], created: ago(1), session: "s-9" });
+  assert.deepEqual(plan(r, "sess-new").held, [], "a queued ticket already dispatched to a session is not held behind a queued one");
+  fs.rmSync(path.join(r, ".opencode", "board", "tickets", "sess-new.json"));
+  ticket(r, "sess-old", { scope: ["m.mjs"], created: ago(5), egm: "approved", session: "s-8" });
+  ticket(r, "m-new", { scope: ["m.mjs"], created: ago(1), egm: "approved" });
+  assert.deepEqual(plan(r, "m-new").held[0], { id: "m-new", waiting_on: ["sess-old"], in_flight: ["sess-old: both edit m.mjs"] }, "a dispatched older ticket holds as in flight, not twice as queued_first");
+  fs.rmSync(path.join(r, ".opencode", "board", "tickets", "sess-old.json"));
+  const adapter = path.join(r, ".opencode", "board", "adapter.json");
+  fs.writeFileSync(adapter, JSON.stringify({ base: "main", gates: [["true"]], queue_priority_hours: 0 }));
+  assert.deepEqual(plan(r, "new-q").held, [], "window 0 disables priority");
+  fs.writeFileSync(adapter, JSON.stringify({ base: "main", gates: [["true"]], queue_priority_hours: 100 }));
+  assert.deepEqual(plan(r, "new-q").held[0].waiting_on.sort(), ["old-q", "stale-q"], "a wider window keeps the 49 h ticket");
+  fs.writeFileSync(adapter, JSON.stringify({ base: "main", gates: [["true"]], queue_priority_hours: "x" }));
+  assert.equal(run(r, "plan", "new-q").status, 2);
 });
 
 test("--help prints the header and exits 0", () => {
