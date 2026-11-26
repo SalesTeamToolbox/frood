@@ -9,8 +9,14 @@ import os from "node:os";
 import path from "node:path";
 
 const HOUR = 3600_000;
-/** Pool-health key of the headless Claude Code runner (oc-worker --agent cc-worker). */
+/** Pool-health key of the headless Claude Code writer (oc-worker --agent cc-worker). */
 export const CC_POOL = "cc-worker";
+/** Every headless Claude Code agent (cc-worker, cc-worker-strong, cc-critic, cc-senior, ...) is keyed by its agent
+ *  name, and every such key starts with this prefix. They share one Claude subscription, so they are one GROUP:
+ *  isDown on any cc-* key is true while any cc-* key is down, markGroupDown writes the same mark under every
+ *  known cc key, and markUp on a cc key clears every cc-* key (an answer proves the subscription is back). */
+export const CC_PREFIX = "cc-";
+export const isCcPool = (key) => typeof key === "string" && key.startsWith(CC_PREFIX);
 const CC_WINDOW_MS = 5 * HOUR;
 
 /** Milliseconds until the reset a Claude limit message names, or null. Forms: "limit reached|<epoch seconds>",
@@ -72,11 +78,11 @@ export function classify(errors = [], model = null) {
   if (/output.?token.?limit|output.?limit|truncat|output.?exceeded/i.test(text)) {
     return { reason: "dropped", ms: 10 * 60_000 };
   }
-  // Claude Code (cc-worker) limits. The pool key is "cc-worker" (no provider prefix). A subscription usage limit
+  // Claude Code (cc-*) limits. The pool key is the cc agent name, e.g. "cc-worker" (no provider prefix). A subscription usage limit
   // holds the pool down until the 5-hour window resets: the reset time when the text names one, else now + 5 h.
   // A plain 429 / rate_limit_error recovers in minutes, so it is a short "rate-limit". "overloaded" falls through
   // to the provider-error branch below.
-  const isCc = model === CC_POOL || /Claude AI usage limit|5-hour limit|hit your limit/i.test(text);
+  const isCc = isCcPool(model) || /Claude AI usage limit|5-hour limit|hit your limit/i.test(text);
   if (isCc && /usage limit|limit reached|hit your limit|5-hour limit|weekly limit|limit.{0,40}resets?/i.test(text)) {
     return { reason: "quota", ms: Math.min(Math.max(ccResetMs(text) ?? CC_WINDOW_MS, 60_000), 7 * 24 * HOUR), scope: "model" };
   }
@@ -142,12 +148,24 @@ export function markDown(model, { reason, ms, detail = "", scope = "model" }, no
   writeHealth(h);
 }
 
+/** markDown for a group: the same mark under every key in `keys` (one read, one write). The cc group uses it. */
+export function markGroupDown(keys, { reason, ms, detail = "" }, now = Date.now()) {
+  const list = [...new Set((keys || []).filter(Boolean))];
+  if (!list.length) return;
+  const h = readHealth();
+  const mark = { reason, since: new Date(now).toISOString(), until: new Date(now + ms).toISOString(), detail: String(detail).slice(0, 200) };
+  for (const k of list) h[k] = { ...mark };
+  writeHealth(h);
+}
+
 // A model that just answered proves its provider is reachable, so a provider-wide mark (`go/*`, set from a
 // monthly/plan quota) goes too. Without this, renewing a plan left the whole provider skipped until the old
 // retry-after ran out (Go, 2026-11-21 -> 11-26: five days of no Go after the subscription was live again).
 export function markUp(model) {
   const h = readHealth();
-  const keys = [model, providerOf(model) ? `${providerOf(model)}/*` : null].filter((k) => k && h[k]);
+  const keys = isCcPool(model)
+    ? Object.keys(h).filter(isCcPool) // one Claude subscription: an answer clears the whole cc group
+    : [model, providerOf(model) ? `${providerOf(model)}/*` : null].filter((k) => k && h[k]);
   if (keys.length) {
     for (const k of keys) delete h[k];
     writeHealth(h);
@@ -161,6 +179,12 @@ export function isDown(model, now = Date.now()) {
   for (const key of [model, `${providerOf(model)}/*`]) {
     const e = h[key];
     if (e && Date.parse(e.until) > now) return { ...e, key };
+  }
+  // The cc group: any live cc-* mark holds every cc agent down (one Claude subscription).
+  if (isCcPool(model)) {
+    for (const [key, e] of Object.entries(h)) {
+      if (isCcPool(key) && e && Date.parse(e.until) > now) return { ...e, key };
+    }
   }
   return null;
 }

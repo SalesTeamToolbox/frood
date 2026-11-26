@@ -94,21 +94,36 @@
 //   slots are released, the receipt is written with exit "killed" (errors: "killed by <SIGNAL>"), the stream run-done is
 //   appended, and oc-worker exits 143 / 130 / 129. A second signal during cleanup is ignored. While still waiting for a
 //   slot nothing is held, so the signal just ends the process (no receipt).
-// - --agent cc-worker: the backend is headless Claude Code, not OpenCode. It runs `claude` (ORCH_CLAUDE_BIN, else `claude` on
-//   PATH) with cwd=<dir>: `-p <prompt> --model sonnet --tools Read,Grep,Glob,Edit,Write,Bash --strict-mcp-config
-//   --permission-mode acceptEdits --allowedTools Bash --permission-prompts none --output-format stream-json --verbose
-//   --settings {"disableAllHooks":true}`, plus `--resume <id>` for --session and the automatic resume. Hook-free: the owner's
+// - --agent cc-worker | cc-worker-strong | cc-critic | cc-senior (any key of `cc.models`): the backend is headless
+//   Claude Code, not OpenCode. The cc agents are the keys of `cc.models` in usage-limits.json merged over the default
+//   {"cc-worker":"sonnet","cc-worker-strong":"opus","cc-critic":"opus","cc-senior":"fable"} (only "cc-" keys count);
+//   the receipt model is cc.models[agent] (or --model on the first hop), never empty. cc-senior runs `opus` instead
+//   while the launch's one pace read says `fable.state: "over"` (a detached child inherits that bit). It runs `claude`
+//   (ORCH_CLAUDE_BIN, else `claude` on PATH) with cwd=<dir>. Writers (cc-worker, cc-worker-strong): `-p <prompt>
+//   --model <m> --settings {"disableAllHooks":true} --tools Read,Grep,Glob,Edit,Write,Bash --strict-mcp-config
+//   --permission-mode acceptEdits --allowedTools Bash --permission-prompts none --output-format stream-json --verbose`.
+//   Readers (cc-critic, cc-senior: a cc agent matching READONLY_AGENT_RE): `--tools Read,Grep,Glob,Bash
+//   --strict-mcp-config --allowedTools Bash --disallowedTools Edit,Write,NotebookEdit` in place of the writer tool
+//   flags, and no acceptEdits; they get the read-only guard (scratch footer, tamper and worktree check,
+//   readonly_violation) and the verdict gate like an OpenCode critic. Plus `--resume <id>` for --session and the
+//   automatic resume. Hook-free: the owner's
 //   Stop hooks (an asyncRewake peer-mail wake, the repo's learning hooks) would keep a finished run alive and dirty the
 //   worktree; the child env also gets PEER_WAKE_MAX_MIN=0 (overriding any inherited value) as a backstop. Never `--bare`
-//   (it refuses the OAuth subscription login). The receipt model is `sonnet` (or --model); session, final text, tokens and
+//   (it refuses the OAuth subscription login). Session, final text, tokens and
 //   cost come from the stream-json `session_id` / `result` events; with no `result` event (timeout, kill) tokens are the
 //   sum of the `assistant` events' message.usage, each message id counted once. Timeout, idle, BelowNormal, the proc-tree
 //   sweep, signals, --stream, --out and --report behave as for an OpenCode agent. A Claude usage/rate limit is classified
-//   quota / rate-limit, so --fallback moves on, and `cc-worker` is marked down in pool-health until the 5-hour reset (the
-//   reset time in the message, else now + 5 h). At most `cc.max_workers` (usage-limits.json, default 1) cc-worker runs
-//   at once machine-wide, via the lock dirs `provider-cc-<i>`; a waiting run waits (ORCH_CC_POLL_MS, default 3000) and
-//   never fails. cc-worker is not in any CHAINS role: name it with --agent (or see pace-aware routing below).
-// - Detached runs (detachRun): a cc-worker run (or any run with --detach) survives its launcher. The launching oc-worker
+//   quota / rate-limit, so --fallback moves on. Pool health keys a cc agent by its name; the cc agents are ONE group
+//   (one subscription): a limit on any of them marks every cc.models key down with the same reset (the 5-hour reset in
+//   the message, else now + 5 h), any live cc-* mark holds every cc agent down, and an answer clears the group.
+//   Slots: at most `cc.max_workers` (usage-limits.json, default 1) cc writers at once machine-wide (lock dirs
+//   `provider-cc-<i>`; a waiting writer waits and never fails), and at most `cc.max_readers` (default 1) cc readers
+//   (`provider-ccread-<i>`); the two caps are independent. A reader also takes the machine worker slot as every run
+//   does. A reader that waited `cc.reader_wait_min` (default 10) minutes for `ccread` gives up: the chain skips to
+//   the next agent without using an attempt, the hop's reason is `cc-slot-timeout: ...`, and the final receipt
+//   carries it in a `notes` array (errors, too, when no agent ran). Polling: ORCH_CC_POLL_MS, default 3000. The cc
+//   agents are not in any CHAINS role: name them with --agent (or see pace-aware routing below).
+// - Detached runs (detachRun): a cc agent run (or any run with --detach) survives its launcher. The launching oc-worker
 //   re-spawns itself (same argv, env marker ORCH_DETACHED_CHILD=1) in a new session and process group (POSIX setsid),
 //   stdin ignored, the child's stderr to <out>.detached.log and its stdout to <out>.detached.out (<out> is the --out path,
 //   or its default beside the prompt). The launcher prints `oc-worker: detached run pid <n>, log <path>` on stderr, waits,
@@ -140,7 +155,7 @@ import { createRequire } from "node:module";
 import { gate } from "./verdict-gate.mjs";
 import { watch, processStart } from "./proc-tree.mjs";
 import { diff, homeDir } from "./install.mjs";
-import { agentModel, classify, isDown, isPolicyFree, markDown, markUp, modelAllowed, policyReason, providerOf, hasRestrictivePolicy, readHealth, CC_POOL } from "./pool-health.mjs";
+import { agentModel, classify, isDown, isPolicyFree, markDown, markGroupDown, markUp, modelAllowed, policyReason, providerOf, hasRestrictivePolicy, readHealth, isCcPool } from "./pool-health.mjs";
 import crypto from "node:crypto";
 import { appendEvent, atomicWrite, streamsDir } from "./handoff.mjs";
 import { workerOutcome } from "./outcome.mjs";
@@ -159,7 +174,9 @@ Run constraints (from the orchestrator):
 - Your final message is saved verbatim for the orchestrator. Make its first line the status line your role defines
   (RESULT: ... for workers, VERDICT: ... for critics).`;
 
-export const READONLY_AGENT_RE = /^(critic|senior|scout|explorer)(-|$)/;
+export const READONLY_AGENT_RE = /^(cc-)?(critic|senior|scout|explorer)(-|$)/;
+// Agents the verdict gate judges (OpenCode critic/senior and their headless Claude twins).
+export const VERDICT_AGENT_RE = /^(cc-)?(critic|senior)/;
 
 // Static list of known vision-capable models (must match router-health.mjs VISION_CAPABLE_MODELS)
 const VISION_CAPABLE_MODELS = new Set([
@@ -450,8 +467,49 @@ export function opencodeBin() {
   return { cmd: "opencode", shell: false };
 }
 
-// The headless Claude Code runner: --agent cc-worker. ORCH_CLAUDE_BIN overrides the binary (tests: a fake .mjs).
-export const isCcAgent = (agent) => agent === CC_POOL;
+// usage.mjs loadLimits(), imported once and lazily: usage.mjs pulls in node:sqlite, which an old Node build cannot
+// load; then every limit below reads as its default. The file is re-read at every call, so an edit takes effect.
+let loadLimitsFn = null;
+try {
+  ({ loadLimits: loadLimitsFn } = await import("./usage.mjs"));
+} catch {}
+const ccLimit = (key) => {
+  try {
+    const l = loadLimitsFn ? loadLimitsFn() : null;
+    return l?.cc?.[key] ?? l?.[`cc.${key}`];
+  } catch {
+    return undefined;
+  }
+};
+
+// The headless Claude Code agents and their models. `cc.models` in usage-limits.json is merged over the default;
+// only keys starting "cc-" and non-empty string values count (the pool group and the read-only rule key on "cc-").
+export const CC_MODELS_DEFAULT = Object.freeze({ "cc-worker": "sonnet", "cc-worker-strong": "opus", "cc-critic": "opus", "cc-senior": "fable" });
+export function ccModels() {
+  const merged = { ...CC_MODELS_DEFAULT };
+  const m = ccLimit("models");
+  if (m && typeof m === "object" && !Array.isArray(m)) {
+    for (const [k, v] of Object.entries(m)) if (isCcPool(k) && typeof v === "string" && v.trim()) merged[k] = v.trim();
+  }
+  return merged;
+}
+// ORCH_CLAUDE_BIN overrides the binary (tests: a fake .mjs).
+export const isCcAgent = (agent) => typeof agent === "string" && Object.hasOwn(ccModels(), agent);
+// A cc reader (cc-critic, cc-senior, any configured read-only cc-* agent): read-only tools, the `ccread` slot.
+export const isCcReader = (agent) => isCcAgent(agent) && READONLY_AGENT_RE.test(agent);
+// The machine-wide provider slot of a cc agent: writers share `cc`, readers share `ccread` (not `cc-read`:
+// providerHeld/providerHolders match the `provider-cc-` prefix, so `cc-read` dirs would count as writer slots).
+export const ccSlotKey = (agent) => (isCcReader(agent) ? "ccread" : "cc");
+// The model a cc agent runs: cc.models[agent]; cc-senior runs opus instead while the pace says fable is over.
+export function ccModelFor(agent, { fableOver = false } = {}) {
+  if (agent === "cc-senior" && fableOver) return "opus";
+  return ccModels()[agent] || "sonnet";
+}
+// --tools and permission flags: writers keep cc-worker's argv; readers get no Edit/Write and no acceptEdits.
+export function ccToolArgs(agent) {
+  if (isCcReader(agent)) return ["--tools", "Read,Grep,Glob,Bash", "--strict-mcp-config", "--allowedTools", "Bash", "--disallowedTools", "Edit,Write,NotebookEdit"];
+  return ["--tools", "Read,Grep,Glob,Edit,Write,Bash", "--strict-mcp-config", "--permission-mode", "acceptEdits", "--allowedTools", "Bash"];
+}
 export const CC_SETTINGS = JSON.stringify({ disableAllHooks: true });
 export function claudeBin() {
   const env = process.env.ORCH_CLAUDE_BIN;
@@ -459,24 +517,21 @@ export function claudeBin() {
   return { cmd: env || "claude", shell: false };
 }
 
-// `cc.max_workers` from usage-limits.json via usage.mjs loadLimits(): a positive integer, else 1. Imported lazily:
-// usage.mjs pulls in node:sqlite, which an old Node build cannot load; that case also reads as 1.
+// `cc.<key>` from usage-limits.json (e.g. max_workers, max_readers): a positive integer, else `dflt`.
 // Returns a synchronous cap reader (acquireProviderSlot asks it at every poll, so an edited file takes effect).
-export async function ccCapReader() {
-  let loadLimits = null;
-  try {
-    ({ loadLimits } = await import("./usage.mjs"));
-  } catch {}
+export function capReader(key, dflt = 1) {
   return () => {
-    try {
-      const l = loadLimits();
-      const n = Number(l?.cc?.max_workers ?? l?.["cc.max_workers"]);
-      return Number.isInteger(n) && n >= 1 ? n : 1;
-    } catch {
-      return 1;
-    }
+    const n = Number(ccLimit(key));
+    return Number.isInteger(n) && n >= 1 ? n : dflt;
   };
 }
+// `cc.reader_wait_min` (default 10): how long a cc reader waits for `ccread` before its chain moves on.
+export function ccReaderWaitMin() {
+  const n = Number(ccLimit("reader_wait_min"));
+  return Number.isFinite(n) && n > 0 ? n : 10;
+}
+// A cc reader gave up waiting for its `ccread` slot: runChain skips to the next agent (no attempt used).
+export class CcSlotTimeout extends Error {}
 
 function alive(pid) {
   try {
@@ -1128,7 +1183,7 @@ function streamPreflight(a) {
   // Queue-time snapshot of the slot decision (fresh sample, clearSince: null) — not the admission outcome.
   const slotsNow = Date.now();
   const slotsReason = allowedSlots(readSample(), a.slotCfg, { clearSince: null }, slotsNow).reason;
-  const ev = { key: `run:${run}:queued`, kind: "queued", run, out, pid: process.pid, pid_start: processStart(process.pid), agent: a.agent, ticket: path.join(path.dirname(out), "ticket.json"), slots: slotsReason + (isNvidiaModel(a.model || agentModel(a.agent)) ? `; nvidia ${providerHeld("nvidia")}/${nvidiaCapNow(slotDir()).cap}` : "") + (isCcAgent(a.agent) ? `; cc ${providerHeld("cc")}` : "") };
+  const ev = { key: `run:${run}:queued`, kind: "queued", run, out, pid: process.pid, pid_start: processStart(process.pid), agent: a.agent, ticket: path.join(path.dirname(out), "ticket.json"), slots: slotsReason + (isNvidiaModel(a.model || agentModel(a.agent)) ? `; nvidia ${providerHeld("nvidia")}/${nvidiaCapNow(slotDir()).cap}` : "") + (isCcAgent(a.agent) ? `; ${ccSlotKey(a.agent)} ${providerHeld(ccSlotKey(a.agent))}` : "") };
   let added;
   try {
     added = appendEvent(stream, ev);
@@ -1156,7 +1211,7 @@ function streamEvent(a, ev) {
   }
 }
 
-// Filter chain for vision-capable agents when --vision is set. cc-worker (headless Claude Sonnet) counts as
+// Filter chain for vision-capable agents when --vision is set. A cc agent (headless Claude) counts as
 // vision-capable: it reads image files with its Read tool, so it is never filtered out.
 export function filterVisionChain(chain, a) {
   if (!a.vision) return { chain, fallback: false };
@@ -1210,14 +1265,15 @@ async function runChain(a) {
   let attempts = 0;
   let visionFallbackWarning = false;
   let liveModels; // `opencode models`, read once and only if some hop has a model to check
+  const notes = []; // receipt `notes`: chain events that are not errors of the run that answered (cc-slot-timeout)
   for (let i = 0; i < chain.length && attempts < 3; i++) {
     const agent = chain[i];
     // The first hop reuses `a` (its --session, --model) only when it is the agent `a` books: after the vision
     // filter dropped a.agent, chain[0] is another agent and runs fresh, with its own pinned model.
     const first = i === 0 && agent === a.agent;
     const cc = isCcAgent(agent);
-    const model = cc ? ((first && a.model) || "sonnet") : (first && a.model) || agentModel(agent);
-    const poolKey = cc ? CC_POOL : model; // pool-health key: the cc runner is one pool whatever --model says
+    const model = cc ? ((first && a.model) || ccModelFor(agent, a)) : (first && a.model) || agentModel(agent);
+    const poolKey = cc ? agent : model; // pool-health key: a cc agent is keyed by its name whatever --model says
     if (model && !modelAllowed(model)) {
       hops.push({ agent, model, skipped: true, reason: policyReason(model) });
       continue;
@@ -1237,18 +1293,29 @@ async function runChain(a) {
     }
     attempts++;
     // a new pool means a new session; a resumed session belongs to the first pool only
-    r = await runWorker(first ? a : { ...a, agent, session: undefined, model: undefined });
+    try {
+      r = await runWorker(first ? a : { ...a, agent, session: undefined, model: undefined });
+    } catch (e) {
+      if (!(e instanceof CcSlotTimeout)) throw e;
+      attempts--; // nothing was spawned; r keeps the previous hop's result, if any
+      hops.push({ agent, model, skipped: true, reason: e.message });
+      notes.push(e.message);
+      continue;
+    }
     attempts += (r.attempts ?? 1) - 1; // cap 3 counts spawns: a resumed run used more than one
     if (r.exit === "killed") break; // the owner stopped this run: no fallback hop, no pool-health change
     const anyCls = classify(r.classifyErrors ?? r.errors, poolKey);
     // A pool that died mid-run (output already produced) is still down for the next run.
-    if (anyCls && r.first_line) markDown(poolKey, { ...anyCls, detail: r.errors[0] || "" });
+    // A cc usage / rate limit is the subscription's: every cc.models key goes down with the same reset. Any other
+    // cc failure (dropped, provider-error) marks only this agent's key.
+    const markPool = (c) => (cc && (c.reason === "quota" || c.reason === "rate-limit") ? markGroupDown(Object.keys(ccModels()), { ...c, detail: r.errors[0] || "" }) : markDown(poolKey, { ...c, detail: r.errors[0] || "" }));
+    if (anyCls && r.first_line) markPool(anyCls);
     const cls = !r.first_line ? anyCls : null;
     if (!cls) {
       if (r.first_line && !anyCls) markUp(poolKey);
       break;
     }
-    markDown(poolKey, { ...cls, detail: r.errors[0] || "" });
+    markPool(cls);
     if (i === chain.length - 1) break; // nothing left to move to: this failure is the result
     hops.push({ agent, model, session: r.session, error: (r.errors[0] || "").slice(0, 200) });
   }
@@ -1264,6 +1331,7 @@ async function runChain(a) {
     r = { agent: a.agent, model: a.model || agentModel(a.agent) || "(agent default)", session: null, exit: "no-healthy-pool", seconds: 0, tokens: null, cost: 0, first_line: "", verdict: null, out: null, partial: false, errors: noPoolErrors(hops), status: 6 };
   }
   if (hops.length) r.repooled_from = hops;
+  if (notes.length) r.notes = notes;
   r.cc_pace = a.ccPace ?? ccPaceRecord(null); // the launch's one pace read (main block), on every receipt
   if (visionFallbackWarning) r.vision_fallback = "no vision-capable agent available, using first healthy agent";
   // Record auto-vision detection info
@@ -1291,6 +1359,7 @@ function noPoolErrors(hops) {
     : absent.length === hops.length ? "absent from opencode models"
     : "absent from opencode models or known-down (pool-health)";
   const errors = [`every agent in the chain is ${why}`];
+  for (const h of hops) if (/^cc-slot-timeout/.test(h.reason || "")) errors.push(h.reason);
   if (absent.length) errors.push(`absent from opencode models: ${absent.join(", ")}`);
   return errors;
 }
@@ -1310,11 +1379,11 @@ export async function runWorker(a) {
   if (!fs.existsSync(dir)) throw new Error(`--dir does not exist: ${dir}`);
   // The model the receipt records is the one that actually runs: --model, else the agent's pinned model. The
   // board reads this to decide whether a review was paid (a receipt no longer says "(agent default)").
-  const wanted = isCcAgent(a.agent) ? (a.model || "sonnet") : a.model || agentModel(a.agent);
+  const wanted = isCcAgent(a.agent) ? (a.model || ccModelFor(a.agent, a)) : a.model || agentModel(a.agent);
   if (!wanted && hasRestrictivePolicy()) return unresolvableReceipt(a); // policy cannot be checked without a model
   if (wanted && !modelAllowed(wanted)) return notAllowedReceipt(a, wanted); // before a slot is taken or opencode started
   const isCc = isCcAgent(a.agent);
-  const model = isCc ? (a.model || "sonnet") : wanted || "(agent default)";
+  const model = isCc ? wanted : wanted || "(agent default)";
   const bin = isCc ? claudeBin() : opencodeBin();
   const title = a.title || `orch ${a.agent} ${path.basename(dir)}`;
   // A message that starts with "-" (YAML front-matter) would be parsed by `opencode run` as a flag.
@@ -1353,14 +1422,25 @@ export async function runWorker(a) {
       });
       queuedMs += providerSlot.waitedSince != null ? Date.now() - providerSlot.waitedSince : 0;
     }
-    // cc-worker: at most cc.max_workers headless Claude runs machine-wide; a waiting run waits and never fails.
+    // cc writers: at most cc.max_workers headless Claude runs machine-wide (slot `cc`); a waiting writer waits and
+    // never fails. cc readers: at most cc.max_readers (slot `ccread`); a reader that waited cc.reader_wait_min gives up
+    // (CcSlotTimeout) and runChain moves to the next agent.
     if (isCc) {
-      providerSlot = await acquireProviderSlot("cc", await ccCapReader(), {
-        pollMs: Number(process.env.ORCH_CC_POLL_MS) || 3000,
-        pid: process.pid,
-        agent: a.agent, title, out,
-        onWait: announceWait,
-      });
+      const reader = isCcReader(a.agent);
+      const waitMin = reader ? ccReaderWaitMin() : null;
+      const deadline = reader ? Date.now() + waitMin * 60000 : Infinity;
+      try {
+        providerSlot = await acquireProviderSlot(ccSlotKey(a.agent), reader ? capReader("max_readers", 1) : capReader("max_workers", 1), {
+          pollMs: Number(process.env.ORCH_CC_POLL_MS) || 3000,
+          deadline,
+          pid: process.pid,
+          agent: a.agent, title, out,
+          onWait: announceWait,
+        });
+      } catch (e) {
+        if (reader && Date.now() > deadline) throw new CcSlotTimeout(`cc-slot-timeout: ${a.agent} waited ${waitMin} min for a ccread slot`);
+        throw e;
+      }
       queuedMs += providerSlot.waitedSince != null ? Date.now() - providerSlot.waitedSince : 0;
     }
     const slotResult = await acquireSlot(a.slotCfg, { pollMs: 3000, pid: process.pid, agent: a.agent, title, out, onWait: announceWait });
@@ -1457,7 +1537,8 @@ export async function runWorker(a) {
     if (isCc) {
       // The prompt comes right after -p: --tools and --allowedTools are variadic and would swallow a later positional.
       // --settings disableAllHooks: the owner's Stop hooks must not keep a finished run alive or dirty the worktree.
-      const cc = ["-p", safe(message), "--model", model, "--settings", CC_SETTINGS, "--tools", "Read,Grep,Glob,Edit,Write,Bash", "--strict-mcp-config", "--permission-mode", "acceptEdits", "--allowedTools", "Bash", "--permission-prompts", "none", "--output-format", "stream-json", "--verbose"];
+      // Writers keep cc-worker's argv byte-for-byte; readers swap the tool/permission flags (ccToolArgs).
+      const cc = ["-p", safe(message), "--model", model, "--settings", CC_SETTINGS, ...ccToolArgs(a.agent), "--permission-prompts", "none", "--output-format", "stream-json", "--verbose"];
       if (session) cc.push("--resume", session);
       return cc;
     }
@@ -1764,7 +1845,7 @@ export async function runWorker(a) {
     }
     errors.push(...guardErrors);
     const readonlyViolation = tampered.length > 0 || worktreeChanged !== null;
-    let gateResult = /^(critic|senior)/.test(a.agent) && sum.final
+    let gateResult = VERDICT_AGENT_RE.test(a.agent) && sum.final
       ? gate(sum.final, { free: /-free$/.test(a.agent) || /^opencode\/.*-free$/.test(a.model || "") || isPolicyFree(a.model || agentModel(a.agent) || "") })
       : null;
     if (readonlyViolation && gateResult) gateResult = { ...gateResult, effective: "INVALID", reasons: [...gateResult.reasons, "readonly_violation"] };
@@ -1985,7 +2066,7 @@ export function paceDecision(text) {
     const d = JSON.parse(text);
     if (!d || typeof d !== "object" || !d.cc_pace || typeof d.cc_pace !== "object") return null;
     const chain = Array.isArray(d.chain) && d.chain.every((x) => typeof x === "string") ? d.chain : null;
-    return { cc_pace: ccPaceRecord(d.cc_pace, d.cc_pace.prepended === true), chain };
+    return { cc_pace: ccPaceRecord(d.cc_pace, d.cc_pace.prepended === true), chain, ...(d.fable_over === true ? { fable_over: true } : {}) };
   } catch {
     return null;
   }
@@ -2007,7 +2088,7 @@ export function detachRun(a, argv) {
   const errFd = fs.openSync(log, "w");
   const outFd = fs.openSync(stdoutFile, "w");
   // The pace decision travels to the child (ORCH_PACE_DECISION): one read, one chain, one receipt value.
-  const decision = a.ccPace ? { ORCH_PACE_DECISION: JSON.stringify({ cc_pace: a.ccPace, chain: a.role ? [a.agent, ...(a.fallback || [])] : null }) } : {};
+  const decision = a.ccPace ? { ORCH_PACE_DECISION: JSON.stringify({ cc_pace: a.ccPace, chain: a.role ? [a.agent, ...(a.fallback || [])] : null, ...(a.fableOver ? { fable_over: true } : {}) }) } : {};
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv], { detached: true, stdio: ["ignore", outFd, errFd], env: { ...process.env, ORCH_DETACHED_CHILD: "1", ...decision }, windowsHide: true });
   fs.closeSync(errFd);
   fs.closeSync(outFd);
@@ -2065,6 +2146,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.exit(2);
   }
   a.ccPace = inherited ? inherited.cc_pace : ccPaceRecord(pace(), a.pacePrepended === true);
+  // cc-senior runs opus while fable is over pace: from the same single read (a detached child inherits it).
+  a.fableOver = inherited ? inherited.fable_over === true : pace()?.fable?.state === "over";
   // Resolve the fixed/dynamic slot decision once at startup; a usage error exits 2.
   let slotCfg;
   try {
