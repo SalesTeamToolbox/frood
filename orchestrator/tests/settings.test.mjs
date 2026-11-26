@@ -177,6 +177,7 @@ test("list prints the effective settings as JSON", () => {
       archive_nested_sessions: true,
       auto_next_module: true,
       auto_push: true,
+      fresh_successor: true,
     });
   });
 });
@@ -196,7 +197,7 @@ test("set creates the parent directory when it is missing", () => {
   });
 });
 
-for (const key of ["auto_next_module", "auto_push"]) {
+for (const key of ["auto_next_module", "auto_push", "fresh_successor"]) {
   test(`${key}: default true with no settings file`, () => {
     withHome((h) => {
       const r = cli(["get", key], h);

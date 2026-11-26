@@ -140,6 +140,32 @@ fails; never block on it.
    `handoff.mjs write --next`. At the owner's next message, start each carded module or ticket: call `dismiss_task`
    on its card first, then `start_session`, unless the dismiss result says the card was already started. Never
    start anything twice.
+
+   **Fresh successor (default on).** In a session without `parentSessionId`, run
+   `node {{ORCH_REPO}}/bin/settings.mjs get fresh_successor`. When it prints `true` and either (a) the stream is
+   finished (**DONE**) and the follow-on work is a new plan or version, or (b) this session's own context is long
+   (several modules done in this one session — "one session per module"), this session hands off to a fresh
+   top-level session instead of nesting one (this takes precedence over Auto-start). In order:
+   1. Write the handoff: the plan file's `## Handoff` and `handoff.mjs write … --release`. For (a), also the
+      follow-on plan file and its stream (`/frood-ticket` when nothing exists yet).
+   2. Start the successor with `start_session`: `initiation: "user_asked"`, `context: "fresh"`, a `title`, a `name`,
+      `prompt` beginning `/frood-next <stream>` (or `/frood-orchestrator <plan>` for a plan not yet discussed), and
+      a complete `background` (≥80 chars: goal, plan path, handoff, what landed). Do NOT add the "report to the
+      parent session" line: the successor talks to the owner directly.
+   3. Immediately call `detach_session` on the returned `local_…` id. The successor is then top-level: not nested,
+      not archived with this session, and it owns the train and pushes (`auto_next_module`, `auto_push`).
+   4. Tell the owner in one line that this session can now be closed, and offer to archive it. Archive it only on
+      the owner's yes; a session never archives itself without it.
+   **Desktop limit** applies here too: on a turn started by an automated event (`<side-sessions-event>` etc.) the
+   app refuses `start_session`. Propose the successor as an `own_initiative` card and record "proposed as card
+   <task_id>" in the `## Handoff` and `handoff.mjs write --next`. When the owner says go or clicks it, start it
+   (`dismiss_task` first, unless the dismiss result says it was already started) and call `detach_session` on it as
+   soon as its id is known — including when the owner clicked the card. Never start it twice. If `detach_session`
+   is not available or fails, say so in one line: the successor stays nested, and this session must stay open (not
+   archived) until it finishes. Where `start_session` is not available (terminal `claude`), the successor is a
+   **Fresh tab** with first message `/frood-next <stream>`.
+   When `fresh_successor` prints `false`, or neither (a) nor (b) holds, use Auto-start or the options below as
+   before.
    - **Start the next module in a nested session (Recommended)** — this session calls `start_session` with
      `initiation: "user_asked"`, `context: "fresh"`, `title: "<Module>: <plain outcome>"` (under 60 chars, readable
      by a stranger), `name: <stream or ticket slug, ≤24 chars, [a-z0-9-]>`, `prompt` beginning `/frood-next <stream>`
@@ -156,7 +182,9 @@ fails; never block on it.
    - **Continue in this session (Recommended for a streamed ticket)** — its context is Mandates, verdicts and
      receipts, not dumps, and this session is the one the desk wakes, so it reports the merge itself.
    - **Fresh tab** — new tab, first message `/frood-next <stream>`; the old tab keeps its history. The escape hatch
-     when the context is genuinely heavy; the handoff waits 72 h for it either way.
+     when the context is genuinely heavy; the handoff waits 72 h for it either way. This is the OpenCode form of
+     the fresh successor: recommend it (list it first) when the stream is DONE with follow-on work or this
+     session's context is long, and say the old tab can then be closed.
    - **Stop here** — the handoff waits (72 h) for a later `/frood-next`.
    <!-- /oc-only -->
 
@@ -382,6 +410,21 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
   - a nested session never pushes.
   To turn it off: `node {{ORCH_REPO}}/bin/settings.mjs set auto_push false`. To turn off auto-start:
   `node {{ORCH_REPO}}/bin/settings.mjs set auto_next_module false`.
+- **Fresh successor for long sessions (default on).** When a top-level session finishes a stream (DONE) with
+  follow-on work, or its own context is long (several modules in one session), it does not keep going or nest:
+<!-- cc-only -->
+  it writes the handoff, starts a fresh successor (`start_session`, `context: "fresh"`, prompt
+  `/frood-next <stream>`), calls `detach_session` on it at once so it is top-level, and tells the owner this session
+  can be closed (archive only on the owner's yes). On an automated-event turn it proposes the successor as a card,
+  then starts and detaches it on the owner's go; if detaching fails, this session stays open until the successor
+  finishes. Details: module boundary item 4, **Fresh successor**. A nested session never starts a successor
+  (one-level rule): it reports to its parent, and the parent decides.
+<!-- /cc-only -->
+<!-- oc-only -->
+  it writes the handoff and recommends a **Fresh tab** with first message `/frood-next <stream>`; the old tab can
+  then be closed.
+<!-- /oc-only -->
+  To turn it off: `node {{ORCH_REPO}}/bin/settings.mjs set fresh_successor false`.
 - **Live progress — one spinner per live run (every ticket, both harnesses).** Chat
   text cannot spin; the native spinner is the todo list (Claude Code: `TodoWrite`,
   OpenCode: `todowrite`) — it must ALWAYS have exactly one `in_progress`, and that

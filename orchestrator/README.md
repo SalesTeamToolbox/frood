@@ -240,6 +240,22 @@ OC commands now install to `~/.config/opencode/commands/`; the legacy singular `
   are unchanged ("no live session", "Resolve in new session" → `/frood-next <stream>`). Escalations whose board
   ticket is `closed` or `shipped` are no longer reported as open (a missing ticket stays open).
 
+## Fresh successor sessions
+
+A long session gets slower and costlier every turn, because it re-reads its whole context. So when a top-level
+orchestrator session finishes a stream (DONE) and the follow-on work is a new plan or version, or when it has done
+several modules in one session, it hands off to a fresh session instead of carrying on:
+
+- It writes the handoff (plan file `## Handoff` and the stream handoff), then starts a fresh top-level successor
+  whose first message is `/frood-next <stream>`, and tells you the old session can be closed.
+- In the desktop app the successor is detached at once, so it is not nested and is not archived with the old
+  session. On a turn started by an automated event the app cannot start sessions; you get a card instead, and the
+  successor starts (and is detached) when you click it or say go.
+- In OpenCode (and terminal `claude`) the successor is a fresh tab whose first message is `/frood-next <stream>`.
+- A nested session never starts a successor; it reports to its parent.
+
+Turn it off with `node bin/settings.mjs set fresh_successor false`.
+
 ## Worktree fence
 
 Workers must not write outside their own worktree. `bin/oc-worker.mjs` enforces this with the `bin/worktree-fence.mjs`

@@ -92,7 +92,9 @@ The tab title is set by the `orchestrator-handoff.js` hook to `[<stream>] <repo>
    writes the handoff, reports in one line, and stops — it does not start the next module (the parent does, without
    asking the owner, when `auto_next_module` is on). Its
    final report names the merged commit sha(s) of its module, so the parent can check them before archiving. If the
-   owner talks to this session directly and tells it to go on, it continues in place.
+   owner talks to this session directly and tells it to go on, it continues in place. A nested session never starts
+   a fresh successor itself; if a top-level `/frood-next` session finishes a stream, the frood-orchestrator
+   **Fresh successor** rule applies.
 
    **A nested session reports to its parent, never to the owner.** The parent is the owner's only thread: it relays
    status and carries every question and approval both ways. So in a nested session:
