@@ -443,7 +443,7 @@ handler: orchestrator/bin/oc-worker.mjs (HEAD captured at run start; `landed` re
 decides: a timeout/stalled receipt whose HEAD moved, tree is clean, and --report says DONE is treated as done, so the desk dispatches the critic instead of resume-worker and board round accepts findings
 
 ### oc-worker: visible slot waits, earlier nudges, hung tool calls
-handler: orchestrator/bin/oc-worker.mjs (acquireSlot + acquireProviderSlot stderr wait lines naming holders; registry `state: "queued"`; receipt `queued_s`; `--idle-min`/`--resume` defaults 6/3 for `*-nvidia` agents; hung-tool descendant kill + nudge)
+handler: orchestrator/bin/oc-worker.mjs (acquireSlot + acquireProviderSlot stderr wait lines naming holders; registry `state: "queued"`; receipt `queued_s`; `--idle-min`/`--resume` defaults 6/3 for `*-nvidia` agents; a stall with exactly one live descendant older than the idle window kills that tool child, restarts the clock, and names it in the next nudge)
 decides: worker looks hung / waiting for a slot → oc-worker acquireSlot + idle defaults; Nvidia stalls caught at 6 min and nudged up to 3 times; hung tool child killed instead of opencode
 
 ### frood-learn per-run opencode join

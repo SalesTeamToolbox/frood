@@ -68,12 +68,15 @@
 //   come from the last attempt only; tokens and cost are summed. stderr is always listed in errors but counts as
 //   pool-health evidence only when the run did not finish cleanly (exit 0 with a final message). A stalled run
 //   exits 4 like a timeout.
-// - Hung tool calls: when the stall rule fires and the opencode process tree holds a descendant that has existed
-//   longer than the idle window (a shell tool child: `node --test`, `npm`, …), that descendant is killed first
-//   and the run is nudged with the existing resume message plus one line:
-//   `A tool command ran over <n> min and was stopped: <cmd>`. Opencode itself survives and is nudged on resume.
-//   Only pids from this run's opencode child tree are ever killed — never by name pattern. bin/proc-tree.mjs
-//   read-only helpers list descendants; its sweep rules are unchanged.
+// - Hung tool calls: when the stall rule fires and the opencode process tree holds exactly one live
+//   descendant that has existed longer than the idle window (a shell tool child: `node --test`, `npm`, …),
+//   that descendant is killed and the silence clock restarts — opencode survives and is nudged by the tool
+//   failure. If it stays silent for another idle window, the normal stall path kills opencode and the resume
+//   message carries one extra line: `A tool command ran over <n> min and was stopped: <cmd>`. With more than
+//   one such descendant (a hung tool next to long-lived MCP servers / a pty daemon) the pid cannot be
+//   identified, so the normal stall kill runs instead — a pid is never guessed. Only pids from this run's
+//   opencode child tree are ever killed — never by name pattern. bin/proc-tree.mjs read-only helpers list
+//   descendants; its sweep rules are unchanged.
 // - After every attempt (finished, failed, timeout, stall) the run's leftover descendants are killed (bin/proc-tree.mjs: the
 //   process table is sampled while opencode runs; a child whose parent died is still swept). Receipt orphans_killed
 //   [{pid, cmd}] appears only when something was killed. ORCH_NO_PROCTREE=1 disables.
@@ -1320,22 +1323,22 @@ export async function runWorker(a) {
       else sig.current = { child, hard: null };
       const tree = child.pid ? watch(child.pid, { since: attemptStart, everyMs: Number(process.env.ORCH_PROCTREE_MS) || 5000 }) : null;
       // Find a tracked descendant that has outlived the idle window (a hung tool child: node --test, npm, ...).
-      // Only pids from this run's opencode tree are ever killed — never by name pattern. Among the live
-      // descendants past the window, the youngest is the one most likely to be the current tool call (MCP
-      // servers and other long-lived helpers started with the run are older).
+      // Only pids from this run's opencode tree are ever killed — never by name pattern. Exactly one live
+      // candidate is the hung command; with more than one (a hung tool next to MCP servers / a pty daemon) the
+      // pid cannot be identified and is not guessed — the normal stall kill of opencode runs instead.
       // `t.start` (from ps lstart via toISOString) is wall-clock time, so compare directly against the
       // wall-clock cutoff without skew (proc-tree already applies skew internally for its `since` checks).
       const findHungTool = () => {
         if (!tree) return null;
         const cutoff = Date.now() - idleMin * 60000;
-        let youngest = null;
+        const candidates = [];
         for (const t of tree.tracked()) {
           const start = Date.parse(t.start);
           if (!Number.isFinite(start) || start >= cutoff) continue;
-          if (!alive(t.pid)) continue; // tracked entries stay after death; never target a recycled/dead pid
-          if (!youngest || start > Date.parse(youngest.start)) youngest = t;
+          if (!alive(t.pid)) continue; // tracked entries stay after death; never target a dead/recycled pid
+          candidates.push(t);
         }
-        return youngest;
+        return candidates.length === 1 ? candidates[0] : null;
       };
       let buf = "";
       child.stdout.on("data", (d) => {
@@ -1374,20 +1377,17 @@ export async function runWorker(a) {
         lastTick = Date.now();
         maxSilence = Math.max(maxSilence, Date.now() - lastOut);
         if (idleMin > 0 && !killReason && Date.now() - lastOut > idleMin * 60000) {
-          killReason = "stalled";
           const hung = findHungTool();
           if (hung) {
-            // Kill the hung tool child first; opencode survives and is nudged on resume.
-            // Resolve this attempt so the outer loop can spawn a fresh opencode for the resume.
+            // Kill only the hung tool child; opencode survives and is nudged by the tool failure. Never
+            // resolve while `child` is alive: a second opencode on the same session/worktree is exactly the
+            // bug killed-run-stops-agent fixed. If it stays silent for another idle window, the normal stall
+            // path below kills opencode, and the resume message carries `hungToolChild` into the nudge line.
             hungToolChild = hung;
             try { process.kill(hung.pid, "SIGKILL"); } catch {}
-            clearTimeout(timer);
-            clearInterval(watchdog);
-            if (sig.current?.child === child) { clearTimeout(sig.current.hard); sig.current = null; }
-            if (buf.trim()) lines.push(buf);
-            tree?.stop();
-            resolve({ code: null, lines, stderr, killReason: "stalled", maxSilence, orphans: [], hungToolChild });
+            lastOut = Date.now(); // the tool kill is progress: restart the silence clock
           } else {
+            killReason = "stalled";
             killTree(child);
           }
         }
@@ -1476,10 +1476,11 @@ export async function runWorker(a) {
       const waitMs = resumeReason === "quota" || resumeReason === "rate-limit"
         ? Math.max(plainWaitMs, Number(process.env.ORCH_RATE_LIMIT_WAIT_MS ?? 60_000))
         : plainWaitMs;
-      // A stalled run can be nudged even if it produced no output yet (silent stall); a dropped run needs
-      // output and a session to resume meaningfully.
+      // A stalled run may be nudged before it produced output (silent stall) only if it has a session id:
+      // resuming without one would start a fresh agent whose whole prompt is "Continue…" — it never saw the
+      // Mandate. A dropped run also needs output. No session id => no resume (the run fails as stalled).
       const canResumeSilent = r.killReason === "stalled";
-      if (sig.name || !interrupted || (!sum.all.trim() && !canResumeSilent) || (!sum.session && !canResumeSilent) || resumed.length >= resumeMax || Date.now() + waitMs >= effectiveDeadline) break;
+      if (sig.name || !interrupted || (!sum.all.trim() && !canResumeSilent) || !sum.session || resumed.length >= resumeMax || Date.now() + waitMs >= effectiveDeadline) break;
       const why = r.killReason === "stalled" ? `no output for ${idleMin} min` : (classifyErrors.find((e) => classify([e])?.reason === resumeReason) || errors[0] || "dropped").slice(0, 80);
       resumed.push({ session: sum.session, reason: why, seconds: Math.round((Date.now() - t0) / 1000) });
       if (waitMs > 0) await new Promise((res) => { const t = setTimeout(res, waitMs); sig.wake = () => { clearTimeout(t); res(); }; });

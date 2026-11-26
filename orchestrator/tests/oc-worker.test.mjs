@@ -660,7 +660,7 @@ test("non-nvidia agent keeps idle-min 20 / resume 1 defaults (no flags)", () => 
 
 // ---------------------------------------------------------------- worker-liveness: hung tool call
 
-test("hung tool call: stall kills the descendant tool child (not opencode), nudges, run finishes", async () => {
+test("hung tool call: the descendant tool child is killed, opencode survives, then the next stall nudges it", async () => {
   const state = tmp();
   CLEAN.push(state);
   const home = tmp();
@@ -670,32 +670,52 @@ test("hung tool call: stall kills the descendant tool child (not opencode), nudg
   const argsFile = path.join(home, "args.json");
   const out = path.join(home, "out", "worker-r1.md");
   const stderr = [];
-  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", home, "--prompt", prompt, "--out", out, "--slots", "2", "--idle-min", "0.02", "--resume", "1", "--timeout-min", "2", "--grace-min", "0"], {
+  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", home, "--prompt", prompt, "--out", out, "--slots", "2", "--idle-min", "0.02", "--resume", "2", "--timeout-min", "2", "--grace-min", "0"], {
     env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_HOME: home, FAKE_OC_ARGS_FILE: argsFile, ORCH_NO_PROCTREE: "", ORCH_PROCTREE_MS: "300", FAKE_OC_MODE: "hung-tool", FAKE_OC_STATE_DIR: state, ORCH_RESUME_WAIT_MS: "0" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stderr.on("data", (d) => stderr.push(d.toString()));
   const exited = new Promise((res) => child.on("close", (code) => res(code)));
-  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 30000);
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 40000);
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   try {
     const code = await exited;
-    assert.equal(code, 0, "run finishes after hung tool is killed and nudge sent");
+    assert.equal(code, 0, "run finishes after the hung tool is killed and opencode is nudged");
     clearTimeout(hard);
     const receipt = JSON.parse(fs.readFileSync(out + ".receipt.json", "utf8"));
-    // The opencode (fake) pid was never signalled — it finished cleanly
-    assert.equal(receipt.exit, 0, "fake opencode exited cleanly, not killed");
-    // orphans_killed should include the hung tool child pid
+    // The tool child was killed (and named in the receipt)
     const toolPid = Number(fs.readFileSync(path.join(state, "hung-tool-pid"), "utf8"));
     assert.ok(receipt.orphans_killed?.some((o) => o.pid === toolPid), `receipt orphans_killed should include the tool child pid ${toolPid}: ${JSON.stringify(receipt.orphans_killed)}`);
-    // the resume message passed to opencode mentions the stopped tool command
+    // The resume happened and its message names the stopped command
+    assert.ok(receipt.resumed.length >= 1, `expected a nudge, got ${JSON.stringify(receipt.resumed)}`);
     const call = JSON.parse(fs.readFileSync(argsFile, "utf8"));
     const lastMsg = call.argv[call.argv.length - 1];
     assert.ok(/A tool command ran over/.test(lastMsg), "resume message should mention the stopped tool command: " + lastMsg);
+    // Never a second opencode while the first was alive (the killed-run-stops-agent class): the resumed
+    // invocation recorded whether the first pid was still running when it started.
+    assert.equal(fs.readFileSync(path.join(state, "first-alive-at-resume"), "utf8"), "0", "the first opencode must be dead before the resume spawns");
+    // No opencode process survives the run
+    const pid1 = Number(fs.readFileSync(path.join(state, "opencode-pid-1"), "utf8"));
+    const pid2 = Number(fs.readFileSync(path.join(state, "opencode-pid-2"), "utf8"));
+    assert.equal(alive(pid1), false, `first opencode pid ${pid1} must not survive the run`);
+    assert.equal(alive(pid2), false, `resumed opencode pid ${pid2} must not survive the run`);
   } finally {
     clearTimeout(hard);
     if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
   }
 });
+
+test("stall with no session id: never resumes into a fresh agent without the Mandate", () => {
+  const state = tmp();
+  CLEAN.push(state);
+  const r = run({ FAKE_OC_MODE: "silent-no-session", FAKE_OC_STATE_DIR: state, ORCH_RESUME_WAIT_MS: "0" }, "--agent", "critic", "--idle-min", "0.02", "--resume", "3", "--timeout-min", "1", "--grace-min", "0");
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.exit, "stalled", `a stall with no session stays stalled: ${r.stdout}`);
+  assert.equal(receipt.resumed.length, 0, "no resume without a session id");
+  const calls = fs.readFileSync(path.join(state, "calls.jsonl"), "utf8").trim().split("\n");
+  assert.equal(calls.length, 1, "exactly one opencode spawn (no resume without a session)");
+});
+
 
 test("a prompt starting with --- reaches opencode as a message (newline-prefixed), not a flag", () => {
   const dir = tmp();
