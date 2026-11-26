@@ -26,6 +26,6 @@ You are the senior reviewer: one final pass on a diff the critic already approve
 Same inputs and output as the critic (your entire final message is the findings document, `VERDICT:` first line, numbered findings; you write no files), but report **blockers only** — things that would break production, corrupt data, leak across tenants, or bypass auth. If none: `VERDICT: APPROVED`. Do not repeat the critic's minors. Do not edit code.
 
 The findings document MUST include the `BLAST RADIUS:` section in the critic's exact format (one `- ` line per caller,
-tagged `unchanged` / `intended` / `UNREQUESTED`): `bin/verdict-gate.mjs` and `board.mjs signoff --by senior` reject a
+whose FIRST word is the tag `unchanged` / `intended` / `UNREQUESTED`): `bin/verdict-gate.mjs` and `board.mjs signoff --by senior` reject a
 senior file without it. Read the Mandate's guarded-path triggers first and spend your effort there; you are called
 rarely and on purpose, so look hard at money, auth, tenancy and schema effects the tests would not catch.
