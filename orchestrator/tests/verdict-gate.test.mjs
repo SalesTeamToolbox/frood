@@ -126,3 +126,100 @@ test("backtick-wrapped unchanged tag then `: UNREQUESTED none` still passes (sen
   assert.equal(r.overridden, false);
   assert.equal(r.unrequested.length, 0);
 });
+
+// Pass bar 1: the real false positive — a doc whose only blast line is the new-format
+// form of gate-unrequested-tag/findings-r4.md:7 must stay APPROVED.
+test("tag-first intended line quoting UNREQUESTED in its detail stays APPROVED (pass bar 1)", () => {
+  const d = doc("APPROVED", "- intended — orchestrator/bin/board.mjs:928: two-clause lines such as `— unchanged; … — UNREQUESTED: …` override APPROVED again");
+  const r = gate(d);
+  assert.equal(r.effective, "APPROVED");
+  assert.equal(r.overridden, false);
+  assert.equal(r.unrequested.length, 0);
+});
+
+// Pass bar 2: new-format tag-first lines whose detail mentions UNREQUESTED stay APPROVED.
+test("tag-first unchanged/intended lines with UNREQUESTED in the detail do not count (pass bar 2)", () => {
+  const blasts = [
+    "- unchanged — a.py:1 — UNREQUESTED: quoted in prose",
+    "- intended — b.py:2: no UNREQUESTED callers",
+    "- **intended** — c.py:3 (nothing UNREQUESTED)",
+    "- unchanged: d.py:4 — UNREQUESTED",
+    "- intended | e.py:5 — UNREQUESTED",
+  ];
+  for (const blast of blasts) {
+    const r = gate(doc("APPROVED", blast));
+    assert.equal(r.effective, "APPROVED", blast);
+    assert.equal(r.overridden, false, blast);
+    assert.equal(r.unrequested.length, 0, blast);
+  }
+});
+
+// Pass bar 3: new format catches — tag-first UNREQUESTED overrides APPROVED in every form.
+test("tag-first UNREQUESTED line overrides APPROVED: plain, emphasized, backticked, bracketed, colon, lowercase, no separator (pass bar 3)", () => {
+  const blasts = [
+    "- UNREQUESTED — x.py:9: …",
+    "- **UNREQUESTED** — x.py:9: …",
+    "- `UNREQUESTED` — x.py:9",
+    "- [UNREQUESTED] x.py:9",
+    "- UNREQUESTED: x.py:9 …",
+    "- unrequested — x.py:9: …",
+    "- UNREQUESTED x.py:9 changed",
+  ];
+  for (const blast of blasts) {
+    const r = gate(doc("APPROVED", blast));
+    assert.equal(r.effective, "CHANGES_REQUESTED", blast);
+    assert.equal(r.overridden, true, blast);
+    assert.equal(r.unrequested.length, 1, blast);
+  }
+});
+
+// Pass bar 4: every senior-r2/r3 line still CHANGES_REQUESTED in old format, and its
+// tag-first rewrite also CHANGES_REQUESTED; senior-r2.md:34 (INVALID rules … unchanged) does not count.
+const SENIOR_R2 = [
+  "- orchestrator/bin/board.mjs:928 (round verdict from a critic receipt) — UNREQUESTED: a blast line whose tag is UNREQUESTED but has an earlier dash, a colon separator with a dash in the detail, or punctuation after the tag no longer overrides APPROVED; the Mandate expects \"lines whose tag is UNREQUESTED still override APPROVED\"",
+  "- orchestrator/bin/board.mjs:944 (round verdict from a native subagent) — UNREQUESTED: same miss, and this path is always treated as a paid review, so the wrong APPROVED is final for the round",
+  "- orchestrator/bin/board.mjs:1065 (signoff refusal on non-APPROVED) — UNREQUESTED: same miss; signoff no longer refuses a findings file carrying such a line",
+  "- orchestrator/bin/desk.mjs:1324 (desk verdict) — UNREQUESTED: same miss; the desk records APPROVED and moves the ticket on instead of sending it back",
+  "- orchestrator/bin/oc-worker.mjs:1548 (receipt verdict; :1701 on main) — UNREQUESTED: same miss; the receipt's gate result says APPROVED, and board.mjs:928 then reads that receipt",
+];
+const SENIOR_R3 = [
+  "- orchestrator/bin/board.mjs:928 — UNREQUESTED: a two-clause line ending `— UNREQUESTED:` no longer overrides APPROVED at 26d90cc7",
+  "- orchestrator/bin/board.mjs:944 — UNREQUESTED: same miss",
+  "- orchestrator/bin/board.mjs:1065 — UNREQUESTED: same miss",
+  "- orchestrator/bin/desk.mjs:1324 — UNREQUESTED: same miss",
+  "- oc-worker.mjs gate call — UNREQUESTED: same miss",
+];
+test("senior-r2/r3 old-format lines still CHANGES_REQUESTED; tag-first rewrites also CHANGES_REQUESTED; INVALID-rule line does not count (pass bar 4)", () => {
+  for (const blast of [...SENIOR_R2, ...SENIOR_R3]) {
+    const r = gate(doc("APPROVED", blast));
+    assert.equal(r.effective, "CHANGES_REQUESTED", blast);
+    assert.equal(r.overridden, true, blast);
+    assert.equal(r.unrequested.length, 1, blast);
+  }
+  // Tag-first rewrites: - UNREQUESTED — <caller>: <detail>
+  for (const blast of [...SENIOR_R2, ...SENIOR_R3]) {
+    const caller = blast.split(/ — | – |: /, 2)[0];
+    const rewrite = `- UNREQUESTED — ${caller}: rewritten by this ticket`;
+    const r = gate(doc("APPROVED", rewrite));
+    assert.equal(r.effective, "CHANGES_REQUESTED", rewrite);
+    assert.equal(r.overridden, true, rewrite);
+    assert.equal(r.unrequested.length, 1, rewrite);
+  }
+  // senior-r2.md:34 "- INVALID rules … — unchanged" does not count
+  const r = gate(doc("APPROVED", "- INVALID rules (no VERDICT line, no BLAST RADIUS entries) and the blocker/major override — unchanged"));
+  assert.equal(r.effective, "APPROVED");
+  assert.equal(r.overridden, false);
+  assert.equal(r.unrequested.length, 0);
+});
+
+// Pass bar 5: transition (old format) keeps today's answers.
+test("transition: old-format two-clause line and no-separator UNREQUESTED still CHANGES_REQUESTED (pass bar 5)", () => {
+  const d = gate(doc("APPROVED", "- unchanged callers in x.py — UNREQUESTED: y"));
+  assert.equal(d.effective, "CHANGES_REQUESTED");
+  assert.equal(d.overridden, true);
+  assert.equal(d.unrequested.length, 1);
+  const d2 = gate(doc("APPROVED", "- UNREQUESTED change in x.py:9 with no separator"));
+  assert.equal(d2.effective, "CHANGES_REQUESTED");
+  assert.equal(d2.overridden, true);
+  assert.equal(d2.unrequested.length, 1);
+});

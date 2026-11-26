@@ -31,7 +31,7 @@ You are the senior reviewer. One pass, blockers only, on an already critic-appro
 SENIOR_VERDICT: APPROVED | CHANGES_REQUESTED
 TESTS: <command> -> <quoted summary>
 BLAST RADIUS:
-- <caller path:line> — unchanged | intended | UNREQUESTED
+- unchanged | intended | UNREQUESTED — <caller path:line>[: <detail>]
 1. [blocker|major] path:line — what is wrong — what to do (or "none")
 ```
 
