@@ -136,15 +136,18 @@
 //   child, so a Claude Code session that ends its turn no longer kills the run; signal the child pid to stop the run.
 //   --no-detach runs in process (the old behaviour). Windows never detaches. OpenCode agents detach only with --detach.
 // - Pace-aware routing (bin/pace-read.mjs): every launch reads `cc-pace.mjs status --json` once (10 s timeout; any
-//   failure reads as `unknown`, never fails the run; ORCH_NO_PACE=1 → `off`). On an `under` pace, `--role worker`
-//   becomes [cc-worker, <today's chain after the Nvidia drop rule>]; every other state, every other role, --agent /
-//   --fallback launches and any `ses_` `--session` launch (the session pins the backend) keep today's chain. A
-//   `--role worker --session <id>` whose id does not start with `ses_` is a Claude session: the chain becomes
-//   [cc-worker, <today's chain>] so the resume goes to cc-worker, in every pace state, without a pace decision.
+//   failure reads as `unknown`, never fails the run; ORCH_NO_PACE=1 → `off`). PACE_POLICY (pace-read.mjs) maps
+//   worker → cc-worker, worker-strong → cc-worker-strong, critic → cc-critic, senior → cc-senior. On an `under`
+//   pace, `--role <r>` for r in the table becomes [<r's cc agent>, <today's chain after the Nvidia drop rule>],
+//   except senior while Fable is over; scout and orchestrator, every other state, --agent / --fallback launches and
+//   any `--session` launch never pace-prepend. A `--role <r> --session <id>` (r in the table) whose id does not
+//   start with `ses_` is a Claude session: the chain becomes [<r's cc agent>, <today's chain>] so the resume goes
+//   to that cc agent, in every pace state, without a pace decision; a `ses_` id keeps today's chain.
 //   With --vision (or an image Mandate) cc-worker counts as vision-capable; a first hop that is not the agent
 //   `a` books (the vision filter dropped it) runs fresh on its own pinned model. Every receipt
-//   gets cc_pace {state, weekly, projected, at, prepended}. A detached child takes the launcher's read and chain
-//   (env ORCH_PACE_DECISION) and never reads again. ORCH_PACE_BIN overrides the cc-pace.mjs path (tests).
+//   gets cc_pace {state, weekly, projected, at, prepended, role, shadow} (role: the --role, null for --agent). A
+//   detached child takes the launcher's read and chain (env ORCH_PACE_DECISION) and never reads again.
+//   ORCH_PACE_BIN overrides the cc-pace.mjs path (tests).
 // Exit: 0 finished, 3 no final text, 4 timeout, 5 opencode error, 6 every pool in the chain known-down, 7 board
 // attach refused (--ticket), 8 model not allowed by provider policy (`ignored`; unreadable providers.json; model unresolvable while any provider is restricted; `free-only`
 // and not on the allowlist), 10 stale or dirty tree (fresh --stream worker refused before queued/spawn).
@@ -164,7 +167,7 @@ import crypto from "node:crypto";
 import { appendEvent, atomicWrite, streamsDir } from "./handoff.mjs";
 import { workerOutcome } from "./outcome.mjs";
 import { CHAINS, chainFor } from "./chains.mjs";
-import { readPace, paceChain, ccPaceRecord } from "./pace-read.mjs";
+import { readPace, paceChain, ccPaceRecord, PACE_POLICY } from "./pace-read.mjs";
 import { readSample, slotConfig, allowedSlots, decisionLog, heldCount, nvidiaCapNow, recordNvidia429 } from "./slots.mjs";
 import { allowedRoots, findMain, gitStatusZ, parseStatusZ, footer, mergeEditFence, foldEscapes, finalizeEscapes, hasCompletedWrite } from "./worktree-fence.mjs";
 
@@ -349,13 +352,14 @@ export function args(argv, opts = {}) {
     if (chain[0] === "worker-nvidia" && nvidiaDropCount(outDir) >= 2) chain = chain.slice(1);
     if (Array.isArray(opts.chain) && opts.chain.length) {
       chain = [...opts.chain]; // detached child: the launcher's decision, never a second pace read
-    } else if (a.role === "worker" && a.session && !a.session.startsWith("ses_")) {
-      // A non-`ses_` session is a Claude Code session (a cc-worker round): resume it on cc-worker (rule 5, same
+    } else if (Object.hasOwn(PACE_POLICY, a.role) && a.session && !a.session.startsWith("ses_")) {
+      // A non-`ses_` session is a Claude Code session (a cc-* round): resume it on the role's cc agent (rule 5, same
       // agent and session) whatever the pace; fallback hops start fresh OpenCode sessions. Not a pace decision.
-      chain = ["cc-worker", ...chain];
+      const cc = PACE_POLICY[a.role];
+      if (chain[0] !== cc) chain = [cc, ...chain];
     } else if (!a.session && opts.pace !== undefined) {
-      // Pace-aware routing (M4): an `under` pace puts cc-worker first for --role worker. --session pins the
-      // backend (a revision round stays on its agent and session), so it never prepends.
+      // Pace-aware routing (M4, v2 A4): an `under` pace puts the role's cc agent first (PACE_POLICY). --session pins
+      // the backend (a revision round stays on its agent and session), so it never prepends.
       const pace = typeof opts.pace === "function" ? opts.pace() : opts.pace;
       const next = paceChain(a.role, chain, pace);
       if (next.length > chain.length) {
@@ -1344,7 +1348,7 @@ async function runChain(a) {
   }
   if (hops.length) r.repooled_from = hops;
   if (notes.length) r.notes = notes;
-  r.cc_pace = a.ccPace ?? ccPaceRecord(null); // the launch's one pace read (main block), on every receipt
+  r.cc_pace = a.ccPace ?? ccPaceRecord(null, false, a.role ?? null); // the launch's one pace read (main block), on every receipt
   if (visionFallbackWarning) r.vision_fallback = "no vision-capable agent available, using first healthy agent";
   // Record auto-vision detection info
   if (a.autoVision) {
@@ -1892,7 +1896,7 @@ export async function runWorker(a) {
       // Worktree fence: only present when something escaped or was suspected.
       ...(escaped ? { escaped } : {}),
       // Claude Code weekly pace at launch (M4): read once per launch, never fails the run.
-      cc_pace: a.ccPace ?? ccPaceRecord(null),
+      cc_pace: a.ccPace ?? ccPaceRecord(null, false, a.role ?? null),
       // Critics: the mechanical decision, not the critic's own claim (free critics find, then approve).
       gate: gateResult,
       // Vision metadata
@@ -2078,7 +2082,7 @@ export function paceDecision(text) {
     const d = JSON.parse(text);
     if (!d || typeof d !== "object" || !d.cc_pace || typeof d.cc_pace !== "object") return null;
     const chain = Array.isArray(d.chain) && d.chain.every((x) => typeof x === "string") ? d.chain : null;
-    return { cc_pace: ccPaceRecord(d.cc_pace, d.cc_pace.prepended === true), chain, ...(d.fable_over === true ? { fable_over: true } : {}) };
+    return { cc_pace: ccPaceRecord(d.cc_pace, d.cc_pace.prepended === true, d.cc_pace.role), chain, ...(d.fable_over === true ? { fable_over: true } : {}) };
   } catch {
     return null;
   }
@@ -2157,7 +2161,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error(`oc-worker: ${e.message}`);
     process.exit(2);
   }
-  a.ccPace = inherited ? inherited.cc_pace : ccPaceRecord(pace(), a.pacePrepended === true);
+  a.ccPace = inherited ? inherited.cc_pace : ccPaceRecord(pace(), a.pacePrepended === true, a.role ?? null);
   // cc-senior runs opus while fable is over pace: from the same single read (a detached child inherits it).
   a.fableOver = inherited ? inherited.fable_over === true : pace()?.fable?.state === "over";
   // Resolve the fixed/dynamic slot decision once at startup; a usage error exits 2.

@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { READONLY_AGENT_RE, VERDICT_AGENT_RE, ccModels, isCcAgent, isCcReader, ccSlotKey, ccModelFor, ccToolArgs, capReader, paceDecision, gateFree } from "../bin/oc-worker.mjs";
+import { READONLY_AGENT_RE, VERDICT_AGENT_RE, ccModels, isCcAgent, isCcReader, ccSlotKey, ccModelFor, ccToolArgs, capReader, paceDecision, gateFree, args as parseArgs } from "../bin/oc-worker.mjs";
 import { isCcPool } from "../bin/pool-health.mjs";
 import { installFixtureGuard } from "./fixtures/fixture-guard.mjs";
 
@@ -129,7 +129,7 @@ test("cc.models from usage-limits.json merges over the default; capReader reads 
 });
 
 test("paceDecision carries fable_over only when set (the round-trip without it is unchanged)", () => {
-  const cc_pace = { state: "on", weekly: 1, projected: 2, at: "t", prepended: false, shadow: null };
+  const cc_pace = { state: "on", weekly: 1, projected: 2, at: "t", prepended: false, role: null, shadow: null };
   assert.deepEqual(paceDecision(JSON.stringify({ cc_pace, chain: null })), { cc_pace, chain: null });
   assert.deepEqual(paceDecision(JSON.stringify({ cc_pace, chain: null, fable_over: true })), { cc_pace, chain: null, fable_over: true });
 });
@@ -332,4 +332,31 @@ test("a lone cc-critic whose ccread wait times out ends with exit cc-slot-timeou
   assert.equal(saved.exit, "cc-slot-timeout");
   assert.equal(r.argv, null, "claude never started");
   fs.rmSync(held, { recursive: true, force: true });
+});
+
+// ---- cc-pacing-v2 A4: --role <r> --session <Claude id> resumes on r's cc agent, in every pace state ----
+test("A4 --session: --role critic --session <Claude id> → cc-critic first in every pace state, no pace read; ses_ → today", () => {
+  const home = tmp();
+  const prompt = path.join(home, "m.md");
+  fs.writeFileSync(prompt, "Review.");
+  const CLAUDE = "7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f";
+  const CRITIC = ["critic", "critic-go", "critic-nvidia", "critic-free"];
+  const dry = (role, session, pace) => {
+    let reads = 0;
+    const a = parseArgs(["--role", role, "--session", session, "--dir", home, "--prompt", prompt, "--out", path.join(home, "o.md")], { pace: () => (reads++, pace) });
+    return { chain: [a.agent, ...a.fallback], prepended: a.pacePrepended === true, reads };
+  };
+  for (const state of ["under", "on", "over", "unknown", "off"]) {
+    for (const fable of ["ok", "over"]) {
+      const pace = { state, fable: { state: fable } };
+      const r = dry("critic", CLAUDE, pace);
+      assert.deepEqual(r.chain, ["cc-critic", ...CRITIC], `${state}/${fable}`);
+      assert.equal(r.prepended, false);
+      assert.equal(r.reads, 0);
+      assert.deepEqual(dry("critic", "ses_x", pace).chain, CRITIC, `${state}/${fable} ses_`);
+      assert.deepEqual(dry("senior", CLAUDE, pace).chain, ["cc-senior", "senior", "senior-nvidia", "senior-free"], "a Claude session resumes on cc-senior even with Fable over");
+      assert.deepEqual(dry("worker-strong", CLAUDE, pace).chain, ["cc-worker-strong", "worker-strong", "worker-nvidia", "worker-free"]);
+      assert.deepEqual(dry("scout", CLAUDE, pace).chain, ["scout", "worker-nvidia", "critic-nvidia"], "scout is never paced");
+    }
+  }
 });

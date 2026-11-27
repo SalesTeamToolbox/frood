@@ -19,8 +19,11 @@
 // --if-stale N: exit 0 immediately when the last check is younger than N hours.
 // Pace (cc-pacing M4): every run except --decide reads `cc-pace.mjs status --json` once, before the --if-stale
 //   early return, and in text mode prints `pace: <cc-pace status line>` as the first stdout line (both paths).
-//   OVER adds `pace: OVER — conserve: ...` right after it; UNDER changes only the worker line to
-//   `use cc-worker (pace UNDER), fallback <agent>`. --json adds a top-level `pace` key; the stamp never holds it.
+//   OVER adds `pace: OVER — conserve: ...` right after it, then `pace: OVER — critic and senior via oc-worker --role,
+//   not Agent(critic|senior) unless guarded`. UNDER (cc-pacing-v2 A4) changes only the worker, worker-strong, critic
+//   and senior lines to `use cc-<role> (pace UNDER), fallback <agent>` (PACE_POLICY in pace-read.mjs), except when
+//   that cc agent is down in pool-health (isDown) or, for senior, while Fable is over: then the line is today's.
+//   --json adds a top-level `pace` key; the stamp never holds it.
 // --free: prints a FREE INVENTORY section after the role lines (also included in default output)
 // --probe-free: probes every unused, allowed free model (max 12, serial), writes free-inventory.json, never marks down/up
 // Exit: 0 every role has a healthy agent, 1 some role has none, 2 usage error.
@@ -34,7 +37,7 @@ import { agentModel, providerOf, readProviders, SEED_PROVIDERS, classify, isDown
 import { collectUsage, poolHeadroom, loadLimits, LOW_HEADROOM_PCT_DEFAULT } from "./usage.mjs";
 import { opencodeBin } from "./oc-worker.mjs";
 import { CHAINS } from "./chains.mjs";
-import { readPace } from "./pace-read.mjs";
+import { readPace, PACE_POLICY } from "./pace-read.mjs";
 import { statusLine as paceStatusLine } from "./cc-pace.mjs";
 
 // Probing these costs real money per call (a large system prompt on a strong model — Sonnet ~$0.07)
@@ -449,6 +452,21 @@ export async function check({ probeModels = false, probeAll = false, models = un
   return report;
 }
 
+/** The `under` pace prefix of a role line: `cc-<role> (pace UNDER), fallback ` for a PACE_POLICY role whose cc agent
+ *  is not down (pool-health isDown) — senior not while Fable is over; "" otherwise (today's line). */
+export function pacePrefixFor(role, pace, down = isDown) {
+  if (pace?.state !== "under" || !Object.hasOwn(PACE_POLICY, role)) return "";
+  if (role === "senior" && pace.fable?.state === "over") return "";
+  const cc = PACE_POLICY[role];
+  let isOut = false;
+  try {
+    isOut = !!down(cc);
+  } catch {
+    isOut = false;
+  }
+  return isOut ? "" : `${cc} (pace UNDER), fallback `;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const argv = process.argv.slice(2);
   const flag = (k) => argv.includes(k);
@@ -475,7 +493,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const pace = readPace();
   if (!flag("--json")) {
     console.log(`pace: ${paceStatusLine(pace)}`);
-    if (pace.state === "over") console.log("pace: OVER — conserve: no Fable senior unless guarded; scouts haiku");
+    if (pace.state === "over") {
+      console.log("pace: OVER — conserve: no Fable senior unless guarded; scouts haiku");
+      console.log("pace: OVER — critic and senior via oc-worker --role, not Agent(critic|senior) unless guarded");
+    }
   }
   const mf = val("--models-file");
   const live = liveModels(mf);
@@ -506,7 +527,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     for (const [role, r] of Object.entries(report.roles)) {
       const why = r.chain.filter((c) => c.state !== "healthy").map((c) => `${c.agent}: ${c.state}${c.detail ? ` (${c.detail})` : ""}`);
       const visionInfo = r.use ? (r.chain.find(c => c.agent === r.use)?.vision ? " 👁" : "") : "";
-      const pacePrefix = role === "worker" && pace.state === "under" ? "cc-worker (pace UNDER), fallback " : "";
+      const pacePrefix = pacePrefixFor(role, pace);
       console.log(`${role.padEnd(14)} use ${pacePrefix}${r.use || "NONE — no healthy agent in chain"}${visionInfo}${why.length ? `   [skipped ${why.join("; ")}]` : ""}`);
     }
     for (const n of report.notes) console.log(`note: ${n}`);
