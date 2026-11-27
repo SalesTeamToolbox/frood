@@ -1042,6 +1042,31 @@ test("phase 2 case 8: an unresolvable critic model is free (fail closed), a reso
   assert.equal(free.ticket.rounds[2].critic.effective, "APPROVED_FREE");
 });
 
+test("cc-pacing-v2-a3b: a cc-critic receipt is paid whatever its model says; OpenCode free-ness unchanged", () => {
+  // A fresh case per receipt: a ticket holds at most max_rounds (3) rounds, and each lands its own blast file.
+  const firstRound = (id, critic) => {
+    const c = mk();
+    workingTicket(c, id);
+    const sha = landBlastFile(c);
+    const r = round(c, id, { critic: typeof critic === "function" ? critic(c) : critic, reviewed: sha });
+    assert.equal(r.status, 0, r.stderr);
+    return r.ticket.rounds[0].critic;
+  };
+  for (const [name, model, recorded] of [["empty", "", null], ["agent-default", "(agent default)", null], ["opus", "opus", "opus"]]) {
+    const cr = firstRound(`p2-cc-${name}`, (c) => fixtureJson(c, `cc-critic-${name}`, "receipts/critic-unknown.json", { agent: "cc-critic", model }));
+    assert.equal(cr.free, false, `model ${JSON.stringify(model)}`);
+    assert.equal(cr.free_source, "agent:cc-critic");
+    assert.equal(cr.model, recorded);
+    assert.equal(cr.effective, "APPROVED");
+  }
+  const free = firstRound("p2-cc-ocfree", "receipts/critic-free.json");
+  assert.equal(free.free, true, "a *-free OpenCode agent is still free");
+  assert.equal(free.free_source, "agent:critic-free");
+  const unknown = firstRound("p2-cc-ocunknown", "receipts/critic-unknown.json");
+  assert.equal(unknown.free, true, "an unknown OpenCode agent with no model is still free");
+  assert.equal(unknown.free_source, "unknown");
+});
+
 test("phase 2 case 9: a commit after the signoff blocks ready", () => {
   const c = mk();
   workingTicket(c, "p2-head");
@@ -1127,6 +1152,16 @@ test("round: no healthy pool blocks with reason no_pool", () => {
   assert.equal(r.ticket.stage, "blocked");
   assert.equal(r.ticket.blocked.reason, "no_pool");
   assert.equal(r.ticket.rounds.length, 0);
+});
+
+test("cc-pacing-v2-a3b: a lone cc reader's cc-slot-timeout receipt blocks like no-healthy-pool", () => {
+  const c = mk();
+  workingTicket(c, "p2-slot");
+  const w = fixtureJson(c, "worker-slot-timeout", "receipts/worker-no-pool.json", { agent: "cc-critic", exit: "cc-slot-timeout" });
+  const r = round(c, "p2-slot", { worker: w, findings: null, critic: null, reviewed: null });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.ticket.stage, "blocked");
+  assert.equal(r.ticket.blocked.reason, "no_pool");
 });
 
 test("round: timeout and no-output are recorded uncounted; a third in a row blocks for a human", () => {

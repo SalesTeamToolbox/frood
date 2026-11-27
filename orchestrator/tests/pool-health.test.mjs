@@ -407,3 +407,74 @@ test("markUp on a model also clears its provider-wide mark, and leaves other pro
   assert.equal(isDown("zen/b").key, "zen/*", "another provider's mark is untouched");
   delete process.env.ORCH_HOME;
 });
+
+// cc-pacing-v2-a3b: the cc group rule is for subscription limits only, and markUp keeps newer group evidence.
+test("cc group: a dropped / provider-error mark holds down only its own key; quota and rate-limit hold the group", () => {
+  process.env.ORCH_HOME = home();
+  try {
+    markDown("cc-worker", { reason: "dropped", ms: 10 * 60_000 });
+    assert.equal(isDown("cc-worker")?.reason, "dropped", "its own key is down");
+    assert.equal(isDown("cc-critic"), null, "a dropped cc-worker does not hold cc-critic down");
+    markDown("cc-senior", { reason: "provider-error", ms: 15 * 60_000 });
+    assert.equal(isDown("cc-critic"), null, "nor does a provider-error on cc-senior");
+    markDown("cc-worker", { reason: "quota", ms: 60_000 });
+    assert.equal(isDown("cc-critic")?.key, "cc-worker", "a quota mark on cc-worker holds cc-critic down");
+    markUp("cc-worker");
+    markDown("cc-worker", { reason: "rate-limit", ms: 60_000 });
+    assert.equal(isDown("cc-critic")?.reason, "rate-limit", "so does a rate-limit mark");
+  } finally {
+    delete process.env.ORCH_HOME;
+  }
+});
+
+test("markUp(cc, {startedAt}): clears its own key and older group marks, keeps a group mark newer than the run", () => {
+  process.env.ORCH_HOME = home();
+  try {
+    const t0 = Date.now();
+    markDown("cc-critic", { reason: "dropped", ms: 60_000 }, t0 + 5_000); // own key: always cleared, even if newer
+    markDown("cc-worker", { reason: "quota", ms: 3600_000 }, t0 - 60_000); // older than the run: cleared
+    markDown("cc-senior", { reason: "quota", ms: 3600_000 }, t0 + 1_000); // written after the run started: kept
+    markDown("go/x", { reason: "quota", ms: 60_000 });
+    markUp("cc-critic", { startedAt: t0 });
+    const h = readHealth();
+    assert.equal(h["cc-critic"], undefined, "own mark cleared");
+    assert.equal(h["cc-worker"], undefined, "group mark with since < startedAt cleared");
+    assert.equal(h["cc-senior"]?.reason, "quota", "group mark with since > startedAt kept");
+    assert.ok(h["go/x"], "non-cc marks untouched");
+    assert.equal(isDown("cc-critic")?.key, "cc-senior", "the newer quota mark still holds the group down");
+  } finally {
+    delete process.env.ORCH_HOME;
+  }
+});
+
+test("markUp(cc) without startedAt keeps today's behaviour: every cc-* mark goes", () => {
+  process.env.ORCH_HOME = home();
+  try {
+    const later = Date.now() + 60_000;
+    markDown("cc-worker", { reason: "quota", ms: 3600_000 }, later);
+    markDown("cc-senior", { reason: "dropped", ms: 3600_000 }, later);
+    markDown("go/x", { reason: "quota", ms: 60_000 });
+    markUp("cc-critic");
+    const h = readHealth();
+    assert.deepEqual(Object.keys(h).filter((k) => k.startsWith("cc-")), []);
+    assert.ok(h["go/x"]);
+  } finally {
+    delete process.env.ORCH_HOME;
+  }
+});
+
+test("OpenCode markUp / isDown ignore startedAt and the cc group rule", () => {
+  process.env.ORCH_HOME = home();
+  try {
+    const t0 = Date.now();
+    markDown("go/a", { reason: "quota", ms: 60_000, scope: "provider" }, t0 + 5_000);
+    markDown("go/a", { reason: "dropped", ms: 60_000 }, t0 + 5_000);
+    assert.equal(isDown("go/a")?.key, "go/a");
+    assert.equal(isDown("cc-worker"), null, "an OpenCode mark never holds a cc agent down");
+    markUp("go/a", { startedAt: t0 });
+    assert.equal(isDown("go/a"), null, "model and provider marks cleared regardless of since");
+    assert.equal(isDown("go/other"), null);
+  } finally {
+    delete process.env.ORCH_HOME;
+  }
+});

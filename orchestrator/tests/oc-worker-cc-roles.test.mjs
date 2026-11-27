@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { READONLY_AGENT_RE, VERDICT_AGENT_RE, ccModels, isCcAgent, isCcReader, ccSlotKey, ccModelFor, ccToolArgs, capReader, paceDecision } from "../bin/oc-worker.mjs";
+import { READONLY_AGENT_RE, VERDICT_AGENT_RE, ccModels, isCcAgent, isCcReader, ccSlotKey, ccModelFor, ccToolArgs, capReader, paceDecision, gateFree } from "../bin/oc-worker.mjs";
 import { isCcPool } from "../bin/pool-health.mjs";
 import { installFixtureGuard } from "./fixtures/fixture-guard.mjs";
 
@@ -304,4 +304,32 @@ test("pool-health group read-back: any live cc-* mark holds every cc agent down;
   } finally {
     if (prev === undefined) delete process.env.ORCH_HOME; else process.env.ORCH_HOME = prev;
   }
+});
+
+// ---- cc-pacing-v2-a3b ----
+
+test("gateFree: a cc critic is paid explicitly, even with a free-looking model; OpenCode critics unchanged", () => {
+  for (const agent of ["cc-critic", "cc-senior"]) {
+    assert.equal(gateFree({ agent }), false, agent);
+    assert.equal(gateFree({ agent, model: "opus" }), false, agent);
+    assert.equal(gateFree({ agent, model: "opencode/some-model-free" }), false, `${agent}: no model makes a cc agent free`);
+  }
+  assert.equal(gateFree({ agent: "critic-free" }), true, "a *-free OpenCode agent is free");
+  assert.equal(gateFree({ agent: "critic", model: "opencode/some-model-free" }), true, "an opencode/*-free model is free");
+});
+
+test("a lone cc-critic whose ccread wait times out ends with exit cc-slot-timeout (status 6), not no-healthy-pool", () => {
+  const home = tmp();
+  limits(home, { reader_wait_min: 0.01 });
+  const held = path.join(slotsOf(home), "provider-ccread-1");
+  fs.mkdirSync(held, { recursive: true });
+  fs.writeFileSync(path.join(held, "owner"), JSON.stringify({ pid: process.pid, agent: "cc-critic", since: new Date().toISOString() }));
+  const r = runSync(home, "cc-critic", "lone", ["--no-detach"]);
+  assert.equal(r.status, 6, r.stderr);
+  assert.equal(r.receipt.exit, "cc-slot-timeout");
+  assert.equal(r.receipt.model, "opus", "the cc model, not (agent default)");
+  const saved = JSON.parse(fs.readFileSync(r.out + ".receipt.json", "utf8"));
+  assert.equal(saved.exit, "cc-slot-timeout");
+  assert.equal(r.argv, null, "claude never started");
+  fs.rmSync(held, { recursive: true, force: true });
 });

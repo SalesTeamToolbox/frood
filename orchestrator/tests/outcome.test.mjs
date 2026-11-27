@@ -30,3 +30,7 @@ test("workerOutcome: existing outcomes unchanged", () => {
   assert.equal(workerOutcome({ exit: "stalled" }), "timeout");
   assert.equal(workerOutcome({ exit: "timeout" }), "timeout");
 });
+
+test("workerOutcome: a lone cc reader's cc-slot-timeout is no_pool, like no-healthy-pool (cc-pacing-v2-a3b)", () => {
+  assert.equal(workerOutcome({ exit: "cc-slot-timeout" }), "no_pool");
+});

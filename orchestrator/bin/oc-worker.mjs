@@ -115,7 +115,11 @@
 //   sweep, signals, --stream, --out and --report behave as for an OpenCode agent. A Claude usage/rate limit is classified
 //   quota / rate-limit, so --fallback moves on. Pool health keys a cc agent by its name; the cc agents are ONE group
 //   (one subscription): a limit on any of them marks every cc.models key down with the same reset (the 5-hour reset in
-//   the message, else now + 5 h), any live cc-* mark holds every cc agent down, and an answer clears the group.
+//   the message, else now + 5 h), any live cc-* quota / rate-limit mark holds every cc agent down (a dropped /
+//   provider-error mark holds only its own key), and an answer clears the group except marks written after the
+//   answering run started. A lone reader whose only hop was a ccread slot timeout ends with exit "cc-slot-timeout"
+//   (status 6, as no-healthy-pool). Desk and board treat cc-* agents as paid (receipt free-ness and the verdict gate),
+//   and the desk verdicts a cc-critic run-done like a critic's.
 //   Slots: at most `cc.max_workers` (usage-limits.json, default 1) cc writers at once machine-wide (lock dirs
 //   `provider-cc-<i>`; a waiting writer waits and never fails), and at most `cc.max_readers` (default 1) cc readers
 //   (`provider-ccread-<i>`); the two caps are independent. A reader also takes the machine worker slot as every run
@@ -498,6 +502,9 @@ export function ccModels() {
 export const isCcAgent = (agent) => typeof agent === "string" && Object.hasOwn(ccModels(), agent);
 // A cc reader (cc-critic, cc-senior, any configured read-only cc-* agent): read-only tools, the `ccread` slot.
 export const isCcReader = (agent) => isCcAgent(agent) && READONLY_AGENT_RE.test(agent);
+// The verdict gate's free-ness for a run. A cc agent bills the Claude subscription: paid, explicitly (it has no
+// OpenCode pin, so the model lookup alone would only be false by accident).
+export const gateFree = (a) => !isCcAgent(a.agent) && (/-free$/.test(a.agent) || /^opencode\/.*-free$/.test(a.model || "") || isPolicyFree(a.model || agentModel(a.agent) || ""));
 // The machine-wide provider slot of a cc agent: writers share `cc`, readers share `ccread` (not `cc-read`:
 // providerHeld/providerHolders match the `provider-cc-` prefix, so `cc-read` dirs would count as writer slots).
 export const ccSlotKey = (agent) => (isCcReader(agent) ? "ccread" : "cc");
@@ -1294,6 +1301,7 @@ async function runChain(a) {
     }
     attempts++;
     // a new pool means a new session; a resumed session belongs to the first pool only
+    const hopStartedAt = Date.now(); // markUp keeps a cc group mark written after this
     try {
       r = await runWorker(first ? a : { ...a, agent, session: undefined, model: undefined });
     } catch (e) {
@@ -1313,7 +1321,7 @@ async function runChain(a) {
     if (anyCls && r.first_line) markPool(anyCls);
     const cls = !r.first_line ? anyCls : null;
     if (!cls) {
-      if (r.first_line && !anyCls) markUp(poolKey);
+      if (r.first_line && !anyCls) markUp(poolKey, { startedAt: hopStartedAt });
       break;
     }
     markPool(cls);
@@ -1328,8 +1336,11 @@ async function runChain(a) {
     r = notAllowedReceipt(a, m);
   }
   if (!r) {
-    // every pool in the chain is known-down: fail fast, no calls made
-    r = { agent: a.agent, model: a.model || agentModel(a.agent) || "(agent default)", session: null, exit: "no-healthy-pool", seconds: 0, tokens: null, cost: 0, first_line: "", verdict: null, out: null, partial: false, errors: noPoolErrors(hops), status: 6 };
+    // every pool in the chain is known-down: fail fast, no calls made. When every hop was a cc reader that gave up
+    // waiting for its ccread slot (a lone cc-critic with the slot held), the exit names that instead.
+    const slotTimeout = hops.length > 0 && hops.every((h) => /^cc-slot-timeout/.test(h.reason || ""));
+    const m = isCcAgent(a.agent) ? a.model || ccModelFor(a.agent, a) : a.model || agentModel(a.agent);
+    r = { agent: a.agent, model: m || "(agent default)", session: null, exit: slotTimeout ? "cc-slot-timeout" : "no-healthy-pool", seconds: 0, tokens: null, cost: 0, first_line: "", verdict: null, out: null, partial: false, errors: noPoolErrors(hops), status: 6 };
   }
   if (hops.length) r.repooled_from = hops;
   if (notes.length) r.notes = notes;
@@ -1847,7 +1858,7 @@ export async function runWorker(a) {
     errors.push(...guardErrors);
     const readonlyViolation = tampered.length > 0 || worktreeChanged !== null;
     let gateResult = VERDICT_AGENT_RE.test(a.agent) && sum.final
-      ? gate(sum.final, { free: /-free$/.test(a.agent) || /^opencode\/.*-free$/.test(a.model || "") || isPolicyFree(a.model || agentModel(a.agent) || "") })
+      ? gate(sum.final, { free: gateFree(a) })
       : null;
     if (readonlyViolation && gateResult) gateResult = { ...gateResult, effective: "INVALID", reasons: [...gateResult.reasons, "readonly_violation"] };
     const receipt = {

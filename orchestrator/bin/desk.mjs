@@ -1072,6 +1072,12 @@ const baseFindings = (f) => (typeof f === "string" ? f.replace(/-alt\.md$/, ".md
 // A worker run: worker, worker-<pool> or cc-worker (headless Claude Code). Critics are never workers.
 // Same test as oc-worker's own worker-role check.
 const isWorkerAgent = (a) => /^(cc-)?worker/.test(a ?? "");
+// A critic run: critic, critic-<pool> or cc-critic (headless Claude Code). Its run-done is verdicted, never stepped.
+const isCriticAgent = (a) => /^(cc-)?critic/.test(a ?? "");
+// A headless Claude Code agent (cc-worker, cc-worker-strong, cc-critic, cc-senior) bills the Claude subscription.
+const isCcAgent = (a) => /^cc-/.test(a ?? "");
+// The model a cc receipt names, if any ("" and "(agent default)" name none).
+const ccReceiptModel = (raw) => (raw && raw !== "(agent default)" ? raw : null);
 
 function criticReviewedRun(lines, events, slug, findings) {
   for (const l of lines) {
@@ -1253,6 +1259,9 @@ function criticFreeFromReceipt(receiptPath) {
     const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
     const agent = isStr(receipt.agent) ? receipt.agent : "";
     const rawModel = isStr(receipt.model) ? receipt.model : null;
+    // A cc-* agent is paid whatever its receipt says: it has no OpenCode pin, so the model lookup would find nothing
+    // and call it free.
+    if (isCcAgent(agent)) return { free: false, model: ccReceiptModel(rawModel), free_source: `agent:${agent}` };
     const model = resolvedModel(agent, rawModel);
     if (/-free$/.test(agent)) return { free: true, model, free_source: `agent:${agent}` };
     if (!model) return { free: true, model: rawModel, free_source: "unknown" };
@@ -1374,7 +1383,8 @@ function ticketOrProblem(events, stream, run) {
   return { ticket };
 }
 
-// The critic's claim is advice; verdict-gate's gate() is the decision. The CC critic is Sonnet (paid): free: false.
+// The critic's claim is advice; verdict-gate's gate() is the decision. Free-ness comes from the critic's receipt:
+// a cc-* critic (cc-critic, headless Claude Code) is always paid; an OpenCode critic is judged by its model.
 function cmdVerdict(opts) {
   const [stream, run] = opts.args ?? [];
   const findings = opts.findings;
@@ -1580,8 +1590,9 @@ export async function handleEvent(stream, key, by) {
     return { stream, key, line: "", outcome: "error", detail: e.message };
   }
   const ev = events.get(key);
-  // A finished critic run is not stepped (step would ESCALATE agent-critic): it is verdicted, like a session does.
-  if (ev?.kind === "run-done" && (ev.agent ?? "").startsWith("critic")) return await verdictFlow(stream, key, state);
+  // A finished critic run (critic*, cc-critic) is not stepped (step would ESCALATE agent-critic): it is verdicted,
+  // like a session does.
+  if (ev?.kind === "run-done" && isCriticAgent(ev.agent)) return await verdictFlow(stream, key, state);
   const r = sub(["step", stream, key, ...(by ? ["--by", by] : [])]);
   const line = r.out.split(/\r?\n/).filter(Boolean)[0] ?? "";
   if (r.status !== 0 || !line) {
@@ -1955,7 +1966,7 @@ async function sweepVerdicts(opts = {}) {
       continue;
     }
     for (const [k, ev] of events) {
-      if (ev.kind !== "run-done" || !(ev.agent ?? "").startsWith("critic")) continue;
+      if (ev.kind !== "run-done" || !isCriticAgent(ev.agent)) continue;
       const vkey = `verdict:${ev.run}`;
       if (!ev.run || events.has(vkey)) continue;
       await verdictFlow(s.name, k, state);

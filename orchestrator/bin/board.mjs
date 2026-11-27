@@ -384,7 +384,8 @@ function workerStatusLine(r) {
 }
 function workerOutcome(r) {
   if (r.exit === "timeout" || r.exit === "stalled") return r.landed ? "done" : "timeout";
-  if (r.exit === "no-healthy-pool") return "no_pool";
+  // A lone cc reader that gave up waiting for its ccread slot ran nothing either: same outcome as no healthy pool.
+  if (r.exit === "no-healthy-pool" || r.exit === "cc-slot-timeout") return "no_pool";
   // A missing `out` is as good as a null one: no final message was saved.
   if (r.exit === 0 && (r.out === null || r.out === undefined)) return "no_output";
   const line = workerStatusLine(r);
@@ -404,6 +405,12 @@ function resolvedModel(agent, raw) {
 }
 function criticFree(agent, rawModel) {
   const a = isStr(agent) ? agent : "";
+  // A cc-* agent (headless Claude Code) is paid before any lookup: it has no OpenCode pin, so an empty or
+  // "(agent default)" model would resolve to nothing and count as free.
+  if (/^cc-/.test(a)) {
+    const m = isStr(rawModel) && rawModel && rawModel !== "(agent default)" ? rawModel : null;
+    return { free: false, model: m, free_source: `agent:${a}` };
+  }
   const model = resolvedModel(a, isStr(rawModel) ? rawModel : null);
   if (/-free$/.test(a)) return { free: true, model, free_source: `agent:${a}` };
   if (!model) return { free: true, model: isStr(rawModel) ? rawModel : null, free_source: "unknown" };

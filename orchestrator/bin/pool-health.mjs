@@ -12,12 +12,17 @@ const HOUR = 3600_000;
 /** Pool-health key of the headless Claude Code writer (oc-worker --agent cc-worker). */
 export const CC_POOL = "cc-worker";
 /** Every headless Claude Code agent (cc-worker, cc-worker-strong, cc-critic, cc-senior, ...) is keyed by its agent
- *  name, and every such key starts with this prefix. They share one Claude subscription, so they are one GROUP:
- *  isDown on any cc-* key is true while any cc-* key is down, markGroupDown writes the same mark under every
- *  known cc key, and markUp on a cc key clears every cc-* key (an answer proves the subscription is back). */
+ *  name, and every such key starts with this prefix. They share one Claude subscription, so they are one GROUP for
+ *  subscription limits: isDown on a cc-* key is true while its own key is down, or while another cc-* key holds a
+ *  live `quota` / `rate-limit` mark (a `dropped` / `provider-error` mark holds down only its own key);
+ *  markGroupDown writes the same mark under every known cc key; markUp on a cc key clears its own key and the
+ *  other cc-* marks (an answer proves the subscription is back), except, given opts.startedAt, a mark written
+ *  after that run started. */
 export const CC_PREFIX = "cc-";
 export const isCcPool = (key) => typeof key === "string" && key.startsWith(CC_PREFIX);
 const CC_WINDOW_MS = 5 * HOUR;
+/** Mark reasons that are the subscription's, so one cc-* key's mark holds the whole cc group down. */
+const GROUP_REASONS = new Set(["quota", "rate-limit"]);
 
 /** Milliseconds until the reset a Claude limit message names, or null. Forms: "limit reached|<epoch seconds>",
  *  "resets at <ISO>", "resets 3pm" / "resets 3:30 pm" (next such local time). */
@@ -161,10 +166,19 @@ export function markGroupDown(keys, { reason, ms, detail = "" }, now = Date.now(
 // A model that just answered proves its provider is reachable, so a provider-wide mark (`go/*`, set from a
 // monthly/plan quota) goes too. Without this, renewing a plan left the whole provider skipped until the old
 // retry-after ran out (Go, 2026-11-21 -> 11-26: five days of no Go after the subscription was live again).
-export function markUp(model) {
+// opts.startedAt (ms): when the answering run started. For a cc key, another cc-* mark whose `since` is later than
+// that is newer evidence (another run hit the limit while this one was answering) and stays; the key's own mark always
+// goes. Without startedAt every cc-* mark goes (legacy callers). Non-cc keys ignore it.
+export function markUp(model, opts = {}) {
   const h = readHealth();
+  const startedAt = Number.isFinite(opts?.startedAt) ? opts.startedAt : null;
+  const olderThanRun = (e) => {
+    if (startedAt === null) return true;
+    const since = Date.parse(e?.since);
+    return !Number.isFinite(since) || since <= startedAt; // a mark with no readable `since` cannot prove it is newer
+  };
   const keys = isCcPool(model)
-    ? Object.keys(h).filter(isCcPool) // one Claude subscription: an answer clears the whole cc group
+    ? Object.keys(h).filter((k) => isCcPool(k) && (k === model || olderThanRun(h[k]))) // one Claude subscription
     : [model, providerOf(model) ? `${providerOf(model)}/*` : null].filter((k) => k && h[k]);
   if (keys.length) {
     for (const k of keys) delete h[k];
@@ -180,10 +194,11 @@ export function isDown(model, now = Date.now()) {
     const e = h[key];
     if (e && Date.parse(e.until) > now) return { ...e, key };
   }
-  // The cc group: any live cc-* mark holds every cc agent down (one Claude subscription).
+  // The cc group: a live subscription limit (quota / rate-limit) on any cc-* key holds every cc agent down (one
+  // Claude subscription). Any other mark (dropped, provider-error, ...) is that agent's own trouble.
   if (isCcPool(model)) {
     for (const [key, e] of Object.entries(h)) {
-      if (isCcPool(key) && e && Date.parse(e.until) > now) return { ...e, key };
+      if (isCcPool(key) && e && GROUP_REASONS.has(e.reason) && Date.parse(e.until) > now) return { ...e, key };
     }
   }
   return null;
