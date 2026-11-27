@@ -24,7 +24,7 @@ const ALL = {
   "worker-nvidia": "nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b",
   "senior-nvidia": "nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b", "senior-free": "opencode/deepseek-v4.1-flash-free",
   "orchestrator-nvidia": "nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b", "orchestrator-free": "opencode/deepseek-v4.1-flash-free",
-  critic: "opencode-go/claude-haiku-5-5", "critic-go": "opencode-go/deepseek-v4.1-flash", "critic-nvidia": "nvidia/minimaxai/minimax-m3.1-flash", "critic-free": "opencode/minimax-m3.1-flash-free",
+  critic: "opencode-go/deepseek-v4.1-flash", "critic-go": "opencode-go/glm-5.3-flash", "critic-nvidia": "nvidia/minimaxai/minimax-m3.1-flash", "critic-free": "opencode/minimax-m3.1-flash-free",
   scout: "opencode/mimo-v2.6-flash-free", senior: "opencode-go/deepseek-v4-pro", orchestrator: "opencode-go/muse-spark-1.3-contributor",
 };
 function run(h, models, ...args) {
@@ -47,13 +47,13 @@ test("all models live: every role uses its first agent, exit 0", () => {
 
 test("a pinned model vanishing from opencode models self-corrects to the next agent and is remembered", () => {
   const h = home(ALL);
-  const live = Object.values(ALL).filter((m) => m !== "opencode-go/claude-haiku-5-5");
+  const live = Object.values(ALL).filter((m) => m !== "opencode-go/deepseek-v4.1-flash");
   const r = run(h, live);
   assert.match(r.stdout, /^critic\s+use critic-go\s+\[skipped critic: down \(unavailable until/m);
   assert.match(r.stdout, /^worker\s+use worker-nvidia/m);
   assert.equal(r.status, 0);
   const health = JSON.parse(fs.readFileSync(path.join(h, ".config", "orchestrator", "pool-health.json"), "utf8"));
-  assert.equal(health["opencode-go/claude-haiku-5-5"].reason, "unavailable");
+  assert.equal(health["opencode-go/deepseek-v4.1-flash"].reason, "unavailable");
 });
 
 test("Go gone: the orchestrator self-corrects to the Nvidia agent, and no chain names a CommandCode agent", () => {
@@ -648,4 +648,15 @@ test("a quota re-test that fails for another reason is one probe-failed row, and
   assert.match(workerLine, /worker: probe-failed/);
   assert.ok(probes.filter((a) => ALL[a]?.startsWith("opencode-go/")).length > 1, `re-tested past the flaky one: ${probes.join(",")}`);
   assert.equal(JSON.parse(fs.readFileSync(healthPath, "utf8"))["opencode-go/*"].reason, "quota", "mark kept: nothing proved it wrong");
+});
+
+// ── go-pacing G1: no Claude through Go ──────────────────────────────────────
+test("a Claude-via-Go model shows as blocked by policy in the free inventory; other Go models do not", () => {
+  const h = home({ ...FREE_AGENTS, critic: "opencode-go/claude-haiku-5-5" });
+  writeProviders(h, { "opencode-go": { decision: "free-only", allow: ["mimo-*"], at: new Date().toISOString(), note: "test" } });
+  const models = [...FREE_MODELS, "opencode-go/mimo-v2.6-flash", "opencode-go/claude-haiku-5-5"];
+  const r = runFree(h, models, "--free");
+  assert.match(r.stdout, /^opencode-go\/claude-haiku-5-5  blocked \(policy: claude via go\)$/m, r.stdout);
+  assert.doesNotMatch(r.stdout, /^opencode-go\/mimo-v2\.6-flash  blocked/m, r.stdout);
+  assert.match(r.stdout, /^opencode-go\/mimo-v2\.6-flash  (in-chain|unused)/m, r.stdout);
 });

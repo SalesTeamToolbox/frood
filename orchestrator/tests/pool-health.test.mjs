@@ -478,3 +478,72 @@ test("OpenCode markUp / isDown ignore startedAt and the cc group rule", () => {
     delete process.env.ORCH_HOME;
   }
 });
+
+// ── go-pacing G1: no Claude through Go ──────────────────────────────────────
+test("isClaudeViaGo matches opencode-go/claude* and *anthropic*, nothing else", async () => {
+  const { isClaudeViaGo } = await import("../bin/pool-health.mjs");
+  for (const m of ["opencode-go/claude-haiku-5-5", "opencode-go/claude-opus-4-8", "opencode-go/Anthropic-x", "opencode-go/deepseek/anthropic-bridge", "opencode-go/CLAUDE-haiku"]) assert.equal(isClaudeViaGo(m), true, m);
+  for (const m of ["opencode-go/deepseek-v4.1-flash", "opencode-go/mimo-v2.6-flash", "commandcode/claude-haiku-5-5", "opencode/claude-haiku-5-5-free", "nvidia/anthropic-x", "haiku", "opus", null, undefined, 7, "claude-haiku", "opencode-go"]) assert.equal(isClaudeViaGo(m), false, String(m));
+});
+
+test("modelAllowed refuses Claude through Go before any providers.json lookup; other Go models unchanged", async () => {
+  const { modelAllowed, policyReason } = await import("../bin/pool-health.mjs");
+  process.env.ORCH_HOME = policyHome({ "opencode-go": { decision: "routed" } });
+  try {
+    assert.equal(modelAllowed("opencode-go/claude-haiku-5-5"), false, "routed does not re-allow it");
+    assert.equal(policyReason("opencode-go/claude-haiku-5-5"), "policy: claude via go");
+    assert.equal(modelAllowed("opencode-go/deepseek-v4.1-flash"), true);
+    assert.equal(policyReason("opencode-go/deepseek-v4.1-flash"), null);
+    assert.equal(modelAllowed("commandcode/claude-haiku-5-5"), true, "CommandCode Claude is not Go");
+  } finally {
+    delete process.env.ORCH_HOME;
+  }
+  process.env.ORCH_HOME = home(); // no providers.json at all (ENOENT)
+  try {
+    assert.equal(modelAllowed("opencode-go/claude-haiku-5-5"), false);
+    assert.equal(policyReason("opencode-go/claude-haiku-5-5"), "policy: claude via go");
+    assert.equal(modelAllowed("opencode-go/deepseek-v4.1-flash"), true, "no policy means allowed");
+  } finally {
+    delete process.env.ORCH_HOME;
+  }
+});
+
+test("oc-worker: an agent pinned to a Claude-via-Go model exits 8 naming the reason, without starting opencode", () => {
+  const h = home();
+  fs.writeFileSync(path.join(h, ".config", "opencode", "agents", "critic.md"), "---\ndescription: x\nmode: subagent\nmodel: opencode-go/claude-haiku-5-5\n---\nbody\n");
+  const argsFile = path.join(h, "args.json");
+  const r = run(h, { FAKE_OC_ARGS_FILE: argsFile });
+  assert.equal(r.status, 8, r.stdout + r.stderr);
+  assert.match(JSON.parse(r.stdout.trim()).errors[0], /model opencode-go\/claude-haiku-5-5 not allowed: provider opencode-go is claude via go/);
+  assert.ok(!fs.existsSync(argsFile), "opencode must not be invoked");
+});
+
+test("oc-worker: a Claude-via-Go agent in a chain is a policy hop and the next agent runs", () => {
+  const h = home();
+  fs.writeFileSync(path.join(h, ".config", "opencode", "agents", "critic.md"), "---\ndescription: x\nmode: subagent\nmodel: opencode-go/claude-haiku-5-5\n---\nbody\n");
+  const r = run(h, {}, "--fallback", "critic-alt,critic-free");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const rec = JSON.parse(r.stdout.trim());
+  assert.equal(rec.agent, "critic-alt");
+  assert.deepEqual(rec.repooled_from[0], { agent: "critic", model: "opencode-go/claude-haiku-5-5", skipped: true, reason: "policy: claude via go" });
+});
+
+test("check-routing flags an installed agent pinned to a Claude-via-Go model", async () => {
+  const { checkRouting } = await import("../bin/check-routing.mjs");
+  process.env.ORCH_HOME = policyHome({}, { "critic-alt": "opencode-go/claude-haiku-5-5" });
+  try {
+    const { problems } = checkRouting({ root: fs.mkdtempSync(path.join(os.tmpdir(), "orch-cr-")), models: null });
+    assert.ok(problems.some((p) => /critic-alt\.md.*Claude model through OpenCode Go `opencode-go\/claude-haiku-5-5`/.test(p)), problems.join("\n"));
+  } finally {
+    delete process.env.ORCH_HOME;
+  }
+});
+
+test("classify: the Go weekly-limit text is a provider-scoped quota until the named reset", () => {
+  const resetAt = new Date(Date.now() + 2 * 24 * 3600_000).toISOString();
+  const body = JSON.stringify({ type: "provider.quota", message: `You've reached your weekly usage limit for your plan. Your limit resets at ${resetAt}. Please wait a while and try again.`, status: 429 });
+  const c = classify([body]);
+  assert.equal(c.reason, "quota");
+  assert.equal(c.scope, "provider");
+  assert.ok(Math.abs(c.ms - (Date.parse(resetAt) - Date.now())) < 60_000, `uses the named reset, got ${c.ms} ms`);
+});

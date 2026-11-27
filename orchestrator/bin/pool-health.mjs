@@ -1,6 +1,11 @@
 // Pool health: remember which models are down (quota, unavailable) so runs route around them
 // instead of re-discovering the outage every call. Shared by oc-worker and router-health.
 //
+// Owner rule (2026-11-26): never spend the OpenCode Go allowance on a Claude model — Claude Code
+// covers Claude on its own subscription. `isClaudeViaGo` / `modelAllowed` / `policyReason` enforce
+// it: `opencode-go/claude*` and `opencode-go/*anthropic*` are refused before any providers.json
+// lookup, so no owner decision can re-allow them.
+//
 // File: ~/.config/orchestrator/pool-health.json  { "<provider/model>": { reason, until, since, detail } }
 // An entry is "down" while now < until. Entries expire on their own; nothing has to clear them.
 import "./no-window.mjs"; // hide console windows of every child process (Windows)
@@ -264,11 +269,29 @@ export function providerPolicy(model) {
 const DENY = ["*-image*", "*-tts*", "*live*", "*-audio*", "*embedding*"];
 
 /**
- * False for: an unreadable providers.json (every model, fail closed), an `ignored` provider, or a `free-only`
- * provider when the model matches no allow glob or matches a built-in deny glob.
+ * True for a Claude model routed through OpenCode Go (`opencode-go/claude*`,
+ * `opencode-go/*anthropic*`, case-insensitive). The owner (2026-11-26) forbids
+ * spending the Go allowance on Claude: Claude Code covers those on its own
+ * subscription. Checked before any providers.json lookup, so no owner
+ * decision can re-allow such a model.
+ */
+export function isClaudeViaGo(model) {
+  if (typeof model !== "string") return false;
+  const cut = model.indexOf("/");
+  if (cut === -1) return false;
+  if (model.slice(0, cut).toLowerCase() !== "opencode-go") return false;
+  const rest = model.slice(cut + 1).toLowerCase();
+  return rest.startsWith("claude") || rest.startsWith("anthropic") || rest.includes("anthropic");
+}
+
+/**
+ * False for: a Claude model through OpenCode Go (owner rule, before any providers.json
+ * lookup), an unreadable providers.json (every model, fail closed), an `ignored` provider,
+ * or a `free-only` provider when the model matches no allow glob or matches a built-in deny glob.
  */
 export function modelAllowed(model) {
   if (!model) return true;
+  if (isClaudeViaGo(model)) return false;
   if (!readProviders().ok) return false;
   const pol = providerPolicy(model);
   if (!pol) return true;
@@ -285,6 +308,7 @@ export function modelAllowed(model) {
 
 /** Why a model is not allowed (for receipts), or null. */
 export function policyReason(model) {
+  if (isClaudeViaGo(model)) return "policy: claude via go";
   if (modelAllowed(model)) return null;
   if (!readProviders().ok) return "policy: providers.json unreadable";
   return `policy: ${providerPolicy(model).decision}`;

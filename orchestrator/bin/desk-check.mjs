@@ -10,8 +10,9 @@
 //   live owner); 2 usage or IO failure. Paging = stdout page text + `notify-send` (best effort;
 //   skipped when ORCH_NO_NOTIFY=1, which tests set). The trigger never takes the lock and never
 //   decides anything: opening a /frood-desk (or starting the daemon) is the human's job.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import fs from "node:fs";
 import path from "node:path";
 import { listStreams } from "./handoff.mjs";
 import { statusRows, watchInfo } from "./desk.mjs";
@@ -19,6 +20,8 @@ import { readService, syncAllStreamTitles } from "./session-title.mjs";
 import { importStatusline } from "./cc-usage.mjs";
 import { adviseTick } from "./cc-pace.mjs";
 import { scan as ledgerScan } from "./cc-ledger.mjs";
+import { weekBounds, periodBounds, goConfig } from "./go-pace.mjs";
+import { loadLimits, orchDir } from "./usage.mjs";
 import { measure, level, readState, writeState, shouldRunNotify, notifyNow, notifyParts } from "./session-pressure.mjs";
 
 function notify(text) {
@@ -44,6 +47,69 @@ export function ledgerTick(deps = {}) {
     return run({ budgetMs: LEDGER_BUDGET_MS });
   } catch {
     return null;
+  }
+}
+
+/**
+ * One Go reset-probe tick (go-pacing G1). A Go quota mark can outlive the provider's reset by
+ * days: while it is down every Go agent is skipped, so nothing answers to clear it. On the first
+ * tick after a Go weekly (Monday 00:00 UTC) or period reset, run `router-health --probe` once —
+ * the probe already re-tests quota marks, and a Go success clears the provider mark via markUp.
+ *
+ * `deps = {now, limits, statePath, run}`; defaults: now = Date.now(), limits = usage
+ * `loadLimits()`, statePath = `<orchDir()>/go-reset-probe.json`, run = spawn a detached
+ * `router-health --probe` (stdio ignored, unref'd: the tick never waits for it; the probe's own
+ * per-model 90 s timeouts bound it). `boundary` = max of `weekBounds(now).start` and, when
+ * `goConfig(limits).period_anchor` is set, `periodBounds(anchor, now).start`.
+ *
+ * State file `{last_reset_probe: ISO}`. Missing/unreadable state writes the boundary and does
+ * NOT run (a first install never probes). Else, when the recorded probe predates the boundary,
+ * the new boundary is written first (atomic: temp + rename) and `run()` is called once; any
+ * other tick does nothing. Every failure returns `{ran: false}` silently — the tick never
+ * changes desk-check output or exit codes.
+ */
+export function goResetProbeTick(deps = {}) {
+  try {
+    const now = deps.now ?? Date.now();
+    const limits = deps.limits ?? loadLimits();
+    const statePath = deps.statePath ?? path.join(orchDir(), "go-reset-probe.json");
+    const run = deps.run ?? (() => {
+      const bin = path.join(path.dirname(fileURLToPath(import.meta.url)), "router-health.mjs");
+      spawn(process.execPath, [bin, "--probe"], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+    });
+    const wb = weekBounds(now);
+    if (!wb) return { ran: false };
+    let boundary = wb.start;
+    const anchor = goConfig(limits).period_anchor;
+    if (anchor) {
+      const pb = periodBounds(anchor, now);
+      if (pb) boundary = Math.max(boundary, pb.start);
+    }
+    let last = NaN;
+    try {
+      const prev = JSON.parse(fs.readFileSync(statePath, "utf8"));
+      if (prev && typeof prev.last_reset_probe === "string") last = Date.parse(prev.last_reset_probe);
+    } catch {
+      last = NaN; // missing/unreadable state: record the boundary, never probe on it
+    }
+    const writeBoundary = () => {
+      fs.mkdirSync(path.dirname(statePath), { recursive: true });
+      const tmp = `${statePath}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify({ last_reset_probe: new Date(boundary).toISOString() }) + "\n");
+      fs.renameSync(tmp, statePath);
+    };
+    if (!Number.isFinite(last)) {
+      writeBoundary();
+      return { ran: false, boundary };
+    }
+    if (last < boundary) {
+      writeBoundary();
+      run();
+      return { ran: true, boundary };
+    }
+    return { ran: false, boundary };
+  } catch {
+    return { ran: false };
   }
 }
 
@@ -86,6 +152,9 @@ export async function main(argv) {
     try { adviseTick(); } catch {}
     // Claude transcript ledger: one capped incremental scan per tick; silent, never changes output or exit code.
     try { ledgerTick(); } catch {}
+    // Go reset probe: one detached `router-health --probe` on the first tick after a Go
+    // weekly/period reset; silent, never changes output or exit code.
+    try { goResetProbeTick(); } catch {}
     const r = check();
     let code = r.code;
     if (r.code === 1) {

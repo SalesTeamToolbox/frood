@@ -122,3 +122,45 @@ test("an unknown ID under a provider that is still configured stays a problem", 
   assert.equal(r.problems.length, 1);
   assert.match(r.problems[0], /unknown model ID `opencode-go\/typo`/);
 });
+
+test("Claude through Go is rejected in an agent, a rule and a command fixture even when the model is live", () => {
+  const live = new Set([...MODELS, "opencode-go/claude-haiku-5-5", "opencode-go/Anthropic-x"]);
+  const r = checkRouting({
+    root: fixture({
+      "agents/w.md": "model: opencode-go/claude-haiku-5-5  # oc-only",
+      "rules/02-x.md": "use `opencode-go/claude-haiku-5-5` here",
+      "commands/w.md": "run opencode-go/Anthropic-x now",
+    }),
+    extra: [],
+    models: live,
+  });
+  const claude = r.problems.filter((p) => /Claude model through OpenCode Go/.test(p));
+  assert.equal(claude.length, 3, r.problems.join("\n"));
+  assert.ok(claude.some((p) => /^agents\/w\.md:1 /.test(p) && p.includes("`opencode-go/claude-haiku-5-5`")), claude.join("\n"));
+  assert.ok(claude.some((p) => /^rules\/02-x\.md:1 /.test(p)), claude.join("\n"));
+  assert.ok(claude.some((p) => /^commands\/w\.md:1 /.test(p) && p.includes("`opencode-go/Anthropic-x`")), claude.join("\n"));
+  assert.ok(claude.every((p) => /owner rule: Claude runs on the Claude Code subscription/.test(p)));
+});
+
+test("Claude through Go is rejected whether or not the model is in opencode models", () => {
+  const root = fixture({ "commands/x.md": "use opencode-go/claude-haiku-5-5 here" });
+  const live = checkRouting({ root, extra: [], models: new Set([...MODELS, "opencode-go/claude-haiku-5-5"]) });
+  assert.ok(live.problems.some((p) => /Claude model through OpenCode Go `opencode-go\/claude-haiku-5-5`/.test(p)));
+  const gone = checkRouting({ root, extra: [], models: new Set(["opencode-go/real"]) });
+  assert.ok(gone.problems.some((p) => /Claude model through OpenCode Go `opencode-go\/claude-haiku-5-5`/.test(p)), gone.problems.join("\n"));
+});
+
+test("other Claude references pass: commandcode Claude, aliases, non-Claude Go", () => {
+  const r = run({ "commands/x.md": "use `commandcode/claude-haiku-5-5` and `opencode-go/mimo-v2.6-flash`" });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(run({ "commands/x.md": 'Task({ model: "haiku" })', "agents/w.md": "model: opus  # cc-only" }).problems, []);
+});
+
+test("tests/fixtures paths are never scanned, even as extra files", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "orch-route-fx-"));
+  const f = path.join(dir, "tests", "fixtures", "x.md");
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, "use opencode-go/claude-haiku-5-5 here");
+  const r = checkRouting({ root: fixture({}), extra: [f], models: new Set([...MODELS, "opencode-go/claude-haiku-5-5"]) });
+  assert.deepEqual(r.problems, []);
+});
