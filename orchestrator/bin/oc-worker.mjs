@@ -1501,6 +1501,7 @@ export async function runWorker(a) {
   // Signal handlers are installed before any slot wait (A1): a signal while waiting for the Nvidia/provider
   // or the machine slot releases whatever we hold, ends the registry entry and exits 143/130/129 with no
   // receipt (nothing ran). `release()` is safe to call before `releaseMachine` is set.
+  let waitingForSlot = true; // A1: true from just before the first slot acquire until both slots are held
   let inhibitorChild = null; // D5: dead pid state dropped, never read
   // Sleep inhibitor: while a run is active (slots held → attempt loop's end, resumes included) hold a
   // systemd inhibitor that blocks idle sleep and lid-switch sleep only. Skipped on Windows/macOS and with
@@ -1546,10 +1547,10 @@ export async function runWorker(a) {
   };
   const sig = { name: null, code: null, current: null, wake: null };
   const SIGNALS = { SIGTERM: 143, SIGINT: 130, SIGHUP: 129 };
-  // A2: a signal that lands while an attempt or the resume wait is live flips the run to "killed";
-  // one that lands only after a clean last attempt leaves the clean receipt intact.
-  let inCritical = false;
-  let signalledWhileLive = false;
+  // A2: a signal that lands before the attempt loop settles (setup gap, attempt, resume wait) flips the run
+  // to "killed"; one that lands only after a clean last attempt (the settled post-loop pause) leaves the
+  // clean receipt intact.
+  let signalPreSettle = false;
   let postAttempt = false;
   const onSignal = (name) => {
     if (sig.name) return; // idempotent: a second signal never interrupts cleanup
@@ -1557,11 +1558,10 @@ export async function runWorker(a) {
     sig.code = SIGNALS[name];
     sig.wake?.();
     releaseInhibitor(); // the run is ending: release the sleep inhibitor now
-    signalledWhileLive = signalledWhileLive || inCritical;
+    if (!postAttempt) signalPreSettle = true; // landed before the loop settled => "killed"
     const cur = sig.current;
-    if (!cur && !postAttempt) {
-      // Nothing ran and no attempt/resume is live: we are still waiting for a slot (or in the gap right
-      // after slot admission). Release anything held and exit without a receipt.
+    if (waitingForSlot && !cur) {
+      // Still waiting for a slot (nothing ran): release anything held and exit without a receipt.
       release();
       clearInterval(kickTimer);
       run.end();
@@ -1617,6 +1617,7 @@ export async function runWorker(a) {
   // Both slots held: the clock starts now (the time budget does not count slot wait time). The registry
   // heartbeat moves the run out of `queued`, and `started` resets so elapsed/OVERDUE measure the run only.
   run.touch({ state: "running", started: Date.now() });
+  waitingForSlot = false; // both slots held: a signal from here on takes the killed/clean receipt path
   let scratchDir = null; // D1: in runWorker scope so the `finally` can remove the scratch dir even if setup throws
   try {
   // D1: the run's try starts right after both slots are held; startInhibitor is its first statement so a
@@ -1883,9 +1884,7 @@ export async function runWorker(a) {
       if (sig.name) break;
       attempts++;
       const t0 = Date.now();
-      inCritical = true; // A2: an attempt is live; a signal here flips the run to "killed"
       r = await attempt(cli);
-      inCritical = false;
       // Worktree fence: scan this attempt's events for exact escapes; check main for suspected dirt.
       try {
         foldEscapes(fenceState, { lines: r.lines, roots: fenceRoots, dir, main: fenceMain, beforeStatus: fenceBefore, out });
@@ -1928,10 +1927,8 @@ export async function runWorker(a) {
         : resumeReason === "truncated" ? "output token limit"
         : (classifyErrors.find((e) => classify([e])?.reason === resumeReason) || errors[0] || "dropped").slice(0, 80);
       resumed.push({ session: sum.session, reason: why, seconds: Math.round((Date.now() - t0) / 1000) });
-      inCritical = true; // A2: the resume wait is live; a signal here flips the run to "killed"
       if (waitMs > 0) await new Promise((res) => { const t = setTimeout(res, waitMs); sig.wake = () => { clearTimeout(t); res(); }; });
       sig.wake = null;
-      inCritical = false;
       const msg =
         `The previous run was interrupted (${why}). Continue the task from where you stopped. The Mandate is unchanged.\n` +
         `Before continuing, check the worktree state below and verify any half-finished edit or command.\n\n` +
@@ -1961,7 +1958,7 @@ export async function runWorker(a) {
     }
     // Suspected-only (main went dirty, no tool event of ours): `escaped.suspected` in the receipt is the warning;
     // no errors[] entry, exit unchanged. Main is often busy with other sessions.
-    const killedBySignal = sig.name && signalledWhileLive; // A2: "killed" only if the signal landed while an attempt/resume was live
+    const killedBySignal = sig.name && signalPreSettle; // A2: "killed" only if the signal landed before the loop settled
     const killReason = killedBySignal ? "killed" : r.killReason;
     if (killedBySignal) errors.push(`killed by ${sig.name}`);
     // Landed work: a timed-out or stalled run whose commit made it in counts as done.

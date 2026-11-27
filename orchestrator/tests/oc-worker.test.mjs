@@ -2582,6 +2582,43 @@ test("A2: SIGTERM after a clean attempt leaves the clean receipt (exit 0, no kil
   }
 });
 
+test("A1: SIGTERM during the resume wait writes a killed receipt and one run-done", async () => {
+  const { h, sd } = streamHome();
+  const state = tmp();
+  CLEAN.push(state);
+  const prompt = path.join(h, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const runDir = path.join(h, "run");
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "ticket.json"), JSON.stringify({ ticket: "m6a", worktree: runDir }));
+  const out = path.join(runDir, "worker-r1.md");
+  const argsFile = path.join(h, "args.json");
+  // drop-once: the first attempt drops (ECONNRESET) after producing output, then oc-worker parks in the
+  // resume wait (ORCH_RESUME_WAIT_MS). SIGTERM there must keep the killed receipt + run-done (not go silent).
+  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", h, "--prompt", prompt, "--out", out, "--stream", "m6a"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: h, FAKE_OC_MODE: "drop-once", FAKE_OC_STATE_DIR: state, ORCH_RESUME_WAIT_MS: "6000", FAKE_OC_ARGS_FILE: argsFile },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const exited = new Promise((res) => child.on("close", (code, signal) => res({ code, signal })));
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 30000);
+  try {
+    await sleep(1800); // first attempt dropped; parked in the 6 s resume wait
+    assert.equal(child.exitCode, null, "still in the resume wait");
+    child.kill("SIGTERM");
+    const res = await exited;
+    assert.equal(res.code, 143, `expected exit 143, got ${JSON.stringify(res)}`);
+    const receipt = JSON.parse(fs.readFileSync(out + ".receipt.json", "utf8"));
+    assert.equal(receipt.exit, "killed", JSON.stringify(receipt));
+    assert.ok(receipt.errors.some((e) => e.includes("killed by SIGTERM")), JSON.stringify(receipt.errors));
+    const done = eventsOf(sd).filter((e) => e.kind === "run-done");
+    assert.equal(done.length, 1, "one run-done");
+    assert.equal(done[0].exit, "killed");
+  } finally {
+    clearTimeout(hard);
+    if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
+  }
+});
+
 // ── fixture orphan guard (test-orphans M2) ───────────────────────────────────
 
 test("fake-opencode cap: a hung run exits 124 after FAKE_OC_MAX_MS, well inside the spawn timeout", () => {
@@ -2891,13 +2928,13 @@ test("inhibitor: a throw in the setup gap releases the inhibitor and the slots (
   const fake = fakeInhibit(dir);
   const prompt = path.join(dir, "mandate.md");
   fs.writeFileSync(prompt, "Review the diff.");
-  // cc-critic needs its role contract (~/.claude/agents/critic.md). Replicate it under ORCH_HOME so
-  // ccContract resolves it, then make --out read-only so atomicWrite(contractFile) throws EACCES in the
-  // setup gap (after startInhibitor, before any spawn) — uncaught, so runWorker's finally releases the
-  // inhibitor and the slots.
+  // cc-critic needs its role contract (<ORCH_HOME>/.claude/agents/critic.md). Write a minimal fixture so
+  // ccContract resolves it (never copy the host's installed agent file), then make --out read-only so
+  // atomicWrite(contractFile) throws EACCES in the setup gap (after startInhibitor, before any spawn) —
+  // uncaught, so runWorker's finally releases the inhibitor and the slots.
   const agentDir = path.join(dir, ".claude", "agents");
   fs.mkdirSync(agentDir, { recursive: true });
-  fs.copyFileSync(path.join(os.homedir(), ".claude", "agents", "critic.md"), path.join(agentDir, "critic.md"));
+  fs.writeFileSync(path.join(agentDir, "critic.md"), "---\nname: critic\n---\nFixture critic contract body.\n");
   const outDir = path.join(dir, "out");
   fs.mkdirSync(outDir, { recursive: true });
   fs.chmodSync(outDir, 0o555);
