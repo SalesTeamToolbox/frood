@@ -191,6 +191,27 @@ test("checkScope: origin/main lags but local main advanced → diffs from the lo
   assert.deepEqual(r.denied, []);
 });
 
+test("checkScope: a tag named `main` at the stale origin commit cannot shadow the local branch", () => {
+  const { repo } = mkWithOrigin();
+  const originMain = git(repo, "rev-parse", "origin/main"); // stale c0
+  const base = commit(repo, { "bin/a.mjs": "base\n" }, "ticket base"); // local main ahead of origin/main
+  git(repo, "checkout", "-q", "-b", "work");
+  commit(repo, { "bin/a.mjs": "a2\n" }, "in scope on work");
+  git(repo, "checkout", "-q", "main");
+  commit(repo, { "other/x.mjs": "another ticket\n" }, "another ticket on local main");
+  git(repo, "checkout", "-q", "work");
+  git(repo, "rebase", "-q", "main");
+  const sha = git(repo, "rev-parse", "HEAD");
+  const main = git(repo, "rev-parse", "main");
+  // A tag named `main` pointing at the stale origin commit must not win over refs/heads/main.
+  git(repo, "tag", "main", originMain);
+  const r = checkScope({ repo, base, sha, scope: ["bin/**"], baseRef: "origin/main" });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.from, main, "from is still the local-main merge-base despite the `main` tag");
+  assert.deepEqual(r.outOfScope, []);
+  assert.deepEqual(r.denied, []);
+});
+
 test("checkScope: rebased onto local main, out-of-scope and denied files on the branch are still caught", () => {
   const { repo } = mkWithOrigin();
   const base = commit(repo, { "bin/a.mjs": "base\n" }, "ticket base");

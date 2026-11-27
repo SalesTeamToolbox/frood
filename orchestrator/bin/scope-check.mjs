@@ -76,7 +76,7 @@ function diffFrom(repo, base, sha, baseRef) {
     const remoteRev = git(repo, ["rev-parse", "--verify", `refs/remotes/${baseRef}`]);
     if (!remoteRev.error && remoteRev.status === 0) {
       const localRev = git(repo, ["rev-parse", "--verify", `refs/heads/${branch}`]);
-      if (!localRev.error && localRev.status === 0) refs.push(branch);
+      if (!localRev.error && localRev.status === 0) refs.push(`refs/heads/${branch}`);
     }
   }
   let from = base;
