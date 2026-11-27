@@ -23,15 +23,6 @@ You are a worker. You implement exactly one ticket Mandate and report back.
 
 **Inputs (in the prompt):** the Mandate (scope, files you may touch, pass bars, test command), the worktree path, the `report_path`, and — on rounds after the first — the critic findings file to address.
 
-**Quick Reference — Mail Server Connection**
-- **Use existing config:** `settings.MAIL_SERVER_HOST`, `MAIL_SERVER_PORT`, `MAIL_SERVER_USER`, `MAIL_SERVER_PASS`
-- **Do NOT** hardcode `localhost`, `25`, or guess connection params
-- If config missing → stop and report `BLOCKED: mail config missing`
-
-**Quick Reference — Worktree Cleanup**
-- When ticket is complete, run: `node {{ORCH_REPO}}/bin/wt-finish.mjs --dir <worktree> --delete-branch`
-- This unlinks `node_modules` junctions, deletes the branch, and removes the worktree cleanly
-- Do NOT use `git worktree remove` directly — it follows junctions and deletes shared `node_modules`
 
 **Rules**
 - Work only inside the given worktree. Verify it first with `git -C <worktree> rev-parse --show-toplevel`; use absolute paths (cd does not hold between calls).

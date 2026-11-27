@@ -2569,3 +2569,127 @@ test("frood-ticket.md and frood-orchestrator.md carry the installer sentence", (
     assert.ok(text.includes(INSTALLER_SENTENCE), `${f} carries the installer sentence verbatim`);
   }
 });
+
+// ---------------------------------------------------------------- sleep inhibitor (worker-prompts-keep-awake)
+
+// A fake `systemd-inhibit`: records argv + pid to INHIBIT_RECORD_FILE, then stays alive until killed.
+function fakeInhibit(dir) {
+  const fake = path.join(dir, "fake-inhibit.mjs");
+  fs.writeFileSync(
+    fake,
+    `#!/usr/bin/env node\n` +
+    `import fs from "node:fs";\n` +
+    `const file = process.env.INHIBIT_RECORD_FILE;\n` +
+    `try { if (file) fs.writeFileSync(file, JSON.stringify({ argv: process.argv.slice(2), pid: String(process.pid) })); } catch {}\n` +
+    `setInterval(() => {}, 3600000);\n`,
+  );
+  fs.chmodSync(fake, 0o755);
+  return fake;
+}
+
+function waitForRecord(record, ms = 10000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    try { return JSON.parse(fs.readFileSync(record, "utf8")); } catch {}
+    const start = Date.now();
+    while (Date.now() - start < 50) {}
+  }
+  return null;
+}
+
+// Wait (bounded) for pid `pid` to vanish. ESRCH = gone.
+function pidGone(pid, ms = 3000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    try { process.kill(pid, 0); } catch (e) { if (e.code === "ESRCH") return true; }
+    const start = Date.now();
+    while (Date.now() - start < 50) {}
+  }
+  return false;
+}
+
+test("inhibitor: spawned with --what=idle:handle-lid-switch --mode=block; argv never names sleep:; pid released after a clean run", () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const record = path.join(dir, "inhibit.json");
+  const fake = fakeInhibit(dir);
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const r = run({ INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake }, "--timeout-min", "1");
+  assert.equal(r.status, 0, r.stderr);
+  const logged = waitForRecord(record);
+  assert.ok(logged, "inhibitor never recorded");
+  assert.ok(logged.argv.includes("--what=idle:handle-lid-switch"), JSON.stringify(logged));
+  assert.ok(logged.argv.includes("--mode=block"), JSON.stringify(logged));
+  assert.ok(logged.argv.some((a) => a.startsWith("--who=oc-worker")), JSON.stringify(logged));
+  assert.ok(logged.argv.some((a) => a.startsWith("--why=worker run ")), JSON.stringify(logged));
+  assert.ok(logged.argv.includes("sleep"), JSON.stringify(logged));
+  assert.ok(!logged.argv.includes("--what=sleep"), JSON.stringify(logged));
+  assert.ok(!logged.argv.some((a) => a.includes("sleep:")), JSON.stringify(logged));
+  assert.ok(pidGone(Number(logged.pid)), `inhibitor pid ${logged.pid} still alive after clean run`);
+});
+
+test("inhibitor: pid released after a timed-out run", () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const record = path.join(dir, "inhibit.json");
+  const fake = fakeInhibit(dir);
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const r = run({ INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake, FAKE_OC_MODE: "hang" }, "--timeout-min", "0.02");
+  assert.equal(r.status, 4, r.stderr);
+  assert.equal(JSON.parse(r.stdout.trim()).exit, "timeout");
+  const logged = waitForRecord(record);
+  assert.ok(logged, "inhibitor never recorded");
+  assert.ok(pidGone(Number(logged.pid)), `inhibitor pid ${logged.pid} still alive after timeout`);
+});
+
+test("inhibitor: pid released after SIGTERM to oc-worker", async () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const record = path.join(dir, "inhibit.json");
+  const fake = fakeInhibit(dir);
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const out = path.join(dir, "out", "findings-r1.md");
+  const child = spawn(process.execPath, [BIN, "--agent", "critic", "--dir", dir, "--prompt", prompt, "--out", out, "--timeout-min", "30"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake, FAKE_OC_MODE: "hang" },
+    encoding: "utf8",
+  });
+  const logged = waitForRecord(record);
+  assert.ok(logged, "inhibitor never recorded");
+  assert.ok(child.exitCode === null && child.signalCode === null, "oc-worker exited before the inhibitor was recorded");
+  child.kill("SIGTERM");
+  const { code, signal } = await new Promise((res) => {
+    if (child.exitCode !== null || child.signalCode !== null) res({ code: child.exitCode, signal: child.signalCode });
+    else child.once("exit", (c, s) => res({ code: c, signal: s }));
+  });
+  assert.ok(code === 143 || signal === "SIGTERM", `oc-worker exited with code ${code} signal ${signal}`);
+  assert.ok(pidGone(Number(logged.pid)), `inhibitor pid ${logged.pid} still alive after SIGTERM`);
+});
+
+test("inhibitor: ORCH_NO_INHIBIT=1 spawns nothing and the run succeeds", () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const record = path.join(dir, "inhibit.json");
+  const fake = fakeInhibit(dir);
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const r = run({ INHIBIT_RECORD_FILE: record, ORCH_INHIBIT_BIN: fake, ORCH_NO_INHIBIT: "1" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!fs.existsSync(record), "inhibitor was spawned with ORCH_NO_INHIBIT=1");
+});
+
+test("inhibitor: systemd-inhibit missing from PATH warns on stderr but the run succeeds", () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const nodir = path.join(dir, "no-bin");
+  fs.mkdirSync(nodir, { recursive: true });
+  const record = path.join(dir, "inhibit.json");
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const r = run({ INHIBIT_RECORD_FILE: record, PATH: nodir }, "--timeout-min", "1");
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!fs.existsSync(record), "inhibitor was spawned without systemd-inhibit");
+  assert.match(r.stderr, /sleep inhibitor spawn failed/, r.stderr);
+});
