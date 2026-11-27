@@ -10,6 +10,11 @@
 //   live owner); 2 usage or IO failure. Paging = stdout page text + `notify-send` (best effort;
 //   skipped when ORCH_NO_NOTIFY=1, which tests set). The trigger never takes the lock and never
 //   decides anything: opening a /frood-desk (or starting the daemon) is the human's job.
+//
+//   Per-tick extras (each silent, each in its own try/catch, none changes output or exit code):
+//   goResetProbeTick (G1: one detached `router-health --probe` on the first tick after a Go
+//   reset; spawn errors swallowed) and goUsageTick (G3b: one throttled Go usage snapshot per
+//   tick, at most every `go.snapshot.min_interval_min`, default 15, bounded at 12 s).
 import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -22,6 +27,7 @@ import { adviseTick } from "./cc-pace.mjs";
 import { scan as ledgerScan } from "./cc-ledger.mjs";
 import { weekBounds, periodBounds, goConfig } from "./go-pace.mjs";
 import { loadLimits, orchDir } from "./usage.mjs";
+import { snapshot as goUsageSnapshot, appendSnapshot as goUsageAppendSnapshot } from "./go-usage.mjs";
 import { measure, level, readState, writeState, shouldRunNotify, notifyNow, notifyParts } from "./session-pressure.mjs";
 
 function notify(text) {
@@ -75,7 +81,7 @@ export function goResetProbeTick(deps = {}) {
     const statePath = deps.statePath ?? path.join(orchDir(), "go-reset-probe.json");
     const run = deps.run ?? (() => {
       const bin = path.join(path.dirname(fileURLToPath(import.meta.url)), "router-health.mjs");
-      spawn(process.execPath, [bin, "--probe"], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+      spawn(process.execPath, [bin, "--probe"], { detached: true, stdio: "ignore", windowsHide: true }).on("error", () => {}).unref();
     });
     const wb = weekBounds(now);
     if (!wb) return { ran: false };
@@ -110,6 +116,117 @@ export function goResetProbeTick(deps = {}) {
     return { ran: false, boundary };
   } catch {
     return { ran: false };
+  }
+}
+
+/**
+ * One throttled Go usage snapshot tick (go-pacing G3b). The Go pace (G4b) needs fresh usage
+ * meters, but the endpoint must not be hit every tick, so a snapshot is taken at most every
+ * `go.snapshot.min_interval_min` (default 15).
+ *
+ * `deps = {now, limits, statePath, logPath, snap}`; defaults: now = Date.now(), limits =
+ * `loadLimits()`, statePath = `<orchDir()>/go-usage-state.json`, logPath =
+ * `<orchDir()>/go-usage.log`, snap = `() => snapshot()` from go-usage.mjs (the tick appends
+ * on ok). State `{last_call: ISO, last_fail: {reason, day} | null}`.
+ *
+ * Missing/unreadable state counts as due. When `now - last_call < interval` the tick returns
+ * `{called: false}` and makes no call. When due, `last_call = now` is written first (atomic:
+ * temp + rename, preserving last_fail) so a hanging or throwing call is not retried on the
+ * next tick, then `snap()` is awaited. `ok` appends the snapshot to the jsonl store and clears
+ * `last_fail`; a failure appends ONE `<ISO> INFO go usage: <reason>` line to the log only when
+ * the `(reason, UTC day)` differs from `last_fail`, and records it. Returns `{called: true,
+ * ok, reason?}`. Every failure is silent: a thrown error gives `{called: false}` (before the
+ * call started) or `{called: true, ok: false}` (the call threw) — nothing is ever thrown out,
+ * and the tick never changes desk-check output or exit codes. The key never appears in the
+ * state file, the log or the jsonl: only fixed reason strings are written.
+ */
+export async function goUsageTick(deps = {}) {
+  try {
+    const now = deps.now ?? Date.now();
+    let intervalMin = 15;
+    try {
+      const limits = deps.limits ?? loadLimits();
+      intervalMin = goConfig(limits).snapshot.min_interval_min;
+    } catch {
+      intervalMin = 15;
+    }
+    if (!Number.isFinite(intervalMin)) intervalMin = 15;
+    const intervalMs = intervalMin * 60 * 1000;
+    const statePath = deps.statePath ?? path.join(orchDir(), "go-usage-state.json");
+    const logPath = deps.logPath ?? path.join(orchDir(), "go-usage.log");
+    const snap = deps.snap ?? (() => goUsageSnapshot());
+    const dayOf = (ms) => {
+      try {
+        return new Date(ms).toISOString().slice(0, 10);
+      } catch {
+        return null;
+      }
+    };
+    let prev = null;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(statePath, "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) prev = parsed;
+    } catch {
+      prev = null; // missing/unreadable state counts as due
+    }
+    const lastCall = prev && typeof prev.last_call === "string" ? Date.parse(prev.last_call) : NaN;
+    if (Number.isFinite(lastCall) && Number.isFinite(now) && now - lastCall < intervalMs) {
+      return { called: false };
+    }
+    const prevFail =
+      prev && prev.last_fail && typeof prev.last_fail === "object" && !Array.isArray(prev.last_fail)
+        ? prev.last_fail
+        : null;
+    const writeState = (fail) => {
+      fs.mkdirSync(path.dirname(statePath), { recursive: true });
+      const tmp = `${statePath}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify({ last_call: new Date(now).toISOString(), last_fail: fail }) + "\n");
+      fs.renameSync(tmp, statePath);
+    };
+    try {
+      writeState(prevFail);
+    } catch {
+      return { called: false };
+    }
+    let res;
+    try {
+      res = await snap();
+    } catch {
+      return { called: true, ok: false, reason: "error" };
+    }
+    if (res && res.ok) {
+      try {
+        goUsageAppendSnapshot(res.snap);
+      } catch {
+        /* store failure never fails the tick */
+      }
+      try {
+        writeState(null);
+      } catch {
+        /* the snapshot is already stored; stay silent */
+      }
+      return { called: true, ok: true };
+    }
+    const reason = res && typeof res.reason === "string" ? res.reason : "error";
+    const fail = { reason, day: dayOf(now) };
+    const same =
+      prevFail && typeof prevFail.reason === "string" && prevFail.reason === reason && prevFail.day === fail.day;
+    if (!same) {
+      try {
+        fs.mkdirSync(path.dirname(logPath), { recursive: true });
+        fs.appendFileSync(logPath, `${new Date(now).toISOString()} INFO go usage: ${reason}\n`);
+      } catch {
+        /* log failure never fails the tick */
+      }
+    }
+    try {
+      writeState(fail);
+    } catch {
+      /* already called; stay silent */
+    }
+    return { called: true, ok: false, reason };
+  } catch {
+    return { called: false };
   }
 }
 
@@ -155,6 +272,11 @@ export async function main(argv) {
     // Go reset probe: one detached `router-health --probe` on the first tick after a Go
     // weekly/period reset; silent, never changes output or exit code.
     try { goResetProbeTick(); } catch {}
+    // Go usage snapshot: one throttled snapshot per tick for the Go pace meters (G4b);
+    // bounded at 12 s, silent, never changes output or exit code.
+    try {
+      await Promise.race([goUsageTick(), new Promise((r) => setTimeout(r, 12000).unref())]);
+    } catch {}
     const r = check();
     let code = r.code;
     if (r.code === 1) {
