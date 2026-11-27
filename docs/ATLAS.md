@@ -548,7 +548,7 @@ sibling traps: oc-worker load-based slots
 
 ### box-wide suite lock
 handler: orchestrator/ops/workstation/suite-lock.sh suite_lock_acquire / suite_lock_release
-decides: one pinned full suite at a time across every repo sharing one box-wide SUITE_LOCK_ROOT queue (arrival-order, heartbeat, two-read stale break, token-checked release); the Makefile test recipe traps TERM/INT to kill its pytest child and release the lock (exit 143/130)
+decides: one pinned full suite at a time across every repo sharing one box-wide SUITE_LOCK_ROOT queue (arrival-order, heartbeat, two-read stale break, token-checked release); `suite_lock_acquire` fails fast (return 2, ERROR line) when the lock root cannot be placed (unset SUITE_LOCK_ROOT/HOME and no passwd home, or an unwritable root); the Makefile test recipe traps TERM/INT to kill its pytest child and release the lock (exit 143/130)
 
 ## How to keep this map accurate
 

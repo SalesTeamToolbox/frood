@@ -237,3 +237,113 @@ test("make test trap with pytest not started (pid unset): SIGTERM still exits 14
     }
   }
 });
+
+// ----------------------------------------------------------- suite-lock-home-guard
+
+// Runs `timeout <sec> bash <scriptFile>` with the given env; captures stdout+stderr.
+// The external `timeout` bounds every run so a hung acquire cannot hang this suite.
+function runBash(scriptFile, env, timeoutSec) {
+  return spawnSync("timeout", [String(timeoutSec), "bash", scriptFile], { env, encoding: "utf8" });
+}
+
+function acquireScript(rootEnv, extra) {
+  return [
+    "set -u",
+    `source "${LOCK}"`,
+    "export SUITE_LOCK_POLL=0.2 SUITE_LOCK_BEAT=1 SUITE_LOCK_STALE=6 SUITE_LOCK_WAITER_STALE=5",
+    ...(rootEnv ? [`export SUITE_LOCK_ROOT="${rootEnv}"`] : []),
+    ...(extra || []),
+    "suite_lock_acquire \"guard-test\" 2>&1",
+    "code=$?",
+    "echo ACQUIRE_CODE $code",
+    "exit $code",
+  ].join("\n");
+}
+
+test("HOME unset: getent passwd home becomes the lock root; lock acquired and released", () => {
+  const home = tmp();
+  const bin = tmp();
+  writeFake(bin, "getent", `#!/bin/sh\necho "nobody:x:65534:65534:nobody:${home}:/bin/sh"\n`);
+
+  const script = path.join(tmp(), "getent-home.sh");
+  fs.writeFileSync(script, [
+    "set -u",
+    `source "${LOCK}"`,
+    "export SUITE_LOCK_POLL=0.2 SUITE_LOCK_BEAT=1 SUITE_LOCK_STALE=6 SUITE_LOCK_WAITER_STALE=5",
+    "suite_lock_acquire \"guard-test\" || { echo ACQUIRE_FAIL; exit 1; }",
+    `echo "DIR ${home}/.local/state/frood-workstation/suite-lock"`,
+    "[ -d \"$SUITE_LOCK_DIR/queue\" ] && echo QUEUE_OK || echo QUEUE_FAIL",
+    "suite_lock_release",
+    "echo RELEASED",
+  ].join("\n"));
+  fs.chmodSync(script, 0o755);
+
+  const env = { ...process.env };
+  delete env.HOME;
+  env.PATH = `${bin}:${env.PATH ?? ""}`;
+
+  const r = runBash(script, env, 15);
+  assert.equal(r.status, 0, `expected acquire to succeed: ${r.stderr}`);
+  assert.ok(
+    r.stdout.includes(`DIR ${home}/.local/state/frood-workstation/suite-lock`),
+    "lock root is the passwd home under /.local/state/frood-workstation/suite-lock: " + r.stdout,
+  );
+  assert.ok(r.stdout.includes("QUEUE_OK"), "queue dir exists while held: " + r.stdout);
+  assert.ok(r.stdout.includes("RELEASED"), "release ran: " + r.stdout);
+  assert.equal(
+    fs.existsSync(path.join(home, ".local/state/frood-workstation/suite-lock/held")),
+    false,
+    "lock released: held removed",
+  );
+});
+
+test("HOME unset with no passwd home: acquire fails fast with return 2 and ERROR line", () => {
+  const bin = tmp();
+  writeFake(bin, "getent", "#!/bin/sh\nexit 0\n"); // prints nothing -> no passwd home
+
+  const script = path.join(tmp(), "nohome.sh");
+  fs.writeFileSync(script, acquireScript(undefined));
+  fs.chmodSync(script, 0o755);
+
+  const env = { ...process.env };
+  delete env.HOME;
+  env.PATH = `${bin}:${env.PATH ?? ""}`;
+
+  const start = Date.now();
+  const r = runBash(script, env, 10);
+  const elapsed = Date.now() - start;
+  assert.ok(elapsed < 5000, `expected fail fast (<5 s), took ${elapsed} ms: ${r.stdout}`);
+  assert.equal(r.status, 2, `expected status 2, got ${r.status}: ${r.stdout}`);
+  assert.ok(
+    r.stdout.includes("==> suite lock: ERROR: cannot place the box-wide lock"),
+    "ERROR line present: " + r.stdout,
+  );
+  assert.ok(r.stdout.includes("ACQUIRE_CODE 2"), "propagated return 2: " + r.stdout);
+});
+
+test("unwritable SUITE_LOCK_ROOT: acquire returns 2 within 5 s, ERROR names the dir, no ticket left", () => {
+  const parent = tmp();
+  fs.chmodSync(parent, 0o500); // cannot create anything beneath it
+  const root = path.join(parent, "lockedroot");
+
+  const script = path.join(tmp(), "unwritable.sh");
+  fs.writeFileSync(script, acquireScript(root));
+  fs.chmodSync(script, 0o755);
+
+  const env = { ...process.env };
+  env.PATH = `${process.env.PATH ?? ""}`;
+
+  const start = Date.now();
+  const r = runBash(script, env, 6);
+  const elapsed = Date.now() - start;
+  assert.ok(elapsed < 5000, `expected fail fast (<5 s), took ${elapsed} ms: ${r.stdout}`);
+  assert.equal(r.status, 2, `expected status 2, got ${r.status}: ${r.stdout}`);
+  assert.ok(
+    r.stdout.includes(`==> suite lock: ERROR: cannot create ${root}:`),
+    "ERROR names the dir: " + r.stdout,
+  );
+  assert.ok(r.stdout.includes("ACQUIRE_CODE 2"), "propagated return 2: " + r.stdout);
+  assert.equal(fs.existsSync(root), false, "no root dir created");
+  assert.equal(fs.existsSync(path.join(root, "queue")), false, "no ticket/queue left behind");
+  fs.chmodSync(parent, 0o755); // so the tmp() cleanup can remove the dir
+});

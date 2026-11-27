@@ -80,12 +80,45 @@ suite_lock_acquire() {  # $1 = one line saying what is about to run, shown to an
     return 0
   fi
 
-  SUITE_LOCK_DIR="${SUITE_LOCK_ROOT:-$HOME/.local/state/frood-workstation/suite-lock}"
-  local q="$SUITE_LOCK_DIR/queue" held="$SUITE_LOCK_DIR/held"
-  mkdir -p "$q"
+  # Resolve the lock root, set -u-safe:
+  #   SUITE_LOCK_ROOT (non-empty) is used as the lock directory as-is;
+  #   otherwise ${HOME:-} (non-empty) + /.local/state/frood-workstation/suite-lock;
+  #   otherwise the passwd home from getent + that suffix.
+  #   An empty HOME never yields "/.local".
+  if [ -n "${SUITE_LOCK_ROOT:-}" ]; then
+    SUITE_LOCK_DIR="$SUITE_LOCK_ROOT"
+  elif [ -n "${HOME:-}" ]; then
+    SUITE_LOCK_DIR="$HOME/.local/state/frood-workstation/suite-lock"
+  else
+    local phome=""
+    if command -v getent >/dev/null 2>&1; then
+      phome="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)" || phome=""
+    fi
+    if [ -n "$phome" ]; then
+      case "$phome" in
+        /*) SUITE_LOCK_DIR="$phome/.local/state/frood-workstation/suite-lock" ;;
+      esac
+    fi
+  fi
+
+  if [ -z "${SUITE_LOCK_DIR:-}" ]; then
+    echo "==> suite lock: ERROR: cannot place the box-wide lock (SUITE_LOCK_ROOT and HOME are unset, and no passwd home)" >&2
+    return 2
+  fi
+
+  local q held reason
+  q="$SUITE_LOCK_DIR/queue" held="$SUITE_LOCK_DIR/held"
+  if ! reason="$(mkdir -p "$q" 2>&1)"; then
+    echo "==> suite lock: ERROR: cannot create $SUITE_LOCK_DIR: $reason" >&2
+    return 2
+  fi
 
   SUITE_LOCK_TICKET="$q/$(date +%s%N)-$$"
-  printf '%s\n' "$what" > "$SUITE_LOCK_TICKET"
+  if ! printf '%s\n' "$what" > "$SUITE_LOCK_TICKET" 2>/dev/null; then
+    echo "==> suite lock: ERROR: cannot create $SUITE_LOCK_DIR: cannot write ticket" >&2
+    rm -f "$SUITE_LOCK_TICKET"
+    return 2
+  fi
 
   local waited=0 last_report=-1 t head ahead age
   local step="${SUITE_LOCK_POLL%.*}"; step="${step:-0}"   # whole seconds, for the "waited" count only
