@@ -32,7 +32,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.datastructures import MutableHeaders
 
 from core.config import Settings, settings
 from dashboard.auth import (
@@ -44,6 +44,7 @@ from dashboard.auth import (
     require_admin,
     verify_password,
 )
+from dashboard.gateway import build_gateway_router
 from dashboard.websocket_manager import WebSocketManager
 
 logger = logging.getLogger("frood.server")
@@ -179,30 +180,42 @@ async def _pip_install(packages: list[str]) -> tuple[list[str], list[str]]:
     return installed, errors
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add security headers to all HTTP responses."""
+class SecurityHeadersMiddleware:
+    """Add security headers to all HTTP responses (pure ASGI middleware)."""
 
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-            "font-src 'self' https://cdn.jsdelivr.net; "
-            "worker-src 'self' blob:; "
-            "img-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'"
-        )
-        response.headers["Permissions-Policy"] = (
-            "camera=(), microphone=(), geolocation=(), payment=()"
-        )
-        # If serving over HTTPS, enable HSTS
-        if request.url.scheme == "https":
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        return response
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            # Lifespan and websocket scopes pass through untouched.
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(raw=message.setdefault("headers", []))
+                headers["X-Content-Type-Options"] = "nosniff"
+                headers["X-Frame-Options"] = "DENY"
+                headers["X-XSS-Protection"] = "1; mode=block"
+                headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+                headers["Content-Security-Policy"] = (
+                    "default-src 'self'; "
+                    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
+                    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                    "font-src 'self' https://cdn.jsdelivr.net; "
+                    "worker-src 'self' blob:; "
+                    "img-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'"
+                )
+                headers["Permissions-Policy"] = (
+                    "camera=(), microphone=(), geolocation=(), payment=()"
+                )
+                # If serving over HTTPS, enable HSTS
+                if scope.get("scheme") == "https":
+                    headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 FRONTEND_DIR = Path(__file__).parent / "frontend" / "dist"
@@ -3481,6 +3494,21 @@ Focus on learnings that would help in future similar sessions."""
                 )
             except httpx.TimeoutException:
                 raise HTTPException(status_code=504, detail=f"App '{slug}' timed out")
+
+    # -- Claude Code gateway (/gw passthrough to OpenCode Go) -------------------
+    # Registered before the StaticFiles "/" mount so /gw/* is never shadowed.
+    # Config is passed explicitly so the gateway never reads a (possibly
+    # mocked) settings object at request time.
+    app.include_router(
+        build_gateway_router(
+            token=settings.frood_gateway_token,
+            host=settings.dashboard_host,
+            go_base_url=settings.gateway_go_base_url,
+            models=settings.gateway_go_models,
+            timeout_s=settings.gateway_upstream_timeout_s,
+            version=app.version,
+        )
+    )
 
     # -- Static files (React frontend) ----------------------------------------
 
