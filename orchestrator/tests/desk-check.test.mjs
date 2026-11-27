@@ -18,6 +18,14 @@ after(() => {
   for (const d of CLEAN) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10 });
 });
 
+// desk-check now takes a throttled Go usage snapshot each tick; a spawned CLI must never
+// read the real opencode db or the real Go key: OPENCODE_DB points at a missing temp path
+// and OPENCODE_GO_KEY is dropped from the copied env.
+function cliEnv(h, extra = {}) {
+  const e = { ...process.env, ORCH_HOME: h, ORCH_NO_NOTIFY: "1", OPENCODE_DB: path.join(h, "no-such-opencode.db"), ...extra };
+  delete e.OPENCODE_GO_KEY;
+  return e;
+}
 function home() {
   const h = fs.mkdtempSync(path.join(os.tmpdir(), "orch-check-"));
   CLEAN.push(h);
@@ -102,7 +110,7 @@ test("check: pending events with a stale watcher pages and names it", () => {
 
 test("check CLI: exits 0/1/2 with ORCH_NO_NOTIFY=1", () => {
   const h = home();
-  const env = { ...process.env, ORCH_HOME: h, ORCH_NO_NOTIFY: "1" };
+  const env = cliEnv(h);
   const cli = (args) => spawnSync(process.execPath, [BIN, ...args], { env, encoding: "utf8" });
   assert.equal(cli([]).status, 0);
   mkStream(h);
@@ -161,7 +169,7 @@ test("desk-check syncs a holder tab to its stream's work (best effort, exit code
     path.join(sdir(h), "m6a.json"),
     JSON.stringify({ name: "m6a", repo: "sales-team-toolbox", plan: "", status: "active", held_by: "oc", held_session: "ses_holder", next: "/frood-gauntlet plan-a.md m3 -- pipeline", done: "", waiting: "", written_at: new Date().toISOString(), written_by: "", consumed_at: new Date().toISOString(), done_at: null }),
   );
-  const env = { ...process.env, ORCH_HOME: h, ORCH_NO_NOTIFY: "1", SERVICE_JSON: svc };
+  const env = cliEnv(h, { SERVICE_JSON: svc });
   const r = spawnSync(process.execPath, [BIN], { env, encoding: "utf8", timeout: 60_000 });
   assert.equal(r.status, 0, r.stderr); // no unhandled events: code 0, sync best-effort
   const titles = await new Promise((resolve) => {

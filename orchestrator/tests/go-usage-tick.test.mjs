@@ -7,8 +7,13 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { goUsageTick } from "../bin/desk-check.mjs";
 import { snapshot } from "../bin/go-usage.mjs";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const DESK_CHECK = path.join(HERE, "..", "bin", "desk-check.mjs");
 
 const FAKE_KEY = "fake-go-key-for-tick-tests";
 const NOW = Date.parse("2026-12-03T00:00:00.000Z");
@@ -212,6 +217,39 @@ test("the fake key never lands in the state file, the log or the jsonl", async (
     assert.equal(logLines(s.logPath).length, 1);
   } finally {
     s.restore();
+  }
+});
+test("spawned desk-check CLI with no key: exit 0, empty stdout, one `no key` log line, no jsonl", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gou-tick-cli-"));
+  const prevHome = process.env.ORCH_HOME;
+  const prevDb = process.env.OPENCODE_DB;
+  const prevKey = process.env.OPENCODE_GO_KEY;
+  process.env.ORCH_HOME = dir;
+  try {
+    const env = {
+      ...process.env,
+      ORCH_HOME: dir,
+      ORCH_NO_NOTIFY: "1",
+      CC_SIDECAR: path.join(dir, "no-such-cc-sidecar.json"),
+      ORCH_CC_PROJECTS: path.join(dir, "no-such-cc-projects"),
+      OPENCODE_DB: path.join(dir, "no-such-opencode.db"),
+    };
+    delete env.OPENCODE_GO_KEY;
+    const r = spawnSync(process.execPath, [DESK_CHECK], { env, encoding: "utf8", timeout: 30000 });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, "");
+    const orchDir = path.join(dir, ".config", "orchestrator");
+    const logLines = fs.readFileSync(path.join(orchDir, "go-usage.log"), "utf8").split("\n").filter(Boolean);
+    assert.equal(logLines.length, 1);
+    assert.match(logLines[0], /INFO go usage: no key/);
+    assert.equal(fs.existsSync(path.join(orchDir, "go-usage.jsonl")), false, "no key means no request, no append");
+  } finally {
+    if (prevHome === undefined) delete process.env.ORCH_HOME;
+    else process.env.ORCH_HOME = prevHome;
+    if (prevDb === undefined) delete process.env.OPENCODE_DB;
+    else process.env.OPENCODE_DB = prevDb;
+    if (prevKey === undefined) delete process.env.OPENCODE_GO_KEY;
+    else process.env.OPENCODE_GO_KEY = prevKey;
   }
 });
 test("missing state is due; junk state is due and ends valid", async () => {
