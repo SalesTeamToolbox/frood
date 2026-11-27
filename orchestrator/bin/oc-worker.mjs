@@ -80,6 +80,10 @@
 // - After every attempt (finished, failed, timeout, stall) the run's leftover descendants are killed (bin/proc-tree.mjs: the
 //   process table is sampled while opencode runs; a child whose parent died is still swept). Receipt orphans_killed
 //   [{pid, cmd}] appears only when something was killed. ORCH_NO_PROCTREE=1 disables.
+// - ORCH_TEST_POSTRUN_PAUSE_MS: test-only, default 0. If set (>0 ms), after the last attempt finishes and <out>
+//   has been written, oc-worker pauses that long before writing the receipt. A signal landing in that pause
+//   (after a clean last attempt) leaves the clean receipt intact and oc-worker exits promptly afterwards; it is
+//   how a test lands a SIGTERM once <out> exists.
 // - --stream <name>: report this run to a desk stream (bin/handoff.mjs). The stream must exist (exit 2) and --out must be
 //   fresh: if <out> or <out>.receipt.json exists the run is refused (exit 2). Before a slot is taken a `queued` event
 //   (pid, pid start, agent, ticket.json path) is appended to the stream; exit 9 (nothing launched) if that run is
@@ -92,8 +96,9 @@
 // - SIGTERM / SIGINT / SIGHUP to oc-worker while a run holds its slots (exit "killed"): the attempt's process group gets
 //   SIGTERM, then SIGKILL after 5 s if it is still there, and the proc-tree sweep kills the leftover descendants. Both
 //   slots are released, the receipt is written with exit "killed" (errors: "killed by <SIGNAL>"), the stream run-done is
-//   appended, and oc-worker exits 143 / 130 / 129. A second signal during cleanup is ignored. While still waiting for a
-//   slot nothing is held, so the signal just ends the process (no receipt).
+//   appended, and oc-worker exits 143 / 130 / 129. A second signal during cleanup is ignored. While a slot wait is in
+//   progress, any held provider slot and the registry entry are released and oc-worker exits 143/130/129 with no
+//   receipt (nothing ran).
 // - --agent cc-worker | cc-worker-strong | cc-critic | cc-senior (any key of `cc.models`): the backend is headless
 //   Claude Code, not OpenCode. The cc agents are the keys of `cc.models` in usage-limits.json merged over the default
 //   {"cc-worker":"sonnet","cc-worker-strong":"opus","cc-critic":"opus","cc-senior":"fable"} (only "cc-" keys count);
@@ -1012,7 +1017,8 @@ export function isQuotaError(receipt) {
   return !receipt.first_line && receipt.errors.some((e) => /limit|quota|429|rate.?limit|insufficient|credit/i.test(e));
 }
 
-/** Classify-and-decide for the resume gate above: only transient pool-side failures. */
+/** Classify-and-decide for the resume gate above: transient pool-side failures (quota, rate-limit,
+ * dropped, provider-error), plus `truncated` for an output-token limit runWorker can resume past. */
 export function resumableReason(errors) {
   const text = errors.join("\n");
   // Output-token truncation (e.g. "Response still truncated after two output token limit
@@ -1161,6 +1167,11 @@ function freshTreeCheck(dir, base) {
   let rest = base;
   if (base.startsWith("origin/")) {
     rest = base.slice("origin/".length);
+    // An option-like ref (`origin/-x`) would reach `git fetch origin -x` and be parsed as a flag: refuse it
+    // before any git call (B3).
+    if (rest.startsWith("-")) {
+      throw new StreamRefused(`base ${base} rejects an option-like ref: pass a bare commit sha`, 10);
+    }
     try {
       gitTimed(dir, ["fetch", "origin", rest], 60000, fetchEnv);
     } catch {
@@ -1488,6 +1499,82 @@ export async function runWorker(a) {
     const what = info.type; // "worker", "nvidia" or "cc"
     console.error(`oc-worker: waiting for a ${what} slot (cap ${info.cap} ${info.mode}; held by ${held || "none"})`);
   };
+  // Signal handlers are installed before any slot wait (A1): a signal while waiting for the Nvidia/provider
+  // or the machine slot releases whatever we hold, ends the registry entry and exits 143/130/129 with no
+  // receipt (nothing ran). `release()` is safe to call before `releaseMachine` is set.
+  let waitingForSlot = true; // A1: true from just before the first slot acquire until both slots are held
+  let inhibitorChild = null; // D5: dead pid state dropped, never read
+  // Sleep inhibitor: while a run is active (slots held → attempt loop's end, resumes included) hold a
+  // systemd inhibitor that blocks idle sleep and lid-switch sleep only. Skipped on Windows/macOS and with
+  // ORCH_NO_INHIBIT=1; a missing `systemd-inhibit` (or any failed spawn) warns once on stderr and the run
+  // continues. Ends by itself after timeout + grace + 5 minutes even if oc-worker dies (D2).
+  const releaseInhibitor = () => {
+    if (inhibitorChild) {
+      try { inhibitorChild.kill("SIGTERM"); } catch {}
+      inhibitorChild = null;
+    }
+  };
+  const startInhibitor = () => {
+    if (process.platform === "win32" || process.platform === "darwin") return;
+    if (process.env.ORCH_NO_INHIBIT === "1") return;
+    const bin = process.env.ORCH_INHIBIT_BIN || "systemd-inhibit";
+    const timeoutMin = Number.isFinite(a.timeoutMin) ? a.timeoutMin : 30;
+    const graceMin = Number.isFinite(a.graceMin) ? a.graceMin : 15;
+    const seconds = (timeoutMin + graceMin + 5) * 60;
+    let child;
+    try {
+      child = spawn(bin, [
+        "--what=idle:handle-lid-switch",
+        "--mode=block",
+        "--who=oc-worker",
+        `--why=worker run ${title}`,
+        "sleep",
+        String(seconds),
+      ], { detached: true, stdio: "ignore", windowsHide: true });
+    } catch (e) {
+      console.error(`oc-worker: sleep inhibitor spawn failed (${bin}): ${e.message}`);
+      return;
+    }
+    child.on("error", (e) => {
+      console.error(`oc-worker: sleep inhibitor spawn failed (${bin}): ${e.message}`);
+    });
+    child.unref();
+    inhibitorChild = child;
+  };
+  const release = () => {
+    releaseMachine?.();
+    providerSlot?.release();
+    releaseInhibitor();
+  };
+  const sig = { name: null, code: null, current: null, wake: null };
+  const SIGNALS = { SIGTERM: 143, SIGINT: 130, SIGHUP: 129 };
+  // A2: a signal that lands before the attempt loop settles (setup gap, attempt, resume wait) flips the run
+  // to "killed"; one that lands only after a clean last attempt (the settled post-loop pause) leaves the
+  // clean receipt intact.
+  let signalPreSettle = false;
+  let postAttempt = false;
+  const onSignal = (name) => {
+    if (sig.name) return; // idempotent: a second signal never interrupts cleanup
+    sig.name = name;
+    sig.code = SIGNALS[name];
+    sig.wake?.();
+    releaseInhibitor(); // the run is ending: release the sleep inhibitor now
+    if (!postAttempt) signalPreSettle = true; // landed before the loop settled => "killed"
+    const cur = sig.current;
+    if (waitingForSlot && !cur) {
+      // Still waiting for a slot (nothing ran): release anything held and exit without a receipt.
+      release();
+      clearInterval(kickTimer);
+      run.end();
+      process.exit(sig.code);
+    }
+    if (!cur) return; // attempt loop already finished: the normal flow decides "killed" vs clean
+    if (process.platform === "win32") return killTree(cur.child);
+    try { process.kill(-cur.child.pid, "SIGTERM"); } catch { try { cur.child.kill("SIGTERM"); } catch {} }
+    cur.hard = setTimeout(() => killTree(cur.child), 5000); // 5 s to exit, then SIGKILL what is left
+  };
+  const handlers = Object.keys(SIGNALS).map((n) => [n, () => onSignal(n)]);
+  for (const [n, h] of handlers) process.on(n, h);
   try {
     if (isNvidiaModel(wanted)) {
       providerSlot = await acquireProviderSlot("nvidia", () => nvidiaCapNow(slotDir()).cap, {
@@ -1526,79 +1613,21 @@ export async function runWorker(a) {
     providerSlot?.release();
     run.end();
     clearInterval(kickTimer);
+    // Deregister the slot-wait handlers so they cannot outlive this runWorker call and take the
+    // no-receipt exit on the next hop of the same chain (e.g. a CcSlotTimeout -> runChain continue).
+    for (const [n, h] of handlers) process.off(n, h);
     throw e;
   }
   // Both slots held: the clock starts now (the time budget does not count slot wait time). The registry
   // heartbeat moves the run out of `queued`, and `started` resets so elapsed/OVERDUE measure the run only.
   run.touch({ state: "running", started: Date.now() });
-  // Sleep inhibitor: while a run is active (slots held → attempt loop's end, resumes included) hold a
-  // systemd inhibitor that blocks idle sleep and lid-switch sleep only, so the laptop cannot idle out of
-  // an active run. `sleep`/`shutdown` are not in --what, so a UPower battery-critical suspend still
-  // happens. Skipped silently on Windows/macOS, without systemd-inhibit on PATH, or with
-  // ORCH_NO_INHIBIT=1; a failed spawn warns on stderr and never fails the run. The inhibitor ends by
-  // itself after timeout + grace + 5 minutes even if oc-worker dies.
-  let inhibitorPid = null;
-  let inhibitorChild = null;
-  const releaseInhibitor = () => {
-    if (inhibitorChild) {
-      try { inhibitorChild.kill("SIGTERM"); } catch {}
-      inhibitorChild = null;
-    }
-    inhibitorPid = null;
-  };
-  const startInhibitor = () => {
-    if (process.platform === "win32" || process.platform === "darwin") return;
-    if (process.env.ORCH_NO_INHIBIT === "1") return;
-    const bin = process.env.ORCH_INHIBIT_BIN || "systemd-inhibit";
-    const timeoutMin = Number.isFinite(a.timeoutMin) ? a.timeoutMin : 30;
-    const graceMin = Number.isFinite(a.graceMin) ? a.graceMin : 15;
-    const seconds = (timeoutMin + graceMin + 5) * 60;
-    let child;
-    try {
-      child = spawn(bin, [
-        "--what=idle:handle-lid-switch",
-        "--mode=block",
-        "--who=oc-worker",
-        `--why=worker run ${title}`,
-        "sleep",
-        String(seconds),
-      ], { detached: true, stdio: "ignore", windowsHide: true });
-    } catch (e) {
-      console.error(`oc-worker: sleep inhibitor spawn failed (${bin}): ${e.message}`);
-      return;
-    }
-    child.on("error", (e) => {
-      console.error(`oc-worker: sleep inhibitor spawn failed (${bin}): ${e.message}`);
-    });
-    child.unref();
-    inhibitorPid = child.pid;
-    inhibitorChild = child;
-  };
+  waitingForSlot = false; // both slots held: a signal from here on takes the killed/clean receipt path
+  let scratchDir = null; // D1: in runWorker scope so the `finally` can remove the scratch dir even if setup throws
+  try {
+  // D1: the run's try starts right after both slots are held; startInhibitor is its first statement so a
+  // throw in the setup gap (fs.createWriteStream, mkdirSync, atomicWrite, findMain, gitStatusZ, ...)
+  // still runs release() in the finally below.
   startInhibitor();
-  const release = () => {
-    releaseMachine();
-    providerSlot?.release();
-    releaseInhibitor();
-  };
-  // Signals: from here on this run holds slots, so SIGTERM/SIGINT/SIGHUP must end its agent tree and release them.
-  // `sig.current` is the live attempt (child + the sweep watcher). The handler only kills and flags; the normal flow
-  // below then writes the receipt and releases the slots, so a signal takes the same path as any other end.
-  const sig = { name: null, code: null, current: null, wake: null };
-  const SIGNALS = { SIGTERM: 143, SIGINT: 130, SIGHUP: 129 };
-  const onSignal = (name) => {
-    if (sig.name) return; // idempotent: a second signal never interrupts cleanup
-    sig.name = name;
-    sig.code = SIGNALS[name];
-    sig.wake?.();
-    releaseInhibitor(); // the run is ending: release the sleep inhibitor now
-    const cur = sig.current;
-    if (!cur) return;
-    if (process.platform === "win32") return killTree(cur.child);
-    try { process.kill(-cur.child.pid, "SIGTERM"); } catch { try { cur.child.kill("SIGTERM"); } catch {} }
-    cur.hard = setTimeout(() => killTree(cur.child), 5000); // 5 s to exit, then SIGKILL what is left
-  };
-  const handlers = Object.keys(SIGNALS).map((n) => [n, () => onSignal(n)]);
-  for (const [n, h] of handlers) process.on(n, h);
   const started = Date.now();
   let effectiveDeadline = started + a.timeoutMin * 60000; // one wall-clock budget for every attempt together
   // Grace: once extended, the dashboard's OVERDUE check must see the extended deadline.
@@ -1619,7 +1648,6 @@ export async function runWorker(a) {
   const guardErrors = []; // guard failures never change the run outcome; they only add error lines
   let preDiff = null;
   let wtStatusBefore = null;
-  let scratchDir = null;
   let readonlyFooter = "";
   if (isReadOnly) {
     try {
@@ -1825,7 +1853,6 @@ export async function runWorker(a) {
       });
     });
 
-  try {
     const resumed = [];
     const alls = [];
     const tokens = { input: 0, output: 0, reasoning: 0, cache_read: 0 };
@@ -1917,6 +1944,7 @@ export async function runWorker(a) {
         FOOTER;
       cli = cliFor(sum.session, msg);
     }
+    postAttempt = true; // A2: the attempt loop finished; a signal now lands after the last attempt
     events.end();
     // Worktree fence: finalize the escape check.
     const { escaped } = finalizeEscapes(fenceState);
@@ -1934,8 +1962,9 @@ export async function runWorker(a) {
     }
     // Suspected-only (main went dirty, no tool event of ours): `escaped.suspected` in the receipt is the warning;
     // no errors[] entry, exit unchanged. Main is often busy with other sessions.
-    const killReason = sig.name ? "killed" : r.killReason;
-    if (sig.name) errors.push(`killed by ${sig.name}`);
+    const killedBySignal = sig.name && signalPreSettle; // A2: "killed" only if the signal landed before the loop settled
+    const killReason = killedBySignal ? "killed" : r.killReason;
+    if (killedBySignal) errors.push(`killed by ${sig.name}`);
     // Landed work: a timed-out or stalled run whose commit made it in counts as done.
     // HEAD moved, tree is clean, and the --report file's status line says DONE.
     let landed;
@@ -1958,6 +1987,10 @@ export async function runWorker(a) {
       fs.writeFileSync(out, `RESULT: BLOCKED: ${why} — partial output below\n\n${all}\n`);
       sum.final = "";
     } else if (sum.final) fs.writeFileSync(out, sum.final.endsWith("\n") ? sum.final : sum.final + "\n");
+    // ORCH_TEST_POSTRUN_PAUSE_MS: test-only pause once <out> has been written, so a test can land a
+    // SIGTERM after a clean attempt and assert the receipt stays clean (default 0: no pause).
+    const postRunPauseMs = Number(process.env.ORCH_TEST_POSTRUN_PAUSE_MS || 0);
+    if (postRunPauseMs > 0) await new Promise((res) => setTimeout(res, postRunPauseMs));
     const code = r.code;
 
     // Read-only guard: compare with the pre-run snapshot. Never changes status/exit.
@@ -2052,13 +2085,13 @@ export async function runWorker(a) {
     };
     atomicWrite(out + ".receipt.json", JSON.stringify(receipt, null, 2) + "\n");
     Object.defineProperty(receipt, "classifyErrors", { value: classifyErrors, enumerable: false }); // for runWithFallback; not serialized
-    receipt.status = sig.name ? sig.code : killReason ? 4 : code ? 5 : sum.final ? 0 : 3;
+    receipt.status = killedBySignal ? sig.code : killReason ? 4 : code ? 5 : sum.final ? 0 : 3;
     // A run with at least one completed escaped write is a failed run (non-zero
     // exit) so the desk escalates instead of sending it to a critic. Status 5 is
     // set only when the receipt exit is escaped-worktree (a completed write);
     // an attempted-only escape (path recorded, no completed write) leaves exit
     // and status unchanged — it is a warning, not a failure.
-    if (receipt.exit === "escaped-worktree" && !sig.name) receipt.status = 5;
+    if (receipt.exit === "escaped-worktree" && !killedBySignal) receipt.status = 5;
     return receipt;
   } finally {
     clearInterval(kickTimer);
