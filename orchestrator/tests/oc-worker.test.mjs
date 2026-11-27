@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { summarize, acquireSlot, slotDir, prio, args, FOOTER } from "../bin/oc-worker.mjs";
+import { summarize, acquireSlot, slotDir, prio, args, FOOTER, sleepGapMs, sleepExtensionMs, resumableReason } from "../bin/oc-worker.mjs";
 import { workerOutcome } from "../bin/outcome.mjs";
 import { CHAINS } from "../bin/chains.mjs";
 import { installFixtureGuard, fixtureChildren, reapFixtureChildren } from "./fixtures/fixture-guard.mjs";
@@ -1687,6 +1687,165 @@ test("grace: --grace-min 0 disables the extension", () => {
   const receipt = JSON.parse(r.stdout.trim());
   assert.equal(receipt.exit, "timeout");
   assert.equal(receipt.extended_min, undefined, "grace-min 0 must not extend");
+});
+
+// ---------------------------------------------------------------- sleep-aware deadline
+
+test("sleepGapMs: sleeps return the gap minus one tick; normal ticks return 0", () => {
+  const now = 1_000_000_000_000;
+  const tickMs = 5000;
+  // a 10-minute tick gap: the host slept ~10 min, give back gap minus the one tick
+  assert.equal(sleepGapMs(now - 10 * 60 * 1000, now, tickMs), 10 * 60 * 1000 - tickMs);
+  // a normal 5 s tick: no sleep
+  assert.equal(sleepGapMs(now - tickMs, now, tickMs), 0);
+  // a gap smaller than a tick: no sleep
+  assert.equal(sleepGapMs(now - 1000, now, tickMs), 0);
+  // a 30 s gap (the watchdog's sleep threshold): 25 s given back
+  assert.equal(sleepGapMs(now - 30_000, now, tickMs), 25_000);
+});
+
+test("sleep: a run with no host sleep has receipt slept_ms 0", () => {
+  const r = run({});
+  assert.equal(r.status, 0, r.stderr);
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.slept_ms, 0, "no sleep: slept_ms must be 0: " + r.stdout);
+});
+
+test("sleep: no real suspend -> killed at the original deadline, slept_ms 0", () => {
+  // A real suspend would need a live host suspend; runWorker's watchdog uses real Date.now(),
+  // so no sleep occurs here and the run dies at its original deadline with slept_ms 0.
+  const state = tmp();
+  CLEAN.push(state);
+  const mandate = path.join(state, "mandate.md");
+  fs.writeFileSync(mandate, "Do the work.");
+  const out = path.join(state, "out", "worker-r1.md");
+  const argsFile = path.join(state, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", state, "--prompt", mandate, "--out", out, "--timeout-min", "0.02", "--grace-min", "0", "--resume", "0"], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: state, FAKE_OC_ARGS_FILE: argsFile, FAKE_OC_MODE: "hang-after-text" },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  assert.equal(r.status, 4, r.stdout + r.stderr);
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.slept_ms, 0, "no sleep: slept_ms must be 0: " + r.stdout);
+  assert.equal(receipt.exit, "timeout");
+});
+
+// sleepExtensionMs: the capped extension the watchdog applies, pure and clock-free.
+test("sleepExtensionMs: a 10-minute sleep gap is given back minus one tick, capped at 2 h", () => {
+  const capMs = 2 * 60 * 60 * 1000;
+  // The watchdog already subtracted one tick via sleepGapMs; sleepExtensionMs just caps the remainder.
+  const slept = 10 * 60 * 1000 - 5000;
+  const first = sleepExtensionMs(0, slept, capMs);
+  assert.equal(first.add, slept, "first sleep gap extended by the already-tick-subtracted slept time");
+  assert.equal(first.total, slept, "total equals the add on the first sleep");
+  // A second sleep pushes total toward but not past the cap.
+  const second = sleepExtensionMs(first.total, slept, capMs);
+  assert.equal(second.total, first.total + second.add, "total accumulates");
+  assert.ok(second.add > 0, "room remains for a second sleep");
+  // Fill the rest of the cap in one go: add should equal the remaining room exactly.
+  const room = capMs - second.total;
+  const filled = sleepExtensionMs(second.total, room + 1_000_000_000, capMs);
+  assert.equal(filled.add, room, "add equals remaining room when the gap exceeds it");
+  assert.equal(filled.total, capMs, "total reaches the cap exactly");
+  // Beyond the cap: no further extension.
+  const over = sleepExtensionMs(capMs, 3 * 60 * 60 * 1000, capMs);
+  assert.equal(over.add, 0, "cap exhausted: a 3 h gap adds nothing");
+  assert.equal(over.total, capMs, "total stays at the cap");
+});
+
+// sleepGapMs arithmetic: a single raw gap can exceed 2 h, which runWorker caps via sleepExtensionMs.
+test("sleepGapMs: a raw 3 h gap exceeds the 2 h cap (runWorker caps total via sleepExtensionMs)", () => {
+  const now = 1_000_000_000_000;
+  const threeHoursMs = 3 * 60 * 60 * 1000;
+  assert.ok(sleepGapMs(now - threeHoursMs, now, 5000) > 2 * 60 * 60 * 1000, "raw 3 h gap exceeds the 2 h cap");
+});
+
+// ---------------------------------------------------------------- small-edit footer
+
+test("worker footer: a worker-role run's prompt carries the small-edit line", () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  const argsFile = path.join(dir, "args.json");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "worker", "--dir", dir, "--prompt", prompt, "--out", path.join(dir, "out", "worker-r1.md")], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, FAKE_OC_ARGS_FILE: argsFile },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const { argv } = JSON.parse(fs.readFileSync(argsFile, "utf8"));
+  const message = argv.at(-1);
+  assert.ok(message.includes("small pieces"), "worker prompt has the small-edit line: " + message);
+  assert.ok(message.includes("8k output tokens"), "worker prompt names the output-token cap: " + message);
+});
+
+test("worker footer: read-only roles (critic, senior, scout) do not get the small-edit line", () => {
+  const dir = tmp();
+  CLEAN.push(dir);
+  const prompt = path.join(dir, "mandate.md");
+  fs.writeFileSync(prompt, "Review the diff.");
+  for (const agent of ["critic", "senior", "scout"]) {
+    const argsFile = path.join(dir, `${agent}-args.json`);
+    const r = spawnSync(process.execPath, [BIN, "--agent", agent, "--dir", dir, "--prompt", prompt, "--out", path.join(dir, `out-${agent}.md`)], {
+      env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: dir, FAKE_OC_ARGS_FILE: argsFile },
+      encoding: "utf8",
+      timeout: 30000,
+    });
+    assert.equal(r.status, 0, `${agent}: ${r.stderr}`);
+    const { argv } = JSON.parse(fs.readFileSync(argsFile, "utf8"));
+    const message = argv.at(-1);
+    assert.ok(!message.includes("small pieces"), `${agent} prompt must not carry the small-edit line: ${message}`);
+    assert.ok(!message.includes("8k output tokens"), `${agent} prompt must not name the output-token cap: ${message}`);
+  }
+});
+
+// ---------------------------------------------------------------- truncation-aware resume
+
+test("resumableReason: output-token truncation is its own 'truncated' reason", () => {
+  assert.equal(resumableReason(["Response still truncated after two output token limit continuations"]), "truncated");
+  assert.equal(resumableReason(["the model output exceeded the output token limit"]), "truncated");
+  assert.equal(resumableReason(["read ECONNRESET"]), "dropped");
+});
+
+test("truncation resume: the resume message tells the worker to split edits; ECONNRESET does not", () => {
+  const truncState = tmp(); CLEAN.push(truncState);
+  const truncFake = path.join(truncState, "fake-truncate-oc.mjs");
+  fs.writeFileSync(truncFake, `#!/usr/bin/env node\nimport fs from "node:fs";\nimport path from "node:path";\nconst argv = process.argv.slice(2);\nconst session = "ses_trunc";\nconst state = process.env.FAKE_OC_STATE_DIR;\nif (state) { fs.mkdirSync(state, { recursive: true }); fs.appendFileSync(path.join(state, "calls.jsonl"), JSON.stringify({ argv, cwd: process.cwd() }) + "\\n"); }\nif (process.env.FAKE_OC_ARGS_FILE) fs.writeFileSync(process.env.FAKE_OC_ARGS_FILE, JSON.stringify({ argv, cwd: process.cwd() }));\nconst counter = path.join(state, "trunc-count");\nlet n = 0;\ntry { n = Number(fs.readFileSync(counter, "utf8")) || 0; } catch {}\nfs.writeFileSync(counter, String(n + 1));\nconst ev = (type, part) => process.stdout.write(JSON.stringify({ type, sessionID: session, part: { sessionID: session, messageID: "m", ...part } }) + "\\n");\nif (n === 0) {\n  ev("text", { type: "text", text: "some work\\n" });\n  ev("error", { type: "error", error: { name: "UnknownError", message: "Response still truncated after two output token limit continuations" } });\n  process.exit(1);\n} else {\n  ev("text", { type: "text", text: "RESULT: DONE\\ntruncated recovery done\\n" });\n  ev("step_finish", { type: "step-finish", cost: 0.001 });\n  process.exit(0);\n}\n`);
+  fs.writeFileSync(path.join(truncState, "mandate.md"), "Do the work.");
+  const r = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", truncState, "--prompt", path.join(truncState, "mandate.md"), "--out", path.join(truncState, "out", "worker-r1.md")], {
+    env: { ...process.env, OPENCODE_BIN: truncFake, ORCH_NO_PROCTREE: "1", ORCH_HOME: truncState, FAKE_OC_STATE_DIR: truncState, ORCH_RESUME_WAIT_MS: "0", FAKE_OC_ARGS_FILE: path.join(truncState, "args.json") },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const receipt = JSON.parse(r.stdout.trim());
+  assert.equal(receipt.resumed.length, 1, `expected one truncation resume, got ${JSON.stringify(receipt.resumed)}`);
+  assert.equal(receipt.resumed[0].reason, "output token limit", `truncation resume reason: ${JSON.stringify(receipt.resumed)}`);
+  const calls = fs.readFileSync(path.join(truncState, "calls.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(calls.length, 2, "first (truncated) call plus one resumed call");
+  const resumedMsg = calls[1].argv[calls[1].argv.length - 1];
+  assert.ok(resumedMsg.includes("split the remaining edit into smaller pieces"), "truncation resume message must tell the worker to split edits: " + resumedMsg);
+
+  // negative: a plain ECONNRESET drop is resumed with the ordinary message, no split line
+  const ecState = tmp(); CLEAN.push(ecState);
+  const dropFake = path.join(ecState, "fake-drop-oc.mjs");
+  fs.writeFileSync(dropFake, `#!/usr/bin/env node\nimport fs from "node:fs";\nimport path from "node:path";\nconst argv = process.argv.slice(2);\nconst session = "ses_drop";\nconst state = process.env.FAKE_OC_STATE_DIR;\nif (state) { fs.mkdirSync(state, { recursive: true }); fs.appendFileSync(path.join(state, "calls.jsonl"), JSON.stringify({ argv, cwd: process.cwd() }) + "\\n"); }\nif (process.env.FAKE_OC_ARGS_FILE) fs.writeFileSync(process.env.FAKE_OC_ARGS_FILE, JSON.stringify({ argv, cwd: process.cwd() }));\nconst counter = path.join(state, "drop-count");\nlet n = 0;\ntry { n = Number(fs.readFileSync(counter, "utf8")) || 0; } catch {}\nfs.writeFileSync(counter, String(n + 1));\nconst ev = (type, part) => process.stdout.write(JSON.stringify({ type, sessionID: session, part: { sessionID: session, messageID: "m", ...part } }) + "\\n");\nif (n === 0) {\n  ev("text", { type: "text", text: "some work\\n" });\n  ev("error", { type: "error", error: { name: "UnknownError", message: "read ECONNRESET" } });\n  process.exit(1);\n} else {\n  ev("text", { type: "text", text: "RESULT: DONE\\ndrop recovery done\\n" });\n  ev("step_finish", { type: "step-finish", cost: 0.001 });\n  process.exit(0);\n}\n`);
+  fs.writeFileSync(path.join(ecState, "mandate.md"), "Do the work.");
+  const r2 = spawnSync(process.execPath, [BIN, "--agent", "critic", "--dir", ecState, "--prompt", path.join(ecState, "mandate.md"), "--out", path.join(ecState, "out", "worker-r1.md")], {
+    env: { ...process.env, OPENCODE_BIN: dropFake, ORCH_NO_PROCTREE: "1", ORCH_HOME: ecState, FAKE_OC_STATE_DIR: ecState, ORCH_RESUME_WAIT_MS: "0", FAKE_OC_ARGS_FILE: path.join(ecState, "args.json") },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  assert.equal(r2.status, 0, r2.stdout + r2.stderr);
+  const receipt2 = JSON.parse(r2.stdout.trim());
+  assert.equal(receipt2.resumed.length, 1, "drop resumes once");
+  const calls2 = fs.readFileSync(path.join(ecState, "calls.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(calls2.length, 2, "first (dropped) call plus one resumed call");
+  const droppedMsg = calls2[calls2.length - 1].argv[calls2[calls2.length - 1].argv.length - 1];
+  assert.ok(!droppedMsg.includes("split the remaining edit into smaller pieces"), "ECONNRESET resume must not carry the split line: " + droppedMsg);
+  assert.ok(!droppedMsg.includes("output token limit"), "ECONNRESET resume must not mention the output cap: " + droppedMsg);
 });
 
 test("--stream queued event carries slots (queue-time snapshot)", () => {
