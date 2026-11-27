@@ -51,9 +51,7 @@ const snap = ({ at, weekly, monthly, rolling } = {}) => {
 /** The plan's worked example: M=60, snap weekly/monthly 10 taken at now, $0.60 in one open 5h window. */
 const worked = () =>
   st({
-    snapshots: [
-      snap({ rolling: { pct: 99, resets_at: iso(NOW_W + 4 * HOUR) } }), // rolling is ignored until G0
-    ],
+    snapshots: [snap({})],
     ledger: { rows: [{ t: NOW_W - HOUR, usd: 0.6 }], unrated: 0 },
   });
 
@@ -369,15 +367,15 @@ test("bar 9: unknown reasons; allowance mismatch; pct 0 never mismatches", () =>
   assert.equal(snapOnly.state, "under");
   assert.equal(snapOnly.src, "snap");
 
-  // Allowance mismatch boundary: just over 110 % of the meter.
+  // Allowance mismatch boundary: just over 110 % of (pct + 1) for the integer-percent meter.
   const over = st({
     snapshots: [snap({})],
-    ledger: { rows: [{ t: Date.parse("2026-11-30T01:00:00.000Z"), usd: 3.31 }], unrated: 0 },
+    ledger: { rows: [{ t: Date.parse("2026-11-30T01:00:00.000Z"), usd: 3.64 }], unrated: 0 },
   });
   assert.equal(over.reason, "allowance mismatch");
   const under110 = st({
     snapshots: [snap({})],
-    ledger: { rows: [{ t: Date.parse("2026-11-30T01:00:00.000Z"), usd: 3.29 }], unrated: 0 },
+    ledger: { rows: [{ t: Date.parse("2026-11-30T01:00:00.000Z"), usd: 3.62 }], unrated: 0 },
   });
   assert.notEqual(under110.reason, "allowance mismatch");
 
@@ -397,7 +395,7 @@ test("bar 9: unknown reasons; allowance mismatch; pct 0 never mismatches", () =>
   // mo-meter mismatch while the wk window passes: spend sits before wk.start but inside the period.
   const moMismatch = st({
     snapshots: [snap({})],
-    ledger: { rows: [{ t: Date.parse("2026-11-25T00:00:00.000Z"), usd: 7 }], unrated: 0 },
+    ledger: { rows: [{ t: Date.parse("2026-11-25T00:00:00.000Z"), usd: 7.3 }], unrated: 0 },
   });
   assert.equal(moMismatch.state, "unknown");
   assert.equal(moMismatch.reason, "allowance mismatch");
@@ -671,6 +669,77 @@ test("bar 14: statusLine for off, unknown, shadow under, on-mode over (non-proje
     assert.ok(!l.includes("\n"), l);
     assert.ok(l.length <= 100, `${l.length}: ${l}`);
   }
+});
+
+test("bar 15 (G3a-a): integer-percent tolerance: pct 1 with 0.015*C_w passes, 0.03*C_w mismatches", () => {
+  const one = (usd) =>
+    st({
+      snapshots: [
+        {
+          at: iso(NOW_W),
+          weekly: { pct: 1, resets_at: iso(WK_END) },
+          monthly: { pct: 1, resets_at: iso(MO_END) },
+        },
+      ],
+      ledger: { rows: [{ t: Date.parse("2026-11-30T01:00:00.000Z"), usd }], unrated: 0 },
+    });
+  // 0.015 * C_wk = 0.45: above the old 0.011*C bar (0.33) but below the new 1.10*(1+1)/100*C bar (0.66).
+  const pass = one(0.45);
+  assert.notEqual(pass.reason, "allowance mismatch");
+  // 0.03 * C_wk = 0.9: above the new 0.66 bar.
+  const fail = one(0.9);
+  assert.equal(fail.state, "unknown");
+  assert.equal(fail.reason, "allowance mismatch");
+});
+
+test("bar 16 (G3a-b): fresh rolling feeds used_5h; past rolling falls back to the ledger window", () => {
+  // Rolling fresh: used_5h = 50% of C_5h ($6) + $1 since at; resets["5h"] from the meter.
+  const freshAt = NOW_W - HOUR;
+  const fresh = st({
+    snapshots: [
+      {
+        at: iso(freshAt),
+        rolling: { pct: 50, resets_at: iso(NOW_W + 4 * HOUR) },
+        weekly: { pct: 10, resets_at: iso(WK_END) },
+        monthly: { pct: 10, resets_at: iso(MO_END) },
+      },
+    ],
+    ledger: { rows: [{ t: NOW_W - 30 * 60 * 1000, usd: 1 }], unrated: 0 },
+  });
+  assert.equal(fresh.used_5h, 7);
+  assert.equal(fresh.p_5h, 58.3);
+  assert.equal(fresh.resets["5h"], iso(NOW_W + 4 * HOUR));
+
+  // Rolling past its reset: the ledger window decides again.
+  const past = st({
+    snapshots: [
+      {
+        at: iso(NOW_W),
+        rolling: { pct: 50, resets_at: iso(NOW_W - HOUR) },
+        weekly: { pct: 10, resets_at: iso(WK_END) },
+        monthly: { pct: 10, resets_at: iso(MO_END) },
+      },
+    ],
+    ledger: { rows: [{ t: NOW_W - HOUR, usd: 0.6 }], unrated: 0 },
+  });
+  assert.equal(past.used_5h, 0.6);
+  assert.equal(past.resets["5h"], iso(NOW_W + 4 * HOUR));
+});
+
+test("bar 17 (G3a-c): null-ledger shapes and out-of-range times", () => {
+  for (const ledger of [{}, { rows: 5 }]) {
+    const r = st({ ledger, snapshots: [] });
+    assert.equal(r.state, "unknown");
+    assert.equal(r.reason, "no ledger");
+  }
+  assert.equal(periodBounds(ANCHOR, 9e15), null);
+  assert.equal(periodBounds(ANCHOR, -9e15), null);
+  assert.equal(weekBounds(9e15), null);
+  assert.equal(fiveHourWindow([NOW_W - HOUR], 9e15), null);
+  assert.equal(periodFromReset(9e15), null);
+  // Out-of-range now still resolves unknown, never throws.
+  const r = st({ now: 9e15 });
+  assert.equal(r.state, "unknown");
 });
 
 test("constants and roles are frozen", () => {
