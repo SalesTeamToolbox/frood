@@ -297,3 +297,105 @@ export function streamOrphaned(name, now = Date.now()) {
 
 /** Ledger key: one page per stream per claim. A new claim (new held_at) re-arms it. */
 export const orphanLedgerKey = (name, s = readStream(name)) => `orphan:${name}:${s?.held_at ?? "unheld"}`;
+
+/** Map a stored `held_parent` id to the peer-mail session id that can be mailed.
+ *  A `local_<uuid>` host id (what `get_session self` shows as `parentSessionId`) is resolved through
+ *  `<home>/.claude/sessions/<pid>.json` files: skip non-`.json` siblings (`.key` files), match
+ *  `hostSessionId === id`, return its `sessionId`. When several files match, a live pid wins first,
+ *  then the newest `statusUpdatedAt`/`updated`. Any other id is returned as is (it is already a
+ *  peer-mail id); an unmapped `local_…` id returns null. The mapping is resolved at use time, never
+ *  stored: a `sessionId` can change under one host id. Read-only; `home` is injectable for tests. */
+export function resolvePeerSession(id, home = orchRoot()) {
+  if (typeof id !== "string" || !id) return null;
+  if (!id.startsWith("local_")) return id;
+  let matches = [];
+  try {
+    const entries = fs.readdirSync(SESSION_DIR(home), { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isFile() || !/\.json$/.test(e.name)) continue;
+      const pid = Number(e.name.replace(/\.json$/, ""));
+      if (!Number.isInteger(pid) || pid <= 0) continue;
+      let s;
+      try {
+        s = JSON.parse(fs.readFileSync(path.join(SESSION_DIR(home), e.name), "utf8"));
+      } catch {
+        continue;
+      }
+      if (!s || typeof s !== "object" || s.hostSessionId !== id || typeof s.sessionId !== "string" || !s.sessionId) continue;
+      let live = false;
+      try {
+        process.kill(pid, 0);
+        live = true;
+      } catch (err) {
+        live = err.code === "EPERM";
+      }
+      const updated = Number(s.statusUpdatedAt ?? s.updated);
+      matches.push({ sessionId: s.sessionId, live, updated: Number.isFinite(updated) ? updated : -Infinity });
+    }
+  } catch {
+    return null;
+  }
+  if (!matches.length) return null;
+  matches.sort((a, b) => (b.live - a.live) || (b.updated - a.updated));
+  return matches[0].sessionId;
+}
+
+/** The nested parent of `stream`, for the orphan page: `{ id, idleMs, live }` for the resolved
+ *  parent session, or null when the stream has no `held_parent` or it cannot be resolved.
+ *  `idleMs` follows the `holderSession` cc rules (session-file `status: idle` + `statusUpdatedAt`,
+ *  else transcript mtime, plus peer-mail `peers.last_seen`, newest wins). `live` is true only when
+ *  the parent is found AND `idleMs <= orphanThresholdMs()`: a live pid alone is not enough (a
+ *  parent idle for days must not suppress the owner page forever). Read-only. */
+export function parentSession(stream, home = orchRoot()) {
+  let s;
+  try {
+    s = readStream(stream);
+  } catch {
+    return null;
+  }
+  const parent = s?.held_parent;
+  if (typeof parent !== "string" || !parent) return null;
+  const id = resolvePeerSession(parent, home);
+  if (!id) return null;
+  const now = Date.now();
+  const idle = newest([
+    parentIdleMs(parent, id, home, now, s),
+    sessionSeen(id),
+  ]);
+  if (idle === null || !Number.isFinite(idle)) return null;
+  const idleMs = now - idle;
+  return { id, idleMs, live: idleMs <= orphanThresholdMs() };
+}
+
+// Newest sign of life for a parent id: the cc session-file/transcript rules from holderSession,
+// keyed on the resolved peer-mail id, plus the stream activity fallback for a `local_…` host id
+// whose transcript lives under the host id itself.
+function parentIdleMs(parent, id, home, now, s) {
+  const seen = [];
+  let foundPid = null;
+  try {
+    const entries = fs.readdirSync(SESSION_DIR(home), { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isFile() || !/\.json$/.test(e.name)) continue;
+      const pid = Number(e.name.replace(/\.json$/, ""));
+      if (!Number.isInteger(pid) || pid <= 0) continue;
+      const sf = sessionFile(home, pid);
+      if (!sf || sf.sessionId !== id) continue;
+      try { if (process.kill(pid, 0)) { foundPid = pid; break; } } catch (err) { if (err.code === "EPERM") { foundPid = pid; break; } }
+    }
+  } catch {}
+  if (foundPid !== null) {
+    const sf = sessionFile(home, foundPid);
+    if (sf && sf.status === "idle" && Number.isFinite(sf.statusUpdatedAt)) return sf.statusUpdatedAt;
+    const tr = transcriptInfo(home, id, sf ? sf.cwd : null, now);
+    if (tr.ms != null) return now - tr.ms;
+    const host = transcriptInfo(home, parent, sf ? sf.cwd : null, now);
+    if (host.ms != null) return now - host.ms;
+    return null;
+  }
+  const tr = transcriptInfo(home, id, s?.repo ? path.resolve(s.repo) : null, now);
+  if (tr.ms != null) return now - tr.ms;
+  const host = transcriptInfo(home, parent, s?.repo ? path.resolve(s.repo) : null, now);
+  if (host.ms != null) return now - host.ms;
+  return null;
+}

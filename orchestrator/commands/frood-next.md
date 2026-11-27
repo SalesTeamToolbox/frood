@@ -38,6 +38,9 @@ The tab title is set by the `orchestrator-handoff.js` hook to `[<stream>] <repo>
    `node {{ORCH_REPO}}/bin/handoff.mjs claim --stream <name> --by cc --session <your peer-mail session id>`
    (the id injected at session start, "your session id for the peer_* messaging tools is ..."). `--session` is
    required here: without it the desk daemon cannot mail escalations to this session and they sit unseen.
+   If `get_session self` shows `parentSessionId`, this session is nested: append
+   `--parent <that parentSessionId>` to the claim, so the desk mails the parent alongside this session and
+   wakes the parent (never the owner) when this session goes idle with an open escalation.
    <!-- /cc-only -->
    <!-- oc-only -->
    `node {{ORCH_REPO}}/bin/handoff.mjs claim --stream <name> --by oc --session "$OPENCODE_SESSION_ID"`
@@ -90,7 +93,10 @@ The tab title is set by the `orchestrator-handoff.js` hook to `[<stream>] <repo>
    Workers you launch with `--stream` are handed to the desk (critic, rounds, merge): launch, set the worker todo
    `in_progress`, move on — and after any wait, check this session's `peer_inbox` before saying anything about the
    ticket, because the desk daemon peer-mails you the merge/senior/sign-off instead of paging the owner. Do not
-   review or merge them here, and never tell the owner to watch `/frood-desk` or `desk.mjs status`.
+   review or merge them here, and never tell the owner to watch `/frood-desk` or `desk.mjs status`. After
+   handling a desk escalation mail (senior review done, merge done, sign-off reported), close it with
+   `node {{ORCH_REPO}}/bin/desk.mjs resolve <stream> <key> --note "<what you did>"` — `peer_ack` alone
+   does not close it, and the escalation stays open until resolved.
    <!-- cc-only -->
    If `get_session self` shows `parentSessionId`, this session was started by a parent: at its module boundary it
    writes the handoff, reports in one line, and stops — it does not start the next module (the parent does, without

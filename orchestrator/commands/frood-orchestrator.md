@@ -309,7 +309,10 @@ Code, read it before dispatching). Spawn the named agent — never hand-type a m
    todo `in_progress` and go on to the next ticket — the desk daemon is the default driver (the driver-check
    rule above already guarantees one is live), so there is nothing for the owner to start and nothing for
    them to watch: the daemon peer-mails this session on a merge, senior review or sign-off, and this session
-   reports it. An interactive `/frood-desk` is the fallback *you* open when the daemon cannot run — never an owner
+   reports it. After handling such a mail, close the escalation with
+   `node {{ORCH_REPO}}/bin/desk.mjs resolve <stream> <key> --note "<what you did>"` (`peer_ack` alone does
+   not close it); a nested child's escalations reach its parent too, via the parent's own desk mail. An
+   interactive `/frood-desk` is the fallback *you* open when the daemon cannot run — never an owner
    action item. Run the critic loop yourself only for a Claude Code `worker` agent (no stream events) or when
    the owner tells you to.
    <!-- oc-only -->
@@ -465,7 +468,9 @@ If vision was used, receipt includes: `vision: { images_detected: N, total_bytes
 - **You own the desk loop for your own tickets; the owner never drives it.** A streamed
   ticket is the desk's to execute and *this session's* to report: the desk daemon peer-mails
   this session when a ticket is ready to merge, needs a senior review, or needs an owner
-  sign-off, and this session brings it to the owner. So, for every streamed ticket:
+  sign-off, and this session brings it to the owner. After handling that mail, run
+  `node {{ORCH_REPO}}/bin/desk.mjs resolve <stream> <key> --note "<what you did>"` — and know a nested
+  child's escalations also reach its parent. So, for every streamed ticket:
 
   ```
   launch → same call sets <ticket> worker-rN in_progress (run id + pid in the content;

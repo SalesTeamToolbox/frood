@@ -97,3 +97,48 @@ when in doubt about a decorated tag, it counts.
 - any other line -> the transition (old format) separator walk plus the no-dash-separator fail safe.
 
 The INVALID rule (no BLAST RADIUS entries) and the blocker/major parser are unchanged.
+
+## nested escalations — streams worked by nested sessions
+
+Ticket `desk-nested-escalations`. On 2026-11-26 the desk paged the owner for work a nested child session
+had already handled: the escalation stayed open because nothing resolved the desk ack.
+
+- **`handoff.mjs claim --parent <id>`** records the nested session's parent on the pointer as
+  `held_parent` (new `LEASE_KEYS` entry, defaults to null on old pointers). Validated like `--session`;
+  `--parent` without `--session` exits 2. Lifecycle in `claimStream`: unheld and takeover branches store
+  `parent ?? null`; the same-harness branch keeps the recorded parent on a same-session re-claim without
+  `--parent` and drops it for a different session; `releaseStream` and `markDone` null it. `show` prints it.
+- **`orphan.mjs resolvePeerSession(id)`** maps a stored parent id to a peer-mail id at use time (never
+  stored mapped): a `local_<uuid>` host id resolves through `<home>/.claude/sessions/<pid>.json` files
+  (non-`.json` siblings skipped; `hostSessionId === id`; live pid first, then newest
+  `statusUpdatedAt`/`updated`); any other id passes through; an unmapped `local_…` id is null.
+- **`orphan.mjs parentSession(stream)`** returns `{ id, idleMs, live }` for the resolved parent, or null
+  with no `held_parent` or no resolution. `idleMs` follows the `holderSession` cc rules (session-file
+  `status: idle` + `statusUpdatedAt`, else transcript mtime, plus peer-mail `peers.last_seen`, newest wins);
+  `live` needs `idleMs <= orphanThresholdMs()` — a live pid alone never suppresses the owner page.
+- **`desk.mjs sendDeskMail(toSession, subject, body)`** (split out of `notifyHeldSession`) writes one
+  peer-mail row, true only when written. `notifyHeldSession` mails the holder as today and, when
+  `held_parent` resolves to a different id, the parent too (`desk: [nested <stream>]` subject, same body).
+  Every desk mail body gains, after the `step` resolve line:
+  `After you handle it: node <desk.mjs> resolve <stream> <key> --note "<what you did>"`.
+- **`desk.mjs pageOrphanOrParent(stream)`** (from `dpage`'s orphan branch and `sweepOrphans`): when the
+  stream is orphaned AND held AND its parent is live, the parent gets
+  `desk: [nested <stream>] child session idle with N open escalation(s)` (open keys from
+  `openEscalations`, each with its `desk.mjs resolve` command) once per claim (`parent:<stream>:<held_at>`
+  ledger entry, written only after a successful send; a failed send falls through to `orphanPage`); dry
+  run sends nothing, writes nothing, logs once per process. Every other case pages the owner as today, and
+  `pruneOrphanLedger` prunes `parent:` entries by the same rules as `orphan:` entries.
+- **`desk.mjs resolve <stream> <key> --note <text>`** (`cmdResolve`) closes one open escalation with one
+  resolved `RESOLVED <note>` ack (ticket copied from the decision line when it has one): after it `step`
+  prints `DONE`, `daemon status` drops it, `openEscalations` drops it, `streamOrphaned` stops counting it.
+  Refuses with exit 2 (one stderr line) a missing stream, a missing/empty or newline `--note`, and a key
+  with no escalation (no unresolved `ESCALATE` line and no `escalations.jsonl` row). Already resolved prints
+  `DONE <key>`, exit 0, writes nothing. `--by` validated like `step`, no HELD refusal.
+- **`cmdStep` decided branch**: a decided `ESCALATE` on a `run-done`/`run-dead`/`verdict` key whose ticket is
+  closed (`closedTicket`: worktree gone) or whose board ticket is `closed`/`shipped` (`ticketResolved` on the
+  stream's repo) appends `STALE ticket-closed` resolved and prints `DONE <key>` instead of replaying. Decided
+  ESCALATEs on open tickets replay exactly as today; non-ESCALATE decided actions keep `effectPresent`.
+- **`pendingEscalations()`** also drops rows whose board ticket is `closed`/`shipped`.
+
+`streamOrphaned`'s result shape is unchanged; `step` stays pure (file reads only, no git, no spawn —
+`ticketResolved` is a file read). `handoff.mjs` append/read semantics are unchanged.

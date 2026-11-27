@@ -84,8 +84,12 @@ are keyed by that same `wakeId`, so one stream's step failures never push anothe
 counter or consume its critic retry; entries a pre-upgrade file wrote bare match no stream and
 restart at zero. A key already in `pagedIds` is skipped silently — the ack stays unresolved,
 other streams keep moving, the owner is never spammed. `status` prints pending escalations
-(unpaged-by-resolution: keys still unresolved) so any interactive `/frood-desk` sees them. Resolution
-is the existing `handoff.mjs ack --resolved` once the owner deals with it.
+(unpaged-by-resolution: keys still unresolved; rows whose board ticket is `closed`/`shipped` are
+dropped) so any interactive `/frood-desk` sees them. Resolution is `desk.mjs resolve <stream> <key>
+--note "<what you did>"` once the escalation is handled (it appends one resolved `RESOLVED <note>` ack;
+the low-level equivalent is the existing `handoff.mjs ack --resolved`). A decided `ESCALATE` whose ticket
+has since closed or shipped no longer replays: `step` on it appends `STALE ticket-closed` resolved and
+prints `DONE <key>`.
 
 ## Orphaned streams
 
@@ -97,12 +101,24 @@ its peer-mail `peers.last_seen`, its OpenCode `session` row `time_updated`, and 
 (`peers.last_seen` moves only on peer-mail tool use, so alone it under-reports a busy Claude Code session). A
 session found in no store is judged by stream activity. Detection is `orphan.mjs` (`streamOrphaned`).
 
+A stream held by a nested session (`handoff.mjs claim --parent <id>`, stored as `held_parent`) whose
+idle child still has a live parent never pages the owner: the daemon peer-mails the parent instead
+(`desk: [nested <stream>] child session idle with N open escalation(s)`, with each open key and its
+`desk.mjs resolve` command), once per stream per claim under ledger key `parent:<stream>:<held_at>`
+(written only after the send succeeds; a failed send falls through to the owner page). The parent id
+is resolved at use time by `orphan.mjs resolvePeerSession` (`local_<uuid>` host ids map through
+`~/.claude/sessions/<pid>.json`) and its liveness by `orphan.mjs parentSession` (live only while its
+idleness is within `ORCH_ORPHAN_MIN` — a live pid alone never suppresses the owner page forever). The
+fork is `desk.mjs pageOrphanOrParent`, called from `dpage`'s orphan branch and from `sweepOrphans`;
+the `held_parent` id is mailed alongside the holder on every desk mail too (`notifyHeldSession`, subject
+`desk: [nested <stream>]`), because the child that was paged may already be gone.
+
 The daemon pages the owner once per stream per claim: ledger `orphaned` in `state.json`, key
 `orphan:<stream>:<held_at|unheld>` (separate from `pagedIds`; a new claim re-arms it). Each poll's sweep also
 prunes entries that can no longer page anything, so the ledger does not grow forever: an entry whose stream has no
 pointer file (deleted), is done or parked (nothing to resume), or whose `<held_at>` part is not the stream's current
 claim (superseded — the newer claim has its own key); plus the original rule, an entry whose stream has no open
-escalation left. A live orphaned stream's current entry is kept, which is what makes the page once-only. It spawns
+escalation left. `parent:` entries prune by the same rules. A live orphaned stream's current entry is kept, which is what makes the page once-only. It spawns
 `orphan-notice.mjs <stream>` detached: `notify-send -u critical -A resolve="Resolve in new session" --wait`; on click it opens a session on `/frood-next <stream>` in the stream's repo. How is `~/.config/orchestrator/launch.json`
 (`bin/launch-config.mjs`; chosen at setup, `--set` to change): `desktop` hands `claude://code/new?q=...&folder=...` to
 `xdg-open` (the Claude desktop app); `terminal` runs `claude` via `xdg-terminal-exec`. An OpenCode holder always gets

@@ -2628,3 +2628,142 @@ test("desk scope fence: a dry run writes no findings and appends no verdict", as
   assert.equal(fs.existsSync(findings), false, "no findings file");
   assert.equal(fs.existsSync(path.join(runDir, "critic-prompt-r1.md")), false, "no critic prompt");
 });
+
+// ---------------------------------------------------------------- resolve (close one escalation by hand)
+
+const escalationsRow = (h, stream, key, reason = "worker-blocked /x") => {
+  const dir = path.join(h, ".config", "orchestrator", "desk-daemon");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.appendFileSync(path.join(dir, "escalations.jsonl"), JSON.stringify({ at: new Date().toISOString(), stream, key, reason }) + "\n");
+};
+const acksOf = (h, name = "m6a") =>
+  fs.readFileSync(path.join(sdir(h), `${name}.acks.jsonl`), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+
+test("resolve: closes an open ESCALATE; step then prints DONE; daemon status drops it; second resolve is DONE", () => {
+  const { h, name, runDir } = t8Stream("rs1");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+    appendAck(name, "run:worker-r1:done", "ESCALATE senior /f/findings-r1.md", { ticket: "t8" });
+  });
+  escalationsRow(h, name, "run:worker-r1:done", "senior /f/findings-r1.md");
+  assert.match(cli(h, ["daemon", "status"]).stdout, /escalations pending: 1/);
+  const r = cli(h, ["resolve", name, "run:worker-r1:done", "--note", "senior done"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.split("\n").filter(Boolean), [`RESOLVED ${name} run:worker-r1:done`]);
+  const acks = acksOf(h, name);
+  const resolved = acks.filter((l) => l.key === "run:worker-r1:done" && l.resolved);
+  assert.equal(resolved.length, 1);
+  assert.equal(resolved[0].action, "RESOLVED senior done");
+  assert.equal(resolved[0].ticket, "t8", "the ticket rides along from the decision line");
+  assert.match(cli(h, ["step", name, "run:worker-r1:done"]).stdout, /^DONE run:worker-r1:done$/m);
+  assert.match(cli(h, ["daemon", "status"]).stdout, /escalations pending: 0/);
+  const before = fs.readFileSync(path.join(sdir(h), `${name}.acks.jsonl`), "utf8");
+  const again = cli(h, ["resolve", name, "run:worker-r1:done", "--note", "again"]);
+  assert.equal(again.status, 0);
+  assert.deepEqual(again.stdout.split("\n").filter(Boolean), ["DONE run:worker-r1:done"]);
+  assert.equal(fs.readFileSync(path.join(sdir(h), `${name}.acks.jsonl`), "utf8"), before, "idempotent: writes nothing");
+});
+
+test("resolve: closes an escalation known only from escalations.jsonl, without a ticket", () => {
+  const { h, name, runDir } = t8Stream("rs2");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+  });
+  escalationsRow(h, name, "run:worker-r1:done");
+  const r = cli(h, ["resolve", name, "run:worker-r1:done", "--note", "paged, handled"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.split("\n").filter(Boolean), [`RESOLVED ${name} run:worker-r1:done`]);
+  assert.match(cli(h, ["daemon", "status"]).stdout, /escalations pending: 0/);
+});
+
+test("resolve: refuses a missing stream, an unknown key, a missing/empty/newline note (exit 2, one stderr line)", () => {
+  const { h, name, runDir } = t8Stream("rs3");
+  inHome(h, undefined, () => {
+    appendEvent(name, evQueued("worker-r1", runDir));
+    appendEvent(name, evDone("worker-r1", runDir));
+    appendAck(name, "run:worker-r1:done", "ESCALATE senior /f", { ticket: "t8" });
+  });
+  const oneLine = (r) => assert.equal(r.stderr.split("\n").filter(Boolean).length, 1, JSON.stringify(r.stderr));
+  let r = cli(h, ["resolve", "nosuch", "run:worker-r1:done", "--note", "x"]);
+  assert.equal(r.status, 2);
+  oneLine(r);
+  assert.match(r.stderr, /no stream nosuch/);
+  r = cli(h, ["resolve", name, "run:nope:done", "--note", "x"]);
+  assert.equal(r.status, 2);
+  oneLine(r);
+  assert.match(r.stderr, /no escalation for run:nope:done/);
+  r = cli(h, ["resolve", name, "run:worker-r1:done"]);
+  assert.equal(r.status, 2);
+  oneLine(r);
+  assert.match(r.stderr, /needs --note/);
+  r = cli(h, ["resolve", name, "run:worker-r1:done", "--note", ""]);
+  assert.equal(r.status, 2);
+  oneLine(r);
+  r = cli(h, ["resolve", name, "run:worker-r1:done", "--note", "line1\nline2"]);
+  assert.equal(r.status, 2);
+  oneLine(r);
+  assert.match(r.stderr, /one line/);
+  // a key with no ESCALATE anywhere (only an ACTION decision) is not an escalation
+  inHome(h, undefined, () => appendAck(name, "verdict:worker-r1", "ACTION critic /t /o /f 1", { ticket: "t8" }));
+  r = cli(h, ["resolve", name, "verdict:worker-r1", "--note", "x"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /no escalation/);
+});
+
+// ---------------------------------------------------------------- step: a decided ESCALATE on a closed ticket is STALE
+
+test("step: a decided ESCALATE senior on a removed worktree prints DONE and writes STALE ticket-closed resolved", () => {
+  const h = home();
+  mkStream(h, "st1");
+  const runDir = runDirOf(h, "t8");
+  mkTicket(runDir, { closed: true });
+  inHome(h, undefined, () => {
+    appendEvent("st1", evQueued("worker-r1", runDir));
+    appendEvent("st1", evDone("worker-r1", runDir));
+    appendAck("st1", "run:worker-r1:done", `ESCALATE senior ${fwd(path.join(runDir, "findings-r1.md"))}`, { ticket: "t8" });
+  });
+  const r = cli(h, ["step", "st1", "run:worker-r1:done"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.split("\n").filter(Boolean), ["DONE run:worker-r1:done"]);
+  const stale = acksOf(h, "st1").filter((l) => l.key === "run:worker-r1:done" && l.resolved);
+  assert.equal(stale.length, 1);
+  assert.equal(stale[0].action, "STALE ticket-closed");
+  assert.equal(stale[0].ticket, "t8");
+});
+
+test("step: a decided ESCALATE on a shipped board ticket prints DONE; an open ticket replays the line", () => {
+  // shipped: worktree open, but the board ticket reached `shipped`
+  const h = home();
+  mkStream(h, "sh1");
+  const runDir = runDirOf(h, "t8");
+  mkTicket(runDir);
+  const boardRepo = path.join(h, "boardrepo");
+  fs.mkdirSync(path.join(boardRepo, ".opencode", "board", "tickets"), { recursive: true });
+  fs.writeFileSync(path.join(boardRepo, ".opencode", "board", "tickets", "t8.json"), JSON.stringify({ id: "t8", stage: "shipped" }));
+  const ptr = path.join(sdir(h), "sh1.json");
+  fs.writeFileSync(ptr, JSON.stringify({ ...JSON.parse(fs.readFileSync(ptr, "utf8")), repo: boardRepo }));
+  inHome(h, undefined, () => {
+    appendEvent("sh1", evQueued("t8/worker-r1", runDir));
+    appendEvent("sh1", evDone("t8/worker-r1", runDir));
+    appendAck("sh1", "run:t8/worker-r1:done", `ESCALATE senior ${fwd(path.join(runDir, "findings-r1.md"))}`, { ticket: "t8" });
+  });
+  const r = cli(h, ["step", "sh1", "run:t8/worker-r1:done"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.split("\n").filter(Boolean), ["DONE run:t8/worker-r1:done"]);
+  const stale = acksOf(h, "sh1").filter((l) => l.key === "run:t8/worker-r1:done" && l.resolved);
+  assert.equal(stale.length, 1);
+  assert.equal(stale[0].action, "STALE ticket-closed");
+  // open: the same decided ESCALATE replays exactly as today
+  const o = t8Stream("op1");
+  inHome(o.h, undefined, () => {
+    appendEvent(o.name, evQueued("worker-r1", o.runDir));
+    appendEvent(o.name, evDone("worker-r1", o.runDir));
+    appendAck(o.name, "run:worker-r1:done", `ESCALATE senior ${fwd(path.join(o.runDir, "findings-r1.md"))}`, { ticket: "t8" });
+  });
+  const r2 = cli(o.h, ["step", o.name, "run:worker-r1:done"]);
+  assert.equal(r2.status, 0, r2.stderr);
+  assert.deepEqual(r2.stdout.split("\n").filter(Boolean), [`ESCALATE senior ${fwd(path.join(o.runDir, "findings-r1.md"))}`]);
+  assert.deepEqual(acksOf(o.h, o.name).filter((l) => l.resolved), [], "replay writes nothing");
+});

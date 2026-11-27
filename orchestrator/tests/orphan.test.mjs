@@ -540,3 +540,74 @@ test("ticketResolved: closed/shipped true, open false, missing ticket false", ()
     assert.equal(ticketResolved("verdict:nope/worker-r1:done", h), false);
   });
 });
+
+test("resolvePeerSession: a plain id passes through; empty is null", async () => {
+  const { resolvePeerSession } = await import("../bin/orphan.mjs");
+  assert.equal(resolvePeerSession("ses_plain123"), "ses_plain123");
+  assert.equal(resolvePeerSession(""), null);
+  assert.equal(resolvePeerSession(null), null);
+});
+
+test("resolvePeerSession: a local_ id maps via the sessions dir; non-json siblings are skipped", async () => {
+  const { resolvePeerSession } = await import("../bin/orphan.mjs");
+  const h = mkdtemp();
+  const dir = path.join(h, ".claude", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  // a .key sibling with a matching hostSessionId must not match
+  fs.writeFileSync(path.join(dir, "7.key"), JSON.stringify({ hostSessionId: "local_h1", sessionId: "ses_wrong" }));
+  // a live pid (this process) holding the host id, older updated
+  const mine = process.pid;
+  fs.writeFileSync(path.join(dir, `${mine}.json`), JSON.stringify({ hostSessionId: "local_h1", sessionId: "ses_live", status: "idle", statusUpdatedAt: Date.now() - 50 * MIN }));
+  // a surely-dead pid with the same host id but a newer updated: liveness beats recency
+  const dead = 2147483647;
+  try {
+    process.kill(dead, 0);
+  } catch (e) {
+    assert.notEqual(e.code, undefined, "probing a dead pid throws");
+  }
+  fs.writeFileSync(path.join(dir, `${dead}.json`), JSON.stringify({ hostSessionId: "local_h1", sessionId: "ses_dead", status: "idle", statusUpdatedAt: Date.now() - MIN }));
+  assert.equal(resolvePeerSession("local_h1", h), "ses_live", "a live pid wins over a newer dead one");
+  fs.rmSync(path.join(dir, `${mine}.json`));
+  assert.equal(resolvePeerSession("local_h1", h), "ses_dead", "without a live pid the newest updated wins");
+  assert.equal(resolvePeerSession("local_nobody", h), null, "unmapped local_ is null");
+});
+
+test("parentSession: null with no held_parent; live via recent peer presence; not live when idle past the threshold", async () => {
+  const { parentSession } = await import("../bin/orphan.mjs");
+  const h = mkdtemp();
+  mkPeers(h, { "parent-live": 5, "parent-old": 120 });
+  mkStream(h, "bare", { ageMin: 200, held_by: "cc", held_session: "child1", held_at: iso(200) });
+  mkStream(h, "live", { ageMin: 200, held_by: "cc", held_session: "child1", held_at: iso(200), held_parent: "parent-live" });
+  mkStream(h, "stale", { ageMin: 200, held_by: "cc", held_session: "child1", held_at: iso(200), held_parent: "parent-old" });
+  mkStream(h, "ghost", { ageMin: 200, held_by: "cc", held_session: "child1", held_at: iso(200), held_parent: "local_nobody" });
+  withHome(h, {}, () => {
+    escalate("bare");
+    escalate("live");
+    escalate("stale");
+    escalate("ghost");
+    assert.equal(parentSession("bare"), null, "no held_parent");
+    const p = parentSession("live");
+    assert.equal(p.id, "parent-live");
+    assert.equal(p.live, true);
+    assert.ok(p.idleMs >= 0 && p.idleMs < orphanThresholdMs());
+    assert.equal(parentSession("stale").live, false, "a parent idle past the threshold is not live");
+    assert.equal(parentSession("ghost"), null, "an unmapped local_ parent is null");
+  });
+});
+
+test("parentSession: a live pid with an old statusUpdatedAt is not live", async () => {
+  const { parentSession } = await import("../bin/orphan.mjs");
+  const h = mkdtemp();
+  const dir = path.join(h, ".claude", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  // a live pid (this process) whose host id maps to a peer id, but idle for 2 h
+  fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ hostSessionId: "local_sleepy", sessionId: "parent-sleepy", status: "idle", statusUpdatedAt: Date.now() - 120 * MIN }));
+  mkStream(h, "sl", { ageMin: 200, held_by: "cc", held_session: "child1", held_at: iso(200), held_parent: "local_sleepy" });
+  withHome(h, {}, () => {
+    escalate("sl");
+    const p = parentSession("sl");
+    assert.equal(p.id, "parent-sleepy");
+    assert.equal(p.live, false, "live pid alone never suppresses the owner page");
+    assert.ok(p.idleMs > orphanThresholdMs());
+  });
+});
