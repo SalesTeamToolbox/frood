@@ -2653,6 +2653,57 @@ test("fence: a post-settle SIGTERM keeps an escaped-worktree run at status 5", a
   }
 });
 
+test("slot-wait handlers do not poison the next hop after a CcSlotTimeout", async () => {
+  const home = tmp();
+  CLEAN.push(home);
+  const slots = slotDir_(home);
+  // Hold the ccread slot with this live test process so cc-critic times out and runChain moves on in-process.
+  fs.mkdirSync(path.join(slots, "provider-ccread-1"), { recursive: true });
+  fs.writeFileSync(path.join(slots, "provider-ccread-1", "owner"), JSON.stringify({ pid: process.pid, since: new Date().toISOString() }));
+  // Tiny reader wait so hop 1 gives up fast.
+  const cfgDir = path.join(home, ".config", "orchestrator");
+  fs.mkdirSync(cfgDir, { recursive: true });
+  fs.writeFileSync(path.join(cfgDir, "usage-limits.json"), JSON.stringify({ cc: { reader_wait_min: 0.02 } }));
+  // cc-critic's role contract must exist, else it throws CcNoContract before the ccread wait (no handlers
+  // installed yet). A minimal fixture gets it to the slot wait, where CcSlotTimeout fires.
+  const agentDir = path.join(home, ".claude", "agents");
+  fs.mkdirSync(agentDir, { recursive: true });
+  fs.writeFileSync(path.join(agentDir, "critic.md"), "---\nname: critic\n---\nFixture critic contract body.\n");
+  const prompt = path.join(home, "mandate.md");
+  fs.writeFileSync(prompt, "Do the thing.");
+  const out = path.join(home, "out", "f.md");
+  const argsFile = path.join(home, "args.json");
+  const child = spawn(process.execPath, [BIN, "--agent", "cc-critic", "--fallback", "worker", "--no-detach", "--dir", home, "--prompt", prompt, "--out", out], {
+    env: { ...process.env, OPENCODE_BIN: FAKE, ORCH_NO_PROCTREE: "1", ORCH_HOME: home, FAKE_OC_MODE: "hang", FAKE_OC_ARGS_FILE: argsFile, ORCH_CC_POLL_MS: "50" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const exited = new Promise((res) => child.on("close", (code, signal) => res({ code, signal })));
+  const hard = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 30000);
+  let agentPid = null;
+  try {
+    // Wait for hop 2's fake agent (hop 1 never spawns — it throws CcSlotTimeout during its slot wait).
+    for (let i = 0; i < 200 && !agentPid; i++) {
+      try { agentPid = JSON.parse(fs.readFileSync(argsFile, "utf8")).pid; } catch { await sleep(100); }
+    }
+    assert.ok(agentPid, "hop 2's fake agent started");
+    child.kill("SIGTERM");
+    const res = await exited;
+    assert.equal(res.code, 143, `expected exit 143, got ${JSON.stringify(res)}`);
+    const receipt = JSON.parse(fs.readFileSync(out + ".receipt.json", "utf8"));
+    assert.equal(receipt.exit, "killed", JSON.stringify(receipt));
+    assert.ok(receipt.errors.some((e) => e.includes("killed by SIGTERM")), JSON.stringify(receipt.errors));
+    // hop 2's agent killed, its machine slot released, its registry entry ended
+    for (let i = 0; i < 50 && pidAlive(agentPid); i++) await sleep(100);
+    assert.equal(pidAlive(agentPid), false, "the fake agent is gone");
+    assert.deepEqual(fs.readdirSync(slots).filter((n) => /^slot-\d+$/.test(n)), [], "no machine slot left");
+    assert.deepEqual(fs.readdirSync(path.join(home, ".config", "orchestrator", "runs")).filter(Boolean), [], "no registry file left");
+  } finally {
+    clearTimeout(hard);
+    if (agentPid && pidAlive(agentPid)) { try { process.kill(agentPid, "SIGKILL"); } catch {} }
+    if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch {} }
+  }
+});
+
 // ── fixture orphan guard (test-orphans M2) ───────────────────────────────────
 
 test("fake-opencode cap: a hung run exits 124 after FAKE_OC_MAX_MS, well inside the spawn timeout", () => {

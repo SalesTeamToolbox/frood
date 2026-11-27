@@ -1613,6 +1613,9 @@ export async function runWorker(a) {
     providerSlot?.release();
     run.end();
     clearInterval(kickTimer);
+    // Deregister the slot-wait handlers so they cannot outlive this runWorker call and take the
+    // no-receipt exit on the next hop of the same chain (e.g. a CcSlotTimeout -> runChain continue).
+    for (const [n, h] of handlers) process.off(n, h);
     throw e;
   }
   // Both slots held: the clock starts now (the time budget does not count slot wait time). The registry
